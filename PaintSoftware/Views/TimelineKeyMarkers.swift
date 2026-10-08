@@ -19,11 +19,12 @@ import Foundation
 ///    those are is the channel panel's question, not the marker's.
 /// 2. **Frames collapse by zoom, and only when they actually touch.** See `runs(frames:pixelsPerFrame:)`.
 ///
-/// **There is one kind of marker and there used to be two.** A keyframe whose frame no channel keyed
-/// was drawn hollow, which is how an artist who dragged a node in the graph editor was left looking at
-/// a greyed diamond with nothing under it. The owner's rule of 2026-09-03 is that a node and an
-/// indicator are the same thing in both directions, and `CanvasManager.marks(_:droppingKeyed:)` is
-/// what makes that true of the model; there is nothing left here for a second form to mean.
+/// **Two kinds of marker: a key, and a primed frame** (TODO (139)). A key is a node in the graph
+/// editor, and the owner's rule of 2026-09-03 — a node and an indicator are the same thing in both
+/// directions — is about that kind; `CanvasManager.marks(_:droppingKeyed:)` keeps it true by dropping
+/// a mark a key lands on. A primed frame is Add Keys pressed with nothing changed yet, has no node,
+/// and draws hollow so it is not read as one. Both are grouped into runs together: they collide on
+/// screen alike.
 enum TimelineKeyMarkers {
 
     // MARK: - The timeline's zoom limits, declared here so the threshold below is a relationship
@@ -218,17 +219,19 @@ enum TimelineKeyMarkers {
     // MARK: - What a test can see
 
     /// The band's accessibility value: each run as `frame`, or `first-last` when it collapsed, joined
-    /// by `|`. So `"3|7-9"` is a keyframe at frame 3 beside a collapsed run of three. Frames are
+    /// by `|`, and **a primed frame suffixed `p`** (TODO (139)). So `"3|7-9"` is a key at frame 3
+    /// beside a collapsed run of three, and `"0p|5"` is frame 0 primed beside a key at 5. Frames are
     /// 0-based, matching `TimelineRowView`'s `"startFrame,frameCount"`.
     ///
     /// **An encoded value on one element rather than one element per marker**, which is
     /// `CurveEditor.encode(points)`' convention and `TimelineFolderRowView`'s. It exists because
-    /// XCUITest can see neither a `CGContext` nor a colour, so "there is a diamond at frame 6" is not
-    /// otherwise assertable — and the collapse is *only* visible as a shape, so without this it would
-    /// be untestable above the logic tier.
-    static func encode(_ runs: [Run]) -> String {
-        runs.map { run in
-            run.isCollapsed ? "\(run.firstFrame)-\(run.lastFrame)" : "\(run.firstFrame)"
+    /// XCUITest can see neither a `CGContext` nor a colour, so "there is a diamond at frame 6" — and
+    /// whether it is filled or hollow — is not otherwise assertable; the collapse is *only* visible as
+    /// a shape, so without this it would be untestable above the logic tier.
+    static func encode(_ runs: [Run], primed: [Int] = []) -> String {
+        func spell(_ frame: Int) -> String { primed.contains(frame) ? "\(frame)p" : "\(frame)" }
+        return runs.map { run in
+            run.isCollapsed ? "\(spell(run.firstFrame))-\(spell(run.lastFrame))" : spell(run.firstFrame)
         }.joined(separator: "|")
     }
 }

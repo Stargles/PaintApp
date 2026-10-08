@@ -356,15 +356,28 @@ final class TimelineKeyMarkersLogicTests: XCTestCase {
         XCTAssertEqual(TimelineKeyMarkers.encode([]), "")
     }
 
-    /// **The encoding has one form for a marker, and this is the guard on that.** It carried a second
-    /// — a keyframe no channel keyed was parenthesised — and the owner asked for the state itself to
-    /// go on 2026-09-03. A row mixing a keyed frame with an unkeyed mark is the case that used to
-    /// print two shapes; it prints one now, and the assertion is on the *string* rather than on a flag
-    /// so it is about what a UI test can read rather than about a field.
-    func testTheAccessibilityValueDrawsEveryKeyframeTheSameWay() {
-        let markers = markerRow(marks: [0, 12], tracks: [brightnessID: curve([0])])
-        XCTAssertEqual(TimelineKeyMarkers.encode(
-            TimelineKeyMarkers.runs(frames: markers, pixelsPerFrame: defaultZoom)), "0|12")
+    /// **A primed frame is spelled apart from a key** — TODO (139): Add Keys primes a frame and keys
+    /// nothing, so the timeline draws it hollow and the band's value suffixes it `p`. A key at 0 beside
+    /// a frame primed at 12 is the row that has to print two shapes; and the moment a key lands on the
+    /// primed frame it prints one again, because the mark is dropped (the 2026-09-03 rule).
+    func testTheAccessibilityValueSpellsAPrimedFrameApartFromAKey() {
+        let manager = gradedManager()
+        let target = KeyframeTarget.layer(id: manager.layers[1].id)
+        func band() -> String {
+            let placed = manager.placedKeys(of: target)
+            return TimelineKeyMarkers.encode(TimelineKeyMarkers.runs(frames: placed.frames,
+                                                                     pixelsPerFrame: defaultZoom),
+                                             primed: placed.primed)
+        }
+        manager.setEffectParameterKeys(target, frame: 0, values: [brightnessID: 1])
+        XCTAssertTrue(manager.addKeys(target, atFrame: 12), "Fixture: the frame is primed")
+        XCTAssertEqual(band(), "0|12p")
+        manager.setEffectParameterKeys(target, frame: 12, values: [brightnessID: 2])
+        XCTAssertEqual(band(), "0|12", "a key on the primed frame is a key")
+        XCTAssertEqual(TimelineKeyMarkers.encode(TimelineKeyMarkers.runs(frames: [0, 1, 2],
+                                                                         pixelsPerFrame: floorZoom),
+                                                 primed: [0]),
+                       "0p-2", "a collapsed run spells each end as what it is")
     }
 
     // MARK: - End to end, from a document to what is drawn
@@ -405,25 +418,26 @@ final class TimelineKeyMarkersLogicTests: XCTestCase {
         manager.addValueLayer(effect: .brightnessContrast(Effect.BrightnessContrast(brightness: 1, contrast: 1)))
         let target = KeyframeTarget.layer(id: manager.layers[1].id)
         func band() -> String {
-            let markers = markerRow(manager, target)
-            return TimelineKeyMarkers.encode(TimelineKeyMarkers.runs(frames: markers,
-                                                                     pixelsPerFrame: defaultZoom))
+            let placed = manager.placedKeys(of: target)
+            return TimelineKeyMarkers.encode(TimelineKeyMarkers.runs(frames: placed.frames,
+                                                                     pixelsPerFrame: defaultZoom),
+                                             primed: placed.primed)
         }
         guard let brightness = manager.layers[1].layerEffect?
             .parameters.first(where: { $0.id == brightnessID }) else {
             return XCTFail("Fixture: the grade should expose a brightness parameter")
         }
 
-        manager.addKeyframe(target, atFrame: 0)
-        XCTAssertEqual(band(), "0", "Keyframe A is added and nothing is saved — the mark alone")
+        manager.addKeys(target, atFrame: 0)
+        XCTAssertEqual(band(), "0p", "A is primed and nothing is saved — the hollow mark alone")
         XCTAssertEqual(manager.keyframeState(of: target).marks, [0],
                        "…and until a key lands on it, the mark is what stores it")
 
         manager.applyEffectParameterEdit(target, parameter: brightness, newValue: 2, atFrame: 8)
-        XCTAssertEqual(band(), "0",
+        XCTAssertEqual(band(), "0p",
                        "The previous value is only held, so nothing has landed on the timeline yet")
 
-        manager.addKeyframe(target, atFrame: 8)
+        manager.addKeys(target, atFrame: 8)
         XCTAssertEqual(band(), "0|8", "B commits the held value onto A and the new one onto B")
         XCTAssertEqual(manager.keyframeState(of: target).marks, [], """
             And both marks are gone from storage, because both frames are keyed now. That is the \

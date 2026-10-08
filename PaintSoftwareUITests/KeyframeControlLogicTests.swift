@@ -147,7 +147,7 @@ final class KeyframeControlLogicTests: XCTestCase {
     func testStandingOnTheOnlyMarkHoldsRatherThanSeeds() {
         let manager = gradedManager()
         let target = layerTarget(manager)
-        manager.addKeyframe(target, atFrame: 0)
+        manager.addKeys(target, atFrame: 0)
 
         XCTAssertEqual(moveSlider(manager, target, brightnessID, to: 5, atFrame: 0),
                        .storedValueHoldingBaseline)
@@ -189,7 +189,7 @@ final class KeyframeControlLogicTests: XCTestCase {
         let target = layerTarget(manager)
 
         // A is added at frame 0, and nothing is saved.
-        XCTAssertTrue(manager.addKeyframe(target, atFrame: 0))
+        XCTAssertTrue(manager.addKeys(target, atFrame: 0))
         XCTAssertEqual(manager.keyframeFrames(of: target), [0])
         XCTAssertTrue(tracks(manager, target).isEmpty, "\"keyframe A is added, nothing is saved\"")
 
@@ -203,7 +203,7 @@ final class KeyframeControlLogicTests: XCTestCase {
         XCTAssertTrue(tracks(manager, target).isEmpty, "No curve until the second keyframe lands")
 
         // B is added at frame 10.
-        XCTAssertTrue(manager.addKeyframe(target, atFrame: 10))
+        XCTAssertTrue(manager.addKeys(target, atFrame: 10))
         XCTAssertEqual(manager.keyframeFrames(of: target), [0, 10])
         XCTAssertEqual(keyFrames(manager, target, brightnessID), [0, 10])
         XCTAssertEqual(keyValue(manager, target, brightnessID, atFrame: 0), 1, accuracy: 1e-9,
@@ -225,9 +225,9 @@ final class KeyframeControlLogicTests: XCTestCase {
     func testModifyingASecondSliderWhileOnBSeedsTheOldValueOntoA() {
         let manager = gradedManager()
         let target = layerTarget(manager)
-        manager.addKeyframe(target, atFrame: 0)
+        manager.addKeys(target, atFrame: 0)
         moveSlider(manager, target, brightnessID, to: 2, atFrame: 10)
-        manager.addKeyframe(target, atFrame: 10)
+        manager.addKeys(target, atFrame: 10)
 
         // Still on B, a second slider moves.
         XCTAssertEqual(moveSlider(manager, target, contrastID, to: 3, atFrame: 10), .seedAndKey)
@@ -249,7 +249,7 @@ final class KeyframeControlLogicTests: XCTestCase {
     /// spelling, and until 2026-09-02 it had two.
     ///
     /// `keyframes(of:)` folded in `poseKeyframeFrames(inLayer:)`; `seedAndKeyChannel` and
-    /// `addKeyframe` took the **static two-argument** overload, whose `poseFrames` defaulted to empty.
+    /// `addKeys` took the **static two-argument** overload, whose `poseFrames` defaulted to empty.
     /// So the routing rule could see a pose key, count it, and hand the edit to the seed arm — which
     /// then could not find the neighbour the count promised. `seedAndKeyChannel`'s own doc names the
     /// consequence: *"seeding would then produce a one-key curve pinning the new value, and the
@@ -276,7 +276,7 @@ final class KeyframeControlLogicTests: XCTestCase {
             TransformChannelID.cel.id: CanvasFixture.poseTrack([(4, PoseQuad(box: CGRect(x: 0, y: 0, width: 10, height: 10),
                                                   mappedBy: CGAffineTransform(translationX: 3, y: 0)))])
         ]
-        manager.addKeyframe(target, atFrame: 10)
+        manager.addKeys(target, atFrame: 10)
         XCTAssertFalse(manager.keyframeState(of: target).marks.contains(4),
                        "Setup: no mark records frame 4 — the pose key is the whole of what makes it one")
         XCTAssertEqual(manager.keyframeFrames(of: target), [4, 10],
@@ -299,8 +299,8 @@ final class KeyframeControlLogicTests: XCTestCase {
         let target = layerTarget(manager)
         manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
                                         to: linear([(0, 1.0), (10, 2.0)]))
-        manager.addKeyframe(target, atFrame: 0)
-        manager.addKeyframe(target, atFrame: 10)
+        manager.addKeys(target, atFrame: 0)
+        manager.addKeys(target, atFrame: 10)
 
         XCTAssertEqual(moveSlider(manager, target, brightnessID, to: 9, atFrame: 10), .key,
                        "On a mark, the key there is updated")
@@ -351,7 +351,7 @@ final class KeyframeControlLogicTests: XCTestCase {
     func testTheBaselineIsHeldOncePerCycle() {
         let manager = gradedManager()
         let target = layerTarget(manager)
-        manager.addKeyframe(target, atFrame: 0)
+        manager.addKeys(target, atFrame: 0)
 
         // One drag, three ticks.
         moveSlider(manager, target, brightnessID, to: 1.4, atFrame: 10)
@@ -360,12 +360,12 @@ final class KeyframeControlLogicTests: XCTestCase {
         XCTAssertEqual(baselines(manager, target)[brightnessID] ?? .nan, 1, accuracy: 1e-9,
                        "The first tick's pre-edit value, not the second tick's")
 
-        manager.addKeyframe(target, atFrame: 10)
+        manager.addKeys(target, atFrame: 10)
         XCTAssertEqual(keyValue(manager, target, brightnessID, atFrame: 0), 1, accuracy: 1e-9)
         XCTAssertEqual(keyValue(manager, target, brightnessID, atFrame: 10), 2, accuracy: 1e-9)
     }
 
-    // MARK: - `addKeyframe`
+    // MARK: - `addKeys`
 
     /// **A mark with no channel is legal and is the point.** The whole workflow rests on a keyframe
     /// being a bare point in time that acquires channels later — a curve cannot express "the artist
@@ -374,7 +374,7 @@ final class KeyframeControlLogicTests: XCTestCase {
         let manager = gradedManager()
         let target = layerTarget(manager)
 
-        XCTAssertTrue(manager.addKeyframe(target, atFrame: 4))
+        XCTAssertTrue(manager.addKeys(target, atFrame: 4))
         XCTAssertEqual(manager.keyframeFrames(of: target), [4])
         XCTAssertTrue(manager.hasKeyframe(target, atFrame: 4))
         XCTAssertFalse(manager.hasKeyframe(target, atFrame: 5))
@@ -388,7 +388,7 @@ final class KeyframeControlLogicTests: XCTestCase {
     func testMarksAreSortedAndUnique() {
         let manager = gradedManager()
         let target = layerTarget(manager)
-        for frame in [10, 2, 7, 2] { manager.addKeyframe(target, atFrame: frame) }
+        for frame in [10, 2, 7, 2] { manager.addKeys(target, atFrame: frame) }
         XCTAssertEqual(manager.keyframeFrames(of: target), [2, 7, 10])
     }
 
@@ -398,14 +398,14 @@ final class KeyframeControlLogicTests: XCTestCase {
     func testAddingAKeyframeWhereOneAlreadySitsStillCommitsHeldValues() {
         let manager = gradedManager()
         let target = layerTarget(manager)
-        manager.addKeyframe(target, atFrame: 0)
-        manager.addKeyframe(target, atFrame: 10)
+        manager.addKeys(target, atFrame: 0)
+        manager.addKeys(target, atFrame: 10)
         // At 10, which is already a mark, a channel with no curve is held rather than seeded only
         // because the edit is made from frame 3; that is what leaves a baseline to commit here.
         moveSlider(manager, target, contrastID, to: 6, atFrame: 3)
         XCTAssertFalse(baselines(manager, target).isEmpty, "Fixture premise: something is held")
 
-        XCTAssertTrue(manager.addKeyframe(target, atFrame: 10),
+        XCTAssertTrue(manager.addKeys(target, atFrame: 10),
                       "The mark does not move and the write is still a change")
         XCTAssertEqual(manager.keyframeFrames(of: target), [0, 10], "…and no duplicate mark appeared")
         XCTAssertEqual(keyFrames(manager, target, contrastID), [0, 10])
@@ -413,13 +413,15 @@ final class KeyframeControlLogicTests: XCTestCase {
         XCTAssertEqual(keyValue(manager, target, contrastID, atFrame: 10), 6, accuracy: 1e-9)
     }
 
-    /// **Every channel that already has a curve gets a key holding the value it *resolves* to** —
-    /// §2.24's "hold this pose here". Without it, placing a new mark lets every other animated channel
-    /// drift straight through it.
+    /// **Add Keys primes an animated frame and keys nothing; the edit past it keys only the channel
+    /// that changed, and holds that channel on the primed frame** — TODO (139): *"you select 'add
+    /// keys' which primes it, then when you move a slider or transform, only the keys of things that
+    /// changed are added."* The press used to key every curved channel on the frame (§2.24's "hold
+    /// this pose here"); the hold now lands at the edit, on the one channel edited.
     ///
-    /// The playhead is parked mid-segment at 5, which is the only place the resolved value and the
-    /// stored base are different numbers and therefore the only place this is assertable.
-    func testAddingAKeyframeHoldsEveryCurvedChannelAtItsResolvedValue() {
+    /// Two animated channels and a frame primed mid-segment at 5, where each curve's value differs
+    /// from its base — the only place a held value is assertable. Then brightness alone is moved at 7.
+    func testAddKeysPrimesAnAnimatedFrameAndOnlyTheChannelEditedPastItIsHeldThere() {
         let manager = gradedManager()
         let target = layerTarget(manager)
         manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
@@ -427,13 +429,21 @@ final class KeyframeControlLogicTests: XCTestCase {
         manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: contrastID,
                                         to: linear([(0, 2.0), (10, 4.0)]))
 
-        XCTAssertTrue(manager.addKeyframe(target, atFrame: 5))
+        XCTAssertTrue(manager.addKeys(target, atFrame: 5), "the press primes the frame")
+        XCTAssertEqual(keyFrames(manager, target, brightnessID), [0, 10], "…and keys nothing")
+        XCTAssertEqual(keyFrames(manager, target, contrastID), [0, 10])
+        XCTAssertEqual(manager.placedKeys(of: target), PlacedKeys(frames: [0, 5, 10], primed: [5]),
+                       "the timeline draws 5 as primed, beside the two keys")
+
+        XCTAssertEqual(moveSlider(manager, target, brightnessID, to: 9, atFrame: 7), .key)
+        XCTAssertEqual(keyFrames(manager, target, brightnessID), [0, 5, 7, 10])
         XCTAssertEqual(keyValue(manager, target, brightnessID, atFrame: 5), 1.5, accuracy: 1e-9,
-                       "Halfway along a linear 1 → 2")
-        XCTAssertEqual(keyValue(manager, target, contrastID, atFrame: 5), 3.0, accuracy: 1e-9)
-        // The whole point of holding a value: the curve either side of the new key is unchanged, so
-        // nothing that was already on screen moved.
-        XCTAssertEqual(keyFrames(manager, target, brightnessID), [0, 5, 10])
+                       "the primed frame keeps what it showed — halfway along a linear 1 → 2")
+        XCTAssertEqual(keyValue(manager, target, brightnessID, atFrame: 7), 9, accuracy: 1e-9)
+        XCTAssertEqual(keyFrames(manager, target, contrastID), [0, 10],
+                       "contrast did not change, so it takes no key — not even on the primed frame")
+        XCTAssertEqual(manager.placedKeys(of: target).primed, [],
+                       "5 is a key now, so it draws as one")
     }
 
     /// **One undo step for the whole press — the mark, the committed baselines and every held pose.**
@@ -443,13 +453,13 @@ final class KeyframeControlLogicTests: XCTestCase {
     func testAddingAKeyframeIsOneUndoStep() {
         let manager = gradedManager()
         let target = layerTarget(manager)
-        manager.addKeyframe(target, atFrame: 0)
+        manager.addKeys(target, atFrame: 0)
         moveSlider(manager, target, brightnessID, to: 2, atFrame: 10)
         moveSlider(manager, target, contrastID, to: 5, atFrame: 10)
         manager.history.removeAll()
         manager.refreshUndoRedoState()
 
-        XCTAssertTrue(manager.addKeyframe(target, atFrame: 10))
+        XCTAssertTrue(manager.addKeys(target, atFrame: 10))
         XCTAssertEqual(tracks(manager, target).count, 2)
 
         manager.undo()
@@ -470,13 +480,13 @@ final class KeyframeControlLogicTests: XCTestCase {
     func testAKeyframePressThatChangesNothingIsNotAnEdit() {
         let manager = gradedManager()
         let target = layerTarget(manager)
-        manager.addKeyframe(target, atFrame: 4)
+        manager.addKeys(target, atFrame: 4)
         manager.history.removeAll()
         manager.refreshUndoRedoState()
 
-        XCTAssertFalse(manager.addKeyframe(target, atFrame: 4))
+        XCTAssertFalse(manager.addKeys(target, atFrame: 4))
         XCTAssertFalse(manager.canUndo)
-        XCTAssertFalse(manager.addKeyframe(.layer(id: UUID()), atFrame: 0),
+        XCTAssertFalse(manager.addKeys(.layer(id: UUID()), atFrame: 0),
                        "And a target that is not in the document answers rather than trapping")
     }
 
@@ -486,7 +496,7 @@ final class KeyframeControlLogicTests: XCTestCase {
         let manager = gradedManager()
         let plain = KeyframeTarget.layer(id: manager.layers[0].id)
         XCTAssertNil(manager.storedEffect(of: plain), "Fixture premise: nothing to key on it")
-        XCTAssertTrue(manager.addKeyframe(plain, atFrame: 3))
+        XCTAssertTrue(manager.addKeys(plain, atFrame: 3))
         XCTAssertEqual(manager.keyframeFrames(of: plain), [3])
     }
 
@@ -498,9 +508,9 @@ final class KeyframeControlLogicTests: XCTestCase {
     func testSeedingReachesOnlyTheNeighbouringMarksAndTheCurveHoldsBeyondThem() {
         let manager = gradedManager()
         let target = layerTarget(manager)
-        for frame in [0, 5, 10, 20] { manager.addKeyframe(target, atFrame: frame) }
+        for frame in [0, 5, 10, 20] { manager.addKeys(target, atFrame: frame) }
         moveSlider(manager, target, brightnessID, to: 3, atFrame: 12)
-        manager.addKeyframe(target, atFrame: 12)
+        manager.addKeys(target, atFrame: 12)
 
         XCTAssertEqual(keyFrames(manager, target, brightnessID), [10, 12, 20],
                        "The marks either side of 12, and 12 itself — not 0 and not 5")
@@ -521,15 +531,15 @@ final class KeyframeControlLogicTests: XCTestCase {
     func testSeedingDoesNotOverwriteAKeyThatIsAlreadyOnANeighbouringKeyframe() {
         let manager = gradedManager()
         let target = layerTarget(manager)
-        manager.addKeyframe(target, atFrame: 0)
-        manager.addKeyframe(target, atFrame: 10)
+        manager.addKeys(target, atFrame: 0)
+        manager.addKeys(target, atFrame: 10)
 
         XCTAssertEqual(moveSlider(manager, target, contrastID, to: 3, atFrame: 5),
                        .storedValueHoldingBaseline, "Fixture premise: the value is held, not keyed")
         // …and by the time it is committed, frame 0 carries a key the artist authored.
         manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: contrastID,
                                         to: linear([(0, 8.0)]))
-        manager.addKeyframe(target, atFrame: 5)
+        manager.addKeys(target, atFrame: 5)
 
         XCTAssertEqual(keyValue(manager, target, contrastID, atFrame: 0), 8, accuracy: 1e-9,
                        "The authored key at 0 survived the neighbour seed")
@@ -549,9 +559,9 @@ final class KeyframeControlLogicTests: XCTestCase {
     func testAFrameOnlyACurveKeysOnIsStillAKeyframe() {
         let manager = gradedManager()
         let target = layerTarget(manager)
-        manager.addKeyframe(target, atFrame: 1)
+        manager.addKeys(target, atFrame: 1)
         moveSlider(manager, target, brightnessID, to: 2, atFrame: 3)
-        manager.addKeyframe(target, atFrame: 3)
+        manager.addKeys(target, atFrame: 3)
         // The middle keyframe: an edit on the now-animated channel keys at the playhead (arm 2) and
         // writes no mark, which is the whole of how the artist places one.
         XCTAssertEqual(moveSlider(manager, target, brightnessID, to: 5, atFrame: 2), .key,
@@ -561,10 +571,10 @@ final class KeyframeControlLogicTests: XCTestCase {
 
         XCTAssertEqual(manager.keyframeFrames(of: target), [1, 2, 3])
         XCTAssertTrue(manager.hasKeyframe(target, atFrame: 2),
-                      "A frame a channel keys on is a keyframe, so Remove Keyframe is offered on it")
+                      "A frame a channel keys on is a keyframe, so Remove Keys is offered on it")
         XCTAssertTrue(manager.hasKeyframe(target, inFrames: 2 ..< 3))
 
-        XCTAssertTrue(manager.removeKeyframe(target, atFrame: 2), "…and taking it back works")
+        XCTAssertTrue(manager.removeKeys(target, atFrame: 2), "…and taking it back works")
         XCTAssertEqual(manager.keyframeFrames(of: target), [1, 3])
         XCTAssertEqual(keyFrames(manager, target, brightnessID), [1, 3])
     }
@@ -579,9 +589,9 @@ final class KeyframeControlLogicTests: XCTestCase {
     func testSeedingLandsOnTheNearestKeyframeEvenWhenOnlyACurveKeysOnIt() {
         let manager = gradedManager()
         let target = layerTarget(manager)
-        manager.addKeyframe(target, atFrame: 1)
+        manager.addKeys(target, atFrame: 1)
         moveSlider(manager, target, brightnessID, to: 2, atFrame: 3)
-        manager.addKeyframe(target, atFrame: 3)
+        manager.addKeys(target, atFrame: 3)
         moveSlider(manager, target, brightnessID, to: 5, atFrame: 2)
 
         // Standing on the last keyframe, the artist moves the other slider.
@@ -602,7 +612,7 @@ final class KeyframeControlLogicTests: XCTestCase {
     func testACurveOnATargetWhoseGradeIsNotInForceIsNotAKeyframe() {
         let manager = gradedManager()
         let target = layerTarget(manager)
-        manager.addKeyframe(target, atFrame: 0)
+        manager.addKeys(target, atFrame: 0)
         manager.setEffectParameterKeys(target, frame: 6, values: [brightnessID: 2])
         XCTAssertEqual(manager.keyframeFrames(of: target), [0, 6], "Fixture premise")
 
@@ -615,7 +625,7 @@ final class KeyframeControlLogicTests: XCTestCase {
                        "…and nothing was deleted behind the artist's back")
     }
 
-    // MARK: - `removeKeyframe` and `clearKeyframes`
+    // MARK: - `removeKeys` and `clearKeys`
 
     /// Both halves go, because the artist asked for the keyframe to go: leaving the keys behind would
     /// take the marker off the timeline and leave the animation doing exactly what it did.
@@ -624,9 +634,9 @@ final class KeyframeControlLogicTests: XCTestCase {
         let target = layerTarget(manager)
         manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
                                         to: linear([(0, 1.0), (5, 3.0), (10, 2.0)]))
-        for frame in [0, 5, 10] { manager.addKeyframe(target, atFrame: frame) }
+        for frame in [0, 5, 10] { manager.addKeys(target, atFrame: frame) }
 
-        XCTAssertTrue(manager.removeKeyframe(target, atFrame: 5))
+        XCTAssertTrue(manager.removeKeys(target, atFrame: 5))
         XCTAssertEqual(manager.keyframeFrames(of: target), [0, 10])
         XCTAssertEqual(keyFrames(manager, target, brightnessID), [0, 10])
 
@@ -642,9 +652,9 @@ final class KeyframeControlLogicTests: XCTestCase {
         let target = layerTarget(manager)
         manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
                                         to: linear([(2, 1.0), (4, 3.0)]))
-        for frame in [2, 4] { manager.addKeyframe(target, atFrame: frame) }
+        for frame in [2, 4] { manager.addKeys(target, atFrame: frame) }
 
-        XCTAssertTrue(manager.clearKeyframes(target, inFrames: 0 ..< 6))
+        XCTAssertTrue(manager.clearKeys(target, inFrames: 0 ..< 6))
         XCTAssertEqual(manager.keyframeFrames(of: target), [])
         XCTAssertTrue(tracks(manager, target).isEmpty, "Gone, not present-and-empty")
     }
@@ -652,16 +662,16 @@ final class KeyframeControlLogicTests: XCTestCase {
     /// The range is half-open, which is what every frame range in this codebase is, and the boundary is
     /// the whole of what a caller can get wrong: the cel block that ends at `startFrame + frameCount`
     /// must not take the next block's first keyframe with it.
-    func testClearKeyframesIsHalfOpenAndOneUndoStep() {
+    func testClearKeysIsHalfOpenAndOneUndoStep() {
         let manager = gradedManager()
         let target = layerTarget(manager)
         manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
                                         to: linear([(0, 1.0), (5, 2.0), (10, 3.0)]))
-        for frame in [0, 5, 10] { manager.addKeyframe(target, atFrame: frame) }
+        for frame in [0, 5, 10] { manager.addKeys(target, atFrame: frame) }
         manager.history.removeAll()
         manager.refreshUndoRedoState()
 
-        XCTAssertTrue(manager.clearKeyframes(target, inFrames: 0 ..< 10))
+        XCTAssertTrue(manager.clearKeys(target, inFrames: 0 ..< 10))
         XCTAssertEqual(manager.keyframeFrames(of: target), [10], "10 is outside a half-open 0..<10")
         XCTAssertEqual(keyFrames(manager, target, brightnessID), [10])
 
@@ -670,14 +680,14 @@ final class KeyframeControlLogicTests: XCTestCase {
         XCTAssertEqual(keyFrames(manager, target, brightnessID), [0, 5, 10])
         XCTAssertFalse(manager.canUndo, "One step for the whole range")
 
-        XCTAssertFalse(manager.clearKeyframes(target, inFrames: 40 ..< 50),
+        XCTAssertFalse(manager.clearKeys(target, inFrames: 40 ..< 50),
                        "A range with nothing in it is not an edit")
-        XCTAssertFalse(manager.clearKeyframes(target, inFrames: 0 ..< 0), "Nor is an empty range")
+        XCTAssertFalse(manager.clearKeys(target, inFrames: 0 ..< 0), "Nor is an empty range")
     }
 
     // MARK: - What the cel menu asks before it offers an item
 
-    /// **"Clear Keyframes" is offered only when there is something in that cel to clear**, and the
+    /// **"Clear Keys" is offered only when there is something in that cel to clear**, and the
     /// question is a range query rather than a container lookup — §2.4 and §2.26 both put keys and
     /// marks on the *layer*, in absolute document frames, so a cel holds no list of keyframes and
     /// "the keyframes in that cel" can only mean the ones inside the span its block covers.
@@ -688,7 +698,7 @@ final class KeyframeControlLogicTests: XCTestCase {
     func testTheRangeQueryMatchesTheRangeTheWriterWouldClear() {
         let manager = gradedManager()
         let target = layerTarget(manager)
-        manager.addKeyframe(target, atFrame: 12)
+        manager.addKeys(target, atFrame: 12)
 
         XCTAssertTrue(manager.hasKeyframe(target, inFrames: 10 ..< 20))
         XCTAssertTrue(manager.hasKeyframe(target, inFrames: 12 ..< 13), "Its own frame")
@@ -842,14 +852,14 @@ final class KeyframeControlLogicTests: XCTestCase {
     /// **Records nothing while an enclosing bracket is open** — `setEffectParameterTrack`'s rule, and
     /// the one the auto-key arm leans on hardest: a slider drag opens a structure gesture and writes a
     /// key on every tick, so a step per tick would make undo useless. The enclosing commit supplies the
-    /// label, which `DrawingView` sets to `.effectKeyframes` when the drag wrote keys.
+    /// label, which `DrawingView` sets to `.effectKeys` when the drag wrote keys.
     func testKeysWrittenInsideAGestureFoldIntoItsOneStep() {
         let manager = gradedManager()
         manager.beginStructureGesture()
         manager.setEffectParameterKeys(layerTarget(manager), frame: 0, values: [brightnessID: 1.2])
         manager.setEffectParameterKeys(layerTarget(manager), frame: 0, values: [brightnessID: 1.4])
         manager.setEffectParameterKeys(layerTarget(manager), frame: 0, values: [brightnessID: 1.6])
-        manager.commitStructureGesture(label: .effectKeyframes)
+        manager.commitStructureGesture(label: .effectKeys)
 
         XCTAssertEqual(keyValue(manager, layerTarget(manager), brightnessID, atFrame: 0),
                        1.6, accuracy: 1e-9)
@@ -865,7 +875,7 @@ final class KeyframeControlLogicTests: XCTestCase {
     func testUndoFindsTheLayerAfterItsIndexHasMoved() {
         let manager = gradedManager()
         let gradeID = manager.layers[gradeIndex].id
-        manager.addKeyframe(.layer(id: gradeID), atFrame: 4)
+        manager.addKeys(.layer(id: gradeID), atFrame: 4)
         manager.setEffectParameterKeys(.layer(id: gradeID), frame: 4, values: [brightnessID: 1.5])
 
         manager.deleteLayer(at: 0)
@@ -905,7 +915,7 @@ final class KeyframeControlLogicTests: XCTestCase {
         // key has landed on is dropped — so 0, 10 and 20 become keys and 30 is the one keyframe still
         // stored as a mark. Without that far mark this test would be asserting that an empty array
         // copies, which is true of a `duplicateLayer` that carries no marks at all.
-        for frame in [0, 10, 20, 30] { manager.addKeyframe(target, atFrame: frame) }
+        for frame in [0, 10, 20, 30] { manager.addKeys(target, atFrame: frame) }
         moveSlider(manager, target, brightnessID, to: 2, atFrame: 10)
         moveSlider(manager, target, contrastID, to: 4, atFrame: 15)
 
@@ -931,7 +941,7 @@ final class KeyframeControlLogicTests: XCTestCase {
     func testChangingTheGradeKeepsTheMarksAndDropsUnaddressableHeldValues() {
         let manager = gradedManager()
         let target = layerTarget(manager)
-        manager.addKeyframe(target, atFrame: 0)
+        manager.addKeys(target, atFrame: 0)
         moveSlider(manager, target, brightnessID, to: 2, atFrame: 6)
         XCTAssertFalse(baselines(manager, target).isEmpty, "Fixture premise: a value is held")
 
@@ -955,14 +965,14 @@ final class KeyframeControlLogicTests: XCTestCase {
     func testAFolderRunsTheWholeWorkflowExactlyAsALayerDoes() {
         let (manager, target) = gradedFolderManager()
 
-        XCTAssertTrue(manager.addKeyframe(target, atFrame: 0))
+        XCTAssertTrue(manager.addKeys(target, atFrame: 0))
         XCTAssertTrue(tracks(manager, target).isEmpty)
 
         XCTAssertEqual(moveSlider(manager, target, brightnessID, to: 2, atFrame: 10),
                        .storedValueHoldingBaseline)
         XCTAssertEqual(baselines(manager, target)[brightnessID] ?? .nan, 1, accuracy: 1e-9)
 
-        XCTAssertTrue(manager.addKeyframe(target, atFrame: 10))
+        XCTAssertTrue(manager.addKeys(target, atFrame: 10))
         XCTAssertEqual(manager.keyframeFrames(of: target), [0, 10])
         XCTAssertEqual(keyFrames(manager, target, brightnessID), [0, 10])
         XCTAssertEqual(keyValue(manager, target, brightnessID, atFrame: 0), 1, accuracy: 1e-9)
@@ -1012,7 +1022,7 @@ final class KeyframeControlLogicTests: XCTestCase {
     func testTheStripsTargetIsStillTheCurrentLayerEvenWithAGradedFolderPresent() {
         let (manager, target) = gradedFolderManager()
         manager.setEffectParameterKeys(target, frame: 0, values: [brightnessID: 1.5])
-        manager.addKeyframe(target, atFrame: 0)
+        manager.addKeys(target, atFrame: 0)
 
         XCTAssertEqual(manager.keyframeTarget, .layer(id: manager.layers[0].id))
         XCTAssertEqual(manager.curvedEffectChannelIDs(of: manager.keyframeTarget!), [],

@@ -48,38 +48,6 @@ rather than assuming it still holds.
 
 ---
 
-## What is left of the owner's 2026-10-01/02 asks
-
-Of (111)–(152) and their ruled follow-ups, only (139) remains. Every other one merged in session 46
-(`git log` and HANDOFF.md carry what each did).
-
----
-
-## (139) Keys, not keyframes — every channel component independent
-
-**Status** — ruled; in flight on `tmp/keys` (Opus, 2026-10-08). *"An update has to be done to the graph editor and key
-framing. First off, remove all notion of keyframes, everything should just be keys. Lets say we have a
-move option. The X and Y and rotation etc components keys should be fully independent from each
-other."* KEYFRAMES.md §2.26–§2.28 (the keyframe-mark workflow) and §2.5 (a transform key stores a quad)
-are what this reverses.
-
-**Ruled 2026-10-01:**
-- **Priming replaces keyframes.** *"you select 'add keys' which primes it, then when you move a slider
-  or transform, only the keys of thingd that changed are added. Note, if you prime this in two frames
-  and then change something, then it should put down two keys like the behaviour today, but only the
-  things that changed"* — so a primed frame is still a bare mark in time (today's mark workflow,
-  renamed "Add Keys"), but what it commits is per component: only the channels that changed get keys.
-- **Distort is two more independent curves**, Perspective X and Perspective Y, beside X / Y / rotation /
-  scale / skew — no corner keys, and the graph editor's "declined" state goes.
-- **The in-between feature's "keyframe" drawings keep their name** — a different feature.
-
-- [x] One curve per pose component (`TransformTrack`'s whole-quad keys replaced); a Move keys only the
-      components it changed; the graph editor edits each independently.
-- [ ] "Add Keyframe" becomes "Add Keys" (priming); commits key only changed components, at every
-      primed frame as today.
-
----
-
 ## (27) Stream the computer's screen as a layer
 
 **Status** — briefed 2026-09-13, designed the same day ([STREAM.md](docs/STREAM.md)), and **built through

@@ -420,7 +420,7 @@ struct CanvasNotice: Identifiable, Equatable {
             case .left(let group):
                 return "Taken out of \(group) — it stays where it is now and stops moving with the group."
             case .joinedGroupThatIsNotAnimatedHere(let group):
-                return "Now in \(group) — nothing is animating it yet. Mark a keyframe, scrub, and Move it, and this comes along."
+                return "Now in \(group) — nothing is animating it yet. Add Keys, scrub, and Move it, and this comes along."
             }
         case .animationGroupEditRefused(let refusal):
             switch refusal {
@@ -434,11 +434,11 @@ struct CanvasNotice: Identifiable, Equatable {
         // see the diamonds that are not there any more; and "Undo brings them back" is the mitigation
         // the owner asked for in place of the bare rule, said where it can be acted on. The frames are
         // spelled out rather than summarised because a crop is usually one or two of them, and an
-        // artist who reads "3 keyframes" wants to know *which* three before deciding.
+        // artist who reads "3 keys" wants to know *which* three before deciding.
         case .keyframesCropped(let crop):
             let one = crop.count == 1
             let where_ = crop.frames.count == 1 ? "frame" : "frames"
-            return "\(crop.count) \(one ? "keyframe" : "keyframes") outside the block's new length \(one ? "was" : "were") removed (\(where_) \(Self.list(crop.frames))). Undo brings \(one ? "it" : "them") back."
+            return "\(crop.count) \(one ? "key" : "keys") outside the block's new length \(one ? "was" : "were") removed (\(where_) \(Self.list(crop.frames))). Undo brings \(one ? "it" : "them") back."
         case .moveOutsideTransformBlock(let frame):
             return "Frame \(frame + 1) is outside this transform layer's bar, and it only moves things where its bar is — scrub to a frame inside the bar, or drag the bar's edge out to here."
         case .effectBoxOutsideBlock(let frame):

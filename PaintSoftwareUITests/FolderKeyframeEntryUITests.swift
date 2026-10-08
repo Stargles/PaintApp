@@ -4,7 +4,7 @@ import XCTest
 /// new document the way the owner drove the three features that shipped unusable on 2026-09-03.
 ///
 /// **Why this file exists at all, given `FolderKeyframeEntryLogicTests`.** Every assertion in that
-/// file reaches `CanvasManager` directly, and `addKeyframe(.folder(…))` already worked before this
+/// file reaches `CanvasManager` directly, and `addKeys(.folder(…))` already worked before this
 /// pass — the gap was that nothing on screen called it. So the fast tier was blind to this defect *by
 /// construction*, which is the exact failure CLAUDE.md's "a feature is not finished because its model
 /// is correct" section records. The assertions below are therefore only ever on **values controls
@@ -14,25 +14,25 @@ import XCTest
 ///
 /// **`exists` is not used as an assertion about behaviour anywhere here.** A hidden element still
 /// resolves, which is how a test in this repo passed with a whole feature deleted; the two places
-/// presence *is* the fact — Remove Keyframe being offered or not — are paired with a value assertion
+/// presence *is* the fact — Remove Keys being offered or not — are paired with a value assertion
 /// on the same surface so a build that drew the row unconditionally still goes red.
 final class FolderKeyframeEntryUITests: PaintUITestCase {
 
     // MARK: - Helpers
 
     /// The keyframe summary the folder's options panel draws — §2.28's union, as the panel exposes it.
-    /// "none", or the frames comma-separated.
+    /// "none", or the frames comma-separated, a primed one suffixed `p`.
     private func keyframeSummary(_ app: XCUIApplication) -> String {
-        app.staticTexts["layerOptions.folderKeyframes"].value as? String ?? "?"
+        app.staticTexts["layerOptions.folderKeys"].value as? String ?? "?"
     }
 
-    /// Opens the group's options panel and waits for the Add Keyframe row to be tappable.
+    /// Opens the group's options panel and waits for the Add Keys row to be tappable.
     private func openFolderOptions(_ app: XCUIApplication, named name: String) {
         XCTAssertTrue(tapWhenHittable(app.buttons["layerPanel.folder.\(name).options"],
                                       "The folder row's options button"),
                       "Without the options panel there is no keyframe row to reach")
-        XCTAssertTrue(app.buttons["layerOptions.addKeyframe"].waitForExistence(timeout: 5), """
-            `layerOptions.addKeyframe` never appeared in the folder's options panel. That row is the \
+        XCTAssertTrue(app.buttons["layerOptions.addKeys"].waitForExistence(timeout: 5), """
+            `layerOptions.addKeys` never appeared in the folder's options panel. That row is the \
             only entry point a folder has — the timeline has no folder menu — so its absence means \
             an artist cannot place a keyframe on a group at all, which is the defect this pass fixes.
             """)
@@ -76,7 +76,7 @@ final class FolderKeyframeEntryUITests: PaintUITestCase {
     ///
     /// The operands, in order:
     ///
-    ///  * **`layerOptions.folderKeyframes`' value against the keyframes placed so far.** It is
+    ///  * **`layerOptions.folderKeys`' value against the keyframes placed so far.** It is
     ///    `keyframeFrames(of:)`' output — §2.28's one accessor — so this is the panel and the model
     ///    being asked to agree, on a surface the artist reads. **It is a read-back of the same
     ///    expression the press wrote through**, so it catches a press that did nothing and not one
@@ -87,10 +87,10 @@ final class FolderKeyframeEntryUITests: PaintUITestCase {
     ///    current layer was keyed", and the one that kills that mutation. **These bands have existed
     ///    since stage 3b and nothing had ever read them**; they were assumed unreachable, because the
     ///    row views they sit inside are themselves accessibility elements. They are reachable.
-    ///  * **`layerOptions.addKeyframe`' value against the playhead.** The row says which frame a press
+    ///  * **`layerOptions.addKeys`' value against the playhead.** The row says which frame a press
     ///    writes to. A build that captured the frame when the panel opened, or that keyed frame 0
     ///    always, fails at step 3 with no other symptom.
-    ///  * **Remove Keyframe's presence against whether the playhead is on a keyframe** — checked in
+    ///  * **Remove Keys's presence against whether the playhead is on a keyframe** — checked in
     ///    both directions, on frame 0 where there is one and frame 4 where there is not, so an
     ///    unconditional row fails the second half.
     ///  * **The folder row's opacity slider at three frames against the two values the artist set.**
@@ -116,20 +116,20 @@ final class FolderKeyframeEntryUITests: PaintUITestCase {
         openFolderOptions(app, named: "Folder 1")
         XCTAssertEqual(keyframeSummary(app), "none",
                        "A fresh group carries no keyframes, and the panel says so")
-        XCTAssertEqual(app.buttons["layerOptions.addKeyframe"].value as? String, "0",
+        XCTAssertEqual(app.buttons["layerOptions.addKeys"].value as? String, "0",
                        "The row names the playhead's frame, which is 0 on a new document")
-        XCTAssertEqual(app.staticTexts["layerOptions.folderKeyframes"].label, "Frame 1 · no keyframes yet",
+        XCTAssertEqual(app.staticTexts["layerOptions.folderKeys"].label, "Frame 1 · no keys yet",
                        "The caption is shown 1-based, like the ruler's own 'Frame 1/…' — since "
                        + "2026-09-11, the model's frame 0 reads as 'Frame 1' here too")
-        XCTAssertFalse(app.buttons["layerOptions.removeKeyframe"].exists,
+        XCTAssertFalse(app.buttons["layerOptions.removeKeys"].exists,
                        "Nothing to remove yet, so the row is absent — the half of this pair that a "
                        + "build drawing it unconditionally still passes")
         attachScreenshot(app, "folder-keyframe-row-before")
 
-        app.buttons["layerOptions.addKeyframe"].tap()
+        app.buttons["layerOptions.addKeys"].tap()
 
-        XCTAssertEqual(keyframeSummary(app), "0", """
-            The panel's keyframe summary must name frame 0 after the press — a press that wrote \
+        XCTAssertEqual(keyframeSummary(app), "0p", """
+            The panel's summary must name frame 0, primed, after the press — a press that wrote \
             nothing leaves this at "none".
 
             **It cannot catch a press that wrote to the wrong target, and that was mutation-tested \
@@ -138,11 +138,12 @@ final class FolderKeyframeEntryUITests: PaintUITestCase {
             keyframes and agree with itself; the mutation survived exactly this assertion. The two \
             operands below are the ones that catch it.
             """)
-        XCTAssertEqual(app.staticTexts["layerOptions.folderKeyframes"].label, "Frame 1 · keyframes at 1",
-                       "the caption's own list is 1-based too, once there is a keyframe to name")
-        XCTAssertTrue(app.buttons["layerOptions.removeKeyframe"].waitForExistence(timeout: 5),
+        XCTAssertEqual(app.staticTexts["layerOptions.folderKeys"].label, "Frame 1 · primed at 1",
+                       "the caption's own list is 1-based too, once there is a frame to name — and a "
+                       + "press that changed nothing primes the frame and keys nothing (TODO (139))")
+        XCTAssertTrue(app.buttons["layerOptions.removeKeys"].waitForExistence(timeout: 5),
                       "With a keyframe under the playhead the panel offers to take it back")
-        XCTAssertEqual(app.buttons["layerOptions.removeKeyframe"].value as? String, "0",
+        XCTAssertEqual(app.buttons["layerOptions.removeKeys"].value as? String, "0",
                        "…and it names the frame it would take back, which is the playhead's — a row "
                        + "that said anything else would remove a keyframe the artist is not looking at")
 
@@ -151,12 +152,13 @@ final class FolderKeyframeEntryUITests: PaintUITestCase {
         // that aimed both of them at the wrong target reads back its own write and agrees with
         // itself — mutation-tested, and it survived. The timeline's marker bands are per row, so
         // "which row grew a diamond" is a fact neither the panel nor the press can fake.
-        XCTAssertEqual(app.otherElements["timeline.folderTrack.Folder 1.keys"].value as? String, "0",
+        XCTAssertEqual(app.otherElements["timeline.folderTrack.Folder 1.keys"].value as? String, "0p",
                        """
-                       The group's timeline row must draw one diamond, at frame 0. This band is \
-                       `TimelineKeyMarkers.encode` over `keyframeFrames(of: .folder(…))`, fed \
-                       through `TimelineLayoutKey` — so it is the same union the panel reports, \
-                       reached by a different path and attributed to a named row.
+                       The group's timeline row must draw one hollow diamond — a primed frame — at \
+                       frame 0. This band is `TimelineKeyMarkers.encode` over \
+                       `placedKeys(of: .folder(…))`, fed through `TimelineLayoutKey` — so it is the \
+                       same answer the panel reports, reached by a different path and attributed to a \
+                       named row.
                        """)
         XCTAssertFalse(app.otherElements["timeline.keyMarkers.0"].exists, """
             The *layer* inside the document must not have grown a keyframe. Its marker band is \
@@ -170,16 +172,16 @@ final class FolderKeyframeEntryUITests: PaintUITestCase {
         // transport sits below this panel, so an artist can scrub while it is up, and a row that had
         // captured its frame when the panel opened would quietly write to the wrong one.
         stepForward(app, 4, toFrame: 4)
-        XCTAssertEqual(app.buttons["layerOptions.addKeyframe"].value as? String, "4", """
+        XCTAssertEqual(app.buttons["layerOptions.addKeys"].value as? String, "4", """
             The Add row must read the playhead as it moves, not the frame the panel was opened on. \
             This is the assertion that distinguishes reading `currentFrame` in the body from \
             capturing it — and capturing is what the timeline's own cel menu deliberately does, so \
             it is a plausible thing to copy across.
             """)
-        XCTAssertEqual(keyframeSummary(app), "0",
-                       "…and the group still carries exactly the one keyframe, moving the playhead "
+        XCTAssertEqual(keyframeSummary(app), "0p",
+                       "…and the group still carries exactly the one primed frame, moving the playhead "
                        + "being a look rather than an edit")
-        XCTAssertFalse(app.buttons["layerOptions.removeKeyframe"].exists,
+        XCTAssertFalse(app.buttons["layerOptions.removeKeys"].exists,
                        "Frame 4 has no keyframe, so Remove is not offered there — the negative half "
                        + "of the pair asserted positively at frame 0 above")
         closeFolderOptions(app)
@@ -206,13 +208,13 @@ final class FolderKeyframeEntryUITests: PaintUITestCase {
         // 6. Place the second key, which commits the held value onto frame 0.
         stepForward(app, 4, toFrame: 4)
         openFolderOptions(app, named: "Folder 1")
-        app.buttons["layerOptions.addKeyframe"].tap()
+        app.buttons["layerOptions.addKeys"].tap()
         XCTAssertEqual(keyframeSummary(app), "0,4", """
             Both frames must now be keyframes of the group. This is the union the timeline draws \
             diamonds from, so a value of "4" alone would mean the first mark was lost and a value of \
             "0" alone that the second press did nothing.
             """)
-        XCTAssertEqual(app.staticTexts["layerOptions.folderKeyframes"].label, "Frame 5 · keyframes at 1, 5",
+        XCTAssertEqual(app.staticTexts["layerOptions.folderKeys"].label, "Frame 5 · keys at 1, 5",
                        "both the playhead (now frame 4, shown 5) and the list (0 and 4, shown 1 and 5) "
                        + "are the ruler's numbers, not the model's")
         attachScreenshot(app, "folder-keyframe-row-after-second")
@@ -279,15 +281,15 @@ final class FolderKeyframeEntryUITests: PaintUITestCase {
 
         // Keyframe A at frame 0, through the row this pass added.
         openFolderOptions(app, named: "Folder 1")
-        app.buttons["layerOptions.addKeyframe"].tap()
-        XCTAssertEqual(keyframeSummary(app), "0", "Premise: the first keyframe landed on the group")
+        app.buttons["layerOptions.addKeys"].tap()
+        XCTAssertEqual(keyframeSummary(app), "0p", "Premise: frame 0 is primed on the group")
         closeFolderOptions(app)
 
         // Fade the group right out at frame 4, then commit it with keyframe B.
         stepForward(app, 4, toFrame: 4)
         app.sliders["layerPanel.folder.Folder 1.opacity"].adjust(toNormalizedSliderPosition: 0.0)
         openFolderOptions(app, named: "Folder 1")
-        app.buttons["layerOptions.addKeyframe"].tap()
+        app.buttons["layerOptions.addKeys"].tap()
         XCTAssertEqual(keyframeSummary(app), "0,4",
                        "Premise: the group is keyed on both frames before the canvas is read")
         closeFolderOptions(app)

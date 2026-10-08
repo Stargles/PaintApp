@@ -75,7 +75,9 @@ final class TransformTrackLogicTests: XCTestCase {
     // MARK: - Independence — TODO (139)
 
     /// **Keying X leaves Y's keys untouched** — the owner's *"fully independent from each other"*.
-    /// A sideways change over a channel already keying Y at other frames writes X alone.
+    /// A sideways change over a channel already keying Y at other frames writes X alone, and X takes
+    /// no key on Y's frames either: they are keyframes of the target, but not primed ones, so they are
+    /// no reason to put a key on X (`AnimationCurve.keyed`).
     func testKeyingXLeavesYsKeysUntouched() {
         var t = TransformTrack(box: box, curves: [
             .x: AnimationCurve(keys: [.init(frame: 0, value: rest.x), .init(frame: 8, value: rest.x + 10)]),
@@ -85,7 +87,7 @@ final class TransformTrackLogicTests: XCTestCase {
         var old = t.values(atTime: 4, base: rest)
         var new = old
         new.x += 20
-        XCTAssertEqual(t.key(new, over: old, atFrame: 4, keyframes: [0, 2, 6, 8]), [.x])
+        XCTAssertEqual(t.key(new, over: old, atFrame: 4, placed: PlacedKeys(frames: [0, 2, 6, 8], primed: [])), [.x])
         XCTAssertEqual(t.curve(.y), yBefore, "Y's keys are exactly where they were")
         XCTAssertEqual(t.curve(.x)?.keys.map(\.frame), [0, 4, 8])
 
@@ -94,7 +96,7 @@ final class TransformTrackLogicTests: XCTestCase {
         new = old
         new.y += 7
         let xBefore = t.curve(.x)
-        XCTAssertEqual(t.key(new, over: old, atFrame: 8, keyframes: [0, 2, 4, 6, 8]), [.y])
+        XCTAssertEqual(t.key(new, over: old, atFrame: 8, placed: PlacedKeys(frames: [0, 2, 4, 6, 8], primed: [])), [.y])
         XCTAssertEqual(t.curve(.x), xBefore)
     }
 
@@ -140,7 +142,7 @@ final class TransformTrackLogicTests: XCTestCase {
         var new = old
         new.x += 5
         new.rotation = 30
-        let written = t.key(new, over: old, atFrame: 10, keyframes: [0, 6])
+        let written = t.key(new, over: old, atFrame: 10, placed: PlacedKeys(frames: [0, 6], primed: []))
         XCTAssertEqual(written, [.x, .rotation])
         XCTAssertEqual(t.curve(.x)?.keys.map(\.frame), [0, 6, 10], "X keyed at the frame alone")
         XCTAssertEqual(t.curve(.rotation)?.keys.map(\.frame), [6, 10], "rotation seeded onto the keyframe below")
@@ -153,7 +155,7 @@ final class TransformTrackLogicTests: XCTestCase {
         var t = xTrack([(0, 0), (6, 30)])
         let before = t
         let values = t.values(atTime: 3, base: rest)
-        XCTAssertEqual(t.key(values, over: values, atFrame: 3, keyframes: [0, 6]), [])
+        XCTAssertEqual(t.key(values, over: values, atFrame: 3, placed: PlacedKeys(frames: [0, 6], primed: [])), [])
         XCTAssertEqual(t, before)
     }
 
@@ -165,17 +167,27 @@ final class TransformTrackLogicTests: XCTestCase {
         let old = t.values(atTime: 4, base: rest)
         var new = old
         new.rotation = -170
-        XCTAssertEqual(t.key(new, over: old, atFrame: 4, keyframes: [0]), [.rotation])
+        XCTAssertEqual(t.key(new, over: old, atFrame: 4, placed: PlacedKeys(frames: [0], primed: [])), [.rotation])
         XCTAssertEqual(t.curve(.rotation)?.key(atFrame: 4)?.value ?? 0, 190, accuracy: 1e-9)
     }
 
-    /// Placing a keyframe holds every keyed component where it shows, and keys nothing it does not.
-    func testHoldingKeysPinsEveryCurveAndTouchesNoOtherComponent() {
+    /// **An animated component edited past a primed frame holds that frame's value, and only it
+    /// does** — TODO (139): priming keys nothing, so the hold Add Keys used to make for every
+    /// component is made at the edit, for the component that changed. X keyed 0 and 8, frame 4
+    /// primed, X moved at 6: X takes its own value at 4 and the new one at 6, so frames 0–4 show what
+    /// they showed, and Y — unchanged — takes nothing.
+    func testAnAnimatedComponentEditedPastAPrimedFrameHoldsItThereAndNothingElseIsKeyed() {
         var t = xTrack([(0, 0), (8, 80)])
-        t.holdKeys(atFrame: 4)
-        XCTAssertEqual(t.curve(.x)?.keys.map(\.frame), [0, 4, 8])
-        XCTAssertEqual(t.curve(.x)?.key(atFrame: 4)?.value ?? 0, rest.x + 40, accuracy: 1e-9)
-        XCTAssertEqual(Set(t.curves.keys), [.x])
+        let shownAt4 = t.values(atTime: 4, base: rest).x
+        let old = t.values(atTime: 6, base: rest)
+        var new = old
+        new.x += 25
+        XCTAssertEqual(t.key(new, over: old, atFrame: 6, placed: PlacedKeys(frames: [0, 4, 8], primed: [4])), [.x])
+        XCTAssertEqual(t.curve(.x)?.keys.map(\.frame), [0, 4, 6, 8])
+        XCTAssertEqual(t.values(atTime: 4, base: rest).x, shownAt4, accuracy: 1e-9,
+                       "the primed frame keeps the value it showed")
+        XCTAssertEqual(t.curve(.x)?.key(atFrame: 6)?.value ?? 0, new.x, accuracy: 1e-9)
+        XCTAssertEqual(Set(t.curves.keys), [.x], "Y did not change and takes no key")
     }
 
     // MARK: - Evaluation

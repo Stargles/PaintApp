@@ -25,7 +25,7 @@ final class CelSpanCropUITests: PaintUITestCase {
         let target = cel.coordinate(withNormalizedOffset: CGVector(dx: dx, dy: 0.5))
         target.tap()
         target.tap()
-        let add = app.buttons["timeline.menu.Add Keyframe"]
+        let add = app.buttons["timeline.menu.Add Keys"]
         XCTAssertTrue(add.waitForExistence(timeout: 5), "The second tap raises the cel menu")
         add.tap()
     }
@@ -60,7 +60,7 @@ final class CelSpanCropUITests: PaintUITestCase {
 
         // Keyframe A: a bare mark on the first frame — §2.26's first step.
         markKeyframe(app, onCelAt: 0.04)
-        XCTAssertEqual(markers(app), "0", "the mark is on the timeline where the artist can see it")
+        XCTAssertEqual(markers(app), "0p", "the primed frame is on the timeline where the artist can see it")
 
         // Scrub to the far end of the block, Move the whole drawing, and let go.
         scrub(app, toCelFraction: 0.95)

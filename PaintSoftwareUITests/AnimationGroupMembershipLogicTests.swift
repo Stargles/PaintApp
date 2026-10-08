@@ -408,7 +408,7 @@ final class AnimationGroupMembershipLogicTests: XCTestCase {
         XCTAssertTrue(f.manager.setAnimationGroupOfSelection(.newGroup))
         XCTAssertEqual(f.manager.notice?.code, "animationGroupJoinedStaticGroup",
                        "a fresh group poses nothing, and the sentence has to say so")
-        XCTAssertTrue(f.manager.notice?.message.contains("keyframe") ?? false,
+        XCTAssertTrue(f.manager.notice?.message.contains("Add Keys") ?? false,
                       "…and name the step that makes it animate (read \"\(f.manager.notice?.message ?? "nil")\")")
 
         XCTAssertTrue(f.manager.setAnimationGroupOfSelection(.existing(f.groupA)))

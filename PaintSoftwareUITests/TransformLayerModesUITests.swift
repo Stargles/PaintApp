@@ -225,7 +225,7 @@ final class TransformLayerModesUITests: PaintUITestCase {
             if read.current == frame { break }
             dx += read.current < frame ? 0.5 / Double(total) : -0.5 / Double(total)
         }
-        let menu = app.buttons["timeline.menu.Add Keyframe"]
+        let menu = app.buttons["timeline.menu.Add Keys"]
         if menu.exists {
             app.staticTexts["timeline.frameLabel"].tap()
             _ = menu.waitForNonExistence(timeout: 3)

@@ -179,7 +179,7 @@ final class PoseNodeDragLogicTests: XCTestCase {
             }
             manager.cancelStructureGesture()
         } else if wrote {
-            manager.commitStructureGesture(label: .effectKeyframes)
+            manager.commitStructureGesture(label: .effectKeys)
         } else {
             manager.cancelStructureGesture()
         }

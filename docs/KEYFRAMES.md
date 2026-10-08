@@ -202,6 +202,9 @@ reasoning is what stops a later session reinstating it by rediscovering the argu
     carries a curve takes a key at the new mark holding the value it *resolves* to there, or placing a
     mark lets every other animated channel drift straight through it. The dimming rule is void — nothing
     is refused now, because a mark with no channel is a legal thing to place on an untouched layer.
+    **That surviving half is superseded too, 2026-10-01 by §2.31**: Add Keys keys nothing, and the hold
+    moved to the edit — `AnimationCurve.keyed` holds the one channel that changed on the primed frames
+    its key reshapes.
 25. **The live per-frame cost of a *derived* frame is not held to the 24 fps budget. The prebake is what
     must play at 24 fps.** 2026-08-29, and it is the widest-reaching of these rulings because it decides
     how every future measurement on this path is read. Shown that engaging the compositor on an
@@ -444,12 +447,22 @@ reasoning is what stops a later session reinstating it by rediscovering the argu
     **What it means in the model.** A pose channel (`TransformTrack`) is a rest box and one
     `AnimationCurve` per component; a component with no curve shows the channel's base — rest for a
     cel, whose base is its geometry, and the stored pose for a transformation layer. Every writer keys
-    through one function, `TransformTrack.key(_:over:atFrame:keyframes:)`: the components the change
+    through one function, `TransformTrack.key(_:over:atFrame:placed:)`: the components the change
     moved (beyond `PoseComponents.Component.flatTolerance`) and no others; a component that already has
-    a curve takes a key at the frame, one that has none is **seeded** — the old value on the
-    neighbouring keyframes, the new one here — so the frames either side keep what they showed. That
-    seed is what a whole-pose key did for the component implicitly, and on two primed frames it is
-    exactly the ruling's "two keys … only the things that changed". The routing (§2.27's five arms) is
+    a curve takes a key at the frame **and holds its own value on every primed frame that key would
+    reshape** (`AnimationCurve.keyed` — primed frames only, never a frame another component keys, so X's
+    keys do not follow Y's), one that has none is **seeded** — the old value on the nearest keyframe
+    below and above, the new one here — so the frames the artist primed keep what they showed. The seed
+    is what a whole-pose key did for the component implicitly, and on two primed frames either is
+    exactly the ruling's "two keys … only the things that changed".
+
+    **Add Keys primes and keys nothing.** The press records the mark and commits whatever edits were
+    held for it (§2.27's second step, which only a changed channel ever has); it no longer keys every
+    animated channel on the frame (§2.24's surviving half), because that put keys on things that did not
+    change. The same hold applies to every channel kind — a grade's parameter and a layer's own scalar
+    key through `AnimationCurve.keyed` too — so a primed frame keeps its value when one channel is edited
+    past it, and only that channel takes the key. The verbs are **Add Keys, Remove Keys, Clear Keys**
+    and a graph node's **Delete Key**, and the undo banner says the same. The routing (§2.27's five arms) is
     still per *channel*, because a cel channel's base is its geometry and one gesture cannot both bake
     and take the bake back.
 
@@ -457,7 +470,10 @@ reasoning is what stops a later session reinstating it by rediscovering the argu
     whole through one funnel (`CanvasManager.setPoseChannelTrack`) — drag, retime, handles, delete and
     tap-to-add touch that row's curve and no other. A sideways Move draws X and Y; a turn draws
     Rotation; a Distort draws Perspective X and Y beside whatever else moved. §2.28's union is unchanged
-    in meaning: a diamond wherever any component keys, a primed frame wherever none does.
+    in meaning, and drawn in two forms: a **filled** diamond wherever any channel keys (a node in the
+    graph editor — the 2026-09-03 rule holds for this form), a **hollow** one where a frame is primed
+    and nothing is keyed yet (`PlacedKeys`; the band's value spells it `3p`). §2.28's pruning keeps the
+    two disjoint: a mark a key lands on goes, so the frame draws as the key it is.
 
     **Superseded by it**: §2.14 and §2.15, and the parts of §2.5 and §11.7 that described a whole-pose
     key (one shared ease, six rows written through `PoseEdit`, a projective channel declined). Nothing

@@ -21,7 +21,7 @@ import CoreGraphics
 ///    that the stored base is written on every one of them — which is where a container pose differs
 ///    from a cel's and is the easiest thing here to get backwards.
 /// 3. **§2.28's biconditional at the two funnels a container pose reaches**, both of which were blind
-///    to it before this pass: Remove Keyframe took the mark and left the key, and placing a keyframe
+///    to it before this pass: Remove Keys took the mark and left the key, and placing a keyframe
 ///    let an animated container drift straight through it.
 /// 4. **Undo**, because the preview writes the document on every tick of the drag and the step the
 ///    commit records has to restore the pose the drag *started* from.
@@ -365,7 +365,7 @@ final class TransformLayerEntryLogicTests: XCTestCase {
         let at = manager.layers.count - 1
         let layerID = manager.layers[at].id
         manager.currentFrame = 0
-        XCTAssertTrue(manager.addKeyframe(.layer(id: layerID), atFrame: 0))
+        XCTAssertTrue(manager.addKeys(.layer(id: layerID), atFrame: 0))
         manager.currentFrame = 4
 
         XCTAssertEqual(manager.containerPoseWrite(.layer(id: layerID), atFrame: 4),
@@ -390,11 +390,11 @@ final class TransformLayerEntryLogicTests: XCTestCase {
         let at = manager.layers.count - 1
         let layerID = manager.layers[at].id
         manager.currentFrame = 0
-        manager.addKeyframe(.layer(id: layerID), atFrame: 0)
+        manager.addKeys(.layer(id: layerID), atFrame: 0)
         manager.currentFrame = 4
         moveBox(manager, by: CGVector(dx: 9, dy: 0))
 
-        XCTAssertTrue(manager.addKeyframe(.layer(id: layerID), atFrame: 4))
+        XCTAssertTrue(manager.addKeys(.layer(id: layerID), atFrame: 4))
 
         let track = manager.layers[at].transform?.track
         XCTAssertEqual(track?.curve(.x)?.key(atFrame: 0)?.value ?? 0, Double(canvasBox.midX), accuracy: 1e-9,
@@ -410,14 +410,14 @@ final class TransformLayerEntryLogicTests: XCTestCase {
 
     // MARK: - §2.28's biconditional, at the funnels a container pose reaches
 
-    /// **Remove Keyframe drops a container pose key, and until this pass it did not.**
+    /// **Remove Keys drops a container pose key, and until this pass it did not.**
     ///
     /// `keyedFrames(of:)` folds `poseKeyframeFrames(inLayer:)`, which folds the container's own track,
     /// so the timeline drew a keyframe indicator for a container pose key. `poseDeltaClearing` walked
     /// only the layer's cels, so the artist's tap took the mark it did not have and left the key it
     /// did — the drawing kept moving with the marker gone, which is a control that appears not to
     /// work and is one of the two device reports §2.28 was written from.
-    func testRemoveKeyframeDropsTheContainerPoseKeyItDrewAnIndicatorFor() {
+    func testRemoveKeysDropsTheContainerPoseKeyItDrewAnIndicatorFor() {
         let manager = makeTransformLayer()
         let at = manager.layers.count - 1
         let target = KeyframeTarget.layer(id: manager.layers[at].id)
@@ -428,7 +428,7 @@ final class TransformLayerEntryLogicTests: XCTestCase {
         XCTAssertTrue(manager.hasKeyframe(target, atFrame: 6),
                       "The premise: the timeline draws one here")
 
-        XCTAssertTrue(manager.removeKeyframe(target, atFrame: 6))
+        XCTAssertTrue(manager.removeKeys(target, atFrame: 6))
 
         XCTAssertFalse(manager.layers[at].transform?.track.keyedFrames.contains(6) ?? true,
                        "The key goes, not just the marker")
@@ -437,15 +437,12 @@ final class TransformLayerEntryLogicTests: XCTestCase {
                        "…and only the one the artist pointed at")
     }
 
-    /// **Placing a keyframe holds an animated container pose instead of letting it drift through.**
-    ///
-    /// §2.24's surviving half: *"every channel that already carries a curve takes a key at the new
-    /// mark holding the value it resolves to there, or placing a mark lets every other animated
-    /// channel drift straight through it."* The same walk that could not clear a container key could
-    /// not hold one either, so a mark placed halfway through a container's move keyed the cels and
-    /// skipped the container — and the move ran straight through the keyframe the artist had just
-    /// placed to stop it.
-    func testPlacingAKeyframeHoldsAnAnimatedContainerPoseAtTheValueItResolvesTo() throws {
+    /// **Add Keys on an animated container primes it and keys nothing; the next Move made past it
+    /// holds the primed frame, on what it changed** — TODO (139). The press used to key the container
+    /// on the frame it marked (§2.24's surviving half), which keyed components nobody touched; the
+    /// hold is made at the edit now (`AnimationCurve.keyed`). A container sliding 0 → 80 over frames
+    /// 0–8, frame 4 primed, a further slide at 6: X takes what it showed at 4 and the new value at 6.
+    func testAddKeysOnAnAnimatedContainerKeysNothingAndTheNextMoveHoldsTheFrameItPrimed() throws {
         let manager = makeTransformLayer()
         let at = manager.layers.count - 1
         let target = KeyframeTarget.layer(id: manager.layers[at].id)
@@ -453,19 +450,29 @@ final class TransformLayerEntryLogicTests: XCTestCase {
             (0, PoseQuad(restingIn: canvasBox)),
             (8, PoseQuad(box: canvasBox, mappedBy: CGAffineTransform(translationX: 80, y: 0))),
         ])
-        let resolvedAtFour = try XCTUnwrap(manager.layers[at].transform?.resolvedValues(atFrame: 4))
-        XCTAssertNotEqual(resolvedAtFour.x, Double(canvasBox.midX), accuracy: 1,
+        let before = try XCTUnwrap(manager.layers[at].transform?.track)
+        let shownAtFour = try XCTUnwrap(manager.layers[at].transform?.resolvedValues(atFrame: 4)).x
+        XCTAssertNotEqual(shownAtFour, Double(canvasBox.midX), accuracy: 1,
                           "The premise: the channel is moving at frame 4")
 
-        XCTAssertTrue(manager.addKeyframe(target, atFrame: 4))
+        XCTAssertTrue(manager.addKeys(target, atFrame: 4), "the press primes frame 4")
+        XCTAssertEqual(manager.layers[at].transform?.track, before, "…and keys nothing")
+        XCTAssertEqual(manager.layers[at].keyframeMarks, [4])
 
-        XCTAssertEqual(manager.layers[at].transform?.track.curve(.x)?.key(atFrame: 4)?.value, resolvedAtFour.x,
-                       "Held at exactly what it was already showing, so nothing on screen moves")
-        XCTAssertEqual(Set(manager.layers[at].transform?.track.curves.keys.map { $0 } ?? []), [.x],
-                       "…and no component the channel did not key takes one")
-        XCTAssertFalse(manager.layers[at].keyframeMarks.contains(4),
-                       "And the mark is dropped, because a channel now keys that frame — the one "
-                       + "rule that keeps a node and an indicator from coming apart")
+        let shownAtSix = try XCTUnwrap(manager.layers[at].transform?.resolvedValues(atFrame: 6)).x
+        let slid = PoseQuad(box: canvasBox, mappedBy: CGAffineTransform(
+            translationX: shownAtSix - Double(canvasBox.midX) + 10, y: 0))
+        XCTAssertEqual(manager.commitContainerPose(target, restingAt: PoseQuad(restingIn: canvasBox),
+                                                   movedTo: slid, atFrame: 6), .key)
+        let track = try XCTUnwrap(manager.layers[at].transform?.track)
+        XCTAssertEqual(Set(track.curves.keys), [.x], "a slide keys X and no other component")
+        XCTAssertEqual(track.curve(.x)?.keys.map(\.frame), [0, 4, 6, 8])
+        XCTAssertEqual(track.curve(.x)?.key(atFrame: 4)?.value ?? .nan, shownAtFour, accuracy: 1e-9,
+                       "Held at exactly what it was showing, so nothing on screen moved there")
+        XCTAssertFalse(manager.layers[at].keyframeMarks.contains(4), """
+            And the mark is dropped, because a channel now keys that frame — the one rule that keeps \
+            a node and an indicator from coming apart
+            """)
     }
 
     /// **A key written by the Move box onto a marked frame takes the mark with it.**
@@ -479,8 +486,8 @@ final class TransformLayerEntryLogicTests: XCTestCase {
         let at = manager.layers.count - 1
         let layerID = manager.layers[at].id
         // Two marks, so a Move standing on one routes to `.seedAndKey` and writes a key here.
-        manager.addKeyframe(.layer(id: layerID), atFrame: 0)
-        manager.addKeyframe(.layer(id: layerID), atFrame: 8)
+        manager.addKeys(.layer(id: layerID), atFrame: 0)
+        manager.addKeys(.layer(id: layerID), atFrame: 8)
         manager.currentFrame = 8
         XCTAssertTrue(manager.layers[at].keyframeMarks.contains(8), "The premise: a bare mark at 8")
 
@@ -505,8 +512,8 @@ final class TransformLayerEntryLogicTests: XCTestCase {
         let manager = makeTransformLayer()
         let at = manager.layers.count - 1
         let layerID = manager.layers[at].id
-        manager.addKeyframe(.layer(id: layerID), atFrame: 0)
-        manager.addKeyframe(.layer(id: layerID), atFrame: 8)
+        manager.addKeys(.layer(id: layerID), atFrame: 0)
+        manager.addKeys(.layer(id: layerID), atFrame: 8)
         manager.currentFrame = 8
         moveBox(manager, by: CGVector(dx: 14, dy: 0))
         XCTAssertEqual(manager.layers[at].transform?.track.curve(.x)?.keys.map(\.frame), [0, 8],
@@ -533,8 +540,8 @@ final class TransformLayerEntryLogicTests: XCTestCase {
         let manager = makeTransformLayer()
         let at = manager.layers.count - 1
         let layerID = manager.layers[at].id
-        manager.addKeyframe(.layer(id: layerID), atFrame: 0)
-        manager.addKeyframe(.layer(id: layerID), atFrame: 8)
+        manager.addKeys(.layer(id: layerID), atFrame: 0)
+        manager.addKeys(.layer(id: layerID), atFrame: 8)
         manager.currentFrame = 8
         moveBox(manager, by: CGVector(dx: 14, dy: 0))
 
@@ -571,7 +578,7 @@ final class TransformLayerEntryLogicTests: XCTestCase {
         stack.manager.currentLayerIndex = stack.mover
         let layerID = stack.moverID
         stack.manager.currentFrame = 0
-        stack.manager.addKeyframe(.layer(id: layerID), atFrame: 0)
+        stack.manager.addKeys(.layer(id: layerID), atFrame: 0)
         stack.manager.currentFrame = 4
         moveBox(stack.manager, by: CGVector(dx: 9, dy: 3))
         XCTAssertNotNil(stack.manager.layers[stack.mover].transform?.baseline,

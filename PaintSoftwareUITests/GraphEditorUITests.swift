@@ -166,7 +166,7 @@ final class GraphEditorUITests: PaintUITestCase {
     /// **What D2's repurposed button had to leave behind, and did not.**
     ///
     /// §2.22's keyframe button became the graph editor toggle on the reasoning that Add / Remove /
-    /// Clear Keyframes had moved to the cel menu. True, and incomplete: they had moved to the
+    /// Clear Keys had moved to the cel menu. True, and incomplete: they had moved to the
     /// `.block` arm of `timelineMenuContent` only, and §2.4 and §2.26 put marks on the *layer* in
     /// absolute document frames — `TimelineKeyMarkers` says they "exist perfectly well at frames the
     /// layer has no cel at", which is why the marker band spans the whole track. So a layer whose one
@@ -194,7 +194,7 @@ final class GraphEditorUITests: PaintUITestCase {
 
         XCTAssertTrue(app.buttons["Add Drawing"].waitForExistence(timeout: 5),
                       "PREMISE: this is the empty slot's menu, not a block's")
-        let add = app.buttons["timeline.menu.Add Keyframe"]
+        let add = app.buttons["timeline.menu.Add Keys"]
         XCTAssertTrue(add.exists, "A frame with no drawing on it is still a frame a mark can sit at")
         add.tap()
 
@@ -370,12 +370,12 @@ final class GraphEditorUITests: PaintUITestCase {
                 CGVector(dx: (Double(frame) + 0.5) / Double(cel.length), dy: 0.5))
         }
         func mark(_ frame: Int) {
-            let add = app.buttons["timeline.menu.Add Keyframe"]
+            let add = app.buttons["timeline.menu.Add Keys"]
             slot(frame).tap()
             if !add.waitForExistence(timeout: 2) {
                 slot(frame).tap()
                 XCTAssertTrue(add.waitForExistence(timeout: 5),
-                              "No Add Keyframe on frame \(frame)'s menu — the artist's only way in")
+                              "No Add Keys on frame \(frame)'s menu — the artist's only way in")
             }
             add.tap()
         }
@@ -383,8 +383,8 @@ final class GraphEditorUITests: PaintUITestCase {
         // Step 1 and 2: the artist marks A and then B, exactly as §2.26 describes.
         mark(0)
         mark(8)
-        XCTAssertEqual(app.otherElements["timeline.keyMarkers.0"].value as? String, "0|8",
-                       "PREMISE: two marks carrying no channel, which is what puts the drag in seedAndKey")
+        XCTAssertEqual(app.otherElements["timeline.keyMarkers.0"].value as? String, "0p|8p",
+                       "PREMISE: two primed frames carrying no channel, which is what puts the drag in seedAndKey")
 
         // Step 3: standing on B, they drag the layer's opacity down. This is the whole gesture — no
         // mode, no second control, and no effect layer anywhere in the document.
@@ -581,7 +581,7 @@ final class GraphEditorGestureUITests: PaintUITestCase {
 
         // The second tap on the node already focused raises its menu, where Delete now lives.
         onTheLine.tap()
-        let delete = app.buttons["timeline.menu.Delete Keyframe"]
+        let delete = app.buttons["timeline.menu.Delete Key"]
         XCTAssertTrue(delete.waitForExistence(timeout: 5),
                       "The second tap on a focused node raises its menu, the way a cel's second tap does")
         delete.tap()
@@ -642,11 +642,11 @@ final class GraphEditorGestureUITests: PaintUITestCase {
         func mark(_ frame: Int) {
             let slot = block.coordinate(withNormalizedOffset:
                 CGVector(dx: (Double(frame) + 0.5) / Double(cel.length), dy: 0.5))
-            let add = app.buttons["timeline.menu.Add Keyframe"]
+            let add = app.buttons["timeline.menu.Add Keys"]
             slot.tap()
             if !add.waitForExistence(timeout: 2) {
                 slot.tap()
-                XCTAssertTrue(add.waitForExistence(timeout: 5), "No Add Keyframe on frame \(frame)'s menu")
+                XCTAssertTrue(add.waitForExistence(timeout: 5), "No Add Keys on frame \(frame)'s menu")
             }
             add.tap()
         }
@@ -730,7 +730,7 @@ final class GraphEditorGestureUITests: PaintUITestCase {
                       "A tap on a pose node focuses it first, exactly as a grade's does — got \(band.label)")
 
         midpoint.tap()
-        let deleteButton = app.buttons["timeline.menu.Delete Keyframe"]
+        let deleteButton = app.buttons["timeline.menu.Delete Key"]
         XCTAssertTrue(deleteButton.waitForExistence(timeout: 5),
                      "TODO (21): a pose node's second tap now raises the menu a grade's always could")
         attachScreenshot(app, "pose-node-menu-with-delete-keyframe")
@@ -886,12 +886,12 @@ final class GraphEditorGestureUITests: PaintUITestCase {
             the node carries an authored tangent — so its absence here is the handle drag not having \
             reached the document.
             """)
-        XCTAssertTrue(app.buttons["timeline.menu.Delete Keyframe"].exists,
+        XCTAssertTrue(app.buttons["timeline.menu.Delete Key"].exists,
                       "…and Delete is on the same menu, which is where the owner asked for it")
         reset.tap()
 
         key.tap()
-        XCTAssertTrue(app.buttons["timeline.menu.Delete Keyframe"].waitForExistence(timeout: 5),
+        XCTAssertTrue(app.buttons["timeline.menu.Delete Key"].waitForExistence(timeout: 5),
                       "PREMISE: the menu came up again")
         XCTAssertFalse(app.buttons["timeline.menu.Reset Curve"].exists,
                        "Reset Curve is gone, because the node is back on its derived tangents")
@@ -959,7 +959,7 @@ private extension PaintUITestCase {
             // `testAnEmptySlotCanStillBeGivenAKeyframe`'s technique.
             let slot = block.coordinate(withNormalizedOffset:
                 CGVector(dx: (Double(frame) + 0.5) / Double(cel.length), dy: 0.5))
-            let add = app.buttons["timeline.menu.Add Keyframe"]
+            let add = app.buttons["timeline.menu.Add Keys"]
             // **One tap or two, decided by what happened rather than assumed.**
             // `handleTapOnCel`/`handleTapOnGap` are a two-stage contract: a tap on a frame that is
             // *not* already selected only selects it, and the menu comes up on the next one. So a
@@ -970,15 +970,15 @@ private extension PaintUITestCase {
             if !add.waitForExistence(timeout: 2) {
                 slot.tap()
                 XCTAssertTrue(add.waitForExistence(timeout: 5),
-                              "No Add Keyframe on frame \(frame)'s menu")
+                              "No Add Keys on frame \(frame)'s menu")
             }
             add.tap()
         }
         mark(from)
         mark(to)
         XCTAssertEqual(app.otherElements["timeline.keyMarkers.1"].value as? String,
-                       "\(from)|\(to)",
-                       "PREMISE: two marks carrying no channel, which is what puts the next slider edit in seedAndKey")
+                       "\(from)p|\(to)p",
+                       "PREMISE: two primed frames carrying no channel, which is what puts the next slider edit in seedAndKey")
 
         // The effect layer is current, so its bar has been up since the grade was picked: the rail
         // is shut and there is nothing to reopen.

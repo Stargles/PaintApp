@@ -129,47 +129,35 @@ struct TransformTrack: Equatable {
     /// **Writes `new` at `frame` on every component where it differs from `old`, and on no other** —
     /// the ruling: *"only the keys of things that changed are added"*. Returns the components written.
     ///
-    /// A component that already has a curve takes a key at `frame` — the auto-key arm, one component
-    /// at a time. **One that has none is seeded** (`AnimationCurve.seeded`): `old` onto the nearest
-    /// keyframe below and above `frame`, `new` on `frame`, so the frames either side keep showing the
-    /// value they showed. That is what a whole-pose key did for that component implicitly — every
-    /// earlier key carried it — and what *"if you prime this in two frames and then change something,
-    /// then it should put down two keys like the behaviour today, but only the things that changed"*
-    /// asks for on the primed pair.
+    /// Either way the primed frames keep showing what they showed, which is *"if you prime this in two
+    /// frames and then change something, then it should put down two keys like the behaviour today,
+    /// but only the things that changed"*. A component that already has a curve takes
+    /// `AnimationCurve.keyed` — its own value held on the primed frames its edit reshapes, `new` on
+    /// `frame`. **One that has none is seeded** (`AnimationCurve.seeded`): `old` onto the nearest
+    /// keyframe below and above, `new` on `frame` — what a whole-pose key did for that component
+    /// implicitly, since every earlier key carried it, and the only way a first key can leave the
+    /// frames before it as they were.
     ///
     /// `new` is unwrapped onto `old`'s turn first, so a drawing turned through ±180° is keyed the
     /// short way round rather than spun back.
     ///
-    /// - Parameter keyframes: the target's keyframes in this track's own frame base, ascending —
+    /// - Parameter placed: the target's keys and primed frames in this track's own frame base —
     ///   restricted by the caller to the frames a key of this channel may sit on (a cel's span).
     @discardableResult
     mutating func key(_ new: PoseComponents.Values, over old: PoseComponents.Values,
-                      atFrame frame: Int, keyframes: [Int]) -> [PoseComponents.Component] {
+                      atFrame frame: Int, placed: PlacedKeys) -> [PoseComponents.Component] {
         let new = new.unwrappingRotation(near: old.rotation)
         let changed = old.components(differingFrom: new)
         for component in changed {
-            if var curve = curves[component] {
-                curve.setKey(AnimationCurve.Key(frame: frame, value: new[component]))
-                curves[component] = curve
+            if let curve = curves[component] {
+                curves[component] = curve.keyed(new[component], atFrame: frame, holding: placed.primed)
             } else {
-                curves[component] = AnimationCurve.seeded(nil, keyframes: keyframes, frame: frame,
+                curves[component] = AnimationCurve.seeded(nil, keyframes: placed.frames, frame: frame,
                                                           oldValue: old[component],
                                                           newValue: new[component])
             }
         }
         return changed
-    }
-
-    /// **Every keyed component takes a key on `frame` holding the value it shows there** —
-    /// `addKeyframe`'s step 3, §2.24's surviving half: placing a mark must not let an animated
-    /// component drift straight through it. A component with no curve takes nothing — it shows the
-    /// base at every frame, and a key would only pin what is already there.
-    mutating func holdKeys(atFrame frame: Int) {
-        for (component, curve) in curves {
-            var held = curve
-            held.setKey(AnimationCurve.Key(frame: frame, value: curve.evaluate(at: Double(frame))))
-            curves[component] = held
-        }
     }
 
     // MARK: - Riding the cel's span — KEYFRAMES.md §3.1 and TODO (62)

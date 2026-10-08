@@ -135,7 +135,7 @@ final class FolderGraphBandLogicTests: XCTestCase {
         manager.beginStructureGesture()
         XCTAssertTrue(manager.setTargetChannelTrack(target, channelID: opacityID,
                                                     to: curve([(0, 1), (8, 0.5)])))
-        manager.commitStructureGesture(label: .effectKeyframes)
+        manager.commitStructureGesture(label: .effectKeys)
         XCTAssertEqual(manager.graphBandExpansion?.target, target, "PREMISE: the band is on the folder")
 
         manager.undo()
@@ -381,7 +381,7 @@ final class FolderGraphBandLogicTests: XCTestCase {
                                                     to: curve([(0, 1), (8, 0), (12, 0.5)])))
         let at = folderIndex(manager, folder)
 
-        // Delete Keyframe on the folder's opacity node at 8.
+        // Delete Key on the folder's opacity node at 8.
         XCTAssertFalse(manager.graphNodeKeyIsAuthored(target: target, parameterID: opacityID,
                                                             frame: 8),
                        "Nothing authored, so Reset Curve is not offered")

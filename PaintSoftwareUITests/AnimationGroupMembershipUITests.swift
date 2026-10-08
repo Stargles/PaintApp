@@ -81,9 +81,9 @@ final class AnimationGroupMembershipUITests: PaintUITestCase {
         let target = cel.coordinate(withNormalizedOffset: CGVector(dx: dx, dy: 0.5))
         target.tap()
         target.tap()
-        let add = app.buttons["timeline.menu.Add Keyframe"]
+        let add = app.buttons["timeline.menu.Add Keys"]
         XCTAssertTrue(add.waitForExistence(timeout: 5),
-                      "the second tap on the cel block raises its menu, which offers Add Keyframe")
+                      "the second tap on the cel block raises its menu, which offers Add Keys")
         add.tap()
     }
 

@@ -552,7 +552,7 @@ final class AnimatedDistortLogicTests: XCTestCase {
 
         // 1. A keyframe mark at frame 0 — §2.26's first step, a bare mark in time.
         manager.currentFrame = 0
-        XCTAssertTrue(manager.addKeyframe(target, atFrame: 0))
+        XCTAssertTrue(manager.addKeys(target, atFrame: 0))
         XCTAssertTrue(manager.layers[at].cels[0].transformTracks.isEmpty,
                       "A mark on its own writes no channel")
 
@@ -576,7 +576,7 @@ final class AnimatedDistortLogicTests: XCTestCase {
         XCTAssertNil(held.affine, "The held baseline is the inverse keystone, not its affine part")
 
         // 4. The second mark commits it, and the pair is an animation.
-        XCTAssertTrue(manager.addKeyframe(target, atFrame: 8))
+        XCTAssertTrue(manager.addKeys(target, atFrame: 8))
         let track = try XCTUnwrap(manager.layers[at].cels[0].transformTracks["cel"])
         XCTAssertEqual(track.keyedFrames, [0, 8])
         XCTAssertTrue(track.isAnimated)

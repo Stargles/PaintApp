@@ -368,8 +368,8 @@ final class TransformLayerModesLogicTests: XCTestCase {
         let fx = fourDrawings(mover: pose(CGAffineTransform(translationX: 100, y: 0), mode: .parallax))
         let poser = KeyframeTarget.layer(id: fx.manager.layers[fx.mover].id)
         let item = KeyframeTarget.layer(id: fx.manager.layers[fx.d].id)
-        XCTAssertTrue(fx.manager.addKeyframe(item, atFrame: 0))
-        XCTAssertTrue(fx.manager.addKeyframe(item, atFrame: 8))
+        XCTAssertTrue(fx.manager.addKeys(item, atFrame: 0))
+        XCTAssertTrue(fx.manager.addKeys(item, atFrame: 8))
         XCTAssertNil(fx.manager.layers[fx.d].parallaxShare, "Premise: nothing typed yet")
 
         let route = fx.manager.setParallaxShare(of: item, beneath: poser, to: 0.3, atFrame: 8)
@@ -513,12 +513,12 @@ final class TransformLayerModesLogicTests: XCTestCase {
         // the box between the marks (the baseline is held), mark B (the held pose is committed onto A
         // and the moved one keyed at B). A bare pair of marks with no Move between them writes no
         // key at all, and a test built that way exercises none of the writers.
-        XCTAssertTrue(fx.manager.addKeyframe(target, atFrame: 0))
+        XCTAssertTrue(fx.manager.addKeys(target, atFrame: 0))
         let resting = PoseQuad(restingIn: canvasBox)
         let slid = PoseQuad(box: canvasBox, mappedBy: CGAffineTransform(translationX: 6, y: 0))
         XCTAssertEqual(fx.manager.commitContainerPose(target, restingAt: resting, movedTo: slid, atFrame: 4),
                        .storedValueHoldingBaseline, "between two marks the Move holds a baseline")
-        XCTAssertTrue(fx.manager.addKeyframe(target, atFrame: 4))
+        XCTAssertTrue(fx.manager.addKeys(target, atFrame: 4))
 
         let track = try XCTUnwrap(fx.manager.layers[fx.mover].transform?.track)
         XCTAssertEqual(track.keyedFrames, [0, 4], "A took the held rest pose, B the moved box")
@@ -695,12 +695,12 @@ final class TransformLayerModesLogicTests: XCTestCase {
 
         let target = KeyframeTarget.layer(id: fx.manager.layers[fx.mover].id)
         fx.manager.layers[fx.mover].transform?.pose = PoseQuad(restingIn: canvasBox)
-        XCTAssertTrue(fx.manager.addKeyframe(target, atFrame: 0))
+        XCTAssertTrue(fx.manager.addKeys(target, atFrame: 0))
         let slid = PoseQuad(box: canvasBox, mappedBy: CGAffineTransform(translationX: 6, y: 0))
         XCTAssertEqual(fx.manager.commitContainerPose(target, restingAt: PoseQuad(restingIn: canvasBox),
                                                       movedTo: slid, atFrame: 4),
                        .storedValueHoldingBaseline)
-        XCTAssertTrue(fx.manager.addKeyframe(target, atFrame: 4))
+        XCTAssertTrue(fx.manager.addKeys(target, atFrame: 4))
         XCTAssertEqual(fx.manager.layers[fx.mover].transform?.mode, .shake, "the Move and the marks kept the mode")
         XCTAssertEqual(fx.manager.layers[fx.mover].transform?.shakeSeed, 1, "…and the seed")
         let n4 = referenceNoise(seed: 1, channel: 0, beat: 4)

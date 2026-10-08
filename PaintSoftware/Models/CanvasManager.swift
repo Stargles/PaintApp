@@ -2559,7 +2559,7 @@ final class CanvasManager: ObservableObject {
         writeEffectParameterTrack(after, marks: marksAfter, parameterID: parameterID, layerID: layerID)
 
         guard structureUndoDepth == 0, gestureSnapshot == nil else { return true }
-        recordUndo(label: .effectKeyframes,
+        recordUndo(label: .effectKeys,
                    cost: Self.trackUndoCost(before) + Self.trackUndoCost(after),
                    undo: { [weak self] in
                        self?.writeEffectParameterTrack(before, marks: marksBefore,
@@ -2756,7 +2756,7 @@ final class CanvasManager: ObservableObject {
                                         parameterID: parameterID, folderID: folderID)
 
         guard structureUndoDepth == 0, gestureSnapshot == nil else { return true }
-        recordUndo(label: .effectKeyframes,
+        recordUndo(label: .effectKeys,
                    cost: Self.trackUndoCost(before) + Self.trackUndoCost(after),
                    undo: { [weak self] in
                        self?.writeFolderEffectParameterTrack(before, marks: marksBefore,

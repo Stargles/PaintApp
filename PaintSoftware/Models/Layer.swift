@@ -159,7 +159,7 @@ struct Layer: Identifiable {
     /// **A mark with no channel is legal and is the whole point.** The owner's ruling is that adding
     /// a keyframe saves nothing by itself — *"keyframe A is added, nothing is saved"* — so a mark is a
     /// bare point in time that acquires channels lazily, when a later mark lands with a held baseline
-    /// to commit (`CanvasManager.addKeyframe(_:atFrame:)`). Storing marks apart from the curves is
+    /// to commit (`CanvasManager.addKeys(_:atFrame:)`). Storing marks apart from the curves is
     /// what makes that possible: a curve cannot represent "the artist marked this frame and has not
     /// yet changed anything".
     ///
@@ -181,7 +181,7 @@ struct Layer: Identifiable {
     ///
     /// **Written once per channel per keyframe-placement cycle**, by the first edit after a mark;
     /// later tweaks in the same cycle must not overwrite it, because the first one is the only one
-    /// that knows the value at A. Consumed and cleared by the next `addKeyframe`.
+    /// that knows the value at A. Consumed and cleared by the next `addKeys`.
     ///
     /// **The edit still writes the stored base as it always did.** A provisional edit that is never
     /// committed is lost work and makes one slider mean two things depending on invisible state; this

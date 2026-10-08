@@ -547,7 +547,7 @@ final class CelSpanCropLogicTests: XCTestCase {
         var one = KeyframeCrop()
         one.record(channel: "cel", frames: [9])
         XCTAssertEqual(CanvasNotice(.keyframesCropped(one)).message,
-                       "1 keyframe outside the block's new length was removed (frame 10). Undo brings it back.")
+                       "1 key outside the block's new length was removed (frame 10). Undo brings it back.")
         XCTAssertEqual(CanvasNotice(.keyframesCropped(one)).code, "keyframesCropped")
         XCTAssertNil(CanvasNotice(.keyframesCropped(one)).actionTitle, "undo is on the toolbar, as for every report")
 
@@ -557,7 +557,7 @@ final class CelSpanCropLogicTests: XCTestCase {
         XCTAssertEqual(many.count, 4)
         XCTAssertEqual(many.frames, [4, 9, 11], "two channels keyed on 9 lose two keys and name one frame")
         XCTAssertEqual(CanvasNotice(.keyframesCropped(many)).message,
-                       "4 keyframes outside the block's new length were removed (frames 5, 10 and 12). Undo brings them back.")
+                       "4 keys outside the block's new length were removed (frames 5, 10 and 12). Undo brings them back.")
     }
 
     /// **The notice is raised when the step lands, not before, and only once.** Through the gesture
@@ -791,8 +791,8 @@ final class CelSpanCropLogicTests: XCTestCase {
         manager.addVectorLayer()
         manager.layers[1].cels = [drawnCel(start: 0, length: 10), drawnCel(start: 10, length: 10)]
         let target = try XCTUnwrap(manager.keyframeTarget(layerIndex: 1))
-        XCTAssertTrue(manager.addKeyframe(target, atFrame: 5))
-        XCTAssertTrue(manager.addKeyframe(target, atFrame: 15))
+        XCTAssertTrue(manager.addKeys(target, atFrame: 5))
+        XCTAssertTrue(manager.addKeys(target, atFrame: 15))
         let layerID = manager.layers[1].id
         let celID = manager.layers[1].cels[0].id
 
@@ -817,8 +817,8 @@ final class CelSpanCropLogicTests: XCTestCase {
         manager.addVectorLayer()
         manager.layers[1].cels = [drawnCel(start: 0, length: 10), drawnCel(start: 10, length: 10)]
         let target = try XCTUnwrap(manager.keyframeTarget(layerIndex: 1))
-        XCTAssertTrue(manager.addKeyframe(target, atFrame: 5))
-        XCTAssertTrue(manager.addKeyframe(target, atFrame: 15))
+        XCTAssertTrue(manager.addKeys(target, atFrame: 5))
+        XCTAssertTrue(manager.addKeys(target, atFrame: 15))
         let layerID = manager.layers[1].id
         let celID = manager.layers[1].cels[1].id
 
@@ -841,8 +841,8 @@ final class CelSpanCropLogicTests: XCTestCase {
         manager.addVectorLayer()
         manager.layers[1].cels = [drawnCel(start: 0, length: 10), drawnCel(start: 10, length: 10)]
         let target = try XCTUnwrap(manager.keyframeTarget(layerIndex: 1))
-        XCTAssertTrue(manager.addKeyframe(target, atFrame: 2))
-        XCTAssertTrue(manager.addKeyframe(target, atFrame: 15))
+        XCTAssertTrue(manager.addKeys(target, atFrame: 2))
+        XCTAssertTrue(manager.addKeys(target, atFrame: 15))
         let layerID = manager.layers[1].id
         let celID = manager.layers[1].cels[0].id
 
@@ -851,7 +851,7 @@ final class CelSpanCropLogicTests: XCTestCase {
                                                 map: PoseMap(CGAffineTransform(translationX: 20, y: 0)),
                                                 restElements: [], movedIDs: [], atFrame: 5)
         XCTAssertEqual(route, .storedValueHoldingBaseline, "Premise")
-        XCTAssertTrue(manager.addKeyframe(target, atFrame: 7))
+        XCTAssertTrue(manager.addKeys(target, atFrame: 7))
         XCTAssertEqual(keyFrames(manager, cel: 0), [2, 7], "the old pose on the mark below, the new on the mark; nothing past the block")
     }
 

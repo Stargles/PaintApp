@@ -118,41 +118,41 @@ enum HistoryActionLabel: CaseIterable, Equatable {
     /// A value layer's grade changing, including the live drag of one of its parameters
     /// (`setLayerEffect`, and the panel's `commitStructureGesture(label: .valueLayerEffect)`).
     case valueLayerEffect
-    /// One keyframe track on one effect parameter being written, replaced or removed
+    /// One curve on one effect parameter being written, replaced or removed
     /// (`setEffectParameterTrack`) — KEYFRAMES.md stage 2. Named apart from `.valueLayerEffect`
     /// because the two are different things to want back: that one is the grade the artist picked,
     /// this one is the animation on it, and an artist who deletes a curve by mistake reads "undo
     /// adjust layer effect" as the wrong thing having gone.
-    case effectKeyframes
-    /// One keyframe track on one of the scalars a layer or folder owns itself being written,
+    case effectKeys
+    /// One curve on one of the scalars a layer or folder owns itself being written,
     /// replaced or removed (`setTargetChannelTrack`) — `TargetChannel`, TODO (21)'s second channel
-    /// kind. Apart from `.effectKeyframes` because they name different things: that one is an
+    /// kind. Apart from `.effectKeys` because they name different things: that one is an
     /// animation on the grade, this one is an animation on the layer, and an artist who deletes an
-    /// opacity curve by mistake reads "undo edit effect keyframes" as a grade having changed.
-    /// Apart from `.opacity` for `.effectKeyframes`' own reason — the value is what the artist
+    /// opacity curve by mistake reads "undo edit effect keys" as a grade having changed.
+    /// Apart from `.opacity` for `.effectKeys`' own reason — the value is what the artist
     /// picked and the curve is the animation on it.
-    case opacityKeyframes
-    /// An item's parallax share changing (`setParallaxShare`), and its keyframes —
+    case opacityKeys
+    /// An item's parallax share changing (`setParallaxShare`), and its keys —
     /// `TargetChannel.parallaxShare`'s two labels, TRANSFORM_LAYER.md §5.2. Two cases for
-    /// `.opacity` / `.opacityKeyframes`' reason: the number and the animation on it are different
+    /// `.opacity` / `.opacityKeys`' reason: the number and the animation on it are different
     /// things to want back.
     case parallaxShare
-    case parallaxShareKeyframes
-    /// A rotate layer's speed changing (`setRotateSpeed`), and its keyframes —
+    case parallaxShareKeys
+    /// A rotate layer's speed changing (`setRotateSpeed`), and its keys —
     /// `TargetChannel.rotateSpeed`'s two labels, TRANSFORM_LAYER.md §5.3.
     case rotateSpeed
-    case rotateSpeedKeyframes
-    /// A shake layer's three amplitudes changing, and their keyframes — `TargetChannel.shakeX`'s,
+    case rotateSpeedKeys
+    /// A shake layer's three amplitudes changing, and their keys — `TargetChannel.shakeX`'s,
     /// `shakeY`'s and `shakeRotation`'s two labels each, TRANSFORM_LAYER.md §5.4.
     case shakeX
-    case shakeXKeyframes
+    case shakeXKeys
     case shakeY
-    case shakeYKeyframes
+    case shakeYKeys
     case shakeRotation
-    case shakeRotationKeyframes
+    case shakeRotationKeys
     /// A shake layer's period (`setShakePeriod`) — how many frames one jolt lasts — and its seed
     /// being re-rolled (`rerollShakeSeed`), §2 rulings 10 and 9. Neither is keyable, so one label
-    /// each and no keyframe twin.
+    /// each and no keys twin.
     case shakePeriod
     case shakeSeed
     /// A repeat layer's period changing (`setRepeatPeriod`), TRANSFORM_LAYER.md §5.5 — typed, not
@@ -161,20 +161,21 @@ enum HistoryActionLabel: CaseIterable, Equatable {
     /// A transform layer's mode being switched (`setTransformLayerMode`),
     /// TRANSFORM_LAYER.md §5: Move, Parallax or Rotate.
     case transformLayerMode
-    /// A keyframe being placed (`CanvasManager.addKeyframe`) — KEYFRAMES.md §2.26. Named apart from
-    /// `.effectKeyframes` because they are different things to want back: that one is an adjustment to
+    /// A frame being primed with Add Keys (`CanvasManager.addKeys`) — TODO (139), KEYFRAMES.md
+    /// §2.31: the bare mark, and whatever held edits the press commits. Named apart from
+    /// `.effectKeys` because they are different things to want back: that one is an adjustment to
     /// an animation that already exists, this one is the press that *made* one, and an artist who
-    /// pressed the button by mistake reads "undo edit effect keyframes" as the animation itself having
+    /// pressed the button by mistake reads "undo edit effect keys" as the animation itself having
     /// been altered.
-    case addKeyframe
-    /// One keyframe being taken off a frame, with every channel's key on it (`removeKeyframe`).
-    case removeKeyframe
-    /// Every keyframe in a span going at once (`clearKeyframes(_:inFrames:)`) — the cel menu's "clear
-    /// keyframes". Apart from `.removeKeyframe` because the two undo very different amounts of work
-    /// and the banner is the only thing that says which one just happened.
-    case clearKeyframes
+    case addKeys
+    /// One frame's keys being taken off, every channel's, with the frame's priming (`removeKeys`).
+    case removeKeys
+    /// Every key and primed frame in a span going at once (`clearKeys(_:inFrames:)`) — the cel
+    /// menu's Clear Keys. Apart from `.removeKeys` because the two undo very different amounts of
+    /// work and the banner is the only thing that says which one just happened.
+    case clearKeys
     /// One live take, however many channels it caught (`CanvasManager.stopRecording`) — KEYFRAMES.md
-    /// §5. Apart from `.effectKeyframes` because a take is the animation rather than an adjustment
+    /// §5. Apart from `.effectKeys` because a take is the animation rather than an adjustment
     /// to one, and an artist who records three seconds and presses undo is taking back a
     /// performance, not an edit.
     case recordAnimation
@@ -307,25 +308,25 @@ enum HistoryActionLabel: CaseIterable, Equatable {
         case .addTransformLayer: return "add transform layer"
         case .valueLayerColor: return "change layer colour"
         case .valueLayerEffect: return "adjust layer effect"
-        case .effectKeyframes: return "edit effect keyframes"
-        case .opacityKeyframes: return "edit opacity keyframes"
+        case .effectKeys: return "edit effect keys"
+        case .opacityKeys: return "edit opacity keys"
         case .parallaxShare: return "change parallax share"
-        case .parallaxShareKeyframes: return "edit parallax keyframes"
+        case .parallaxShareKeys: return "edit parallax keys"
         case .rotateSpeed: return "change rotate speed"
-        case .rotateSpeedKeyframes: return "edit rotate speed keyframes"
+        case .rotateSpeedKeys: return "edit rotate speed keys"
         case .shakeX: return "change shake x"
-        case .shakeXKeyframes: return "edit shake x keyframes"
+        case .shakeXKeys: return "edit shake x keys"
         case .shakeY: return "change shake y"
-        case .shakeYKeyframes: return "edit shake y keyframes"
+        case .shakeYKeys: return "edit shake y keys"
         case .shakeRotation: return "change rotate shake"
-        case .shakeRotationKeyframes: return "edit rotate shake keyframes"
+        case .shakeRotationKeys: return "edit rotate shake keys"
         case .shakePeriod: return "change shake speed"
         case .shakeSeed: return "re-roll shake"
         case .repeatPeriod: return "change repeat length"
         case .transformLayerMode: return "change transform mode"
-        case .addKeyframe: return "add keyframe"
-        case .removeKeyframe: return "remove keyframe"
-        case .clearKeyframes: return "clear keyframes"
+        case .addKeys: return "add keys"
+        case .removeKeys: return "remove keys"
+        case .clearKeys: return "clear keys"
         case .recordAnimation: return "record animation"
         case .renameLayer: return "rename layer"
         case .deleteLayer: return "delete layer"

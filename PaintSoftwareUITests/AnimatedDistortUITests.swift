@@ -98,7 +98,7 @@ final class AnimatedDistortUITests: PaintUITestCase {
         let target = cel.coordinate(withNormalizedOffset: CGVector(dx: dx, dy: 0.5))
         target.tap()
         target.tap()
-        let add = app.buttons["timeline.menu.Add Keyframe"]
+        let add = app.buttons["timeline.menu.Add Keys"]
         XCTAssertTrue(add.waitForExistence(timeout: 5), "The second tap raises the cel menu")
         add.tap()
     }

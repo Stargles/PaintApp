@@ -156,11 +156,11 @@ final class LiveTransformEditUITests: PaintUITestCase {
         func mark(_ frame: Int) {
             let slot = block.coordinate(withNormalizedOffset:
                 CGVector(dx: (Double(frame) + 0.5) / Double(cel.length), dy: 0.5))
-            let add = app.buttons["timeline.menu.Add Keyframe"]
+            let add = app.buttons["timeline.menu.Add Keys"]
             slot.tap()
             if !add.waitForExistence(timeout: 2) {
                 slot.tap()
-                XCTAssertTrue(add.waitForExistence(timeout: 5), "no Add Keyframe on frame \(frame)'s menu")
+                XCTAssertTrue(add.waitForExistence(timeout: 5), "no Add Keys on frame \(frame)'s menu")
             }
             add.tap()
         }

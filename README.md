@@ -66,8 +66,9 @@ toolset, and a frame-by-frame animation timeline.
 - **Animation Timeline**: multi-cel frame-by-frame animation, scrub/play, per-cel copy/clear/extend
 - **Keys and the graph editor**: a Move keys only what it changed — X, Y, Scale X, Scale Y,
   Rotation, Skew, Perspective X and Perspective Y are independent curves, so a sideways drag keys X and
-  Y, a turn keys Rotation and a Distort keys the two Perspective curves. Prime frames from a block's
-  menu, change something, and the primed frames take keys for the things that changed. The graph
+  Y, a turn keys Rotation and a Distort keys the two Perspective curves. **Add Keys** on a block's
+  menu (or a group's options) primes a frame — a hollow diamond, nothing keyed — and the next change
+  puts keys on the primed frames for the things that changed, which then draw filled. The graph
   editor shows each keyed component as its own row: drag, retime, shape, delete or add a key on one
   without touching the others (KEYFRAMES.md §2.31)
 - **Keyframe interpolation** on vector layers: mark two cels as references and the cels between them

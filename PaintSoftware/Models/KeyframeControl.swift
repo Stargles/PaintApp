@@ -103,6 +103,36 @@ enum KeyframeTarget: Equatable, Hashable {
     }
 }
 
+/// **What a target shows on the timeline: its keys, and the frames primed with no key yet** — TODO
+/// (139). Two indicators, because they are two things to the artist: a key is a value some channel
+/// holds there (and a node in the graph editor), and a primed frame is where Add Keys was pressed and
+/// nothing has changed yet — the next edit keys there, and only what it changes.
+///
+/// **Disjoint by construction.** `commitKeyframeState` drops a mark a key lands on
+/// (`marks(_:droppingKeyed:)`), so a frame is keyed or primed and never both; `primed` subtracts the
+/// keyed frames anyway, so a mark left beside a key by any path draws as the key it is.
+struct PlacedKeys: Equatable {
+    /// Every frame either kind sits on, ascending and unique — §2.28's union,
+    /// `CanvasManager.keyframeFrames(of:)`. What the marker runs are grouped over, and the frames a
+    /// channel with no curve is seeded onto (`AnimationCurve.seeded`).
+    let frames: [Int]
+    /// The frames primed with no key, ascending — drawn with their own indicator, and the frames an
+    /// animated channel holds when it is edited past them (`AnimationCurve.keyed`).
+    let primed: [Int]
+
+    static let none = PlacedKeys(frames: [], primed: [])
+
+    /// The same frames moved by `offset` — a layer's absolute frames into a cel's own (§3.1).
+    func shifted(by offset: Int) -> PlacedKeys {
+        PlacedKeys(frames: frames.map { $0 + offset }, primed: primed.map { $0 + offset })
+    }
+
+    /// Only the frames inside `span` — a cel's keys never live outside `0..<frameCount` (TODO (62)).
+    func restricted(to span: Range<Int>) -> PlacedKeys {
+        PlacedKeys(frames: frames.filter(span.contains), primed: primed.filter(span.contains))
+    }
+}
+
 // MARK: - The model half
 
 extension CanvasManager {
@@ -247,14 +277,14 @@ extension CanvasManager {
     /// **A target with no grade contributes no curves, and that asymmetry is deliberate.**
     /// `storedEffect(of:)`'s rule: a layer that is not in effect form grades nothing, so tracks left on
     /// it by a kind change are storage rather than animation and must not draw a marker for a value the
-    /// canvas is not showing. A **mark** is not a value at all — `addKeyframe` takes one on a target
+    /// canvas is not showing. A **mark** is not a value at all — `addKeys` takes one on a target
     /// with no grade whatsoever, and later stages key transforms onto the same marks — so gating those
     /// would hide the entire first step of the workflow on every ordinary drawing layer.
     ///
     /// **The pose channels are part of this too, and stage 5 is where that stopped being theoretical.**
     /// A transform key is a key — the two device reports that produced §2.28 were both the timeline and
     /// the model asking different questions, and a pose channel omitted here would reproduce both of
-    /// them exactly (a diamond with no Remove Keyframe, and a seed arm stepping over a frame the artist
+    /// them exactly (a diamond with no Remove Keys, and a seed arm stepping over a frame the artist
     /// can see). The keys live on the layer's *cels* in cel-local frames (§3.1) and are converted by
     /// `poseKeyframeFrames(inLayer:)`, which is the one place that conversion happens.
     func keyframeFrames(of target: KeyframeTarget) -> [Int] {
@@ -264,7 +294,7 @@ extension CanvasManager {
     /// **The same union, taken against marks and curves a writer is holding mid-edit** — which is the
     /// only other shape anything is allowed to ask this in.
     ///
-    /// `addKeyframe` needs the union over its *new* marks and its *old* curves, and `seedAndKeyChannel`
+    /// `addKeys` needs the union over its *new* marks and its *old* curves, and `seedAndKeyChannel`
     /// needs it before it writes; neither can go through `keyframeFrames(of:)`, which re-reads the
     /// document. **Both of them used to call a static form** whose `poseFrames` defaulted to empty — so
     /// the union had two spellings in one file, one of which could not see a pose key. That is
@@ -283,6 +313,20 @@ extension CanvasManager {
         var frames = keyedFrames(of: target, in: state)
         frames.formUnion(state.marks)
         return frames.sorted()
+    }
+
+    /// **The same union, split into keys and primed frames** — what the timeline and the folder's
+    /// Add Keys row draw (`PlacedKeys`). One read of the state, so the two halves are of one document.
+    func placedKeys(of target: KeyframeTarget) -> PlacedKeys {
+        placedKeys(of: target, in: keyframeState(of: target))
+    }
+
+    /// The same, against a state the caller is holding mid-edit — `keyframeFrames(of:in:)`'s reason.
+    func placedKeys(of target: KeyframeTarget, in state: KeyframeState) -> PlacedKeys {
+        let keyed = keyedFrames(of: target, in: state)
+        guard !state.marks.isEmpty || !keyed.isEmpty else { return .none }
+        return PlacedKeys(frames: keyed.union(state.marks).sorted(),
+                          primed: Set(state.marks).subtracting(keyed).sorted())
     }
 
     /// **The frames some channel of `target` holds a key on** — the keyed half of the union above, and
@@ -310,7 +354,7 @@ extension CanvasManager {
         // artist can see a change at. Gating these on `storedEffect` — the line above, which is
         // right for the grade's own channels because a track left behind by a kind change renders
         // nothing — would reproduce §2.28's divergence precisely: a node in the graph editor with no
-        // indicator on the cel, and a Remove Keyframe that is not offered for a key that exists.
+        // indicator on the cel, and a Remove Keys that is not offered for a key that exists.
         for curve in state.channelTracks.values {
             for key in curve.keys { keyed.insert(key.frame) }
         }
@@ -354,8 +398,8 @@ extension CanvasManager {
         keyframeFrames(of: target).contains(frame)
     }
 
-    /// Whether any keyframe sits inside a half-open frame range — `clearKeyframes(_:inFrames:)`'s
-    /// question asked without performing it, so the cel menu can offer "Clear Keyframes" only when
+    /// Whether any keyframe sits inside a half-open frame range — `clearKeys(_:inFrames:)`'s
+    /// question asked without performing it, so the cel menu can offer "Clear Keys" only when
     /// there is something for it to clear.
     ///
     /// **A range query rather than a container lookup, because a cel does not contain keyframes.**
@@ -497,7 +541,7 @@ extension CanvasManager {
     /// view is left holding is which slider moved and by how much.
     ///
     /// - Returns: the arm that was taken, so the caller can label its undo bracket — a drag that wrote
-    ///   keys is `.effectKeyframes` and a drag that wrote a value is `.valueLayerEffect`, and an artist
+    ///   keys is `.effectKeys` and a drag that wrote a value is `.valueLayerEffect`, and an artist
     ///   who animated a bloom must not read "Adjust Layer Effect" and conclude the grade itself has
     ///   gone.
     @discardableResult
@@ -609,47 +653,45 @@ extension CanvasManager {
         state.baselines.removeValue(forKey: parameterID)
         guard state != before else { return false }
 
-        commitKeyframeState(state, from: before, to: target, label: .effectKeyframes)
+        commitKeyframeState(state, from: before, to: target, label: .effectKeys)
         return true
     }
 
-    /// **Places a keyframe on `frame`** — §2.26's whole write, and one undo step for all of it.
+    /// **Add Keys: primes `frame`, and commits whatever edits were held for it** — TODO (139),
+    /// KEYFRAMES.md §2.31, and one undo step for all of it.
     ///
-    /// Three things happen, in this order:
+    /// Two things happen, in this order:
     ///
     /// 1. **The mark is recorded**, if it is not already there. A mark with no channel is legal and is
-    ///    the point: *"keyframe A is added, nothing is saved."*
+    ///    the point: the owner's *"you select 'add keys' which primes it"* — the frame is primed and
+    ///    nothing is keyed.
     ///
-    ///    **And it does not survive steps 2 and 3 keying the frame it names.** `commitKeyframeState`
-    ///    prunes it — `marks(_:droppingKeyed:)` — so a press that lands a key stores the key alone.
-    ///    This reverses §2.28's closing paragraph, which kept the mark on the grounds that *"a key is
-    ///    a value some channel holds and a mark is the artist saying this frame is a keyframe"*: true,
-    ///    but what it bought was a keyframe indicator that outlived the node under it, which the owner
-    ///    reported three times. The guard here therefore stays what it always was, a dedupe of `marks`
-    ///    against itself; the pruning is one level down, where every writer reaches it.
-    /// 2. **Every held baseline is committed and cleared.** The old value goes onto the nearest mark
-    ///    below and the nearest mark above (whichever exist — see `seedAndKeyChannel` for why only the
-    ///    immediate neighbours), and the channel's **current stored value** goes on `frame`. This is
-    ///    the owner's *"that previous value gets saved to A and the new value gets saved to B and the
-    ///    held value is discarded."*
-    /// 3. **Every channel that already had a curve gets a key on `frame` holding the value it
-    ///    resolves to there** — §2.24's "hold this pose here", read off the *resolved* grade rather than
-    ///    the stored one, which is the difference between holding what is on screen and holding what
-    ///    was typed before anything was animated. Without it, placing a new mark lets every other
-    ///    animated channel drift through it.
+    ///    **And it does not survive step 2 keying the frame it names.** `commitKeyframeState` prunes
+    ///    it — `marks(_:droppingKeyed:)` — so a press that lands a key stores the key alone, and the
+    ///    timeline draws a key there rather than a primed frame.
+    /// 2. **Every held baseline is committed and cleared.** The old value goes onto the nearest
+    ///    keyframe below and the nearest above (whichever exist — see `seedAndKeyChannel` for why only
+    ///    the immediate neighbours), and the channel's **current stored value** goes on `frame`. A
+    ///    baseline is held only by a channel the artist changed, so this keys *"only the things that
+    ///    changed"* and keys each of them on both primed frames.
     ///
-    /// **Placing a mark on a frame that already has one is not a no-op.** The mark itself does not
-    /// change, but steps 2 and 3 still run — which is the owner's *"modifies another slider while on
-    /// B"* reached by a second press instead of by the seed arm, and refusing it would make a keyframe
-    /// press silently do nothing at the exact moment the artist expects it to save their edit.
+    /// **What it no longer does is key every animated channel on `frame`.** That was §2.24's "hold this
+    /// pose here", and it put a key on every channel the artist had not touched — exactly what the
+    /// ruling forbids. The hold moved to the edit: `AnimationCurve.keyed` holds a changed channel's
+    /// value on the keyframes either side of the playhead, so a primed frame still keeps its value
+    /// when a channel is edited past it, and only that channel takes the key.
+    ///
+    /// **Priming a frame that is already primed is not a no-op when something is held**: step 2 still
+    /// runs, which is the owner's *"modifies another slider while on B"* reached by a second press, and
+    /// refusing it would make the press silently do nothing at the moment the artist expects it to save
+    /// their edit.
     ///
     /// **A target with no grade at all still takes the mark.** A mark is a point in time rather than a
-    /// property of an effect, and the later stages key transforms and object channels onto the same
-    /// marks.
+    /// property of an effect, and transforms and object channels key onto the same marks.
     ///
     /// - Returns: whether the document changed.
     @discardableResult
-    func addKeyframe(_ target: KeyframeTarget, atFrame frame: Int) -> Bool {
+    func addKeys(_ target: KeyframeTarget, atFrame frame: Int) -> Bool {
         guard targetExists(target) else { return false }
 
         let before = keyframeState(of: target)
@@ -659,144 +701,97 @@ extension CanvasManager {
             state.marks.append(frame)
             state.marks.sort()
         }
-        // **The neighbour search's view of the timeline, taken once.** Three things it must be: the
-        // *union*, so a keyframe the artist placed with a slider is a neighbour like any other; a
-        // snapshot of `before.tracks` rather than of the tracks being written, because seeding one
-        // channel adds keys and would otherwise move the next channel's neighbour — an order
-        // dependence over a dictionary, which has none; and **§2.28's union including the pose
-        // channels**, which is what `keyframeFrames(of:marks:tracks:)` supplies and what the static
-        // two-argument form silently did not. It feeds `poseDeltaForKeyframe` below as well as the
-        // effect loop, so a pose key missing from it seeds a pose baseline onto the wrong frame — or,
-        // when it is the only other keyframe there is, onto no frame at all, discarding the baseline
-        // and the animation with it.
-        // The *new* marks against the *old* curves, which is what the comment above means by a
-        // snapshot: `state.marks` may already carry the mark this press is placing, while every
-        // track dictionary must be the one this write has not touched yet.
+        // **The neighbour search's view of the timeline, taken once**: the *union*, so a keyframe the
+        // artist placed with a slider is a neighbour like any other; the *new* marks against the *old*
+        // curves, because seeding one channel adds keys and would otherwise move the next channel's
+        // neighbour — an order dependence over a dictionary, which has none; and the pose channels
+        // with the rest, which `keyframeFrames(of:in:)` supplies so `poseDeltaForKeyframe` below
+        // cannot seed a held pose onto the wrong frame.
         var neighbourState = before
         neighbourState.marks = state.marks
-        let placed = keyframeFrames(of: target, in: neighbourState)
+        let placed = placedKeys(of: target, in: neighbourState)
 
         if let stored = storedEffect(of: target) {
-            let resolved = resolvedEffect(of: target, atFrame: frame)
             for parameter in stored.parameters where parameter.isScalarAnimatable {
-                if let baseline = before.baselines[parameter.id] {
-                    // 2. Commit the held value. `stored`, not `resolved`: this channel has no curve to
-                    // resolve through — that is what made it a baseline rather than an auto-key.
-                    guard let current = parameter.read(stored) else { continue }
-                    state.tracks[parameter.id] = AnimationCurve.seeded(state.tracks[parameter.id],
-                                                             keyframes: placed, frame: frame,
-                                                             oldValue: baseline, newValue: current)
-                } else if before.tracks[parameter.id]?.isEmpty == false {
-                    // 3. Hold the pose. Skipped for a channel that just seeded, whose key on `frame`
-                    // is the artist's new value and must not be overwritten by the old one resolved
-                    // through the curve that write just created.
-                    guard let resolved, let value = parameter.read(resolved) else { continue }
-                    var curve = state.tracks[parameter.id] ?? AnimationCurve()
-                    curve.setKey(AnimationCurve.Key(frame: frame, value: value))
-                    state.tracks[parameter.id] = curve
-                }
+                // `stored`, not resolved: a channel holding a baseline has no curve to resolve
+                // through — that is what made it a baseline rather than an auto-key.
+                guard let baseline = before.baselines[parameter.id],
+                      let current = parameter.read(stored) else { continue }
+                state.tracks[parameter.id] = AnimationCurve.seeded(state.tracks[parameter.id],
+                                                                   keyframes: placed.frames, frame: frame,
+                                                                   oldValue: baseline, newValue: current)
             }
         }
         state.baselines = [:]
 
-        // **Steps 2 and 3 again for the target's own scalars** — TODO (21)'s second channel kind,
-        // and it is the same two steps with the descriptor table swapped and no grade to gate on.
-        // A layer with no effect at all still reaches this loop, which is the point: opacity is a
-        // property of every layer, so a keyframe press on a plain drawing layer commits a held
-        // opacity exactly as it commits a held bloom on a value layer.
+        // **The same commit for the target's own scalars** — TODO (21)'s second channel kind, with the
+        // descriptor table swapped and no grade to gate on: opacity is a property of every layer, so a
+        // press on a plain drawing layer commits a held opacity exactly as it commits a held bloom.
         for channel in TargetChannel.all {
-            if let baseline = before.channelBaselines[channel.id] {
-                // 2. Commit the held value. The *stored* base, not the resolved one: a channel with
-                // a baseline has no curve to resolve through — that absence is what made the edit
-                // hold a baseline instead of keying.
-                guard let current = storedValue(of: target, channel: channel) else { continue }
-                state.channelTracks[channel.id] = AnimationCurve.seeded(state.channelTracks[channel.id],
-                                                              keyframes: placed, frame: frame,
-                                                              oldValue: baseline, newValue: current)
-            } else if before.channelTracks[channel.id]?.isEmpty == false {
-                // 3. Hold the value the curve *resolves* to here, §2.24's surviving half — or
-                // placing a mark lets an animated opacity drift straight through it.
-                guard let curve = state.channelTracks[channel.id] else { continue }
-                var held = curve
-                held.setKey(AnimationCurve.Key(frame: frame,
-                                               value: channel.clamped(curve.evaluate(at: Double(frame)))))
-                state.channelTracks[channel.id] = held
-            }
+            guard let baseline = before.channelBaselines[channel.id],
+                  let current = storedValue(of: target, channel: channel) else { continue }
+            state.channelTracks[channel.id] = AnimationCurve.seeded(state.channelTracks[channel.id],
+                                                                    keyframes: placed.frames, frame: frame,
+                                                                    oldValue: baseline, newValue: current)
         }
         state.channelBaselines = [:]
 
-        let (poses, posesBefore) = poseDeltaForKeyframe(target, atFrame: frame, keyframes: placed)
+        let (poses, posesBefore) = poseDeltaForKeyframe(target, atFrame: frame, placed: placed)
 
         guard state != before || !poses.isEmpty else { return false }
-        commitKeyframeState(state, from: before, to: target, label: .addKeyframe,
+        commitKeyframeState(state, from: before, to: target, label: .addKeys,
                             poses: poses, posesBefore: posesBefore)
         return true
     }
 
-    /// **Steps 2 and 3 again, in the pose channel's own currency** — KEYFRAMES.md stage 5, one
-    /// component at a time since TODO (139).
+    /// **Step 2 again, in the pose channel's own currency** — one component at a time since TODO
+    /// (139).
     ///
     /// The effect loop above walks the grade's descriptors; this walks the layer's *cels*, because a
     /// transform channel lives on the cel in cel-local frames (§3.1) while a grade's lives on the
-    /// layer in absolute ones. Everything else is the same two steps:
-    ///
-    /// 2. **Every held pose is committed and cleared — on the components it changed.** The baseline is
-    ///    where the drawing *was*; the channel's current value is the **resting** pose for a cel,
-    ///    whose base is its own geometry (`CanvasManager.CelPoseState`), and the stored base for a
-    ///    container. `TransformTrack.key(_:over:atFrame:keyframes:)` seeds exactly the components
-    ///    that differ between the two — *"only the keys of things that changed are added"* — so a
-    ///    sideways Move between two primed frames keys X and Y and nothing else.
-    /// 3. **Every component that already has a curve takes a key holding the value it resolves to
-    ///    here** (`TransformTrack.holdKeys(atFrame:)`), §2.24's surviving half. Without it, placing a
-    ///    new mark lets an animated drawing drift straight through it.
+    /// layer in absolute ones. **Every held pose is committed and cleared — on the components it
+    /// changed.** The baseline is where the drawing *was*; the channel's current value is the
+    /// **resting** pose for a cel, whose base is its own geometry (`CanvasManager.CelPoseState`), and
+    /// the stored base for a container. `TransformTrack.key(_:over:atFrame:placed:)` keys exactly
+    /// the components that differ between the two, so a sideways Move between two primed frames keys
+    /// X and Y and nothing else.
     ///
     /// **A cel takes a key only for a mark inside its own span**, and the neighbours a held pose is
     /// seeded onto obey the same fence — TODO (62): a key never lives outside `0..<frameCount`.
     private func poseDeltaForKeyframe(_ target: KeyframeTarget, atFrame frame: Int,
-                                      keyframes placed: [Int]) -> (KeyframePoseDelta, KeyframePoseDelta) {
+                                      placed: PlacedKeys) -> (KeyframePoseDelta, KeyframePoseDelta) {
         var after = KeyframePoseDelta()
         var before = KeyframePoseDelta()
 
         // **The container's channel first.** §3.1: it keys in absolute document frames, so there is
         // no cel span to fall inside and no conversion to make.
-        if let container = containerPose(of: target), !container.track.isEmpty || container.baseline != nil {
+        if let container = containerPose(of: target), let baseline = container.baseline {
             var now = container
-            if let baseline = container.baseline,
-               let old = PoseComponents.decompose(baseline, inBox: container.track.box) {
-                now.track.key(container.baseValues, over: old, atFrame: frame, keyframes: placed)
-            } else {
-                now.track.holdKeys(atFrame: frame)
+            if let old = PoseComponents.decompose(baseline, inBox: container.track.box) {
+                now.track.key(container.baseValues, over: old, atFrame: frame, placed: placed)
             }
             now.baseline = nil
-            if now != container {
-                before.container = container
-                after.container = now
-            }
+            before.container = container
+            after.container = now
         }
 
         guard case .layer(let layerID) = target,
               let index = layers.firstIndex(where: { $0.id == layerID }) else { return (after, before) }
 
-        for cel in layers[index].cels {
-            guard !cel.transformTracks.isEmpty || !cel.pendingPoseBaselines.isEmpty else { continue }
+        for cel in layers[index].cels where !cel.pendingPoseBaselines.isEmpty {
             // §2.18 again: an in-between carries no object channels, so a mark on one keys nothing.
             guard cel.interpolation == nil else { continue }
             let local = frame - cel.startFrame
             guard local >= 0, local < cel.frameCount else { continue }
-            let localKeyframes = placed.map { $0 - cel.startFrame }.filter { (0..<cel.frameCount).contains($0) }
+            let celPlaced = placed.shifted(by: -cel.startFrame).restricted(to: 0..<cel.frameCount)
 
             let was = CelPoseState(tracks: cel.transformTracks, baselines: cel.pendingPoseBaselines)
             var now = was
             for (id, baseline) in was.baselines {
                 var track = now.tracks[id] ?? TransformTrack(box: baseline.box)
                 guard let old = PoseComponents.decompose(baseline, inBox: track.box) else { continue }
-                track.key(track.restValues, over: old, atFrame: local, keyframes: localKeyframes)
+                track.key(track.restValues, over: old, atFrame: local, placed: celPlaced)
                 now.tracks[id] = track.isEmpty ? nil : track
-            }
-            for (id, track) in was.tracks where was.baselines[id] == nil {
-                var held = track
-                held.holdKeys(atFrame: local)
-                now.tracks[id] = held
             }
             now.baselines = [:]
 
@@ -820,8 +815,8 @@ extension CanvasManager {
     ///
     /// - Returns: whether the document changed.
     @discardableResult
-    func removeKeyframe(_ target: KeyframeTarget, atFrame frame: Int) -> Bool {
-        clearKeyframes(target, inFrames: frame ..< (frame + 1), label: .removeKeyframe)
+    func removeKeys(_ target: KeyframeTarget, atFrame frame: Int) -> Bool {
+        clearKeys(target, inFrames: frame ..< (frame + 1), label: .removeKeys)
     }
 
     /// **Drops every mark and every key in a half-open frame range**, as one undo step.
@@ -833,14 +828,14 @@ extension CanvasManager {
     ///
     /// - Returns: whether the document changed.
     @discardableResult
-    func clearKeyframes(_ target: KeyframeTarget, inFrames frames: Range<Int>) -> Bool {
-        clearKeyframes(target, inFrames: frames, label: .clearKeyframes)
+    func clearKeys(_ target: KeyframeTarget, inFrames frames: Range<Int>) -> Bool {
+        clearKeys(target, inFrames: frames, label: .clearKeys)
     }
 
     /// The body of both, with the label the artist reads passed in — "remove keyframe" and "clear
     /// keyframes" are the same edit and two different things to want back.
     @discardableResult
-    private func clearKeyframes(_ target: KeyframeTarget, inFrames frames: Range<Int>,
+    private func clearKeys(_ target: KeyframeTarget, inFrames frames: Range<Int>,
                                 label: HistoryActionLabel) -> Bool {
         guard targetExists(target), !frames.isEmpty else { return false }
 
@@ -876,7 +871,7 @@ extension CanvasManager {
         return true
     }
 
-    /// The pose half of `clearKeyframes`, as a delta over the cels it touches. `frames` is absolute
+    /// The pose half of `clearKeys`, as a delta over the cels it touches. `frames` is absolute
     /// and each cel converts it — the same conversion `poseKeyframeFrames(inLayer:)` makes in the
     /// other direction, and the only two places either happens.
     private func poseDeltaClearing(_ target: KeyframeTarget,
@@ -886,7 +881,7 @@ extension CanvasManager {
 
         // **The container's own keys go too, and until §4.4 was reachable nothing dropped them.**
         // `keyedFrames(of:)` folds them into §2.28's union, so the timeline drew a keyframe for one;
-        // Remove Keyframe then took the mark it did not have and left the key it did, which is the
+        // Remove Keys then took the mark it did not have and left the key it did, which is the
         // biconditional broken in the direction §2.28 was reported from. Absolute frames, no cel
         // conversion (§3.1), and both homes — a folder holds no cels and reaches only this half.
         if let container = containerPose(of: target), !container.track.isEmpty {
@@ -925,6 +920,10 @@ extension CanvasManager {
     /// **Inserts or replaces one key on each of several channels of one target, as one undo step** —
     /// the write `setEffectParameterTrack` was missing, and the one the auto-key arm leans on.
     ///
+    /// **Each key is `AnimationCurve.keyed`**: a channel that is already animated first holds what it
+    /// showed on every primed frame its edit would reshape — the hold Add Keys used to make for every
+    /// channel at the press, made now for the one channel that changed (TODO (139)).
+    ///
     /// **Why not `setEffectParameterTrack` in a loop.** Two reasons, and the second is the one that
     /// bites. It is a *whole-curve* replace, so a caller would have to read, mutate and hand back the
     /// curve at each of `n` channels — fine. But it records **one undo step per call**, so a single
@@ -942,7 +941,7 @@ extension CanvasManager {
     /// **Records nothing while an enclosing bracket is open**: a slider drag opens a structure gesture,
     /// that gesture has already snapshotted `layers` *and* `folders`, so a step here would split one
     /// drag into two. The enclosing `commitStructureGesture` supplies the label — see `DrawingView`,
-    /// which passes `.effectKeyframes` when the drag wrote keys and `.valueLayerEffect` when it wrote
+    /// which passes `.effectKeys` when the drag wrote keys and `.valueLayerEffect` when it wrote
     /// a value.
     ///
     /// - Returns: how many channels actually changed. A key identical to one already on that frame is
@@ -955,19 +954,19 @@ extension CanvasManager {
         let before = keyframeState(of: target)
         var state = before
         var changed = 0
+        let primed = placedKeys(of: target, in: before).primed
 
         for parameter in effect.parameters {
             guard parameter.isScalarAnimatable, let value = values[parameter.id] else { continue }
             let existing = state.tracks[parameter.id]
-            var curve = existing ?? AnimationCurve()
-            curve.setKey(AnimationCurve.Key(frame: frame, value: value))
+            let curve = (existing ?? AnimationCurve()).keyed(value, atFrame: frame, holding: primed)
             guard curve != existing else { continue }
             state.tracks[parameter.id] = curve
             changed += 1
         }
         guard changed > 0 else { return 0 }
 
-        commitKeyframeState(state, from: before, to: target, label: .effectKeyframes)
+        commitKeyframeState(state, from: before, to: target, label: .effectKeys)
         return changed
     }
 
@@ -1043,7 +1042,7 @@ extension CanvasManager {
     /// **And the container's own pose beside them**, §4.4's transformation layer, which is not a cel
     /// and so has nowhere in the dictionary to live. It arrived after this type and was missed by
     /// both producers: `keyedFrames(of:)` folds a container pose key into §2.28's union, so the
-    /// timeline drew a diamond for one — and Remove Keyframe then took the mark and left the key,
+    /// timeline drew a diamond for one — and Remove Keys then took the mark and left the key,
     /// which is a control that appears not to work. Nil means *untouched*, which is every document
     /// with no transformation layer in it.
     struct KeyframePoseDelta: Equatable {
@@ -1064,7 +1063,7 @@ extension CanvasManager {
         beginCanvasEdit()
         // **Taken before the write as well as after, and free when there is no mark to prune** —
         // `marks(_:droppingKeyed:)` carries the argument for both halves. This is the funnel every
-        // writer in this file reaches, so `addKeyframe`'s own mark is dropped by the same keys that
+        // writer in this file reaches, so `addKeys`'s own mark is dropped by the same keys that
         // write commits, in the one call that writes them.
         let keyedBefore = state.marks.isEmpty ? [] : keyedFrames(of: target)
         applyKeyframeState(state, to: target)
@@ -1290,6 +1289,7 @@ extension CanvasManager {
         let before = keyframeState(of: target)
         var state = before
         var changed = 0
+        let primed = placedKeys(of: target, in: before).primed
         // The first channel this write actually touches names the step. With one channel in the
         // table that is always Opacity; the day there are two, a press that moves both is named
         // after the first in `TargetChannel.all` rather than after whichever the dictionary
@@ -1299,8 +1299,8 @@ extension CanvasManager {
         for channel in TargetChannel.all {
             guard let value = values[channel.id] else { continue }
             let existing = state.channelTracks[channel.id]
-            var curve = existing ?? AnimationCurve()
-            curve.setKey(AnimationCurve.Key(frame: frame, value: channel.clamped(value)))
+            let curve = (existing ?? AnimationCurve()).keyed(channel.clamped(value), atFrame: frame,
+                                                             holding: primed)
             guard curve != existing else { continue }
             state.channelTracks[channel.id] = curve
             if label == nil { label = channel.keyframeLabel }
@@ -1425,7 +1425,7 @@ extension CanvasManager {
             guard !poses.isEmpty else { return false }
         }
         let state = keyframeState(of: target)
-        commitKeyframeState(state, from: state, to: target, label: .effectKeyframes,
+        commitKeyframeState(state, from: state, to: target, label: .effectKeys,
                             poses: poses, posesBefore: posesBefore)
         return true
     }

@@ -234,6 +234,49 @@ struct AnimationCurve: Codable, Hashable {
 
     func key(atFrame frame: Int) -> Key? { keys.first { $0.frame == frame } }
 
+    /// **`value` keyed on `frame`, with what this curve showed on every primed frame the edit would
+    /// reshape held there first** — the auto-key write every channel kind shares (a grade's
+    /// parameter, a target's own scalar, each component of a pose), and TODO (139)'s *"if you prime
+    /// this in two frames and then change something, then it should put down two keys"* for a channel
+    /// that is already animated.
+    ///
+    /// **Why the hold is here and not on the priming press.** Add Keys used to key every animated
+    /// channel on the frame it primed, so an edit elsewhere could not drag that frame's value with it;
+    /// the ruling is that priming keys nothing and an edit keys only what it changed. So the hold
+    /// moves to the moment a channel *does* change, and lands only on that channel.
+    ///
+    /// **Which frames: the primed ones inside the stretch this key reshapes** — between this curve's
+    /// own key below `frame` and its own key above (or the open end, past the first or last key, where
+    /// the curve holds flat). A key of this curve outside that stretch already pins everything beyond
+    /// it, and a frame some *other* channel keys is not a reason to put a key on this one: the owner's
+    /// *"fully independent from each other"*.
+    ///
+    /// **Every hold is read before any is written**, so each reads the curve the artist was looking at
+    /// rather than one an earlier hold has re-shaped; and a held key inherits the interpolation of the
+    /// segment it lands in, `split(atFrame:)`'s rule, so a hold cut into a `.constant` segment does
+    /// not start easing there.
+    ///
+    /// An empty curve has shown nothing to hold, so it takes `value` alone — the same as `setKey`.
+    ///
+    /// - Parameter primed: ascending — `PlacedKeys.primed`, the frames primed with no key yet, taken
+    ///   once by the caller before it writes.
+    func keyed(_ value: Double, atFrame frame: Int, holding primed: [Int]) -> AnimationCurve {
+        var curve = self
+        if !keys.isEmpty {
+            let lower = keys.last { $0.frame < frame }?.frame ?? Int.min
+            let upper = keys.first { $0.frame > frame }?.frame ?? Int.max
+            let held = primed
+                .filter { $0 > lower && $0 < upper && $0 != frame }
+                .map { primedFrame in
+                    Key(frame: primedFrame, value: evaluate(at: Double(primedFrame)),
+                        interpolation: keys.last { $0.frame <= primedFrame }?.interpolation ?? .bezier)
+                }
+            for key in held { curve.setKey(key) }
+        }
+        curve.setKey(Key(frame: frame, value: value))
+        return curve
+    }
+
     /// **`existing` with `oldValue` keyed onto the keyframes either side of `frame` and `newValue` on
     /// `frame` itself** — the seed every channel kind shares: a grade's parameter, a target's own
     /// scalar and each component of a pose (KEYFRAMES.md §2.27's *"the previous value gets saved to A

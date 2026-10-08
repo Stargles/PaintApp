@@ -1026,7 +1026,7 @@ private struct RotateSpeedRow: View {
                 .font(.caption2)
                 .foregroundColor(.gray)
                 .accessibilityIdentifier("layerOptions.rotateSpeedCaption")
-            Text("Spins from the start of the bar. A keyframe holds the box, not the spin — set the speed to 0 to stop it.")
+            Text("Spins from the start of the bar. A key holds the box, not the spin — set the speed to 0 to stop it.")
                 .font(.caption2)
                 .foregroundColor(.gray)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1102,7 +1102,7 @@ private struct ShakeRows: View {
                     .foregroundColor(.gray)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Text("Shakes from the start of the bar, about the box's centre — a box scaled 2× shakes twice as far. A keyframe holds the box, not the shake; set the amounts to 0 to hold still.")
+            Text("Shakes from the start of the bar, about the box's centre — a box scaled 2× shakes twice as far. A key holds the box, not the shake; set the amounts to 0 to hold still.")
                 .font(.caption2)
                 .foregroundColor(.gray)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1512,7 +1512,7 @@ struct FolderOptionsPanel: View {
 
     /// **Where a folder's first keyframe is placed** — KEYFRAMES.md §2.26, TODO (21).
     ///
-    /// **Why it is here and not on a timeline row.** A layer's Add Keyframe lives on the timeline's
+    /// **Why it is here and not on a timeline row.** A layer's Add Keys lives on the timeline's
     /// cel menu (`AnimationTimeline.keyframeItems`), and a folder cannot have it there: that menu is
     /// raised by a **two-stage tap** whose first stage *selects the row*, and the timeline's notion of
     /// "the row you are working on" is `currentLayerIndex` — a layer index, with no folder spelling.
@@ -1521,7 +1521,7 @@ struct FolderOptionsPanel: View {
     /// deliberately not the brush's, and this menu is a menu of a *cel*. Two smaller refusals sit
     /// behind that one: `TimelineFolderRowView` is `isUserInteractionEnabled = false` by
     /// construction ("cels are edited on the child layers' own rows") and would need a coordinator
-    /// back-reference and a zone model it has no cels to build one from; and Clear Keyframes' scope
+    /// back-reference and a zone model it has no cels to build one from; and Clear Keys' scope
     /// is *the stretch of track you tapped*, which on a folder row is its descendants' span — the
     /// wrong set, since a folder's own marks are in absolute document frames and can sit outside
     /// every child's block.
@@ -1531,7 +1531,7 @@ struct FolderOptionsPanel: View {
     /// is how its scalar is edited. Putting the mark beside them makes one surface the answer to
     /// "animate this group" rather than two.
     ///
-    /// **It takes no channel argument, and that is the design.** `addKeyframe(_:atFrame:)` walks the
+    /// **It takes no channel argument, and that is the design.** `addKeys(_:atFrame:)` walks the
     /// grade's parameters and `TargetChannel.all`, so one press serves every channel kind a folder
     /// has and the next row added to `TargetChannel.all` needs nothing here. The view's whole
     /// contribution is a `KeyframeTarget` and a frame.
@@ -1544,23 +1544,23 @@ struct FolderOptionsPanel: View {
     private var keyframeSection: some View {
         let target = KeyframeTarget.folder(id: folderID)
         let frame = canvasManager.currentFrame
-        let placed = canvasManager.keyframeFrames(of: target)
+        let placed = canvasManager.placedKeys(of: target)
 
         HStack(spacing: 8) {
             Image(systemName: "plus.diamond").foregroundColor(.white).frame(width: 20)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Add Keyframe").foregroundColor(.white)
+                Text("Add Keys").foregroundColor(.white)
                 // `maskRow`'s rule: the identifier rides the `Text`, so the summary surfaces as its
                 // own `staticTexts` element instead of being folded into the button's.
                 //
-                // **The value is §2.28's union, not the mark list** — `keyframeFrames(of:)`, the one
-                // accessor, so what this row reports and what the timeline draws diamonds for cannot
-                // come apart. The caption may truncate at 240 pt; the value never does.
+                // **The value is the timeline's own** — `placedKeys(of:)`, the accessor the marker
+                // band draws from, so what this row reports and what the timeline draws cannot come
+                // apart. The caption may truncate at 240 pt; the value never does.
                 Text(Self.keyframeCaption(frame: frame, placed: placed))
                     .font(.caption2)
                     .foregroundColor(.gray)
                     .lineLimit(2)
-                    .accessibilityIdentifier("layerOptions.folderKeyframes")
+                    .accessibilityIdentifier("layerOptions.folderKeys")
                     .accessibilityValue(Self.keyframeValue(placed))
             }
             Spacer()
@@ -1569,14 +1569,14 @@ struct FolderOptionsPanel: View {
         .padding(.vertical, 10)
         .contentShape(Rectangle())
         // The tap target beside the texts rather than around them — `maskRow` carries the argument:
-        // a `Button` wrapped around this would fold `layerOptions.folderKeyframes` into itself.
+        // a `Button` wrapped around this would fold `layerOptions.folderKeys` into itself.
         .overlay(
-            Button { canvasManager.addKeyframe(target, atFrame: frame) } label: {
+            Button { canvasManager.addKeys(target, atFrame: frame) } label: {
                 Color.clear.contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityIdentifier("layerOptions.addKeyframe")
-            .accessibilityLabel("Add Keyframe")
+            .accessibilityIdentifier("layerOptions.addKeys")
+            .accessibilityLabel("Add Keys")
             .accessibilityValue("\(frame)")
         )
 
@@ -1586,14 +1586,14 @@ struct FolderOptionsPanel: View {
         // §2.28 exists to hold: a diamond the artist can see and a Remove that is not offered is the
         // device report it was written from.
         //
-        // **No Clear Keyframes.** Its scope is the stretch of track the artist tapped, and this panel
+        // **No Clear Keys.** Its scope is the stretch of track the artist tapped, and this panel
         // is not a stretch of track; a whole-track Clear here would give a folder a destructive reach
         // its layers do not have, from a surface with no frame context. Every keyframe is reachable
         // one at a time by scrubbing to it, which is what Remove is.
-        if placed.contains(frame) {
-            optionsAction("Remove Keyframe", systemImage: "minus.diamond",
-                          identifier: "layerOptions.removeKeyframe") {
-                canvasManager.removeKeyframe(target, atFrame: frame)
+        if placed.frames.contains(frame) {
+            optionsAction("Remove Keys", systemImage: "minus.diamond",
+                          identifier: "layerOptions.removeKeys") {
+                canvasManager.removeKeys(target, atFrame: frame)
             }
             .accessibilityValue("\(frame)")
         }
@@ -1601,7 +1601,7 @@ struct FolderOptionsPanel: View {
         // **The band, from the surface the keyframes were placed from** — TODO (21)'s folder band.
         // A layer's band opens on the current layer from the timeline's own button, and a folder
         // has a second door there too (its name in the timeline's name column picks it); this row
-        // is the one an artist standing *here*, having just pressed Add Keyframe, can see. It picks
+        // is the one an artist standing *here*, having just pressed Add Keys, can see. It picks
         // the folder's row and opens the editor in one press, and closes this panel so the band it
         // raised is not under the rail that raised it.
         // No `endMaskEdit()` here, unlike Delete and the Move row: those make a document edit
@@ -1615,36 +1615,39 @@ struct FolderOptionsPanel: View {
         }
     }
 
-    /// The caption under "Add Keyframe": which frame a press writes, and what this folder already
-    /// carries.
+    /// The caption under "Add Keys": which frame a press primes, and what this folder already
+    /// carries — its keys, and the frames primed with nothing keyed yet, named apart as the timeline
+    /// draws them apart (TODO (139)).
     ///
     /// Pure, so the two callers below cannot drift, but **not reachable from the fast tier** — this
     /// file is not compiled into `PaintSoftwareUITests`, which is why neither of these holds a
-    /// *decision*. The decision is `keyframeFrames(of:)`, which lives in `KeyframeControl.swift` and
-    /// has its own logic tests; these two only spell its answer, and what pins them is the XCUITest
-    /// that reads the rendered row.
-    ///
-    /// **"keyframes", never "keys".** A key is one channel's value at a frame — what the graph editor
-    /// draws a node for; a keyframe is §2.28's union of those and the artist's bare marks, which is
-    /// what this row lists and what the timeline draws diamonds for. The first keyframe a group ever
-    /// gets is a mark with no key anywhere, so a caption reading "keys at 0" would be naming the empty
-    /// half of the union. Three device reports came from those two words being treated as one.
+    /// *decision*. The decision is `placedKeys(of:)`, which lives in `KeyframeControl.swift` and has
+    /// its own logic tests; these two only spell its answer, and what pins them is the XCUITest that
+    /// reads the rendered row.
     ///
     /// **Shown 1-based, since 2026-09-11** — the same numbering the ruler and `AnimationTimeline`'s
     /// "Frame N/M" label already use (`frameLabel`, `CanvasNotice.list`): the model's frame 0 is the
-    /// artist's frame 1 everywhere they read one, and this caption used to be the one place that
-    /// disagreed. `frame` and `placed` stay the raw model numbers — every caller (`addKeyframe`,
-    /// `removeKeyframe`, `placed.contains(frame)`) reads them unchanged; only this sentence adds 1.
-    private static func keyframeCaption(frame: Int, placed: [Int]) -> String {
-        guard !placed.isEmpty else { return "Frame \(frame + 1) · no keyframes yet" }
-        return "Frame \(frame + 1) · keyframes at "
-             + placed.map { String($0 + 1) }.joined(separator: ", ")
+    /// artist's frame 1 everywhere they read one. `frame` and `placed` stay the raw model numbers —
+    /// every caller (`addKeys`, `removeKeys`, `placed.frames.contains(frame)`) reads them unchanged;
+    /// only this sentence adds 1.
+    private static func keyframeCaption(frame: Int, placed: PlacedKeys) -> String {
+        let keyed = placed.frames.filter { !placed.primed.contains($0) }
+        let primed = placed.frames.filter { placed.primed.contains($0) }
+        func list(_ frames: [Int]) -> String { frames.map { String($0 + 1) }.joined(separator: ", ") }
+        var parts = ["Frame \(frame + 1)"]
+        if !keyed.isEmpty { parts.append("keys at " + list(keyed)) }
+        if !primed.isEmpty { parts.append("primed at " + list(primed)) }
+        if keyed.isEmpty && primed.isEmpty { parts.append("no keys yet") }
+        return parts.joined(separator: " · ")
     }
 
-    /// The same union as a machine-readable value — "none", or the frames comma-separated. Apart from
-    /// the caption because the caption is a sentence that can truncate and this must not.
-    private static func keyframeValue(_ placed: [Int]) -> String {
-        placed.isEmpty ? "none" : placed.map(String.init).joined(separator: ",")
+    /// The same as a machine-readable value — "none", or the frames comma-separated with a primed
+    /// one suffixed `p`, the marker band's spelling. Apart from the caption because the caption is a
+    /// sentence that can truncate and this must not.
+    private static func keyframeValue(_ placed: PlacedKeys) -> String {
+        placed.frames.isEmpty
+            ? "none"
+            : placed.frames.map { placed.primed.contains($0) ? "\($0)p" : "\($0)" }.joined(separator: ",")
     }
 
     /// §4.3's op picker, widened to §4.4's grades — **one list, because a node does exactly one

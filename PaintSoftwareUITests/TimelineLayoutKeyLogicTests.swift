@@ -307,8 +307,8 @@ final class TimelineLayoutKeyLogicTests: XCTestCase {
         let group = m.addFolder(name: "Plain group")
         m.restackLayer(m.layers[0].id, above: .folder(group), parentFolderID: group)
         XCTAssertNil(m.folders.first { $0.id == group }?.effect, "Fixture: an ungraded group")
-        XCTAssertTrue(m.addKeyframe(.folder(id: group), atFrame: 6), "Fixture: the mark should land")
-        XCTAssertEqual(key(m).folders.first?.markers, [6])
+        XCTAssertTrue(m.addKeys(.folder(id: group), atFrame: 6), "Fixture: the mark should land")
+        XCTAssertEqual(key(m).folders.first?.markers, PlacedKeys(frames: [6], primed: [6]))
     }
 
     /// **A layer that is not in effect form grades nothing, so its curves draw no markers.** Tracks
@@ -320,13 +320,13 @@ final class TimelineLayoutKeyLogicTests: XCTestCase {
         XCTAssertNil(m.layers[0].layerEffect, "Fixture: an ordinary drawing layer is not a value layer")
         m.layers[0].effectTracks["brightnessContrast.brightness"] =
             AnimationCurve(keys: [AnimationCurve.Key(frame: 3, value: 1)])
-        XCTAssertEqual(key(m).trackMarkers.first, [],
+        XCTAssertEqual(key(m).trackMarkers.first, PlacedKeys.none,
                        "Storage without a grade in force is not animation")
     }
 
     /// **And the same layer must still draw a mark**, which is the asymmetry §2.26 forces and the
     /// half that was missing. A mark is a point in time the artist placed, not a property of an
-    /// effect: `addKeyframe` takes one on a target with no grade whatsoever, and an ordinary drawing
+    /// effect: `addKeys` takes one on a target with no grade whatsoever, and an ordinary drawing
     /// layer is exactly where the workflow's first step happens. Gating marks on the grade the way
     /// curves are gated would leave *"keyframe A is added, nothing is saved"* drawing nothing at all,
     /// which is a feature the artist cannot use rather than one that looks slightly wrong.
@@ -335,8 +335,8 @@ final class TimelineLayoutKeyLogicTests: XCTestCase {
         let target = KeyframeTarget.layer(id: m.layers[0].id)
         XCTAssertNil(m.layers[0].layerEffect, "Fixture: an ordinary drawing layer is not a value layer")
         let before = key(m)
-        XCTAssertTrue(m.addKeyframe(target, atFrame: 4), "Fixture: the mark should land")
-        XCTAssertEqual(key(m).trackMarkers.first, [4])
+        XCTAssertTrue(m.addKeys(target, atFrame: 4), "Fixture: the mark should land")
+        XCTAssertEqual(key(m).trackMarkers.first, PlacedKeys(frames: [4], primed: [4]))
         XCTAssertNotEqual(before.trackMarkers, key(m).trackMarkers,
                           "…and the layout gate has to see it, or the marker draws once and never again")
     }

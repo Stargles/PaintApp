@@ -852,8 +852,8 @@ final class ProjectSaveLogicTests: XCTestCase {
         manager.setNodeEffect(group, to: .blur(Effect.Blur(radius: 4)))
 
         for target in [KeyframeTarget.layer(id: gradeID), .folder(id: group)] {
-            manager.addKeyframe(target, atFrame: 3)
-            manager.addKeyframe(target, atFrame: 11)
+            manager.addKeys(target, atFrame: 3)
+            manager.addKeys(target, atFrame: 11)
             manager.holdBaseline(target, parameterID: "blur.radius", value: 4)
         }
 

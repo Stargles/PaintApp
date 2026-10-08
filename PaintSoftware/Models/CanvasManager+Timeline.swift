@@ -351,7 +351,7 @@ extension CanvasManager {
     ///
     /// The bounds check is the point as much as the arithmetic: a menu can outlive the block it was
     /// raised on (undo, another gesture), and a caller that subscripted `cels` directly would trap.
-    /// Half-open because that is what every frame-range writer here takes — `clearKeyframes(_:inFrames:)`
+    /// Half-open because that is what every frame-range writer here takes — `clearKeys(_:inFrames:)`
     /// most immediately — and because `endFrame` is already the frame *after* the last one drawn.
     func celFrameRange(layerIndex: Int, celIndex: Int) -> Range<Int>? {
         guard layers.indices.contains(layerIndex),
@@ -366,7 +366,7 @@ extension CanvasManager {
     /// **Why a gap needs a frame range at all.** §2.4 and §2.26 put keys and marks on the *layer*, in
     /// absolute document frames, so they exist perfectly well at frames the layer has no cel at —
     /// `TimelineLayoutKey.trackMarkers` says so and the marker band spans the whole track because of
-    /// it. The cel menu's "Clear Keyframes" is scoped to the block that raised it; the gap menu's has
+    /// it. The cel menu's "Clear Keys" is scoped to the block that raised it; the gap menu's has
     /// to be scoped to something, and the only unit the artist can see there is the gap itself. So
     /// the two menus scope to the same thing said twice: *the stretch of track you tapped*.
     ///

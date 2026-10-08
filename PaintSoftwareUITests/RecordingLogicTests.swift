@@ -592,12 +592,12 @@ final class RecordingLogicTests: XCTestCase {
         manager.beginStructureGesture()
         drag(manager, clock, tgt, brightnessID, to: 0.1, at: epoch)
         drag(manager, clock, tgt, brightnessID, to: 1.9, at: epoch + 1.0)
-        manager.commitStructureGesture(label: .effectKeyframes)
+        manager.commitStructureGesture(label: .effectKeys)
 
         manager.beginStructureGesture()
         drag(manager, clock, tgt, contrastID, to: 0.3, at: epoch + 1.0)
         drag(manager, clock, tgt, contrastID, to: 1.6, at: epoch + 2.0)
-        manager.commitStructureGesture(label: .effectKeyframes)
+        manager.commitStructureGesture(label: .effectKeys)
 
         let refusal = manager.stopRecording()
 

@@ -80,8 +80,8 @@ struct TimelineLayoutKey: Equatable {
         let span: ClosedRange<Int>?
         /// The folder's own markers — §2.21 makes a folder's grade animate exactly as a layer's, so
         /// the folder row draws a marker band like any other row. Its **own** marks and keys, not its
-        /// descendants': a marker says "a keyframe is here on this target", and a target is a row.
-        let markers: [Int]
+        /// descendants': a marker says "a key is here on this target", and a target is a row.
+        let markers: PlacedKeys
     }
 
     /// A block in flight. `TimelineTrackView.Coordinator.BlockDrag` mapped down to the parts the
@@ -100,8 +100,9 @@ struct TimelineLayoutKey: Equatable {
     let rows: [LayerStackRow]
     /// Parallel to the `.layer` entries of `rows`, in their order.
     let tracks: [[CelKey]]
-    /// The document frames each of those layers carries a keyframe on — ascending, unique, and **one
-    /// entry per frame however many channels key there** (`CanvasManager.keyframeFrames(of:)`).
+    /// The document frames each of those layers carries a key or a primed frame on — ascending,
+    /// unique, **one entry per frame however many channels key there**, and the primed frames named
+    /// apart so they draw their own indicator (`CanvasManager.placedKeys(of:)`, TODO (139)).
     ///
     /// **A second array rather than a field on `CelKey`, because a keyframe is not on a cel.** §2.4
     /// puts effect keys on the *layer*, in absolute document frames, and §2.26's marks likewise, so
@@ -119,7 +120,7 @@ struct TimelineLayoutKey: Equatable {
     /// rebuilds up to thirty-three closures per call. Comparing it is equality over a handful of
     /// `Int`s, against a key that already carries every cel's id, start, length and thumbnail
     /// address.
-    let trackMarkers: [[Int]]
+    let trackMarkers: [PlacedKeys]
     /// **The frames on each layer's row a Repeat layer above it is showing as an earlier frame**,
     /// as runs of one source cel — TRANSFORM_LAYER.md §5.5's ghost blocks, parallel to `tracks`.
     /// In the key for `trackMarkers`' reason: the gate early-returns on an unchanged key, so a
@@ -206,7 +207,7 @@ extension TimelineLayoutKey {
                      rowHeight: CGFloat,
                      drag: DragKey?) -> TimelineLayoutKey {
         var tracks: [[CelKey]] = []
-        var trackMarkers: [[Int]] = []
+        var trackMarkers: [PlacedKeys] = []
         var trackGhosts: [[CanvasManager.RepeatGhost]] = []
         var folders: [FolderKey] = []
 
@@ -217,11 +218,11 @@ extension TimelineLayoutKey {
                     CelKey(id: cel.id, startFrame: cel.startFrame, frameCount: cel.frameCount)
                 }
                 tracks.append(cels)
-                // **What counts as a keyframe is the model's answer, asked here rather than rebuilt.**
-                // `CanvasManager.keyframeFrames(of:)` unions the explicit marks with every frame a
-                // channel in force keys on, and carries the grade asymmetry that used to sit on this
-                // line.
-                trackMarkers.append(canvasManager.keyframeFrames(of: .layer(id: layer.id)))
+                // **What counts as a key or a primed frame is the model's answer, asked here rather
+                // than rebuilt.** `CanvasManager.placedKeys(of:)` unions the explicit marks with every
+                // frame a channel in force keys on, and carries the grade asymmetry that used to sit
+                // on this line.
+                trackMarkers.append(canvasManager.placedKeys(of: .layer(id: layer.id)))
                 trackGhosts.append(canvasManager.repeatGhostSegments(forLayer: layerIndex))
             } else if let folderID = row.folderID {
                 let folder = canvasManager.folders.first { $0.id == folderID }
@@ -235,7 +236,7 @@ extension TimelineLayoutKey {
                                          name: folder?.name ?? folderID.uuidString,
                                          isVisible: folder?.isVisible ?? true,
                                          span: span,
-                                         markers: canvasManager.keyframeFrames(of: .folder(id: folderID))))
+                                         markers: canvasManager.placedKeys(of: .folder(id: folderID))))
             }
         }
 

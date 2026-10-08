@@ -277,8 +277,8 @@ final class TransformChannelLogicTests: XCTestCase {
     func testAPoseCommitIsOneUndoStep() throws {
         let (manager, layerID, celID) = fixture()
         let target = try XCTUnwrap(manager.keyframeTarget(layerIndex: 1))
-        manager.addKeyframe(target, atFrame: 0)
-        manager.addKeyframe(target, atFrame: 4)
+        manager.addKeys(target, atFrame: 0)
+        manager.addKeys(target, atFrame: 4)
         XCTAssertEqual(manager.commitTransformPose(layerID: layerID, celID: celID, channel: .cel, restBox: box,
                                                    map: PoseMap(CGAffineTransform(translationX: 12, y: 0)),
                                                    restElements: [], movedIDs: [], atFrame: 4), .seedAndKey)
@@ -298,7 +298,7 @@ final class TransformChannelLogicTests: XCTestCase {
         let target = try XCTUnwrap(manager.keyframeTarget(layerIndex: 1))
         XCTAssertEqual(manager.keyframeFrames(of: target), [0, 8])
 
-        manager.removeKeyframe(target, atFrame: 8)
+        manager.removeKeys(target, atFrame: 8)
         XCTAssertEqual(manager.keyframeFrames(of: target), [0])
         manager.undo()
         XCTAssertEqual(manager.keyframeFrames(of: target), [0, 8], "One press brings both halves back")
@@ -328,7 +328,7 @@ final class TransformChannelLogicTests: XCTestCase {
     func testAMarkAMoveAndASecondMarkProduceAnAnimation() throws {
         let (manager, layerID, celID) = fixture()
         let target = try XCTUnwrap(manager.keyframeTarget(layerIndex: 1))
-        manager.addKeyframe(target, atFrame: 0)
+        manager.addKeys(target, atFrame: 0)
 
         let route = manager.commitTransformPose(layerID: layerID, celID: celID, channel: .cel,
                                                 restBox: box,
@@ -339,7 +339,7 @@ final class TransformChannelLogicTests: XCTestCase {
                        "The previous value is held; nothing is keyed yet")
         XCTAssertTrue(manager.layers[1].cels[0].transformTracks.isEmpty)
 
-        manager.addKeyframe(target, atFrame: 8)
+        manager.addKeys(target, atFrame: 8)
         let track = try XCTUnwrap(manager.layers[1].cels[0].transformTracks["cel"])
         XCTAssertEqual(track.keyedFrames, [0, 8])
         XCTAssertTrue(track.isAnimated)
@@ -363,8 +363,8 @@ final class TransformChannelLogicTests: XCTestCase {
     func testPrimingTwoFramesThenMovingKeysOnlyTheChangedComponentsOnBoth() throws {
         let (manager, layerID, celID) = fixture()
         let target = try XCTUnwrap(manager.keyframeTarget(layerIndex: 1))
-        manager.addKeyframe(target, atFrame: 0)
-        manager.addKeyframe(target, atFrame: 6)
+        manager.addKeys(target, atFrame: 0)
+        manager.addKeys(target, atFrame: 6)
         XCTAssertEqual(manager.layers[1].keyframeMarks, [0, 6], "PREMISE: two primed frames, nothing keyed")
 
         let route = manager.commitTransformPose(layerID: layerID, celID: celID, channel: .cel, restBox: box,
@@ -380,6 +380,36 @@ final class TransformChannelLogicTests: XCTestCase {
         XCTAssertEqual(track.curve(.x)?.key(atFrame: 6)?.value ?? 0, Double(box.midX) + 20, accuracy: 1e-9,
                        "and the frame the Move was made on holds where it is now")
         XCTAssertTrue(manager.layers[1].keyframeMarks.isEmpty, "both marks are keyed now, so both marks went")
+    }
+
+    /// **Add Keys on a frame of an animated drawing primes it and keys nothing; a Move made past it
+    /// keys only what it changed, and holds that on the primed frame** — TODO (139): the press used to
+    /// key every animated component on the frame it marked, which put keys on components nobody
+    /// touched. X keyed 0 and 8, frame 4 primed, a slide right at 6: X takes its own value at 4 and the
+    /// new one at 6, and no other component takes anything.
+    func testAddKeysOnAnAnimatedDrawingKeysNothingAndTheNextMoveHoldsOnlyWhatItChangesThere() throws {
+        let (manager, layerID, celID) = fixture()
+        animate(manager, layerID: layerID, celID: celID)   // X keyed at 0 and 8
+        let target = try XCTUnwrap(manager.keyframeTarget(layerIndex: 1))
+        let before = try XCTUnwrap(manager.layers[1].cels[0].transformTracks["cel"])
+        let shownAt4 = before.values(atTime: 4, base: before.restValues).x
+
+        XCTAssertTrue(manager.addKeys(target, atFrame: 4), "the press primes frame 4")
+        XCTAssertEqual(manager.layers[1].cels[0].transformTracks["cel"], before, "…and keys nothing")
+        XCTAssertEqual(manager.placedKeys(of: target), PlacedKeys(frames: [0, 4, 8], primed: [4]))
+
+        let current = manager.resolvedPoseMap(layerID: layerID, celID: celID, channel: .cel, atFrame: 6)
+        let route = manager.commitTransformPose(layerID: layerID, celID: celID, channel: .cel, restBox: box,
+                                                map: current.concatenating(PoseMap(CGAffineTransform(
+                                                    translationX: 10, y: 0))),
+                                                restElements: [], movedIDs: [], atFrame: 6)
+        XCTAssertEqual(route, .key)
+        let track = try XCTUnwrap(manager.layers[1].cels[0].transformTracks["cel"])
+        XCTAssertEqual(Set(track.curves.keys), [.x], "a slide keys X and nothing else")
+        XCTAssertEqual(track.curve(.x)?.keys.map(\.frame), [0, 4, 6, 8])
+        XCTAssertEqual(track.values(atTime: 4, base: track.restValues).x, shownAt4, accuracy: 1e-9,
+                       "the primed frame keeps what it showed")
+        XCTAssertEqual(manager.placedKeys(of: target).primed, [], "4 is a key now, and draws as one")
     }
 
     /// **A turn on a channel that already keys X keys Rotation alone** — and seeds it, so the frames
@@ -416,8 +446,8 @@ final class TransformChannelLogicTests: XCTestCase {
     func testAfterASlideCreatesTheChannelATurnAboutTheDrawingsCentreKeysRotationAlone() throws {
         let (manager, layerID, celID) = fixture()
         let target = try XCTUnwrap(manager.keyframeTarget(layerIndex: 1))
-        manager.addKeyframe(target, atFrame: 0)
-        manager.addKeyframe(target, atFrame: 5)
+        manager.addKeys(target, atFrame: 0)
+        manager.addKeys(target, atFrame: 5)
         XCTAssertEqual(manager.commitTransformPose(layerID: layerID, celID: celID, channel: .cel, restBox: box,
                                                    map: PoseMap(CGAffineTransform(translationX: 20, y: 7)),
                                                    restElements: [], movedIDs: [], atFrame: 5), .seedAndKey)
@@ -647,7 +677,7 @@ final class TransformChannelLogicTests: XCTestCase {
         // A mark at frame 0 and the playhead at 8: one keyframe, not standing on it, which is the
         // `.storedValueHoldingBaseline` arm.
         manager.currentFrame = 0
-        manager.addKeyframe(target, atFrame: 0)
+        manager.addKeys(target, atFrame: 0)
         manager.currentFrame = 8
 
         let restX = try XCTUnwrap(manager.layers[1].cels[0].vector?.elements.first?.stroke?
@@ -682,7 +712,7 @@ final class TransformChannelLogicTests: XCTestCase {
         let target = try XCTUnwrap(manager.keyframeTarget(layerIndex: 1))
         manager.currentLayerIndex = 1
         manager.currentFrame = 0
-        manager.addKeyframe(target, atFrame: 0)
+        manager.addKeys(target, atFrame: 0)
         manager.currentFrame = 8
         manager.history.removeAll()
         manager.refreshUndoRedoState()
@@ -702,13 +732,13 @@ final class TransformChannelLogicTests: XCTestCase {
     /// currency: *"I have 3 keyframes and only slider A is being controlled. I go to keyframe 3 and
     /// modify slider B. It starts from keyframe 1 to 3, skipping 2."*
     ///
-    /// `addKeyframe` took its neighbour list from the **two-argument** `keyframes(marks:tracks:)`,
+    /// `addKeys` took its neighbour list from the **two-argument** `keyframes(marks:tracks:)`,
     /// whose `poseFrames` defaulted to empty, while `keyframes(of:)` passed them — two spellings of
     /// the list §2.28 rules must have exactly one. Here the pose key at frame 4 is the *only* other
     /// keyframe, so the blind list finds no neighbour at all and the baseline is discarded with the
     /// animation it was holding.
     ///
-    /// Watched failing with `addKeyframe`'s `placed` back on the static two-argument form: the group
+    /// Watched failing with `addKeys`'s `placed` back on the static two-argument form: the group
     /// channel comes out with one key at frame 8, `isAnimated` false, and the drawing's old position
     /// nowhere in the document.
     func testAddingAKeyframeSeedsAHeldPoseOntoANeighbourThatIsOnlyAPoseKey() throws {
@@ -730,7 +760,7 @@ final class TransformChannelLogicTests: XCTestCase {
         manager.holdPoseBaseline(layerID: layerID, celID: celID, channel: .group(group),
                                  pose: slide(-18))
 
-        manager.addKeyframe(target, atFrame: 8)
+        manager.addKeys(target, atFrame: 8)
         let track = try XCTUnwrap(manager.layers[1].cels[0].transformTracks["group.\(group.uuidString)"])
         XCTAssertEqual(track.keyedFrames, [4, 8],
                        "The held pose lands on frame 4 — the nearest keyframe below, which is a pose key")

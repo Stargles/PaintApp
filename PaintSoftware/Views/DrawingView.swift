@@ -493,11 +493,11 @@ struct DrawingView: View {
                     // step that would otherwise lie: a slider drag opens a structure gesture, so a
                     // track written inside it records no step of its own and folds into this one. An
                     // artist who animated a bloom and pressed undo would read "Adjust Layer Effect"
-                    // and conclude the grade itself had gone. `.effectKeyframes` exists for exactly
+                    // and conclude the grade itself had gone. `.effectKeys` exists for exactly
                     // this distinction — see `HistoryActionLabel`.
                     onEditEnded: {
                         canvasManager.commitStructureGesture(
-                            label: effectEditWroteKeyframe ? .effectKeyframes : .valueLayerEffect)
+                            label: effectEditWroteKeyframe ? .effectKeys : .valueLayerEffect)
                     },
                     // **The slider is §5's first recordable surface, and this line is all of what it
                     // implements** — KEYFRAMES.md §5 and the owner's 2026-09-09 ruling. The pencil

@@ -400,7 +400,7 @@ final class FolderMoveLogicTests: XCTestCase {
     func testAllFramesWritesNoPoseBaselineWhereThisCelHoldsOne() throws {
         for (scope, holdsBaseline) in [(FolderMoveScope.thisCel, true), (.allFrames, false)] {
             let f = frames()
-            XCTAssertTrue(f.manager.addKeyframe(.layer(id: f.manager.layers[f.a].id), atFrame: 0))
+            XCTAssertTrue(f.manager.addKeys(.layer(id: f.manager.layers[f.a].id), atFrame: 0))
             f.manager.setFolderMoveScope(scope)
             XCTAssertTrue(f.manager.beginVectorFolderMove(f.fx.folder))
             try nudge(f.manager, byX: 5)

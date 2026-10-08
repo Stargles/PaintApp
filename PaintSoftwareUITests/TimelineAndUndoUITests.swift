@@ -467,9 +467,9 @@ final class TimelineGestureUITests: PaintUITestCase {
         }
         target.tap()
 
-        let add = app.buttons["timeline.menu.Add Keyframe"]
+        let add = app.buttons["timeline.menu.Add Keys"]
         XCTAssertTrue(add.waitForExistence(timeout: 5), "The second tap raises the cel menu")
-        XCTAssertFalse(app.buttons["timeline.menu.Remove Keyframe"].exists,
+        XCTAssertFalse(app.buttons["timeline.menu.Remove Keys"].exists,
                        "There is no mark on this frame yet, so there is nothing to offer to remove")
         add.tap()
 
@@ -480,12 +480,12 @@ final class TimelineGestureUITests: PaintUITestCase {
         // The label is 1-based and marker frames are 0-based. Asserting against the label rather than
         // against a literal is what makes this a pin on *the frame that was tapped* rather than on
         // where the block happens to sit.
-        XCTAssertEqual(band.value as? String, "\(tappedFrame - 1)",
-                       "The mark lands on the playhead, and it draws as any other keyframe does")
+        XCTAssertEqual(band.value as? String, "\(tappedFrame - 1)p",
+                       "The frame is primed at the playhead, and it draws as a primed frame — hollow, no key yet")
 
         // The playhead has not moved, so one tap is now the second stage.
         target.tap()
-        let remove = app.buttons["timeline.menu.Remove Keyframe"]
+        let remove = app.buttons["timeline.menu.Remove Keys"]
         XCTAssertTrue(remove.waitForExistence(timeout: 5),
                       "The frame carries a mark now, so the menu offers to take it back")
         remove.tap()

@@ -1241,7 +1241,7 @@ final class TimelineGraphBandLogicTests: XCTestCase {
                 manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: id, to: curve)
             }
         }
-        manager.commitStructureGesture(label: .effectKeyframes)
+        manager.commitStructureGesture(label: .effectKeys)
 
         XCTAssertEqual(manager.history.undoStack.count - before, 1,
                        "Six writes over three ticks, one undo step")
@@ -1351,9 +1351,9 @@ final class TimelineGraphBandLogicTests: XCTestCase {
         let brightness = try XCTUnwrap(manager.storedEffect(of: target)?
             .parameters.first { $0.id == brightnessID })
 
-        manager.addKeyframe(target, atFrame: 0)
+        manager.addKeys(target, atFrame: 0)
         manager.applyEffectParameterEdit(target, parameter: brightness, newValue: 2, atFrame: 10)
-        manager.addKeyframe(target, atFrame: 10)
+        manager.addKeys(target, atFrame: 10)
         XCTAssertEqual(nodeFrames(manager), [0, 10], "PREMISE: A and B both carry a node")
         XCTAssertEqual(manager.keyframeFrames(of: target), [0, 10])
 
@@ -1377,9 +1377,9 @@ final class TimelineGraphBandLogicTests: XCTestCase {
         let brightness = try XCTUnwrap(manager.storedEffect(of: target)?
             .parameters.first { $0.id == brightnessID })
 
-        manager.addKeyframe(target, atFrame: 0)
+        manager.addKeys(target, atFrame: 0)
         manager.applyEffectParameterEdit(target, parameter: brightness, newValue: 2, atFrame: 10)
-        manager.addKeyframe(target, atFrame: 10)
+        manager.addKeys(target, atFrame: 10)
 
         var curve = try XCTUnwrap(manager.keyframeState(of: target).tracks[brightnessID])
         curve.removeKey(atFrame: 0)
@@ -1393,7 +1393,7 @@ final class TimelineGraphBandLogicTests: XCTestCase {
     /// **A mark a node lands on later, and is then dragged off** — the case the pruning in
     /// `setEffectParameterTrack` exists for, and the one the workflow test above cannot reach.
     ///
-    /// After `addKeyframe` seeds a channel, only the *immediate* neighbours take a key
+    /// After `addKeys` seeds a channel, only the *immediate* neighbours take a key
     /// (`seedAndKeyChannel` says why), so a fourth mark further out survives un-keyed while the band
     /// has curves to draw. Dragging a node onto it is then the moment a key and a mark first coincide
     /// on a frame no `commitKeyframeState` write is running — and if the mark is not dropped there,
@@ -1404,7 +1404,7 @@ final class TimelineGraphBandLogicTests: XCTestCase {
         let brightness = try XCTUnwrap(manager.storedEffect(of: target)?
             .parameters.first { $0.id == brightnessID })
 
-        for frame in [0, 4, 10, 20] { manager.addKeyframe(target, atFrame: frame) }
+        for frame in [0, 4, 10, 20] { manager.addKeys(target, atFrame: frame) }
         manager.applyEffectParameterEdit(target, parameter: brightness, newValue: 2, atFrame: 4)
         XCTAssertEqual(manager.keyframeState(of: target).marks, [20], """
             PREMISE: seeding keys 0, 4 and 10 and drops their marks, and 20 is not an immediate \
@@ -1432,7 +1432,7 @@ final class TimelineGraphBandLogicTests: XCTestCase {
         let brightness = try XCTUnwrap(manager.storedEffect(of: target)?
             .parameters.first { $0.id == brightnessID })
 
-        for frame in [0, 4, 10, 20] { manager.addKeyframe(target, atFrame: frame) }
+        for frame in [0, 4, 10, 20] { manager.addKeys(target, atFrame: frame) }
         manager.applyEffectParameterEdit(target, parameter: brightness, newValue: 2, atFrame: 4)
         let before = manager.keyframeFrames(of: target)
         XCTAssertEqual(before, [0, 4, 10, 20], "PREMISE: four keyframes, one of them a bare mark")
@@ -1705,9 +1705,9 @@ final class TimelineGraphBandLogicTests: XCTestCase {
         let target = target(manager)
         let brightness = try XCTUnwrap(manager.storedEffect(of: target)?
             .parameters.first { $0.id == brightnessID })
-        manager.addKeyframe(target, atFrame: 0)
+        manager.addKeys(target, atFrame: 0)
         manager.applyEffectParameterEdit(target, parameter: brightness, newValue: 2, atFrame: 10)
-        manager.addKeyframe(target, atFrame: 10)
+        manager.addKeys(target, atFrame: 10)
         XCTAssertEqual(manager.keyframeFrames(of: target), [0, 10], "PREMISE: two keyframes, two nodes")
 
         let before = manager.history.undoStack.count

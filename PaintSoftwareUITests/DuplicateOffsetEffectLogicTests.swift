@@ -593,7 +593,7 @@ final class DuplicateOffsetEffectLogicTests: XCTestCase {
                        "Done wrote a key at the playhead")
         XCTAssertEqual(stored(manager, index)?.offsetX, 0, "The base is untouched")
         XCTAssertEqual(manager.history.undoStack.count, steps + 1)
-        XCTAssertEqual(manager.history.undoStack.last?.label, .effectKeyframes, "The step says it wrote keys")
+        XCTAssertEqual(manager.history.undoStack.last?.label, .effectKeys, "The step says it wrote keys")
 
         manager.undo()
         XCTAssertNil(manager.layers[index].effectTracks["duplicateOffset.offsetX"]?.key(atFrame: 5),

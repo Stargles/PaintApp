@@ -20,14 +20,14 @@ final class FolderGraphBandUITests: PaintUITestCase {
     // MARK: - Helpers
 
     private func keyframeSummary(_ app: XCUIApplication) -> String {
-        app.staticTexts["layerOptions.folderKeyframes"].value as? String ?? "?"
+        app.staticTexts["layerOptions.folderKeys"].value as? String ?? "?"
     }
 
     private func openFolderOptions(_ app: XCUIApplication, named name: String) {
         XCTAssertTrue(tapWhenHittable(app.buttons["layerPanel.folder.\(name).options"],
                                       "The folder row's options button"),
                       "Without the options panel there is no keyframe row and no graph editor row")
-        XCTAssertTrue(app.buttons["layerOptions.addKeyframe"].waitForExistence(timeout: 5),
+        XCTAssertTrue(app.buttons["layerOptions.addKeys"].waitForExistence(timeout: 5),
                       "The folder's options panel must show its keyframe row")
     }
 
@@ -101,14 +101,14 @@ final class FolderGraphBandUITests: PaintUITestCase {
 
         // 3. Two keyframes on the group's opacity: 100% at frame 0, 0% at frame 4.
         openFolderOptions(app, named: "Folder 1")
-        app.buttons["layerOptions.addKeyframe"].tap()
-        XCTAssertEqual(keyframeSummary(app), "0", "Premise: the first keyframe landed on the group")
+        app.buttons["layerOptions.addKeys"].tap()
+        XCTAssertEqual(keyframeSummary(app), "0p", "Premise: frame 0 is primed on the group")
         closeFolderOptions(app)
         stepForward(app, 4, toFrame: 4)
         app.sliders["layerPanel.folder.Folder 1.opacity"].adjust(toNormalizedSliderPosition: 0.0)
         XCTAssertLessThan(folderOpacity(app, named: "Folder 1"), 5, "Premise: the group is faded out")
         openFolderOptions(app, named: "Folder 1")
-        app.buttons["layerOptions.addKeyframe"].tap()
+        app.buttons["layerOptions.addKeys"].tap()
         XCTAssertEqual(keyframeSummary(app), "0,4", "Premise: the group is keyed on both frames")
         XCTAssertTrue(waitUntilBlank(canvas, dx: probe.dx, dy: probe.dy, timeout: 15),
                       "Premise: at frame 4 the group draws at zero opacity, so the probe is paper")
@@ -125,7 +125,7 @@ final class FolderGraphBandUITests: PaintUITestCase {
         let band = app.otherElements["timeline.graphBand"]
         XCTAssertTrue(band.waitForExistence(timeout: 5),
                       "The row opens the graph editor — the band has to come up")
-        XCTAssertFalse(app.buttons["layerOptions.addKeyframe"].exists,
+        XCTAssertFalse(app.buttons["layerOptions.addKeys"].exists,
                        "…and closes the panel, so the band is not under the rail that raised it")
         XCTAssertEqual(band.value as? String, "opacity:0,4", """
             The band must be drawing the *group's* opacity curve, keyed at 0 and 4. "empty" means \

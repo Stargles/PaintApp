@@ -5,8 +5,8 @@ import UIKit
 /// 2026-09-10, built from `FolderOptionsPanel`'s own keyframe rows.
 ///
 /// **What this file exists to prove, and what it deliberately does not.** Nothing in the *model* was
-/// missing: `addKeyframe(_:atFrame:)` has taken a `KeyframeTarget` since stage 3b and the `.folder`
-/// arm has always worked. So a test that calls `addKeyframe(.folder(…))` and reads back
+/// missing: `addKeys(_:atFrame:)` has taken a `KeyframeTarget` since stage 3b and the `.folder`
+/// arm has always worked. So a test that calls `addKeys(.folder(…))` and reads back
 /// `keyframeMarks` would pass on the commit before this one as readily as on this one, and would be
 /// the "green assertion about the wrong thing" CLAUDE.md has a section on. The assertions here are
 /// therefore about the three things the entry point has to be *true of* rather than about the call
@@ -137,7 +137,7 @@ final class FolderKeyframeEntryLogicTests: XCTestCase {
         XCTAssertEqual(storedUnion(manager, folder), [],
                        "…and its stored fields agree, which is the fixture premise")
 
-        XCTAssertTrue(manager.addKeyframe(target, atFrame: 7),
+        XCTAssertTrue(manager.addKeys(target, atFrame: 7),
                       "The press must report that it changed the document, or the panel's row is inert")
 
         XCTAssertEqual(manager.keyframeFrames(of: target), [7])
@@ -159,7 +159,7 @@ final class FolderKeyframeEntryLogicTests: XCTestCase {
     /// `HistoryActionLabel`'s own notes are written against.
     func testPlacingAGroupKeyframeIsOneUndoStep() {
         let (manager, folder, target) = folderManager()
-        manager.addKeyframe(target, atFrame: 3)
+        manager.addKeys(target, atFrame: 3)
 
         XCTAssertTrue(manager.canUndo, "The press must be undoable")
         manager.undo()
@@ -190,7 +190,7 @@ final class FolderKeyframeEntryLogicTests: XCTestCase {
                        "With no keyframe on the group, dragging its opacity is an ordinary setting "
                        + "— §2.26's fifth arm, and the state the feature starts from")
 
-        manager.addKeyframe(target, atFrame: 4)
+        manager.addKeys(target, atFrame: 4)
 
         XCTAssertEqual(manager.keyframeWrite(target, channel: .opacity, atFrame: 4),
                        .storedValueHoldingBaseline, """
@@ -210,7 +210,7 @@ final class FolderKeyframeEntryLogicTests: XCTestCase {
         let (manager, folder, target) = folderManager()
 
         // 1. A bare mark at A. "Keyframe A is added, nothing is saved."
-        manager.addKeyframe(target, atFrame: 0)
+        manager.addKeys(target, atFrame: 0)
         XCTAssertEqual(drawnFolderOpacity(manager, folder, atFrame: 10), 1, accuracy: 0.0001,
                        "A mark alone animates nothing — the group still draws at full opacity "
                        + "everywhere, which is §2.26's first step stated as a picture")
@@ -221,7 +221,7 @@ final class FolderKeyframeEntryLogicTests: XCTestCase {
                        "Fixture premise: the drag held rather than keyed")
 
         // 3. Mark at B commits it.
-        manager.addKeyframe(target, atFrame: 10)
+        manager.addKeys(target, atFrame: 10)
 
         XCTAssertEqual(drawnFolderOpacity(manager, folder, atFrame: 0), 1, accuracy: 0.0001,
                        "The held value landed on A, so the group draws fully opaque at frame 0")
@@ -246,12 +246,12 @@ final class FolderKeyframeEntryLogicTests: XCTestCase {
         let (manager, folder, target) = folderManager()
         let index = folderIndex(manager, folder)
 
-        manager.addKeyframe(target, atFrame: 0)
+        manager.addKeys(target, atFrame: 0)
         XCTAssertEqual(manager.folders[index].keyframeMarks, [0],
                        "Fixture premise: an unkeyed mark is stored, because nothing else can hold it")
 
         dragFolderOpacity(manager, target, to: 0.25, atFrame: 10)
-        manager.addKeyframe(target, atFrame: 10)
+        manager.addKeys(target, atFrame: 10)
 
         XCTAssertEqual(manager.folders[index].keyframeMarks, [], """
                        Both frames are keyed now, so neither needs a mark — `marks(_:droppingKeyed:)` \
@@ -265,19 +265,20 @@ final class FolderKeyframeEntryLogicTests: XCTestCase {
 
     // MARK: - One press, every channel kind
 
-    /// **One press serves the grade and every `TargetChannel` row a folder owns** — requirement 1,
-    /// and the reason the panel row takes a `KeyframeTarget` and a frame and nothing else.
+    /// **One press primes the group for the grade and every `TargetChannel` row it owns, and keys
+    /// none of them; an edit made past the primed frame holds that frame on the channel edited and no
+    /// other** — requirement 1, under TODO (139)'s *"only the keys of things that changed are added"*.
+    /// The press used to key every animated channel at the frame (§2.24's surviving half); the hold
+    /// moved to the edit (`AnimationCurve.keyed`).
     ///
-    /// Operands: for each of the two stores, *whether a key now sits on frame 10*, against the
-    /// single `addKeyframe` call that is supposed to have put it there. Every one of them is keyed 0
-    /// and 20 beforehand, so §2.24's surviving half — "hold this pose here" — must reach all of them
-    /// or the group drifts through the new mark on whichever channel was missed.
+    /// Operands: for each of the two stores, *whether a key sits on the primed frame* — after the
+    /// press (none anywhere), and after the channel is edited past it (that channel's, holding what it
+    /// showed there, and no other channel's). A primed frame is spent once a key lands on it (the
+    /// 2026-09-03 rule drops the mark), so each `TargetChannel` row is primed on a frame of its own.
     ///
-    /// **The `TargetChannel` half iterates the table rather than naming `.opacity`.** `addKeyframe`'s
-    /// own loop is `for channel in TargetChannel.all`, so the day a second row lands (a blend amount,
-    /// an effect strength) this assertion covers it without being rewritten — which is the claim that
-    /// "the next row needs no third case here" stated as a test rather than as a comment.
-    func testOneGroupKeyframePressHoldsEveryChannelKindAtOnce() {
+    /// **The `TargetChannel` half iterates the table rather than naming `.opacity`**, so the day a
+    /// second row lands this covers it without being rewritten.
+    func testOneGroupPressPrimesEveryChannelKindAndAnEditPastItHoldsOnlyThatChannel() {
         let (manager, folder, target) = folderManager(frames: 32)
         let index = folderIndex(manager, folder)
 
@@ -296,22 +297,42 @@ final class FolderKeyframeEntryLogicTests: XCTestCase {
         XCTAssertEqual(manager.keyframeFrames(of: target), [0, 20],
                        "Fixture premise: both channel kinds, all keyed on the same two frames")
 
-        XCTAssertTrue(manager.addKeyframe(target, atFrame: 10),
-                      "One press on the group's Add Keyframe row")
-
-        XCTAssertNotNil(manager.folders[index].effectTracks[brightnessID]?
-                            .keys.first { $0.frame == 10 },
-                        "The grade's channel took a key at 10 — §2.21's home, §2.24's hold")
+        XCTAssertTrue(manager.addKeys(target, atFrame: 10), "One press on the group's Add Keys row")
+        XCTAssertNil(manager.folders[index].effectTracks[brightnessID]?.key(atFrame: 10),
+                     "The press keys nothing on the grade")
         for channel in owned {
-            XCTAssertNotNil(manager.folders[index].channelTracks[channel.id]?
-                                .keys.first { $0.frame == 10 },
-                            "\(channel.name): every row of `TargetChannel.all` a folder owns took a "
-                            + "key at 10, so the next row added to that table needs no new case in "
-                            + "the panel")
+            XCTAssertNil(manager.folders[index].channelTracks[channel.id]?.key(atFrame: 10),
+                         "…nor on \(channel.name)")
         }
-        XCTAssertEqual(manager.keyframeFrames(of: target), [0, 10, 20],
-                       "…and the union names the new frame once, however many channels key it")
-        XCTAssertEqual(storedUnion(manager, folder), [0, 10, 20])
+        XCTAssertEqual(manager.placedKeys(of: target), PlacedKeys(frames: [0, 10, 20], primed: [10]),
+                       "It primes frame 10, which the timeline draws hollow")
+
+        let brightnessAt10 = manager.folders[index].effectTracks[brightnessID]?.evaluate(at: 10) ?? .nan
+        manager.setEffectParameterKeys(target, frame: 14, values: [brightnessID: 3])
+        XCTAssertEqual(manager.folders[index].effectTracks[brightnessID]?.key(atFrame: 10)?.value ?? .nan,
+                       brightnessAt10, accuracy: 1e-9, "The grade, edited at 14, holds what it showed at 10")
+        for channel in owned {
+            XCTAssertNil(manager.folders[index].channelTracks[channel.id]?.key(atFrame: 10),
+                         "…and \(channel.name), not edited, takes nothing")
+        }
+
+        // Each row the folder owns, primed on a frame of its own and edited past it.
+        for (offset, channel) in owned.enumerated() {
+            let primedFrame = 4 + offset
+            XCTAssertTrue(manager.addKeys(target, atFrame: primedFrame))
+            let shown = manager.folders[index].channelTracks[channel.id]?.evaluate(at: Double(primedFrame)) ?? .nan
+            manager.setTargetChannelKeys(target, frame: 2, values: [channel.id: 0.5])
+            XCTAssertEqual(manager.folders[index].channelTracks[channel.id]?.key(atFrame: primedFrame)?.value ?? .nan,
+                           shown, accuracy: 1e-9,
+                           "\(channel.name), edited at 2, holds what it showed on the frame primed for "
+                           + "it — every row of `TargetChannel.all` a folder owns, so the next row needs "
+                           + "no new case")
+            XCTAssertNil(manager.folders[index].effectTracks[brightnessID]?.key(atFrame: primedFrame),
+                         "…and the grade, not edited, takes nothing there")
+        }
+        XCTAssertEqual(manager.keyframeFrames(of: target), [0, 2] + owned.indices.map { 4 + $0 } + [10, 14, 20],
+                       "…and the union names each frame once, however many channels key it")
+        XCTAssertEqual(storedUnion(manager, folder), [0, 2] + owned.indices.map { 4 + $0 } + [10, 14, 20])
     }
 
     // MARK: - Remove
@@ -322,14 +343,14 @@ final class FolderKeyframeEntryLogicTests: XCTestCase {
     /// presence from — against `folders[i].keyframeMarks`, which does *not* contain the frame. The
     /// whole point: after the four-step workflow there are no marks left, so a Remove row gated on
     /// the mark list would vanish exactly when the artist has an animation to edit. That is §2.28's
-    /// second reported symptom — "a diamond with no Remove Keyframe".
+    /// second reported symptom — "a diamond with no Remove Keys".
     func testRemoveIsOfferedForAGroupKeyframeThatHasNoMarkAndClearsEveryChannel() {
         let (manager, folder, target) = folderManager()
         let index = folderIndex(manager, folder)
 
-        manager.addKeyframe(target, atFrame: 0)
+        manager.addKeys(target, atFrame: 0)
         dragFolderOpacity(manager, target, to: 0.25, atFrame: 10)
-        manager.addKeyframe(target, atFrame: 10)
+        manager.addKeys(target, atFrame: 10)
 
         XCTAssertFalse(manager.folders[index].keyframeMarks.contains(10),
                        "Fixture premise: frame 10 carries a key and no mark")
@@ -337,7 +358,7 @@ final class FolderKeyframeEntryLogicTests: XCTestCase {
                       "…and the panel still offers Remove there, because the predicate is the union "
                       + "and not the mark list")
 
-        XCTAssertTrue(manager.removeKeyframe(target, atFrame: 10),
+        XCTAssertTrue(manager.removeKeys(target, atFrame: 10),
                       "Remove must report that it changed the document")
         XCTAssertEqual(manager.keyframeFrames(of: target), [0],
                        "Frame 10 is no longer a keyframe of the group")
@@ -351,7 +372,7 @@ final class FolderKeyframeEntryLogicTests: XCTestCase {
     /// **A group's Remove does not reach into its children**, which is the one thing a container
     /// action has to be checked for.
     ///
-    /// Operands: the *layer's* union either side of a `removeKeyframe` on the folder. A folder is a
+    /// Operands: the *layer's* union either side of a `removeKeys` on the folder. A folder is a
     /// `KeyframeTarget` in its own right (`TimelineFolderRowView`'s own note: aggregating its
     /// descendants' keys "would draw a marker with no target to attribute it to"), so the artist who
     /// clears the group's keyframe must not lose the drawing's.
@@ -359,11 +380,11 @@ final class FolderKeyframeEntryLogicTests: XCTestCase {
         let (manager, folder, target) = folderManager()
         let child = KeyframeTarget.layer(id: manager.layers[0].id)
 
-        manager.addKeyframe(target, atFrame: 5)
-        manager.addKeyframe(child, atFrame: 5)
+        manager.addKeys(target, atFrame: 5)
+        manager.addKeys(child, atFrame: 5)
         XCTAssertEqual(manager.keyframeFrames(of: child), [5], "Fixture premise: the layer is keyed too")
 
-        manager.removeKeyframe(target, atFrame: 5)
+        manager.removeKeys(target, atFrame: 5)
 
         XCTAssertEqual(manager.keyframeFrames(of: target), [],
                        "The group's keyframe went")

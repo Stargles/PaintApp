@@ -1239,7 +1239,7 @@ extension CanvasManager {
                                                  atFrame: currentFrame)
             if route == .key || route == .seedAndKey { wroteKey = true }
         }
-        commitStructureGesture(label: wroteKey ? .effectKeyframes : .valueLayerEffect)
+        commitStructureGesture(label: wroteKey ? .effectKeys : .valueLayerEffect)
     }
 
     /// **The pose a container float is showing right now** — the rest pose it came up on, carried
@@ -1499,7 +1499,7 @@ extension CanvasManager {
         live.pose = posed
         if !live.track.isEmpty, let new = PoseComponents.decompose(posed, inBox: live.track.box) {
             live.track.key(new, over: restState.resolvedValues(atFrame: currentFrame),
-                           atFrame: currentFrame, keyframes: keyframeFrames(of: target))
+                           atFrame: currentFrame, placed: placedKeys(of: target))
         }
         guard current != live, case .layer(let id) = target,
               let index = layers.firstIndex(where: { $0.id == id }) else { return }

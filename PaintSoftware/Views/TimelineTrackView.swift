@@ -515,7 +515,7 @@ struct TimelineTrackView: UIViewRepresentable {
                     row.update(cels: layers[entry.layerIndex].cels,
                                displayedFrameCount: laidOutCount,
                                markers: built.trackMarkers.indices.contains(slot)
-                                   ? built.trackMarkers[slot] : [],
+                                   ? built.trackMarkers[slot] : .none,
                                // Out of the key, for the markers' reason: a ghost drawn from a
                                // value the key does not carry would draw once and never move.
                                ghosts: built.trackGhosts.indices.contains(slot)
@@ -566,7 +566,7 @@ struct TimelineTrackView: UIViewRepresentable {
                                identifier: "timeline.folderTrack.\(folder?.name ?? entry.folderID.uuidString)",
                                // Out of the key, for the layer rows' reason above.
                                markers: built.folders.indices.contains(slot)
-                                   ? built.folders[slot].markers : [])
+                                   ? built.folders[slot].markers : .none)
                 }
 
                 layoutGraphBand(content: built.graphBand, layout: layout, stackRows: stackRows,
@@ -1153,7 +1153,7 @@ struct TimelineTrackView: UIViewRepresentable {
                 _ = writeGraphBandCurves(restored, target: drag.target)
                 canvasManager.cancelStructureGesture()
             } else if drag.didWrite {
-                canvasManager.commitStructureGesture(label: .effectKeyframes)
+                canvasManager.commitStructureGesture(label: .effectKeys)
             } else {
                 // `recordStructureChange` records unconditionally, so a bracket that spanned no write
                 // would put an undo step on the stack that undoes nothing.
@@ -1580,7 +1580,7 @@ private final class TimelineFolderRowView: UIView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     func update(span: ClosedRange<Int>?, pixelsPerFrame: CGFloat, isVisible: Bool, identifier: String,
-                markers: [Int]) {
+                markers: PlacedKeys) {
         accessibilityIdentifier = identifier
         keyMarkers.frame = CGRect(x: 0, y: bounds.height - TimelineKeyMarkers.bandHeight,
                                   width: bounds.width, height: TimelineKeyMarkers.bandHeight)
@@ -1646,16 +1646,19 @@ private final class TimelineDropIndicatorView: UIView {
 /// cannot act on. It also costs nothing structurally: no new row height, so `contentHeight` and
 /// `totalHeight` stay as they are, and §10's three height traps are simply not entered.
 ///
-/// **Hidden outright when the row has no keyframes**, which is almost every row of almost every
-/// document — so an un-animated timeline looks exactly as it did, and the band is also absent from the
-/// accessibility tree, making *"this layer has keyframes"* a queryable fact rather than a value to parse.
+/// **Hidden outright when the row has no keys and nothing primed**, which is almost every row of
+/// almost every document — so an un-animated timeline looks exactly as it did, and the band is also
+/// absent from the accessibility tree, making *"this layer has keys"* a queryable fact rather than a
+/// value to parse.
 ///
-/// **Fill white, stroke dark.** Blue is the playhead and the current layer; yellow is an interpolation
-/// reference, and §2.8 exists precisely so the two kinds of "keyframe" are never confused — so an
-/// animation key must not be yellow. White over a 1 pt dark outline reads on a pale thumbnail and on a
-/// dark one, which is the only requirement a marker drawn over arbitrary artwork actually has.
+/// **A key is filled white, a primed frame is a hollow white outline** — TODO (139). Blue is the
+/// playhead and the current layer; yellow is an interpolation reference, and §2.8 exists precisely so
+/// the in-between feature's keyframe drawings are never confused with these — so neither may be
+/// yellow. Both carry a dark outline, so they read on a pale thumbnail and on a dark one, which is the
+/// only requirement a marker drawn over arbitrary artwork actually has.
 private final class TimelineKeyMarkerBand: UIView {
     private var runs: [TimelineKeyMarkers.Run] = []
+    private var primed: [Int] = []
     private var pixelsPerFrame: CGFloat = TimelineKeyMarkers.basePixelsPerFrame
 
     override init(frame: CGRect) {
@@ -1670,20 +1673,20 @@ private final class TimelineKeyMarkerBand: UIView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    /// - Parameter markers: ascending and unique — `CanvasManager.keyframeFrames(of:)`' output,
-    ///   carried here through `TimelineLayoutKey` so what is drawn and what the layout gate compares
-    ///   are the same array.
-    func update(markers: [Int], pixelsPerFrame: CGFloat, identifier: String) {
-        let runs = TimelineKeyMarkers.runs(frames: markers, pixelsPerFrame: pixelsPerFrame)
+    /// - Parameter markers: `CanvasManager.placedKeys(of:)`' output, carried here through
+    ///   `TimelineLayoutKey` so what is drawn and what the layout gate compares are the same value.
+    func update(markers: PlacedKeys, pixelsPerFrame: CGFloat, identifier: String) {
+        let runs = TimelineKeyMarkers.runs(frames: markers.frames, pixelsPerFrame: pixelsPerFrame)
         // A pinch changes `pixelsPerFrame` without changing a single key, and it changes what
         // collapses — so both halves gate the redraw. `relayout` is already gated by the layout key;
         // this is the second gate, for the same reason `appliedDisplacementFrames` is.
-        let changed = runs != self.runs || pixelsPerFrame != self.pixelsPerFrame
+        let changed = runs != self.runs || markers.primed != primed || pixelsPerFrame != self.pixelsPerFrame
         self.runs = runs
+        primed = markers.primed
         self.pixelsPerFrame = pixelsPerFrame
         isHidden = runs.isEmpty
         accessibilityIdentifier = identifier
-        accessibilityValue = TimelineKeyMarkers.encode(runs)
+        accessibilityValue = TimelineKeyMarkers.encode(runs, primed: markers.primed)
         if changed { setNeedsDisplay() }
     }
 
@@ -1727,25 +1730,33 @@ private final class TimelineKeyMarkerBand: UIView {
                 diamond.addLine(to: CGPoint(x: centerX, y: midY + half))
                 diamond.addLine(to: CGPoint(x: centerX - half, y: midY))
                 diamond.close()
-                paint(diamond)
+                if primed.contains(frame) { paintPrimed(diamond) } else { paint(diamond) }
             }
         }
     }
 
-    /// **One form for every keyframe**, white over a dark hairline so it reads on a pale cel
-    /// thumbnail and on a dark one, which is the only requirement a marker drawn over arbitrary
-    /// artwork has.
-    ///
-    /// **There was a second, hollow form and it is gone.** It meant *the artist marked this frame and
-    /// no channel keys it*, which is a distinction the owner asked to be removed on 2026-09-03: a node
-    /// in the graph editor and an indicator on the cel are the same thing, so a greyed third state is
-    /// something to read and act on that says nothing. `CanvasManager.marks(_:droppingKeyed:)` is what
-    /// removes the state that produced most of them — a mark stranded by a key dragged off it.
+    /// **A key**: white over a dark hairline, so it reads on a pale cel thumbnail and on a dark one.
+    /// The owner's rule of 2026-09-03 holds for this form exactly: a node in the graph editor and a
+    /// filled diamond on the row are the same thing in both directions.
     private func paint(_ path: UIBezierPath) {
         UIColor.white.setFill()
         path.fill()
         UIColor.black.withAlphaComponent(0.6).setStroke()
         path.lineWidth = 1
+        path.stroke()
+    }
+
+    /// **A primed frame** — Add Keys pressed and nothing changed yet, so no node exists for it: the
+    /// same diamond, hollow. A dark ring under a white one keeps it legible over any artwork, and the
+    /// empty middle is the difference the artist reads — *"something will key here"* rather than
+    /// *"something is keyed here"*. The run bar between collapsed markers stays solid: it is drawn
+    /// for the run, not for any one frame.
+    private func paintPrimed(_ path: UIBezierPath) {
+        UIColor.black.withAlphaComponent(0.6).setStroke()
+        path.lineWidth = 3
+        path.stroke()
+        UIColor.white.setStroke()
+        path.lineWidth = 1.5
         path.stroke()
     }
 }
@@ -2390,7 +2401,7 @@ private final class TimelineRowView: UIView {
     /// gap this draws runs to the right-hand edge of what is laid out, which is two screenfuls past
     /// wherever the artist has scrolled, so there is always empty slot to tap on. See
     /// `TimelineTrackView.Coordinator.displayedFrameCount(contentEndFrame:contentOffsetX:viewportWidth:pixelsPerFrame:)`.
-    func update(cels: [Cel], displayedFrameCount: Int, markers: [Int],
+    func update(cels: [Cel], displayedFrameCount: Int, markers: PlacedKeys,
                 ghosts: [CanvasManager.RepeatGhost] = []) {
         var result: [Segment] = []
         var cursor = 0

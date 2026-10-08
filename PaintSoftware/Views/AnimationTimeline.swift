@@ -571,7 +571,7 @@ struct AnimationTimeline: View {
                                                              parameterID: parameterID, frame: frame)
                     }
                 }
-                menuButton("Delete Keyframe", icon: "trash", role: .destructive) {
+                menuButton("Delete Key", icon: "trash", role: .destructive) {
                     canvasManager.removeGraphNodeKey(target: target,
                                                      parameterID: parameterID, frame: frame)
                 }
@@ -615,17 +615,17 @@ struct AnimationTimeline: View {
     @ViewBuilder
     private func keyframeItems(layerIndex: Int, frame: Int, clearing scope: Range<Int>?) -> some View {
         if let target = canvasManager.keyframeTarget(layerIndex: layerIndex) {
-            menuButton("Add Keyframe", icon: "plus.diamond") {
-                canvasManager.addKeyframe(target, atFrame: frame)
+            menuButton("Add Keys", icon: "plus.diamond") {
+                canvasManager.addKeys(target, atFrame: frame)
             }
             if canvasManager.hasKeyframe(target, atFrame: frame) {
-                menuButton("Remove Keyframe", icon: "minus.diamond") {
-                    canvasManager.removeKeyframe(target, atFrame: frame)
+                menuButton("Remove Keys", icon: "minus.diamond") {
+                    canvasManager.removeKeys(target, atFrame: frame)
                 }
             }
             if let scope, canvasManager.hasKeyframe(target, inFrames: scope) {
-                menuButton("Clear Keyframes", icon: "xmark.diamond") {
-                    canvasManager.clearKeyframes(target, inFrames: scope)
+                menuButton("Clear Keys", icon: "xmark.diamond") {
+                    canvasManager.clearKeys(target, inFrames: scope)
                 }
             }
         }
@@ -1006,7 +1006,7 @@ struct AnimationTimeline: View {
     /// editor instead of placing a keyframe (icon and its name also may have to be changed to graph
     /// editor)."*
     ///
-    /// **The keyframe it used to place is not lost, it moved.** Add / Remove / Clear Keyframes are in
+    /// **The keyframe it used to place is not lost, it moved.** Add / Remove / Clear Keys are in
     /// the cel menu (`keyframeItems`), which is the workflow §2.26 describes and where the artist is
     /// already standing when they want one — beside the block, at the frame they tapped, rather than
     /// at wherever a playback timer has since carried the playhead.

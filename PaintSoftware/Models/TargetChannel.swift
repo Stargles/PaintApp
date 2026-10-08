@@ -81,7 +81,7 @@ struct TargetChannel: Identifiable {
     let editLabel: HistoryActionLabel
 
     /// The undo step a *keyframe* write on this channel records — "edit opacity keyframes". Apart
-    /// from `editLabel` for `.effectKeyframes`' stated reason: the value is the thing the artist
+    /// from `editLabel` for `.effectKeys`' stated reason: the value is the thing the artist
     /// picked and the curve is the animation on it, and they are different things to want back.
     let keyframeLabel: HistoryActionLabel
 
@@ -107,7 +107,7 @@ struct TargetChannel: Identifiable {
         modelDomain: 0...1,
         format: "%.2f",
         editLabel: .opacity,
-        keyframeLabel: .opacityKeyframes,
+        keyframeLabel: .opacityKeys,
         layerPath: \Layer.opacity,
         folderPath: \LayerFolder.opacity)
 
@@ -134,7 +134,7 @@ struct TargetChannel: Identifiable {
         modelDomain: -10...10,
         format: "%.2f",
         editLabel: .parallaxShare,
-        keyframeLabel: .parallaxShareKeyframes,
+        keyframeLabel: .parallaxShareKeys,
         layerPath: \Layer.parallaxShareValue,
         folderPath: \LayerFolder.parallaxShareValue)
 
@@ -154,7 +154,7 @@ struct TargetChannel: Identifiable {
         modelDomain: -360...360,
         format: "%.1f",
         editLabel: .rotateSpeed,
-        keyframeLabel: .rotateSpeedKeyframes,
+        keyframeLabel: .rotateSpeedKeys,
         layerPath: \Layer.rotateSpeed,
         folderPath: nil)
 
@@ -171,7 +171,7 @@ struct TargetChannel: Identifiable {
         modelDomain: -4096...4096,
         format: "%.0f",
         editLabel: .shakeX,
-        keyframeLabel: .shakeXKeyframes,
+        keyframeLabel: .shakeXKeys,
         layerPath: \Layer.shakeX,
         folderPath: nil)
 
@@ -183,7 +183,7 @@ struct TargetChannel: Identifiable {
         modelDomain: -4096...4096,
         format: "%.0f",
         editLabel: .shakeY,
-        keyframeLabel: .shakeYKeyframes,
+        keyframeLabel: .shakeYKeys,
         layerPath: \Layer.shakeY,
         folderPath: nil)
 
@@ -197,7 +197,7 @@ struct TargetChannel: Identifiable {
         modelDomain: -180...180,
         format: "%.1f",
         editLabel: .shakeRotation,
-        keyframeLabel: .shakeRotationKeyframes,
+        keyframeLabel: .shakeRotationKeys,
         layerPath: \Layer.shakeRotation,
         folderPath: nil)
 

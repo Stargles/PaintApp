@@ -366,8 +366,8 @@ final class PoseBandLogicTests: XCTestCase {
         manager.currentLayerIndex = 1
         manager.isGraphEditorOpen = true
         let target = KeyframeTarget.layer(id: manager.layers[1].id)
-        manager.addKeyframe(target, atFrame: 0)
-        manager.addKeyframe(target, atFrame: 11)
+        manager.addKeys(target, atFrame: 0)
+        manager.addKeys(target, atFrame: 11)
 
         let slid = PoseQuad(box: wide, mappedBy: CGAffineTransform(translationX: 2048 * 0.4, y: 0))
         let noisy = try XCTUnwrap(PoseComponents.decompose(slid, inBox: wide)).scaleX

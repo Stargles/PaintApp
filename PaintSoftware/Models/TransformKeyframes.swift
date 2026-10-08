@@ -39,7 +39,7 @@ import Combine
 ///    restored and the map is keyed at the playhead, as one undo step.
 ///
 /// **Both keying arms write only the components the Move changed** — TODO (139), one curve per
-/// component, and `TransformTrack.key(_:over:atFrame:keyframes:)` is the one place the rule is
+/// component, and `TransformTrack.key(_:over:atFrame:placed:)` is the one place the rule is
 /// stated. A component that has no curve yet is seeded rather than keyed alone, so the frames either
 /// side of the playhead keep showing what they showed.
 ///
@@ -179,7 +179,7 @@ extension CanvasManager {
     /// **Creates a pose channel from nothing with the old pose on its neighbouring keyframes and the
     /// new one at the playhead, on the components that changed** — `.seedAndKey`, and §2.27's
     /// *"modifies another slider while on B"*, with TODO (139)'s *"only the things that changed"*:
-    /// `TransformTrack.key(_:over:atFrame:keyframes:)` seeds exactly the components the Move moved.
+    /// `TransformTrack.key(_:over:atFrame:placed:)` seeds exactly the components the Move moved.
     ///
     /// **Only neighbours inside this cel's span** — TODO (62): a key never lives outside
     /// `0..<frameCount`. The layer's keyframes are the layer's, so the nearest one below or above the
@@ -191,23 +191,23 @@ extension CanvasManager {
     ///   box the gesture was made in.
     @discardableResult
     func seedAndKeyPose(layerID: UUID, celID: UUID, channel: TransformChannelID, restBox: CGRect,
-                        oldPose: PoseQuad, atCelLocalFrame frame: Int, keyframes: [Int]) -> Bool {
+                        oldPose: PoseQuad, atCelLocalFrame frame: Int, placed: PlacedKeys) -> Bool {
         let before = celPoseState(layerID: layerID, celID: celID)
         var state = before
         var track = state.tracks[channel.id] ?? TransformTrack(box: restBox)
         guard let old = PoseComponents.decompose(oldPose, inBox: track.box) else { return false }
         let span = celIndices(forCel: celID, inLayer: layerID)
             .map { 0..<layers[$0.layer].cels[$0.cel].frameCount } ?? 0..<Int.max
-        track.key(track.restValues, over: old, atFrame: frame, keyframes: keyframes.filter { span.contains($0) })
+        track.key(track.restValues, over: old, atFrame: frame, placed: placed.restricted(to: span))
         state.tracks[channel.id] = track.isEmpty ? nil : track
         state.baselines.removeValue(forKey: channel.id)
         guard state != before else { return false }
-        commitCelPoseState(state, from: before, layerID: layerID, celID: celID, label: .effectKeyframes)
+        commitCelPoseState(state, from: before, layerID: layerID, celID: celID, label: .effectKeys)
         return true
     }
 
     /// **Drops every pose key and held baseline in a half-open range of *absolute* frames** — the
-    /// pose half of `removeKeyframe` and `clearKeyframes`, applied to every cel of one layer.
+    /// pose half of `removeKeys` and `clearKeys`, applied to every cel of one layer.
     ///
     /// The range is absolute and each cel converts it, which is the same conversion
     /// `poseKeyframeFrames` makes in the other direction and the only place either happens.
@@ -281,7 +281,7 @@ extension CanvasManager {
     /// rather than being flattened to its affine part on the way in.
     ///
     /// **Every writing arm keys only the components the Move changed** (TODO (139)) —
-    /// `TransformTrack.key(_:over:atFrame:keyframes:)` is the one statement of it, so a sideways drag
+    /// `TransformTrack.key(_:over:atFrame:placed:)` is the one statement of it, so a sideways drag
     /// keys X and Y, a turn about the drawing's centre keys Rotation, and a Distort keys the two
     /// perspective curves.
     ///
@@ -300,7 +300,7 @@ extension CanvasManager {
         // the writer refuses rather than leaving storage that renders nothing.
         guard cel.interpolation == nil else { return .storedValue }
 
-        let placed = keyframeFrames(of: target)
+        let placed = placedKeys(of: target)
         let route = transformWrite(layerID: layerID, celID: celID, channel: channel, atFrame: frame)
 
         guard route != .storedValue else { return .storedValue }
@@ -323,8 +323,8 @@ extension CanvasManager {
         // writing a key nothing can render; the geometry is already baked and the artist sees their
         // drag stand, which is exactly what the `.storedValue` arm means.
         guard let wasAt = PoseQuad(box: bakedBox, mappedThrough: inverse.homography) else { return .storedValue }
-        // The keyframes a seed may land on: this cel's own span, in its own frames (TODO (62)).
-        let localKeyframes = placed.map { $0 - cel.startFrame }.filter { (0..<cel.frameCount).contains($0) }
+        // The frames a seed or a hold may land on: this cel's own span, in its own frames (TODO (62)).
+        let celPlaced = placed.shifted(by: -cel.startFrame).restricted(to: 0..<cel.frameCount)
 
         switch route {
         case .storedValue:
@@ -335,7 +335,7 @@ extension CanvasManager {
 
         case .seedAndKey:
             seedAndKeyPose(layerID: layerID, celID: celID, channel: channel, restBox: bakedBox,
-                           oldPose: wasAt, atCelLocalFrame: local, keyframes: localKeyframes)
+                           oldPose: wasAt, atCelLocalFrame: local, placed: celPlaced)
 
         case .key:
             // The one arm that takes the bake back: the cel holds one drawing in its rest position and
@@ -349,7 +349,7 @@ extension CanvasManager {
             guard var track = before.tracks[channel.id],
                   let new = PoseComponents.decompose(map, box: track.box) else { return .storedValue }
             let old = track.values(atTime: Double(local), base: track.restValues)
-            track.key(new, over: old, atFrame: local, keyframes: localKeyframes)
+            track.key(new, over: old, atFrame: local, placed: celPlaced)
             var state = before
             state.tracks[channel.id] = track
             state.baselines.removeValue(forKey: channel.id)
@@ -381,7 +381,7 @@ extension CanvasManager {
         celContentChangedOutsideStroke(layerID: layerID, celID: celID)
 
         guard structureUndoDepth == 0, gestureSnapshot == nil else { return }
-        recordUndo(label: .effectKeyframes,
+        recordUndo(label: .effectKeys,
                    cost: (movedElements.count + restElements.count) * 512,
                    undo: { [weak self] in
                        vector.restoreElements(movedElements, changedInk: nil, rewriting: movedIDs)
@@ -740,7 +740,7 @@ extension CanvasManager {
     ///
     /// The arms are therefore the effect-parameter path's, one payload over — and, since TODO (139),
     /// **each writing arm keys only the components the Move changed**
-    /// (`TransformTrack.key(_:over:atFrame:keyframes:)`):
+    /// (`TransformTrack.key(_:over:atFrame:placed:)`):
     ///
     ///  * **`.storedValue`** — no keyframes anywhere. The base moves and nothing else happens, which
     ///    is the property the whole routing rule is shaped around.
@@ -787,12 +787,12 @@ extension CanvasManager {
         case .seedAndKey, .key:
             guard let new = PoseComponents.decompose(posed, inBox: before.track.box) else { break }
             after.track.key(new, over: before.resolvedValues(atFrame: frame), atFrame: frame,
-                            keyframes: keyframeFrames(of: target))
+                            placed: placedKeys(of: target))
             after.baseline = nil
         }
 
         guard after != before else { return route }
-        writeContainerPose(after, from: before, target: target, label: .effectKeyframes)
+        writeContainerPose(after, from: before, target: target, label: .effectKeys)
         return route
     }
 
@@ -807,7 +807,7 @@ extension CanvasManager {
     /// live drag that calls this on every tick costs the artist one press of Undo rather than one per
     /// tick.
     func writeContainerPose(_ pose: LayerPose?, from before: LayerPose?, target: KeyframeTarget,
-                            label: HistoryActionLabel = .effectKeyframes) {
+                            label: HistoryActionLabel = .effectKeys) {
         guard targetExists(target) else { return }
         let marksBefore = keyframeState(of: target).marks
         beginCanvasEdit()

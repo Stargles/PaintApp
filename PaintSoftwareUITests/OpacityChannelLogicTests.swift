@@ -222,23 +222,23 @@ final class OpacityChannelLogicTests: XCTestCase {
         XCTAssertEqual(manager.keyframeFrames(of: tgt), [3, 9],
                        "The union counts an opacity key exactly as it counts a pose key")
         XCTAssertTrue(manager.hasKeyframe(tgt, atFrame: 9),
-                      "…so the cel menu offers Remove Keyframe on a frame the artist can see a node on")
+                      "…so the cel menu offers Remove Keys on a frame the artist can see a node on")
         XCTAssertFalse(manager.hasKeyframe(tgt, atFrame: 5),
                        "…and does not offer it between two keys, where there is no node")
     }
 
-    /// **Remove Keyframe takes the opacity key with it.**
+    /// **Remove Keys takes the opacity key with it.**
     ///
     /// Operands: the curve's keys before and after, and the union before and after. Leaving the key
     /// behind would take the diamond off the timeline and leave the fade running, which is the shape
-    /// of a control that appears not to work — `clearKeyframes`' own stated reason for dropping the
+    /// of a control that appears not to work — `clearKeys`' own stated reason for dropping the
     /// grade's keys, which this channel had to join rather than be forgotten by.
     func testRemovingAKeyframeDropsTheOpacityKeyOnThatFrame() {
         let manager = drawingManager()
         let tgt = target(manager)
         manager.layers[0].channelTracks[opacityID] = curve([(3, 1), (9, 0)])
 
-        XCTAssertTrue(manager.removeKeyframe(tgt, atFrame: 9), "The write changed the document")
+        XCTAssertTrue(manager.removeKeys(tgt, atFrame: 9), "The write changed the document")
 
         XCTAssertEqual(manager.layers[0].channelTracks[opacityID]?.keys.map(\.frame), [3],
                        "The key on the removed frame is gone and the other is untouched")
@@ -257,7 +257,7 @@ final class OpacityChannelLogicTests: XCTestCase {
     func testAKeyLandingOnAMarkedFrameDropsTheMark() {
         let manager = drawingManager()
         let tgt = target(manager)
-        XCTAssertTrue(manager.addKeyframe(tgt, atFrame: 4), "A bare mark is placed")
+        XCTAssertTrue(manager.addKeys(tgt, atFrame: 4), "A bare mark is placed")
         XCTAssertEqual(manager.layers[0].keyframeMarks, [4], "Fixture premise: the mark is stored")
 
         XCTAssertEqual(manager.setTargetChannelKeys(tgt, frame: 4, values: [opacityID: 0.5]), 1,
@@ -287,7 +287,7 @@ final class OpacityChannelLogicTests: XCTestCase {
         manager.currentFrame = 0
 
         // A.
-        XCTAssertTrue(manager.addKeyframe(tgt, atFrame: 0), "Keyframe A is placed")
+        XCTAssertTrue(manager.addKeys(tgt, atFrame: 0), "Keyframe A is placed")
         XCTAssertTrue(manager.layers[0].channelTracks.isEmpty,
                       "…and nothing is saved by it — the owner's first sentence")
 
@@ -303,7 +303,7 @@ final class OpacityChannelLogicTests: XCTestCase {
 
         // B.
         manager.currentFrame = 12
-        XCTAssertTrue(manager.addKeyframe(tgt, atFrame: 12), "Keyframe B is placed")
+        XCTAssertTrue(manager.addKeys(tgt, atFrame: 12), "Keyframe B is placed")
         XCTAssertTrue(manager.layers[0].channelBaselines.isEmpty, "The held value is consumed")
 
         XCTAssertEqual(drawnOpacity(manager, atFrame: 0), 1, accuracy: 0.0001,
@@ -364,8 +364,8 @@ final class OpacityChannelLogicTests: XCTestCase {
         let manager = drawingManager()
         let tgt = target(manager)
         manager.layers[0].opacity = 0.9
-        XCTAssertTrue(manager.addKeyframe(tgt, atFrame: 0), "A")
-        XCTAssertTrue(manager.addKeyframe(tgt, atFrame: 10), "B")
+        XCTAssertTrue(manager.addKeys(tgt, atFrame: 0), "A")
+        XCTAssertTrue(manager.addKeys(tgt, atFrame: 10), "B")
 
         let route = manager.applyTargetChannelEdit(tgt, channel: channel, newValue: 0.1, atFrame: 10)
 
@@ -493,10 +493,10 @@ final class OpacityChannelLogicTests: XCTestCase {
     ///
     /// `writeGraphBandCurves` funnels every band gesture through `setEffectParameterTrack`, which
     /// refuses an id no `EffectParameter` claims — silently. Under that, an opacity node would move
-    /// under the finger and spring back, and Delete Keyframe would do nothing.
+    /// under the finger and spring back, and Delete Key would do nothing.
     ///
     /// Operands: the curve after the write, and the union after the delete. The delete is asserted
-    /// through `removeGraphNodeKey`, which is the method the node menu's Delete Keyframe
+    /// through `removeGraphNodeKey`, which is the method the node menu's Delete Key
     /// button calls, so this is a pin on the artist's own path rather than on the store.
     func testTheBandsWriteAndTheNodeMenusDeleteBothReachTheOpacityCurve() {
         let manager = drawingManager()
@@ -510,7 +510,7 @@ final class OpacityChannelLogicTests: XCTestCase {
                        "…and the node really moved")
 
         XCTAssertTrue(manager.removeGraphNodeKey(target: .layer(id: manager.layers[0].id), parameterID: opacityID, frame: 18),
-                      "The node menu's Delete Keyframe reaches this channel's store")
+                      "The node menu's Delete Key reaches this channel's store")
         XCTAssertEqual(manager.keyframeFrames(of: tgt), [0],
                        "…and the timeline loses the indicator with it")
     }
@@ -594,9 +594,9 @@ final class OpacityChannelLogicTests: XCTestCase {
     func testAnAnimatedOpacityWritesNothingIntoTheGradesOwnStore() {
         let manager = drawingManager()
         let tgt = target(manager)
-        XCTAssertTrue(manager.addKeyframe(tgt, atFrame: 0))
+        XCTAssertTrue(manager.addKeys(tgt, atFrame: 0))
         manager.applyTargetChannelEdit(tgt, channel: channel, newValue: 0.2, atFrame: 6)
-        XCTAssertTrue(manager.addKeyframe(tgt, atFrame: 12))
+        XCTAssertTrue(manager.addKeys(tgt, atFrame: 12))
 
         XCTAssertFalse(manager.layers[0].channelTracks.isEmpty,
                        "Fixture premise: the workflow really did produce a curve")
@@ -717,12 +717,12 @@ final class OpacityChannelLogicTests: XCTestCase {
         let manager = drawingManager()
         let tgt = target(manager)
         manager.layers[0].opacity = 1
-        XCTAssertTrue(manager.addKeyframe(tgt, atFrame: 0))
+        XCTAssertTrue(manager.addKeys(tgt, atFrame: 0))
         manager.applyTargetChannelEdit(tgt, channel: channel, newValue: 0.2, atFrame: 6)
         manager.history.removeAll()
         manager.refreshUndoRedoState()
 
-        XCTAssertTrue(manager.addKeyframe(tgt, atFrame: 12), "B commits the held value")
+        XCTAssertTrue(manager.addKeys(tgt, atFrame: 12), "B commits the held value")
         XCTAssertEqual(manager.history.undoStack.count, 1,
                        "The mark, the baseline and the curve are one step, not three")
 

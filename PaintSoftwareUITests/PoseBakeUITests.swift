@@ -8,7 +8,7 @@ import XCTest
 /// ids, one undo step, the computed cost. What it cannot say is whether a person can get there, and
 /// that is what this file is for:
 ///
-///  * that the **row is on the cel menu** once the block is animated, beside Add Keyframe, and not
+///  * that the **row is on the cel menu** once the block is animated, beside Add Keys, and not
 ///    before — a hidden row on an unanimated block is the same decision Bake to Images made;
 ///  * that the **confirmation names the count** the bake then makes;
 ///  * that the **timeline shows the new blocks** and the **canvas at a middle frame shows the same
@@ -29,7 +29,7 @@ final class PoseBakeUITests: PaintUITestCase {
 
     private func markKeyframe(_ app: XCUIApplication, onCelAt dx: Double) {
         openCelMenu(app, cel: "timeline.cel.0.0", at: dx)
-        let add = app.buttons["timeline.menu.Add Keyframe"]
+        let add = app.buttons["timeline.menu.Add Keys"]
         XCTAssertTrue(add.waitForExistence(timeout: 5), "The second tap raises the cel menu")
         add.tap()
     }
@@ -154,12 +154,12 @@ final class PoseBakeUITests: PaintUITestCase {
 
         // The row is not there on an unanimated block — the cel menu, opened for the first mark.
         openCelMenu(app, cel: "timeline.cel.0.0", at: 0.04)
-        let add = app.buttons["timeline.menu.Add Keyframe"]
+        let add = app.buttons["timeline.menu.Add Keys"]
         XCTAssertTrue(add.waitForExistence(timeout: 5), "The second tap raises the cel menu")
         XCTAssertFalse(app.buttons["timeline.menu.Bake Animation"].exists,
                        "An unanimated block has no motion to bake, so it must not offer Bake")
         add.tap()
-        XCTAssertEqual(markers(app), "0", "the mark is on the timeline where the artist can see it")
+        XCTAssertEqual(markers(app), "0p", "the primed frame is on the timeline where the artist can see it")
 
         // Scrub to the far end of the block, Move the whole drawing, and let go.
         scrub(app, toCelFraction: 0.95)
@@ -195,11 +195,11 @@ final class PoseBakeUITests: PaintUITestCase {
                                "premise: the middle frame shows the drawing somewhere other than at rest")
         attachScreenshot(app, "1-animated-at-the-middle-frame")
 
-        // What the artist does next: the block's menu, the Bake row beside Add Keyframe.
+        // What the artist does next: the block's menu, the Bake row beside Add Keys.
         openCelMenu(app, cel: "timeline.cel.0.0", at: 0.54)
         let bakeRow = app.buttons["timeline.menu.Bake Animation"]
         XCTAssertTrue(bakeRow.waitForExistence(timeout: 5), "an animated block's menu offers Bake Animation")
-        XCTAssertTrue(app.buttons["timeline.menu.Add Keyframe"].exists, "beside Add Keyframe")
+        XCTAssertTrue(app.buttons["timeline.menu.Add Keys"].exists, "beside Add Keys")
         bakeRow.tap()
 
         // What is said: the confirmation names the count — twelve frames on ones are twelve drawings.
