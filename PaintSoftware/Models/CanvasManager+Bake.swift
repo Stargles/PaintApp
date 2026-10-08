@@ -523,25 +523,7 @@ extension CanvasManager {
             guard !written.isEmpty else { continue }
 
             let loop = LoopBake(stretches: written, over: layer.cels.map { $0.startFrame ..< $0.endFrame })
-            var leftover: BakeLeftover.Reason?
-            for run in loop.runs {
-                guard let id = run.replay.source, let source = layer.cels.first(where: { $0.id == id }) else { continue }
-                if source.vector?.holdsVideo == true || source.vector?.holdsStream == true {
-                    leftover = .cannotBeCopied
-                } else if Self.changesWithItsOwnFrame(source),
-                          run.frames.lowerBound + run.replay.offset != source.startFrame {
-                    leftover = .animatedDrawing
-                }
-            }
-            // A cut through an animated drawing re-eases the segment it cuts (`TransformTrack.split`), so
-            // the frames either side of the cut would no longer move as they did.
-            let edges = loop.runs.flatMap { [$0.frames.lowerBound, $0.frames.upperBound] }
-            if layer.cels.contains(where: { cel in
-                Self.changesWithItsOwnFrame(cel) && edges.contains { cel.startFrame < $0 && $0 < cel.endFrame }
-            }) {
-                leftover = .animatedDrawing
-            }
-            if let leftover {
+            if let leftover = Self.loopLeftover(of: layer, writing: loop) {
                 plan.leftovers.append(BakeLeftover(name: layer.name, reason: leftover))
                 continue
             }
@@ -550,6 +532,28 @@ extension CanvasManager {
                                          cels: [], loop: loop))
         }
         return nil
+    }
+
+    /// Why a layer cannot take `loop` exactly, if it cannot — nil when every run can be written.
+    private static func loopLeftover(of layer: Layer, writing loop: LoopBake) -> BakeLeftover.Reason? {
+        var reason: BakeLeftover.Reason?
+        for run in loop.runs {
+            guard let id = run.replay.source, let source = layer.cels.first(where: { $0.id == id }) else { continue }
+            if source.vector?.holdsVideo == true || source.vector?.holdsStream == true {
+                reason = .cannotBeCopied
+            } else if changesWithItsOwnFrame(source), run.frames.lowerBound + run.replay.offset != source.startFrame {
+                reason = .animatedDrawing
+            }
+        }
+        // A cut through an animated drawing re-eases the segment it cuts (`TransformTrack.split`), so the
+        // frames either side of the cut would no longer move as they did.
+        let edges = loop.runs.flatMap { [$0.frames.lowerBound, $0.frames.upperBound] }
+        if layer.cels.contains(where: { cel in
+            changesWithItsOwnFrame(cel) && edges.contains { cel.startFrame < $0 && $0 < cel.endFrame }
+        }) {
+            reason = .animatedDrawing
+        }
+        return reason
     }
 
     /// Whether the picture a cel shows depends on which of its own frames is read — a pose channel moves

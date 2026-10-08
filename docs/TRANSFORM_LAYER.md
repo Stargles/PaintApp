@@ -476,6 +476,16 @@ a nested fixture.
 relationship. A repeat is a reference — edit the walk once and every cycle follows — and it applies to
 everything beneath, which no cel operation can express.
 
+**Bake is the one way out of the reference** (TODO (131), ruled 2026-10-02: *materialise the loop*). It is
+Bake's shared core (`CanvasManager+Bake.swift`) with a time remap for its treatment: on every frame after
+the first cycle each layer beneath gets, as a cel of its own, a copy of the drawing the loop showed there
+(`planLoop` reads it off the render walk with the Repeat and without it, `replay` writes it), runs showing
+one drawing stay one cel, what the loop hid under its bar is replaced, and the Repeat layer goes — one undo
+step, behind the count-and-cost prompt. **Exact, or refused**: a cel is all a drawing layer can carry, so a
+loop that also repeats an opacity, a grade or a pose under it (the walks differ in more than `frames`) is
+refused, and an animated drawing that a cut would re-ease, one the loop enters partway, a video, and a layer
+under a second Repeat are left as they were and named in the notice.
+
 ### 5.6 Duplicate offset
 
 §3.4 is the design. The artist's surface is the value layer's Blend Mode menu: **Duplicate Offset**,

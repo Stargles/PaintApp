@@ -50,19 +50,11 @@ rather than assuming it still holds.
 
 ## What is left of the owner's 2026-10-01/02 asks
 
-Of (111)–(152) and their ruled follow-ups, four items remain: the anchored menus, inline renaming everywhere, the
-Repeat bake and (139). Every
+Of (111)–(152) and their ruled follow-ups, three items remain: the anchored menus, inline renaming everywhere
+and (139). Every
 other one merged in session 46 (`git log` and HANDOFF.md carry what each did).
 
 ---
-
-## (131) follow-up: Bake on a Repeat layer materialises the loop
-
-**Status** — not started. (131) merged (`2d9fdef`) refusing Bake on a Repeat transformation layer (Repeat
-loops time; there is no geometry to carry). Ruled 2026-10-02: **materialise the loop** — the replayed
-frames are written out as real drawings, one per looped frame (unchanged runs stay one cel), replacing
-what the loop hid, through Bake's shared core and its count-and-cost prompt. Also ruled, as built: a
-masked layer beneath a Bake is left as it was and named in the notice.
 
 ## (139) Keys, not keyframes — every channel component independent
 

@@ -17,7 +17,8 @@ import XCTest
 ///    playhead comes back (ruling 9's determinism, off the screen), somewhere new after Re-roll, and
 ///    back where it was after one undo; three drawings on frames 1–3 under a Repeat of 3 show frame
 ///    2's picture on frame 5, the timeline ghosts the repeated frames, and ink drawn on frame 5
-///    appears on frame 2 (ruling 13).
+///    appears on frame 2 (ruling 13) — and Bake on that Repeat layer turns the loop into a drawing on
+///    every frame that draws the same pictures, with one Undo looping again.
 ///
 /// The assertions are on screenshots of `canvas.host` and on the panel's exposed values, never on
 /// anything stored. A small class on purpose (CLAUDE.md's cost model: per test *class*).
@@ -554,12 +555,20 @@ final class TransformLayerModesUITests: PaintUITestCase {
     /// The born layer's block whose value starts at `start` — the array index moves under a split,
     /// so the block is found by what it says rather than by where it is.
     private func bornCel(_ app: XCUIApplication, startingAt start: Int) -> XCUIElement? {
-        for celIndex in 0..<6 {
+        for celIndex in 0..<16 {
             let cel = app.otherElements["timeline.cel.0.\(celIndex)"]
             guard cel.exists, let value = cel.value as? String else { continue }
             if value.split(separator: ",").first.map(String.init) == "\(start)" { return cel }
         }
         return nil
+    }
+
+    /// Every block on the born layer as `"start,length"`, in frame order.
+    private func bornBlocks(_ app: XCUIApplication) -> [String] {
+        (0..<16).map { app.otherElements["timeline.cel.0.\($0)"] }
+            .filter(\.exists)
+            .compactMap { $0.value as? String }
+            .sorted { (Int($0.split(separator: ",")[0]) ?? 0) < (Int($1.split(separator: ",")[0]) ?? 0) }
     }
 
     /// Taps frame `frame` (0-based) of the born layer's block starting at `start`, which selects the
@@ -602,18 +611,17 @@ final class TransformLayerModesUITests: PaintUITestCase {
         return last
     }
 
-    /// **Three drawings on frames 1, 2 and 3, a transform layer above, Mode → Repeat, type 3, and
-    /// frame 5 shows frame 2's picture; the timeline ghosts the repeated frames; and a line drawn on
-    /// frame 5 appears on frame 2** — §5.5 and rulings 11–13, off the screen. The born layer's
-    /// twelve-frame block is cut twice through the cel menu so the three frames are three drawings;
-    /// the period field is the exposed operand (pre-filled to 12, where the held third drawing ends,
-    /// then typed to 3); the ghost band's value is read off the born layer's row.
-    func testRepeatShowsFrameTwoOnFrameFiveGhostsTheLoopAndRedirectsInkToTheFrameItRepeats() throws {
-        let app = XCUIApplication()
-        XCTAssertTrue(launchIntoEditor(app))
-        let canvas = app.otherElements["canvas.host"]
-        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
-        guard let total = readFrameLabel(app)?.total else { return XCTFail("No frame label") }
+    /// **Three drawings on frames 1, 2 and 3 of a fresh document, a transform layer above, Mode →
+    /// Repeat, typed to 3** — the born layer's twelve-frame block is cut twice through the cel menu so
+    /// the three frames are three drawings; the period field is the exposed operand (pre-filled to 12,
+    /// where the held third drawing ends, then typed to 3). Returns the band column each drawing was
+    /// drawn at and the document's frame count, with the rail closed and the playhead on frame 3.
+    private func threeDrawingsUnderARepeatOfThree(_ app: XCUIApplication, canvas: XCUIElement)
+        -> (columns: [Double], total: Int)? {
+        guard let total = readFrameLabel(app)?.total else {
+            XCTFail("No frame label")
+            return nil
+        }
         XCTAssertEqual(total, 12, "Premise: a new document is twelve frames")
 
         // Three blocks: [0,1), [1,2), [2,12).
@@ -628,7 +636,7 @@ final class TransformLayerModesUITests: PaintUITestCase {
         let columns = [0.2, 0.4, 0.7]
         for (frame, u) in columns.enumerated() {
             tapBornLayer(app, blockStartingAt: frame, frame: frame)
-            guard let paper = currentPaper(canvas, "frame \(frame + 1) before drawing") else { return }
+            guard let paper = currentPaper(canvas, "frame \(frame + 1) before drawing") else { return nil }
             let at = hostPoint(paper.paper, u: u, v: 0.3)
             drawBand(on: canvas, x: Double(at.dx), y: Double(at.dy), halfHeight: 0.04)
             let read = settledColumn(canvas, v0: 0.15, v1: 0.45, "frame \(frame + 1) after drawing")
@@ -654,6 +662,18 @@ final class TransformLayerModesUITests: PaintUITestCase {
         XCTAssertEqual(readout.label, "3 frames", "the readout echoes the typed length")
         attachScreenshot(app, "2-repeat-period-typed")
         closeRail(app)
+        return (columns, total)
+    }
+
+    /// **Three drawings on frames 1, 2 and 3, a transform layer above, Mode → Repeat, type 3, and
+    /// frame 5 shows frame 2's picture; the timeline ghosts the repeated frames; and a line drawn on
+    /// frame 5 appears on frame 2** — §5.5 and rulings 11–13, off the screen.
+    func testRepeatShowsFrameTwoOnFrameFiveGhostsTheLoopAndRedirectsInkToTheFrameItRepeats() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        guard let (columns, total) = threeDrawingsUnderARepeatOfThree(app, canvas: canvas) else { return }
 
         // **What the timeline exposes**: the born layer's row ghosts frames 4–12, one frame each.
         let ghosts = app.otherElements["timeline.repeatGhosts.0"]
@@ -686,5 +706,65 @@ final class TransformLayerModesUITests: PaintUITestCase {
         attachScreenshot(app, "4-ink-from-frame-5-on-frame-2")
         scrub(app, toFrame: 3, total: total)
         XCTAssertNil(settledColumn(canvas, v0: 0.5, v1: 0.8, "at frame 3"), "frame 3 did not receive it")
+    }
+
+    /// **Bake on the Repeat layer writes the loop out as drawings the artist can see on the timeline,
+    /// draws the same pictures, and one Undo loops again** — (131)'s follow-up, driven from a fresh
+    /// document: three drawings on frames 1–3 under a Repeat of 3 (the test above), then the layer's
+    /// own menu → Bake → the prompt that says what it writes → Bake. The born layer's row, which held
+    /// three blocks, holds twelve one-frame blocks; the Repeat layer and its ghost band are gone; and
+    /// frames 4, 5, 6, 8 and 12 draw drawings 1, 2, 3, 2 and 3 off the canvas with nothing looping them.
+    func testBakingTheRepeatLayerWritesTheLoopAsDrawingsOnTheTimelineAndOneUndoLoopsAgain() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        guard let (columns, _) = threeDrawingsUnderARepeatOfThree(app, canvas: canvas) else { return }
+        XCTAssertEqual(bornBlocks(app), ["0,1", "1,1", "2,10"], "Premise: three drawings, the third held")
+        XCTAssertTrue(app.otherElements["timeline.repeatGhosts.0"].waitForExistence(timeout: 5),
+                      "Premise: the loop is ghosted over them")
+
+        // The Repeat layer's own menu offers Bake.
+        openLayerPanel(app)
+        let row = app.staticTexts["layerPanel.row.1"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "The Repeat layer is the second row")
+        row.tap()
+        let bake = app.buttons["layerOptions.bake"]
+        if !bake.waitForExistence(timeout: 3) { row.tap() }
+        XCTAssertTrue(bake.waitForExistence(timeout: 5), "A Repeat layer offers Bake")
+        bake.tap()
+
+        // It writes drawings, so it says how many and asks first.
+        let ask = app.alerts.firstMatch
+        XCTAssertTrue(ask.waitForExistence(timeout: 5), "A bake that adds drawings asks first")
+        let sentence = ask.staticTexts.allElementsBoundByIndex.map(\.label).joined(separator: " ")
+        XCTAssertTrue(sentence.contains("9 drawings"), "It says how many it adds: \(sentence)")
+        XCTAssertTrue(sentence.contains("undone"), "…and that it can be undone: \(sentence)")
+        attachScreenshot(app, "3-the-prompt")
+        ask.buttons["Bake"].tap()
+        XCTAssertTrue(app.staticTexts["layerPanel.row.1"].waitForNonExistence(timeout: 5), "The Repeat layer is gone")
+        closeRail(app)
+
+        // **What the timeline exposes**: a real block on every frame, and no ghosts.
+        XCTAssertTrue(app.otherElements["timeline.cel.0.11"].waitForExistence(timeout: 8), "The loop was written out")
+        XCTAssertEqual(bornBlocks(app), (0..<12).map { "\($0),1" }, "One drawing on each of the twelve frames")
+        XCTAssertFalse(app.otherElements["timeline.repeatGhosts.0"].exists, "Nothing is looped now, so nothing is ghosted")
+
+        // **What is drawn**: the loop's pictures, from drawings that are really there.
+        for frame in [3, 4, 5, 7, 11] {
+            tapBornLayer(app, blockStartingAt: frame, frame: frame)
+            XCTAssertEqual(settledColumn(canvas, v0: 0.15, v1: 0.45, "frame \(frame + 1) after the bake") ?? -1,
+                           columns[frame % 3], accuracy: 0.03,
+                           "frame \(frame + 1) draws drawing \(frame % 3 + 1), now a drawing of its own")
+        }
+        attachScreenshot(app, "4-after-the-bake")
+
+        // One press of Undo brings the Repeat layer, its ghosts and the three drawings back.
+        let undo = app.buttons["sideToolbar.undoButton"]
+        XCTAssertTrue(undo.waitForExistence(timeout: 5))
+        undo.tap()
+        XCTAssertTrue(app.otherElements["timeline.repeatGhosts.0"].waitForExistence(timeout: 8), "Undo loops again")
+        XCTAssertTrue(app.otherElements["timeline.cel.0.11"].waitForNonExistence(timeout: 5))
+        XCTAssertEqual(bornBlocks(app), ["0,1", "1,1", "2,10"], "…over the three drawings it hid")
     }
 }
