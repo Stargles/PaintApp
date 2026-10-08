@@ -479,11 +479,11 @@ extension CanvasManager {
     /// - Parameters:
     ///   - insertBelow: the new *first* frame inside, when this call's own operation just moved a
     ///     block's start later — never every covered interval's own edge. See
-    ///     `TransformTrack.croppedToBlocks` for why only the one edge the caller moved.
+    ///     `AnimationCurve.croppedToBlocks` for why only the one edge the caller moved.
     ///   - insertAbove: the new *last* frame inside, symmetric, for an operation that moved a block's
     ///     end earlier.
-    /// - Returns: what was removed, in absolute frames — `"transform"` for the pose track, the
-    ///   scalar's own `TargetChannel.id` for a mode channel, `"marks"` for `keyframeMarks` — for the
+    /// - Returns: what was removed, in absolute frames — `"transform.<component>"` for each pose
+    ///   curve, the scalar's own `TargetChannel.id` for a mode channel, `"marks"` for `keyframeMarks` — for the
     ///   caller to fold into whatever its own cel-level crop already found, so the notice and the undo
     ///   step are the ones (62) already built (`noteKeyframeCrop`).
     @discardableResult
@@ -494,7 +494,7 @@ extension CanvasManager {
 
         if let track = layers[layerIndex].transform?.track {
             let (kept, discarded) = track.croppedToBlocks(coverage, insertBelow: insertBelow, insertAbove: insertAbove)
-            crop.record(channel: "transform", frames: discarded)
+            crop.record(poseChannel: "transform", discarded: discarded)
             if !discarded.isEmpty { layers[layerIndex].transform?.track = kept }
         }
 

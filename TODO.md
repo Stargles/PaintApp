@@ -73,7 +73,7 @@ are what this reverses.
   scale / skew — no corner keys, and the graph editor's "declined" state goes.
 - **The in-between feature's "keyframe" drawings keep their name** — a different feature.
 
-- [ ] One curve per pose component (`TransformTrack`'s whole-quad keys replaced); a Move keys only the
+- [x] One curve per pose component (`TransformTrack`'s whole-quad keys replaced); a Move keys only the
       components it changed; the graph editor edits each independently.
 - [ ] "Add Keyframe" becomes "Add Keys" (priming); commits key only changed components, at every
       primed frame as today.

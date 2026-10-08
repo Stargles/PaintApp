@@ -146,7 +146,7 @@ final class InkPoseLogicTests: XCTestCase {
         let celTurn = CGAffineTransform(translationX: 128, y: 128).rotated(by: .pi / 2)
             .translatedBy(x: -128, y: -128)
         fx.manager.layers[fx.ink].cels[0].transformTracks[TransformChannelID.cel.id] =
-            TransformTrack(keys: [.init(frame: 0, pose: PoseQuad(box: Self.box, mappedBy: celTurn))])
+            CanvasFixture.poseTrack([(0, PoseQuad(box: Self.box, mappedBy: celTurn))])
         let pose = fx.manager.inkPose(forLayerID: fx.manager.layers[fx.ink].id)
         let p = CGPoint(x: 10, y: 20)
         assertSame(pose?.applied(to: p), p.applying(celTurn).applying(CGAffineTransform(translationX: 0, y: 25)),

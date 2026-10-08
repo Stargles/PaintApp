@@ -254,15 +254,14 @@ final class FolderGraphBandLogicTests: XCTestCase {
         manager.isGraphEditorOpen = true
         let listed = manager.graphBandListing(of: try content(manager).target)
 
-        XCTAssertEqual(listed.channels.map(\.parameterID), [opacityID, parallaxShareID],
+        XCTAssertEqual(listed.map(\.parameterID), [opacityID, parallaxShareID],
                        "The folder's own scalars, and nothing of the layer inside it — a folder has "
                        + "no pose rows since TODO (71)")
-        XCTAssertEqual(listed.channels.first { $0.parameterID == opacityID }?.curve.keys.map(\.frame),
+        XCTAssertEqual(listed.first { $0.parameterID == opacityID }?.curve.keys.map(\.frame),
                        [0, 8], "The opacity row is the *folder's* curve, keyed at 0 and 8 — the "
                        + "child's is keyed at 2 and 5 and shares the id")
-        XCTAssertEqual(listed.channels.first { $0.parameterID == parallaxShareID }?.name,
+        XCTAssertEqual(listed.first { $0.parameterID == parallaxShareID }?.name,
                        TargetChannel.parallaxShare.name)
-        XCTAssertEqual(listed.declined, [], "Nothing projective, nothing declined")
 
         // The band's own accessibility value says the same thing, which is what the UI class reads.
         XCTAssertTrue(TimelineGraphBand.encode(try content(manager)).hasPrefix("\(opacityID):0,8|"),
@@ -383,31 +382,30 @@ final class FolderGraphBandLogicTests: XCTestCase {
         let at = folderIndex(manager, folder)
 
         // Delete Keyframe on the folder's opacity node at 8.
-        XCTAssertFalse(manager.effectParameterKeyIsAuthored(target: target, parameterID: opacityID,
+        XCTAssertFalse(manager.graphNodeKeyIsAuthored(target: target, parameterID: opacityID,
                                                             frame: 8),
                        "Nothing authored, so Reset Curve is not offered")
-        XCTAssertTrue(manager.removeEffectParameterKey(target: target, parameterID: opacityID, frame: 8))
+        XCTAssertTrue(manager.removeGraphNodeKey(target: target, parameterID: opacityID, frame: 8))
         XCTAssertEqual(manager.folders[at].channelTracks[opacityID]?.keys.map(\.frame), [0],
                        "The folder's node is gone, and the folder's curve is the one it was read from")
         XCTAssertEqual(manager.layers[0].channelTracks[opacityID]?.keys.map(\.frame), [0, 8, 12],
                        "The layer's node on the same id and frame is not")
-        XCTAssertFalse(manager.removeEffectParameterKey(target: target, parameterID: opacityID, frame: 8),
+        XCTAssertFalse(manager.removeGraphNodeKey(target: target, parameterID: opacityID, frame: 8),
                        "A second Delete on the same node is not an edit")
 
         // A container channel names nothing on a folder: a folder has no pose.
         let containerX = PoseChannelID.container.parameterID(.x)
-        XCTAssertFalse(manager.removePoseChannelKey(target: target, parameterID: containerX, frame: 0))
-        XCTAssertFalse(manager.addPoseChannelKey(target: target, parameterID: containerX,
-                                                 frame: 4, value: 10))
+        XCTAssertFalse(manager.removeGraphNodeKey(target: target, parameterID: containerX, frame: 0))
+        XCTAssertFalse(manager.setPoseChannelTrack(target, parameterID: containerX,
+                                                   to: AnimationCurve(keys: [.init(frame: 4, value: 10)])))
         XCTAssertNil(manager.layers[0].transform, "The layer gained no pose from any of it")
 
         // And a cel channel names nothing on a folder either: a folder has no cels.
-        XCTAssertFalse(manager.removePoseChannelKey(target: target,
-                                                    parameterID: PoseChannelID.cel(.cel).parameterID(.x),
-                                                    frame: 0))
-        XCTAssertFalse(manager.addPoseChannelKey(target: target,
-                                                 parameterID: PoseChannelID.cel(.cel).parameterID(.x),
-                                                 frame: 0, value: 0))
+        XCTAssertFalse(manager.removeGraphNodeKey(target: target,
+                                                  parameterID: PoseChannelID.cel(.cel).parameterID(.x),
+                                                  frame: 0))
+        XCTAssertFalse(manager.setPoseChannelTrack(target, parameterID: PoseChannelID.cel(.cel).parameterID(.x),
+                                                   to: AnimationCurve(keys: [.init(frame: 0, value: 0)])))
     }
 
     /// **A folder's grade node goes through the folder overload of `setEffectParameterTrack`** —
@@ -422,7 +420,7 @@ final class FolderGraphBandLogicTests: XCTestCase {
         let at = folderIndex(manager, folder)
         XCTAssertEqual(manager.folders[at].effectTracks[brightnessID]?.keys.map(\.frame), [0, 8])
 
-        XCTAssertTrue(manager.removeEffectParameterKey(target: target, parameterID: brightnessID, frame: 8))
+        XCTAssertTrue(manager.removeGraphNodeKey(target: target, parameterID: brightnessID, frame: 8))
         XCTAssertEqual(manager.folders[at].effectTracks[brightnessID]?.keys.map(\.frame), [0])
         XCTAssertTrue(manager.layers[0].effectTracks.isEmpty, "The drawing layer has no grade to key")
     }

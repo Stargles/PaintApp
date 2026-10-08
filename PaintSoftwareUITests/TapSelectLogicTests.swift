@@ -285,10 +285,7 @@ final class TapSelectLogicTests: XCTestCase {
         vector.addStroke(line)
         let box = CGRect(x: 4, y: 24, width: 32, height: 12)
         manager.layers[layerIndex].cels[0].transformTracks = [
-            TransformChannelID.cel.id: TransformTrack(keys: [
-                TransformTrack.Key(frame: 0, pose: PoseQuad(restingIn: box), interpolation: .linear),
-                TransformTrack.Key(frame: 12, pose: PoseQuad(box: box, mappedBy: .init(translationX: 20, y: 0)),
-                                   interpolation: .linear)])
+            TransformChannelID.cel.id: CanvasFixture.poseTrack([(0, PoseQuad(restingIn: box)), (12, PoseQuad(box: box, mappedBy: .init(translationX: 20, y: 0)))], interpolation: .linear)
         ]
         manager.currentFrame = 12
 

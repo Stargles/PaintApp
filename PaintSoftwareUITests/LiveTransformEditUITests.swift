@@ -178,13 +178,7 @@ final class LiveTransformEditUITests: PaintUITestCase {
         app.buttons["timeline.graphEditorButton"].tap()
         let band = app.otherElements["timeline.graphBand"]
         XCTAssertTrue(band.waitForExistence(timeout: 5))
-        app.buttons["timeline.graphChannelsButton"].tap()
-        for hidden in ["containerPose.x", "containerPose.y"] {
-            let checkbox = app.buttons["timeline.graphChannels.\(hidden)"]
-            XCTAssertTrue(checkbox.waitForExistence(timeout: 5), "missing row: \(hidden)")
-            if (checkbox.value as? String)?.hasPrefix("on") == true { checkbox.tap() }
-        }
-        app.buttons["timeline.graphChannelsButton"].tap()
+        // TODO (139): a turn about the box's centre keys Rotation alone, so it is the one row drawn.
         XCTAssertEqual(band.value as? String, "containerPose.rotation:0,6", "PREMISE: one pose row, keyed at 0 and 6")
         XCTAssertTrue(waitForSandwichState(app, "rest", timeout: 40, "Setup: the Move's bake lands"))
         let turned = try XCTUnwrap(canvas.screenshot().image.cgImage)

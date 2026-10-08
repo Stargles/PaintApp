@@ -138,9 +138,7 @@ final class PlaybackTickBench: XCTestCase {
                                       raster: .empty(size: Self.canvas))]
         manager.layers[1].transform = LayerPose(
             pose: PoseQuad(restingIn: box),
-            track: TransformTrack(keys: [
-                .init(frame: 0, pose: PoseQuad(restingIn: box)),
-                .init(frame: 11, pose: PoseQuad(box: box,
+            track: CanvasFixture.poseTrack([(0, PoseQuad(restingIn: box)), (11, PoseQuad(box: box,
                                                 mappedBy: CGAffineTransform(translationX: 535,
                                                                             y: -239)))]))
         manager.currentLayerIndex = 0
@@ -303,9 +301,7 @@ final class PlaybackTickBench: XCTestCase {
                       raster: .empty(size: Self.canvas), vector: .empty(size: Self.canvas))
         for index in 0..<Self.strokeCount { cel.vector?.addStroke(Self.ink(index)) }
         let box = CGRect(origin: .zero, size: Self.canvas)
-        cel.transformTracks = [TransformChannelID.cel.id: TransformTrack(keys: [
-            .init(frame: 0, pose: PoseQuad(restingIn: box)),
-            .init(frame: 11, pose: PoseQuad(box: box,
+        cel.transformTracks = [TransformChannelID.cel.id: CanvasFixture.poseTrack([(0, PoseQuad(restingIn: box)), (11, PoseQuad(box: box,
                                             mappedBy: CGAffineTransform(translationX: 535, y: -239)))])]
         manager.layers[0].cels = [cel]
         manager.currentLayerIndex = 0

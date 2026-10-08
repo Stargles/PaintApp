@@ -117,7 +117,7 @@ struct CanvasNotice: Identifiable, Equatable {
         /// **What it was before the refusal existed.** A group is a set of elements one pose channel
         /// carries, so a key written for it moves every one of them. `commitPoseFromFloat` reused an
         /// existing group whenever the lassoed elements all shared one — *without* asking whether the
-        /// group had members the loop had missed — and `keyPoseRestoringRest` then put the pre-lift
+        /// group had members the loop had missed — and the `.key` arm then put the pre-lift
         /// display list back and keyed the channel. So lassoing half of an animated group and dragging
         /// it moved **all** of it, and said nothing.
         ///

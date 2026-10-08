@@ -78,11 +78,8 @@ final class PosedLassoMoveLogicTests: XCTestCase {
     /// so an in-between is a plain fraction of the travel and this file's arithmetic is hand-checkable.
     private func animate(_ manager: CanvasManager, _ layerIndex: Int, dx: CGFloat) {
         manager.layers[layerIndex].cels[0].transformTracks = [
-            TransformChannelID.cel.id: TransformTrack(keys: [
-                TransformTrack.Key(frame: 0, pose: PoseQuad(restingIn: box), interpolation: .linear),
-                TransformTrack.Key(frame: 12, pose: PoseQuad(box: box,
-                                                             mappedBy: .init(translationX: dx, y: 0)),
-                                   interpolation: .linear)])
+            TransformChannelID.cel.id: CanvasFixture.poseTrack([(0, PoseQuad(restingIn: box)), (12, PoseQuad(box: box,
+                                                             mappedBy: .init(translationX: dx, y: 0)))], interpolation: .linear)
         ]
     }
 
@@ -285,8 +282,7 @@ final class PosedLassoMoveLogicTests: XCTestCase {
         // One key, held constant across the cel: the map is exactly 2× about the canvas origin at
         // every frame, with no interpolation in the way.
         manager.layers[layerIndex].cels[0].transformTracks = [
-            TransformChannelID.cel.id: TransformTrack(keys: [
-                TransformTrack.Key(frame: 0, pose: PoseQuad(box: box, mappedBy: .init(scaleX: 2, y: 2)))])
+            TransformChannelID.cel.id: CanvasFixture.poseTrack([(0, PoseQuad(box: box, mappedBy: .init(scaleX: 2, y: 2)))])
         ]
         manager.currentFrame = 4
         let map = try celMap(manager, layerIndex)
@@ -342,8 +338,9 @@ final class PosedLassoMoveLogicTests: XCTestCase {
 
         let track = try XCTUnwrap(manager.layers[layerIndex].cels[0]
             .transformTracks[TransformChannelID.cel.id])
-        XCTAssertEqual(track.keys.map(\.frame), [0, 6, 12],
+        XCTAssertEqual(track.keyedFrames, [0, 6, 12],
                        "the drag created a keyframe at the frame it happened on (§2.27)")
+        XCTAssertEqual(Set(track.curves.keys), [.x], "…on X alone, the one component the drag changed")
         assertXs(sampleXs(vector.elements), restBefore,
                  "and took the bake back: the cel still holds one drawing in its rest position (§2.5)")
         XCTAssertEqual(try celMap(manager, layerIndex).tx, 29, accuracy: 1e-6,
@@ -353,8 +350,8 @@ final class PosedLassoMoveLogicTests: XCTestCase {
 
         // Asked of the keys rather than of `celMap`, because a resting pose resolves to *no* mapping
         // at all (`TransformTrack.mapping`'s nil-for-resting rule) and "no answer" is the assertion.
-        XCTAssertTrue(try XCTUnwrap(track.key(atFrame: 0)).pose.isIdentity,
-                      "keyframe A is untouched — it still rests")
+        XCTAssertEqual(track.curve(.x)?.key(atFrame: 0)?.value, track.restValues.x,
+                       "keyframe A is untouched — it still rests")
         manager.currentFrame = 12
         XCTAssertEqual(try celMap(manager, layerIndex).tx, 40, accuracy: 1e-6, "and so is keyframe B")
     }
@@ -414,11 +411,11 @@ final class PosedLassoMoveLogicTests: XCTestCase {
         manager.nudgeVectorFloat(to: movedBy(manager, dx: 9, dy: 0))
         XCTAssertTrue(manager.commitVectorFloatIfNeeded())
         XCTAssertEqual(manager.layers[layerIndex].cels[0]
-            .transformTracks[TransformChannelID.cel.id]?.keys.count, 3)
+            .transformTracks[TransformChannelID.cel.id]?.keyedFrames.count, 3)
 
         manager.undo()
         XCTAssertEqual(manager.layers[layerIndex].cels[0]
-            .transformTracks[TransformChannelID.cel.id]?.keys.map(\.frame), [0, 12],
+            .transformTracks[TransformChannelID.cel.id]?.keyedFrames, [0, 12],
                        "the first press takes the key back")
         assertXs(sampleXs(vector.elements), restBefore.map { $0 + 9 },
                  "…together with the rest geometry the key's arm had restored, so this is the state the drag left")

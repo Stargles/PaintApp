@@ -237,13 +237,22 @@ final class FrameBakerLogicTests: XCTestCase {
                                                      VectorSample(x: 18, y: 10, pressure: 1)]))
         manager.layers[1].cels = [cel]
         let layerID = manager.layers[1].id
-        manager.setTransformPoseKey(layerID: layerID, celID: cel.id, channel: .cel,
-                                    atCelLocalFrame: 0, pose: PoseQuad(restingIn: posedBox))
-        manager.setTransformPoseKey(layerID: layerID, celID: cel.id, channel: .cel,
-                                    atCelLocalFrame: 4,
-                                    pose: PoseQuad(box: posedBox,
-                                                   mappedBy: CGAffineTransform(translationX: 20, y: 0)))
+        CanvasFixture.setPoseTrack(manager, layerID: layerID, celID: cel.id,
+                                   CanvasFixture.poseTrack(box: posedBox, [
+                                       (0, PoseQuad(restingIn: posedBox)),
+                                       (4, PoseQuad(box: posedBox, mappedBy: CGAffineTransform(translationX: 20, y: 0)))]))
         return (manager, layerID, cel.id)
+    }
+
+    /// The graph editor's write: the X row of the whole-cel channel, its key at cel-local 4 (document
+    /// frame 6) moved to `dx` right of rest — one undo step, through the funnel the band uses.
+    private func dragPoseKey(_ manager: CanvasManager, layerID: UUID, to dx: CGFloat) {
+        let rest = Double(posedBox.midX)
+        XCTAssertTrue(manager.setPoseChannelTrack(.layer(id: layerID),
+                                                  parameterID: PoseChannelID.cel(.cel).parameterID(.x),
+                                                  to: AnimationCurve(keys: [.init(frame: 2, value: rest),
+                                                                            .init(frame: 6, value: rest + Double(dx))])),
+                      "Fixture: the edit reached the document")
     }
 
     /// **Dragging a pose keyframe dirties the span of the cel it poses** — KEYFRAMES.md stage 5's
@@ -264,7 +273,7 @@ final class FrameBakerLogicTests: XCTestCase {
     /// the span but resolving to the resting pose it already had, cost one mint and no render, which
     /// is §3.3's claim that over-marking is cheap by construction.
     func testEditingAPoseKeyframeDirtiesTheCelsSpan() {
-        let (manager, layerID, celID) = posedDocument()
+        let (manager, layerID, _) = posedDocument()
         let baker = makeBaker(manager)
         baker.noteDocumentChanged()
         drain(baker)
@@ -273,10 +282,7 @@ final class FrameBakerLogicTests: XCTestCase {
 
         // The edit: the key at cel-local 4 — frame 6 — dragged further right. Frames 3 through 6
         // resolve to a new map; frame 2 is the resting key and resolves to the one it had.
-        manager.setTransformPoseKey(layerID: layerID, celID: celID, channel: .cel,
-                                    atCelLocalFrame: 4,
-                                    pose: PoseQuad(box: posedBox,
-                                                   mappedBy: CGAffineTransform(translationX: 34, y: 0)))
+        dragPoseKey(manager, layerID: layerID, to: 34)
 
         baker.syncDirty()
         XCTAssertEqual(pending(baker, manager), [2, 3, 4, 5, 6],
@@ -301,16 +307,13 @@ final class FrameBakerLogicTests: XCTestCase {
     /// mutation both directions go through — so a stamp that misses the tracks misses the undo too,
     /// and this is the half an artist notices first.
     func testUndoingAPoseKeyframeEditDirtiesTheCelsSpanAgain() {
-        let (manager, layerID, celID) = posedDocument()
+        let (manager, layerID, _) = posedDocument()
         let baker = makeBaker(manager)
         baker.noteDocumentChanged()
         drain(baker)
         let before = baker.keyByFrame
 
-        manager.setTransformPoseKey(layerID: layerID, celID: celID, channel: .cel,
-                                    atCelLocalFrame: 4,
-                                    pose: PoseQuad(box: posedBox,
-                                                   mappedBy: CGAffineTransform(translationX: 34, y: 0)))
+        dragPoseKey(manager, layerID: layerID, to: 34)
         baker.syncDirty()
         drain(baker)
 

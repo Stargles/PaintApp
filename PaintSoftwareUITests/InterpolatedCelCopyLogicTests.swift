@@ -200,11 +200,8 @@ final class InterpolatedCelCopyLogicTests: XCTestCase {
         let (manager, _, _) = try interpolated()
         let box = CGRect(x: 4, y: 6, width: 16, height: 8)
         manager.layers[1].cels[1].transformTracks = [
-            TransformChannelID.cel.id: TransformTrack(keys: [
-                TransformTrack.Key(frame: 0, pose: PoseQuad(restingIn: box), interpolation: .linear),
-                TransformTrack.Key(frame: 2, pose: PoseQuad(box: box,
-                                                            mappedBy: CGAffineTransform(translationX: 30, y: 0)),
-                                   interpolation: .linear)])
+            TransformChannelID.cel.id: CanvasFixture.poseTrack([(0, PoseQuad(restingIn: box)), (2, PoseQuad(box: box,
+                                                            mappedBy: CGAffineTransform(translationX: 30, y: 0)))], interpolation: .linear)
         ]
         manager.layers[1].cels[1].pendingPoseBaselines = [TransformChannelID.cel.id: PoseQuad(restingIn: box)]
         let want = bytes(of: shown(manager, manager.layers[1].cels[1]))
@@ -256,9 +253,7 @@ final class InterpolatedCelCopyLogicTests: XCTestCase {
         // The second key on the two-frame cel's last frame, not one past it: a key outside the
         // span is what TODO (62) crops on a copy, and this test is about the copy *not* flattening.
         manager.layers[1].cels[0].transformTracks = [
-            TransformChannelID.cel.id: TransformTrack(keys: [
-                TransformTrack.Key(frame: 0, pose: slid(10), interpolation: .linear),
-                TransformTrack.Key(frame: 1, pose: slid(30), interpolation: .linear)])
+            TransformChannelID.cel.id: CanvasFixture.poseTrack([(0, slid(10)), (1, slid(30))], interpolation: .linear)
         ]
         let posed = manager.layers[1].cels[0]
         XCTAssertNotNil(manager.derivedCelContent(for: posed, atFrame: posed.startFrame),
@@ -272,7 +267,7 @@ final class InterpolatedCelCopyLogicTests: XCTestCase {
         XCTAssertEqual(copy.vector?.elements.count, 1,
                        "a cel that is not an in-between is copied as geometry, not as a picture of it")
         XCTAssertNil(copy.bakedImage, "and nothing is baked into it")
-        XCTAssertEqual(copy.transformTracks[TransformChannelID.cel.id]?.keys.map(\.frame), [0, 1],
+        XCTAssertEqual(copy.transformTracks[TransformChannelID.cel.id]?.keyedFrames, [0, 1],
                        "and its animation rides along, which a flatten would have deleted")
     }
 

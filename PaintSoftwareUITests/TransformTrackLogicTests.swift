@@ -2,293 +2,384 @@ import XCTest
 import CoreGraphics
 
 /// Pure-logic tests for one pose channel's storage and evaluation — KEYFRAMES.md §3.1, §3.2 and
-/// §2.10, build-order stage 5.
+/// §2.10, and TODO (139): **one curve per component, each keyed independently of the others.**
 ///
-/// `PoseInterpolationLogicTests` covers what happens *between* two poses. This covers which two, and
-/// when: the cel-local time base, the timing spine over pose indices, the constant hold at both ends,
-/// the step, and the invariant that decides whether the cel has a derivation at all.
+/// The channel is eight `AnimationCurve`s against one rest box, so what is pinned here is what the
+/// channel adds on top of a curve: that the components stay independent under every edit, that a
+/// write keys only what changed, that a component with no curve shows the base, and that a resting
+/// channel costs the document nothing.
 final class TransformTrackLogicTests: XCTestCase {
 
     private let box = CGRect(x: 10, y: 10, width: 40, height: 20)
+    private var rest: PoseComponents.Values { .resting(in: box) }
 
-    private func moved(_ dx: CGFloat, _ dy: CGFloat = 0) -> PoseQuad {
-        PoseQuad(box: box, mappedBy: CGAffineTransform(translationX: dx, y: dy))
+    /// A channel whose X curve holds `pairs` as offsets from the box's rest centre.
+    private func xTrack(_ pairs: [(Int, Double)],
+                        interpolation: AnimationCurve.Interpolation = .linear,
+                        step: Int = 1) -> TransformTrack {
+        TransformTrack(box: box, curves: [.x: AnimationCurve(keys: pairs.map {
+            AnimationCurve.Key(frame: $0.0, value: Double(box.midX) + $0.1, interpolation: interpolation)
+        }, step: step)])
     }
 
-    private func track(_ pairs: [(Int, CGFloat)],
-                       interpolation: AnimationCurve.Interpolation = .linear,
-                       step: Int = 1) -> TransformTrack {
-        TransformTrack(keys: pairs.map { TransformTrack.Key(frame: $0.0, pose: moved($0.1),
-                                                            interpolation: interpolation) },
-                       step: step)
+    /// How far right of rest the channel shows the drawing at `frame` — read off the map, which is
+    /// what a renderer is handed.
+    private func dx(_ track: TransformTrack, at frame: Int) -> Double? {
+        guard let map = track.mapping(atCelLocalFrame: frame) else {
+            return track.isEmpty ? nil : 0
+        }
+        return Double(map.applied(to: CGPoint(x: box.midX, y: box.midY))!.x - box.midX)
     }
-
-    private func dx(_ pose: PoseQuad?) -> CGFloat? { pose.map { $0.corners.p0.x - box.minX } }
 
     // MARK: - Storage
 
-    /// `AnimationCurve`'s decision 4, restated: at most one key per frame, sorted, and `setKey`
-    /// replaces rather than appends. The timing spine is built **by index**, so a duplicate frame
-    /// would make two indices name one moment and the blend would have nowhere to go.
-    func testKeysAreSortedAndUniqueByFrame() {
-        var t = TransformTrack(keys: [TransformTrack.Key(frame: 8, pose: moved(8)),
-                                      TransformTrack.Key(frame: 0, pose: moved(0)),
-                                      TransformTrack.Key(frame: 8, pose: moved(80))])
-        XCTAssertEqual(t.keys.map(\.frame), [0, 8])
-        XCTAssertEqual(dx(t.key(atFrame: 8)?.pose), 80, "Among keys on one frame the later one wins")
-
-        t.setKey(TransformTrack.Key(frame: 4, pose: moved(4)))
-        XCTAssertEqual(t.keys.map(\.frame), [0, 4, 8])
-        t.removeKey(atFrame: 4)
-        XCTAssertEqual(t.keys.map(\.frame), [0, 8])
+    /// An empty curve is never stored: a component with no keys is a component with no curve, which
+    /// shows the base, and storing an empty one would list a channel that animates nothing.
+    func testAnEmptyCurveIsNeverStored() {
+        var t = TransformTrack(box: box, curves: [.x: AnimationCurve(), .y: AnimationCurve(keys: [.init(frame: 0, value: 3)])])
+        XCTAssertEqual(Set(t.curves.keys), [.y])
+        t.setCurve(nil, for: .y)
+        XCTAssertTrue(t.isEmpty)
+        t.setCurve(AnimationCurve(keys: [.init(frame: 2, value: 1)]), for: .rotation)
+        t.setCurve(AnimationCurve(), for: .rotation)
+        XCTAssertTrue(t.isEmpty, "an empty curve written is a removal")
     }
 
-    /// The strict predicate. Two keys holding the same pose is a channel **in force** and not an
-    /// animation — the distinction §2.23's surviving half exists for, and the reason routing asks a
-    /// different question from the channel list.
-    func testATrackIsAnAnimationOnlyWhenTwoKeysDisagree() {
-        XCTAssertFalse(TransformTrack().isAnimated)
-        XCTAssertFalse(track([(0, 12)]).isAnimated, "One key is a hold, not an animation")
-        XCTAssertFalse(track([(0, 12), (8, 12)]).isAnimated, "Two equal poses animate nothing")
-        XCTAssertTrue(track([(0, 0), (8, 12)]).isAnimated)
+    /// The strict predicate, per component: the channel is an animation when some component's curve
+    /// is one.
+    func testAChannelIsAnAnimationOnlyWhenSomeComponentMoves() {
+        XCTAssertFalse(TransformTrack(box: box).isAnimated)
+        XCTAssertFalse(xTrack([(0, 12)]).isAnimated, "One key is a hold, not an animation")
+        XCTAssertFalse(xTrack([(0, 12), (8, 12)]).isAnimated, "Two equal values animate nothing")
+        XCTAssertTrue(xTrack([(0, 0), (8, 12)]).isAnimated)
+    }
+
+    /// Every frame some component keys, once — what the timeline draws a diamond on.
+    func testKeyedFramesAreTheUnionOfEveryComponentsKeys() {
+        var t = xTrack([(8, 80), (0, 0)])
+        t.setCurve(AnimationCurve(keys: [.init(frame: 4, value: 30), .init(frame: 8, value: 0)]), for: .rotation)
+        XCTAssertEqual(t.keyedFrames, [0, 4, 8])
+        XCTAssertEqual(t.keyCount, 4)
+    }
+
+    /// Removing the keys on a frame takes every component's key there and drops a component left
+    /// with none.
+    func testRemovingAFrameTakesEveryComponentsKeyAndDropsEmptiedCurves() {
+        var t = xTrack([(0, 0), (8, 80)])
+        t.setCurve(AnimationCurve(keys: [.init(frame: 8, value: 30)]), for: .rotation)
+        t.removeKeys(atFrame: 8)
+        XCTAssertEqual(t.curve(.x)?.keys.map(\.frame), [0])
+        XCTAssertNil(t.curve(.rotation), "a component left with no key is no longer stored")
+    }
+
+    // MARK: - Independence — TODO (139)
+
+    /// **Keying X leaves Y's keys untouched** — the owner's *"fully independent from each other"*.
+    /// A sideways change over a channel already keying Y at other frames writes X alone.
+    func testKeyingXLeavesYsKeysUntouched() {
+        var t = TransformTrack(box: box, curves: [
+            .x: AnimationCurve(keys: [.init(frame: 0, value: rest.x), .init(frame: 8, value: rest.x + 10)]),
+            .y: AnimationCurve(keys: [.init(frame: 2, value: rest.y), .init(frame: 6, value: rest.y - 5)])
+        ])
+        let yBefore = t.curve(.y)
+        var old = t.values(atTime: 4, base: rest)
+        var new = old
+        new.x += 20
+        XCTAssertEqual(t.key(new, over: old, atFrame: 4, keyframes: [0, 2, 6, 8]), [.x])
+        XCTAssertEqual(t.curve(.y), yBefore, "Y's keys are exactly where they were")
+        XCTAssertEqual(t.curve(.x)?.keys.map(\.frame), [0, 4, 8])
+
+        // And the other way round: a change to Y at a frame X keys leaves X's key value alone.
+        old = t.values(atTime: 8, base: rest)
+        new = old
+        new.y += 7
+        let xBefore = t.curve(.x)
+        XCTAssertEqual(t.key(new, over: old, atFrame: 8, keyframes: [0, 2, 4, 6, 8]), [.y])
+        XCTAssertEqual(t.curve(.x), xBefore)
+    }
+
+    /// **Retiming one component's key moves only it** — the graph editor writes a whole curve per
+    /// row, and a row is one component.
+    func testRetimingOneComponentsKeyMovesOnlyThatComponent() {
+        var t = TransformTrack(box: box, curves: [
+            .x: AnimationCurve(keys: [.init(frame: 0, value: rest.x), .init(frame: 8, value: rest.x + 10)]),
+            .rotation: AnimationCurve(keys: [.init(frame: 0, value: 0), .init(frame: 8, value: 45)])
+        ])
+        var x = t.curve(.x)!
+        var moved = x.key(atFrame: 8)!
+        x.removeKey(atFrame: 8)
+        moved.frame = 11
+        x.setKey(moved)
+        t.setCurve(x, for: .x)
+        XCTAssertEqual(t.curve(.x)?.keys.map(\.frame), [0, 11])
+        XCTAssertEqual(t.curve(.rotation)?.keys.map(\.frame), [0, 8], "rotation still keys frame 8")
+        XCTAssertEqual(t.values(atTime: 8, base: rest).rotation, 45, accuracy: 1e-12)
+        XCTAssertLessThan(t.values(atTime: 8, base: rest).x, rest.x + 10, "X is still on its way at 8")
+    }
+
+    /// A component with no curve shows the base at every frame — rest for a cel channel.
+    func testAComponentWithNoCurveShowsTheBase() {
+        let t = xTrack([(0, 0), (8, 80)])
+        for frame in 0...8 {
+            let values = t.values(atTime: Double(frame), base: rest)
+            XCTAssertEqual(values.y, rest.y)
+            XCTAssertEqual(values.rotation, 0)
+            XCTAssertEqual(values.scaleX, 1)
+            XCTAssertEqual(values.perspectiveX, 0)
+        }
+    }
+
+    // MARK: - Writing what changed
+
+    /// **A component with a curve is keyed at the frame; one without is seeded** — the old value on
+    /// the neighbouring keyframes, the new one here — so the frames either side keep what they
+    /// showed. That is what a whole-pose key used to do for the component implicitly.
+    func testAnUncurvedComponentIsSeededAndACurvedOneIsKeyed() {
+        var t = xTrack([(0, 0), (6, 30)])
+        let old = t.values(atTime: 10, base: rest)
+        var new = old
+        new.x += 5
+        new.rotation = 30
+        let written = t.key(new, over: old, atFrame: 10, keyframes: [0, 6])
+        XCTAssertEqual(written, [.x, .rotation])
+        XCTAssertEqual(t.curve(.x)?.keys.map(\.frame), [0, 6, 10], "X keyed at the frame alone")
+        XCTAssertEqual(t.curve(.rotation)?.keys.map(\.frame), [6, 10], "rotation seeded onto the keyframe below")
+        XCTAssertEqual(t.values(atTime: 0, base: rest).rotation, 0, "so frame 0 still shows no turn")
+        XCTAssertEqual(t.values(atTime: 10, base: rest).rotation, 30, accuracy: 1e-12)
+    }
+
+    /// Nothing changed is nothing written — not even a key re-stating a value.
+    func testAWriteThatChangesNothingKeysNothing() {
+        var t = xTrack([(0, 0), (6, 30)])
+        let before = t
+        let values = t.values(atTime: 3, base: rest)
+        XCTAssertEqual(t.key(values, over: values, atFrame: 3, keyframes: [0, 6]), [])
+        XCTAssertEqual(t, before)
+    }
+
+    /// **A turn through ±180° is keyed the short way round.** `decompose` reports an angle in
+    /// `(−180°, 180°]`; a channel wound to 170° turned by 20° more must be keyed at 190°, not at
+    /// −170°, which would spin it back through 340°.
+    func testATurnPastHalfAWayIsKeyedTheShortWayRound() {
+        var t = TransformTrack(box: box, curves: [.rotation: AnimationCurve(keys: [.init(frame: 0, value: 170)])])
+        let old = t.values(atTime: 4, base: rest)
+        var new = old
+        new.rotation = -170
+        XCTAssertEqual(t.key(new, over: old, atFrame: 4, keyframes: [0]), [.rotation])
+        XCTAssertEqual(t.curve(.rotation)?.key(atFrame: 4)?.value ?? 0, 190, accuracy: 1e-9)
+    }
+
+    /// Placing a keyframe holds every keyed component where it shows, and keys nothing it does not.
+    func testHoldingKeysPinsEveryCurveAndTouchesNoOtherComponent() {
+        var t = xTrack([(0, 0), (8, 80)])
+        t.holdKeys(atFrame: 4)
+        XCTAssertEqual(t.curve(.x)?.keys.map(\.frame), [0, 4, 8])
+        XCTAssertEqual(t.curve(.x)?.key(atFrame: 4)?.value ?? 0, rest.x + 40, accuracy: 1e-9)
+        XCTAssertEqual(Set(t.curves.keys), [.x])
     }
 
     // MARK: - Evaluation
 
-    /// The spine is an `AnimationCurve` over pose *indices*, so a `.linear` segment between two poses
-    /// blends them linearly — and the endpoints come back as the authored keys.
-    func testALinearSegmentWalksFromOnePoseToTheNext() {
-        let t = track([(0, 0), (8, 80)])
-        XCTAssertEqual(dx(t.pose(atCelLocalFrame: 0)), 0)
-        XCTAssertEqual(dx(t.pose(atCelLocalFrame: 4))!, 40, accuracy: 1e-9)
-        XCTAssertEqual(dx(t.pose(atCelLocalFrame: 8)), 80)
+    /// A `.linear` segment walks from one key's value to the next, and the endpoints are the keys.
+    func testALinearSegmentWalksFromOneKeyToTheNext() {
+        let t = xTrack([(0, 0), (8, 80)])
+        XCTAssertEqual(dx(t, at: 0), 0)
+        XCTAssertEqual(dx(t, at: 4)!, 40, accuracy: 1e-9)
+        XCTAssertEqual(dx(t, at: 8)!, 80, accuracy: 1e-9)
     }
 
-    /// **Decision 2 arrives for free rather than as a special case**: outside the first and last key
-    /// the curve is a constant hold, so a drawing moved by a track stays where the last key put it.
-    /// Linear extrapolation here would carry it off the canvas over a long cel with nothing on screen
-    /// to explain it.
-    func testOutsideTheKeysThePoseIsHeldRatherThanExtrapolated() {
-        let t = track([(4, 0), (8, 80)])
-        XCTAssertEqual(dx(t.pose(atCelLocalFrame: 0)), 0)
-        XCTAssertEqual(dx(t.pose(atCelLocalFrame: -20)), 0)
-        XCTAssertEqual(dx(t.pose(atCelLocalFrame: 40)), 80)
+    /// **Decision 2**: outside the first and last key a curve is a constant hold, so a drawing moved
+    /// by a channel stays where the last key put it.
+    func testOutsideTheKeysTheValueIsHeldRatherThanExtrapolated() {
+        let t = xTrack([(4, 0), (8, 80)])
+        XCTAssertEqual(dx(t, at: 0), 0)
+        XCTAssertEqual(dx(t, at: -20), 0)
+        XCTAssertEqual(dx(t, at: 40)!, 80, accuracy: 1e-9)
     }
 
-    /// One key is a hold everywhere, which is what makes a single authored pose a legal state — it is
-    /// exactly what the `.seedAndKey` arm produces before a second keyframe exists.
+    /// One key is a hold everywhere.
     func testASingleKeyHoldsAtEveryFrame() {
-        let t = track([(3, 25)])
-        for frame in -5...20 { XCTAssertEqual(dx(t.pose(atCelLocalFrame: frame)), 25) }
+        let t = xTrack([(3, 25)])
+        for frame in -5...20 { XCTAssertEqual(dx(t, at: frame)!, 25, accuracy: 1e-9) }
     }
 
-    /// An empty channel has no pose, which is not the same as a resting one: nil means *this cel
-    /// stores what it shows*, and it is what `mapping(atCelLocalFrame:)` turns into "no derivation".
-    func testAnEmptyTrackHasNoPoseAtAll() {
-        XCTAssertNil(TransformTrack().pose(atCelLocalFrame: 0))
-        XCTAssertNil(TransformTrack().mapping(atCelLocalFrame: 0))
+    /// An empty channel has no map — *this cel stores what it shows*, which is "no derivation".
+    func testAnEmptyChannelHasNoMapping() {
+        XCTAssertNil(TransformTrack(box: box).mapping(atCelLocalFrame: 0))
     }
 
-    /// §2.10. Evaluate, then hold for `step` frames, anchored at frame **0 of the track's own base**
-    /// rather than at the first key — `AnimationCurve.step`'s rule, so two channels on twos step on
-    /// the same frames whatever the parity of their first keys.
-    func testAStepOfTwoHoldsThePoseForPairsOfFrames() {
-        let t = track([(0, 0), (8, 80)], step: 2)
-        XCTAssertEqual(dx(t.pose(atCelLocalFrame: 2))!, 20, accuracy: 1e-9)
-        XCTAssertEqual(dx(t.pose(atCelLocalFrame: 3))!, 20, accuracy: 1e-9,
-                       "Frame 3 quantises down onto 2")
-        XCTAssertEqual(dx(t.pose(atCelLocalFrame: 4))!, 40, accuracy: 1e-9)
-        XCTAssertEqual(dx(t.pose(atCelLocalFrame: 5))!, 40, accuracy: 1e-9)
+    /// §2.10, per curve: evaluate, then hold for `step` frames anchored at frame 0.
+    func testAStepOfTwoHoldsTheValueForPairsOfFrames() {
+        let t = xTrack([(0, 0), (8, 80)], step: 2)
+        XCTAssertEqual(dx(t, at: 2)!, 20, accuracy: 1e-9)
+        XCTAssertEqual(dx(t, at: 3)!, 20, accuracy: 1e-9, "Frame 3 quantises down onto 2")
+        XCTAssertEqual(dx(t, at: 5)!, 40, accuracy: 1e-9)
     }
 
-    /// A `.constant` segment holds its start pose and steps at the next key — the hold that lets an
-    /// artist put a drawing somewhere and leave it there for a run of frames without the in-betweens
-    /// sliding.
+    /// A `.constant` segment holds its start value and steps at the next key.
     func testAConstantSegmentHoldsAndThenSteps() {
-        let t = track([(0, 0), (8, 80)], interpolation: .constant)
-        XCTAssertEqual(dx(t.pose(atCelLocalFrame: 7)), 0)
-        XCTAssertEqual(dx(t.pose(atCelLocalFrame: 8)), 80)
+        let t = xTrack([(0, 0), (8, 80)], interpolation: .constant)
+        XCTAssertEqual(dx(t, at: 7), 0)
+        XCTAssertEqual(dx(t, at: 8)!, 80, accuracy: 1e-9)
     }
 
-    /// Three keys, and the segment the spine picks is the one the frame is in — the arithmetic that
-    /// would go wrong if the fractional index were clamped to `0...1` instead of split into a pair
-    /// and a fraction.
-    func testThreeKeysResolveIntoTheRightPair() {
-        let t = track([(0, 0), (4, 40), (12, 0)])
-        XCTAssertEqual(dx(t.pose(atCelLocalFrame: 2))!, 20, accuracy: 1e-9)
-        XCTAssertEqual(dx(t.pose(atCelLocalFrame: 8))!, 20, accuracy: 1e-9,
-                       "Half way back down the second segment, not half way along the first")
+    /// **An overshooting handle carries a component past its key** — a curve's decision 1, which a
+    /// pose component now inherits directly.
+    func testAFreeHandleCarriesTheDrawingPastTheKeyItIsHeadingFor() {
+        let t = TransformTrack(box: box, curves: [.x: AnimationCurve(keys: [
+            AnimationCurve.Key(frame: 0, value: rest.x,
+                               outHandle: AnimationCurve.Handle(deltaFrames: 5, deltaValue: 320), tangentMode: .free),
+            AnimationCurve.Key(frame: 10, value: rest.x + 80,
+                               inHandle: AnimationCurve.Handle(deltaFrames: -5, deltaValue: 320), tangentMode: .free)
+        ])])
+        let travelled = (0...10).compactMap { dx(t, at: $0) }
+        XCTAssertGreaterThan(travelled.max() ?? 0, 160, "the drawing sails past its mark")
+        XCTAssertEqual(travelled.first, 0)
+        XCTAssertEqual(travelled.last!, 80, accuracy: 1e-9)
     }
 
-    /// **An overshooting timing curve carries the pose past its key**, which is the whole reason
-    /// `pose(atCelLocalTime:)` clamps the *segment* and leaves the *fraction* alone — and it only
-    /// works if `PoseInterpolation.blend` extrapolates, which until 2026-09-02 it did not.
-    ///
-    /// The handles are `AnimationCurveLogicTests.testAFreeHandleOvershootIsNotClampedAway`'s, so the
-    /// spine is known to ride above 3 somewhere in the segment. **A translation is the operand**
-    /// because it extrapolates without limit, so a green here cannot be the §9.1 validity clamp
-    /// standing in for the arithmetic.
-    ///
-    /// Watched failing with the `t == 0` / `t == 1` shortcuts written back as `t <= 0` / `t >= 1`:
-    /// every frame of the segment then reads exactly 80, the second key's own pose.
-    func testAFreeHandleCarriesThePosePastTheKeyItIsHeadingFor() {
-        let overshooting = TransformTrack(keys: [
-            TransformTrack.Key(frame: 0, pose: moved(0),
-                               outHandle: AnimationCurve.Handle(deltaFrames: 5, deltaValue: 4),
-                               tangentMode: .free),
-            TransformTrack.Key(frame: 10, pose: moved(80),
-                               inHandle: AnimationCurve.Handle(deltaFrames: -5, deltaValue: 4),
-                               tangentMode: .free)
-        ])
-        let travelled = (0...10).compactMap { dx(overshooting.pose(atCelLocalFrame: $0)) }
-        XCTAssertEqual(travelled.count, 11)
-        XCTAssertGreaterThan(travelled.max() ?? 0, 160,
-                             "the spine rides past index 2, so the drawing sails past its mark")
-        XCTAssertEqual(travelled.first, 0, "and still lands on both authored keys")
-        XCTAssertEqual(travelled.last, 80)
-    }
-
-    // MARK: - Splitting
-
-    /// **§3.1's rule for `splitCel`, in the currency it is written in**: *"keys before the cut go
-    /// left, keys after go right, and a key is inserted at the cut in both so the value is continuous
-    /// across it."*
-    ///
-    /// The assertion is the *rendering* rather than the key list, because "continuous across the cut"
-    /// is a statement about what the artist sees: every frame of the original span must show the pose
-    /// it showed before, read out of whichever half now covers it. `.linear` keys, so the claim is
-    /// exact for every frame and not only for the keyed ones — a bezier segment cut in two is
-    /// re-parameterised on both sides, which `split` states and which no arithmetic can avoid.
-    func testSplittingATrackLeavesEveryFrameShowingThePoseItShowed() {
-        let whole = track([(0, 0), (12, 120)])
-        let (left, right) = whole.split(atCelLocalFrame: 5)
-
-        for frame in 0..<5 {
-            XCTAssertEqual(dx(left.pose(atCelLocalFrame: frame))!,
-                           dx(whole.pose(atCelLocalFrame: frame))!, accuracy: 1e-9,
-                           "left half, frame \(frame)")
-        }
-        for frame in 5..<13 {
-            XCTAssertEqual(dx(right.pose(atCelLocalFrame: frame - 5))!,
-                           dx(whole.pose(atCelLocalFrame: frame))!, accuracy: 1e-9,
-                           "right half, frame \(frame)")
-        }
-        // **The left half's inserted key is on its own last frame, not one past it** — TODO (62).
-        // Until 2026-09-11 this line read `[0, 5]` with the caption "the inserted key is one past the
-        // left span", on the strength of §3.1's old rule that a key outside a span is held; the owner
-        // reversed that rule, and a key at 5 on a five-frame half is exactly the thing
-        // `Cel.cropPoseKeysToSpan` now removes. The per-frame loop above is what matters and it did
-        // not change: every frame the left half draws still shows what it showed.
-        XCTAssertEqual(left.keys.map(\.frame), [0, 4], "the inserted key is the left half's last frame")
-        XCTAssertEqual(dx(left.keys[1].pose)!, 40, accuracy: 1e-9, "and it holds the pose at that frame")
-        XCTAssertEqual(right.keys.map(\.frame), [0, 7])
-        XCTAssertEqual(dx(right.keys[0].pose)!, 50, accuracy: 1e-9, "and it holds the pose at the cut")
-    }
-
-    /// The inserted key inherits the interpolation of the segment it lands in. A `.constant` hold cut
-    /// in two must stay a hold on both sides — `Key`'s default is `.bezier`, so an inserted key that
-    /// took it would start easing where the artist asked for a step.
-    func testSplittingAHoldLeavesAHoldOnBothSides() {
-        let held = track([(0, 0), (12, 120)], interpolation: .constant)
-        let (left, right) = held.split(atCelLocalFrame: 5)
-        XCTAssertEqual(dx(left.pose(atCelLocalFrame: 4)), 0)
-        XCTAssertEqual(dx(right.pose(atCelLocalFrame: 0)), 0)
-        XCTAssertEqual(dx(right.pose(atCelLocalFrame: 6)), 0, "still holding one frame before the step")
-        XCTAssertEqual(dx(right.pose(atCelLocalFrame: 7)), 120, "and stepping on the key, as before")
-    }
-
-    /// A key sitting exactly on the cut is carried across **whole** to the right half rather than
-    /// re-synthesised from its own pose: the pose would match either way, but the handles and the
-    /// tangent mode would not, and a split is not an occasion to flatten an authored ease.
-    ///
-    /// **The left half does not get it** — TODO (62). The cut is the right half's first frame and not
-    /// one of the left half's, so a copy there would be a key outside the left span, which is the
-    /// thing the owner ruled deleted; the left half ends on a synthesised key at `cut - 1` instead.
-    /// This assertion read `left.key(atFrame: 6) == authored` until 2026-09-11.
-    func testAKeyOnTheCutKeepsItsHandlesOnBothSides() {
-        let authored = TransformTrack.Key(frame: 6, pose: moved(60),
-                                          inHandle: AnimationCurve.Handle(deltaFrames: -3, deltaValue: 0.4),
-                                          outHandle: AnimationCurve.Handle(deltaFrames: 3, deltaValue: -0.4),
-                                          tangentMode: .free, interpolation: .constant)
-        var whole = track([(0, 0), (12, 120)])
-        whole.setKey(authored)
-
-        let (left, right) = whole.split(atCelLocalFrame: 6)
-        XCTAssertEqual(left.keys.map(\.frame), [0, 5], "the left half ends inside its own span")
-        XCTAssertNil(left.key(atFrame: 6), "and holds no key on the cut, which is not one of its frames")
-        var rebased = authored
-        rebased.frame = 0
-        XCTAssertEqual(right.key(atFrame: 0), rebased)
-    }
-
-    /// The other boundary case: a key already sitting on `cut - 1` is the left half's last frame and
-    /// is kept whole rather than overwritten by a synthesised one — the same "not an occasion to
-    /// flatten an authored ease" argument, applied to the frame the left half actually ends on.
-    func testAKeyOnTheFrameBeforeTheCutIsKeptWholeOnTheLeft() {
-        let authored = TransformTrack.Key(frame: 5, pose: moved(50),
-                                          inHandle: AnimationCurve.Handle(deltaFrames: -2, deltaValue: 0.3),
-                                          outHandle: AnimationCurve.Handle(deltaFrames: 2, deltaValue: -0.3),
-                                          tangentMode: .free, interpolation: .linear)
-        var whole = track([(0, 0), (12, 120)])
-        whole.setKey(authored)
-
-        let (left, right) = whole.split(atCelLocalFrame: 6)
-        XCTAssertEqual(left.keys.map(\.frame), [0, 5])
-        XCTAssertEqual(left.key(atFrame: 5), authored, "kept whole, handles and all")
-        XCTAssertEqual(right.keys.map(\.frame), [0, 6], "the right half still gets its own key at the cut")
-    }
-
-    /// **The predicate the whole derivation hangs off.** A track whose keys all hold the rest pose —
-    /// which is what §2.27's seeding writes before anything has been moved — must cost the document
-    /// nothing at all, because a non-nil answer here is a canvas-sized render and two extra cache
-    /// entries per frame (§4.5).
+    /// **The predicate the whole derivation hangs off.** A channel whose keys all hold rest values —
+    /// what a seed writes before anything has been moved — must cost the document nothing.
     func testARestingChannelProducesNoMappingAndThereforeNoDerivation() {
-        let resting = TransformTrack(keys: [TransformTrack.Key(frame: 0, pose: PoseQuad(restingIn: box)),
-                                            TransformTrack.Key(frame: 8, pose: PoseQuad(restingIn: box))])
+        let resting = xTrack([(0, 0), (8, 0)])
         XCTAssertNil(resting.mapping(atCelLocalFrame: 0))
         XCTAssertNil(resting.mapping(atCelLocalFrame: 4))
-        XCTAssertNil(resting.mapping(atCelLocalFrame: 8))
 
-        let moving = track([(0, 0), (8, 80)])
-        XCTAssertNil(moving.mapping(atCelLocalFrame: 0), "Frame 0's key is the rest pose")
+        let moving = xTrack([(0, 0), (8, 80)])
+        XCTAssertNil(moving.mapping(atCelLocalFrame: 0), "Frame 0's key is the rest value")
         XCTAssertNotNil(moving.mapping(atCelLocalFrame: 1))
     }
 
-    /// The frames a channel keys on, which `CanvasManager.keyframes(of:)` folds into §2.28's union
-    /// after adding the cel's `startFrame`. Cel-local here, deliberately: the track rides its cel
-    /// precisely because it does not know where the cel starts.
-    func testKeyedFramesAreCelLocalAndAscending() {
-        XCTAssertEqual(track([(8, 80), (0, 0), (4, 40)]).keyedFrames, [0, 4, 8])
+    /// **At every key the channel shows the pose it was keyed with** — what the whole-pose model this
+    /// replaced returned bit for bit, and what eight independent curves return to floating point: a
+    /// key holds each component's value, and recomposing the eight is `decompose`'s inverse. One
+    /// fixture holds every kind of pose a Move makes, keystone included.
+    func testAtEveryKeyTheChannelShowsThePoseItWasKeyedWith() throws {
+        let centre = CGPoint(x: box.midX, y: box.midY)
+        let turn = CGAffineTransform(translationX: centre.x, y: centre.y).rotated(by: 0.7)
+            .translatedBy(x: -centre.x, y: -centre.y)
+        let poses: [(frame: Int, pose: PoseQuad)] = [
+            (0, PoseQuad(restingIn: box)),
+            (3, PoseQuad(box: box, mappedBy: CGAffineTransform(translationX: 31, y: -12))),
+            (6, PoseQuad(box: box, mappedBy: turn.concatenating(CGAffineTransform(scaleX: 1.6, y: 0.7)))),
+            (9, PoseQuad(box: box, mappedBy: CGAffineTransform(a: 1, b: 0, c: 0.4, d: 1, tx: 5, ty: 2))),
+            (12, PoseQuad(box: box, corners: Quad(CGPoint(x: 16, y: 10), CGPoint(x: 44, y: 10),
+                                                  CGPoint(x: 50, y: 30), CGPoint(x: 10, y: 30)))),
+        ]
+        let track = CanvasFixture.poseTrack(box: box, poses)
+        for (frame, pose) in poses {
+            let shown: [CGPoint]
+            if let map = track.mapping(atCelLocalFrame: frame) {
+                shown = try Quad.rect(box).points.map { try XCTUnwrap(map.applied(to: $0)) }
+            } else {
+                shown = Quad.rect(box).points
+            }
+            for (a, b) in zip(shown, pose.corners.points) {
+                XCTAssertEqual(a.x, b.x, accuracy: 1e-6, "frame \(frame)")
+                XCTAssertEqual(a.y, b.y, accuracy: 1e-6, "frame \(frame)")
+            }
+        }
+        XCTAssertEqual(track.mapping(atCelLocalFrame: 12)?.isProjective, true, "the keystone key is a keystone")
+    }
+
+    // MARK: - Splitting and cropping, per component
+
+    /// **§3.1's rule for `splitCel`**, on each component: every frame of the original span shows what
+    /// it showed, read out of whichever half covers it, and the components split independently.
+    func testSplittingAChannelLeavesEveryFrameShowingWhatItShowed() {
+        var whole = xTrack([(0, 0), (12, 120)])
+        whole.setCurve(AnimationCurve(keys: [.init(frame: 2, value: 0, interpolation: .linear),
+                                             .init(frame: 9, value: 70)]), for: .rotation)
+        let (left, right) = whole.split(atCelLocalFrame: 5)
+
+        for frame in 0..<5 {
+            let w = whole.values(atTime: Double(frame), base: rest)
+            let l = left.values(atTime: Double(frame), base: rest)
+            XCTAssertEqual(l.x, w.x, accuracy: 1e-9, "left half X, frame \(frame)")
+            XCTAssertEqual(l.rotation, w.rotation, accuracy: 1e-9, "left half rotation, frame \(frame)")
+        }
+        for frame in 5..<13 {
+            let w = whole.values(atTime: Double(frame), base: rest)
+            let r = right.values(atTime: Double(frame - 5), base: rest)
+            XCTAssertEqual(r.x, w.x, accuracy: 1e-9, "right half X, frame \(frame)")
+            XCTAssertEqual(r.rotation, w.rotation, accuracy: 1e-9, "right half rotation, frame \(frame)")
+        }
+        XCTAssertEqual(left.curve(.x)?.keys.map(\.frame), [0, 4], "the inserted key is the left half's last frame")
+        XCTAssertEqual(right.curve(.x)?.keys.map(\.frame), [0, 7])
+        XCTAssertEqual(left.curve(.rotation)?.keys.map(\.frame), [2, 4], "each component splits on its own keys")
+        XCTAssertEqual(right.curve(.rotation)?.keys.map(\.frame), [0, 4])
+        XCTAssertEqual(left.box, box)
+        XCTAssertEqual(right.box, box)
+    }
+
+    /// The inserted key inherits the interpolation of the segment it lands in.
+    func testSplittingAHoldLeavesAHoldOnBothSides() {
+        let held = xTrack([(0, 0), (12, 120)], interpolation: .constant)
+        let (left, right) = held.split(atCelLocalFrame: 5)
+        XCTAssertEqual(dx(left, at: 4), 0)
+        XCTAssertEqual(dx(right, at: 6), 0, "still holding one frame before the step")
+        XCTAssertEqual(dx(right, at: 7)!, 120, accuracy: 1e-9, "and stepping on the key, as before")
+    }
+
+    /// A key on the cut is carried across whole, handles and all.
+    func testAKeyOnTheCutKeepsItsHandles() {
+        let authored = AnimationCurve.Key(frame: 6, value: rest.x + 60,
+                                          inHandle: AnimationCurve.Handle(deltaFrames: -3, deltaValue: 4),
+                                          outHandle: AnimationCurve.Handle(deltaFrames: 3, deltaValue: -4),
+                                          tangentMode: .free, interpolation: .constant)
+        var x = xTrack([(0, 0), (12, 120)]).curve(.x)!
+        x.setKey(authored)
+        let (left, right) = TransformTrack(box: box, curves: [.x: x]).split(atCelLocalFrame: 6)
+        XCTAssertEqual(left.curve(.x)?.keys.map(\.frame), [0, 5])
+        var rebased = authored
+        rebased.frame = 0
+        XCTAssertEqual(right.curve(.x)?.key(atFrame: 0), rebased)
+    }
+
+    /// TODO (62)'s crop, per component: the keys past the span go, each component's edge gains the
+    /// value it showed there, and what went is reported per component.
+    func testCroppingReportsWhatEachComponentLost() {
+        var t = xTrack([(0, 0), (10, 100)])
+        t.setCurve(AnimationCurve(keys: [.init(frame: 2, value: 0), .init(frame: 3, value: 9)]), for: .rotation)
+        let (kept, discarded) = t.cropped(toFrameCount: 6)
+        XCTAssertEqual(discarded, [.x: [10]], "rotation keeps both its keys, so it lost nothing")
+        XCTAssertEqual(kept.curve(.x)?.keys.map(\.frame), [0, 5])
+        XCTAssertEqual(kept.curve(.x)?.key(atFrame: 5)?.value ?? 0, rest.x + 50, accuracy: 1e-9)
+        XCTAssertEqual(kept.curve(.rotation), t.curve(.rotation))
     }
 
     // MARK: - Persistence
 
-    /// §3.5. Field-presence versioning: a track written before a field existed decodes to its
-    /// default, and everything the artist authored survives the round trip exactly.
-    func testATrackRoundTripsThroughItsSidecarFormat() throws {
-        var t = track([(0, 0), (6, 60)], step: 3)
-        t.setKey(TransformTrack.Key(frame: 12, pose: moved(20, 5),
-                                    inHandle: AnimationCurve.Handle(deltaFrames: -2, deltaValue: 0.3),
-                                    outHandle: AnimationCurve.Handle(deltaFrames: 2, deltaValue: -0.3),
-                                    tangentMode: .free, interpolation: .constant))
+    /// Everything the artist authored survives the round trip exactly, per component.
+    func testAChannelRoundTripsThroughItsSidecarFormat() throws {
+        var t = xTrack([(0, 0), (6, 60)], step: 3)
+        t.setCurve(AnimationCurve(keys: [
+            AnimationCurve.Key(frame: 12, value: 0.25,
+                               inHandle: AnimationCurve.Handle(deltaFrames: -2, deltaValue: 0.3),
+                               outHandle: AnimationCurve.Handle(deltaFrames: 2, deltaValue: -0.3),
+                               tangentMode: .free, interpolation: .constant)]), for: .perspectiveX)
         let data = try JSONEncoder().encode(CelAnimationData(tracks: ["cel": t]))
         let back = try JSONDecoder().decode(CelAnimationData.self, from: data)
         XCTAssertEqual(back.tracks["cel"], t)
     }
 
-    /// A sidecar with no `baselines` key at all — which is every one written before §2.27's held pose
-    /// existed — loads with the animation intact and no held pose, rather than failing the cel.
-    func testASidecarWithoutBaselinesLoadsTheAnimationAnyway() throws {
-        let json = #"{"tracks":{"cel":{"step":1,"keys":[]}}}"#
-        let back = try JSONDecoder().decode(CelAnimationData.self, from: Data(json.utf8))
-        XCTAssertEqual(back.tracks.count, 1)
+    /// **No legacy decode** — a channel written before TODO (139), whose keys were whole poses, opens
+    /// empty rather than failing the cel (TODO.md's standing permission: nothing written so far has
+    /// to survive). A component name this build does not know is ignored the same way.
+    func testAWholePoseTrackOpensEmptyAndAnUnknownComponentIsIgnored() throws {
+        let old = #"{"tracks":{"cel":{"step":1,"keys":[{"frame":0}]}}}"#
+        let back = try JSONDecoder().decode(CelAnimationData.self, from: Data(old.utf8))
+        XCTAssertEqual(back.tracks["cel"]?.isEmpty, true)
         XCTAssertTrue(back.baselines.isEmpty)
+
+        let later = #"{"box":[[0,0],[4,4]],"curves":{"x":{"keys":[{"frame":0,"value":1}]},"wobble":{"keys":[{"frame":0,"value":1}]}}}"#
+        let track = try JSONDecoder().decode(TransformTrack.self, from: Data(later.utf8))
+        XCTAssertEqual(Set(track.curves.keys), [.x])
     }
 
     // MARK: - Channel ids
 
-    /// The id format is the `effectTracks` idiom — `"<prefix>.<rest>"` — so a transform channel lands
-    /// in the grouping `TimelineGraphChannelList.groupID(ofParameterID:)` already reads.
+    /// The id format is the `effectTracks` idiom — `"<prefix>.<rest>"`.
     func testChannelIDsRoundTripAndAnUnknownOneIsIgnoredRatherThanTrapped() {
         let group = UUID()
         XCTAssertEqual(TransformChannelID(id: TransformChannelID.cel.id), .cel)

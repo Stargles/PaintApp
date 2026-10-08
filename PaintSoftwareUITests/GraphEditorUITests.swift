@@ -623,10 +623,9 @@ final class GraphEditorGestureUITests: PaintUITestCase {
     /// **Rotate 45°, not a drag**, so the one component that moves does so by an exact, known amount
     /// (`FixedAngleRotation`) — the tap coordinates below are computed through
     /// `TimelineGraphBand.anchoredRange`/`y(ofValue:)`, the band's own formulas, rather than guessed,
-    /// and an exact input is what makes that computation exact instead of approximate. The channel
-    /// list hides every other row first — KEYFRAMES.md §11.7's own answer to six dots sharing 96 pt of
-    /// band ("hide the five rows you are not editing") — so the one node this test taps is the only
-    /// one drawn at that frame.
+    /// and an exact input is what makes that computation exact instead of approximate. Since TODO
+    /// (139) the turn keys Rotation alone, so the one node this test taps is the only one drawn at
+    /// that frame without any row having to be hidden first.
     func testGraphEditorPoseNodeDeleteAndTapToAddOnATransformationLayer() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
@@ -670,31 +669,20 @@ final class GraphEditorGestureUITests: PaintUITestCase {
         let band = app.otherElements["timeline.graphBand"]
         XCTAssertTrue(band.waitForExistence(timeout: 5))
 
-        // Isolate the one row a pure rotation actually animates.
+        // **TODO (139): a turn keys Rotation and nothing else**, so the channel list holds exactly one
+        // row for this Move — no flat X, Y, Scale or Skew rows to hide first, which is what the
+        // channel list's filter used to be the artist's answer to.
         app.buttons["timeline.graphChannelsButton"].tap()
-        // **TODO (59) has already done three fifths of that**, and this is where the default is
-        // checked on the surface an artist actually reads: the three rows are *listed* — so they can
-        // be switched back on — and their boxes are empty. `"off,flat"` is the row's two facts in
-        // one string (`AnimationTimeline.graphChannelRow`), so this states both that the default hid
-        // them and that they were flat, which is the condition under which it is allowed to.
-        for defaulted in ["containerPose.scaleX", "containerPose.scaleY", "containerPose.skew"] {
-            let checkbox = app.buttons["timeline.graphChannels.\(defaulted)"]
-            XCTAssertTrue(checkbox.waitForExistence(timeout: 5),
-                          "Missing row: \(defaulted) — a hidden channel must still be listed")
-            XCTAssertEqual(checkbox.value as? String, "off,flat",
-                           "TODO (59): \(defaulted) starts switched off, and is still findable here")
-        }
-        for hidden in ["containerPose.x", "containerPose.y"] {
-            let checkbox = app.buttons["timeline.graphChannels.\(hidden)"]
-            XCTAssertTrue(checkbox.waitForExistence(timeout: 5), "Missing row: \(hidden)")
-            XCTAssertEqual(checkbox.value as? String, "on,flat",
-                           "PREMISE: \(hidden) is drawn until this tap, so the default is the three above")
-            checkbox.tap()
+        let rotationRow = app.buttons["timeline.graphChannels.containerPose.rotation"]
+        XCTAssertTrue(rotationRow.waitForExistence(timeout: 5), "The turn is listed as a Rotation row")
+        for untouched in ["x", "y", "scaleX", "scaleY", "skew", "perspectiveX", "perspectiveY"] {
+            XCTAssertFalse(app.buttons["timeline.graphChannels.containerPose.\(untouched)"].exists,
+                           "A turn keys no \(untouched), so it draws no \(untouched) row")
         }
         app.buttons["timeline.graphChannelsButton"].tap()
 
         XCTAssertEqual(band.value as? String, "containerPose.rotation:0,6",
-                      "TODO (21): a Move now reaches the graph editor as a listed, drawn pose channel")
+                      "A Move reaches the graph editor as the one curve it changed")
         attachScreenshot(app, "pose-band-before-add-or-delete")
 
         // The axis a pure rotation is drawn on: reference is rest (0°, box-independent), and the one
@@ -748,7 +736,7 @@ final class GraphEditorGestureUITests: PaintUITestCase {
         attachScreenshot(app, "pose-node-menu-with-delete-keyframe")
         deleteButton.tap()
         XCTAssertEqual(waitForBandValue("containerPose.rotation:0,6"), .completed,
-                      "Delete should remove the whole pose key at frame 3 — got \(band.value ?? "nil")")
+                      "Delete should remove Rotation's key at frame 3 — got \(band.value ?? "nil")")
         attachScreenshot(app, "pose-band-after-delete")
 
         // **Recoverable, both ways** — one press of Undo brings the tapped-away node back, and Redo

@@ -63,7 +63,7 @@ final class CelSpanCropLogicTests: XCTestCase {
     /// A `.linear` whole-cel channel: one key per `(celLocalFrame, dx)` pair. Linear so that "the
     /// pose at a frame the span still covers is unchanged" is exact rather than approximate.
     private func track(_ keys: [(Int, CGFloat)]) -> TransformTrack {
-        TransformTrack(keys: keys.map { TransformTrack.Key(frame: $0.0, pose: slide($0.1), interpolation: .linear) })
+        CanvasFixture.poseTrack(box: box, keys.map { (frame: $0.0, pose: slide($0.1)) }, interpolation: .linear)
     }
 
     /// A manager with a vector layer (index 1) holding one drawn cel over `start ..< start + length`,
@@ -81,15 +81,16 @@ final class CelSpanCropLogicTests: XCTestCase {
     }
 
     private func keyFrames(_ manager: CanvasManager, cel: Int = 0) -> [Int]? {
-        manager.layers[1].cels[cel].transformTracks[TransformChannelID.cel.id]?.keys.map(\.frame)
+        manager.layers[1].cels[cel].transformTracks[TransformChannelID.cel.id]?.keyedFrames
     }
 
     /// The x-offset the whole-cel channel shows at an **absolute** frame, or nil if unposed there.
     private func shownDX(_ manager: CanvasManager, atFrame frame: Int, layer: Int = 1) -> CGFloat? {
         guard let index = manager.activeCelIndex(inLayer: layer, atFrame: frame) else { return nil }
         let cel = manager.layers[layer].cels[index]
-        guard let pose = manager.resolvedPose(layerID: manager.layers[layer].id, celID: cel.id,
-                                              channel: .cel, atFrame: frame) else { return nil }
+        guard cel.transformTracks[TransformChannelID.cel.id] != nil else { return nil }
+        let pose = CanvasFixture.resolvedPose(manager, layerID: manager.layers[layer].id, celID: cel.id,
+                                              atFrame: frame, box: box)
         return pose.corners.p0.x - pose.box.minX
     }
 
@@ -131,7 +132,8 @@ final class CelSpanCropLogicTests: XCTestCase {
         XCTAssertEqual(shownDX(manager, atFrame: 5)!, 50, accuracy: 1e-9, "the inserted key's own pose")
         XCTAssertEqual(crop.frames, [9], "only the key actually discarded is named, in absolute frames")
         XCTAssertEqual(crop.count, 1)
-        XCTAssertEqual(crop.discarded, [TransformChannelID.cel.id: [9]], "attributed to its channel")
+        XCTAssertEqual(crop.discarded, [TransformChannelID.cel.id + ".x": [9]],
+                       "attributed to its channel's component — the slide keys X alone")
     }
 
     /// **The boundary is `frameCount`, and a key on it is outside.** A cel whose end is dragged to 9
@@ -339,8 +341,8 @@ final class CelSpanCropLogicTests: XCTestCase {
         XCTAssertEqual(keyFrames(manager, cel: 0), [0, 4])
         XCTAssertEqual(keyFrames(manager, cel: 1), [0, 4])
         for (cel, count) in [(0, 5), (1, 5)] {
-            for key in manager.layers[1].cels[cel].transformTracks.values.flatMap(\.keys) {
-                XCTAssertTrue((0..<count).contains(key.frame), "cel \(cel) key at \(key.frame) is inside 0..<\(count)")
+            for frame in manager.layers[1].cels[cel].transformTracks.values.flatMap(\.keyedFrames) {
+                XCTAssertTrue((0..<count).contains(frame), "cel \(cel) key at \(frame) is inside 0..<\(count)")
             }
         }
         for frame in 0..<10 {
@@ -413,11 +415,11 @@ final class CelSpanCropLogicTests: XCTestCase {
         XCTAssertTrue(manager.pasteCel(layerIndex: 1, startFrame: 20))
         let pasted = try XCTUnwrap(manager.layers[1].cels.first { $0.startFrame == 20 })
         XCTAssertEqual(pasted.frameCount, 4, "Premise: clamped by the wall at 24")
-        XCTAssertEqual(pasted.transformTracks[TransformChannelID.cel.id]?.keys.map(\.frame), [0, 3],
+        XCTAssertEqual(pasted.transformTracks[TransformChannelID.cel.id]?.keyedFrames, [0, 3],
                        "4 and 9 are past a four-frame cel, and 3 — its new last frame — gains their pose")
         XCTAssertEqual(shownDX(manager, atFrame: 23)!, 30, accuracy: 1e-9, "document 23 is cel-local 3")
         XCTAssertEqual(croppedNotice(manager)?.frames, [24, 29])
-        XCTAssertEqual(manager.copiedCel?.transformTracks[TransformChannelID.cel.id]?.keys.map(\.frame),
+        XCTAssertEqual(manager.copiedCel?.transformTracks[TransformChannelID.cel.id]?.keyedFrames,
                        [0, 4, 9], "the clipboard keeps everything for the next paste")
     }
 
@@ -463,15 +465,14 @@ final class CelSpanCropLogicTests: XCTestCase {
         manager.addTransformLayer()
         manager.layers[2].cels = [Cel(id: UUID(), startFrame: 0, frameCount: 12, raster: .empty(size: size))]
         let rest = PoseQuad(restingIn: CGRect(origin: .zero, size: size))
-        manager.layers[2].transform = LayerPose(pose: rest, track: TransformTrack(keys: [
-            .init(frame: 0, pose: rest), .init(frame: 11, pose: slide(24))]))
+        manager.layers[2].transform = LayerPose(pose: rest, track: CanvasFixture.poseTrack([(0, rest), (11, slide(24))]))
 
         var crop = manager.resizeCelRightEdge(layerIndex: 1, celIndex: 0, newEndFrame: 6)
         crop.merge(manager.resizeCelLeftEdge(layerIndex: 1, celIndex: 0, newStartFrame: 2))
         crop.merge(manager.resizeCelRightEdge(layerIndex: 2, celIndex: 0, newEndFrame: 4))
         crop.merge(manager.splitCel(layerIndex: 1, celIndex: 0, atFrame: 4))
 
-        XCTAssertEqual(crop.discarded.keys.sorted(), [TransformChannelID.cel.id, "transform"],
+        XCTAssertEqual(crop.discarded.keys.sorted(), [TransformChannelID.cel.id + ".x", "transform.x"],
                        "the drawing layer's own channel, and the transform layer's, and nothing else")
         XCTAssertEqual(manager.layers[1].channelTracks[TargetChannel.opacity.id]?.keys.map(\.frame), [0, 9],
                        "opacity on the drawing layer is untouched — it is not a transform layer")
@@ -663,7 +664,9 @@ final class CelSpanCropLogicTests: XCTestCase {
     func testEveryRemainingFrameIsUnchangedByTheCropOnASteppedChannel() {
         let manager = fixture()
         var stepped = manager.layers[1].cels[0].transformTracks[TransformChannelID.cel.id]!
-        stepped.step = 3
+        var x = stepped.curve(.x)!
+        x.step = 3
+        stepped.setCurve(x, for: .x)
         manager.layers[1].cels[0].transformTracks[TransformChannelID.cel.id] = stepped
         // frameCount 4 puts the new boundary (local 3) exactly on a step anchor (0, 3, 6, ...), so the
         // stepped read at frame 3 samples the inserted key directly rather than rounding down past it

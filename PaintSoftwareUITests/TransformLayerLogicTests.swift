@@ -96,9 +96,9 @@ final class TransformLayerLogicTests: XCTestCase {
     /// A pose with two keys on its own track: resting at document frame 0, `transform` at frame 8.
     private func animatedPose(_ transform: CGAffineTransform) -> LayerPose {
         LayerPose(pose: PoseQuad(restingIn: canvasBox),
-                  track: TransformTrack(keys: [
-                    .init(frame: 0, pose: PoseQuad(restingIn: canvasBox)),
-                    .init(frame: 8, pose: PoseQuad(box: canvasBox, mappedBy: transform)),
+                  track: CanvasFixture.poseTrack(box: canvasBox, [
+                    (0, PoseQuad(restingIn: canvasBox)),
+                    (8, PoseQuad(box: canvasBox, mappedBy: transform)),
                   ]))
     }
 
@@ -111,10 +111,9 @@ final class TransformLayerLogicTests: XCTestCase {
     /// two endpoints, so a key's crop cannot be felt anywhere but past it.
     private func linearAnimatedPose(_ keys: [(frame: Int, transform: CGAffineTransform)]) -> LayerPose {
         LayerPose(pose: PoseQuad(restingIn: canvasBox),
-                  track: TransformTrack(keys: keys.map {
-                    .init(frame: $0.frame, pose: PoseQuad(box: canvasBox, mappedBy: $0.transform),
-                         interpolation: .linear)
-                  }))
+                  track: CanvasFixture.poseTrack(box: canvasBox, keys.map {
+                    (frame: $0.frame, pose: PoseQuad(box: canvasBox, mappedBy: $0.transform))
+                  }, interpolation: .linear))
     }
 
     private func inkBounds(_ image: UIImage) -> CGRect? { PixelOps.opaqueContentBounds(image) }
@@ -718,7 +717,7 @@ final class TransformLayerLogicTests: XCTestCase {
                 (frame: 8, transform: CGAffineTransform(translationX: 24, y: 0)),
             ]))
             let mover = try XCTUnwrap(manager.layers.firstIndex { $0.name == "mover" })
-            XCTAssertEqual(manager.layers[mover].transform?.track.keys.map(\.frame), [0, 4, 8], "Premise")
+            XCTAssertEqual(manager.layers[mover].transform?.track.keyedFrames, [0, 4, 8], "Premise")
 
             var before: [[UInt8]] = []
             for frame in 0..<6 { before.append(try compositeBytes(manager, atFrame: frame)) }
@@ -729,7 +728,7 @@ final class TransformLayerLogicTests: XCTestCase {
             }
             XCTAssertEqual(manager.history.undoStack.count, undoCountBefore + 1,
                            "one undo step covers the span and the crop together (\(backend))")
-            XCTAssertEqual(manager.layers[mover].transform?.track.keys.map(\.frame), [0, 4, 5],
+            XCTAssertEqual(manager.layers[mover].transform?.track.keyedFrames, [0, 4, 5],
                            "8 is gone; 4 stays, solidly inside; 5 gains the pose the block showed there (\(backend))")
             guard case .keyframesCropped(let crop)? = manager.notice?.kind else {
                 return XCTFail("the artist is told a crop happened (\(backend))")
@@ -742,7 +741,7 @@ final class TransformLayerLogicTests: XCTestCase {
             }
 
             manager.undo()
-            XCTAssertEqual(manager.layers[mover].transform?.track.keys.map(\.frame), [0, 4, 8],
+            XCTAssertEqual(manager.layers[mover].transform?.track.keyedFrames, [0, 4, 8],
                            "the span and the key come back together, in the same press (\(backend))")
         }
     }
@@ -766,7 +765,7 @@ final class TransformLayerLogicTests: XCTestCase {
             manager.withStructureUndo(label: .resizeFrame) {
                 manager.resizeCelRightEdge(layerIndex: mover, celIndex: 0, newEndFrame: 12)
             }
-            XCTAssertEqual(manager.layers[mover].transform?.track.keys.map(\.frame), [0, 5],
+            XCTAssertEqual(manager.layers[mover].transform?.track.keyedFrames, [0, 5],
                            "the key at 8 is gone until undo — lengthening does not bring it back (\(backend))")
             XCTAssertEqual(try compositeBytes(manager, atFrame: 8), heldAt5,
                            "…so frame 8 holds at the pose the crop preserved at 5, not the old key's (\(backend))")
@@ -827,7 +826,7 @@ final class TransformLayerLogicTests: XCTestCase {
     func testAMultiTickDragCropsFromTheGesturesBaselineNotFromThePreviousTick() throws {
         let (manager, _) = posedVectorLayer(animatedPose(CGAffineTransform(translationX: 24, y: 0)))
         let mover = try XCTUnwrap(manager.layers.firstIndex { $0.name == "mover" })
-        XCTAssertEqual(manager.layers[mover].transform?.track.keys.map(\.frame), [0, 8], "Premise")
+        XCTAssertEqual(manager.layers[mover].transform?.track.keyedFrames, [0, 8], "Premise")
 
         // Walk the end down one frame at a time, as `TimelineTrackView`'s pan handler does on every
         // `.changed` — each call recomputing from the same `gestureSnapshot`, exactly as the resized
@@ -838,7 +837,7 @@ final class TransformLayerLogicTests: XCTestCase {
         }
         manager.commitStructureGesture(label: .resizeFrame)
 
-        XCTAssertEqual(manager.layers[mover].transform?.track.keys.map(\.frame), [0, 5],
+        XCTAssertEqual(manager.layers[mover].transform?.track.keyedFrames, [0, 5],
                        "the key at 8 is gone and 5 gains the boundary pose — not whatever an "
                        + "intermediate tick's own insertion left behind")
         guard case .keyframesCropped(let crop)? = manager.notice?.kind else {
@@ -858,7 +857,7 @@ final class TransformLayerLogicTests: XCTestCase {
             outAndBack.resizeCelRightEdge(layerIndex: outAndBackMover, celIndex: 0, newEndFrame: end)
         }
         outAndBack.commitStructureGesture(label: .resizeFrame)
-        XCTAssertEqual(outAndBack.layers[outAndBackMover].transform?.track.keys.map(\.frame), [0, 8],
+        XCTAssertEqual(outAndBack.layers[outAndBackMover].transform?.track.keyedFrames, [0, 8],
                        "settled back past the key, in the same gesture — nothing was cropped")
         XCTAssertNil(outAndBack.notice, "nothing to announce")
     }

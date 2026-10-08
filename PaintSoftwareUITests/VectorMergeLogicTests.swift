@@ -422,8 +422,7 @@ final class VectorMergeLogicTests: XCTestCase {
     func testACelWithAPoseChannelFallsBackToPixels() {
         let manager = plainPair()
         let box = CGRect(origin: .zero, size: CanvasFixture.canvasSize)
-        let track = TransformTrack(keys: [.init(frame: 0,
-                                                pose: PoseQuad(box: box,
+        let track = CanvasFixture.poseTrack([(0, PoseQuad(box: box,
                                                                mappedBy: CGAffineTransform(translationX: 5, y: 0)))])
         manager.layers[1].cels[0].transformTracks = [TransformChannelID.cel.id: track]
         XCTAssertNotNil(manager.derivedCelContent(for: manager.layers[1].cels[0], atFrame: 0),
@@ -734,8 +733,7 @@ final class VectorMergeLogicTests: XCTestCase {
             upper: [cel(0, 4, [.stroke(Self.stroke(2, y: 34))]), cel(4, 4, [.stroke(Self.stroke(3, y: 34))])])
         let box = CGRect(origin: .zero, size: CanvasFixture.canvasSize)
         animated.layers[1].cels[1].transformTracks = [
-            TransformChannelID.cel.id: TransformTrack(keys: [
-                .init(frame: 0, pose: PoseQuad(box: box, mappedBy: CGAffineTransform(translationX: 5, y: 0)))])]
+            TransformChannelID.cel.id: CanvasFixture.poseTrack([(0, PoseQuad(box: box, mappedBy: CGAffineTransform(translationX: 5, y: 0)))])]
 
         XCTAssertTrue(animated.mergeLayers(animated.layers[0].id, animated.layers[1].id))
         guard animated.layers[0].cels.count == 2 else { return XCTFail("the orphan cel should have been adopted") }

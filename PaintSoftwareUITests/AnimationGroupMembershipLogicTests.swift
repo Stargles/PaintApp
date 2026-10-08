@@ -85,12 +85,8 @@ final class AnimationGroupMembershipLogicTests: XCTestCase {
         manager.animationGroups.append(AnimationGroup(id: group, displayName: name,
                                                       tagColor: black()))
         manager.layers[layerIndex].cels[0].transformTracks[TransformChannelID.group(group).id] =
-            TransformTrack(keys: [
-                TransformTrack.Key(frame: 0, pose: PoseQuad(restingIn: box), interpolation: .linear),
-                TransformTrack.Key(frame: 12,
-                                   pose: PoseQuad(box: box,
-                                                  mappedBy: .init(translationX: by.dx, y: by.dy)),
-                                   interpolation: .linear)])
+            CanvasFixture.poseTrack([(0, PoseQuad(restingIn: box)), (12, PoseQuad(box: box,
+                                                  mappedBy: .init(translationX: by.dx, y: by.dy)))], interpolation: .linear)
     }
 
     private func fixture() -> Fixture {
@@ -329,7 +325,7 @@ final class AnimationGroupMembershipLogicTests: XCTestCase {
     func testRemovingTheLastMemberKeepsTheGroupAndItsTrack() throws {
         let f = fixture()
         let keysBefore = f.manager.layers[f.layerIndex].cels[0]
-            .transformTracks[TransformChannelID.group(f.groupB).id]?.keys.count
+            .transformTracks[TransformChannelID.group(f.groupB).id]?.keyedFrames.count
         XCTAssertEqual(keysBefore, 2, "fixture: Group B is animated")
 
         select(f, loopOverS2AsItLooks)
@@ -339,7 +335,7 @@ final class AnimationGroupMembershipLogicTests: XCTestCase {
         XCTAssertTrue(f.manager.animationGroups.contains { $0.id == f.groupB },
                       "and the group is still in the registry, so the artist can put something back in it")
         XCTAssertEqual(f.manager.layers[f.layerIndex].cels[0]
-            .transformTracks[TransformChannelID.group(f.groupB).id]?.keys.count, 2,
+            .transformTracks[TransformChannelID.group(f.groupB).id]?.keyedFrames.count, 2,
                        "and its animation is still there, inert rather than destroyed")
     }
 
@@ -437,8 +433,7 @@ final class AnimationGroupMembershipLogicTests: XCTestCase {
         let keystone = Quad(CGPoint(x: 20, y: 2), CGPoint(x: 44, y: 2),
                             CGPoint(x: 62, y: 62), CGPoint(x: 2, y: 62))
         f.manager.layers[f.layerIndex].cels[0]
-            .transformTracks[TransformChannelID.group(f.groupB).id] = TransformTrack(keys: [
-                TransformTrack.Key(frame: 0, pose: PoseQuad(box: box, corners: keystone))])
+            .transformTracks[TransformChannelID.group(f.groupB).id] = CanvasFixture.poseTrack([(0, PoseQuad(box: box, corners: keystone))])
         XCTAssertTrue(PoseMap(PoseQuad(box: box, corners: keystone))?.isProjective ?? false,
                       "fixture: Group B's pose is genuinely a keystone")
 

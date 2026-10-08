@@ -273,9 +273,7 @@ final class KeyframeControlLogicTests: XCTestCase {
         // Frame 4 is a keyframe by pose key alone — no mark, which is what §2.26 says a channel
         // records and a mark does not.
         manager.layers[gradeIndex].cels[0].transformTracks = [
-            TransformChannelID.cel.id: TransformTrack(keys: [
-                TransformTrack.Key(frame: 4,
-                                   pose: PoseQuad(box: CGRect(x: 0, y: 0, width: 10, height: 10),
+            TransformChannelID.cel.id: CanvasFixture.poseTrack([(4, PoseQuad(box: CGRect(x: 0, y: 0, width: 10, height: 10),
                                                   mappedBy: CGAffineTransform(translationX: 3, y: 0)))])
         ]
         manager.addKeyframe(target, atFrame: 10)

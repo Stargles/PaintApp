@@ -59,12 +59,11 @@ final class TransformChannelLogicTests: XCTestCase {
         PoseQuad(box: box, mappedBy: CGAffineTransform(translationX: dx, y: 0))
     }
 
-    /// Two keys on the whole-cel channel: resting at frame 0, slid `dx` right at frame 8.
+    /// Two keys on the whole-cel channel: resting at frame 0, slid `dx` right at frame 8 — X's curve.
     private func animate(_ manager: CanvasManager, layerID: UUID, celID: UUID, dx: CGFloat = 24) {
-        manager.setTransformPoseKey(layerID: layerID, celID: celID, channel: .cel,
-                                    atCelLocalFrame: 0, pose: PoseQuad(restingIn: box))
-        manager.setTransformPoseKey(layerID: layerID, celID: celID, channel: .cel,
-                                    atCelLocalFrame: 8, pose: slide(dx))
+        CanvasFixture.setPoseTrack(manager, layerID: layerID, celID: celID,
+                                   CanvasFixture.poseTrack(box: box, [(0, PoseQuad(restingIn: box)),
+                                                                      (8, slide(dx))]))
     }
 
     private func bytes(_ image: UIImage) -> Data { image.pngData() ?? Data() }
@@ -172,8 +171,7 @@ final class TransformChannelLogicTests: XCTestCase {
         animate(manager, layerID: layerID, celID: celID)
         let before = try XCTUnwrap(manager.derivedCelContent(for: manager.layers[1].cels[0],
                                                              atFrame: 4)?.identity)
-        manager.setTransformPoseKey(layerID: layerID, celID: celID, channel: .cel,
-                                    atCelLocalFrame: 8, pose: slide(40))
+        animate(manager, layerID: layerID, celID: celID, dx: 40)
         let after = try XCTUnwrap(manager.derivedCelContent(for: manager.layers[1].cels[0],
                                                             atFrame: 4)?.identity)
         XCTAssertNotEqual(before, after)
@@ -238,10 +236,10 @@ final class TransformChannelLogicTests: XCTestCase {
     func testAGroupUnderAnAnimatedCelIsCarriedByItsGroupAndThenByTheCel() throws {
         let group = UUID()
         let tracks: [String: TransformTrack] = [
-            TransformChannelID.cel.id: TransformTrack(keys: [
-                TransformTrack.Key(frame: 0, pose: PoseQuad(box: box, mappedBy: .init(scaleX: 2, y: 2)))]),
-            TransformChannelID.group(group).id: TransformTrack(keys: [
-                TransformTrack.Key(frame: 0, pose: PoseQuad(box: box, mappedBy: .init(translationX: 3, y: 0)))])
+            TransformChannelID.cel.id: CanvasFixture.poseTrack(box: box, [
+                (0, PoseQuad(box: box, mappedBy: .init(scaleX: 2, y: 2)))]),
+            TransformChannelID.group(group).id: CanvasFixture.poseTrack(box: box, [
+                (0, PoseQuad(box: box, mappedBy: .init(translationX: 3, y: 0)))])
         ]
         let mappings = CanvasManager.poseMappings(tracks, atCelLocalFrame: 0)
         XCTAssertEqual(mappings.count, 2)
@@ -264,8 +262,8 @@ final class TransformChannelLogicTests: XCTestCase {
         let target = try XCTUnwrap(manager.keyframeTarget(layerIndex: 1))
         XCTAssertEqual(manager.keyframeFrames(of: target), [])
 
-        manager.setTransformPoseKey(layerID: layerID, celID: celID, channel: .cel,
-                                    atCelLocalFrame: 2, pose: slide(9))
+        CanvasFixture.setPoseTrack(manager, layerID: layerID, celID: celID,
+                                   CanvasFixture.poseTrack(box: box, [(2, slide(9))]))
         XCTAssertEqual(manager.keyframeFrames(of: target), [6],
                        "Cel-local 2 on a cel starting at 4 is document frame 6")
         XCTAssertTrue(manager.keyedFrames(of: target).contains(6),
@@ -274,16 +272,21 @@ final class TransformChannelLogicTests: XCTestCase {
 
     // MARK: - Undo
 
-    /// One pose key is one undo step, and undoing it takes the channel with it.
-    func testAPoseKeyIsOneUndoStep() {
+    /// One committed Move on two primed frames is one undo step, and undoing it takes the channel it
+    /// created with it.
+    func testAPoseCommitIsOneUndoStep() throws {
         let (manager, layerID, celID) = fixture()
-        manager.setTransformPoseKey(layerID: layerID, celID: celID, channel: .cel,
-                                    atCelLocalFrame: 4, pose: slide(12))
+        let target = try XCTUnwrap(manager.keyframeTarget(layerIndex: 1))
+        manager.addKeyframe(target, atFrame: 0)
+        manager.addKeyframe(target, atFrame: 4)
+        XCTAssertEqual(manager.commitTransformPose(layerID: layerID, celID: celID, channel: .cel, restBox: box,
+                                                   map: PoseMap(CGAffineTransform(translationX: 12, y: 0)),
+                                                   restElements: [], movedIDs: [], atFrame: 4), .seedAndKey)
         XCTAssertEqual(manager.layers[1].cels[0].transformTracks.count, 1)
         manager.undo()
         XCTAssertTrue(manager.layers[1].cels[0].transformTracks.isEmpty)
         manager.redo()
-        XCTAssertEqual(manager.layers[1].cels[0].transformTracks["cel"]?.keys.count, 1)
+        XCTAssertEqual(manager.layers[1].cels[0].transformTracks["cel"]?.keyedFrames, [0, 4])
     }
 
     /// Clearing a keyframe clears the pose key on it, as part of the same step — both halves, because
@@ -338,14 +341,101 @@ final class TransformChannelLogicTests: XCTestCase {
 
         manager.addKeyframe(target, atFrame: 8)
         let track = try XCTUnwrap(manager.layers[1].cels[0].transformTracks["cel"])
-        XCTAssertEqual(track.keys.map(\.frame), [0, 8])
+        XCTAssertEqual(track.keyedFrames, [0, 8])
         XCTAssertTrue(track.isAnimated)
         XCTAssertTrue(manager.layers[1].cels[0].pendingPoseBaselines.isEmpty,
                       "The held value is discarded once it has been committed")
         // Keyframe A holds the drawing 20pt back from where the geometry now sits, and B holds it
-        // where it is — the owner's *"A and B are assigned the two states of that one animation"*.
-        XCTAssertEqual(track.keys[0].pose.corners.p0.x - box.minX, -20, accuracy: 1e-9)
-        XCTAssertTrue(track.keys[1].pose.isIdentity)
+        // where it is — the owner's *"A and B are assigned the two states of that one animation"* —
+        // **on X alone**: TODO (139)'s *"only the keys of things that changed are added"*.
+        XCTAssertEqual(Set(track.curves.keys), [.x], "a sideways Move keys X and nothing else")
+        XCTAssertEqual(track.box.midX, box.midX + 20, accuracy: 1e-9,
+                       "the channel is read against the box where the baked drawing now rests")
+        XCTAssertEqual(track.curve(.x)?.key(atFrame: 0)?.value ?? 0, Double(track.box.midX) - 20, accuracy: 1e-9)
+        XCTAssertEqual(track.curve(.x)?.key(atFrame: 8)?.value ?? 0, Double(track.box.midX), accuracy: 1e-9)
+    }
+
+    /// **TODO (139)'s ruling, whole: prime two frames, change something, and both get keys — on the
+    /// components that changed and no others.** *"if you prime this in two frames and then change
+    /// something, then it should put down two keys like the behaviour today, but only the things that
+    /// changed"*. A drag right and down keys X and Y on both primed frames; Rotation, Scale, Skew and
+    /// the two keystones take nothing.
+    func testPrimingTwoFramesThenMovingKeysOnlyTheChangedComponentsOnBoth() throws {
+        let (manager, layerID, celID) = fixture()
+        let target = try XCTUnwrap(manager.keyframeTarget(layerIndex: 1))
+        manager.addKeyframe(target, atFrame: 0)
+        manager.addKeyframe(target, atFrame: 6)
+        XCTAssertEqual(manager.layers[1].keyframeMarks, [0, 6], "PREMISE: two primed frames, nothing keyed")
+
+        let route = manager.commitTransformPose(layerID: layerID, celID: celID, channel: .cel, restBox: box,
+                                                map: PoseMap(CGAffineTransform(translationX: 20, y: 7)),
+                                                restElements: [], movedIDs: [], atFrame: 6)
+        XCTAssertEqual(route, .seedAndKey, "standing on a primed frame with another primed: two keys")
+        let track = try XCTUnwrap(manager.layers[1].cels[0].transformTracks["cel"])
+        XCTAssertEqual(Set(track.curves.keys), [.x, .y], "only the things that changed")
+        XCTAssertEqual(track.curve(.x)?.keys.map(\.frame), [0, 6])
+        XCTAssertEqual(track.curve(.x)?.key(atFrame: 0)?.value ?? 0, Double(box.midX), accuracy: 1e-9,
+                       "the primed frame before holds where the drawing was")
+        XCTAssertEqual(track.curve(.y)?.key(atFrame: 0)?.value ?? 0, Double(box.midY), accuracy: 1e-9)
+        XCTAssertEqual(track.curve(.x)?.key(atFrame: 6)?.value ?? 0, Double(box.midX) + 20, accuracy: 1e-9,
+                       "and the frame the Move was made on holds where it is now")
+        XCTAssertTrue(manager.layers[1].keyframeMarks.isEmpty, "both marks are keyed now, so both marks went")
+    }
+
+    /// **A turn on a channel that already keys X keys Rotation alone** — and seeds it, so the frames
+    /// before the turn keep showing no turn. The auto-key arm keys a changed component that already
+    /// has a curve at the playhead; one that has none is seeded onto the keyframe below, which is what
+    /// a whole-pose key did for that component implicitly.
+    func testATurnOnAKeyedChannelKeysRotationAloneAndSeedsItOntoTheKeyframeBefore() throws {
+        let (manager, layerID, celID) = fixture()
+        animate(manager, layerID: layerID, celID: celID)   // X keyed at 0 and 8
+        let current = manager.resolvedPoseMap(layerID: layerID, celID: celID, channel: .cel, atFrame: 10)
+        let centre = try XCTUnwrap(current.applied(to: CGPoint(x: box.midX, y: box.midY)))
+        let turn = CGAffineTransform(translationX: -centre.x, y: -centre.y)
+            .concatenating(CGAffineTransform(rotationAngle: .pi / 6))
+            .concatenating(CGAffineTransform(translationX: centre.x, y: centre.y))
+        let keyed = current.concatenating(PoseMap(turn))
+
+        let route = manager.commitTransformPose(layerID: layerID, celID: celID, channel: .cel, restBox: box,
+                                                map: keyed, restElements: [], movedIDs: [], atFrame: 10)
+        XCTAssertEqual(route, .key)
+        let track = try XCTUnwrap(manager.layers[1].cels[0].transformTracks["cel"])
+        XCTAssertEqual(Set(track.curves.keys), [.x, .rotation], "the turn keyed Rotation and touched nothing else")
+        XCTAssertEqual(track.curve(.x)?.keys.map(\.frame), [0, 8], "X's keys are where they were")
+        XCTAssertEqual(track.curve(.rotation)?.keys.map(\.frame), [8, 10], "Rotation seeded onto 8, keyed at 10")
+        XCTAssertEqual(track.curve(.rotation)?.key(atFrame: 10)?.value ?? 0, 30, accuracy: 1e-9)
+        XCTAssertEqual(track.values(atTime: 4, base: track.restValues).rotation, 0,
+                       "so frame 4 still shows no turn")
+    }
+
+    /// **After a slide has created the channel, a turn about the drawing's own centre keys Rotation
+    /// alone** — the cold-start sequence `KeysUITests` drives, in the model: the slide's bake moves the
+    /// stored drawing, so the channel is read against the box where it now rests, and the Move box
+    /// raised at a later frame turns about that box's shown centre. A channel read against the
+    /// pre-move box keyed X and Y beside Rotation here — found by driving it.
+    func testAfterASlideCreatesTheChannelATurnAboutTheDrawingsCentreKeysRotationAlone() throws {
+        let (manager, layerID, celID) = fixture()
+        let target = try XCTUnwrap(manager.keyframeTarget(layerIndex: 1))
+        manager.addKeyframe(target, atFrame: 0)
+        manager.addKeyframe(target, atFrame: 5)
+        XCTAssertEqual(manager.commitTransformPose(layerID: layerID, celID: celID, channel: .cel, restBox: box,
+                                                   map: PoseMap(CGAffineTransform(translationX: 20, y: 7)),
+                                                   restElements: [], movedIDs: [], atFrame: 5), .seedAndKey)
+        // The drawing as stored now rests 20 right and 7 down; the Move box at frame 9 is around it as
+        // shown, and turns about its centre.
+        let stored = CGPoint(x: box.midX + 20, y: box.midY + 7)
+        let current = manager.resolvedPoseMap(layerID: layerID, celID: celID, channel: .cel, atFrame: 9)
+        let pivot = try XCTUnwrap(current.applied(to: stored))
+        let turn = CGAffineTransform(translationX: -pivot.x, y: -pivot.y)
+            .concatenating(CGAffineTransform(rotationAngle: -.pi / 4))
+            .concatenating(CGAffineTransform(translationX: pivot.x, y: pivot.y))
+        XCTAssertEqual(manager.commitTransformPose(layerID: layerID, celID: celID, channel: .cel, restBox: box,
+                                                   map: current.concatenating(PoseMap(turn)),
+                                                   restElements: [], movedIDs: [], atFrame: 9), .key)
+        let track = try XCTUnwrap(manager.layers[1].cels[0].transformTracks["cel"])
+        XCTAssertEqual(track.curve(.x)?.keys.map(\.frame), [0, 5], "X keeps its two keys")
+        XCTAssertEqual(track.curve(.y)?.keys.map(\.frame), [0, 5], "Y keeps its two keys")
+        XCTAssertEqual(track.curve(.rotation)?.keys.map(\.frame), [5, 9], "and the turn is Rotation's alone")
     }
 
     /// **A Move is allowed at a frame the cel is not resting at**, which reverses what this test
@@ -384,9 +474,10 @@ final class TransformChannelLogicTests: XCTestCase {
         let (manager, layerID, celID) = fixture()
         manager.currentLayerIndex = 1
         manager.currentFrame = 0
-        // One key at frame 0 holding the rest pose: a channel in force, resting where the box is.
-        manager.setTransformPoseKey(layerID: layerID, celID: celID, channel: .cel,
-                                    atCelLocalFrame: 0, pose: PoseQuad(restingIn: box))
+        // One key at frame 0 holding X at rest: a channel in force, resting where the box is.
+        CanvasFixture.setPoseTrack(manager, layerID: layerID, celID: celID,
+                                   TransformTrack(box: box, curves: [.x: AnimationCurve(keys: [
+                                       .init(frame: 0, value: Double(box.midX))])]))
         let restX = try XCTUnwrap(manager.layers[1].cels[0].vector?.elements.first?.stroke?
             .samples.first?.point.x)
 
@@ -394,18 +485,16 @@ final class TransformChannelLogicTests: XCTestCase {
         var pose = try XCTUnwrap(manager.vectorFloat?.frame.transform)
         pose.position.x += 15
         manager.nudgeVectorFloat(to: pose)
-        XCTAssertEqual(manager.layers[1].cels[0].transformTracks["cel"]?.keys.count, 1,
+        XCTAssertEqual(manager.layers[1].cels[0].transformTracks["cel"]?.keyCount, 1,
                        "A nudge writes no key — §2.5, and it is the ruling rather than a convenience")
 
         manager.commitVectorFloatIfNeeded()
         let track = try XCTUnwrap(manager.layers[1].cels[0].transformTracks["cel"])
-        XCTAssertEqual(track.keys.count, 1, "The key replaces the one on this frame")
-        // **Against the pose's *own* box, which is the float's measured ink bounds rather than this
-        // file's fixture rectangle.** The first draft compared to the fixture and read 14 for a 15pt
-        // drag — the difference being `MoveBoxInk`'s half-a-stroke-width padding, which is exactly the
-        // reason a pose stores the box it was measured against instead of assuming one.
-        let key = track.keys[0].pose
-        XCTAssertEqual(key.corners.p0.x - key.box.minX, 15, accuracy: 1e-6)
+        XCTAssertEqual(track.keyCount, 1, "The key replaces the one on this frame")
+        XCTAssertEqual(Set(track.curves.keys), [.x], "…and the slide keyed no other component")
+        // Read against the channel's own box, which the drag's map is decomposed in whatever box the
+        // Move box measured: X is where that box's centre is now shown.
+        XCTAssertEqual(track.curve(.x)?.key(atFrame: 0)?.value ?? 0, Double(box.midX) + 15, accuracy: 1e-6)
 
         let afterX = try XCTUnwrap(manager.layers[1].cels[0].vector?.elements.first?.stroke?
             .samples.first?.point.x)
@@ -421,8 +510,9 @@ final class TransformChannelLogicTests: XCTestCase {
     private func shownDX(_ manager: CanvasManager, atFrame frame: Int) -> CGFloat? {
         guard let index = manager.activeCelIndex(inLayer: 1, atFrame: frame) else { return nil }
         let cel = manager.layers[1].cels[index]
-        guard let pose = manager.resolvedPose(layerID: manager.layers[1].id, celID: cel.id,
-                                              channel: .cel, atFrame: frame) else { return nil }
+        guard !cel.transformTracks.isEmpty else { return nil }
+        let pose = CanvasFixture.resolvedPose(manager, layerID: manager.layers[1].id, celID: cel.id,
+                                              atFrame: frame, box: box)
         return pose.corners.p0.x - pose.box.minX
     }
 
@@ -438,9 +528,9 @@ final class TransformChannelLogicTests: XCTestCase {
     private func animateLinearly(_ manager: CanvasManager, dx travel: CGFloat = 120,
                                  lastKeyAt lastKey: Int = 11) {
         manager.layers[1].cels[0].transformTracks = [
-            TransformChannelID.cel.id: TransformTrack(keys: [
-                TransformTrack.Key(frame: 0, pose: PoseQuad(restingIn: box), interpolation: .linear),
-                TransformTrack.Key(frame: lastKey, pose: slide(travel), interpolation: .linear)])
+            TransformChannelID.cel.id: TransformTrack(box: box, curves: [.x: AnimationCurve(keys: [
+                .init(frame: 0, value: Double(box.midX), interpolation: .linear),
+                .init(frame: lastKey, value: Double(box.midX + travel), interpolation: .linear)])])
         ]
     }
 
@@ -484,7 +574,7 @@ final class TransformChannelLogicTests: XCTestCase {
         manager.splitCel(layerIndex: 1, celIndex: 0, atFrame: 5)
         manager.undo()
         XCTAssertEqual(manager.layers[1].cels.count, 1)
-        XCTAssertEqual(manager.layers[1].cels[0].transformTracks["cel"]?.keys.map(\.frame), [0, 11])
+        XCTAssertEqual(manager.layers[1].cels[0].transformTracks["cel"]?.keyedFrames, [0, 11])
     }
 
     /// **`duplicateCel` copies the animation with the drawing.** `Cel.transformTracks`' own doc
@@ -511,7 +601,7 @@ final class TransformChannelLogicTests: XCTestCase {
         XCTAssertEqual(manager.layers[1].cels.count, 2)
         let copy = manager.layers[1].cels[1]
         XCTAssertEqual(copy.startFrame, 6)
-        XCTAssertEqual(copy.transformTracks["cel"]?.keys.map(\.frame), [0, 5],
+        XCTAssertEqual(copy.transformTracks["cel"]?.keyedFrames, [0, 5],
                        "keys are cel-local, so they need no rebasing and none is done")
         XCTAssertEqual(copy.pendingPoseBaselines["cel"], slide(-7))
         XCTAssertNotEqual(copy.id, celID, "and it really is a different cel")
@@ -529,7 +619,7 @@ final class TransformChannelLogicTests: XCTestCase {
         manager.copyCel(layerIndex: 1, celIndex: 0)
         XCTAssertTrue(manager.pasteCel(layerIndex: 1, startFrame: 20))
         let pasted = try XCTUnwrap(manager.layers[1].cels.first { $0.startFrame == 20 })
-        XCTAssertEqual(pasted.transformTracks["cel"]?.keys.map(\.frame), [0, 5])
+        XCTAssertEqual(pasted.transformTracks["cel"]?.keyedFrames, [0, 5])
         XCTAssertEqual(pasted.pendingPoseBaselines["cel"], slide(-3))
     }
 
@@ -628,10 +718,9 @@ final class TransformChannelLogicTests: XCTestCase {
 
         // The whole-cel channel is animated across frames 0 and 4 — keys placed by moving, which
         // §2.26 records as a curve and no mark, so `keyframeMarks` is empty.
-        manager.setTransformPoseKey(layerID: layerID, celID: celID, channel: .cel,
-                                    atCelLocalFrame: 0, pose: PoseQuad(restingIn: box))
-        manager.setTransformPoseKey(layerID: layerID, celID: celID, channel: .cel,
-                                    atCelLocalFrame: 4, pose: slide(30))
+        CanvasFixture.setPoseTrack(manager, layerID: layerID, celID: celID,
+                                   CanvasFixture.poseTrack(box: box, [(0, PoseQuad(restingIn: box)),
+                                                                      (4, slide(30))]))
         XCTAssertEqual(manager.keyframeState(of: target).marks, [],
                        "Setup: frames 0 and 4 are keyframes by key, not by mark")
         XCTAssertEqual(manager.keyframeFrames(of: target), [0, 4])
@@ -643,11 +732,13 @@ final class TransformChannelLogicTests: XCTestCase {
 
         manager.addKeyframe(target, atFrame: 8)
         let track = try XCTUnwrap(manager.layers[1].cels[0].transformTracks["group.\(group.uuidString)"])
-        XCTAssertEqual(track.keys.map(\.frame), [4, 8],
+        XCTAssertEqual(track.keyedFrames, [4, 8],
                        "The held pose lands on frame 4 — the nearest keyframe below, which is a pose key")
         XCTAssertTrue(track.isAnimated)
-        XCTAssertEqual(track.key(atFrame: 4)?.pose, slide(-18), "keyframe A holds where the drawing was")
-        XCTAssertEqual(track.key(atFrame: 8)?.pose.isIdentity, true, "and B holds where it is now")
+        XCTAssertEqual(track.curve(.x)?.key(atFrame: 4)?.value ?? 0, Double(box.midX) - 18, accuracy: 1e-9,
+                       "keyframe A holds where the drawing was")
+        XCTAssertEqual(track.curve(.x)?.key(atFrame: 8)?.value ?? 0, Double(box.midX), accuracy: 1e-9,
+                       "and B holds where it is now")
         XCTAssertTrue(manager.layers[1].cels[0].pendingPoseBaselines.isEmpty)
     }
 

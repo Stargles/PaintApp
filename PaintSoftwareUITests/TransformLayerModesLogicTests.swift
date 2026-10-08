@@ -414,8 +414,9 @@ final class TransformLayerModesLogicTests: XCTestCase {
     func testSwitchingTheModeIsOneUndoStepThatLeavesThePoseAndItsKeysAlone() throws {
         let fx = fourDrawings(mover: pose(.identity, mode: .move))
         var keyed = try XCTUnwrap(fx.manager.layers[fx.mover].transform)
-        keyed.track.setKey(TransformTrack.Key(frame: 0, pose: PoseQuad(restingIn: canvasBox)))
-        keyed.track.setKey(TransformTrack.Key(frame: 8, pose: PoseQuad(box: canvasBox, mappedBy: CGAffineTransform(translationX: 30, y: 0))))
+        keyed.track = CanvasFixture.poseTrack(box: canvasBox, [
+            (0, PoseQuad(restingIn: canvasBox)),
+            (8, PoseQuad(box: canvasBox, mappedBy: CGAffineTransform(translationX: 30, y: 0)))])
         fx.manager.layers[fx.mover].transform = keyed
         fx.manager.layers[fx.mover].rotateSpeed = 15
         let target = KeyframeTarget.layer(id: fx.manager.layers[fx.mover].id)
@@ -520,10 +521,11 @@ final class TransformLayerModesLogicTests: XCTestCase {
         XCTAssertTrue(fx.manager.addKeyframe(target, atFrame: 4))
 
         let track = try XCTUnwrap(fx.manager.layers[fx.mover].transform?.track)
-        XCTAssertEqual(track.keys.map(\.frame), [0, 4], "A took the held rest pose, B the moved box")
-        XCTAssertTrue(try XCTUnwrap(track.key(atFrame: 0)).pose.isIdentity, "A holds the box where it rested")
-        XCTAssertEqual(try XCTUnwrap(track.key(atFrame: 4)).pose.corners.p0.x, slid.corners.p0.x, accuracy: 1e-9,
-                       "B holds the box where it went — the box, and never the angle")
+        XCTAssertEqual(track.keyedFrames, [0, 4], "A took the held rest pose, B the moved box")
+        XCTAssertEqual(Set(track.curves.keys), [.x], "…on X alone — the box, and never the angle")
+        XCTAssertEqual(track.curve(.x)?.key(atFrame: 0)?.value, track.restValues.x, "A holds the box where it rested")
+        XCTAssertEqual(track.curve(.x)?.key(atFrame: 4)?.value ?? 0, track.restValues.x + 6, accuracy: 1e-9,
+                       "B holds the box where it went")
         XCTAssertEqual(fx.manager.layers[fx.mover].transform?.mode, .rotate,
                        "neither the Move nor the mark lost the mode")
         let right = CGPoint(x: centre.x + 10, y: centre.y)

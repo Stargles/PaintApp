@@ -78,11 +78,9 @@ final class ProjectPackageLayoutLogicTests: XCTestCase {
         // A pose channel, so the `animation` sidecar is written too — KEYFRAMES.md §3.5. Two keys,
         // because one key is not a channel anybody would author.
         let box = CGRect(x: 0, y: 0, width: 64, height: 64)
-        manager.layers[vectorLayer].cels[0].transformTracks["cel"] = TransformTrack(keys: [
-            TransformTrack.Key(frame: 0, pose: PoseQuad(restingIn: box), interpolation: .linear),
-            TransformTrack.Key(frame: 8, pose: PoseQuad(restingIn: box.offsetBy(dx: 20, dy: 0)),
-                               interpolation: .linear)
-        ])
+        manager.layers[vectorLayer].cels[0].transformTracks["cel"] = CanvasFixture.poseTrack(box: box, [
+            (0, PoseQuad(restingIn: box)),
+            (8, PoseQuad(box: box, mappedBy: CGAffineTransform(translationX: 20, y: 0)))], interpolation: .linear)
         return manager
     }
 
@@ -231,7 +229,7 @@ final class ProjectPackageLayoutLogicTests: XCTestCase {
         // else in the suite would notice: `decodeCel`'s animation branch has no else arm, so a miss
         // leaves an empty map with no log line at all.
         let tracks = reloaded.layers.compactMap { $0.cels.first }.flatMap { $0.transformTracks.values }
-        XCTAssertEqual(tracks.first?.keys.count, 2,
+        XCTAssertEqual(tracks.first?.keyedFrames.count, 2,
                        "\(context): the cel's pose channel should still carry both of its keys — a "
                        + "missing animation sidecar loads as an empty map and says nothing",
                        file: file, line: line)

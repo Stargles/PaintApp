@@ -49,11 +49,7 @@ final class SplitDrawingLogicTests: XCTestCase {
     /// Two keys on the whole-cel channel — enough to make `transformTracks` non-empty, which is all
     /// the gate reads. The pose values themselves are not asserted on here.
     private func linearTrack() -> TransformTrack {
-        TransformTrack(keys: [
-            TransformTrack.Key(frame: 0, pose: PoseQuad(restingIn: box), interpolation: .linear),
-            TransformTrack.Key(frame: 6, pose: PoseQuad(box: box, mappedBy: CGAffineTransform(translationX: 12, y: 0)),
-                               interpolation: .linear)
-        ])
+        CanvasFixture.poseTrack([(0, PoseQuad(restingIn: box)), (6, PoseQuad(box: box, mappedBy: CGAffineTransform(translationX: 12, y: 0)))], interpolation: .linear)
     }
 
     /// The picture a cel shows from its own storage — what `splitCel`'s copy has to reproduce for
@@ -215,8 +211,9 @@ final class SplitDrawingLogicTests: XCTestCase {
         func shownDX(_ frame: Int) -> CGFloat? {
             guard let index = manager.activeCelIndex(inLayer: 1, atFrame: frame) else { return nil }
             let c = manager.layers[1].cels[index]
-            guard let pose = manager.resolvedPose(layerID: manager.layers[1].id, celID: c.id,
-                                                  channel: .cel, atFrame: frame) else { return nil }
+            guard c.transformTracks[TransformChannelID.cel.id] != nil else { return nil }
+            let pose = CanvasFixture.resolvedPose(manager, layerID: manager.layers[1].id, celID: c.id,
+                                                  atFrame: frame, box: box)
             return pose.corners.p0.x - pose.box.minX
         }
 

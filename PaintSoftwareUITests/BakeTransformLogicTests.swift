@@ -95,9 +95,7 @@ final class BakeTransformLogicTests: XCTestCase {
         let at = manager.layers.firstIndex { $0.name == name }!
         let rest = PoseQuad(restingIn: canvasRect)
         let moved = PoseQuad(box: canvasRect, mappedBy: CGAffineTransform(translationX: dx, y: 0))
-        manager.layers[at].transform = LayerPose(pose: rest, track: TransformTrack(keys: [
-            .init(frame: 0, pose: rest, interpolation: .linear),
-            .init(frame: last, pose: moved, interpolation: .linear)]))
+        manager.layers[at].transform = LayerPose(pose: rest, track: CanvasFixture.poseTrack([(0, rest), (last, moved)], interpolation: .linear))
         return manager.layers[at].id
     }
 
@@ -300,9 +298,7 @@ final class BakeTransformLogicTests: XCTestCase {
         let ink = addInk(manager, "Ink")
         let own = PoseQuad(box: canvasRect, mappedBy: CGAffineTransform(translationX: 8, y: 0))
         manager.layers[index(ink, manager)].cels[0].transformTracks = [
-            TransformChannelID.cel.id: TransformTrack(keys: [
-                .init(frame: 0, pose: PoseQuad(restingIn: canvasRect), interpolation: .linear),
-                .init(frame: 11, pose: own, interpolation: .linear)], step: 1)]
+            TransformChannelID.cel.id: CanvasFixture.poseTrack([(0, PoseQuad(restingIn: canvasRect)), (11, own)], interpolation: .linear, step: 1)]
         let move = addMove(manager, CGAffineTransform(translationX: 16, y: 0))
         let before = try scene(manager)
 
@@ -549,9 +545,7 @@ final class BakeTransformLogicTests: XCTestCase {
         let sprite = addDrawings(manager, "Sprite", blocks: [(0, 4)])
         let moved = PoseQuad(box: canvasRect, mappedBy: CGAffineTransform(translationX: 24, y: 0))
         manager.layers[index(sprite, manager)].cels[0].transformTracks = [
-            TransformChannelID.cel.id: TransformTrack(keys: [
-                .init(frame: 0, pose: PoseQuad(restingIn: canvasRect), interpolation: .linear),
-                .init(frame: 3, pose: moved, interpolation: .linear)], step: 1)]
+            TransformChannelID.cel.id: CanvasFixture.poseTrack([(0, PoseQuad(restingIn: canvasRect)), (3, moved)], interpolation: .linear, step: 1)]
         let loop = addLoop(manager, period: 4)
         let before = try scene(manager)
         XCTAssertNotEqual(before[0], before[3], "Premise: the sprite moves within its cycle")
@@ -572,9 +566,7 @@ final class BakeTransformLogicTests: XCTestCase {
         let sprite = addDrawings(manager, "Sprite", blocks: [(0, 8)])
         let moved = PoseQuad(box: canvasRect, mappedBy: CGAffineTransform(translationX: 24, y: 0))
         manager.layers[index(sprite, manager)].cels[0].transformTracks = [
-            TransformChannelID.cel.id: TransformTrack(keys: [
-                .init(frame: 0, pose: PoseQuad(restingIn: canvasRect), interpolation: .linear),
-                .init(frame: 7, pose: moved, interpolation: .linear)], step: 1)]
+            TransformChannelID.cel.id: CanvasFixture.poseTrack([(0, PoseQuad(restingIn: canvasRect)), (7, moved)], interpolation: .linear, step: 1)]
         let loop = addLoop(manager, period: 3, bar: 2..<12)
 
         XCTAssertEqual(manager.bakeLayer(id: loop),
@@ -597,9 +589,7 @@ final class BakeTransformLogicTests: XCTestCase {
         let sprite = addDrawings(manager, "Sprite", blocks: [(0, 12)])
         let moved = PoseQuad(box: canvasRect, mappedBy: CGAffineTransform(translationX: 24, y: 0))
         manager.layers[index(sprite, manager)].cels[0].transformTracks = [
-            TransformChannelID.cel.id: TransformTrack(keys: [
-                .init(frame: 0, pose: PoseQuad(restingIn: canvasRect), interpolation: .bezier),
-                .init(frame: 11, pose: moved, interpolation: .bezier)], step: 1)]
+            TransformChannelID.cel.id: CanvasFixture.poseTrack([(0, PoseQuad(restingIn: canvasRect)), (11, moved)], interpolation: .bezier, step: 1)]
         let loop = addLoop(manager, period: 4)
 
         XCTAssertEqual(manager.bakeLayer(id: loop),

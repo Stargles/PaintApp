@@ -535,9 +535,7 @@ final class BakeLogicTests: XCTestCase {
             let rest = PoseQuad(restingIn: whole)
             let moved = PoseQuad(box: whole, mappedBy: CGAffineTransform(translationX: 8, y: 0))
             manager.layers[index(floor, manager)].cels[0].transformTracks = [
-                TransformChannelID.cel.id: TransformTrack(keys: [
-                    .init(frame: 0, pose: rest, interpolation: .linear),
-                    .init(frame: 11, pose: moved, interpolation: .linear)])]
+                TransformChannelID.cel.id: CanvasFixture.poseTrack([(0, rest), (11, moved)], interpolation: .linear)]
             return (manager, floor)
         }
 

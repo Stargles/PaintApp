@@ -81,26 +81,27 @@ final class AnimatedDistortLogicTests: XCTestCase {
         XCTAssertEqual(route, .key, "Fixture: an already-animated channel takes the auto-key arm")
 
         let track = try XCTUnwrap(manager.layers[1].cels[0].transformTracks["cel"])
-        let key = try XCTUnwrap(track.key(atFrame: 4))
-        XCTAssertNil(key.pose.affine, "The stored key is a keystone and not any affine")
-        XCTAssertEqual(key.pose.map?.isProjective, true)
-        // The four corners are the artist's, to the bit the solver can recover them.
-        for (stored, wanted) in zip(key.pose.corners.points, keystone.points) {
+        XCTAssertNotNil(track.curve(.perspectiveY)?.key(atFrame: 4),
+                        "TODO (139): the keystone is keyed as a Perspective curve, not dropped")
+        let shown = CanvasFixture.resolvedPose(manager, layerID: layerID, celID: celID, atFrame: 4, box: box)
+        XCTAssertNil(shown.affine, "The frame shows a keystone and not any affine")
+        // The four corners are the artist's, to the precision the components recover them.
+        for (stored, wanted) in zip(shown.corners.points, keystone.points) {
             XCTAssertEqual(distance(stored, wanted), 0, accuracy: 1e-6)
         }
     }
 
-    /// **A keystoned key survives a save and a reload**, which costs nothing to check and is the one
-    /// claim §2.14 made in advance: eight doubles were always on the wire, so the format did not move.
+    /// **A keystoned channel survives a save and a reload** — its Perspective curves are ordinary
+    /// curves on the wire, so a reload draws the same keystone.
     func testAKeystonedKeySurvivesTheWireUnflattened() throws {
-        let track = TransformTrack(keys: [TransformTrack.Key(frame: 0, pose: restingPose),
-                                          TransformTrack.Key(frame: 8, pose: keystonePose)])
+        let track = CanvasFixture.poseTrack(box: box, [(0, restingPose), (8, keystonePose)])
         let decoded = try JSONDecoder().decode(TransformTrack.self,
                                                from: try JSONEncoder().encode(track))
-        let key = try XCTUnwrap(decoded.key(atFrame: 8))
-        XCTAssertNil(key.pose.affine, "A reload must not flatten the keystone")
-        for (stored, wanted) in zip(key.pose.corners.points, keystone.points) {
-            XCTAssertEqual(distance(stored, wanted), 0, accuracy: 1e-9)
+        XCTAssertEqual(decoded, track)
+        let map = try XCTUnwrap(decoded.mapping(atCelLocalFrame: 8))
+        XCTAssertTrue(map.isProjective, "A reload must not flatten the keystone")
+        for (corner, wanted) in zip(Quad.rect(box).points, keystone.points) {
+            XCTAssertEqual(distance(try XCTUnwrap(map.applied(to: corner)), wanted), 0, accuracy: 1e-6)
         }
     }
 
@@ -114,7 +115,7 @@ final class AnimatedDistortLogicTests: XCTestCase {
     /// **164.4 px** at the box's own bottom corner, so a reader that quietly went back to it cannot
     /// pass.
     func testTheCelChannelsRenderReadAnswersTheKeystoneAndNotItsLinearisation() throws {
-        let track = TransformTrack(keys: [TransformTrack.Key(frame: 0, pose: keystonePose)])
+        let track = CanvasFixture.poseTrack(box: box, [(0, keystonePose)])
         let map = try XCTUnwrap(track.mapping(atCelLocalFrame: 3), "A single key holds at every frame")
         XCTAssertTrue(map.isProjective)
         XCTAssertNil(map.affine)
@@ -136,8 +137,7 @@ final class AnimatedDistortLogicTests: XCTestCase {
         let stored = try XCTUnwrap(pose.mapping(atFrame: 0))
         XCTAssertTrue(stored.isProjective, "The stored base carries a keystone")
 
-        pose.track = TransformTrack(keys: [TransformTrack.Key(frame: 0, pose: restingPose),
-                                           TransformTrack.Key(frame: 8, pose: keystonePose)])
+        pose.track = CanvasFixture.poseTrack(box: box, [(0, restingPose), (8, keystonePose)])
         XCTAssertNil(pose.mapping(atFrame: 0),
                      "A resting key still costs the leaves beneath it no derivation at all")
         let keyed = try XCTUnwrap(pose.mapping(atFrame: 8))
@@ -150,8 +150,7 @@ final class AnimatedDistortLogicTests: XCTestCase {
     /// the 78.5% figure).
     func testAnAffinePoseIsStillAnAffineMapAndTheSameOne() throws {
         let slid = CGAffineTransform(translationX: 17, y: -4).rotated(by: 0.3)
-        let track = TransformTrack(keys: [TransformTrack.Key(frame: 0,
-                                                            pose: PoseQuad(box: box, mappedBy: slid))])
+        let track = CanvasFixture.poseTrack(box: box, [(0, PoseQuad(box: box, mappedBy: slid))])
         let map = try XCTUnwrap(track.mapping(atCelLocalFrame: 0))
         XCTAssertFalse(map.isProjective)
         let recovered = try XCTUnwrap(map.affine)
@@ -456,8 +455,8 @@ final class AnimatedDistortLogicTests: XCTestCase {
         let celBox = CGRect(origin: .zero, size: CanvasFixture.canvasSize)
         let pulled = Quad(CGPoint(x: celBox.width / 4, y: 0), CGPoint(x: celBox.width * 3 / 4, y: 0),
                           CGPoint(x: celBox.maxX, y: celBox.maxY), CGPoint(x: 0, y: celBox.maxY))
-        manager.setTransformPoseKey(layerID: layerID, celID: celID, channel: .cel,
-                                    atCelLocalFrame: 0, pose: PoseQuad(box: celBox, corners: pulled))
+        CanvasFixture.setPoseTrack(manager, layerID: layerID, celID: celID,
+                                   CanvasFixture.poseTrack(box: celBox, [(0, PoseQuad(box: celBox, corners: pulled))]))
         let pose = try XCTUnwrap(manager.layers[at].cels[0]
             .transformTracks["cel"]?.mapping(atCelLocalFrame: 0))
         XCTAssertTrue(pose.isProjective, "Fixture: the frame the artist is standing on is a keystone")
@@ -579,10 +578,12 @@ final class AnimatedDistortLogicTests: XCTestCase {
         // 4. The second mark commits it, and the pair is an animation.
         XCTAssertTrue(manager.addKeyframe(target, atFrame: 8))
         let track = try XCTUnwrap(manager.layers[at].cels[0].transformTracks["cel"])
-        XCTAssertEqual(track.keys.count, 2)
+        XCTAssertEqual(track.keyedFrames, [0, 8])
         XCTAssertTrue(track.isAnimated)
-        XCTAssertNil(try XCTUnwrap(track.key(atFrame: 0)).pose.affine,
-                     "Keyframe A holds where the drawing was — a keystone, because the Move was one")
+        XCTAssertNotNil(track.curve(.perspectiveX) ?? track.curve(.perspectiveY),
+                        "TODO (139): the Distort is keyed as Perspective curves")
+        XCTAssertEqual(track.mapping(atCelLocalFrame: 0)?.isProjective, true,
+                       "Keyframe A holds where the drawing was — a keystone, because the Move was one")
 
         // 5. And a scrub between them shows a keystone rather than a parallelogram.
         let between = try XCTUnwrap(track.mapping(atCelLocalFrame: 4))
@@ -606,11 +607,10 @@ final class AnimatedDistortLogicTests: XCTestCase {
         cel.vector?.addStroke(stroke([CGPoint(x: 6, y: 10), CGPoint(x: 18, y: 10)]))
         manager.layers[1].cels = [cel]
         let layerID = manager.layers[1].id
-        manager.setTransformPoseKey(layerID: layerID, celID: cel.id, channel: .cel,
-                                    atCelLocalFrame: 0, pose: PoseQuad(restingIn: box))
-        manager.setTransformPoseKey(layerID: layerID, celID: cel.id, channel: .cel,
-                                    atCelLocalFrame: 8,
-                                    pose: PoseQuad(box: box, mappedBy: .init(translationX: 5, y: 0)))
+        CanvasFixture.setPoseTrack(manager, layerID: layerID, celID: cel.id,
+                                   CanvasFixture.poseTrack(box: box, [
+                                       (0, PoseQuad(restingIn: box)),
+                                       (8, PoseQuad(box: box, mappedBy: .init(translationX: 5, y: 0)))]))
         return (manager, layerID, cel.id)
     }
 

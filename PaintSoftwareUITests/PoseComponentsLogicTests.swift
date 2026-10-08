@@ -1,14 +1,14 @@
 import XCTest
 import CoreGraphics
 
-/// **The six curves a pose is read as, and the round trip back into it** — KEYFRAMES.md §11.7's
-/// first ruling, the owner's one word: *"decomposed"*.
+/// **The eight curves a pose is keyed as, and the round trip back into it** — KEYFRAMES.md §11.7's
+/// first ruling (*"decomposed"*) and TODO (139)'s: every component independent, and Distort two more
+/// of them, Perspective X and Perspective Y.
 ///
-/// This is the file the transform band's honesty rests on. The band itself does nothing new — it
-/// draws six ordinary `AnimationCurve`s — so every way the feature can be *wrong* is in here: a
-/// decomposition that names the wrong quantity, a recomposition that is not its inverse, an edit to
-/// one component that moves another, or a projective pose flattened into an affine one without
-/// saying so.
+/// A pose channel stores one curve per component, so every way the feature can be *wrong* is in
+/// here: a decomposition that names the wrong quantity, a recomposition that is not its inverse, an
+/// edit to one component that moves another, a keystone that moves the drawing, or a change test
+/// that keys a component the gesture did not touch.
 ///
 /// **Three of the tests below could each be written in a vacuous form and are deliberately not.**
 /// "Decomposition returns six numbers" is true of any implementation whatever and measures a
@@ -68,10 +68,10 @@ final class PoseComponentsLogicTests: XCTestCase {
     /// **A resting pose decomposes to the neutral six, and the expectation is not the function under
     /// test.** `Values.resting(in:)` is written out separately for exactly this reason: comparing
     /// `decompose(rest)` against `decompose(rest)` would be an equality anyone could pass.
-    func testARestingPoseDecomposesToTheNeutralSix() throws {
-        let values = try XCTUnwrap(PoseComponents.decompose(PoseQuad(restingIn: box)))
+    func testARestingPoseDecomposesToTheNeutralEight() throws {
+        let values = try XCTUnwrap(PoseComponents.decompose(PoseQuad(restingIn: box), inBox: box))
         XCTAssertEqual(values, PoseComponents.Values.resting(in: box),
-                       "Position at the box's own centre, scales 1, no rotation and no skew")
+                       "Position at the box's own centre, scales 1, no rotation, skew or keystone")
     }
 
     /// **Each component names the quantity it claims to name**, checked against a number derived by
@@ -81,25 +81,25 @@ final class PoseComponentsLogicTests: XCTestCase {
     /// radians were confused, or if position were reported as an offset rather than as a place — none
     /// of which a round-trip test can see, because every one of them round-trips perfectly.
     func testEachComponentNamesTheQuantityItClaimsTo() throws {
-        let slid = try XCTUnwrap(PoseComponents.decompose(pose(CGAffineTransform(translationX: 31, y: -12))))
+        let slid = try XCTUnwrap(PoseComponents.decompose(pose(CGAffineTransform(translationX: 31, y: -12)), inBox: box))
         XCTAssertEqual(slid.x, Double(box.midX) + 31, accuracy: 1e-9, "X is where the centre went")
         XCTAssertEqual(slid.y, Double(box.midY) - 12, accuracy: 1e-9)
         XCTAssertEqual(slid.scaleX, 1, accuracy: 1e-9, "…and a slide scales nothing")
         XCTAssertEqual(slid.rotation, 0, accuracy: 1e-9)
 
-        let scaled = try XCTUnwrap(PoseComponents.decompose(pose(CGAffineTransform(scaleX: 0.4, y: 3))))
+        let scaled = try XCTUnwrap(PoseComponents.decompose(pose(CGAffineTransform(scaleX: 0.4, y: 3)), inBox: box))
         XCTAssertEqual(scaled.scaleX, 0.4, accuracy: 1e-9)
         XCTAssertEqual(scaled.scaleY, 3, accuracy: 1e-9)
         XCTAssertEqual(scaled.skew, 0, accuracy: 1e-9, "a non-uniform scale is not a skew")
 
-        let turned = try XCTUnwrap(PoseComponents.decompose(pose(rotation(37))))
+        let turned = try XCTUnwrap(PoseComponents.decompose(pose(rotation(37)), inBox: box))
         XCTAssertEqual(turned.rotation, 37, accuracy: 1e-7, "degrees, not radians")
         XCTAssertEqual(turned.scaleX, 1, accuracy: 1e-9, "…and a turn stretches nothing")
         XCTAssertEqual(turned.scaleY, 1, accuracy: 1e-9)
         XCTAssertEqual(turned.x, Double(box.midX), accuracy: 1e-7,
                        "a turn about the box's own centre leaves the centre where it is")
 
-        let mirrored = try XCTUnwrap(PoseComponents.decompose(pose(CGAffineTransform(scaleX: -1, y: 1))))
+        let mirrored = try XCTUnwrap(PoseComponents.decompose(pose(CGAffineTransform(scaleX: -1, y: 1)), inBox: box))
         XCTAssertGreaterThan(mirrored.scaleX, 0,
                              "`scaleX` is a length, so a mirror is never spelled here")
         XCTAssertEqual(abs(mirrored.scaleY), 1, accuracy: 1e-9)
@@ -121,7 +121,7 @@ final class PoseComponentsLogicTests: XCTestCase {
         XCTAssertEqual(polar.angle * 180 / .pi, -16.699, accuracy: 0.01,
                        "Fixture: polar puts nearly 17 degrees of turn into a pose with no turn in it")
 
-        let values = try XCTUnwrap(PoseComponents.decompose(sheared))
+        let values = try XCTUnwrap(PoseComponents.decompose(sheared, inBox: box))
         XCTAssertEqual(values.rotation, 0, accuracy: 1e-9,
                        "The band reports no rotation, which is what the artist did")
         XCTAssertEqual(values.scaleX, 1, accuracy: 1e-9)
@@ -133,104 +133,162 @@ final class PoseComponentsLogicTests: XCTestCase {
     // MARK: - The round trip
 
     /// **Decompose then recompose returns the pose it was given**, for every kind of affine pose the
-    /// app can author and two it cannot.
+    /// app can author.
     ///
     /// The tolerance is stated rather than left to `==`: both directions go through `atan2`, `hypot`
     /// and `tan`, so this is a floating-point guarantee and not a bitwise one. **1e-8 of a canvas
     /// point** on a box 40 points across — five orders of magnitude below anything that could move a
-    /// pixel — which is also why `PoseInterpolation.blend` short-circuits its endpoints rather than
-    /// round-tripping a key through its own factorisation.
-    func testEveryPoseRoundTripsThroughItsSixNumbers() throws {
+    /// pixel.
+    func testEveryPoseRoundTripsThroughItsEightNumbers() throws {
         for (name, original) in poses {
-            let values = try XCTUnwrap(PoseComponents.decompose(original), name)
+            let values = try XCTUnwrap(PoseComponents.decompose(original, inBox: box), name)
+            XCTAssertEqual(values.perspectiveX, 0, "\(name): an affine pose carries no keystone")
+            XCTAssertEqual(values.perspectiveY, 0, "\(name)")
             let rebuilt = try XCTUnwrap(PoseComponents.recompose(values, box: original.box), name)
             XCTAssertEqual(rebuilt.box, original.box, "\(name): the box is carried, not re-derived")
             assertQuad(rebuilt.corners, original.corners, "\(name) did not round-trip")
+            XCTAssertFalse(PoseComponents.map(values, box: box)?.isProjective ?? true,
+                           "\(name): no keystone, no projective arithmetic")
         }
     }
 
-    /// **Editing one component moves that component and leaves the other five exactly where they
-    /// were** — the property the write-back would stand on, and the one an implementation gets wrong
-    /// by recomposing from a *fresh* decomposition of the edited pose.
+    /// **Changing one component moves that component and leaves the other seven exactly where they
+    /// were** — the property a per-component curve stands on: evaluating seven curves and changing
+    /// the eighth must not leak into the seven.
     ///
-    /// Written as a loop over all six against a pose that has a non-neutral value in every one of
-    /// them, which is the fixture half that matters: on a resting pose, "the others did not move"
-    /// is true of an implementation that resets them all to neutral.
-    func testEditingOneComponentLeavesTheOtherFiveAlone() throws {
-        let start = pose(rotation(23)
+    /// Written against a pose with a non-neutral value in every component, keystone included, which
+    /// is the fixture half that matters: on a resting pose, "the others did not move" is true of an
+    /// implementation that resets them all to neutral.
+    func testChangingOneComponentLeavesTheOtherSevenAlone() throws {
+        var before = try XCTUnwrap(PoseComponents.decompose(pose(rotation(23)
             .concatenating(CGAffineTransform(a: 1, b: 0, c: -0.35, d: 1, tx: 0, ty: 0))
             .concatenating(CGAffineTransform(scaleX: 1.7, y: 0.6))
-            .concatenating(CGAffineTransform(translationX: -18, y: 44)))
-        let before = try XCTUnwrap(PoseComponents.decompose(start))
+            .concatenating(CGAffineTransform(translationX: -18, y: 44))), inBox: box))
+        before.perspectiveX = 0.3
+        before.perspectiveY = -0.2
         for component in PoseComponents.Component.allCases {
-            let target: Double
+            var target = before
             switch component {
-            case .x, .y: target = before[component] + 25
-            case .scaleX, .scaleY: target = before[component] * 1.6
-            case .rotation: target = before[component] + 18
-            case .skew: target = before[component] - 11
+            case .x, .y: target[component] += 25
+            case .scaleX, .scaleY: target[component] *= 1.6
+            case .rotation: target[component] += 18
+            case .skew: target[component] -= 11
+            case .perspectiveX, .perspectiveY: target[component] += 0.25
             }
-            XCTAssertNotEqual(target, before[component], accuracy: 1e-6,
-                              "Fixture: \(component) is actually being changed")
-
-            let edited = try XCTUnwrap(PoseComponents.setting(component, to: target, of: start),
-                                       "\(component)")
-            let after = try XCTUnwrap(PoseComponents.decompose(edited), "\(component)")
-            XCTAssertEqual(after[component], target, accuracy: 1e-7,
+            let posed = try XCTUnwrap(PoseComponents.recompose(target, box: box), "\(component)")
+            let after = try XCTUnwrap(PoseComponents.decompose(posed, inBox: box), "\(component)")
+            XCTAssertEqual(after[component], target[component], accuracy: 1e-7,
                            "\(component) did not take the value it was set to")
             for other in PoseComponents.Component.allCases where other != component {
                 XCTAssertEqual(after[other], before[other], accuracy: 1e-7,
-                               "setting \(component) moved \(other)")
+                               "changing \(component) moved \(other)")
             }
         }
     }
 
-    /// **Setting a component to the value it already holds returns the pose unchanged** — the
-    /// zero-travel property `testTakingAHandleAtZeroTravelChangesNothingAboutTheCurve` pins one file
-    /// over, and the one that would catch a recomposition that quietly normalises.
-    func testSettingAComponentToItsOwnValueChangesNothing() throws {
-        for (name, original) in poses {
-            let values = try XCTUnwrap(PoseComponents.decompose(original), name)
-            for component in PoseComponents.Component.allCases {
-                let same = try XCTUnwrap(
-                    PoseComponents.setting(component, to: values[component], of: original), name)
-                assertQuad(same.corners, original.corners,
-                           "\(name): re-setting \(component) to its own value moved the pose")
+    // MARK: - Distort is two more curves — TODO (139)
+
+    /// **A keystone decomposes into Perspective X and Y and comes back as the same quad** — the ruling
+    /// that replaced §11.7's "declined": a homography has eight freedoms and these are eight, so
+    /// there is nothing left over to decline.
+    ///
+    /// The expected keystone is the rendered one: the quad a Distort drag produces, mapped back
+    /// through the recomposed map, at every corner.
+    func testAKeystoneRoundTripsThroughItsPerspectiveComponents() throws {
+        let keystone = PoseQuad(box: box,
+                                corners: Quad(CGPoint(x: 0, y: 0), CGPoint(x: 100, y: 0),
+                                              CGPoint(x: 80, y: 100), CGPoint(x: 20, y: 100)))
+        XCTAssertEqual(keystone.map?.isProjective, true, "Fixture: this pose is genuinely projective")
+        let values = try XCTUnwrap(PoseComponents.decompose(keystone, inBox: box))
+        XCTAssertNotEqual(values.perspectiveY, 0, accuracy: 1e-6, "the narrowing bottom is a keystone in Y")
+        let map = try XCTUnwrap(PoseComponents.map(values, box: box))
+        XCTAssertTrue(map.isProjective)
+        let rebuilt = try XCTUnwrap(PoseComponents.recompose(values, box: box))
+        assertQuad(rebuilt.corners, keystone.corners, accuracy: 1e-7, "the keystone did not round-trip")
+        // Render equivalence: every point of the box lands where the pose itself puts it.
+        let reference = try XCTUnwrap(keystone.map)
+        for u in stride(from: 0.0, through: 1.0, by: 0.25) {
+            for v in stride(from: 0.0, through: 1.0, by: 0.25) {
+                let p = CGPoint(x: box.minX + box.width * u, y: box.minY + box.height * v)
+                let a = try XCTUnwrap(map.applied(to: p)), b = try XCTUnwrap(reference.applied(to: p))
+                XCTAssertEqual(a.x, b.x, accuracy: 1e-7)
+                XCTAssertEqual(a.y, b.y, accuracy: 1e-7)
             }
         }
+    }
+
+    /// **A keystone does not move the drawing** — X and Y stay the image of the box's centre under
+    /// the whole map, so a Distort keys the two perspective curves and not X and Y.
+    func testAKeystoneLeavesTheCentreWhereItIs() throws {
+        var values = PoseComponents.Values.resting(in: box)
+        values.perspectiveX = 0.6
+        let map = try XCTUnwrap(PoseComponents.map(values, box: box))
+        let centre = try XCTUnwrap(map.applied(to: CGPoint(x: box.midX, y: box.midY)))
+        XCTAssertEqual(centre.x, box.midX, accuracy: 1e-9)
+        XCTAssertEqual(centre.y, box.midY, accuracy: 1e-9)
+        // And positive Perspective X shrinks the right edge and grows the left.
+        let rightEdge = try XCTUnwrap(map.applied(to: CGPoint(x: box.maxX, y: box.maxY))).y
+            - (try XCTUnwrap(map.applied(to: CGPoint(x: box.maxX, y: box.minY))).y)
+        let leftEdge = try XCTUnwrap(map.applied(to: CGPoint(x: box.minX, y: box.maxY))).y
+            - (try XCTUnwrap(map.applied(to: CGPoint(x: box.minX, y: box.minY))).y)
+        XCTAssertLessThan(rightEdge, box.height)
+        XCTAssertGreaterThan(leftEdge, box.height)
+    }
+
+    /// **A keystone asked for past the vanishing line is held short of it** — every box corner keeps
+    /// a positive weight, so an overshooting curve draws a strong keystone rather than garbage.
+    func testAKeystonePastTheVanishingLineIsHeldShortOfIt() throws {
+        var values = PoseComponents.Values.resting(in: box)
+        values.perspectiveX = 1.6
+        values.perspectiveY = 1.4
+        let quad = try XCTUnwrap(PoseComponents.recompose(values, box: box))
+        XCTAssertTrue(quad.isValid, "every corner stays on the near side")
+    }
+
+    // MARK: - What changed
+
+    /// **A slide changes X and Y and nothing else** — the measured noise in a derived scale is held
+    /// below `flatTolerance`, so the change test keys exactly what moved.
+    func testASlideChangesOnlyPosition() throws {
+        let start = try XCTUnwrap(PoseComponents.decompose(pose(rotation(23)), inBox: box))
+        let slid = try XCTUnwrap(PoseComponents.decompose(
+            pose(rotation(23).concatenating(CGAffineTransform(translationX: 819.2, y: 3))), inBox: box))
+        XCTAssertEqual(start.components(differingFrom: slid), [.x, .y])
+        let turned = try XCTUnwrap(PoseComponents.decompose(pose(rotation(40)), inBox: box))
+        XCTAssertEqual(start.components(differingFrom: turned), [.rotation],
+                       "a turn about the box's centre changes the rotation alone")
+    }
+
+    /// Rotation is compared on its own turn: 179° to −179° is a two-degree change.
+    func testRotationIsComparedTheShortWayRound() {
+        var a = PoseComponents.Values.resting(in: box)
+        a.rotation = 179
+        var b = a
+        b.rotation = -179
+        XCTAssertEqual(a.components(differingFrom: b), [.rotation])
+        XCTAssertEqual(b.unwrappingRotation(near: a.rotation).rotation, 181, accuracy: 1e-12)
+        b.rotation = 179 - 360
+        XCTAssertEqual(a.components(differingFrom: b), [], "a whole turn apart is the same pose")
+    }
+
+    /// The recorder's tolerance means the same visible movement in every component: a rotation by the
+    /// tolerance moves the box's farthest corner by the corner deviation it was derived from.
+    func testARecordingToleranceIsTheSameCornerMovementInEveryComponent() {
+        let points = 2.0
+        let degrees = PoseComponents.Component.rotation.recordingTolerance(cornerDeviation: points, inBox: box)
+        let radius = Double(hypot(box.width / 2, box.height / 2))
+        XCTAssertEqual(degrees * .pi / 180 * radius, points, accuracy: 1e-9)
+        XCTAssertEqual(PoseComponents.Component.x.recordingTolerance(cornerDeviation: points, inBox: box), points)
+        XCTAssertEqual(PoseComponents.Component.scaleX.recordingTolerance(cornerDeviation: points, inBox: box)
+                       * Double(box.width / 2), points, accuracy: 1e-9)
     }
 
     // MARK: - What is refused
 
-    /// **A projective pose is declined rather than linearised** — §11.7's ruling, and the whole
-    /// reason `decompose` asks `Homography.affine()` rather than reaching for an approximation.
-    ///
-    /// The second half is the one that makes this a test rather than a tautology: the same pose
-    /// **is rendered**, exactly, since KEYFRAMES §8 stage 5b — `PoseQuad.map` answers `.projective`
-    /// and `VectorCanvas.posing(_:through: Homography)` carries it — so the refusal is a deliberate
-    /// narrowing of *this* surface and not the absence of an answer anywhere. Give `decompose` the
-    /// linearisation instead and this goes red while every other test in the file stays green.
-    ///
-    /// **This test used to assert that the pre-stage-5b fallback was non-nil for the same pose.**
-    /// That fallback is gone: it answered a keystone with the linearisation at the box centre,
-    /// MEASURED 218% wrong in local scale at the far end, and nothing renders through it any more
-    /// (KEYFRAMES.md §8 stage 5b).
-    func testAProjectivePoseIsDeclinedRatherThanLinearised() {
-        let keystone = PoseQuad(box: box,
-                                corners: Quad(CGPoint(x: 0, y: 0), CGPoint(x: 100, y: 0),
-                                              CGPoint(x: 80, y: 100), CGPoint(x: 20, y: 100)))
-        XCTAssertNil(keystone.affine, "Fixture: this pose is genuinely projective")
-        XCTAssertEqual(keystone.map?.isProjective, true,
-                       "Fixture: rendering carries it exactly, so the refusal below is a choice")
-        XCTAssertNil(PoseComponents.decompose(keystone),
-                     "…and the six curves do not, because a homography has eight freedoms")
-    }
-
     /// A pose that has collapsed its drawing to a line has no rotation to report and no inverse to
-    /// write back through, so it is declined too — for the same reason `TransformTrack.mapping`
-    /// drops a degenerate quad rather than rendering it.
+    /// write back through, so it is declined — there is nothing a Move could key from it.
     func testACollapsedPoseIsDeclined() {
-        XCTAssertNil(PoseComponents.decompose(pose(CGAffineTransform(scaleX: 1, y: 0))))
+        XCTAssertNil(PoseComponents.decompose(pose(CGAffineTransform(scaleX: 1, y: 0)), inBox: box))
     }
 
     /// `recompose` refuses the values `Component.skew`'s domain exists to keep it away from, so a

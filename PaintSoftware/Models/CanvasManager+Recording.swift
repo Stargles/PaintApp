@@ -55,16 +55,16 @@ extension CanvasManager {
         /// Nil on a target that poses nothing, which is every target but a transformation layer.
         let basePose: LayerPose?
 
-        /// Every pose the Move box reported, with the wall time it reported it at — `channels`'
-        /// counterpart in the quad currency, and §5.1's *"a quad surface needs its own intercept"*.
+        /// **Every pose the Move box reported, as the eight components it is keyed by** — `channels`'
+        /// counterpart for §5.1's quad surface, one `ValueRecording` per component.
         ///
-        /// **One stream rather than a dictionary**, where a take's scalar side is keyed by parameter
-        /// id. A take is already scoped to one target (see this type's own header) and a container has
-        /// exactly one pose channel — `LayerPose`'s *"there is exactly one of it, it addresses the
-        /// container itself, and its shape never varies"* — so there is nothing for a key to
-        /// distinguish. A cel's pose channels are many, and they are deliberately not recordable here:
-        /// see `beginMoveBoxTake`.
-        var poses = PoseRecording()
+        /// **Decomposed as each sample arrives** (`recordMoveBoxSample`), against the base pose's
+        /// box, because since TODO (139) a pose is eight independent curves and a take is eight
+        /// scalar takes: the same resample and thinning `ValueRecording` gives a slider, applied to
+        /// each component, so a sideways shake keys X and Y and nothing else. A container has exactly
+        /// one pose channel, so the dictionary is keyed by component alone; a cel's pose channels are
+        /// many, and they are deliberately not recordable here — see `beginMoveBoxTake`.
+        var poses: [PoseComponents.Component: ValueRecording] = [:]
 
         /// **How many gesture brackets were open when the take began**, so that `stopRecording` can
         /// tell "a control the artist is still holding opened one *inside* mine" from "brackets that
@@ -186,10 +186,11 @@ extension CanvasManager {
     ///
     /// **Absolute where the scalar tolerance is a fraction, and that is forced rather than
     /// inconsistent.** A value channel has a `uiRange` to take a fraction of and no common scale
-    /// between channels (opacity runs 0…1, a blur radius 0…500). A pose channel has neither problem
-    /// and needs neither fix: every corner is already in canvas points, which is the unit the artist's
-    /// eye is in, and two points of corner movement means the same amount of visible motion on every
-    /// document. `PoseRecording.cornerDeviation` is what it is compared against.
+    /// between channels (opacity runs 0…1, a blur radius 0…500). A pose channel has a better unit
+    /// than either: the canvas point, which is the unit the artist's eye is in, so the tolerance is a
+    /// corner movement and `PoseComponents.Component.recordingTolerance(cornerDeviation:inBox:)`
+    /// expresses it in each component's own units — two points of visible motion whether the hand
+    /// slid, turned, scaled or keystoned.
     ///
     /// **2 points is a starting value, not a measured one**, and §5 says in advance that it will want
     /// tuning: *"Expect it to feel twitchy before it feels good… Smoothing is part of this feature, not
@@ -377,10 +378,20 @@ extension CanvasManager {
     ///
     /// - Returns: whether a take took the sample. `false` means nothing was recording, or the box is
     ///   posing something other than what the take is aimed at.
+    ///
+    /// **The rotation is unwrapped onto the previous sample's turn**, so a box spun through 180° keeps
+    /// winding rather than jumping a full turn back between two samples — which the resample would
+    /// otherwise draw as the box spinning the other way.
     @discardableResult
     func recordMoveBoxSample(_ target: KeyframeTarget, pose: PoseQuad) -> Bool {
-        guard isRecording, var take = recordingTake, take.target == target else { return false }
-        take.poses.record(pose, at: playbackNow())
+        guard isRecording, var take = recordingTake, take.target == target,
+              let box = take.basePose?.track.box,
+              var values = PoseComponents.decompose(pose, inBox: box) else { return false }
+        if let last = take.poses[.rotation]?.samples.last { values = values.unwrappingRotation(near: last.value) }
+        let now = playbackNow()
+        for component in PoseComponents.Component.allCases {
+            take.poses[component, default: ValueRecording()].record(values[component], at: now)
+        }
         recordingTake = take
         return true
     }
@@ -746,16 +757,21 @@ extension CanvasManager {
     }
 
     /// **The Move box's whole commit** — KEYFRAMES.md §5's second surface, and `setEffectParameterCurves`
-    /// in the quad currency.
+    /// one component at a time.
     ///
-    /// **The take replaces the track rather than merging into it**, which is that function's own ruling
-    /// restated: *"a take writes a whole curve per channel and replaces it, because the take is the
-    /// animation rather than an adjustment to one."* `step` is carried across, because it is a property
-    /// of how the channel is read rather than of what was recorded — a stepped channel stays stepped.
+    /// **Each component the take moved replaces that component's curve**, which is that function's
+    /// own ruling restated per curve: *"a take writes a whole curve per channel and replaces it,
+    /// because the take is the animation rather than an adjustment to one."* **A component the take
+    /// did not move is left exactly as it was** — TODO (139)'s *"only the keys of things that changed
+    /// are added"* — so a sideways shake recorded over a turn keeps the turn on its own curve. `step`
+    /// is carried across per component, because it is a property of how the curve is read rather than
+    /// of what was recorded.
     ///
-    /// **`isAnimated` is the gate, and it is the owner's own definition** — two or more keys not all
-    /// holding one pose. A take that produced less than that wrote nothing, and the shared rule in
-    /// `commitRecordingTake` is what turns "nothing" into the right sentence.
+    /// **The gate is the owner's definition of an animation** — two or more keys not all holding one
+    /// value — with a commit's change tolerance in place of `!=`, because a component's samples are
+    /// decomposed and carry rounding the hand never made. A take in which no component moved wrote
+    /// nothing, and the shared rule in `commitRecordingTake` is what turns "nothing" into the right
+    /// sentence.
     ///
     /// **The box is dismissed on success, and that is load-bearing rather than tidy.** The float's own
     /// commit (`commitContainerFloat`) restores `containerRest` and writes one key at the playhead — so
@@ -776,8 +792,6 @@ extension CanvasManager {
         // switch would expose.
         guard !take.poses.isEmpty, let base = take.basePose,
               containerPose(of: take.target) != nil else { return (0, false) }
-        let keys = take.poses.keys(fps: fps, startFrame: take.startFrame,
-                                   tolerance: Self.recordingPoseSimplifyPoints)
         // **Built from `take.basePose`, never from `containerPose(of:)`.** This is the whole of the
         // scratch-pad restore for this surface: `showContainerPoseLive` has been writing the stored pose
         // on every tick of the drag so the artist can see the box move, so the live value *is* the drag
@@ -786,14 +800,31 @@ extension CanvasManager {
         // Move: *"one press of Undo would put the drawing back exactly where the artist had just
         // dragged it, which is a control that appears not to work."*
         var after = base
-        after.track = TransformTrack(keys: keys, step: base.track.step)
-        // A channel that lands keys no longer needs its held pose — `setTransformPoseKey`'s rule, one
+        var sawTwoStops = false
+        var moved = false
+        for component in PoseComponents.Component.allCases {
+            guard let recording = take.poses[component] else { continue }
+            let tolerance = component.recordingTolerance(
+                cornerDeviation: Double(Self.recordingPoseSimplifyPoints), inBox: base.track.box)
+            let keys = recording.keys(fps: fps, startFrame: take.startFrame, tolerance: tolerance)
+            if keys.count > 1 { sawTwoStops = true }
+            // **Moved by the hand, not by the decomposition's rounding** — the change test a commit
+            // makes (`Component.flatTolerance`), asked of the take: a component every stop of which is
+            // within tolerance of the first did not move, however unequal its bits.
+            guard let first = keys.first,
+                  keys.contains(where: { abs($0.value - first.value) > component.flatTolerance })
+            else { continue }
+            after.track.setCurve(AnimationCurve(keys: keys, step: base.track.curve(component)?.step ?? 1),
+                                 for: component)
+            moved = true
+        }
+        // A channel that lands keys no longer needs its held pose — a keying arm's rule, one
         // container up.
         after.baseline = nil
-        guard after.track.isAnimated, after != base else { return (0, keys.count > 1) }
+        guard moved, after != base else { return (0, sawTwoStops) }
         dismissRecordedMoveBox(take)
         writeContainerPose(after, from: base, target: take.target, label: .recordAnimation)
-        return (1, keys.count > 1)
+        return (1, sawTwoStops)
     }
 
     /// Takes down the Move box this take recorded, without committing it — see

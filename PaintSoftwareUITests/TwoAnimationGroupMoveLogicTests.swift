@@ -112,11 +112,8 @@ final class TwoAnimationGroupMoveLogicTests: XCTestCase {
         manager.animationGroups.append(AnimationGroup(id: group, displayName: name,
                                                       tagColor: black()))
         manager.layers[layerIndex].cels[0]
-            .transformTracks[TransformChannelID.group(group).id] = TransformTrack(keys: [
-                TransformTrack.Key(frame: 0, pose: PoseQuad(restingIn: box), interpolation: .linear),
-                TransformTrack.Key(frame: 12, pose: PoseQuad(box: box,
-                                                             mappedBy: .init(translationX: dx, y: 0)),
-                                   interpolation: .linear)])
+            .transformTracks[TransformChannelID.group(group).id] = CanvasFixture.poseTrack([(0, PoseQuad(restingIn: box)), (12, PoseQuad(box: box,
+                                                             mappedBy: .init(translationX: dx, y: 0)))], interpolation: .linear)
     }
 
     /// The x of every stroke sample in a display list, in order — the cheapest honest reading of
@@ -142,7 +139,7 @@ final class TwoAnimationGroupMoveLogicTests: XCTestCase {
 
     private func keyCount(_ manager: CanvasManager, _ layerIndex: Int,
                           _ channel: TransformChannelID) -> Int? {
-        manager.layers[layerIndex].cels[0].transformTracks[channel.id]?.keys.count
+        manager.layers[layerIndex].cels[0].transformTracks[channel.id]?.keyedFrames.count
     }
 
     /// Two coordinate lists compared elementwise to a tolerance. `XCTAssertEqual`'s `accuracy` arm

@@ -467,10 +467,7 @@ final class FolderMoveLogicTests: XCTestCase {
         let box = CGRect(origin: .zero, size: CanvasFixture.canvasSize)
         f.manager.layers[mover].transform = LayerPose(
             pose: PoseQuad(restingIn: box),
-            track: TransformTrack(keys: [
-                .init(frame: 0, pose: PoseQuad(restingIn: box)),
-                .init(frame: 1, pose: PoseQuad(box: box, mappedBy: CGAffineTransform(translationX: 30, y: 0))),
-                .init(frame: 3, pose: PoseQuad(box: box, mappedBy: CGAffineTransform(translationX: 90, y: 0)))]))
+            track: CanvasFixture.poseTrack([(0, PoseQuad(restingIn: box)), (1, PoseQuad(box: box, mappedBy: CGAffineTransform(translationX: 30, y: 0))), (3, PoseQuad(box: box, mappedBy: CGAffineTransform(translationX: 90, y: 0)))]))
         f.manager.currentFrame = 5
         f.manager.setFolderMoveScope(.allFrames)
         XCTAssertTrue(f.manager.beginVectorFolderMove(f.fx.folder))

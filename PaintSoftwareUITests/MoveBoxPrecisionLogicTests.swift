@@ -217,8 +217,9 @@ final class MoveBoxPrecisionLogicTests: XCTestCase {
 
         let track = try XCTUnwrap(manager.layers[moverIndex].layerTransform).track
         XCTAssertTrue(track.isAnimated, "PREMISE: the take landed a curve")
-        let last = try XCTUnwrap(track.keys.last)
-        let travelled = try XCTUnwrap(PoseComponents.decompose(last.pose)).x - Double(centre.x)
+        XCTAssertEqual(Set(track.curves.keys), [.x], "a sideways take keys X alone")
+        let last = try XCTUnwrap(track.curve(.x)?.keys.last)
+        let travelled = last.value - Double(centre.x)
         XCTAssertEqual(travelled, 120, accuracy: 1.0,
                        "100 points at full speed and 100 at a fifth is 120; an unslowed take would hold 200")
     }

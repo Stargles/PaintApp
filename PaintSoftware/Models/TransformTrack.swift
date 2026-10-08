@@ -44,381 +44,215 @@ enum TransformChannelID: Hashable {
     }
 }
 
-/// **One pose channel: where a drawing is, over the frames its cel spans** — KEYFRAMES.md build-order
-/// stage 5, and §2.5's *"a transform key stores a pose"*.
+/// **One pose channel: where a drawing is, over the frames its cel spans** — one `AnimationCurve`
+/// per component, each keyed independently of the others. TODO (139), the owner: *"The X and Y and
+/// rotation etc components keys should be fully independent from each other."*
+///
+/// ## A key is a value on one component, and nothing else
+///
+/// Until TODO (139) a pose key was a whole `PoseQuad` — every component at once, on one shared timing
+/// spine with one shared handle pair — so a sideways drag keyed the rotation too, a node dragged in
+/// the graph editor dragged all six of its rows, and a Distort could not be drawn as curves at all.
+/// Now each of `PoseComponents.Component`'s eight is an ordinary `AnimationCurve`, which is what the
+/// grade's sliders have always been: crop, split, step, the graph band's gestures and its whole-curve
+/// write funnel apply to a pose through the same code they apply to a grade. **A component with no
+/// curve is not keyed**: it shows the channel's base — rest for a cel channel, whose base is the
+/// geometry itself, and the container's stored pose for a transformation layer (`LayerPose`).
 ///
 /// ## Its time base is cel-local, and that is §3.1 rather than a convenience
 ///
 /// Keys are numbered from the cel's own `startFrame`, so the channel rides the cel through move,
-/// split, duplicate and paste for free — the same argument `motionGroupID`'s doc makes for a field
-/// over a side table. A *layer* channel (an effect parameter, §2.4) is in absolute document frames
-/// because its target has no cel to ride. There is no third notion. **And a key is never outside the
-/// cel's span** (TODO 62): `cropped(toFrameCount:)` and `shifted(by:)` below are what a span change
+/// split, duplicate and paste for free. A *layer* channel — the container's, and every grade's — is
+/// in absolute document frames because its target has no cel to ride. **And a key is never outside
+/// the cel's span** (TODO 62): `cropped(toFrameCount:)` and `shifted(by:)` are what a span change
 /// applies, through `Cel.cropPoseKeysToSpan`.
 ///
-/// ## Why the timing is an `AnimationCurve` over pose *indices* rather than a second interpolant
+/// ## The rest box
 ///
-/// The keys hold poses, which cannot be lerped (`PoseInterpolation` is the whole of why), but the
-/// *timing* between two poses is an ordinary scalar problem that `AnimationCurve` has already solved:
-/// per-segment `constant` / `linear` / `bezier` carried on the key that begins the segment, five
-/// tangent modes, unclamped overshoot, a constant hold outside the first and last key, and §2.10's
-/// `step`. So `timing` is an `AnimationCurve` whose key values are `0, 1, 2, …` — the index of the
-/// pose each key holds — and evaluating it at a frame gives a **fractional pose index**: the pair to
-/// blend and how far between them.
-///
-/// **It is computed from `keys`, never stored beside them.** Two lists of the same length whose
-/// entries correspond is a drift hazard the first time a writer touches one and not the other; this
-/// is §2.28's "computed, never stored" applied one type down. The cost is rebuilding a small array
-/// per evaluation, behind the `keys.count < 2` fast path that covers every static channel.
-///
-/// **Overshoot is a feature here and reads unusually.** A `.free` or `.auto` handle can carry the
-/// index past its segment, and `PoseInterpolation.blend` extrapolates rather than clamping — so a
-/// move can overshoot its mark and settle back, which is what makes it read as weight. `.autoClamped`
-/// is the default and does not, exactly as it does not for a slider.
+/// The components are read against `box` — X and Y are where its centre is shown, the two keystones
+/// are in its units — so it is stored with the curves rather than with each key. It is latched when
+/// the channel is first written and never moves: the map a pose describes is the same map from any
+/// box, so a later write measured against a different box is decomposed against this one
+/// (`PoseComponents.decompose(_:inBox:)`) and means the same thing.
 struct TransformTrack: Equatable {
 
-    /// One authored pose at one cel-local frame, with the graph-editor vocabulary
-    /// `AnimationCurve.Key` already carries so that a pose channel and a value channel are edited by
-    /// one set of gestures rather than two.
-    struct Key: Equatable {
-        /// Cel-local. Integer for `AnimationCurve.Key.frame`'s reason: there is nothing an artist can
-        /// do in the timeline to land one between two frames.
-        var frame: Int
-        var pose: PoseQuad
-        var inHandle: AnimationCurve.Handle
-        var outHandle: AnimationCurve.Handle
-        var tangentMode: AnimationCurve.TangentMode
-        /// The segment that *begins* here. Ignored on the last key, which begins nothing.
-        var interpolation: AnimationCurve.Interpolation
+    /// The box the components are read against — canvas coordinates for a cel channel, the canvas
+    /// frame for a container.
+    var box: CGRect
 
-        init(frame: Int,
-             pose: PoseQuad,
-             inHandle: AnimationCurve.Handle = .zero,
-             outHandle: AnimationCurve.Handle = .zero,
-             tangentMode: AnimationCurve.TangentMode = .autoClamped,
-             interpolation: AnimationCurve.Interpolation = .bezier) {
-            self.frame = frame
-            self.pose = pose
-            self.inHandle = inHandle
-            self.outHandle = outHandle
-            self.tangentMode = tangentMode
-            self.interpolation = interpolation
+    /// One curve per keyed component. **Never holds an empty curve**: `setCurve(_:for:)` removes one,
+    /// for `setEffectParameterTrack`'s reason — a curve with no keys is a channel that exists,
+    /// animates nothing, and shows up in a channel list.
+    private(set) var curves: [PoseComponents.Component: AnimationCurve]
+
+    init(box: CGRect, curves: [PoseComponents.Component: AnimationCurve] = [:]) {
+        self.box = box
+        self.curves = curves.filter { !$0.value.isEmpty }
+    }
+
+    /// No component carries a key.
+    var isEmpty: Bool { curves.isEmpty }
+
+    /// **Whether this channel is an *animation*** — some component's curve is one by the owner's
+    /// definition (`AnimationCurve.isAnimated`: two or more keys, not all holding one value). The
+    /// strict predicate, which the recorder's gate asks; routing asks the loose one, whether the
+    /// channel has a curve at all, for `AnimationCurve.isAnimated`'s stated reason.
+    var isAnimated: Bool { curves.values.contains { $0.isAnimated } }
+
+    /// Every frame some component holds a key on, ascending and unique — what
+    /// `CanvasManager.keyframeFrames(of:)` folds into §2.28's union, converted to absolute frames by
+    /// its caller because only the caller knows the cel's `startFrame`.
+    var keyedFrames: [Int] { Set(curves.values.flatMap { $0.keys.map(\.frame) }).sorted() }
+
+    /// How many keys the channel holds across its components — what an undo estimate counts.
+    var keyCount: Int { curves.values.reduce(0) { $0 + $1.keys.count } }
+
+    func curve(_ component: PoseComponents.Component) -> AnimationCurve? { curves[component] }
+
+    /// Replaces one component's curve. **Nil or empty removes it**, so the component falls back to
+    /// the channel's base.
+    mutating func setCurve(_ curve: AnimationCurve?, for component: PoseComponents.Component) {
+        if let curve, !curve.isEmpty { curves[component] = curve } else { curves.removeValue(forKey: component) }
+    }
+
+    /// Drops every component's key on `frame`; a component left with no keys is removed.
+    mutating func removeKeys(atFrame frame: Int) {
+        for (component, curve) in curves where curve.key(atFrame: frame) != nil {
+            var trimmed = curve
+            trimmed.removeKey(atFrame: frame)
+            setCurve(trimmed, for: component)
         }
     }
 
-    /// Sorted by frame, one key per frame — `AnimationCurve`'s decision 4, restated here because the
-    /// timing spine is built by index and a duplicate frame would make two indices name one moment.
-    private(set) var keys: [Key]
+    // MARK: - Writing what a gesture changed — TODO (139)
 
-    /// Evaluate, then hold the result for this many frames (§2.10). Anchored at frame 0 of this
-    /// track's own — cel-local — base, `AnimationCurve.step`'s rule.
-    var step: Int
-
-    var isEmpty: Bool { keys.isEmpty }
-
-    /// **Whether this channel is an *animation*** — the owner's definition applied to poses: two or
-    /// more keys, and not every key holding the same pose. The strict predicate, as
-    /// `AnimationCurve.isAnimated` is for a value channel, and it is what the channel list asks;
-    /// routing asks the loose one (does it have a track at all). Do not merge them — a track whose
-    /// two keys hold the same pose is still *in force*, and a Move routed to the geometry instead
-    /// would be overwritten by the track at every frame.
-    var isAnimated: Bool {
-        guard let first = keys.first, keys.count > 1 else { return false }
-        return keys.contains { $0.pose != first.pose }
+    /// **Writes `new` at `frame` on every component where it differs from `old`, and on no other** —
+    /// the ruling: *"only the keys of things that changed are added"*. Returns the components written.
+    ///
+    /// A component that already has a curve takes a key at `frame` — the auto-key arm, one component
+    /// at a time. **One that has none is seeded** (`AnimationCurve.seeded`): `old` onto the nearest
+    /// keyframe below and above `frame`, `new` on `frame`, so the frames either side keep showing the
+    /// value they showed. That is what a whole-pose key did for that component implicitly — every
+    /// earlier key carried it — and what *"if you prime this in two frames and then change something,
+    /// then it should put down two keys like the behaviour today, but only the things that changed"*
+    /// asks for on the primed pair.
+    ///
+    /// `new` is unwrapped onto `old`'s turn first, so a drawing turned through ±180° is keyed the
+    /// short way round rather than spun back.
+    ///
+    /// - Parameter keyframes: the target's keyframes in this track's own frame base, ascending —
+    ///   restricted by the caller to the frames a key of this channel may sit on (a cel's span).
+    @discardableResult
+    mutating func key(_ new: PoseComponents.Values, over old: PoseComponents.Values,
+                      atFrame frame: Int, keyframes: [Int]) -> [PoseComponents.Component] {
+        let new = new.unwrappingRotation(near: old.rotation)
+        let changed = old.components(differingFrom: new)
+        for component in changed {
+            if var curve = curves[component] {
+                curve.setKey(AnimationCurve.Key(frame: frame, value: new[component]))
+                curves[component] = curve
+            } else {
+                curves[component] = AnimationCurve.seeded(nil, keyframes: keyframes, frame: frame,
+                                                          oldValue: old[component],
+                                                          newValue: new[component])
+            }
+        }
+        return changed
     }
 
-    init(keys: [Key] = [], step: Int = 1) {
-        self.keys = Self.normalised(keys)
-        self.step = step
-    }
-
-    // MARK: - Editing
-
-    /// Inserts `key`, or replaces the one already on its frame.
-    mutating func setKey(_ key: Key) {
-        if let i = keys.firstIndex(where: { $0.frame == key.frame }) {
-            keys[i] = key
-        } else if let i = keys.firstIndex(where: { $0.frame > key.frame }) {
-            keys.insert(key, at: i)
-        } else {
-            keys.append(key)
+    /// **Every keyed component takes a key on `frame` holding the value it shows there** —
+    /// `addKeyframe`'s step 3, §2.24's surviving half: placing a mark must not let an animated
+    /// component drift straight through it. A component with no curve takes nothing — it shows the
+    /// base at every frame, and a key would only pin what is already there.
+    mutating func holdKeys(atFrame frame: Int) {
+        for (component, curve) in curves {
+            var held = curve
+            held.setKey(AnimationCurve.Key(frame: frame, value: curve.evaluate(at: Double(frame))))
+            curves[component] = held
         }
     }
 
-    mutating func removeKey(atFrame frame: Int) { keys.removeAll { $0.frame == frame } }
+    // MARK: - Riding the cel's span — KEYFRAMES.md §3.1 and TODO (62)
 
-    func key(atFrame frame: Int) -> Key? { keys.first { $0.frame == frame } }
-
-    /// Every frame this channel holds a key on — what `CanvasManager.keyframeFrames(of:)` folds into
-    /// §2.28's union, converted to absolute frames by its caller because only the caller knows the
-    /// cel's `startFrame`.
-    var keyedFrames: [Int] { keys.map(\.frame) }
-
-    /// **This channel cut in two at a cel-local frame** — KEYFRAMES.md §3.1's rule for `splitCel`:
-    /// *"keys before the cut go left, keys after go right, and a key is inserted at the cut in both so
-    /// the value is continuous across it."*
-    ///
-    /// `cut` is the first cel-local frame of the **right** half, so the left half spans `0..<cut` and
-    /// a key of the right half at original frame `f` lands at `f - cut`.
-    ///
-    /// **The right half's inserted key is the pose this track already shows at `cut`; the left half's
-    /// is the pose it shows at `cut - 1`, its own last frame.** Both are what make *"so the value is
-    /// continuous"* true at every frame either half draws. The left one is needed at all because
-    /// without it the left half's frames from its last real key onward would hold that key's pose
-    /// flat (`AnimationCurve`'s decision 2 reaching here through `timing`) instead of continuing to
-    /// travel, and the artist would watch a moving drawing stop dead before the cut.
-    ///
-    /// **It lands on `cut - 1` rather than on `cut`, and that is TODO (62).** Until 2026-09-11 the left
-    /// half kept a key at `cut` — one frame *past* its own span — on the strength of §3.1's old resize
-    /// rule that a key outside a span is held. The owner reversed that rule: a key beyond a cel's span
-    /// is deleted, so a split may not mint one. A key on the last frame the half actually draws says
-    /// the same thing about every frame the artist can see, and is inside the span, so the crop that
-    /// follows a split (`Cel.cropPoseKeysToSpan`) finds nothing to remove on a track this produced.
-    ///
-    /// **What is lost is stated rather than hidden.** A segment that spans the cut is re-parameterised
-    /// on both sides: `[k₀, cut - 1]` and `[cut, k₁]` each become a segment of their own, so the
-    /// easing *within* that one span is not the easing it had. Every other frame's pose is unchanged,
-    /// which is the strongest statement §3.1's rule admits — a single bezier cannot be two beziers.
-    ///
-    /// **A key that already sits exactly on the cut is carried across whole to the right half, not
-    /// re-synthesised.** Its pose is what `pose(atCelLocalFrame: cut)` would answer anyway, but its
-    /// handles and tangent mode are not recoverable from a pose, and a split is not an occasion to
-    /// flatten an authored ease. The left half still needs its own key at `cut - 1` in that case, since
-    /// the key on the cut is not one of its frames. A key already on `cut - 1` is likewise kept whole.
-    ///
-    /// Empty halves are never returned: an empty track cannot exist in `Cel.transformTracks`
-    /// (`clearPoseKeys` removes a channel left with no keys), and a track with keys yields a key at
-    /// each half's boundary whatever the keys are. `step` rides unchanged onto both, which does re-phase
-    /// the right half — its frame 0 is the original `cut` and §2.10 anchors a step at frame 0 of the
-    /// track's own base. Rescaling it instead would retime the animation, which is the thing §3.1
-    /// refuses for the resize handles and refuses here for the same reason.
+    /// **This channel cut in two at a cel-local frame** — `AnimationCurve.split(atFrame:)` per
+    /// component, which carries §3.1's rule and its costs. The box rides onto both halves.
     func split(atCelLocalFrame cut: Int) -> (left: TransformTrack, right: TransformTrack) {
-        guard let atCut = pose(atCelLocalFrame: cut),
-              let beforeCut = pose(atCelLocalFrame: cut - 1) else { return (self, self) }
-        // **The inserted keys inherit the interpolation of the segment they land in**, which matters on
-        // the right half and only there: a key's `interpolation` describes the segment it *begins*, so
-        // the right half's first segment would otherwise be `.bezier` — `Key`'s default — whatever the
-        // artist authored. A `.constant` hold cut in two would start easing, and a `.linear` span
-        // would gain a curve at the join. The left half's inserted key is its last and begins nothing,
-        // and takes the same value so that the two halves read alike.
-        let segment = keys.last { $0.frame <= cut }?.interpolation ?? .bezier
-        var left = TransformTrack(keys: keys.filter { $0.frame < cut }, step: step)
-        if key(atFrame: cut - 1) == nil {
-            left.setKey(Key(frame: cut - 1, pose: beforeCut, interpolation: segment))
+        var left = TransformTrack(box: box)
+        var right = TransformTrack(box: box)
+        for (component, curve) in curves {
+            let halves = curve.split(atFrame: cut)
+            left.setCurve(halves.left, for: component)
+            right.setCurve(halves.right, for: component)
         }
-        var right = TransformTrack(keys: keys.filter { $0.frame >= cut }.map {
-            var moved = $0
-            moved.frame -= cut
-            return moved
-        }, step: step)
-        if key(atFrame: cut) == nil { right.setKey(Key(frame: 0, pose: atCut, interpolation: segment)) }
         return (left, right)
     }
 
-    // MARK: - Keeping keys inside the cel's span — TODO (62)
-
-    /// Every key moved by `delta` cel-local frames. What a **left-edge** resize does to a track before
-    /// cropping it: the cel's origin moves and its keys stay on the document frames they were on, so
-    /// their cel-local numbers move the other way. A key that lands below 0 is then outside the span
-    /// and `cropped(toFrameCount:)` removes it.
-    ///
-    /// `step` rides unchanged, which re-phases it exactly as `split` re-phases the right half's — and
-    /// for the same reason: §2.10 anchors a step at frame 0 of the track's own base, and rescaling
-    /// would retime the animation as a side effect of dragging a cel edge.
+    /// Every component's keys moved by `delta` cel-local frames — what a left-edge resize does
+    /// before cropping (`AnimationCurve.shifted(by:)`).
     func shifted(by delta: Int) -> TransformTrack {
         guard delta != 0 else { return self }
-        return TransformTrack(keys: keys.map { key in
-            var moved = key
-            moved.frame += delta
-            return moved
-        }, step: step)
+        return TransformTrack(box: box, curves: curves.mapValues { $0.shifted(by: delta) })
     }
 
-    /// **The keys inside `0..<frameCount`, and the cel-local frames of the ones that were not** —
-    /// TODO (62)'s rule, settled 2026-09-10 and revised 2026-09-11: *keys beyond a cel's span are
-    /// deleted, and shortening a cel crops the keys past its new end* — but **before** a key past an
-    /// edge is removed, a key is inserted at the new edge carrying the pose the track showed there,
-    /// so the frames that remain keep the motion they had up to the new end instead of snapping to
-    /// whichever key happened to still be inside. Nothing here rescales or clamps a key *onto* the
-    /// edge — the survivors keep their own frames exactly — it is only the edge itself that gains a
-    /// key when one did not already stand there.
-    ///
-    /// **Both edges, not only the end**, on the owner's ruling of 2026-09-11 — this file's reading of
-    /// symmetry, not a separate ruling of its own; a key below 0 is as far outside the span as one at
-    /// `frameCount`, and a left-edge resize (`shifted(by:)`) is what produces one. The new *first*
-    /// frame (0) gets the same treatment as the new *last* frame (`frameCount - 1`).
-    ///
-    /// **The inserted key's pose comes from `self`, before anything is removed** — `pose(atCelLocalFrame:)`
-    /// evaluated against the full, uncropped track, exactly as `split` samples `beforeCut` and `atCut`
-    /// from the whole track before slicing it. Its interpolation is inherited from the segment that
-    /// was carrying the edge, `split`'s same idea, so a `.constant` hold reads as a hold across the
-    /// join and a `.linear` ramp does not gain a curve it wasn't authored with.
-    ///
-    /// **Only inserted when a key past that edge is actually being removed.** A crop that discards
-    /// nothing changes nothing — the common case of a cel that already fits its span costs one
-    /// `isEmpty` and two no-op `contains` checks. And nothing is inserted where a key already stands
-    /// on the edge: the survivor there already says what the new edge shows, and re-minting it would
-    /// only flatten a handle or a tangent mode it does not need to lose.
-    func cropped(toFrameCount frameCount: Int) -> (kept: TransformTrack, discarded: [Int]) {
-        let discardedBelow = keys.contains { $0.frame < 0 }
-        let discardedAbove = keys.contains { $0.frame >= frameCount }
-        guard discardedBelow || discardedAbove else { return (self, []) }
-
-        var working = keys
-        if discardedAbove, frameCount > 0, key(atFrame: frameCount - 1) == nil,
-           let edgePose = pose(atCelLocalFrame: frameCount - 1) {
-            // The last key still inside is ignored on the segment field of the key that begins
-            // nothing (`Key.interpolation`'s own doc), so which segment this inherits from cannot
-            // matter for the picture — carried for the same "reads alike" reason `split` gives.
-            let segment = keys.last { $0.frame <= frameCount - 1 }?.interpolation ?? .bezier
-            working.append(Key(frame: frameCount - 1, pose: edgePose, interpolation: segment))
+    /// **Every component cropped to `0..<frameCount`, and the frames each one lost** —
+    /// `AnimationCurve.cropped(toFrameCount:)` per component, edge keys and all.
+    func cropped(toFrameCount frameCount: Int)
+        -> (kept: TransformTrack, discarded: [PoseComponents.Component: [Int]]) {
+        var kept = TransformTrack(box: box)
+        var discarded: [PoseComponents.Component: [Int]] = [:]
+        for (component, curve) in curves {
+            let result = curve.cropped(toFrameCount: frameCount)
+            kept.setCurve(result.kept, for: component)
+            if !result.discarded.isEmpty { discarded[component] = result.discarded }
         }
-        if discardedBelow, key(atFrame: 0) == nil, let edgePose = pose(atCelLocalFrame: 0) {
-            // Frame 0 begins the segment that follows it, and does matter: this inherits the
-            // interpolation of whichever key was carrying frame 0 before the crop, so the new first
-            // key continues the ease the removed one started rather than defaulting to `.bezier`.
-            let segment = keys.last { $0.frame <= 0 }?.interpolation ?? .bezier
-            working.append(Key(frame: 0, pose: edgePose, interpolation: segment))
-        }
-
-        let discarded = keys.filter { $0.frame < 0 || $0.frame >= frameCount }.map(\.frame)
-        let kept = working.filter { $0.frame >= 0 && $0.frame < frameCount }
-        return (TransformTrack(keys: kept, step: step), discarded)
+        return (kept, discarded)
     }
 
-    // MARK: - Cropping a *layer's* track to its blocks — TODO (62), reversed 2026-09-11 (txcrop)
-
-    /// **`cropped(toFrameCount:)` one level up: this track is a `.transform` layer's own
-    /// `LayerPose.track`, in absolute document frames, and `coverage` is the union of that layer's
-    /// blocks (`CanvasManager.transformLayerBlockCoverage`) rather than one window starting at 0.**
-    ///
-    /// The owner's reversal (worktree `txcrop`, 2026-09-11): *"why are there keyframes outside a
-    /// transform cel? … I'm pretty sure I explicitly wanted keyframes to be clamped to inside the
-    /// cels."* TRANSFORM_LAYER.md §2 ruling 17 (kept, inert) is gone; a layer's keys outside every
-    /// block it has are now deleted exactly as a cel's own keys are deleted past its span.
-    ///
-    /// **`insertBelow`/`insertAbove` name the one edge *this call's own operation* just moved inward
-    /// — never every covered interval's edge.** A layer can own several blocks (ruling 17's own
-    /// premise), and inserting a boundary key at every interval's edge merely because *some* key
-    /// elsewhere in the track is outside *some* interval would plant keys the artist never asked for
-    /// on blocks nobody touched. So a caller passes only the edge its own resize produced — the new
-    /// last frame inside for a right-edge shrink, the new first frame inside for a left-edge one —
-    /// and nil for the edge it did not move. Passing nil for both only prunes.
-    ///
-    /// **Removal is unconditional and global**: any key outside `coverage`, from any block, goes —
-    /// including a key a document written under the old ruling parked in a gap between two blocks to
-    /// interpolate across it. The owner's own words are the ruling on that: *"I don't care about data
-    /// loss if the cel is shortened then expanded."*
-    ///
-    /// Mirrors `cropped(toFrameCount:)` in every other respect: the inserted key's pose comes from
-    /// `self` before anything is removed, its interpolation is inherited from the segment that was
-    /// carrying the edge, and nothing is inserted where a key already stands on the edge or where
-    /// nothing is actually being discarded past it.
+    /// **Every component cropped to a transformation layer's blocks** —
+    /// `AnimationCurve.croppedToBlocks(_:insertBelow:insertAbove:)` per component, for a container's
+    /// own channel, which keys in absolute document frames.
     func croppedToBlocks(_ coverage: [Range<Int>], insertBelow: Int? = nil, insertAbove: Int? = nil)
-        -> (kept: TransformTrack, discarded: [Int]) {
-        func isCovered(_ frame: Int) -> Bool { coverage.contains { $0.contains(frame) } }
-
-        let discarded = keys.filter { !isCovered($0.frame) }.map(\.frame)
-        guard !discarded.isEmpty else { return (self, []) }
-
-        var working = keys
-        if let edge = insertBelow, isCovered(edge), key(atFrame: edge) == nil,
-           keys.contains(where: { $0.frame < edge }), let edgePose = pose(atDocumentFrame: edge) {
-            let segment = keys.last { $0.frame <= edge }?.interpolation ?? .bezier
-            working.append(Key(frame: edge, pose: edgePose, interpolation: segment))
+        -> (kept: TransformTrack, discarded: [PoseComponents.Component: [Int]]) {
+        var kept = TransformTrack(box: box)
+        var discarded: [PoseComponents.Component: [Int]] = [:]
+        for (component, curve) in curves {
+            let result = curve.croppedToBlocks(coverage, insertBelow: insertBelow, insertAbove: insertAbove)
+            kept.setCurve(result.kept, for: component)
+            if !result.discarded.isEmpty { discarded[component] = result.discarded }
         }
-        if let edge = insertAbove, isCovered(edge), key(atFrame: edge) == nil,
-           keys.contains(where: { $0.frame > edge }), let edgePose = pose(atDocumentFrame: edge) {
-            let segment = keys.last { $0.frame <= edge }?.interpolation ?? .bezier
-            working.append(Key(frame: edge, pose: edgePose, interpolation: segment))
-        }
-
-        let kept = working.filter { isCovered($0.frame) }
-        return (TransformTrack(keys: kept, step: step), discarded)
-    }
-
-    private static func normalised(_ input: [Key]) -> [Key] {
-        guard input.count > 1 else { return input }
-        let sorted = input.enumerated()
-            .sorted { $0.element.frame == $1.element.frame ? $0.offset < $1.offset
-                                                           : $0.element.frame < $1.element.frame }
-            .map(\.element)
-        var out: [Key] = []
-        out.reserveCapacity(sorted.count)
-        for key in sorted {
-            if out.last?.frame == key.frame { out[out.count - 1] = key } else { out.append(key) }
-        }
-        return out
+        return (kept, discarded)
     }
 
     // MARK: - Evaluation
 
-    /// The timing spine: `AnimationCurve` over pose indices. Computed, never stored — see the type's
-    /// own header for why.
-    var timing: AnimationCurve {
-        AnimationCurve(keys: keys.enumerated().map { index, key in
-            AnimationCurve.Key(frame: key.frame, value: Double(index),
-                               inHandle: key.inHandle, outHandle: key.outHandle,
-                               tangentMode: key.tangentMode, interpolation: key.interpolation)
-        }, step: step)
+    /// The values a resting pose holds against this channel's box — a cel channel's base, since its
+    /// stored base is the geometry itself (`CanvasManager.CelPoseState`).
+    var restValues: PoseComponents.Values { .resting(in: box) }
+
+    /// **The eight values this channel shows at `time`** — each keyed component evaluated
+    /// (`AnimationCurve.evaluate(at:)`, step and constant hold included), every other one `base`'s.
+    func values(atTime time: Double, base: PoseComponents.Values) -> PoseComponents.Values {
+        var values = base
+        for (component, curve) in curves { values[component] = curve.evaluate(at: time) }
+        return values
     }
 
-    /// **The pose this channel shows at a cel-local frame**, or nil when it holds no keys.
-    ///
-    /// One key is a constant hold at that pose, which is `AnimationCurve`'s decision 2 arriving here
-    /// for free rather than as a special case. Outside the first and last key the same rule holds the
-    /// end poses, so a drawing moved by a track stays where the last key put it rather than drifting
-    /// off the end of a linear extrapolation.
-    func pose(atCelLocalFrame frame: Int) -> PoseQuad? { pose(atCelLocalTime: Double(frame)) }
-
-    /// The continuous form, for a graph editor that scrubs along the curve rather than along the
-    /// frame ruler — `AnimationCurve.evaluate(at:)`'s own argument for taking a `Double`.
-    func pose(atCelLocalTime time: Double) -> PoseQuad? {
-        guard let first = keys.first else { return nil }
-        guard keys.count > 1 else { return first.pose }
-
-        let index = timing.evaluate(at: time)
-        // The segment, clamped to a real pair. The *fraction* is deliberately left unclamped inside
-        // it: an overshooting handle is meant to carry the blend past its key, and
-        // `PoseInterpolation.blend` extrapolates correctly for it.
-        let lower = min(max(Int(index.rounded(.down)), 0), keys.count - 2)
-        let t = CGFloat(index - Double(lower))
-        return PoseInterpolation.blend(keys[lower].pose, keys[lower + 1].pose, t: t)
-    }
-
-    /// The map a renderer carries ink through at a cel-local frame, or nil when this channel shows
-    /// the drawing where it rests.
+    /// **The map a renderer carries ink through at a cel-local frame, or nil when this channel shows
+    /// the drawing where it rests.**
     ///
     /// **Nil for a resting pose is load-bearing rather than an optimisation.** It is what decides
     /// whether the cel has a derivation at that frame at all, and a derivation costs a canvas-sized
-    /// render and a second entry in two caches (§4.5). A track whose keys all hold the rest pose —
-    /// which is exactly what §2.27's seeding writes before the artist has moved anything — must
-    /// therefore cost the document nothing.
-    ///
-    /// **A `PoseMap` rather than a `CGAffineTransform`, which is KEYFRAMES.md §8 stage 5b** — the
-    /// first of this file's two render reads. It used to answer a keystone with its linearisation at
-    /// the box centre: MEASURED 218% wrong in local scale and
-    /// 164 px out at the far corner of a 400x300 box pulled to a 120 pt top edge. A `PoseMap` is the
-    /// affine when the pose is one — bit for bit, so every stage-5 document is the document it was —
-    /// and the homography when it is not.
+    /// render and a second entry in two caches (§4.5). A channel whose keys all hold rest values —
+    /// which is exactly what a seed writes before the artist has moved anything — must therefore cost
+    /// the document nothing. "Rest" is `Values.isResting(in:)`: the same per-component tolerance that
+    /// decides what a commit keys, so there is one threshold and not two.
     func mapping(atCelLocalFrame frame: Int) -> PoseMap? {
-        guard let pose = pose(atCelLocalFrame: frame), !pose.isIdentity,
-              let map = pose.map, !map.isIdentity
+        guard !curves.isEmpty else { return nil }
+        let values = values(atTime: Double(frame), base: restValues)
+        guard !values.isResting(in: box), let map = PoseComponents.map(values, box: box), !map.isIdentity
         else { return nil }
         return map
     }
-
-    /// **The same two evaluations, spelled for a track whose base is not a cel's.**
-    ///
-    /// §3.1 gives a layer- or folder-scoped channel **absolute document frames**, because its target
-    /// has no cel to ride — so the frame handed in is the playhead's own number and there is no
-    /// `startFrame` to subtract. The arithmetic is identical and these delegate; what differs is the
-    /// argument label, and that is the whole reason they exist. A label reading `atCelLocalFrame:` on
-    /// a channel that has no cel is a lie a later reader corrects by subtracting a `startFrame` that
-    /// is not there.
-    func pose(atDocumentFrame frame: Int) -> PoseQuad? { pose(atCelLocalFrame: frame) }
-
-    func mapping(atDocumentFrame frame: Int) -> PoseMap? { mapping(atCelLocalFrame: frame) }
 }
 
 // MARK: - What a span change discarded (TODO 62)
@@ -433,11 +267,13 @@ struct TransformTrack: Equatable {
 /// crop is on the stack, and the banner names the count and the frames.
 ///
 /// **Frames are absolute document frames**, not cel-local ones, because the artist reads the ruler.
-/// A key at cel-local 9 on a block starting at frame 20 is "the keyframe at 29" to them, and that is
-/// what the sentence says.
+/// A key at cel-local 9 on a block starting at frame 20 is "the key at 29" to them, and that is what
+/// the sentence says.
 struct KeyframeCrop: Equatable {
 
-    /// Channel id (`TransformChannelID.id`) → the absolute frames of the keys removed, ascending.
+    /// Channel id → the absolute frames of the keys removed, ascending. **A pose component is a
+    /// channel of its own** (`"cel.x"`, `"transform.rotation"`), since TODO (139) made each one an
+    /// independent curve: a crop that took X and Y at one frame took two keys.
     private(set) var discarded: [String: [Int]] = [:]
 
     var isEmpty: Bool { discarded.isEmpty }
@@ -454,6 +290,14 @@ struct KeyframeCrop: Equatable {
         discarded[channel, default: []] = ((discarded[channel] ?? []) + frames).sorted()
     }
 
+    /// Records what one pose channel's crop discarded, one channel per component.
+    mutating func record(poseChannel id: String, discarded: [PoseComponents.Component: [Int]],
+                         offsetBy offset: Int = 0) {
+        for (component, frames) in discarded {
+            record(channel: id + "." + component.rawValue, frames: frames.map { $0 + offset })
+        }
+    }
+
     /// Folds another crop into this one — `splitCel` crops two halves and reports once.
     mutating func merge(_ other: KeyframeCrop) {
         for (channel, frames) in other.discarded { record(channel: channel, frames: frames) }
@@ -466,13 +310,12 @@ extension Cel {
     /// the one crop, which every verb that can leave a key outside a span calls (TODO 62).
     ///
     /// A key is outside when its cel-local frame is below 0 or at or past `frameCount`. A channel left
-    /// with no keys is removed rather than stored empty, which is `removeTransformPoseKey`'s rule on
-    /// the same payload: an empty `TransformTrack` in the dictionary is a channel the graph editor
-    /// would list and draw as a flat, unkeyed line.
+    /// with no keys is removed rather than stored empty: an empty `TransformTrack` in the dictionary
+    /// is a channel that animates nothing and still routes a Move as though it did.
     ///
     /// **`pendingPoseBaselines` is left alone.** A held pose is not a key and has no frame — it is
-    /// §2.27's *"the previous value is held"*, waiting for the next keyframe mark to commit it — so
-    /// there is nothing about it that can be outside a span.
+    /// §2.27's *"the previous value is held"*, waiting for the next Add Keys to commit it — so there
+    /// is nothing about it that can be outside a span.
     ///
     /// - Parameter delta: how far to move every key's cel-local frame **first**. A left-edge resize
     ///   moves the cel's origin by `newStart - oldStart` and the keys stay on the document frames
@@ -485,7 +328,7 @@ extension Cel {
         guard !transformTracks.isEmpty else { return crop }
         for (id, track) in transformTracks {
             let (kept, discarded) = track.shifted(by: delta).cropped(toFrameCount: frameCount)
-            crop.record(channel: id, frames: discarded.map { startFrame + $0 })
+            crop.record(poseChannel: id, discarded: discarded, offsetBy: startFrame)
             if kept.isEmpty {
                 transformTracks.removeValue(forKey: id)
             } else if kept != track {
@@ -536,9 +379,10 @@ struct LayerPose: Equatable {
     /// pose a future Move-on-a-transform-layer writes.
     var pose: PoseQuad
 
-    /// The keyframe channel, in **absolute document frames** (§3.1, and see `LayerFolder.effectTracks`
-    /// for why a folder's argument for absolute time is stronger than a layer's rather than weaker).
-    /// Empty on a container the artist has posed but not animated.
+    /// The channel's curves, in **absolute document frames** (§3.1). Empty on a container the artist
+    /// has posed but not animated. **A component it does not key shows `pose`'s value for that
+    /// component** — so turning a container whose X is animated leaves X on its curve and the turn in
+    /// the base, exactly as a grade's unkeyed parameter shows the stored effect.
     var track: TransformTrack
 
     /// **The pose this container was showing before the artist moved it between two keyframe marks**
@@ -598,11 +442,12 @@ struct LayerPose: Equatable {
     /// fills it in on the way into Repeat. Not keyable, so it sits here with the shake's seed.
     var repeatPeriod: Int = 0
 
-    init(pose: PoseQuad, track: TransformTrack = TransformTrack(), baseline: PoseQuad? = nil,
+    /// - Parameter track: the channel's curves; an empty one on `pose`'s own box when omitted.
+    init(pose: PoseQuad, track: TransformTrack? = nil, baseline: PoseQuad? = nil,
          mode: TransformLayerMode = .move, shakeSeed: UInt64 = 0, shakePeriod: Int = 1,
          repeatPeriod: Int = 0) {
         self.pose = pose
-        self.track = track
+        self.track = track ?? TransformTrack(box: pose.box)
         self.baseline = baseline
         self.mode = mode
         self.shakeSeed = shakeSeed
@@ -620,15 +465,27 @@ struct LayerPose: Equatable {
     /// means one level out.
     init(restingIn box: CGRect) { self.init(pose: PoseQuad(restingIn: box)) }
 
-    /// §2.26's stricter predicate, for the channel list: two or more keys not all holding one pose.
+    /// §2.26's stricter predicate, for the channel list: some component is an animation.
     var isAnimated: Bool { track.isAnimated }
 
-    /// The pose at one document frame — **the track when it holds keys, the stored base otherwise.**
-    ///
-    /// The same precedence `Layer.layerEffect(atFrame:)` has: a channel that exists is what the
-    /// render reads, and the stored value is what a channel-free container shows at every frame.
+    /// **The stored base, as the eight values the track's unkeyed components show** — read against
+    /// the track's box, which a container shares with its base.
+    var baseValues: PoseComponents.Values {
+        PoseComponents.decompose(pose, inBox: track.box) ?? track.restValues
+    }
+
+    /// The eight values the container shows at one document frame — each keyed component's curve,
+    /// every other component the base's.
+    func resolvedValues(atFrame frame: Int) -> PoseComponents.Values {
+        track.values(atTime: Double(frame), base: baseValues)
+    }
+
+    /// The pose at one document frame — **the stored base itself when nothing is keyed**, and
+    /// otherwise the keyed components over the base's. The same precedence
+    /// `Layer.layerEffect(atFrame:)` has, one component at a time.
     func resolvedPose(atFrame frame: Int) -> PoseQuad {
-        track.pose(atDocumentFrame: frame) ?? pose
+        guard !track.isEmpty else { return pose }
+        return PoseComponents.recompose(resolvedValues(atFrame: frame), box: track.box) ?? pose
     }
 
     /// **The map this container carries its contents through at `frame`, or nil when it shows them
@@ -644,8 +501,13 @@ struct LayerPose: Equatable {
     /// `distortUnavailableReason` stop refusing a container float: the sentence it said named this
     /// accessor's linearisation as the reason, so the refusal ended when the linearisation did.
     func mapping(atFrame frame: Int) -> PoseMap? {
-        let resolved = resolvedPose(atFrame: frame)
-        guard !resolved.isIdentity, let map = resolved.map, !map.isIdentity else { return nil }
+        guard !track.isEmpty else {
+            guard !pose.isIdentity, let map = pose.map, !map.isIdentity else { return nil }
+            return map
+        }
+        let values = resolvedValues(atFrame: frame)
+        guard !values.isResting(in: track.box), let map = PoseComponents.map(values, box: track.box),
+              !map.isIdentity else { return nil }
         return map
     }
 
@@ -658,14 +520,22 @@ struct LayerPose: Equatable {
     /// starts, which is the failure `RenderNode.needsCompositorOnCanvas` refuses one line up when it
     /// declines to consult visibility.
     ///
-    /// **It follows `resolvedPose`'s precedence exactly rather than testing both halves**, so a
-    /// container whose stored base is posed but whose track holds only resting keys answers false —
-    /// which is what it renders as. The one direction it is deliberately loose in is the segment
-    /// between two keys: two resting keys cannot interpolate to anything but rest, so testing the
-    /// keys is exact for every curve `TransformTrack` can hold.
+    /// **It follows `resolvedValues`' precedence component by component**, with `isResting(in:)`'s
+    /// tolerance: a keyed component moves the contents when any of its keys leaves rest, an unkeyed
+    /// one when the base does. The one direction it is deliberately loose in is the segment between
+    /// two keys — two resting keys interpolate to rest under every tangent mode but an overshooting
+    /// `.free` handle, which is exact for every curve the app writes.
     var movesItsContents: Bool {
         guard !track.isEmpty else { return !pose.isIdentity }
-        return track.keys.contains { !$0.pose.isIdentity }
+        let rest = track.restValues
+        let base = baseValues
+        func leavesRest(_ value: Double, _ component: PoseComponents.Component) -> Bool {
+            abs(value - rest[component]) > component.flatTolerance
+        }
+        return PoseComponents.Component.allCases.contains { component in
+            guard let curve = track.curve(component) else { return leavesRest(base[component], component) }
+            return curve.keys.contains { leavesRest($0.value, component) }
+        }
     }
 }
 
@@ -676,7 +546,7 @@ extension LayerPose: Codable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         pose = try c.decode(PoseQuad.self, forKey: .pose)
-        track = try c.decodeIfPresent(TransformTrack.self, forKey: .track) ?? TransformTrack()
+        track = try c.decodeIfPresent(TransformTrack.self, forKey: .track) ?? TransformTrack(box: pose.box)
         baseline = try c.decodeIfPresent(PoseQuad.self, forKey: .baseline)
         // Absent is Move — every document written before the modes existed, and every pose nobody
         // has switched. `decodeIfPresent` rather than a tolerant `try?`: a mode string this build
@@ -709,35 +579,33 @@ extension LayerPose: Codable {
 
 // MARK: - Codable
 
-/// Field-presence versioning, the idiom every persisted field in this tree follows: a track written
-/// before a field existed decodes to the default rather than failing.
+/// Field-presence versioning, the idiom every persisted field in this tree follows. **The curves are
+/// keyed by component name** (`PoseComponents.Component.rawValue`), so the file reads as the graph
+/// editor does — one entry per curve — and a component this build does not know is ignored rather
+/// than failing the document. A track written before TODO (139), which stored whole-pose keys under
+/// `keys`, carries neither field and opens empty: no document so far has to survive (TODO.md's
+/// standing permission), so there is no second decoder for it.
 extension TransformTrack: Codable {
 
-    private enum CodingKeys: String, CodingKey { case keys, step }
+    private enum CodingKeys: String, CodingKey { case box, curves }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        keys = Self.normalised(try c.decodeIfPresent([Key].self, forKey: .keys) ?? [])
-        step = try c.decodeIfPresent(Int.self, forKey: .step) ?? 1
+        box = try c.decodeIfPresent(CGRect.self, forKey: .box) ?? .zero
+        let named = try c.decodeIfPresent([String: AnimationCurve].self, forKey: .curves) ?? [:]
+        var curves: [PoseComponents.Component: AnimationCurve] = [:]
+        for (name, curve) in named {
+            guard let component = PoseComponents.Component(rawValue: name), !curve.isEmpty else { continue }
+            curves[component] = curve
+        }
+        self.curves = curves
     }
-}
 
-extension TransformTrack.Key: Codable {
-
-    private enum CodingKeys: String, CodingKey {
-        case frame, pose, inHandle, outHandle, tangentMode, interpolation
-    }
-
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        frame = try c.decode(Int.self, forKey: .frame)
-        pose = try c.decode(PoseQuad.self, forKey: .pose)
-        inHandle = try c.decodeIfPresent(AnimationCurve.Handle.self, forKey: .inHandle) ?? .zero
-        outHandle = try c.decodeIfPresent(AnimationCurve.Handle.self, forKey: .outHandle) ?? .zero
-        tangentMode = try c.decodeIfPresent(AnimationCurve.TangentMode.self, forKey: .tangentMode)
-            ?? .autoClamped
-        interpolation = try c.decodeIfPresent(AnimationCurve.Interpolation.self, forKey: .interpolation)
-            ?? .bezier
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(box, forKey: .box)
+        try c.encode(Dictionary(uniqueKeysWithValues: curves.map { ($0.key.rawValue, $0.value) }),
+                     forKey: .curves)
     }
 }
 

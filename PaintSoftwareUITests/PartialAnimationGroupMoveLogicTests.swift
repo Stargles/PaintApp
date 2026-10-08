@@ -96,11 +96,8 @@ final class PartialAnimationGroupMoveLogicTests: XCTestCase {
         manager.animationGroups.append(AnimationGroup(id: group, displayName: "Group 1",
                                                       tagColor: black()))
         manager.layers[layerIndex].cels[0].transformTracks = [
-            TransformChannelID.group(group).id: TransformTrack(keys: [
-                TransformTrack.Key(frame: 0, pose: PoseQuad(restingIn: box), interpolation: .linear),
-                TransformTrack.Key(frame: 12, pose: PoseQuad(box: box,
-                                                             mappedBy: .init(translationX: dx, y: 0)),
-                                   interpolation: .linear)])
+            TransformChannelID.group(group).id: CanvasFixture.poseTrack([(0, PoseQuad(restingIn: box)), (12, PoseQuad(box: box,
+                                                             mappedBy: .init(translationX: dx, y: 0)))], interpolation: .linear)
         ]
     }
 
@@ -108,11 +105,8 @@ final class PartialAnimationGroupMoveLogicTests: XCTestCase {
     /// `testAPartialLassoOnACelAnimatedDrawingIsNotRefused` exists to pin.
     private func animateCel(_ manager: CanvasManager, _ layerIndex: Int, dx: CGFloat) {
         manager.layers[layerIndex].cels[0].transformTracks = [
-            TransformChannelID.cel.id: TransformTrack(keys: [
-                TransformTrack.Key(frame: 0, pose: PoseQuad(restingIn: box), interpolation: .linear),
-                TransformTrack.Key(frame: 12, pose: PoseQuad(box: box,
-                                                             mappedBy: .init(translationX: dx, y: 0)),
-                                   interpolation: .linear)])
+            TransformChannelID.cel.id: CanvasFixture.poseTrack([(0, PoseQuad(restingIn: box)), (12, PoseQuad(box: box,
+                                                             mappedBy: .init(translationX: dx, y: 0)))], interpolation: .linear)
         ]
     }
 
@@ -202,7 +196,7 @@ final class PartialAnimationGroupMoveLogicTests: XCTestCase {
                  [46, 54, 62, 80, 88, 96, 70, 78, 86],
                  "and the animation the group already had is exactly as it was")
         XCTAssertEqual(manager.layers[layerIndex].cels[0]
-            .transformTracks[TransformChannelID.group(group).id]?.keys.count, 2,
+            .transformTracks[TransformChannelID.group(group).id]?.keyedFrames.count, 2,
                        "no key was written")
     }
 
@@ -262,7 +256,7 @@ final class PartialAnimationGroupMoveLogicTests: XCTestCase {
                  [46, 54, 62, 80, 88, 96, 70, 78, 86],
                  "and the far keyframe is where it always was")
         XCTAssertEqual(manager.layers[layerIndex].cels[0]
-            .transformTracks[TransformChannelID.group(group).id]?.keys.count, 2,
+            .transformTracks[TransformChannelID.group(group).id]?.keyedFrames.count, 2,
                        "the key at the playhead was replaced, not added to")
     }
 

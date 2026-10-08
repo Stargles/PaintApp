@@ -168,10 +168,11 @@ enum TimelineGraphChannelList {
     ///
     /// **Only a channel that is *not* an animation**, and that qualifier is the whole of the ask's
     /// one real hazard: a default that hid an animated Scale X would take an animation the artist
-    /// made off the surface they made it on. A pure slide leaves all three of these with two keys of
-    /// equal value — `AnimationCurve.isAnimated` is false, the band draws them as dashed flat lines,
-    /// and those are exactly the rows the owner is complaining about. Scale something and the curve
-    /// stops being flat and the row comes back by itself.
+    /// made off the surface they made it on. Since TODO (139) a pure slide keys no scale or skew at
+    /// all — each component is its own curve and a Move keys only what it changed — so the rows the
+    /// owner complained about are not drawn in the first place; what this still folds away is a
+    /// scale or skew curve left flat, which the band would otherwise draw as a dashed line. Scale
+    /// something and the curve stops being flat and the row comes back by itself.
     ///
     /// A hidden row is still **listed**: `groups(of:hidden:names:)` is built from the band's
     /// unfiltered channels, so all three appear in the channel list with an empty box and one tap
@@ -256,9 +257,9 @@ enum TimelineGraphChannelList {
         /// **What tapping this row's body raises** — §11.7's second ruling, nil for a channel that
         /// has no subject to raise.
         ///
-        /// The channel rather than the parameter: all six of a pose channel's rows name the same
-        /// Move, because they are six readings of one `TransformTrack`, so tapping "Rotation" and
-        /// tapping "X" put up the same box. That is the right answer and not a shortcut — the owner
+        /// The channel rather than the parameter: every row of a pose channel names the same Move,
+        /// because they are the curves of one `TransformTrack`, so tapping "Rotation" and tapping
+        /// "X" put up the same box. That is the right answer and not a shortcut — the owner
         /// asked for *"the move box for that move item"*, and the move item is the channel.
         let navigation: PoseChannelID?
 
@@ -430,7 +431,7 @@ extension CanvasManager {
     /// they cannot disagree about what a channel is. This one is read only while the popup is up.
     var graphChannelGroups: [TimelineGraphChannelList.Group]? {
         guard let target = graphBandExpansion?.target else { return nil }
-        let channels = graphBandListing(of: target).channels
+        let channels = graphBandListing(of: target)
         // **Two name tables merged, which is the shape `groupNames(of:)`' doc predicted**: *"the day
         // a band lists a transform beside a grade, its names are two of these merged, and nothing
         // above here changes."* It is that day.
@@ -460,7 +461,7 @@ extension CanvasManager {
     /// closed, which is what stops a filter existing for a surface that is not on screen.
     func setGraphChannels(_ ids: [String], visible: Bool) {
         guard let target = graphBandExpansion?.target else { return }
-        let channels = graphBandListing(of: target).channels
+        let channels = graphBandListing(of: target)
         graphChannelFilter = graphChannelFilter.setting(
             ids, visible: visible, on: target, listed: channels.map(\.parameterID),
             defaults: TimelineGraphChannelList.defaultHidden(in: channels))
@@ -470,7 +471,7 @@ extension CanvasManager {
     /// `setGraphChannels`' twin down to the no-op with the band closed.
     func setGraphGroupCollapsed(_ id: String, collapsed: Bool) {
         guard let target = graphBandExpansion?.target else { return }
-        let listed = graphBandListing(of: target).channels
+        let listed = graphBandListing(of: target)
             .map { TimelineGraphChannelList.groupID(ofParameterID: $0.parameterID) }
         graphChannelFold = graphChannelFold.setting(id, collapsed: collapsed,
                                                     on: target, listed: listed)

@@ -452,8 +452,7 @@ final class StreamBarStateLogicTests: XCTestCase {
                                                                 raster: .empty(size: size))]
         manager.layers[manager.layers.count - 1].transform = LayerPose(
             pose: PoseQuad(restingIn: box),
-            track: TransformTrack(keys: [.init(frame: 0, pose: PoseQuad(restingIn: box)),
-                                         .init(frame: 11, pose: moving)]))
+            track: CanvasFixture.poseTrack([(0, PoseQuad(restingIn: box)), (11, moving)]))
         manager.currentLayerIndex = layerIndex
         manager.currentFrame = 6    // mid-move: the walk poses the stream's cel here, and not at the key's rest
         XCTAssertFalse(manager.activeStreamIsPlainWhileMoving, "a moved stream is held, and says nothing")
@@ -642,9 +641,7 @@ final class StreamBarStateLogicTests: XCTestCase {
         let (manager, _) = streaming()
         let layerIndex = manager.currentLayerIndex
         let vector = try XCTUnwrap(manager.layers[layerIndex].cels[0].vector)
-        manager.layers[layerIndex].cels[0].transformTracks[TransformChannelID.cel.id] = TransformTrack(keys: [
-            .init(frame: 0, pose: PoseQuad(restingIn: CGRect(origin: .zero, size: CanvasFixture.canvasSize))),
-            .init(frame: 11, pose: PoseQuad(box: CGRect(origin: .zero, size: CanvasFixture.canvasSize),
+        manager.layers[layerIndex].cels[0].transformTracks[TransformChannelID.cel.id] = CanvasFixture.poseTrack([(0, PoseQuad(restingIn: CGRect(origin: .zero, size: CanvasFixture.canvasSize))), (11, PoseQuad(box: CGRect(origin: .zero, size: CanvasFixture.canvasSize),
                                             mappedBy: CGAffineTransform(translationX: 8, y: 0)))])
         manager.currentFrame = 6
         let coordinator = manager.streamCoordinator

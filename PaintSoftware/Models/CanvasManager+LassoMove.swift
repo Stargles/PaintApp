@@ -781,7 +781,7 @@ extension CanvasManager {
     /// instruction — and the owner's requirement of both refusals is that they name the way out.
     ///
     /// **At the lift, not at the commit**, which is the whole point of it being here. The commit is
-    /// where the damage was — `keyPoseRestoringRest` un-splits the cut and keys the group, or
+    /// where the damage was — the `.key` arm (`restoreRestAndApply`) un-splits the cut and keys the group, or
     /// `mintAnimationChannel` overwrites every carried tag — but by then the artist has drawn a loop,
     /// tapped Move, dragged a box across the canvas and let go, and a refusal that lands there tells
     /// them their gesture was wasted *after* they made it. §5.24's argument, one step earlier: the
@@ -1732,8 +1732,14 @@ extension CanvasManager {
                                           atFrame: currentFrame)
             guard let outerInverse = outer.inverse else { continue }
             let keyed = current.concatenating(outer).concatenating(map).concatenating(outerInverse)
+            // The box is measured on the ink as shown; the channel reads its components in the space
+            // the ink is stored in, so the box's centre is pulled back through what is applied after it.
+            let shownCentre = CGPoint(x: restBox.midX, y: restBox.midY)
+            let storedCentre = outerInverse.applied(to: shownCentre) ?? shownCentre
+            let channelBox = CGRect(x: storedCentre.x - restBox.width / 2, y: storedCentre.y - restBox.height / 2,
+                                    width: restBox.width, height: restBox.height)
             commitTransformPose(layerID: part.layerID, celID: part.celID, channel: channel,
-                                restBox: restBox, map: keyed, restElements: part.elementsBeforeLift,
+                                restBox: channelBox, map: keyed, restElements: part.elementsBeforeLift,
                                 movedIDs: part.insideIDs, atFrame: currentFrame)
         }
     }

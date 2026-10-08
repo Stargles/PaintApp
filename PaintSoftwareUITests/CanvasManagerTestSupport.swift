@@ -94,6 +94,77 @@ enum CanvasFixture {
         manager.layers.first { $0.id == layerID }
     }
 
+    // MARK: - Pose fixtures — TODO (139)
+
+    /// **A pose channel that shows `poses` at their frames**, stated the way a fixture wants to say it
+    /// — "the drawing rests at 0 and is slid 24 pt at 8" — and stored the way the app stores it: one
+    /// curve per component, keyed at every listed frame, **for exactly the components that move**
+    /// across the poses or away from rest. A slide therefore keys X alone, as a sideways Move would.
+    ///
+    /// Each pose is read against `box` (`PoseComponents.decompose(_:inBox:)`), so the poses may be
+    /// measured in any box. A fixture whose pose cannot be decomposed is a broken fixture, and traps.
+    static func poseTrack(box: CGRect, _ poses: [(frame: Int, pose: PoseQuad)],
+                          interpolation: AnimationCurve.Interpolation = .bezier,
+                          step: Int = 1) -> TransformTrack {
+        let rest = PoseComponents.Values.resting(in: box)
+        var values = poses.map { (frame: $0.frame, values: PoseComponents.decompose($0.pose, inBox: box)!) }
+        // Wound onto one turn, frame by frame, as a commit would key them.
+        for i in values.indices.dropFirst() {
+            values[i].values = values[i].values.unwrappingRotation(near: values[i - 1].values.rotation)
+        }
+        var curves: [PoseComponents.Component: AnimationCurve] = [:]
+        for component in PoseComponents.Component.allCases {
+            let moves = values.contains { abs($0.values[component] - rest[component]) > component.flatTolerance }
+            guard moves else { continue }
+            curves[component] = AnimationCurve(keys: values.map {
+                AnimationCurve.Key(frame: $0.frame, value: $0.values[component], interpolation: interpolation)
+            }, step: step)
+        }
+        // A fixture whose poses move no component keys nothing, which reads as "no channel" — not as
+        // the in-force flat channel a whole-pose fixture used to mean. Such a fixture has to say which
+        // component it keys, so it is caught here rather than passing for the wrong reason.
+        if curves.isEmpty, !poses.isEmpty {
+            XCTFail("CanvasFixture.poseTrack: no component moves across these poses; key one explicitly")
+        }
+        return TransformTrack(box: box, curves: curves)
+    }
+
+    /// `poseTrack(box:_:)` read against the first pose's own box — what a fixture means when every
+    /// pose it lists is measured in one box.
+    static func poseTrack(_ poses: [(frame: Int, pose: PoseQuad)],
+                          interpolation: AnimationCurve.Interpolation = .bezier,
+                          step: Int = 1) -> TransformTrack {
+        poseTrack(box: poses[0].pose.box, poses, interpolation: interpolation, step: step)
+    }
+
+    /// Writes a pose channel straight onto a cel, past every writer — the fixture's own state, so a
+    /// test about a reader does not depend on the writers it is not about.
+    static func setPoseTrack(_ manager: CanvasManager, layerID: UUID, celID: UUID,
+                             channel: TransformChannelID = .cel, _ track: TransformTrack) {
+        guard let layer = manager.layers.firstIndex(where: { $0.id == layerID }),
+              let cel = manager.layers[layer].cels.firstIndex(where: { $0.id == celID }) else { return }
+        manager.layers[layer].cels[cel].transformTracks[channel.id] = track.isEmpty ? nil : track
+    }
+
+    /// The map one channel resolves to at an absolute frame, as a pose on `box` — what a fixture
+    /// compares against the poses it keyed. Nil where the channel shows rest.
+    static func resolvedPose(_ manager: CanvasManager, layerID: UUID, celID: UUID,
+                             channel: TransformChannelID = .cel, atFrame frame: Int,
+                             box: CGRect) -> PoseQuad {
+        let map = manager.resolvedPoseMap(layerID: layerID, celID: celID, channel: channel, atFrame: frame)
+        switch map {
+        case .affine(let affine): return PoseQuad(box: box, mappedBy: affine)
+        case .projective(let homography): return PoseQuad(box: box, mappedThrough: homography)!
+        }
+    }
+
+    /// The largest distance between two poses' corners — the tolerance a pose comparison is stated
+    /// in, since a channel's pose is recomposed from its components and equals a keyed pose to
+    /// floating point rather than to the bit.
+    static func cornerDistance(_ a: PoseQuad, _ b: PoseQuad) -> CGFloat {
+        (0..<4).map { hypot(a.corners[$0].x - b.corners[$0].x, a.corners[$0].y - b.corners[$0].y) }.max() ?? 0
+    }
+
     // MARK: - Pixel fixtures
 
     /// A canvas-sized image with `rect` filled in `color` and the rest transparent.

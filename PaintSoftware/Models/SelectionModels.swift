@@ -1487,17 +1487,19 @@ extension CanvasManager {
                                              movedBy: piece)
         else { return }
         // **Written wherever `resolvedPose` reads**, or the preview shows nothing on exactly the
-        // documents this feature is for: that accessor is *"the track when it holds keys, the stored
-        // base otherwise"*, so writing the base under a keyed container would move a value the render
-        // never consults and the canvas would sit still under the artist's finger.
+        // documents this feature is for: a keyed component shows its curve, not the base, so writing
+        // only the base under a keyed container would move a value the render never consults and the
+        // canvas would sit still under the artist's finger. Keyed, the preview is the `.key` arm the
+        // commit will take — the changed components keyed here, an unkeyed one seeded — so letting go
+        // changes nothing on screen.
         //
         // Composed onto the **lift** state rather than onto the live one, so a hundred ticks of a
         // drag leave one key rather than a hundred baselines of drift.
         var live = restState
-        if live.track.isEmpty {
-            live.pose = posed
-        } else {
-            live.track.setKey(TransformTrack.Key(frame: currentFrame, pose: posed))
+        live.pose = posed
+        if !live.track.isEmpty, let new = PoseComponents.decompose(posed, inBox: live.track.box) {
+            live.track.key(new, over: restState.resolvedValues(atFrame: currentFrame),
+                           atFrame: currentFrame, keyframes: keyframeFrames(of: target))
         }
         guard current != live, case .layer(let id) = target,
               let index = layers.firstIndex(where: { $0.id == id }) else { return }

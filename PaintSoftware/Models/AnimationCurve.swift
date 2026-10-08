@@ -234,19 +234,150 @@ struct AnimationCurve: Codable, Hashable {
 
     func key(atFrame frame: Int) -> Key? { keys.first { $0.frame == frame } }
 
+    /// **`existing` with `oldValue` keyed onto the keyframes either side of `frame` and `newValue` on
+    /// `frame` itself** — the seed every channel kind shares: a grade's parameter, a target's own
+    /// scalar and each component of a pose (KEYFRAMES.md §2.27's *"the previous value gets saved to A
+    /// and the new value gets saved to B"*).
+    ///
+    /// **Only the immediate neighbours are seeded, and that is behaviourally identical to seeding every
+    /// keyframe.** Decision 2 holds a curve constant outside its first and last key, so a value placed
+    /// on the nearest keyframe below already holds at every one below that, and likewise above. Fewer
+    /// keys, same curve, and no handles on frames the artist never touched.
+    ///
+    /// **A neighbour that already carries a key is left alone.** That key is a value the artist
+    /// authored or one a previous keyframe held, and overwriting it would move a point of the curve
+    /// nobody asked to move. `frame`'s own key *is* replaced, because that is the edit being made.
+    ///
+    /// - Parameter keyframes: ascending — `CanvasManager.keyframeFrames(of:)`, so a keyframe placed by
+    ///   moving a control counts as a neighbour exactly as a primed one does. Taken *once* by each
+    ///   caller before it starts writing, because seeding one channel adds keys and would otherwise
+    ///   move the next channel's neighbour.
+    static func seeded(_ existing: AnimationCurve?, keyframes: [Int], frame: Int,
+                       oldValue: Double, newValue: Double) -> AnimationCurve {
+        var curve = existing ?? AnimationCurve()
+        if let below = keyframes.last(where: { $0 < frame }), curve.key(atFrame: below) == nil {
+            curve.setKey(Key(frame: below, value: oldValue))
+        }
+        if let above = keyframes.first(where: { $0 > frame }), curve.key(atFrame: above) == nil {
+            curve.setKey(Key(frame: above, value: oldValue))
+        }
+        curve.setKey(Key(frame: frame, value: newValue))
+        return curve
+    }
+
+    // MARK: - Riding a cel's span — KEYFRAMES.md §3.1 and TODO (62)
+
+    /// **This curve cut in two at a cel-local frame** — §3.1's rule for `splitCel`: *"keys before the
+    /// cut go left, keys after go right, and a key is inserted at the cut in both so the value is
+    /// continuous across it."* A pose component is a curve like any other (TODO (139)), so this is
+    /// the one place the rule is written.
+    ///
+    /// `cut` is the first cel-local frame of the **right** half, so the left half spans `0..<cut` and
+    /// a key of the right half at original frame `f` lands at `f - cut`.
+    ///
+    /// **The right half's inserted key is the value this curve shows at `cut`; the left half's is the
+    /// value it shows at `cut - 1`, its own last frame.** Both are what make *"so the value is
+    /// continuous"* true at every frame either half draws: without the left one, the frames from the
+    /// left half's last real key onward would hold that key flat (decision 2) and a moving drawing
+    /// would stop dead before the cut. It lands on `cut - 1` rather than on `cut` because a key beyond
+    /// a cel's span is deleted (TODO (62)), so a split may not mint one.
+    ///
+    /// **What is lost is stated rather than hidden.** A segment that spans the cut is re-parameterised
+    /// on both sides — a single bezier cannot be two beziers — so the easing *within* that one span is
+    /// not the easing it had. Every other frame's value is unchanged.
+    ///
+    /// **A key already on the cut is carried across whole to the right half, not re-synthesised**:
+    /// its handles and tangent mode are not recoverable from a value, and a split is not an occasion
+    /// to flatten an authored ease. A key already on `cut - 1` is likewise kept whole.
+    ///
+    /// **The inserted keys inherit the interpolation of the segment they land in**, which matters on
+    /// the right half: a key's `interpolation` describes the segment it *begins*, so a `.constant`
+    /// hold cut in two would otherwise start easing at the join. `step` rides unchanged onto both,
+    /// which re-phases the right half (§2.10 anchors a step at frame 0 of the curve's own base);
+    /// rescaling it would retime the animation, which §3.1 refuses.
+    ///
+    /// An empty curve splits into two empty ones; a curve with keys yields a key at each half's
+    /// boundary whatever the keys are, so neither half is ever empty.
+    func split(atFrame cut: Int) -> (left: AnimationCurve, right: AnimationCurve) {
+        guard !keys.isEmpty else { return (self, self) }
+        let atCut = evaluate(at: Double(cut))
+        let beforeCut = evaluate(at: Double(cut - 1))
+        let segment = keys.last { $0.frame <= cut }?.interpolation ?? .bezier
+        var left = AnimationCurve(keys: keys.filter { $0.frame < cut }, step: step)
+        if key(atFrame: cut - 1) == nil {
+            left.setKey(Key(frame: cut - 1, value: beforeCut, interpolation: segment))
+        }
+        var right = AnimationCurve(keys: keys.filter { $0.frame >= cut }.map {
+            var moved = $0
+            moved.frame -= cut
+            return moved
+        }, step: step)
+        if key(atFrame: cut) == nil { right.setKey(Key(frame: 0, value: atCut, interpolation: segment)) }
+        return (left, right)
+    }
+
+    /// Every key moved by `delta` frames. What a **left-edge** resize does to a cel-local curve before
+    /// cropping it: the cel's origin moves and its keys stay on the document frames they were on, so
+    /// their cel-local numbers move the other way. `step` rides unchanged, `split`'s reason.
+    func shifted(by delta: Int) -> AnimationCurve {
+        guard delta != 0 else { return self }
+        return AnimationCurve(keys: keys.map { key in
+            var moved = key
+            moved.frame += delta
+            return moved
+        }, step: step)
+    }
+
+    /// **The keys inside `0..<frameCount`, and the frames of the ones that were not** — TODO (62)'s
+    /// rule: *keys beyond a cel's span are deleted, and shortening a cel crops the keys past its new
+    /// end* — but **before** a key past an edge is removed, a key is inserted at the new edge carrying
+    /// the value the curve showed there, so the frames that remain keep the motion they had up to the
+    /// new end. Both edges, on the owner's ruling of 2026-09-11: a key below 0 is as far outside the
+    /// span as one at `frameCount`, and a left-edge resize (`shifted(by:)`) is what produces one.
+    ///
+    /// The inserted value comes from `self` before anything is removed, its interpolation is inherited
+    /// from the segment that was carrying the edge (`split`'s rule), and nothing is inserted where a
+    /// key already stands on the edge or where nothing past it is being removed — a crop that discards
+    /// nothing changes nothing.
+    func cropped(toFrameCount frameCount: Int) -> (kept: AnimationCurve, discarded: [Int]) {
+        let discardedBelow = keys.contains { $0.frame < 0 }
+        let discardedAbove = keys.contains { $0.frame >= frameCount }
+        guard discardedBelow || discardedAbove else { return (self, []) }
+
+        var working = keys
+        if discardedAbove, frameCount > 0, key(atFrame: frameCount - 1) == nil {
+            let segment = keys.last { $0.frame <= frameCount - 1 }?.interpolation ?? .bezier
+            working.append(Key(frame: frameCount - 1, value: evaluate(at: Double(frameCount - 1)),
+                               interpolation: segment))
+        }
+        if discardedBelow, key(atFrame: 0) == nil {
+            let segment = keys.last { $0.frame <= 0 }?.interpolation ?? .bezier
+            working.append(Key(frame: 0, value: evaluate(at: 0), interpolation: segment))
+        }
+
+        let discarded = keys.filter { $0.frame < 0 || $0.frame >= frameCount }.map(\.frame)
+        let kept = working.filter { $0.frame >= 0 && $0.frame < frameCount }
+        return (AnimationCurve(keys: kept, step: step), discarded)
+    }
+
     // MARK: - Cropping to a transform layer's blocks — TODO (62), reversed 2026-09-11 (txcrop)
 
-    /// **`TransformTrack.croppedToBlocks(_:insertBelow:insertAbove:)`'s exact shape, for a scalar
-    /// channel** — a `.transform` layer's mode scalar (`rotateSpeed`, `parallaxShare`, and whatever
-    /// TRANSFORM_LAYER.md §3.3 adds later) lives in `Layer.channelTracks` as an `AnimationCurve` in
-    /// absolute document frames, and is gated by the layer's blocks exactly as its pose track is —
-    /// **`opacity` is the one member of that dictionary excluded**, since every layer owns it and it
-    /// is never gated by a block (`CanvasManager.cropTransformLayerKeysToBlocks` is the one caller and
-    /// is what excludes it).
+    /// **`cropped(toFrameCount:)` one level up: this curve is in absolute document frames, and
+    /// `coverage` is the union of a `.transform` layer's blocks** (`CanvasManager
+    /// .transformLayerBlockCoverage`) rather than one window starting at 0. Its pose components and
+    /// its mode scalars (`rotateSpeed`, `parallaxShare`, …) in `Layer.channelTracks` are gated by the
+    /// blocks alike — **`opacity` is the one member of that dictionary excluded**, since every layer
+    /// owns it and it is never gated by a block (`CanvasManager.cropTransformLayerKeysToBlocks` is the
+    /// one caller and is what excludes it).
     ///
-    /// `coverage` is the union of the layer's blocks; `insertBelow`/`insertAbove` name the one edge
-    /// the caller's own resize just moved inward, never every interval's edge — see the `TransformTrack`
-    /// twin for why. Removal is unconditional and global, the owner's own ruling on data loss.
+    /// The owner's reversal (worktree `txcrop`, 2026-09-11): *"why are there keyframes outside a
+    /// transform cel? … I'm pretty sure I explicitly wanted keyframes to be clamped to inside the
+    /// cels."* **`insertBelow`/`insertAbove` name the one edge the caller's own resize just moved
+    /// inward — never every covered interval's edge**, because a layer can own several blocks and
+    /// inserting a boundary key at every interval's edge merely because *some* key elsewhere is outside
+    /// *some* interval would plant keys the artist never asked for on blocks nobody touched. Removal is
+    /// unconditional and global, the owner's own ruling on data loss: *"I don't care about data loss
+    /// if the cel is shortened then expanded."*
     func croppedToBlocks(_ coverage: [Range<Int>], insertBelow: Int? = nil, insertAbove: Int? = nil)
         -> (kept: AnimationCurve, discarded: [Int]) {
         func isCovered(_ frame: Int) -> Bool { coverage.contains { $0.contains(frame) } }

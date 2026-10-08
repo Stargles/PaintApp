@@ -372,12 +372,12 @@ final class BakeWiringLogicTests: XCTestCase {
         let box = CGRect(origin: .zero, size: size)
         manager.layers[1].cels = [Cel(id: UUID(), startFrame: 0, frameCount: 12,
                                       raster: .empty(size: size))]
-        let far = moving ? PoseQuad(box: box, mappedBy: CGAffineTransform(translationX: 24, y: 0))
-                         : PoseQuad(restingIn: box)
+        // Still: X keyed at rest on both frames — a channel in force that moves nothing.
+        let farX = Double(box.midX) + (moving ? 24 : 0)
         manager.layers[1].transform = LayerPose(
             pose: PoseQuad(restingIn: box),
-            track: TransformTrack(keys: [.init(frame: 0, pose: PoseQuad(restingIn: box)),
-                                         .init(frame: 11, pose: far)]))
+            track: TransformTrack(box: box, curves: [.x: AnimationCurve(keys: [
+                .init(frame: 0, value: Double(box.midX)), .init(frame: 11, value: farX)])]))
         manager.currentLayerIndex = 0
         return manager
     }

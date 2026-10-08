@@ -4,33 +4,27 @@ import Foundation
 import QuartzCore
 #endif
 
-/// **A pose: the rectangle a drawing rests in, and the four corners it is currently shown at** —
-/// KEYFRAMES.md §2.14's *"four corners plus a box size, from day one"*, and the whole currency of the
-/// transform channel.
+/// **A pose: the rectangle a drawing rests in, and the four corners it is currently shown at** — the
+/// currency a *resolved* pose travels in: what a Move box commits, what a held baseline holds, what a
+/// container's stored base is, and what `PoseComponents.recompose` builds out of a channel's eight
+/// evaluated curves (TODO (139)). A channel itself stores those curves, not quads.
 ///
-/// **Why a quad rather than the six scalars the Move box uses.** §2.14 and §3.3. `ObjectTransformFrame`
-/// is `position` + `scale` + `rotation` + `aspect` + `stretchAxis`, which LASSO_MOVE.md §5.20 settles
-/// *is* a general affine *"with nothing left over for a later stage to invent"* — and which therefore
-/// *"stops well short of stage 5b's Distort, which is a homography and needs 8"*. One quad expresses
-/// Uniform, Freeform **and** Distort, so storing it now is what makes §2.13's "Distort follows
-/// immediately after" cost no migration. Stage 5 only ever writes quads that happen to be
-/// parallelograms; nothing here knows that.
+/// **Four corners because a pose may be a keystone.** One quad expresses Uniform, Freeform **and**
+/// Distort — four correspondences determine a projective map exactly — so every surface that hands a
+/// pose around can carry any pose the Move box makes.
 ///
-/// **A `CGRect`, not a `CGSize`, and that is one deliberate departure from §2.14's letter.** The
-/// precedent §2.14 names is `TextFrame`, whose box is at its own origin because a text box carries its
-/// position in the corners. A cel's ink has no origin of its own — the rest box is measured *in canvas
-/// coordinates* by `MoveBoxInk` — so a size alone would need a second field to say where it was
-/// measured, and `Homography.init(rect:to:)` already exists for exactly this caller ("a caller whose
-/// source box does not start at the origin"). The size is still in there; it has an origin beside it.
+/// **A `CGRect`, not a `CGSize`.** A cel's ink has no origin of its own — the rest box is measured *in
+/// canvas coordinates* by `MoveBoxInk` — so a size alone would need a second field to say where it was
+/// measured, and `Homography.init(rect:to:)` already exists for exactly this caller.
 ///
-/// **The 3×3 is computed and never stored**, which is the half of `TextFrame`'s precedent that is
-/// actually load-bearing: two representations of one map are two things to keep in step.
+/// **The 3×3 is computed and never stored**: two representations of one map are two things to keep
+/// in step.
 struct PoseQuad: Equatable {
 
     /// Where the drawing rests, in the space the pose maps *from* — canvas coordinates for a cel
-    /// channel. Every key of one track normally carries the same box; nothing assumes it, because
-    /// `PoseInterpolation.blend` interpolates the two *maps* rather than the two corner sets, and a
-    /// map does not care what box it was read off.
+    /// channel. Nothing assumes two poses share a box: what they describe is a *map*, and a map does
+    /// not care what box it was read off (`PoseComponents.decompose(_:inBox:)` reads any pose against
+    /// the channel's own).
     var box: CGRect
 
     /// Where `box`'s four corners are shown, in `Quad`'s own order — `(minX,minY)`, `(maxX,minY)`,
@@ -43,8 +37,8 @@ struct PoseQuad: Equatable {
         self.corners = corners
     }
 
-    /// The pose that shows a box exactly where it rests. The value every track's first key holds, and
-    /// the one §2.5's *"a state of the unmoved item at keyframe A"* means.
+    /// The pose that shows a box exactly where it rests — §2.5's *"a state of the unmoved item at
+    /// keyframe A"*.
     init(restingIn box: CGRect) {
         self.init(box: box, corners: Quad.rect(box))
     }
@@ -54,15 +48,12 @@ struct PoseQuad: Equatable {
         self.init(box: box, corners: Quad.rect(box).mapped(by: transform))
     }
 
-    /// **A box carried by a homography — how a *Distort* commit turns a gesture into a key**, and the
-    /// whole of KEYFRAMES.md §8 stage 5b's *"store a genuinely projective quad"*.
+    /// **A box carried by a homography — how a *Distort* gesture becomes a pose.**
     ///
     /// **Four corners are the exact currency of a homography and not an approximation of one**: a
     /// projective map of the plane is determined by four correspondences, so mapping the box's own
     /// corners loses nothing that `Homography(rect:to:)` cannot recover — `homography` above is this
-    /// initialiser's exact inverse over every quad `Homography.isValidQuad` accepts. That is what
-    /// makes §2.14's *"a transform key stores a quad from day one"* cost no migration: the field that
-    /// held a parallelogram since stage 5 holds a keystone with no format change at all.
+    /// initialiser's exact inverse over every quad `Homography.isValidQuad` accepts.
     ///
     /// **Nil where the map has no image**, which for a corner is the vanishing line — `map(_:)`
     /// answering nil, the one failure a projective map has that an affine one does not.
@@ -167,8 +158,8 @@ enum PoseMap: Equatable {
         }
     }
 
-    /// The affine this map is, or nil because it is a keystone. `PoseComponents.decompose` and the
-    /// graph editor's six curves are the callers that must see the nil.
+    /// The affine this map is, or nil because it is a keystone — which `PoseComponents.decompose` reads
+    /// as Perspective X and Y on top of the affine six.
     var affine: CGAffineTransform? {
         switch self {
         case .affine(let t): return t
@@ -322,58 +313,32 @@ extension PoseQuad: Codable {
 
 // MARK: - Interpolating two poses
 
-/// **Two poses blended through their factored form** — KEYFRAMES.md §2.15 and §4.3, and the one piece
-/// of stage 5's arithmetic that has a wrong answer which looks right.
+/// **Two poses blended through their factored form** — KEYFRAMES.md §2.15 and §4.3. Since TODO (139) a
+/// keyed channel interpolates each component on its own curve, so this whole-pose blend is what a
+/// *share* of one pose is read through: `TransformLayerMode.parallaxMap` hands an item beneath a
+/// parallax poser `blend(rest, authored, t: share)`.
 ///
 /// **Neither obvious spelling works, and they fail the same way.** Lerping the nine matrix entries
 /// collapses a rotating arm to a line at `t = 0.5` and re-expands — `DeformFactorization.Matrix2x2.polar`
-/// already says so in as many words, and that warning is why `interpolatedFromIdentity` exists at all.
-/// A vertex-wise lerp of the two corner sets has the *identical* defect for the identical reason: the
-/// blended edge cross product goes negative when the two poses differ by a large rotation, so
-/// **convexity is not preserved by corner lerp and an in-between can be invalid between two valid
-/// keys**. §4.3 states that outright; this file is where it is acted on.
+/// already says so in as many words. A vertex-wise lerp of the two corner sets has the *identical*
+/// defect for the identical reason: the blended edge cross product goes negative when the two poses
+/// differ by a large rotation, so **convexity is not preserved by corner lerp**.
 ///
 /// ## The construction
 ///
 /// A homography factors exactly as **affine × pure-projective**, `H = A · P` with
-/// `P = [1 0 0; 0 1 0; g h 1]`, and reading `A` off is eight subtractions (see `factored`). Then:
+/// `P = [1 0 0; 0 1 0; g h 1]`, and reading `A` off is eight subtractions (see `factored`, which
+/// `PoseComponents.decompose` reuses). Then:
 ///
 ///  * the affine's **linear** part is blended through `Matrix2x2.interpolatedFromIdentity`, which
-///    rotates by `t·θ` and blends the symmetric remainder toward the identity — the project's own
-///    primitive, and the one that makes an arm swing rather than collapse;
+///    rotates by `t·θ` and blends the symmetric remainder toward the identity;
 ///  * the affine's **translation** is expressed as the image of the rest box's centre and lerped
 ///    there, so a pose about a far-away origin blends the same way as one about the box itself;
-///  * the **perspective row** is lerped, which §4.3 rules is safe and which for every pose stage 5
-///    can author is a lerp of two exact zeros.
+///  * the **perspective row** is lerped.
 ///
-/// ## Two properties worth stating, because a test would otherwise have to guess at them
-///
-/// **The endpoints are the keys, bit for bit.** `t == 0` and `t == 1` return the stored pose without
-/// going through any of the above — `interpolatedFromIdentity(t: 1)` reproduces its matrix only to
-/// floating-point, and a key the artist authored must be the pose the artist sees. Same argument
-/// `DeformFactorization.solve` makes for solving in the anchor frame.
-///
-/// **`t` is not clamped anywhere, and the shortcut above is an exact-equality shortcut rather than a
-/// clamp.** An overshooting timing curve (§3.2 decision 1) hands this a `t` outside `0...1` on
-/// purpose, and the factored form extrapolates it correctly: the rotation keeps turning and the scale
-/// keeps going. That is the anticipation and settle a graph editor exists to give, and clamping here
-/// would remove it from the transform channel alone.
-///
-/// **It was written `t <= 0` / `t >= 1` until 2026-09-02 and that flattened every overshoot**, while
-/// this comment, `TransformTrack`'s header (*"a move can overshoot its mark and settle back"*) and
-/// `TransformTrack.pose(atCelLocalTime:)` (*"the fraction is deliberately left unclamped … `blend`
-/// extrapolates correctly for it"*) all three said it did not. Three prose statements of the
-/// behaviour and two comparison operators against them, with nothing red — which is why the
-/// extrapolation is now pinned by `PoseInterpolationLogicTests` in both directions rather than only
-/// described here.
-///
-/// **How far it extrapolates before §9.1 takes over, measured 2026-09-02.** A translation and a
-/// rotation extrapolate cleanly to `t = 3` and beyond. A *scale* does not, and the arithmetic says
-/// where it stops: `interpolatedFromIdentity` blends the symmetric part linearly, so extrapolating a
-/// `k`× scale passes through a singular map at `t = k / (k - 1)` — `t = 2` for a 2× shrink — and the
-/// `isValid` guard below returns the nearer key from there on. That is §9.1's clamp doing exactly its
-/// job, not a limit of the extrapolation, and it is far outside any overshoot an authored handle
-/// produces.
+/// **The endpoints are the poses, bit for bit** — `t == 0` and `t == 1` return the stored pose without
+/// going through any of the above. **`t` is not clamped**: the shortcut is an exact-equality one, and
+/// anything outside `0...1` extrapolates — `PoseInterpolationLogicTests` pins it in both directions.
 enum PoseInterpolation {
 
     /// `a` at `t = 0`, `b` at `t = 1`, and the factored blend in between.

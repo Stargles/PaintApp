@@ -2587,9 +2587,10 @@ final class CanvasManager: ObservableObject {
         if layers[index].keyframeMarks != marks { layers[index].keyframeMarks = marks }
     }
 
-    /// **Delete one node from the graph editor** — TODO (38)(b), the item the node's own menu carries.
+    /// **Delete one node from the graph editor** — TODO (38)(b), the item the node's own menu carries,
+    /// on a grade's row, a target scalar's or a pose component's.
     ///
-    /// **Through `setEffectParameterTrack`, which is the funnel and not a convenience.** That writer
+    /// **Through the kind's whole-curve funnel, which is the funnel and not a convenience.** That writer
     /// is where a mark the node was standing on is dropped and where the undo step is recorded, so
     /// removing a key any other way would be the second writer the rule of 2026-09-03 exists to
     /// forbid — a node and a keyframe indicator are one thing, and they stay one thing by there being
@@ -2606,7 +2607,7 @@ final class CanvasManager: ObservableObject {
     /// **Addressed by `KeyframeTarget`** — the band it serves is on a layer or, since TODO (21)'s
     /// folder band, a folder, and `graphNodeCurve` reads whichever of the two homes the target names.
     @discardableResult
-    func removeEffectParameterKey(target: KeyframeTarget, parameterID: String, frame: Int) -> Bool {
+    func removeGraphNodeKey(target: KeyframeTarget, parameterID: String, frame: Int) -> Bool {
         guard var curve = graphNodeCurve(target: target, parameterID: parameterID),
               curve.key(atFrame: frame) != nil
         else { return false }
@@ -2614,17 +2615,20 @@ final class CanvasManager: ObservableObject {
         return writeGraphNodeCurve(target: target, parameterID: parameterID, to: curve)
     }
 
-    /// **The curve one graph-editor node belongs to, from whichever store owns its id** — the two
-    /// non-pose channel kinds resolved in one place, on either of a target's two homes.
+    /// **The curve one graph-editor node belongs to, from whichever store owns its id** — the three
+    /// channel kinds resolved in one place, on either of a target's two homes.
     ///
     /// The node menu addresses a node by `(target, parameterID, frame)` and cannot know which
-    /// store the id names, so the three readers below asked `effectTracks` outright — which for a
-    /// `TargetChannel` id answers nil, and every one of them then returns false in silence. That is
-    /// Delete Keyframe doing nothing on a node the artist is looking at, which is the shape of a
-    /// control that appears not to work. `keyframeState(of:)` is the one reader of both stores on
-    /// both homes, so a folder's node is found by the same line a layer's is.
+    /// store the id names, so a reader that asked one store outright answered nil for the others'
+    /// ids and every action then returned false in silence — Delete doing nothing on a node the
+    /// artist is looking at. A pose component's node is the row the band draws, which is the
+    /// component's curve merged across the layer's cels (`TimelineGraphBand.poseChannels`).
     private func graphNodeCurve(target: KeyframeTarget, parameterID: String) -> AnimationCurve? {
         guard targetExists(target) else { return nil }
+        if PoseChannelID.isPose(parameterID: parameterID) {
+            return TimelineGraphBand.poseChannels(poseSources(of: target), descriptorOffset: 0)
+                .first { $0.parameterID == parameterID }?.curve
+        }
         let state = keyframeState(of: target)
         return TargetChannel.isTargetChannel(parameterID: parameterID)
             ? state.channelTracks[parameterID]
@@ -2636,6 +2640,9 @@ final class CanvasManager: ObservableObject {
     @discardableResult
     private func writeGraphNodeCurve(target: KeyframeTarget, parameterID: String,
                                      to curve: AnimationCurve?) -> Bool {
+        if PoseChannelID.isPose(parameterID: parameterID) {
+            return setPoseChannelTrack(target, parameterID: parameterID, to: curve)
+        }
         guard TargetChannel.isTargetChannel(parameterID: parameterID) else {
             return setEffectParameterTrack(target, parameterID: parameterID, to: curve)
         }
@@ -2671,7 +2678,7 @@ final class CanvasManager: ObservableObject {
     /// - Returns: whether the document changed. False when the node is already on the default, which
     ///   is what lets the menu hide the item rather than offering an action that does nothing.
     @discardableResult
-    func resetEffectParameterKeyCurve(target: KeyframeTarget, parameterID: String, frame: Int) -> Bool {
+    func resetGraphNodeKeyCurve(target: KeyframeTarget, parameterID: String, frame: Int) -> Bool {
         guard var curve = graphNodeCurve(target: target, parameterID: parameterID),
               var key = curve.key(atFrame: frame)
         else { return false }
@@ -2685,7 +2692,7 @@ final class CanvasManager: ObservableObject {
     /// Whether that node has anything to reset — an authored tangent rather than a derived one. The
     /// menu reads this so Reset Curve appears only where it would do something, which is
     /// `Clear Loop Range`'s rule on the ruler menu beside it.
-    func effectParameterKeyIsAuthored(target: KeyframeTarget, parameterID: String, frame: Int) -> Bool {
+    func graphNodeKeyIsAuthored(target: KeyframeTarget, parameterID: String, frame: Int) -> Bool {
         guard let key = graphNodeCurve(target: target, parameterID: parameterID)?
                 .key(atFrame: frame)
         else { return false }

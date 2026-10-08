@@ -237,10 +237,8 @@ final class SelectionPencilOnlyUITests: PaintUITestCase {
         app.buttons["timeline.graphEditorButton"].tap()
         let band = app.otherElements["timeline.graphBand"]
         XCTAssertTrue(band.waitForExistence(timeout: 5), "the graph editor did not open")
-        XCTAssertEqual(band.value as? String,
-                       "containerPose.x:0,11|containerPose.y~0,11|containerPose.rotation~0,11",
-                       "PREMISE: the seeded slide draws three channels — X animated, Y and Rotation "
-                       + "flat — and Scale X, Scale Y and Skew are off by TODO (59)'s default")
+        XCTAssertEqual(band.value as? String, "containerPose.x:0,11",
+                       "PREMISE: the seeded slide keys X alone, so it is the one row drawn (TODO (139))")
         XCTAssertEqual(band.label, TimelineGraphBand.encodeGesture(focus: nil, readout: nil),
                        "PREMISE: nothing is ringed before the drag")
 
@@ -270,9 +268,9 @@ final class SelectionPencilOnlyUITests: PaintUITestCase {
         setFingersCanPaint(app, to: true)              // pencil-only mode off
         boxSelect()
         let ringed = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "label ENDSWITH %@", "|sel:3"), object: band)
+            predicate: NSPredicate(format: "label ENDSWITH %@", "|sel:1"), object: band)
         XCTAssertEqual(XCTWaiter().wait(for: [ringed], timeout: 5), .completed,
-                       "with pencil-only mode off the same finger drag should ring the three drawn "
-                       + "channels' keys at frame 11. Got \(band.label)")
+                       "with pencil-only mode off the same finger drag should ring X's key at frame "
+                       + "11, the one drawn row's. Got \(band.label)")
     }
 }

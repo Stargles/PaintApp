@@ -1711,7 +1711,7 @@ final class TimelineGraphBandLogicTests: XCTestCase {
         XCTAssertEqual(manager.keyframeFrames(of: target), [0, 10], "PREMISE: two keyframes, two nodes")
 
         let before = manager.history.undoStack.count
-        XCTAssertTrue(manager.removeEffectParameterKey(target: target,
+        XCTAssertTrue(manager.removeGraphNodeKey(target: target,
                                                        parameterID: brightnessID, frame: 10))
         XCTAssertEqual(nodeFrames(manager), [0], "The node is gone")
         XCTAssertEqual(manager.keyframeFrames(of: target), nodeFrames(manager),
@@ -1721,7 +1721,7 @@ final class TimelineGraphBandLogicTests: XCTestCase {
         manager.undo()
         XCTAssertEqual(manager.keyframeFrames(of: target), [0, 10], "…and one press brings both back")
 
-        XCTAssertFalse(manager.removeEffectParameterKey(target: target,
+        XCTAssertFalse(manager.removeGraphNodeKey(target: target,
                                                         parameterID: brightnessID, frame: 7),
                        "A frame the channel does not key is not an edit — a menu left up over an undo")
     }
@@ -1735,10 +1735,10 @@ final class TimelineGraphBandLogicTests: XCTestCase {
     func testResetCurveGivesANodeItsDerivedTangentsBackAndOnlySaysSoWhenItCan() throws {
         let manager = rampedManager()
         let untouched = brightnessChannel(manager).curve
-        XCTAssertFalse(manager.effectParameterKeyIsAuthored(target: target(manager),
+        XCTAssertFalse(manager.graphNodeKeyIsAuthored(target: target(manager),
                                                             parameterID: brightnessID, frame: 10),
                        "PREMISE: nothing authored yet, so the menu offers no item")
-        XCTAssertFalse(manager.resetEffectParameterKeyCurve(target: target(manager),
+        XCTAssertFalse(manager.resetGraphNodeKeyCurve(target: target(manager),
                                                             parameterID: brightnessID, frame: 10),
                        "…and calling it anyway changes nothing")
 
@@ -1748,11 +1748,11 @@ final class TimelineGraphBandLogicTests: XCTestCase {
             pixelsPerFrame: base, bandHeight: band)
         manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
                                         to: try XCTUnwrap(written[brightnessID]))
-        XCTAssertTrue(manager.effectParameterKeyIsAuthored(target: target(manager),
+        XCTAssertTrue(manager.graphNodeKeyIsAuthored(target: target(manager),
                                                            parameterID: brightnessID, frame: 10),
                       "PREMISE: now there is something to reset, so the menu offers it")
 
-        XCTAssertTrue(manager.resetEffectParameterKeyCurve(target: target(manager),
+        XCTAssertTrue(manager.resetGraphNodeKeyCurve(target: target(manager),
                                                            parameterID: brightnessID, frame: 10))
         let reset = brightnessChannel(manager).curve
         XCTAssertEqual(reset.keys[1].tangentMode, .autoClamped)

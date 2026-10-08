@@ -303,11 +303,9 @@ enum UITestSeeds {
         let mover = canvasManager.layers.count - 1
         canvasManager.layers[mover].transform = LayerPose(
             pose: PoseQuad(restingIn: box),
-            track: TransformTrack(keys: [
-                .init(frame: 0, pose: PoseQuad(restingIn: box)),
-                .init(frame: 11, pose: PoseQuad(box: box,
-                                                mappedBy: CGAffineTransform(translationX: size.width * 0.4,
-                                                                            y: 0)))]))
+            track: TransformTrack(box: box, curves: [.x: AnimationCurve(keys: [
+                .init(frame: 0, value: Double(box.midX)),
+                .init(frame: 11, value: Double(box.midX + size.width * 0.4))])]))
         canvasManager.currentLayerIndex = 0
     }
 
@@ -352,11 +350,9 @@ enum UITestSeeds {
         let mover = canvasManager.layers.count - 1
         canvasManager.layers[mover].transform = LayerPose(
             pose: PoseQuad(restingIn: box),
-            track: TransformTrack(keys: [
-                .init(frame: 0, pose: PoseQuad(restingIn: box)),
-                .init(frame: 4, pose: PoseQuad(box: box,
-                                               mappedBy: CGAffineTransform(translationX: size.width * 0.4,
-                                                                           y: 0)))]))
+            track: TransformTrack(box: box, curves: [.x: AnimationCurve(keys: [
+                .init(frame: 0, value: Double(box.midX)),
+                .init(frame: 4, value: Double(box.midX + size.width * 0.4))])]))
         canvasManager.currentLayerIndex = 0
     }
 

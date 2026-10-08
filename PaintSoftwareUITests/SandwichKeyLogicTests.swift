@@ -118,9 +118,7 @@ final class SandwichKeyLogicTests: XCTestCase {
             let mover = manager.layers.count - 1
             manager.layers[mover].transform = LayerPose(
                 pose: PoseQuad(restingIn: box),
-                track: TransformTrack(keys: [
-                    .init(frame: 0, pose: PoseQuad(restingIn: box)),
-                    .init(frame: 3, pose: PoseQuad(box: box,
+                track: CanvasFixture.poseTrack([(0, PoseQuad(restingIn: box)), (3, PoseQuad(box: box,
                                                    mappedBy: CGAffineTransform(translationX: 20, y: 0)))]))
             CanvasFixture.setCelLayout(manager, layerIndex: mover, [(start: 0, length: 8)])
             cases.append(Battery(name: "a transformation layer keyed at 0 and 3, held to 7",

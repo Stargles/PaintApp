@@ -22,9 +22,9 @@ extension CanvasManager {
     /// omission.** A value channel needs one — `Layer.effect` holds the number a slider writes when
     /// nothing is keyed — but a pose channel's stored base **is the cel's own geometry**: a Move with
     /// no keyframes anywhere bakes into `VectorCanvas.elements` exactly as it always has, and the
-    /// pose that describes where that geometry sits relative to itself is the identity. So the pose
-    /// channel's "current stored value" is always `PoseQuad(restingIn:)`, and the arm a value channel
-    /// spends writing its base is spent here on the bake that already happens.
+    /// pose that describes where that geometry sits relative to itself is the identity. So every
+    /// component a cel channel does not key shows its rest value (`TransformTrack.restValues`), and the
+    /// arm a value channel spends writing its base is spent here on the bake that already happens.
     struct CelPoseState: Equatable {
         var tracks: [String: TransformTrack] = [:]
         /// §2.27's *"the previous value is held"*, per channel id. Persisted, because the gap between
@@ -458,8 +458,9 @@ extension CanvasManager {
         }
     }
 
-    /// The affine one channel maps its members through at an absolute frame, or the identity when it
-    /// has no track — the loose reading every commit-side caller wants.
+    /// The map one channel carries its members through at an **absolute** frame, or the identity when
+    /// it has no track — the loose reading every commit-side caller wants, and the cel-local
+    /// conversion in one place so no caller subtracts `startFrame` by hand.
     func resolvedPoseMap(layerID: UUID, celID: UUID, channel: TransformChannelID,
                          atFrame frame: Int) -> PoseMap {
         guard let at = celIndices(forCel: celID, inLayer: layerID) else { return .identity }
@@ -479,14 +480,6 @@ extension CanvasManager {
         return inverse
     }
 
-    /// The pose one channel of one cel resolves to at an **absolute** document frame — the
-    /// cel-local conversion in one place so no caller subtracts `startFrame` by hand.
-    func resolvedPose(layerID: UUID, celID: UUID, channel: TransformChannelID,
-                      atFrame frame: Int) -> PoseQuad? {
-        guard let at = celIndices(forCel: celID, inLayer: layerID) else { return nil }
-        let cel = layers[at.layer].cels[at.cel]
-        return cel.transformTracks[channel.id]?.pose(atCelLocalFrame: frame - cel.startFrame)
-    }
 
     // MARK: - The derivation
 

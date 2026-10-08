@@ -453,7 +453,7 @@ final class OpacityChannelLogicTests: XCTestCase {
         manager.currentLayerIndex = 0
         manager.isGraphEditorOpen = true
 
-        XCTAssertEqual(manager.graphBandListing(of: tgt).channels.map(\.parameterID), [opacityID],
+        XCTAssertEqual(manager.graphBandListing(of: tgt).map(\.parameterID), [opacityID],
                        "The band lists the opacity curve")
         XCTAssertEqual(manager.listedAnimationChannelIDs(of: tgt), [opacityID],
                        "…and the model's own 'what is an animation' answer agrees with it")
@@ -479,7 +479,7 @@ final class OpacityChannelLogicTests: XCTestCase {
         manager.currentLayerIndex = 0
         manager.isGraphEditorOpen = true
 
-        XCTAssertEqual(manager.graphBandListing(of: tgt).channels.map(\.parameterID), [opacityID],
+        XCTAssertEqual(manager.graphBandListing(of: tgt).map(\.parameterID), [opacityID],
                        "The band draws it, dashed, so the artist can put a key back")
         XCTAssertEqual(manager.listedAnimationChannelIDs(of: tgt), [],
                        "…and the model does not call it an animation")
@@ -496,7 +496,7 @@ final class OpacityChannelLogicTests: XCTestCase {
     /// under the finger and spring back, and Delete Keyframe would do nothing.
     ///
     /// Operands: the curve after the write, and the union after the delete. The delete is asserted
-    /// through `removeEffectParameterKey`, which is the method the node menu's Delete Keyframe
+    /// through `removeGraphNodeKey`, which is the method the node menu's Delete Keyframe
     /// button calls, so this is a pin on the artist's own path rather than on the store.
     func testTheBandsWriteAndTheNodeMenusDeleteBothReachTheOpacityCurve() {
         let manager = drawingManager()
@@ -509,7 +509,7 @@ final class OpacityChannelLogicTests: XCTestCase {
         XCTAssertEqual(manager.layers[0].channelTracks[opacityID]?.keys.map(\.frame), [0, 18],
                        "…and the node really moved")
 
-        XCTAssertTrue(manager.removeEffectParameterKey(target: .layer(id: manager.layers[0].id), parameterID: opacityID, frame: 18),
+        XCTAssertTrue(manager.removeGraphNodeKey(target: .layer(id: manager.layers[0].id), parameterID: opacityID, frame: 18),
                       "The node menu's Delete Keyframe reaches this channel's store")
         XCTAssertEqual(manager.keyframeFrames(of: tgt), [0],
                        "…and the timeline loses the indicator with it")

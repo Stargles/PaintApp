@@ -1,17 +1,14 @@
 import XCTest
 import CoreGraphics
 
-/// **The transform channel's band, its rows, and the two funnels it made honest** — KEYFRAMES.md
-/// §11.7.
+/// **The transform channel's band and its rows** — KEYFRAMES.md §11.7, and TODO (139): each row is a
+/// component's own stored curve, so it is drawn, dragged, shaped, deleted and added to exactly as a
+/// grade's row is, through one whole-curve funnel (`CanvasManager.setPoseChannelTrack`).
 ///
-/// `PoseComponentsLogicTests` beside this one pins the arithmetic — the six numbers, the round trip,
-/// the projective refusal. This one pins everything that is about the *document*: which channels a
-/// band lists, at which frames, what the channel list makes of them, that a node on the band and an
-/// indicator on the track are the same thing (§2.28), and that the pose band takes no gesture.
-///
-/// Two of these tests are the funnels the transformation layer's own pass left open and named. Both
-/// are §2.28's biconditional broken from a door §2.28 could not have known about, and both are
-/// written so that reverting the one line that fixes them turns exactly one test red.
+/// `PoseComponentsLogicTests` beside this one pins the arithmetic. This one pins everything that is
+/// about the *document*: which rows a band lists, at which frames, what the channel list makes of
+/// them, that a node on the band and an indicator on the track are the same thing (§2.28), and that
+/// an edit to one row leaves every other row alone.
 @MainActor
 final class PoseBandLogicTests: XCTestCase {
 
@@ -52,13 +49,43 @@ final class PoseBandLogicTests: XCTestCase {
         .layer(id: manager.layers[manager.currentLayerIndex].id)
     }
 
-    /// A pure slide on the whole-cel channel, cel-local frames 0 and 8.
+    /// A pure slide on the whole-cel channel, cel-local frames 0 and 8 — which keys X alone.
     private func animateCel(_ manager: CanvasManager, layerID: UUID, celID: UUID,
                             channel: TransformChannelID = .cel, dx: CGFloat = 24) {
-        manager.setTransformPoseKey(layerID: layerID, celID: celID, channel: channel,
-                                    atCelLocalFrame: 0, pose: PoseQuad(restingIn: box))
-        manager.setTransformPoseKey(layerID: layerID, celID: celID, channel: channel,
-                                    atCelLocalFrame: 8, pose: slide(dx))
+        CanvasFixture.setPoseTrack(manager, layerID: layerID, celID: celID, channel: channel,
+                                   CanvasFixture.poseTrack(box: box, [(0, PoseQuad(restingIn: box)),
+                                                                      (8, slide(dx))]))
+    }
+
+    /// **A slide whose other five affine components are keyed too, flat** — the state TODO (59)'s
+    /// default exists for: a row keyed but not animated, which the band draws dashed.
+    private func animateCelWithFlatRows(_ manager: CanvasManager, layerID: UUID, celID: UUID) {
+        let rest = PoseComponents.Values.resting(in: box)
+        var curves: [PoseComponents.Component: AnimationCurve] = [
+            .x: AnimationCurve(keys: [.init(frame: 0, value: rest.x), .init(frame: 8, value: rest.x + 24)])
+        ]
+        for component in [PoseComponents.Component.y, .scaleX, .scaleY, .rotation, .skew] {
+            curves[component] = AnimationCurve(keys: [.init(frame: 0, value: rest[component]),
+                                                      .init(frame: 8, value: rest[component])])
+        }
+        CanvasFixture.setPoseTrack(manager, layerID: layerID, celID: celID,
+                                   TransformTrack(box: box, curves: curves))
+    }
+
+    /// A transformation layer whose own pose slides 40 points between frames `from` and `to`.
+    private func slidingTransformLayer(from: Int = 0, to: Int = 9, box canvasBox: CGRect? = nil,
+                                       dx: CGFloat = 40) -> CanvasManager {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.addTransformLayer()
+        let canvasBox = canvasBox ?? CGRect(origin: .zero, size: size)
+        manager.layers[1].transform = LayerPose(
+            pose: PoseQuad(restingIn: canvasBox),
+            track: CanvasFixture.poseTrack(box: canvasBox, [
+                (from, PoseQuad(restingIn: canvasBox)),
+                (to, PoseQuad(box: canvasBox, mappedBy: CGAffineTransform(translationX: dx, y: 0)))]))
+        manager.currentLayerIndex = 1
+        manager.isGraphEditorOpen = true
+        return manager
     }
 
     private func content(_ manager: CanvasManager) throws -> TimelineGraphBand.Content {
@@ -69,13 +96,11 @@ final class PoseBandLogicTests: XCTestCase {
     ///
     /// `graphBandContent` is the *drawn* half and has been the filtered one since (59): a transform
     /// channel's flat Scale X, Scale Y and Skew start switched off
-    /// (`TimelineGraphChannelList.defaultHidden(in:)`). A test asking what a pose *becomes* — six
-    /// curves, at which frames, carrying which ease — is asking about the listing, so it reads this;
-    /// `testATransformChannelStartsWithItsFlatScaleAndSkewRowsHidden` is the one test that owns the
-    /// default, and it is the only place that states it.
+    /// (`TimelineGraphChannelList.defaultHidden(in:)`). A test asking which rows a pose keys is
+    /// asking about the listing, so it reads this.
     private func listed(_ manager: CanvasManager) throws -> [TimelineGraphBand.Channel] {
         let expansion = try XCTUnwrap(manager.graphBandExpansion, "the band is not open")
-        return manager.graphBandListing(of: expansion.target).channels
+        return manager.graphBandListing(of: expansion.target)
     }
 
     private func channel(_ channels: [TimelineGraphBand.Channel],
@@ -94,25 +119,20 @@ final class PoseBandLogicTests: XCTestCase {
 
     // MARK: - The band lists a pose channel, at the timeline's own frames
 
-    /// **A cel pose channel becomes six curves, keyed at *absolute* frames.**
+    /// **A cel pose channel draws one row per keyed component, at *absolute* frames.**
     ///
     /// The cel starts at frame 4 and its keys are at cel-local 0 and 8, so the band draws them at 4
     /// and 12. Deleting `+ source.frameOffset` in `poseChannels` leaves them at 0 and 8, and the
     /// nodes then sit four frames left of the indicators on the track — the exact divergence §2.28
-    /// exists to forbid, which is why the second assertion states the cel-local numbers as the thing
-    /// the answer must *not* be.
-    func testACelPoseChannelIsSixCurvesAtAbsoluteFrames() throws {
+    /// exists to forbid.
+    func testACelPoseChannelDrawsItsKeyedComponentsAtAbsoluteFrames() throws {
         let (manager, layerID, celID) = celFixture()
         animateCel(manager, layerID: layerID, celID: celID)
 
-        // The **listing**, not the drawn content: TODO (59) starts three of the six switched off,
-        // and what this test is about is that a pose decomposes into six curves at the right frames.
         let listed = try listed(manager)
-        XCTAssertEqual(listed.map(\.parameterID),
-                       PoseComponents.Component.allCases.map { PoseChannelID.cel(.cel).parameterID($0) },
-                       "Six channels, in `Component.allCases` order")
-        XCTAssertEqual(listed.map(\.name),
-                       ["X", "Y", "Scale X", "Scale Y", "Rotation", "Skew"])
+        XCTAssertEqual(listed.map(\.parameterID), [celX],
+                       "TODO (139): a slide keys X, so X is the one row — no flat Scale, Rotation or Skew")
+        XCTAssertEqual(listed.map(\.name), ["X"])
 
         let x = try XCTUnwrap(channel(listed, celX))
         XCTAssertEqual(x.curve.keys.map(\.frame), [4, 12],
@@ -121,55 +141,28 @@ final class PoseBandLogicTests: XCTestCase {
                           "…and are emphatically not the numbers stored on the track")
     }
 
-    /// **A pure slide animates X and leaves the other five flat**, which the band draws dashed and
-    /// the model refuses to call animations.
-    ///
-    /// The values are checked against the geometry rather than against the decomposition: the box's
-    /// centre starts at `box.midX` and ends 24 points right of it. An implementation that reported an
-    /// offset from rest, or the box's origin, or a Y for an X, fails here and round-trips perfectly.
-    func testASlideAnimatesXAloneAndTheRestAreDrawnFlat() throws {
+    /// **The row is the stored curve, and its values are where the box's centre is.** Checked against
+    /// the geometry rather than the decomposition: the centre starts at `box.midX` and ends 24 points
+    /// right of it. An implementation that reported an offset from rest, or the box's origin, or a Y
+    /// for an X, fails here.
+    func testASlidesRowIsWhereTheBoxCentreIs() throws {
         let (manager, layerID, celID) = celFixture()
         animateCel(manager, layerID: layerID, celID: celID, dx: 24)
 
-        // The listing, for `testACelPoseChannelIsSixCurvesAtAbsoluteFrames`' reason: the claim here
-        // is about which of the six the *model* calls an animation, which is upstream of (59)'s
-        // default filter and is in fact the input that default reads.
-        let listed = try listed(manager)
-        let x = try XCTUnwrap(channel(listed, celX))
+        let x = try XCTUnwrap(channel(try listed(manager), celX))
         XCTAssertEqual(x.curve.keys.map(\.value), [Double(box.midX), Double(box.midX) + 24],
                        "X is where the box's centre is, in canvas points")
         XCTAssertTrue(x.isAnimated)
-
-        for id in [PoseChannelID.cel(.cel).parameterID(.y),
-                   celScaleX,
-                   PoseChannelID.cel(.cel).parameterID(.rotation),
-                   PoseChannelID.cel(.cel).parameterID(.skew)] {
-            let flat = try XCTUnwrap(channel(listed, id), id)
-            XCTAssertFalse(flat.isAnimated, "\(id) is in force and is not an animation")
-            XCTAssertEqual(Set(flat.curve.keys.map(\.value)).count, 1, "\(id) really is flat")
-        }
-        // Y and Rotation are flat *and drawn*, so the dash reaches the encoding of what is on screen
-        // — which is the half of this claim (59) could otherwise have quietly deleted by hiding
-        // every flat row.
-        XCTAssertEqual(TimelineGraphBand.encode(try content(manager)).contains("~"), true,
-                       "…which the tier that cannot see a dash reads as `~` rather than `:`")
+        XCTAssertEqual(x.curve, manager.layers[1].cels[0].transformTracks[TransformChannelID.cel.id]?
+                        .curve(.x)?.shifted(by: 4),
+                       "…and is the stored curve itself, moved onto the timeline's frames")
     }
 
     /// **A container pose is listed too, at its own time base** — §3.1's second kind, which needs no
     /// conversion because a transformation layer has no cel to ride.
     func testAContainerPoseIsListedInAbsoluteFramesWithNoOffset() throws {
-        let manager = CanvasFixture.manager(layerCount: 1)
-        manager.addTransformLayer()
+        let manager = slidingTransformLayer()
         let canvasBox = CGRect(origin: .zero, size: size)
-        manager.layers[1].transform = LayerPose(
-            pose: PoseQuad(restingIn: canvasBox),
-            track: TransformTrack(keys: [
-                .init(frame: 0, pose: PoseQuad(restingIn: canvasBox)),
-                .init(frame: 9, pose: PoseQuad(box: canvasBox,
-                                               mappedBy: CGAffineTransform(translationX: 40, y: 0)))]))
-        manager.currentLayerIndex = 1
-        manager.isGraphEditorOpen = true
-
         let content = try content(manager)
         let x = try XCTUnwrap(channel(content, containerX))
         XCTAssertEqual(x.curve.keys.map(\.frame), [0, 9], "Document frames, exactly as stored")
@@ -181,17 +174,7 @@ final class PoseBandLogicTests: XCTestCase {
     /// `storedEffect(of:)`'s asymmetry one payload over: a pose left behind by a kind change poses
     /// nothing, so a curve for it would picture an animation the canvas is not running.
     func testAPoseLeftOnALayerThatIsNotATransformLayerIsNotListed() throws {
-        let manager = CanvasFixture.manager(layerCount: 1)
-        manager.addTransformLayer()
-        let canvasBox = CGRect(origin: .zero, size: size)
-        manager.layers[1].transform = LayerPose(
-            pose: PoseQuad(restingIn: canvasBox),
-            track: TransformTrack(keys: [
-                .init(frame: 0, pose: PoseQuad(restingIn: canvasBox)),
-                .init(frame: 9, pose: PoseQuad(box: canvasBox,
-                                               mappedBy: CGAffineTransform(translationX: 40, y: 0)))]))
-        manager.currentLayerIndex = 1
-        manager.isGraphEditorOpen = true
+        let manager = slidingTransformLayer()
         XCTAssertNotNil(manager.layers[1].layerTransform, "Fixture: it is a transform layer")
         XCTAssertFalse(try content(manager).channels.isEmpty)
 
@@ -199,6 +182,24 @@ final class PoseBandLogicTests: XCTestCase {
         XCTAssertNil(manager.layers[1].layerTransform, "…and the kind flip takes it out of it")
         XCTAssertEqual(try content(manager).channels.map(\.parameterID), [],
                        "so the band draws nothing for a pose the renderer ignores")
+    }
+
+    /// **A Distort draws Perspective X and Perspective Y rows** — TODO (139)'s ruling, which replaced
+    /// §11.7's "declined" state: the band's refusal is gone, because a keystone is two more curves.
+    func testADistortDrawsPerspectiveRowsBesideTheRest() throws {
+        let (manager, layerID, celID) = celFixture()
+        let keystone = PoseQuad(box: box, corners: Quad(CGPoint(x: 4, y: 6), CGPoint(x: 20, y: 6),
+                                                        CGPoint(x: 18, y: 14), CGPoint(x: 6, y: 14)))
+        XCTAssertEqual(keystone.map?.isProjective, true, "Fixture: a genuine keystone")
+        CanvasFixture.setPoseTrack(manager, layerID: layerID, celID: celID,
+                                   CanvasFixture.poseTrack(box: box, [(0, PoseQuad(restingIn: box)),
+                                                                      (8, keystone)]))
+        let ids = try listed(manager).map(\.parameterID)
+        XCTAssertTrue(ids.contains(PoseChannelID.cel(.cel).parameterID(.perspectiveY)),
+                      "the narrowing bottom is drawn as a Perspective Y curve")
+        XCTAssertEqual(try listed(manager).first { $0.parameterID == PoseChannelID.cel(.cel).parameterID(.perspectiveY) }?.name,
+                       "Perspective Y")
+        XCTAssertFalse(TimelineGraphBand.encode(try content(manager)).contains("declined"))
     }
 
     // MARK: - §2.28's biconditional, in both directions
@@ -225,17 +226,7 @@ final class PoseBandLogicTests: XCTestCase {
     /// Watched failing with the `layerTransform` fold removed from `poseKeyframeFrames(inLayer:)`:
     /// this test and `testEveryPoseNodeHasAnIndicatorAndEveryIndicatorHasANode`'s container twin.
     func testATransformationLayersOwnKeysAreKeyframes() throws {
-        let manager = CanvasFixture.manager(layerCount: 1)
-        manager.addTransformLayer()
-        let canvasBox = CGRect(origin: .zero, size: size)
-        manager.layers[1].transform = LayerPose(
-            pose: PoseQuad(restingIn: canvasBox),
-            track: TransformTrack(keys: [
-                .init(frame: 2, pose: PoseQuad(restingIn: canvasBox)),
-                .init(frame: 11, pose: PoseQuad(box: canvasBox,
-                                                mappedBy: CGAffineTransform(translationX: 40, y: 0)))]))
-        manager.currentLayerIndex = 1
-        manager.isGraphEditorOpen = true
+        let manager = slidingTransformLayer(from: 2, to: 11)
 
         let target = KeyframeTarget.layer(id: manager.layers[1].id)
         XCTAssertEqual(manager.keyframeFrames(of: target), [2, 11])
@@ -247,13 +238,13 @@ final class PoseBandLogicTests: XCTestCase {
     /// the effect channels already carry, extended to the pose ones.
     ///
     /// **The fixture holds something the predicate must reject**, which is what makes it a pin rather
-    /// than an identity: a pure slide leaves four of the six components flat, so an implementation
-    /// that listed the whole track as animated returns six where this wants one.
+    /// than an identity: five flat rows beside the animated X, so an implementation that listed every
+    /// keyed component as animated returns six where this wants one.
     func testTheBandAndTheModelAgreeAboutWhichPoseChannelsAreAnimations() throws {
         let (manager, layerID, celID) = celFixture()
-        animateCel(manager, layerID: layerID, celID: celID)
+        animateCelWithFlatRows(manager, layerID: layerID, celID: celID)
 
-        let drawn = try content(manager).channels.filter(\.isAnimated).map(\.parameterID)
+        let drawn = try listed(manager).filter(\.isAnimated).map(\.parameterID)
         XCTAssertEqual(drawn, [celX], "Fixture: five of the six are refused")
         XCTAssertEqual(manager.listedAnimationChannelIDs(of: target(manager)), drawn,
                        "The model's own answer, in the band's own order")
@@ -266,12 +257,10 @@ final class PoseBandLogicTests: XCTestCase {
     /// Poses the cel's own channel so that a *scale* varies across its two keys, which is what makes
     /// `celPose.scaleX` an animation rather than a flat row.
     private func scaleCel(_ manager: CanvasManager, layerID: UUID, celID: UUID) {
-        manager.setTransformPoseKey(layerID: layerID, celID: celID, channel: .cel,
-                                    atCelLocalFrame: 0, pose: PoseQuad(restingIn: box))
-        manager.setTransformPoseKey(layerID: layerID, celID: celID, channel: .cel,
-                                    atCelLocalFrame: 8,
-                                    pose: PoseQuad(box: box,
-                                                   mappedBy: CGAffineTransform(scaleX: 2, y: 1)))
+        CanvasFixture.setPoseTrack(manager, layerID: layerID, celID: celID,
+                                   CanvasFixture.poseTrack(box: box, [
+                                       (0, PoseQuad(restingIn: box)),
+                                       (8, PoseQuad(box: box, mappedBy: CGAffineTransform(scaleX: 2, y: 1)))]))
     }
 
     private func drawnIDs(_ manager: CanvasManager) throws -> [String] {
@@ -281,17 +270,17 @@ final class PoseBandLogicTests: XCTestCase {
     /// **The owner's ask, whole** — 2026-09-10: *"transformations should hide scale x, scale y, and
     /// skew by default."*
     ///
-    /// The two operands are the band's **listing** and the band's **drawn content**, taken from one
-    /// fixture: six channels are listed and three are drawn, and the three missing ones are exactly
-    /// the three the ask names. Stating both is what stops this passing against an implementation
-    /// that stopped *listing* them — which would be a different and much worse change, because a row
-    /// that is not listed cannot be switched back on.
+    /// Since TODO (139) a slide keys none of those rows, so the default only has work to do where
+    /// they are keyed and flat. The two operands are the band's **listing** and its **drawn
+    /// content**: six rows are listed and three are drawn, and the three missing ones are exactly the
+    /// three the ask names.
     func testATransformChannelStartsWithItsFlatScaleAndSkewRowsHidden() throws {
         let (manager, layerID, celID) = celFixture()
-        animateCel(manager, layerID: layerID, celID: celID)
+        animateCelWithFlatRows(manager, layerID: layerID, celID: celID)
 
         XCTAssertEqual(try listed(manager).map(\.parameterID),
-                       PoseComponents.Component.allCases.map { PoseChannelID.cel(.cel).parameterID($0) },
+                       [PoseComponents.Component.x, .y, .scaleX, .scaleY, .rotation, .skew]
+                        .map { PoseChannelID.cel(.cel).parameterID($0) },
                        "PREMISE: all six are still listed — the default is a filter, not a deletion")
         XCTAssertEqual(try drawnIDs(manager),
                        [PoseChannelID.cel(.cel).parameterID(.x),
@@ -302,16 +291,10 @@ final class PoseBandLogicTests: XCTestCase {
                       "…and the channel-list button is tinted, so the filter has a visible sign")
     }
 
-    /// **A hidden row is still findable, and switching it on sticks** — the one hazard the ask
-    /// carries, answered on the surface an artist would actually use.
-    ///
-    /// The list is built from the band's *unfiltered* channels, so all six rows are there with the
-    /// three default-hidden ones unchecked. One tap on Scale X's box draws it, and — the second
-    /// operand — Scale Y and Skew stay off, which is what proves the first toggle captured the
-    /// default rather than discarding it.
+    /// **A hidden row is still findable, and switching it on sticks.**
     func testSwitchingADefaultHiddenRowBackOnDrawsThatOneAndLeavesTheOthersOff() throws {
         let (manager, layerID, celID) = celFixture()
-        animateCel(manager, layerID: layerID, celID: celID)
+        animateCelWithFlatRows(manager, layerID: layerID, celID: celID)
 
         let rows = try XCTUnwrap(manager.graphChannelGroups?.first?.rows)
         XCTAssertEqual(rows.count, 6, "Every channel is in the list, hidden or not")
@@ -330,10 +313,6 @@ final class PoseBandLogicTests: XCTestCase {
         manager.setGraphChannels([celScaleX], visible: false)
         XCTAssertFalse(try drawnIDs(manager).contains(celScaleX), "…and it can go off again")
 
-        // **Switching all three on leaves an *empty but scoped* filter, not the neutral one**, which
-        // is the state `Filter.setting` used to collapse away. The operands are the stored set (now
-        // empty) and what the band draws (now all six): if the empty set read as "untouched" the
-        // defaults would apply again and the band would fall back to three.
         manager.setGraphChannels(rows.map(\.parameterID), visible: true)
         XCTAssertEqual(manager.graphChannelFilter.hidden, [], "Nothing is switched off any more")
         XCTAssertEqual(try drawnIDs(manager).count, 6,
@@ -342,15 +321,11 @@ final class PoseBandLogicTests: XCTestCase {
 
     /// **An animated scale is never hidden**, which is the qualifier that keeps the default from
     /// taking an artist's own animation off the surface they made it on.
-    ///
-    /// The operands are two fixtures that differ in exactly one thing: the second key's pose is a
-    /// slide in one and a stretch in the other. The same channel id is absent from the band in the
-    /// first and present in the second, so what this measures is `isAnimated` and not the id.
     func testAnAnimatedScaleIsDrawnWhereAFlatOneIsHidden() throws {
-        let slid = celFixture()
-        animateCel(slid.manager, layerID: slid.layerID, celID: slid.celID)
-        XCTAssertFalse(try drawnIDs(slid.manager).contains(celScaleX),
-                       "A pure slide leaves Scale X flat, so the default hides it")
+        let flat = celFixture()
+        animateCelWithFlatRows(flat.manager, layerID: flat.layerID, celID: flat.celID)
+        XCTAssertFalse(try drawnIDs(flat.manager).contains(celScaleX),
+                       "A flat Scale X is hidden by the default")
 
         let scaled = celFixture()
         scaleCel(scaled.manager, layerID: scaled.layerID, celID: scaled.celID)
@@ -361,79 +336,48 @@ final class PoseBandLogicTests: XCTestCase {
     }
 
     /// **"Includes transformation layers and normal move"** — the same default on §3.1's other time
-    /// base, where the pose lives on the layer rather than on a cel.
-    ///
-    /// `PoseChannelID.resolve` is what makes this one rule rather than three, so the operand worth
-    /// stating is the `containerPose` id: a rule written against `"celPose"` would pass every test
-    /// above and fail exactly here.
+    /// base. The operand worth stating is the `containerPose` id: a rule written against `"celPose"`
+    /// would pass every test above and fail exactly here.
     func testTheDefaultReachesATransformationLayersOwnPose() throws {
-        let manager = CanvasFixture.manager(layerCount: 1)
-        manager.addTransformLayer()
-        let canvasBox = CGRect(origin: .zero, size: size)
-        manager.layers[1].transform = LayerPose(
-            pose: PoseQuad(restingIn: canvasBox),
-            track: TransformTrack(keys: [
-                .init(frame: 0, pose: PoseQuad(restingIn: canvasBox)),
-                .init(frame: 9, pose: PoseQuad(box: canvasBox,
-                                               mappedBy: CGAffineTransform(translationX: 40, y: 0)))]))
-        manager.currentLayerIndex = 1
-        manager.isGraphEditorOpen = true
+        let manager = slidingTransformLayer()
+        var track = try XCTUnwrap(manager.layers[1].transform?.track)
+        track.setCurve(AnimationCurve(keys: [.init(frame: 0, value: 1), .init(frame: 9, value: 1)]), for: .scaleX)
+        manager.layers[1].transform?.track = track
 
         XCTAssertEqual(try listed(manager).map(\.parameterID),
-                       PoseComponents.Component.allCases.map { PoseChannelID.container.parameterID($0) },
-                       "PREMISE: a transformation layer lists the same six")
-        XCTAssertEqual(try drawnIDs(manager),
-                       [PoseChannelID.container.parameterID(.x),
-                        PoseChannelID.container.parameterID(.y),
-                        PoseChannelID.container.parameterID(.rotation)],
-                       "and starts with the same three switched off")
+                       [PoseChannelID.container.parameterID(.x), PoseChannelID.container.parameterID(.scaleX)],
+                       "PREMISE: a transformation layer lists its keyed rows")
+        XCTAssertEqual(try drawnIDs(manager), [PoseChannelID.container.parameterID(.x)],
+                       "and starts with its flat Scale X switched off")
     }
 
-    /// **A pure slide on a full-size canvas leaves Scale X flat, and exact equality said otherwise.**
+    /// **A full-size slide keys X and nothing else** — the measured case behind `flatTolerance`.
     ///
     /// The numbers are the ones `-uiTestSeedKeyframedMove` builds and the owner works at
-    /// (PERFORMANCE.md §1): a 2048-wide box slid `2048 * 0.4` points and nothing else.
-    /// `(2048 + 819.2) - 819.2` is not 2048 in binary floating point, so `decompose` reads the x
-    /// axis back a few bits short and `AnimationCurve.isAnimated`'s `!=` called the channel an
-    /// animation — which drew it solid where §11.4 says dashed, dropped the word "flat" from its row
-    /// in the channel list, and made TODO (59)'s default decline to hide the one row the ask names.
-    ///
-    /// **The two operands are the decomposed values and the verdict**, and the first is what stops
-    /// this passing vacuously: the test asserts the two keys' Scale X are *not* bit-equal — so the
-    /// fixture really does carry the error the tolerance exists for — and then that the channel is
-    /// still not an animation and is still hidden by default.
-    func testAFullSizeSlideLeavesScaleXFlatDespiteTheDecompositionsFloatingPointNoise() throws {
+    /// (PERFORMANCE.md §1): a 2048-wide box slid `2048 * 0.4` points. `(2048 + 819.2) - 819.2` is not
+    /// 2048 in binary floating point, so the decomposition reads the slid pose's Scale X a few bits
+    /// short of 1 — and an exact change test would key Scale X beside X. The commit goes through the
+    /// shipped writer on two primed frames, so what this pins is the change test the writer applies.
+    func testAFullSizeSlideKeysXAloneDespiteTheDecompositionsFloatingPointNoise() throws {
         let manager = CanvasFixture.manager(layerCount: 1)
         manager.addTransformLayer()
         let wide = CGRect(x: 0, y: 0, width: 2048, height: 1024)
-        manager.layers[1].transform = LayerPose(
-            pose: PoseQuad(restingIn: wide),
-            track: TransformTrack(keys: [
-                .init(frame: 0, pose: PoseQuad(restingIn: wide)),
-                .init(frame: 11, pose: PoseQuad(box: wide,
-                                                mappedBy: CGAffineTransform(translationX: 2048 * 0.4,
-                                                                            y: 0)))]))
+        manager.layers[1].transform = LayerPose(pose: PoseQuad(restingIn: wide))
         manager.currentLayerIndex = 1
         manager.isGraphEditorOpen = true
+        let target = KeyframeTarget.layer(id: manager.layers[1].id)
+        manager.addKeyframe(target, atFrame: 0)
+        manager.addKeyframe(target, atFrame: 11)
 
-        let scaleX = try XCTUnwrap(channel(try listed(manager),
-                                           PoseChannelID.container.parameterID(.scaleX)))
-        let values = scaleX.curve.keys.map(\.value)
-        XCTAssertEqual(values.count, 2, "PREMISE: two keys")
-        XCTAssertNotEqual(values[0], values[1],
-                          "PREMISE: the decomposition really is bit-unequal across a pure slide — "
-                          + "without this the tolerance would be testing nothing")
-        XCTAssertEqual(values[0], values[1], accuracy: 1e-9,
-                       "…and the difference is float noise, not a scale the artist authored")
+        let slid = PoseQuad(box: wide, mappedBy: CGAffineTransform(translationX: 2048 * 0.4, y: 0))
+        let noisy = try XCTUnwrap(PoseComponents.decompose(slid, inBox: wide)).scaleX
+        XCTAssertNotEqual(noisy, 1, "PREMISE: the decomposition really is bit-unequal across a pure slide")
+        XCTAssertEqual(manager.commitContainerPose(target, restingAt: PoseQuad(restingIn: wide),
+                                                   movedTo: slid, atFrame: 11), .seedAndKey)
 
-        XCTAssertFalse(scaleX.isAnimated,
-                       "A pure slide leaves Scale X flat, which is what `listedAnimationChannelIDs` "
-                       + "already claimed and `!=` did not deliver")
-        XCTAssertFalse(manager.listedAnimationChannelIDs(of: .layer(id: manager.layers[1].id))
-            .contains(PoseChannelID.container.parameterID(.scaleX)),
-                       "…and the two readers of that verdict agree, as they are pinned to")
-        XCTAssertFalse(try drawnIDs(manager).contains(PoseChannelID.container.parameterID(.scaleX)),
-                       "…so TODO (59)'s default hides it on the document the owner actually works on")
+        XCTAssertEqual(try listed(manager).map(\.parameterID), [PoseChannelID.container.parameterID(.x)],
+                       "X is keyed, and Scale X — moved by float noise alone — is not")
+        XCTAssertEqual(manager.listedAnimationChannelIDs(of: target), [PoseChannelID.container.parameterID(.x)])
     }
 
     /// **A grade's channels are untouched by the default**, which is the boundary the rule draws:
@@ -475,7 +419,7 @@ final class PoseBandLogicTests: XCTestCase {
         XCTAssertEqual(groups.count, 2, "One section per Move channel")
         XCTAssertEqual(Set(groups.map(\.name)), ["Move", "Arm"],
                        "…named by the artist's own group name where there is one")
-        XCTAssertEqual(groups.map { $0.rows.count }, [6, 6])
+        XCTAssertEqual(groups.map { $0.rows.count }, [1, 1], "a slide keys one row in each")
         for section in groups {
             XCTAssertFalse(section.id.contains("."), "\(section.id) would split in the wrong place")
         }
@@ -489,7 +433,7 @@ final class PoseBandLogicTests: XCTestCase {
     /// the filter, which is the obvious simplification and is wrong.
     func testFoldingAGroupDrawsTheSameBand() throws {
         let (manager, layerID, celID) = celFixture()
-        animateCel(manager, layerID: layerID, celID: celID)
+        animateCelWithFlatRows(manager, layerID: layerID, celID: celID)
         let before = try content(manager)
         let id = try XCTUnwrap(manager.graphChannelGroups?.first?.id)
 
@@ -524,11 +468,11 @@ final class PoseBandLogicTests: XCTestCase {
     /// **A row's body names the Move it is about, and a grade's row names nothing** — §11.7's second
     /// ruling expressed as the value the view reads.
     ///
-    /// All six rows of one channel name the same Move, which is the ruling rather than a shortcut:
+    /// Every row of one channel names the same Move, which is the ruling rather than a shortcut:
     /// the owner asked for *"the move box for that move item"*, and the move item is the channel.
     func testEveryRowOfAMoveChannelNavigatesToThatChannelAndAGradesRowNavigatesNowhere() throws {
         let (manager, layerID, celID) = celFixture()
-        animateCel(manager, layerID: layerID, celID: celID)
+        animateCelWithFlatRows(manager, layerID: layerID, celID: celID)
         let rows = try XCTUnwrap(manager.graphChannelGroups?.first?.rows)
         XCTAssertEqual(rows.count, 6)
         XCTAssertEqual(Set(rows.map(\.navigation)), [PoseChannelID.cel(.cel)])
@@ -556,22 +500,12 @@ final class PoseBandLogicTests: XCTestCase {
     /// gesture and it comes up as a `.containerPose` float rather than a vector one, because a
     /// container has no geometry to lift.
     func testAContainerPosesRowsNavigateToItsOwnMoveBox() throws {
-        let manager = CanvasFixture.manager(layerCount: 1)
-        manager.addTransformLayer()
-        let canvasBox = CGRect(origin: .zero, size: size)
-        manager.layers[1].transform = LayerPose(
-            pose: PoseQuad(restingIn: canvasBox),
-            track: TransformTrack(keys: [
-                .init(frame: 0, pose: PoseQuad(restingIn: canvasBox)),
-                .init(frame: 9, pose: PoseQuad(box: canvasBox,
-                                               mappedBy: CGAffineTransform(translationX: 40, y: 0)))]))
-        manager.currentLayerIndex = 1
-        manager.isGraphEditorOpen = true
+        let manager = slidingTransformLayer()
 
         let rows = try XCTUnwrap(manager.graphChannelGroups?.first?.rows)
-        XCTAssertEqual(rows.count, 6, "Fixture: the rows are there")
+        XCTAssertEqual(rows.count, 1, "Fixture: the slide's row is there")
         XCTAssertEqual(Set(rows.map(\.navigation)), [.container],
-                       "All six decompose one channel, so all six name the same subject")
+                       "A row of the channel names the channel's own subject")
         XCTAssertTrue(manager.revealPoseChannel(.container))
         XCTAssertEqual(manager.floatingPiece?.kind, .containerPose,
                        "A container's box carries no pixels — it is the canvas frame, and the "
@@ -631,39 +565,23 @@ final class PoseBandLogicTests: XCTestCase {
         XCTAssertNil(manager.vectorFloat)
     }
 
-    // MARK: - What a pose node takes, now that it has a writer for all of it — TODO (21)
+    // MARK: - A pose row takes every gesture a grade's row does — TODO (139)
 
-    /// **A pose node is dragged, marquee'd, focused, shaped, menu'd and tapped-to-add, exactly as a
-    /// grade's is** — TODO (21)'s "still refused for want of a writer", closed.
+    /// **A pose node is grabbed, marquee'd, focused, menu'd and tapped-to-add exactly as a grade's
+    /// is** — and since TODO (139) there is nothing pose-specific left to say about it: the row is a
+    /// stored curve, so the same `tap`, `grab` and `keys(in:)` answer the same things on both.
     ///
-    /// This used to be named for the two gestures it proved refused: the node menu's Delete, which
-    /// funnelled through `removeEffectParameterKey` and dropped a pose id outright, and tap-to-add,
-    /// which would have had to invent the five component values the artist never gave.
-    /// `CanvasManager.removePoseChannelKey`/`addPoseChannelKey` are the writers KEYFRAMES.md §11.7
-    /// named as owed to "whoever extends (38)(b)", and this file is that extension: both gestures now
-    /// reach `TimelineGraphBand.tap`'s `.menu`/`.add` the same way a grade's always have, because
-    /// `Channel.Gestures` no longer gates the *gesture* — see its own doc for what it gates instead.
-    ///
-    /// **The second tap answers `.menu` now, not `.focus` and emphatically not `.nothing`.**
-    /// `.nothing` is the empty-band case and its caller drops the selection *and* the focus, so a
-    /// pose node's second tap must not be indistinguishable from that — this file's own note from
-    /// when the gesture was refused, still true of the new answer for the same reason.
-    ///
-    /// **The fixture holds a grade channel too**, which is what stops these being tests of a list of
-    /// one: the same `tap` at the same kind of point does the same thing on both channels now, and
-    /// this test says so rather than only asserting the pose half.
-    func testAPoseNodeTakesTheSameMenuAndTapToAddAGradesDoes() throws {
+    /// **The second tap answers `.menu`, not `.focus` and emphatically not `.nothing`** — `.nothing`
+    /// is the empty-band case and its caller drops the selection *and* the focus.
+    func testAPoseNodeTakesTheSameGesturesAGradesDoes() throws {
         let (manager, layerID, celID) = celFixture()
         animateCel(manager, layerID: layerID, celID: celID)
         let pose = try XCTUnwrap(channel(try content(manager), celX))
-        XCTAssertEqual(pose.gestures, .dragAndHandles)
-
         let grade = TimelineGraphBand.Channel(
             parameterID: "brightnessContrast.brightness", name: "Brightness",
             curve: AnimationCurve(keys: [.init(frame: 4, value: 0), .init(frame: 12, value: 1)]),
             uiRange: 0...1, modelDomain: 0...1, format: "%.2f", descriptorIndex: 0,
             isAnimated: true)
-        XCTAssertEqual(grade.gestures, .all, "Fixture: a grade's channel takes every gesture")
 
         let height = TimelineGraphBand.height
         let ppf: CGFloat = 30
@@ -673,169 +591,135 @@ final class PoseBandLogicTests: XCTestCase {
                            y: TimelineGraphBand.y(ofValue: key.value, in: channel.axis,
                                                   bandHeight: height))
         }
-        let both = [pose, grade]
-        let poseNode = TimelineGraphBand.KeyRef(parameterID: celX, frame: 4)
-        let posePoint = at(pose, frame: 4)
-        XCTAssertEqual(TimelineGraphBand.grab(at: posePoint, focused: nil, channels: [pose],
-                                              pixelsPerFrame: ppf, bandHeight: height),
-                       .key(poseNode),
-                       "A touch on a pose node takes hold of it")
-        XCTAssertEqual(TimelineGraphBand.keys(in: CGRect(x: 0, y: 0, width: 1000, height: height),
-                                              channels: [pose], pixelsPerFrame: ppf,
-                                              bandHeight: height),
-                       [.init(parameterID: celX, frame: 4), .init(parameterID: celX, frame: 12)],
-                       "…and a marquee over the band picks up both of its nodes")
-        XCTAssertEqual(TimelineGraphBand.tap(at: posePoint, channels: [pose], focused: nil,
-                                             frameCount: 40, pixelsPerFrame: ppf,
-                                             bandHeight: height),
-                       .focus(poseNode), "…and a tap focuses it, which is what draws its handles")
-        XCTAssertFalse(TimelineGraphBand.handles(of: poseNode, in: [pose], pixelsPerFrame: ppf,
-                                                 bandHeight: height).isEmpty,
-                       "…and the handles are there to be drawn")
-        XCTAssertEqual(TimelineGraphBand.tap(at: posePoint, channels: [pose], focused: poseNode,
-                                             frameCount: 40, pixelsPerFrame: ppf,
-                                             bandHeight: height),
-                       .menu(poseNode),
-                       "TODO (21): a second tap now raises the menu on a pose node too — the writer " +
-                       "`removePoseChannelKey` gives it something to do")
-
-        // Halfway between the two nodes and on the drawn line, which on a grade was always `.add`
-        // and now is on a pose channel too.
-        let onTheLine = CGPoint(x: TimelineGraphBand.x(ofFrame: 8, pixelsPerFrame: ppf),
-                                y: TimelineGraphBand.y(ofValue: pose.curve.evaluate(at: 8),
-                                                       in: pose.axis, bandHeight: height))
-        XCTAssertEqual(TimelineGraphBand.tap(at: onTheLine, channels: [pose], focused: nil,
-                                             frameCount: 40, pixelsPerFrame: ppf,
-                                             bandHeight: height),
-                       .add(parameterID: celX, frame: 8, value: pose.curve.evaluate(at: 8)),
-                       "TODO (21): a tap on a pose curve now adds a key — the five components the " +
-                       "tap did not name are `addPoseChannelKey`'s job to hold, not this function's")
-        let onTheGradeLine = CGPoint(x: TimelineGraphBand.x(ofFrame: 8, pixelsPerFrame: ppf),
-                                     y: TimelineGraphBand.y(ofValue: grade.curve.evaluate(at: 8),
-                                                            in: grade.axis, bandHeight: height))
-        XCTAssertEqual(TimelineGraphBand.tap(at: onTheGradeLine, channels: [grade], focused: nil,
-                                             frameCount: 40, pixelsPerFrame: ppf,
-                                             bandHeight: height),
-                       .add(parameterID: grade.parameterID, frame: 8,
-                            value: grade.curve.evaluate(at: 8)),
-                       "Fixture: the same geometry on a grade does add one too, so the two channels " +
-                       "are asserted to agree rather than one being taken on faith")
-
-        let gradePoint = at(grade, frame: 4)
-        let gradeNode = TimelineGraphBand.KeyRef(parameterID: grade.parameterID, frame: 4)
-        XCTAssertEqual(TimelineGraphBand.tap(at: gradePoint, channels: both, focused: nil,
-                                             frameCount: 40, pixelsPerFrame: ppf,
-                                             bandHeight: height),
-                       .focus(gradeNode),
-                       "…while a tap on the grade beside it focuses as it always did")
-        XCTAssertEqual(TimelineGraphBand.tap(at: gradePoint, channels: both, focused: gradeNode,
-                                             frameCount: 40, pixelsPerFrame: ppf,
-                                             bandHeight: height),
-                       .menu(gradeNode),
-                       "…and its second tap still raises the menu, the same answer the pose node beside it now gets")
-        XCTAssertEqual(TimelineGraphBand.keys(in: CGRect(x: 0, y: 0, width: 1000, height: height),
-                                              channels: both, pixelsPerFrame: ppf,
-                                              bandHeight: height),
-                       [.init(parameterID: celX, frame: 4), .init(parameterID: celX, frame: 12),
-                        .init(parameterID: grade.parameterID, frame: 4),
-                        .init(parameterID: grade.parameterID, frame: 12)],
-                       "…and a marquee over both catches all four nodes")
+        for row in [pose, grade] {
+            let node = TimelineGraphBand.KeyRef(parameterID: row.parameterID, frame: 4)
+            let point = at(row, frame: 4)
+            XCTAssertEqual(TimelineGraphBand.grab(at: point, focused: nil, channels: [row],
+                                                  pixelsPerFrame: ppf, bandHeight: height),
+                           .key(node), "\(row.name): a touch on a node takes hold of it")
+            XCTAssertEqual(TimelineGraphBand.tap(at: point, channels: [row], focused: nil,
+                                                 frameCount: 40, pixelsPerFrame: ppf, bandHeight: height),
+                           .focus(node), "\(row.name): a tap focuses it")
+            XCTAssertEqual(TimelineGraphBand.handles(of: node, in: [row], pixelsPerFrame: ppf,
+                                                     bandHeight: height).map(\.side), [.outgoing],
+                           "\(row.name): its own handle is drawn")
+            XCTAssertEqual(TimelineGraphBand.tap(at: point, channels: [row], focused: node,
+                                                 frameCount: 40, pixelsPerFrame: ppf, bandHeight: height),
+                           .menu(node), "\(row.name): and a second tap raises the menu")
+            let onTheLine = CGPoint(x: TimelineGraphBand.x(ofFrame: 8, pixelsPerFrame: ppf),
+                                    y: TimelineGraphBand.y(ofValue: row.curve.evaluate(at: 8),
+                                                           in: row.axis, bandHeight: height))
+            XCTAssertEqual(TimelineGraphBand.tap(at: onTheLine, channels: [row], focused: nil,
+                                                 frameCount: 40, pixelsPerFrame: ppf, bandHeight: height),
+                           .add(parameterID: row.parameterID, frame: 8, value: row.curve.evaluate(at: 8)),
+                           "\(row.name): a tap on the line adds a key")
+        }
     }
 
-    // MARK: - The two writers TODO (21) added
+    // MARK: - The writes, one component at a time
 
-    /// **Delete drops the whole key, all six components, not one row's reading of it.**
-    ///
-    /// A pose channel's six band rows are one `TransformTrack.Key` decomposed — there is no partial
-    /// delete to ask for — so calling the writer through the *X* row's parameter id removes the same
-    /// key every other row would have named too, leaving the track's other key untouched.
-    func testRemovePoseChannelKeyDropsTheWholeKeyAtThatFrame() throws {
+    /// A pose track with X and Rotation both keyed at cel-local 0 and 8 — two independent rows that
+    /// share frames, which is the case a whole-pose model could not keep apart.
+    private func slideAndTurn(_ manager: CanvasManager, layerID: UUID, celID: UUID) {
+        let rest = PoseComponents.Values.resting(in: box)
+        CanvasFixture.setPoseTrack(manager, layerID: layerID, celID: celID, TransformTrack(box: box, curves: [
+            .x: AnimationCurve(keys: [.init(frame: 0, value: rest.x), .init(frame: 8, value: rest.x + 24)]),
+            .rotation: AnimationCurve(keys: [.init(frame: 0, value: 0), .init(frame: 8, value: 30)])
+        ]))
+    }
+
+    private var celRotation: String { PoseChannelID.cel(.cel).parameterID(.rotation) }
+
+    private func storedTrack(_ manager: CanvasManager) -> TransformTrack? {
+        manager.layers[1].cels[0].transformTracks[TransformChannelID.cel.id]
+    }
+
+    /// **Delete on the X row takes X's key and leaves Rotation's at the same frame** — the owner's
+    /// *"fully independent"*, on the graph editor's own menu. One undo step brings it back.
+    func testDeletingOneRowsNodeLeavesTheOtherRowsKeyAtThatFrame() throws {
         let (manager, layerID, celID) = celFixture()
-        animateCel(manager, layerID: layerID, celID: celID)
-        XCTAssertEqual(manager.layers[1].cels[0].transformTracks[TransformChannelID.cel.id]?.keys.count,
-                       2, "Sanity: the fixture keys the channel twice")
+        slideAndTurn(manager, layerID: layerID, celID: celID)
 
-        XCTAssertTrue(manager.removePoseChannelKey(target: .layer(id: manager.layers[1].id), parameterID: celX, frame: 12),
-                     "Frame 12 is cel-local 8 (the fixture's cel starts at 4), the second key")
-
-        let track = manager.layers[1].cels[0].transformTracks[TransformChannelID.cel.id]
-        XCTAssertEqual(track?.keys.map(\.frame), [0], "One key left, at cel-local frame 0")
+        XCTAssertTrue(manager.removeGraphNodeKey(target: target(manager), parameterID: celX, frame: 12),
+                      "Frame 12 is cel-local 8 (the fixture's cel starts at 4)")
+        XCTAssertEqual(storedTrack(manager)?.curve(.x)?.keys.map(\.frame), [0])
+        XCTAssertEqual(storedTrack(manager)?.curve(.rotation)?.keys.map(\.frame), [0, 8],
+                       "Rotation still keys frame 8")
+        XCTAssertEqual(Set(manager.keyframeFrames(of: target(manager))), [4, 12],
+                       "…so the indicator at 12 stays: Rotation's node is still there")
 
         manager.undo()
-        let restored = manager.layers[1].cels[0].transformTracks[TransformChannelID.cel.id]
-        XCTAssertEqual(restored?.keys.map(\.frame), [0, 8], "Undo brings the deleted key back")
+        XCTAssertEqual(storedTrack(manager)?.curve(.x)?.keys.map(\.frame), [0, 8], "Undo brings it back")
     }
 
-    /// **A delete that empties a channel removes it rather than storing it with no keys** —
-    /// `clearKeyframes`' rule on the same payload one door over, and the reason `removeTransformPose\
-    /// Key` has an `isEmpty` branch at all.
-    ///
-    /// An empty `TransformTrack` left in the dictionary is not inert: `poseChannels` skips a channel
-    /// with no keys by *absence*, so one stored empty is a channel the band still lists and still
-    /// draws, as a flat unkeyed line with no node on it and no gesture that can remove it. The test
-    /// beside this one deletes one of two keys and so never reaches the branch; this one starts from
-    /// a single key on purpose.
-    func testDeletingTheLastKeyRemovesTheChannelRatherThanLeavingItEmpty() throws {
+    /// **Deleting a row's last key removes that row, and the channel when it was the last row** — an
+    /// empty curve is never stored, and an empty channel is never stored either.
+    func testDeletingTheLastKeysRemoveTheRowAndThenTheChannel() throws {
         let (manager, layerID, celID) = celFixture()
-        manager.setTransformPoseKey(layerID: layerID, celID: celID, channel: .cel,
-                                    atCelLocalFrame: 0, pose: PoseQuad(restingIn: box))
-        XCTAssertEqual(manager.layers[1].cels[0].transformTracks[TransformChannelID.cel.id]?.keys.count,
-                       1, "Sanity: exactly one key, so the delete below empties the channel")
-
-        XCTAssertTrue(manager.removePoseChannelKey(target: .layer(id: manager.layers[1].id), parameterID: celX, frame: 4),
-                      "Frame 4 is cel-local 0 — the fixture's cel starts at 4")
-        XCTAssertNil(manager.layers[1].cels[0].transformTracks[TransformChannelID.cel.id],
-                     "The channel is gone from the dictionary, not stored with an empty track")
+        CanvasFixture.setPoseTrack(manager, layerID: layerID, celID: celID, TransformTrack(box: box, curves: [
+            .x: AnimationCurve(keys: [.init(frame: 0, value: 30)]),
+            .rotation: AnimationCurve(keys: [.init(frame: 0, value: 5)])
+        ]))
+        XCTAssertTrue(manager.removeGraphNodeKey(target: target(manager), parameterID: celX, frame: 4))
+        XCTAssertNil(storedTrack(manager)?.curve(.x), "X's row is gone")
+        XCTAssertNotNil(storedTrack(manager)?.curve(.rotation))
+        XCTAssertTrue(manager.removeGraphNodeKey(target: target(manager), parameterID: celRotation, frame: 4))
+        XCTAssertNil(storedTrack(manager), "and with its last row the channel is gone, not stored empty")
     }
 
-    /// A frame the channel does not key is refused rather than deleting whatever key happens to be
-    /// nearest — `removeEffectParameterKey`'s own guard, restated for the pose funnel.
-    func testRemovePoseChannelKeyRefusesAFrameWithNoKey() throws {
+    /// A frame the row does not key is refused rather than deleting whatever key is nearest.
+    func testDeletingAFrameTheRowDoesNotKeyIsRefused() throws {
         let (manager, layerID, celID) = celFixture()
-        animateCel(manager, layerID: layerID, celID: celID)
-        XCTAssertFalse(manager.removePoseChannelKey(target: .layer(id: manager.layers[1].id), parameterID: celX, frame: 7))
-        XCTAssertEqual(manager.layers[1].cels[0].transformTracks[TransformChannelID.cel.id]?.keys.count, 2,
-                       "A refused delete must not have touched the track")
+        slideAndTurn(manager, layerID: layerID, celID: celID)
+        let before = storedTrack(manager)
+        XCTAssertFalse(manager.removeGraphNodeKey(target: target(manager), parameterID: celX, frame: 7))
+        XCTAssertEqual(storedTrack(manager), before)
     }
 
-    /// **Add holds every component the tap did not name at exactly what the track already resolved
-    /// to there** — the ruling KEYFRAMES.md §11.7 left owed, applied: nothing is reset to rest and
-    /// nothing is invented, the same property `PoseEdit`'s retime rule and `addKeyframe`'s "hold this
-    /// pose here" step both have.
-    ///
-    /// The fixture moves **two** components together (a slide and a stretch) precisely so a "held"
-    /// bug that quietly rested or zeroed one of them is visible on a component this test never taps.
-    func testAddPoseChannelKeyHoldsTheUntappedComponentsAtWhatTheTrackAlreadyShowed() throws {
+    /// **A tap-to-add on the X row adds an X key and nothing else** — no component is invented and
+    /// none is reset, because there is nothing to invent: the row is one curve.
+    func testAddingOnOneRowKeysThatComponentAlone() throws {
         let (manager, layerID, celID) = celFixture()
-        let moved = PoseQuad(box: box,
-                             mappedBy: CGAffineTransform(translationX: 24, y: 0).scaledBy(x: 2, y: 1))
-        manager.setTransformPoseKey(layerID: layerID, celID: celID, channel: .cel,
-                                    atCelLocalFrame: 0, pose: PoseQuad(restingIn: box))
-        manager.setTransformPoseKey(layerID: layerID, celID: celID, channel: .cel,
-                                    atCelLocalFrame: 8, pose: moved)
+        slideAndTurn(manager, layerID: layerID, celID: celID)
+        let x = try XCTUnwrap(channel(try content(manager), celX))
+        var curve = x.curve
+        curve.setKey(AnimationCurve.Key(frame: 8, value: Double(box.midX) + 3))
+        XCTAssertTrue(manager.setPoseChannelTrack(target(manager), parameterID: celX, to: curve))
+        XCTAssertEqual(storedTrack(manager)?.curve(.x)?.keys.map(\.frame), [0, 4, 8],
+                       "absolute 8 is cel-local 4")
+        XCTAssertEqual(storedTrack(manager)?.curve(.rotation)?.keys.map(\.frame), [0, 8],
+                       "Rotation took no key")
+    }
 
-        // Read before the add, so the assertion below is against a value nobody could have
-        // fabricated after the fact to make the test pass.
-        let track = try XCTUnwrap(manager.layers[1].cels[0].transformTracks[TransformChannelID.cel.id])
-        let before = try XCTUnwrap(track.pose(atCelLocalFrame: 4))
-        let beforeValues = try XCTUnwrap(PoseComponents.decompose(before))
+    /// **A row merged across two cels is written back to each cel's own span** — the band draws a
+    /// layer's cels as one row per component, so the write splits it again.
+    func testAMergedRowIsWrittenBackToEachCelsOwnSpan() throws {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.addVectorLayer()
+        let first = Cel(id: UUID(), startFrame: 0, frameCount: 6, raster: .empty(size: size), vector: .empty(size: size))
+        let second = Cel(id: UUID(), startFrame: 6, frameCount: 6, raster: .empty(size: size), vector: .empty(size: size))
+        manager.layers[1].cels = [first, second]
+        manager.currentLayerIndex = 1
+        manager.isGraphEditorOpen = true
+        let rest = PoseComponents.Values.resting(in: box)
+        for cel in [first, second] {
+            CanvasFixture.setPoseTrack(manager, layerID: manager.layers[1].id, celID: cel.id,
+                                       TransformTrack(box: box, curves: [.x: AnimationCurve(keys: [
+                                           .init(frame: 0, value: rest.x), .init(frame: 5, value: rest.x + 10)])]))
+        }
+        let merged = try XCTUnwrap(channel(try listed(manager), celX))
+        XCTAssertEqual(merged.curve.keys.map(\.frame), [0, 5, 6, 11], "PREMISE: one row, both cels")
 
-        let celScaleY = PoseChannelID.cel(.cel).parameterID(.scaleY)
-        XCTAssertTrue(manager.addPoseChannelKey(target: .layer(id: manager.layers[1].id), parameterID: celScaleY, frame: 8,
-                                                value: 3),
-                     "Frame 8 is cel-local 4, inside the cel and between the fixture's two keys")
-
-        let afterPose = try XCTUnwrap(manager.layers[1].cels[0].transformTracks[TransformChannelID.cel.id]?
-            .key(atFrame: 4)?.pose)
-        let after = try XCTUnwrap(PoseComponents.decompose(afterPose))
-        XCTAssertEqual(after.scaleY, 3, "The tapped component takes the tapped value")
-        XCTAssertEqual(after.x, beforeValues.x, accuracy: 1e-9,
-                      "…and X — which the tap did not name — holds exactly what the track already " +
-                      "showed there, not rest and not zero")
-        XCTAssertEqual(after.scaleX, beforeValues.scaleX, accuracy: 1e-9,
-                      "…same for Scale X, the other component this drag actually moved")
-        XCTAssertEqual(after.rotation, beforeValues.rotation, accuracy: 1e-9)
-        XCTAssertEqual(after.skew, beforeValues.skew, accuracy: 1e-9)
+        var curve = merged.curve
+        var key = try XCTUnwrap(curve.key(atFrame: 11))
+        curve.removeKey(atFrame: 11)
+        key.frame = 9
+        curve.setKey(key)
+        XCTAssertTrue(manager.setPoseChannelTrack(target(manager), parameterID: celX, to: curve))
+        XCTAssertEqual(manager.layers[1].cels[0].transformTracks["cel"]?.curve(.x)?.keys.map(\.frame), [0, 5],
+                       "the first cel is untouched")
+        XCTAssertEqual(manager.layers[1].cels[1].transformTracks["cel"]?.curve(.x)?.keys.map(\.frame), [0, 3],
+                       "the second cel's key moved from local 5 to local 3")
     }
 
     // MARK: - The y axis a node is drawn against
@@ -847,14 +731,15 @@ final class PoseBandLogicTests: XCTestCase {
                           by translation: CGSize,
                           pixelsPerFrame: CGFloat = 30) throws -> TimelineGraphBand.Content {
         let content = try content(manager)
-        let snapshot = manager.graphBandPoseSnapshot(of: content.target)
         let moves = TimelineGraphBand.moves(of: [ref], in: content.channels, translation: translation,
                                             pixelsPerFrame: pixelsPerFrame,
                                             bandHeight: TimelineGraphBand.height)
-        XCTAssertTrue(manager.writeGraphBandPoseEdits(
-            TimelineGraphBand.poseEdits(moves, in: content.channels),
-            from: snapshot, target: content.target),
-                      "Fixture: the drag has to reach the document")
+        let curves = TimelineGraphBand.applying(moves, to: content.channels)
+        XCTAssertFalse(curves.isEmpty, "Fixture: the drag has to change a curve")
+        for (id, curve) in curves {
+            XCTAssertTrue(manager.setPoseChannelTrack(content.target, parameterID: id, to: curve),
+                          "Fixture: the drag has to reach the document")
+        }
         return try self.content(manager)
     }
 
@@ -921,7 +806,10 @@ final class PoseBandLogicTests: XCTestCase {
         var moved: [CGFloat: Double] = [:]
         for spread in [CGFloat(0), 2, 24] {
             let (manager, layerID, celID) = celFixture()
-            animateCel(manager, layerID: layerID, celID: celID, dx: spread)
+            CanvasFixture.setPoseTrack(manager, layerID: layerID, celID: celID,
+                                       TransformTrack(box: box, curves: [.x: AnimationCurve(keys: [
+                                           .init(frame: 0, value: Double(box.midX)),
+                                           .init(frame: 8, value: Double(box.midX + spread))])]))
             let ref = TimelineGraphBand.KeyRef(parameterID: celX, frame: 4)
             let before = try XCTUnwrap(
                 XCTUnwrap(channel(try content(manager), celX)).curve.key(atFrame: 4)).value
@@ -978,19 +866,7 @@ final class PoseBandLogicTests: XCTestCase {
     // MARK: - Bezier handles on a pose node
 
     /// **A handle on a pose node is grabbed, dragged, written, and drawn back where the finger left
-    /// it** — the whole round trip, and the assertion that catches the units.
-    ///
-    /// **The units are the trap here, and they are invisible in the model.** `TransformTrack.timing`
-    /// is an `AnimationCurve` whose key values are the pose **indices** `0, 1, 2, …` carrying this
-    /// key's handles, so a stored `deltaValue` is a fraction of a *pose*; the band's six rows are in
-    /// canvas points, degrees and multiples. `poseChannels` multiplies by the segment's own rise on
-    /// the way out and `poseHandleEdits` divides by it on the way back, and this test does not check
-    /// either of them — it checks that they are **inverses**, which is the only thing an artist can
-    /// see. Delete the multiply, delete the divide, or change one and not the other, and the dot
-    /// lands somewhere other than under the finger.
-    ///
-    /// It also pins the two funnels apart: the grade's writer answers empty for a pose row, because
-    /// `setEffectParameterTrack` would drop such an id silently and read as a handle that did nothing.
+    /// it** — through the same writer a grade's handle uses, because the row is a stored curve.
     func testAPoseHandleIsGrabbedDraggedAndLandsWhereTheFingerLeftIt() throws {
         let (manager, layerID, celID) = celFixture()
         animateCel(manager, layerID: layerID, celID: celID)
@@ -1010,115 +886,34 @@ final class PoseBandLogicTests: XCTestCase {
                        .handle(ref), "A touch on the dot takes the handle rather than its node")
 
         let travel = CGSize(width: 9, height: -13)
-        let edits = TimelineGraphBand.poseHandleEdits(ref, in: before.channels, translation: travel,
+        let curves = TimelineGraphBand.draggingHandle(ref, in: before.channels, translation: travel,
                                                       pixelsPerFrame: ppf, bandHeight: height)
-        XCTAssertFalse(edits.isEmpty, "A pose handle writes through the pose funnel")
-        XCTAssertTrue(TimelineGraphBand.draggingHandle(ref, in: before.channels, translation: travel,
-                                                       pixelsPerFrame: ppf, bandHeight: height).isEmpty,
-                      "…and not through the grade's, which would drop the id without saying so")
-        let snapshot = manager.graphBandPoseSnapshot(of: before.target)
-        XCTAssertTrue(manager.writeGraphBandPoseEdits(edits, from: snapshot,
-                                                      target: before.target))
+        XCTAssertEqual(Array(curves.keys), [celX], "the handle shapes its own row's curve")
+        XCTAssertTrue(manager.setPoseChannelTrack(before.target, parameterID: celX, to: curves[celX]))
 
         let moved = try XCTUnwrap(TimelineGraphBand.handles(of: node, in: try content(manager).channels,
                                                             pixelsPerFrame: ppf,
                                                             bandHeight: height).first)
         XCTAssertEqual(moved.point.x, dot.point.x + travel.width, accuracy: 0.001)
         XCTAssertEqual(moved.point.y, dot.point.y + travel.height, accuracy: 0.001)
+        XCTAssertEqual(storedTrack(manager)?.curve(.x)?.key(atFrame: 0)?.tangentMode, .free,
+                       "the stored key took the authored ease")
     }
 
-    /// **One handle pair, drawn on all six rows** — which is why the gesture is offered at all.
-    ///
-    /// A `TransformTrack.Key` carries one `inHandle`/`outHandle` pair and one tangent mode for its
-    /// whole pose, so shaping X's ease shapes Y's and Rotation's with it. That was the argument for
-    /// refusing the gesture until 2026-09-03 and it over-corrected: a shared ease is what the model
-    /// stores and what `PoseInterpolation.blend` runs, so the thing to repair was the picture. Drawing
-    /// the handle on the six rows at once is that repair.
-    ///
-    /// **A row that does not move across the segment offers no dot**, which is the same rule
-    /// `handles(of:in:…)` already applies to a curve's two ends: the conversion factor is that row's
-    /// own rise, so on a flat row the dot would sit inside its node and a drag on it could not be read
-    /// back. Five of these six are flat, which makes the fixture's one animated row the whole contrast.
-    func testAPoseKeysHandlesAreOneEaseSharedByAllSixRows() throws {
+    /// **Shaping X's ease shapes X's alone** — TODO (139). A whole-pose key carried one handle pair
+    /// for every component, so a handle drag on one row bent all six; a component's curve carries
+    /// its own, and Rotation's curve is untouched by a drag on X's.
+    func testShapingOneRowsEaseLeavesEveryOtherRowsCurveAlone() throws {
         let (manager, layerID, celID) = celFixture()
-        animateCel(manager, layerID: layerID, celID: celID)
-        let height = TimelineGraphBand.height
-        let ppf: CGFloat = 30
-        let before = try content(manager)
-        // The listing again: the claim is that one stored key's ease belongs to all six rows a pose
-        // decomposes into, which is a fact about the decomposition. TODO (59) hides three of them by
-        // default, and `handleRows` correctly answers about whatever array it is handed — so handing
-        // it the drawn three would turn this into a test of the filter.
-        let beforeRows = try listed(manager)
-        let node = TimelineGraphBand.KeyRef(parameterID: celX, frame: 4)
-
-        XCTAssertEqual(TimelineGraphBand.handleRows(of: node, in: beforeRows),
-                       PoseComponents.Component.allCases.map {
-                           TimelineGraphBand.KeyRef(parameterID: PoseChannelID.cel(.cel).parameterID($0),
-                                                    frame: 4)
-                       },
-                       "One node's handles belong to all six of its rows")
-
-        let travel = CGSize(width: 9, height: -13)
-        let snapshot = manager.graphBandPoseSnapshot(of: before.target)
-        XCTAssertTrue(manager.writeGraphBandPoseEdits(
-            TimelineGraphBand.poseHandleEdits(.init(key: node, side: .outgoing),
-                                              in: beforeRows, translation: travel,
-                                              pixelsPerFrame: ppf, bandHeight: height),
-            from: snapshot, target: before.target))
-
-        let after = try listed(manager)
-        let stored = try XCTUnwrap(manager.layers.first { $0.id == layerID }?
-            .cels.first { $0.id == celID }?
-            .transformTracks[TransformChannelID.cel.id]?.keys.first { $0.frame == 0 })
-        XCTAssertEqual(stored.tangentMode, .free, "The drag authored the key's own ease")
-        XCTAssertNotEqual(stored.outHandle.deltaFrames, 0)
-
-        for component in PoseComponents.Component.allCases {
-            let id = PoseChannelID.cel(.cel).parameterID(component)
-            let row = try XCTUnwrap(channel(after, id))
-            let key = try XCTUnwrap(row.curve.key(atFrame: 4))
-            XCTAssertEqual(key.tangentMode, .free, "\(component.name) carries the same mode")
-            XCTAssertEqual(key.outHandle.deltaFrames, stored.outHandle.deltaFrames, accuracy: 1e-9,
-                           "\(component.name) carries the same timing, unscaled")
-            let rise = try XCTUnwrap(row.curve.key(atFrame: 12)).value - key.value
-            XCTAssertEqual(key.outHandle.deltaValue, stored.outHandle.deltaValue * rise,
-                           accuracy: 1e-9,
-                           "\(component.name)'s drawn rise is the stored ease through its own segment")
-            let dots = TimelineGraphBand.handles(of: .init(parameterID: id, frame: 4), in: after,
-                                                 pixelsPerFrame: ppf, bandHeight: height)
-            XCTAssertEqual(dots.isEmpty, rise == 0,
-                           "\(component.name) offers a dot exactly where its own segment moves")
-        }
-    }
-
-    // MARK: - The projective refusal
-
-    /// **A projective pose declines its whole channel and the band names it** — §11.7's ruling, and
-    /// the one state in this file no writer in the app can reach: animated Distort is stage 5b.
-    ///
-    /// The channel is declined **whole** rather than per key: six curves five of whose keys were
-    /// honest and one of which was a linearisation would be worse than none, because nothing would
-    /// mark the sixth.
-    func testAProjectivePoseDeclinesItsChannelAndTheBandSaysSo() throws {
-        let (manager, layerID, celID) = celFixture()
-        animateCel(manager, layerID: layerID, celID: celID)
-        XCTAssertFalse(try content(manager).channels.isEmpty, "Fixture: it drew before")
-
-        let keystone = PoseQuad(box: box,
-                                corners: Quad(CGPoint(x: 0, y: 0), CGPoint(x: 100, y: 0),
-                                              CGPoint(x: 80, y: 100), CGPoint(x: 20, y: 100)))
-        manager.setTransformPoseKey(layerID: layerID, celID: celID, channel: .cel,
-                                    atCelLocalFrame: 4, pose: keystone)
-
-        let content = try content(manager)
-        XCTAssertEqual(content.channels.map(\.parameterID), [],
-                       "One projective key takes the whole channel out")
-        XCTAssertEqual(content.declinedChannelIDs, [PoseChannelID.cel(.cel).groupID],
-                       "…and it is named rather than merely absent")
-        XCTAssertEqual(TimelineGraphBand.encode(content), "declined:celPose",
-                       "which is what the tier that cannot read a `Content` sees")
-        XCTAssertNotEqual(TimelineGraphBand.encode(content), "empty",
-                          "a band that refused is not a band that had nothing")
+        slideAndTurn(manager, layerID: layerID, celID: celID)
+        let rotationBefore = storedTrack(manager)?.curve(.rotation)
+        let before = try listed(manager)
+        let curves = TimelineGraphBand.draggingHandle(.init(key: .init(parameterID: celX, frame: 4), side: .outgoing),
+                                                      in: before, translation: CGSize(width: 9, height: -13),
+                                                      pixelsPerFrame: 30, bandHeight: TimelineGraphBand.height)
+        XCTAssertTrue(manager.setPoseChannelTrack(target(manager), parameterID: celX, to: curves[celX]))
+        XCTAssertEqual(storedTrack(manager)?.curve(.x)?.key(atFrame: 0)?.tangentMode, .free)
+        XCTAssertEqual(storedTrack(manager)?.curve(.rotation), rotationBefore,
+                       "Rotation's keys, handles and tangent modes are exactly what they were")
     }
 }

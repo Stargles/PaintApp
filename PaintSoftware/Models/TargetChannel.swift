@@ -5,7 +5,7 @@ import Foundation
 ///
 /// **Why this type exists at all.** Every channel the graph editor carried before this was one of
 /// two things: an `EffectParameter` (a number inside `Layer.effect` / `LayerFolder.effect`,
-/// addressed by `"<case>.<field>"`) or a pose (`TransformTrack`, six curves of a quad). Layer
+/// addressed by `"<case>.<field>"`) or a pose component (`TransformTrack`, one curve per component). Layer
 /// opacity is neither. It is a plain `Double` stored on the layer, read by the compositor on every
 /// frame whether or not the layer grades anything, and there is nothing to hang an `EffectParameter`
 /// off — that struct's `read`/`write` are `(Effect) -> Double?` and `(Effect, Double) -> Effect`,

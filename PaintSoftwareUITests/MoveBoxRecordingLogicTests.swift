@@ -6,9 +6,10 @@ import UIKit
 /// The live take on **the Move box** at the `CanvasManager` level — KEYFRAMES.md §5's second surface,
 /// and the last unbuilt half of §8 stage 7.
 ///
-/// `RecordingLogicTests` is the slider surface's equivalent and `PoseRecordingLogicTests` is the pure
-/// engine this drives; what is here is the joins, which is where the surface-specific hazards are. Four
-/// of them, ordered by how expensive each is to discover later:
+/// `RecordingLogicTests` is the slider surface's equivalent and `ValueRecordingLogicTests` is the pure
+/// engine this drives — once per pose component since TODO (139), so a take keys only the components
+/// the hand moved. What is here is the joins, which is where the surface-specific hazards are. Four of
+/// them, ordered by how expensive each is to discover later:
 ///
 /// 1. **The box is a preview that writes the document on every tick**, so the take's base is a scratch
 ///    pad in a way a slider's is too — but the restore lives in a third store (`LayerPose`), reached by
@@ -89,7 +90,7 @@ final class MoveBoxRecordingLogicTests: XCTestCase {
     /// **The default gesture is a bow rather than a straight line**, deliberately: a straight drag thins
     /// to two keys that reproduce it exactly, so a reconstruction assertion over one is vacuously true.
     /// This one swings out 48 points and back over two seconds, which is curvature the rule has to
-    /// decide about at every frame. `PoseRecordingLogicTests` is where the straight case is pinned.
+    /// decide about at every frame. `ValueRecordingLogicTests` is where the straight case is pinned.
     @discardableResult
     private func recordedDrag(_ manager: CanvasManager, _ clock: FakeClock,
                               steps: Int = 48, seconds: TimeInterval = 2,
@@ -162,7 +163,7 @@ final class MoveBoxRecordingLogicTests: XCTestCase {
         XCTAssertFalse(manager.isPlaying, "An unrecorded Move starts no playback")
         let pose = try XCTUnwrap(manager.layers[moverIndex].layerTransform)
         XCTAssertTrue(pose.track.isEmpty, "…writes no track…")
-        let decomposed = try XCTUnwrap(PoseComponents.decompose(pose.pose))
+        let decomposed = try XCTUnwrap(PoseComponents.decompose(pose.pose, inBox: canvasBox))
         XCTAssertEqual(decomposed.x, Double(canvasCentre.x) + 12, accuracy: 1e-6,
                        "…and lands the drag on the stored base, exactly as it always did")
         XCTAssertEqual(manager.history.undoStack.count, stepsBefore + 1, "…as one undo step")
@@ -170,8 +171,8 @@ final class MoveBoxRecordingLogicTests: XCTestCase {
 
     // MARK: - §5.1 step 3: the quad intercept, and what it commits
 
-    /// **The take lands as one curve on the container's own pose track, and the curve reproduces the
-    /// drag.**
+    /// **The take lands as one curve on the container's own pose track — X's, the one component the
+    /// hand moved — and the curve reproduces the drag.**
     ///
     /// The two operands are the honest pair for a thinning rule: **the keys the take committed**,
     /// against **the poses the drag actually passed through**, which the fixture returns. A test that
@@ -192,31 +193,31 @@ final class MoveBoxRecordingLogicTests: XCTestCase {
         let pose = try XCTUnwrap(manager.layers[moverIndex].layerTransform)
         XCTAssertTrue(pose.track.isAnimated,
                       "PREMISE: a curve landed, by the owner's own definition of an animation")
-        XCTAssertGreaterThan(pose.track.keys.count, 1, "PREMISE: …with more than one key")
-        XCTAssertLessThan(pose.track.keys.count, reported.count,
+        XCTAssertEqual(Set(pose.track.curves.keys), [.x],
+                       "TODO (139): a sideways take keys X and no other component")
+        let keys = try XCTUnwrap(pose.track.curve(.x)?.keys)
+        XCTAssertGreaterThan(keys.count, 1, "PREMISE: …with more than one key")
+        XCTAssertLessThan(keys.count, reported.count,
                           "PREMISE: …and fewer keys than the drag reported poses, or nothing thinned")
 
         // Where the hand was at each document frame, from the fixture's own record of what it reported.
         var handAt: [Int: CGFloat] = [:]
         for (i, step) in reported.enumerated() { handAt[startFrame + i] = canvasCentre.x + step.delta.dx }
 
-        for key in pose.track.keys {
+        for key in keys {
             let hand = try XCTUnwrap(handAt[key.frame],
                                      "Key on frame \(key.frame), which the drag never visited")
-            XCTAssertEqual(try XCTUnwrap(PoseComponents.decompose(key.pose)).x, Double(hand),
-                           accuracy: 0.01,
+            XCTAssertEqual(key.value, Double(hand), accuracy: 0.01,
                            "A kept key holds where the hand was on its own frame")
         }
 
         var worstDiscarded: CGFloat = 0
         for (frame, hand) in handAt {
-            guard let after = pose.track.keys.firstIndex(where: { $0.frame >= frame }),
-                  pose.track.keys[after].frame != frame, after > 0 else { continue }
-            let a = pose.track.keys[after - 1], b = pose.track.keys[after]
+            guard let after = keys.firstIndex(where: { $0.frame >= frame }),
+                  keys[after].frame != frame, after > 0 else { continue }
+            let a = keys[after - 1], b = keys[after]
             let t = Double(frame - a.frame) / Double(b.frame - a.frame)
-            let ax = try XCTUnwrap(PoseComponents.decompose(a.pose)).x
-            let bx = try XCTUnwrap(PoseComponents.decompose(b.pose)).x
-            worstDiscarded = max(worstDiscarded, abs(CGFloat(ax + (bx - ax) * t) - hand))
+            worstDiscarded = max(worstDiscarded, abs(CGFloat(a.value + (b.value - a.value) * t) - hand))
         }
         XCTAssertLessThanOrEqual(worstDiscarded, CanvasManager.recordingPoseSimplifyPoints,
                                  "THE CLAIM: every frame the thinning discarded is within the "
@@ -494,48 +495,39 @@ final class MoveBoxRecordingLogicTests: XCTestCase {
         XCTAssertTrue(try XCTUnwrap(manager.layers[moverIndex].layerTransform).track.isEmpty)
     }
 
-    /// **A take of a pure translation invents no scale and no rotation** — and the bound rather than an
-    /// equality is the finding, which driving the feature is what surfaced.
-    ///
-    /// The graph editor's six rows are a **decomposition** of one quad (`PoseComponents.decompose`), and
-    /// `resampled` reaches a frame between two reported poses by lerping the eight corner coordinates.
-    /// `a + (b − a)·t` does not reproduce a rectangle's side lengths to the bit, so a drag that moved the
-    /// box and nothing else leaves ~1e-13 of difference in the scale rows — and `TimelineGraphBand
-    /// .Channel.isAnimated` is an **exact** comparison, so one of those rows reads "animated" in the
-    /// channel list. MEASURED on the real drive: `containerPose.scaleY:` beside `containerPose.scaleX~`
-    /// on a gesture that only translated.
-    ///
-    /// **It is cosmetic and it is deliberately not fixed with a threshold.** The band floors each row's
-    /// axis at `Component.minimumAxisSpan`, so the curve is drawn flat; what the artist sees wrong is a
-    /// filled dot where a hollow one belongs. The alternative — an epsilon on "did this component move"
-    /// — is a second invisible threshold beside the tolerance, which is the argument `PoseQuad
-    /// .isIdentity` and `PoseRecording.moved` both make for being exact.
-    ///
-    /// Operands: the spread of each decomposed component across the committed keys, against the drag.
-    /// If this went red by a wide margin the take would be inventing motion, which is a real defect.
-    func testATakeOfAPureTranslationInventsNoScaleOrRotation() throws {
+    /// **A take of a pure translation keys no scale, rotation, skew or keystone at all** — each
+    /// component is recorded and thinned on its own (TODO (139)), and one that did not move across
+    /// the take writes no curve. Before the components were independent the take was one whole-pose
+    /// track whose corner lerp left ~1e-13 in the scale rows, MEASURED on the real drive as a filled
+    /// dot in the channel list; now there is no scale row to fill.
+    func testATakeOfAPureTranslationKeysNoOtherComponent() throws {
         let (manager, clock) = movingDocument()
         recordedDrag(manager, clock)
-        let keys = try XCTUnwrap(manager.layers[moverIndex].layerTransform).track.keys
-        XCTAssertGreaterThan(keys.count, 1, "PREMISE: a curve landed")
+        let track = try XCTUnwrap(manager.layers[moverIndex].layerTransform).track
+        let x = try XCTUnwrap(track.curve(.x)?.keys.map(\.value))
+        XCTAssertGreaterThan((x.max() ?? 0) - (x.min() ?? 0), 40, "PREMISE: the drag moved the box a long way in x")
+        XCTAssertEqual(Set(track.curves.keys), [.x], "a translation-only drag records X and nothing else")
+    }
 
-        var values: [PoseComponents.Values] = []
-        for key in keys { values.append(try XCTUnwrap(PoseComponents.decompose(key.pose))) }
-        func spread(_ read: (PoseComponents.Values) -> Double) -> Double {
-            let all = values.map(read)
-            return (all.max() ?? 0) - (all.min() ?? 0)
+    /// **A turn records Rotation alone** — the take's per-component split from the other side: a box
+    /// spun about its own centre leaves X and Y where they were.
+    func testATakeOfATurnKeysRotationAlone() throws {
+        let (manager, clock) = movingDocument()
+        manager.armRecording()
+        XCTAssertTrue(manager.beginContainerPoseMove())
+        XCTAssertTrue(manager.beginMoveBoxTake())
+        let start = clock.now
+        for i in 0...24 {
+            clock.now = start + TimeInterval(i) / 12
+            manager.tickPlayback()
+            manager.updateFloatingPose(transform: FloatingTransform(position: canvasCentre, scaleX: 1, scaleY: 1,
+                                                                    rotation: CGFloat(i) * .pi / 48),
+                                       distortQuad: nil)
         }
-
-        XCTAssertGreaterThan(spread(\.x), 40, "PREMISE: the drag moved the box a long way in x")
-        for (name, read) in [("scaleX", { (v: PoseComponents.Values) in v.scaleX }),
-                             ("scaleY", { $0.scaleY }),
-                             ("rotation", { $0.rotation }),
-                             ("skew", { $0.skew })] {
-            XCTAssertLessThan(spread(read), 1e-9,
-                              "A translation-only drag must not record \(name) motion. Spread "
-                              + "\(spread(read)) — anything above float noise here is the take "
-                              + "inventing a transform the hand never made")
-        }
+        manager.stopRecording()
+        let track = try XCTUnwrap(manager.layers[moverIndex].layerTransform).track
+        XCTAssertEqual(Set(track.curves.keys), [.rotation], "a turn about the box's centre records Rotation alone")
+        XCTAssertEqual(track.curve(.rotation)?.keys.last?.value ?? 0, 90, accuracy: 0.01)
     }
 
     // MARK: - An animated container
@@ -554,21 +546,23 @@ final class MoveBoxRecordingLogicTests: XCTestCase {
         let (manager, clock) = movingDocument()
         var posed = try XCTUnwrap(manager.layers[moverIndex].layerTransform)
         let shifted = PoseQuad(box: canvasBox, mappedBy: CGAffineTransform(translationX: 40, y: 0))
-        posed.track = TransformTrack(keys: [TransformTrack.Key(frame: 0, pose: shifted),
-                                            TransformTrack.Key(frame: 100, pose: shifted)])
+        posed.track = TransformTrack(box: canvasBox, curves: [.x: AnimationCurve(keys: [
+            .init(frame: 0, value: Double(canvasBox.midX) + 40), .init(frame: 100, value: Double(canvasBox.midX) + 40)])])
         manager.layers[moverIndex].transform = posed
         manager.history.removeAll()
         manager.refreshUndoRedoState()
-        let wasAtStart = try XCTUnwrap(posed.track.pose(atDocumentFrame: manager.currentFrame))
+        let wasAtStart = posed.resolvedValues(atFrame: manager.currentFrame)
+        XCTAssertEqual(PoseComponents.decompose(shifted, inBox: canvasBox)?.x ?? 0, wasAtStart.x, accuracy: 1e-9,
+                       "PREMISE: the old track holds the container 40 points right")
 
         manager.armRecording()
         XCTAssertTrue(manager.beginContainerPoseMove())
         XCTAssertTrue(manager.beginMoveBoxTake())
         // The first report is the box where it came up — no delta at all.
         dragBox(manager, clock, to: CGVector(dx: 0, dy: 0), at: 1_000 + 1.0 / 24)
-        let firstSample = try XCTUnwrap(manager.recordingTake?.poses.samples.first?.pose)
+        let firstSample = try XCTUnwrap(manager.recordingTake?.poses[.x]?.samples.first?.value)
 
-        XCTAssertEqual(firstSample, wasAtStart,
+        XCTAssertEqual(firstSample, wasAtStart.x, accuracy: 1e-9,
                        "An undragged box records the pose already in force, which is only true if the "
                        + "sample composes onto the track instead of replacing it")
 
@@ -579,9 +573,8 @@ final class MoveBoxRecordingLogicTests: XCTestCase {
         manager.stopRecording()
 
         let after = try XCTUnwrap(manager.layers[moverIndex].layerTransform)
-        let firstKey = try XCTUnwrap(after.track.keys.first)
-        XCTAssertEqual(try XCTUnwrap(PoseComponents.decompose(firstKey.pose)).x,
-                       try XCTUnwrap(PoseComponents.decompose(wasAtStart)).x, accuracy: 1e-6,
+        let firstKey = try XCTUnwrap(after.track.curve(.x)?.keys.first)
+        XCTAssertEqual(firstKey.value, wasAtStart.x, accuracy: 1e-6,
                        "…and the committed curve begins where the old animation had the container, so "
                        + "replacing the track did not throw the 40-point offset away")
     }

@@ -292,8 +292,7 @@ final class MediaPlacementLogicTests: XCTestCase {
         let box = CGRect(origin: .zero, size: CanvasFixture.canvasSize)
         let pose = CGAffineTransform(translationX: 5, y: 3).rotated(by: 0.33).scaledBy(x: 0.5, y: 0.5)
         manager.layers[layerIndex].cels[0].transformTracks = [
-            TransformChannelID.cel.id: TransformTrack(keys: [
-                TransformTrack.Key(frame: 0, pose: PoseQuad(box: box, mappedBy: pose))])
+            TransformChannelID.cel.id: CanvasFixture.poseTrack([(0, PoseQuad(box: box, mappedBy: pose))])
         ]
         XCTAssertTrue(manager.beginVectorWholeCelMove(), "setup: Move lifts the posed picture")
         XCTAssertTrue(manager.floatHoldsPlacedMedia)
@@ -332,7 +331,7 @@ final class MediaPlacementLogicTests: XCTestCase {
         let box = CGRect(origin: .zero, size: CanvasFixture.canvasSize)
         let quad = PoseQuad(box: box, mappedBy: CGAffineTransform(translationX: -4, y: 6).rotated(by: -0.4)
                                                    .scaledBy(x: 0.75, y: 0.75))
-        manager.layers[mover].transform = LayerPose(pose: quad, track: TransformTrack(keys: [.init(frame: 0, pose: quad)]))
+        manager.layers[mover].transform = LayerPose(pose: quad, track: CanvasFixture.poseTrack([(0, quad)]))
         manager.currentLayerIndex = pictureLayer
         let pose = try XCTUnwrap(manager.containerPose(ofLayerAt: pictureLayer, atFrame: 0)?.affine,
                                  "setup: the transformation layer poses the picture's layer")

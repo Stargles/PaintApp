@@ -73,10 +73,8 @@ final class PoseBakeLogicTests: XCTestCase {
     /// A linear whole-cel channel from rest at frame 0 to `moved(dx, scale)` at frame 11, on `step`.
     private func animate(_ manager: CanvasManager, dx: CGFloat = 24, scale: CGFloat = 1.25, step: Int = 1) {
         manager.layers[1].cels[0].transformTracks = [
-            TransformChannelID.cel.id: TransformTrack(keys: [
-                TransformTrack.Key(frame: 0, pose: PoseQuad(restingIn: box), interpolation: .linear),
-                TransformTrack.Key(frame: 11, pose: moved(dx, scale: scale), interpolation: .linear)],
-                step: step)
+            TransformChannelID.cel.id: CanvasFixture.poseTrack(box: box, [
+                (0, PoseQuad(restingIn: box)), (11, moved(dx, scale: scale))], interpolation: .linear, step: step)
         ]
     }
 
@@ -167,9 +165,8 @@ final class PoseBakeLogicTests: XCTestCase {
     func testAHoldPastTheLastKeyBakesToOneCel() {
         let (manager, _, _) = fixture()
         manager.layers[1].cels[0].transformTracks = [
-            TransformChannelID.cel.id: TransformTrack(keys: [
-                TransformTrack.Key(frame: 0, pose: PoseQuad(restingIn: box), interpolation: .linear),
-                TransformTrack.Key(frame: 4, pose: moved(16), interpolation: .linear)])
+            TransformChannelID.cel.id: CanvasFixture.poseTrack(box: box, [
+                (0, PoseQuad(restingIn: box)), (4, moved(16))], interpolation: .linear)
         ]
         XCTAssertEqual(bake(manager), 5)
         XCTAssertEqual(CanvasFixture.celLayout(manager, layerIndex: 1).map { [$0.start, $0.length] },
@@ -206,9 +203,8 @@ final class PoseBakeLogicTests: XCTestCase {
     func testABezierPairBakesTheFramesItShowedNotTheFramesItsHalvesWouldShow() throws {
         let (manager, _, _) = fixture()
         manager.layers[1].cels[0].transformTracks = [
-            TransformChannelID.cel.id: TransformTrack(keys: [
-                TransformTrack.Key(frame: 0, pose: PoseQuad(restingIn: box)),
-                TransformTrack.Key(frame: 11, pose: moved(24, scale: 1.25))])
+            TransformChannelID.cel.id: CanvasFixture.poseTrack(box: box, [
+                (0, PoseQuad(restingIn: box)), (11, moved(24, scale: 1.25))])
         ]
         let before = try (0..<12).map { try compositeBytes(manager, atFrame: $0) }
         XCTAssertNotEqual(before[0], before[6], "premise — the animation moves")
@@ -259,13 +255,11 @@ final class PoseBakeLogicTests: XCTestCase {
         }
         vector.bumpVersion()
         manager.layers[1].cels[0].transformTracks = [
-            TransformChannelID.cel.id: TransformTrack(keys: [
-                TransformTrack.Key(frame: 0, pose: PoseQuad(restingIn: box), interpolation: .linear),
-                TransformTrack.Key(frame: 11, pose: moved(10), interpolation: .linear)]),
-            TransformChannelID.group(group).id: TransformTrack(keys: [
-                TransformTrack.Key(frame: 0, pose: PoseQuad(restingIn: box), interpolation: .linear),
-                TransformTrack.Key(frame: 11, pose: PoseQuad(box: box, mappedBy: CGAffineTransform(translationX: 0, y: 8)),
-                                   interpolation: .linear)])
+            TransformChannelID.cel.id: CanvasFixture.poseTrack(box: box, [
+                (0, PoseQuad(restingIn: box)), (11, moved(10))], interpolation: .linear),
+            TransformChannelID.group(group).id: CanvasFixture.poseTrack(box: box, [
+                (0, PoseQuad(restingIn: box)),
+                (11, PoseQuad(box: box, mappedBy: CGAffineTransform(translationX: 0, y: 8)))], interpolation: .linear)
         ]
         let before = try (0..<12).map { try compositeBytes(manager, atFrame: $0) }
         XCTAssertNotEqual(before[0], before[6], "premise — the animation moves")

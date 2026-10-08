@@ -182,8 +182,7 @@ final class LiveTransformEditLogicTests: XCTestCase {
         let inner = index(s.inner, s.manager)
         let runs = s.manager.liveTransformRuns(.cel(layerID: s.inner), atFrame: 0)
         let minted = s.manager.liveTransformMaps(.cel(layerID: s.inner), runs: runs, atFrame: 0)
-        s.manager.layers[inner].cels[0].transformTracks = [TransformChannelID.cel.id: TransformTrack(keys: [
-            .init(frame: 0, pose: PoseQuad(box: canvasBox, mappedBy: CGAffineTransform(translationX: -5, y: 3)))])]
+        s.manager.layers[inner].cels[0].transformTracks = [TransformChannelID.cel.id: CanvasFixture.poseTrack([(0, PoseQuad(box: canvasBox, mappedBy: CGAffineTransform(translationX: -5, y: 3)))])]
         let now = s.manager.liveTransformMaps(.cel(layerID: s.inner), runs: runs, atFrame: 0)
         let delta = try XCTUnwrap(minted[0].inverse?.concatenating(now[0]).affine)
         XCTAssertEqual(delta.tx, -5, accuracy: 1e-6)

@@ -9,9 +9,10 @@ reference cels and ships already ([VECTOR_INTERPOLATION.md](VECTOR_INTERPOLATION
 and grades content that is already drawn. They are complementary, they will sit in the same timeline,
 and §2.8 is how the artist tells them apart.
 
-**How to read it.** Blockquotes are the owner's own words. §2 is the settled rulings — thirty of
-them, twenty from 2026-08-28, eight from 2026-08-29 and two from 2026-09-03 — and TODO.md's rule applies: *a question the owner has answered stops being a
-question*. Everything else is our reading of the tree at `2eb3e5f`, marked INFERRED where it is a guess.
+**How to read it.** Blockquotes are the owner's own words. §2 is the settled rulings — thirty-one of
+them, twenty from 2026-08-28, eight from 2026-08-29, two from 2026-09-03 and one from 2026-10-01
+(§2.31, TODO (139): keys, not keyframes) — and TODO.md's rule applies: *a question the owner has
+answered stops being a question*. Everything else is our reading of the tree at `2eb3e5f`, marked INFERRED where it is a guess.
 
 ---
 
@@ -52,10 +53,11 @@ pose channel and its bake, which is why item (2) is stated to require item (1).
 
 ## 2. Rulings — settled 2026-08-28 and 2026-08-29, do not re-litigate
 
-**Four of these are superseded, and they are kept rather than deleted.** §2.1, §2.23 and §2.24 were
+**Seven of these are superseded, and they are kept rather than deleted.** §2.1, §2.23 and §2.24 were
 overtaken by §2.26 and §2.27 later on 2026-08-29 — the owner reversing their own ruling, which is not a
 re-litigation. §2.16 was overtaken by BRUSH.md §2.4/§2.5 on 2026-09-03, the brush overhaul it said would
-inherit grain deleting grain instead. Each is marked in place with the date and the reason, because the
+inherit grain deleting grain instead. §2.5's quad, §2.14 and §2.15 were overtaken by §2.31 on
+2026-10-01: a pose channel is one curve per component, not a list of whole-pose keys. Each is marked in place with the date and the reason, because the
 reasoning is what stops a later session reinstating it by rediscovering the argument that produced it.
 
 1. ~~**Tap the keyframe button inserts a key. Hold it 0.8 s enters or exits Animate mode.** In Animate
@@ -85,6 +87,8 @@ reasoning is what stops a later session reinstating it by rediscovering the argu
    moving, it should save a state of the unmoved item at keyframe A, then when the move 'bakes' as in
    the box disappears, keyframe B receives the second position."* So the cel holds **one** drawing, in
    its rest position; keys hold poses; the render composes them. **A nudge writes no key** — §4.2.
+   **Amended 2026-10-01 by §2.31**: the write is still at commit and a nudge still writes nothing, but
+   what lands is one key per *component the Move changed*, not a whole pose.
 6. **The value layer's "Blend Mode" menu is relabelled to follow what is set** — Blend Mode / Effect /
    ~~Transform~~. The owner: *"that 'blend mode' is very vague since effects, blend modes, and now the
    transform will be added to it."* **Transform left this menu on 2026-09-11** — TRANSFORM_LAYER.md §2
@@ -114,13 +118,24 @@ reasoning is what stops a later session reinstating it by rediscovering the argu
 13. **The keyframe substrate ships before Distort; Distort follows immediately after.** Enabled by §2.14
     — see §3.3. Keyframes ship with Uniform and Freeform working and Distort still greyed exactly as it
     is today.
-14. **A transform key stores a quad — four corners plus a box size — from day one.** One representation
+14. ~~**A transform key stores a quad — four corners plus a box size — from day one.** One representation
     expresses Uniform, Freeform *and* Distort, so §2.13 costs no migration. `TextFrame`
     (`Engine/TextObject.swift:239`) is the shipped precedent: `size` + `corners` + `mode`, `Codable`,
-    with the 3×3 **computed and never stored**.
-15. **Two poses are interpolated through their factored form** — affine × pure-projective — not by
+    with the 3×3 **computed and never stored**.~~
+    **SUPERSEDED 2026-10-01 by §2.31.** A channel stores eight curves — X, Y, Scale X, Scale Y,
+    Rotation, Skew, Perspective X, Perspective Y — against one rest box. What survived is the reason the
+    quad was chosen: one representation for Uniform, Freeform *and* Distort. Eight numbers are exactly a
+    homography's eight freedoms (`PoseComponents`), so Distort still costs no special case; the quad
+    (`PoseQuad`) is now only the currency a *resolved* pose travels in.
+15. ~~**Two poses are interpolated through their factored form** — affine × pure-projective — not by
     lerping matrix entries and **not** by lerping corners. See §4.3 for why corner-lerp is not the safe
-    alternative it looks like.
+    alternative it looks like.~~
+    **SUPERSEDED 2026-10-01 by §2.31**: each component is interpolated on its own curve, which is what
+    makes the components independent. The factored blend survives as the read of a *share* of one pose
+    (`TransformLayerMode.parallaxMap`), and the factorisation itself is how `PoseComponents.decompose`
+    reads the keystone off a map. A per-component in-between differs from the old whole-pose blend only
+    for a large combined rotate-and-stretch between two keys — it can no longer cross an invalid quad,
+    because the keystone pair interpolates inside the valid region by convexity.
 16. ~~**Brush grain travels with the ink.** Each dab's grain value is baked when the stroke is drawn, so
     the texture is part of the mark. Accepted consequence: a stroke you Move keeps its grain instead of
     re-sampling, which is a visible change to how existing artwork behaves under Move.~~
@@ -222,6 +237,9 @@ reasoning is what stops a later session reinstating it by rediscovering the argu
     **The last sentence is a second ruling wearing the same paragraph**: what appears in the channel list
     is a channel with **two or more keys whose values are not all equal**. That is strictly narrower than
     "has a curve", and §2.23's surviving half is why the two must not be merged.
+    **Amended 2026-10-01 by §2.31**: a placed mark is a *primed* frame — the owner's "Add Keys" — and
+    the workflow is otherwise this one; what a later change commits onto it is a key per changed
+    component.
 27. **Nothing is saved when a keyframe is placed; the previous value is held, and the *next* keyframe
     commits it.** 2026-08-29, the owner's own architecture, given when asked what "everything gets saved"
     means:
@@ -256,6 +274,8 @@ reasoning is what stops a later session reinstating it by rediscovering the argu
       playhead on it, seeding would pin the new value in a one-key curve and lose the old one, so the
       answer there is to hold the baseline and let B commit it. That is the owner's canonical story and
       the reason the rule counts marks rather than asking whether any exist.
+    **Amended 2026-10-01 by §2.31**: a held pose is committed one component at a time — the components
+    that differ between the held pose and the current one take keys, and no others.
 28. **A keyframe is any frame the target marks explicitly *or* any of its channels holds a key on.**
     2026-08-29, and it is not a preference — it is the invariant two bug reports off the owner's iPad
     turned out to be the same defect of:
@@ -407,6 +427,43 @@ reasoning is what stops a later session reinstating it by rediscovering the argu
     **Refused at the lift** for §2.29's reason, and **refused rather than narrowed to one of the
     groups**: choosing which of them the artist meant is a Move on ink they did not point at.
 
+31. **Keys, not keyframes — every component of a pose is independent.** 2026-10-01, TODO (139). The
+    owner:
+
+    > "An update has to be done to the graph editor and key framing. First off, remove all notion of
+    > keyframes, everything should just be keys. Lets say we have a move option. The X and Y and
+    > rotation etc components keys should be fully independent from each other."
+
+    Ruled with it: **priming replaces keyframes** — *"you select 'add keys' which primes it, then when
+    you move a slider or transform, only the keys of thingd that changed are added. Note, if you prime
+    this in two frames and then change something, then it should put down two keys like the behaviour
+    today, but only the things that changed"* — and **Distort is two more independent curves**,
+    Perspective X and Perspective Y, with no corner keys and no "declined" band. The in-between
+    feature's "keyframe" drawings keep their name (§2.8's split stands).
+
+    **What it means in the model.** A pose channel (`TransformTrack`) is a rest box and one
+    `AnimationCurve` per component; a component with no curve shows the channel's base — rest for a
+    cel, whose base is its geometry, and the stored pose for a transformation layer. Every writer keys
+    through one function, `TransformTrack.key(_:over:atFrame:keyframes:)`: the components the change
+    moved (beyond `PoseComponents.Component.flatTolerance`) and no others; a component that already has
+    a curve takes a key at the frame, one that has none is **seeded** — the old value on the
+    neighbouring keyframes, the new one here — so the frames either side keep what they showed. That
+    seed is what a whole-pose key did for the component implicitly, and on two primed frames it is
+    exactly the ruling's "two keys … only the things that changed". The routing (§2.27's five arms) is
+    still per *channel*, because a cel channel's base is its geometry and one gesture cannot both bake
+    and take the bake back.
+
+    **What it means on screen.** The graph editor draws each keyed component as its own row, written
+    whole through one funnel (`CanvasManager.setPoseChannelTrack`) — drag, retime, handles, delete and
+    tap-to-add touch that row's curve and no other. A sideways Move draws X and Y; a turn draws
+    Rotation; a Distort draws Perspective X and Y beside whatever else moved. §2.28's union is unchanged
+    in meaning: a diamond wherever any component keys, a primed frame wherever none does.
+
+    **Superseded by it**: §2.14 and §2.15, and the parts of §2.5 and §11.7 that described a whole-pose
+    key (one shared ease, six rows written through `PoseEdit`, a projective channel declined). Nothing
+    written before it has to open animated (TODO.md's standing permission): a track that stored
+    whole-pose keys decodes empty.
+
 ---
 
 ## 3. The model
@@ -499,6 +556,10 @@ timing UI from creeping, and they are worth more than the widget.
 graph editor could drive an interpolation span's easing. Never the reverse.
 
 ### 3.3 The pose is a quad
+
+**Superseded for storage by §2.31** — a channel stores eight component curves; `PoseQuad` is the
+currency of a resolved pose, a held baseline and a Move commit. What follows is §2.14's original
+argument, kept for its reasoning.
 
 §2.14. `Quad` (`Engine/Deform/Quad.swift:18`) exists with `isConvex`, `isSimple`, `isParallelogram` and
 `mapped(by:)`, and `Homography` (`Engine/Deform/Homography.swift:31`) is a finished projective solver —
@@ -2417,7 +2478,7 @@ and Delete Keyframe, and on empty graph it still adds. That second stage is `han
 two-stage contract — the app has no double-tap recogniser anywhere, and "clicking twice" means a second
 tap that lands where the selection already is — so `MenuRequest` gained a `.graphNode` case and reuses
 the one `timelineMenu` state and anchor path. Delete funnels through
-`CanvasManager.removeEffectParameterKey` to the *same* writer the old tap used, so it is still one undo
+`CanvasManager.removeGraphNodeKey` to the *same* writer the old tap used, so it is still one undo
 step and it still drops a mark through `marks(_:droppingKeyed:)`. No third writer.
 
 **A dragged node reads its own value (TODO (38)(d))** in `EffectParameter.format` verbatim — the exact
@@ -2594,6 +2655,14 @@ names nothing hides nothing and no id can resurrect a channel `isAnimated` refus
 
 ### 11.7 The transform band — the two rulings, and what shipped
 
+**Rewritten by §2.31 (TODO (139), 2026-10-01).** Each component is a stored curve now, so the band
+draws the curves themselves — one row per *keyed* component, Perspective X and Y included — and every
+gesture writes one row's curve through `CanvasManager.setPoseChannelTrack`. Everything below about a
+decomposed whole-pose key — the "declined" state, `PoseEdit`, `GraphBandPoseSnapshot`, one ease shared
+by six rows, the handle rescaling between pose-index and row units — describes the build §2.31 replaced
+and is kept for its reasoning. `anchoredRange` and the per-component axis (`minimumAxisSpan`,
+`restValue`) still stand.
+
 **A transform/pose channel had no band at all.** `TimelineGraphBand.allChannels(effect:tracks:)` took
 an `Effect?` and a `[String: AnimationCurve]`, so a `TransformTrack` could not reach it — a missing
 door rather than a hidden band, and the brief that opened this stage said so and was right.
@@ -2680,7 +2749,7 @@ that the dot stops where the document stops.
 `.dragOnly` against a grade's `.all`: no focus, no bezier handles, no node menu, no tap-to-add. Each
 has the same cause one level down — a `TransformTrack.Key` carries **one** handle pair for all six
 components, so shaping Scale X's tangent would bend the other five; the menu's Delete funnels through
-`removeEffectParameterKey`, a grade writer; and tapping a curve to add a key would have to invent five
+`removeGraphNodeKey`, a grade writer; and tapping a curve to add a key would have to invent five
 component values the artist never gave. Those belong to whoever extends (38)(b), not to this stage.
 `TimelineGraphBand.editable(_:)` is replaced by `tappable(_:)`, and there is deliberately no
 `draggable(_:)` beside it: every channel the band draws takes a drag, so such a filter would return
@@ -2689,7 +2758,7 @@ its argument and read as a rule being enforced.
 **Superseded 2026-09-06, TODO (21).** The handles half of this paragraph is already stale by the time
 it was written (below, `.dragOnly` → `.dragAndHandles`); the tap half stood until (21) gave it the
 two writers it was owed. `CanvasManager.removePoseChannelKey`/`addPoseChannelKey` are the pose-side
-funnels `removeEffectParameterKey`/a grade's tap-to-add always had, so a pose node's second tap now
+funnels `removeGraphNodeKey`/a grade's tap-to-add always had, so a pose node's second tap now
 raises the same menu a grade's does and a tap on its line now adds a key the same way. The ruling the
 add side was missing — what the five untapped components hold — is `addKeyframe`'s own "hold this
 pose here" and `PoseEdit`'s "only what moved is listed", reused rather than invented: they hold

@@ -822,17 +822,6 @@ struct TimelineTrackView: UIViewRepresentable {
             /// longer carries the group, and nothing repairs it — `layoutGraphBand` clears the
             /// selection when the band changes layer but never recomputes it.
             let startSelection: Set<TimelineGraphBand.KeyRef>
-            /// **The layer's poses as they stood at touch-down** — KEYFRAMES §11.7's write-back.
-            ///
-            /// The pose funnel's twin of `channels`, and needed for a reason `channels` does not have:
-            /// a pose retime names the frame a key *was* on, so after the first tick that key is
-            /// somewhere else and a second tick composed onto the document would look for it in vain.
-            /// Every tick therefore rewrites this snapshot rather than the document, exactly as every
-            /// tick applies its moves to `channels` rather than to the current curves.
-            ///
-            /// Empty — and free — on a band with no pose channel on it, which is every document that
-            /// has not keyframed a Move.
-            let poseBaseline: CanvasManager.GraphBandPoseSnapshot
             /// Set once travel passes `tapSlop`. Until then the touch is still a candidate tap, and
             /// **no undo bracket is open** — `CurveEditor`'s rule: a drag that never moved closes no
             /// bracket, because it never opened one.
@@ -944,15 +933,6 @@ struct TimelineTrackView: UIViewRepresentable {
                 graphBandSelection = [hit]
                 graphBandView.setSelection(graphBandSelection)
             }
-            // Captured *after* that replacement, so a cancel restores what the artist saw once the
-            // finger was down rather than undoing the touch-down itself: taking a key that was not in
-            // the selection is an immediate, visible edit to the selection, and it is not part of the
-            // drag that may be cancelled.
-            // Taken only when the band actually draws a pose channel, so a grade-only band pays one
-            // `contains` and never walks the layer's cels.
-            let poseBaseline = content.channels.contains { PoseChannelID.isPose(parameterID: $0.parameterID) }
-                ? canvasManager.graphBandPoseSnapshot(of: content.target)
-                : CanvasManager.GraphBandPoseSnapshot()
             // **The axes are frozen for the life of the drag** — see `TimelineGraphBandView.frozenAxes`.
             // Taken from the same `content.channels` the drag itself captures, so the axis the value
             // is computed through and the axis the dot is drawn through are one array.
@@ -968,8 +948,7 @@ struct TimelineTrackView: UIViewRepresentable {
                                           allowsMarquee: pencilOnlyDrawingAllows(
                                               touchType, pencilOnly: canvasManager.pencilOnlyDrawing),
                                           grabbed: hit, handle: handle,
-                                          startSelection: graphBandSelection,
-                                          poseBaseline: poseBaseline)
+                                          startSelection: graphBandSelection)
             // **A finger on a pose node is a live transform edit** (TODO (140)): the canvas re-poses
             // what the channel moves instead of re-rendering it per tick, and the baker waits for the
             // finger. At touch-down rather than at the first movement, so the bands are minted while
@@ -1002,23 +981,11 @@ struct TimelineTrackView: UIViewRepresentable {
             // the value the node holds has not changed, so a number that appeared here would be
             // answering a question (38)(d) did not ask.
             if let handle = drag.handle {
-                // **Two funnels over one handle**, for the same reason the node drag below has two:
-                // a grade's ease is a whole-curve replacement and a pose's is an edit to the one
-                // `TransformTrack.Key` its six rows are drawn from. Each answers empty for the other's
-                // kind of channel, so this is two calls rather than a branch.
                 if writeGraphBandCurves(TimelineGraphBand.draggingHandle(handle, in: drag.channels,
                                                                         translation: translation,
                                                                         pixelsPerFrame: pixelsPerFrame,
                                                                         bandHeight: drag.bandHeight),
                                         target: drag.target) {
-                    graphBandDrag?.didWrite = true
-                }
-                if canvasManager.writeGraphBandPoseEdits(
-                    TimelineGraphBand.poseHandleEdits(handle, in: drag.channels,
-                                                      translation: translation,
-                                                      pixelsPerFrame: pixelsPerFrame,
-                                                      bandHeight: drag.bandHeight),
-                    from: drag.poseBaseline, target: drag.target) {
                     graphBandDrag?.didWrite = true
                 }
                 relayout()
@@ -1045,18 +1012,8 @@ struct TimelineTrackView: UIViewRepresentable {
                                                 translation: translation,
                                                 pixelsPerFrame: pixelsPerFrame,
                                                 bandHeight: drag.bandHeight)
-            // **Two funnels over one set of moves** — KEYFRAMES §11.7. A grade's rows are whole-curve
-            // replacements through `setEffectParameterTrack`; a pose channel's are *key*-level edits
-            // through `writeGraphBandPoseEdits`, because six rows of a pose are one
-            // `TransformTrack.Key` and a curve-at-a-time writer has no way to say so. One marquee can
-            // hold both kinds, which is why they are two calls over one `moves` rather than a branch.
             if writeGraphBandCurves(TimelineGraphBand.applying(moves, to: drag.channels),
                                     target: drag.target) {
-                graphBandDrag?.didWrite = true
-            }
-            if canvasManager.writeGraphBandPoseEdits(
-                TimelineGraphBand.poseEdits(moves, in: drag.channels),
-                from: drag.poseBaseline, target: drag.target) {
                 graphBandDrag?.didWrite = true
             }
             // The rings follow the keys rather than staying on the frames they were picked up from,
@@ -1131,19 +1088,10 @@ struct TimelineTrackView: UIViewRepresentable {
                                           parameterID: ref.parameterID, frame: ref.frame),
                                graphBandView.nodeRectInWindow(ref, pixelsPerFrame: pixelsPerFrame))
             case .add(let parameterID, let frame, let value):
-                // **A pose id routes to its own funnel, TODO (21)** — `writeGraphBandCurves` skips one
-                // outright (see its own doc), because a `TransformTrack.Key` is six components sharing
-                // one frame and not a curve `setEffectParameterTrack` could ever accept.
-                if PoseChannelID.isPose(parameterID: parameterID) {
-                    _ = canvasManager.addPoseChannelKey(target: drag.target,
-                                                        parameterID: parameterID, frame: frame,
-                                                        value: value)
-                } else {
-                    guard var curve = drag.channels.first(where: { $0.parameterID == parameterID })?.curve
-                    else { return }
-                    curve.setKey(AnimationCurve.Key(frame: frame, value: value))
-                    _ = writeGraphBandCurves([parameterID: curve], target: drag.target)
-                }
+                guard var curve = drag.channels.first(where: { $0.parameterID == parameterID })?.curve
+                else { return }
+                curve.setKey(AnimationCurve.Key(frame: frame, value: value))
+                _ = writeGraphBandCurves([parameterID: curve], target: drag.target)
                 relayout()
             case .nothing:
                 // A tap on genuinely empty band drops the selection, which is the only gesture that
@@ -1203,9 +1151,6 @@ struct TimelineTrackView: UIViewRepresentable {
                     restored[channel.parameterID] = channel.curve
                 }
                 _ = writeGraphBandCurves(restored, target: drag.target)
-                // The pose half of the same restore. One call, because the drag never edited the
-                // document in place: every tick rewrote `poseBaseline` and wrote the result.
-                canvasManager.restoreGraphBandPoses(drag.poseBaseline, target: drag.target)
                 canvasManager.cancelStructureGesture()
             } else if drag.didWrite {
                 canvasManager.commitStructureGesture(label: .effectKeyframes)
@@ -1231,19 +1176,16 @@ struct TimelineTrackView: UIViewRepresentable {
                                           target: KeyframeTarget) -> Bool {
             var changed = false
             for (parameterID, curve) in curves {
-                // **A pose id is skipped here rather than being dropped there**, which is the same
-                // outcome reached deliberately instead of by another function's guard — the accident
-                // KEYFRAMES §11.7 refused the whole band over. Its own funnel is
-                // `writeGraphBandPoseEdits`; passing one through here would silently do nothing.
-                guard !PoseChannelID.isPose(parameterID: parameterID) else { continue }
-                // **TODO (21)'s second channel kind routes to its own funnel here**, not skipped
-                // like a pose: an opacity curve *is* an `AnimationCurve` and every band gesture —
-                // drag, retime, marquee, tap-to-add — produces exactly the whole-curve replacement
-                // `setTargetChannelTrack` takes. It is a different store rather than a different
-                // shape, which is why one line covers it and the pose needed a funnel of its own.
-                // `setEffectParameterTrack` would refuse it silently (no `EffectParameter` claims
-                // the id), so the node would move under the finger and spring back.
-                if TargetChannel.isTargetChannel(parameterID: parameterID) {
+                // **Three stores, one shape.** Every band gesture — drag, retime, marquee, handle,
+                // tap-to-add — produces a whole-curve replacement, and each kind of channel has the
+                // funnel that takes one: a pose component's (TODO (139)), a target scalar's, a
+                // grade's. Each refuses the others' ids silently, so the node would move under the
+                // finger and spring back if an id reached the wrong one.
+                if PoseChannelID.isPose(parameterID: parameterID) {
+                    if canvasManager.setPoseChannelTrack(target, parameterID: parameterID, to: curve) {
+                        changed = true
+                    }
+                } else if TargetChannel.isTargetChannel(parameterID: parameterID) {
                     if canvasManager.setTargetChannelTrack(target, channelID: parameterID, to: curve) {
                         changed = true
                     }
@@ -1965,7 +1907,6 @@ private final class TimelineGraphBandView: UIView {
                                              modelDomain: channel.modelDomain, format: channel.format,
                                              descriptorIndex: channel.descriptorIndex,
                                              isAnimated: channel.isAnimated,
-                                             gestures: channel.gestures,
                                              frameWindows: channel.frameWindows)
         }
     }
@@ -2271,37 +2212,25 @@ private final class TimelineGraphBandView: UIView {
     /// The dots are joined **through the key**, which is what makes the pair read as one straight
     /// line pivoting on the node rather than as two unrelated marks.
     private func drawHandles(in channels: [TimelineGraphBand.Channel]) {
-        guard let focus else { return }
-        // **One focused node, and on a pose channel six rows of it** — `handleRows(of:in:)`. A
-        // `TransformTrack.Key` carries one handle pair for all six components, so drawing it on the
-        // row the tap landed on alone would look like that row's ease and be all six.
-        var drawn: [(origin: CGPoint, handles: [TimelineGraphBand.DrawnHandle])] = []
-        for row in TimelineGraphBand.handleRows(of: focus, in: channels) {
-            guard let channel = channels.first(where: { $0.parameterID == row.parameterID }),
-                  let key = channel.curve.key(atFrame: row.frame)
-            else { continue }
-            let handles = TimelineGraphBand.handles(of: row, in: channels,
-                                                    pixelsPerFrame: pixelsPerFrame,
-                                                    bandHeight: bounds.height)
-            guard !handles.isEmpty else { continue }
-            drawn.append((CGPoint(x: TimelineGraphBand.x(ofFrame: key.frame,
-                                                         pixelsPerFrame: pixelsPerFrame),
-                                  y: TimelineGraphBand.y(ofValue: key.value, in: channel.axis,
-                                                         bandHeight: bounds.height)),
-                          handles))
-        }
-        guard !drawn.isEmpty else { return }
+        guard let focus,
+              let channel = channels.first(where: { $0.parameterID == focus.parameterID }),
+              let key = channel.curve.key(atFrame: focus.frame)
+        else { return }
+        let handles = TimelineGraphBand.handles(of: focus, in: channels,
+                                                pixelsPerFrame: pixelsPerFrame, bandHeight: bounds.height)
+        guard !handles.isEmpty else { return }
+        let origin = CGPoint(x: TimelineGraphBand.x(ofFrame: key.frame, pixelsPerFrame: pixelsPerFrame),
+                             y: TimelineGraphBand.y(ofValue: key.value, in: channel.axis,
+                                                    bandHeight: bounds.height))
         let line = UIBezierPath()
-        for row in drawn {
-            for handle in row.handles {
-                line.move(to: row.origin)
-                line.addLine(to: handle.point)
-            }
+        for handle in handles {
+            line.move(to: origin)
+            line.addLine(to: handle.point)
         }
         UIColor.white.withAlphaComponent(0.8).setStroke()
         line.lineWidth = TimelineGraphBand.handleLineWidth
         line.stroke()
-        for handle in drawn.flatMap(\.handles) {
+        for handle in handles {
             let dot = UIBezierPath(ovalIn: CGRect(x: handle.point.x - TimelineGraphBand.handleRadius,
                                                   y: handle.point.y - TimelineGraphBand.handleRadius,
                                                   width: TimelineGraphBand.handleRadius * 2,
