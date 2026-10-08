@@ -18,125 +18,72 @@ Read this, then [CLAUDE.md](CLAUDE.md), then the specification for whatever you 
 folder (CLAUDE.md "Build and test", first paragraph), so every worktree lives at
 `~/PaintWork/PaintApp-<id>` and Bash calls that run `xcodebuild` need the sandbox off. The owner can
 end this by granting Xcode Full Disk Access; nobody has yet. `~/PaintWork/deploy` is a detached
-worktree kept for device builds — `git -C ~/PaintWork/deploy checkout --detach origin/main` and build.
+worktree kept for device builds — `git -C ~/PaintWork/deploy checkout --detach origin/main` and build
+with CLAUDE.md's "Deploy to iPad" command (it names the iPad and passes
+`-allowProvisioningDeviceRegistration`; without that a free team's portal refuses to mint).
 
-**(101)'s reconnect loop is fixed, merged from `tmp/pingpong`** — one client per laptop by a
-server-minted machine id, and an evicted client parks instead of fighting back (docs/STREAM.md
-§5.10/§6). MEASURED against the real laptop while the owner's own (then-unpatched) iPad was
-mid-loop. Three LAN mDNS bugs on our own side fixed too (multicast joined the wrong interface, the
-A record could carry the Tailscale address, `ExclusiveAddressUse`), confirmed at the network layer
-on the laptop — **not yet confirmed by Nearby actually listing the laptop on the owner's iPad**,
-which needs a build on the device. Stash empty, no simulator debris left behind.
+**Session 46 closed 2026-10-08 with the owner's queue empty.** Every ask of (111)–(152) and every ruled
+follow-up is merged; nothing is in flight. **Full suite at `4cb36c1`** (fresh erased device, four clones,
+97% idle): **5283 / 5221 passed / 3 failed / 59 skipped, 69.2 min**, all three environmental (CLAUDE.md
+carries the table). **Fast tier at close: 4790 / 4786 / 0 / 4**, Debug and Release, reconciled.
 
-**Full suite at `f509d39`** (fresh erased device, 97.5% idle): **4679 / 4609 passed / 10 failed / 60
-skipped, 53.6 min**, 295 classes. Five failures were real and are fixed (a brush-library leak between
-UI tests — `-resetBrushLibrary` on each test's first launch; a palette row below the fold since
-`f77df00`; `FrameBakeKeyLogicTests`' mask-order test whose 64 attempts were not independent); five
-passed in isolation. **The two test-helper commits after it (`87851ca`, `fd1d287`) have not had a full
-run** — `87851ca` changes every UI test's first launch, so the next full run is its proof.
-`OptionsPanelUITests` is now the heaviest class at 663 s, 212 s of it one test — look for a wait that
-runs to its timeout. **Fast tier at close: 4331 / 4327 passed / 0 failed / 4 skipped**, Debug and
-Release, reconciled against a static `func test` count — the full UI suite has not been run since
-`tmp/pingpong` merged.
+**The owner's iPad has `2974b33`** — the final tree (Release, installed 2026-10-08, profile to
+2026-10-15T04:52Z). The re-signer (`~/PaintApp/deploy/resign.sh`, untracked there) now judges due-ness
+only from the installed profile's expiry, skips quietly while it is valid (the portal renews only after
+expiry), arms a wake 120 s after expiry, and builds with the device destination; it records its own
+installs, not this session's manual ones, so its first run after 2026-10-15T03:52Z will rebuild.
 
-**The owner's iPad has `fe036df`** (Release, installed by the re-signer 2026-09-30; profile to
-2026-10-08T03:16Z).
-**Free-account profiles last seven days and the re-signer only runs while this Mac is awake** — the Mac
-slept 2026-09-20 → 23, the profile lapsed, and iOS asked the owner to re-trust the developer. The
-certificate itself has not changed since 2026-07-20.
-
-**The laptop streamer was started by hand 2026-09-24 22:34** and has no autostart (TODO (99), as asked);
-after a reboot the owner opens it from its desktop icon. A stopped streamer reads on the iPad as a
-**timeout** ("did not answer … asleep, off, or not on this network"), not a refusal — docs/STREAM.md §5.9.
+**The laptop streamer** has no autostart (TODO (99)); a stopped streamer reads on the iPad as a timeout.
+**`f84776f`'s C# half** (clear a stale pause on connect, idempotent resume) **is merged uncompiled** —
+run `tools/windows/streamer-remote.sh deploy` the next time the laptop is on.
 
 ## What is left
 
-**Paused by the owner on 2026-10-02** after the last two lanes merged — *"pause for now until i give you a
-message to continue"*. Nothing is in flight: no worktrees but `~/PaintWork/deploy`, no `tmp/*` branches.
+**Ask the owner what to pick up** — the queue is TODO's deprioritised (22), (10), (37) stage 12 and the
+"Later" features (28) audio, (30) video editor, (35) masks, each needing a design conversation first.
 
-**Session 46 worked the owner's 2026-10-01/02 asks, (111)–(152), plus every ruled follow-up** — all
-merged but two. In order, what is next when the owner says continue:
+**Owner-side, in order:**
+1. **Feel `2974b33`** — the brief's ~40 asks are on the device unfelt. Drive the old things too (play a
+   scene, pan from the grey, a Move node release, draw). Specifically ask: how (132)'s held stroke ends feel
+   on a direction-following brush (the ink trails the pen by up to a quarter of the brush width) and
+   whether a live stroke's interior wants smoothing; whether **folder Move** lags on the iPad ((136) did not
+   reproduce in the simulator); whether a newly placed gradient should keep opening its colour panel.
+2. **(27) stage 5** — stream Blender on the real link, latency, the device tick, Ctrl+V (the
+   stream-under-blend limitation is ruled: live then exact when still).
 
-1. **Done 2026-10-07/08**: the full UI suite (`e953bb8`: 5203 / 5140 / 3 / 60, 65.4 min — CLAUDE.md carries
-   the table); a read-only audit of the session's diff (`~/PaintWork/design/audit-1007.md`) and all of its
-   cleanup lanes — C1 test helpers + one dock-aware rule, C1b honest `waitForPixel` + `check-ui-helpers.py`,
-   C2 app-side mechanics + docs + the re-signer, C3a one `HandleDrag` / `ToolReturnPath` / sandwich input,
-   C3b one edit-session core / colour-slot accessor / topmost walk; every menu over the canvas an
-   `AnchoredMenu`; inline renaming everywhere + the text colour on the app's panel; the Repeat bake and its
-   partial case.
-2. **In flight: (139) keys, not keyframes** — Opus alone on `tmp/keys`. **After it**: a full UI suite on the
-   final tree (the session has merged ~25 commits since `e953bb8`), then an iPad install.
-3. **Ask the owner** how (132)'s held stroke ends feel on the installed build and whether a live stroke's
-   interior wants smoothing.
-4. **`tools/windows/streamer-remote.sh deploy`** when the laptop is on — `f84776f`'s C# half is uncompiled.
-
-**The owner's iPad has `fe036df`** (Release, installed by the re-signer 2026-09-30; profile to
-2026-10-08T03:16Z).
-**Free-account profiles last seven days and the re-signer only runs while this Mac is awake** — the Mac
-slept 2026-09-20 → 23, the profile lapsed, and iOS asked the owner to re-trust the developer. The
-certificate itself has not changed since 2026-07-20.
-
-**The laptop streamer was started by hand 2026-09-24 22:34** and has no autostart (TODO (99), as asked);
-after a reboot the owner opens it from its desktop icon. A stopped streamer reads on the iPad as a
-**timeout** ("did not answer … asleep, off, or not on this network"), not a refusal — docs/STREAM.md §5.9.
-
-## What is left
-
-**Paused by the owner on 2026-10-02** after the last two lanes merged — *"pause for now until i give you a
-message to continue"*. Nothing is in flight: no worktrees but `~/PaintWork/deploy`, no `tmp/*` branches.
-
-**Session 46 worked the owner's 2026-10-01/02 asks, (111)–(152), plus every ruled follow-up** — all
-merged but two. In order, what is next when the owner says continue:
-
-1. **Done 2026-10-07**: the full UI suite (`e953bb8`: 5203 / 5140 / 3 / 60, 65.4 min, triaged green but
-   for the menu defect below — CLAUDE.md carries the table) and a read-only audit of the session's diff,
-   whose worklist is `~/PaintWork/design/audit-1007.md`: lanes **C1** (UI-test helpers, the dock offsets)
-   and **C2** (app-side mechanical cleanup, stale docs, the re-signer script) are in flight on
-   `tmp/cleanc1` / `tmp/cleanc2`; **C3** (the four design refactors) follows.
-2. **Then**: every menu over the canvas as an `AnchoredMenu` (ruled), inline renaming everywhere (ruled),
-   the Repeat bake, and **(139) keys, not keyframes** — Opus, alone; `~/PaintWork/design/survey-1001.md`
-   §(139) is the starting point, but the pose code moved a lot this session — re-verify every symbol.
-3. **Ask the owner** how (132)'s held stroke ends feel on `6fcc705` and whether a live stroke's interior
-   wants smoothing.
-4. **`tools/windows/streamer-remote.sh deploy`** when the laptop is on — `f84776f`'s C# half is uncompiled.
-
-**The owner's iPad has `6fcc705`** (Release, installed 2026-10-08 00:55, profile to 2026-10-15T04:52Z).
-The overnight re-signer failed after expiry because the portal had no registered device for the free team;
-fixed by naming the iPad and passing `-allowProvisioningDeviceRegistration` (CLAUDE.md "Deploy to iPad";
-`~/PaintApp/deploy/resign.sh`, untracked there, backup `resign.sh.bak-2026-10-08`).
-
-**How this session ran, for the next one**: one shared worker brief at `~/PaintWork/brief-common.md`
-(read first by every worker; it carries the owner's clean-architecture rule, including *"when a ruling
-replaces shipped behaviour, the old behaviour goes whole"*); cap one Opus *or* two Sonnet; fresh workers
-per lane — never continue a worker whose context is large (memory `feedback-fresh-agent-over-bloated-
-continuation`).
+**Engineering notes for the next session:**
+- CLAUDE.md's argument for `-parallel-testing-enabled NO` on the fast tier was written when the logic tier
+  was ~250 s of work; it now takes 14.4 min Debug / 8.2 min Release. Whether clones would pay for
+  themselves there is unmeasured.
+- The code still says "keyframe" internally (`KeyframeTarget`, `keyframeMarks`, `KeyframeControl`) — the
+  owner ruled (2026-10-08) to leave the names; everything the artist sees says "keys".
 
 ## What shipped this session
 
-Eleven merges, `cbd248f..0e20568`; causes are in the commit messages and SESSION_LOG's session 45. The
+~120 merges, `9704384..2974b33`; causes are in the commit messages and SESSION_LOG's session 46. The
 decisions most likely to be tripped over:
 
-- **(110)** — nothing over the canvas is a UIKit popover; `canvasPresentationHost` draws them and
-  `AnchoredMenuRouter` alone decides dismissal. `CanvasView.Coordinator.replaceStrandedRecognizers`
-  swaps in fresh recognizers 0.1 s after the last lift. The flight recorder is `ActionRecorder`'s ring
-  (90 s, 5,000 events, low-rate events only), written on `stranded` / `wedge` / `manual`. **A tap that
-  dismisses a picker now also acts on what it lands on.**
-- **`DrawingView.openPanelIsStandingDown`** — a canvas touch leaves alone a panel that is hidden only
-  because a piece floats (the gate's fix for `c8b93c9` closing the Select panel under a float).
-- **(106)** — one hue-angle convention in `ColorMath`, used by drawing, drag and marker; the triangle is
-  clipped to its true path at display scale. The panel still opens on Classic (the old Square) because
-  a dozen tests reach `colorPanel.svSquare`.
-- **(103)** — Rectangle/Ellipse call `beginInteractiveShape` with a default square (there is no shape
-  tool) — since (129) they lay down solid fill objects, and the gradient is a fill object (128).
-- **(105)** — `VectorVideoElement.mappedFrameRate`, frozen at insertion (24 when absent).
-- **(86)** — `CanvasManager.maxCanvasExtent(deviceMemoryBudgetBytes:)`, fit ≈42.25 B/px − 288.6 MiB,
-  63% margin; 6000 at 1850 MiB, 8000 at twice that.
-- **(101)** — `PaintSoftware-Info.plist` carries `NSBonjourServices`; `StreamConnectFailure` is the one
-  classification the sheet and the bar read.
+- **One input plane** — `CanvasPlaneView` makes everything outside the paper hit-test as canvas; only
+  rendering is clipped ((121)). A canvas finger is watched 80 ms (`CanvasTouchSettle`) before it counts.
+- **One source for input under a transform stack** — `inkPose(forLayerID:)` and its pull-back family
+  (`layerSpacePoint` / `layerSpacePath` / `placedInLayerSpace`) ((124)).
+- **One fast-then-exact live preview** — `LiveTransformEdit` and `SandwichPresentation.next(from:live:held:)`
+  serve strokes, transform edits, undo, and the stream (live while the laptop screen moves, exact 0.6 s
+  after it stills); the baker is held during an edit ((125)/(136)/(140)/(145)/(112)).
+- **Bake** replaces Merge Down's effect/value/transform arms on one core that also runs Bake Animation and
+  the Repeat bake ((131)); colours go through `VectorElement.mappingColours`.
+- **Keys, not keyframes** — a pose channel is up to eight independent curves (X, Y, Scale X/Y, Rotation,
+  Skew, Perspective X/Y); "Add Keys" primes a frame and an edit keys only what changed ((139)).
+- **Every menu over the canvas is a `CanvasMenu`/`AnchoredMenu`; no `.popover` remains in Views; Scribble is
+  refused app-wide by one hook (`ScribbleRefusal`); every rename is inline (`InlineNameField`).**
+- **UI tests**: one dock-aware visible-region rule (`visiblePaperRect`, `rowAboveTheDock`); helpers live
+  once in `PaintUITestCase`, enforced by `tools/check-ui-helpers.py`; `waitForPixel` returns nil on timeout.
+- **Workers**: the shared brief is `~/PaintWork/brief-common.md`; never continue a worker whose context is
+  large (memory `feedback-fresh-agent-over-bloated-continuation`); one end-of-session audit
+  (`~/PaintWork/design/audit-1007.md`) instead of per-item reviewers.
 
 ## Waiting on the owner
 
-- The device checks above; the palette-row question in BUGS.md. (Answered 2026-09-25: same Wi-Fi, Local
-  Network allowed.)
+- The device checks above.
 - Granting Xcode Full Disk Access would let builds run from `~/Desktop` again.
 - **XCUITest cannot synthesise a Pencil**; the owner has granted device build and deploy.
