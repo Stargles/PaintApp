@@ -184,12 +184,18 @@ struct InlineNameFieldView: UIViewRepresentable {
         case .row(let style, let weight):
             field.textAlignment = .left
             field.font = .systemFont(ofSize: UIFont.preferredFont(forTextStyle: style).pointSize, weight: weight)
-            field.beginsEditingWhenShown = true
         }
         return field
     }
 
     func updateUIView(_ field: InlineNameField, context: Context) {
+        // **A row's field asks for the keyboard each time SwiftUI sets it up to be shown, not once per
+        // view.** SwiftUI configures a view before it is on a window, and a lazy container keeps the view
+        // of a tile that left and hands it to the next tile with the same identity — a folder made as
+        // `Folder 1` again after the first was renamed gets the first one's spent field, and the artist
+        // sees a field with no keyboard. Being configured while detached is the one moment that is always
+        // a new request; a view re-parented while it is on screen is not.
+        if case .row = placement, field.window == nil { field.beginsEditingWhenShown = true }
         field.name = name
         field.onCommit = onCommit
         field.onEndEditing = onEndEditing

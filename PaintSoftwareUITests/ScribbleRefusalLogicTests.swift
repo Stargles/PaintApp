@@ -8,12 +8,11 @@ import XCTest
 ///
 /// **What these prove and what they cannot.** They prove the hook reaches every kind of text input
 /// the app is built from — UIKit's two text classes, the `UITextField` SwiftUI's `TextField`,
-/// `SecureField` and `TextEditor` stand on, a `UIAlertController`'s fields, and the canvas's own
-/// `TextOverlayView` — that the delegate refuses at every location, and that nothing else in the app
-/// builds a Scribble interaction, so a second per-feature blocker cannot grow back unnoticed. They
-/// cannot prove iOS *asks*: that takes a pencil, and XCUITest cannot synthesise one (see
-/// `tools/recording2xcuitest.py`). The on-device half is the `scribble.veto` line the delegate writes
-/// into an `ActionRecorder` file.
+/// `SecureField` and `TextEditor` stand on, and the canvas's own `TextOverlayView` — that the delegate
+/// refuses at every location, and that nothing else in the app builds a Scribble interaction, so a
+/// second per-feature blocker cannot grow back unnoticed. They cannot prove iOS *asks*: that takes a
+/// pencil, and XCUITest cannot synthesise one (see `tools/recording2xcuitest.py`). The on-device half
+/// is the `scribble.veto` line the delegate writes into an `ActionRecorder` file.
 ///
 /// The tests install the hook themselves, so `testPaintAppInstallsTheHookBeforeAnythingIsCreated`
 /// reads the app's launch path as source — the honest substitute for a launch this tier cannot make.
@@ -156,57 +155,6 @@ final class ScribbleRefusalLogicTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(inputs.count, 4,
                                     "Fixture check: SwiftUI built its four text inputs (found \(inputs.count)), or this walked nothing")
         for input in inputs { assertRefuses(input, "SwiftUI text input \(type(of: input))") }
-    }
-
-    /// A `UIAlertController`'s text fields — what every `.alert` with a `TextField` in this app
-    /// (the gallery's New Folder) is made of, and what no representable could ever stand in for.
-    func testAnAlertsTextFieldCarriesTheRefusal() {
-        let root = UIViewController()
-        let window = onScreenWindow(root: root)
-        let alert = UIAlertController(title: "New Folder", message: nil, preferredStyle: .alert)
-        alert.addTextField { $0.placeholder = "Name" }
-        alert.addAction(UIAlertAction(title: "OK", style: .default))
-        root.present(alert, animated: false)
-        settle()
-
-        guard let field = alert.textFields?.first else {
-            XCTFail("Fixture check: the alert has no text field")
-            return
-        }
-        XCTAssertNotNil(field.window, "Fixture check: the alert is on screen, or its field never saw a window")
-        assertRefuses(field, "an alert's text field")
-        XCTAssertTrue(textInputs(under: window).contains(field), "the walk reaches the alert's field too")
-    }
-
-    /// The same, through SwiftUI's `.alert` — the call sites' own spelling.
-    func testASwiftUIAlertsTextFieldCarriesTheRefusal() {
-        struct Host: View {
-            @State var shown = true
-            @State var name = ""
-            var body: some View {
-                Color.clear.alert("New Folder", isPresented: $shown) {
-                    TextField("Name", text: $name)
-                    Button("OK") {}
-                }
-            }
-        }
-        let host = UIHostingController(rootView: Host())
-        _ = onScreenWindow(root: host)
-        var alert: UIAlertController?
-        let deadline = Date().addingTimeInterval(10)
-        while alert?.textFields?.first?.window == nil, Date() < deadline {
-            settle(0.1)
-            alert = host.presentedViewController as? UIAlertController
-        }
-        guard let alert else {
-            XCTFail("Fixture check: SwiftUI presented no alert in this process, so there is no field to inspect")
-            return
-        }
-        guard let field = alert.textFields?.first else {
-            XCTFail("Fixture check: the alert has no text field")
-            return
-        }
-        assertRefuses(field, "a SwiftUI alert's text field")
     }
 
     /// The canvas's own editor, which used to carry a veto of its own and now has none: the text tool's

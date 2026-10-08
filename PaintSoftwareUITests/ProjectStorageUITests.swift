@@ -145,6 +145,64 @@ final class ProjectStorageUITests: PaintUITestCase {
         XCTAssertEqual(crumb.label, "Projects / Scene 2")
     }
 
+    /// **New Folder asks for nothing: the folder exists the moment the button is tapped, named, and its
+    /// tile is already being renamed.** From a gallery nobody has arranged: no alert, the default name in
+    /// the tile's own field, and Return with the name untouched keeps it. A second one counts on, and
+    /// typing over the default renames it where it stands.
+    func testNewFolderMakesTheFolderAndTheArtistNamesItInItsTile() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-resetGallery"]
+        app.launch()
+        XCTAssertTrue(app.buttons["gallery.newCanvasButton"].waitForExistence(timeout: 15))
+
+        app.buttons["gallery.newFolderButton"].tap()
+        let field = app.textFields["gallery.folderRenameField"]
+        XCTAssertTrue(field.waitForExistence(timeout: 10), "the new tile's name is a field as soon as the folder exists")
+        XCTAssertFalse(app.alerts.firstMatch.exists, "with no alert asking for a name first")
+        XCTAssertEqual(field.value as? String, "Folder 1", "holding the default name")
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10),
+                      "and the keyboard is already up for it — the artist has not tapped anything")
+        attachScreenshot(app, "new-folder-being-named")
+
+        field.typeText("\n")
+        XCTAssertTrue(app.buttons["gallery.folderTile.Folder 1"].waitForExistence(timeout: 10),
+                      "Return with the name untouched keeps the default: the tile is a folder again")
+
+        app.buttons["gallery.newFolderButton"].tap()
+        XCTAssertTrue(field.waitForExistence(timeout: 10), "a second New Folder is also named in its tile")
+        XCTAssertEqual(field.value as? String, "Folder 2", "and takes the next number, so its name is never one that stands")
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10), "with the keyboard up again")
+        field.typeText("Rooftop Chase\n")
+
+        XCTAssertTrue(app.buttons["gallery.folderTile.Rooftop Chase"].waitForExistence(timeout: 10),
+                      "typing over the default renamed the tile")
+        XCTAssertFalse(app.buttons["gallery.folderTile.Folder 2"].exists, "renamed, not duplicated")
+        XCTAssertTrue(app.buttons["gallery.folderTile.Folder 1"].exists, "and the first is untouched")
+        attachScreenshot(app, "new-folders-named")
+    }
+
+    /// **Naming a new folder after one that stands says so and keeps the default** — the inline rename's
+    /// own refusal, reached from New Folder: the name it was made with is still the tile's.
+    func testNamingANewFolderAfterOneThatStandsIsRefusedAndKeepsTheDefaultName() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-resetGallery"]
+        app.launch()
+        XCTAssertTrue(app.buttons["gallery.newCanvasButton"].waitForExistence(timeout: 15))
+        makeFolder(app, named: "Scene 1")
+        XCTAssertTrue(app.buttons["gallery.folderTile.Scene 1"].waitForExistence(timeout: 10))
+
+        makeFolder(app, named: "Scene 1")
+
+        let alert = app.alerts["Couldn’t Rename Folder"]
+        XCTAssertTrue(alert.waitForExistence(timeout: 10), "a taken name is refused, and the alert says what was attempted")
+        XCTAssertTrue(alert.staticTexts["There is already something called “Scene 1” here."].exists,
+                      "…and which name is the trouble")
+        alert.buttons.matching(identifier: "OK").firstMatch.tap()
+        XCTAssertTrue(app.buttons["gallery.folderTile.Folder 1"].waitForExistence(timeout: 10),
+                      "the new folder keeps the name it was made with")
+        XCTAssertTrue(app.buttons["gallery.folderTile.Scene 1"].exists, "and the one that stands is untouched")
+    }
+
     /// Renaming a folder is on the tile, and the tile redraws under the new name. Asserted through
     /// what is drawn, because a rename that moved the directory and left the grid stale is a bug the
     /// model cannot see.
@@ -386,22 +444,14 @@ final class ProjectStorageUITests: PaintUITestCase {
         restore.tap()
     }
 
-    /// **Scoped to `app.alerts`, and by label rather than by identifier.** SwiftUI renders an
-    /// `.alert` in its own presentation, and the accessibility identifiers set on a `TextField` and
-    /// the action buttons inside one do not reach the element tree — the alert's own title and the
-    /// buttons' titles do. Querying the app-wide `textFields` therefore matches nothing, which is
-    /// what the first run of this suite found.
+    /// New Folder as the artist does it: the tap makes the folder, its tile's name is a field holding the
+    /// keyboard with the default name selected, and typing replaces it (`InlineNameField`).
     private func makeFolder(_ app: XCUIApplication, named name: String) {
         app.buttons["gallery.newFolderButton"].tap()
-        let alert = app.alerts["New Folder"]
-        XCTAssertTrue(alert.waitForExistence(timeout: 10), "the New Folder prompt appears")
-        let field = alert.textFields.firstMatch
-        XCTAssertTrue(field.waitForExistence(timeout: 5), "and it asks for a name")
-        field.tap()
-        field.typeText(name)
-        // `.firstMatch`: an alert's action button appears more than once in the tree, so the
-        // subscript form raises "Multiple matching elements found" rather than tapping.
-        alert.buttons.matching(identifier: "Create").firstMatch.tap()
+        let field = app.textFields["gallery.folderRenameField"]
+        XCTAssertTrue(field.waitForExistence(timeout: 10), "New Folder puts the new tile's name into edit")
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10), "…and the keyboard is up for it")
+        field.typeText("\(name)\n")
     }
 
     /// Back to the gallery the way the artist goes: the editor's own gallery control.

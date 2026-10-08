@@ -139,6 +139,23 @@ final class ProjectFolderLogicTests: XCTestCase {
                        "and the move picker sees the whole tree, indented")
     }
 
+    /// **New Folder asks for no name**, so the one it picks must never be one that stands: `Folder N`,
+    /// one past the highest among the folders beside it — `DefaultName`'s rule, the one a layer's name
+    /// follows — and numbered per directory.
+    func testNewFolderTakesTheNextDefaultNameAmongItsSiblings() throws {
+        let top = ProjectStore.projectsDirectory
+        let first = try ProjectStore.createFolder(in: top)
+        let second = try ProjectStore.createFolder(in: top)
+        XCTAssertEqual([first, second].map(\.lastPathComponent), ["Folder 1", "Folder 2"])
+
+        try FileManager.default.removeItem(at: first)
+        XCTAssertEqual(try ProjectStore.createFolder(in: top).lastPathComponent, "Folder 3",
+                       "a deleted number is not handed out again while a higher one stands")
+
+        XCTAssertEqual(try ProjectStore.createFolder(in: second).lastPathComponent, "Folder 1",
+                       "and the count is of the folder it is made in, not of the whole tree")
+    }
+
     func testATakenNameIsRefusedRatherThanSilentlyMerged() throws {
         _ = try ProjectStore.createFolder(named: "Scene", in: ProjectStore.projectsDirectory)
         XCTAssertThrowsError(try ProjectStore.createFolder(named: "Scene",

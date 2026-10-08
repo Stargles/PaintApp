@@ -37,12 +37,9 @@ struct GalleryView: View {
     @State private var showRecentlyDeleted = false
     @State private var showingUnrecoverableAlert = false
     @State private var showingStorage = false
-    @State private var showingNewFolder = false
     /// The folder whose tile shows its name as a field (`InlineNameField`), by `ProjectFolder.id`.
     @State private var renamingFolderID: String?
-    /// The name typed into the New Folder alert.
-    @State private var folderNameField = ""
-    @State private var folderError: String?
+    @State private var folderProblem: FolderProblem?
     @State private var locationProblem: String? = ProjectLocation.status.problem
     /// Which project is opening, if any — see `GalleryOpenState` for the two rules it carries.
     @State private var openState = GalleryOpenState()
@@ -182,9 +179,7 @@ struct GalleryView: View {
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
-                            folderNameField = ""
-                            folderError = nil
-                            showingNewFolder = true
+                            createFolder()
                         } label: {
                             Image(systemName: "folder.badge.plus")
                                 .accessibilityLabel("New Folder")
@@ -241,15 +236,6 @@ struct GalleryView: View {
                 refresh()
             })
         }
-        .alert("New Folder", isPresented: $showingNewFolder) {
-            TextField("Name", text: $folderNameField)
-                .accessibilityIdentifier("gallery.folderNameField")
-            Button("Create") { createFolder() }
-                .accessibilityIdentifier("gallery.createFolderButton")
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Folders can hold projects and other folders — a sequence, a scene, a shot.")
-        }
         .alert("Delete this project?", isPresented: Binding(
             get: { projectPendingDeletion != nil },
             set: { if !$0 { projectPendingDeletion = nil } }
@@ -292,12 +278,12 @@ struct GalleryView: View {
         } message: {
             Text("This project is damaged and no intact backup of it exists to restore from.")
         }
-        .alert("Couldn’t Create Folder", isPresented: Binding(
-            get: { folderError != nil }, set: { if !$0 { folderError = nil } }
+        .alert(folderProblem?.title ?? "", isPresented: Binding(
+            get: { folderProblem != nil }, set: { if !$0 { folderProblem = nil } }
         )) {
-            Button("OK", role: .cancel) { folderError = nil }
+            Button("OK", role: .cancel) { folderProblem = nil }
         } message: {
-            Text(folderError ?? "")
+            Text(folderProblem?.message ?? "")
         }
     }
 
@@ -336,12 +322,16 @@ struct GalleryView: View {
         projects = ProjectStore.listProjects(in: currentDirectory)
     }
 
+    /// New Folder makes the folder under its default name and puts its tile straight into rename, so the
+    /// name is typed where the folder is shown (`InlineNameField`), and an artist content with the default
+    /// has nothing more to do.
     private func createFolder() {
         do {
-            try ProjectStore.createFolder(named: folderNameField, in: currentDirectory)
+            let created = try ProjectStore.createFolder(in: currentDirectory)
             refresh()
+            renamingFolderID = folders.first { $0.name == created.lastPathComponent }?.id
         } catch {
-            folderError = error.localizedDescription
+            folderProblem = FolderProblem(title: "Couldn’t Create Folder", message: error.localizedDescription)
         }
     }
 
@@ -362,7 +352,7 @@ struct GalleryView: View {
             try ProjectStore.renameFolder(at: folder.url, to: name)
             refresh()
         } catch {
-            folderError = error.localizedDescription
+            folderProblem = FolderProblem(title: "Couldn’t Rename Folder", message: error.localizedDescription)
         }
     }
 
@@ -413,5 +403,11 @@ struct GalleryView: View {
         } else {
             showingUnrecoverableAlert = true
         }
+    }
+
+    /// What the folder alert says: which verb failed, and why.
+    private struct FolderProblem {
+        let title: String
+        let message: String
     }
 }

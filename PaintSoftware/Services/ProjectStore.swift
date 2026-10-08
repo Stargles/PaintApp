@@ -150,6 +150,15 @@ enum ProjectStore {
         return url
     }
 
+    /// The folder a New Folder tap makes: `Folder N`, `DefaultName`'s next number among the folders
+    /// already in `directory`, so the name is never one that stands. The artist renames it where its
+    /// tile is shown (`InlineNameField`) rather than being asked for a name first.
+    @discardableResult
+    static func createFolder(in directory: URL) throws -> URL {
+        let siblings = ProjectBackupManager.subfolders(of: directory).map(\.lastPathComponent)
+        return try createFolder(named: DefaultName.next(stem: "Folder", among: siblings), in: directory)
+    }
+
     @discardableResult
     static func renameFolder(at url: URL, to raw: String) throws -> URL {
         let name = sanitizedFolderName(raw)

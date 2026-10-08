@@ -14,10 +14,10 @@ import UIKit
 /// interaction to each text input as it comes on screen.
 ///
 /// **Why a hook and not a component every call site uses.** The app's text inputs are SwiftUI
-/// `TextField`s, `.alert` text fields (a `UIAlertController`'s, which no `UIViewRepresentable` can
-/// stand in for), one `UITextView` on the canvas, and whatever is added next. The only place all of
-/// them pass through is UIKit's own text classes, so that is where the refusal lives: a future field
-/// cannot forget it, and there is no per-feature blocker to keep in step with the others.
+/// `TextField`s, the `UITextField` of an inline name (`InlineNameField`), one `UITextView` on the
+/// canvas, and whatever is added next. The only place all of them pass through is UIKit's own text
+/// classes, so that is where the refusal lives: a future field cannot forget it, and there is no
+/// per-feature blocker to keep in step with the others.
 /// `ScribbleRefusalLogicTests` fails if any other file builds a Scribble interaction.
 ///
 /// **Unconditional, and there is no finer seam.** The delegate is asked once, with a location and
