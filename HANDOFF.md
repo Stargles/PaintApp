@@ -65,13 +65,14 @@ merged but two. In order, what is next when the owner says continue:
 2. **Then**: every menu over the canvas as an `AnchoredMenu` (ruled), inline renaming everywhere (ruled),
    the Repeat bake, and **(139) keys, not keyframes** — Opus, alone; `~/PaintWork/design/survey-1001.md`
    §(139) is the starting point, but the pose code moved a lot this session — re-verify every symbol.
-3. **Install on the iPad** once the re-signer has a fresh profile (it needs the old one expired first);
-   then ask how (132)'s held stroke ends feel and whether a live stroke's interior wants smoothing.
+3. **Ask the owner** how (132)'s held stroke ends feel on `6fcc705` and whether a live stroke's interior
+   wants smoothing.
 4. **`tools/windows/streamer-remote.sh deploy`** when the laptop is on — `f84776f`'s C# half is uncompiled.
 
-**The re-signer's 2026-10-07 15:14 "sign in to Xcode" FAIL was a misdiagnosis** (BUGS.md, newest): Xcode
-is signed in; the portal only renews an expired profile. The iPad's profile expires 2026-10-08T03:16Z
-and the first hourly run after that should mint and install `main` — **the Mac must be awake then**.
+**The owner's iPad has `6fcc705`** (Release, installed 2026-10-08 00:55, profile to 2026-10-15T04:52Z).
+The overnight re-signer failed after expiry because the portal had no registered device for the free team;
+fixed by naming the iPad and passing `-allowProvisioningDeviceRegistration` (CLAUDE.md "Deploy to iPad";
+`~/PaintApp/deploy/resign.sh`, untracked there, backup `resign.sh.bak-2026-10-08`).
 
 **How this session ran, for the next one**: one shared worker brief at `~/PaintWork/brief-common.md`
 (read first by every worker; it carries the owner's clean-architecture rule, including *"when a ruling

@@ -794,10 +794,15 @@ end with `tools/stream/stream-client-check.py --host 100.104.85.111` and the iPa
 source ~/.config/paintapp/.env      # KEYCHAIN_PASSWORD, SIGNING_IDENTITY, PROJECT_DIR, PROJECT_FILE, SCHEME
 security unlock-keychain -p "$KEYCHAIN_PASSWORD" ~/Library/Keychains/login.keychain-db
 xcodebuild build -project PaintSoftware.xcodeproj -scheme PaintSoftware -configuration Release \
-  -destination "generic/platform=iOS" -allowProvisioningUpdates -derivedDataPath build/DerivedData
+  -destination "platform=iOS,id=E3B83820-DF74-5042-B52B-0D5BA17E4877" -allowProvisioningUpdates \
+  -allowProvisioningDeviceRegistration -derivedDataPath build/DerivedData
 EXP=$(security cms -D -i <path>.app/embedded.mobileprovision | plutil -extract ExpirationDate raw - -o -); [[ $(( $(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$EXP" +%s) - $(date +%s) )) -lt $((5*86400)) ]] && echo "REFUSE: profile expires $EXP — under 5 days, do not install" && exit 1
 xcrun devicectl device install app --device E3B83820-DF74-5042-B52B-0D5BA17E4877 <path>.app
 ```
+**Name the iPad and allow device registration when a profile has to be minted**: on 2026-10-08 the
+free team's portal refused with *"Your team has no devices from which to generate a provisioning
+profile"* until the build named the device and passed `-allowProvisioningDeviceRegistration`; a
+`generic/platform=iOS` destination registers nothing. `resign.sh` builds the same way since then.
 Check the expiry before installing, not after: the build installed on 2026-09-12 embedded a profile
 with under a day of life left, which is exactly how "PaintApp is no longer available" recurred a
 fourth time. The scheme's LaunchAction stays Debug (Xcode's Run button is for development); `-configuration
