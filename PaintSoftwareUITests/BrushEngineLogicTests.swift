@@ -594,6 +594,9 @@ final class BrushEngineLogicTests: XCTestCase {
         manager.currentLayerIndex = 0
         XCTAssertTrue(manager.insertImage(solidImage(.red)))
         XCTAssertTrue(manager.insertImage(solidImage(.green)))
+        // The import arrives held in the Move box; putting it down records nothing, so the next undo
+        // is the import's own.
+        manager.commitVectorFloatIfNeeded()
 
         guard let celIdx = manager.activeCelIndex(inLayer: 0, atFrame: manager.currentFrame),
               let vector = manager.layers[0].cels[celIdx].vector else {
