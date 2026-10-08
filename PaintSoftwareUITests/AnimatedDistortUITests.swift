@@ -109,13 +109,6 @@ final class AnimatedDistortUITests: PaintUITestCase {
         cel.coordinate(withNormalizedOffset: CGVector(dx: dx, dy: 0.5)).tap()
     }
 
-    private func attach(_ canvas: XCUIElement, _ name: String) {
-        let shot = XCTAttachment(screenshot: canvas.screenshot())
-        shot.name = name
-        shot.lifetime = .keepAlways
-        add(shot)
-    }
-
     /// **Mark, scrub, Move, Distort, Done, mark — and every frame between the two marks shows a
     /// keystone.**
     ///
@@ -145,7 +138,7 @@ final class AnimatedDistortUITests: PaintUITestCase {
         dragOnCanvas(app, from: CGVector(dx: 0.20, dy: 0.42), to: CGVector(dx: 0.85, dy: 0.42))
         let drawn = try settledProbe(canvas, window: inkWindow)
         let flat = try XCTUnwrap(inkLines(drawn), "setup: there is ink on the canvas")
-        attach(canvas, "1-two-flat-lines-at-frame-0")
+        attachScreenshot(canvas, "1-two-flat-lines-at-frame-0")
         XCTAssertGreaterThan(flat.top.width, 0.30, "setup: the top line is most of the way across")
         XCTAssertEqual(flat.top.width, flat.bottom.width, accuracy: 0.03,
                        String(format: "setup: and the two are the same length before anything "
@@ -195,7 +188,7 @@ final class AnimatedDistortUITests: PaintUITestCase {
 
         let keyed = try XCTUnwrap(inkLines(try settledProbe(canvas, window: inkWindow)))
         let atB = (top: keyed.top.width, bottom: keyed.bottom.width)
-        attach(canvas, "2-keystone-at-keyframe-B")
+        attachScreenshot(canvas, "2-keystone-at-keyframe-B")
         XCTAssertLessThan(atB.top, atB.bottom - 0.05, String(format: """
             setup: the committed drawing is a keystone — top %.3f, bottom %.3f
             """, atB.top, atB.bottom))
@@ -208,7 +201,7 @@ final class AnimatedDistortUITests: PaintUITestCase {
         scrub(app, toCelFraction: 0.5)
         let between = try XCTUnwrap(inkLines(try settledProbe(canvas, window: inkWindow)))
         let mid = (top: between.top.width, bottom: between.bottom.width)
-        attach(canvas, "3-in-between-at-the-midpoint")
+        attachScreenshot(canvas, "3-in-between-at-the-midpoint")
 
         XCTAssertGreaterThan(mid.bottom, 0.20, "the drawing is still on the canvas at the in-between")
         XCTAssertLessThan(mid.top, mid.bottom - 0.02, String(format: """

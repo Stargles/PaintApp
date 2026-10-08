@@ -39,13 +39,6 @@ final class LiveTransformEditUITests: PaintUITestCase {
         return count
     }
 
-    private func attach(_ canvas: XCUIElement, _ name: String) {
-        let shot = XCTAttachment(screenshot: canvas.screenshot())
-        shot.name = name
-        shot.lifetime = .keepAlways
-        add(shot)
-    }
-
     // MARK: - (125) A transformation layer's Move
 
     /// **Cold start**: a mark, a transformation layer from the + menu, its Move row, and a drag. The
@@ -76,7 +69,7 @@ final class LiveTransformEditUITests: PaintUITestCase {
         let followed = moves(app) - before
         let state = sandwichState(app)
         let probe = try inkProbe(canvas)
-        attach(canvas, "after-the-drag-before-its-bake")
+        attachScreenshot(canvas, "after-the-drag-before-its-bake")
         XCTContext.runActivity(named: "the picture followed \(followed) updates; canvas \(state)") { _ in }
         XCTAssertGreaterThan(followed, 10, "the picture should have followed the finger through the "
                              + "drag, update by update, not once at the end")
@@ -129,7 +122,7 @@ final class LiveTransformEditUITests: PaintUITestCase {
         dragAcross(canvas, from: onHost(lifted, 0.25, 0.5), paperDX: 0.2, paper: lifted)
         let followed = moves(app) - before
         let probe = try inkProbe(canvas)
-        attach(canvas, "after-the-folder-drag")
+        attachScreenshot(canvas, "after-the-folder-drag")
         XCTContext.runActivity(named: "the picture followed \(followed) updates") { _ in }
         XCTAssertGreaterThan(followed, 10, "the folder's ink should have followed the finger, update by update")
         for row in [0.4, 0.6] {
@@ -207,7 +200,7 @@ final class LiveTransformEditUITests: PaintUITestCase {
         let followed = moves(app) - before
         let state = sandwichState(app)
         let after = try XCTUnwrap(canvas.screenshot().image.cgImage)
-        attach(canvas, "after-the-node-drag-before-its-bake")
+        attachScreenshot(canvas, "after-the-node-drag-before-its-bake")
         XCTContext.runActivity(named: "the picture followed \(followed) updates; canvas \(state)") { _ in }
         XCTAssertGreaterThan(followed, 10, "the picture should have followed the node, update by update")
         XCTAssertTrue(["moving", "live"].contains(state),

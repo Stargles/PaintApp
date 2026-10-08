@@ -31,9 +31,6 @@ final class AutosaveUITests: PaintUITestCase {
         XCTAssertTrue(waitUntilFilled(canvas, dx: 0.5, dy: 0.5),
                       "The stroke the autosave carried is on the canvas after a kill and a relaunch")
 
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = "1-reopened-after-a-kill-with-the-autosaved-stroke"
-        shot.lifetime = .keepAlways
-        add(shot)
+        attachScreenshot(app, "1-reopened-after-a-kill-with-the-autosaved-stroke")
     }
 }

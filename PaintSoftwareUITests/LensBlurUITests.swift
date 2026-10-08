@@ -15,51 +15,6 @@ import XCTest
 /// full-screen editor for every step).
 final class LensBlurUITests: PaintUITestCase {
 
-    private func attach(_ app: XCUIApplication, _ name: String) {
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = name
-        shot.lifetime = .keepAlways
-        add(shot)
-    }
-
-    private struct RGB: Equatable, CustomStringConvertible {
-        let r: Int, g: Int, b: Int
-        var sum: Int { r + g + b }
-        var description: String { "(r: \(r), g: \(g), b: \(b))" }
-    }
-
-    private func probe(_ canvas: XCUIElement, dx: Double, dy: Double) -> RGB {
-        let p = rgbaPixel(of: canvas, dx: dx, dy: dy)
-        return RGB(r: Int(p?.r ?? 0), g: Int(p?.g ?? 0), b: Int(p?.b ?? 0))
-    }
-
-    /// Reads until two consecutive reads agree, so a probe taken while the render is still landing
-    /// off the main thread is not the number the test reasons about — `GlareUITests`' own helper.
-    private func settled(timeout: TimeInterval = 4, _ read: () -> RGB) -> RGB {
-        var last: RGB?
-        let deadline = Date().addingTimeInterval(timeout)
-        var current = read()
-        while Date() < deadline {
-            if current == last { return current }
-            last = current
-            usleep(150_000)
-            current = read()
-        }
-        return current
-    }
-
-    private func setBrushColor(_ app: XCUIApplication, hex: String) {
-        let colorButton = app.buttons["toolbar.colorButton"]
-        XCTAssertTrue(colorButton.waitForExistence(timeout: 5), "The toolbar's colour button")
-        colorButton.tap()
-        let hexField = app.textFields["colorPanel.hexField"]
-        XCTAssertTrue(hexField.waitForExistence(timeout: 5), "The colour panel's hex field")
-        setHexField(app, hexField, to: hex)
-        colorButton.tap()
-        XCTAssertTrue(app.otherElements["colorPanel.svSquare"].waitForNonExistence(timeout: 5),
-                      "The colour panel must be closed before the canvas is touched")
-    }
-
     /// **The whole feature, cold, from an empty document**, in the order the artist meets it:
     ///
     /// 1. A thick black band across the middle, so there is dark ink for a highlight to bloom over —
@@ -98,7 +53,7 @@ final class LensBlurUITests: PaintUITestCase {
         let beforePaper = settled { probe(canvas, dx: 0.5, dy: 0.2) }
         XCTAssertLessThan(beforeBeside.sum, 150, "PREMISE: dark ink beside the blob before any effect: \(beforeBeside)")
         XCTAssertGreaterThan(beforePaper.sum, 600, "PREMISE: bare paper above the band: \(beforePaper)")
-        attach(app, "1-band-and-highlight")
+        attachScreenshot(app, "1-band-and-highlight")
 
         // 3.
         openLayerPanel(app)
@@ -128,7 +83,7 @@ final class LensBlurUITests: PaintUITestCase {
         for (id, position) in [("radius", 1.0), ("threshold", 0.5), ("boost", 1.0)] {
             app.sliders["effectSettings.\(id)"].adjust(toNormalizedSliderPosition: position)
         }
-        attach(app, "2-lens-blur-settings")
+        attachScreenshot(app, "2-lens-blur-settings")
 
         // 5.
         let afterBeside = settled { probe(canvas, dx: 0.525, dy: 0.5) }
@@ -143,6 +98,9 @@ final class LensBlurUITests: PaintUITestCase {
             Bare paper nowhere near the ink must be left alone — the gather reads the ink and no ink \
             is within reach: before \(beforePaper), after \(afterPaper).
             """)
-        attach(app, "3-after-the-lens-blur")
+        attachScreenshot(app, "3-after-the-lens-blur")
     }
+}
+
+private extension PaintUITestCase.RGB {
 }

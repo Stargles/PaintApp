@@ -46,13 +46,6 @@ final class PoseBakeUITests: PaintUITestCase {
         return band.value as? String
     }
 
-    private func attach(_ app: XCUIApplication, _ name: String) {
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = name
-        shot.lifetime = .keepAlways
-        add(shot)
-    }
-
     /// **The picture on the canvas as a grid of ink samples inside the visible paper**, taken once
     /// the canvas has stopped changing *and is showing a drawing*: two consecutive grids that agree,
     /// with paper under most of the samples and ink under some.
@@ -61,21 +54,14 @@ final class PoseBakeUITests: PaintUITestCase {
     /// served from a baked frame that arrives after a gesture, and while it is on its way the host is
     /// masked black — two reads of that a quarter-second apart "agree", and the first draft of this
     /// probe returned an all-dark grid for the animated frame and the resting one alike. Sampling only
-    /// inside `visibleCanvasBounds` keeps the letterbox out of the count, and 300 rows are enough that
-    /// a stroke drawn with the size below cannot fall between two of them.
+    /// inside `visiblePaperRect` keeps the letterbox and the timeline — both black, which reads as ink —
+    /// out of the count, and 300 rows are enough that a stroke drawn with the size below cannot fall
+    /// between two of them.
     private func settledInk(_ app: XCUIApplication, _ canvas: XCUIElement,
                             timeout: TimeInterval = 12) throws -> [Bool] {
-        let bounds = visibleCanvasBounds(canvas)
-        // **The paper's bottom edge is under the timeline**, which draws over the host from its own
-        // top edge down: `visibleCanvasBounds` is where the paper would end, not where it can be seen
-        // to. The probe stopped 3 points short of the timeline and a 20-point-wider canvas (the
-        // slimmer rail, TODO (144)) put its last rows inside it, where black reads as ink and made
-        // every grid's extent run to the bottom row. The timeline's top edge is 28 points above its
-        // collapse button (MEASURED, 1105 against 1133 on the 13-inch simulator); 32 is that and slack.
-        let timelineTop = Double(app.buttons["timeline.collapseButton"].frame.minY - 32 - canvas.frame.minY)
-            / Double(canvas.frame.height)
-        let x0 = bounds.minX + 0.04, x1 = bounds.maxX - 0.04
-        let y0 = bounds.minY + 0.04, y1 = min(bounds.maxY - 0.04, timelineTop)
+        let paper = visiblePaperRect(app, in: canvas)
+        let x0 = paper.minX + 0.04, x1 = paper.maxX - 0.04
+        let y0 = paper.minY + 0.04, y1 = paper.maxY - 0.04
         func grid(_ probe: (Double, Double) -> Bool) -> [Bool] {
             (0..<300).flatMap { yi in (0..<60).map { xi in
                 probe(x0 + (x1 - x0) * Double(xi) / 59, y0 + (y1 - y0) * Double(yi) / 299)
@@ -207,7 +193,7 @@ final class PoseBakeUITests: PaintUITestCase {
         let animatedInk = try settledInk(app, canvas)
         assertDifferentDrawing(animatedInk, restingInk,
                                "premise: the middle frame shows the drawing somewhere other than at rest")
-        attach(app, "1-animated-at-the-middle-frame")
+        attachScreenshot(app, "1-animated-at-the-middle-frame")
 
         // What the artist does next: the block's menu, the Bake row beside Add Keyframe.
         openCelMenu(app, cel: "timeline.cel.0.0", at: 0.54)
@@ -223,7 +209,7 @@ final class PoseBakeUITests: PaintUITestCase {
         XCTAssertTrue(sentence.contains("12 drawings from 1"), "the sentence names the count: \(sentence)")
         XCTAssertTrue(sentence.contains("save"), "and the save cost: \(sentence)")
         XCTAssertTrue(sentence.contains("undone"), "and that it can be undone: \(sentence)")
-        attach(app, "2-the-confirmation")
+        attachScreenshot(app, "2-the-confirmation")
         confirm.buttons["Bake"].tap()
 
         // What is drawn on the timeline: twelve one-frame blocks and no diamonds.
@@ -248,7 +234,7 @@ final class PoseBakeUITests: PaintUITestCase {
         assertSameDrawing(bakedInk, animatedInk,
                           "the baked drawing at frame \(shown) is the picture the animation showed there")
         assertDifferentDrawing(bakedInk, restingInk, "and it is not the resting drawing")
-        attach(app, "3-baked-at-the-middle-frame")
+        attachScreenshot(app, "3-baked-at-the-middle-frame")
 
         // What the artist does next: one press of Undo, and the one block and its motion return.
         let undo = app.buttons["sideToolbar.undoButton"]
@@ -263,6 +249,6 @@ final class PoseBakeUITests: PaintUITestCase {
         XCTAssertEqual(markers(app), two, "and the same press restores both keyframes")
         XCTAssertEqual(readFrameLabel(app)?.current, shown, "the playhead is still on frame \(shown)")
         assertSameDrawing(try settledInk(app, canvas), animatedInk, "the middle frame animates again")
-        attach(app, "4-after-one-undo")
+        attachScreenshot(app, "4-after-one-undo")
     }
 }

@@ -177,9 +177,6 @@ final class CRTScreenUITests: PaintUITestCase {
                        "A knob off the preset reads Custom: the name is read from the fields, never stored")
         XCTAssertTrue(title.exists, "…and the bar is still up")
 
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = "computer-screen-arcade-custom"
-        shot.lifetime = .keepAlways
-        add(shot)
+        attachScreenshot(app, "computer-screen-arcade-custom")
     }
 }

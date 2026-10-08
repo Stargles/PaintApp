@@ -32,15 +32,6 @@ final class BakeWiringUITests: PaintUITestCase {
         return nil
     }
 
-    /// `.keepAlways`, as `VideoBakeUITests` does and for its reason: CLAUDE.md's *"drive it in the
-    /// simulator and look at it"* wants the picture kept whether or not the assertion failed.
-    private func attachScreen(_ name: String) {
-        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        shot.name = name
-        shot.lifetime = .keepAlways
-        add(shot)
-    }
-
     private func report(_ name: String, _ seconds: TimeInterval?) {
         XCTContext.runActivity(named: name) { activity in
             activity.add(XCTAttachment(string: seconds.map { "\($0) s" } ?? "never"))
@@ -155,7 +146,7 @@ final class BakeWiringUITests: PaintUITestCase {
                         "A document whose only compositor-worthy feature is a keyframed "
                         + "transformation layer must engage the sandwich, or the canvas never reads "
                         + "the bake and pays a canvas-sized posed render on the main actor per tick")
-        attachScreen("01-frame-0-off-the-bake")
+        attachScreenshot(XCUIScreen.main, "01-frame-0-off-the-bake")
 
         // The seed's stroke runs from 0.2 to 0.5 of the width at mid-height and the move translates
         // by 0.4 of the width, so this point is ink at frame 0 and has to stay ink: what is being
@@ -183,7 +174,7 @@ final class BakeWiringUITests: PaintUITestCase {
                             "Every frame of a move is its own bake key and its own file, and the "
                             + "canvas has to come to rest on each of them")
         }
-        attachScreen("02-six-frames-into-the-move")
+        attachScreenshot(XCUIScreen.main, "02-six-frames-into-the-move")
 
         let after = try XCTUnwrap(derivedRenderCount(app))
         XCTAssertEqual(after, before,
@@ -234,7 +225,7 @@ final class BakeWiringUITests: PaintUITestCase {
                        "Three seconds of playback — six laps of the loop — must rasterize no posed "
                        + "ink either. This is the owner's report in one line: \"when I play the "
                        + "animation, the FPS drops to 8fps\"")
-        attachScreen("03-after-three-seconds-of-playback")
+        attachScreenshot(XCUIScreen.main, "03-after-three-seconds-of-playback")
     }
 
     /// **A held frame is composited once for the whole hold, on the live canvas as well as in the
@@ -265,7 +256,7 @@ final class BakeWiringUITests: PaintUITestCase {
         XCTAssertNotNil(waitForSandwich(app, "rest"),
                         "A transformation layer engages the sandwich, so the canvas has to come to "
                         + "rest on the baked frame before any of this is measurable")
-        attachScreen("01-hold-fixture-frame-0")
+        attachScreenshot(XCUIScreen.main, "01-hold-fixture-frame-0")
 
         let next = app.buttons["timeline.stepForwardButton"]
         XCTAssertTrue(next.waitForExistence(timeout: 5))
@@ -295,7 +286,7 @@ final class BakeWiringUITests: PaintUITestCase {
                                     + "composite has to be rebuilt for each. A count that did not "
                                     + "move here is a broken instrument, and would make the "
                                     + "assertion below meaningless")
-        attachScreen("02-end-of-the-move")
+        attachScreenshot(XCUIScreen.main, "02-end-of-the-move")
 
         // **The case under test.** Frames 5→11 are past the last pose key, so `AnimationCurve` clamps
         // and every one of them resolves to the frame-4 pose: the same tree, the same leaf versions,
@@ -311,7 +302,7 @@ final class BakeWiringUITests: PaintUITestCase {
             per frame is fourteen canvas-sized composites (`FrameRecipe.compositeHalves` is two) \
             spent to produce the picture already on screen, which is TODO (54) exactly.
             """)
-        attachScreen("03-end-of-the-hold")
+        attachScreenshot(XCUIScreen.main, "03-end-of-the-hold")
     }
 
     /// **Where the seeded stroke's ink begins and ends across the paper, in `canvas.host`'s own

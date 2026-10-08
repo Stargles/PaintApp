@@ -48,13 +48,6 @@ final class SelectToolTapOffUITests: PaintUITestCase {
         selectButton.tap()
         XCTAssertTrue(deselect.waitForExistence(timeout: 5))
         XCTAssertFalse(deselect.isEnabled, "no loop, so Deselect is dim — the selection is gone")
-        attach(app, "select-off-cleared")
-    }
-
-    private func attach(_ app: XCUIApplication, _ name: String) {
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = name
-        shot.lifetime = .keepAlways
-        add(shot)
+        attachScreenshot(app, "select-off-cleared")
     }
 }

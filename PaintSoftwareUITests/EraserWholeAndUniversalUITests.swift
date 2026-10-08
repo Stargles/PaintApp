@@ -7,14 +7,6 @@ import XCTest
 /// `VectorEraserCommitLogicTests`; nothing there can see a segmented control or a switch.
 final class EraserWholeAndUniversalUITests: PaintUITestCase {
 
-    /// Kept past a green run, so the picture can be looked at rather than inferred from the counts.
-    private func attach(_ element: XCUIElement, _ name: String) {
-        let shot = XCTAttachment(screenshot: element.screenshot())
-        shot.name = name
-        shot.lifetime = .keepAlways
-        add(shot)
-    }
-
     private func openEraserPanel(_ app: XCUIApplication) {
         openBrushLibrary(app, tool: "eraser")
     }
@@ -64,7 +56,7 @@ final class EraserWholeAndUniversalUITests: PaintUITestCase {
         let after = vectorMarkerViaPanel(app, layerIndex: 0)
         XCTAssertEqual(after?.strokes, 1, "one line deleted whole, one left — not split, so not three")
         XCTAssertEqual(after?.erases, 0, "Whole retains no punch")
-        attach(canvas, "whole-after")
+        attachScreenshot(canvas, "whole-after")
     }
 
     // MARK: - (82)
@@ -92,14 +84,14 @@ final class EraserWholeAndUniversalUITests: PaintUITestCase {
         // The switch itself, not its label — tapping a SwiftUI `Toggle`'s label does not flip it.
         toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
         XCTAssertEqual(toggle.value as? String, "1", "One tap turns it on")
-        attach(app, "universal-panel")
+        attachScreenshot(app, "universal-panel")
         closeEraserPanel(app)
 
         drawLine(on: canvas, from: CGVector(dx: 0.5, dy: 0.35), to: CGVector(dx: 0.5, dy: 0.65))
         XCTAssertEqual(vectorMarkerViaPanel(app, layerIndex: 1)?.strokes, 2, "The active layer's line is cut in two")
         XCTAssertEqual(vectorMarkerViaPanel(app, layerIndex: 0)?.strokes, 2,
                        "…and so is the other visible layer's, which a single-layer eraser would never have reached")
-        attach(canvas, "universal-after")
+        attachScreenshot(canvas, "universal-after")
 
         app.buttons["sideToolbar.undoButton"].tap()
         XCTAssertEqual(vectorMarkerViaPanel(app, layerIndex: 1)?.strokes, 1, "One undo press restores both layers")

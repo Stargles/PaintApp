@@ -18,12 +18,9 @@ final class KeepStrokeWidthUITests: PaintUITestCase {
         // **Every coordinate below is on the paper, not the host.** The paper is letterboxed inside
         // a black host, and a darkness probe reads the letterbox as ink — a column measured from the
         // host's top edge counted a band of chrome as line and the line's own growth was a rounding
-        // error beside it. `visibleCanvasBounds` is where the paper actually is.
-        let paper = visibleCanvasBounds(canvas)
-        func at(_ dx: Double, _ dy: Double) -> CGVector {
-            CGVector(dx: paper.minX + (paper.maxX - paper.minX) * dx,
-                     dy: paper.minY + (paper.maxY - paper.minY) * dy)
-        }
+        // error beside it. `paperRect` is where the paper actually is.
+        let paper = paperRect(in: canvas)
+        func at(_ dx: Double, _ dy: Double) -> CGVector { onHost(paper, dx, dy) }
         let lineRow = at(0.5, 0.30).dy, column = at(0.5, 0.30).dx
         let searchWindow = CGRect(x: at(0.05, 0.05).dx, y: at(0.05, 0.05).dy,
                                   width: at(0.95, 0).dx - at(0.05, 0).dx,
@@ -72,8 +69,7 @@ final class KeepStrokeWidthUITests: PaintUITestCase {
             done.tap()
             XCTAssertTrue(done.waitForNonExistence(timeout: 5), "\(label): Done bakes the piece")
             let after = try settledProbe(canvas, window: searchWindow)
-            let shot = XCTAttachment(screenshot: canvas.screenshot())
-            shot.name = label; shot.lifetime = .keepAlways; add(shot)
+            attachScreenshot(canvas, label)
             XCTAssertGreaterThan(length(after), length(drawn) * 1.3,
                                  "\(label): the line is longer, so the corner drag really scaled it")
             return thickness(after)

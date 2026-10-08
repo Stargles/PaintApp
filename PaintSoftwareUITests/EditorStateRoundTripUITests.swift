@@ -70,10 +70,7 @@ final class EditorStateRoundTripUITests: PaintUITestCase {
         let transform = readTransform(app)
         XCTAssertNotEqual(transform, defaultTransform, "PREMISE: the canvas zoomed (\(transform))")
 
-        let before = XCTAttachment(screenshot: app.screenshot())
-        before.name = "1-before-leaving-to-the-gallery"
-        before.lifetime = .keepAlways
-        add(before)
+        attachScreenshot(app, "1-before-leaving-to-the-gallery")
 
         // Out, and back in — the round trip the owner described.
         let tile = saveEditorAndReturnToGallery(app)
@@ -96,9 +93,6 @@ final class EditorStateRoundTripUITests: PaintUITestCase {
         XCTAssertEqual(readTransform(app), transform,
                        "…and at the zoom they had, to the four decimals the label prints")
 
-        let after = XCTAttachment(screenshot: app.screenshot())
-        after.name = "2-reopened-from-the-gallery"
-        after.lifetime = .keepAlways
-        add(after)
+        attachScreenshot(app, "2-reopened-from-the-gallery")
     }
 }

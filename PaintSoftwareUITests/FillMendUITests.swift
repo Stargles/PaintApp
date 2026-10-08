@@ -152,10 +152,7 @@ final class FillMendUITests: PaintUITestCase {
         let picture = try screen(of: canvas)
         let unmended = picture.lightPixels(row: 0.5, from: dividers[0] - 0.007, to: dividers[0] + 0.0095)
         let mended = picture.lightPixels(row: 0.5, from: dividers[1] - 0.007, to: dividers[1] + 0.0095)
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = "mend-seams-line-art-hidden"
-        shot.lifetime = .keepAlways
-        add(shot)
+        attachScreenshot(app, "mend-seams-line-art-hidden")
         XCTAssertGreaterThan(unmended, 0, "Control: with the option off the first two fills leave paper under the line")
         XCTAssertEqual(mended, 0, "With it on the third fill meets the second under the line — no paper left across the seam")
     }
@@ -200,8 +197,7 @@ final class FillMendUITests: PaintUITestCase {
 
         // The visible canvas is the square the host letterboxes; the padding's outer 40% of itself is
         // a band on each side, so a point 1% of the visible width in from its edge is padding.
-        let bounds = visibleCanvasBounds(canvas)
-        let inPadding = (dx: bounds.minX + (bounds.maxX - bounds.minX) * 0.01, dy: 0.5)
+        let inPadding = onHost(paperRect(in: canvas), 0.01, 0.5)
         canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         XCTAssertTrue(waitUntilFilled(canvas, dx: 0.5, dy: 0.5), "The flood fills the paper")
         let before = try screen(of: canvas)
@@ -214,10 +210,7 @@ final class FillMendUITests: PaintUITestCase {
         fillButton.tap()
         Thread.sleep(forTimeInterval: 1.5)
         let after = try screen(of: canvas)
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = "extension-buffer-at-the-padding"
-        shot.lifetime = .keepAlways
-        add(shot)
+        attachScreenshot(app, "extension-buffer-at-the-padding")
         XCTAssertFalse(after.light(inPadding.dx, inPadding.dy),
                        "With the buffer at the padding's width the fill reaches out to the padded canvas's edge")
     }

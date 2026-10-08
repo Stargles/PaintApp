@@ -42,13 +42,6 @@ final class CelSpanCropUITests: PaintUITestCase {
         return band.value as? String
     }
 
-    private func attach(_ app: XCUIApplication, _ name: String) {
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = name
-        shot.lifetime = .keepAlways
-        add(shot)
-    }
-
     /// **Mark, scrub, Move, Done, mark; drag the right edge in past the second key; read the banner;
     /// undo.** The assertions are on the marker band (`TimelineKeyMarkers.encode` over §2.28's union,
     /// which is what draws the diamonds) and on the banner's case code, not on anything stored.
@@ -88,7 +81,7 @@ final class CelSpanCropUITests: PaintUITestCase {
             return XCTFail("Could not read the block before the drag")
         }
         XCTAssertEqual(before.length, 12, "Premise: a fresh document's block is twelve frames")
-        attach(app, "1-two-keyframes-on-the-block")
+        attachScreenshot(app, "1-two-keyframes-on-the-block")
 
         // Drag the right edge inward past the second key. More than the minimum, since a synthetic
         // drag undershoots; the premise below checks it actually went past.
@@ -115,7 +108,7 @@ final class CelSpanCropUITests: PaintUITestCase {
                        "and it is the crop notice, not some other banner that happened to be up")
         XCTAssertTrue((notice.label).contains("Undo"),
                       "the sentence says how to get the keyframe back: \(notice.label)")
-        attach(app, "2-cropped-with-the-banner-up")
+        attachScreenshot(app, "2-cropped-with-the-banner-up")
 
         // What the artist does next: one press of Undo, and both the length and the diamond return.
         let undo = app.buttons["sideToolbar.undoButton"]
@@ -127,6 +120,6 @@ final class CelSpanCropUITests: PaintUITestCase {
         }
         XCTAssertEqual(restored.length, before.length, "one press restores the block's length")
         XCTAssertEqual(markers(app), two, "and the same press restores the keyframe with it")
-        attach(app, "3-after-one-undo")
+        attachScreenshot(app, "3-after-one-undo")
     }
 }

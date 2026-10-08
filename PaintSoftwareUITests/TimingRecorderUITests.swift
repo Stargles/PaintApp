@@ -143,13 +143,6 @@ final class TimingRecorderUITests: PaintUITestCase {
                     thenHoldForDuration: 0.5)
     }
 
-    private func attach(_ canvas: XCUIElement, _ name: String) {
-        let shot = XCTAttachment(screenshot: canvas.screenshot())
-        shot.name = name
-        shot.lifetime = .keepAlways
-        add(shot)
-    }
-
     // MARK: -
 
     /// **The feature, on the canvas: one gesture, and each cel keeps the arc drawn while it was up.**
@@ -184,7 +177,7 @@ final class TimingRecorderUITests: PaintUITestCase {
                              "Putting the pen on the canvas starts the take and playback with it — "
                              + "if the playhead is still on frame 1 the canvas is not a recordable "
                              + "surface at all")
-        attach(canvas, "the last cel, straight after the take")
+        attachScreenshot(canvas, "the last cel, straight after the take")
 
         let lastEnd = rgbaPixel(of: canvas, dx: Self.lateProbe.dx, dy: Self.lateProbe.dy)
         let lastStart = rgbaPixel(of: canvas, dx: Self.earlyProbe.dx, dy: Self.earlyProbe.dy)
@@ -197,7 +190,7 @@ final class TimingRecorderUITests: PaintUITestCase {
                       + "(read \(String(describing: lastStart)))")
 
         scrubToFirstBlock(app)
-        attach(canvas, "the first cel, after the take")
+        attachScreenshot(canvas, "the first cel, after the take")
 
         let firstStart = rgbaPixel(of: canvas, dx: Self.earlyProbe.dx, dy: Self.earlyProbe.dy)
         let firstEnd = rgbaPixel(of: canvas, dx: Self.lateProbe.dx, dy: Self.lateProbe.dy)
@@ -228,7 +221,7 @@ final class TimingRecorderUITests: PaintUITestCase {
         let undo = app.buttons["sideToolbar.undoButton"]
         XCTAssertTrue(undo.waitForExistence(timeout: 5))
         undo.tap()
-        attach(canvas, "after one undo press")
+        attachScreenshot(canvas, "after one undo press")
 
         let lastEnd = rgbaPixel(of: canvas, dx: Self.lateProbe.dx, dy: Self.lateProbe.dy)
         XCTAssertTrue(isWhitish(lastEnd),
@@ -283,7 +276,7 @@ final class TimingRecorderUITests: PaintUITestCase {
         let union = zip(onFirst, onLast).map { $0 || $1 }
         let map = zip(steps, union).map { String(format: "%.2f:%@", $0.0, $0.1 ? "#" : ".") }
             .joined(separator: " ")
-        attach(canvas, "the first cel, for the seam sweep")
+        attachScreenshot(canvas, "the first cel, for the seam sweep")
 
         let first = try XCTUnwrap(union.firstIndex(of: true),
                                   "The gesture put ink somewhere, or there is nothing to join (\(map))")

@@ -20,17 +20,6 @@ import XCTest
 /// the bake leaves it white (Bake changes the drawings only).
 final class LayerBakeUITests: PaintUITestCase {
 
-    private func setBrushColour(_ app: XCUIApplication, _ hex: String) {
-        app.buttons["toolbar.colorButton"].tap()
-        let panel = app.otherElements["colorPanel.svSquare"]
-        XCTAssertTrue(panel.waitForExistence(timeout: 5), "The colour button opens the colour panel")
-        let field = app.textFields["colorPanel.hexField"]
-        XCTAssertTrue(field.waitForExistence(timeout: 5))
-        setHexField(app, field, to: hex)
-        app.buttons["toolbar.colorButton"].tap()
-        XCTAssertTrue(panel.waitForNonExistence(timeout: 5), "The colour panel must be closed before the canvas is touched")
-    }
-
     private func pixel(_ canvas: XCUIElement, _ point: (dx: CGFloat, dy: CGFloat)) -> (r: UInt8, g: UInt8, b: UInt8, a: UInt8)? {
         rgbaPixel(of: canvas, dx: Double(point.dx), dy: Double(point.dy))
     }
@@ -60,13 +49,13 @@ final class LayerBakeUITests: PaintUITestCase {
         let onPaper = (dx: start.dx + 0.06, dy: start.dy + 0.1)
 
         // Two drawings, each its own colour, each on its own vector layer.
-        setBrushColour(app, "FF0000")
+        setBrushColor(app, hex: "FF0000")
         drawLine(on: canvas, from: start, to: CGVector(dx: start.dx + 0.12, dy: start.dy))
         openLayerPanel(app)
         addVectorLayerFromOpenPanel(app)
         XCTAssertTrue(app.staticTexts["layerPanel.row.1"].waitForExistence(timeout: 5))
         app.buttons["toolbar.layersButton"].tap()
-        setBrushColour(app, "0000FF")
+        setBrushColor(app, hex: "0000FF")
         drawLine(on: canvas, from: second, to: CGVector(dx: second.dx + 0.12, dy: second.dy))
 
         // The layer that is going to be baked: a flat colour in Multiply (mid-grey, which is what a new

@@ -39,10 +39,7 @@ final class FlightRecorderUITests: PaintUITestCase {
 
         XCTAssertTrue(app.staticTexts["recorder.flightNotice"].waitForExistence(timeout: 3),
                       "the badge over the canvas says the save happened")
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = "save-last-90-seconds"
-        shot.lifetime = .keepAlways
-        add(shot)
+        attachScreenshot(app, "save-last-90-seconds")
         _ = flightFiles.element(boundBy: before).waitForExistence(timeout: 5)
         XCTAssertEqual(flightFiles.count, before + 1, """
             The saved file has to be listed under Recordings — the list Share and Delete work from — \

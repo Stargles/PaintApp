@@ -25,10 +25,7 @@ final class TopBarMenusUITests: PaintUITestCase {
         XCTAssertTrue(app.buttons["recorder.toggle"].waitForExistence(timeout: 5),
                       "Record My Actions is in the Settings menu")
 
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = "settings-menu"
-        shot.lifetime = .keepAlways
-        add(shot)
+        attachScreenshot(app, "settings-menu")
     }
 
     /// TODO (104) — the owner: *"In actions should be cut, copy, paste, flip horizontal, flip
@@ -58,10 +55,7 @@ final class TopBarMenusUITests: PaintUITestCase {
                            "\(identifier) moved out of Actions and must not still be reachable there")
         }
 
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = "actions-menu-six-rows"
-        shot.lifetime = .keepAlways
-        add(shot)
+        attachScreenshot(app, "actions-menu-six-rows")
     }
 
     /// TODO (143) — the owner: *"rearrange the icons into this order from left to right: gallery,
@@ -114,10 +108,7 @@ final class TopBarMenusUITests: PaintUITestCase {
         XCTAssertLessThan(nameField.frame.minY, 100,
                           "the scene name must be in the top bar, not down by the timeline")
 
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = "top-bar-order"
-        shot.lifetime = .keepAlways
-        add(shot)
+        attachScreenshot(app, "top-bar-order")
     }
 
     /// TODO (137) — the owner: *"In the selection menu, remove "what the loop catches", and "draw a
@@ -147,10 +138,7 @@ final class TopBarMenusUITests: PaintUITestCase {
         XCTAssertTrue(explanation.exists, "the line saying what the selected rule does is gone")
         XCTAssertFalse(explanation.label.isEmpty, "…and it is empty")
 
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = "select-menu-without-hints"
-        shot.lifetime = .keepAlways
-        add(shot)
+        attachScreenshot(app, "select-menu-without-hints")
     }
 
     /// TODO (137) — the owner: *"In the move menu, remove the text "strokes you move are stored
@@ -182,10 +170,7 @@ final class TopBarMenusUITests: PaintUITestCase {
         XCTAssertLessThan(floor.frame.maxY - precision.frame.maxY, 40,
                           "something is stacked under the two switches, taking vertical space")
 
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = "move-menu-without-paragraph"
-        shot.lifetime = .keepAlways
-        add(shot)
+        attachScreenshot(app, "move-menu-without-paragraph")
     }
 
     /// **TODO (133) — the padding covers what is drawn into it, and the artwork's edge stays an edge.**
@@ -216,9 +201,8 @@ final class TopBarMenusUITests: PaintUITestCase {
 
         // The visible canvas is the padded square the host letterboxes; at a 0.2 slider the margin is
         // about 8% of its width a side, so 2% is inside it and 20% is well inside the artwork.
-        let bounds = visibleCanvasBounds(canvas)
-        let width = bounds.maxX - bounds.minX
-        func x(_ fraction: Double) -> Double { bounds.minX + width * fraction }
+        let paper = paperRect(in: canvas)
+        func x(_ fraction: Double) -> Double { onHost(paper, fraction, 0.5).dx }
         dragOnCanvas(app, from: CGVector(dx: x(0.02), dy: 0.5), to: CGVector(dx: x(0.20), dy: 0.5))
         Thread.sleep(forTimeInterval: 1.0)
 

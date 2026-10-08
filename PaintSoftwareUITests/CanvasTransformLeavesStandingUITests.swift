@@ -16,7 +16,7 @@ import XCTest
 /// looked exactly like a tap, a stroke or a fill — it closed the open panel and stopped the playhead
 /// before the second finger arrived to say it was neither. `pinch` and `rotate` deliver both touches in
 /// one event and so never showed it, which is how TODO (67) shipped green and the owner still lost
-/// the menu. **`staggeredTwoFingerDrag` is what reproduces it**: every test here drives the stagger
+/// the menu. **`panAboveTheDock` is what reproduces it**: every test here drives the stagger
 /// the owner's hand makes, and the batched `pinch` beside it.
 ///
 /// Each test starts from a fresh document and reaches its menu the way the artist does; none builds
@@ -26,11 +26,6 @@ import XCTest
 /// Its own class because xcodebuild distributes parallel work per class (CLAUDE.md), and
 /// `OptionsPanelUITests` is already the heaviest.
 final class CanvasTransformLeavesStandingUITests: PaintUITestCase {
-
-    /// Where the two fingers land, left of the layer rail, the dock and the timeline — the one
-    /// stretch of canvas nothing here ever covers.
-    private let first = CGVector(dx: 0.10, dy: 0.30)
-    private let second = CGVector(dx: 0.22, dy: 0.42)
 
     /// **The owner draws with the Pencil, so a finger on the canvas is a pan and never a stroke.**
     /// That is "Fingers Can Paint" off — passed as a launch argument, which overrides the persisted
@@ -62,7 +57,7 @@ final class CanvasTransformLeavesStandingUITests: PaintUITestCase {
         XCTAssertTrue(title.waitForExistence(timeout: 5),
                       "PREMISE: the effect settings bar is up the moment the effect layer is current, with no tap")
         XCTAssertEqual(title.label, "Brightness / Contrast")
-        attach(app, "effect-bar-up")
+        attachScreenshot(app, "effect-bar-up")
 
         try assertTheMenuSurvivesTheTransforms(app, canvas, "the effect settings bar") { title.exists }
 
@@ -102,14 +97,15 @@ final class CanvasTransformLeavesStandingUITests: PaintUITestCase {
         XCTAssertTrue(title.waitForExistence(timeout: 5), "PREMISE: the node's effect settings bar is up")
         XCTAssertFalse(app.tables["layerPanel.list"].exists,
                        "PREMISE: a node's bar is raised from the rail's options, so the rail stands down for it")
-        attach(app, "node-effect-bar-up")
+        attachScreenshot(app, "node-effect-bar-up")
 
         try assertTheMenuSurvivesTheTransforms(app, canvas, "the node's effect settings bar") { title.exists }
 
         // THE CONTROL: a genuine single-finger touch on the canvas is an edit, and still closes it —
         // the gate defers the touch, it does not make it harmless. (Layer 0, the document's own
         // vector layer, is still current and drawable: opening a node's options selects nothing.)
-        drawLine(on: canvas, from: CGVector(dx: 0.4, dy: 0.3), to: CGVector(dx: 0.6, dy: 0.3))
+        let paper = visiblePaperRect(app, in: canvas)
+        drawLine(on: canvas, from: onHost(paper, 0.4, 0.5), to: onHost(paper, 0.6, 0.5))
         XCTAssertTrue(title.waitForNonExistence(timeout: 5),
                       "CONTROL: a single-finger touch on the canvas must still close a node's bar")
     }
@@ -129,7 +125,7 @@ final class CanvasTransformLeavesStandingUITests: PaintUITestCase {
         XCTAssertTrue(app.buttons["selectPanel.mode.lasso"].waitForExistence(timeout: 5), "PREMISE: the Select panel is up")
         XCTAssertTrue(title.waitForNonExistence(timeout: 5),
                       "Select opened over an effect layer's bar: the two stack in the dock instead of one yielding")
-        attach(app, "select-over-effect-layer")
+        attachScreenshot(app, "select-over-effect-layer")
 
         app.buttons["toolbar.selectButton"].tap()
         XCTAssertTrue(app.buttons["selectPanel.mode.lasso"].waitForNonExistence(timeout: 5), "PREMISE: Select closed")
@@ -160,7 +156,7 @@ final class CanvasTransformLeavesStandingUITests: PaintUITestCase {
         settings.tap()
         let title = app.staticTexts["layerOptions.subMenuTitle"]
         XCTAssertTrue(title.waitForExistence(timeout: 5), "PREMISE: the mode's settings are docked at the bottom")
-        attach(app, "transform-settings-bar-up")
+        attachScreenshot(app, "transform-settings-bar-up")
 
         try assertTheMenuSurvivesTheTransforms(app, canvas, "the transform mode's settings bar") { title.exists }
     }
@@ -179,7 +175,7 @@ final class CanvasTransformLeavesStandingUITests: PaintUITestCase {
         addText.tap()
         let font = app.buttons["textPanel.fontButton"]
         XCTAssertTrue(font.waitForExistence(timeout: 5), "PREMISE: Add Text opened the text panel")
-        attach(app, "text-panel-up")
+        attachScreenshot(app, "text-panel-up")
 
         try assertTheMenuSurvivesTheTransforms(app, canvas, "the text panel") { font.exists }
     }
@@ -238,8 +234,7 @@ final class CanvasTransformLeavesStandingUITests: PaintUITestCase {
 
         for stagger in [0.0, 0.02] {
             let before = readTransform(app)
-            try staggeredTwoFingerDrag(canvas, a: first, b: second, stagger: stagger,
-                                       delta: CGVector(dx: 60, dy: 40))
+            try panAboveTheDock(app, canvas, stagger: stagger)
             XCTAssertNotEqual(readTransform(app), before,
                               "PREMISE (stagger \(stagger)): the two-finger drag panned the canvas")
             XCTAssertEqual(play.label, playingLabel,
@@ -253,7 +248,7 @@ final class CanvasTransformLeavesStandingUITests: PaintUITestCase {
         XCTAssertNotEqual(readTransform(app), before, "PREMISE: the pinch zoomed the canvas")
         XCTAssertEqual(play.label, playingLabel, "THE BUG: a pinch stopped playback")
         XCTAssertTrue(playheadIsAdvancing(app), "THE BUG: a pinch stopped the playhead")
-        attach(app, "still-playing-after-pan-and-pinch")
+        attachScreenshot(app, "still-playing-after-pan-and-pinch")
 
         // The control that keeps the fix honest: a single touch on the canvas is an edit, and still
         // ends playback.
@@ -274,19 +269,18 @@ final class CanvasTransformLeavesStandingUITests: PaintUITestCase {
         for (stagger, shape) in [(0.0, "two fingers landing together"),
                                  (0.02, "two fingers landing 20 ms apart")] {
             let before = readTransform(app)
-            try staggeredTwoFingerDrag(canvas, a: first, b: second, stagger: stagger,
-                                       delta: CGVector(dx: 60, dy: 40))
+            try panAboveTheDock(app, canvas, stagger: stagger)
             XCTAssertNotEqual(readTransform(app), before,
                               "PREMISE (\(shape)): the drag panned the canvas", file: file, line: line)
             XCTAssertTrue(stillOnScreen(),
                           "THE BUG: a two-finger pan with \(shape) closed \(what)", file: file, line: line)
         }
         let before = readTransform(app)
-        try pinchAboveTheDock(canvas, scale: 1.4)
+        try pinchAboveTheDock(app, canvas, scale: 1.4)
         XCTAssertNotEqual(readTransform(app), before, "PREMISE: the pinch zoomed the canvas",
                           file: file, line: line)
         XCTAssertTrue(stillOnScreen(), "THE BUG: a pinch closed \(what)", file: file, line: line)
-        attach(app, "\(what)-after-pan-and-pinch")
+        attachScreenshot(app, "\(what)-after-pan-and-pinch")
     }
 
     /// Whether the playhead is moving: the frame label takes more than one value across a run of reads.
@@ -317,12 +311,5 @@ final class CanvasTransformLeavesStandingUITests: PaintUITestCase {
             Thread.sleep(forTimeInterval: Double.random(in: 0.003...0.09))
         }
         return seen.count == 1
-    }
-
-    private func attach(_ app: XCUIApplication, _ name: String) {
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = name
-        shot.lifetime = .keepAlways
-        add(shot)
     }
 }

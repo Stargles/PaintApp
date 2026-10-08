@@ -62,13 +62,6 @@ final class OnionOpacitySlidersUITests: PaintUITestCase {
         (1...5).map { percent(opacitySlider(app, side, $0)) }
     }
 
-    private func attach(_ app: XCUIApplication, _ name: String) {
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = name
-        shot.lifetime = .keepAlways
-        add(shot)
-    }
-
     // MARK: - The tests
 
     /// **TODO (138), cold start: the two opacity sliders are independent.** The owner: *"the user
@@ -103,7 +96,7 @@ final class OnionOpacitySlidersUITests: PaintUITestCase {
         drag(previous, to: 0.08)
         XCTAssertLessThan(percent(previous), startPrevious - 15, "PREMISE: the drag moved the left slider")
         XCTAssertEqual(percent(next), movedNext, "dragging the left slider moved the right one")
-        attach(app, "onion-sliders-independent")
+        attachScreenshot(app, "onion-sliders-independent")
     }
 
     /// **TODO (138)'s follow-up, cold start: the chain links one side's two ends.** The owner: *"keep
@@ -142,7 +135,7 @@ final class OnionOpacitySlidersUITests: PaintUITestCase {
         let startPrevious = readings(app, "previous"), startNext = readings(app, "next")
         assertOnTheLine(startPrevious, "a fresh side")
         assertOnTheLine(startNext, "a fresh side")
-        attach(app, "onion-chain-on-five-skins")
+        attachScreenshot(app, "onion-chain-on-five-skins")
 
         // Drag the previous side's furthest end up: everything between follows, its nearest and the
         // other side do not.
@@ -162,7 +155,7 @@ final class OnionOpacitySlidersUITests: PaintUITestCase {
         XCTAssertEqual(afterNext[4], startNext[4], "the furthest end did not move")
         assertOnTheLine(afterNext, "after dragging the next side's nearest end")
         XCTAssertEqual(readings(app, "previous"), afterPrevious, "the other side did not move")
-        attach(app, "onion-chain-on-ends-dragged")
+        attachScreenshot(app, "onion-chain-on-ends-dragged")
 
         // Chain off: every slider is live, and none jumped.
         chain(app).tap()
@@ -184,6 +177,6 @@ final class OnionOpacitySlidersUITests: PaintUITestCase {
         XCTAssertEqual(relinked[4], alone[4], "…and the furthest")
         assertOnTheLine(relinked, "re-chained")
         XCTAssertFalse(opacitySlider(app, "previous", 3).isEnabled, "…and the middle is dimmed again")
-        attach(app, "onion-chain-relinked")
+        attachScreenshot(app, "onion-chain-relinked")
     }
 }

@@ -82,10 +82,7 @@ final class EyedropperModeUITests: PaintUITestCase {
         XCTAssertTrue(compositeMode.exists)
         XCTAssertTrue(layerMode.isSelected, "A new document picks from the layer — the owner's default")
         XCTAssertFalse(compositeMode.isSelected)
-        let panelShot = XCTAttachment(screenshot: app.screenshot())
-        panelShot.name = "colour-panel-with-the-eyedropper-switch"
-        panelShot.lifetime = .keepAlways
-        add(panelShot)
+        attachScreenshot(app, "colour-panel-with-the-eyedropper-switch")
         closeColorPanel(app)
         XCTAssertEqual(brushHex(app), "000000", "Setup: the brush is black before any pick")
 
@@ -138,9 +135,6 @@ final class EyedropperModeUITests: PaintUITestCase {
         XCTAssertTrue(app.buttons["colorPanel.eyedropperMode.composite"].isSelected,
                       "The reopened document still picks from the whole canvas — it is one of the things the canvas remembers")
         XCTAssertFalse(app.buttons["colorPanel.eyedropperMode.layer"].isSelected)
-        let after = XCTAttachment(screenshot: app.screenshot())
-        after.name = "reopened-with-the-switch-still-on-canvas"
-        after.lifetime = .keepAlways
-        add(after)
+        attachScreenshot(app, "reopened-with-the-switch-still-on-canvas")
     }
 }

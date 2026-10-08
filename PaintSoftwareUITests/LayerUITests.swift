@@ -188,10 +188,7 @@ final class LayerStackUITests: PaintUITestCase {
 
         XCTAssertFalse(app.staticTexts["Vector 1"].exists, "no layer carries the old \"Vector N\" name")
         XCTAssertFalse(app.staticTexts["Vector 2"].exists, "no layer carries the old \"Vector N\" name")
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = "layer-names"
-        shot.lifetime = .keepAlways
-        add(shot)
+        attachScreenshot(app, "layer-names")
     }
 
     /// Swiping a layer row reveals Delete and Duplicate — and no Edit, which moved to the options
@@ -354,10 +351,7 @@ final class LayerFolderAndMaskMenuUITests: PaintUITestCase {
         XCTAssertEqual(app.staticTexts["layerPanel.folder.Folder 2"].value as? String, "0",
                        "…beside it, not inside it: a drop below a folder is not a drop into it")
         XCTAssertEqual(app.staticTexts["layerPanel.folder.Folder 1"].value as? String, "0")
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = "folder-dropped-below-the-other"
-        shot.lifetime = .keepAlways
-        add(shot)
+        attachScreenshot(app, "folder-dropped-below-the-other")
 
         dragRow(folderCell(app, named: "Folder 2"), onto: folderCell(app, named: "Folder 1"), dropDY: 0.05)
         waitForOrder("Folder 2", above: "Folder 1", "Dropped on the upper edge of the other, it should be back on top")
@@ -565,8 +559,7 @@ final class LayerFolderAndMaskMenuUITests: PaintUITestCase {
         let moveRow = app.buttons["layerOptions.folderMove"]
         XCTAssertTrue(moveRow.waitForExistence(timeout: 5),
                       "A folder's options offer Move, with no switch to turn on first")
-        var shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = "folder-move-before-move"; shot.lifetime = .keepAlways; add(shot)
+        attachScreenshot(app, "folder-move-before-move")
 
         moveRow.tap()
         XCTAssertTrue(app.buttons["moveBar.doneButton"].waitForExistence(timeout: 5), """
@@ -601,8 +594,7 @@ final class LayerFolderAndMaskMenuUITests: PaintUITestCase {
         let start = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.32, dy: 0.50))
         let end = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.52, dy: 0.50))
         start.press(forDuration: 0.4, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.4)
-        shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = "folder-move-mid-drag"; shot.lifetime = .keepAlways; add(shot)
+        attachScreenshot(app, "folder-move-mid-drag")
 
         // **The live preview moves the ink too, before Done is ever tapped** — the latched bitmap
         // rides a Core Animation transform under the finger, and the bake at gesture end writes the
@@ -627,8 +619,7 @@ final class LayerFolderAndMaskMenuUITests: PaintUITestCase {
             The drawing inside the folder did not travel with the box. A Move row that raises a box
             which moves nothing is the same unusable feature wearing a control.
             """)
-        shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = "folder-move-after-commit"; shot.lifetime = .keepAlways; add(shot)
+        attachScreenshot(app, "folder-move-after-commit")
 
         // **One press of Undo puts the ink back** — the Move tool's own step per nudge (§5.5), which
         // is the whole difference from the container box this row used to raise: what moved is the
@@ -686,10 +677,7 @@ final class LayerPanelControlsUITests: PaintUITestCase {
                        "the readout must say what the slider says — slider at "
                        + "\(slider.normalizedSliderPosition), readout \"\(shown)\"")
 
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = "layer-opacity-readout"
-        shot.lifetime = .keepAlways
-        add(shot)
+        attachScreenshot(app, "layer-opacity-readout")
     }
 
     /// The views control is a dropdown, not a cycling button: it lists the saved views, adds new
@@ -738,10 +726,7 @@ final class LayerPanelControlsUITests: PaintUITestCase {
         XCTAssertEqual(app.buttons["viewMenu.row.0"].label, "View 1 (rough)",
                        "Save commits the typed name onto the same row")
 
-        let renamedShot = XCTAttachment(screenshot: app.screenshot())
-        renamedShot.name = "1-view-renamed-with-visible-pencil-and-trash"
-        renamedShot.lifetime = .keepAlways
-        add(renamedShot)
+        attachScreenshot(app, "1-view-renamed-with-visible-pencil-and-trash")
 
         let deleteButton = app.buttons["viewMenu.row.0.delete"]
         XCTAssertTrue(deleteButton.exists, "Delete is a visible row control too, not a hidden swipe")
@@ -1222,8 +1207,7 @@ final class LayerPanelControlsUITests: PaintUITestCase {
         XCTAssertNotNil(inkPosed, "The ink is still on the canvas after the move")
         XCTAssertGreaterThan(inkPosed ?? 0, (inkResting ?? 0) + 0.05,
                              "Premise: the transformation layer really did move the ink")
-        var shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = "transform-layer-posed"; shot.lifetime = .keepAlways; add(shot)
+        attachScreenshot(app, "transform-layer-posed")
 
         // **What the artist does next.** The Move box docks the rail down while it is live (unlike a
         // no-selection canvas Move, entering *this* Move through the layer options panel leaves the
@@ -1247,8 +1231,7 @@ final class LayerPanelControlsUITests: PaintUITestCase {
             \(String(describing: inkResting)), posed was \(String(describing: inkPosed)). A hidden \
             eye that leaves the ink moved is a control with no visible effect.
             """)
-        shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = "transform-layer-hidden"; shot.lifetime = .keepAlways; add(shot)
+        attachScreenshot(app, "transform-layer-hidden")
 
         openLayerPanel(app)
         eye.tap()   // show it again
@@ -1339,7 +1322,7 @@ final class LayerPanelControlsUITests: PaintUITestCase {
         XCTAssertTrue(waitForThumbnail(app, layerIndex: 0, whitish: false),
                       "the layer panel never shows frame 0's own ink")
         let inkedPixel = try XCTUnwrap(rgbaPixel(of: thumbnail, dx: 0.5, dy: 0.5))
-        shot(app, "78-01-frame0-inked-thumbnail")
+        attachScreenshot(app, "78-01-frame0-inked-thumbnail")
 
         // Everything from here on is a timeline gesture, not a canvas touch, so the panel opened
         // above stays up throughout — `AnimationTimeline` deliberately has no
@@ -1374,7 +1357,7 @@ final class LayerPanelControlsUITests: PaintUITestCase {
             waitForThumbnailChange(app, layerIndex: 0, awayFrom: inkedPixel),
             "the layer panel is still showing frame 0's own ink on a cel that has none of its own "
             + "— the stale-cache bug TODO (78) exists to fix")
-        shot(app, "78-02-new-frame-blank-thumbnail")
+        attachScreenshot(app, "78-02-new-frame-blank-thumbnail")
 
         XCTAssertNotEqual([inkedPixel.r, inkedPixel.g, inkedPixel.b],
                           [blankPixel.r, blankPixel.g, blankPixel.b],
@@ -1417,15 +1400,6 @@ final class LayerPanelControlsUITests: PaintUITestCase {
             Thread.sleep(forTimeInterval: 0.3)
         }
         return nil
-    }
-
-    /// Keeps a screenshot in the result bundle so a person — or an agent reading it back — can look
-    /// at what the test drove, per CLAUDE.md's *"drive it in the simulator and look at it"*.
-    private func shot(_ app: XCUIApplication, _ name: String) {
-        let attachment = XCTAttachment(screenshot: app.screenshot())
-        attachment.name = name
-        attachment.lifetime = .keepAlways
-        add(attachment)
     }
 }
 
@@ -1827,20 +1801,8 @@ final class SandwichCompositingUITests: PaintUITestCase {
     // MARK: - §5.2's sandwich on the live canvas
 
     /// Where the two crossed strokes below meet — the one pixel every assertion in this section is
-    /// about. Vertically centred, so it is never in the letterbox margin (`visibleCanvasBounds`).
+    /// about. Vertically centred, so it is never in the letterbox margin (`paperRect`).
     private var crossing: CGVector { CGVector(dx: 0.45, dy: 0.5) }
-
-    /// Sets the brush colour through the colour panel and closes it again, so it cannot cover the
-    /// canvas the next probe screenshots.
-    private func setBrushColor(_ app: XCUIApplication, hex: String) {
-        let colorButton = app.buttons["toolbar.colorButton"]
-        XCTAssertTrue(colorButton.waitForExistence(timeout: 5))
-        colorButton.tap()
-        let hexField = app.textFields["colorPanel.hexField"]
-        XCTAssertTrue(hexField.waitForExistence(timeout: 5))
-        setHexField(app, hexField, to: hex)
-        colorButton.tap()
-    }
 
     /// Two overlapping strokes on two layers, in colours whose product is nothing like either of
     /// them: cyan underneath, magenta on top. At `crossing` a **Normal** top layer reads magenta

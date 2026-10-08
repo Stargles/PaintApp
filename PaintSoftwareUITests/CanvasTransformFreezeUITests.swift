@@ -197,9 +197,6 @@ final class CanvasTransformFreezeUITests: PaintUITestCase {
         XCTAssertEqual(app.buttons["layerOptions.blendModeButton"].value as? String, "lensblur",
                        "PREMISE: the active layer is a value layer grading Lens Blur, as the owner's was")
 
-        // Left of the rail, the options panel and every menu that hangs off them, and above the
-        // effect layer's settings bar, which is up beside the rail with the layer current.
-        let first = CGVector(dx: 0.10, dy: 0.12), second = CGVector(dx: 0.22, dy: 0.24)
         let menus: [(name: String, open: (XCUIApplication) -> Void)] = [
             ("the Blend Mode / Effect menu", openEffectMenu),
             ("the Views menu", openViewsMenu),
@@ -210,25 +207,20 @@ final class CanvasTransformFreezeUITests: PaintUITestCase {
                 let shape = "\(menu.name), \(fingers)"
                 menu.open(app)
                 let before = readTransform(app)
-                try staggeredTwoFingerDrag(canvas, a: first, b: second, stagger: stagger,
-                                           delta: CGVector(dx: 60, dy: 40))
+                try panAboveTheDock(app, canvas, stagger: stagger)
                 XCTAssertNotEqual(readTransform(app), before, "PREMISE (\(shape)): the drag under the menu pans the canvas")
 
                 closeMenusAndRail(app)
                 try assertPinchMovesCanvas(app, canvas,
                                            "THE BUG (\(shape)): nothing transforms the canvas after a two-finger drag under an open menu")
                 // The same drag with nothing open is the control: it has to leave the canvas alive.
-                try staggeredTwoFingerDrag(canvas, a: first, b: second, stagger: stagger,
-                                           delta: CGVector(dx: -30, dy: -20))
+                try panAboveTheDock(app, canvas, stagger: stagger, delta: CGVector(dx: -30, dy: -20))
                 try assertPinchMovesCanvas(app, canvas,
                                            "CONTROL (\(shape)): the same drag with nothing open stranded the canvas")
             }
         }
         // What is drawn, not only what is stored: the canvas the four drags and eight pinches left.
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = "after-two-finger-drags-under-open-menus"
-        shot.lifetime = .keepAlways
-        add(shot)
+        attachScreenshot(app, "after-two-finger-drags-under-open-menus")
     }
 
     /// Opens the active layer's options from the rail and its Blend Mode / Effect `Menu`, and asserts
@@ -388,7 +380,7 @@ final class CanvasTransformFreezeUITests: PaintUITestCase {
         XCTAssertTrue(app.buttons["textPanel.fontButton"].waitForExistence(timeout: 5),
                       "PREMISE: Add Text opens the text settings panel")
 
-        canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.70, dy: 0.35)).tap()
+        canvas.coordinate(withNormalizedOffset: aboveTheDock(app, canvas, x: 0.70, y: 0.5)).tap()
 
         // **Not optional politeness — without it both tests pass having placed nothing, which is what
         // the first draft of this class did.** The whole premise is a live text session on screen
@@ -537,7 +529,7 @@ final class CanvasTransformFreezeUITests: PaintUITestCase {
     @discardableResult
     private func assertPinchMovesCanvas(_ app: XCUIApplication, _ canvas: XCUIElement, _ message: String) throws -> String {
         let before = readTransform(app)
-        try pinchAboveTheDock(canvas, scale: 2.0)
+        try pinchAboveTheDock(app, canvas, scale: 2.0)
         let after = readTransform(app)
         XCTAssertNotEqual(before, after, "\(message) (xform \(before) -> \(after))")
         return after

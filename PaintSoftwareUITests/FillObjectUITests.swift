@@ -16,36 +16,6 @@ import XCTest
 /// pencil-only gate, which is the fill's and the text tool's, shared by reading the same flag.
 final class FillObjectUITests: PaintUITestCase {
 
-    private typealias RGBA = (r: UInt8, g: UInt8, b: UInt8, a: UInt8)
-
-    private func isInk(_ p: RGBA?) -> Bool { p.map { $0.r < 100 && $0.g < 100 && $0.b < 100 } ?? false }
-    private func isPaper(_ p: RGBA?) -> Bool { p.map { $0.r > 235 && $0.g > 235 && $0.b > 235 } ?? false }
-
-    private func waitUntil(_ canvas: XCUIElement, _ point: CGVector, _ test: (RGBA?) -> Bool,
-                           timeout: TimeInterval = 10) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if test(rgbaPixel(of: canvas, dx: point.dx, dy: point.dy)) { return true }
-            Thread.sleep(forTimeInterval: 0.25)
-        }
-        return false
-    }
-
-    /// A point in the paper's own coordinates — 0…1 across and down the visible square — as a
-    /// normalised offset in `canvas.host`, which is letterboxed.
-    private func paperPoint(_ canvas: XCUIElement, _ x: Double, _ y: Double) -> CGVector {
-        let paper = visibleCanvasBounds(canvas)
-        return CGVector(dx: paper.minX + (paper.maxX - paper.minX) * x,
-                        dy: paper.minY + (paper.maxY - paper.minY) * y)
-    }
-
-    private func attach(_ app: XCUIApplication, _ name: String) {
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = name
-        shot.lifetime = .keepAlways
-        add(shot)
-    }
-
     private func red(_ p: RGBA?) -> Int { Int(p?.r ?? 0) }
 
     private func launch(_ arguments: [String] = []) -> (app: XCUIApplication, canvas: XCUIElement) {
@@ -67,7 +37,7 @@ final class FillObjectUITests: PaintUITestCase {
         XCTAssertTrue(button.waitForNonExistence(timeout: 5), "choosing a row closes the Add menu")
         XCTAssertEqual(primedObjectName(app), name, "the Add icon says what the next pen-down places")
         XCTAssertTrue(app.buttons["toolbar.addButton"].isSelected, "…and is lit while it is primed")
-        attach(app, "primed-\(name)")
+        attachScreenshot(app, "primed-\(name)")
     }
 
     /// The rail's sliders are a `Slider` rotated -90°, which `adjust(toNormalizedSliderPosition:)` does
@@ -94,35 +64,36 @@ final class FillObjectUITests: PaintUITestCase {
     /// lift hands the brush back, and one undo takes it away.
     func testPrimingARectangleThenDraggingPlacesASolidAxisAlignedSquareCentredOnThePress() throws {
         let (app, canvas) = launch()
-        let centre = paperPoint(canvas, 0.5, 0.5)
-        XCTAssertTrue(isPaper(rgbaPixel(of: canvas, dx: centre.dx, dy: centre.dy)), "PREMISE: blank paper")
+        let paper = paperRect(in: canvas)
+        let centre = onHost(paper, 0.5, 0.5)
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: centre.dx, dy: centre.dy)), "PREMISE: blank paper")
 
         prime(app, row: "add.rectangleRow", named: "rectangle")
-        XCTAssertTrue(isPaper(rgbaPixel(of: canvas, dx: centre.dx, dy: centre.dy)),
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: centre.dx, dy: centre.dy)),
                       "priming places nothing: the shape comes with the pen")
         XCTAssertTrue(app.sliders["sideToolbar.brushOpacitySlider"].exists, "the rail keeps the dial a shape has: its opacity")
         XCTAssertFalse(app.sliders["sideToolbar.brushSizeSlider"].exists, "…and not the brush's size, which the pen is about to set")
 
         // A diagonal-ish drag: half the square's side is the larger of the two travels, 0.18 of the paper.
-        dragOnCanvas(app, from: centre, to: paperPoint(canvas, 0.68, 0.64))
+        dragOnCanvas(app, from: centre, to: onHost(paper, 0.68, 0.64))
 
         XCTAssertTrue(waitUntil(canvas, centre, isInk), "the middle of the rectangle is solid")
         for (x, y) in [(0.37, 0.37), (0.63, 0.37), (0.37, 0.63), (0.63, 0.63)] {
-            XCTAssertTrue(isInk(rgbaPixel(of: canvas, dx: paperPoint(canvas, x, y).dx, dy: paperPoint(canvas, x, y).dy)),
+            XCTAssertTrue(isInk(rgbaPixel(of: canvas, at: onHost(paper, x, y))),
                           "corner (\(x), \(y)) is inked — a square that stayed upright however the pen travelled")
         }
         for (x, y) in [(0.5, 0.2), (0.5, 0.8), (0.2, 0.5), (0.8, 0.5)] {
-            XCTAssertTrue(isPaper(rgbaPixel(of: canvas, dx: paperPoint(canvas, x, y).dx, dy: paperPoint(canvas, x, y).dy)),
+            XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, at: onHost(paper, x, y))),
                           "(\(x), \(y)) is outside the square, so it is paper")
         }
         XCTAssertEqual(primedObjectName(app), "", "the lift placed it, so nothing is primed")
         XCTAssertFalse(app.buttons["toolbar.addButton"].isSelected, "…and the Add icon is no longer lit")
         XCTAssertTrue(app.buttons["toolbar.brushButton"].isSelected, "the brush is back in the artist's hand")
         XCTAssertFalse(app.buttons["moveBar.doneButton"].exists, "no Move box: the pen already sized it")
-        attach(app, "rectangle-dragged-out")
+        attachScreenshot(app, "rectangle-dragged-out")
 
         undo(app)
-        XCTAssertTrue(waitUntil(canvas, centre, isPaper), "one undo took the whole rectangle away")
+        XCTAssertTrue(waitUntil(canvas, centre, isWhitish), "one undo took the whole rectangle away")
     }
 
     /// **An ellipse starts as a point at the press and the circle grows with the pen**, which rides its
@@ -130,38 +101,40 @@ final class FillObjectUITests: PaintUITestCase {
     /// bounding square — farther from the press than the pen went — is bare paper.
     func testPrimingAnEllipseThenDraggingPlacesASolidCircleTheSizeOfTheDrag() throws {
         let (app, canvas) = launch()
+        let paper = paperRect(in: canvas)
         prime(app, row: "add.ellipseRow", named: "ellipse")
-        let centre = paperPoint(canvas, 0.5, 0.5)
+        let centre = onHost(paper, 0.5, 0.5)
 
-        dragOnCanvas(app, from: centre, to: paperPoint(canvas, 0.7, 0.5))
+        dragOnCanvas(app, from: centre, to: onHost(paper, 0.7, 0.5))
 
         XCTAssertTrue(waitUntil(canvas, centre, isInk), "the middle of the ellipse is solid")
-        XCTAssertTrue(isInk(rgbaPixel(of: canvas, dx: paperPoint(canvas, 0.5, 0.36).dx, dy: paperPoint(canvas, 0.5, 0.36).dy)),
+        XCTAssertTrue(isInk(rgbaPixel(of: canvas, at: onHost(paper, 0.5, 0.36))),
                       "…out to near its top, a radius above the press — it is a circle, not a line")
-        XCTAssertTrue(isPaper(rgbaPixel(of: canvas, dx: paperPoint(canvas, 0.33, 0.33).dx, dy: paperPoint(canvas, 0.33, 0.33).dy)),
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, at: onHost(paper, 0.33, 0.33))),
                       "the corner of its bounding square is paper — an ellipse, not a square")
-        XCTAssertTrue(isPaper(rgbaPixel(of: canvas, dx: paperPoint(canvas, 0.5, 0.22).dx, dy: paperPoint(canvas, 0.5, 0.22).dy)),
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, at: onHost(paper, 0.5, 0.22))),
                       "nothing past the pen's distance from the press")
         XCTAssertEqual(primedObjectName(app), "")
-        attach(app, "ellipse-dragged-out")
+        attachScreenshot(app, "ellipse-dragged-out")
     }
 
     /// **On a raster layer the shape is painted into the cel** — the fill tool's raster arm — still one
     /// undo step, still solid, still with no Move box (there is no object to lift).
     func testDraggingARectangleOnARasterLayerPaintsPixelsAsOneStep() throws {
         let (app, canvas) = launch()
+        let paper = paperRect(in: canvas)
         addRasterLayer(app)
-        let centre = paperPoint(canvas, 0.5, 0.5)
+        let centre = onHost(paper, 0.5, 0.5)
 
         prime(app, row: "add.rectangleRow", named: "rectangle")
-        dragOnCanvas(app, from: centre, to: paperPoint(canvas, 0.7, 0.5))
+        dragOnCanvas(app, from: centre, to: onHost(paper, 0.7, 0.5))
 
         XCTAssertTrue(waitUntil(canvas, centre, isInk), "the raster shape is solid at its centre")
-        XCTAssertTrue(isInk(rgbaPixel(of: canvas, dx: paperPoint(canvas, 0.37, 0.37).dx, dy: paperPoint(canvas, 0.37, 0.37).dy)),
+        XCTAssertTrue(isInk(rgbaPixel(of: canvas, at: onHost(paper, 0.37, 0.37))),
                       "…and at its corner")
         XCTAssertFalse(app.buttons["moveBar.doneButton"].exists, "a raster shape raises no Move box")
         undo(app)
-        XCTAssertTrue(waitUntil(canvas, centre, isPaper), "one undo takes the painted shape away")
+        XCTAssertTrue(waitUntil(canvas, centre, isWhitish), "one undo takes the painted shape away")
     }
 
     // MARK: - How priming begins and ends
@@ -170,6 +143,7 @@ final class FillObjectUITests: PaintUITestCase {
     /// it, and the pen then draws a stroke instead of placing a shape.
     func testTappingThePrimedRowAgainPutsItDown() throws {
         let (app, canvas) = launch()
+        let paper = paperRect(in: canvas)
         prime(app, row: "add.rectangleRow", named: "rectangle")
 
         app.buttons["toolbar.addButton"].tap()
@@ -180,10 +154,10 @@ final class FillObjectUITests: PaintUITestCase {
         XCTAssertEqual(primedObjectName(app), "", "tapping it again un-primed it")
         XCTAssertTrue(app.buttons["toolbar.brushButton"].isSelected, "the brush is back")
 
-        let centre = paperPoint(canvas, 0.5, 0.5)
-        dragOnCanvas(app, from: paperPoint(canvas, 0.3, 0.5), to: paperPoint(canvas, 0.7, 0.5))
+        let centre = onHost(paper, 0.5, 0.5)
+        dragOnCanvas(app, from: onHost(paper, 0.3, 0.5), to: onHost(paper, 0.7, 0.5))
         XCTAssertTrue(waitUntil(canvas, centre, isInk), "the pen drew a stroke along its path")
-        XCTAssertTrue(isPaper(rgbaPixel(of: canvas, dx: paperPoint(canvas, 0.5, 0.3).dx, dy: paperPoint(canvas, 0.5, 0.3).dy)),
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, at: onHost(paper, 0.5, 0.3))),
                       "…and placed no square")
     }
 
@@ -191,14 +165,15 @@ final class FillObjectUITests: PaintUITestCase {
     /// find the row again.
     func testPickingAnotherToolEndsThePriming() throws {
         let (app, canvas) = launch()
+        let paper = paperRect(in: canvas)
         prime(app, row: "add.ellipseRow", named: "ellipse")
 
         app.buttons["toolbar.eraserButton"].tap()
         XCTAssertEqual(primedObjectName(app), "", "choosing the eraser ended the priming")
         XCTAssertFalse(app.buttons["toolbar.addButton"].isSelected)
         app.buttons["toolbar.brushButton"].tap()
-        dragOnCanvas(app, from: paperPoint(canvas, 0.3, 0.5), to: paperPoint(canvas, 0.7, 0.5))
-        XCTAssertTrue(isPaper(rgbaPixel(of: canvas, dx: paperPoint(canvas, 0.5, 0.4).dx, dy: paperPoint(canvas, 0.5, 0.4).dy)),
+        dragOnCanvas(app, from: onHost(paper, 0.3, 0.5), to: onHost(paper, 0.7, 0.5))
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, at: onHost(paper, 0.5, 0.4))),
                       "no ellipse is waiting for the pen: it drew a line")
     }
 
@@ -206,15 +181,16 @@ final class FillObjectUITests: PaintUITestCase {
     /// artist nothing and the next drag still places it.
     func testATapWithoutADragPlacesNothingAndLeavesTheObjectPrimed() throws {
         let (app, canvas) = launch()
+        let paper = paperRect(in: canvas)
         prime(app, row: "add.rectangleRow", named: "rectangle")
-        let centre = paperPoint(canvas, 0.5, 0.5)
+        let centre = onHost(paper, 0.5, 0.5)
 
         canvas.coordinate(withNormalizedOffset: centre).tap()
         Thread.sleep(forTimeInterval: 0.5)
 
-        XCTAssertTrue(isPaper(rgbaPixel(of: canvas, dx: centre.dx, dy: centre.dy)), "a tap places nothing")
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: centre.dx, dy: centre.dy)), "a tap places nothing")
         XCTAssertEqual(primedObjectName(app), "rectangle", "…and the rectangle is still primed")
-        dragOnCanvas(app, from: centre, to: paperPoint(canvas, 0.7, 0.5))
+        dragOnCanvas(app, from: centre, to: onHost(paper, 0.7, 0.5))
         XCTAssertTrue(waitUntil(canvas, centre, isInk), "the next drag places it")
     }
 
@@ -226,46 +202,48 @@ final class FillObjectUITests: PaintUITestCase {
     /// the seed that calls the verb the picker's caller calls.) One undo takes it away.
     func testDraggingAPrimedPictureKeepsItsAspectRatio() throws {
         let (app, canvas) = launch(["-resetGallery", "-uiTestPrimeImage"])
+        let paper = paperRect(in: canvas)
         XCTAssertEqual(primedObjectName(app), "image", "PREMISE: the seed primed a picture")
-        let centre = paperPoint(canvas, 0.5, 0.5)
-        XCTAssertTrue(isPaper(rgbaPixel(of: canvas, dx: centre.dx, dy: centre.dy)), "PREMISE: nothing is placed yet")
+        let centre = onHost(paper, 0.5, 0.5)
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: centre.dx, dy: centre.dy)), "PREMISE: nothing is placed yet")
 
-        dragOnCanvas(app, from: centre, to: paperPoint(canvas, 0.7, 0.55))
+        dragOnCanvas(app, from: centre, to: onHost(paper, 0.7, 0.55))
 
         XCTAssertTrue(waitUntil(canvas, centre, isInk), "the picture is on the paper")
         for x in [0.34, 0.66] {
-            XCTAssertTrue(isInk(rgbaPixel(of: canvas, dx: paperPoint(canvas, x, 0.5).dx, dy: paperPoint(canvas, x, 0.5).dy)),
+            XCTAssertTrue(isInk(rgbaPixel(of: canvas, at: onHost(paper, x, 0.5))),
                           "the picture reaches out to x = \(x)")
         }
         for y in [0.3, 0.7] {
-            XCTAssertTrue(isPaper(rgbaPixel(of: canvas, dx: paperPoint(canvas, 0.5, y).dx, dy: paperPoint(canvas, 0.5, y).dy)),
+            XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, at: onHost(paper, 0.5, y))),
                           "…and no further up or down than its own height (y = \(y)), which a square would have")
         }
         XCTAssertEqual(primedObjectName(app), "")
         XCTAssertFalse(app.buttons["moveBar.doneButton"].exists, "no Move box: the pen already placed it")
-        attach(app, "picture-dragged-out")
+        attachScreenshot(app, "picture-dragged-out")
 
         undo(app)
-        XCTAssertTrue(waitUntil(canvas, centre, isPaper), "one undo took the picture away")
+        XCTAssertTrue(waitUntil(canvas, centre, isWhitish), "one undo took the picture away")
     }
 
     /// **A primed clip is dragged out the same way**, and its first frame (dark grey) is what lands on the
     /// paper. Its own new layer is a separate step: one undo takes the clip away.
     func testDraggingAPrimedClipPlacesItsFirstFrameWhereThePenWent() throws {
         let (app, canvas) = launch(["-resetGallery", "-uiTestPrimeVideo"])
+        let paper = paperRect(in: canvas)
         XCTAssertEqual(primedObjectName(app), "video", "PREMISE: the seed primed a clip")
-        let centre = paperPoint(canvas, 0.5, 0.5)
+        let centre = onHost(paper, 0.5, 0.5)
 
-        dragOnCanvas(app, from: centre, to: paperPoint(canvas, 0.7, 0.5))
+        dragOnCanvas(app, from: centre, to: onHost(paper, 0.7, 0.5))
 
         XCTAssertTrue(waitUntil(canvas, centre, { self.isInk($0) }, timeout: 20), "the clip's first frame is on the paper")
-        XCTAssertTrue(isPaper(rgbaPixel(of: canvas, dx: paperPoint(canvas, 0.5, 0.15).dx, dy: paperPoint(canvas, 0.5, 0.15).dy)),
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, at: onHost(paper, 0.5, 0.15))),
                       "nothing past the square the drag made")
         XCTAssertEqual(primedObjectName(app), "")
-        attach(app, "clip-dragged-out")
+        attachScreenshot(app, "clip-dragged-out")
 
         undo(app)
-        XCTAssertTrue(waitUntil(canvas, centre, isPaper), "one undo took the clip away")
+        XCTAssertTrue(waitUntil(canvas, centre, isWhitish), "one undo took the clip away")
     }
 
     // MARK: - (128) The gradient is an object
@@ -276,6 +254,7 @@ final class FillObjectUITests: PaintUITestCase {
     /// end runs on past the points the pen marked. Its panel opens with it.
     func testADraggedGradientIsABandFromThePressToTheLiftAsWideAsTheRailSays() throws {
         let (app, canvas) = launch()
+        let paper = paperRect(in: canvas)
         prime(app, row: "add.linearGradientRow", named: "gradient")
 
         let width = app.sliders["sideToolbar.gradientWidthSlider"]
@@ -285,27 +264,27 @@ final class FillObjectUITests: PaintUITestCase {
         // slack (about a tenth either way), so the probes below sit far from the band's edge on both sides.
         dragRailSlider(width, fromNormalizedDy: 0.09, toNormalizedDy: 0.65)
 
-        dragOnCanvas(app, from: paperPoint(canvas, 0.2, 0.5), to: paperPoint(canvas, 0.8, 0.5))
+        dragOnCanvas(app, from: onHost(paper, 0.2, 0.5), to: onHost(paper, 0.8, 0.5))
 
         XCTAssertTrue(app.buttons["gradientPanel.startSwatch"].waitForExistence(timeout: 5),
                       "the gradient's own panel is up — two swatches and an angle")
-        let start = paperPoint(canvas, 0.25, 0.5), middle = paperPoint(canvas, 0.5, 0.5), end = paperPoint(canvas, 0.75, 0.5)
+        let start = onHost(paper, 0.25, 0.5), middle = onHost(paper, 0.5, 0.5), end = onHost(paper, 0.75, 0.5)
         XCTAssertTrue(waitUntil(canvas, start, { self.red($0) < 90 }), "dark near the press")
         XCTAssertTrue(waitUntil(canvas, end, { self.red($0) > 170 }), "light near the lift")
         let m = red(rgbaPixel(of: canvas, dx: middle.dx, dy: middle.dy))
         XCTAssertGreaterThan(m, red(rgbaPixel(of: canvas, dx: start.dx, dy: start.dy)) + 20, "a ramp: the middle is lighter than the start")
         XCTAssertLessThan(m, red(rgbaPixel(of: canvas, dx: end.dx, dy: end.dy)) - 20, "…and darker than the end")
         for (x, y, what) in [(0.1, 0.5, "before the press"), (0.9, 0.5, "past the lift")] {
-            XCTAssertTrue(isPaper(rgbaPixel(of: canvas, dx: paperPoint(canvas, x, y).dx, dy: paperPoint(canvas, x, y).dy)),
+            XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, at: onHost(paper, x, y))),
                           "the gradient is the length of the line: bare paper \(what)")
         }
-        XCTAssertFalse(isPaper(rgbaPixel(of: canvas, dx: paperPoint(canvas, 0.5, 0.42).dx, dy: paperPoint(canvas, 0.5, 0.42).dy)),
+        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, at: onHost(paper, 0.5, 0.42))),
                        "inside the band, a little above the line")
-        XCTAssertTrue(isPaper(rgbaPixel(of: canvas, dx: paperPoint(canvas, 0.5, 0.12).dx, dy: paperPoint(canvas, 0.5, 0.12).dy)),
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, at: onHost(paper, 0.5, 0.12))),
                       "outside the band, which is narrower than the paper: the Width slider set it")
         XCTAssertFalse(width.exists, "once placed, the rail is the brush's again")
         XCTAssertTrue(app.sliders["sideToolbar.brushSizeSlider"].exists)
-        attach(app, "gradient-band")
+        attachScreenshot(app, "gradient-band")
     }
 
     /// **The direction of the gradient is the direction of the drag**: top to bottom, dark at the press
@@ -313,32 +292,34 @@ final class FillObjectUITests: PaintUITestCase {
     /// The lift stays above the gradient's own docked panel, which covers the lower part of the canvas.
     func testTheGradientRunsInTheDirectionOfTheDrag() throws {
         let (app, canvas) = launch()
+        let paper = paperRect(in: canvas)
         prime(app, row: "add.linearGradientRow", named: "gradient")
 
-        dragOnCanvas(app, from: paperPoint(canvas, 0.5, 0.15), to: paperPoint(canvas, 0.5, 0.65))
-        attach(app, "gradient-top-to-bottom")
+        dragOnCanvas(app, from: onHost(paper, 0.5, 0.15), to: onHost(paper, 0.5, 0.65))
+        attachScreenshot(app, "gradient-top-to-bottom")
 
-        let top = paperPoint(canvas, 0.5, 0.2), bottom = paperPoint(canvas, 0.5, 0.6)
+        let top = onHost(paper, 0.5, 0.2), bottom = onHost(paper, 0.5, 0.6)
         XCTAssertTrue(waitUntil(canvas, top, { self.red($0) < 90 }), "dark at the press, the top")
         XCTAssertTrue(waitUntil(canvas, bottom, { self.red($0) > 170 }), "light at the lift, the bottom")
-        let left = red(rgbaPixel(of: canvas, dx: paperPoint(canvas, 0.1, 0.4).dx, dy: paperPoint(canvas, 0.1, 0.4).dy))
-        let right = red(rgbaPixel(of: canvas, dx: paperPoint(canvas, 0.9, 0.4).dx, dy: paperPoint(canvas, 0.9, 0.4).dy))
+        let left = red(rgbaPixel(of: canvas, at: onHost(paper, 0.1, 0.4)))
+        let right = red(rgbaPixel(of: canvas, at: onHost(paper, 0.9, 0.4)))
         XCTAssertLessThanOrEqual(abs(left - right), 6, "a top-to-bottom ramp is constant along a row, across the whole band")
-        XCTAssertTrue(isPaper(rgbaPixel(of: canvas, dx: paperPoint(canvas, 0.5, 0.08).dx, dy: paperPoint(canvas, 0.5, 0.08).dy)),
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, at: onHost(paper, 0.5, 0.08))),
                       "and it begins at the press: bare paper above it")
     }
 
     /// **The panel's angle turns the ramp, live**, and Done closes the panel.
     func testTheAngleInTheGradientPanelTurnsItLive() throws {
         let (app, canvas) = launch()
+        let paper = paperRect(in: canvas)
         placeFromTheAddMenu(app, row: "add.linearGradientRow", primedName: "gradient",
-                            from: paperPoint(canvas, 0.1, 0.5), to: paperPoint(canvas, 0.9, 0.5))
+                            from: onHost(paper, 0.1, 0.5), to: onHost(paper, 0.9, 0.5))
 
         let slider = app.sliders["gradientPanel.angleSlider"]
         XCTAssertTrue(slider.waitForExistence(timeout: 5), "the panel is up with the direction")
         XCTAssertEqual(slider.value as? String, "0", "the drag ran left to right, so the angle reads 0")
         slider.adjust(toNormalizedSliderPosition: 0.25)
-        let top = paperPoint(canvas, 0.5, 0.2), lower = paperPoint(canvas, 0.5, 0.6)
+        let top = onHost(paper, 0.5, 0.2), lower = onHost(paper, 0.5, 0.6)
         XCTAssertTrue(waitUntil(canvas, top, { self.red($0) < 90 }), "the top is now the dark end")
         XCTAssertTrue(waitUntil(canvas, lower, { self.red($0) > 110 }), "…and further down is lighter")
         app.buttons["gradientPanel.doneButton"].tap()
@@ -352,8 +333,9 @@ final class FillObjectUITests: PaintUITestCase {
     /// session the card belongs to.
     func testTappingThePanelsOwnLabelDoesNotFallThroughToTheCanvas() throws {
         let (app, canvas) = launch()
+        let paper = paperRect(in: canvas)
         placeFromTheAddMenu(app, row: "add.linearGradientRow", primedName: "gradient",
-                            from: paperPoint(canvas, 0.1, 0.5), to: paperPoint(canvas, 0.9, 0.5))
+                            from: onHost(paper, 0.1, 0.5), to: onHost(paper, 0.9, 0.5))
         XCTAssertTrue(app.buttons["gradientPanel.endSwatch"].waitForExistence(timeout: 5))
         app.staticTexts["Gradient"].firstMatch.tap()
         Thread.sleep(forTimeInterval: 1)
@@ -364,8 +346,9 @@ final class FillObjectUITests: PaintUITestCase {
     /// the lift end of the ramp goes red.
     func testTheEndSwatchRecoloursTheRampLive() throws {
         let (app, canvas) = launch()
+        let paper = paperRect(in: canvas)
         placeFromTheAddMenu(app, row: "add.linearGradientRow", primedName: "gradient",
-                            from: paperPoint(canvas, 0.1, 0.5), to: paperPoint(canvas, 0.9, 0.5))
+                            from: onHost(paper, 0.1, 0.5), to: onHost(paper, 0.9, 0.5))
 
         let end = app.buttons["gradientPanel.endSwatch"]
         XCTAssertTrue(end.waitForExistence(timeout: 5))
@@ -377,12 +360,12 @@ final class FillObjectUITests: PaintUITestCase {
         app.staticTexts["Gradient"].firstMatch.tap()   // away from the swatch, which dismisses the picker
 
         XCTAssertEqual(end.value as? String, "FF0000", "the pick reached the model")
-        let right = paperPoint(canvas, 0.88, 0.5)
+        let right = onHost(paper, 0.88, 0.5)
         XCTAssertTrue(waitUntil(canvas, right, { p in
             guard let p else { return false }
             return p.r > 150 && p.g < 90 && p.b < 90
         }), "the lift end of the ramp is now red")
-        attach(app, "gradient-end-red")
+        attachScreenshot(app, "gradient-end-red")
     }
 
     /// **Select → Edit Gradient — the whole journey, from a fresh document.** Drag a gradient out and
@@ -390,8 +373,9 @@ final class FillObjectUITests: PaintUITestCase {
     /// that gradient and changing its angle changes the pixels.
     func testSelectEditGradientReopensThePanelOnTheCaughtGradient() throws {
         let (app, canvas) = launch()
+        let paper = paperRect(in: canvas)
         placeFromTheAddMenu(app, row: "add.linearGradientRow", primedName: "gradient",
-                            from: paperPoint(canvas, 0.1, 0.5), to: paperPoint(canvas, 0.9, 0.5))
+                            from: onHost(paper, 0.1, 0.5), to: onHost(paper, 0.9, 0.5))
         app.buttons["gradientPanel.doneButton"].tap()
         XCTAssertTrue(app.buttons["gradientPanel.startSwatch"].waitForNonExistence(timeout: 5), "PREMISE: closed")
 
@@ -401,22 +385,22 @@ final class FillObjectUITests: PaintUITestCase {
         rectangle.tap()
         XCTAssertFalse(app.buttons["selectPanel.editGradientButton"].exists,
                        "with nothing selected there is no object to edit")
-        dragOnCanvas(app, from: paperPoint(canvas, 0.2, 0.2), to: paperPoint(canvas, 0.8, 0.6))
+        dragOnCanvas(app, from: onHost(paper, 0.2, 0.2), to: onHost(paper, 0.8, 0.6))
 
         let edit = app.buttons["selectPanel.editGradientButton"]
         XCTAssertTrue(edit.waitForExistence(timeout: 5), "a loop over the gradient offers an Edit entry")
         XCTAssertEqual(edit.label, "Edit Gradient", "titled for what it will open")
         XCTAssertFalse(app.buttons["selectPanel.editTextButton"].exists, "the loop caught no text box, so no Edit Text")
-        attach(app, "select-offers-edit-gradient")
+        attachScreenshot(app, "select-offers-edit-gradient")
         edit.tap()
 
         let slider = app.sliders["gradientPanel.angleSlider"]
         XCTAssertTrue(slider.waitForExistence(timeout: 5), "Edit Gradient opens the gradient panel")
         XCTAssertEqual(slider.value as? String, "0", "on the gradient that was caught")
         slider.adjust(toNormalizedSliderPosition: 0.25)
-        let top = paperPoint(canvas, 0.5, 0.15), lower = paperPoint(canvas, 0.5, 0.55)
+        let top = onHost(paper, 0.5, 0.15), lower = onHost(paper, 0.5, 0.55)
         XCTAssertTrue(waitUntil(canvas, top, { self.red($0) < 90 }), "the gradient was turned live: dark at the top")
         XCTAssertTrue(waitUntil(canvas, lower, { self.red($0) > 100 }), "…lighter lower down")
-        attach(app, "edit-gradient-turned")
+        attachScreenshot(app, "edit-gradient-turned")
     }
 }

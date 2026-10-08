@@ -165,10 +165,7 @@ final class DistortUITests: PaintUITestCase {
         let rightAfter = inkedHeight(after, column: 0.70)
         // The picture, saved so a person can open it. `xcresulttool export attachments` pulls it out
         // of the run's bundle.
-        let shot = XCTAttachment(screenshot: canvas.screenshot())
-        shot.name = "distorted-ink"
-        shot.lifetime = .keepAlways
-        add(shot)
+        attachScreenshot(canvas, "distorted-ink")
 
         XCTAssertGreaterThan(leftAfter, 0.001, "the line is still on the canvas after the bake")
         XCTAssertGreaterThan(leftAfter, rightAfter + 0.008,

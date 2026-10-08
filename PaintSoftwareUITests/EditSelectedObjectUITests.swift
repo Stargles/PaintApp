@@ -121,10 +121,8 @@ final class EditSelectedObjectUITests: PaintUITestCase {
         let host = canvas.frame
 
         // 1. The gradient: Add → Linear Gradient, dragged across the paper, then Done.
-        let paper = visibleCanvasBounds(canvas)
-        func onPaper(_ x: Double, _ y: Double) -> CGVector {
-            CGVector(dx: paper.minX + (paper.maxX - paper.minX) * x, dy: paper.minY + (paper.maxY - paper.minY) * y)
-        }
+        let paper = paperRect(in: canvas)
+        func onPaper(_ x: Double, _ y: Double) -> CGVector { onHost(paper, x, y) }
         placeFromTheAddMenu(app, row: "add.linearGradientRow", primedName: "gradient",
                             from: onPaper(0.1, 0.5), to: onPaper(0.9, 0.5))
         let gradientDone = app.buttons["gradientPanel.doneButton"]

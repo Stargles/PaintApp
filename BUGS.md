@@ -2157,7 +2157,7 @@ as intentional — are a vector-interpolation product call, not a layer-composit
 found and fixed along the way (an originally unbridgeable gap, `app.sliders.firstMatch` grabbing the
 wrong slider, and a synthetic drag too near the screen edge dropping the next stroke) and the final
 containment assertion still fails. Next step: re-point the "outside" probe using
-`visibleCanvasBounds`/`safeOutsideCornerPoint`. Re-enable by deleting the `throw XCTSkip(...)` at the
+`paperRect`/`safeOutsideCornerPoint`. Re-enable by deleting the `throw XCTSkip(...)` at the
 top of the test body.
 
 **Its second suggested next step is now the cheap one and the tool for it exists** — this entry used

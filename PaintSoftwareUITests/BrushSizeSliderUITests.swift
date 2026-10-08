@@ -72,7 +72,7 @@ final class BrushSizeSliderUITests: PaintUITestCase {
         assertInsideTheRail(app.buttons["sideToolbar.eyedropperButton"], "the eyedropper")
         assertInsideTheRail(app.buttons["sideToolbar.undoButton"], "Undo")
         assertInsideTheRail(app.buttons["sideToolbar.redoButton"], "Redo")
-        attachScreen(app, "rail-brush")
+        attachScreenshot(app, "rail-brush")
 
         app.buttons["toolbar.fillButton"].tap()
         for identifier in ["sideToolbar.gapClosingSlider", "sideToolbar.thresholdSlider", "sideToolbar.edgeOverlapSlider"] {
@@ -80,14 +80,7 @@ final class BrushSizeSliderUITests: PaintUITestCase {
             XCTAssertTrue(app.sliders[identifier].isHittable, "\(identifier) can be touched")
             assertInsideTheRail(app.staticTexts["\(identifier).caption"], "\(identifier)'s caption")
         }
-        attachScreen(app, "rail-fill")
-    }
-
-    private func attachScreen(_ app: XCUIApplication, _ name: String) {
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = name
-        shot.lifetime = .keepAlways
-        add(shot)
+        attachScreenshot(app, "rail-fill")
     }
 
     /// **TODO (79)(b): no permanent percentage badge exists at rest, on either tool's sliders.** The
@@ -116,10 +109,7 @@ final class BrushSizeSliderUITests: PaintUITestCase {
         XCTAssertEqual(app.staticTexts["sideToolbar.eraserSizeSlider.caption"].label, "Size")
         XCTAssertEqual(app.staticTexts["sideToolbar.eraserOpacitySlider.caption"].label, "Opacity")
 
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = "1-no-badges-at-rest"
-        shot.lifetime = .keepAlways
-        add(shot)
+        attachScreenshot(app, "1-no-badges-at-rest")
     }
 
     /// Dragging the Size slider to each end must raise the real-size pop-up (and, inside it, the
@@ -164,10 +154,7 @@ final class BrushSizeSliderUITests: PaintUITestCase {
         XCTAssertFalse(percent.exists, "…and lifting takes it away at the floor too")
         XCTAssertFalse(window.exists)
 
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = "2-size-slider-at-its-floor"
-        shot.lifetime = .keepAlways
-        add(shot)
+        attachScreenshot(app, "2-size-slider-at-its-floor")
     }
 
     /// **TODO (79)(b)+(c), and the task's own repro shape**: drag the eraser's Size slider — reachable
@@ -197,10 +184,7 @@ final class BrushSizeSliderUITests: PaintUITestCase {
         XCTAssertFalse(percent.exists, "TODO (79)(c): lifting must take the percent away…")
         XCTAssertFalse(window.exists, "…and the pop-up with it — neither may strand on screen")
 
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = "3-eraser-percent-gone-after-lift"
-        shot.lifetime = .keepAlways
-        add(shot)
+        attachScreenshot(app, "3-eraser-percent-gone-after-lift")
     }
 
     /// **What actually gets drawn, not only the number in the badge.** A hairline at the slider's
@@ -234,10 +218,7 @@ final class BrushSizeSliderUITests: PaintUITestCase {
         XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: offPoint.dx, dy: offPoint.dy)),
                        "a brush as wide as the canvas is short must ink a point 2% away from its line")
 
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = "3-a-canvas-wide-stroke-at-100-percent"
-        shot.lifetime = .keepAlways
-        add(shot)
+        attachScreenshot(app, "3-a-canvas-wide-stroke-at-100-percent")
     }
 
     // MARK: - TODO (79)(c)'s own repro: not attempted here, and why

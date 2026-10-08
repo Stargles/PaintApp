@@ -15,13 +15,6 @@ import XCTest
 /// it. A device check is a pen on a box and a finger beside it.
 final class MoveBoxPrecisionUITests: PaintUITestCase {
 
-    private func attachScreen(_ name: String) {
-        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        shot.name = name
-        shot.lifetime = .keepAlways
-        add(shot)
-    }
-
     /// **The picture's box, dragged three times: alone, with a finger landing beside it after the drag
     /// began and drifting as a resting finger does, and with one that rests perfectly still.** The first
     /// is the control — and the proof that the baseline is read correctly, since a count that is off by
@@ -57,7 +50,7 @@ final class MoveBoxPrecisionUITests: PaintUITestCase {
         // 2. A finger lands beside the drag after it began, and drifts as a resting finger does.
         let from = CGVector(dx: afterControl.midX, dy: afterControl.midY)
         try dragWithAFingerHeldBeside(canvas, from: from, delta: drag, holding: aside, holdDrift: drift)
-        attachScreen("vector-after-the-precise-drag")
+        attachScreenshot(XCUIScreen.main, "vector-after-the-precise-drag")
         let afterPrecise = try XCTUnwrap(settledMoveBox(app),
                                          "the box is still up: the finger that lifted away from it did not commit it")
         let preciseTravel = afterPrecise.minY - afterControl.minY
@@ -80,7 +73,7 @@ final class MoveBoxPrecisionUITests: PaintUITestCase {
                                        "the box is still up: a finger that lifts as a tap away from it did not commit it")
         XCTAssertEqual((afterStill.minY - afterPrecise.minY) / controlTravel, 0.2, accuracy: 0.06,
                        "…and it was slowed just the same")
-        attachScreen("vector-box-after-the-three-drags")
+        attachScreenshot(XCUIScreen.main, "vector-box-after-the-three-drags")
     }
 
     /// **The same on the raster Move box**, which is the recordable one's mechanism: ten pans on a
@@ -94,7 +87,7 @@ final class MoveBoxPrecisionUITests: PaintUITestCase {
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
         // `DistortUITests`' own set-up, so the geometry is the one that already drives this box.
         let filled = try liftAFilledBlockIntoTheRasterMoveBox(app, on: canvas)
-        attachScreen("raster-before-the-drags")
+        attachScreenshot(XCUIScreen.main, "raster-before-the-drags")
 
         let window = CGRect(x: 0.40, y: 0.16, width: 0.55, height: 0.50)
         func top() throws -> CGPoint {
@@ -107,7 +100,7 @@ final class MoveBoxPrecisionUITests: PaintUITestCase {
         let drag = CGVector(dx: 0, dy: 150)
 
         try dragWithAFingerHeldBeside(canvas, from: centre, delta: drag, holding: nil)
-        attachScreen("raster-after-the-control-drag")
+        attachScreenshot(XCUIScreen.main, "raster-after-the-control-drag")
         let afterControl = try top()
         let controlTravel = afterControl.y - start.y
         XCTAssertGreaterThan(controlTravel, 0.05,
@@ -132,6 +125,6 @@ final class MoveBoxPrecisionUITests: PaintUITestCase {
                                       delta: drag, holding: CGVector(dx: 0.20, dy: 0.60))
         XCTAssertTrue(app.buttons["moveBar.doneButton"].exists,
                       "a still finger lifting as a tap away from the box did not bake the piece")
-        attachScreen("raster-box-after-the-three-drags")
+        attachScreenshot(XCUIScreen.main, "raster-box-after-the-three-drags")
     }
 }

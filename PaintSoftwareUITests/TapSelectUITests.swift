@@ -14,39 +14,16 @@ import XCTest
 /// are one tap away; a tap on bare canvas puts the selection down.
 final class TapSelectUITests: PaintUITestCase {
 
-    private typealias RGBA = (r: UInt8, g: UInt8, b: UInt8, a: UInt8)
-
-    private func isInk(_ p: RGBA?) -> Bool { p.map { $0.r < 100 && $0.g < 100 && $0.b < 100 } ?? false }
-    private func isPaper(_ p: RGBA?) -> Bool { p.map { $0.r > 235 && $0.g > 235 && $0.b > 235 } ?? false }
-
-    private func waitUntil(_ canvas: XCUIElement, _ point: CGVector, _ test: (RGBA?) -> Bool,
-                           timeout: TimeInterval = 10) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if test(rgbaPixel(of: canvas, dx: point.dx, dy: point.dy)) { return true }
-            Thread.sleep(forTimeInterval: 0.25)
-        }
-        return false
+    private func tapPaper(_ canvas: XCUIElement, _ paper: CGRect, _ x: Double, _ y: Double) {
+        canvas.coordinate(withNormalizedOffset: onHost(paper, x, y)).tap()
     }
 
-    /// A point in the paper's own coordinates — 0…1 across and down the visible square — as a
-    /// normalised offset in `canvas.host`, which is letterboxed.
-    private func paperPoint(_ canvas: XCUIElement, _ x: Double, _ y: Double) -> CGVector {
-        let paper = visibleCanvasBounds(canvas)
-        return CGVector(dx: paper.minX + (paper.maxX - paper.minX) * x,
-                        dy: paper.minY + (paper.maxY - paper.minY) * y)
-    }
-
-    private func tapPaper(_ canvas: XCUIElement, _ x: Double, _ y: Double) {
-        canvas.coordinate(withNormalizedOffset: paperPoint(canvas, x, y)).tap()
-    }
-
-    private func launch() -> (app: XCUIApplication, canvas: XCUIElement) {
+    private func launch() -> (app: XCUIApplication, canvas: XCUIElement, paper: CGRect) {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app), "setup: a brand-new document")
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
-        return (app, canvas)
+        return (app, canvas, paperRect(in: canvas))
     }
 
     /// Select tool, Tap mode — what the artist presses before tapping anything.
@@ -58,9 +35,9 @@ final class TapSelectUITests: PaintUITestCase {
     }
 
     /// Add → Rectangle, dragged out from the middle of the paper: a solid square, put down by the lift.
-    private func addRectangle(_ app: XCUIApplication, _ canvas: XCUIElement) {
+    private func addRectangle(_ app: XCUIApplication, _ paper: CGRect) {
         placeFromTheAddMenu(app, row: "add.rectangleRow", primedName: "rectangle",
-                            from: paperPoint(canvas, 0.5, 0.5), to: paperPoint(canvas, 0.8, 0.5))
+                            from: onHost(paper, 0.5, 0.5), to: onHost(paper, 0.8, 0.5))
     }
 
     // MARK: - Text
@@ -68,7 +45,7 @@ final class TapSelectUITests: PaintUITestCase {
     /// **Tapping words opens Edit Text at once** — the text panel is up and the words' box is on the
     /// canvas with its grips, with no loop drawn and no button pressed.
     func testTappingTextOpensEditTextAtOnce() throws {
-        let (app, canvas) = launch()
+        let (app, canvas, _) = launch()
         let host = canvas.frame
         let boxTopLeft = writeWords("Hello", app, canvas)
         app.buttons["toolbar.brushButton"].tap()
@@ -92,9 +69,9 @@ final class TapSelectUITests: PaintUITestCase {
 
     /// **Tapping a gradient opens Edit Gradient at once** — its card, on the gradient tapped.
     func testTappingAGradientOpensEditGradientAtOnce() throws {
-        let (app, canvas) = launch()
+        let (app, canvas, paper) = launch()
         placeFromTheAddMenu(app, row: "add.linearGradientRow", primedName: "gradient",
-                            from: paperPoint(canvas, 0.1, 0.5), to: paperPoint(canvas, 0.9, 0.5))
+                            from: onHost(paper, 0.1, 0.5), to: onHost(paper, 0.9, 0.5))
         let done = app.buttons["gradientPanel.doneButton"]
         XCTAssertTrue(done.waitForExistence(timeout: 5), "PREMISE: the gradient's card is up")
         done.tap()
@@ -102,7 +79,7 @@ final class TapSelectUITests: PaintUITestCase {
 
         chooseTapMode(app)
         XCTAssertFalse(app.sliders["gradientPanel.angleSlider"].exists, "PREMISE: no gradient card until something is tapped")
-        tapPaper(canvas, 0.5, 0.5)
+        tapPaper(canvas, paper, 0.5, 0.5)
 
         XCTAssertTrue(app.sliders["gradientPanel.angleSlider"].waitForExistence(timeout: 5),
                       "the tap opened the gradient's card")
@@ -116,10 +93,10 @@ final class TapSelectUITests: PaintUITestCase {
     /// come alive (Edit, Clear), no editor opens, and Clear takes the stroke away — the pixels under
     /// the tap go back to paper — which is how the artist can tell *that stroke* was selected.
     func testTappingAStrokeSelectsItAndTheSelectPanelsVerbsActOnIt() throws {
-        let (app, canvas) = launch()
-        let from = paperPoint(canvas, 0.25, 0.5), to = paperPoint(canvas, 0.75, 0.5)
+        let (app, canvas, paper) = launch()
+        let from = onHost(paper, 0.25, 0.5), to = onHost(paper, 0.75, 0.5)
         drawLine(on: canvas, from: from, to: to)
-        let middle = paperPoint(canvas, 0.5, 0.5)
+        let middle = onHost(paper, 0.5, 0.5)
         XCTAssertTrue(waitUntil(canvas, middle, isInk), "PREMISE: the stroke is on the paper")
 
         chooseTapMode(app)
@@ -136,7 +113,7 @@ final class TapSelectUITests: PaintUITestCase {
         attachScreenshot(app, "tap-on-stroke-selected")
 
         clear.tap()
-        XCTAssertTrue(waitUntil(canvas, middle, isPaper), "Clear took away the stroke that was tapped")
+        XCTAssertTrue(waitUntil(canvas, middle, isWhitish), "Clear took away the stroke that was tapped")
         XCTAssertFalse(clear.isEnabled, "…and with it the selection")
     }
 
@@ -145,31 +122,31 @@ final class TapSelectUITests: PaintUITestCase {
     /// **Tapping a flat shape selects it alone and opens no editor**; Clear takes it away. Then a tap on
     /// bare paper puts the selection down.
     func testTappingAShapeSelectsItAndATapOnBareCanvasClearsTheSelection() throws {
-        let (app, canvas) = launch()
-        addRectangle(app, canvas)
-        let centre = paperPoint(canvas, 0.5, 0.5)
+        let (app, canvas, paper) = launch()
+        addRectangle(app, paper)
+        let centre = onHost(paper, 0.5, 0.5)
         XCTAssertTrue(waitUntil(canvas, centre, isInk), "PREMISE: the rectangle is on the paper")
 
         chooseTapMode(app)
         let clear = app.buttons["selectPanel.clearButton"]
         XCTAssertTrue(clear.waitForExistence(timeout: 5))
-        tapPaper(canvas, 0.5, 0.5)
+        tapPaper(canvas, paper, 0.5, 0.5)
         XCTAssertTrue(waitUntil(canvas, centre, isInk), "the tap changed nothing about the picture")
         XCTAssertTrue(clear.isEnabled, "the tap selected the rectangle")
         XCTAssertFalse(app.buttons["textPanel.fontButton"].exists, "a flat shape opens no editor of its own")
         XCTAssertFalse(app.sliders["gradientPanel.angleSlider"].exists)
         attachScreenshot(app, "tap-on-shape-selected")
 
-        tapPaper(canvas, 0.06, 0.06)
+        tapPaper(canvas, paper, 0.06, 0.06)
         let deadline = Date().addingTimeInterval(5)
         while clear.isEnabled, Date() < deadline { Thread.sleep(forTimeInterval: 0.2) }
         XCTAssertFalse(clear.isEnabled, "a tap on bare paper put the selection down")
         XCTAssertTrue(waitUntil(canvas, centre, isInk), "…and the rectangle is still there")
 
-        tapPaper(canvas, 0.5, 0.5)
+        tapPaper(canvas, paper, 0.5, 0.5)
         XCTAssertTrue(clear.isEnabled)
         clear.tap()
-        XCTAssertTrue(waitUntil(canvas, centre, isPaper), "Clear took away the rectangle that was selected")
+        XCTAssertTrue(waitUntil(canvas, centre, isWhitish), "Clear took away the rectangle that was selected")
     }
     // MARK: - Single, Add, Subtract
 
@@ -184,18 +161,21 @@ final class TapSelectUITests: PaintUITestCase {
     /// panel's verbs come alive; choosing Add turns the next taps into a set; choosing Subtract takes one
     /// out; Clear (or any verb) acts on what is left.
     func testTheTapPickerAddsThreeStrokesAndSubtractsTheMiddleOne() throws {
-        let (app, canvas) = launch()
-        // Above the dock: the paper's lower rows run under the Select panel and the timeline, where a tap
-        // is on the chrome and not on the stroke.
-        let rows = [0.2, 0.35, 0.5]
+        let (app, canvas, paper) = launch()
+        // Drawn before the Select panel stands up, so the three rows end at `rowAboveTheDock`: the
+        // panel's card covers the paper's lower rows, and a tap there is on the chrome and not the stroke.
+        let lowest = rowAboveTheDock(canvas)
+        let rows = [lowest - 0.14, lowest - 0.07, lowest]
+        func at(_ x: Double, _ row: Double) -> CGVector { CGVector(dx: onHost(paper, x, 0).dx, dy: row) }
         for row in rows {
-            drawLine(on: canvas, from: paperPoint(canvas, 0.25, row), to: paperPoint(canvas, 0.75, row))
+            drawLine(on: canvas, from: at(0.25, row), to: at(0.75, row))
         }
         for row in rows {
-            XCTAssertTrue(waitUntil(canvas, paperPoint(canvas, 0.5, row), isInk), "PREMISE: the stroke at \(row) is on the paper")
+            XCTAssertTrue(waitUntil(canvas, at(0.5, row), isInk), "PREMISE: the stroke at \(row) is on the paper")
         }
 
         chooseTapMode(app)
+        assertAboveTheDock(app, canvas, dy: lowest, "The three strokes")
         let picker = app.segmentedControls["selectPanel.tapCompositionPicker"]
         XCTAssertTrue(picker.waitForExistence(timeout: 5), "Tap mode has its own picker, where the membership picker was")
         XCTAssertEqual(picker.buttons.count, 3, "Single, Add and Subtract")
@@ -207,7 +187,7 @@ final class TapSelectUITests: PaintUITestCase {
 
         picker.buttons["Add"].tap()
         XCTAssertTrue(picker.buttons["Add"].isSelected)
-        for row in rows { tapPaper(canvas, 0.5, row) }
+        for row in rows { canvas.coordinate(withNormalizedOffset: at(0.5, row)).tap() }
         let clear = app.buttons["selectPanel.clearButton"]
         XCTAssertTrue(clear.isEnabled, "the taps selected strokes")
         XCTAssertFalse(app.buttons["textPanel.fontButton"].exists, "…and no editor opened")
@@ -215,14 +195,14 @@ final class TapSelectUITests: PaintUITestCase {
 
         picker.buttons["Subtract"].tap()
         XCTAssertTrue(picker.buttons["Subtract"].isSelected)
-        tapPaper(canvas, 0.5, 0.35)
+        canvas.coordinate(withNormalizedOffset: at(0.5, rows[1])).tap()
         XCTAssertTrue(clear.isEnabled, "two strokes are still selected")
         attachScreenshot(app, "tap-picker-after-subtracting-the-middle")
 
         clear.tap()
-        XCTAssertTrue(waitUntil(canvas, paperPoint(canvas, 0.5, 0.2), isPaper), "Clear took away the first stroke")
-        XCTAssertTrue(waitUntil(canvas, paperPoint(canvas, 0.5, 0.5), isPaper), "…and the last")
-        XCTAssertTrue(isInk(rgbaPixel(of: canvas, dx: paperPoint(canvas, 0.5, 0.35).dx, dy: paperPoint(canvas, 0.5, 0.35).dy)),
+        XCTAssertTrue(waitUntil(canvas, at(0.5, rows[0]), isWhitish), "Clear took away the first stroke")
+        XCTAssertTrue(waitUntil(canvas, at(0.5, rows[2]), isWhitish), "…and the last")
+        XCTAssertTrue(isInk(rgbaPixel(of: canvas, at: at(0.5, rows[1]))),
                       "…and left the stroke that was subtracted from the selection")
         XCTAssertFalse(clear.isEnabled, "the selection went with what it held")
         attachScreenshot(app, "tap-picker-after-clear")

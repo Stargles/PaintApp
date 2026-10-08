@@ -14,13 +14,6 @@ import XCTest
 /// is the owner's own and the one the panel must also fit.
 final class ColorPanelFitUITests: PaintUITestCase {
 
-    private func attachScreen(_ name: String) {
-        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        shot.name = name
-        shot.lifetime = .keepAlways
-        add(shot)
-    }
-
     func testTheRecentStripAndTheWholePaletteAreHittableWithoutScrollingInLandscape() throws {
         XCUIDevice.shared.orientation = .landscapeLeft
         defer { XCUIDevice.shared.orientation = .portrait }
@@ -33,7 +26,7 @@ final class ColorPanelFitUITests: PaintUITestCase {
                       "the colour button opens the panel")
         let window = app.windows.firstMatch.frame
         XCTAssertGreaterThan(window.width, window.height, "setup: the app is in landscape (\(window))")
-        attachScreen("colour-panel-landscape-\(Int(window.width))x\(Int(window.height))")
+        attachScreenshot(XCUIScreen.main, "colour-panel-landscape-\(Int(window.width))x\(Int(window.height))")
 
         func element(_ identifier: String) -> XCUIElement { app.descendants(matching: .any)[identifier] }
 

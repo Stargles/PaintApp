@@ -68,13 +68,6 @@ final class FolderKeyframeEntryUITests: PaintUITestCase {
         sliderNumericValue(app.sliders["layerPanel.folder.\(name).opacity"])
     }
 
-    private func attach(_ app: XCUIApplication, _ name: String) {
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = name
-        shot.lifetime = .keepAlways
-        add(shot)
-    }
-
     // MARK: - The cold-start path
 
     /// **The owner's four steps on a group, from a brand-new document**: make a folder, place a key on
@@ -131,7 +124,7 @@ final class FolderKeyframeEntryUITests: PaintUITestCase {
         XCTAssertFalse(app.buttons["layerOptions.removeKeyframe"].exists,
                        "Nothing to remove yet, so the row is absent — the half of this pair that a "
                        + "build drawing it unconditionally still passes")
-        attach(app, "folder-keyframe-row-before")
+        attachScreenshot(app, "folder-keyframe-row-before")
 
         app.buttons["layerOptions.addKeyframe"].tap()
 
@@ -171,7 +164,7 @@ final class FolderKeyframeEntryUITests: PaintUITestCase {
             that goes red if the panel's row addressed `keyframeTarget` (the current layer) rather \
             than the folder it was opened on, which is the likeliest way to write this wrong.
             """)
-        attach(app, "folder-keyframe-row-after-first")
+        attachScreenshot(app, "folder-keyframe-row-after-first")
 
         // 3. Move the playhead **with the panel still open**. The row has to follow it live: the
         // transport sits below this panel, so an artist can scrub while it is up, and a row that had
@@ -222,7 +215,7 @@ final class FolderKeyframeEntryUITests: PaintUITestCase {
         XCTAssertEqual(app.staticTexts["layerOptions.folderKeyframes"].label, "Frame 5 · keyframes at 1, 5",
                        "both the playhead (now frame 4, shown 5) and the list (0 and 4, shown 1 and 5) "
                        + "are the ruler's numbers, not the model's")
-        attach(app, "folder-keyframe-row-after-second")
+        attachScreenshot(app, "folder-keyframe-row-after-second")
         closeFolderOptions(app)
 
         // 7. See the animation: three frames, three readings.
@@ -238,7 +231,7 @@ final class FolderKeyframeEntryUITests: PaintUITestCase {
         XCTAssertTrue(tapWhenHittable(app.buttons["timeline.stepBackButton"], "Step back"))
         XCTAssertEqual(readFrameLabel(app)?.current, 3, "Premise: the playhead is on frame 2")
         let between = folderOpacity(app, named: "Folder 1")
-        attach(app, "folder-keyframe-midway")
+        attachScreenshot(app, "folder-keyframe-midway")
         XCTAssertTrue(between > faded + 2 && between < 98, """
             At frame 2 the group's opacity must be strictly between the two keys — \
             \(faded) at frame 4 and 100 at frame 0 — and it read \(between). This is the assertion \
@@ -304,7 +297,7 @@ final class FolderKeyframeEntryUITests: PaintUITestCase {
             the probe point should read as paper. It did not, which means the keyed opacity never \
             reached the render path for the *folder* node.
             """)
-        attach(app, "folder-opacity-faded-at-frame-4")
+        attachScreenshot(app, "folder-opacity-faded-at-frame-4")
 
         goToStart(app)
         XCTAssertTrue(waitUntilFilled(canvas, dx: probe.dx, dy: probe.dy, timeout: 15), """
@@ -312,6 +305,6 @@ final class FolderKeyframeEntryUITests: PaintUITestCase {
             white reading here means the fade was applied to the stored value rather than keyed, so \
             it is showing at every frame.
             """)
-        attach(app, "folder-opacity-opaque-at-frame-0")
+        attachScreenshot(app, "folder-opacity-opaque-at-frame-0")
     }
 }

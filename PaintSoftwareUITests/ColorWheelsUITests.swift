@@ -16,54 +16,8 @@ import XCTest
 /// full-screen editor for every step).
 final class ColorWheelsUITests: PaintUITestCase {
 
-    private func attach(_ app: XCUIApplication, _ name: String) {
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = name
-        shot.lifetime = .keepAlways
-        add(shot)
-    }
-
-    private struct RGB: Equatable, CustomStringConvertible {
-        let r: Int, g: Int, b: Int
-        /// How blue against red — the axis a push toward blue moves along.
-        var blueness: Int { b - r }
-        var description: String { "(r: \(r), g: \(g), b: \(b))" }
-    }
-
-    private func probe(_ canvas: XCUIElement, dx: Double, dy: Double) -> RGB {
-        let p = rgbaPixel(of: canvas, dx: dx, dy: dy)
-        return RGB(r: Int(p?.r ?? 0), g: Int(p?.g ?? 0), b: Int(p?.b ?? 0))
-    }
-
-    /// Reads until two consecutive reads agree, so a probe taken while the render is still landing
-    /// off the main thread is not the number the test reasons about — `GlareUITests`' helper.
-    private func settled(timeout: TimeInterval = 4, _ read: () -> RGB) -> RGB {
-        var last: RGB?
-        let deadline = Date().addingTimeInterval(timeout)
-        var current = read()
-        while Date() < deadline {
-            if current == last { return current }
-            last = current
-            usleep(150_000)
-            current = read()
-        }
-        return current
-    }
-
-    private func setBrushColor(_ app: XCUIApplication, hex: String) {
-        let colorButton = app.buttons["toolbar.colorButton"]
-        XCTAssertTrue(colorButton.waitForExistence(timeout: 5), "The toolbar's colour button")
-        colorButton.tap()
-        let hexField = app.textFields["colorPanel.hexField"]
-        XCTAssertTrue(hexField.waitForExistence(timeout: 5), "The colour panel's hex field")
-        setHexField(app, hexField, to: hex)
-        colorButton.tap()
-        XCTAssertTrue(app.otherElements["colorPanel.svSquare"].waitForNonExistence(timeout: 5),
-                      "The colour panel must be closed before the canvas is touched")
-    }
-
     /// Where the two strokes lie and where they are read. The dark one at 0.35, the light one at
-    /// 0.5 — both inside the letterbox (`visibleCanvasBounds`) and above the docked bar.
+    /// 0.5 — both inside the letterbox (`paperRect`) and above the docked bar.
     private let darkY = 0.35, lightY = 0.5
 
     /// **The whole feature, cold, from an empty document**, in the order the artist meets it:
@@ -112,7 +66,7 @@ final class ColorWheelsUITests: PaintUITestCase {
         XCTAssertGreaterThan(lightBefore.r + lightBefore.g + lightBefore.b, 600,
                              "PREMISE: light ink at the light probe before any effect: \(lightBefore)")
         XCTAssertLessThan(abs(darkBefore.blueness), 12, "PREMISE: the dark stroke is grey: \(darkBefore)")
-        attach(app, "1-two-strokes")
+        attachScreenshot(app, "1-two-strokes")
 
         // 2.
         openLayerPanel(app)
@@ -148,7 +102,7 @@ final class ColorWheelsUITests: PaintUITestCase {
             XCTAssertLessThan(left.maxX, right.minX + 1, "Discs run left to right in one row: \(discs)")
             XCTAssertEqual(left.midY, right.midY, accuracy: 2, "…on one line: \(discs)")
         }
-        attach(app, "2-four-wheels-at-rest")
+        attachScreenshot(app, "2-four-wheels-at-rest")
 
         // 4. The bottom of the Shadows disc is hue 270°, the blue direction.
         let shadowsDisc = any["effectSettings.colorWheels.shadows.disc"]
@@ -170,7 +124,7 @@ final class ColorWheelsUITests: PaintUITestCase {
                            "The dot sits at the blue direction: \(dragged)")
             XCTAssertGreaterThan(parts[1], 0.85, "…at the rim: \(dragged)")
         }
-        attach(app, "3-shadows-dot-dragged-toward-blue")
+        attachScreenshot(app, "3-shadows-dot-dragged-toward-blue")
 
         // 5.
         let darkAfter = settled { probe(canvas, dx: 0.5, dy: darkY) }
@@ -191,7 +145,7 @@ final class ColorWheelsUITests: PaintUITestCase {
         let darkReset = settled { probe(canvas, dx: 0.5, dy: darkY) }
         XCTAssertLessThan(abs(darkReset.blueness - darkBefore.blueness), 10,
                           "After the reset the dark stroke reads as it did before: \(darkBefore) vs \(darkReset)")
-        attach(app, "4-after-double-tap-reset")
+        attachScreenshot(app, "4-after-double-tap-reset")
 
         // 7.
         dragShadowsDotToBlue()
@@ -206,6 +160,11 @@ final class ColorWheelsUITests: PaintUITestCase {
             \(darkUndone). Two steps for one drag would leave it blue here.
             """)
         XCTAssertEqual(shadowsDot.value as? String, "0.00|0.0000", "…and the dot is back at the centre")
-        attach(app, "5-after-one-undo")
+        attachScreenshot(app, "5-after-one-undo")
     }
+}
+
+private extension PaintUITestCase.RGB {
+    /// How blue against red — the axis a push toward blue moves along.
+    var blueness: Int { b - r }
 }

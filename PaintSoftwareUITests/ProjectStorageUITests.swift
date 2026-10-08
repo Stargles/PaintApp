@@ -40,7 +40,7 @@ final class ProjectStorageUITests: PaintUITestCase {
                       "a fresh install with work in it says, on the gallery, that the work is "
                       + "inside the app — this is the whole discoverability of the feature")
 
-        shot(app, "01-gallery-cold-start-warning")
+        attachScreenshot(app, "01-gallery-cold-start-warning")
 
         // And the setting is reachable from the toolbar regardless.
         let storage = app.buttons["gallery.storageButton"]
@@ -53,7 +53,7 @@ final class ProjectStorageUITests: PaintUITestCase {
         XCTAssertEqual(name.label, "Inside the app",
                        "and it says where the projects are now, in words the artist can act on")
 
-        shot(app, "02-storage-screen-default")
+        attachScreenshot(app, "02-storage-screen-default")
         let choose = app.buttons["storage.chooseFolderButton"]
         XCTAssertTrue(choose.exists, "the picker is one tap away")
         XCTAssertTrue(choose.isHittable, "and it is reachable, not merely present")
@@ -82,7 +82,7 @@ final class ProjectStorageUITests: PaintUITestCase {
         XCTAssertFalse(app.staticTexts["gallery.breadcrumbPath"].exists,
                        "and there is no breadcrumb at the top of the tree")
 
-        shot(app, "03-gallery-with-folder-tile")
+        attachScreenshot(app, "03-gallery-with-folder-tile")
         tile.tap()
         let crumb = app.staticTexts["gallery.breadcrumbPath"]
         XCTAssertTrue(crumb.waitForExistence(timeout: 10), "opening a folder shows where you are")
@@ -103,7 +103,7 @@ final class ProjectStorageUITests: PaintUITestCase {
         XCTAssertEqual(app.staticTexts["gallery.breadcrumbPath"].label, "Projects / Scene 1")
         XCTAssertTrue(app.buttons["gallery.tileMenu.Untitled"].waitForExistence(timeout: 10),
                       "and the project just left is right there, inside the folder it was made in")
-        shot(app, "04-project-inside-the-folder")
+        attachScreenshot(app, "04-project-inside-the-folder")
 
         // Out again, by the breadcrumb's own control — the folder is at the top level and the
         // project inside it is not, which is what separates a tree from decoration.
@@ -186,7 +186,7 @@ final class ProjectStorageUITests: PaintUITestCase {
 
         XCTAssertTrue(app.buttons["gallery.folderTile.Rooftop Chase"].waitForExistence(timeout: 10),
                       "the grid redraws under the new name")
-        shot(app, "05-folder-renamed")
+        attachScreenshot(app, "05-folder-renamed")
         XCTAssertFalse(app.buttons["gallery.folderTile.Untitled Scene"].exists,
                        "and the old tile is gone rather than duplicated")
     }
@@ -218,7 +218,7 @@ final class ProjectStorageUITests: PaintUITestCase {
         returnToGallery(app)
         XCTAssertTrue(app.buttons["gallery.tileMenu.Untitled"].waitForExistence(timeout: 15),
                       "Setup: the project is on the gallery under the name it was born with")
-        shot(app, "1-gallery-before-the-retitle")
+        attachScreenshot(app, "1-gallery-before-the-retitle")
 
         app.staticTexts["Untitled"].tap()
         // The scene's name is its own field in the top bar — tap it, type, Return — and not a button
@@ -233,7 +233,7 @@ final class ProjectStorageUITests: PaintUITestCase {
         // The whole name is selected on the way in, so typing replaces it.
         nameField.typeText("Rooftop Chase\n")
         XCTAssertEqual(nameField.value as? String, "Rooftop Chase", "the field now shows the new name")
-        shot(app, "2-editor-after-the-retitle")
+        attachScreenshot(app, "2-editor-after-the-retitle")
 
         returnToGallery(app)
 
@@ -242,7 +242,7 @@ final class ProjectStorageUITests: PaintUITestCase {
         XCTAssertFalse(app.buttons["gallery.tileMenu.Untitled"].exists,
                        "and there is no second tile under the old name — two packages carrying one "
                        + "manifest id is what a rename fork looks like from here")
-        shot(app, "3-gallery-after-the-retitle")
+        attachScreenshot(app, "3-gallery-after-the-retitle")
 
         // The half a stale in-memory URL breaks: the project has to still open, with its drawing.
         app.staticTexts["Rooftop Chase"].tap()
@@ -252,7 +252,7 @@ final class ProjectStorageUITests: PaintUITestCase {
         XCTAssertTrue(reopened.waitForExistence(timeout: 10))
         XCTAssertEqual(reopened.value as? String, "Rooftop Chase",
                        "and it is the project that was retitled, not a fresh one beside it")
-        shot(app, "4-reopened-under-the-new-name")
+        attachScreenshot(app, "4-reopened-under-the-new-name")
     }
 
     /// **TODO (36)'s last line, driven through a finger, in the two acts an artist actually meets.**
@@ -308,7 +308,7 @@ final class ProjectStorageUITests: PaintUITestCase {
         XCTAssertEqual(origin.label, "In Projects / Scene 7",
                        "and names the folder — the only place the artist can see, before committing "
                        + "to a restore, where it is going to land")
-        shot(app, "06-recently-deleted-names-the-origin")
+        attachScreenshot(app, "06-recently-deleted-names-the-origin")
 
         tapRestore(app)
         XCTAssertFalse(app.alerts["Restored"].waitForExistence(timeout: 3),
@@ -317,7 +317,7 @@ final class ProjectStorageUITests: PaintUITestCase {
 
         XCTAssertTrue(app.buttons["gallery.tileMenu.Untitled"].waitForExistence(timeout: 15),
                       "the restored project is drawn inside the folder it was deleted from")
-        shot(app, "07-restored-inside-the-folder")
+        attachScreenshot(app, "07-restored-inside-the-folder")
 
         app.buttons["gallery.breadcrumbBack"].tap()
         XCTAssertTrue(app.buttons["gallery.folderTile.Scene 7"].waitForExistence(timeout: 10))
@@ -361,7 +361,7 @@ final class ProjectStorageUITests: PaintUITestCase {
         let sentence = notice.staticTexts.element(boundBy: notice.staticTexts.count - 1).label
         XCTAssertTrue(sentence.contains("Scene 7"),
                       "and it names the folder that is missing, rather than only the fact: \(sentence)")
-        shot(app, "08-restored-to-the-top-with-a-notice")
+        attachScreenshot(app, "08-restored-to-the-top-with-a-notice")
         notice.buttons["OK"].tap()
         app.buttons["Done"].tap()
 
@@ -395,16 +395,6 @@ final class ProjectStorageUITests: PaintUITestCase {
         XCTAssertTrue(restore.waitForExistence(timeout: 10),
                       "Recently Deleted lists the deleted project with a Restore control")
         restore.tap()
-    }
-
-    /// Keeps a screenshot in the result bundle so a person can look at what the test drove. These are
-    /// what CLAUDE.md's *"drive it in the simulator and look at it"* asks for, taken from inside the
-    /// run that already performs the gestures rather than from a second, hand-driven pass.
-    private func shot(_ app: XCUIApplication, _ name: String) {
-        let attachment = XCTAttachment(screenshot: app.screenshot())
-        attachment.name = name
-        attachment.lifetime = .keepAlways
-        add(attachment)
     }
 
     /// **Scoped to `app.alerts`, and by label rather than by identifier.** SwiftUI renders an

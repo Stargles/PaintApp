@@ -332,18 +332,14 @@ final class RecordingUITests: PaintUITestCase {
         // the canvas is a drag of the box.
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
-        // **Both ends are computed from `visibleCanvasBounds`, not guessed**, and that is not
+        // **Both ends are computed from `paperRect`, not guessed**, and that is not
         // fastidiousness either. `canvas.host` is the whole host *including the black surround*, so a
         // flat fraction of it lands in the letterbox on some frame proportions — and a touch out there
         // is a touch *outside* the box, which `handleTapOutside` correctly reads as the tap-away that
         // commits it. Same symptom, second cause.
-        let inside = visibleCanvasBounds(canvas)
-        let span = inside.maxX - inside.minX
-        let vspan = inside.maxY - inside.minY
-        let start = canvas.coordinate(withNormalizedOffset:
-            CGVector(dx: inside.minX + span * 0.3, dy: inside.minY + vspan * 0.35))
-        let end = canvas.coordinate(withNormalizedOffset:
-            CGVector(dx: inside.minX + span * 0.75, dy: inside.minY + vspan * 0.5))
+        let paper = paperRect(in: canvas)
+        let start = canvas.coordinate(withNormalizedOffset: onHost(paper, 0.3, 0.35))
+        let end = canvas.coordinate(withNormalizedOffset: onHost(paper, 0.75, 0.5))
         start.press(forDuration: 0.2, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 1.5)
 
         // **The take ends itself at the end of the scene and takes the box with it**, which is the first

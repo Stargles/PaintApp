@@ -13,11 +13,8 @@ final class SelectPanelEditDisclosureUITests: PaintUITestCase {
         XCTAssertTrue(launchIntoEditor(app), "setup: a brand-new document")
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
-        let paper = visibleCanvasBounds(canvas)
-        func at(_ dx: Double, _ dy: Double) -> CGVector {
-            CGVector(dx: paper.minX + (paper.maxX - paper.minX) * dx,
-                     dy: paper.minY + (paper.maxY - paper.minY) * dy)
-        }
+        let paper = paperRect(in: canvas)
+        func at(_ dx: Double, _ dy: Double) -> CGVector { onHost(paper, dx, dy) }
         drawLine(on: canvas, from: at(0.12, 0.22), to: at(0.38, 0.22))
 
         // 1. Before a loop: the icon is there and off, and no band.
@@ -51,7 +48,7 @@ final class SelectPanelEditDisclosureUITests: PaintUITestCase {
                           "the band unfolds above the action row")
         XCTAssertEqual(app.buttons["selectPanel.clearButton"].frame.minY, actionRowTop, accuracy: 1,
                        "…and the row the icon sits in did not move under the finger")
-        attach(app, "edit-band-expanded")
+        attachScreenshot(app, "edit-band-expanded")
 
         // 4. Press again: it folds away and the panel is as short as it was.
         edit.tap()
@@ -59,7 +56,7 @@ final class SelectPanelEditDisclosureUITests: PaintUITestCase {
         XCTAssertTrue(slider.waitForNonExistence(timeout: 5), "the band folds")
         XCTAssertEqual(app.otherElements["bottomDock.floor"].frame.maxY, foldedFloor, accuracy: 1,
                        "the panel's floor is back where it was with the band folded")
-        attach(app, "edit-band-collapsed")
+        attachScreenshot(app, "edit-band-collapsed")
     }
 
     /// TODO (109) — the owner: *"The edit button in the select menu should be beside fill and to new
@@ -73,11 +70,8 @@ final class SelectPanelEditDisclosureUITests: PaintUITestCase {
         XCTAssertTrue(launchIntoEditor(app), "setup: a brand-new document")
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
-        let paper = visibleCanvasBounds(canvas)
-        func at(_ dx: Double, _ dy: Double) -> CGVector {
-            CGVector(dx: paper.minX + (paper.maxX - paper.minX) * dx,
-                     dy: paper.minY + (paper.maxY - paper.minY) * dy)
-        }
+        let paper = paperRect(in: canvas)
+        func at(_ dx: Double, _ dy: Double) -> CGVector { onHost(paper, dx, dy) }
         drawLine(on: canvas, from: at(0.12, 0.22), to: at(0.38, 0.22))
         app.buttons["toolbar.selectButton"].tap()
         let rectangle = app.buttons["selectPanel.mode.rectangle"]
@@ -102,13 +96,6 @@ final class SelectPanelEditDisclosureUITests: PaintUITestCase {
         XCTAssertGreaterThan(edit.frame.minX, fill.frame.minX, "Edit sits after Fill, not before it")
         XCTAssertLessThan(edit.frame.minX - fill.frame.maxX, fill.frame.width,
                           "Edit should sit immediately beside Fill, not across the row from it")
-        attach(app, "edit-beside-fill-and-to-new-layer")
-    }
-
-    private func attach(_ app: XCUIApplication, _ name: String) {
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = name
-        shot.lifetime = .keepAlways
-        add(shot)
+        attachScreenshot(app, "edit-beside-fill-and-to-new-layer")
     }
 }

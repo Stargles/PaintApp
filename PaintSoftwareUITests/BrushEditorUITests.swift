@@ -495,7 +495,7 @@ final class BrushEditorUITests: PaintUITestCase {
         XCTAssertTrue(toggle.waitForExistence(timeout: 5), "§7.2's third ask needs a control")
         XCTAssertEqual(toggle.value as? String, "Zoomed 3×",
                        "The pad opens zoomed in — §7.2's second ask")
-        attachScreen("pad-opens-on-a-sample-stroke-zoomed")
+        attachScreenshot(XCUIScreen.main, "pad-opens-on-a-sample-stroke-zoomed", lifetime: .deleteOnSuccess)
 
         app.buttons["brushPanel.padClear"].tap()
         XCTAssertEqual(padInk(pad)?.total, 0, "Clear takes the sample with it")
@@ -505,7 +505,7 @@ final class BrushEditorUITests: PaintUITestCase {
         // 3. And the toggle takes it to real size, which changes what is drawn.
         tapWhenHittable(toggle, "The real-size toggle")
         XCTAssertEqual(toggle.value as? String, "Real size")
-        attachScreen("pad-at-real-size")
+        attachScreenshot(XCUIScreen.main, "pad-at-real-size", lifetime: .deleteOnSuccess)
         app.buttons["brushPanel.padClear"].tap()
         let real = padStroke(app, on: pad)
         XCTAssertGreaterThan(real, 0)
@@ -578,31 +578,18 @@ final class BrushEditorUITests: PaintUITestCase {
 
         app.buttons["brushPanel.padClear"].tap()
         let textured = padStroke(app, on: pad)
-        attachScreen("square-tip-with-paper-grain-at-full-depth")
+        attachScreenshot(XCUIScreen.main, "square-tip-with-paper-grain-at-full-depth", lifetime: .deleteOnSuccess)
         XCTAssertLessThan(textured, square,
                           "Paper takes ink away — a picker that wrote the mask and never reached the merge would not")
 
         depth.adjust(toNormalizedSliderPosition: 0)
         app.buttons["brushPanel.padClear"].tap()
         let noDepth = padStroke(app, on: pad)
-        attachScreen("same-brush-with-depth-taken-to-zero")
+        attachScreenshot(XCUIScreen.main, "same-brush-with-depth-taken-to-zero", lifetime: .deleteOnSuccess)
         XCTAssertGreaterThan(noDepth, textured, "Depth must be the strength of it")
         XCTAssertEqual(Double(noDepth), Double(square), accuracy: Double(square) * 0.05,
                        "Depth 0 is **exactly** no texture — every pixel survives, which is what makes "
                        + "one arithmetic serve the whole range")
-    }
-
-    /// A picture of the screen, kept **only when the test fails**.
-    ///
-    /// `.deleteOnSuccess` is what makes this free on a green run and the whole story on a red one:
-    /// every defect this file exists to catch is one the model tier cannot see, so what a reader of a
-    /// failure needs is what the screen looked like — the same reason CLAUDE.md asks for a screenshot
-    /// before a feature is called done.
-    private func attachScreen(_ name: String) {
-        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        shot.name = name
-        shot.lifetime = .deleteOnSuccess
-        add(shot)
     }
 
     // MARK: - Helpers

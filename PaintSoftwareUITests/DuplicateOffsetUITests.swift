@@ -21,44 +21,6 @@ import XCTest
 /// full-screen editor for every step).
 final class DuplicateOffsetUITests: PaintUITestCase {
 
-    private func attach(_ app: XCUIApplication, _ name: String) {
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = name
-        shot.lifetime = .keepAlways
-        add(shot)
-    }
-
-    // `scrollMenuTo` used to be restated here rather than shared; it is now `PaintUITestCase`'s
-    // (TODO(45), 2026-09-11) — this file's own copy was byte-identical and, once lifted, collided
-    // with the inherited one (a private method cannot narrow an inherited internal one). Inherited
-    // from `PaintUITestCase` instead.
-
-    /// Reads until two consecutive reads agree, so a probe taken while the render is still landing
-    /// is not the number the test reasons about.
-    private func settled<T: Equatable>(timeout: TimeInterval = 4, _ read: () -> T) -> T {
-        var last: T?
-        let deadline = Date().addingTimeInterval(timeout)
-        var current = read()
-        while Date() < deadline {
-            if current == last { return current }
-            last = current
-            usleep(150_000)
-            current = read()
-        }
-        return current
-    }
-
-    /// One probe, as a value with `==` so `settled` can compare two reads.
-    private struct RGB: Equatable, CustomStringConvertible {
-        let r: Int, g: Int, b: Int
-        var description: String { "(r: \(r), g: \(g), b: \(b))" }
-    }
-
-    private func probe(_ canvas: XCUIElement, dx: Double, dy: Double) -> RGB {
-        let p = rgbaPixel(of: canvas, dx: dx, dy: dy)
-        return RGB(r: Int(p?.r ?? 0), g: Int(p?.g ?? 0), b: Int(p?.b ?? 0))
-    }
-
     /// The whole walk, from a blank document to a red rim on the canvas.
     ///
     /// The blob is a thick horizontal bar across the middle 40% of the canvas. The catalogue's
@@ -120,7 +82,7 @@ final class DuplicateOffsetUITests: PaintUITestCase {
         tapAway(app)
         XCTAssertTrue(hex.waitForNonExistence(timeout: 3), "The tap outside took the picker down")
         XCTAssertEqual(swatch.value as? String, "FF0000", "…and changed nothing on the way")
-        attach(app, "1-duplicate-offset-settings")
+        attachScreenshot(app, "1-duplicate-offset-settings")
 
         // Adjust Box: the Move box comes up, the settings bar stands down, Distort says why not.
         adjustBox.tap()
@@ -135,7 +97,7 @@ final class DuplicateOffsetUITests: PaintUITestCase {
             XCTAssertTrue((caption.label).contains("Duplicate Offset"), "…naming what is in the way: \(caption.label)")
             app.segmentedControls.buttons["Uniform"].tap()
         }
-        attach(app, "2-box-up")
+        attachScreenshot(app, "2-box-up")
 
         // The drag: a fifth of the canvas to the right, half the bar's length.
         let start = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: barY))
@@ -151,9 +113,9 @@ final class DuplicateOffsetUITests: PaintUITestCase {
         XCTAssertTrue(offsetX.waitForExistence(timeout: 5), "Done gives the settings bar back with the same grade")
         let written = sliderNumericValue(offsetX)
         XCTAssertGreaterThan(written, 100, "The drag moved the copy right by a good way, in canvas pixels: \(written)")
-        attach(app, "3-offset-x-written")
+        attachScreenshot(app, "3-offset-x-written")
 
-        attach(app, "4-after-the-drag")
+        attachScreenshot(app, "4-after-the-drag")
 
         // What is drawn. Left half of the bar: the copy moved away, so it is the rim — red.
         assertAboveTheDock(app, canvas, dy: barY, "The bar's probes")
@@ -169,4 +131,7 @@ final class DuplicateOffsetUITests: PaintUITestCase {
         let paper = settled { probe(canvas, dx: 0.5, dy: barY - 0.12) }
         XCTAssertGreaterThan(paper.r + paper.g + paper.b, 700, "The paper beside the bar is untouched: \(paper)")
     }
+}
+
+private extension PaintUITestCase.RGB {
 }

@@ -133,15 +133,6 @@ final class BrushMenuUITests: PaintUITestCase {
                           "Picking the technical pen must reach the ink — its stroke is visibly narrower than the 22 pt brush the document opened with")
     }
 
-    /// A picture of the screen, kept **only when the test fails** — see `BrushEditorUITests`'
-    /// attachment of the same name for why the lifetime is what it is.
-    private func attachScreen(_ name: String) {
-        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        shot.name = name
-        shot.lifetime = .deleteOnSuccess
-        add(shot)
-    }
-
     /// How many rows of one pixel column are inked, inside each of several horizontal bands, from a
     /// **single** screenshot. `halfBand` is the half-height of each band in normalized coordinates.
     private func inkedColumnHeights(of element: XCUIElement, dx: Double,
@@ -248,10 +239,7 @@ final class BrushMenuUITests: PaintUITestCase {
         XCTAssertFalse(app.buttons["brushPanel.brush.Square"].exists, "…and only those five")
         XCTAssertTrue(app.buttons["brushPanel.brush.Round Soft"].isSelected,
                       "Round Soft is the brush in hand, and its row in Favourites says so")
-        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        shot.name = "favourites-folder"
-        shot.lifetime = .keepAlways
-        add(shot)
+        attachScreenshot(XCUIScreen.main, "favourites-folder")
 
         // A favourite is the real brush: one tap selects it.
         tapWhenHittable(app.buttons["brushPanel.brush.Rough Ink"], "Rough Ink's favourite row")
@@ -336,7 +324,7 @@ final class BrushMenuUITests: PaintUITestCase {
 
         XCTAssertTrue(app.otherElements["brushPanel.editorScreen"].waitForExistence(timeout: 5),
                       "It must take the artist straight to the edit menu, not merely add a row")
-        attachScreen("create-manually-lands-in-the-editor")
+        attachScreenshot(XCUIScreen.main, "create-manually-lands-in-the-editor", lifetime: .deleteOnSuccess)
         XCTAssertEqual(app.buttons["brushPanel.tipPicker"].value as? String, "Round",
                        "…on a brush with the neutral tip")
         let madeRow = app.buttons["brushPanel.output.size"]
@@ -513,7 +501,7 @@ final class BrushMenuUITests: PaintUITestCase {
         XCTAssertTrue(app.scrollViews["brushPanel.groupList"].waitForNonExistence(timeout: 3))
 
         drawLine(on: canvas, from: CGVector(dx: 0.30, dy: roughY), to: CGVector(dx: 0.70, dy: roughY))
-        attachScreen("owner-rough-ink")
+        attachScreenshot(XCUIScreen.main, "owner-rough-ink", lifetime: .deleteOnSuccess)
 
         let plain = inkedRowCounts(of: canvas, band: defaultY, halfBand: 0.03)
         let roughProfile = inkedRowCounts(of: canvas, band: roughY, halfBand: 0.03)

@@ -76,7 +76,7 @@ final class TimelineGestureUITests: PaintUITestCase {
 
         // The redesigned panel in its default state (TODO (70)) — kept on success as well as on
         // failure, since this is the "drive it and look at it" record itself, not incidental debris.
-        attachScreen("onion-panel-70-default-layout")
+        attachScreenshot(XCUIScreen.main, "onion-panel-70-default-layout")
 
         // The panel no longer carries its own off switch (TODO (69) retired it: the toolbar button's
         // own tap is both switches now). A quick tap on that button is what has to close the panel —
@@ -130,7 +130,7 @@ final class TimelineGestureUITests: PaintUITestCase {
         XCTAssertTrue(farNext.waitForExistence(timeout: 5), "the fifth next slot is on the panel")
         XCTAssertTrue(farPrevious.isHittable, "the fifth previous slot must not be clipped off the panel")
         XCTAssertTrue(farNext.isHittable, "the fifth next slot must not be clipped off the panel")
-        attachScreen("onion-panel-opacity-row-at-max-skin-counts")
+        attachScreenshot(XCUIScreen.main, "onion-panel-opacity-row-at-max-skin-counts")
     }
 
     /// **TODO (69), cold start.** A tap toggles onion skin outright and a ~0.4s hold reaches its menu
@@ -283,7 +283,7 @@ final class TimelineGestureUITests: PaintUITestCase {
         let ghostOnly = try XCTUnwrap(rgbaPixel(of: canvas, dx: crossing.dx, dy: crossing.dy))
         XCTAssertFalse(isWhitish(ghostOnly),
                        "Setup: the ghost of drawing A reaches the probe on the new blank drawing")
-        attachScreen("onion-01-behind-ghost-over-blank-drawing")
+        attachScreenshot(XCUIScreen.main, "onion-01-behind-ghost-over-blank-drawing")
 
         // Drawing B — a vertical line crossing A at the probe. Its lower half is ink the ghost
         // never touches, which is the operand every assertion below compares against.
@@ -294,7 +294,7 @@ final class TimelineGestureUITests: PaintUITestCase {
                              "Setup: the ghost's tint and the artist's ink are told apart by colour")
 
         let behind = try XCTUnwrap(rgbaPixel(of: canvas, dx: crossing.dx, dy: crossing.dy))
-        attachScreen("onion-02-behind-ghost-cut-by-the-artists-ink")
+        attachScreenshot(XCUIScreen.main, "onion-02-behind-ghost-cut-by-the-artists-ink")
         XCTAssertLessThan(channelDistance(behind, inkOnly), 20,
                           "Behind: the ghost is masked out where the artist's own ink covers it, so "
                           + "the crossing is the same ink as the stroke's clear half")
@@ -319,7 +319,7 @@ final class TimelineGestureUITests: PaintUITestCase {
                        "Setup: changing the placement must not have moved the playhead off the drawing")
 
         let inFront = try XCTUnwrap(rgbaPixel(of: canvas, dx: crossing.dx, dy: crossing.dy))
-        attachScreen("onion-03-in-front-ghost-over-the-artists-ink")
+        attachScreenshot(XCUIScreen.main, "onion-03-in-front-ghost-over-the-artists-ink")
         XCTAssertFalse(isWhitish(inFront),
                        "Setup: there is still something at the crossing — ink, ghost, or both")
         XCTAssertGreaterThan(channelDistance(inFront, inkOnly), 20,
@@ -334,16 +334,6 @@ final class TimelineGestureUITests: PaintUITestCase {
     private func channelDistance(_ a: (r: UInt8, g: UInt8, b: UInt8, a: UInt8),
                                  _ b: (r: UInt8, g: UInt8, b: UInt8, a: UInt8)) -> Int {
         max(abs(Int(a.r) - Int(b.r)), abs(Int(a.g) - Int(b.g)), abs(Int(a.b) - Int(b.b)))
-    }
-
-    /// Kept on success as well as on failure: these three are the "drive it and look at it" record
-    /// this change is required to produce, and a `.deleteOnSuccess` lifetime would throw away
-    /// exactly the run worth looking at.
-    private func attachScreen(_ name: String) {
-        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        shot.name = name
-        shot.lifetime = .keepAlways
-        add(shot)
     }
 
     /// `waitForExistence`'s missing twin. A polling loop was written first and is the wrong shape:

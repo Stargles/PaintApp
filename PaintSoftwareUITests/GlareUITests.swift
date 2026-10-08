@@ -15,52 +15,6 @@ import XCTest
 /// full-screen editor for every step).
 final class GlareUITests: PaintUITestCase {
 
-    private func attach(_ app: XCUIApplication, _ name: String) {
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = name
-        shot.lifetime = .keepAlways
-        add(shot)
-    }
-
-    private struct RGB: Equatable, CustomStringConvertible {
-        let r: Int, g: Int, b: Int
-        var sum: Int { r + g + b }
-        var description: String { "(r: \(r), g: \(g), b: \(b))" }
-    }
-
-    private func probe(_ canvas: XCUIElement, dx: Double, dy: Double) -> RGB {
-        let p = rgbaPixel(of: canvas, dx: dx, dy: dy)
-        return RGB(r: Int(p?.r ?? 0), g: Int(p?.g ?? 0), b: Int(p?.b ?? 0))
-    }
-
-    /// Reads until two consecutive reads agree, so a probe taken while the render is still landing
-    /// off the main thread is not the number the test reasons about — `DuplicateOffsetUITests`' own
-    /// helper, restated here since the two files do not share a base beyond `PaintUITestCase`.
-    private func settled(timeout: TimeInterval = 4, _ read: () -> RGB) -> RGB {
-        var last: RGB?
-        let deadline = Date().addingTimeInterval(timeout)
-        var current = read()
-        while Date() < deadline {
-            if current == last { return current }
-            last = current
-            usleep(150_000)
-            current = read()
-        }
-        return current
-    }
-
-    private func setBrushColor(_ app: XCUIApplication, hex: String) {
-        let colorButton = app.buttons["toolbar.colorButton"]
-        XCTAssertTrue(colorButton.waitForExistence(timeout: 5), "The toolbar's colour button")
-        colorButton.tap()
-        let hexField = app.textFields["colorPanel.hexField"]
-        XCTAssertTrue(hexField.waitForExistence(timeout: 5), "The colour panel's hex field")
-        setHexField(app, hexField, to: hex)
-        colorButton.tap()
-        XCTAssertTrue(app.otherElements["colorPanel.svSquare"].waitForNonExistence(timeout: 5),
-                      "The colour panel must be closed before the canvas is touched")
-    }
-
     /// **The whole feature, cold, from an empty document**, in the order the artist meets it:
     ///
     /// 1. A black cross under white paper, so there is dark ink for a glow to brighten against — Glare
@@ -111,7 +65,7 @@ final class GlareUITests: PaintUITestCase {
         setBrushColor(app, hex: "FFFFFF")
         setBrushSize(app, normalized: 0.15)
         drawLine(on: canvas, from: CGVector(dx: 0.495, dy: cy), to: CGVector(dx: 0.505, dy: cy))
-        attach(app, "1-cross-and-blob")
+        attachScreenshot(app, "1-cross-and-blob")
 
         // 3.
         openLayerPanel(app)
@@ -148,7 +102,7 @@ final class GlareUITests: PaintUITestCase {
             XCTAssertTrue(slider.exists, "The \(id) slider is on the bar")
             slider.adjust(toNormalizedSliderPosition: position)
         }
-        attach(app, "2-glare-settings")
+        attachScreenshot(app, "2-glare-settings")
 
         // 6.
         assertAboveTheDock(app, canvas, dy: cy + 0.02, "The Glare probes")
@@ -165,6 +119,9 @@ final class GlareUITests: PaintUITestCase {
             \(beforeDiagonal), after \(afterDiagonal). Brightening here would mean a direction \
             reached a pixel its own angle does not cover.
             """)
-        attach(app, "3-after-the-streak")
+        attachScreenshot(app, "3-after-the-streak")
     }
+}
+
+private extension PaintUITestCase.RGB {
 }

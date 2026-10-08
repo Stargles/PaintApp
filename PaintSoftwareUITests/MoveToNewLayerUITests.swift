@@ -16,11 +16,8 @@ final class MoveToNewLayerUITests: PaintUITestCase {
         XCTAssertTrue(launchIntoEditor(app), "setup: a brand-new document")
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
-        let paper = visibleCanvasBounds(canvas)
-        func at(_ dx: Double, _ dy: Double) -> CGVector {
-            CGVector(dx: paper.minX + (paper.maxX - paper.minX) * dx,
-                     dy: paper.minY + (paper.maxY - paper.minY) * dy)
-        }
+        let paper = paperRect(in: canvas)
+        func at(_ dx: Double, _ dy: Double) -> CGVector { onHost(paper, dx, dy) }
 
         // 1. A line on the layer the document is born with.
         setBrushSize(app, normalized: 0.12)
@@ -54,13 +51,13 @@ final class MoveToNewLayerUITests: PaintUITestCase {
         let source = try XCTUnwrap(readVectorMarker(app, layerIndex: 0))
         XCTAssertEqual(source.strokes, 0, "the original lost it — moved, not copied")
         XCTAssertTrue(app.images["layerPanel.row.1.current"].waitForExistence(timeout: 5), "the new layer is current")
-        attach(app, "to-new-layer-panel")
+        attachScreenshot(app, "to-new-layer-panel")
 
         // 4. Hide the new layer: the line goes with it, so it is that layer's and nobody else's.
         let eye = app.buttons["layerPanel.row.1.visibility"]
         XCTAssertTrue(eye.waitForExistence(timeout: 5))
         eye.tap()
-        XCTAssertTrue(waitUntil(canvas, mid, isPaper), "hiding the new layer hides the line")
+        XCTAssertTrue(waitUntil(canvas, mid, isWhitish), "hiding the new layer hides the line")
         eye.tap()
         XCTAssertTrue(waitUntil(canvas, mid, isInk), "…and showing it brings the line back")
 
@@ -87,11 +84,8 @@ final class MoveToNewLayerUITests: PaintUITestCase {
         XCTAssertTrue(launchIntoEditor(app), "setup: a brand-new document")
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
-        let paper = visibleCanvasBounds(canvas)
-        func at(_ dx: Double, _ dy: Double) -> CGVector {
-            CGVector(dx: paper.minX + (paper.maxX - paper.minX) * dx,
-                     dy: paper.minY + (paper.maxY - paper.minY) * dy)
-        }
+        let paper = paperRect(in: canvas)
+        func at(_ dx: Double, _ dy: Double) -> CGVector { onHost(paper, dx, dy) }
 
         // 1. Split the born layer's one cel at frame 4, so its second half starts away from 0.
         XCTAssertEqual(readCel(app, layerIndex: 0, celIndex: 0)?.start, 0, "PREMISE: one cel from the start")
@@ -146,29 +140,5 @@ final class MoveToNewLayerUITests: PaintUITestCase {
         let split = app.buttons["timeline.menu.Split Drawing"]
         XCTAssertTrue(split.waitForExistence(timeout: 5), "the second tap opens the block's menu")
         split.tap()
-    }
-
-    // MARK: - Reading the canvas
-
-    private typealias RGBA = (r: UInt8, g: UInt8, b: UInt8, a: UInt8)
-
-    private func isInk(_ p: RGBA?) -> Bool { p.map { $0.r < 100 && $0.g < 100 && $0.b < 100 } ?? false }
-    private func isPaper(_ p: RGBA?) -> Bool { p.map { $0.r > 235 && $0.g > 235 && $0.b > 235 } ?? false }
-
-    private func waitUntil(_ canvas: XCUIElement, _ point: CGVector, _ test: (RGBA?) -> Bool,
-                           timeout: TimeInterval = 10) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if test(rgbaPixel(of: canvas, dx: point.dx, dy: point.dy)) { return true }
-            Thread.sleep(forTimeInterval: 0.25)
-        }
-        return false
-    }
-
-    private func attach(_ app: XCUIApplication, _ name: String) {
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = name
-        shot.lifetime = .keepAlways
-        add(shot)
     }
 }

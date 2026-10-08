@@ -13,16 +13,6 @@ import XCTest
 /// second copy of the logic tier's assertions.
 final class VideoBakeUITests: PaintUITestCase {
 
-    /// `.keepAlways` rather than the `.deleteOnSuccess` this suite's other `attachScreen` copies
-    /// use — this stage's own bar asks for the screenshots to actually be looked at, not just kept
-    /// on hand for a failure that did not happen.
-    private func attachScreen(_ name: String) {
-        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        shot.name = name
-        shot.lifetime = .keepAlways
-        add(shot)
-    }
-
     /// Two-stage tap: the first only selects the block/frame, the second (landing on what is
     /// already selected) opens its menu — `TimelineTrackView.Coordinator.handleTapOnCel`'s own
     /// documented contract, and `TimelineAndUndoUITests`'s gap-menu test uses the identical
@@ -51,7 +41,7 @@ final class VideoBakeUITests: PaintUITestCase {
         }
         XCTAssertEqual(seeded.start, 0)
         XCTAssertGreaterThan(seeded.length, 1, "Setup: a one-frame block would make the split moot to look at.")
-        attachScreen("01-seeded-video-block-on-a-fresh-document")
+        attachScreenshot(XCUIScreen.main, "01-seeded-video-block-on-a-fresh-document")
 
         // An ordinary drawing has nothing to bake, and the row must say so by not existing —
         // `celHoldsVideo`'s own gate in `AnimationTimeline`.
@@ -66,7 +56,7 @@ final class VideoBakeUITests: PaintUITestCase {
         let bakeRow = app.buttons["timeline.menu.Bake to Images"]
         XCTAssertTrue(bakeRow.waitForExistence(timeout: 5),
                      "The video block's menu should offer \"Bake to Images\".")
-        attachScreen("02-video-blocks-menu-offers-bake-to-images")
+        attachScreenshot(XCUIScreen.main, "02-video-blocks-menu-offers-bake-to-images")
         bakeRow.tap()
 
         // KEYFRAMES §6's cost disclosure — Cancel first, to prove the alert genuinely gates the
@@ -74,7 +64,7 @@ final class VideoBakeUITests: PaintUITestCase {
         let confirm = app.alerts["Bake to Images?"]
         XCTAssertTrue(confirm.waitForExistence(timeout: 5),
                      "Bake is destructive-but-undoable and KEYFRAMES §6 asks for a cost disclosure before it runs.")
-        attachScreen("03-cost-disclosure-confirmation")
+        attachScreenshot(XCUIScreen.main, "03-cost-disclosure-confirmation")
         confirm.buttons["Cancel"].tap()
         XCTAssertEqual(readCel(app, layerIndex: 1, celIndex: 0)?.length, seeded.length,
                       "Cancel must leave the block exactly as it was.")
@@ -97,7 +87,7 @@ final class VideoBakeUITests: PaintUITestCase {
         }
         XCTAssertFalse(app.otherElements["timeline.cel.1.\(seeded.length)"].exists,
                        "There should be exactly \(seeded.length) resulting cels, no more.")
-        attachScreen("04-timeline-after-bake-one-cel-per-frame")
+        attachScreenshot(XCUIScreen.main, "04-timeline-after-bake-one-cel-per-frame")
 
         // And the artist's very next move — undo — takes back the *whole* bake in one press,
         // exactly as it took one menu tap to make. `readCel` answers nil once the array shrinks
@@ -108,6 +98,6 @@ final class VideoBakeUITests: PaintUITestCase {
         XCTAssertEqual(restored.length, seeded.length)
         XCTAssertFalse(app.otherElements["timeline.cel.1.1"].exists,
                        "A single undo press must collapse every baked cel back to one block.")
-        attachScreen("05-one-undo-press-restores-the-single-video-block")
+        attachScreenshot(XCUIScreen.main, "05-one-undo-press-restores-the-single-video-block")
     }
 }

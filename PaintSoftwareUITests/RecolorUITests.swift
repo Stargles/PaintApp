@@ -24,15 +24,7 @@ final class RecolorUITests: PaintUITestCase {
     /// right of the canvas, and the stroke runs straight under it — see
     /// `EraserAndPersistenceUITests.testTheSidebarEyedropperPicksTheColourUnderTheTapAndRevertsTheTool`).
     private func paintLine(_ app: XCUIApplication, hex: String, at dy: Double) {
-        let colorButton = app.buttons["toolbar.colorButton"]
-        XCTAssertTrue(colorButton.waitForExistence(timeout: 5), "The toolbar's colour button")
-        colorButton.tap()
-        let hexField = app.textFields["colorPanel.hexField"]
-        XCTAssertTrue(hexField.waitForExistence(timeout: 5), "The colour panel's hex field")
-        setHexField(app, hexField, to: hex)
-        colorButton.tap()
-        XCTAssertTrue(app.otherElements["colorPanel.svSquare"].waitForNonExistence(timeout: 5),
-                      "The colour panel must be closed before the canvas is touched")
+        setBrushColor(app, hex: hex)
 
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5), "The canvas host")
@@ -195,10 +187,7 @@ final class RecolorUITests: PaintUITestCase {
             """)
         XCTAssertLessThan(under.g, 80, "…got \(under)")
 
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = "recolour-red-line-green"
-        shot.lifetime = .keepAlways
-        add(shot)
+        attachScreenshot(app, "recolour-red-line-green")
     }
 
     /// **Small-defects batch, 2026-09-11: the recolour swatch's popover was unreachable by name.**

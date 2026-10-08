@@ -22,16 +22,13 @@ final class SelectionEditUITests: PaintUITestCase {
         XCTAssertTrue(launchIntoEditor(app), "setup: a brand-new document")
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
-        let paper = visibleCanvasBounds(canvas)
-        func at(_ dx: Double, _ dy: Double) -> CGVector {
-            CGVector(dx: paper.minX + (paper.maxX - paper.minX) * dx,
-                     dy: paper.minY + (paper.maxY - paper.minY) * dy)
-        }
+        let paper = paperRect(in: canvas)
+        func at(_ dx: Double, _ dy: Double) -> CGVector { onHost(paper, dx, dy) }
 
         // 1. Red, thin. What the artist does next: pick a colour, pick a size, draw two lines.
         //    The brush editor's slider runs 1…200, so 0.05 is a line of ten-odd points — thin
         //    enough that the Select panel's own 1…50 slider has room to make it fat.
-        setBrushColour(app, hex: "FF0000")
+        setBrushColor(app, hex: "FF0000")
         setBrushSize(app, normalized: 0.05)
         let l1 = (from: at(0.12, 0.22), to: at(0.38, 0.22))
         let l2 = (from: at(0.60, 0.22), to: at(0.86, 0.22))
@@ -45,8 +42,8 @@ final class SelectionEditUITests: PaintUITestCase {
         let l1Above = at(0.25, 0.22 - 0.008), l2Above = at(0.73, 0.22 - 0.008)
         XCTAssertTrue(waitUntil(canvas, l1Mid, isRed), "PREMISE: the first red line is on screen")
         XCTAssertTrue(waitUntil(canvas, l2Mid, isRed), "PREMISE: the second red line is on screen")
-        XCTAssertTrue(isPaper(rgba(canvas, l1Above)), "PREMISE: just above the first line is paper at the drawn width")
-        XCTAssertTrue(isPaper(rgba(canvas, l2Above)), "PREMISE: just above the second line is paper")
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, at: l1Above)), "PREMISE: just above the first line is paper at the drawn width")
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, at: l2Above)), "PREMISE: just above the second line is paper")
 
         // 2. Lasso the first line. What the artist does next: tap Select, tap Rectangle, drag a loop.
         //    The band appears with the loop: Colour, Brush, Size, Opacity, each reading the line.
@@ -74,7 +71,7 @@ final class SelectionEditUITests: PaintUITestCase {
         XCTAssertTrue(swatch.exists, "the band has the colour swatch")
         XCTAssertTrue((swatch.value as? String ?? "").uppercased().hasPrefix("FF0000"),
                       "the swatch shows the line's own red, not the palette's: \(swatch.value ?? "nil")")
-        attach(app, "1-loop-drawn-band-reads-the-line")
+        attachScreenshot(app, "1-loop-drawn-band-reads-the-line")
 
         // 3. Drag Size up and HOLD, sampling the screen from another thread while the finger is
         //    still down. What the artist does next: put a finger on the Size slider and drag right.
@@ -117,29 +114,29 @@ final class SelectionEditUITests: PaintUITestCase {
                       "while the finger was still on the slider, the pixel above the lassoed line never "
                       + "turned red — the size change did not reach the screen before lift "
                       + "(\(samples.count) mid-drag samples)")
-        XCTAssertTrue(samples.allSatisfy { isPaper($0[1]) },
+        XCTAssertTrue(samples.allSatisfy { isWhitish($0[1]) },
                       "the line outside the loop grew while the finger was down")
-        attach(app, "2-after-lift-first-line-fat")
+        attachScreenshot(app, "2-after-lift-first-line-fat")
 
         // 4. After lift: the first line is fat, the second is not.
         XCTAssertTrue(waitUntil(canvas, l1Above, isRed), "after lift the first line is drawn wider")
-        XCTAssertTrue(isRed(rgba(canvas, l1Mid)), "and still red at its centre")
-        XCTAssertTrue(isPaper(rgba(canvas, l2Above)), "the second line kept its width")
-        XCTAssertTrue(isRed(rgba(canvas, l2Mid)), "and its ink")
+        XCTAssertTrue(isRed(rgbaPixel(of: canvas, at: l1Mid)), "and still red at its centre")
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, at: l2Above)), "the second line kept its width")
+        XCTAssertTrue(isRed(rgbaPixel(of: canvas, at: l2Mid)), "and its ink")
 
         // 5. Undo once. What the artist does next: press undo — the whole drag is one step.
         let undo = app.buttons["sideToolbar.undoButton"]
         XCTAssertTrue(undo.waitForExistence(timeout: 5))
         undo.tap()
-        XCTAssertTrue(waitUntil(canvas, l1Above, isPaper),
+        XCTAssertTrue(waitUntil(canvas, l1Above, isWhitish),
                       "one undo did not draw the first line back at its old width — the drag was more "
                       + "than one step, or the repair missed the rectangle")
-        XCTAssertTrue(isRed(rgba(canvas, l1Mid)), "the line is still there, at its old width")
-        XCTAssertTrue(isPaper(rgba(canvas, l2Above)) && isRed(rgba(canvas, l2Mid)),
+        XCTAssertTrue(isRed(rgbaPixel(of: canvas, at: l1Mid)), "the line is still there, at its old width")
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, at: l2Above)) && isRed(rgbaPixel(of: canvas, at: l2Mid)),
                       "the second line never changed")
         XCTAssertFalse(undo.isEnabled && app.buttons["sideToolbar.redoButton"].isEnabled == false,
                        "sanity: undo left a step to redo")
-        attach(app, "3-undone-first-line-thin-again")
+        attachScreenshot(app, "3-undone-first-line-thin-again")
     }
 
     // MARK: - Colour, from the line's own colour
@@ -149,23 +146,20 @@ final class SelectionEditUITests: PaintUITestCase {
         XCTAssertTrue(launchIntoEditor(app), "setup: a brand-new document")
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
-        let paper = visibleCanvasBounds(canvas)
-        func at(_ dx: Double, _ dy: Double) -> CGVector {
-            CGVector(dx: paper.minX + (paper.maxX - paper.minX) * dx,
-                     dy: paper.minY + (paper.maxY - paper.minY) * dy)
-        }
+        let paper = paperRect(in: canvas)
+        func at(_ dx: Double, _ dy: Double) -> CGVector { onHost(paper, dx, dy) }
 
         // 1. A red line, and the palette left on red — so a picker that opened on the palette's
         //    colour and one that opened on the line's would agree, which is why the palette is then
         //    moved to green before the loop: the swatch has to show red *against* a green palette.
-        setBrushColour(app, hex: "FF0000")
+        setBrushColor(app, hex: "FF0000")
         setBrushSize(app, normalized: 0.6)
         drawLine(on: canvas, from: at(0.12, 0.22), to: at(0.38, 0.22))
         drawLine(on: canvas, from: at(0.60, 0.22), to: at(0.86, 0.22))
         let l1Mid = at(0.25, 0.22), l2Mid = at(0.73, 0.22)
         XCTAssertTrue(waitUntil(canvas, l1Mid, isRed), "PREMISE: the first red line is on screen")
         XCTAssertTrue(waitUntil(canvas, l2Mid, isRed), "PREMISE: the second red line is on screen")
-        setBrushColour(app, hex: "00FF00")
+        setBrushColor(app, hex: "00FF00")
 
         // 2. Lasso the first line and tap the swatch. What the artist does next: Select, Rectangle,
         //    loop, tap the swatch — the picker opens on red, the line's colour, not the palette's green.
@@ -186,7 +180,7 @@ final class SelectionEditUITests: PaintUITestCase {
                        "the picker opened on the line's own colour — \"defaulting to the current color\"")
         XCTAssertFalse(app.sliders["colorPanel.opacitySlider"].exists,
                        "no alpha slider: only the hue travels, and Opacity has its own control in the band")
-        attach(app, "1-picker-open-on-the-lines-red")
+        attachScreenshot(app, "1-picker-open-on-the-lines-red")
 
         // 3. Type blue while the picker is still up: the line follows it live. **Read where the picker
         //    is not**: it opens beside the swatch and stands over part of the line, so the line's middle
@@ -200,13 +194,13 @@ final class SelectionEditUITests: PaintUITestCase {
                           "PREMISE: some of the line is clear of the picker (picker \(picker.frame), line ends at \(lineEndX))")
         let l1Clear = CGVector(dx: Double((picker.frame.maxX + lineEndX) / 2 - host.minX) / Double(host.width),
                                dy: at(0.25, 0.22).dy)
-        XCTAssertTrue(isRed(rgba(canvas, l1Clear)), "PREMISE: that part of the line is the line's own red")
+        XCTAssertTrue(isRed(rgbaPixel(of: canvas, at: l1Clear)), "PREMISE: that part of the line is the line's own red")
         setHexField(app, hexField, to: "0000FF")
         XCTAssertTrue(waitUntil(canvas, l1Clear, isBlue),
                       "with the picker still open the lassoed line did not turn blue — the colour is not live")
-        XCTAssertTrue(isRed(rgba(canvas, l2Mid)), "the line outside the loop stayed red")
+        XCTAssertTrue(isRed(rgbaPixel(of: canvas, at: l2Mid)), "the line outside the loop stayed red")
         XCTAssertTrue(hexField.exists, "PREMISE: the picker is still up while the line changed")
-        attach(app, "2-line-blue-while-the-picker-is-still-up")
+        attachScreenshot(app, "2-line-blue-while-the-picker-is-still-up")
 
         // 4. Dismiss the picker — a tap outside the popover, on a spot that does nothing else — and
         //    that is the one undo step. What the artist does next: tap away, press undo.
@@ -216,13 +210,13 @@ final class SelectionEditUITests: PaintUITestCase {
         // reaches the canvas underneath it and discards the live edit instead of committing it.
         tapAway(app)
         XCTAssertTrue(hexField.waitForNonExistence(timeout: 5), "tapping outside closes the picker")
-        XCTAssertTrue(isBlue(rgba(canvas, l1Mid)), "the line keeps the picked colour after the picker closes")
+        XCTAssertTrue(isBlue(rgbaPixel(of: canvas, at: l1Mid)), "the line keeps the picked colour after the picker closes")
         let undo = app.buttons["sideToolbar.undoButton"]
         XCTAssertTrue(undo.waitForExistence(timeout: 5))
         undo.tap()
         XCTAssertTrue(waitUntil(canvas, l1Mid, isRed), "one undo puts the line's red back")
-        XCTAssertTrue(isRed(rgba(canvas, l2Mid)), "and the other line never moved")
-        attach(app, "3-undone-red-again")
+        XCTAssertTrue(isRed(rgbaPixel(of: canvas, at: l2Mid)), "and the other line never moved")
+        attachScreenshot(app, "3-undone-red-again")
     }
 
     // MARK: - Sampling the screen while a gesture is in flight
@@ -279,45 +273,4 @@ final class SelectionEditUITests: PaintUITestCase {
     }
 
     // MARK: - Driving the colour swatch
-
-    private func setBrushColour(_ app: XCUIApplication, hex: String) {
-        let colorButton = app.buttons["toolbar.colorButton"]
-        XCTAssertTrue(colorButton.waitForExistence(timeout: 5), "the toolbar has a colour swatch")
-        colorButton.tap()
-        let hexField = app.textFields["colorPanel.hexField"]
-        XCTAssertTrue(hexField.waitForExistence(timeout: 5), "the colour panel has a hex field")
-        setHexField(app, hexField, to: hex)
-        colorButton.tap()
-        XCTAssertTrue(app.otherElements["colorPanel.svSquare"].waitForNonExistence(timeout: 5),
-                      "the colour panel must be closed before the canvas is touched")
-    }
-
-    // MARK: - Reading the canvas
-
-    private typealias RGBA = (r: UInt8, g: UInt8, b: UInt8, a: UInt8)
-
-    private func rgba(_ canvas: XCUIElement, _ point: CGVector) -> RGBA? {
-        rgbaPixel(of: canvas, dx: point.dx, dy: point.dy)
-    }
-
-    private func isRed(_ p: RGBA?) -> Bool { p.map { $0.r > 150 && $0.g < 100 && $0.b < 100 } ?? false }
-    private func isBlue(_ p: RGBA?) -> Bool { p.map { $0.b > 150 && $0.r < 100 && $0.g < 100 } ?? false }
-    private func isPaper(_ p: RGBA?) -> Bool { p.map { $0.r > 235 && $0.g > 235 && $0.b > 235 } ?? false }
-
-    private func waitUntil(_ canvas: XCUIElement, _ point: CGVector, _ test: (RGBA?) -> Bool,
-                           timeout: TimeInterval = 10) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if test(rgba(canvas, point)) { return true }
-            Thread.sleep(forTimeInterval: 0.25)
-        }
-        return false
-    }
-
-    private func attach(_ app: XCUIApplication, _ name: String) {
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = name
-        shot.lifetime = .keepAlways
-        add(shot)
-    }
 }

@@ -47,13 +47,6 @@ final class TransformLayerSpanUITests: PaintUITestCase {
         return band.value as? String
     }
 
-    private func attach(_ app: XCUIApplication, _ name: String) {
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = name
-        shot.lifetime = .keepAlways
-        add(shot)
-    }
-
     /// **Add, mark, scrub, Move, Done, mark; drag the bar's right edge in past the second key; read
     /// the band and the crop banner; tap Move out there and read the refusal banner; drag the edge
     /// back out and tap Move again.** The assertions are on the marker band (`TimelineKeyMarkers.encode`
@@ -104,7 +97,7 @@ final class TransformLayerSpanUITests: PaintUITestCase {
         XCTAssertEqual(frames.count, 2, "two keyframes on the bar, read \(two)")
         let second = try XCTUnwrap(frames.last)
         XCTAssertGreaterThan(second, 4, "the second key is well past the first, read \(two)")
-        attach(app, "1-two-keyframes-on-the-bar")
+        attachScreenshot(app, "1-two-keyframes-on-the-bar")
 
         // Drag the bar's right edge inward past the second key. More than the minimum, since a
         // synthetic drag undershoots; the premise below checks it actually went past.
@@ -126,7 +119,7 @@ final class TransformLayerSpanUITests: PaintUITestCase {
         XCTAssertTrue(notice.waitForExistence(timeout: 5), "the crop is announced")
         XCTAssertEqual(notice.value as? String, "keyframesCropped",
                        "the same notice a drawing's own crop raises, reused verbatim")
-        attach(app, "2-bar-shortened-key-cropped")
+        attachScreenshot(app, "2-bar-shortened-key-cropped")
 
         // Move, with the playhead still at the second key — now past the bar. No box, and a reason.
         app.buttons["toolbar.moveButton"].tap()
@@ -137,7 +130,7 @@ final class TransformLayerSpanUITests: PaintUITestCase {
                        "…as the transform layer's own notice, not some other banner that happened to be up")
         XCTAssertTrue(notice.label.contains("bar"),
                       "the sentence names the bar, which is what the artist has to lengthen or scrub inside: \(notice.label)")
-        attach(app, "3-move-refused-outside-the-bar")
+        attachScreenshot(app, "3-move-refused-outside-the-bar")
 
         // What the artist does next: drag the edge back out. The bar covers the second key's frame
         // again, but the cropped key itself does not come back — only undo brings it back, exactly as
@@ -157,7 +150,7 @@ final class TransformLayerSpanUITests: PaintUITestCase {
         app.buttons["toolbar.moveButton"].tap()
         XCTAssertTrue(app.buttons["moveBar.doneButton"].waitForExistence(timeout: 5),
                       "Inside the bar again, Move raises the box regardless of the crop")
-        attach(app, "4-bar-lengthened-move-works-key-still-gone")
+        attachScreenshot(app, "4-bar-lengthened-move-works-key-still-gone")
         app.buttons["moveBar.doneButton"].tap()
     }
 
@@ -211,14 +204,14 @@ final class TransformLayerSpanUITests: PaintUITestCase {
         XCTAssertTrue(shakeY.exists, "…and Shake Y beside it")
         XCTAssertFalse(app.tables["layerPanel.list"].exists,
                        "the rail stands down while the bar is up — `EffectSettingsBar`'s own rule, TODO (64)'s twin")
-        attach(app, "5-shake-settings-bar-open")
+        attachScreenshot(app, "5-shake-settings-bar-open")
 
         // THE FIX PROVEN, NOT ASSUMED: a two-finger canvas pinch must not close the bar.
         canvas.pinch(withScale: 1.3, velocity: 1.0)
         XCTAssertTrue(title.exists,
                       "A two-finger canvas pinch/pan/rotate must not close the transform settings bar")
         XCTAssertEqual(title.label, "Shake", "…and it must still be showing the same mode")
-        attach(app, "6-shake-settings-bar-survives-pinch")
+        attachScreenshot(app, "6-shake-settings-bar-survives-pinch")
 
         // The X closes the whole options menu, exactly as it does for the effect bar — back to the
         // bare rail, nothing docked.
@@ -226,6 +219,6 @@ final class TransformLayerSpanUITests: PaintUITestCase {
         XCTAssertFalse(title.exists, "The X closes the settings bar")
         XCTAssertTrue(app.tables["layerPanel.list"].waitForExistence(timeout: 5),
                      "…back to the plain rail, no options panel and no bar")
-        attach(app, "7-shake-settings-bar-closed-by-x")
+        attachScreenshot(app, "7-shake-settings-bar-closed-by-x")
     }
 }

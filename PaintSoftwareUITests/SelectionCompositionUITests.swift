@@ -18,14 +18,11 @@ final class SelectionCompositionUITests: PaintUITestCase {
         XCTAssertTrue(launchIntoEditor(app), "setup: a brand-new document")
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
-        let paper = visibleCanvasBounds(canvas)
-        func at(_ dx: Double, _ dy: Double) -> CGVector {
-            CGVector(dx: paper.minX + (paper.maxX - paper.minX) * dx,
-                     dy: paper.minY + (paper.maxY - paper.minY) * dy)
-        }
+        let paper = paperRect(in: canvas)
+        func at(_ dx: Double, _ dy: Double) -> CGVector { onHost(paper, dx, dy) }
 
         // 1. Two red lines, far apart, on the layer the document is born with.
-        setBrushColour(app, hex: "FF0000")
+        setBrushColor(app, hex: "FF0000")
         setBrushSize(app, normalized: 0.12)
         let leftMid = at(0.25, 0.22), rightMid = at(0.73, 0.22)
         func drawBoth() {
@@ -46,16 +43,16 @@ final class SelectionCompositionUITests: PaintUITestCase {
         XCTAssertFalse(subtract.isSelected, "…off by default: a new loop adds")
         dragOnCanvas(app, from: at(0.06, 0.12), to: at(0.44, 0.32))
         dragOnCanvas(app, from: at(0.54, 0.12), to: at(0.92, 0.32))
-        attach(app, "union-two-loops")
+        attachScreenshot(app, "union-two-loops")
 
         let clear = app.buttons["selectPanel.clearButton"]
         XCTAssertTrue(clear.isEnabled, "a selection is up")
         clear.tap()
-        XCTAssertTrue(waitUntil(canvas, leftMid, isPaper), "Clear took the line under the first loop")
-        XCTAssertTrue(waitUntil(canvas, rightMid, isPaper),
+        XCTAssertTrue(waitUntil(canvas, leftMid, isWhitish), "Clear took the line under the first loop")
+        XCTAssertTrue(waitUntil(canvas, rightMid, isWhitish),
                       "…and the line under the second: the second loop joined the first rather "
                       + "than replacing it")
-        attach(app, "union-cleared-both")
+        attachScreenshot(app, "union-cleared-both")
 
         // 3. Subtract: a loop around both lines, the switch on, a loop over the right one.
         app.buttons["sideToolbar.undoButton"].tap()
@@ -65,48 +62,12 @@ final class SelectionCompositionUITests: PaintUITestCase {
         subtract.tap()
         XCTAssertTrue(subtract.isSelected, "Subtract is on")
         dragOnCanvas(app, from: at(0.54, 0.08), to: at(0.92, 0.36))
-        attach(app, "subtract-one-loop")
+        attachScreenshot(app, "subtract-one-loop")
 
         clear.tap()
-        XCTAssertTrue(waitUntil(canvas, leftMid, isPaper), "Clear took the line the selection still held")
+        XCTAssertTrue(waitUntil(canvas, leftMid, isWhitish), "Clear took the line the selection still held")
         XCTAssertTrue(waitUntil(canvas, rightMid, isRed),
                       "…and left the line the Subtract loop took out of it")
-        attach(app, "subtract-cleared-left-only")
-    }
-
-    // MARK: - Reading the canvas
-
-    private typealias RGBA = (r: UInt8, g: UInt8, b: UInt8, a: UInt8)
-
-    private func isRed(_ p: RGBA?) -> Bool { p.map { $0.r > 150 && $0.g < 100 && $0.b < 100 } ?? false }
-    private func isPaper(_ p: RGBA?) -> Bool { p.map { $0.r > 235 && $0.g > 235 && $0.b > 235 } ?? false }
-
-    private func waitUntil(_ canvas: XCUIElement, _ point: CGVector, _ test: (RGBA?) -> Bool,
-                           timeout: TimeInterval = 10) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if test(rgbaPixel(of: canvas, dx: point.dx, dy: point.dy)) { return true }
-            Thread.sleep(forTimeInterval: 0.25)
-        }
-        return false
-    }
-
-    private func setBrushColour(_ app: XCUIApplication, hex: String) {
-        let colorButton = app.buttons["toolbar.colorButton"]
-        XCTAssertTrue(colorButton.waitForExistence(timeout: 5), "the toolbar has a colour swatch")
-        colorButton.tap()
-        let hexField = app.textFields["colorPanel.hexField"]
-        XCTAssertTrue(hexField.waitForExistence(timeout: 5), "the colour panel has a hex field")
-        setHexField(app, hexField, to: hex)
-        colorButton.tap()
-        XCTAssertTrue(app.otherElements["colorPanel.svSquare"].waitForNonExistence(timeout: 5),
-                      "the colour panel must be closed before the canvas is touched")
-    }
-
-    private func attach(_ app: XCUIApplication, _ name: String) {
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = name
-        shot.lifetime = .keepAlways
-        add(shot)
+        attachScreenshot(app, "subtract-cleared-left-only")
     }
 }

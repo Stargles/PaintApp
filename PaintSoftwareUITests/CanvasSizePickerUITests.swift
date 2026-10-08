@@ -56,10 +56,7 @@ final class CanvasSizePickerUITests: PaintUITestCase {
                        + "showing both would tell the artist nothing about which one applies")
 
         // The refusal as the artist actually sees it.
-        let screenshot = XCTAttachment(screenshot: app.screenshot())
-        screenshot.name = "canvas-size-picker-refusal"
-        screenshot.lifetime = .keepAlways
-        add(screenshot)
+        attachScreenshot(app, "canvas-size-picker-refusal")
 
         // What the artist does next: back off to a size the app will take.
         setField(widthField, to: "2048")

@@ -42,10 +42,7 @@ final class TextFontListUITests: PaintUITestCase {
         XCTAssertEqual(Set(faces).count, faces.count,
                        "no two of these families share a face — a list drawn in one font throughout would")
 
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = "font-list-in-own-faces"
-        shot.lifetime = .keepAlways
-        add(shot)
+        attachScreenshot(app, "font-list-in-own-faces")
 
         // Choosing a row picks the family and closes the list.
         let (family, _) = try XCTUnwrap(families.last)

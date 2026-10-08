@@ -27,13 +27,6 @@ final class OptionsPanelUITests: PaintUITestCase {
                       "Move raised no menu")
     }
 
-    private func attach(_ app: XCUIApplication, _ name: String) {
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = name
-        shot.lifetime = .keepAlways
-        add(shot)
-    }
-
     /// **The dock rides on the timeline's top edge, and moves with it one-for-one.**
     ///
     /// Two heights, three assertions: the panel clears the timeline at the resting height, it clears
@@ -50,7 +43,7 @@ final class OptionsPanelUITests: PaintUITestCase {
         XCTAssertTrue(floor.waitForExistence(timeout: 5))
         let timelineTop = { app.buttons["timeline.collapseButton"].frame.minY }
 
-        attach(app, "01-move-panel-timeline-resting")
+        attachScreenshot(app, "01-move-panel-timeline-resting")
         let restingFloor = floor.frame.maxY
         let restingTop = timelineTop()
         XCTAssertLessThanOrEqual(restingFloor, restingTop,
@@ -59,7 +52,7 @@ final class OptionsPanelUITests: PaintUITestCase {
 
         let grew = dragTimelineGrabHandle(app, by: 220)
         XCTAssertGreaterThan(grew, 60, "the grab handle drag did not grow the timeline")
-        attach(app, "02-move-panel-timeline-expanded")
+        attachScreenshot(app, "02-move-panel-timeline-expanded")
 
         let raisedFloor = floor.frame.maxY
         XCTAssertLessThanOrEqual(raisedFloor, timelineTop(),
@@ -86,7 +79,7 @@ final class OptionsPanelUITests: PaintUITestCase {
         let floor = app.otherElements["bottomDock.floor"]
         XCTAssertTrue(floor.waitForExistence(timeout: 5))
         dragTimelineGrabHandle(app, by: 400)
-        attach(app, "03-move-panel-graph-editor-full-height")
+        attachScreenshot(app, "03-move-panel-graph-editor-full-height")
 
         let top = app.buttons["timeline.collapseButton"].frame.minY
         XCTAssertLessThanOrEqual(floor.frame.maxY, top,
@@ -128,7 +121,7 @@ final class OptionsPanelUITests: PaintUITestCase {
         XCTAssertTrue(rectangle.waitForExistence(timeout: 5))
         let membership = app.segmentedControls["selectPanel.membershipPicker"]
         XCTAssertTrue(membership.waitForExistence(timeout: 5))
-        attach(app, "04-select-panel")
+        attachScreenshot(app, "04-select-panel")
         XCTAssertLessThan(membership.frame.minY, rectangle.frame.maxY,
                           "the membership picker is stacked under the mode tabs rather than beside them")
         XCTAssertGreaterThan(membership.frame.minX, rectangle.frame.maxX,
@@ -164,7 +157,7 @@ final class OptionsPanelUITests: PaintUITestCase {
         let floor = app.otherElements["bottomDock.floor"]
         XCTAssertTrue(cardTop.waitForExistence(timeout: 5), "the Select panel's card has no top probe")
         XCTAssertTrue(floor.waitForExistence(timeout: 5), "the dock has no floor probe")
-        attach(app, "07-select-panel-height")
+        attachScreenshot(app, "07-select-panel-height")
 
         let height = floor.frame.maxY - cardTop.frame.minY
         XCTAssertGreaterThan(height, 0, "the panel measured no height at all")
@@ -205,7 +198,7 @@ final class OptionsPanelUITests: PaintUITestCase {
         XCTAssertTrue(app.otherElements["panel.textSettings"].waitForExistence(timeout: 5)
                       || app.scrollViews["panel.textSettings"].waitForExistence(timeout: 5),
                       "Add Text raised no panel")
-        attach(app, "05-text-panel")
+        attachScreenshot(app, "05-text-panel")
         assertPanelIsDockedAndFlat(app, topControl: app.sliders["textPanel.sizeSlider"], "the text panel")
     }
 
@@ -217,7 +210,7 @@ final class OptionsPanelUITests: PaintUITestCase {
         addEffectLayerFromAddMenu(app)
         XCTAssertTrue(app.sliders["effectSettings.contrast"].waitForExistence(timeout: 5),
                       "the knobs are not on screen the moment the effect layer is current")
-        attach(app, "06-effect-settings-bar")
+        attachScreenshot(app, "06-effect-settings-bar")
         assertPanelIsDockedAndFlat(app, topControl: app.staticTexts["layerOptions.subMenuTitle"],
                                    "the effect settings bar")
     }
@@ -305,29 +298,6 @@ final class OptionsPanelUITests: PaintUITestCase {
         return best
     }
 
-    /// Re-reads a scan until two consecutive readings agree or `timeout` runs out — the bake pipeline
-    /// this file has no other visibility into may still be settling a frame after a slider drag or a
-    /// panel close, and a single screenshot taken on the very next line can catch it mid-flight
-    /// (`DistortUITests.settledProbe` is the precedent for waiting on stability rather than on a fixed
-    /// delay).
-    private func settled<T: Equatable>(timeout: TimeInterval = 4, _ read: () throws -> T) rethrows -> T {
-        var last: T?
-        let deadline = Date().addingTimeInterval(timeout)
-        var current = try read()
-        while Date() < deadline {
-            if current == last { return current }
-            last = current
-            usleep(150_000)
-            current = try read()
-        }
-        return current
-    }
-
-    // `scrollMenuTo(_:identifier:maxSwipes:)` lifted into `PaintUITestCase` 2026-09-11 — Recolour
-    // (RecolorUITests) needed the same fix once the catalogue's growth pushed it past the menu's
-    // realized-cell window too, and a second private copy would have been the same failure shipping
-    // again under a different name. See `PaintUITestCase.swift` for the doc and the implementation.
-
     /// **TODO (60), cold start: Sobel's new Gain slider actually changes the picture.** A model
     /// assertion on `Effect.Sobel.gain` proves nothing about whether an artist can reach or see it
     /// (CLAUDE.md's "prove the artist can use it" rule). Sobel is always `.backdrop` with no control
@@ -354,7 +324,7 @@ final class OptionsPanelUITests: PaintUITestCase {
         app.buttons["layerOptions.close"].tap()
         openLayerPanel(app)   // close the panel so the canvas is clear
         let dim = try settled { try maxRedChannel(canvas, dx: 0.5, dyRange: 0.4...0.6) }
-        attach(app, "sobel-gain-dim")
+        attachScreenshot(app, "sobel-gain-dim")
 
         openLayerPanel(app)
         app.staticTexts["layerPanel.row.1"].tap()
@@ -363,7 +333,7 @@ final class OptionsPanelUITests: PaintUITestCase {
         app.buttons["layerOptions.close"].tap()
         openLayerPanel(app)
         let bright = try settled { try maxRedChannel(canvas, dx: 0.5, dyRange: 0.4...0.6) }
-        attach(app, "sobel-gain-bright")
+        attachScreenshot(app, "sobel-gain-bright")
 
         XCTAssertGreaterThan(bright, dim, """
             Dragging Sobel's Gain slider must change the edge it draws. Dim (gain 0.25) read \(dim), \
@@ -409,7 +379,7 @@ final class OptionsPanelUITests: PaintUITestCase {
         app.buttons["layerOptions.close"].tap()
         openLayerPanel(app)   // close the panel so the canvas is clear
         let beforeRedness = try settled { try maxRedness(canvas, dx: 0.5, dyRange: 0.3...0.7) }
-        attach(app, "bloom-colour-before")
+        attachScreenshot(app, "bloom-colour-before")
 
         openLayerPanel(app)
         app.staticTexts["layerPanel.row.1"].tap()
@@ -438,7 +408,7 @@ final class OptionsPanelUITests: PaintUITestCase {
         app.buttons["layerOptions.close"].tap()
         openLayerPanel(app)
         let afterRedness = try settled { try maxRedness(canvas, dx: 0.5, dyRange: 0.3...0.7) }
-        attach(app, "bloom-colour-after")
+        attachScreenshot(app, "bloom-colour-after")
 
         XCTAssertGreaterThan(afterRedness, beforeRedness + 15, """
             Changing Bloom's Colour swatch to red must change what is drawn. Redness before \
@@ -560,7 +530,7 @@ final class OptionsPanelUITests: PaintUITestCase {
         app.buttons["layerOptions.close"].tap()
         openLayerPanel(app)
         let flat = try settled { try inkRedValues(canvas, dxRange: 0.3...0.7, dyRange: 0.48...0.52) }
-        attach(app, "posterize-flat")
+        attachScreenshot(app, "posterize-flat")
 
         openLayerPanel(app)
         app.staticTexts["layerPanel.row.1"].tap()
@@ -575,7 +545,7 @@ final class OptionsPanelUITests: PaintUITestCase {
         app.buttons["layerOptions.close"].tap()
         openLayerPanel(app)
         let dithered = try settled { try inkRedValues(canvas, dxRange: 0.3...0.7, dyRange: 0.48...0.52) }
-        attach(app, "posterize-dithered")
+        attachScreenshot(app, "posterize-dithered")
 
         XCTAssertGreaterThan(flat.count, 10, "Fixture premise: the patch must be mostly ink. Got \(flat)")
         XCTAssertGreaterThan(dithered.count, 10, "Fixture premise: the patch must be mostly ink. Got \(dithered)")
@@ -682,7 +652,7 @@ final class OptionsPanelUITests: PaintUITestCase {
         app.buttons["layerOptions.close"].tap()
         openLayerPanel(app)
         let cyanish = try settled { try maxRedness(canvas, dx: 0.5, dyRange: 0.4...0.6) }
-        attach(app, "hue-colorize-cyan")
+        attachScreenshot(app, "hue-colorize-cyan")
 
         openLayerPanel(app)
         app.staticTexts["layerPanel.row.1"].tap()
@@ -691,7 +661,7 @@ final class OptionsPanelUITests: PaintUITestCase {
         app.buttons["layerOptions.close"].tap()
         openLayerPanel(app)
         let reddish = try settled { try maxRedness(canvas, dx: 0.5, dyRange: 0.4...0.6) }
-        attach(app, "hue-colorize-red")
+        attachScreenshot(app, "hue-colorize-red")
 
         XCTAssertGreaterThan(reddish, cyanish + 15, """
             Dragging Hue Colorize's Hue slider from −180° to 0° must change the colour it paints. \

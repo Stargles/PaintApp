@@ -45,13 +45,6 @@ final class PlaybackBakeUITests: PaintUITestCase {
          "-uiTestTextureBudgetBytes", String(2048 * 2048 * 4 * 2)]
     }
 
-    private func attachScreen(_ name: String) {
-        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        shot.name = name
-        shot.lifetime = .keepAlways
-        add(shot)
-    }
-
     private func field(_ app: XCUIApplication, _ name: String) -> Int? {
         app.otherElements["canvas.host"].label
             .split(separator: " ")
@@ -85,7 +78,7 @@ final class PlaybackBakeUITests: PaintUITestCase {
                        + "Animation's flat row. Engaging everywhere would be a different change")
         XCTAssertEqual(readFrameLabel(app)?.total, frameCount,
                        "Setup: the seed has to have laid \(frameCount) frames down")
-        attachScreen("01-at-rest-on-the-flat-row")
+        attachScreenshot(XCUIScreen.main, "01-at-rest-on-the-flat-row")
 
         let play = app.buttons["timeline.playButton"]
         XCTAssertTrue(play.waitForExistence(timeout: 5))
@@ -94,7 +87,7 @@ final class PlaybackBakeUITests: PaintUITestCase {
                                            "Playing a plain document never reached the baked frame. "
                                            + "That is the owner's report exactly: the bake is on "
                                            + "disk and the canvas is drawing the layers itself"))
-        attachScreen("02-playing-off-the-bake")
+        attachScreenshot(XCUIScreen.main, "02-playing-off-the-bake")
 
         // **The picture on screen is the artwork, asked while the bake is what is drawing it.** With
         // the sandwich engaged every host is blanked, so the only thing that can put ink on the
@@ -120,7 +113,7 @@ final class PlaybackBakeUITests: PaintUITestCase {
         XCTAssertEqual(sandwichState(app), "off",
                        "Stopping puts the canvas back on the flat row — disengaging is a branch, not "
                        + "a composite, so it is immediate")
-        attachScreen("03-stopped-and-back-on-the-flat-row")
+        attachScreenshot(XCUIScreen.main, "03-stopped-and-back-on-the-flat-row")
 
         let rebuildsAfter = try XCTUnwrap(field(app, "rebuilds"))
         let rasterizesAfter = try XCTUnwrap(field(app, "rasterizes"))
@@ -176,7 +169,7 @@ final class PlaybackBakeUITests: PaintUITestCase {
         XCTAssertNotEqual(first, second,
                           "Setup: the seed's two frames have to draw different rows (\(first)), or "
                           + "nothing below can tell a stale picture from a correct one")
-        attachScreen("01-the-two-frames-before-playback")
+        attachScreenshot(XCUIScreen.main, "01-the-two-frames-before-playback")
 
         let play = app.buttons["timeline.playButton"]
         play.tap()
@@ -188,7 +181,7 @@ final class PlaybackBakeUITests: PaintUITestCase {
         let stopped = try XCTUnwrap(readFrameLabel(app)?.current, "the timeline publishes the frame")
         let expected = stopped == 1 ? first : second
         let settled = waitForRowSignature(canvas, matching: expected)
-        attachScreen("02-stopped-on-frame-\(stopped)")
+        attachScreenshot(XCUIScreen.main, "02-stopped-on-frame-\(stopped)")
         XCTAssertEqual(settled, expected,
                        "Playback stopped on frame \(stopped) and the canvas is drawing \(settled) "
                        + "where that frame is \(expected). Every host was blanked a moment ago and "
@@ -225,7 +218,7 @@ final class PlaybackBakeUITests: PaintUITestCase {
             eye.tap()
         }
         app.buttons["toolbar.layersButton"].tap()
-        attachScreen("01-every-layer-hidden")
+        attachScreenshot(XCUIScreen.main, "01-every-layer-hidden")
 
         // After the hiding, so the renders the hiding itself provoked are behind the baseline.
         Thread.sleep(forTimeInterval: 1)
@@ -264,7 +257,7 @@ final class PlaybackBakeUITests: PaintUITestCase {
                        "A stroke on a plain document must leave the canvas exactly where it was")
         XCTAssertNotNil(waitForPixel(canvas, at: CGVector(dx: 0.5, dy: 0.6)),
                         "…and the ink is on screen, which is what says the flat row is still drawing")
-        attachScreen("01-stroke-on-the-flat-row")
+        attachScreenshot(XCUIScreen.main, "01-stroke-on-the-flat-row")
     }
 
     /// Polls a canvas pixel until it is not the paper — `BakeWiringUITests`' probe, local for its

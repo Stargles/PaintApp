@@ -776,33 +776,13 @@ final class SelectionAndMoveUITests: PaintUITestCase {
     /// including its reason for closing the colour panel with a confirmed wait: the panel is a
     /// dropdown over the right of the canvas and the stroke runs straight under it.
     private func paintRedLineAndReturnToBlack(_ app: XCUIApplication, at dy: Double) {
-        let colorButton = app.buttons["toolbar.colorButton"]
-        XCTAssertTrue(colorButton.waitForExistence(timeout: 5))
-
-        func closeColorPanel() {
-            colorButton.tap()
-            XCTAssertTrue(app.otherElements["colorPanel.svSquare"].waitForNonExistence(timeout: 5),
-                          "The colour panel must be closed before the canvas is touched")
-        }
-
-        colorButton.tap()
-        let hexField = app.textFields["colorPanel.hexField"]
-        XCTAssertTrue(hexField.waitForExistence(timeout: 5))
-        setHexField(app, hexField, to: "FF0000")
-        closeColorPanel()
+        setBrushColor(app, hex: "FF0000")
 
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
         drawLine(on: canvas, from: CGVector(dx: 0.3, dy: dy), to: CGVector(dx: 0.7, dy: dy))
 
-        // Back to black through the SV square rather than the hex field: the field needs the
-        // keyboard, and a second visit to it mid-test is a focus race this test has nothing to do
-        // with. Bottom-left of the square is saturation 0, brightness 0.
-        colorButton.tap()
-        let svSquare = app.otherElements["colorPanel.svSquare"]
-        XCTAssertTrue(svSquare.waitForExistence(timeout: 5))
-        dragWithinElement(svSquare, from: CGVector(dx: 0.5, dy: 0.5), to: CGVector(dx: 0.0, dy: 1.0))
-        closeColorPanel()
+        returnTheBrushToBlack(app)
     }
 
     /// **The owner's bug** (2026-08-22): *"The pick tool does not work when the lasso select tool is
@@ -1136,25 +1116,8 @@ final class EraserAndPersistenceUITests: PaintUITestCase {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
 
-        let colorButton = app.buttons["toolbar.colorButton"]
-        XCTAssertTrue(colorButton.waitForExistence(timeout: 5))
-
-        /// Closes the colour panel and waits until it is really gone. **Not optional**: the panel is
-        /// a dropdown over the right of the canvas, and the stroke this test draws runs straight
-        /// under it — an unconfirmed close meant the drag landed on the hue bar instead of the
-        /// canvas and repainted the brush a colour nothing had asked for.
-        func closeColorPanel() {
-            colorButton.tap()
-            XCTAssertTrue(app.otherElements["colorPanel.svSquare"].waitForNonExistence(timeout: 5),
-                          "The colour panel must be closed before the canvas is touched")
-        }
-
         // Paint a red stroke across the middle of the canvas…
-        colorButton.tap()
-        let hexField = app.textFields["colorPanel.hexField"]
-        XCTAssertTrue(hexField.waitForExistence(timeout: 5))
-        setHexField(app, hexField, to: "FF0000")
-        closeColorPanel()
+        setBrushColor(app, hex: "FF0000")
 
         let eyedropper = app.buttons["sideToolbar.eyedropperButton"]
         XCTAssertTrue(eyedropper.waitForExistence(timeout: 5),
@@ -1166,15 +1129,8 @@ final class EraserAndPersistenceUITests: PaintUITestCase {
         drawLine(on: canvas, from: CGVector(dx: 0.3, dy: 0.5), to: CGVector(dx: 0.7, dy: 0.5))
 
         // …then move the brush to a colour nothing on the canvas is, so a pick that silently did
-        // nothing is distinguishable from one that worked. Through the SV square rather than the hex
-        // field: the field needs the keyboard, and a second visit to it mid-test is a focus race the
-        // pick has nothing to do with. Bottom-left of the square is saturation 0, brightness 0 —
-        // black, whatever the hue happens to be.
-        colorButton.tap()
-        let svSquare = app.otherElements["colorPanel.svSquare"]
-        XCTAssertTrue(svSquare.waitForExistence(timeout: 5))
-        dragWithinElement(svSquare, from: CGVector(dx: 0.5, dy: 0.5), to: CGVector(dx: 0.0, dy: 1.0))
-        closeColorPanel()
+        // nothing is distinguishable from one that worked.
+        returnTheBrushToBlack(app)
 
         XCTAssertEqual(eyedropper.value as? String, "000000", "Sanity: the brush is black before the pick")
         XCTAssertFalse(eyedropper.isSelected, "…and the tool is not armed yet")

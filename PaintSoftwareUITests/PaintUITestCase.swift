@@ -311,11 +311,14 @@ class PaintUITestCase: XCTestCase {
         start.press(forDuration: 0.05, thenDragTo: end)
     }
 
+    /// One pixel as `rgbaPixel` reads it.
+    typealias RGBA = (r: UInt8, g: UInt8, b: UInt8, a: UInt8)
+
     /// Rasterizes `element`'s own on-screen content (not the whole app screenshot) into a flat RGBA8
     /// buffer, top-left origin, so individual pixels can be inspected by fraction-of-element position.
     /// Goes through an explicit CGContext (rather than trusting the screenshot's native byte order) for
     /// the same reason FloodFillEngine does: it removes any ambiguity about pixel format.
-    func rgbaPixel(of element: XCUIElement, dx: Double, dy: Double) -> (r: UInt8, g: UInt8, b: UInt8, a: UInt8)? {
+    func rgbaPixel(of element: XCUIElement, dx: Double, dy: Double) -> RGBA? {
         guard let cgImage = element.screenshot().image.cgImage else { return nil }
         let width = cgImage.width
         let height = cgImage.height
@@ -338,57 +341,87 @@ class PaintUITestCase: XCTestCase {
         return (buffer[offset], buffer[offset + 1], buffer[offset + 2], buffer[offset + 3])
     }
 
-    func isWhitish(_ pixel: (r: UInt8, g: UInt8, b: UInt8, a: UInt8)?) -> Bool {
+    func rgbaPixel(of element: XCUIElement, at point: CGVector) -> RGBA? {
+        rgbaPixel(of: element, dx: point.dx, dy: point.dy)
+    }
+
+    func isWhitish(_ pixel: RGBA?) -> Bool {
         guard let pixel else { return false }
         return pixel.r > 240 && pixel.g > 240 && pixel.b > 240
+    }
+
+    /// Dark: the pixel a stroke leaves on white paper, and not the black letterbox margin's absence of one.
+    func isInk(_ pixel: RGBA?) -> Bool {
+        guard let pixel else { return false }
+        return pixel.r < 100 && pixel.g < 100 && pixel.b < 100
+    }
+
+    func isRed(_ pixel: RGBA?) -> Bool {
+        guard let pixel else { return false }
+        return pixel.r > 150 && pixel.g < 100 && pixel.b < 100
+    }
+
+    func isBlue(_ pixel: RGBA?) -> Bool {
+        guard let pixel else { return false }
+        return pixel.b > 150 && pixel.r < 100 && pixel.g < 100
+    }
+
+    /// Polls the pixel at `point` on `canvas` until `test` accepts it or `timeout` elapses. Every render
+    /// the editor does after a gesture or a model change lands off the main thread a moment later, so a
+    /// read of what the canvas shows is a wait, never an instant look.
+    func waitUntil(_ canvas: XCUIElement, _ point: CGVector, _ test: (RGBA?) -> Bool,
+                   timeout: TimeInterval = 10) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if test(rgbaPixel(of: canvas, at: point)) { return true }
+            Thread.sleep(forTimeInterval: 0.25)
+        }
+        return false
+    }
+
+    /// One canvas pixel as whole numbers, with `==` so `settled` can compare two reads. A fixture that
+    /// asks something of a colour in particular (how blue, which red) adds it in a `private extension`.
+    struct RGB: Equatable, CustomStringConvertible {
+        let r: Int, g: Int, b: Int
+        var sum: Int { r + g + b }
+        var description: String { "(r: \(r), g: \(g), b: \(b))" }
+    }
+
+    /// The pixel at `dx`, `dy` of `canvas`; black where there is no screenshot to read.
+    func probe(_ canvas: XCUIElement, dx: Double, dy: Double) -> RGB {
+        let p = rgbaPixel(of: canvas, dx: dx, dy: dy)
+        return RGB(r: Int(p?.r ?? 0), g: Int(p?.g ?? 0), b: Int(p?.b ?? 0))
+    }
+
+    /// Reads until two consecutive reads agree, so a probe taken while the render is still landing off
+    /// the main thread is not the number the test reasons about (`settledProbe` is the same wait for a
+    /// whole region's fingerprint).
+    func settled<T: Equatable>(timeout: TimeInterval = 4, _ read: () throws -> T) rethrows -> T {
+        var last: T?
+        let deadline = Date().addingTimeInterval(timeout)
+        var current = try read()
+        while Date() < deadline {
+            if current == last { return current }
+            last = current
+            usleep(150_000)
+            current = try read()
+        }
+        return current
     }
 
     /// The fill runs off-main-thread (see CanvasManager.beginInteractiveFill), so polls the given point on
     /// `element` until it's no longer whitish (i.e. the fill landed) or `timeout` elapses.
     @discardableResult
     func waitUntilFilled(_ element: XCUIElement, dx: Double, dy: Double, timeout: TimeInterval = 15) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if !isWhitish(rgbaPixel(of: element, dx: dx, dy: dy)) { return true }
-            Thread.sleep(forTimeInterval: 0.3)
-        }
-        return false
+        waitUntil(element, CGVector(dx: dx, dy: dy), { !isWhitish($0) }, timeout: timeout)
     }
 
-    /// The canvas is always rendered as a square (2048x2048 by default) scaled to fit and centered
-    /// within `canvas.host`'s own element frame. On this iPad simulator that frame is *not* square
-    /// (portrait-ish, taller than wide), so the canvas content is vertically letterboxed: there's a
-    /// margin above and below the actual square canvas that belongs to the view's own background,
-    /// not to any layer's content. A normalized probe point like (0.05, 0.05) can land in that
-    /// margin instead of on real canvas content — confirmed empirically (see BUGS.md's fill
-    /// containment / letterbox investigation): on a completely blank, freshly-created canvas with
-    /// nothing drawn or filled, (0.05,0.05) already reads solid black, and the margin only clears
-    /// past roughly dx/dy ~0.19 on this device's frame proportions. Returns the normalized bounding
-    /// box of the actual canvas content within `canvas`'s frame, so tests can build "definitely on
-    /// real content" probe points instead of guessing a magic constant that happens to work for one
-    /// specific frame size.
-    func visibleCanvasBounds(_ canvas: XCUIElement) -> (minX: Double, maxX: Double, minY: Double, maxY: Double) {
-        let frame = canvas.frame
-        guard frame.width > 0, frame.height > 0 else { return (0, 1, 0, 1) }
-        if frame.width < frame.height {
-            let marginFrac = Double((frame.height - frame.width) / (2 * frame.height))
-            return (0, 1, marginFrac, 1 - marginFrac)
-        } else if frame.height < frame.width {
-            let marginFrac = Double((frame.width - frame.height) / (2 * frame.width))
-            return (marginFrac, 1 - marginFrac, 0, 1)
-        }
-        return (0, 1, 0, 1)
-    }
-
-    /// A point safely inside the visible (non-letterboxed) canvas content, inset a further 10% of
-    /// that visible region from the top-left corner — comfortably away from both the letterbox
-    /// margin and (for this test suite's shapes, all drawn no closer than 30% from any edge) any
+    /// A point safely inside the paper, inset a further 10% of it from the top-left corner — clear of
+    /// the letterbox margin (which reads solid black, so a normalized probe like (0.05, 0.05) can land
+    /// in it) and, for this test suite's shapes, all drawn no closer than 30% from any edge, of any
     /// drawn lineart, while still being far from the canvas center.
     func safeOutsideCornerPoint(_ canvas: XCUIElement) -> CGVector {
-        let bounds = visibleCanvasBounds(canvas)
-        let dx = bounds.minX + (bounds.maxX - bounds.minX) * 0.1
-        let dy = bounds.minY + (bounds.maxY - bounds.minY) * 0.1
-        return CGVector(dx: dx, dy: dy)
+        onHost(paperRect(in: canvas), 0.1, 0.1)
     }
 
     // MARK: - Where the paper can be seen
@@ -402,7 +435,8 @@ class PaintUITestCase: XCTestCase {
     /// on a portrait iPad the middle of the host is under the card.
     func dockTop(_ app: XCUIApplication, _ canvas: XCUIElement) -> Double {
         let host = canvas.frame
-        var top = app.otherElements["timeline.panel"].frame.minY
+        let panel = app.otherElements["timeline.panel"]
+        var top = panel.exists ? panel.frame.minY : host.maxY
         let card = app.descendants(matching: .any)["bottomDock.card"].firstMatch
         if card.exists { top = min(top, card.frame.minY) }
         return Double((top - host.minY) / host.height)
@@ -410,10 +444,22 @@ class PaintUITestCase: XCTestCase {
 
     /// The part of the paper no chrome covers: `paperRect`, cut off where the timeline panel (and a
     /// docked card, if one is up) begins. In host fractions, like `paperRect`.
+    ///
+    /// **This is where a touch or a probe goes; `paperRect` is where the document is.** Choose where to put
+    /// ink and where to tap from this, measured *after* the chrome the test will stand up is up; convert
+    /// between host and canvas coordinates against `paperRect`, whose extent they are in.
     func visiblePaperRect(_ app: XCUIApplication, in canvas: XCUIElement) -> CGRect {
         var paper = paperRect(in: canvas)
         paper.size.height = max(0, min(paper.maxY, CGFloat(dockTop(app, canvas))) - paper.minY)
         return paper
+    }
+
+    /// A point in the host above whatever stands over its lower part, `x` of the way across and `y` of
+    /// the way down from the host's top edge to the dock's (`dockTop`, measured now) — for a gesture that
+    /// is about the canvas as a whole and not the paper, such as a pan or a pinch, and must not land on
+    /// the timeline or a docked card. The rails stand at the sides, so keep `x` clear of them.
+    func aboveTheDock(_ app: XCUIApplication, _ canvas: XCUIElement, x: Double, y: Double) -> CGVector {
+        CGVector(dx: x, dy: dockTop(app, canvas) * y)
     }
 
     /// **The host row to put ink on when a docked card will stand over the picture while it is read** —
@@ -551,12 +597,7 @@ class PaintUITestCase: XCTestCase {
     /// main thread. Returns whether the target state was reached before `timeout`.
     @discardableResult
     func waitUntilBlank(_ element: XCUIElement, dx: Double, dy: Double, timeout: TimeInterval = 10) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if isWhitish(rgbaPixel(of: element, dx: dx, dy: dy)) { return true }
-            Thread.sleep(forTimeInterval: 0.3)
-        }
-        return false
+        waitUntil(element, CGVector(dx: dx, dy: dy), isWhitish, timeout: timeout)
     }
 
     /// Drags the element with the given accessibility identifier's own drag gesture from one
@@ -651,6 +692,36 @@ class PaintUITestCase: XCTestCase {
         }
         hexField.typeText(value)
         app.keyboards.buttons["Return"].tap()
+    }
+
+    /// Sets the brush colour through the toolbar's colour panel and closes it again, confirmed gone before
+    /// returning — **not optional**: the panel is a dropdown over the right of the canvas, and the next
+    /// stroke runs straight under it, so an unconfirmed close puts the drag on the hue bar instead of the
+    /// paper and repaints the brush a colour nothing asked for.
+    func setBrushColor(_ app: XCUIApplication, hex: String) {
+        let colorButton = app.buttons["toolbar.colorButton"]
+        XCTAssertTrue(colorButton.waitForExistence(timeout: 5), "The toolbar's colour button")
+        colorButton.tap()
+        let hexField = app.textFields["colorPanel.hexField"]
+        XCTAssertTrue(hexField.waitForExistence(timeout: 5), "The colour panel's hex field")
+        setHexField(app, hexField, to: hex)
+        colorButton.tap()
+        XCTAssertTrue(app.otherElements["colorPanel.svSquare"].waitForNonExistence(timeout: 5),
+                      "The colour panel must be closed before the canvas is touched")
+    }
+
+    /// Back to black through the SV square rather than the hex field: the field needs the keyboard, and
+    /// a second visit to it mid-test is a focus race the pick has nothing to do with. Bottom-left of the
+    /// square is saturation 0, brightness 0 — black, whatever the hue happens to be.
+    func returnTheBrushToBlack(_ app: XCUIApplication) {
+        let colorButton = app.buttons["toolbar.colorButton"]
+        colorButton.tap()
+        let svSquare = app.otherElements["colorPanel.svSquare"]
+        XCTAssertTrue(svSquare.waitForExistence(timeout: 5))
+        dragWithinElement(svSquare, from: CGVector(dx: 0.5, dy: 0.5), to: CGVector(dx: 0.0, dy: 1.0))
+        colorButton.tap()
+        XCTAssertTrue(svSquare.waitForNonExistence(timeout: 5),
+                      "The colour panel must be closed before the canvas is touched")
     }
 
     func brushIsSelected(_ app: XCUIApplication) -> Bool {
@@ -1193,12 +1264,15 @@ class PaintUITestCase: XCTestCase {
         XCTAssertEqual(edit.value as? String, "expanded", "pressing Edit unfolds the band")
     }
 
-    /// Keeps a screenshot of the app in the test's result bundle, so a run can be looked at and not only
-    /// read — the bar for a visible feature is that someone saw it.
-    func attachScreenshot(_ app: XCUIApplication, _ name: String) {
-        let shot = XCTAttachment(screenshot: app.screenshot())
+    /// Keeps a screenshot in the test's result bundle, so a run can be looked at and not only read — the
+    /// bar for a visible feature is that someone saw it. `subject` is the app, one element of it (the
+    /// canvas) or `XCUIScreen.main`; `lifetime` is `.keepAlways` unless a suite that attaches a great many
+    /// asks to keep only the failures'.
+    func attachScreenshot(_ subject: XCUIScreenshotProviding, _ name: String,
+                          lifetime: XCTAttachment.Lifetime = .keepAlways) {
+        let shot = XCTAttachment(screenshot: subject.screenshot())
         shot.name = name
-        shot.lifetime = .keepAlways
+        shot.lifetime = lifetime
         add(shot)
     }
 
@@ -1368,12 +1442,10 @@ class PaintUITestCase: XCTestCase {
     /// with a tall panel docked above the timeline (Text, the colour wheels, an effect's settings) or the
     /// layer rail's menus open, the middle of it is *theirs*, one of the two fingers lands on one of
     /// them, and the canvas never sees a pinch. A test that is about the canvas moving while such a panel
-    /// is up pinches where none is — the stretch left of the rail and above the dock, which
-    /// `CanvasTransformLeavesStandingUITests` already names for its two-finger pans. Both fingers land in
-    /// one event, as `pinch` lands them.
-    func pinchAboveTheDock(_ element: XCUIElement, scale: CGFloat) throws {
-        let frame = element.frame
-        let centre = CGPoint(x: frame.minX + frame.width * 0.16, y: frame.minY + frame.height * 0.25)
+    /// is up pinches where none is — halfway up the space above the dock (`aboveTheDock`), left of the
+    /// rail. Both fingers land in one event, as `pinch` lands them.
+    func pinchAboveTheDock(_ app: XCUIApplication, _ element: XCUIElement, scale: CGFloat) throws {
+        let centre = element.coordinate(withNormalizedOffset: aboveTheDock(app, element, x: 0.16, y: 0.5)).screenPoint
         let spread: CGFloat = 40
         try twoFingerGesture(from: (CGPoint(x: centre.x - spread, y: centre.y), CGPoint(x: centre.x + spread, y: centre.y)),
                              to: (CGPoint(x: centre.x - spread * scale, y: centre.y),
@@ -1381,20 +1453,16 @@ class PaintUITestCase: XCTestCase {
                              stagger: 0, duration: 0.5)
     }
 
-    /// **A two-finger drag whose fingers land in two separate touch events, `stagger` seconds apart —
-    /// the way a hand lands on glass, and the one shape `pinch`/`rotate` cannot make.**
-    ///
-    /// - Parameters:
-    ///   - a, b: where each finger lands, normalised within `element`; `a` lands first.
-    ///   - delta: how far both fingers travel together, in points.
-    func staggeredTwoFingerDrag(_ element: XCUIElement, a: CGVector, b: CGVector,
-                                stagger: TimeInterval = 0.02, delta: CGVector,
-                                duration: TimeInterval = 0.4) throws {
+    /// **A two-finger pan above the dock, whose fingers land in two separate touch events `stagger` seconds
+    /// apart — the way a hand lands on glass, and the one shape `pinch`/`rotate` cannot make.** Both
+    /// fingers start left of the rail, in the space above the dock (`aboveTheDock`), and travel `delta`
+    /// points together.
+    func panAboveTheDock(_ app: XCUIApplication, _ canvas: XCUIElement, stagger: TimeInterval,
+                         delta: CGVector = CGVector(dx: 60, dy: 40)) throws {
         func end(_ start: CGPoint) -> CGPoint { CGPoint(x: start.x + delta.dx, y: start.y + delta.dy) }
-        let start = (a: element.coordinate(withNormalizedOffset: a).screenPoint,
-                     b: element.coordinate(withNormalizedOffset: b).screenPoint)
-        try twoFingerGesture(from: start, to: (end(start.a), end(start.b)), stagger: stagger, duration: duration,
-                             steps: 8)
+        let start = (a: canvas.coordinate(withNormalizedOffset: aboveTheDock(app, canvas, x: 0.10, y: 0.25)).screenPoint,
+                     b: canvas.coordinate(withNormalizedOffset: aboveTheDock(app, canvas, x: 0.22, y: 0.5)).screenPoint)
+        try twoFingerGesture(from: start, to: (end(start.a), end(start.b)), stagger: stagger, duration: 0.4, steps: 8)
     }
 
     /// **One finger drags while a second lands on the glass beside it** — the shape of TODO (146)'s
@@ -1514,7 +1582,7 @@ class PaintUITestCase: XCTestCase {
     private static let tapAwayClearance: CGFloat = 44
 }
 
-/// The selector-level plumbing behind `staggeredTwoFingerDrag`. Every object here is created through
+/// The selector-level plumbing behind `twoFingerGesture`. Every object here is created through
 /// `alloc`/`init…` read off the runtime and handed back `Unmanaged` so ARC makes no assumption about
 /// ownership it cannot see; the few objects it leaks per gesture are a test process's to lose.
 private enum SynthesizedTouch {

@@ -15,27 +15,6 @@ import XCTest
 /// full-screen editor for every step).
 final class GuideUITests: PaintUITestCase {
 
-    private func attach(_ app: XCUIApplication, _ name: String) {
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = name
-        shot.lifetime = .keepAlways
-        add(shot)
-    }
-
-    private struct RGB: Equatable, CustomStringConvertible {
-        let r: Int, g: Int, b: Int
-        var sum: Int { r + g + b }
-        /// The guide's default colour is a blue: markedly more blue than red.
-        var isGuideBlue: Bool { b > r + 60 }
-        var isPaper: Bool { r > 235 && g > 235 && b > 235 }
-        var description: String { "(r: \(r), g: \(g), b: \(b))" }
-    }
-
-    private func probe(_ canvas: XCUIElement, dx: Double, dy: Double) -> RGB {
-        let p = rgbaPixel(of: canvas, dx: dx, dy: dy)
-        return RGB(r: Int(p?.r ?? 0), g: Int(p?.g ?? 0), b: Int(p?.b ?? 0))
-    }
-
     /// An 11×11 patch of probes over the middle fifth of the paper — two-dimensional rather than a
     /// single row, because a row that happens to lie along one of the grid's own horizontals reads
     /// the line's colour end to end (which is exactly what the first version of this test did).
@@ -104,7 +83,7 @@ final class GuideUITests: PaintUITestCase {
         // 4.
         app.sliders["effectSettings.lineWidth"].adjust(toNormalizedSliderPosition: 1)
         app.sliders["effectSettings.opacity"].adjust(toNormalizedSliderPosition: 1)
-        attach(app, "1-grid-settings")
+        attachScreenshot(app, "1-grid-settings")
 
         // 5.
         var after = patch(canvas)
@@ -117,7 +96,7 @@ final class GuideUITests: PaintUITestCase {
         XCTAssertGreaterThan(blue, 0, "A grid line's blue must be on the paper somewhere in the patch: \(after)")
         XCTAssertGreaterThan(paper, 0, "…with bare paper between the lines: \(after)")
         XCTContext.runActivity(named: "[guide] patch of \(after.count): \(blue) on a line, \(paper) on paper") { _ in }
-        attach(app, "2-grid-drawn")
+        attachScreenshot(app, "2-grid-drawn")
 
         // 6.
         modeRow.tap()
@@ -129,6 +108,12 @@ final class GuideUITests: PaintUITestCase {
         }
         XCTAssertTrue(app.switches["effectSettings.twoPoint"].exists, "…and the Two Points switch")
         XCTAssertFalse(app.sliders["effectSettings.spacing"].exists, "…and the grid's spacing is not")
-        attach(app, "3-perspective")
+        attachScreenshot(app, "3-perspective")
     }
+}
+
+private extension PaintUITestCase.RGB {
+    /// The guide's default colour is a blue: markedly more blue than red.
+    var isGuideBlue: Bool { b > r + 60 }
+    var isPaper: Bool { r > 235 && g > 235 && b > 235 }
 }

@@ -31,7 +31,7 @@ final class MenuInterruptionUITests: PaintUITestCase {
 
     /// Left of centre, clear of the trailing layer rail and the options panel that hangs off its left
     /// edge (`DrawingView` lays both out on the trailing edge), and vertically centred so it is never
-    /// in the letterbox margin (`visibleCanvasBounds`).
+    /// in the letterbox margin (`paperRect`).
     private let strokeStart = CGVector(dx: 0.28, dy: 0.45)
     private let strokeEnd = CGVector(dx: 0.42, dy: 0.55)
     private let secondStrokeStart = CGVector(dx: 0.28, dy: 0.62)

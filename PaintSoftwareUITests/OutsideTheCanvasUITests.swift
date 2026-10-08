@@ -68,13 +68,6 @@ final class OutsideTheCanvasUITests: PaintUITestCase {
         return best
     }
 
-    private func attach(_ canvas: XCUIElement, _ name: String) {
-        let shot = XCTAttachment(screenshot: canvas.screenshot())
-        shot.name = name
-        shot.lifetime = .keepAlways
-        add(shot)
-    }
-
     // MARK: - A stroke started outside the canvas
 
     /// The owner: *"Starting a brushstroke outside of canvas also does not work."* A drag that begins
@@ -94,7 +87,7 @@ final class OutsideTheCanvasUITests: PaintUITestCase {
                       "the paper's top edge already carries ink, so this measures nothing")
 
         dragOnCanvas(app, from: start, to: onHost(paper, 0.5, 0.3))
-        attach(canvas, "stroke-from-the-surround")
+        attachScreenshot(canvas, "stroke-from-the-surround")
 
         let probe = try settledProbe(canvas, window: CGRect(x: paper.minX, y: paper.minY,
                                                             width: paper.width, height: paper.height * 0.4))
@@ -135,7 +128,7 @@ final class OutsideTheCanvasUITests: PaintUITestCase {
                                                           width: 0.06, height: 0.04))
         XCTAssertGreaterThan(drawn.level, 450, "no node is drawn in the surround where the line ends — "
                              + "brightest was \(drawn.level) at \(drawn.point)")
-        attach(canvas, "01-line-with-a-node-off-the-canvas")
+        attachScreenshot(canvas, "01-line-with-a-node-off-the-canvas")
 
         let before = try settledProbe(canvas, window: CGRect(x: paper.minX, y: paper.minY,
                                                              width: paper.width, height: paper.height * 0.4))
@@ -145,7 +138,7 @@ final class OutsideTheCanvasUITests: PaintUITestCase {
         // Swing the far node along the surround to the left. The line from (0.5, 0.4) to (0.15, -0.06)
         // crosses paper row 0.02 at x ≈ 0.21.
         dragOnCanvas(app, from: CGVector(dx: drawn.point.x, dy: drawn.point.y), to: onHost(paper, 0.15, -0.06))
-        attach(canvas, "02-after-dragging-the-node-off-the-canvas")
+        attachScreenshot(canvas, "02-after-dragging-the-node-off-the-canvas")
 
         XCTAssertEqual(readField(app, "shape:"), "adjustable",
                        "the drag committed the shape instead of adjusting it, so it reached a stroke")
@@ -183,7 +176,7 @@ final class OutsideTheCanvasUITests: PaintUITestCase {
         app.buttons["toolbar.moveButton"].tap()
         XCTAssertTrue(app.buttons["moveBar.doneButton"].waitForExistence(timeout: 5),
                       "Move raised no box")
-        attach(canvas, "01-box-raised")
+        attachScreenshot(canvas, "01-box-raised")
 
         // Scale up by the top-left grip, which starts **on** the paper. It ends in the surround,
         // above the paper and below the top toolbar.
@@ -191,7 +184,7 @@ final class OutsideTheCanvasUITests: PaintUITestCase {
         let outside = CGVector(dx: 0.37, dy: 0.10)
         XCTAssertLessThan(outside.dy, Double(paper.minY), "the target is on the paper, not off it")
         dragOnCanvas(app, from: liftedTopLeft, to: outside)
-        attach(canvas, "02-scaled-up-grip-off-canvas")
+        attachScreenshot(canvas, "02-scaled-up-grip-off-canvas")
 
         // Where the grip actually landed, measured rather than assumed — a white dot on black.
         // The window stops short of the top toolbar, which is bright chrome over the same host.
@@ -208,7 +201,7 @@ final class OutsideTheCanvasUITests: PaintUITestCase {
         // The drag that starts in the black surround.
         dragOnCanvas(app, from: CGVector(dx: grip.point.x, dy: grip.point.y),
                      to: CGVector(dx: 0.47, dy: 0.34))
-        attach(canvas, "03-after-dragging-the-off-canvas-grip")
+        attachScreenshot(canvas, "03-after-dragging-the-off-canvas-grip")
 
         XCTAssertTrue(app.buttons["moveBar.doneButton"].exists,
                       "the drag committed the move instead of scaling it, so this measures a commit")

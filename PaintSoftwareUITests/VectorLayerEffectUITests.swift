@@ -12,41 +12,9 @@ import XCTest
 /// canvas. One test, on purpose (CLAUDE.md's cost model: per test *class*).
 final class VectorLayerEffectUITests: PaintUITestCase {
 
-    private func attach(_ app: XCUIApplication, _ name: String) {
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = name
-        shot.lifetime = .keepAlways
-        add(shot)
-    }
-
-    private struct RGB: Equatable, CustomStringConvertible {
-        let r: Int, g: Int, b: Int
-        var sum: Int { r + g + b }
-        /// The blob is painted pure red; nothing in a black-band-on-white composite is.
-        var isBlobRed: Bool { r > 150 && g < 100 && b < 100 }
-        var description: String { "(r: \(r), g: \(g), b: \(b))" }
-    }
-
-    private func probe(_ canvas: XCUIElement, dx: Double, dy: Double) -> RGB {
-        let p = rgbaPixel(of: canvas, dx: dx, dy: dy)
-        return RGB(r: Int(p?.r ?? 0), g: Int(p?.g ?? 0), b: Int(p?.b ?? 0))
-    }
-
     /// A column of probes through the band and past both its edges, at `dx`, about the band's row `cy`.
     private func column(_ canvas: XCUIElement, dx: Double, about cy: Double) -> [RGB] {
         stride(from: cy - 0.15, through: cy + 0.15, by: 0.01).map { probe(canvas, dx: dx, dy: $0) }
-    }
-
-    private func setBrushColor(_ app: XCUIApplication, hex: String) {
-        let colorButton = app.buttons["toolbar.colorButton"]
-        XCTAssertTrue(colorButton.waitForExistence(timeout: 5), "The toolbar's colour button")
-        colorButton.tap()
-        let hexField = app.textFields["colorPanel.hexField"]
-        XCTAssertTrue(hexField.waitForExistence(timeout: 5), "The colour panel's hex field")
-        setHexField(app, hexField, to: hex)
-        colorButton.tap()
-        XCTAssertTrue(app.otherElements["colorPanel.svSquare"].waitForNonExistence(timeout: 5),
-                      "The colour panel must be closed before the canvas is touched")
     }
 
     /// **The whole feature, cold, from an empty document**, in the order the artist meets it:
@@ -89,7 +57,7 @@ final class VectorLayerEffectUITests: PaintUITestCase {
         setBrushColor(app, hex: "FF0000")
         setBrushSize(app, normalized: 0.9)
         drawLine(on: canvas, from: CGVector(dx: 0.4, dy: cy - 0.15), to: CGVector(dx: 0.4, dy: cy + 0.15))
-        attach(app, "1-band-and-red-blob")
+        attachScreenshot(app, "1-band-and-red-blob")
 
         // 3.
         let underBefore = column(canvas, dx: 0.4, about: cy), besideBefore = column(canvas, dx: 0.6, about: cy)
@@ -113,7 +81,7 @@ final class VectorLayerEffectUITests: PaintUITestCase {
         let radius = app.sliders["effectSettings.radius"]
         XCTAssertTrue(radius.waitForExistence(timeout: 5), "The radius slider is on the bar")
         radius.adjust(toNormalizedSliderPosition: 1)
-        attach(app, "2-blur-on-the-vector-layer")
+        attachScreenshot(app, "2-blur-on-the-vector-layer")
 
         // 5.
         assertAboveTheDock(app, canvas, dy: cy + 0.15, "The blur's probe columns")
@@ -132,6 +100,11 @@ final class VectorLayerEffectUITests: PaintUITestCase {
                       "…into greys the hard edge never had: \(underAfter)")
         let changedBeside = zip(besideBefore, besideAfter).filter { abs($0.sum - $1.sum) > 40 }.count
         XCTAssertEqual(changedBeside, 0, "Beside the blob nothing changes — the grade reaches only through the ink: before \(besideBefore), after \(besideAfter)")
-        attach(app, "3-after-the-blur")
+        attachScreenshot(app, "3-after-the-blur")
     }
+}
+
+private extension PaintUITestCase.RGB {
+    /// The blob is painted pure red; nothing in a black-band-on-white composite is.
+    var isBlobRed: Bool { r > 150 && g < 100 && b < 100 }
 }

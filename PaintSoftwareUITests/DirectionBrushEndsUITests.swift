@@ -49,10 +49,10 @@ final class DirectionBrushEndsUITests: PaintUITestCase {
         // **Every coordinate below is screen points on the paper**, for `KeepStrokeWidthUITests`' reason:
         // the paper is letterboxed in a black host and a darkness probe reads the letterbox as ink.
         let host = canvas.frame
-        let paper = visibleCanvasBounds(canvas)
+        let paper = paperRect(in: canvas)
         func at(_ dx: Double, _ dy: Double) -> CGPoint {
-            CGPoint(x: host.minX + host.width * (paper.minX + (paper.maxX - paper.minX) * dx),
-                    y: host.minY + host.height * (paper.minY + (paper.maxY - paper.minY) * dy))
+            let p = onHost(paper, dx, dy)
+            return CGPoint(x: host.minX + host.width * p.dx, y: host.minY + host.height * p.dy)
         }
         let start = at(0.30, 0).x, end = at(0.70, 0).x
         let controlLine = at(0, 0.62).y, hookedLine = at(0, 0.30).y
@@ -79,10 +79,7 @@ final class DirectionBrushEndsUITests: PaintUITestCase {
                             width: norm(x: end + 40) - norm(x: start - 40),
                             height: norm(y: controlLine + 40) - norm(y: hookedLine - 40))
         let probe = try settledProbe(canvas, window: window)
-        let shot = XCTAttachment(screenshot: canvas.screenshot())
-        shot.name = raster ? "raster-hooked-stroke" : "vector-hooked-stroke"
-        shot.lifetime = .keepAlways
-        add(shot)
+        attachScreenshot(canvas, raster ? "raster-hooked-stroke" : "vector-hooked-stroke")
 
         /// How far the ink reaches left of `start` and right of `end` among the rows a stroke on `line`
         /// can touch, in screen points — nil if the line holds no ink at all.

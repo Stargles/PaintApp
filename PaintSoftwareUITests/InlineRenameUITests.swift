@@ -18,13 +18,6 @@ final class InlineRenameUITests: PaintUITestCase {
         return (app, canvas)
     }
 
-    private func attach(_ app: XCUIApplication, _ name: String) {
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = name
-        shot.lifetime = .keepAlways
-        add(shot)
-    }
-
     /// A text field's text as the artist reads it. An empty `UITextField` reports its placeholder, which
     /// these fields have none of, so a read is the name or "".
     private func text(of field: XCUIElement) -> String { field.value as? String ?? "" }
@@ -45,7 +38,7 @@ final class InlineRenameUITests: PaintUITestCase {
                        "the tap edits in place: no sheet and no alert opened")
         field.typeText("Moonrise\n")
         XCTAssertEqual(text(of: field), "Moonrise", "Return committed the name, typed over the one that was selected")
-        attach(app, "scene-renamed-in-place")
+        attachScreenshot(app, "scene-renamed-in-place")
 
         // An empty name reverts.
         field.tap()
@@ -88,7 +81,7 @@ final class InlineRenameUITests: PaintUITestCase {
         XCTAssertEqual(text(of: editor), "Layer 1", "the field starts on the current name")
         XCTAssertTrue(editor.frame.intersects(row.frame) || abs(editor.frame.midY - row.frame.midY) < 20,
                       "…and it is in the row (field \(editor.frame), row \(row.frame))")
-        attach(app, "layer-row-being-renamed")
+        attachScreenshot(app, "layer-row-being-renamed")
         editor.typeText("Sky\n")
         XCTAssertTrue(editor.waitForNonExistence(timeout: 5), "Return ended the edit")
         XCTAssertEqual(row.label, "Sky", "the row shows the new name")
@@ -160,7 +153,7 @@ final class InlineRenameUITests: PaintUITestCase {
         try XCTSkipUnless(keyboard.waitForExistence(timeout: 5),
                           "a hardware keyboard is connected to this simulator, so no software keyboard rises")
         Thread.sleep(forTimeInterval: 1.0)   // the keyboard settles and the rail scrolls
-        attach(app, "low-row-above-the-keyboard")
+        attachScreenshot(app, "low-row-above-the-keyboard")
         XCTAssertLessThanOrEqual(editor.frame.maxY, keyboard.frame.minY,
                                  "the row being typed into (bottom \(editor.frame.maxY)) is above the keyboard (top \(keyboard.frame.minY))")
         editor.typeText("Base\n")

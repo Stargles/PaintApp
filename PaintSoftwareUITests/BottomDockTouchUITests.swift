@@ -46,13 +46,6 @@ final class BottomDockTouchUITests: PaintUITestCase {
         }
     }
 
-    private func attach(_ app: XCUIApplication, _ name: String) {
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = name
-        shot.lifetime = .keepAlways
-        add(shot)
-    }
-
     // MARK: - The panels
 
     /// Select: a loop is up, and the Select overlay owns canvas touches — a tap that fell through to it
@@ -70,7 +63,7 @@ final class BottomDockTouchUITests: PaintUITestCase {
         XCTAssertTrue(deselect.isEnabled, "PREMISE: a loop is up")
 
         tapThePanelsOwnSurface(app, label: app.staticTexts["selectPanel.membershipCaption"])
-        attach(app, "select-panel-surface-tapped")
+        attachScreenshot(app, "select-panel-surface-tapped")
 
         XCTAssertTrue(rectangle.exists, "the Select panel is still up")
         XCTAssertTrue(deselect.isEnabled, "the loop is still up — a tap on the card did not reach the overlay")
@@ -86,7 +79,7 @@ final class BottomDockTouchUITests: PaintUITestCase {
         XCTAssertTrue(done.waitForExistence(timeout: 5), "Move raised no bar")
 
         tapThePanelsOwnSurface(app, bare: { CGPoint(x: $0.maxX - 80, y: $0.maxY - 22) })
-        attach(app, "move-bar-surface-tapped")
+        attachScreenshot(app, "move-bar-surface-tapped")
 
         XCTAssertTrue(done.exists, "the Move bar is still up — a tap on the card did not bake the piece")
     }
@@ -104,7 +97,7 @@ final class BottomDockTouchUITests: PaintUITestCase {
         XCTAssertEqual(readTextState(app), "none", "PREMISE: no box yet")
 
         tapThePanelsOwnSurface(app, label: app.staticTexts["textPanel.placementHint"])
-        attach(app, "text-panel-surface-tapped")
+        attachScreenshot(app, "text-panel-surface-tapped")
 
         XCTAssertTrue(size.exists, "the text panel is still up")
         XCTAssertEqual(readTextState(app), "none", "no text box was placed behind the card")
@@ -124,7 +117,7 @@ final class BottomDockTouchUITests: PaintUITestCase {
         XCTAssertTrue(rail.exists, "PREMISE: the layer rail is up")
 
         tapThePanelsOwnSurface(app, label: app.staticTexts["layerOptions.subMenuTitle"])
-        attach(app, "effect-bar-surface-tapped")
+        attachScreenshot(app, "effect-bar-surface-tapped")
 
         XCTAssertTrue(knob.exists, "the effect bar is still up")
         XCTAssertTrue(rail.exists, "the layer rail is still up — a canvas touch would have closed it")
@@ -151,7 +144,7 @@ final class BottomDockTouchUITests: PaintUITestCase {
         XCTAssertTrue(card(app).waitForExistence(timeout: 5), "the transform settings bar is docked")
 
         tapThePanelsOwnSurface(app, label: app.staticTexts["layerOptions.subMenuTitle"])
-        attach(app, "transform-bar-surface-tapped")
+        attachScreenshot(app, "transform-bar-surface-tapped")
 
         XCTAssertTrue(card(app).exists, "the transform settings bar is still up — a canvas touch would have closed it")
     }

@@ -54,13 +54,6 @@ final class FolderGraphBandUITests: PaintUITestCase {
         sliderNumericValue(app.sliders["layerPanel.folder.\(name).opacity"])
     }
 
-    private func attach(_ app: XCUIApplication, _ name: String) {
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = name
-        shot.lifetime = .keepAlways
-        add(shot)
-    }
-
     // MARK: - The cold-start path
 
     /// **From a blank document: ink, a group around it, two keyframes on the group's opacity, then
@@ -158,7 +151,7 @@ final class FolderGraphBandUITests: PaintUITestCase {
             \(folderTrack.frame.maxY)) — a band under any other row is a curve labelled by the \
             wrong name.
             """)
-        attach(app, "folder-band-open-from-panel")
+        attachScreenshot(app, "folder-band-open-from-panel")
 
         // 5. Picking the layer's row takes the band back to the layer — a tap on its cel, which is
         //    how a layer has always been picked in the timeline.
@@ -188,7 +181,7 @@ final class FolderGraphBandUITests: PaintUITestCase {
             "\(band.value as? String ?? "?")".
             """)
         XCTAssertTrue(folderName.isSelected, "…and the name column says the group is the picked row")
-        attach(app, "folder-band-open-from-name")
+        attachScreenshot(app, "folder-band-open-from-name")
 
         // 7. Drag the node at frame 4 from 0% to the top of the band. Vertical only, so the frame
         //    stays 4 and what changes is the value — which is what the canvas can show.
@@ -218,7 +211,7 @@ final class FolderGraphBandUITests: PaintUITestCase {
             paper a moment ago and the node it depends on has been dragged to full opacity. Paper \
             here means the drag wrote somewhere the compositor does not read for the *folder* node.
             """)
-        attach(app, "folder-band-node-dragged")
+        attachScreenshot(app, "folder-band-node-dragged")
 
         // 8. Which row took the write — the operand the band's value cannot supply, since the layer
         //    inside the group shares the `opacity` id.

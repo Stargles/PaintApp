@@ -32,13 +32,6 @@ final class FolderMoveScopeUITests: PaintUITestCase {
         return (first, last)
     }
 
-    private func attachScreen(_ name: String) {
-        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        shot.name = name
-        shot.lifetime = .keepAlways
-        add(shot)
-    }
-
     /// The folder's options → Move, with the rail opened for it when it is not already.
     private func raiseTheFoldersMoveBox(_ app: XCUIApplication) {
         let options = app.buttons["layerPanel.folder.Folder 1.options"]
@@ -121,7 +114,7 @@ final class FolderMoveScopeUITests: PaintUITestCase {
         XCTAssertTrue(scope.waitForExistence(timeout: 5), "a folder's Move bar offers which frames it moves")
         XCTAssertTrue(scope.buttons["This Cel"].isSelected, "…with the shipped behaviour chosen")
         XCTAssertFalse(scope.buttons["All Frames"].isSelected)
-        attachScreen("folder-move-bar-this-cel")
+        attachScreenshot(XCUIScreen.main, "folder-move-bar-this-cel")
         try dragTheBoxAndPutItDown(app, canvas, paperDX: 0.2)
         let afterThisCel = try lines()
         let thisCelShift = afterThisCel[0].extent.start - drawn[0].extent.start
@@ -147,7 +140,7 @@ final class FolderMoveScopeUITests: PaintUITestCase {
         scopeAgain.buttons["All Frames"].tap()
         XCTAssertTrue(scopeAgain.buttons["All Frames"].isSelected, "the picker shows the choice")
         XCTAssertTrue(app.buttons["moveBar.doneButton"].exists, "choosing lifts the folder again: its box is still up")
-        attachScreen("folder-move-bar-all-frames")
+        attachScreenshot(XCUIScreen.main, "folder-move-bar-all-frames")
         try dragTheBoxAndPutItDown(app, canvas, paperDX: 0.1)
         let afterAll = try lines()
         let allShift = afterAll[0].extent.start - afterThisCel[0].extent.start
@@ -155,7 +148,7 @@ final class FolderMoveScopeUITests: PaintUITestCase {
         step("timeline.stepForwardButton")
         XCTAssertEqual(frameNow(app), 2)
         let frameTwo = try lines()
-        attachScreen("frame-two-after-all-frames")
+        attachScreenshot(XCUIScreen.main, "frame-two-after-all-frames")
         for line in frameTwo.prefix(2) {
             XCTAssertEqual(line.extent.start - 0.13, allShift, accuracy: 0.03,
                            "All Frames carried layer \(line.layer)'s line on frame 2 by the distance the drag moved frame 1's")
@@ -207,7 +200,7 @@ final class FolderMoveScopeUITests: PaintUITestCase {
         app.segmentedControls["moveBar.folderScopePicker"].buttons["All Frames"].tap()
         let box = try XCTUnwrap(settledMoveBox(app), "the folder's box is on the glass")
         dragAcross(canvas, from: CGVector(dx: min(box.midX, box.minX + 0.08), dy: box.midY), paperDX: 0.2, paper: paper)
-        attachScreen("mid-float-with-an-empty-frame-in-the-folder")
+        attachScreenshot(XCUIScreen.main, "mid-float-with-an-empty-frame-in-the-folder")
         // Mid-float, left of the rail: layer 0's line has moved right. Layer 1's drawing is on the
         // other frame, and moves there — not here.
         probe = try settledProbe(canvas, window: window)

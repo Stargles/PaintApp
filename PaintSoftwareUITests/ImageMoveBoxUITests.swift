@@ -31,13 +31,6 @@ final class ImageMoveBoxUITests: PaintUITestCase {
         return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
     }
 
-    private func attachScreen(_ name: String) {
-        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        shot.name = name
-        shot.lifetime = .keepAlways
-        add(shot)
-    }
-
     /// **An imported wide picture arrives in a box that hugs it.** From a fresh document: the import
     /// lifts the picture into the Move box (TODO (34)), the box is read off the canvas's published
     /// state, and the picture is measured off a screenshot of the same canvas. The two rectangles
@@ -63,7 +56,7 @@ final class ImageMoveBoxUITests: PaintUITestCase {
         let window = CGRect(x: 0.02, y: 0.25, width: 0.96, height: 0.36)
         let probe = try settledProbe(canvas, window: window)
         let picture = try inkBounds(probe, in: window)
-        attachScreen("image-move-box")
+        attachScreenshot(XCUIScreen.main, "image-move-box")
         let numbers = XCTAttachment(string: "box \(box)\npicture \(picture)")
         numbers.name = "box-and-picture"
         numbers.lifetime = .keepAlways
@@ -105,13 +98,13 @@ final class ImageMoveBoxUITests: PaintUITestCase {
         // The paper, in the host's unit square, is what turns a box in host units into canvas pixels.
         // The default canvas is 2048 square; the import's own box (0.8 of the canvas wide) is the check
         // that the conversion is right before anything is pressed.
-        let paper = visibleCanvasBounds(canvas)
+        let paper = paperRect(in: canvas)
         let canvasSide = 2048.0
         func pixels(_ box: CGRect) -> (width: Double, height: Double, centreX: Double, centreY: Double) {
-            (box.width / (paper.maxX - paper.minX) * canvasSide,
-             box.height / (paper.maxY - paper.minY) * canvasSide,
-             (box.midX - paper.minX) / (paper.maxX - paper.minX) * canvasSide,
-             (box.midY - paper.minY) / (paper.maxY - paper.minY) * canvasSide)
+            (box.width / paper.width * canvasSide,
+             box.height / paper.height * canvasSide,
+             (box.midX - paper.minX) / paper.width * canvasSide,
+             (box.midY - paper.minY) / paper.height * canvasSide)
         }
 
         let imported = try XCTUnwrap(settledMoveBox(app), "the import holds the picture in a Move box")

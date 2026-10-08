@@ -695,8 +695,7 @@ final class GraphEditorGestureUITests: PaintUITestCase {
 
         XCTAssertEqual(band.value as? String, "containerPose.rotation:0,6",
                       "TODO (21): a Move now reaches the graph editor as a listed, drawn pose channel")
-        var shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = "pose-band-before-add-or-delete"; shot.lifetime = .keepAlways; add(shot)
+        attachScreenshot(app, "pose-band-before-add-or-delete")
 
         // The axis a pure rotation is drawn on: reference is rest (0°, box-independent), and the one
         // key away from it is -45°, `TimelineGraphBand.anchoredRange`'s own formula computed with the
@@ -728,8 +727,7 @@ final class GraphEditorGestureUITests: PaintUITestCase {
             """)
         XCTAssertEqual(app.otherElements["timeline.keyMarkers.1"].value as? String, "0|3|6",
                       "…and the new key is a keyframe, with no bare mark written for it")
-        shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = "pose-band-after-tap-to-add"; shot.lifetime = .keepAlways; add(shot)
+        attachScreenshot(app, "pose-band-after-tap-to-add")
 
         // **The node just added takes the same two-stage tap and the same menu a Move-authored one
         // does** — focus first, menu second, exactly as `restNode` would show at frame 0 or 6.
@@ -747,13 +745,11 @@ final class GraphEditorGestureUITests: PaintUITestCase {
         let deleteButton = app.buttons["timeline.menu.Delete Keyframe"]
         XCTAssertTrue(deleteButton.waitForExistence(timeout: 5),
                      "TODO (21): a pose node's second tap now raises the menu a grade's always could")
-        shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = "pose-node-menu-with-delete-keyframe"; shot.lifetime = .keepAlways; add(shot)
+        attachScreenshot(app, "pose-node-menu-with-delete-keyframe")
         deleteButton.tap()
         XCTAssertEqual(waitForBandValue("containerPose.rotation:0,6"), .completed,
                       "Delete should remove the whole pose key at frame 3 — got \(band.value ?? "nil")")
-        shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = "pose-band-after-delete"; shot.lifetime = .keepAlways; add(shot)
+        attachScreenshot(app, "pose-band-after-delete")
 
         // **Recoverable, both ways** — one press of Undo brings the tapped-away node back, and Redo
         // takes it away again, the same guarantee `testATapAddsAKeyToTheCurveItLandsOnAndTheNodeMenu\

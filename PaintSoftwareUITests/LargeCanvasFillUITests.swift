@@ -54,10 +54,7 @@ final class LargeCanvasFillUITests: PaintUITestCase {
         XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: 0.2, dy: 0.5)),
                       "the paper outside the square is untouched — the fill stayed inside the line art")
 
-        let screenshot = XCTAttachment(screenshot: app.screenshot())
-        screenshot.name = "large-canvas-fill"
-        screenshot.lifetime = .keepAlways
-        add(screenshot)
+        attachScreenshot(app, "large-canvas-fill")
     }
 
     /// `CanvasSizePickerUITests`' own way in: the field raises a number pad with no selection

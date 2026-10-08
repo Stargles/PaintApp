@@ -11,13 +11,6 @@ import XCTest
 /// put the box down**, and **without the finger the same drag turns freely**.
 final class RotationSnapUITests: PaintUITestCase {
 
-    private func attachScreen(_ name: String) {
-        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        shot.name = name
-        shot.lifetime = .keepAlways
-        add(shot)
-    }
-
     private func degrees(of readout: String) -> Double? {
         guard readout.hasSuffix("°") else { return nil }
         return Double(readout.dropLast())
@@ -83,7 +76,7 @@ final class RotationSnapUITests: PaintUITestCase {
 
         // 1. A finger beside the drag: 11° is held at 15°.
         let snapped = try turn(from: 0, to: 11, holding: aside)
-        attachScreen("vector-after-the-snapped-turn")
+        attachScreenshot(XCUIScreen.main, "vector-after-the-snapped-turn")
         let snappedDegrees = try XCTUnwrap(degrees(of: snapped), "the pill reads a number: \(snapped) (\(canvas.label))")
         XCTAssertEqual(snappedDegrees, 15, accuracy: 0.005, "a pen dragged to 11° with a finger beside it is held at 15°")
         let afterSnap = try XCTUnwrap(settledMoveBox(app), "the finger that snapped the turn did not put the box down")
@@ -97,7 +90,7 @@ final class RotationSnapUITests: PaintUITestCase {
 
         // 2. The pen alone, from where the knob now stands: dragged 11° further round it is at 26°, not 30°.
         let free = try turn(from: 15, to: 26, holding: nil)
-        attachScreen("vector-after-the-free-turn")
+        attachScreenshot(XCUIScreen.main, "vector-after-the-free-turn")
         let freeDegrees = try XCTUnwrap(degrees(of: free), "the pill reads a number: \(free)")
         XCTAssertEqual(freeDegrees, 26, accuracy: 2.5, "without a finger the turn is the pen's own")
         XCTAssertGreaterThan(abs(freeDegrees - 30), 1.5, "…and is not on the grid")
@@ -147,7 +140,7 @@ final class RotationSnapUITests: PaintUITestCase {
 
         try dragWithAFingerHeldBeside(canvas, from: CGVector(dx: knob.x / host.width, dy: knob.y / host.height),
                                       delta: CGVector(dx: 40, dy: 0), holding: nil)
-        attachScreen("pill-at-the-bars-edge")
+        attachScreenshot(XCUIScreen.main, "pill-at-the-bars-edge")
         let reading = readField(app, "readout:")
         XCTAssertNotEqual(reading, "none", "a held knob raises the pill (\(canvas.label))")
         let box = readField(app, "readoutbox:").split(separator: ",").compactMap { Double($0) }
@@ -240,7 +233,7 @@ final class RotationSnapUITests: PaintUITestCase {
         XCTAssertEqual(readField(app, "readout:"), "none", "no knob held, nothing read out")
         let transform = readTransform(app)
         let free = try dragKnob(app, canvas, at: knob, by: first, holding: nil)
-        attachScreen("\(attachments)-after-the-free-turn")
+        attachScreenshot(XCUIScreen.main, "\(attachments)-after-the-free-turn")
         let freeDegrees = try XCTUnwrap(degrees(of: free), "the pill reads a number: \(free)")
         let nearestGrid = (freeDegrees / 15).rounded() * 15
         XCTAssertGreaterThan(abs(freeDegrees - nearestGrid), 0.3,
@@ -249,7 +242,7 @@ final class RotationSnapUITests: PaintUITestCase {
         let moved = try XCTUnwrap(findKnob(), "the knob followed the box round")
         XCTAssertGreaterThan(hypot(moved.x - knob.x, moved.y - knob.y), 8, "the box turned: the knob moved")
         let snapped = try dragKnob(app, canvas, at: moved, by: second, holding: holding)
-        attachScreen("\(attachments)-after-the-snapped-turn")
+        attachScreenshot(XCUIScreen.main, "\(attachments)-after-the-snapped-turn")
         let snappedDegrees = try XCTUnwrap(degrees(of: snapped), "the pill reads a number: \(snapped)")
         assertOnTheGrid(snappedDegrees, "with a finger beside the knob")
         XCTAssertGreaterThanOrEqual(abs(snappedDegrees), 15,
@@ -309,13 +302,13 @@ final class RotationSnapUITests: PaintUITestCase {
         }
         let expected = knobAt(0)
         let knob = try XCTUnwrap(blueKnob(in: canvas, near: expected), "the rotate knob is on the glass near \(expected)")
-        attachScreen("raster-before-the-turn")
+        attachScreenshot(XCUIScreen.main, "raster-before-the-turn")
         XCTAssertEqual(readField(app, "readout:"), "none", "no knob held, nothing read out")
 
         let target = knobAt(11)
         let snapped = try dragKnob(app, canvas, at: knob, by: CGVector(dx: target.x - knob.x, dy: target.y - knob.y),
                                    holding: CGVector(dx: 0.20, dy: 0.60))
-        attachScreen("raster-after-the-snapped-turn")
+        attachScreenshot(XCUIScreen.main, "raster-after-the-snapped-turn")
         let snappedDegrees = try XCTUnwrap(degrees(of: snapped), "the pill reads a number: \(snapped) (\(canvas.label))")
         assertOnTheGrid(snappedDegrees, "with a finger beside the knob")
         XCTAssertEqual(snappedDegrees, 15, accuracy: 15.01, "…the grid angle nearest where the pen went")
@@ -350,7 +343,7 @@ final class RotationSnapUITests: PaintUITestCase {
         canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.62, dy: 0.20)).tap()
         XCTAssertTrue(waitForTextState(app, "editing"), "PREMISE: the tap puts a live box on screen (text:\(readTextState(app)))")
         Thread.sleep(forTimeInterval: 0.8)   // the host settles under the keyboard
-        attachScreen("text-before-the-turns")
+        attachScreenshot(XCUIScreen.main, "text-before-the-turns")
 
         try assertTheKnobSnapsOnlyWithAFinger(app, canvas, { self.greenKnob(in: canvas) },
                                               first: CGVector(dx: 70, dy: 30), second: CGVector(dx: 40, dy: 40),
@@ -371,7 +364,7 @@ final class RotationSnapUITests: PaintUITestCase {
         let pending = NSPredicate { _, _ in self.readField(app, "shape:") == "adjustable" }
         wait(for: [XCTNSPredicateExpectation(predicate: pending, object: nil)], timeout: 10)
         XCTAssertEqual(readField(app, "shape:"), "adjustable", "PREMISE: the seed leaves a rectangle pending")
-        attachScreen("shape-before-the-turns")
+        attachScreenshot(XCUIScreen.main, "shape-before-the-turns")
         let aside = CGVector(dx: 0.12, dy: 0.22)
 
         try assertTheKnobSnapsOnlyWithAFinger(app, canvas, { self.greenKnob(in: canvas) },
@@ -450,7 +443,7 @@ final class RotationSnapUITests: PaintUITestCase {
 
         // 1. A finger beside the drag: the start end, dragged to 79° about the far end, is held at 75°.
         let snapped = try dragALineEnd(app, canvas, held: ends.start, pivot: ends.end, toBearing: 79, holding: aside)
-        attachScreen("line-after-the-snapped-turn")
+        attachScreenshot(XCUIScreen.main, "line-after-the-snapped-turn")
         let snappedDegrees = try XCTUnwrap(degrees(of: snapped), "the pill reads a number: \(snapped) (\(canvas.label))")
         XCTAssertEqual(snappedDegrees, 75, accuracy: 0.005, "a pen dragged to 79° with a finger beside it is held at 75°")
         XCTAssertEqual(readField(app, "shape:"), "adjustable", "the finger neither committed the shape nor drew a dot")
@@ -496,7 +489,7 @@ final class RotationSnapUITests: PaintUITestCase {
         // with a finger beside it, it is held at −105°.
         let snapped = try dragALineEnd(app, canvas, held: ends.end, pivot: ends.start, toBearing: -101,
                                        holding: CGVector(dx: 0.12, dy: 0.62))
-        attachScreen("line-far-end-after-the-snapped-turn")
+        attachScreenshot(XCUIScreen.main, "line-far-end-after-the-snapped-turn")
         let snappedDegrees = try XCTUnwrap(degrees(of: snapped), "the pill reads a number: \(snapped) (\(canvas.label))")
         XCTAssertEqual(snappedDegrees, -105, accuracy: 0.005, "dragged to −101° with a finger beside it, held at −105°")
         XCTAssertEqual(readField(app, "shape:"), "adjustable")

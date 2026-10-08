@@ -73,13 +73,6 @@ final class EditorKeyboardLayoutUITests: PaintUITestCase {
         }
     }
 
-    private func attach(_ app: XCUIApplication, _ name: String) {
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = name
-        shot.lifetime = .keepAlways
-        add(shot)
-    }
-
     /// Leaving by picking the brush — the commonest way to put text down, and the one that left the
     /// editor compressed.
     func testTheLayoutComesBackWhenTheTextIsPutDownWithTheBrush() throws {
@@ -98,7 +91,7 @@ final class EditorKeyboardLayoutUITests: PaintUITestCase {
         XCTAssertTrue(waitForTextState(app, "none"), "PREMISE: the brush puts the box down")
         XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5), "the keyboard is gone")
         let settled = waitForGeometry(app, toBe: before)
-        attach(app, "text-put-down-with-the-brush")
+        attachScreenshot(app, "text-put-down-with-the-brush")
         XCTAssertTrue(settled, "the editor did not come back after the text was put down: host \(before.host) -> \(during.host) -> \(geometry(app).host)")
     }
 
@@ -118,7 +111,7 @@ final class EditorKeyboardLayoutUITests: PaintUITestCase {
         XCTAssertTrue(waitForTextState(app, "none"), "PREMISE: picking Select puts the box down")
         XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5), "the keyboard is gone")
         let settled = waitForGeometry(app, toBe: before)
-        attach(app, "text-put-down-with-the-select-tool")
+        attachScreenshot(app, "text-put-down-with-the-select-tool")
         XCTAssertTrue(settled, "the editor did not come back after the text was put down: host \(before.host) -> \(geometry(app).host)")
     }
 
@@ -198,7 +191,7 @@ final class EditorKeyboardLayoutUITests: PaintUITestCase {
 
         let lifted = try XCTUnwrap(waitForTheBox(app, in: canvas, toStandAbove: { panel.frame.minY }),
                                    "the session has a box on the glass")
-        attach(app, "box-placed-low-with-the-keyboard-up")
+        attachScreenshot(app, "box-placed-low-with-the-keyboard-up")
         XCTAssertLessThanOrEqual(lifted.maxY, panel.frame.minY,
                                  "the box (bottom \(lifted.maxY)) stands above the Text panel (top \(panel.frame.minY)) "
                                  + "— the canvas scrolled to keep it in view; xform \(readTransform(app))")
@@ -207,7 +200,7 @@ final class EditorKeyboardLayoutUITests: PaintUITestCase {
         typeIntoTextBox("Hi", app, at: CGPoint(x: lifted.minX + 4, y: lifted.midY))
         let typed = try XCTUnwrap(textBox(app, in: canvas))
         XCTAssertLessThanOrEqual(typed.maxY, panel.frame.minY, "still above the panel once the words are typed")
-        attach(app, "words-typed-above-the-panel")
+        attachScreenshot(app, "words-typed-above-the-panel")
 
         app.buttons["toolbar.brushButton"].tap()
         XCTAssertTrue(waitForTextState(app, "none"), "PREMISE: the brush puts the box down")
@@ -215,7 +208,7 @@ final class EditorKeyboardLayoutUITests: PaintUITestCase {
         XCTAssertTrue(waitForGeometry(app, toBe: before), "PREMISE: the editor is back at full height")
         let deadline = Date().addingTimeInterval(6)
         while readTransform(app) != transformBefore, Date() < deadline { Thread.sleep(forTimeInterval: 0.25) }
-        attach(app, "box-put-down-canvas-back")
+        attachScreenshot(app, "box-put-down-canvas-back")
         XCTAssertEqual(readTransform(app), transformBefore, "the canvas went back to where it was before the box")
     }
 

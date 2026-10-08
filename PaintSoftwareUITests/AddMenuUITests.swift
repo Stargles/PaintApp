@@ -48,10 +48,7 @@ final class AddMenuUITests: PaintUITestCase {
                               "\(rows[i - 1]) must be above \(rows[i]); the ask was \"in order\"")
         }
 
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = "add-menu-all-seven-rows"
-        shot.lifetime = .keepAlways
-        add(shot)
+        attachScreenshot(app, "add-menu-all-seven-rows")
     }
 
     /// What the artist does with a row still works — the move changed where the door is, not what is

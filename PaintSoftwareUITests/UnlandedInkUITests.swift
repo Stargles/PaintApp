@@ -50,7 +50,7 @@ final class UnlandedInkUITests: PaintUITestCase {
 
         let first = rgbaPixel(of: canvas, dx: 0.47, dy: 0.42)
         let second = rgbaPixel(of: canvas, dx: 0.47, dy: 0.58)
-        attach(canvas, "both strokes, before either render has landed")
+        attachScreenshot(canvas, "both strokes, before either render has landed")
         XCTAssertFalse(isWhitish(second),
                        "Setup: the stroke that has just been lifted is on screen — if this is paper "
                        + "the drag missed the canvas and the assertion below proves nothing "
@@ -91,11 +91,11 @@ final class UnlandedInkUITests: PaintUITestCase {
         drawLine(on: canvas, from: CGVector(dx: 0.35, dy: 0.42), to: CGVector(dx: 0.60, dy: 0.42))
         drawLine(on: canvas, from: CGVector(dx: 0.35, dy: 0.58), to: CGVector(dx: 0.60, dy: 0.58))
         let held = canvasBytes(canvas)
-        attach(canvas, "both strokes, before either render has landed")
+        attachScreenshot(canvas, "both strokes, before either render has landed")
         // Two renders are queued on one serial background queue, each holding this delay.
         Thread.sleep(forTimeInterval: TimeInterval(Self.renderMillis) / 1000 * 3)
 
-        attach(canvas, "both strokes, after both renders have landed")
+        attachScreenshot(canvas, "both strokes, after both renders have landed")
 
         // **The invariant itself, on the screen rather than on the model.** The held pictures are
         // what the base will contain; when the base lands and they retire, the canvas must not
@@ -138,7 +138,7 @@ final class UnlandedInkUITests: PaintUITestCase {
         XCTAssertTrue(canvas.waitForExistence(timeout: 5), "Setup: the canvas should exist")
 
         drawLine(on: canvas, from: CGVector(dx: 0.35, dy: 0.5), to: CGVector(dx: 0.60, dy: 0.5))
-        attach(canvas, "one stroke, before its render has landed")
+        attachScreenshot(canvas, "one stroke, before its render has landed")
         XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.47, dy: 0.5)),
                        "a finished stroke is on screen the instant the pen lifts, whatever the "
                        + "rasterize is doing — RENDER.md §2.13")
@@ -168,12 +168,5 @@ final class UnlandedInkUITests: PaintUITestCase {
         var worst = 0
         for i in 0..<min(a.count, b.count) { worst = max(worst, abs(Int(a[i]) - Int(b[i]))) }
         return worst
-    }
-
-    private func attach(_ element: XCUIElement, _ name: String) {
-        let shot = XCTAttachment(screenshot: element.screenshot())
-        shot.name = name
-        shot.lifetime = .keepAlways
-        add(shot)
     }
 }

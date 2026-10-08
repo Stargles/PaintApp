@@ -32,13 +32,6 @@ final class InkUnderTransformUITests: PaintUITestCase {
             .filter { probe(paper.minX + paper.width * $0, paper.minY + paper.height * row) }
     }
 
-    private func attach(_ canvas: XCUIElement, _ name: String) {
-        let shot = XCTAttachment(screenshot: canvas.screenshot())
-        shot.name = name
-        shot.lifetime = .keepAlways
-        add(shot)
-    }
-
     /// `+` → Transform Layer above the drawing layer (the active one, at `drawing`), its Move box
     /// dragged a fifth of the paper to the right, Done, and the drawing layer selected again with the
     /// rail shut.
@@ -81,7 +74,7 @@ final class InkUnderTransformUITests: PaintUITestCase {
                                               file: StaticString = #filePath, line: UInt = #line) throws {
         let paper = paperRect(in: canvas)
         dragOnCanvas(app, from: onHost(paper, 0.25, 0.3), to: onHost(paper, 0.45, 0.3))
-        attach(canvas, "stroke-under-the-moved-transform-layer")
+        attachScreenshot(canvas, "stroke-under-the-moved-transform-layer")
         let probe = try settledProbe(canvas, window: CGRect(x: paper.minX, y: paper.minY + paper.height * 0.2,
                                                             width: paper.width, height: paper.height * 0.2))
         let underThePen = inkColumns(probe, paper, row: 0.3, span: 0.27...0.43)
@@ -133,7 +126,7 @@ final class InkUnderTransformUITests: PaintUITestCase {
                 gone = (Date().timeIntervalSince(tapped), sandwichState(app))
             }
         }
-        attach(canvas, "after-the-undo-before-its-bake")
+        attachScreenshot(canvas, "after-the-undo-before-its-bake")
         let shown = try XCTUnwrap(gone, "the undone stroke was still on the canvas \(Self.bakeDelay * 0.7) s "
                                   + "after the undo, with its bake still compositing (canvas: "
                                   + "\(sandwichState(app))) — the edit waited for the bake")
@@ -171,7 +164,7 @@ final class InkUnderTransformUITests: PaintUITestCase {
         // No wait: the whole subject is the window before the posed picture lands.
         let probe = try inkProbe(canvas)
         let state = sandwichState(app)
-        attach(canvas, "just-lifted-before-its-posed-picture")
+        attachScreenshot(canvas, "just-lifted-before-its-posed-picture")
         XCTAssertEqual(state, "stroke", "PREMISE: the host is what is on screen — the lifted stroke's "
                        + "pair, with its bake still compositing — or this says nothing about the host")
         XCTAssertGreaterThan(inkColumns(probe, paper, row: 0.3, span: 0.27...0.43).count, 300,
@@ -219,14 +212,14 @@ final class InkUnderTransformUITests: PaintUITestCase {
         let done = app.buttons["moveBar.doneButton"]
         XCTAssertTrue(done.waitForExistence(timeout: 5), "Move raised no box over the selection")
         dragOnCanvas(app, from: onHost(paper, 0.45, 0.60), to: onHost(paper, 0.65, 0.60))
-        attach(canvas, "raster-piece-dragged-under-the-transform-layer")
+        attachScreenshot(canvas, "raster-piece-dragged-under-the-transform-layer")
         done.tap()
         XCTAssertTrue(done.waitForNonExistence(timeout: 5), "Done must put the box down")
         if app.buttons["selectPanel.deselectButton"].exists { app.buttons["selectPanel.deselectButton"].tap() }
 
         let probe = try settledProbe(canvas, window: CGRect(x: paper.minX, y: paper.minY + paper.height * 0.5,
                                                             width: paper.width, height: paper.height * 0.2))
-        attach(canvas, "raster-piece-set-down")
+        attachScreenshot(canvas, "raster-piece-set-down")
         XCTAssertGreaterThan(inkColumns(probe, paper, row: 0.6, span: 0.61...0.69).count, 100,
                              "the piece is not under the pen: the loop was drawn round the mark where it is "
                              + "shown, so the mark should be shown a fifth of the paper right of there")
@@ -256,7 +249,7 @@ final class InkUnderTransformUITests: PaintUITestCase {
 
         let probe = try settledProbe(canvas, window: CGRect(x: paper.minX, y: paper.minY + paper.height * 0.4,
                                                             width: paper.width, height: paper.height * 0.2))
-        attach(canvas, "rectangle-dragged-out-under-the-moved-transform-layer")
+        attachScreenshot(canvas, "rectangle-dragged-out-under-the-moved-transform-layer")
         XCTAssertGreaterThan(inkColumns(probe, paper, row: 0.5, span: 0.26...0.74).count, 280,
                              "the rectangle is not solid across the square the pen dragged out")
         XCTAssertTrue(inkColumns(probe, paper, row: 0.5, span: 0.04...0.17).isEmpty,
@@ -286,7 +279,7 @@ final class InkUnderTransformUITests: PaintUITestCase {
         func red(_ x: Double, _ y: Double) -> Int {
             Int(rgbaPixel(of: canvas, dx: paper.minX + paper.width * x, dy: paper.minY + paper.height * y)?.r ?? 255)
         }
-        attach(canvas, "gradient-dragged-out-under-the-moved-transform-layer")
+        attachScreenshot(canvas, "gradient-dragged-out-under-the-moved-transform-layer")
         XCTAssertLessThan(red(0.09, 0.2), 60, "the press is not the dark end of the ramp where it is shown")
         XCTAssertGreaterThan(red(0.91, 0.2), 220, "the lift is not the light end where it is shown")
         let mid = red(0.5, 0.2)
@@ -319,12 +312,12 @@ final class InkUnderTransformUITests: PaintUITestCase {
         let deadline = Date().addingTimeInterval(5)
         while !clear.isEnabled, Date() < deadline { Thread.sleep(forTimeInterval: 0.2) }
         XCTAssertTrue(clear.isEnabled, "the tap on the shown mark selected nothing")
-        attach(canvas, "wand-on-the-shown-mark")
+        attachScreenshot(canvas, "wand-on-the-shown-mark")
 
         clear.tap()
         let probe = try settledProbe(canvas, window: CGRect(x: paper.minX, y: paper.minY + paper.height * 0.2,
                                                             width: paper.width, height: paper.height * 0.5))
-        attach(canvas, "after-clearing-the-wanded-mark")
+        attachScreenshot(canvas, "after-clearing-the-wanded-mark")
         XCTAssertTrue(inkColumns(probe, paper, row: 0.6, span: 0.41...0.49).isEmpty,
                       "the mark that was tapped is still on the canvas — the wand selected something else")
         XCTAssertGreaterThan(inkColumns(probe, paper, row: 0.3, span: 0.41...0.49).count, 100,
@@ -375,7 +368,7 @@ final class InkUnderTransformUITests: PaintUITestCase {
         try waitForInk(canvas, paper, x: 0.35, y: 0.5, "the picture never landed on the press")
         let probe = try settledProbe(canvas, window: CGRect(x: paper.minX, y: paper.minY + paper.height * 0.4,
                                                             width: paper.width, height: paper.height * 0.2))
-        attach(canvas, "picture-dragged-out-under-the-moved-transform-layer")
+        attachScreenshot(canvas, "picture-dragged-out-under-the-moved-transform-layer")
         XCTAssertGreaterThan(inkColumns(probe, paper, row: 0.5, span: 0.27...0.43).count, 380,
                              "the picture is not solid across the span the pen dragged out")
         XCTAssertTrue(inkColumns(probe, paper, row: 0.5, span: 0.04...0.2).isEmpty, "ink left of the picture")
@@ -395,7 +388,7 @@ final class InkUnderTransformUITests: PaintUITestCase {
         try waitForInk(canvas, paper, x: 0.35, y: 0.5, "the clip's first frame never landed on the press")
         let probe = try settledProbe(canvas, window: CGRect(x: paper.minX, y: paper.minY + paper.height * 0.4,
                                                             width: paper.width, height: paper.height * 0.2))
-        attach(canvas, "clip-dragged-out-under-the-moved-transform-layer")
+        attachScreenshot(canvas, "clip-dragged-out-under-the-moved-transform-layer")
         XCTAssertGreaterThan(inkColumns(probe, paper, row: 0.5, span: 0.22...0.48).count, 380,
                              "the clip is not solid across the square the pen swept")
         XCTAssertTrue(inkColumns(probe, paper, row: 0.5, span: 0.04...0.16).isEmpty, "ink left of the clip")
@@ -414,7 +407,7 @@ final class InkUnderTransformUITests: PaintUITestCase {
 
         let probe = try settledProbe(canvas, window: CGRect(x: paper.minX, y: paper.minY + paper.height * 0.4,
                                                             width: paper.width, height: paper.height * 0.2))
-        attach(canvas, "picture-pasted-under-the-moved-transform-layer")
+        attachScreenshot(canvas, "picture-pasted-under-the-moved-transform-layer")
         XCTAssertGreaterThan(inkColumns(probe, paper, row: 0.5, span: 0.2...0.8).count, 380,
                              "the picture is not solid across the middle of the paper")
         XCTAssertTrue(inkColumns(probe, paper, row: 0.5, span: 0.93...0.99).isEmpty,

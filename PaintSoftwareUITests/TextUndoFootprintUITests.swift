@@ -90,10 +90,7 @@ final class TextUndoFootprintUITests: PaintUITestCase {
                       + "did not cover its own glyphs")
         XCTAssertTrue(hasInk(around: strokeProbe, radius: 2), "Undoing the deletion took the stroke with it")
 
-        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        shot.name = "text redrawn after undoing its deletion, stroke intact"
-        shot.lifetime = .keepAlways
-        add(shot)
+        attachScreenshot(XCUIScreen.main, "text redrawn after undoing its deletion, stroke intact")
     }
 
     // MARK: - Driving the text tool

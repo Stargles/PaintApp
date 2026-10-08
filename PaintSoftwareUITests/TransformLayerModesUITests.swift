@@ -40,7 +40,7 @@ final class TransformLayerModesUITests: PaintUITestCase {
 
     /// The centre of gravity of the ink inside `region` (normalised to the host), as a normalised
     /// point — or nil when the region holds no ink. `region` keeps the probe off the letterbox
-    /// margins, which read as black on this device (`visibleCanvasBounds` says why).
+    /// margins, which read as black on this device (`paperRect` says why).
     private func inkCentroid(_ pixels: (bytes: [UInt8], width: Int, height: Int),
                              in region: (minX: Double, maxX: Double, minY: Double, maxY: Double)) -> CGPoint? {
         let (buf, w, h) = pixels
@@ -62,7 +62,7 @@ final class TransformLayerModesUITests: PaintUITestCase {
     /// centre**, not estimated from the host's aspect and not the extent of every whitish pixel.
     /// `canvas.host` is the whole screen under the toolbars: its screenshot carries the left rail's
     /// white knobs and the top bar's white circle, so a whitish-extent scan reads 0.03…0.97 across;
-    /// `visibleCanvasBounds` assumes a square canvas filling the shorter side, which this document
+    /// `paperRect` assumes a square canvas filling the shorter side, which this document
     /// is not; and **the canvas re-fits when the layer rail opens and closes**, so two screenshots
     /// are only comparable in coordinates relative to the paper each one shows. The paper is one
     /// solid white rectangle with the host's centre inside it, so its edges are where whitish stops
@@ -183,13 +183,6 @@ final class TransformLayerModesUITests: PaintUITestCase {
         }
     }
 
-    private func attach(_ app: XCUIApplication, _ name: String) {
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = name
-        shot.lifetime = .keepAlways
-        add(shot)
-    }
-
     /// The modes §8 has shipped, which the picker must list — and no other.
     private static let shippedModes = ["move", "parallax", "rotate", "shake", "repeat"]
 
@@ -294,7 +287,7 @@ final class TransformLayerModesUITests: PaintUITestCase {
         XCTAssertTrue(backSlider.exists, "…each with a slider of its own")
         XCTAssertEqual(backSlider.value as? String, "25", "…drawn at the share the row says, not at the key path's 100")
         XCTAssertEqual(app.textFields["layerOptions.parallaxItem.3.field"].value as? String, "25")
-        attach(app, "1-parallax-item-list")
+        attachScreenshot(app, "1-parallax-item-list")
 
         // Back to the rail: the Move row lives there, not in the settings bar.
         backFromTransformSettings(app)
@@ -312,7 +305,7 @@ final class TransformLayerModesUITests: PaintUITestCase {
         start.press(forDuration: 0.4, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.4)
         app.buttons["moveBar.doneButton"].tap()
         closeRail(app)
-        attach(app, "2-parallax-after-the-drag")
+        attachScreenshot(app, "2-parallax-after-the-drag")
 
         // **What is drawn**: each band moved by its share of what the top band moved, in paper units.
         guard let after = currentPaper(canvas, "after the drag") else { return }
@@ -347,14 +340,14 @@ final class TransformLayerModesUITests: PaintUITestCase {
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
         guard let blank = currentPaper(canvas, "at launch") else { return }
         guard let total = readFrameLabel(app)?.total else { return XCTFail("No frame label") }
-        attach(app, "0-launch")
+        attachScreenshot(app, "0-launch")
 
         // A band 0.15 of the paper right of the middle of what is visible — near enough the centre
         // that a quarter turn lands it well clear of the timeline panel, which covers the paper's
         // lower third.
         let at = hostPoint(blank.paper, u: 0.65, v: 0.5)
         drawBand(on: canvas, x: Double(at.dx), y: Double(at.dy), halfHeight: 0.04)
-        attach(app, "0-band-drawn")
+        attachScreenshot(app, "0-band-drawn")
         guard let rest = currentPaper(canvas, "after drawing"),
               let restInk = inkCentroid(rest.pixels, in: paperRegion(rest.paper, v0: 0.04, v1: 0.96)) else {
             return XCTFail("The band did not land: paper at launch \(blank.paper), drawn at \(at)")
@@ -381,12 +374,12 @@ final class TransformLayerModesUITests: PaintUITestCase {
         XCTAssertTrue(readout.label.hasPrefix("15.0°"), "the readout echoes the typed speed: \(readout.label)")
         let caption = app.staticTexts["layerOptions.rotateSpeedCaption"]
         XCTAssertTrue(caption.label.contains("24.0 frames"), "…and says how long one turn takes: \(caption.label)")
-        attach(app, "1-rotate-speed-typed")
+        attachScreenshot(app, "1-rotate-speed-typed")
         closeRail(app)
 
         // At the bar's first frame nothing has turned yet.
         scrub(app, toFrame: 1, total: total)
-        attach(app, "1b-at-frame-1")
+        attachScreenshot(app, "1b-at-frame-1")
         guard let first = currentPaper(canvas, "at the first frame"),
               let atFirst = inkCentroid(first.pixels, in: paperRegion(first.paper, v0: 0.04, v1: 0.96))
                   .map({ paperRelative($0, in: first.paper) }) else {
@@ -423,7 +416,7 @@ final class TransformLayerModesUITests: PaintUITestCase {
             if abs(misses(read).x) < tolerance, abs(misses(read).y) < tolerance { break }
             Thread.sleep(forTimeInterval: 0.4)
         } while Date() < deadline
-        attach(app, "2-rotate-six-frames-in")
+        attachScreenshot(app, "2-rotate-six-frames-in")
         XCTAssertEqual(misses(atSeventh).x, 0, accuracy: tolerance,
                        "frame 7: the band is on the centre column — turned about the box's centre, not slid "
                        + "(read \(atSeventh), expected \(expected))")
@@ -511,7 +504,7 @@ final class TransformLayerModesUITests: PaintUITestCase {
         let readout = app.staticTexts["layerOptions.shakeXReadout"]
         XCTAssertTrue(readout.waitForExistence(timeout: 5))
         XCTAssertTrue(readout.label.hasPrefix("300"), "the readout echoes the typed amplitude: \(readout.label)")
-        attach(app, "1-shake-amplitude-typed")
+        attachScreenshot(app, "1-shake-amplitude-typed")
         closeRail(app)
 
         // **What is drawn**: on the bar's first four frames the band is somewhere else — 300 points
@@ -519,7 +512,7 @@ final class TransformLayerModesUITests: PaintUITestCase {
         // the playhead comes back to the first frame.
         let frames = [1, 2, 3, 4]
         guard let first = bandColumns(app, canvas: canvas, frames: frames, total: total, "first pass") else { return }
-        attach(app, "2-shake-frame-4")
+        attachScreenshot(app, "2-shake-frame-4")
         XCTAssertTrue(first.contains { abs($0 - restU) > 0.01 },
                       "the band moved on at least one of the first four frames: \(first) against rest \(restU)")
         // Two frames suffice for the determinism check (the noise either re-rolls per render or it
@@ -541,7 +534,7 @@ final class TransformLayerModesUITests: PaintUITestCase {
         reroll.tap()
         closeRail(app)
         guard let rerolled = bandColumns(app, canvas: canvas, frames: frames, total: total, "after re-roll") else { return }
-        attach(app, "3-shake-rerolled-frame-4")
+        attachScreenshot(app, "3-shake-rerolled-frame-4")
         XCTAssertTrue(zip(first, rerolled).contains { abs($0 - $1) > 0.01 },
                       "Re-roll drew a different picture on at least one frame: \(first) vs \(rerolled)")
 
@@ -550,7 +543,7 @@ final class TransformLayerModesUITests: PaintUITestCase {
         XCTAssertTrue(undo.waitForExistence(timeout: 5))
         undo.tap()
         guard let restored = bandColumns(app, canvas: canvas, frames: Array(frames.prefix(2)), total: total, "after undo") else { return }
-        attach(app, "4-shake-undone-frame-4")
+        attachScreenshot(app, "4-shake-undone-frame-4")
         for (a, b) in zip(first, restored) {
             XCTAssertEqual(a, b, accuracy: 0.004, "one undo brings the old shake back: \(first) vs \(restored)")
         }
@@ -641,7 +634,7 @@ final class TransformLayerModesUITests: PaintUITestCase {
             let read = settledColumn(canvas, v0: 0.15, v1: 0.45, "frame \(frame + 1) after drawing")
             XCTAssertEqual(read ?? -1, u, accuracy: 0.03, "Sanity: frame \(frame + 1)'s band is at \(u)")
         }
-        attach(app, "1-three-drawings")
+        attachScreenshot(app, "1-three-drawings")
 
         // The layer, from +, then Mode → Repeat. The period is pre-filled from where the drawings
         // beneath end — the third block is held to 12 — and typed to 3.
@@ -659,7 +652,7 @@ final class TransformLayerModesUITests: PaintUITestCase {
         let readout = app.staticTexts["layerOptions.repeatPeriodReadout"]
         XCTAssertTrue(readout.waitForExistence(timeout: 5))
         XCTAssertEqual(readout.label, "3 frames", "the readout echoes the typed length")
-        attach(app, "2-repeat-period-typed")
+        attachScreenshot(app, "2-repeat-period-typed")
         closeRail(app)
 
         // **What the timeline exposes**: the born layer's row ghosts frames 4–12, one frame each.
@@ -675,7 +668,7 @@ final class TransformLayerModesUITests: PaintUITestCase {
         XCTAssertEqual(atFive ?? -1, columns[1], accuracy: 0.03, "frame 5 shows frame 2's drawing, not the block sitting under the playhead")
         scrub(app, toFrame: 4, total: total)
         XCTAssertEqual(settledColumn(canvas, v0: 0.15, v1: 0.45, "at frame 4") ?? -1, columns[0], accuracy: 0.03, "frame 4 shows frame 1's")
-        attach(app, "3-frame-5-shows-frame-2")
+        attachScreenshot(app, "3-frame-5-shows-frame-2")
 
         // **Ruling 13**: a second band drawn on frame 5, lower down, lands on frame 2 — and not on
         // frame 3. The born layer is selected by tapping its held block at frame 5.
@@ -690,7 +683,7 @@ final class TransformLayerModesUITests: PaintUITestCase {
                        "…and on frame 2, the drawing it repeats")
         XCTAssertEqual(settledColumn(canvas, v0: 0.15, v1: 0.45, "at frame 2, upper") ?? -1, columns[1], accuracy: 0.03,
                        "frame 2's own band is still there")
-        attach(app, "4-ink-from-frame-5-on-frame-2")
+        attachScreenshot(app, "4-ink-from-frame-5-on-frame-2")
         scrub(app, toFrame: 3, total: total)
         XCTAssertNil(settledColumn(canvas, v0: 0.5, v1: 0.8, "at frame 3"), "frame 3 did not receive it")
     }

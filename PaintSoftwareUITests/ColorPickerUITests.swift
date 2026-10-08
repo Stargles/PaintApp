@@ -52,17 +52,6 @@ final class ColorPickerUITests: PaintUITestCase {
         return rgbaPixel(of: canvas, dx: 0.5, dy: 0.5)
     }
 
-    /// Attaches a full-screen screenshot that survives a pass (`XCTAttachment`'s default lifetime
-    /// deletes screenshots from *passing* tests, which is exactly backwards for a visual review of a
-    /// brand new picker) — CLAUDE.md's "drive it and look at it", kept as a permanent artifact rather
-    /// than a one-off debugging step.
-    private func attachScreenshot(_ name: String) {
-        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        attachment.name = name
-        attachment.lifetime = .keepAlways
-        add(attachment)
-    }
-
     // MARK: - Triangle
 
     /// A fresh document, Triangle tab: ring to green, triangle dragged toward its hue corner (the
@@ -97,7 +86,7 @@ final class ColorPickerUITests: PaintUITestCase {
         let currentSwatch = app.otherElements["colorPanel.currentSwatch"]
         XCTAssertTrue(currentSwatch.waitForExistence(timeout: 5))
         XCTAssertNotEqual(currentSwatch.value as? String, "000000", "Picking on the triangle should move the current swatch off the panel's opening colour")
-        attachScreenshot("Triangle tab after picking")
+        attachScreenshot(XCUIScreen.main, "Triangle tab after picking")
 
         closeColorPanel(app, colorButton: colorButton, sentinel: triangle)
 
@@ -135,7 +124,7 @@ final class ColorPickerUITests: PaintUITestCase {
         // Out to the gallery and back into the same drawing.
         saveEditorAndReturnToGallery(app).tap()
         assertThePanelOpensOnTheWheel(app, "after leaving the canvas and coming back")
-        attachScreenshot("Wheel after re-entering the canvas")
+        attachScreenshot(XCUIScreen.main, "Wheel after re-entering the canvas")
 
         // And a launch of its own, which keeps everything but the reset arguments.
         app.terminate()
@@ -185,7 +174,7 @@ final class ColorPickerUITests: PaintUITestCase {
         dragWithinElement(ring, from: CGVector(dx: 0.5, dy: 0.03), to: CGVector(dx: 0.29, dy: 0.136)) // hue ~2/3: blue
 
         dragWithinElement(square, from: CGVector(dx: 0.5, dy: 0.5), to: CGVector(dx: 1.0, dy: 0.0))
-        attachScreenshot("Square tab after picking")
+        attachScreenshot(XCUIScreen.main, "Square tab after picking")
 
         closeColorPanel(app, colorButton: colorButton, sentinel: square)
 
@@ -224,7 +213,7 @@ final class ColorPickerUITests: PaintUITestCase {
         XCTAssertTrue(currentSwatch.waitForExistence(timeout: 5))
         XCTAssertEqual((currentSwatch.value as? String ?? "").uppercased(), "FF0000",
                        "a pick at the ring's own red (3 o'clock) must actually be red, got \(currentSwatch.value ?? "nil")")
-        attachScreenshot("Picked at the ring's right edge")
+        attachScreenshot(XCUIScreen.main, "Picked at the ring's right edge")
 
         closeColorPanel(app, colorButton: colorButton, sentinel: square)
         guard let pixel = paintStrokeAndSamplePixel(app) else {
@@ -268,7 +257,7 @@ final class ColorPickerUITests: PaintUITestCase {
             return
         }
         context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
-        attachScreenshot("Triangle tab, sampled for edge smoothness")
+        attachScreenshot(XCUIScreen.main, "Triangle tab, sampled for edge smoothness")
 
         func pixel(_ x: Int, _ y: Int) -> (r: Int, g: Int, b: Int) {
             let offset = y * bytesPerRow + x * 4
@@ -324,7 +313,7 @@ final class ColorPickerUITests: PaintUITestCase {
 
         let hexField = app.textFields["colorPanel.hexField"]
         XCTAssertTrue(hexField.waitForExistence(timeout: 5), "The Value tab shows the hex field too")
-        attachScreenshot("Value tab after adjusting sliders")
+        attachScreenshot(XCUIScreen.main, "Value tab after adjusting sliders")
 
         closeColorPanel(app, colorButton: colorButton, sentinel: hueSlider)
 
@@ -358,7 +347,7 @@ final class ColorPickerUITests: PaintUITestCase {
                       "Spectrum, the first seeded preset, should be the default on a reset store")
         XCTAssertTrue(app.buttons["colorPanel.palettes.row.0.rename"].exists, "Every row carries a rename control")
         XCTAssertTrue(app.buttons["colorPanel.palettes.row.0.delete"].exists, "…and a delete control")
-        attachScreenshot("Palettes tab, library")
+        attachScreenshot(XCUIScreen.main, "Palettes tab, library")
 
         let cell = app.otherElements["colorPanel.palettes.row.0.swatch.20"]
         XCTAssertFalse(cell.exists, "Swatch 20 of the seeded 20-swatch Spectrum preset must not exist yet")
@@ -368,7 +357,7 @@ final class ColorPickerUITests: PaintUITestCase {
         addButton.tap()
 
         XCTAssertTrue(cell.waitForExistence(timeout: 5), "Adding the current colour should fill the empty cell")
-        attachScreenshot("Palettes tab, cell filled")
+        attachScreenshot(XCUIScreen.main, "Palettes tab, cell filled")
     }
 
     // MARK: - Opacity, with the hex field right under it
@@ -413,6 +402,6 @@ final class ColorPickerUITests: PaintUITestCase {
         XCTAssertTrue((38...42).contains(percent), "Dragging to 40% along the bar reads \(label.label)")
         XCTAssertEqual((swatch.value as? String)?.count, 8,
                        "…and the colour is no longer opaque (RRGGBBAA), got \(swatch.value ?? "nil")")
-        attachScreenshot("Opacity dragged beside the hex field")
+        attachScreenshot(XCUIScreen.main, "Opacity dragged beside the hex field")
     }
 }

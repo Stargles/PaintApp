@@ -35,44 +35,7 @@ import XCTest
 /// named for the class so a triage selector built from either name resolves.
 final class AnimationGroupMembershipUITests: PaintUITestCase {
 
-    // MARK: - Paper coordinates
-
-    /// The visible paper inside the letterboxed host, so every fraction below is a fraction of the
-    /// *drawing* rather than of the window. `visibleCanvasBounds`' own argument: a magic constant that
-    /// happens to work on one frame size is what this replaces.
-    private typealias Paper = (minX: Double, maxX: Double, minY: Double, maxY: Double)
-
-    private func paperPoint(_ paper: Paper, _ dx: Double, _ dy: Double) -> CGVector {
-        CGVector(dx: paper.minX + (paper.maxX - paper.minX) * dx,
-                 dy: paper.minY + (paper.maxY - paper.minY) * dy)
-    }
-
     // MARK: - Reading the canvas
-
-    /// A probe taken once the canvas has stopped changing — two consecutive fingerprints that agree,
-    /// or the last one at the deadline. `AnimatedDistortUITests.settledProbe`'s reason verbatim: the
-    /// resting canvas is served from a baked frame that arrives *after* the gesture, so a screenshot
-    /// on the next line can catch the frame before the commit.
-    private func settledProbe(_ canvas: XCUIElement, _ window: Paper,
-                              timeout: TimeInterval = 8) throws -> (Double, Double) -> Bool {
-        func fingerprint(_ probe: (Double, Double) -> Bool) -> [Bool] {
-            (0..<28).flatMap { yi in (0..<28).map { xi in
-                probe(window.minX + (window.maxX - window.minX) * Double(xi) / 28,
-                      window.minY + (window.maxY - window.minY) * Double(yi) / 28)
-            } }
-        }
-        var probe = try inkProbe(canvas)
-        var previous = fingerprint(probe)
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            let next = try inkProbe(canvas)
-            let current = fingerprint(next)
-            probe = next
-            if current == previous { return probe }
-            previous = current
-        }
-        return probe
-    }
 
     /// **The inked bounding box inside `window`, in paper fractions** — the one geometry this file
     /// measures, and the operand every assertion below compares.
@@ -83,7 +46,7 @@ final class AnimationGroupMembershipUITests: PaintUITestCase {
     ///
     /// Nil when the window holds no ink, which is always a fixture failure and never a behaviour, so
     /// every caller unwraps it with a sentence.
-    private func inkBox(_ probe: (Double, Double) -> Bool, _ paper: Paper, _ window: CGRect)
+    private func inkBox(_ probe: (Double, Double) -> Bool, _ paper: CGRect, _ window: CGRect)
         -> CGRect? {
         let steps = 180
         var minX = Double.infinity, maxX = -Double.infinity
@@ -92,7 +55,7 @@ final class AnimationGroupMembershipUITests: PaintUITestCase {
             let py = Double(window.minY) + Double(window.height) * Double(iy) / Double(steps)
             for ix in 0...steps {
                 let px = Double(window.minX) + Double(window.width) * Double(ix) / Double(steps)
-                let host = paperPoint(paper, px, py)
+                let host = onHost(paper, px, py)
                 guard probe(host.dx, host.dy) else { continue }
                 minX = min(minX, px); maxX = max(maxX, px)
                 minY = min(minY, py); maxY = max(maxY, py)
@@ -136,26 +99,26 @@ final class AnimationGroupMembershipUITests: PaintUITestCase {
     /// after the first. That cost one run: the second selection failed to find Rectangle on a panel
     /// this helper had just put away. Asking whether the panel is already up is the whole fix, and it
     /// is what makes this safe to call four times.
-    private func selectRectangle(_ app: XCUIApplication, _ paper: Paper,
+    private func selectRectangle(_ app: XCUIApplication, _ paper: CGRect,
                                  from: (Double, Double), to: (Double, Double)) {
         let rectangle = app.buttons["selectPanel.mode.rectangle"]
         if !rectangle.exists { app.buttons["toolbar.selectButton"].tap() }
         XCTAssertTrue(rectangle.waitForExistence(timeout: 5), "the Select panel offers Rectangle")
         rectangle.tap()
-        dragOnCanvas(app, from: paperPoint(paper, from.0, from.1), to: paperPoint(paper, to.0, to.1))
+        dragOnCanvas(app, from: onHost(paper, from.0, from.1), to: onHost(paper, to.0, to.1))
     }
 
     /// Lifts whatever is selected, drags it, and puts it down. The drag starts at the box's middle,
     /// which is why the marks below are fat diagonal bars rather than thin lines: every point of a
     /// box around a hairline is inside a grip's 22 pt reach
     /// (`ObjectTransformOverlayView.handleScreenReach`), so a thin mark's "translate" is a resize.
-    private func moveSelection(_ app: XCUIApplication, _ paper: Paper,
+    private func moveSelection(_ app: XCUIApplication, _ paper: CGRect,
                                from: (Double, Double), by: (Double, Double)) {
         app.buttons["toolbar.moveButton"].tap()
         let done = app.buttons["moveBar.doneButton"]
         XCTAssertTrue(done.waitForExistence(timeout: 5), "Move raised no box over the selection")
-        dragOnCanvas(app, from: paperPoint(paper, from.0, from.1),
-                     to: paperPoint(paper, from.0 + by.0, from.1 + by.1))
+        dragOnCanvas(app, from: onHost(paper, from.0, from.1),
+                     to: onHost(paper, from.0 + by.0, from.1 + by.1))
         done.tap()
         XCTAssertTrue(done.waitForNonExistence(timeout: 5), "Done must put the box down")
     }
@@ -186,13 +149,6 @@ final class AnimationGroupMembershipUITests: PaintUITestCase {
                       "the Select panel has to come down — its card overlaps the measured window")
     }
 
-    private func attach(_ canvas: XCUIElement, _ name: String) {
-        let shot = XCTAttachment(screenshot: canvas.screenshot())
-        shot.name = name
-        shot.lifetime = .keepAlways
-        add(shot)
-    }
-
     // MARK: - The whole journey
 
     /// **New document → two animated groups → a drawing moved between them → it is where it was, and
@@ -209,19 +165,19 @@ final class AnimationGroupMembershipUITests: PaintUITestCase {
         XCTAssertTrue(launchIntoEditor(app), "setup: a brand-new document")
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
-        let paper = visibleCanvasBounds(canvas)
+        let paper = paperRect(in: canvas)
 
         // **Two fat diagonal bars on the default vector layer**, so they lift as geometry rather than
         // as pixels and so each Move box is big enough to drag by its middle. D1 on the left is the
         // drawing that changes group; D2 on the right exists only to carry the second group, and it is
         // parked outside the measured window for the whole test.
         setBrushSize(app, normalized: 0.75)
-        dragOnCanvas(app, from: paperPoint(paper, 0.14, 0.12), to: paperPoint(paper, 0.26, 0.24))
-        dragOnCanvas(app, from: paperPoint(paper, 0.62, 0.12), to: paperPoint(paper, 0.74, 0.24))
-        let drawn = try settledProbe(canvas, paper)
+        dragOnCanvas(app, from: onHost(paper, 0.14, 0.12), to: onHost(paper, 0.26, 0.24))
+        dragOnCanvas(app, from: onHost(paper, 0.62, 0.12), to: onHost(paper, 0.74, 0.24))
+        let drawn = try settledProbe(canvas, window: paper, timeout: 8)
         let rest = try XCTUnwrap(inkBox(drawn, paper, windowAroundD1),
                                  "setup: D1 is on the paper inside the measured window")
-        attach(canvas, "1-two-marks-drawn-at-frame-0")
+        attachScreenshot(canvas, "1-two-marks-drawn-at-frame-0")
         XCTAssertGreaterThan(rest.width, 0.05,
                              String(format: "setup: D1 is a real mark and not a dot — %.3f wide",
                                     rest.width))
@@ -244,9 +200,9 @@ final class AnimationGroupMembershipUITests: PaintUITestCase {
 
         // **The far frame before the edit.** D1 has travelled to the right and not downward.
         clearTheCanvasOfChrome(app)
-        let farBefore = try XCTUnwrap(inkBox(try settledProbe(canvas, paper), paper, windowAroundD1),
+        let farBefore = try XCTUnwrap(inkBox(try settledProbe(canvas, window: paper, timeout: 8), paper, windowAroundD1),
                                       "D1 is still inside the measured window at the far frame")
-        attach(canvas, "2-far-frame-before-the-edit")
+        attachScreenshot(canvas, "2-far-frame-before-the-edit")
         XCTAssertGreaterThan(farBefore.minX, rest.minX + 0.04, String(format: """
             setup: Group 1 carries D1 to the right by the far frame — rest x %.3f, far x %.3f. \
             Without travel here there is no animation for the edit to change.
@@ -257,9 +213,9 @@ final class AnimationGroupMembershipUITests: PaintUITestCase {
 
         // **The mid frame before the edit** — an in-between, halfway along both channels.
         scrub(app, toCelFraction: 0.5)
-        let midBefore = try XCTUnwrap(inkBox(try settledProbe(canvas, paper), paper, windowAroundD1),
+        let midBefore = try XCTUnwrap(inkBox(try settledProbe(canvas, window: paper, timeout: 8), paper, windowAroundD1),
                                       "D1 is inside the measured window at the mid frame")
-        attach(canvas, "3-mid-frame-before-the-edit")
+        attachScreenshot(canvas, "3-mid-frame-before-the-edit")
         XCTAssertGreaterThan(midBefore.minX, rest.minX + 0.01, String(format: """
             setup: the mid frame is genuinely in between — rest x %.3f, mid x %.3f, far x %.3f
             """, rest.minX, midBefore.minX, farBefore.minX))
@@ -291,10 +247,7 @@ final class AnimationGroupMembershipUITests: PaintUITestCase {
                       "the second group the two Moves minted is offered as a destination")
         // The whole screen rather than the canvas: this is the one attachment that shows the control
         // itself, which is what a reviewer asking "where does an artist find this" wants to see.
-        let panel = XCTAttachment(screenshot: app.screenshot())
-        panel.name = "3b-the-animation-group-band-with-the-loop-around-D1"
-        panel.lifetime = .keepAlways
-        add(panel)
+        attachScreenshot(app, "3b-the-animation-group-band-with-the-loop-around-D1")
         secondGroup.tap()
 
         let banner = app.staticTexts["canvasNotice"]
@@ -311,9 +264,9 @@ final class AnimationGroupMembershipUITests: PaintUITestCase {
 
         // **(1) The ruling: the same frame, and D1 has not moved.**
         clearTheCanvasOfChrome(app)
-        let midAfter = try XCTUnwrap(inkBox(try settledProbe(canvas, paper), paper, windowAroundD1),
+        let midAfter = try XCTUnwrap(inkBox(try settledProbe(canvas, window: paper, timeout: 8), paper, windowAroundD1),
                                      "D1 is still inside the measured window after the edit")
-        attach(canvas, "4-mid-frame-after-the-edit")
+        attachScreenshot(canvas, "4-mid-frame-after-the-edit")
         XCTAssertEqual(midAfter.minX, midBefore.minX, accuracy: 0.025, String(format: """
             D1 moved on the frame the artist is standing on — x was %.3f and is %.3f. \
             Changing animation group must preserve where the drawing looks here.
@@ -324,9 +277,9 @@ final class AnimationGroupMembershipUITests: PaintUITestCase {
         // **(2) …and it follows the other group now.** Without this the test would pass against an
         // implementation that did nothing at all.
         scrub(app, toCelFraction: 0.95)
-        let farAfter = try XCTUnwrap(inkBox(try settledProbe(canvas, paper), paper, windowAroundD1),
+        let farAfter = try XCTUnwrap(inkBox(try settledProbe(canvas, window: paper, timeout: 8), paper, windowAroundD1),
                                      "D1 is still inside the measured window at the far frame")
-        attach(canvas, "5-far-frame-after-the-edit")
+        attachScreenshot(canvas, "5-far-frame-after-the-edit")
         XCTAssertGreaterThan(farAfter.minY, farBefore.minY + 0.03, String(format: """
             D1 does not travel downward at the far frame, so it is not following the group it was \
             moved into — y was %.3f before the edit and is %.3f after.
