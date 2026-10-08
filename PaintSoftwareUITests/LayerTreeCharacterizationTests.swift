@@ -978,4 +978,75 @@ final class LayerTreeCharacterizationTests: XCTestCase {
         XCTAssertEqual(manager.layers.count, 2, "Cancel means cancel — no merge happened")
         XCTAssertEqual(manager.layers[1].blendMode, .multiply, "…and nothing about either layer changed")
     }
+
+    // MARK: - The vector cels the viewer can see
+
+    /// A raster layer under three vector layers, the lower two inside a folder: `[A raster, B, C, D]`
+    /// bottom to top, with B and C in `folder` and D loose above it.
+    private func visibleStack() -> (manager: CanvasManager, folder: UUID, ids: [String: UUID]) {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.layers[0].name = "A"
+        for name in ["B", "C", "D"] { manager.addVectorLayer(name: name) }
+        let folder = manager.addFolder(name: "F")
+        manager.layers[1].parentFolderID = folder
+        manager.layers[2].parentFolderID = folder
+        return (manager, folder, Dictionary(uniqueKeysWithValues: manager.layers.map { ($0.name, $0.id) }))
+    }
+
+    private func visibleNames(_ manager: CanvasManager, shownAt frames: [Int: Int] = [:]) -> [String] {
+        manager.visibleStoredVectorCels(in: manager.renderTree(atFrame: manager.currentFrame), shownAt: frames)
+            .map { manager.layers[$0.layerIndex].name }
+    }
+
+    /// **Topmost first, in the compositor's order and folders included** — and a raster layer holds no
+    /// stored vector geometry, so it is not here.
+    func testTheVisibleStoredVectorCelsRunTopmostFirstThroughFolders() {
+        let (manager, _, _) = visibleStack()
+        XCTAssertEqual(manager.layers.map(\.name), ["A", "B", "C", "D"], "PREMISE: B and C sit in the folder, D above it")
+        XCTAssertEqual(visibleNames(manager), ["D", "C", "B"])
+    }
+
+    /// **A layer's own eye gates it, and a folder's eye gates everything inside it** — whatever the
+    /// layers inside say for themselves.
+    func testALayersEyeAndEveryFoldersAboveItGateTheVisibleStoredVectorCels() {
+        let (manager, folder, ids) = visibleStack()
+
+        manager.layers[manager.layers.firstIndex { $0.id == ids["C"] }!].isVisible = false
+        XCTAssertEqual(visibleNames(manager), ["D", "B"], "a hidden layer is not here")
+        manager.layers[manager.layers.firstIndex { $0.id == ids["C"] }!].isVisible = true
+
+        manager.folders[manager.folders.firstIndex { $0.id == folder }!].isVisible = false
+        XCTAssertEqual(visibleNames(manager), ["D"], "a hidden folder hides its layers whatever their own eyes say")
+    }
+
+    /// **An in-between has no stored geometry**, so it is not a cel to cut or to hit.
+    func testAnInBetweenIsNotAStoredVectorCel() {
+        let (manager, _, ids) = visibleStack()
+        let c = manager.layers.firstIndex { $0.id == ids["C"] }!
+        manager.layers[c].cels[0].interpolation = InterpolationRecipe(references: [], t: 0.5)
+        XCTAssertEqual(visibleNames(manager), ["D", "B"])
+    }
+
+    /// **The frame each layer is read at is the caller's to say**: the playhead by default, and the
+    /// walk's Repeat source frame where one is given — the cel and the frame reported are that frame's.
+    func testTheVisibleStoredVectorCelsAreReadAtTheFrameTheCallerNames() throws {
+        let (manager, _, ids) = visibleStack()
+        let size = try XCTUnwrap(manager.canvasSize)
+        let d = manager.layers.firstIndex { $0.id == ids["D"] }!
+        manager.layers[d].cels = (0..<2).map {
+            Cel(id: UUID(), startFrame: $0 * 4, frameCount: 4, raster: .empty(size: size), vector: .empty(size: size))
+        }
+        manager.currentFrame = 1
+
+        let atPlayhead = try XCTUnwrap(manager.visibleStoredVectorCels(in: manager.renderTree(atFrame: 1))
+            .first { $0.layerIndex == d })
+        XCTAssertEqual(atPlayhead.celIndex, 0)
+        XCTAssertEqual(atPlayhead.frame, 1)
+
+        let repeated = try XCTUnwrap(manager.visibleStoredVectorCels(in: manager.renderTree(atFrame: 1), shownAt: [d: 5])
+            .first { $0.layerIndex == d })
+        XCTAssertEqual(repeated.celIndex, 1, "a Repeat layer shows the cel of the frame it repeats")
+        XCTAssertEqual(repeated.frame, 5)
+        XCTAssertTrue(repeated.vector === manager.layers[d].cels[1].vector)
+    }
 }

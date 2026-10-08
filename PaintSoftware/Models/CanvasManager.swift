@@ -979,7 +979,7 @@ final class CanvasManager: ObservableObject {
             // by a new loop drawn while a slider is still held. Cheap when no session is open, which
             // is every assignment but that one.
             guard let session = selectionEdit else { return }
-            if let selection, selection.layerID == session.layerID, selection.celID == session.celID,
+            if let selection, selection.layerID == session.edit.layerID, selection.celID == session.edit.celID,
                let old = oldValue, old.path === selection.path { return }
             cancelSelectionEdit()
         }
@@ -4599,9 +4599,9 @@ final class CanvasManager: ObservableObject {
         // transform's own clause when that path was deleted (TODO item (12) stage 2): Move with no
         // selection is a float now, so `vectorFloat != nil` is the whole answer for both.
         let newCanUndo = fillGestureActive || shapeGestureActive || textGestureActive
-            || gradientEdit?.applied == true || vectorFloat != nil || history.canUndo
+            || gradientEdit?.edit.applied == true || vectorFloat != nil || history.canUndo
         let newCanRedo = !fillGestureActive && !shapeGestureActive && !textGestureActive
-            && gradientEdit?.applied != true && history.canRedo
+            && gradientEdit?.edit.applied != true && history.canRedo
         if canUndo != newCanUndo { canUndo = newCanUndo }
         if canRedo != newCanRedo { canRedo = newCanRedo }
     }

@@ -215,6 +215,40 @@ extension CanvasManager {
         return ancestorFolders(ofLayer: index).allSatisfy(\.isVisible)
     }
 
+    /// **A stored vector cel the viewer can see**, and the frame it was read at.
+    struct VisibleVectorCel {
+        let layerIndex: Int
+        let celIndex: Int
+        let vector: VectorCanvas
+        /// The playhead, or the source frame a Repeat layer shows this layer at (`RenderWalk.frames`).
+        let frame: Int
+    }
+
+    /// **The vector layers' stored cels the viewer can see, topmost first** — the one walk behind "what
+    /// is under this" for everything that edits or selects ink rather than reads pixels: the
+    /// universal eraser's targets and the Tap selection's hit test. Built on
+    /// `RenderNode.visibleLeavesTopmostFirst`, the walk the eyedropper reads pixels through, so all
+    /// three agree on what is visible (a layer's own switch and every group's above it) and what is on
+    /// top (the compositor's order, folders included). Each caller keeps its own filter on top of it.
+    ///
+    /// An in-between is left out: its drawing is derived from its references, so there is no stored
+    /// geometry to cut or to hit.
+    ///
+    /// - Parameter frames: the frame each layer is read at when it is not the playhead's — the walk's
+    ///   Repeat source frames. The eraser passes them, since a stroke lands on the drawing a Repeat
+    ///   layer shows; the Tap selection reads every layer at the playhead, since a selection belongs to
+    ///   the cel under it.
+    func visibleStoredVectorCels(in tree: [RenderNode], shownAt frames: [Int: Int] = [:]) -> [VisibleVectorCel] {
+        tree.visibleLeavesTopmostFirst.compactMap { node in
+            guard case .leaf(let index) = node.content, layers[index].kind == .vector else { return nil }
+            let frame = frames[index] ?? currentFrame
+            guard let celIndex = activeCelIndex(inLayer: index, atFrame: frame),
+                  layers[index].cels[celIndex].interpolation == nil,
+                  let vector = layers[index].cels[celIndex].vector else { return nil }
+            return VisibleVectorCel(layerIndex: index, celIndex: celIndex, vector: vector, frame: frame)
+        }
+    }
+
     /// A layer's opacity with every enclosing group's folded in.
     ///
     /// **An approximation, and the one place phase 4 knowingly ships one.** Group opacity means "fade

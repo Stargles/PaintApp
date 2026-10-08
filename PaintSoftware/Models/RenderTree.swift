@@ -389,8 +389,9 @@ extension Array where Element == RenderNode {
     /// **Every leaf a viewer can see, topmost first** — the painter's order read from the top, folders
     /// included. A leaf's own flag gates only itself and a node's gates its whole subtree, so a layer
     /// inside a hidden folder is not here whatever its own eye says. Slots of a multi-input node are
-    /// read in order, as `leafLayerIndices` reads them. What the eyedropper's Layer mode walks to find
-    /// the topmost object under a point.
+    /// read in order, as `leafLayerIndices` reads them. The one walk behind "what is under this point":
+    /// the eyedropper's Layer mode reads pixels through it, and `CanvasManager.visibleStoredVectorCels`
+    /// — the universal eraser's targets and the Tap selection's hit test — reads stored ink through it.
     var visibleLeavesTopmostFirst: [RenderNode] {
         func bottomToTop(_ nodes: [RenderNode]) -> [RenderNode] {
             nodes.flatMap { node -> [RenderNode] in

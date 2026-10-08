@@ -1318,6 +1318,52 @@ enum VectorElement: Identifiable {
         }
     }
 
+    /// **The element with each of its colours taken through `transform`, or nil when it has none** —
+    /// the one place that says which fields of which kind *are* colours, so a recolour (the Select
+    /// panel's Colour) and a Bake cannot disagree about it, and a new element kind has to decide here.
+    ///
+    /// - A **paint stroke** has one: its ink. An **erase stroke** has none — `.destinationOut` reads
+    ///   only alpha, so recolouring one changes no pixel.
+    /// - A **flat fill** has one. A **gradient fill** has two, `start` then `end`, and keeps its ramp.
+    /// - **Text** has one: its recipe's.
+    /// - A placed **image**, a **video** and a **stream** have none: a picture is pixels or a file, not a
+    ///   colour field (a Bake takes an image's pixels through their own route).
+    ///
+    /// The whole `CodableColor` goes through `transform`, alpha included; a caller that means to keep
+    /// the element's own alpha says so in its closure.
+    func mappingColours(_ transform: (CodableColor) -> CodableColor) -> VectorElement? {
+        switch self {
+        case .stroke(var stroke):
+            guard stroke.composite == .paint else { return nil }
+            stroke.color = transform(stroke.color)
+            return .stroke(stroke)
+        case .fill(var fill):
+            switch fill.paint {
+            case .solid(let colour):
+                fill.paint = .solid(transform(colour))
+            case .linearGradient(var gradient):
+                gradient.start = transform(gradient.start)
+                gradient.end = transform(gradient.end)
+                fill.paint = .linearGradient(gradient)
+            }
+            return .fill(fill)
+        case .text(var text):
+            text.recipe.color = transform(text.recipe.color)
+            return .text(text)
+        case .image, .video, .stream:
+            return nil
+        }
+    }
+
+    /// Every colour `mappingColours` reaches, in the order it reaches them — empty exactly where it
+    /// answers nil. Read through the same switch rather than a second one, so the colours an element is
+    /// read as and the colours it is rewritten through cannot come apart.
+    var colours: [CodableColor] {
+        var found: [CodableColor] = []
+        _ = mappingColours { found.append($0); return $0 }
+        return found
+    }
+
     /// The element's placement when it *has* one — the three kinds that are a rectangle of pixels
     /// under an affine, and nil for the three that are ink.
     ///

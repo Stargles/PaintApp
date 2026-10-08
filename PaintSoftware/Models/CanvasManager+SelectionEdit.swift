@@ -24,7 +24,8 @@ import SwiftUI
 // unconditionally and is what a cleared selection or an undo press mid-drag reaches. The shape is the
 // text session's (`commitTextToVector`: *"one undo step for the whole session, whatever happened
 // inside it"*) and the value layer's colour swatch (`valueLayerColour`), which brackets its popover's
-// lifetime rather than its writes for exactly this reason.
+// lifetime rather than its writes for exactly this reason. What the drag shares with the gradient
+// panel — the snapshot, the in-place write, the one step, the revert — is `ElementEditSession`.
 
 /// What one of the three controls writes.
 ///
@@ -83,22 +84,20 @@ enum SelectionEditKind: Equatable {
     /// | Size | yes | yes | no | no | no |
     /// | Opacity | yes | yes | yes | yes | no |
     ///
-    /// An `.erase` stroke takes no colour because `.destinationOut` reads only alpha, so recolouring
-    /// one changes no pixel and would be an undo step that lies (`applyBrushToSelection`'s doc
-    /// carries the same argument for why it *does* re-point one — the hole's shape is visible). It
-    /// takes a size and an opacity for that reason: both change the hole. A gradient fill takes no
+    /// The Colour row is not a table of its own: it is `VectorElement.colours` having exactly one
+    /// entry, so a new element kind decides there and this follows. An `.erase` stroke takes no
+    /// colour because `.destinationOut` reads only alpha, so recolouring one changes no pixel and
+    /// would be an undo step that lies (`applyBrushToSelection`'s doc carries the same argument for
+    /// why it *does* re-point one — the hole's shape is visible). It takes a size and an opacity for
+    /// that reason: both change the hole. A gradient fill takes no
     /// colour here either: its two colours are edited as a pair in the gradient panel
     /// (`CanvasManager.editSelectedObject(_:)`), and one hue written over both would flatten it. A placed
     /// image and a video frame take nothing from any of the three — neither has a colour field, a width, or an opacity,
     /// and tinting or fading a photograph is an effect (`Effect`), not a recolour.
     func current(of element: VectorElement) -> SelectionEditValue? {
         switch (self, element) {
-        case (.color, .stroke(let stroke)):
-            return stroke.composite == .paint ? .color(Self.hue(of: stroke.color)) : nil
-        case (.color, .fill(let fill)):
-            return fill.solidColor.map { .color(Self.hue(of: $0)) }
-        case (.color, .text(let text)):
-            return .color(Self.hue(of: text.recipe.color))
+        case (.color, _):
+            return Self.soleColour(of: element).map { .color(Self.hue(of: $0)) }
         case (.size, .stroke(let stroke)):
             return .size(stroke.size)
         case (.opacity, .stroke(let stroke)):
@@ -107,8 +106,7 @@ enum SelectionEditKind: Equatable {
             return .opacity(fill.opacity)
         case (.opacity, .text(let text)):
             return .opacity(text.recipe.opacity)
-        case (.color, .image), (.color, .video), (.color, .stream),
-             (.size, .fill), (.size, .text), (.size, .image), (.size, .video), (.size, .stream),
+        case (.size, .fill), (.size, .text), (.size, .image), (.size, .video), (.size, .stream),
              (.opacity, .image), (.opacity, .video), (.opacity, .stream):
             return nil
         }
@@ -124,17 +122,9 @@ enum SelectionEditKind: Equatable {
     /// rather than falling to the cel.
     static func rewritten(_ element: VectorElement, to value: SelectionEditValue) -> VectorElement? {
         switch (value, element) {
-        case (.color(let picked), .stroke(var stroke)):
-            guard stroke.composite == .paint else { return nil }
-            stroke.color = Self.recoloured(stroke.color, to: picked)
-            return .stroke(stroke)
-        case (.color(let picked), .fill(var fill)):
-            guard let existing = fill.solidColor else { return nil }
-            fill.paint = .solid(Self.recoloured(existing, to: picked))
-            return .fill(fill)
-        case (.color(let picked), .text(var text)):
-            text.recipe.color = Self.recoloured(text.recipe.color, to: picked)
-            return .text(text)
+        case (.color(let picked), _):
+            guard soleColour(of: element) != nil else { return nil }
+            return element.mappingColours { Self.recoloured($0, to: picked) }
         case (.size(let size), .stroke(var stroke)):
             stroke.size = size
             return .stroke(stroke)
@@ -147,11 +137,18 @@ enum SelectionEditKind: Equatable {
         case (.opacity(let opacity), .text(var text)):
             text.recipe.opacity = opacity
             return .text(text)
-        case (.color, .image), (.color, .video), (.color, .stream),
-             (.size, .fill), (.size, .text), (.size, .image), (.size, .video), (.size, .stream),
+        case (.size, .fill), (.size, .text), (.size, .image), (.size, .video), (.size, .stream),
              (.opacity, .image), (.opacity, .video), (.opacity, .stream):
             return nil
         }
+    }
+
+    /// **The colour the Colour control reads and writes: the one an element has, when it has exactly
+    /// one** (`VectorElement.colours`). A gradient has two, which the gradient panel edits as a pair,
+    /// and one hue written over both would flatten it; an eraser stroke and a picture have none.
+    private static func soleColour(of element: VectorElement) -> CodableColor? {
+        let colours = element.colours
+        return colours.count == 1 ? colours[0] : nil
     }
 
     /// The colour with its alpha pinned at 1 — what a colour *comparison* and a colour *tally* are
@@ -329,25 +326,21 @@ struct SelectionStyleMemo: Equatable {
 /// `previewSelectionEdit`, closed by `commitSelectionEdit` or `cancelSelectionEdit`.
 struct SelectionEditSession {
     let kind: SelectionEditKind
-    let layerID: UUID
-    let celID: UUID
-    let vectorCanvas: VectorCanvas
-    /// The list as the artist found it — what a cancel puts back and what the undo step's old side is.
-    let elementsBefore: [VectorElement]
-    /// The list every tick rewrites *from*: `elementsBefore` under Enclosed and Touching, and the split
-    /// list under Cut, whose inside pieces are the caught set. Rewriting from here rather than from the
-    /// canvas's current list is what makes a tick idempotent — dragging back to the start value gives
-    /// exactly this list back, field for field.
+    /// The cel, the list as the artist found it and the ids a tick may rewrite — the part this drag
+    /// shares with the gradient panel (`ElementEditSession`).
+    var edit: ElementEditSession
+    /// The list every tick rewrites *from*: `edit.elementsBefore` under Enclosed and Touching, and the
+    /// split list under Cut, whose inside pieces are the caught set. Rewriting from here rather than
+    /// from the canvas's current list is what makes a tick idempotent — dragging back to the start
+    /// value gives exactly this list back, field for field.
     let working: [VectorElement]
-    /// The ids a tick may rewrite — `ElementSwap.rewritesInPlace`'s operand, over-declared on purpose:
-    /// it includes the caught elements the control does not reach, which cost their own footprint of
-    /// repair and can never draw a wrong picture.
-    let caught: Set<UUID>
-    /// Whether any tick has reached the canvas. False for a picker opened and closed untouched, and
-    /// for a drag whose first ticks changed nothing; such a session ends with no render and no step.
-    var applied = false
     /// The last value previewed, laid over the readout while the drag is live.
     var value: SelectionEditValue?
+
+    /// The ids a tick may rewrite — over-declared on purpose: it includes the caught elements the
+    /// control does not reach, which cost their own footprint of repair and can never draw a wrong
+    /// picture.
+    var caught: Set<UUID> { edit.rewriting }
 }
 
 extension CanvasManager {
@@ -485,10 +478,11 @@ extension CanvasManager {
                 return false
             }
         }
-        selectionEdit = SelectionEditSession(kind: kind, layerID: layerID, celID: celID,
-                                             vectorCanvas: vectorCanvas,
-                                             elementsBefore: elementsBefore, working: working,
-                                             caught: caught)
+        selectionEdit = SelectionEditSession(
+            kind: kind,
+            edit: ElementEditSession(layerID: layerID, celID: celID, vectorCanvas: vectorCanvas,
+                                     elementsBefore: elementsBefore, rewriting: caught),
+            working: working)
         return true
     }
 
@@ -516,26 +510,23 @@ extension CanvasManager {
             newElements[index] = rewritten
         }
         session.value = value
-        guard changed > 0 || session.applied else {
+        guard changed > 0 || session.edit.applied else {
             selectionEdit = session
             return
         }
-        if !session.applied,
-           let layerIndex = layers.firstIndex(where: { $0.id == session.layerID }),
-           let celIndex = layers[layerIndex].cels.firstIndex(where: { $0.id == session.celID }) {
+        if !session.edit.applied,
+           let layerIndex = layers.firstIndex(where: { $0.id == session.edit.layerID }),
+           let celIndex = layers[layerIndex].cels.firstIndex(where: { $0.id == session.edit.celID }) {
             // Clear the transient tier once, or a stale pre-edit fill preview composites over the top —
             // `applyBrushToSelection`'s line, at the first tick rather than the press.
             setFillPreview(layerIndex: layerIndex, celIndex: celIndex, nil)
         }
-        session.applied = true
+        session.edit.applied = true
         selectionEdit = session
-        // **The seam, told the ids** — `restoreElements(_:changedInk:rewriting:)` bounds the swap by
-        // the union of where each caught element was and where it will be, and a tick landing before
-        // the previous tick's render has measured anything is bounded the same way rather than
-        // falling to the cel (PERFORMANCE.md §11.11f's closing argument). `caught` rather than the
-        // exact changed set, for `ElementSwap.rewritesInPlace`'s over-declare rule.
-        session.vectorCanvas.restoreElements(newElements, changedInk: nil, rewriting: session.caught)
-        celContentChangedOutsideStroke(layerID: session.layerID, celID: session.celID)
+        // **Told the ids** (`writeElementEdit`) — `caught` rather than the exact changed set, for
+        // `ElementSwap.rewritesInPlace`'s over-declare rule, so a tick landing before the previous
+        // tick's render has measured anything is bounded the same way rather than falling to the cel.
+        writeElementEdit(newElements, on: session.edit)
     }
 
     /// Closes the drag as **one undo step** from the list the artist started with to the list they
@@ -547,8 +538,8 @@ extension CanvasManager {
     func commitSelectionEdit() -> Bool {
         guard let session = selectionEdit else { return false }
         selectionEdit = nil
-        guard session.applied else { return false }
-        let final = session.vectorCanvas.elements
+        guard session.edit.applied else { return false }
+        let final = session.edit.vectorCanvas.elements
         // "Changed" is asked of the fields, not of the lists: under Cut the lists differ by the split
         // alone, and a split nobody's tick coloured, widened or faded is not an edit the artist made.
         var before: [UUID: SelectionEditValue] = [:]
@@ -560,23 +551,13 @@ extension CanvasManager {
             return session.kind.current(of: element) != was
         }
         guard changed else {
-            session.vectorCanvas.restoreElements(session.elementsBefore, changedInk: nil,
-                                                 rewriting: session.caught)
-            celContentChangedOutsideStroke(layerID: session.layerID, celID: session.celID)
+            revertElementEdit(session.edit)
             return false
         }
-        registerVectorElementsUndo(vectorCanvas: session.vectorCanvas,
-                                   oldElements: session.elementsBefore, newElements: final,
-                                   layerID: session.layerID, celID: session.celID,
-                                   label: session.kind.label,
-                                   // Every tick put each caught element back at its own index under
-                                   // its own id — these are the ids. Under Cut the split's pieces
-                                   // arrive under fresh ids, which the same seam bounds by id
-                                   // difference.
-                                   swap: .rewritesInPlace(session.caught))
-        // The layer-panel thumbnail is a third thing, and `registerVectorElementsUndo` refreshes it
-        // on the undo and redo sides but not on the initial apply — `applyBrushToSelection`'s line.
-        celContentChangedOutsideStroke(layerID: session.layerID, celID: session.celID)
+        // Every tick put each caught element back at its own index under its own id — these are the
+        // ids. Under Cut the split's pieces arrive under fresh ids, which the same seam bounds by id
+        // difference.
+        recordElementEdit(session.edit, finalElements: final, label: session.kind.label)
         return true
     }
 
@@ -587,10 +568,8 @@ extension CanvasManager {
     func cancelSelectionEdit() {
         guard let session = selectionEdit else { return }
         selectionEdit = nil
-        guard session.applied else { return }
-        session.vectorCanvas.restoreElements(session.elementsBefore, changedInk: nil,
-                                             rewriting: session.caught)
-        celContentChangedOutsideStroke(layerID: session.layerID, celID: session.celID)
+        guard session.edit.applied else { return }
+        revertElementEdit(session.edit)
     }
 
     // MARK: - One-shot

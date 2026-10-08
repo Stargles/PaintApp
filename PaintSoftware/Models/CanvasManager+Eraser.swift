@@ -53,25 +53,21 @@ extension CanvasManager {
     }
 
     /// **The cels a universal eraser gesture reaches**: every `.vector` layer that reaches the canvas
-    /// through its own switch and every group above it (`isLayerEffectivelyVisible`), showing a
-    /// stored cel at the playhead — an in-between is derived, and Modes 2, 3 and 4 have no stored
-    /// geometry there to cut. The active layer is one of them by the same rule and by no other.
+    /// through its own switch and every group above it, showing a stored cel at the playhead — an
+    /// in-between is derived, and Modes 2, 3 and 4 have no stored geometry there to cut
+    /// (`visibleStoredVectorCels`). The active layer is one of them by the same rule and by no other.
     ///
     /// Under a Repeat layer the cel is the *shown* one (`displayedCelIndex`, TRANSFORM_LAYER.md
     /// §5.5), exactly as a single-layer stroke lands on the drawing it repeats.
     func universalEraseTargets() -> [UniversalEraseTarget] {
-        var targets: [UniversalEraseTarget] = []
         let walk = renderTreeAndPoses(atFrame: currentFrame)
-        for index in layers.indices where layers[index].kind == .vector && isLayerEffectivelyVisible(index) {
-            let shown = walk.frames[index] ?? currentFrame
-            guard let celIndex = activeCelIndex(inLayer: index, atFrame: shown) else { continue }
-            let cel = layers[index].cels[celIndex]
-            guard cel.interpolation == nil, let canvas = cel.vector else { continue }
-            targets.append(UniversalEraseTarget(
-                layerID: layers[index].id, celID: cel.id, canvas: canvas,
-                pose: inkPose(ofLayerAt: index, showing: shown, inheriting: walk.poses[index])))
+        return visibleStoredVectorCels(in: walk.tree, shownAt: walk.frames).map { shown in
+            UniversalEraseTarget(
+                layerID: layers[shown.layerIndex].id, celID: layers[shown.layerIndex].cels[shown.celIndex].id,
+                canvas: shown.vector,
+                pose: inkPose(ofLayerAt: shown.layerIndex, showing: shown.frame,
+                              inheriting: walk.poses[shown.layerIndex]))
         }
-        return targets
     }
 
     /// Commits one whole eraser gesture — its selection-clipped `runs`, in canvas space — to every

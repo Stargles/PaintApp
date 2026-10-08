@@ -156,7 +156,8 @@ enum BakeOperation: Equatable {
     /// **The colour route for one element, exhaustive over the element kinds** — a new kind has to
     /// decide what a bake does to it.
     ///
-    /// - A **gradient fill** is taken by its two stops, and stays a gradient: the ramp between them
+    /// - Every colour the element carries (`VectorElement.mappingColours`) goes through the operation.
+    ///   A **gradient fill** is taken by its two stops, and stays a gradient: the ramp between them
     ///   is still mixed in Oklab, so it is the colour a person would call halfway between the two
     ///   *graded* stops. That is exact for a straight tint and an approximation for a curve, which
     ///   is the same one a colour makes against the composite.
@@ -165,30 +166,17 @@ enum BakeOperation: Equatable {
     ///   A colour-class operation acts on pixel colour alone, so grading the picture in its own
     ///   coordinates is the same as grading it on the canvas.
     func baked(_ element: VectorElement, using colours: BakedColours) -> ElementResult {
+        if let recoloured = element.mappingColours({ colours($0) }) { return .baked(recoloured) }
         switch element {
-        case .stroke(var stroke):
-            guard stroke.composite == .paint else { return .untouched }
-            stroke.color = colours(stroke.color)
-            return .baked(.stroke(stroke))
-        case .fill(var fill):
-            switch fill.paint {
-            case .solid(let colour):
-                fill.paint = .solid(colours(colour))
-            case .linearGradient(var gradient):
-                gradient.start = colours(gradient.start)
-                gradient.end = colours(gradient.end)
-                fill.paint = .linearGradient(gradient)
-            }
-            return .baked(.fill(fill))
-        case .text(var text):
-            text.recipe.color = colours(text.recipe.color)
-            return .baked(.text(text))
         case .image(var image):
             image.image = baked(image.image)
             image.fileName = nil
             return .baked(.image(image))
         case .video, .stream:
             return .cannotTakeColour
+        case .stroke, .fill, .text:
+            // Only an eraser stroke reaches here: it removes ink and carries none.
+            return .untouched
         }
     }
 }

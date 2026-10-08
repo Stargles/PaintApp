@@ -147,18 +147,15 @@ extension CanvasManager {
 
     /// The topmost object under `point` across the document, as it is shown, and where it lives.
     ///
-    /// The render walk's own order (`leafLayerIndices` is bottom to top, depth first through the
-    /// folders), so "topmost" is what the compositor puts on top; a layer a switch or a folder hides
-    /// is not asked, and neither is an in-between, whose drawing is derived rather than stored.
+    /// The render walk's own order (`visibleStoredVectorCels`), so "topmost" is what the compositor
+    /// puts on top; a layer a switch or a folder hides is not asked, and neither is an in-between,
+    /// whose drawing is derived rather than stored.
     private func topmostObject(at point: CGPoint)
         -> (layerIndex: Int, celIndex: Int, shown: VectorElement)? {
-        for index in renderTreeAndPoses(atFrame: currentFrame).tree.leafLayerIndices.reversed() {
-            guard layers.indices.contains(index), layers[index].kind == .vector,
-                  isLayerEffectivelyVisible(index),
-                  let celIndex = activeCelIndex(inLayer: index, atFrame: currentFrame),
-                  layers[index].cels[celIndex].interpolation == nil else { continue }
-            if let hit = VectorHitTest.topmost(in: shownElements(layerIndex: index, celIndex: celIndex), at: point) {
-                return (index, celIndex, hit)
+        for cel in visibleStoredVectorCels(in: renderTree(atFrame: currentFrame)) {
+            if let hit = VectorHitTest.topmost(in: shownElements(layerIndex: cel.layerIndex, celIndex: cel.celIndex),
+                                               at: point) {
+                return (cel.layerIndex, cel.celIndex, hit)
             }
         }
         return nil
