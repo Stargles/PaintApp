@@ -50,11 +50,18 @@ rather than assuming it still holds.
 
 ## What is left of the owner's 2026-10-01/02 asks
 
-Of (111)–(152) and their ruled follow-ups, three items remain: the anchored menus, inline renaming everywhere
-and (139). Every
-other one merged in session 46 (`git log` and HANDOFF.md carry what each did).
+Of (111)–(152) and their ruled follow-ups, two items remain: the Repeat bake's partial case below and
+(139). Every other one merged in session 46 (`git log` and HANDOFF.md carry what each did).
 
 ---
+
+## (131) follow-up: a Repeat bake bakes what it can
+
+**Status** — not started. The Repeat bake (`8795472`) refuses the whole bake (`.loopsMoreThanDrawings`) when
+anything beneath also changes over time in a way drawings cannot carry (a keyed opacity, grade or pose).
+The owner's 2026-10-01 ruling for Bake already answers it — *"Bake the rest"*: bake the layers whose loop is
+only drawings, leave the others as they were, and name them in the notice. Needs per-layer attribution of
+the two walks' differences.
 
 ## (139) Keys, not keyframes — every channel component independent
 
