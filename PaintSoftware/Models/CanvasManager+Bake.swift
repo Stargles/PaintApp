@@ -31,6 +31,12 @@ import UIKit
 // A transformation layer is carried the same way: its share of the pose is read off the render walk
 // (`renderTreeAndPoses`) and written into each cel's geometry, so the walk stays the one source of what a
 // transformation layer does.
+//
+// **A Repeat layer is the third case, and its treatment is a time remap.** It poses nothing: it shows each
+// layer beneath at an earlier frame (TRANSFORM_LAYER.md §5.5), so Bake writes those frames out — on every
+// frame after the loop's first cycle, each layer beneath gets, as a cel of its own, the drawing the loop
+// showed there (`planLoop`, `replay`). Runs showing one drawing stay one cel (`bakeSegments`), and what the
+// loop hid under its bar is replaced.
 
 extension CanvasManager {
 
@@ -125,6 +131,7 @@ extension CanvasManager {
                 bakeCel(layerID: layerBake.layerID, celID: cel.celID, segments: cel.segments,
                         canvasSize: canvasSize, memo: memo)
             }
+            if let loop = layerBake.loop { replay(loop, onLayerID: layerBake.layerID) }
         }
     }
 
@@ -194,6 +201,50 @@ extension CanvasManager {
         celContentChangedOutsideStroke(layerID: layerID, celID: celID)
     }
 
+    /// **A Repeat's loop, written onto one layer as the drawings it showed** — each run becomes a cel of
+    /// its own, over exactly the frames of the run, holding a copy of the drawing the loop read there.
+    /// What the layer held on those frames is replaced: a drawing across a run's edge is cut there
+    /// (`splitCel`), a drawing inside goes, and a run the loop showed nothing in is left empty.
+    ///
+    /// **Every copy is taken before the first run is carved.** Carving cuts and drops the very cels a
+    /// later run copies from (a source held across a cycle's end is cut at it), and a cut half keeps
+    /// only its own keys — so copying afterwards would copy the cut cel and lose the tail of its
+    /// animation. `copyTiers` is the one place a copy of a drawing is made (a derived cel is flattened to
+    /// the still it shows, a pose comes with the drawing), so a replayed drawing is a duplicated one.
+    private func replay(_ loop: LoopBake, onLayerID layerID: UUID) {
+        guard let at = layers.firstIndex(where: { $0.id == layerID }) else { return }
+        let held = layers[at].cels
+        let drawings = loop.runs.map { run -> (frames: Range<Int>, cel: Cel?) in
+            guard let source = held.first(where: { $0.id == run.replay.source }) else { return (run.frames, nil) }
+            var cel = Cel(startFrame: run.frames.lowerBound, frameCount: run.frames.count, copying: copyTiers(of: source))
+            cel.cropPoseKeysToSpan()
+            return (run.frames, cel)
+        }
+        for drawing in drawings {
+            vacate(drawing.frames, inLayerAt: at)
+            if let cel = drawing.cel {
+                layers[at].cels.append(cel)
+                layers[at].cels.sort { $0.startFrame < $1.startFrame }
+            }
+        }
+        // A layer keeps at least one cel (`deleteCel`'s rule): one whose every drawing the loop hid, and
+        // showed nothing in, keeps a blank one where the loop began.
+        if layers[at].cels.isEmpty, let first = loop.stretches.first {
+            addCel(layerIndex: at, startFrame: first.start, frameCount: 1)
+        }
+    }
+
+    /// Empties `frames` on a layer: a drawing across either edge is cut there, and every drawing left
+    /// inside goes.
+    private func vacate(_ frames: Range<Int>, inLayerAt at: Int) {
+        for edge in [frames.lowerBound, frames.upperBound] {
+            if let idx = activeCelIndex(inLayer: at, atFrame: edge), layers[at].cels[idx].startFrame < edge {
+                splitCel(layerIndex: at, celIndex: idx, atFrame: edge)
+            }
+        }
+        layers[at].cels.removeAll { $0.startFrame >= frames.lowerBound && $0.endFrame <= frames.upperBound }
+    }
+
     // MARK: - Planning it
 
     /// **What baking this layer would do, read off the document and written nowhere** — the same plan the
@@ -220,8 +271,13 @@ extension CanvasManager {
             guard !baker.isClipped else { return .refused(.partialCoverage) }
             planOperation(of: bakerIndex, over: scope, into: &plan)
         case .transform:
-            guard baker.layerTransform?.repeats != true else { return .refused(.repeatsInTime) }
-            planPose(of: bakerIndex, over: scope, into: &plan)
+            if let pose = baker.layerTransform, pose.repeats {
+                if let refusal = planLoop(of: bakerIndex, period: pose.repeatPeriod, over: scope, into: &plan) {
+                    return .refused(refusal)
+                }
+            } else {
+                planPose(of: bakerIndex, over: scope, into: &plan)
+            }
         case .raster, .vector:
             return .refused(.notABakingLayer)
         }
@@ -390,6 +446,109 @@ extension CanvasManager {
                                          medium: layer.kind == .vector ? .ink : .pixels(rasterizes: false),
                                          cels: celBakes))
         }
+    }
+
+    /// **A Repeat layer, written out as the drawings it showed.**
+    ///
+    /// A Repeat poses nothing (`renderNodes`' `carriedFrame`): after its first cycle it shows each layer
+    /// beneath at the source frame `s + ((f − s) mod period)`. So what the loop made is read off the render
+    /// walk, with the layer and without it, exactly as `planPose` reads a pose: `frames[i]` is the frame
+    /// layer *i* is read at with the loop, and the cel it holds there against the cel it holds at *f*
+    /// itself — which is what it will show once the loop is gone — is the whole of the treatment.
+    ///
+    /// **Exact, or refused.** A cel is all a drawing layer can carry, so the bake is right only if the loop
+    /// changes nothing else: the two walks must agree on the tree (opacity, grade, masks) and on every
+    /// pose on each looped frame. Where they do not — an opacity fading in over the first cycle, a Move
+    /// the loop repeats — the loop repeats more than drawings, and baking would quietly play it once.
+    ///
+    /// - A **still** is one picture whatever frame is read, so the same cel on consecutive frames is one
+    ///   run. A cel a pose channel moves is read at its own frames, so its run carries the offset and is
+    ///   copied with its keys whole — which is exact only when the run starts at the cel's first frame
+    ///   (a loop that begins partway into an animated drawing would need the keys cut there, and Split
+    ///   Drawing re-eases the segment it cuts), so that case is left as it was.
+    /// - A **video or stream** cannot be copied, and is left as it was.
+    /// - A layer under **another Repeat** is read at a frame the walk composes twice; it is left as it
+    ///   was, bake the nearer Repeat first.
+    /// - A Repeat that is itself read at another frame (under a Repeat above it) writes nothing there.
+    private func planLoop(of bakerIndex: Int, period: Int, over scope: [BakeScoped],
+                          into plan: inout BakePlan) -> BakeRefusal? {
+        let bakerID = layers[bakerIndex].id
+        // Each block's frames after its first cycle: the first is the identity (§5.5), so nothing to write.
+        let stretches = layers[bakerIndex].cels.compactMap { cel -> Range<Int>? in
+            let first = cel.startFrame + period
+            return first < cel.endFrame ? first ..< cel.endFrame : nil
+        }
+        struct Walks { let with: RenderWalk, without: RenderWalk }
+        var walked: [Int: Walks?] = [:]
+        func walks(atFrame frame: Int) -> Walks? {
+            if let known = walked[frame] { return known }
+            let with = renderTreeAndPoses(atFrame: frame)
+            let both = with.frames[bakerIndex] == nil
+                ? Walks(with: with, without: renderTreeAndPoses(atFrame: frame, excluding: bakerID)) : nil
+            walked.updateValue(both, forKey: frame)
+            return both
+        }
+
+        for frame in stretches.joined() {
+            guard let walk = walks(atFrame: frame) else { continue }
+            if walk.with.tree != walk.without.tree || walk.with.poses != walk.without.poses {
+                return .loopsMoreThanDrawings
+            }
+        }
+
+        for (index, shadow) in scope {
+            let layer = layers[index]
+            // A drawing, or a flat colour whose blocks are what gate it: a pose layer and a grade hold no
+            // drawing to show again, and the walks already agreed on what they do.
+            guard layer.kind.holdsPixels || layer.valueFill != nil else { continue }
+            if let name = shadow.repeated {
+                plan.leftovers.append(BakeLeftover(name: layer.name, reason: .underARepeat(name)))
+                continue
+            }
+
+            var written: [LoopBake.Stretch] = []
+            for stretch in stretches {
+                let segments = Self.bakeSegments(frameCount: stretch.count) { local -> Replay? in
+                    let frame = stretch.lowerBound + local
+                    guard let walk = walks(atFrame: frame) else { return nil }
+                    let shown = walk.with.frames[index] ?? frame
+                    let wanted = activeCelIndex(inLayer: index, atFrame: shown).map { layer.cels[$0] }
+                    let held = activeCelIndex(inLayer: index, atFrame: frame).map { layer.cels[$0] }
+                    let offset = wanted.map(Self.changesWithItsOwnFrame) == true ? shown - frame : 0
+                    return wanted?.id == held?.id && offset == 0 ? nil : Replay(source: wanted?.id, offset: offset)
+                }
+                if segments.contains(where: { $0.treatment != nil }) {
+                    written.append(LoopBake.Stretch(start: stretch.lowerBound, segments: segments))
+                }
+            }
+            guard !written.isEmpty else { continue }
+
+            let loop = LoopBake(stretches: written, over: layer.cels.map { $0.startFrame ..< $0.endFrame })
+            var leftover: BakeLeftover.Reason?
+            for run in loop.runs {
+                guard let id = run.replay.source, let source = layer.cels.first(where: { $0.id == id }) else { continue }
+                if source.vector?.holdsVideo == true || source.vector?.holdsStream == true {
+                    leftover = .cannotBeCopied
+                } else if Self.changesWithItsOwnFrame(source),
+                          run.frames.lowerBound + run.replay.offset != source.startFrame {
+                    leftover = .animatedDrawing
+                }
+            }
+            if let leftover {
+                plan.leftovers.append(BakeLeftover(name: layer.name, reason: leftover))
+                continue
+            }
+            plan.layers.append(LayerBake(layerID: layer.id, name: layer.name,
+                                         medium: layer.kind == .vector ? .ink : .pixels(rasterizes: false),
+                                         cels: [], loop: loop))
+        }
+        return nil
+    }
+
+    /// Whether the picture a cel shows depends on which of its own frames is read — a pose channel moves
+    /// it. An in-between is one picture across its span, its recipe winning over any channel.
+    private static func changesWithItsOwnFrame(_ cel: Cel) -> Bool {
+        cel.interpolation == nil && !cel.transformTracks.isEmpty
     }
 
     // MARK: - Scope

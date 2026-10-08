@@ -262,7 +262,7 @@ extension CanvasManager {
         withStructureUndo(label: .duplicateFrame) {
             // No `interpolation:` argument, on either arm — a copy never derives. On the flatten arm
             // that is the ruling; on the verbatim arm the source had no recipe to carry.
-            var newCel = Cel(id: UUID(), startFrame: newStart, frameCount: length, raster: tiers.raster, bakedImage: tiers.bakedImage, vector: tiers.vector, transformTracks: tiers.transformTracks, pendingPoseBaselines: tiers.pendingPoseBaselines)
+            var newCel = Cel(startFrame: newStart, frameCount: length, copying: tiers)
             crop = newCel.cropPoseKeysToSpan()
             noteKeyframeCrop(crop)
             layers[layerIndex].cels.append(newCel)

@@ -197,3 +197,15 @@ struct Cel: Identifiable {
         var pendingPoseBaselines: [String: PoseQuad]
     }
 }
+
+extension Cel {
+    /// **A new cel holding `tiers`, over `frameCount` frames from `startFrame`** — what a copy of a
+    /// drawing is, built once for the verbs that place one (`duplicateCel`, a Repeat's Bake). Its keys
+    /// ride across cel-local and may lie past the span when the copy is shorter than its source; the
+    /// caller crops (`cropPoseKeysToSpan`), because only it knows whether the crop is announced.
+    init(startFrame: Int, frameCount: Int, copying tiers: CopyTiers) {
+        self.init(id: UUID(), startFrame: startFrame, frameCount: frameCount, raster: tiers.raster,
+                  bakedImage: tiers.bakedImage, vector: tiers.vector, transformTracks: tiers.transformTracks,
+                  pendingPoseBaselines: tiers.pendingPoseBaselines)
+    }
+}

@@ -16,6 +16,10 @@ import CoreGraphics
 /// measured re-phasing its lattice under a naive re-walk), and the layer's share of the pose is read off
 /// the render walk rather than recomputed — so every mode, and every layer stacked with it, is baked by
 /// the one source of what a transformation layer does.
+///
+/// **A Repeat is the same pin with a different carrier**: it poses nothing, it shows each layer beneath at
+/// an earlier frame, so baking it writes the replayed frames out as drawings — and the baked document
+/// must still render every frame of the bar byte for byte.
 @MainActor
 final class BakeTransformLogicTests: XCTestCase {
 
@@ -351,21 +355,6 @@ final class BakeTransformLogicTests: XCTestCase {
         XCTAssertEqual(manager.layers[index(outside, manager)].cels[0].vector!.elements.count, outsideBefore)
     }
 
-    /// A Repeat layer loops time rather than posing drawings: there is no geometry to carry it into, so
-    /// Bake refuses and keeps the layer.
-    func testARepeatLayerIsRefusedBecauseItLoopsTimeRatherThanMovingDrawings() {
-        let manager = document()
-        addInk(manager, "Ink")
-        manager.addTransformLayer(name: "Loop")
-        let loop = manager.layers.first { $0.name == "Loop" }!.id
-        manager.layers[index(loop, manager)].transform = LayerPose(pose: PoseQuad(restingIn: canvasRect),
-                                                                  mode: .repeat, repeatPeriod: 4)
-
-        XCTAssertEqual(manager.bakeLayer(id: loop), .refused(.repeatsInTime))
-        XCTAssertEqual(manager.layers.count, 2, "The layer is kept")
-        guard case .bakeRefused? = manager.notice?.kind else { return XCTFail("A refusal says so") }
-    }
-
     /// A transformation layer resting at the identity changes nothing, so there is nothing to bake in —
     /// and the layer is kept rather than silently deleted.
     func testALayerAtRestHasNothingToBake() {
@@ -376,6 +365,312 @@ final class BakeTransformLogicTests: XCTestCase {
 
         XCTAssertEqual(manager.bakeLayer(id: rest), .refused(.nothingToBake([])))
         XCTAssertEqual(manager.layers.count, 2)
+    }
+
+    // MARK: - A Repeat layer
+
+    /// A vector layer holding one drawing per `(start, length)` block, the drawing in block `i` a red
+    /// square at x = 4 + 12·i, so every drawing is told apart on the canvas.
+    @discardableResult
+    private func addDrawings(_ manager: CanvasManager, _ name: String, blocks: [(start: Int, length: Int)]) -> UUID {
+        manager.addVectorLayer(name: name)
+        let at = manager.layers.firstIndex { $0.name == name }!
+        manager.layers[at].cels = blocks.enumerated().map { i, block in
+            let vector = VectorCanvas.empty(size: size)
+            vector.addFill(canvasSpacePath: CGPath(rect: CGRect(x: 4 + 12 * CGFloat(i), y: 14, width: 8, height: 10), transform: nil),
+                           color: CodableColor(red: 1, green: 0, blue: 0, alpha: 1))
+            return Cel(id: UUID(), startFrame: block.start, frameCount: block.length, raster: .empty(size: size), vector: vector)
+        }
+        return manager.layers[at].id
+    }
+
+    /// A Repeat layer of `period` frames whose bar covers `bar`.
+    @discardableResult
+    private func addLoop(_ manager: CanvasManager, period: Int, bar: Range<Int> = 0..<12, name: String = "Loop") -> UUID {
+        manager.addTransformLayer(name: name)
+        let at = manager.layers.firstIndex { $0.name == name }!
+        manager.layers[at].transform = LayerPose(pose: PoseQuad(restingIn: canvasRect), mode: .repeat, repeatPeriod: period)
+        CanvasFixture.setCelLayout(manager, layerIndex: at, [(start: bar.lowerBound, length: bar.count)])
+        return manager.layers[at].id
+    }
+
+    /// Three drawings on frames 0, 1 and 2 — the third held to the end of the scene — under a Repeat of
+    /// `period`, the picture §5.5's tests use.
+    private func walkerUnderALoop(period: Int = 3, bar: Range<Int> = 0..<12)
+        -> (manager: CanvasManager, walker: UUID, loop: UUID) {
+        let manager = document()
+        let walker = addDrawings(manager, "Walker", blocks: [(0, 1), (1, 1), (2, 10)])
+        return (manager, walker, addLoop(manager, period: period, bar: bar))
+    }
+
+    private func layout(_ manager: CanvasManager, _ id: UUID) -> [[Int]] {
+        CanvasFixture.celLayout(manager, layerIndex: index(id, manager)).map { [$0.start, $0.length] }
+    }
+
+    /// Bakes `loop` and says how many cels `layer` gained, which the plan has to have said first.
+    private func bakeCountingCels(_ manager: CanvasManager, loop: UUID, layer: UUID,
+                                  file: StaticString = #filePath, line: UInt = #line) -> (planned: Int, actual: Int)? {
+        guard case .plan(let plan) = manager.bakePlan(forLayerID: loop) else {
+            XCTFail("The loop must plan", file: file, line: line)
+            return nil
+        }
+        let before = manager.layers[index(layer, manager)].cels.count
+        guard bake(manager, loop, file: file, line: line) != nil else { return nil }
+        return (plan.addedCels.vector + plan.addedCels.raster, manager.layers[index(layer, manager)].cels.count - before)
+    }
+
+    /// **Baking a Repeat writes every looped frame out as a drawing, and the scene is the same bytes.**
+    /// The walker's third drawing is held across the loop's first cycle, so the loop hides most of it;
+    /// a background held under the whole bar already shows the same cel on every frame and is left alone.
+    func testBakingARepeatWritesTheLoopedFramesAsDrawingsAndEveryFrameIsByteIdentical() throws {
+        let manager = document()
+        let background = addDrawings(manager, "Background", blocks: [(0, 12)])
+        manager.layers[index(background, manager)].opacity = 0.5
+        let walker = addDrawings(manager, "Walker", blocks: [(0, 1), (1, 1), (2, 10)])
+        let loop = addLoop(manager, period: 3)
+        let before = try scene(manager)
+        XCTAssertNotEqual(before[0], before[1], "Premise: the drawings differ")
+        XCTAssertEqual(before[3], before[0], "Premise: the loop shows frame 0 again on frame 3")
+        XCTAssertEqual(before[4], before[1], "…and frame 1 on frame 4")
+        let backgroundCels = manager.layers[index(background, manager)].cels.map(\.id)
+
+        guard case .plan(let plan) = manager.bakePlan(forLayerID: loop) else { return XCTFail("Must plan") }
+        XCTAssertEqual(plan.addedCels.vector, 9, "Three drawings become twelve: one a frame")
+        XCTAssertTrue(plan.needsConfirmation)
+        XCTAssertTrue(plan.confirmationMessage.contains("9 drawings"), plan.confirmationMessage)
+        XCTAssertEqual(plan.layers.map(\.name), ["Walker"], "The background already shows what the loop shows")
+
+        manager.requestBake(layerID: loop)
+        XCTAssertNotNil(manager.pendingBake, "Writing drawings costs every future save, so the artist is asked")
+        XCTAssertEqual(manager.layers.count, 3, "Nothing is written until the artist says so")
+        manager.confirmPendingBake()
+
+        XCTAssertEqual(manager.layers.map(\.id), [background, walker], "The Repeat layer is gone")
+        XCTAssertEqual(layout(manager, walker), (0..<12).map { [$0, 1] }, "One cel on every looped frame")
+        XCTAssertEqual(manager.layers[index(background, manager)].cels.map(\.id), backgroundCels, "The background was not touched")
+        assertSameScene(try scene(manager), before, "every baked frame is the looped frame")
+    }
+
+    func testOneUndoBringsTheLoopAndTheDrawingsItHidBack() throws {
+        let fx = walkerUnderALoop()
+        let layoutBefore = layout(fx.manager, fx.walker)
+        let before = try scene(fx.manager)
+        let steps = fx.manager.history.undoStack.count
+
+        XCTAssertNotNil(bake(fx.manager, fx.loop))
+        XCTAssertEqual(fx.manager.history.undoStack.count, steps + 1, "One step, however many drawings it wrote")
+
+        fx.manager.undo()
+        XCTAssertEqual(fx.manager.layers.map(\.id), [fx.walker, fx.loop], "The Repeat layer is back")
+        XCTAssertEqual(layout(fx.manager, fx.walker), layoutBefore, "…and so are the drawings, as they were")
+        assertSameScene(try scene(fx.manager), before, "…looping again")
+    }
+
+    /// **A drawing that holds across the loop is one cel, not one per frame** — the cut rule is Bake's
+    /// own (`bakeSegments`): consecutive looped frames showing one drawing are one run, across a cycle's
+    /// end too.
+    func testADrawingHeldAcrossTheLoopStaysOneCelPerRun() throws {
+        let manager = document()
+        let held = addDrawings(manager, "Held", blocks: [(0, 4), (4, 2)])
+        let loop = addLoop(manager, period: 6, bar: 0..<18)
+        let before = try scene(manager, frames: 0..<18)
+        XCTAssertEqual(before[6], before[0], "Premise: the loop is running")
+
+        let counted = bakeCountingCels(manager, loop: loop, layer: held)
+        XCTAssertEqual(layout(manager, held), [[0, 4], [4, 2], [6, 4], [10, 2], [12, 4], [16, 2]],
+                       "Each hold is one cel, four drawings from two")
+        XCTAssertEqual(counted?.planned, counted?.actual, "The plan counted the cels the bake made")
+        assertSameScene(try scene(manager, frames: 0..<18), before, "the held frames render as the loop did")
+    }
+
+    /// **What the loop hid under its bar is replaced, and what lies past the bar is kept.** The drawing on
+    /// frames 6–8 is never shown while the loop runs; after the bake those frames show the loop's.
+    func testWhatTheLoopHidIsReplacedAndWhatLiesPastItsBarIsKept() throws {
+        let manager = document()
+        let walker = addDrawings(manager, "Walker", blocks: [(0, 1), (1, 1), (2, 1), (6, 3), (9, 2)])
+        let loop = addLoop(manager, period: 3, bar: 0..<9)
+        let before = try scene(manager)
+        XCTAssertEqual(before[7], before[1], "Premise: frame 7 shows frame 1, not the hidden drawing on 6–8")
+        XCTAssertNotEqual(before[9], before[0], "Premise: past the bar the drawing at 9 is shown")
+        let past = manager.layers[index(walker, manager)].cels.last!.id
+
+        let counted = bakeCountingCels(manager, loop: loop, layer: walker)
+        XCTAssertEqual(layout(manager, walker), (0..<9).map { [$0, 1] } + [[9, 2]], "The hidden drawing is gone")
+        XCTAssertEqual(manager.layers[index(walker, manager)].cels.last?.id, past, "The drawing past the bar is the same cel")
+        XCTAssertEqual(counted?.planned, counted?.actual)
+        assertSameScene(try scene(manager), before, "the hidden drawing does not reappear")
+    }
+
+    /// **A drawing across the bar's edges is cut at them**, and the plan counted the pieces: the third
+    /// drawing runs from frame 2 to 12, the bar ends at 8.
+    func testADrawingAcrossTheBarsEdgesIsCutThere() throws {
+        let fx = walkerUnderALoop(bar: 0..<8)
+        let before = try scene(fx.manager)
+        XCTAssertEqual(before[8], before[2], "Premise: past the bar the third drawing holds")
+
+        let counted = bakeCountingCels(fx.manager, loop: fx.loop, layer: fx.walker)
+        XCTAssertEqual(layout(fx.manager, fx.walker), (0..<8).map { [$0, 1] } + [[8, 4]],
+                       "Frames 3–7 are drawings of their own; the hold resumes past the bar")
+        XCTAssertEqual(counted?.planned, 6)
+        XCTAssertEqual(counted?.planned, counted?.actual)
+        assertSameScene(try scene(fx.manager), before, "the bar's edges are where the loop's did")
+    }
+
+    /// **Pixels are copied, not shared**: a raster layer beneath gets a texture of its own on every
+    /// looped cel, so a stroke on one frame does not appear on another.
+    func testARasterLayerBeneathIsCopiedFrameByFrame() throws {
+        let manager = document()
+        manager.addLayer(name: "Paint")
+        let paint = manager.layers.firstIndex { $0.name == "Paint" }!
+        CanvasFixture.setCelLayout(manager, layerIndex: paint, [(start: 0, length: 1), (start: 1, length: 1), (start: 2, length: 10)])
+        for (frame, x) in [(0, 4), (1, 20), (2, 36)] {
+            CanvasFixture.setBakedContent(manager, layerIndex: paint, frame: frame,
+                                          CanvasFixture.solidImage(.blue, rect: CGRect(x: x, y: 40, width: 10, height: 10)))
+        }
+        let loop = addLoop(manager, period: 3)
+        let before = try scene(manager)
+        XCTAssertEqual(before[4], before[1], "Premise: the loop is running")
+
+        let id = manager.layers[paint].id
+        let counted = bakeCountingCels(manager, loop: loop, layer: id)
+        let cels = manager.layers[index(id, manager)].cels
+        XCTAssertEqual(manager.layers[index(id, manager)].kind, .raster)
+        XCTAssertEqual(cels.map(\.startFrame), Array(0..<12))
+        XCTAssertFalse(cels[3].raster === cels[0].raster, "A copy has a texture of its own")
+        XCTAssertEqual(counted?.planned, counted?.actual)
+        assertSameScene(try scene(manager), before, "the pixels are where the loop showed them")
+    }
+
+    /// **A drawing a pose channel animates is copied with its keys**, whole, and renders as it did — the
+    /// cel's channels are numbered from its own first frame, so a copy placed at the start of a cycle
+    /// plays the same motion.
+    func testAnAnimatedDrawingIsCopiedWithItsMotion() throws {
+        let manager = document()
+        let sprite = addDrawings(manager, "Sprite", blocks: [(0, 4)])
+        let moved = PoseQuad(box: canvasRect, mappedBy: CGAffineTransform(translationX: 24, y: 0))
+        manager.layers[index(sprite, manager)].cels[0].transformTracks = [
+            TransformChannelID.cel.id: TransformTrack(keys: [
+                .init(frame: 0, pose: PoseQuad(restingIn: canvasRect), interpolation: .linear),
+                .init(frame: 3, pose: moved, interpolation: .linear)], step: 1)]
+        let loop = addLoop(manager, period: 4)
+        let before = try scene(manager)
+        XCTAssertNotEqual(before[0], before[3], "Premise: the sprite moves within its cycle")
+        XCTAssertEqual(before[5], before[1], "…and the loop plays that motion again")
+
+        let counted = bakeCountingCels(manager, loop: loop, layer: sprite)
+        let cels = manager.layers[index(sprite, manager)].cels
+        XCTAssertEqual(layout(manager, sprite), [[0, 4], [4, 4], [8, 4]])
+        XCTAssertTrue(cels.allSatisfy { !$0.transformTracks.isEmpty }, "Each cycle's drawing carries the motion")
+        XCTAssertEqual(counted?.planned, counted?.actual)
+        assertSameScene(try scene(manager), before, "the motion is the same on every cycle")
+    }
+
+    /// **A loop that begins partway into an animated drawing cannot be written out exactly** — the copy
+    /// would need the keys cut at that frame — so that drawing is left as it was, said so, and the rest bakes.
+    func testALoopThatBeginsPartwayIntoAnAnimatedDrawingLeavesItAsItWas() throws {
+        let manager = document()
+        let sprite = addDrawings(manager, "Sprite", blocks: [(0, 8)])
+        let moved = PoseQuad(box: canvasRect, mappedBy: CGAffineTransform(translationX: 24, y: 0))
+        manager.layers[index(sprite, manager)].cels[0].transformTracks = [
+            TransformChannelID.cel.id: TransformTrack(keys: [
+                .init(frame: 0, pose: PoseQuad(restingIn: canvasRect), interpolation: .linear),
+                .init(frame: 7, pose: moved, interpolation: .linear)], step: 1)]
+        let loop = addLoop(manager, period: 3, bar: 2..<12)
+
+        XCTAssertEqual(manager.bakeLayer(id: loop),
+                       .refused(.nothingToBake([CanvasManager.BakeLeftover(name: "Sprite", reason: .animatedDrawing)])))
+        XCTAssertEqual(manager.layers.count, 2, "The Repeat layer is kept")
+
+        let walker = addDrawings(manager, "Walker", blocks: [(2, 1), (3, 1), (4, 10)])
+        manager.restackLayer(loop, above: .layer(walker), parentFolderID: nil)
+        guard case .baked(let plan) = manager.bakeLayer(id: loop) else { return XCTFail("The walker bakes") }
+        XCTAssertEqual(plan.leftovers, [CanvasManager.BakeLeftover(name: "Sprite", reason: .animatedDrawing)])
+        XCTAssertEqual(manager.layers[index(sprite, manager)].cels.count, 1, "The animated drawing is untouched")
+        guard case .bakedWithLeftovers? = manager.notice?.kind else { return XCTFail("The leftover is said") }
+    }
+
+    /// **Exact, or refused.** An opacity that fades in over the first cycle repeats with the loop, and
+    /// a drawing cannot carry it — baking would play the fade once and quietly change the picture.
+    func testALoopThatRepeatsMoreThanDrawingsIsRefused() throws {
+        let fx = walkerUnderALoop()
+        fx.manager.layers[index(fx.walker, fx.manager)].channelTracks[TargetChannel.opacity.id] =
+            AnimationCurve(keys: [.init(frame: 0, value: 0.2), .init(frame: 2, value: 1)])
+        let before = try scene(fx.manager)
+        XCTAssertNotEqual(before[3], before[2], "Premise: the fade repeats")
+
+        XCTAssertEqual(fx.manager.bakeLayer(id: fx.loop), .refused(.loopsMoreThanDrawings))
+        XCTAssertEqual(fx.manager.layers.count, 2, "The Repeat layer is kept")
+        guard case .bakeRefused? = fx.manager.notice?.kind else { return XCTFail("A refusal says so") }
+        assertSameScene(try scene(fx.manager), before, "nothing changed")
+    }
+
+    /// A layer whose only drawing the loop hid, and showed nothing in, keeps one blank cel — a layer
+    /// is never left with none.
+    func testALayerWhoseOnlyDrawingTheLoopHidKeepsOneBlankCel() throws {
+        let manager = document()
+        let stray = addDrawings(manager, "Stray", blocks: [(6, 3)])
+        let loop = addLoop(manager, period: 3)
+        let before = try scene(manager)
+        XCTAssertNil(bounds(before[7]), "Premise: the loop shows nothing at frame 7")
+
+        let counted = bakeCountingCels(manager, loop: loop, layer: stray)
+        XCTAssertEqual(layout(manager, stray), [[3, 1]])
+        XCTAssertTrue(manager.layers[index(stray, manager)].cels[0].isCertainlyBlank, "…and it is blank")
+        XCTAssertEqual(counted?.planned, counted?.actual)
+        assertSameScene(try scene(manager), before, "still nothing")
+    }
+
+    /// A flat colour's block is what gates it, so a block shorter than the loop is written out too — and
+    /// its three looped cycles are one run, one cel.
+    func testAFlatColourWhoseBlockIsShorterThanTheLoopIsExtended() throws {
+        let manager = document()
+        manager.addValueLayer(name: "Tint")
+        let tint = manager.layers.firstIndex { $0.name == "Tint" }!
+        CanvasFixture.setCelLayout(manager, layerIndex: tint, [(start: 0, length: 3)])
+        let loop = addLoop(manager, period: 3)
+        let before = try scene(manager)
+        XCTAssertEqual(before[8], before[1], "Premise: the loop keeps the colour on past its block")
+
+        let id = manager.layers[tint].id
+        XCTAssertNotNil(bake(manager, loop))
+        XCTAssertEqual(layout(manager, id), [[0, 3], [3, 9]])
+        XCTAssertEqual(manager.layers[index(id, manager)].kind, .value)
+        assertSameScene(try scene(manager), before, "the colour is on as long as the loop kept it")
+    }
+
+    /// **Layers in a folder beneath the loop are looped by the same walk.**
+    func testALayerInAFolderBeneathTheLoopIsWrittenOut() throws {
+        let fx = walkerUnderALoop()
+        let folder = fx.manager.addFolder(name: "G")
+        fx.manager.layers[index(fx.walker, fx.manager)].parentFolderID = folder
+        fx.manager.restackFolder(folder, above: .bottom, parentFolderID: nil)
+        let before = try scene(fx.manager)
+        XCTAssertEqual(before[4], before[1], "Premise: the loop reaches into the folder")
+
+        XCTAssertNotNil(bake(fx.manager, fx.loop))
+        XCTAssertEqual(layout(fx.manager, fx.walker), (0..<12).map { [$0, 1] })
+        XCTAssertEqual(fx.manager.layers[index(fx.walker, fx.manager)].parentFolderID, folder, "It stays in its folder")
+        assertSameScene(try scene(fx.manager), before, "the folder's picture is the loop's")
+    }
+
+    /// A layer under another Repeat is read at a frame the walk composes twice: it is left as it was, and
+    /// said so, rather than written out wrong.
+    func testALayerUnderAnotherRepeatIsLeftAsItWas() throws {
+        let manager = document()
+        addDrawings(manager, "Walker", blocks: [(0, 1), (1, 1), (2, 10)])
+        addLoop(manager, period: 2, name: "Inner")
+        let outer = addLoop(manager, period: 5, name: "Outer")
+
+        XCTAssertEqual(manager.bakeLayer(id: outer),
+                       .refused(.nothingToBake([CanvasManager.BakeLeftover(name: "Walker", reason: .underARepeat("Inner"))])))
+        XCTAssertEqual(manager.layers.count, 3)
+    }
+
+    /// A loop that never goes round again (its period is its bar) has nothing to write, and is kept.
+    func testALoopThatNeverRepeatsHasNothingToBake() {
+        let fx = walkerUnderALoop(period: 12)
+        XCTAssertEqual(fx.manager.bakeLayer(id: fx.loop), .refused(.nothingToBake([])))
+        XCTAssertEqual(fx.manager.layers.count, 2)
     }
 
     // MARK: - The walk it reads

@@ -8,7 +8,8 @@ import Foundation
 // can say exactly what a tap will do and the fast tier can read the same plan the artist's alert does;
 // `CanvasManager.bakeLayer` performs it. `bakePoseToCels` (Bake Animation) is the same machinery with
 // one cel and one kind of treatment, which is why the segment type below is generic rather than owned
-// by either.
+// by either. A Repeat is the third case: its treatment is a time remap, so what is cut into runs is a
+// stretch of frames (`LoopBake`) rather than a cel the layer already holds.
 
 extension CanvasManager {
 
@@ -91,6 +92,8 @@ extension CanvasManager {
         var medium: Medium
         /// The cels the bake touches, each cut where its treatment changes. Empty for a flat colour.
         var cels: [CelBake]
+        /// What a Repeat's loop writes onto this layer. Nil for every other baking layer.
+        var loop: LoopBake?
 
         var rasterizes: Bool {
             if case .pixels(let rasterizes) = medium { return rasterizes }
@@ -105,6 +108,68 @@ extension CanvasManager {
 
         /// How many drawings the cut adds — none if no run is treated.
         var addedCels: Int { segments.contains { $0.treatment != nil } ? segments.count - 1 : 0 }
+    }
+
+    /// **The drawing a Repeat showed over a run of frames** — the cel it read (nil where it read none:
+    /// the loop showed nothing there) and, for a cel whose picture moves with its own time, how many
+    /// frames later than the run's own frame it read it. A still has offset 0, so the same still on
+    /// consecutive frames — across a cycle's end too — is one run, and so one cel.
+    struct Replay: Equatable {
+        var source: UUID?
+        var offset: Int
+    }
+
+    /// **A Repeat's looped frames on one layer, cut into the runs that show one drawing.** The loop is a
+    /// time remap, not a colour or a pose, so it is not written into a cel the layer holds: each run
+    /// whose drawing the layer does not hold on those frames becomes a cel of its own
+    /// (`CanvasManager.replay`).
+    struct LoopBake: Equatable {
+        /// One block of the Repeat layer's looped frames — everything after its first cycle. `start` is
+        /// its first frame, the segments' `localStart` counts from it, and a nil treatment is a run the
+        /// layer already shows as it is.
+        struct Stretch: Equatable {
+            let start: Int
+            var segments: [BakeSegment<Replay?>]
+        }
+
+        var stretches: [Stretch]
+        /// How many cels the layer gains once every run is written — the drawings a run replaces and the
+        /// pieces a cut leaves are counted, so it is the figure every save then pays for.
+        let addedCels: Int
+
+        /// The runs that get a drawing of their own, in frame order, with what each one shows.
+        var runs: [(frames: Range<Int>, replay: Replay)] { Self.runs(of: stretches) }
+
+        /// `cels` are the frame spans the layer holds now: each keeps the pieces outside every run, each
+        /// run that shows a drawing adds one, and a layer is never left with none.
+        init(stretches: [Stretch], over cels: [Range<Int>]) {
+            self.stretches = stretches
+            let runs = Self.runs(of: stretches)
+            let written = runs.filter { $0.replay.source != nil }.count
+            let kept = cels.reduce(0) { $0 + Self.pieces(of: $1, outside: runs.map(\.frames)) }
+            addedCels = max(kept + written, 1) - cels.count
+        }
+
+        private static func runs(of stretches: [Stretch]) -> [(frames: Range<Int>, replay: Replay)] {
+            stretches.flatMap { stretch in
+                stretch.segments.compactMap { segment in
+                    segment.treatment.map { replay in
+                        let first = stretch.start + segment.localStart
+                        return (first ..< first + segment.length, replay)
+                    }
+                }
+            }
+        }
+
+        /// How many cels remain of `span` once `runs` are taken out of it.
+        private static func pieces(of span: Range<Int>, outside runs: [Range<Int>]) -> Int {
+            var pieces = 0, cursor = span.lowerBound
+            for run in runs.sorted(by: { $0.lowerBound < $1.lowerBound }) where run.overlaps(span) {
+                if run.lowerBound > cursor { pieces += 1 }
+                cursor = max(cursor, run.upperBound)
+            }
+            return cursor < span.upperBound ? pieces + 1 : pieces
+        }
     }
 
     /// **Something a bake left exactly as it was, and why** — the artist is told, because the layer
@@ -125,6 +190,8 @@ extension CanvasManager {
             case partlyCovered
             /// A video or a live stream: there is no colour in it, or asset, to write the result to.
             case cannotTakeColour
+            /// A video or a live stream cannot be copied onto the frames a loop repeats it over.
+            case cannotBeCopied
             /// An effect that needs pixels has nothing to act on in a single flat colour.
             case flatColourNeedsAColourEffect
             /// A drawing laid between two others, shown by the two it is between rather than stored.
@@ -143,6 +210,7 @@ extension CanvasManager {
                 case .underARepeat(let name): return "it sits under \(name), which repeats it"
                 case .partlyCovered: return "the layer only covers part of it"
                 case .cannotTakeColour: return "a video or a stream in it can't take the effect"
+                case .cannotBeCopied: return "a video or a stream in it can't be copied"
                 case .flatColourNeedsAColourEffect: return "this effect can't be applied to one flat colour"
                 case .inBetween: return "it is an in-between, which is worked out from the drawings either side"
                 case .cannotBeCarried: return "the pose squashes it flat"
@@ -170,8 +238,9 @@ extension CanvasManager {
         case nothingBeneath
         /// Everything beneath it was either outside its frames or left as it was.
         case nothingToBake([BakeLeftover])
-        /// A Repeat layer is a loop in time rather than a pose, so there is no drawing to carry it into.
-        case repeatsInTime
+        /// A Repeat layer's loop repeats more than the drawings under it — an opacity, a grade, a pose —
+        /// and drawings alone cannot carry that.
+        case loopsMoreThanDrawings
 
         var phrase: String {
             switch self {
@@ -181,7 +250,9 @@ extension CanvasManager {
             case .insideACombiner: return "a layer inside a combiner acts on nothing"
             case .nothingBeneath: return "there is nothing beneath this layer"
             case .nothingToBake: return "it has nothing to change in the layers beneath it"
-            case .repeatsInTime: return "a Repeat layer loops time rather than moving drawings"
+            case .loopsMoreThanDrawings:
+                return "something under this Repeat also changes over time — an opacity, a grade or a move — "
+                    + "and the loop repeats that too, which drawings can't carry"
             }
         }
     }
@@ -207,7 +278,7 @@ extension CanvasManager {
         var addedCels: (vector: Int, raster: Int) {
             var vector = 0, raster = 0
             for layer in layers {
-                let added = layer.cels.reduce(0) { $0 + $1.addedCels }
+                let added = max(0, layer.cels.reduce(0) { $0 + $1.addedCels } + (layer.loop?.addedCels ?? 0))
                 switch layer.medium {
                 case .ink: vector += added
                 case .pixels: raster += added
