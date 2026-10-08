@@ -32,8 +32,8 @@ the sandbox disabled.
 Xcode lives at `/Applications/Xcode.app`; `xcodebuild`/`xcrun` are on PATH. Metal shaders need the
 toolchain once: `xcodebuild -downloadComponent MetalToolchain`.
 
-- **Fast tier (~1–2 min)** — the pure-logic `*LogicTests` run headless. Use constantly.
-- **Full run (~26 min)** — XCUITests are 99% of the runtime. Phase boundaries only, and
+- **Fast tier (~14 min Debug, ~8 min Release, 4790 tests — MEASURED 2026-10-08)** — the pure-logic `*LogicTests` run headless. Use constantly.
+- **Full run (~69 min, MEASURED 2026-10-08)** — XCUITests are 99% of the runtime. Phase boundaries only, and
   `simctl shutdown all` + `erase` the simulator *immediately before* it: leftover parallel clones
   are the cause of nearly every mystery failure.
 
@@ -46,19 +46,25 @@ It was derived on 2026-08-15 by splitting the six heavy UI classes into three ea
 25.7 min → 1023 in 18.8 min**. Before the split four clones received 482 / 324 / 74 / **44** tests and
 two sat idle while the last ground on.
 
-**MEASURED 2026-10-07 at `e953bb8`**, erased device, four working clones, no clone debris, machine 98%
-idle before the build: **5203 tests, 5140 passed, 3 failed, 60 skipped, 65.4 min** — the 5203
-`func test` in the source, so the count reconciles. **14,738.8 class-seconds
-across 341 classes**, so four clones hold **61.4 min** of ideal work against 65.4 of wall clock — a 6.5%
-scheduling gap, the smallest of the runs on record (10.6%, 10%, 16%, 7.1%). That is 524 tests and 46
-classes after the 2026-09-25 run (4679 tests, 53.6 min, 11,965.7 class-seconds): per test 2.56 s → 2.83 s,
-the heavier UI classes the last fortnight added. Of the three reds one is real
-(`MenuInterruptionUITests`, BUGS.md) and two (`StreamLiveUITests`' hidden-layer test and
-`RecolorUITests`' green-line test) passed clean in a serial run on an erased device, alone and together,
-and failed at 19:07 and 19:33 — outside the Release device build the owner's re-signer ran from 19:23 to
-19:27 inside the window, so clone-versus-clone contention and nothing else.
+**MEASURED 2026-10-08 at `4cb36c1`**, erased device, four working clones, no clone debris, machine 97%
+idle before the build: **5283 tests, 5221 passed, 3 failed, 59 skipped, 69.2 min** — the 5283
+`func test` in the source, so the count reconciles. **15,417.2 class-seconds across 346 classes**, so
+four clones hold **64.2 min** of ideal work against 69.2 of wall clock — a 7.6% scheduling gap (6.5%,
+7.1%, 10.6%, 10%, 16% before it). That is 80 tests and 5 classes after the 2026-10-07 run (5203 tests,
+65.4 min, 14,738.8 class-seconds): per test 2.83 s → 2.92 s. **None of the three reds is real** — all
+three passed in one serial batch on an erased device (107 s for the three) — and the xcresult says what
+each was. `CanvasMenuFamiliesUITests`' swatch-menu test tapped the Canvas swatch 0.44 s after the Layers
+button with the panel still sliding in (the last frame of its recording is mid-slide) and missed it.
+`OptionsPanelUITests`' Hue Colorize test drew correctly — cyan at −180°, yellow at 58° — but
+`adjust(toNormalizedSliderPosition: 0.5)` overshot to 58° instead of 0° under load, which the first
+adjust to `0.0` cannot do because the track's end clamps it. `BakeWiringUITests`' setup read
+`sandwichState` as "rest" on the line after the blend-mode tap, the instant read
+`PaintUITestCase.waitForSandwichState` calls a race, and got "live" (`dfb9122` waits for the bake). The
+twenty commits since `e953bb8` — the anchored menus, inline renames, the `waitForPixel` consolidation,
+the `HandleDrag`/`ToolReturnPath`/sandwich refactor, the edit-session core, the Repeat bake and (139)'s
+per-component pose curves with Add Keys — reddened nothing that fails alone.
 
-**A run is only as many clones as bootstrapped, and the banner does not say.** The first run that day
+**A run is only as many clones as bootstrapped, and the banner does not say.** The first run of 2026-10-07
 (`9b5d486`) lost one of its four runners before it connected — the xcresult carries it as a *System
 Failures* entry, *"Early unexpected exit, operation never finished bootstrapping — no restart will be
 attempted"* — and ran on three: **98.6 min** for 15,976 class-seconds, 88.8 min of ideal work at three
@@ -73,25 +79,24 @@ made the layer the default, and the menu one.
 
 | class | seconds | tests |
 |---|---|---|
-| **`BrushEditorUITests`** | **673.1** | 11 |
-| `OptionsPanelUITests` | 497.4 | 12 |
-| `InkUnderTransformUITests` | 496.9 | 11 |
-| `TransformLayerModesUITests` | 483.3 | 4 |
-| `SandwichCompositingUITests` | 342.8 | 10 |
-| `LayerPanelControlsUITests` | 335.1 | 12 |
-| `FillObjectUITests` | 300.8 | 14 |
-| `SelectionAndMoveUITests` | 274.0 | 10 |
-| `StreamLiveEngagedUITests` | 272.1 | 7 |
-| `BrushMenuUITests` | 265.8 | 9 |
+| **`BrushEditorUITests`** | **543.0** | 11 |
+| `TransformLayerModesUITests` | 519.2 | 5 |
+| `InkUnderTransformUITests` | 397.6 | 11 |
+| `OptionsPanelUITests` | 366.5 | 12 |
+| `SandwichCompositingUITests` | 318.8 | 10 |
+| `LayerPanelControlsUITests` | 317.2 | 12 |
+| `FillObjectUITests` | 302.4 | 14 |
+| `StreamLiveUITests` | 294.8 | 8 |
+| `SelectionAndMoveUITests` | 287.7 | 10 |
+| `PerfBaselineTests` | 280.0 | 59 |
 
-Three of the ten are classes this fortnight added — `InkUnderTransformUITests` (third),
-`FillObjectUITests` and `StreamLiveEngagedUITests` — and none sets a floor: the top class is 11.2 min
-against a 61.4 min share. `StreamLiveUITests` (242 s), `TapSelectUITests` (129 s) and
-`LiveTransformEditUITests` (127 s) rank 14th, 39th and 42nd. `OptionsPanelUITests` fell from 663 s
-because (118) deleted its 212 s test; `InkUnderTransformUITests` read 411 s → 497 s between that day's two
-runs on unchanged tests — the noise this section's "read a single class's rise as a signal only when it
-repeats" rule is for. The longest single test is 162.5 s
-(`TransformLayerModesUITests.testParallaxMovesFourLayersByTheirSharesOfTheBoxDrag`).
+None of the ten sets a floor: the top class is 9.1 min against a 64.2 min share.
+`TransformLayerModesUITests` rose 483.3 → 519.2 s because it gained a fifth test, the Repeat bake's
+(123.9 s), while its parallax test fell 162.5 → 82.1 s; `BrushEditorUITests` (673.1 → 543.0),
+`OptionsPanelUITests` (497.4 → 366.5) and `InkUnderTransformUITests` (496.9 → 397.6) all fell 19–26% on
+unchanged test counts — the noise this section's "read a single class's rise as a signal only when it
+repeats" rule is for. The longest single test is 171.2 s
+(`InterpolationWorkflowUITests.testInterpolateModeEndToEndFromGestureToScrub`), which passed.
 
 **What eleven re-takings of that table between 2026-08-15 and 2026-09-09 actually established** — the
 tables themselves are in `git log`, and only these conclusions survived them:
