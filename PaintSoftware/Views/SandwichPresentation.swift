@@ -96,28 +96,49 @@ enum SandwichPresentation: String {
     /// - A stale pair is never *entered*, from the rest picture: it is no newer than the bake the
     ///   canvas is already standing on, so swapping one stale picture for another is a flicker for
     ///   nothing.
-    static func next(from current: SandwichPresentation, strokeIsLive: Bool, transformEditIsLive: Bool,
-                     bakeIsCurrent: Bool, livePair: LivePairFit,
-                     holdsBandsOfThisFrame: Bool, streamIsMoving: Bool) -> SandwichPresentation {
-        if strokeIsLive { return .midStroke }
-        if transformEditIsLive {
-            switch livePair {
+    static func next(from current: SandwichPresentation, live: Live, held: Held) -> SandwichPresentation {
+        if live.stroke { return .midStroke }
+        if live.transformEdit {
+            switch held.livePair {
             case .current: return .moving
             case .stale: return current == .moving ? .moving : .rest
             case .none, .regrouped: return .rest
             }
         }
-        if bakeIsCurrent, !streamIsMoving { return .rest }
-        if current == .moving, holdsBandsOfThisFrame { return .moving }
-        switch livePair {
+        if held.bakeIsCurrent, !live.stream { return .rest }
+        if current == .moving, held.bandsOfThisFrame { return .moving }
+        switch held.livePair {
         case .none:
             return .rest
         case .regrouped:
-            return streamIsMoving && current.activeHostDrawsItself ? current : .rest
+            return live.stream && current.activeHostDrawsItself ? current : .rest
         case .stale, .current:
-            if current == .midStroke, !(streamIsMoving && livePair == .current) { return .midStroke }
-            return livePair == .current || current == .live ? .live : .rest
+            if current == .midStroke, !(live.stream && held.livePair == .current) { return .midStroke }
+            return held.livePair == .current || current == .live ? .live : .rest
         }
+    }
+
+    /// **What is producing a picture right now** — each of these holds the canvas on a picture of its
+    /// own, and `next` reads them as one fact.
+    struct Live: Equatable {
+        /// A stroke is under the pen.
+        var stroke = false
+        /// A transform edit is under a finger.
+        var transformEdit = false
+        /// A stream the laptop is still sending to — drawn by its host, which only a live presentation
+        /// has (TODO (112)). Once it has been still the bake is exact, and an edit's rule applies.
+        var stream = false
+    }
+
+    /// **The pictures the canvas has in hand** to choose between.
+    struct Held: Equatable {
+        /// The bake for this key has landed.
+        var bakeIsCurrent: Bool
+        /// How the live pair the canvas is holding relates to this key and cut.
+        var livePair: LivePairFit
+        /// A transform edit's bands of this frame are held — what keeps them up after the finger has
+        /// lifted, until the bake or the pair minted for the result replaces them.
+        var bandsOfThisFrame = false
     }
 }
 

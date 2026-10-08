@@ -79,17 +79,9 @@ final class ObjectTransformOverlayView: CanvasPlaneView {
     /// writes is what the baker bakes.
     var onBoxTouchUp: (() -> Void)?
 
-    /// How many touches are on the canvas right now, the dragging one included — pushed down by
-    /// `CanvasView` from the host's `TouchCountRecognizer`, which sees every touch however it landed.
-    /// A touch that joins mid-drag is what slows the drag, or snaps a turn (`PrecisionDrag`, TODO
-    /// (146), (151)).
-    ///
-    /// The touch asked about is counted whether or not the counter has heard of it, which is how the
-    /// baseline is taken at the drag's own touch-down; nil asks for the count as it stands.
-    var touchesOnCanvas: (UITouch?) -> Int = { _ in 0 }
-
-    /// The pill that says what angle a held knob has the box at (TODO (151)), pushed down by `CanvasView`.
-    weak var rotationReadout: RotationReadoutView?
+    /// What a touch that joins a drag does to it, and the pill that reads a held knob out — pushed down
+    /// by `CanvasView` (`PrecisionDrag`, TODO (146), (151)).
+    var assist = HandleDragAssist()
 
     // MARK: - Chrome, in screen points
 
@@ -131,20 +123,15 @@ final class ObjectTransformOverlayView: CanvasPlaneView {
     private let outlineLayer = CAShapeLayer()
     private let handleHost = CALayer()
     private var handles: [(handle: ObjectTransformFrame.Handle, layer: CALayer)] = []
-    /// Which target the finger is on. Latched here only so `touchesMoved` knows where to send the
-    /// point; the starting transform and the anchor are latched in the model, on
+    /// The drag in flight: which target the finger is on, the one touch that owns it — a second touch
+    /// on this view (a finger resting inside a big box) neither starts another drag nor moves this
+    /// one — and the point it is read through. Latched here only so `touchesMoved` knows where to send
+    /// the point; the starting transform and the anchor are latched in the model, on
     /// `ObjectTransformDrag`.
-    private var activeHandle: ObjectTransformFrame.Handle?
-    /// The one touch that owns the drag, and the point it is read through — a second touch on this
-    /// view (a finger resting inside a big box) neither starts another drag nor moves this one.
-    private weak var draggingTouch: UITouch?
-    private var precision: PrecisionDrag?
+    private var drag: HandleDrag<ObjectTransformFrame.Handle>?
     /// Whether a drag is in flight. The canvas's own pan, pinch and rotate stand down while it is
     /// (`CanvasView.Coordinator.gestureRecognizerShouldBegin`), as does the tap away that commits.
-    var isDragging: Bool {
-        guard activeHandle != nil, let touch = draggingTouch else { return false }
-        return touch.phase != .ended && touch.phase != .cancelled
-    }
+    var isDragging: Bool { drag?.isLive ?? false }
     /// Whether a corner grip currently means Distort — the Move bar's mode, pushed down so the four
     /// corners can say on the canvas what the picker says in the bar. Chrome only: nothing here reads
     /// it but the dot's colour, and the geometry is `ObjectTransformFrame`'s throughout.
@@ -211,11 +198,8 @@ final class ObjectTransformOverlayView: CanvasPlaneView {
         isHidden = true
         isUserInteractionEnabled = false
         frameModel = nil
-        // The pill is shared with the other overlays, so only the one holding it takes it down.
-        if activeHandle?.turns == true { rotationReadout?.hide() }
-        activeHandle = nil
-        draggingTouch = nil
-        precision = nil
+        drag?.abandon()
+        drag = nil
         distorting = false
         clearHandles()
         outlineLayer.path = nil
@@ -344,13 +328,12 @@ final class ObjectTransformOverlayView: CanvasPlaneView {
         super.touchesBegan(touches, with: event)
         // A drag whose touch is gone without having said so (released by UIKit mid-sequence) is over:
         // settle it rather than leave the box deaf to the next touch.
-        if activeHandle != nil, !isDragging { endDrag() }
-        guard activeHandle == nil, let touch = touches.first else { return }
+        if let drag, !drag.isLive { endDrag() }
+        guard drag == nil, let touch = touches.first else { return }
         let point = touch.location(in: self)
         guard let handle = target(at: point) else { return }
-        activeHandle = handle
-        draggingTouch = touch
-        precision = PrecisionDrag(startingAt: point, touchesDown: touchesOnCanvas(touch), turns: handle.turns)
+        drag = HandleDrag(handle, touch: touch, at: point, precision: handle.turns ? .snapsAngle : .slowsPoint,
+                          assist: assist)
         showReadoutIfTurning()
         // **Before the drag's own latch and its undo bracket**, which is §5.1's load-bearing ordering:
         // the take's bracket has to be the outer one or the undo step takes the inner surface's label.
@@ -360,39 +343,29 @@ final class ObjectTransformOverlayView: CanvasPlaneView {
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesMoved(touches, with: event)
-        guard activeHandle != nil, let touch = draggingTouch, touches.contains(touch),
-              var drag = precision else { return }
+        guard var drag, let touch = drag.touch(in: touches) else { return }
         // The pen's point as the drag is to read it — slowed while another touch is down.
-        let point = drag.point(for: touch.location(in: self), touchesDown: touchesOnCanvas(nil))
-        precision = drag
+        let point = drag.advance(to: touch.location(in: self))
+        self.drag = drag
         onHandleDragged?(point, drag.snapsAngle)
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesEnded(touches, with: event)
-        guard owns(touches) else { return }
+        guard drag?.ends(with: touches) == true else { return }
         endDrag()
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesCancelled(touches, with: event)
-        guard owns(touches) else { return }
+        guard drag?.ends(with: touches) == true else { return }
         endDrag()
     }
 
-    /// Whether an ending belongs to the drag: the dragging touch is among them, or it is no longer
-    /// anywhere to be found — in which case there is nothing left for the drag to follow.
-    private func owns(_ touches: Set<UITouch>) -> Bool {
-        guard let touch = draggingTouch else { return true }
-        return touches.contains(touch)
-    }
-
     private func endDrag() {
-        guard activeHandle != nil else { return }
-        activeHandle = nil
-        draggingTouch = nil
-        precision = nil
-        rotationReadout?.release()
+        guard let ended = drag else { return }
+        drag = nil
+        ended.finish()
         onHandleDragEnded?()
         onBoxTouchUp?()
     }
@@ -401,11 +374,11 @@ final class ObjectTransformOverlayView: CanvasPlaneView {
     /// which the consumer re-fits on every delta (`CanvasView.Coordinator.objectTransformDragged`), so
     /// the pill follows the box's own angle — snap included — and never the finger's.
     private func showReadoutIfTurning() {
-        guard let handle = activeHandle, handle.turns, let frameModel else { return }
-        let knob = handle == .rotation
+        guard let drag, drag.turns, let frameModel else { return }
+        let knob = drag.handle == .rotation
             ? frameModel.rotationHandlePosition(offset: rotationOffset)
             : frameModel.boxRotationHandlePosition(offset: rotationOffset)
-        rotationReadout?.show(angle: frameModel.drawnAngle, knob: knob, centre: frameModel.centre, in: self)
+        drag.showAngle(frameModel.drawnAngle, knob: knob, centre: frameModel.centre, in: self)
     }
 
     // MARK: - Test seam

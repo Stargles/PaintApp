@@ -448,7 +448,7 @@ server (§5.3's TODO (97)). Until (112) the canvas simply stood on whatever the 
 a blend mode, mask, effect or transformation layer is in the document"*; a stroke un-stuck it because it
 was the one thing that put a host between the halves of a live pair, and its commit re-baked. Now **a
 stream the laptop is still sending to is what the pair is for** (`SandwichPresentation.live`,
-`streamIsMoving`): `CanvasManager.liveHostRun` is the leaves from the lowest to the highest of the
+`SandwichPresentation.Live.stream`): `CanvasManager.liveHostRun` is the leaves from the lowest to the highest of the
 active layer and every live stream (`liveStreamLayerIndices`: visible, unfrozen, a stream on the cel
 shown at this frame, a leaf, not posed), the pair is cut around that run and those hosts draw
 themselves between the two halves, and the bake — which lacks the frames since its key — is not the

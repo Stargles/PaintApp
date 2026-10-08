@@ -32,13 +32,11 @@ import CoreGraphics
 ///
 /// ## Which touch counts
 ///
-/// **Only one that joined after the drag began** — the smart-shape snap's rule
-/// (`CanvasView.Coordinator.currentAccompanyingFingers`), for its reason: a hand already resting on the
-/// glass is not the gesture, and a palm must not make every drag a fifth as fast. The baseline is the
-/// count of touches on the canvas when the drag began, the dragging touch included — whatever its
-/// type, which is also what lets a finger-driven drag with a second finger stand in for the pen in a
-/// test — and it ratchets *down* and never up, so a palm that lifts mid-drag cannot leave a finger
-/// that lands afterwards uncounted.
+/// **Only one that joined after the drag began** — `JoinedTouches`, the smart-shape snap's rule too, for
+/// its reason: a hand already resting on the glass is not the gesture, and a palm must not make every
+/// drag a fifth as fast. The baseline is the count of touches on the canvas when the drag began, the
+/// dragging touch included — whatever its type, which is also what lets a finger-driven drag with a
+/// second finger stand in for the pen in a test.
 ///
 /// A pure value with no clock and no view, so `MoveBoxPrecisionLogicTests` walks every ordering of a
 /// landing, a lift and a movement without a simulator. XCUITest cannot synthesise a Pencil, and this is
@@ -51,7 +49,7 @@ struct PrecisionDrag {
     private var rawAnchor: CGPoint
     private var effectiveAnchor: CGPoint
     private var lastRaw: CGPoint
-    private var touchBaseline: Int
+    private var joinedTouches: JoinedTouches
     /// Whether the handle sets the box's angle — see the type's note. Latched at the drag's start.
     private let turns: Bool
     /// Whether a touch had joined as of the last point asked for.
@@ -75,7 +73,7 @@ struct PrecisionDrag {
         rawAnchor = point
         effectiveAnchor = point
         lastRaw = point
-        touchBaseline = touchesDown
+        joinedTouches = JoinedTouches(baseline: touchesDown)
         self.turns = turns
     }
 
@@ -83,8 +81,7 @@ struct PrecisionDrag {
     /// touches on the canvas now. A handle that turns always gets `raw` back: what a joined touch does
     /// to it is `snapsAngle`, read after this call.
     mutating func point(for raw: CGPoint, touchesDown: Int) -> CGPoint {
-        touchBaseline = min(touchBaseline, touchesDown)
-        let joined = touchesDown > touchBaseline
+        let joined = joinedTouches.joined(with: touchesDown) > 0
         guard !turns else {
             isJoined = joined
             return raw

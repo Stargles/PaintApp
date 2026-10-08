@@ -126,7 +126,7 @@ struct EditorPreferences: Codable, Equatable {
 extension Tool {
     /// Whether this tool is one the artist can be handed back on their next document. The
     /// eyedropper, the text tool and a primed object are all entered for one action and leave through
-    /// their own exit paths (`toolBeforeEyedropper`, the text session, `leavePlacement`), so restoring
+    /// their own exit paths (`leaveMomentaryTool`, the text session, `leavePlacement`), so restoring
     /// any of them would open the editor mid-gesture with nothing to finish.
     var restoresAcrossDocuments: Bool {
         switch self {
@@ -172,7 +172,7 @@ extension CanvasManager {
 
     /// The app half, read for `UserDefaults`. The eyedropper reports the tool it will hand back to.
     var editorPreferences: EditorPreferences {
-        let tool = selectedTool == .eyedropper ? toolBeforeEyedropper ?? .pen : selectedTool
+        let tool = selectedTool == .eyedropper ? toolReturnPath.handsBackTo : selectedTool
         return EditorPreferences(tool: tool.restoresAcrossDocuments ? tool : .pen,
                                  brushSize: Double(brushSize), brushOpacity: brushOpacity,
                                  brushColor: brushColor.codable,

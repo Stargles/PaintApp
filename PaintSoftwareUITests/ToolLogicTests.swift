@@ -135,7 +135,7 @@ final class ToolLogicTests: XCTestCase {
         // The fill's rule, also original.
         .fill: false,
         // Added by this test file, and both are omissions rather than decisions anybody made: the
-        // eyedropper is momentary and owns `toolBeforeEyedropper`, and text owns a live session that
+        // eyedropper is momentary and owns the return path, and text owns a live session that
         // only its own exit path commits.
         .eyedropper: false,
         .text: false,

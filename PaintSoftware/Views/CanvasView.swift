@@ -47,7 +47,7 @@ struct CanvasView: UIViewRepresentable {
         // is published on the host's label (`publishCanvasState`).
         let rotationReadout = RotationReadoutView()
         host.addSubview(rotationReadout)
-        context.coordinator.rotationReadout = rotationReadout
+        context.coordinator.handleAssist.readout = rotationReadout
         rotationReadout.onChanged = { [weak coordinator = context.coordinator] in
             coordinator?.rotationReadoutChanged()
         }
@@ -135,10 +135,7 @@ struct CanvasView: UIViewRepresentable {
         shapeOverlay.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(shapeOverlay)
         context.coordinator.shapeOverlay = shapeOverlay
-        shapeOverlay.rotationReadout = rotationReadout
-        shapeOverlay.touchesOnCanvas = { [weak coordinator = context.coordinator] touch in
-            coordinator?.touchesOnCanvas(counting: touch) ?? 0
-        }
+        shapeOverlay.assist = context.coordinator.handleAssist
 
         // The live picture of a primed object being dragged out (TODO (149)). Never interactive, so
         // where it sits in the stack decides nothing about who owns a touch.
@@ -196,10 +193,7 @@ struct CanvasView: UIViewRepresentable {
         textTransformOverlay.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(textTransformOverlay)
         context.coordinator.textTransformOverlay = textTransformOverlay
-        textTransformOverlay.rotationReadout = rotationReadout
-        textTransformOverlay.touchesOnCanvas = { [weak coordinator = context.coordinator] touch in
-            coordinator?.touchesOnCanvas(counting: touch) ?? 0
-        }
+        textTransformOverlay.assist = context.coordinator.handleAssist
         textTransformOverlay.onHandleDragBegan = { [weak coordinator = context.coordinator] handle in
             coordinator?.canvasManager.beginTextHandleDrag(handle)
         }
@@ -354,16 +348,9 @@ struct CanvasView: UIViewRepresentable {
         }
         // **A touch that joins a handle's drag makes it more precise** — slower on a move or a scale
         // (TODO (146)), a round angle on a turn (TODO (151)). The four overlays that have a handle to
-        // hold read the count through the one closure, so the rule has one source: the host's own touch
-        // counter.
-        transformOverlay.touchesOnCanvas = { [weak coordinator = context.coordinator] touch in
-            coordinator?.touchesOnCanvas(counting: touch) ?? 0
-        }
-        floatingOverlay.touchesOnCanvas = { [weak coordinator = context.coordinator] touch in
-            coordinator?.touchesOnCanvas(counting: touch) ?? 0
-        }
-        transformOverlay.rotationReadout = rotationReadout
-        floatingOverlay.rotationReadout = rotationReadout
+        // hold share the one assist, so the rule has one source: the host's own touch counter.
+        transformOverlay.assist = context.coordinator.handleAssist
+        floatingOverlay.assist = context.coordinator.handleAssist
         transformOverlay.onHandleDragBegan = { [weak coordinator = context.coordinator] handle, point in
             coordinator?.beginObjectTransformDrag(handle, at: point)
         }
@@ -575,19 +562,16 @@ struct CanvasView: UIViewRepresentable {
         /// Counts live canvas touches — engages the shape constraint snap whenever a second is down.
         weak var touchCountRecognizer: TouchCountRecognizer?
 
-        /// How many touches of any kind are on the canvas — what `PrecisionDrag` is measured against.
-        ///
-        /// **`touch` is the dragging touch, counted whether or not the counter has heard of it yet.**
-        /// A Move box's own pan sits on a view deeper than the host, and nothing orders its touch-down
-        /// against the counter's: read first, the count would leave the dragging touch out, the
-        /// baseline would be one short, and the drag would read as *joined by a finger* the moment it
-        /// moved — a Move slowed to a fifth with nothing beside it. MEASURED as exactly that, once in
-        /// a handful of runs. Passing nil asks for the count as it stands (every later read).
-        func touchesOnCanvas(counting touch: UITouch? = nil) -> Int {
-            let counter = touchCountRecognizer
-            let unheard = touch.map { counter?.has($0) == false ? 1 : 0 } ?? 0
-            return (counter?.activeCount ?? 0) + unheard
-        }
+        /// **What a touch that joins a handle's drag does to it, and the pill that reads a turn out** —
+        /// shared by the four overlays with a handle to hold. The count it measures against is this
+        /// coordinator's current counter, read at each call so a replaced recognizer is followed.
+        lazy var handleAssist: HandleDragAssist = {
+            let assist = HandleDragAssist()
+            assist.touchesDown = { [weak self] touch in
+                self?.touchCountRecognizer?.activeCount(including: touch) ?? 0
+            }
+            return assist
+        }()
 
         /// **Whether a drag that a joined touch assists is live right now** — a Move box dragged by
         /// either overlay, or a text box's or a shape's rotate knob held (`PrecisionDrag`). While it
@@ -602,10 +586,10 @@ struct CanvasView: UIViewRepresentable {
         /// second source `refreshShapeConstraint` folds in. See
         /// `StrokeGestureRecognizer.onAccompanyingFingersChanged` for why there are two.
         private var strokeAccompanyingFingers = 0
-        /// Fingers already on the glass at the moment a shape started following the pen — subtracted
-        /// from the container counter so a *resting hand* cannot snap a shape nobody asked to snap.
-        /// See `currentAccompanyingFingers()`.
-        private var shapeFingerBaseline = 0
+        /// Fingers already on the glass at the moment a shape started following the pen, against the
+        /// container counter's — so a *resting hand* cannot snap a shape nobody asked to snap. See
+        /// `currentAccompanyingFingers()`.
+        private var shapeFingers = JoinedTouches(baseline: 0)
 
         // Smart-shape overlay and detection state
         weak var shapeOverlay: ShapeOverlayView?
@@ -1324,7 +1308,7 @@ struct CanvasView: UIViewRepresentable {
                 + " textbox:\(textBoxHull())"
                 // **The angle readout as it is drawn** (TODO (151)): the pill's own text, `none`
                 // while it is hidden — the host hides the pill from XCUITest like every descendant.
-                + " readout:\(rotationReadout?.text ?? "none")"
+                + " readout:\(handleAssist.readout?.text ?? "none")"
                 + " readoutbox:\(rotationReadoutBox())"
             // **Compared before it is written, because this now runs on every pass.** Building the
             // string is a handful of interpolations against a `renderTree` derivation and a
@@ -1338,14 +1322,11 @@ struct CanvasView: UIViewRepresentable {
         /// The last string `publishCanvasState` wrote, so an unchanged pass costs a comparison.
         private var lastPublishedCanvasState: String?
 
-        /// The angle pill (`RotationReadoutView`), whose text `publishCanvasState` carries.
-        weak var rotationReadout: RotationReadoutView?
-
         /// How much of the host's bottom lies under chrome drawn over it — the timeline and the docked
         /// panel (`BottomDock.coveredBottom`). Set by `CanvasView` on every pass. What the angle pill and
         /// the text box's follow (`followTextBox`) both keep clear of.
         var coveredBottom: CGFloat = 0 {
-            didSet { rotationReadout?.coveredBottom = coveredBottom }
+            didSet { handleAssist.readout?.coveredBottom = coveredBottom }
         }
 
         /// The pill's text changed: the host's label follows it now, not on the next SwiftUI pass.
@@ -1357,7 +1338,7 @@ struct CanvasView: UIViewRepresentable {
         /// hidden — the pill's frame as drawn, for a test to hold against the chrome it must clear.
         /// Current as of the last time the knob was let go (`RotationReadoutView.onChanged`).
         private func rotationReadoutBox() -> String {
-            guard let pill = rotationReadout, pill.text != nil, let host = hostView,
+            guard let pill = handleAssist.readout, pill.text != nil, let host = hostView,
                   host.bounds.width > 0, host.bounds.height > 0 else { return "none" }
             return String(format: "%.4f,%.4f,%.4f,%.4f", pill.frame.minX / host.bounds.width,
                           pill.frame.minY / host.bounds.height, pill.frame.width / host.bounds.width,
@@ -1442,40 +1423,6 @@ struct CanvasView: UIViewRepresentable {
         weak var sandwichBelowView: UIImageView?
         weak var sandwichAboveView: UIImageView?
 
-        /// **The live picture: the bands of one rebuild, with the key and the cut they were minted
-        /// for** — wrapped as `UIImage` once so assigning them is an identity check rather than a
-        /// fresh wrapper, and therefore a Core Animation no-op, on every one of the many SwiftUI
-        /// passes that change nothing.
-        ///
-        /// **`full` is not here any more: it is the baked frame** (RENDER.md §3.6, stage 4d). This is
-        /// the live picture and nothing else — a different product from the bake, keyed additionally
-        /// by where the tree is cut, and transient rather than stored.
-        ///
-        /// **Two cuts, one product** (TODO (125)). Cut around the host, it is two thirds of the live
-        /// pair (TODO 145) and only makes a picture with the layer it was cut around: the third, the
-        /// active layer's own picture, went to its host in the same main-thread turn
-        /// (`finishSandwichRebuild`). Cut around a transform edit's runs, it is every band of the
-        /// frame, the moving ones re-posed per update from `mintMaps` (`showMovingBands`).
-        private struct LivePicture {
-            /// The `SandwichKey` the bands were minted at. Stale bands are still shown — at most one
-            /// edit behind — while the rebuild that replaces them runs.
-            let key: SandwichKey
-            let cut: LivePairCut
-            /// The frame they were minted at — what keeps a transform edit's bands from outliving a
-            /// scrub after the finger lifts.
-            let frame: Int
-            /// One image per band, bottom-to-top; nil for a band the cut left empty, and for the run a
-            /// host draws (a cut around the host composites only its two halves).
-            let bands: [UIImage?]
-            /// A transform edit's bands only: the edit, and the map each run's ink was shown through
-            /// at the mint (`CanvasManager.liveTransformMaps`) — what each moving band's transform is
-            /// measured from.
-            let edit: LiveTransformEdit?
-            let mintMaps: [PoseMap]
-
-            var below: UIImage? { bands.first ?? nil }
-            var above: UIImage? { bands.count > 1 ? bands[bands.count - 1] : nil }
-        }
         private var livePicture: LivePicture?
         /// The key as of the last pass. What `makeSandwichKey` freezes the active layer against, and
         /// deliberately *not* the same thing as `livePicture`'s.
@@ -1801,20 +1748,14 @@ struct CanvasView: UIViewRepresentable {
             // hold after the finger lifts is the same wait reached by a move (TODO 125).
             let activeID = canvasManager.layers.indices.contains(canvasManager.currentLayerIndex)
                 ? canvasManager.layers[canvasManager.currentLayerIndex].id : nil
-            // A stream the laptop is still sending to is drawn by its host, which only a live
-            // presentation has (TODO (112)); once it has been still the bake is exact, and an edit's
-            // rule applies.
-            let streamIsMoving = canvasManager.liveStreamIsMoving()
-            var holdsBandsOfThisFrame = false
-            if case .aroundRuns? = livePicture?.cut, livePicture?.frame == canvasManager.currentFrame {
-                holdsBandsOfThisFrame = true
-            }
             let presentation = SandwichPresentation.next(
-                from: sandwichPresentation, strokeIsLive: isSandwichStrokeLive,
-                transformEditIsLive: edit != nil,
-                bakeIsCurrent: sandwichFullKey == key,
-                livePair: LivePairFit(held: livePicture.map { (key: $0.key, cut: $0.cut) }, key: key, cut: cut),
-                holdsBandsOfThisFrame: holdsBandsOfThisFrame, streamIsMoving: streamIsMoving)
+                from: sandwichPresentation,
+                live: .init(stroke: isSandwichStrokeLive, transformEdit: edit != nil,
+                            stream: canvasManager.liveStreamIsMoving()),
+                held: .init(bakeIsCurrent: sandwichFullKey == key,
+                            livePair: LivePairFit(held: livePicture.map { (key: $0.key, cut: $0.cut) },
+                                                  key: key, cut: cut),
+                            bandsOfThisFrame: livePicture?.holdsBands(of: canvasManager.currentFrame) ?? false))
             let live = presentation.activeHostDrawsItself
 
             // **Trap 1: do not blank the hosts until there is something to blank them in favour
@@ -2170,49 +2111,6 @@ struct CanvasView: UIViewRepresentable {
             applySandwichPresentationNow()
         }
 
-        /// **A host's third of the live pair** — what the host of each layer the pair is cut around
-        /// shows as its own picture at the pair's key, produced on `sandwichQueue` beside the two
-        /// halves and handed over with them (TODO 145).
-        ///
-        /// **Why with the halves, and not by the pass that un-blanks the host.** A blanked host keeps
-        /// nothing current: `updateInterpolationPreviews` skips it, which is TODO (53)'s whole fix,
-        /// and `refreshDisplay` declines a rasterize nobody can see. So what it holds is the picture
-        /// from the last time it drew itself, any number of edits ago — and the edges that un-blank
-        /// it are not SwiftUI passes: `onStrokeBegan` latches a stroke and applies it on the spot,
-        /// and a rebuild or a bake landing reconciles from its own callback. A host refreshed only
-        /// by a later pass comes back on screen showing that old picture until the pass arrives,
-        /// which is the owner's *"The first stroke briefly appears"*: draw, undo, draw again, and
-        /// the undone stroke is under the pen for the length of the second one. Minted here, the
-        /// host's picture is never older than the halves either side of it, blanked or not.
-        private enum LiveActivePicture {
-            /// A picture in place of the cel's own ink — a pose or an in-between,
-            /// `LiveCelPreview.derived`. `covering` is the canvas and version of the cel's own ink it
-            /// already contains (`inkCoverage(of:)`).
-            case derived(layerID: UUID, content: DerivedCelContent,
-                         covering: (canvas: VectorCanvas, version: Int)?)
-            /// The cel's own committed render, for a blanked host, which is not keeping it current.
-            /// Rendered into the canvas's own memo — the one `refreshDisplay` reads — so the edge that
-            /// un-blanks the host installs it synchronously instead of showing what it had.
-            case committed(VectorCanvas, version: Int)
-
-            /// The picture, on `sandwichQueue`. A committed render lands in the canvas's memo, so
-            /// there is nothing to hand over.
-            func render() -> UIImage? {
-                // For a posed layer this *is* the pen-up render, so it takes the pen-up render's seam
-                // — zero on every ordinary launch; see `UITestSeeds.slowVectorRenderDelay`.
-                if UITestSeeds.slowVectorRenderDelay > 0 {
-                    Thread.sleep(forTimeInterval: UITestSeeds.slowVectorRenderDelay)
-                }
-                switch self {
-                case .derived(_, let content, _):
-                    return content.render(.full)
-                case .committed(let canvas, let version):
-                    _ = canvas.render(quality: .full, ifStillAtVersion: version)
-                    return nil
-                }
-            }
-        }
-
         /// What the rebuild renders for a layer it cuts at. Nil for a raster tier, which the edge
         /// that un-blanks the host reads synchronously, and for a vector host already on screen,
         /// which keeps its own committed render current (`refreshDisplayIfStale`).
@@ -2269,72 +2167,45 @@ struct CanvasView: UIViewRepresentable {
             // delete and the reselect that follows it, and the next pass schedules the rebuild this
             // one declined.
             let frame = canvasManager.currentFrame
-            let recipe: SandwichRecipe
-            let cut: LivePairCut
-            let active: [LiveActivePicture]
-            let mintMaps: [PoseMap]
+            let mint: LivePictureMint
             if let edit {
                 let runs = canvasManager.liveTransformRuns(edit, atFrame: frame)
-                guard let bands = canvasManager.makeSandwichRecipe(atFrame: frame, runs: runs) else { return }
-                recipe = bands
-                cut = .aroundRuns(runs.map { run in run.map { canvasManager.layers[$0].id } })
-                // On the main actor, from the same model state the recipe just froze — the two have
-                // to describe one moment, or the first update would jump by the difference.
-                mintMaps = canvasManager.liveTransformMaps(edit, runs: runs, atFrame: frame)
-                active = []
+                guard let recipe = canvasManager.makeSandwichRecipe(atFrame: frame, runs: runs) else { return }
+                mint = LivePictureMint(
+                    key: key, frame: frame, recipe: recipe,
+                    cut: .aroundRuns(runs.map { run in run.map { canvasManager.layers[$0].id } }),
+                    edit: edit,
+                    // On the main actor, from the same model state the recipe just froze — the two have
+                    // to describe one moment, or the first update would jump by the difference.
+                    mintMaps: canvasManager.liveTransformMaps(edit, runs: runs, atFrame: frame),
+                    active: [])
             } else {
                 let walk = canvasManager.renderTreeAndPoses(atFrame: frame)
                 let run = canvasManager.liveHostRun(tree: walk.tree)
-                guard !run.isEmpty, let pair = canvasManager.makeSandwichRecipe(atFrame: frame, runs: [run])
+                guard !run.isEmpty, let recipe = canvasManager.makeSandwichRecipe(atFrame: frame, runs: [run])
                 else { return }
-                recipe = pair
-                cut = .aroundHost(frame: frame, layerIDs: run.map { canvasManager.layers[$0].id })
-                mintMaps = []
-                active = run.compactMap { liveActivePicture(ofLayerAt: $0, in: walk) }
+                mint = LivePictureMint(
+                    key: key, frame: frame, recipe: recipe,
+                    cut: .aroundHost(frame: frame, layerIDs: run.map { canvasManager.layers[$0].id }),
+                    edit: nil, mintMaps: [],
+                    active: run.compactMap { liveActivePicture(ofLayerAt: $0, in: walk) })
             }
 
             isSandwichRebuilding = true
             sandwichRebuildCount += 1
             publishCanvasState()
             Self.sandwichQueue.async { [weak self] in
-                // **The flatten happens here now, not on the main actor before the hop** — RENDER.md
-                // §3.2. `resolve()` is pure over the values `makeSandwichRecipe` froze, so an edit
-                // the artist makes while this runs reaches the live tiers and not these; the picture
-                // that lands is the one the recipe named, which is at worst one edit stale and is
-                // exactly what `finishSandwichRebuild`'s key check already tolerates.
-                //
-                // **`full` is deliberately not composited here.** It is the same product as the
-                // baked frame, and §2.15 allows exactly one producer of it; that producer is
-                // `FrameBaker`, which chunks the walk under a memory ceiling (§3.4) and writes the
-                // result where play and export can read it. `SandwichRecipe.resolve()` still mints
-                // it because the *cut* is defined against it — the bands are correct precisely when
-                // they recompose to `full` — and that invariant is what `SandwichLogicTests` pins.
-                // Nothing on the canvas resolves it.
-                //
-                // **`compositeHalves`/`compositeBands` rather than `Compositor.composite`, and that is
-                // the whole of RENDER.md §2.12 on this path.** Each band goes through
-                // `StripedCompositor` and `ChunkedCompositor` — the same two cuts the bake takes — so
-                // a document whose textures do not fit the device is composited in horizontal bands
-                // at the size the knob asked for, rather than refused by the GPU and re-rendered whole
-                // on the CPU reference for the duration of every stroke. A document that fits takes
-                // the identical path it took before: one composite per band, unwindowed, unchunked.
-                let bands: [CGImage?]? = PlaybackTrace.span(.sandwichComposite) {
-                    if case .aroundRuns = cut { return recipe.compositeBands() }
-                    return recipe.compositeHalves().map { [$0.below, nil, $0.above] }
-                }
-                // **The third picture of the pair, on the same queue and for the same key** — see
-                // `LiveActivePicture`. After the halves, so a pair is never waiting on a half.
-                let activeImages = active.map { $0.render() }
+                // **The flatten happens here, not on the main actor before the hop** — RENDER.md §3.2.
+                // The picture that lands is the one the recipe named, which is at worst one edit stale
+                // and is exactly what `finishSandwichRebuild`'s key check already tolerates.
+                let rendered = mint.render()
                 Task { @MainActor in
-                    self?.finishSandwichRebuild(key: key, cut: cut, frame: frame, bands: bands, edit: edit,
-                                                mintMaps: mintMaps, active: active, activeImages: activeImages)
+                    self?.finishSandwichRebuild(mint, rendered)
                 }
             }
         }
 
-        private func finishSandwichRebuild(key: SandwichKey, cut: LivePairCut, frame: Int, bands: [CGImage?]?,
-                                           edit: LiveTransformEdit?, mintMaps: [PoseMap],
-                                           active: [LiveActivePicture], activeImages: [UIImage?]) {
+        private func finishSandwichRebuild(_ mint: LivePictureMint, _ rendered: LivePictureMint.Rendered) {
             isSandwichRebuilding = false
             // All or none: a half-updated pair would put a `below` from this frame under an `above`
             // from the last one, and a pair whose middle is older than its halves is the flash TODO
@@ -2348,11 +2219,10 @@ struct CanvasView: UIViewRepresentable {
             // a pair minted before a drag began lands at the drag's held key, and must not take the
             // bands' place.
             let wanted = wantedLiveCut(for: movingBandsEdit)
-            if let bands, let wanted, cut == wanted || (key == sandwichKey && cut.isSameKind(as: wanted)) {
-                livePicture = LivePicture(key: key, cut: cut, frame: frame,
-                                          bands: bands.map { $0.map { UIImage(cgImage: $0, scale: 1, orientation: .up) } },
-                                          edit: edit, mintMaps: mintMaps)
-                for (picture, image) in zip(active, activeImages) {
+            if let bands = rendered.bands, let wanted,
+               mint.cut == wanted || (mint.key == sandwichKey && mint.cut.isSameKind(as: wanted)) {
+                livePicture = mint.picture(of: bands)
+                for (picture, image) in zip(mint.active, rendered.activeImages) {
                     guard case .derived(let layerID, let content, let covering) = picture else { continue }
                     interpolationPreviewKeys[layerID] = InterpolationPreviewKey(identity: content.identity,
                                                                                 preview: false)
@@ -3756,7 +3626,7 @@ struct CanvasView: UIViewRepresentable {
             // also the only moment at which "already resting" and "joined afterwards" are
             // distinguishable — see `currentAccompanyingFingers()`. Seeded before the refresh below,
             // which would otherwise engage the snap on a palm the instant the shape appeared.
-            shapeFingerBaseline = touchCountRecognizer?.fingerCount ?? 0
+            shapeFingers = JoinedTouches(baseline: touchCountRecognizer?.fingerCount ?? 0)
             refreshShapeConstraint()
         }
 
@@ -4605,13 +4475,11 @@ struct CanvasView: UIViewRepresentable {
         /// `shouldIgnoreAdditionalTouches`), so a resting palm is already excluded there by
         /// construction, and it is that source — not this one — that carries the owner's gesture.
         ///
-        /// The baseline ratchets **down** and never up. Without that, a palm that lifts mid-gesture
-        /// would leave a permanent 1 subtracted and the real finger would never reach the threshold —
-        /// a snap that silently stops working for the rest of the shape.
+        /// The baseline is `JoinedTouches`', the same rule a handle drag measures a joined touch by: it
+        /// ratchets **down** and never up, or a palm that lifts mid-gesture would leave the real finger
+        /// uncounted — a snap that silently stops working for the rest of the shape.
         private func currentAccompanyingFingers() -> Int {
-            let counterFingers = touchCountRecognizer?.fingerCount ?? 0
-            if counterFingers < shapeFingerBaseline { shapeFingerBaseline = counterFingers }
-            let joined = max(0, counterFingers - shapeFingerBaseline)
+            let joined = shapeFingers.joined(with: touchCountRecognizer?.fingerCount ?? 0)
             return max(joined, strokeAccompanyingFingers)
         }
 
@@ -4663,7 +4531,7 @@ struct CanvasView: UIViewRepresentable {
             // answers to "is the container's recognizer being starved", and they differ in one line.
             ActionRecorder.ifRecording {
                 $0.model("shape.touches",
-                         "counter:\(counterTotal)/\(counterFingers) base:\(shapeFingerBaseline) "
+                         "counter:\(counterTotal)/\(counterFingers) base:\(shapeFingers.baseline) "
                          + "stroke:\(strokeAccompanyingFingers) joined:\(fingers) "
                          + "following:\(canvasManager.isShapeFollowingFinger)")
             }

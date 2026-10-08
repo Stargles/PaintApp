@@ -45,13 +45,9 @@ final class TextTransformOverlayView: CanvasPlaneView {
     var onHandleDragged: ((_ point: CGPoint, _ snapsAngle: Bool) -> Void)?
     var onHandleDragEnded: (() -> Void)?
 
-    /// How many touches are on the canvas right now, the dragging one included — pushed down by
-    /// `CanvasView` from the host's `TouchCountRecognizer`. A touch that joins the knob's drag is what
-    /// snaps the turn (`PrecisionDrag`, TODO (151)).
-    var touchesOnCanvas: (UITouch?) -> Int = { _ in 0 }
-
-    /// The pill that says what angle the knob has the box at (TODO (151)), pushed down by `CanvasView`.
-    weak var rotationReadout: RotationReadoutView?
+    /// What a touch that joins the knob's drag does to it, and the pill that says what angle the knob
+    /// has the box at — pushed down by `CanvasView` (`PrecisionDrag`, TODO (151)).
+    var assist = HandleDragAssist()
 
     // MARK: - Chrome, in screen points
 
@@ -90,22 +86,16 @@ final class TextTransformOverlayView: CanvasPlaneView {
     private var cornerMode: TextCornerMode = .scale
     private let handleHost = CALayer()
     private var handles: [(handle: TextFrame.Handle, layer: CALayer)] = []
-    /// Which grip the finger is on. Latched here only so `touchesMoved` knows where to send the
-    /// point; the reference quad and the anchor are latched in the model, on `TextFrameDrag`.
-    private var activeHandle: TextFrame.Handle?
-    /// The one touch that owns the drag — a finger resting on another grip neither starts a second
-    /// drag nor moves this one.
-    private weak var draggingTouch: UITouch?
-    /// Only the rotation knob takes a joined touch; nil on every other grip.
-    private var precision: PrecisionDrag?
+    /// The drag in flight: which grip the finger is on, and the one touch that owns it — a finger
+    /// resting on another grip neither starts a second drag nor moves this one. Latched here only so
+    /// `touchesMoved` knows where to send the point; the reference quad and the anchor are latched in
+    /// the model, on `TextFrameDrag`. Only the rotation knob takes a joined touch.
+    private var drag: HandleDrag<TextFrame.Handle>?
     /// Whether the rotation knob is held — the canvas's pan, pinch and rotate stand down while it is
     /// (`CanvasView.Coordinator.assistedDragIsLive`), or the finger that snaps the turn would move the
     /// canvas out from under it.
-    var isTurning: Bool { activeHandle == .rotation && isDragging }
-    private var isDragging: Bool {
-        guard activeHandle != nil, let touch = draggingTouch else { return false }
-        return touch.phase != .ended && touch.phase != .cancelled
-    }
+    var isTurning: Bool { drag?.turns == true && isDragging }
+    private var isDragging: Bool { drag?.isLive ?? false }
 
     // MARK: - Init
 
@@ -156,11 +146,8 @@ final class TextTransformOverlayView: CanvasPlaneView {
         isHidden = true
         isUserInteractionEnabled = false
         frameModel = nil
-        // The pill is shared with the other overlays, so only the one holding it takes it down.
-        if activeHandle == .rotation { rotationReadout?.hide() }
-        activeHandle = nil
-        draggingTouch = nil
-        precision = nil
+        drag?.abandon()
+        drag = nil
         clearHandles()
     }
 
@@ -248,56 +235,39 @@ final class TextTransformOverlayView: CanvasPlaneView {
         super.touchesBegan(touches, with: event)
         // A drag whose touch is gone without having said so is over: settle it rather than leave the
         // box deaf to the next touch.
-        if activeHandle != nil, !isDragging { endDrag() }
-        guard activeHandle == nil, let touch = touches.first,
+        if drag != nil, !isDragging { endDrag() }
+        guard drag == nil, let touch = touches.first,
               let handle = handle(at: touch.location(in: self)) else { return }
-        activeHandle = handle
-        draggingTouch = touch
-        precision = handle == .rotation
-            ? PrecisionDrag(startingAt: touch.location(in: self), touchesDown: touchesOnCanvas(touch), turns: true)
-            : nil
+        drag = HandleDrag(handle, touch: touch, at: touch.location(in: self),
+                          precision: handle == .rotation ? .snapsAngle : .unassisted, assist: assist)
         showReadoutIfTurning()
         onHandleDragBegan?(handle)
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesMoved(touches, with: event)
-        guard activeHandle != nil, let touch = draggingTouch, touches.contains(touch) else { return }
-        var point = touch.location(in: self)
-        var snapsAngle = false
-        if var drag = precision {
-            point = drag.point(for: point, touchesDown: touchesOnCanvas(nil))
-            snapsAngle = drag.snapsAngle
-            precision = drag
-        }
-        onHandleDragged?(point, snapsAngle)
+        guard var drag, let touch = drag.touch(in: touches) else { return }
+        let point = drag.advance(to: touch.location(in: self))
+        self.drag = drag
+        onHandleDragged?(point, drag.snapsAngle)
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesEnded(touches, with: event)
-        guard owns(touches) else { return }
+        guard drag?.ends(with: touches) == true else { return }
         endDrag()
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesCancelled(touches, with: event)
-        guard owns(touches) else { return }
+        guard drag?.ends(with: touches) == true else { return }
         endDrag()
     }
 
-    /// Whether an ending belongs to the drag: the dragging touch is among them, or it is no longer
-    /// anywhere to be found.
-    private func owns(_ touches: Set<UITouch>) -> Bool {
-        guard let touch = draggingTouch else { return true }
-        return touches.contains(touch)
-    }
-
     private func endDrag() {
-        guard activeHandle != nil else { return }
-        activeHandle = nil
-        draggingTouch = nil
-        precision = nil
-        rotationReadout?.release()
+        guard let ended = drag else { return }
+        drag = nil
+        ended.finish()
         onHandleDragEnded?()
     }
 
@@ -305,9 +275,9 @@ final class TextTransformOverlayView: CanvasPlaneView {
     /// `CanvasView.Coordinator.updateTextOverlay` re-hands on every delta, so the pill says the box's
     /// own angle — snap included — and never the finger's.
     private func showReadoutIfTurning() {
-        guard activeHandle == .rotation, let frameModel,
+        guard let drag, drag.turns, let frameModel,
               let knob = frameModel.handleLayout(rotationOffset: rotationOffset).first(where: { $0.handle == .rotation })
         else { return }
-        rotationReadout?.show(angle: frameModel.rotation, knob: knob.position, centre: frameModel.centre, in: self)
+        drag.showAngle(frameModel.rotation, knob: knob.position, centre: frameModel.centre, in: self)
     }
 }

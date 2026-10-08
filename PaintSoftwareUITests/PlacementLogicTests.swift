@@ -177,7 +177,7 @@ final class PlacementLogicTests: XCTestCase {
             manager.primeObject(.ellipse)
             manager.selectedTool = other
             XCTAssertNil(manager.primedObject, "\(other) ended the priming")
-            XCTAssertNil(manager.toolBeforePlacement, "…and its memory")
+            XCTAssertEqual(manager.toolReturnPath, ToolReturnPath(), "…and its memory")
         }
     }
 

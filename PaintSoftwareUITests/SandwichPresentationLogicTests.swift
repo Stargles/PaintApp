@@ -23,9 +23,8 @@ final class SandwichPresentationLogicTests: XCTestCase {
     private func next(_ current: SandwichPresentation, stroke: Bool = false, edit: Bool = false,
                       bake: Bool, pair: LivePairFit, bands: Bool = false,
                       stream: Bool = false) -> SandwichPresentation {
-        SandwichPresentation.next(from: current, strokeIsLive: stroke, transformEditIsLive: edit,
-                                  bakeIsCurrent: bake, livePair: pair, holdsBandsOfThisFrame: bands,
-                                  streamIsMoving: stream)
+        SandwichPresentation.next(from: current, live: .init(stroke: stroke, transformEdit: edit, stream: stream),
+                                  held: .init(bakeIsCurrent: bake, livePair: pair, bandsOfThisFrame: bands))
     }
 
     /// Distinct keys, cheaply: everything equal but the cut index.

@@ -144,9 +144,8 @@ extension CanvasManager {
         guard canvasSize != nil else { return }
         commitAllInteractiveState()
         if selectedTool == .eyedropper { leaveEyedropper() }
-        if selectedTool != .place { toolBeforePlacement = selectedTool }
         primedObject = object
-        selectedTool = .place
+        enterMomentaryTool(.place)
     }
 
     /// **Primes a picked picture.** False when it has no size to drag out or the document has no canvas.
@@ -181,11 +180,11 @@ extension CanvasManager {
 
     /// Hands the canvas back to the tool that was selected before the object was primed, ending the
     /// priming. The single exit for both a placement and a cancel; `selectedTool`'s `didSet` clears the
-    /// object and its memory.
+    /// object.
     func leavePlacement() {
         guard selectedTool == .place else { return }
         placementDrag = nil
-        selectedTool = toolBeforePlacement ?? .pen
+        leaveMomentaryTool()
     }
 
     // MARK: - The drag

@@ -28,11 +28,16 @@ final class TouchCountRecognizer: UIGestureRecognizer {
 
     private var active: Set<UITouch> = []
 
-    /// Whether this recognizer has been told about `touch` yet. Recognizers on different views are
-    /// handed a touch-down in an order nothing promises, so a recognizer that runs *first* (a Move
-    /// box's own pan, one view deeper) cannot assume the count already includes its own touch — see
-    /// `CanvasView.Coordinator.touchesOnCanvas(counting:)`.
-    func has(_ touch: UITouch) -> Bool { active.contains(touch) }
+    /// **The count with `touch` in it, whether or not this recognizer has heard of it yet.** Recognizers
+    /// on different views are handed a touch-down in an order nothing promises, and a Move box's own
+    /// pan sits on a view deeper than the host: read first, the plain count would leave the dragging
+    /// touch out, a handle drag's baseline (`HandleDrag`) would be one short, and the drag would read
+    /// as *joined by a finger* the moment it moved — a Move slowed to a fifth with nothing beside it.
+    /// MEASURED as exactly that, once in a handful of runs. Passing nil asks for the count as it stands
+    /// (every later read).
+    func activeCount(including touch: UITouch?) -> Int {
+        active.count + (touch.map { active.contains($0) ? 0 : 1 } ?? 0)
+    }
 
     private func report() { onTouchesChanged?(active.count, fingerCount) }
 
@@ -56,9 +61,8 @@ final class TouchCountRecognizer: UIGestureRecognizer {
         // binding, not at refusal — see `StrokeGestureRecognizer`'s own initialiser for the full
         // reading of that capture.
         //
-        // Counting a resting palm is the price, and it is paid in `Coordinator
-        // .currentAccompanyingFingers()`, which subtracts the fingers already down when the shape
-        // began following rather than narrowing anything here. This recognizer must keep reporting
+        // Counting a resting palm is the price, and it is paid in `JoinedTouches`, which subtracts the
+        // fingers already down when the shape began following rather than narrowing anything here. This recognizer must keep reporting
         // the truth; deciding which fingers *mean* something is not its job.
         requiresExclusiveTouchType = false
     }

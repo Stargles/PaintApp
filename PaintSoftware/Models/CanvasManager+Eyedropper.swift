@@ -72,9 +72,8 @@ extension CanvasManager {
     /// before touching the canvas fills `to`, and the tool still hands back to what the artist was
     /// doing before either tap.
     func selectEyedropper(for destination: EyedropperDestination) {
-        if selectedTool != .eyedropper { toolBeforeEyedropper = selectedTool }
         eyedropperDestination = destination
-        selectedTool = .eyedropper
+        enterMomentaryTool(.eyedropper)
     }
 
     /// Leaves the eyedropper for whatever was selected before it, defaulting to the pen if nothing
@@ -83,8 +82,7 @@ extension CanvasManager {
     /// open (`DrawingView`'s `interactionBegan` exception), not of the tool staying armed. Left
     /// armed, the artist's next canvas touch would re-pick into the same swatch instead of drawing.
     func leaveEyedropper() {
-        selectedTool = toolBeforeEyedropper ?? .pen
-        toolBeforeEyedropper = nil
+        leaveMomentaryTool()
         eyedropperDestination = .brushColor
     }
 

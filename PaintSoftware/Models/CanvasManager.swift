@@ -1055,17 +1055,29 @@ final class CanvasManager: ObservableObject {
         didSet {
             guard oldValue != selectedTool else { return }
             ActionRecorder.ifRecording { $0.model("selectedTool", String(describing: selectedTool)) }
-            // **A primed object lives exactly as long as `.place` does** — except behind the
-            // eyedropper armed straight from it, which hands back to it (`Tool.place`). Any other tool
-            // taking over ends the priming, so no door that switches tools has to remember to.
-            let parkedBehindEyedropper = selectedTool == .eyedropper && oldValue == .place
-            if selectedTool != .place, !parkedBehindEyedropper { primedObject = nil }
+            // **A tool picked by any other door than a momentary tool's own entry and exit ends the
+            // path back** (`ToolReturnPath`), and with it the priming: **a primed object lives exactly
+            // as long as `.place` is current or on the path** — the eyedropper armed straight from it
+            // hands back to it (`Tool.place`). So no door that switches tools has to remember to.
+            if !selectedTool.isMomentary { toolReturnPath.abandon() }
+            if selectedTool != .place, !toolReturnPath.passesThrough(.place) { primedObject = nil }
         }
     }
-    /// The tool to return to when the eyedropper finishes its one tap — see `Tool.eyedropper` and
-    /// `CanvasManager+Eyedropper.swift`. Not `@Published`: nothing renders it, and republishing on a
-    /// field the artist cannot see would invalidate every observer of this object for nothing.
-    var toolBeforeEyedropper: Tool?
+    /// The tools the momentary ones — the eyedropper's one tap, a primed object's one placement — hand
+    /// back to. Not `@Published`: nothing renders it, and republishing on a field the artist cannot
+    /// see would invalidate every observer of this object for nothing.
+    var toolReturnPath = ToolReturnPath()
+
+    /// Selects `tool`, a momentary one (`Tool.isMomentary`), remembering the tool it interrupts.
+    func enterMomentaryTool(_ tool: Tool) {
+        toolReturnPath.enter(tool, from: selectedTool)
+        selectedTool = tool
+    }
+
+    /// Hands the canvas back to the tool beneath the momentary one — the pen if nothing was recorded.
+    func leaveMomentaryTool() {
+        selectedTool = toolReturnPath.leave()
+    }
 
     /// **The object the Add menu primed for the next pen-down** — `Tool.place`'s payload, TODO (149).
     /// Nil whenever the tool is not `.place` (see `selectedTool`'s `didSet`), and `@Published` because
@@ -1079,16 +1091,12 @@ final class CanvasManager: ObservableObject {
         didSet {
             guard oldValue != primedObject else { return }
             ActionRecorder.ifRecording { $0.model("primedObject", primedObject?.name ?? "none") }
-            if primedObject == nil { toolBeforePlacement = nil }
             if case .media(let old)? = oldValue, case .video(let url) = old.source,
                primedObject?.mediaFileURL != url {
                 try? FileManager.default.removeItem(at: url)
             }
         }
     }
-    /// The tool to hand back to once the primed object is down — the eyedropper's memory, for the
-    /// placement tool. Not `@Published`, for `toolBeforeEyedropper`'s reason.
-    var toolBeforePlacement: Tool?
     /// The press and the pen of the placement in progress — nil between touches. Not `@Published`:
     /// the pen moves at the hardware's rate and the preview is pushed to its overlay directly
     /// (`CanvasView.Coordinator.handlePlacementPress`), so a SwiftUI pass per sample would buy nothing.

@@ -37,6 +37,19 @@ enum Tool: String, Codable, CaseIterable {
 }
 
 extension Tool {
+    /// Whether this tool is entered in the middle of drawing for one action and hands the canvas back
+    /// to the tool beneath it (`ToolReturnPath`) — the eyedropper's one tap and a primed object's one
+    /// placement. **Exhaustive, with no `default:`**, like the properties below: a tool added after
+    /// this cannot be left out of the answer.
+    var isMomentary: Bool {
+        switch self {
+        case .eyedropper, .place: return true
+        case .pen, .pencil, .eraser, .fill, .text: return false
+        }
+    }
+}
+
+extension Tool {
     /// Whether a canvas touch made with this tool selected belongs to the active layer's own
     /// drawing surface. `CanvasView.reconcileLayers`' `shouldInteract` is the caller of record: it
     /// is what decides whether that layer's host view — and the `StrokeGestureRecognizer` inside it
@@ -126,8 +139,8 @@ extension Tool {
         case .fill, .eyedropper, .text, .place:
             // None of the four is a stroke tool, so none of them has a brush preset to follow — and
             // all four carry state that only their own exit path settles: the fill's interactive
-            // gesture, the eyedropper's `toolBeforeEyedropper` memory, the live text session and the
-            // primed object. Retargeting `selectedTool` from underneath any of them strands that state.
+            // gesture, the eyedropper's return path, the live text session and the primed object.
+            // Retargeting `selectedTool` from underneath any of them strands that state.
             return false
         }
     }
