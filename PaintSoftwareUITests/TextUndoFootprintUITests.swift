@@ -61,7 +61,7 @@ final class TextUndoFootprintUITests: PaintUITestCase {
 
         // 3. Undo removes the words and only the words. What the artist does next: press undo.
         pressUndo()
-        XCTAssertTrue(waitUntilBlank(in: textRegion),
+        XCTAssertTrue(waitUntilNoInk(in: textRegion),
                       "Undoing the text left ink where the words were — the departure's rectangle "
                       + "did not cover its own glyphs")
         XCTAssertTrue(hasInk(around: strokeProbe, radius: 2),
@@ -80,7 +80,7 @@ final class TextUndoFootprintUITests: PaintUITestCase {
         deleteCharacters(5, app, at: wordsOnScreen)
         leaveTextForTheBrush(app)
         waitForTheLayoutToSettle(app, canvas, restoring: host)
-        XCTAssertTrue(waitUntilBlank(in: textRegion), "Emptying the box did not remove the words from the canvas")
+        XCTAssertTrue(waitUntilNoInk(in: textRegion), "Emptying the box did not remove the words from the canvas")
         XCTAssertTrue(hasInk(around: strokeProbe, radius: 2), "Emptying the box took the stroke with it")
 
         // 6. Undo the deletion: the words are drawn again, the stroke is still there.
@@ -242,7 +242,7 @@ final class TextUndoFootprintUITests: PaintUITestCase {
         return false
     }
 
-    private func waitUntilBlank(in region: CGRect, timeout: TimeInterval = 10) -> Bool {
+    private func waitUntilNoInk(in region: CGRect, timeout: TimeInterval = 10) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             if inkPixels(in: region) == 0 { return true }

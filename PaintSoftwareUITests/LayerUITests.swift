@@ -1814,22 +1814,6 @@ final class SandwichCompositingUITests: PaintUITestCase {
         return canvas
     }
 
-    /// Polls a canvas pixel until `matches` holds. The sandwich composites off the main thread (see
-    /// `CanvasView.Coordinator.startSandwichRebuild`), so every assertion about what the canvas shows
-    /// after a model change is a wait, exactly as `waitUntilFilled` is for the fill.
-    @discardableResult
-    private func waitForPixel(_ canvas: XCUIElement, at point: CGVector, timeout: TimeInterval = 10,
-                              matches: ((r: UInt8, g: UInt8, b: UInt8, a: UInt8)) -> Bool) -> (r: UInt8, g: UInt8, b: UInt8, a: UInt8)? {
-        let deadline = Date().addingTimeInterval(timeout)
-        var last: (r: UInt8, g: UInt8, b: UInt8, a: UInt8)?
-        while Date() < deadline {
-            last = rgbaPixel(of: canvas, dx: Double(point.dx), dy: Double(point.dy))
-            if let last, matches(last) { return last }
-            Thread.sleep(forTimeInterval: 0.2)
-        }
-        return last
-    }
-
     /// How many times the canvas has entered §5.2's mid-stroke presentation — the latch
     /// `CanvasView.Coordinator.midStrokeEntryCount` keeps, because the presentation itself only
     /// exists while a touch is down and XCUITest cannot drag and look at once.
@@ -1864,7 +1848,7 @@ final class SandwichCompositingUITests: PaintUITestCase {
         XCTAssertEqual(vectorMarkerViaPanel(app, layerIndex: 0)?.strokes, 1,
                        "The stroke has to reach the blanked host. A zero here means the host was hidden rather than masked and the touch was never delivered")
         XCTAssertNotNil(waitForPixel(canvas, at: crossing) { !isWhitish($0) },
-                        "And it has to be visible: on lift the canvas goes back to `composite(full)`, which contains the stroke")
+                        "And it has to be visible: on lift the canvas goes back to `composite(full)`, which contains the stroke (it reads \(probe(canvas, at: crossing)))")
     }
 
     /// **"I cannot see my paint strokes live" — the one thing no other case in this file looks at.**
@@ -1903,7 +1887,7 @@ final class SandwichCompositingUITests: PaintUITestCase {
         // Stroke one spawns the cel, and that spawn publishes — so this stroke gets a SwiftUI pass
         // for free and enters the mid-stroke presentation even with the defect present.
         drawLine(on: canvas, from: CGVector(dx: 0.35, dy: 0.5), to: CGVector(dx: 0.55, dy: 0.5))
-        XCTAssertNotNil(waitForPixel(canvas, at: crossing) { !isWhitish($0) }, "Setup: the first stroke landed")
+        XCTAssertNotNil(waitForPixel(canvas, at: crossing) { !isWhitish($0) }, "Setup: the first stroke landed (it reads \(probe(canvas, at: crossing)))")
         XCTAssertEqual(midStrokeEntries(app), 1, "Setup: the first stroke is the one that gets a pass for free")
 
         // Let the 400 ms thumbnail-regen debounce land before the stroke under test, so its publish
@@ -1921,7 +1905,7 @@ final class SandwichCompositingUITests: PaintUITestCase {
         XCTAssertEqual(midStrokeEntries(app), 2,
                        "The second stroke has to show the artist their ink too. A count still at 1 means the mid-stroke picture was never put up for it — the active host stayed blanked by §5.2 for the whole gesture and the stroke only appeared on lift")
 
-        XCTAssertNotNil(waitForPixel(canvas, at: second) { !isWhitish($0) }, "The stroke survives the lift")
+        XCTAssertNotNil(waitForPixel(canvas, at: second) { !isWhitish($0) }, "The stroke survives the lift (it reads \(probe(canvas, at: second)))")
         waitForSandwichState(app, "rest", "…and the canvas goes back to the baked frame")
     }
 
@@ -1990,21 +1974,21 @@ final class SandwichCompositingUITests: PaintUITestCase {
         XCTAssertTrue(launchIntoEditor(app))
         let canvas = drawCrossedStrokesOnTwoLayers(app)
         setBlendMode(app, layerIndex: 1, to: "multiply")
-        XCTAssertNotNil(waitForPixel(canvas, at: crossing, matches: { $0.r < 80 }), "Setup: multiplied")
+        XCTAssertNotNil(waitForPixel(canvas, at: crossing, matches: { $0.r < 80 }), "Setup: multiplied (it reads \(probe(canvas, at: crossing)))")
 
         // A layer switch changes only where the tree is cut, so the picture must not change with it.
         openLayerPanel(app)
         app.staticTexts["layerPanel.row.0"].tap()
         app.buttons["toolbar.layersButton"].tap()
         XCTAssertNotNil(waitForPixel(canvas, at: crossing, matches: { $0.r < 80 }),
-                        "Selecting the layer underneath re-cuts the sandwich; at rest it is still `composite(full)` and still multiplied")
+                        "Selecting the layer underneath re-cuts the sandwich; at rest it is still `composite(full)` and still multiplied (it reads \(probe(canvas, at: crossing)))")
 
         // Hiding the cyan layer leaves the magenta one multiplying against nothing, which is itself.
         openLayerPanel(app)
         app.buttons["layerPanel.row.0.visibility"].tap()
         app.buttons["toolbar.layersButton"].tap()
         XCTAssertNotNil(waitForPixel(canvas, at: crossing, matches: { $0.r > 200 && $0.b > 200 }),
-                        "With nothing underneath to multiply into, the top layer reads as its own colour again")
+                        "With nothing underneath to multiply into, the top layer reads as its own colour again (it reads \(probe(canvas, at: crossing)))")
 
         // And undo, which is the same change arriving from the history rather than from a tap.
         // `toggleLayerVisibility` goes through `withStructureUndo`, so the hide above is the newest
@@ -2014,7 +1998,7 @@ final class SandwichCompositingUITests: PaintUITestCase {
         XCTAssertTrue(undo.waitForExistence(timeout: 5))
         undo.tap()
         XCTAssertNotNil(waitForPixel(canvas, at: crossing, matches: { $0.r < 80 }),
-                        "Undoing the hide should bring the multiply back, not leave a composite that still remembers the layer as hidden")
+                        "Undoing the hide should bring the multiply back, not leave a composite that still remembers the layer as hidden (it reads \(probe(canvas, at: crossing)))")
     }
 
     /// The playhead is the last of §5.2's invalidation triggers, and the one that changes *which*
@@ -2031,9 +2015,16 @@ final class SandwichCompositingUITests: PaintUITestCase {
         // VectorShapeAndRecoveryUITests already uses for its two disk-state-sensitive tests.
         app.launchArguments = ["-resetGallery"]
         XCTAssertTrue(launchIntoEditor(app))
+        // The onion skin is the artist's to have, and it is on from the start; but past the first frame a
+        // held drawing's ghost tints the cyan this test reads (MEASURED: a pure cyan stroke reads (5, 255,
+        // 255) at its core with the ghost off and (82, 194, 189) with it on), and the ghost is the picture's,
+        // not the compositor's — which is what is under test.
+        let onionToggle = app.buttons["timeline.onionSkinToggle"]
+        XCTAssertTrue(onionToggle.waitForExistence(timeout: 5), "PREMISE: the onion skin toggle exists")
+        onionToggle.tap()
         let canvas = drawCrossedStrokesOnTwoLayers(app)
         setBlendMode(app, layerIndex: 1, to: "multiply")
-        XCTAssertNotNil(waitForPixel(canvas, at: crossing, matches: { $0.r < 80 }), "Setup: multiplied at frame 1")
+        XCTAssertNotNil(waitForPixel(canvas, at: crossing, matches: { $0.r < 80 }), "Setup: multiplied at frame 1 (it reads \(probe(canvas, at: crossing)))")
 
         // Shrink the magenta layer's block. Read the result rather than assuming the drag's reach —
         // XCUITest's synthetic drags undershoot by a timing-dependent amount (see `performDrag`).
@@ -2055,7 +2046,7 @@ final class SandwichCompositingUITests: PaintUITestCase {
                              "Setup: the playhead has to land past the shortened block for this to test anything")
 
         XCTAssertNotNil(waitForPixel(canvas, at: crossing, matches: { $0.g > 200 && $0.b > 200 && $0.r < 120 }),
-                        "Past the magenta block there is nothing to multiply, so the canvas is the cyan layer alone — a stale composite would still read blue")
+                        "Past the magenta block there is nothing to multiply, so the canvas is the cyan layer alone — a stale composite would still read blue (it reads \(probe(canvas, at: crossing)))")
     }
 
     // MARK: - §4.3 compositor nodes

@@ -175,9 +175,11 @@ final class ToolPanelsUITests: PaintUITestCase {
         let rectangleMode = app.buttons["selectPanel.mode.rectangle"]
         XCTAssertTrue(rectangleMode.waitForExistence(timeout: 5))
         rectangleMode.tap()
-        // Upper portion of the canvas, clear of the Select menu's bottom-docked bar — same reason as
-        // the selection tests in `SelectionAndMoveUITests`.
-        dragOnCanvas(app, from: CGVector(dx: 0.3, dy: 0.2), to: CGVector(dx: 0.55, dy: 0.35))
+        // On the paper the Select bar leaves visible.
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let visible = visiblePaperRect(app, in: canvas)
+        dragOnCanvas(app, from: onHost(visible, 0.3, 0.1), to: onHost(visible, 0.55, 0.45))
 
         for identifier in ["toolbar.brushButton", "toolbar.eraserButton", "toolbar.fillButton"] {
             let tool = app.buttons[identifier]
@@ -503,33 +505,36 @@ final class SelectionAndMoveUITests: PaintUITestCase {
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
-        // One horizontal line across the upper canvas, on the default vector layer.
-        dragOnCanvas(app, from: CGVector(dx: 0.2, dy: 0.26), to: CGVector(dx: 0.85, dy: 0.26))
+        // One horizontal line across the upper canvas, on the default vector layer — on `rowAboveTheDock`,
+        // above the Select and Move bars that stand over the lower paper.
+        let row = rowAboveTheDock(canvas)
+        dragOnCanvas(app, from: CGVector(dx: 0.2, dy: row), to: CGVector(dx: 0.85, dy: row))
         app.buttons["toolbar.layersButton"].tap()   // the marker lives in the layer panel
         XCTAssertEqual(readVectorMarker(app, layerIndex: 0)?.strokes, 1, "one stroke to start with")
         app.buttons["toolbar.layersButton"].tap()   // and the panel covers the canvas, so close it
 
-        // Select its right-hand half. Upper canvas, clear of the Select menu's bottom-docked bar.
+        // Select its right-hand half.
         app.buttons["toolbar.selectButton"].tap()
         let rectangleMode = app.buttons["selectPanel.mode.rectangle"]
         XCTAssertTrue(rectangleMode.waitForExistence(timeout: 5))
         rectangleMode.tap()
-        dragOnCanvas(app, from: CGVector(dx: 0.6, dy: 0.16), to: CGVector(dx: 0.95, dy: 0.36))
+        dragOnCanvas(app, from: CGVector(dx: 0.6, dy: row - 0.10), to: CGVector(dx: 0.95, dy: row + 0.10))
 
         // Move lifts the lassoed half. Nothing visibly changes yet — the float sits exactly over the
         // hole it came out of — so the assertions worth making are about where it *lands*.
         app.buttons["toolbar.moveButton"].tap()
+        assertAboveTheDock(app, canvas, dy: row + 0.26, "The moved half's probes")
         // Drag the box down by roughly a fifth of the canvas, then Move again to bake it.
-        dragOnCanvas(app, from: CGVector(dx: 0.75, dy: 0.26), to: CGVector(dx: 0.75, dy: 0.46))
+        dragOnCanvas(app, from: CGVector(dx: 0.75, dy: row), to: CGVector(dx: 0.75, dy: row + 0.20))
         app.buttons["toolbar.moveButton"].tap()
 
-        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: 0.75, dy: 0.26)),
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: 0.75, dy: row)),
                       "the lassoed half should have left the paper it came off bare")
-        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.3, dy: 0.26)),
+        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.3, dy: row)),
                        "while the half outside the loop is exactly where it was drawn")
         // A band rather than one row: XCUITest's synthetic drags undershoot by a timing-dependent
         // amount (see `dragElement`), so the assertion is "it moved down", not "it moved 0.20".
-        let landedRow = stride(from: 0.33, through: 0.52, by: 0.01)
+        let landedRow = stride(from: row + 0.07, through: row + 0.26, by: 0.01)
             .first { !isWhitish(rgbaPixel(of: canvas, dx: 0.75, dy: $0)) }
         XCTAssertNotNil(landedRow, "the moved half should have landed somewhere below where it started")
         app.buttons["toolbar.layersButton"].tap()
@@ -562,13 +567,14 @@ final class SelectionAndMoveUITests: PaintUITestCase {
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
-        dragOnCanvas(app, from: CGVector(dx: 0.2, dy: 0.26), to: CGVector(dx: 0.85, dy: 0.26))
+        let row = rowAboveTheDock(canvas)
+        dragOnCanvas(app, from: CGVector(dx: 0.2, dy: row), to: CGVector(dx: 0.85, dy: row))
 
         app.buttons["toolbar.selectButton"].tap()
         let rectangleMode = app.buttons["selectPanel.mode.rectangle"]
         XCTAssertTrue(rectangleMode.waitForExistence(timeout: 5))
         rectangleMode.tap()
-        dragOnCanvas(app, from: CGVector(dx: 0.6, dy: 0.16), to: CGVector(dx: 0.95, dy: 0.36))
+        dragOnCanvas(app, from: CGVector(dx: 0.6, dy: row - 0.10), to: CGVector(dx: 0.95, dy: row + 0.10))
         XCTAssertTrue(rectangleMode.exists, "setup: the Select menu is the one that is up")
 
         app.buttons["toolbar.moveButton"].tap()
@@ -587,7 +593,7 @@ final class SelectionAndMoveUITests: PaintUITestCase {
         XCTAssertFalse(app.buttons["moveBar.resetButton"].isEnabled,
                        "Reset has nothing to put back until the piece has been moved")
 
-        dragOnCanvas(app, from: CGVector(dx: 0.75, dy: 0.26), to: CGVector(dx: 0.75, dy: 0.44))
+        dragOnCanvas(app, from: CGVector(dx: 0.75, dy: row), to: CGVector(dx: 0.75, dy: row + 0.18))
         XCTAssertTrue(app.buttons["moveBar.resetButton"].isEnabled, "and turns on once it has")
 
         doneButton.tap()
@@ -617,9 +623,11 @@ final class SelectionAndMoveUITests: PaintUITestCase {
         XCTAssertTrue(rectangleMode.waitForExistence(timeout: 5))
         rectangleMode.tap()
 
-        // Draw the selection in the upper portion of the canvas, clear of the Select menu's bar
-        // (which docks at the bottom, covering the lower portion of the screen).
-        dragOnCanvas(app, from: CGVector(dx: 0.55, dy: 0.25), to: CGVector(dx: 0.78, dy: 0.42))
+        // Draw the selection on the paper the Select menu's bar leaves visible.
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let visible = visiblePaperRect(app, in: canvas)
+        dragOnCanvas(app, from: onHost(visible, 0.55, 0.2), to: onHost(visible, 0.78, 0.6))
 
         let fillButton = app.buttons["selectPanel.fillButton"]
         XCTAssertTrue(fillButton.waitForExistence(timeout: 5))
@@ -647,16 +655,18 @@ final class SelectionAndMoveUITests: PaintUITestCase {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
 
-        dragOnCanvas(app, from: CGVector(dx: 0.2, dy: 0.26), to: CGVector(dx: 0.85, dy: 0.26))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let row = rowAboveTheDock(canvas)
+        dragOnCanvas(app, from: CGVector(dx: 0.2, dy: row), to: CGVector(dx: 0.85, dy: row))
 
         app.buttons["toolbar.selectButton"].tap()
         let rectangleMode = app.buttons["selectPanel.mode.rectangle"]
         XCTAssertTrue(rectangleMode.waitForExistence(timeout: 5))
         rectangleMode.tap()
 
-        // Around the whole stroke, in the upper portion of the canvas and clear of the Select menu's
-        // bottom-docked bar (see the fill test).
-        dragOnCanvas(app, from: CGVector(dx: 0.15, dy: 0.16), to: CGVector(dx: 0.95, dy: 0.38))
+        // Around the whole stroke, which stands on `rowAboveTheDock`, above the Select menu's bar.
+        dragOnCanvas(app, from: CGVector(dx: 0.15, dy: row - 0.10), to: CGVector(dx: 0.95, dy: row + 0.12))
 
         let duplicateButton = app.buttons["selectPanel.duplicateButton"]
         XCTAssertTrue(duplicateButton.waitForExistence(timeout: 5))
@@ -682,15 +692,20 @@ final class SelectionAndMoveUITests: PaintUITestCase {
     func testDenyOutsideSelectionClipsStrokeUntilToggledOn() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
         app.buttons["toolbar.selectButton"].tap()
         let rectangleMode = app.buttons["selectPanel.mode.rectangle"]
         XCTAssertTrue(rectangleMode.waitForExistence(timeout: 5))
         rectangleMode.tap()
 
-        // A rectangle selection in the upper-left quadrant; the probe points below straddle its right
-        // edge (dx: 0.55) so one lands inside and one lands clearly outside.
-        dragOnCanvas(app, from: CGVector(dx: 0.3, dy: 0.2), to: CGVector(dx: 0.55, dy: 0.35))
+        // A rectangle selection on the paper the Select bar leaves visible; the probe points below straddle
+        // its right edge (dx: 0.55) so one lands inside and one lands clearly outside.
+        let visible = visiblePaperRect(app, in: canvas)
+        let loopTop = onHost(visible, 0.3, 0.1), loopBottom = onHost(visible, 0.55, 0.45)
+        let strokeRow = (loopTop.dy + loopBottom.dy) / 2
+        dragOnCanvas(app, from: loopTop, to: loopBottom)
 
         let allowToggle = app.buttons["selectPanel.allowOutsideToggle"]
         XCTAssertTrue(allowToggle.waitForExistence(timeout: 5))
@@ -700,13 +715,11 @@ final class SelectionAndMoveUITests: PaintUITestCase {
         app.buttons["toolbar.brushButton"].tap()
         XCTAssertFalse(app.buttons["selectPanel.mode.rectangle"].exists, "Selecting the brush tool should fully exit Select, not just unhighlight its icon")
 
-        let canvas = app.otherElements["canvas.host"]
-        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
         // A horizontal stroke starting inside the selection (dx 0.4) and ending well outside it (dx 0.75).
-        dragOnCanvas(app, from: CGVector(dx: 0.4, dy: 0.275), to: CGVector(dx: 0.75, dy: 0.275))
+        dragOnCanvas(app, from: CGVector(dx: 0.4, dy: strokeRow), to: CGVector(dx: 0.75, dy: strokeRow))
 
-        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.45, dy: 0.275)), "Paint inside the selection should land normally")
-        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: 0.65, dy: 0.275)), "Paint outside the selection should be discarded while outside interaction is denied")
+        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.45, dy: strokeRow)), "Paint inside the selection should land normally")
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: 0.65, dy: strokeRow)), "Paint outside the selection should be discarded while outside interaction is denied")
 
         // Flip the toggle on and repeat the same stroke — this time it should reach past the boundary.
         app.buttons["toolbar.selectButton"].tap()
@@ -714,8 +727,8 @@ final class SelectionAndMoveUITests: PaintUITestCase {
         allowToggle.tap()
 
         app.buttons["toolbar.brushButton"].tap()
-        dragOnCanvas(app, from: CGVector(dx: 0.4, dy: 0.275), to: CGVector(dx: 0.75, dy: 0.275))
-        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.65, dy: 0.275)), "With outside interaction allowed, the same stroke should now paint past the selection boundary")
+        dragOnCanvas(app, from: CGVector(dx: 0.4, dy: strokeRow), to: CGVector(dx: 0.75, dy: strokeRow))
+        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.65, dy: strokeRow)), "With outside interaction allowed, the same stroke should now paint past the selection boundary")
     }
 
     /// With no active selection, Move lifts the whole current layer; committing bakes it back into
@@ -804,16 +817,17 @@ final class SelectionAndMoveUITests: PaintUITestCase {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
 
-        // Well up the canvas, clear of the Select panel's bottom-docked bar.
-        paintRedLineAndReturnToBlack(app, at: 0.30)
-
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        // On `rowAboveTheDock`, clear of the Select panel's bottom-docked bar.
+        let row = rowAboveTheDock(canvas)
+        paintRedLineAndReturnToBlack(app, at: row)
 
         app.buttons["toolbar.selectButton"].tap()
         let lassoMode = app.buttons["selectPanel.mode.lasso"]
         XCTAssertTrue(lassoMode.waitForExistence(timeout: 5))
         lassoMode.tap()
+        assertAboveTheDock(app, canvas, dy: row + 0.12, "The red line and the lasso over it")
 
         let eyedropper = app.buttons["sideToolbar.eyedropperButton"]
         XCTAssertTrue(eyedropper.waitForExistence(timeout: 5))
@@ -828,7 +842,7 @@ final class SelectionAndMoveUITests: PaintUITestCase {
                       "Arming the eyedropper must leave the Select panel open — that is the reported situation")
 
         // The tap that does the picking, right on the red line.
-        canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.30)).tap()
+        canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: row)).tap()
 
         // The composite runs off the main thread, so the colour lands a beat after the tap.
         expectation(for: NSPredicate(format: "value != %@", "000000"), evaluatedWith: eyedropper)
@@ -856,7 +870,7 @@ final class SelectionAndMoveUITests: PaintUITestCase {
         XCTAssertFalse(fillButton.isEnabled, "Sanity: the pick itself must not have created a selection")
 
         // …and the overlay is capturing again, so a drag lassoes.
-        dragOnCanvas(app, from: CGVector(dx: 0.30, dy: 0.20), to: CGVector(dx: 0.60, dy: 0.42))
+        dragOnCanvas(app, from: CGVector(dx: 0.30, dy: row - 0.10), to: CGVector(dx: 0.60, dy: row + 0.12))
         XCTAssertTrue(fillButton.isEnabled, """
             The selection overlay never resumed capturing after the pick. It yields *while the \
             eyedropper is armed* and the revert is what hands it back, so if this fails while the \
@@ -871,13 +885,17 @@ final class SelectionAndMoveUITests: PaintUITestCase {
     func testTheSelectOverlayStillOwnsTheCanvasWhileTheEyedropperIsNotArmed() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
-        paintRedLineAndReturnToBlack(app, at: 0.30)
+        let row = rowAboveTheDock(canvas)
+        paintRedLineAndReturnToBlack(app, at: row)
 
         app.buttons["toolbar.selectButton"].tap()
         let lassoMode = app.buttons["selectPanel.mode.lasso"]
         XCTAssertTrue(lassoMode.waitForExistence(timeout: 5))
         lassoMode.tap()
+        assertAboveTheDock(app, canvas, dy: row + 0.12, "The red line and the lasso over it")
 
         let eyedropper = app.buttons["sideToolbar.eyedropperButton"]
         XCTAssertTrue(eyedropper.waitForExistence(timeout: 5))
@@ -889,7 +907,7 @@ final class SelectionAndMoveUITests: PaintUITestCase {
 
         // A drag straight over the red line: the overlay must take it as a lasso, and nothing must
         // sample a colour off it.
-        dragOnCanvas(app, from: CGVector(dx: 0.30, dy: 0.20), to: CGVector(dx: 0.60, dy: 0.42))
+        dragOnCanvas(app, from: CGVector(dx: 0.30, dy: row - 0.10), to: CGVector(dx: 0.60, dy: row + 0.12))
 
         XCTAssertTrue(fillButton.isEnabled,
                       "With the eyedropper unarmed, a canvas drag must still make a selection")
@@ -1319,7 +1337,12 @@ final class EraserAndPersistenceUITests: PaintUITestCase {
         let rectangleMode = app.buttons["selectPanel.mode.rectangle"]
         XCTAssertTrue(rectangleMode.waitForExistence(timeout: 5))
         rectangleMode.tap()
-        dragOnCanvas(app, from: CGVector(dx: 0.55, dy: 0.25), to: CGVector(dx: 0.78, dy: 0.42))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let visible = visiblePaperRect(app, in: canvas)
+        let loopTop = onHost(visible, 0.55, 0.2), loopBottom = onHost(visible, 0.78, 0.6)
+        let middle = CGVector(dx: (loopTop.dx + loopBottom.dx) / 2, dy: (loopTop.dy + loopBottom.dy) / 2)
+        dragOnCanvas(app, from: loopTop, to: loopBottom)
 
         let fillButton = app.buttons["selectPanel.fillButton"]
         XCTAssertTrue(fillButton.waitForExistence(timeout: 5))
@@ -1334,17 +1357,15 @@ final class EraserAndPersistenceUITests: PaintUITestCase {
         XCTAssertTrue(deselectButton.waitForExistence(timeout: 5))
         deselectButton.tap()
 
-        let canvas = app.otherElements["canvas.host"]
-        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
-        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.66, dy: 0.33)), "Sanity: the fill should be visible before erasing it")
+        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, at: middle)), "Sanity: the fill should be visible before erasing it")
 
         let eraserButton = app.buttons["toolbar.eraserButton"]
         XCTAssertTrue(eraserButton.waitForExistence(timeout: 5))
         eraserButton.tap() // select
         setBrushSize(app, tool: "eraser", normalized: 1.0) // menu, second tap, Size slider
 
-        drawLine(on: canvas, from: CGVector(dx: 0.55, dy: 0.33), to: CGVector(dx: 0.78, dy: 0.33))
-        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: 0.66, dy: 0.33)), "Erasing over the filled region should restore blank paper")
+        drawLine(on: canvas, from: CGVector(dx: loopTop.dx, dy: middle.dy), to: CGVector(dx: loopBottom.dx, dy: middle.dy))
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, at: middle)), "Erasing over the filled region should restore blank paper")
     }
 
     /// Regression test for the "ghost layer" bug: committing a Move used to wipe `Cel.raster` and put

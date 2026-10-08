@@ -366,17 +366,27 @@ class PaintUITestCase: XCTestCase {
         return pixel.b > 150 && pixel.r < 100 && pixel.g < 100
     }
 
-    /// Polls the pixel at `point` on `canvas` until `test` accepts it or `timeout` elapses. Every render
-    /// the editor does after a gesture or a model change lands off the main thread a moment later, so a
-    /// read of what the canvas shows is a wait, never an instant look.
-    func waitUntil(_ canvas: XCUIElement, _ point: CGVector, _ test: (RGBA?) -> Bool,
-                   timeout: TimeInterval = 10) -> Bool {
+    /// Polls the pixel at `point` on `canvas` until `matches` accepts it, and returns that pixel — **nil
+    /// when the deadline passes, never the last reading**. Every render the editor does after a gesture
+    /// or a model change lands off the main thread a moment later, so a read of what the canvas shows is
+    /// a wait, never an instant look; and `XCTAssertNotNil(waitForPixel(…))` asserts that the canvas
+    /// *came to show it*. (A copy that handed back whatever it last read made ten such assertions that
+    /// could not go red.) A caller that prints the reading on failure takes a fresh `probe` in its message.
+    @discardableResult
+    func waitForPixel(_ canvas: XCUIElement, at point: CGVector, timeout: TimeInterval = 10,
+                      matches: (RGBA) -> Bool) -> RGBA? {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
-            if test(rgbaPixel(of: canvas, at: point)) { return true }
+            if let pixel = rgbaPixel(of: canvas, at: point), matches(pixel) { return pixel }
             Thread.sleep(forTimeInterval: 0.25)
         }
-        return false
+        return nil
+    }
+
+    /// `waitForPixel`, as the yes/no a plain assertion wants.
+    func waitUntil(_ canvas: XCUIElement, _ point: CGVector, _ test: (RGBA?) -> Bool,
+                   timeout: TimeInterval = 10) -> Bool {
+        waitForPixel(canvas, at: point, timeout: timeout) { test($0) } != nil
     }
 
     /// One canvas pixel as whole numbers, with `==` so `settled` can compare two reads. A fixture that
@@ -391,6 +401,11 @@ class PaintUITestCase: XCTestCase {
     func probe(_ canvas: XCUIElement, dx: Double, dy: Double) -> RGB {
         let p = rgbaPixel(of: canvas, dx: dx, dy: dy)
         return RGB(r: Int(p?.r ?? 0), g: Int(p?.g ?? 0), b: Int(p?.b ?? 0))
+    }
+
+    /// `probe` at a normalized point of the host.
+    func probe(_ canvas: XCUIElement, at point: CGVector) -> RGB {
+        probe(canvas, dx: point.dx, dy: point.dy)
     }
 
     /// Reads until two consecutive reads agree, so a probe taken while the render is still landing off
@@ -694,10 +709,32 @@ class PaintUITestCase: XCTestCase {
         app.keyboards.buttons["Return"].tap()
     }
 
-    /// Sets the brush colour through the toolbar's colour panel and closes it again, confirmed gone before
-    /// returning — **not optional**: the panel is a dropdown over the right of the canvas, and the next
-    /// stroke runs straight under it, so an unconfirmed close puts the drag on the hue bar instead of the
-    /// paper and repaints the brush a colour nothing asked for.
+    /// Opens the colour panel and waits for its default (Square) tab to actually be up — `colorPanel.
+    /// svSquare`'s existence, not just `toolbar.colorButton`'s tap — before returning. **Not optional**:
+    /// the panel slides in (`DrawingView`'s `.move(edge: .top)` transition), and a tab bar tap fired
+    /// before that settles can land on a button whose on-screen position is still mid-animation, tapping
+    /// nothing.
+    func openColorPanel(_ app: XCUIApplication) {
+        let colorButton = app.buttons["toolbar.colorButton"]
+        XCTAssertTrue(colorButton.waitForExistence(timeout: 5), "The toolbar's colour button")
+        colorButton.tap()
+        XCTAssertTrue(app.otherElements["colorPanel.svSquare"].waitForExistence(timeout: 5),
+                      "The colour panel's default tab should be up before it is touched")
+    }
+
+    /// Closes the colour panel through the toolbar's colour button and waits for it to be gone —
+    /// **not optional**: the panel is a dropdown over the right of the canvas, and the next stroke runs
+    /// straight under it, so an unconfirmed close puts the drag on the hue bar instead of the paper and
+    /// repaints the brush a colour nothing asked for. `tab` is whatever element of the tab the test was
+    /// just using (the default is the Square tab's), for a tab that does not have a square to wait on.
+    func closeColorPanel(_ app: XCUIApplication, whileShowing tab: XCUIElement? = nil) {
+        app.buttons["toolbar.colorButton"].tap()
+        XCTAssertTrue((tab ?? app.otherElements["colorPanel.svSquare"]).waitForNonExistence(timeout: 5),
+                      "The colour panel must be closed before the canvas is touched")
+    }
+
+    /// Sets the brush colour through the toolbar's colour panel and closes it again, confirmed gone
+    /// before returning (`closeColorPanel`).
     func setBrushColor(_ app: XCUIApplication, hex: String) {
         let colorButton = app.buttons["toolbar.colorButton"]
         XCTAssertTrue(colorButton.waitForExistence(timeout: 5), "The toolbar's colour button")
@@ -705,23 +742,17 @@ class PaintUITestCase: XCTestCase {
         let hexField = app.textFields["colorPanel.hexField"]
         XCTAssertTrue(hexField.waitForExistence(timeout: 5), "The colour panel's hex field")
         setHexField(app, hexField, to: hex)
-        colorButton.tap()
-        XCTAssertTrue(app.otherElements["colorPanel.svSquare"].waitForNonExistence(timeout: 5),
-                      "The colour panel must be closed before the canvas is touched")
+        closeColorPanel(app)
     }
 
     /// Back to black through the SV square rather than the hex field: the field needs the keyboard, and
     /// a second visit to it mid-test is a focus race the pick has nothing to do with. Bottom-left of the
     /// square is saturation 0, brightness 0 — black, whatever the hue happens to be.
     func returnTheBrushToBlack(_ app: XCUIApplication) {
-        let colorButton = app.buttons["toolbar.colorButton"]
-        colorButton.tap()
-        let svSquare = app.otherElements["colorPanel.svSquare"]
-        XCTAssertTrue(svSquare.waitForExistence(timeout: 5))
-        dragWithinElement(svSquare, from: CGVector(dx: 0.5, dy: 0.5), to: CGVector(dx: 0.0, dy: 1.0))
-        colorButton.tap()
-        XCTAssertTrue(svSquare.waitForNonExistence(timeout: 5),
-                      "The colour panel must be closed before the canvas is touched")
+        openColorPanel(app)
+        dragWithinElement(app.otherElements["colorPanel.svSquare"],
+                          from: CGVector(dx: 0.5, dy: 0.5), to: CGVector(dx: 0.0, dy: 1.0))
+        closeColorPanel(app)
     }
 
     func brushIsSelected(_ app: XCUIApplication) -> Bool {

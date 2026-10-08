@@ -75,8 +75,8 @@ final class BakeWiringUITests: PaintUITestCase {
                         "A stroke that publishes nothing still has to reach the bake. A canvas stuck "
                         + "here is `onFrameFinished` not arriving, or arriving on a baker nothing is "
                         + "listening to")
-        XCTAssertNotNil(waitForPixelOnCanvas(canvas, at: CGVector(dx: 0.45, dy: 0.62)),
-                        "…and the picture it came back to contains the stroke")
+        XCTAssertTrue(waitUntilFilled(canvas, dx: 0.45, dy: 0.62),
+                      "…and the picture it came back to contains the stroke")
     }
 
     /// **A scrub reaches a baked frame, and the main thread is not what composites it.**
@@ -151,9 +151,9 @@ final class BakeWiringUITests: PaintUITestCase {
         // The seed's stroke runs from 0.2 to 0.5 of the width at mid-height and the move translates
         // by 0.4 of the width, so this point is ink at frame 0 and has to stay ink: what is being
         // asserted is that the *baked* picture the canvas switched to still contains the artwork.
-        XCTAssertNotNil(waitForPixelOnCanvas(canvas, at: CGVector(dx: 0.35, dy: 0.5)),
-                        "The baked frame the canvas came to rest on has to contain the ink — a "
-                        + "composite of an elided transformation layer over nothing would be blank")
+        XCTAssertTrue(waitUntilFilled(canvas, dx: 0.35, dy: 0.5),
+                      "The baked frame the canvas came to rest on has to contain the ink — a "
+                      + "composite of an elided transformation layer over nothing would be blank")
 
         // Where the ink is at the move's resting key, for the comparison six frames from now.
         let atRest = try XCTUnwrap(inkSpanOnPaper(canvas),
@@ -387,18 +387,5 @@ final class BakeWiringUITests: PaintUITestCase {
             .split(separator: " ")
             .first { $0.hasPrefix("derived:") }
             .flatMap { Int($0.dropFirst("derived:".count)) }
-    }
-
-    /// Polls a canvas pixel until it is not the paper. `waitForPixel` in `SandwichCompositingUITests`
-    /// is the same idea; this is the one-liner form, kept local because it is the only probe here.
-    private func waitForPixelOnCanvas(_ canvas: XCUIElement, at point: CGVector,
-                                      timeout: TimeInterval = 10) -> (r: UInt8, g: UInt8, b: UInt8, a: UInt8)? {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            let pixel = rgbaPixel(of: canvas, dx: Double(point.dx), dy: Double(point.dy))
-            if let pixel, !isWhitish(pixel) { return pixel }
-            Thread.sleep(forTimeInterval: 0.2)
-        }
-        return nil
     }
 }

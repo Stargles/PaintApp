@@ -268,6 +268,7 @@ final class FillObjectUITests: PaintUITestCase {
 
         XCTAssertTrue(app.buttons["gradientPanel.startSwatch"].waitForExistence(timeout: 5),
                       "the gradient's own panel is up — two swatches and an angle")
+        assertAboveTheDock(app, canvas, dy: onHost(paper, 0.5, 0.5).dy, "The band's probes")
         let start = onHost(paper, 0.25, 0.5), middle = onHost(paper, 0.5, 0.5), end = onHost(paper, 0.75, 0.5)
         XCTAssertTrue(waitUntil(canvas, start, { self.red($0) < 90 }), "dark near the press")
         XCTAssertTrue(waitUntil(canvas, end, { self.red($0) > 170 }), "light near the lift")
@@ -289,7 +290,8 @@ final class FillObjectUITests: PaintUITestCase {
 
     /// **The direction of the gradient is the direction of the drag**: top to bottom, dark at the press
     /// and light at the lift, at the Width the rail left it (100%, so the band covers the paper's width).
-    /// The lift stays above the gradient's own docked panel, which covers the lower part of the canvas.
+    /// The lift stays above the gradient's own docked panel, which covers the lower part of the canvas
+    /// (`assertAboveTheDock` measures it once the panel is up).
     func testTheGradientRunsInTheDirectionOfTheDrag() throws {
         let (app, canvas) = launch()
         let paper = paperRect(in: canvas)
@@ -299,6 +301,7 @@ final class FillObjectUITests: PaintUITestCase {
         attachScreenshot(app, "gradient-top-to-bottom")
 
         let top = onHost(paper, 0.5, 0.2), bottom = onHost(paper, 0.5, 0.6)
+        assertAboveTheDock(app, canvas, dy: bottom.dy, "The ramp's probes")
         XCTAssertTrue(waitUntil(canvas, top, { self.red($0) < 90 }), "dark at the press, the top")
         XCTAssertTrue(waitUntil(canvas, bottom, { self.red($0) > 170 }), "light at the lift, the bottom")
         let left = red(rgbaPixel(of: canvas, at: onHost(paper, 0.1, 0.4)))
@@ -320,6 +323,7 @@ final class FillObjectUITests: PaintUITestCase {
         XCTAssertEqual(slider.value as? String, "0", "the drag ran left to right, so the angle reads 0")
         slider.adjust(toNormalizedSliderPosition: 0.25)
         let top = onHost(paper, 0.5, 0.2), lower = onHost(paper, 0.5, 0.6)
+        assertAboveTheDock(app, canvas, dy: lower.dy, "The turned ramp's probes")
         XCTAssertTrue(waitUntil(canvas, top, { self.red($0) < 90 }), "the top is now the dark end")
         XCTAssertTrue(waitUntil(canvas, lower, { self.red($0) > 110 }), "…and further down is lighter")
         app.buttons["gradientPanel.doneButton"].tap()
@@ -385,7 +389,8 @@ final class FillObjectUITests: PaintUITestCase {
         rectangle.tap()
         XCTAssertFalse(app.buttons["selectPanel.editGradientButton"].exists,
                        "with nothing selected there is no object to edit")
-        dragOnCanvas(app, from: onHost(paper, 0.2, 0.2), to: onHost(paper, 0.8, 0.6))
+        let visible = visiblePaperRect(app, in: canvas)
+        dragOnCanvas(app, from: onHost(visible, 0.2, 0.2), to: onHost(visible, 0.8, 0.9))
 
         let edit = app.buttons["selectPanel.editGradientButton"]
         XCTAssertTrue(edit.waitForExistence(timeout: 5), "a loop over the gradient offers an Edit entry")
@@ -399,6 +404,7 @@ final class FillObjectUITests: PaintUITestCase {
         XCTAssertEqual(slider.value as? String, "0", "on the gradient that was caught")
         slider.adjust(toNormalizedSliderPosition: 0.25)
         let top = onHost(paper, 0.5, 0.15), lower = onHost(paper, 0.5, 0.55)
+        assertAboveTheDock(app, canvas, dy: lower.dy, "The edited ramp's probes")
         XCTAssertTrue(waitUntil(canvas, top, { self.red($0) < 90 }), "the gradient was turned live: dark at the top")
         XCTAssertTrue(waitUntil(canvas, lower, { self.red($0) > 100 }), "…lighter lower down")
         attachScreenshot(app, "edit-gradient-turned")

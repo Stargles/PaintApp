@@ -91,7 +91,7 @@ final class StreamLiveUITests: StreamUITestCase {
         waitForPicture(.red, on: canvas)
 
         XCUIDevice.shared.press(.home)
-        waitUntil(15, "the app pauses the laptop on the way out") { laptop.isPausedByClient }
+        waitForTheLaptop(15, "the app pauses the laptop on the way out") { laptop.isPausedByClient }
         laptop.show(.green)
         Thread.sleep(forTimeInterval: 1)
         app.activate()
@@ -113,7 +113,7 @@ final class StreamLiveUITests: StreamUITestCase {
         waitForPicture(.red, on: canvas)
 
         XCUIDevice.shared.press(.home)
-        waitUntil(15, "the app pauses the laptop on the way out") { laptop.isPausedByClient }
+        waitForTheLaptop(15, "the app pauses the laptop on the way out") { laptop.isPausedByClient }
         laptop.dropClient()
         laptop.show(.green)
         app.activate()

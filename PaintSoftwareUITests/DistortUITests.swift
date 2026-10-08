@@ -41,8 +41,14 @@ final class DistortUITests: PaintUITestCase {
         let rectangleMode = app.buttons["selectPanel.mode.rectangle"]
         XCTAssertTrue(rectangleMode.waitForExistence(timeout: 5))
         rectangleMode.tap()
-        // Upper canvas, clear of the Select menu's bottom-docked bar.
-        dragOnCanvas(app, from: CGVector(dx: 0.55, dy: 0.22), to: CGVector(dx: 0.80, dy: 0.40))
+        // On the paper the Select menu's bar leaves visible. `region` is where the loop is asked for with
+        // room for the drag's undershoot and for what the later steps move: every measurement below
+        // looks only in it.
+        let visible = visiblePaperRect(app, in: canvas)
+        let loopTop = onHost(visible, 0.55, 0.12), loopBottom = onHost(visible, 0.80, 0.52)
+        let region = CGRect(x: loopTop.dx - 0.05, y: loopTop.dy - 0.03,
+                            width: loopBottom.dx - loopTop.dx + 0.15, height: loopBottom.dy - loopTop.dy + 0.18)
+        dragOnCanvas(app, from: loopTop, to: loopBottom)
         let fillButton = app.buttons["selectPanel.fillButton"]
         XCTAssertTrue(fillButton.waitForExistence(timeout: 5))
         fillButton.tap()
@@ -53,8 +59,7 @@ final class DistortUITests: PaintUITestCase {
         // selection standing, so Move lifts the same rectangle that was just painted and the box's
         // top-left grip sits on the ink's own top-left. Drawing a second loop would have put a
         // second, differently-undershot rectangle between the measurement and the grip.
-        let filled = try inkTopLeft(try settledProbe(canvas),
-                                    in: CGRect(x: 0.50, y: 0.19, width: 0.36, height: 0.27))
+        let filled = try inkTopLeft(try settledProbe(canvas, window: region), in: region)
         app.buttons["toolbar.moveButton"].tap()
 
         let doneButton = app.buttons["moveBar.doneButton"]
@@ -76,12 +81,10 @@ final class DistortUITests: PaintUITestCase {
         // the artwork are shown under a `CATransform3D` with the layer's anchor point moved to its
         // origin, so UIKit has to invert a *projective* layer transform to decide the touch is on the
         // band. Nothing in the model can say whether it did.
-        let held = try inkTopLeft(try settledProbe(canvas),
-                                  in: CGRect(x: 0.50, y: 0.19, width: 0.40, height: 0.30))
+        let held = try inkTopLeft(try settledProbe(canvas, window: region), in: region)
         dragOnCanvas(app, from: CGVector(dx: filled.x + 0.16, dy: filled.y + 0.09),
                      to: CGVector(dx: filled.x + 0.16, dy: filled.y + 0.15))
-        let moved = try inkTopLeft(try settledProbe(canvas),
-                                   in: CGRect(x: 0.50, y: 0.19, width: 0.40, height: 0.36))
+        let moved = try inkTopLeft(try settledProbe(canvas, window: region), in: region)
         XCTAssertGreaterThan(moved.y, held.y + 0.02,
                              "the move band still takes a touch through the perspective transform")
 
@@ -91,9 +94,9 @@ final class DistortUITests: PaintUITestCase {
         // Two rows of the committed canvas, near the top of the piece and near its bottom — measured
         // from where the band drag left it, not from where it was lifted. The window is wide enough
         // to hold the whole block at either row, so what separates them is the map and nothing else.
-        let after = try settledProbe(canvas)
-        let top = inkedWidth(after, row: moved.y + 0.02)
-        let bottom = inkedWidth(after, row: moved.y + 0.14)
+        let after = try settledProbe(canvas, window: region)
+        let top = inkedWidth(after, row: moved.y + 0.02, from: region.minX, to: region.maxX)
+        let bottom = inkedWidth(after, row: moved.y + 0.14, from: region.minX, to: region.maxX)
         XCTAssertGreaterThan(bottom, 0.12, "the bottom edge of the piece is still its full width")
         XCTAssertLessThan(top, bottom - 0.06,
                           "the committed piece is a trapezoid, which no affine transform of a "
@@ -121,8 +124,10 @@ final class DistortUITests: PaintUITestCase {
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
-        // The default layer is a vector one, so this stroke lifts as geometry rather than as pixels.
-        dragOnCanvas(app, from: CGVector(dx: 0.25, dy: 0.30), to: CGVector(dx: 0.80, dy: 0.30))
+        // The default layer is a vector one, so this stroke lifts as geometry rather than as pixels. On
+        // `rowAboveTheDock`, above the Select and Move bars.
+        let row = rowAboveTheDock(canvas)
+        dragOnCanvas(app, from: CGVector(dx: 0.25, dy: row), to: CGVector(dx: 0.80, dy: row))
         let drawn = try settledProbe(canvas)
         let leftBefore = inkedHeight(drawn, column: 0.35)
         let rightBefore = inkedHeight(drawn, column: 0.70)
@@ -134,7 +139,7 @@ final class DistortUITests: PaintUITestCase {
         let rectangleMode = app.buttons["selectPanel.mode.rectangle"]
         XCTAssertTrue(rectangleMode.waitForExistence(timeout: 5))
         rectangleMode.tap()
-        dragOnCanvas(app, from: CGVector(dx: 0.15, dy: 0.18), to: CGVector(dx: 0.90, dy: 0.42))
+        dragOnCanvas(app, from: CGVector(dx: 0.15, dy: row - 0.12), to: CGVector(dx: 0.90, dy: row + 0.12))
         app.buttons["toolbar.moveButton"].tap()
 
         XCTAssertTrue(app.buttons["moveBar.doneButton"].waitForExistence(timeout: 5),
@@ -151,7 +156,7 @@ final class DistortUITests: PaintUITestCase {
         // The box hugs the ink, so its top-left grip sits a little above the line's left end. Pull it
         // up and left: the left edge of the box grows and the right edge does not, which is a
         // keystone and not any affine of a rectangle.
-        let box = try inkTopLeft(drawn, in: CGRect(x: 0.15, y: 0.18, width: 0.75, height: 0.24))
+        let box = try inkTopLeft(drawn, in: CGRect(x: 0.15, y: row - 0.12, width: 0.75, height: 0.24))
         dragOnCanvas(app, from: CGVector(dx: box.x, dy: box.y),
                      to: CGVector(dx: box.x - 0.06, dy: box.y - 0.14))
         XCTAssertTrue(app.buttons["moveBar.resetButton"].isEnabled,

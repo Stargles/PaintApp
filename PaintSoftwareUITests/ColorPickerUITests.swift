@@ -21,30 +21,6 @@ final class ColorPickerUITests: PaintUITestCase {
 
     // MARK: - Shared
 
-    /// Opens the panel and waits for its default (Square) tab to actually be up — `colorPanel.
-    /// svSquare`'s existence, not just `toolbar.colorButton`'s tap — before returning. **Not
-    /// optional**: the panel slides in (`DrawingView`'s `.move(edge: .top)` transition), and a tab
-    /// bar tap fired before that settles can land on a button whose on-screen position is still
-    /// mid-animation, tapping nothing. Every other test in this suite already waits for a piece of
-    /// the panel's *content* before touching it; this is that same discipline for the tab bar.
-    private func openColorPanel(_ app: XCUIApplication) -> XCUIElement {
-        let colorButton = app.buttons["toolbar.colorButton"]
-        XCTAssertTrue(colorButton.waitForExistence(timeout: 5), "The toolbar's colour button")
-        colorButton.tap()
-        XCTAssertTrue(app.otherElements["colorPanel.svSquare"].waitForExistence(timeout: 5),
-                      "The colour panel's default tab should be up before its tab bar is touched")
-        return colorButton
-    }
-
-    /// Closes the panel via `colorButton` and waits for `sentinel` (whatever this test was just
-    /// looking at) to be gone before touching the canvas — the panel is a dropdown over the right of
-    /// the canvas and a stroke drawn before it is confirmed closed lands on the panel instead.
-    private func closeColorPanel(_ app: XCUIApplication, colorButton: XCUIElement, sentinel: XCUIElement) {
-        colorButton.tap()
-        XCTAssertTrue(sentinel.waitForNonExistence(timeout: 5),
-                      "The colour panel must be closed before the canvas is touched")
-    }
-
     private func paintStrokeAndSamplePixel(_ app: XCUIApplication) -> (r: UInt8, g: UInt8, b: UInt8, a: UInt8)? {
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5), "The canvas host")
@@ -65,7 +41,7 @@ final class ColorPickerUITests: PaintUITestCase {
     func testTriangleTabPicksAColourThatPaintsOnTheCanvasFromAFreshDocument() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
-        let colorButton = openColorPanel(app)
+        openColorPanel(app)
 
         app.buttons["colorPanel.tab.triangle"].tap()
         let triangle = app.otherElements["colorPanel.triangle"]
@@ -88,7 +64,7 @@ final class ColorPickerUITests: PaintUITestCase {
         XCTAssertNotEqual(currentSwatch.value as? String, "000000", "Picking on the triangle should move the current swatch off the panel's opening colour")
         attachScreenshot(XCUIScreen.main, "Triangle tab after picking")
 
-        closeColorPanel(app, colorButton: colorButton, sentinel: triangle)
+        closeColorPanel(app, whileShowing: triangle)
 
         guard let pixel = paintStrokeAndSamplePixel(app) else {
             XCTFail("Could not sample the drawn stroke's pixel colour")
@@ -113,13 +89,13 @@ final class ColorPickerUITests: PaintUITestCase {
     func testTheTypeTheArtistChoseIsStillChosenAfterLeavingTheCanvasAndAfterAFreshLaunch() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
-        let colorButton = openColorPanel(app)
+        openColorPanel(app)
         XCTAssertTrue(app.buttons["colorPanel.tab.square"].isSelected, "PREMISE: a fresh install opens on Classic")
 
         app.buttons["colorPanel.tab.triangle"].tap()
         let triangle = app.otherElements["colorPanel.triangle"]
         XCTAssertTrue(triangle.waitForExistence(timeout: 5), "PREMISE: the Wheel tab is up")
-        closeColorPanel(app, colorButton: colorButton, sentinel: triangle)
+        closeColorPanel(app, whileShowing: triangle)
 
         // Out to the gallery and back into the same drawing.
         saveEditorAndReturnToGallery(app).tap()
@@ -162,7 +138,7 @@ final class ColorPickerUITests: PaintUITestCase {
     func testSquareTabPicksAColourThatPaintsOnTheCanvasFromAFreshDocument() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
-        let colorButton = openColorPanel(app)
+        openColorPanel(app)
 
         app.buttons["colorPanel.tab.square"].tap()
         let square = app.otherElements["colorPanel.svSquare"]
@@ -176,7 +152,7 @@ final class ColorPickerUITests: PaintUITestCase {
         dragWithinElement(square, from: CGVector(dx: 0.5, dy: 0.5), to: CGVector(dx: 1.0, dy: 0.0))
         attachScreenshot(XCUIScreen.main, "Square tab after picking")
 
-        closeColorPanel(app, colorButton: colorButton, sentinel: square)
+        closeColorPanel(app, whileShowing: square)
 
         guard let pixel = paintStrokeAndSamplePixel(app) else {
             XCTFail("Could not sample the drawn stroke's pixel colour")
@@ -195,7 +171,7 @@ final class ColorPickerUITests: PaintUITestCase {
     func testPickingAtTheRingsRightEdgePaintsRed() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
-        let colorButton = openColorPanel(app)
+        openColorPanel(app)
 
         let square = app.otherElements["colorPanel.svSquare"]
         XCTAssertTrue(square.waitForExistence(timeout: 5), "The Square tab (the panel's default) is up")
@@ -215,7 +191,7 @@ final class ColorPickerUITests: PaintUITestCase {
                        "a pick at the ring's own red (3 o'clock) must actually be red, got \(currentSwatch.value ?? "nil")")
         attachScreenshot(XCUIScreen.main, "Picked at the ring's right edge")
 
-        closeColorPanel(app, colorButton: colorButton, sentinel: square)
+        closeColorPanel(app, whileShowing: square)
         guard let pixel = paintStrokeAndSamplePixel(app) else {
             XCTFail("Could not sample the drawn stroke's pixel colour")
             return
@@ -234,7 +210,7 @@ final class ColorPickerUITests: PaintUITestCase {
     func testTheTrianglesShadingEdgeIsAntialiasedNotJagged() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
-        _ = openColorPanel(app)
+        openColorPanel(app)
 
         app.buttons["colorPanel.tab.triangle"].tap()
         let triangle = app.otherElements["colorPanel.triangle"]
@@ -297,7 +273,7 @@ final class ColorPickerUITests: PaintUITestCase {
     func testValueTabSlidersPickAColourThatPaintsOnTheCanvasFromAFreshDocument() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
-        let colorButton = openColorPanel(app)
+        openColorPanel(app)
 
         app.buttons["colorPanel.tab.value"].tap()
         let hueSlider = app.sliders["colorPanel.value.hueSlider"]
@@ -315,7 +291,7 @@ final class ColorPickerUITests: PaintUITestCase {
         XCTAssertTrue(hexField.waitForExistence(timeout: 5), "The Value tab shows the hex field too")
         attachScreenshot(XCUIScreen.main, "Value tab after adjusting sliders")
 
-        closeColorPanel(app, colorButton: colorButton, sentinel: hueSlider)
+        closeColorPanel(app, whileShowing: hueSlider)
 
         guard let pixel = paintStrokeAndSamplePixel(app) else {
             XCTFail("Could not sample the drawn stroke's pixel colour")
@@ -337,7 +313,7 @@ final class ColorPickerUITests: PaintUITestCase {
         let app = XCUIApplication()
         app.launchArguments.append("-resetPalettes")
         XCTAssertTrue(launchIntoEditor(app))
-        _ = openColorPanel(app)
+        openColorPanel(app)
 
         app.buttons["colorPanel.tab.palettes"].tap()
         XCTAssertTrue(app.buttons["colorPanel.palettes.newButton"].waitForExistence(timeout: 5),
@@ -378,7 +354,7 @@ final class ColorPickerUITests: PaintUITestCase {
     func testDraggingTheOpacityBarDirectlyAboveTheHexFieldChangesTheOpacityFromAFreshDocument() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
-        _ = openColorPanel(app)
+        openColorPanel(app)
 
         let bar = app.descendants(matching: .any)["colorPanel.opacitySlider"]
         XCTAssertTrue(bar.waitForExistence(timeout: 5), "The colour panel's opacity bar")

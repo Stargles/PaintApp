@@ -31,24 +31,6 @@ final class RecolorUITests: PaintUITestCase {
         drawLine(on: canvas, from: CGVector(dx: 0.3, dy: dy), to: CGVector(dx: 0.7, dy: dy))
     }
 
-    /// Polls a canvas pixel until `predicate` holds or `timeout` elapses — the composite lands a
-    /// beat after the model changes, off the main thread.
-    @discardableResult
-    private func waitForPixel(_ canvas: XCUIElement, dx: Double, dy: Double, timeout: TimeInterval = 10,
-                              _ predicate: ((r: UInt8, g: UInt8, b: UInt8, a: UInt8)) -> Bool)
-    -> (r: UInt8, g: UInt8, b: UInt8, a: UInt8)? {
-        let deadline = Date().addingTimeInterval(timeout)
-        var last: (r: UInt8, g: UInt8, b: UInt8, a: UInt8)?
-        while Date() < deadline {
-            if let pixel = rgbaPixel(of: canvas, dx: dx, dy: dy) {
-                last = pixel
-                if predicate(pixel) { return pixel }
-            }
-            Thread.sleep(forTimeInterval: 0.3)
-        }
-        return last
-    }
-
     /// **The whole feature, cold, from an empty document**, in the order the artist meets it:
     ///
     /// 1. Draw a red line and a green line.
@@ -70,14 +52,15 @@ final class RecolorUITests: PaintUITestCase {
         XCTAssertTrue(launchIntoEditor(app))
 
         // 1.
-        paintLine(app, hex: "FF0000", at: 0.30)
-        paintLine(app, hex: "00FF00", at: 0.40)
+        let onRed = CGVector(dx: 0.5, dy: 0.30), onGreen = CGVector(dx: 0.5, dy: 0.40)
+        paintLine(app, hex: "FF0000", at: onRed.dy)
+        paintLine(app, hex: "00FF00", at: onGreen.dy)
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
-        let redBefore = waitForPixel(canvas, dx: 0.5, dy: 0.30) { $0.r > 200 && $0.g < 80 }
-        XCTAssertNotNil(redBefore, "PREMISE: the red line is on the canvas, got \(String(describing: redBefore))")
-        let greenBefore = waitForPixel(canvas, dx: 0.5, dy: 0.40) { $0.g > 200 && $0.r < 80 }
-        XCTAssertNotNil(greenBefore, "PREMISE: the green line is on the canvas, got \(String(describing: greenBefore))")
+        XCTAssertNotNil(waitForPixel(canvas, at: onRed) { $0.r > 200 && $0.g < 80 },
+                        "PREMISE: the red line is on the canvas, got \(probe(canvas, at: onRed))")
+        XCTAssertNotNil(waitForPixel(canvas, at: onGreen) { $0.g > 200 && $0.r < 80 },
+                        "PREMISE: the green line is on the canvas, got \(probe(canvas, at: onGreen))")
 
         // 2.
         openLayerPanel(app)
@@ -120,7 +103,7 @@ final class RecolorUITests: PaintUITestCase {
         XCTAssertTrue(fromEyedropper.exists, "Each swatch has an eyedropper beside it")
         fromEyedropper.tap()
         XCTAssertTrue(fromEyedropper.isSelected, "The armed eyedropper is highlighted so the artist knows which swatch the tap is for")
-        canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.30)).tap()
+        canvas.coordinate(withNormalizedOffset: onRed).tap()
 
         expectation(for: NSPredicate(format: "value != %@", "808080"), evaluatedWith: fromSwatch)
         waitForExpectations(timeout: 10)
@@ -143,7 +126,7 @@ final class RecolorUITests: PaintUITestCase {
         let toEyedropper = app.buttons["effectSettings.recolorEntry.0.toEyedropper"]
         toEyedropper.tap()
         XCTAssertTrue(toEyedropper.isSelected)
-        canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.40)).tap()
+        canvas.coordinate(withNormalizedOffset: onGreen).tap()
         expectation(for: NSPredicate(format: "value != %@", "808080"), evaluatedWith: toSwatch)
         waitForExpectations(timeout: 10)
         guard let to = channels(toSwatch.value as? String) else {
@@ -154,25 +137,20 @@ final class RecolorUITests: PaintUITestCase {
         XCTAssertTrue(title.exists, "…and the bar is still up after the second pick")
 
         // 6.
-        let redNow = waitForPixel(canvas, dx: 0.5, dy: 0.30) { $0.g > 150 && $0.r < 100 }
-        XCTAssertNotNil(redNow, "No pixel read back from the red line")
-        if let redNow {
-            XCTAssertGreaterThan(Int(redNow.g), 150, """
-                The red line did not turn green on the canvas: \(redNow). The model may hold the \
-                pair while the compositor never applied it — this is the assertion on what is drawn.
-                """)
-            XCTAssertLessThan(Int(redNow.r), 100, "…got \(redNow)")
-        }
-        let greenNow = waitForPixel(canvas, dx: 0.5, dy: 0.40) { $0.g > 200 && $0.r < 80 }
-        XCTAssertNotNil(greenNow, "The green line is still green: nothing else matched red, got \(String(describing: greenNow))")
-        let paper = rgbaPixel(of: canvas, dx: 0.15, dy: 0.30)
+        XCTAssertNotNil(waitForPixel(canvas, at: onRed) { $0.g > 150 && $0.r < 100 }, """
+            The red line did not turn green on the canvas: \(probe(canvas, at: onRed)). The model may hold \
+            the pair while the compositor never applied it — this is the assertion on what is drawn.
+            """)
+        XCTAssertNotNil(waitForPixel(canvas, at: onGreen) { $0.g > 200 && $0.r < 80 },
+                        "The green line is still green: nothing else matched red, got \(probe(canvas, at: onGreen))")
+        let paper = rgbaPixel(of: canvas, dx: 0.15, dy: onRed.dy)
         XCTAssertTrue(isWhitish(paper), "The paper is still white: white is nowhere near red in Oklab, got \(String(describing: paper))")
 
         addColour.tap()
         let secondFrom = app.buttons["effectSettings.recolorEntry.1.from"]
         XCTAssertTrue(secondFrom.waitForExistence(timeout: 5), "A second pair")
         app.buttons["effectSettings.recolorEntry.1.fromEyedropper"].tap()
-        canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.30)).tap()
+        canvas.coordinate(withNormalizedOffset: onRed).tap()
         expectation(for: NSPredicate(format: "value != %@", "808080"), evaluatedWith: secondFrom)
         waitForExpectations(timeout: 10)
         guard let under = channels(secondFrom.value as? String) else {

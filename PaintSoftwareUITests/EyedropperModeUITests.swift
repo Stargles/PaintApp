@@ -19,18 +19,6 @@ import XCTest
 /// grey wherever the artist taps; the line is still red.
 final class EyedropperModeUITests: PaintUITestCase {
 
-    private func closeColorPanel(_ app: XCUIApplication) {
-        app.buttons["toolbar.colorButton"].tap()
-        XCTAssertTrue(app.otherElements["colorPanel.svSquare"].waitForNonExistence(timeout: 5),
-                      "The colour panel must be closed before the canvas is touched")
-    }
-
-    private func openColorPanel(_ app: XCUIApplication) {
-        app.buttons["toolbar.colorButton"].tap()
-        XCTAssertTrue(app.otherElements["colorPanel.svSquare"].waitForExistence(timeout: 5),
-                      "The colour button opens the colour panel")
-    }
-
     /// The hex the rail's eyedropper button carries — the colour the next pick will replace, and so
     /// the way a completed pick is read back without opening a panel over the canvas.
     private func brushHex(_ app: XCUIApplication) -> String {

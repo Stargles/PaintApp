@@ -416,24 +416,16 @@ final class CanvasTransformFreezeUITests: PaintUITestCase {
     /// changes only the scale, while an anchored pinch also translates so the content under the
     /// fingers stays put.
     ///
-    /// **Skipped: XCUITest cannot reach this test's premise.** It needs a pending shape, which needs
-    /// `drawAndHoldShape` to complete a hold, and a synthetic touch cannot hold — `thenHoldForDuration`
-    /// emits no touch events at all, so `ShapeHoldClock` never accumulates a millisecond of stillness.
-    /// Measured, not inferred; see BUGS.md for the numbers. The assertions below are correct and are
-    /// what to run the moment the harness can drive a hold.
+    /// **The pending shape is seeded** (`-uiTestSeedPendingRectangle`), not held into being: the hold
+    /// is a pen standing still, which a synthetic touch cannot do (BUGS.md), and nothing asserted
+    /// here is about the hold.
     func testPinchingWithAPendingShapeMovesTheCanvasAndLeavesTheShapeAlone() throws {
-        throw XCTSkip("XCUITest cannot synthesise a stationary hold — see BUGS.md")
-
         let app = XCUIApplication()
+        app.launchArguments += ["-resetGallery", "-uiTestSeedPendingRectangle"]
         XCTAssertTrue(launchIntoEditor(app))
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
-        XCTAssertEqual(readShapeState(app), "none", "PREMISE: nothing pending before the gesture")
-
-        drawAndHoldShape(on: canvas, from: CGVector(dx: 0.30, dy: 0.35), to: CGVector(dx: 0.70, dy: 0.65))
-        XCTAssertEqual(readShapeState(app), "adjustable",
-                       "PREMISE: holding a stroke has to leave a shape in the adjustable state — "
-                       + "'following' here would mean the pen lift never reached the shape at all")
+        XCTAssertEqual(readShapeState(app), "adjustable", "PREMISE: the seed leaves a rectangle pending")
 
         let before = readTransform(app)
         canvas.pinch(withScale: 2.0, velocity: 1.5)

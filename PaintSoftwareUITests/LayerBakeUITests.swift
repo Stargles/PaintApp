@@ -20,22 +20,6 @@ import XCTest
 /// the bake leaves it white (Bake changes the drawings only).
 final class LayerBakeUITests: PaintUITestCase {
 
-    private func pixel(_ canvas: XCUIElement, _ point: (dx: CGFloat, dy: CGFloat)) -> (r: UInt8, g: UInt8, b: UInt8, a: UInt8)? {
-        rgbaPixel(of: canvas, dx: Double(point.dx), dy: Double(point.dy))
-    }
-
-    /// Polls until `check` holds of the pixel — the canvas repaints a beat after the model changes.
-    @discardableResult
-    private func waitForPixel(_ canvas: XCUIElement, _ point: (dx: CGFloat, dy: CGFloat),
-                              timeout: TimeInterval = 8, where check: ((r: Int, g: Int, b: Int)) -> Bool) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if let p = pixel(canvas, point), check((Int(p.r), Int(p.g), Int(p.b))) { return true }
-            Thread.sleep(forTimeInterval: 0.25)
-        }
-        return false
-    }
-
     func testBakingAMultiplyLayerColoursBothDrawingsBeneathItAndOneUndoBringsItBack() throws {
         let app = XCUIApplication()
         app.launchArguments += ["-resetGallery", "-uiTestNoticeSeconds", "120"]
@@ -44,9 +28,9 @@ final class LayerBakeUITests: PaintUITestCase {
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
         let start = safeOutsideCornerPoint(canvas)
         let second = CGVector(dx: start.dx, dy: start.dy + 0.2)
-        let onFirst = (dx: start.dx + 0.06, dy: start.dy)
-        let onSecond = (dx: second.dx + 0.06, dy: second.dy)
-        let onPaper = (dx: start.dx + 0.06, dy: start.dy + 0.1)
+        let onFirst = CGVector(dx: start.dx + 0.06, dy: start.dy)
+        let onSecond = CGVector(dx: second.dx + 0.06, dy: second.dy)
+        let onPaper = CGVector(dx: start.dx + 0.06, dy: start.dy + 0.1)
 
         // Two drawings, each its own colour, each on its own vector layer.
         setBrushColor(app, hex: "FF0000")
@@ -65,7 +49,7 @@ final class LayerBakeUITests: PaintUITestCase {
         XCTAssertTrue(app.staticTexts["layerPanel.row.2"].waitForExistence(timeout: 5), "Setup: the value layer is the third row")
         app.buttons["toolbar.layersButton"].tap()
         setBlendMode(app, layerIndex: 2, to: "multiply")
-        XCTAssertTrue(waitForPixel(canvas, onPaper) { !($0.r > 240 && $0.g > 240 && $0.b > 240) },
+        XCTAssertTrue(waitUntil(canvas, onPaper, { !self.isWhitish($0) }),
                       "Setup: the Multiply layer greys the paper while it is there")
 
         // Bake it, from the layer's own menu.
@@ -88,19 +72,18 @@ final class LayerBakeUITests: PaintUITestCase {
         app.buttons["toolbar.layersButton"].tap()
 
         // What is DRAWN: red × grey and blue × grey, on paper the layer no longer greys.
-        XCTAssertTrue(waitForPixel(canvas, onPaper) { $0.r > 240 && $0.g > 240 && $0.b > 240 },
-                      "The paper stays white — Bake changes the drawings only")
-        XCTAssertTrue(waitForPixel(canvas, onFirst) { $0.r > $0.g + 40 && $0.r < 200 && $0.b < 80 },
-                      "The red stroke carries its Multiply colour: \(String(describing: pixel(canvas, onFirst)))")
-        XCTAssertTrue(waitForPixel(canvas, onSecond) { $0.b > $0.r + 40 && $0.b < 200 && $0.r < 80 },
-                      "The blue stroke carries its Multiply colour: \(String(describing: pixel(canvas, onSecond)))")
+        XCTAssertTrue(waitUntil(canvas, onPaper, isWhitish), "The paper stays white — Bake changes the drawings only")
+        XCTAssertNotNil(waitForPixel(canvas, at: onFirst) { Int($0.r) > Int($0.g) + 40 && $0.r < 200 && $0.b < 80 },
+                        "The red stroke carries its Multiply colour: \(probe(canvas, at: onFirst))")
+        XCTAssertNotNil(waitForPixel(canvas, at: onSecond) { Int($0.b) > Int($0.r) + 40 && $0.b < 200 && $0.r < 80 },
+                        "The blue stroke carries its Multiply colour: \(probe(canvas, at: onSecond))")
         attachScreenshot(app, "2-after-the-bake")
 
         // One press of Undo brings the layer back, greying the paper again.
         let undo = app.buttons["sideToolbar.undoButton"]
         XCTAssertTrue(undo.waitForExistence(timeout: 5))
         undo.tap()
-        XCTAssertTrue(waitForPixel(canvas, onPaper) { !($0.r > 240 && $0.g > 240 && $0.b > 240) },
+        XCTAssertTrue(waitUntil(canvas, onPaper, { !self.isWhitish($0) }),
                       "Undo brings the Multiply layer back, and the paper under it grey")
         openLayerPanel(app)
         XCTAssertTrue(app.staticTexts["layerPanel.row.2"].waitForExistence(timeout: 5), "…as the third row")

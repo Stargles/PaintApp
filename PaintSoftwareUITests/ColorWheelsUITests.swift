@@ -16,10 +16,6 @@ import XCTest
 /// full-screen editor for every step).
 final class ColorWheelsUITests: PaintUITestCase {
 
-    /// Where the two strokes lie and where they are read. The dark one at 0.35, the light one at
-    /// 0.5 — both inside the letterbox (`paperRect`) and above the docked bar.
-    private let darkY = 0.35, lightY = 0.5
-
     /// **The whole feature, cold, from an empty document**, in the order the artist meets it:
     ///
     /// 1. A dark grey stroke (`1A1A1A`, Oklab `L` ≈ 0.22, Shadows weight ≈ 0.6) and a light grey
@@ -50,7 +46,11 @@ final class ColorWheelsUITests: PaintUITestCase {
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5), "The canvas host")
 
-        // 1.
+        // 1. Where the two strokes lie and where they are read: the dark one above `rowAboveTheDock` and
+        // the light one below it, both on the paper and — `assertAboveTheDock` says so once the bar is up —
+        // above the docked bar.
+        let inkRow = rowAboveTheDock(canvas)
+        let darkY = inkRow - 0.075, lightY = inkRow + 0.075
         setBrushSize(app, normalized: 0.9)
         setBrushColor(app, hex: "1A1A1A")
         drawLine(on: canvas, from: CGVector(dx: 0.3, dy: darkY), to: CGVector(dx: 0.7, dy: darkY))
@@ -83,6 +83,7 @@ final class ColorWheelsUITests: PaintUITestCase {
         XCTAssertTrue(title.waitForExistence(timeout: 5), "The effect bar is up the moment the grade is picked, with no extra tap")
         closeLayerRail(app)
         XCTAssertEqual(title.label, "Colour Wheels")
+        assertAboveTheDock(app, canvas, dy: lightY, "The wheels' probes")
 
         // 3.
         let any = app.descendants(matching: .any)

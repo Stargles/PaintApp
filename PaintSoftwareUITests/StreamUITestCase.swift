@@ -134,8 +134,8 @@ class StreamUITestCase: PaintUITestCase {
     }
 
     /// Waits for a condition on the laptop's side — what the iPad has asked of it.
-    func waitUntil(_ timeout: TimeInterval = 10, _ message: String, file: StaticString = #filePath,
-                   line: UInt = #line, _ condition: () -> Bool) {
+    func waitForTheLaptop(_ timeout: TimeInterval = 10, _ message: String, file: StaticString = #filePath,
+                          line: UInt = #line, _ condition: () -> Bool) {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             if condition() { return }

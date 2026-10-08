@@ -1679,9 +1679,12 @@ two-finger drag `CanvasTransformFreezeUITests` documents as missing — delibera
 app, which is the bug `ShapeHoldClock` exists to make unrepresentable, and the device data says the
 current design is right.
 
-Skipped, both with the reason in their doc comments:
+**A test that needs a pending shape and not the hold itself seeds one** — `-uiTestSeedPendingRectangle` /
+`-uiTestSeedPendingLine` call the two verbs the hold and the lift call — as
+`CanvasTransformFreezeUITests.testPinchingWithAPendingShapeMovesTheCanvasAndLeavesTheShapeAlone` does.
 
- * `CanvasTransformFreezeUITests.testPinchingWithAPendingShapeMovesTheCanvasAndLeavesTheShapeAlone`
+Skipped, with the reason in its doc comment:
+
  * `ShapeRecoveryUITests.testDraggingALinesStartHandleMovesThatEndAndLeavesTheOther`
 
 **The second one had two innocent suspects, and it is worth recording that they were cleared.** It

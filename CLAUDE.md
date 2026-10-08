@@ -211,13 +211,14 @@ tables themselves are in `git log`, and only these conclusions survived them:
   the 25-minute suite proves a UI change, so **say in the summary that the UI tier was not run** rather
   than reporting a green fast tier as if it covered the branch.
 
-  Two cheap things see a little way into it, and both are seconds rather than minutes:
+  Three cheap things see a little way into it, and all are seconds rather than minutes:
 
   ```bash
   tools/check-ui-identifiers.py     # no UI test may reach a control by its SF Symbol glyph name
+  tools/check-ui-helpers.py         # no UI test may define a helper whose name PaintUITestCase already defines
   ```
 
-  That one exists because of the 2026-09-07 defect and would have caught it at zero cost. `ed7c8f4`
+  The first exists because of the 2026-09-07 defect and would have caught it at zero cost. `ed7c8f4`
   gave the gallery button an explicit `accessibilityIdentifier`, which **replaces** the implicit one
   SwiftUI derives from `Image(systemName:)` — so the two helpers reaching it by `"square.grid.2x2"`
   silently matched nothing, and three tests failed a mile from the code they guard. **A glyph name is
@@ -227,7 +228,12 @@ tables themselves are in `git log`, and only these conclusions survived them:
   written first and abandoned at 186 false positives, because identifiers reach their views through
   `identifier:` parameters on a dozen helper views.
 
-  The second is free and is about triage rather than prevention: **give every `XCTAssertTrue` in a
+  The second is the same idea for helpers: a copy written beside the test that needs it is how
+  `waitForPixel` came to exist in four classes, one of which handed back its *last reading* on a
+  timeout and so made ten `XCTAssertNotNil(waitForPixel(…))` assertions that could not go red. It
+  compares names, not signatures, because the copies all had different parameter lists.
+
+  The third is free and is about triage rather than prevention: **give every `XCTAssertTrue` in a
   shared helper a message.** All three of those failures reported a bare `XCTAssertTrue failed`, which
   names neither the element nor the reason, and two of them were inside `PaintUITestCase` where the
   line number does not say which test called it. `xcodebuild` does print `file:line: error:` for a

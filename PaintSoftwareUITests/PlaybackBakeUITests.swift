@@ -255,23 +255,9 @@ final class PlaybackBakeUITests: PaintUITestCase {
         drawLine(on: canvas, from: CGVector(dx: 0.3, dy: 0.6), to: CGVector(dx: 0.7, dy: 0.6))
         XCTAssertEqual(sandwichState(app), "off",
                        "A stroke on a plain document must leave the canvas exactly where it was")
-        XCTAssertNotNil(waitForPixel(canvas, at: CGVector(dx: 0.5, dy: 0.6)),
-                        "…and the ink is on screen, which is what says the flat row is still drawing")
+        XCTAssertTrue(waitUntilFilled(canvas, dx: 0.5, dy: 0.6),
+                      "…and the ink is on screen, which is what says the flat row is still drawing")
         attachScreenshot(XCUIScreen.main, "01-stroke-on-the-flat-row")
-    }
-
-    /// Polls a canvas pixel until it is not the paper — `BakeWiringUITests`' probe, local for its
-    /// reason.
-    @discardableResult
-    private func waitForPixel(_ canvas: XCUIElement, at point: CGVector,
-                              timeout: TimeInterval = 10) -> (r: UInt8, g: UInt8, b: UInt8, a: UInt8)? {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            let pixel = rgbaPixel(of: canvas, dx: Double(point.dx), dy: Double(point.dy))
-            if let pixel, !isWhitish(pixel) { return pixel }
-            Thread.sleep(forTimeInterval: 0.2)
-        }
-        return nil
     }
 
     /// Which of the seed's six rows currently carry ink, as a string — the canvas's picture reduced

@@ -38,19 +38,22 @@ final class LensBlurUITests: PaintUITestCase {
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5), "The canvas host")
 
-        // 1.
+        // 1. The band is on `rowAboveTheDock`, and the bare paper is read well above it: the effect's
+        // settings bar stands over the lower paper once it is up (`assertAboveTheDock` says so).
+        let bandY = rowAboveTheDock(canvas)
+        let bareY = onHost(paperRect(in: canvas), 0.5, 0.1).dy
         setBrushColor(app, hex: "000000")
         setBrushSize(app, normalized: 0.9)
-        drawLine(on: canvas, from: CGVector(dx: 0.3, dy: 0.5), to: CGVector(dx: 0.7, dy: 0.5))
-        XCTAssertTrue(waitUntilFilled(canvas, dx: 0.5, dy: 0.5), "The band landed")
+        drawLine(on: canvas, from: CGVector(dx: 0.3, dy: bandY), to: CGVector(dx: 0.7, dy: bandY))
+        XCTAssertTrue(waitUntilFilled(canvas, dx: 0.5, dy: bandY), "The band landed")
 
         // 2.
         setBrushColor(app, hex: "FFFFFF")
         setBrushSize(app, normalized: 0.15)
-        drawLine(on: canvas, from: CGVector(dx: 0.495, dy: 0.5), to: CGVector(dx: 0.505, dy: 0.5))
+        drawLine(on: canvas, from: CGVector(dx: 0.495, dy: bandY), to: CGVector(dx: 0.505, dy: bandY))
 
-        let beforeBeside = settled { probe(canvas, dx: 0.525, dy: 0.5) }
-        let beforePaper = settled { probe(canvas, dx: 0.5, dy: 0.2) }
+        let beforeBeside = settled { probe(canvas, dx: 0.525, dy: bandY) }
+        let beforePaper = settled { probe(canvas, dx: 0.5, dy: bareY) }
         XCTAssertLessThan(beforeBeside.sum, 150, "PREMISE: dark ink beside the blob before any effect: \(beforeBeside)")
         XCTAssertGreaterThan(beforePaper.sum, 600, "PREMISE: bare paper above the band: \(beforePaper)")
         attachScreenshot(app, "1-band-and-highlight")
@@ -70,6 +73,7 @@ final class LensBlurUITests: PaintUITestCase {
         XCTAssertTrue(title.waitForExistence(timeout: 5), "The effect bar is up the moment the grade is picked, with no extra tap")
         closeLayerRail(app)
         XCTAssertEqual(title.label, "Lens Blur")
+        assertAboveTheDock(app, canvas, dy: bandY, "The lens blur's probes")
         let radius = app.sliders["effectSettings.radius"]
         XCTAssertTrue(radius.waitForExistence(timeout: 5), "The radius slider is on the bar")
         XCTAssertEqual(Double(radius.value as? String ?? "") ?? -1, 8, accuracy: 0.01,
@@ -86,21 +90,18 @@ final class LensBlurUITests: PaintUITestCase {
         attachScreenshot(app, "2-lens-blur-settings")
 
         // 5.
-        let afterBeside = settled { probe(canvas, dx: 0.525, dy: 0.5) }
+        let afterBeside = settled { probe(canvas, dx: 0.525, dy: bandY) }
         XCTAssertGreaterThan(afterBeside.sum - beforeBeside.sum, 60, """
             The pixel beside the highlight, inside the black band, must brighten markedly — the \
             highlight blooms into a disc that reaches it: before \(beforeBeside), after \(afterBeside). \
             The model may hold the effect while the compositor never applied it — this is the \
             assertion on what is drawn.
             """)
-        let afterPaper = settled { probe(canvas, dx: 0.5, dy: 0.2) }
+        let afterPaper = settled { probe(canvas, dx: 0.5, dy: bareY) }
         XCTAssertLessThan(abs(afterPaper.sum - beforePaper.sum), 30, """
             Bare paper nowhere near the ink must be left alone — the gather reads the ink and no ink \
             is within reach: before \(beforePaper), after \(afterPaper).
             """)
         attachScreenshot(app, "3-after-the-lens-blur")
     }
-}
-
-private extension PaintUITestCase.RGB {
 }
