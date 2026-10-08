@@ -399,8 +399,7 @@ struct CanvasNotice: Identifiable, Equatable {
         case .poseBakeRefused(let refusal): return "Couldn't bake — \(refusal.phrase)."
         case .bakeRefused(let refusal): return "Couldn't bake — \(refusal.phrase)."
         case .bakedWithLeftovers(let leftovers):
-            let named = leftovers.map { "\($0.name) (\($0.reason.phrase))" }.joined(separator: ", ")
-            return "Baked. Left as they were: \(named)."
+            return "Baked. Left as they were: \(leftovers.map(\.phrase).joined(separator: ", "))."
         case .mergeNeedsADrawingBelow: return "Can't merge into this layer — it holds no drawing."
         case .recordingRefused(let refusal): return refusal.message
         // **The canvas is named first and the slider second** — KEYFRAMES.md §7, stage 10. The order

@@ -607,19 +607,185 @@ final class BakeTransformLogicTests: XCTestCase {
         XCTAssertEqual(manager.layers[index(sprite, manager)].cels.count, 1, "Not cut")
     }
 
-    /// **Exact, or refused.** An opacity that fades in over the first cycle repeats with the loop, and
-    /// a drawing cannot carry it — baking would play the fade once and quietly change the picture.
-    func testALoopThatRepeatsMoreThanDrawingsIsRefused() throws {
-        let fx = walkerUnderALoop()
-        fx.manager.layers[index(fx.walker, fx.manager)].channelTracks[TargetChannel.opacity.id] =
-            AnimationCurve(keys: [.init(frame: 0, value: 0.2), .init(frame: 2, value: 1)])
-        let before = try scene(fx.manager)
-        XCTAssertNotEqual(before[3], before[2], "Premise: the fade repeats")
+    // MARK: - What a loop repeats besides drawings
 
-        XCTAssertEqual(fx.manager.bakeLayer(id: fx.loop), .refused(.loopsMoreThanDrawings))
+    /// A fade-in over the layer's first three frames — what a loop repeats and a drawing cannot carry.
+    private func fadeIn(_ manager: CanvasManager, _ id: UUID) {
+        manager.layers[index(id, manager)].channelTracks[TargetChannel.opacity.id] =
+            AnimationCurve(keys: [.init(frame: 0, value: 0.2), .init(frame: 2, value: 1)])
+    }
+
+    private func hide(_ manager: CanvasManager, _ ids: UUID...) {
+        for id in ids { manager.layers[index(id, manager)].isVisible = false }
+    }
+
+    /// A frame composited with the hidden layer `id` shown for the one render.
+    private func composite(_ manager: CanvasManager, frame: Int, showing id: UUID) throws -> [UInt8] {
+        manager.layers[index(id, manager)].isVisible = true
+        defer { manager.layers[index(id, manager)].isVisible = false }
+        return try composite(manager, frame: frame)
+    }
+
+    /// The opacity the top-level node of layer `id` has at `frame` — what the walk, with the loop, draws.
+    private func walkedOpacity(_ manager: CanvasManager, _ id: UUID, atFrame frame: Int) -> Double? {
+        manager.renderTree(atFrame: frame).first { $0.id == id }?.opacity
+    }
+
+    private func leftover(_ name: String) -> CanvasManager.BakeLeftover {
+        CanvasManager.BakeLeftover(name: name, reason: .loopsMoreThanDrawings)
+    }
+
+    /// **"Bake the rest."** A layer whose fade the loop repeats is left exactly as it was, said so, and
+    /// the layer beside it that the loop only re-shows bakes — byte for byte, over the whole bar. The
+    /// Repeat layer goes all the same (as an effect layer does with a layer it left), so the left layer
+    /// stops looping.
+    func testALayerTheLoopRepeatsMoreOfIsLeftAsItWasAndTheRestBakes() throws {
+        let manager = document()
+        let fader = addDrawings(manager, "Fader", blocks: [(0, 1), (1, 1), (2, 10)])
+        fadeIn(manager, fader)
+        let walker = addDrawings(manager, "Walker", blocks: [(0, 1), (1, 1), (2, 10)])
+        let loop = addLoop(manager, period: 3)
+        XCTAssertEqual(walkedOpacity(manager, fader, atFrame: 3) ?? -1, 0.2, accuracy: 1e-9,
+                       "Premise: the loop repeats the fade")
+        let faderCels = manager.layers[index(fader, manager)].cels.map(\.id)
+        let faderFade = manager.layers[index(fader, manager)].channelTracks
+        hide(manager, fader)
+        let before = try scene(manager)
+        XCTAssertEqual(before[4], before[1], "Premise: the loop runs under the hidden layer")
+        let loopedFrameThree = try composite(manager, frame: 3, showing: fader)
+
+        guard case .plan(let plan) = manager.bakePlan(forLayerID: loop) else { return XCTFail("The walker bakes") }
+        XCTAssertEqual(plan.layers.map(\.name), ["Walker"])
+        XCTAssertEqual(plan.leftovers, [leftover("Fader")])
+        XCTAssertNotNil(bake(manager, loop))
+
+        XCTAssertEqual(manager.layers.map(\.id), [fader, walker], "Only the Repeat layer is gone")
+        XCTAssertEqual(layout(manager, walker), (0..<12).map { [$0, 1] })
+        XCTAssertEqual(manager.layers[index(fader, manager)].cels.map(\.id), faderCels, "The left layer's drawings are untouched")
+        XCTAssertEqual(manager.layers[index(fader, manager)].channelTracks, faderFade, "…and so is its fade")
+        guard case .bakedWithLeftovers(let said)? = manager.notice?.kind else { return XCTFail("The leftover is said") }
+        XCTAssertEqual(said, [leftover("Fader")])
+        XCTAssertTrue(manager.notice?.message.contains("Fader") == true, manager.notice?.message ?? "no notice")
+        assertSameScene(try scene(manager), before, "the layer that baked renders what the loop showed")
+        XCTAssertNotEqual(try composite(manager, frame: 3, showing: fader), loopedFrameThree,
+                          "The Repeat is gone, so the layer it left no longer loops")
+    }
+
+    /// **Nothing bakeable is still a refusal**, and it names the layer — the Repeat layer is kept.
+    func testWhenNoLayerCanTakeTheLoopTheBakeIsRefusedAndNamesThem() throws {
+        let fx = walkerUnderALoop()
+        fadeIn(fx.manager, fx.walker)
+        XCTAssertEqual(walkedOpacity(fx.manager, fx.walker, atFrame: 3) ?? -1, 0.2, accuracy: 1e-9,
+                       "Premise: the loop repeats the fade")
+        let before = try scene(fx.manager)
+
+        let refused = fx.manager.bakeLayer(id: fx.loop)
+        XCTAssertEqual(refused, .refused(.nothingToBake([leftover("Walker")])))
         XCTAssertEqual(fx.manager.layers.count, 2, "The Repeat layer is kept")
-        guard case .bakeRefused? = fx.manager.notice?.kind else { return XCTFail("A refusal says so") }
+        guard case .bakeRefused(let refusal)? = fx.manager.notice?.kind else { return XCTFail("A refusal says so") }
+        XCTAssertTrue(refusal.phrase.contains("Walker"), "The refusal names the layer: \(refusal.phrase)")
         assertSameScene(try scene(fx.manager), before, "nothing changed")
+    }
+
+    /// **A group's own fade reaches every layer in it, and a layer's fade reaches only that layer.** The
+    /// "Fading" group is keyed, so both its layers are left; in the "Plain" group only the layer whose own
+    /// opacity is keyed is, and its neighbour bakes with the layer outside any group.
+    func testAGroupsOwnFadeReachesEveryLayerInItButNotItsNeighbours() throws {
+        let manager = document()
+        let blocks = [(start: 0, length: 1), (start: 1, length: 1), (start: 2, length: 10)]
+        let inFading = [addDrawings(manager, "FadeOne", blocks: blocks), addDrawings(manager, "FadeTwo", blocks: blocks)]
+        let steady = addDrawings(manager, "Steady", blocks: blocks)
+        let ownFade = addDrawings(manager, "OwnFade", blocks: blocks)
+        let outside = addDrawings(manager, "Outside", blocks: blocks)
+        fadeIn(manager, ownFade)
+        let loop = addLoop(manager, period: 3)
+
+        let fading = manager.addFolder(name: "Fading")
+        let plain = manager.addFolder(name: "Plain")
+        for id in inFading { manager.layers[index(id, manager)].parentFolderID = fading }
+        for id in [steady, ownFade] { manager.layers[index(id, manager)].parentFolderID = plain }
+        for group in [fading, plain] { manager.restackFolder(group, above: .bottom, parentFolderID: nil) }
+        let fadingAt = manager.folders.firstIndex { $0.id == fading }!
+        manager.folders[fadingAt].channelTracks[TargetChannel.opacity.id] =
+            AnimationCurve(keys: [.init(frame: 0, value: 0.2), .init(frame: 2, value: 1)])
+        hide(manager, inFading[0], inFading[1], ownFade)
+        let before = try scene(manager)
+        XCTAssertEqual(before[4], before[1], "Premise: the loop reaches into the groups")
+
+        guard case .plan(let plan) = manager.bakePlan(forLayerID: loop) else { return XCTFail("The others bake") }
+        XCTAssertEqual(Set(plan.layers.map(\.name)), ["Steady", "Outside"])
+        XCTAssertEqual(plan.leftovers.map(\.name).sorted(), ["FadeOne", "FadeTwo", "OwnFade"])
+        XCTAssertTrue(plan.leftovers.allSatisfy { $0.reason == .loopsMoreThanDrawings })
+        XCTAssertNotNil(bake(manager, loop))
+        XCTAssertEqual(layout(manager, steady), (0..<12).map { [$0, 1] })
+        XCTAssertEqual(layout(manager, outside), (0..<12).map { [$0, 1] })
+        XCTAssertEqual(layout(manager, ownFade), [[0, 1], [1, 1], [2, 10]], "Left as it was")
+        XCTAssertEqual(layout(manager, inFading[0]), [[0, 1], [1, 1], [2, 10]], "Left as it was")
+        assertSameScene(try scene(manager), before, "the layers that baked render what the loop showed")
+    }
+
+    /// **A Move the loop repeats is more than drawings too** — the Slide under the Repeat is read at the
+    /// first cycle's frames, so the layer it slides is posed differently with the loop than without it.
+    /// That layer is left; the one above the Slide, which it never moved, bakes — and a grade the Slide
+    /// moves is not named, because a grade is moved by nothing.
+    func testALayerAMoveTheLoopRepeatsSlidesIsLeftAsItWas() throws {
+        let manager = document()
+        let slid = addDrawings(manager, "Slid", blocks: [(0, 1), (1, 1), (2, 10)])
+        manager.addValueLayer(effect: .hsvShift(Effect.HSVShift(hueDegrees: 120)), name: "Grade")
+        addSlide(manager, by: 24)
+        let steady = addDrawings(manager, "Steady", blocks: [(0, 1), (1, 1), (2, 10)])
+        let loop = addLoop(manager, period: 3)
+        XCTAssertEqual(manager.layers.map(\.name), ["Slid", "Grade", "Slide", "Steady", "Loop"],
+                       "Premise: the Slide is between")
+        hide(manager, slid)
+        let before = try scene(manager)
+        XCTAssertEqual(before[4], before[1], "Premise: the loop is running")
+
+        guard case .plan(let plan) = manager.bakePlan(forLayerID: loop) else { return XCTFail("Steady bakes") }
+        XCTAssertEqual(plan.layers.map(\.name), ["Steady"])
+        XCTAssertEqual(plan.leftovers, [leftover("Slid")], "The Slide itself holds no drawing, so only the layer it moves is named")
+        XCTAssertNotNil(bake(manager, loop))
+        XCTAssertEqual(layout(manager, steady), (0..<12).map { [$0, 1] })
+        XCTAssertEqual(layout(manager, slid), [[0, 1], [1, 1], [2, 10]], "Left as it was")
+        assertSameScene(try scene(manager), before, "the layer the Slide does not move renders what the loop showed")
+    }
+
+    /// **A Move that holds still is nothing the loop repeats**, so the layer under it bakes whole and the
+    /// Move layer stays.
+    func testAMoveThatHoldsStillUnderTheLoopDoesNotStopTheBake() throws {
+        let manager = document()
+        let walker = addDrawings(manager, "Walker", blocks: [(0, 1), (1, 1), (2, 10)])
+        let move = addMove(manager, CGAffineTransform(translationX: 12, y: 0))
+        let loop = addLoop(manager, period: 3)
+        let before = try scene(manager)
+        XCTAssertEqual(before[4], before[1], "Premise: the loop is running, under a Move")
+
+        XCTAssertNotNil(bake(manager, loop))
+        XCTAssertEqual(manager.layers.map(\.id), [walker, move])
+        XCTAssertEqual(layout(manager, walker), (0..<12).map { [$0, 1] })
+        XCTAssertNil(manager.notice, "Nothing was left, so nothing is said")
+        assertSameScene(try scene(manager), before, "still moved, and still looped")
+    }
+
+    /// **A grade the loop carries past its bar is more than drawings, and is named**: the drawings under
+    /// it still bake, and it is the grade that stops. (A grade has no drawing of its own to write out.)
+    func testAGradeTheLoopKeepsOnPastItsBarIsNamedWhileTheDrawingsUnderItBake() throws {
+        let manager = document()
+        let walker = addDrawings(manager, "Walker", blocks: [(0, 1), (1, 1), (2, 10)])
+        manager.addValueLayer(effect: .hsvShift(Effect.HSVShift(hueDegrees: 120)), name: "Grade")
+        let grade = manager.layers.firstIndex { $0.name == "Grade" }!
+        CanvasFixture.setCelLayout(manager, layerIndex: grade, [(start: 0, length: 3)])
+        let loop = addLoop(manager, period: 3)
+        hide(manager, manager.layers[grade].id)
+        let before = try scene(manager)
+        XCTAssertEqual(before[4], before[1], "Premise: the loop is running")
+
+        guard case .plan(let plan) = manager.bakePlan(forLayerID: loop) else { return XCTFail("The walker bakes") }
+        XCTAssertEqual(plan.layers.map(\.name), ["Walker"])
+        XCTAssertEqual(plan.leftovers, [leftover("Grade")])
+        XCTAssertNotNil(bake(manager, loop))
+        XCTAssertEqual(layout(manager, walker), (0..<12).map { [$0, 1] })
+        assertSameScene(try scene(manager), before, "the drawings render what the loop showed")
     }
 
     /// A layer whose only drawing the loop hid, and showed nothing in, keeps one blank cel — a layer

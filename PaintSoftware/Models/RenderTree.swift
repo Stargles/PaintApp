@@ -301,6 +301,14 @@ extension RenderNode {
         }
     }
 
+    /// **Whether this node does the same to what it holds as `other` does**, whatever either holds —
+    /// opacity, mode, isolation, masks and grade. What `leafLayerIndices(differingFrom:)` asks of a
+    /// group, so that a group whose own parameters moved is told from one whose contents did.
+    func actsAlike(_ other: RenderNode) -> Bool {
+        RenderNode(id: id, content: other.content, opacity: opacity, isVisible: isVisible,
+                   blendMode: blendMode, isIsolated: isIsolated, masks: masks, effect: effect) == other
+    }
+
     /// This node and everything under it, switched on — §6.6's "a mask ignores its source's
     /// visibility", applied where a mask source stack is built (`maskSourceStacks(of:)`).
     ///
@@ -411,6 +419,27 @@ extension Array where Element == RenderNode {
     /// is, once the tree is flattened back down.
     var leafLayerIndices: [Int] {
         flatMap(\.leafLayerIndices)
+    }
+
+    /// **The `layers` index of every leaf `other` draws differently from this stack** — two walks of one
+    /// document, which have the same shape and differ only in what a frame resolves to (`excluded`, or a
+    /// Repeat's source frame). A leaf differs when its own node does, and so does every leaf under a
+    /// group whose own opacity, mode, masks or grade differ: the group's parameter reaches all of them.
+    /// A group whose contents alone differ names only the leaves that do.
+    func leafLayerIndices(differingFrom other: [RenderNode]) -> Set<Int> {
+        var differing: Set<Int> = []
+        for (node, counterpart) in zip(self, other) where node != counterpart {
+            guard node.actsAlike(counterpart) else {
+                differing.formUnion(node.leafLayerIndices)
+                continue
+            }
+            if case .node(_, let inputs) = node.content, case .node(_, let otherInputs) = counterpart.content {
+                for (input, otherInput) in zip(inputs, otherInputs) {
+                    differing.formUnion(input.leafLayerIndices(differingFrom: otherInput))
+                }
+            }
+        }
+        return differing
     }
 
     /// **Whether Core Animation's flat row of sibling views can still express this tree**, which is

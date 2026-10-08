@@ -271,9 +271,7 @@ extension CanvasManager {
             planOperation(of: bakerIndex, over: scope, into: &plan)
         case .transform:
             if let pose = baker.layerTransform, pose.repeats {
-                if let refusal = planLoop(of: bakerIndex, period: pose.repeatPeriod, over: scope, into: &plan) {
-                    return .refused(refusal)
-                }
+                planLoop(of: bakerIndex, period: pose.repeatPeriod, over: scope, into: &plan)
             } else {
                 planPose(of: bakerIndex, over: scope, into: &plan)
             }
@@ -455,10 +453,12 @@ extension CanvasManager {
     /// layer *i* is read at with the loop, and the cel it holds there against the cel it holds at *f*
     /// itself — which is what it will show once the loop is gone — is the whole of the treatment.
     ///
-    /// **Exact, or refused.** A cel is all a drawing layer can carry, so the bake is right only if the loop
-    /// changes nothing else: the two walks must agree on the tree (opacity, grade, masks) and on every
-    /// pose on each looped frame. Where they do not — an opacity fading in over the first cycle, a Move
-    /// the loop repeats — the loop repeats more than drawings, and baking would quietly play it once.
+    /// **Exact, or left as it was — layer by layer.** A cel is all a drawing layer can carry, so a layer
+    /// bakes only if the loop repeats nothing else of it: the two walks must agree on its node (opacity,
+    /// grade, masks), on the nodes of the groups it sits in, and on its pose, on each looped frame. Where
+    /// they do not — an opacity fading in over the first cycle, a Move the loop repeats — baking would
+    /// quietly play it once, so that layer is left (`.loopsMoreThanDrawings`) and the rest bakes. The
+    /// Repeat layer goes all the same, as an effect layer does, so a layer left stops looping.
     ///
     /// - A **still** is one picture whatever frame is read, so the same cel on consecutive frames is one
     ///   run. A cel a pose channel moves is read at its own frames, so its run carries the offset and is
@@ -470,7 +470,7 @@ extension CanvasManager {
     ///   was, bake the nearer Repeat first.
     /// - A Repeat that is itself read at another frame (under a Repeat above it) writes nothing there.
     private func planLoop(of bakerIndex: Int, period: Int, over scope: [BakeScoped],
-                          into plan: inout BakePlan) -> BakeRefusal? {
+                          into plan: inout BakePlan) {
         let bakerID = layers[bakerIndex].id
         // Each block's frames after its first cycle: the first is the identity (§5.5), so nothing to write.
         let stretches = layers[bakerIndex].cels.compactMap { cel -> Range<Int>? in
@@ -488,20 +488,29 @@ extension CanvasManager {
             return both
         }
 
+        // The layers the loop shows differently in more than the frame it reads them at.
+        var repeatsMore: Set<Int> = []
         for frame in stretches.joined() {
             guard let walk = walks(atFrame: frame) else { continue }
-            if walk.with.tree != walk.without.tree || walk.with.poses != walk.without.poses {
-                return .loopsMoreThanDrawings
-            }
+            repeatsMore.formUnion(walk.with.tree.leafLayerIndices(differingFrom: walk.without.tree))
+            // A pose is carried by geometry; a layer that holds none is moved by nothing.
+            let posed = Set(walk.with.poses.keys).union(walk.without.poses.keys)
+                .filter { layers[$0].kind.holdsPixels }
+            repeatsMore.formUnion(posed.filter { walk.with.poses[$0] != walk.without.poses[$0] })
         }
 
         for (index, shadow) in scope {
             let layer = layers[index]
-            // A drawing, or a flat colour whose blocks are what gate it: a pose layer and a grade hold no
-            // drawing to show again, and the walks already agreed on what they do.
-            guard layer.kind.holdsPixels || layer.valueFill != nil else { continue }
+            // A drawing, or a flat colour whose blocks are what gate it. A pose layer holds nothing to show
+            // again — what it does under the loop is in the poses of the layers it moves — and a grade is
+            // spoken of only when the loop changes it.
+            guard layer.kind.holdsPixels || layer.valueFill != nil || repeatsMore.contains(index) else { continue }
             if let name = shadow.repeated {
                 plan.leftovers.append(BakeLeftover(name: layer.name, reason: .underARepeat(name)))
+                continue
+            }
+            if repeatsMore.contains(index) {
+                plan.leftovers.append(BakeLeftover(name: layer.name, reason: .loopsMoreThanDrawings))
                 continue
             }
 
@@ -531,7 +540,6 @@ extension CanvasManager {
                                          medium: layer.kind == .vector ? .ink : .pixels(rasterizes: false),
                                          cels: [], loop: loop))
         }
-        return nil
     }
 
     /// Why a layer cannot take `loop` exactly, if it cannot — nil when every run can be written.

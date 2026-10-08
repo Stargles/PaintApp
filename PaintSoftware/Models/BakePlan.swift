@@ -192,6 +192,9 @@ extension CanvasManager {
             case cannotTakeColour
             /// A video or a live stream cannot be copied onto the frames a loop repeats it over.
             case cannotBeCopied
+            /// A Repeat also loops this layer's opacity, grade or move — or those of a group it sits in —
+            /// and a drawing cannot carry them.
+            case loopsMoreThanDrawings
             /// An effect that needs pixels has nothing to act on in a single flat colour.
             case flatColourNeedsAColourEffect
             /// A drawing laid between two others, shown by the two it is between rather than stored.
@@ -211,6 +214,8 @@ extension CanvasManager {
                 case .partlyCovered: return "the layer only covers part of it"
                 case .cannotTakeColour: return "a video or a stream in it can't take the effect"
                 case .cannotBeCopied: return "a video or a stream in it can't be copied"
+                case .loopsMoreThanDrawings:
+                    return "the loop also repeats its opacity, grade or move, which drawings can't carry"
                 case .flatColourNeedsAColourEffect: return "this effect can't be applied to one flat colour"
                 case .inBetween: return "it is an in-between, which is worked out from the drawings either side"
                 case .cannotBeCarried: return "the pose squashes it flat"
@@ -221,6 +226,9 @@ extension CanvasManager {
 
         var name: String
         var reason: Reason
+
+        /// The layer and why, in the artist's words — what a notice lists.
+        var phrase: String { "\(name) (\(reason.phrase))" }
     }
 
     /// Why a bake did not run — the artist's own terms, `PoseBakeRefusal`'s shape.
@@ -238,9 +246,6 @@ extension CanvasManager {
         case nothingBeneath
         /// Everything beneath it was either outside its frames or left as it was.
         case nothingToBake([BakeLeftover])
-        /// A Repeat layer's loop repeats more than the drawings under it — an opacity, a grade, a pose —
-        /// and drawings alone cannot carry that.
-        case loopsMoreThanDrawings
 
         var phrase: String {
             switch self {
@@ -249,10 +254,10 @@ extension CanvasManager {
             case .partialCoverage: return "this layer has a mask, so it reaches only part of what is beneath it"
             case .insideACombiner: return "a layer inside a combiner acts on nothing"
             case .nothingBeneath: return "there is nothing beneath this layer"
-            case .nothingToBake: return "it has nothing to change in the layers beneath it"
-            case .loopsMoreThanDrawings:
-                return "something under this Repeat also changes over time — an opacity, a grade or a move — "
-                    + "and the loop repeats that too, which drawings can't carry"
+            case .nothingToBake(let leftovers):
+                return leftovers.isEmpty
+                    ? "it has nothing to change in the layers beneath it"
+                    : "nothing beneath it could take it: \(leftovers.map(\.phrase).joined(separator: ", "))"
             }
         }
     }

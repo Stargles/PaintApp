@@ -481,10 +481,13 @@ Bake's shared core (`CanvasManager+Bake.swift`) with a time remap for its treatm
 the first cycle each layer beneath gets, as a cel of its own, a copy of the drawing the loop showed there
 (`planLoop` reads it off the render walk with the Repeat and without it, `replay` writes it), runs showing
 one drawing stay one cel, what the loop hid under its bar is replaced, and the Repeat layer goes — one undo
-step, behind the count-and-cost prompt. **Exact, or refused**: a cel is all a drawing layer can carry, so a
-loop that also repeats an opacity, a grade or a pose under it (the walks differ in more than `frames`) is
-refused, and an animated drawing that a cut would re-ease, one the loop enters partway, a video, and a layer
-under a second Repeat are left as they were and named in the notice.
+step, behind the count-and-cost prompt. **Exact, or left as it was — layer by layer** (the owner's *"Bake
+the rest"*): a cel is all a drawing layer can carry, so a layer whose opacity, grade or pose the loop also
+repeats — its own, or a group's it sits in, read off where the two walks differ — is left, as are an
+animated drawing that a cut would re-ease, one the loop enters partway, a video, and a layer under a second
+Repeat, each named in the notice; the rest bakes. The Repeat layer goes all the same, as an effect layer
+does with a layer it left, so a layer left stops looping. Only when nothing could bake is the Repeat kept,
+and the refusal names the layers.
 
 ### 5.6 Duplicate offset
 
