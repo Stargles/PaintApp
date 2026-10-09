@@ -43,11 +43,11 @@ run `tools/windows/streamer-remote.sh deploy` the next time the laptop is on.
 "Later" features (28) audio, (30) video editor, (35) masks, each needing a design conversation first.
 
 **Owner-side, in order:**
-1. **Feel `2974b33`** — the brief's ~40 asks are on the device unfelt. Drive the old things too (play a
-   scene, pan from the grey, a Move node release, draw). Specifically ask: how (132)'s held stroke ends feel
-   on a direction-following brush (the ink trails the pen by up to a quarter of the brush width) and
-   whether a live stroke's interior wants smoothing; whether **folder Move** lags on the iPad ((136) did not
-   reproduce in the simulator); whether a newly placed gradient should keep opening its colour panel.
+1. **The owner has `2974b33` and reports *"feedback is all good so far"* (2026-10-08).** Still unasked, for
+   whenever they come up: how (132)'s held stroke ends feel on a direction-following brush (the ink trails
+   the pen by up to a quarter of the brush width) and whether a live stroke's interior wants smoothing;
+   whether **folder Move** lags on the iPad ((136) did not reproduce in the simulator); whether a newly
+   placed gradient should keep opening its colour panel.
 2. **(27) stage 5** — stream Blender on the real link, latency, the device tick, Ctrl+V (the
    stream-under-blend limitation is ruled: live then exact when still).
 
@@ -84,6 +84,6 @@ decisions most likely to be tripped over:
 
 ## Waiting on the owner
 
-- The device checks above.
+- What to pick up next (the queue above), and the unasked device checks.
 - Granting Xcode Full Disk Access would let builds run from `~/Desktop` again.
 - **XCUITest cannot synthesise a Pencil**; the owner has granted device build and deploy.
