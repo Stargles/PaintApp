@@ -1171,14 +1171,17 @@ struct CanvasView: UIViewRepresentable {
         //                since RENDER.md §3.6 stage 4d, composited by `FrameBaker` on its own queue
         //                and read back off disk rather than composited here. A frame that is not
         //                baked yet is a miss, and a miss leaves the previous picture up (§2.10).
-        //   mid-stroke   `composite(below)` | the active layer's live host | `composite(above)`.
+        //   mid-stroke   `composite(below)` | the active layer's live host | `composite(above)` —
+        //                or, where a layer above blends or grades, one composite of everything
+        //                but the live hosts with the hosts drawn over it (`LivePairCut.overHost`).
         //
-        // Both halves of the mid-stroke picture are approximations and both are deliberate for this
-        // phase: the active layer's own mode degrades to normal because Core Animation is what draws
-        // that view, and a layer *above* it degrades too because a texture composited onto
-        // transparency has no backdrop left to blend against. `SandwichLogicTests` pins the exact
-        // measured deltas (127, 127, 64) so that a later session cannot come to believe the
-        // mid-stroke path is exact. Lift is what snaps it back to the baked frame.
+        // The mid-stroke picture is an approximation, deliberately: the active layer's own mode
+        // degrades to normal because Core Animation is what draws that view. A layer *above* it used
+        // to degrade too, because a texture composited onto transparency has no backdrop left to
+        // blend against — `SandwichLogicTests` pins those deltas (127, 127, 64) for the cut around
+        // the host — and since TODO (160) such a layer sends the hosts over one exact picture of the
+        // rest instead, where it is drawn as it is at rest and the stroke is drawn over it. Lift is
+        // what snaps it back to the baked frame.
         //
         // Both are cached, so switching state is an image swap — which is what lets the switch
         // happen on a stroke's first touch without a hitch, and what keeps the compositor off the
@@ -1197,12 +1200,6 @@ struct CanvasView: UIViewRepresentable {
         /// so it lives beside `makeSandwichRecipe` where `SandwichLogicTests` can reach it. That is
         /// also where its clauses, and the 2026-08-29 removal of the in-between one, are written down.
         /// Nothing but the call is left here.
-        ///
-        /// **The price of disengaging is more than the blend mode**, which is worth knowing at the
-        /// call site: `updateSandwich`'s disengage branch also calls `host.setContentMask(nil)`, so
-        /// §6.4's alpha-mask *clipping* comes off the canvas for as long as a piece floats. A clip
-        /// lost is more visible than a blend lost, and the trade is still the right way round — an
-        /// unclipped picture of the artwork beats no picture of it.
         private func isSandwichEngaged(_ tree: [RenderNode]) -> Bool {
             canvasManager.sandwichEngagesOnCanvas(tree: tree)
         }
@@ -1779,7 +1776,8 @@ struct CanvasView: UIViewRepresentable {
             let presentation = SandwichPresentation.next(
                 from: sandwichPresentation,
                 live: .init(stroke: isSandwichStrokeLive, transformEdit: edit != nil,
-                            stream: !canvasManager.streamLayerIndices().isEmpty),
+                            stream: !canvasManager.streamLayerIndices().isEmpty,
+                            float: !canvasManager.floatHostLayerIndices.isEmpty),
                 held: .init(bakeIsCurrent: sandwichFullKey == key,
                             livePair: LivePairFit(held: livePicture.map { (key: $0.key, cut: $0.cut) },
                                                   key: key, cut: cut),
@@ -1799,11 +1797,12 @@ struct CanvasView: UIViewRepresentable {
                 if aboveView.image !== picture.above { aboveView.image = picture.above }
                 showMovingBands(picture, editIsLive: edit != nil)
             case .live, .midStroke:
-                guard let picture = livePicture, case .aroundHost = picture.cut,
-                      let below = picture.below, let above = picture.above
+                // Around the hosts, `above` is the upper half; over them (`LivePairCut.overHost`) the
+                // one picture is the whole rest of the frame and there is no upper half to show.
+                guard let picture = livePicture, picture.cut.hostLayerIDs != nil, let below = picture.below
                 else { return paperIsNowPaintedBy(false) }
                 if belowView.image !== below { belowView.image = below }
-                if aboveView.image !== above { aboveView.image = above }
+                if aboveView.image !== picture.above { aboveView.image = picture.above }
             case .rest, .disengaged:
                 guard let full = sandwichFull else { return paperIsNowPaintedBy(false) }
                 if belowView.image !== full { belowView.image = full }
@@ -1817,12 +1816,14 @@ struct CanvasView: UIViewRepresentable {
                 for view in bandViews where view.image != nil { view.image = nil; view.isHidden = true }
             }
             if belowView.isHidden { belowView.isHidden = false }
-            let showsAbove = live || presentation == .moving
+            let showsAbove = (live || presentation == .moving) && aboveView.image != nil
             if aboveView.isHidden != !showsAbove { aboveView.isHidden = !showsAbove }
 
             // The hosts the pair is cut around are its middle and the only ones that draw themselves —
-            // the active layer, and a stream's layer with whatever lies between (`liveHostRun`);
-            // everything else is in one of the two composites already. At rest even they are
+            // the active layer, every stream's layer and every floating piece's, with whatever lies
+            // between (`liveHostRun`); everything else is in the composite already, in one of the two
+            // halves or, over them, in the one picture beneath. Over them they draw above every
+            // other host as well as above that picture, since every other host is blanked. At rest even they are
             // blanked, because `full` includes them, and under a transform edit every host is,
             // because every leaf is in one of the bands.
             //
@@ -1831,9 +1832,7 @@ struct CanvasView: UIViewRepresentable {
             // grade — until its bake lands: the owner's ruling for the fast picture (TODO (125),
             // `SandwichPresentation.live`).
             var drawnByHosts: Set<UUID> = []
-            if live, let picture = livePicture, case .aroundHost(_, let ids) = picture.cut {
-                drawnByHosts = Set(ids)
-            }
+            if live, let ids = livePicture?.cut.hostLayerIDs { drawnByHosts = Set(ids) }
             let mask = presentation == .midStroke ? liveMaskImage : nil
             for (id, host) in layerHosts {
                 let drawsItself = live && (id == activeID || drawnByHosts.contains(id))
@@ -1863,7 +1862,7 @@ struct CanvasView: UIViewRepresentable {
         }
 
         /// **Where the live picture should be cut this pass**: around the runs `edit` moves, by id,
-        /// or around the hosts that draw (`CanvasManager.liveHostRun`).
+        /// or at the hosts that draw (`hostCut`).
         private func wantedLiveCut(for edit: LiveTransformEdit?, tree: [RenderNode]? = nil) -> LivePairCut? {
             let frame = canvasManager.currentFrame
             if let edit {
@@ -1871,9 +1870,21 @@ struct CanvasView: UIViewRepresentable {
                 return .aroundRuns(canvasManager.liveTransformRuns(edit, atFrame: frame, tree: tree)
                     .map { run in run.map { layers[$0].id } })
             }
-            let run = canvasManager.liveHostRun(tree: tree ?? canvasManager.renderTree(atFrame: frame))
+            return hostCut(in: tree ?? canvasManager.renderTree(atFrame: frame))?.cut
+        }
+
+        /// **The pair's cut at the hosts that draw themselves** (`CanvasManager.liveHostRun`) and the
+        /// run it was made from: between two halves where the layers above them composite onto
+        /// transparency exactly, over one picture of the rest of the frame where they do not
+        /// (`CanvasManager.liveHostsSitBetweenTheHalves`, TODO (160)). Nil when no host draws.
+        private func hostCut(in tree: [RenderNode]) -> (cut: LivePairCut, run: [Int])? {
+            let run = canvasManager.liveHostRun(tree: tree)
             guard !run.isEmpty else { return nil }
-            return .aroundHost(frame: frame, layerIDs: run.map { canvasManager.layers[$0].id })
+            let frame = canvasManager.currentFrame
+            let ids = run.map { canvasManager.layers[$0].id }
+            return canvasManager.liveHostsSitBetweenTheHalves(run, in: tree)
+                ? (.aroundHost(frame: frame, layerIDs: ids), run)
+                : (.overHost(frame: frame, layerIDs: ids), run)
         }
 
         /// **A transform edit's bands, on screen and re-posed to where the model has the edit now** —
@@ -2222,14 +2233,17 @@ struct CanvasView: UIViewRepresentable {
                     active: [])
             } else {
                 let walk = canvasManager.renderTreeAndPoses(atFrame: frame)
-                let run = canvasManager.liveHostRun(tree: walk.tree)
-                guard !run.isEmpty, let recipe = canvasManager.makeSandwichRecipe(atFrame: frame, runs: [run])
-                else { return }
+                guard let host = hostCut(in: walk.tree) else { return }
+                let recipe: SandwichRecipe?
+                if case .overHost = host.cut {
+                    recipe = canvasManager.makeSandwichRecipe(atFrame: frame, over: host.run)
+                } else {
+                    recipe = canvasManager.makeSandwichRecipe(atFrame: frame, runs: [host.run])
+                }
+                guard let recipe else { return }
                 mint = LivePictureMint(
-                    key: key, frame: frame, recipe: recipe,
-                    cut: .aroundHost(frame: frame, layerIDs: run.map { canvasManager.layers[$0].id }),
-                    edit: nil, mintMaps: [],
-                    active: run.compactMap { liveActivePicture(ofLayerAt: $0, in: walk) })
+                    key: key, frame: frame, recipe: recipe, cut: host.cut, edit: nil, mintMaps: [],
+                    active: host.run.compactMap { liveActivePicture(ofLayerAt: $0, in: walk) })
             }
 
             isSandwichRebuilding = true
@@ -2716,14 +2730,14 @@ struct CanvasView: UIViewRepresentable {
                                     isInteractive: canvasTouchInputs().floatingOverlayIsInteractive)
             guard let overlay = floatingOverlay, let container = containerView else { return }
 
-            // A piece lifted by the Move tool still belongs to its source layer, so it renders in
-            // that layer's stack position rather than floating above everything above it. Every
-            // other case puts it back at the front, or the overlay would stay wedged below.
+            // A piece lifted by the Move tool still belongs to its source layer, so it renders just
+            // over that layer's host — the hole it came out of — rather than floating above everything
+            // above it: between the halves that is the layer's stack position, and over the rest of the
+            // frame (`LivePairCut.overHost`) it is over the picture with the host. Every other case puts
+            // it back at the front, or the overlay would stay wedged below.
             if let piece = canvasManager.floatingPiece, piece.kind == .move,
-               let sourceIndex = canvasManager.layers.firstIndex(where: { $0.id == piece.sourceLayerID }),
-               sourceIndex + 1 < canvasManager.layers.count,
-               let hostAbove = layerHosts[canvasManager.layers[sourceIndex + 1].id] {
-                container.insertSubview(overlay, belowSubview: hostAbove)
+               let sourceHost = layerHosts[piece.sourceLayerID] {
+                container.insertSubview(overlay, aboveSubview: sourceHost)
             } else {
                 container.bringSubviewToFront(overlay)
             }

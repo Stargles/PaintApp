@@ -9,11 +9,12 @@ import UIKit
 /// the live picture and nothing else — a different product from the bake, keyed additionally
 /// by where the tree is cut, and transient rather than stored.
 ///
-/// **Two cuts, one product** (TODO (125)). Cut around the host, it is two thirds of the live
-/// pair (TODO 145) and only makes a picture with the layer it was cut around: the third, the
-/// active layer's own picture, went to its host in the same main-thread turn
-/// (`finishSandwichRebuild`). Cut around a transform edit's runs, it is every band of the
-/// frame, the moving ones re-posed per update from `mintMaps` (`showMovingBands`).
+/// **Three cuts, one product** (TODO (125), TODO (160)). Cut around the hosts, it is two thirds of
+/// the live pair (TODO 145) and only makes a picture with the layers it was cut around: the third,
+/// their own pictures, went to their hosts in the same main-thread turn (`finishSandwichRebuild`).
+/// Cut over the hosts, it is one band — the frame without them — and the hosts draw over it. Cut
+/// around a transform edit's runs, it is every band of the frame, the moving ones re-posed per
+/// update from `mintMaps` (`showMovingBands`).
 struct LivePicture {
     /// The `SandwichKey` the bands were minted at. Stale bands are still shown — at most one
     /// edit behind — while the rebuild that replaces them runs.
@@ -23,7 +24,8 @@ struct LivePicture {
     /// scrub after the finger lifts.
     let frame: Int
     /// One image per band, bottom-to-top; nil for a band the cut left empty, and for the run a
-    /// host draws (a cut around the host composites only its two halves).
+    /// host draws (a cut around the host composites only its two halves). One image for a cut over
+    /// the hosts, so `above` is nil there.
     let bands: [UIImage?]
     /// A transform edit's bands only: the edit, and the map each run's ink was shown through
     /// at the mint (`CanvasManager.liveTransformMaps`) — what each moving band's transform is
@@ -126,8 +128,10 @@ struct LivePictureMint {
         // stroke. A document that fits takes the identical path it took before: one composite per
         // band, unwindowed, unchunked.
         let bands: [CGImage?]? = PlaybackTrace.span(.sandwichComposite) {
-            if case .aroundRuns = cut { return recipe.compositeBands() }
-            return recipe.compositeHalves().map { [$0.below, nil, $0.above] }
+            switch cut {
+            case .aroundRuns, .overHost: return recipe.compositeBands()
+            case .aroundHost: return recipe.compositeHalves().map { [$0.below, nil, $0.above] }
+            }
         }
         // **The third picture of the pair, on the same queue and for the same key** — see
         // `LiveActivePicture`. After the halves, so a pair is never waiting on a half.

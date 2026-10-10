@@ -219,58 +219,5 @@ final class SelectionEditUITests: PaintUITestCase {
         attachScreenshot(app, "3-undone-red-again")
     }
 
-    // MARK: - Sampling the screen while a gesture is in flight
-
-    /// Reads screen pixels from a background thread while the test's main thread is blocked inside a
-    /// synchronous `press(forDuration:thenDragTo:…)`. `XCUIScreen.main.screenshot()` is what makes
-    /// that possible: it asks the device for its framebuffer rather than resolving any element, so it
-    /// does not contend with the gesture being synthesised. Points are in screen coordinates.
-    private final class MidGestureSampler {
-        typealias Sample = (finished: CFAbsoluteTime, pixels: [RGBA?])
-        private let points: [CGPoint]
-        private var stopped = false
-        private var samples: [Sample] = []
-        private let lock = NSLock()
-        private let group = DispatchGroup()
-
-        init(points: [CGPoint]) { self.points = points }
-
-        func start() {
-            group.enter()
-            DispatchQueue.global(qos: .userInitiated).async { [self] in
-                defer { group.leave() }
-                while true {
-                    lock.lock(); let done = stopped; lock.unlock()
-                    if done { return }
-                    let image = XCUIScreen.main.screenshot().image
-                    let finished = CFAbsoluteTimeGetCurrent()
-                    let read = points.map { Self.pixel(in: image, at: $0) }
-                    lock.lock(); samples.append((finished, read)); lock.unlock()
-                    Thread.sleep(forTimeInterval: 0.2)
-                }
-            }
-        }
-
-        func stop() -> [Sample] {
-            lock.lock(); stopped = true; lock.unlock()
-            group.wait()
-            return samples
-        }
-
-        private static func pixel(in image: UIImage, at point: CGPoint) -> RGBA? {
-            guard let cg = image.cgImage else { return nil }
-            let scale = image.scale
-            let x = Int(point.x * scale), y = Int(point.y * scale)
-            guard x >= 0, y >= 0, x < cg.width, y < cg.height else { return nil }
-            var buffer = [UInt8](repeating: 0, count: 4)
-            guard let context = CGContext(data: &buffer, width: 1, height: 1, bitsPerComponent: 8,
-                                          bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(),
-                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
-            else { return nil }
-            context.draw(cg, in: CGRect(x: -x, y: -(cg.height - 1 - y), width: cg.width, height: cg.height))
-            return (buffer[0], buffer[1], buffer[2], buffer[3])
-        }
-    }
-
     // MARK: - Driving the colour swatch
 }

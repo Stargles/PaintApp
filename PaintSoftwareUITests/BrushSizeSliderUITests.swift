@@ -228,7 +228,7 @@ final class BrushSizeSliderUITests: PaintUITestCase {
     // better: two concurrently-injected gestures need two threads each driving an `XCUIElement`
     // interaction, and MEASURED directly (an earlier version of this file), that crashes the whole
     // test runner — `XCActivityRecord` assertion, "Activity cannot be used after its scope has
-    // completed" — not merely fails to reproduce the bug. `SelectionEditUITests.MidGestureSampler`'s
+    // completed" — not merely fails to reproduce the bug. `PaintUITestCase.MidGestureSampler`'s
     // own concurrent-thread technique is safe only because it reads `XCUIScreen.main.screenshot()`,
     // which touches the device rather than an element; nothing in this app's XCUITest surface offers
     // an equivalent safe way to *inject* a second touch. The fix is proven instead by

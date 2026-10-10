@@ -78,8 +78,8 @@ enum SandwichPresentation: String {
     /// - Otherwise a bake for this key is the whole truth, and wins.
     /// - Otherwise a transform edit's bands stay up, after the finger has lifted, while they are of
     ///   this frame — until the bake or the live pair minted for the result replaces them.
-    /// - **A stream on the frame keeps the canvas on the pair** whatever the bake says: no bake
-    ///   contains the stream, so it is never the picture to wait for. The pair is shown once it is
+    /// - **A stream or a floating piece on the frame keeps the canvas on the pair** whatever the bake
+    ///   says: no bake contains either, so it is never the picture to wait for. The pair is shown once it is
     ///   current, kept while it is stale, and a lifted stroke leaves `.midStroke` for `.live` the
     ///   moment its pair is current rather than when a bake lands. A pair cut around other hosts at
     ///   this frame (`.regrouped`) is kept on screen until the new cut's pair lands.
@@ -101,7 +101,7 @@ enum SandwichPresentation: String {
             case .none, .regrouped: return .rest
             }
         }
-        if held.bakeIsCurrent, !live.stream { return .rest }
+        if held.bakeIsCurrent, !live.drawnByHostsAlone { return .rest }
         if current == .moving, held.bandsOfThisFrame { return .moving }
         switch held.livePair {
         case .none:
@@ -109,7 +109,7 @@ enum SandwichPresentation: String {
         case .regrouped:
             return live.stream && current.activeHostDrawsItself ? current : .rest
         case .stale, .current:
-            if current == .midStroke, !(live.stream && held.livePair == .current) { return .midStroke }
+            if current == .midStroke, !(live.drawnByHostsAlone && held.livePair == .current) { return .midStroke }
             return held.livePair == .current || current == .live ? .live : .rest
         }
     }
@@ -124,6 +124,15 @@ enum SandwichPresentation: String {
         /// A stream is on the frame — drawn by its host, which only a live presentation has
         /// (TODO (112)); no bake contains it, so the bake is never the picture (TODO (162)).
         var stream = false
+        /// **A floating piece is up** — a lasso's, a folder's or a raster Move's, drawn by the hosts
+        /// that carry it (`CanvasManager.floatHostLayerIndices`) in the middle of the pair (TODO
+        /// (160)). The bake of the lifted state has a hole where the piece is, so, as for a stream,
+        /// the bake is never the picture while it floats.
+        var float = false
+
+        /// Something on the frame reaches the screen only through its own host — what keeps the canvas
+        /// on the live pair whatever the bake says.
+        var drawnByHostsAlone: Bool { stream || float }
     }
 
     /// **The pictures the canvas has in hand** to choose between.
@@ -189,11 +198,25 @@ enum LivePairFit: Equatable {
 /// below it, and a pair cut at the old one would then be drawn around the wrong host.
 enum LivePairCut: Equatable {
 
-    /// A stroke's pair, or an edit's, or a stream's: the layers `CanvasManager.liveHostRun`
-    /// names — the active layer, with every live stream and what lies between — drawn by their own
-    /// hosts between two halves. **With its frame**, because the hosts draw the frame the canvas is
-    /// on and must not stand between halves from another.
+    /// A stroke's pair, or an edit's, a stream's or a floating piece's: the layers
+    /// `CanvasManager.liveHostRun` names — the active layer, with every live stream and every host
+    /// carrying a floating piece, and what lies between — drawn by their own hosts between two
+    /// halves. **With its frame**, because the hosts draw the frame the canvas is on and must not
+    /// stand between halves from another.
+    ///
+    /// The cut wherever the layers above those hosts composite onto transparency as they do onto the
+    /// picture beneath (`CanvasManager.liveHostsSitBetweenTheHalves`), so the hosts are drawn at their
+    /// true place in the stack.
     case aroundHost(frame: Int, layerIDs: [UUID])
+
+    /// **The same hosts drawn over one picture of everything else** — TODO (160). Where something
+    /// above the hosts blends or grades (an effect, the drawing Guide among them), the half above
+    /// composited onto transparency would blend against nothing and grade nothing, so a guide above
+    /// a stroke or a lasso move vanished for its length. Here the rest of the frame is composited in
+    /// one pass, exactly, with the hosts' leaves left out (`[RenderNode].hidingLeaves`), and the hosts
+    /// draw over it: what the owner ruled, *"rendering only the brush stroke without the compositing,
+    /// and once the stroke ends, it joins down"*. The join is the bake landing, as for every pair.
+    case overHost(frame: Int, layerIDs: [UUID])
 
     /// A transform edit's bands, around the runs it moves (`CanvasManager.liveTransformRuns`).
     /// **Without a frame**: every band is a picture of one moment, so bands from the previous frame
@@ -202,14 +225,27 @@ enum LivePairCut: Equatable {
 
     /// The frame a cut around hosts was made at, or nil for a transform edit's bands.
     var hostFrame: Int? {
-        if case .aroundHost(let frame, _) = self { return frame }
-        return nil
+        switch self {
+        case .aroundHost(let frame, _), .overHost(let frame, _): return frame
+        case .aroundRuns: return nil
+        }
     }
 
-    /// Around a host both, at any frame; or around the same runs both.
+    /// The layers whose hosts draw themselves in this cut's picture, or nil for a transform edit's
+    /// bands, where none does.
+    var hostLayerIDs: [UUID]? {
+        switch self {
+        case .aroundHost(_, let ids), .overHost(_, let ids): return ids
+        case .aroundRuns: return nil
+        }
+    }
+
+    /// Of one shape both — around hosts, or over them, at any frame — or around the same runs both.
+    /// A pair cut one way is never shown as the other: the one's middle is between two halves, the
+    /// other's over a picture that already holds what the first one's upper half does.
     func isSameKind(as other: LivePairCut) -> Bool {
         switch (self, other) {
-        case (.aroundHost, .aroundHost): return true
+        case (.aroundHost, .aroundHost), (.overHost, .overHost): return true
         case (.aroundRuns(let a), .aroundRuns(let b)): return a == b
         default: return false
         }

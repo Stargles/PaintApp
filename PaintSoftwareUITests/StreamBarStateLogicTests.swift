@@ -527,14 +527,14 @@ final class StreamBarStateLogicTests: XCTestCase {
         let (manager, element) = streaming()
         let layerIndex = manager.currentLayerIndex
         let shown = manager.sandwichKey(atFrame: 0, activeLayerIndex: 0)
-        XCTAssertEqual(shown.streamLayers, [layerIndex])
+        XCTAssertEqual(shown.drawnByHosts, [layerIndex])
 
         XCTAssertTrue(manager.setStreamFrozen(layerIndex: layerIndex, celIndex: 0, elementID: element.id, true))
         XCTAssertEqual(manager.sandwichKey(atFrame: 0, activeLayerIndex: 0), shown, "frozen is the same cut")
 
         manager.layers[layerIndex].isVisible = false
         let hidden = manager.sandwichKey(atFrame: 0, activeLayerIndex: 0)
-        XCTAssertEqual(hidden.streamLayers, [])
+        XCTAssertEqual(hidden.drawnByHosts, [])
         XCTAssertNotEqual(shown, hidden)
     }
 

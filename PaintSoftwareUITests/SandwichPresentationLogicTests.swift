@@ -19,17 +19,18 @@ final class SandwichPresentationLogicTests: XCTestCase {
     private static let fits: [LivePairFit] = [.none, .stale, .current, .regrouped]
 
     /// `SandwichPresentation.next` with every fact not under test at its quiet value: no transform
-    /// edit, no bands held of this frame, and no stream on the frame.
+    /// edit, no bands held of this frame, no stream on the frame and nothing floating.
     private func next(_ current: SandwichPresentation, stroke: Bool = false, edit: Bool = false,
                       bake: Bool, pair: LivePairFit, bands: Bool = false,
-                      stream: Bool = false) -> SandwichPresentation {
-        SandwichPresentation.next(from: current, live: .init(stroke: stroke, transformEdit: edit, stream: stream),
+                      stream: Bool = false, float: Bool = false) -> SandwichPresentation {
+        SandwichPresentation.next(from: current,
+                                  live: .init(stroke: stroke, transformEdit: edit, stream: stream, float: float),
                                   held: .init(bakeIsCurrent: bake, livePair: pair, bandsOfThisFrame: bands))
     }
 
     /// Distinct keys, cheaply: everything equal but the cut index.
     private func key(_ n: Int) -> SandwichKey {
-        SandwichKey(tree: [], activeLayerIndex: n, streamLayers: [], contents: [], renderResolution: .full,
+        SandwichKey(tree: [], activeLayerIndex: n, drawnByHosts: [], contents: [], renderResolution: .full,
                     canvasBackgroundColor: .white, isCanvasBackgroundVisible: true)
     }
 
@@ -335,5 +336,67 @@ final class SandwichPresentationLogicTests: XCTestCase {
                        "a take's next frame")
         XCTAssertEqual(LivePairFit(held: held, key: key(0), cut: .aroundRuns([[layerA], [layerB]])), .none,
                        "the same leaves moving as two runs are another cut")
+    }
+
+    // MARK: - A floating piece (TODO (160))
+
+    /// **A lifted piece is drawn by the hosts that carry it, and the bake of the lifted state has a
+    /// hole where it is** — the owner's guide below a lasso move vanished because the canvas left the
+    /// compositor for the whole float. It keeps the pair now, whatever the bake says, as a stream does.
+    func testAFloatingPieceKeepsTheCanvasOnItsPairWhateverTheBakeSays() {
+        for current in [SandwichPresentation.rest, .live] {
+            for bake in [false, true] {
+                XCTAssertEqual(next(current, bake: bake, pair: .current, float: true), .live,
+                               "from \(current), bake current \(bake)")
+            }
+        }
+        XCTAssertEqual(next(.live, bake: true, pair: .stale, float: true), .live,
+                       "a nudge's commit moved the key: the pair on screen is kept while the next one mints")
+        XCTAssertEqual(next(.rest, bake: true, pair: .stale, float: true), .rest,
+                       "but a stale pair is still never entered")
+    }
+
+    /// One lasso move on an engaged canvas, pass by pass: the lift moves the key, the pair minted for
+    /// it goes up, a bake of the hole state changes nothing, and the drop's bake is the picture once
+    /// the piece is down.
+    func testALassoMoveIsOnItsPairFromTheLiftToTheDropsBake() {
+        var shown = SandwichPresentation.rest
+        func pass(bake: Bool, pair: LivePairFit, float: Bool) -> SandwichPresentation {
+            shown = next(shown, bake: bake, pair: pair, float: float)
+            return shown
+        }
+        XCTAssertEqual(pass(bake: false, pair: .stale, float: true), .rest,
+                       "the lift: the pair is a key behind, and a stale pair is never entered")
+        XCTAssertEqual(pass(bake: false, pair: .current, float: true), .live, "its pair lands")
+        XCTAssertEqual(pass(bake: true, pair: .current, float: true), .live,
+                       "the bake of the lifted state lands: it has a hole where the piece is, so it is not the picture")
+        XCTAssertEqual(pass(bake: false, pair: .stale, float: false), .live,
+                       "the drop: the pair is kept while the bake of the result composites")
+        XCTAssertEqual(pass(bake: true, pair: .stale, float: false), .rest, "and the bake is the picture again")
+    }
+
+    // MARK: - Over the hosts (TODO (160))
+
+    /// **A pair cut over the hosts is never taken for one cut around them**, at one key or another:
+    /// the one's picture holds what the other's upper half does, so showing either as the other draws
+    /// a layer twice or not at all.
+    func testAPictureOverTheHostsFitsOnlyAnotherOverThem() {
+        let around = LivePairCut.aroundHost(frame: 3, layerIDs: [layerA])
+        let over = LivePairCut.overHost(frame: 3, layerIDs: [layerA])
+        XCTAssertEqual(LivePairFit(held: (key: key(0), cut: around), key: key(0), cut: over), .none)
+        XCTAssertEqual(LivePairFit(held: (key: key(0), cut: over), key: key(0), cut: around), .none)
+        XCTAssertEqual(LivePairFit(held: (key: key(0), cut: over), key: key(0), cut: over), .current)
+        XCTAssertEqual(LivePairFit(held: (key: key(0), cut: over), key: key(1), cut: over), .stale)
+        XCTAssertEqual(LivePairFit(held: (key: key(0), cut: over), key: key(1),
+                                   cut: .overHost(frame: 3, layerIDs: [layerA, layerB])), .regrouped)
+    }
+
+    /// Both host cuts name the hosts that draw themselves and the frame they draw; bands name neither.
+    func testBothHostCutsNameTheirHostsAndFrame() {
+        XCTAssertEqual(LivePairCut.aroundHost(frame: 2, layerIDs: [layerA]).hostLayerIDs, [layerA])
+        XCTAssertEqual(LivePairCut.overHost(frame: 2, layerIDs: [layerB]).hostLayerIDs, [layerB])
+        XCTAssertEqual(LivePairCut.overHost(frame: 2, layerIDs: [layerB]).hostFrame, 2)
+        XCTAssertNil(LivePairCut.aroundRuns([[layerA]]).hostLayerIDs)
+        XCTAssertNil(LivePairCut.aroundRuns([[layerA]]).hostFrame)
     }
 }

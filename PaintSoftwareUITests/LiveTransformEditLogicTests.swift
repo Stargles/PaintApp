@@ -533,10 +533,11 @@ final class LiveTransformEditLogicTests: XCTestCase {
 
     // MARK: - The compositor stays on
 
-    /// **The transformation layer's box keeps the compositor** — it holds no picture, and leaving
-    /// for the flat row is what re-rasterized every posed drawing per tick — while a box over lifted
-    /// pixels or ink still leaves it. And a live edit engages a document that otherwise would not be.
-    func testATransformLayersBoxKeepsTheCompositorAndAFloatDoesNot() throws {
+    /// **Every box keeps the compositor** — the transformation layer's, which holds no picture and
+    /// whose leaving for the flat row re-rasterized every posed drawing per tick, and since TODO (160)
+    /// a box over lifted ink too, whose hosts are the live pair's middle (`liveHostRun`). And a live
+    /// edit engages a document that otherwise would not be; a float's own edit does not.
+    func testEveryBoxKeepsTheCompositor() throws {
         let s = scene(pose(CGAffineTransform(translationX: 4, y: 0)))
         s.manager.currentLayerIndex = index(s.mover, s.manager)
         XCTAssertTrue(s.manager.beginContainerPoseMove())
@@ -544,7 +545,7 @@ final class LiveTransformEditLogicTests: XCTestCase {
         _ = s.manager.commitFloatingPieceIfNeeded()
 
         XCTAssertTrue(s.manager.beginVectorFolderMove(try XCTUnwrap(s.manager.folders.first?.id)))
-        XCTAssertFalse(s.manager.sandwichEngagesOnCanvas(tree: s.manager.renderTree(atFrame: 0)))
+        XCTAssertTrue(s.manager.sandwichEngagesOnCanvas(tree: s.manager.renderTree(atFrame: 0)))
 
         let plain = scene()
         let tree = plain.manager.renderTree(atFrame: 0)

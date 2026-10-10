@@ -197,10 +197,12 @@ struct FrameRecipe {
 /// same array answers every walk unchanged, and the flatten — which PERFORMANCE.md §11 measured at
 /// 276 ms against an 84 ms composite and which is therefore the expensive half — is paid once.
 ///
-/// **Two cuts, one recipe.** A stroke's (and an edit's live pair) is cut around one leaf, the active
-/// layer, whose host draws itself between `below` and `above`; a transform edit's is cut around the
-/// runs of leaves it moves (`CanvasManager.liveTransformRuns`), and every band is composited — the
-/// moving ones into pictures Core Animation re-poses per update (TODO (125)).
+/// **Three cuts, one recipe.** A stroke's (and an edit's live pair) is cut around the leaves whose
+/// hosts draw themselves (`CanvasManager.liveHostRun`), which sit between `below` and `above` — or,
+/// where the layers above them blend or grade, over one band that is the whole frame with those
+/// leaves hidden (`LivePairCut.overHost`, TODO (160)); a transform edit's is cut around the runs of
+/// leaves it moves (`CanvasManager.liveTransformRuns`), and every band is composited — the moving
+/// ones into pictures Core Animation re-poses per update (TODO (125)).
 struct SandwichRecipe {
 
     /// The whole tree, uncut — what `full` composites.

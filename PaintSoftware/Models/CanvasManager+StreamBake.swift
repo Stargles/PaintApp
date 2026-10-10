@@ -112,24 +112,6 @@ extension CanvasManager {
                                  inheriting: walk.poses[index]) != nil
     }
 
-    /// **The leaves whose own hosts draw the engaged canvas's picture** — the live pair's middle
-    /// (`LivePairCut.aroundHost`): the active layer, so a stroke lands on a host that is already
-    /// drawing, and every stream, since a stream has no other way onto the screen. Every leaf between
-    /// the lowest and the highest of them draws too: the pair has one middle, and a run that is one
-    /// span of the leaf order is what `[RenderNode].cut(around:)` can cut. Those between layers are
-    /// drawn plain, as the active layer is (`SandwichPresentation.live`); with no stream in the
-    /// document this is the active layer alone, as it always was. Empty when the active layer is not a
-    /// leaf and nothing streams.
-    @MainActor
-    func liveHostRun(tree: [RenderNode]) -> [Int] {
-        var hosts = Set(streamLayerIndices())
-        if layers.indices.contains(currentLayerIndex) { hosts.insert(currentLayerIndex) }
-        let order = tree.leafLayerIndices
-        let positions = order.indices.filter { hosts.contains(order[$0]) }
-        guard let first = positions.first, let last = positions.last else { return [] }
-        return Array(order[first ... last])
-    }
-
     /// **What the bar tells the artist about the picture they are looking at** — nil when there is
     /// nothing to add. A stream is reference, so the document's grading never reaches it
     /// (STREAM.md §2.13), and the two ways that shows are said in words rather than left to look like

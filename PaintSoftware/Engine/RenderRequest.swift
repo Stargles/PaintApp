@@ -871,9 +871,30 @@ extension CanvasManager {
     func makeSandwichRecipe(atFrame frame: Int,
                             runs: [[Int]],
                             quality: RenderQuality = .full) -> SandwichRecipe? {
+        makeSandwichRecipe(atFrame: frame, quality: quality) { $0.cut(around: runs) }
+    }
+
+    /// **The recipe for hosts drawn over the rest of the frame** (`LivePairCut.overHost`, TODO (160)):
+    /// one band, the whole tree with `run`'s leaves hidden (`[RenderNode].hidingLeaves`), carrying the
+    /// paper as the lowest band always does. Nil when there is no canvas or a leaf of `run` is not in
+    /// this frame's tree — never a picture with a host's ink in it as well as over it.
+    @MainActor
+    func makeSandwichRecipe(atFrame frame: Int,
+                            over run: [Int],
+                            quality: RenderQuality = .full) -> SandwichRecipe? {
+        makeSandwichRecipe(atFrame: frame, quality: quality) { tree in
+            guard !run.isEmpty, Set(tree.leafLayerIndices).isSuperset(of: run) else { return nil }
+            return [tree.hidingLeaves(Set(run))]
+        }
+    }
+
+    /// The recipe whose bands `cutting` makes of this frame's tree — the one body behind both cuts.
+    @MainActor
+    private func makeSandwichRecipe(atFrame frame: Int, quality: RenderQuality,
+                                    cutting: ([RenderNode]) -> [[RenderNode]]?) -> SandwichRecipe? {
         guard let canvasSize, canvasSize.width > 0, canvasSize.height > 0 else { return nil }
         let (tree, poses, frames) = renderTreeAndPoses(atFrame: frame)
-        guard let bands = tree.cut(around: runs) else { return nil }
+        guard let bands = cutting(tree) else { return nil }
 
         // **`renderResolution` is applied here and nowhere else**, which is what makes it a live-canvas
         // setting rather than a document one — see the type. One size for the whole request: the
@@ -923,31 +944,18 @@ extension CanvasManager {
     /// compositor and no cached images. A document with no blend modes, effects, masks or nodes
     /// anywhere cannot regress no matter what the rest of this does.
     ///
-    /// **The clauses after it narrow engagement further, and each is a case where the compositor's
-    /// snapshot is not the whole picture.** `RenderRequest`'s sources are `PixelOps.rasterize(cel:)`
-    /// — the model's pixels — and the live canvas draws things that are in no cel. **This list being
-    /// one short is what the 2026-08-26 bug was**, so it is the list to extend the day something new
-    /// starts being drawn on the canvas and not in a cel:
-    ///
-    /// - A **floating Move piece**: `bakedImageToDisplay` shows `piece.remainderPreview` (the hole)
-    ///   where the cel still holds the un-lifted content, so a composite would show the moved content
-    ///   twice, once at each end of the move.
-    /// - A **lasso move's latched piece**: `updateVectorFloat` renders the lifted elements once into
-    ///   `StrokeCanvasView.floatView` and drags that bitmap under a Core Animation transform, while
-    ///   the model carries `vector.suppressedElementIDs = insideIDs` so the hole really is punched.
-    ///   The piece is therefore in no cel *and* in no composite — the opposite failure from the raster
-    ///   float's, and worse. It went unlisted until 2026-08-26, and the symptom was the artist's
-    ///   lassoed ink **vanishing for the whole move**: with the sandwich engaged and no stroke in
-    ///   flight, `updateSandwich` blanks *every* host, including the one whose `floatView` holds the
-    ///   piece, and the flatten behind it is honestly empty where the piece used to be. The fix is
-    ///   this clause and not "skip blanking for the float's host": that host still draws its own
-    ///   unsuppressed remainder, so unblanking it would lay the whole layer a second time over `full`.
-    ///
-    /// **A transformation layer's Move box is neither, and keeps the compositor** (TODO (125)). It
-    /// holds no picture — a clear pixel — and lifts nothing out of any cel: what moves under it is the
-    /// composite itself, re-posed by the live transform edit's bands. It used to take the float clause
-    /// with the others, which put every posed drawing beneath it back on the flat row and
-    /// re-rasterized each of them on the main thread on every tick of the drag (PERFORMANCE.md §24).
+    /// **A floating piece is carried, not refused** (TODO (160)). Three pieces are drawn in no cel:
+    /// a raster Move's lifted pixels (`FloatingPieceOverlayView`, over `piece.remainderPreview` in the
+    /// source host while the cel still holds the un-lifted content), a lasso's or a folder's lifted
+    /// ink (`StrokeCanvasView.floatView`, a bitmap under a Core Animation transform over a host whose
+    /// canvas suppresses `insideIDs`), and a Duplicate's copy (the overlay alone). None of them is in
+    /// any composite, so the canvas draws the hosts that carry them itself: `liveHostRun` cuts the
+    /// live pair around them, every layer below and above stays in the two halves, and
+    /// `SandwichPresentation.Live.float` keeps the canvas on that pair for as long as the piece is up
+    /// — the bake of the lifted state has a hole where the piece is. This used to be a clause that
+    /// took the compositor away for the whole move, which dropped every blend mode, effect and mask
+    /// on the canvas and made every host repaint itself at the lift: the owner's guide layers
+    /// *"disappear if I try to lasso move"*.
     ///
     /// ## The fourth clause is a live transform edit, added 2026-10-02
     ///
@@ -1055,8 +1063,73 @@ extension CanvasManager {
     func sandwichEngagesOnCanvas(tree: [RenderNode]) -> Bool {
         guard tree.needsCompositorOnCanvas || hasContainerPoseInForce || isPlaying
                 || liveTransformEdit?.movesBands == true else { return false }
-        guard floatingPiece.map({ $0.kind == .containerPose }) ?? true, vectorFloat == nil else { return false }
         return !isScrubbingInterpolation
+    }
+
+    /// **The leaves whose own hosts draw the engaged canvas's picture** — the live pair's middle
+    /// (`LivePairCut.aroundHost`, `.overHost`), everything else being in the composite:
+    ///
+    /// - the active layer, so a stroke lands on a host that is already drawing;
+    /// - every other layer `liveHostsBesidesTheActive` names — streams and floating pieces, which are
+    ///   in no composite.
+    ///
+    /// Every leaf between the lowest and the highest of them draws too: the pair has one middle, and a
+    /// run that is one span of the leaf order is what `[RenderNode].cut(around:)` can cut. Those
+    /// between layers are drawn plain, as the active layer is (`SandwichPresentation.live`); with no
+    /// stream and nothing floating this is the active layer alone. Empty when none of them is a leaf.
+    @MainActor
+    func liveHostRun(tree: [RenderNode]) -> [Int] {
+        var hosts = Set(liveHostsBesidesTheActive())
+        if layers.indices.contains(currentLayerIndex) { hosts.insert(currentLayerIndex) }
+        let order = tree.leafLayerIndices
+        let positions = order.indices.filter { hosts.contains(order[$0]) }
+        guard let first = positions.first, let last = positions.last else { return [] }
+        return Array(order[first ... last])
+    }
+
+    /// **The layers whose hosts draw themselves whichever layer is active**, ascending: every stream
+    /// on the frame (`streamLayerIndices`) — reference, in no picture the document keeps — and every
+    /// host carrying a floating piece (`floatHostLayerIndices`), which is in no cel (TODO (160)).
+    /// What `liveHostRun` cuts around beside the active layer, and what `SandwichKey.drawnByHosts`
+    /// carries, so a pair minted for one cut is never taken for another's.
+    @MainActor
+    func liveHostsBesidesTheActive(atFrame frame: Int? = nil, walk: RenderWalk? = nil) -> [Int] {
+        Set(streamLayerIndices(atFrame: frame, walk: walk)).union(floatHostLayerIndices).sorted()
+    }
+
+    /// **The layers whose hosts draw a floating piece the document does not hold yet** — every part of
+    /// a lasso's or a folder's float on the glass, and a raster Move's source, whose host shows the
+    /// hole (`piece.remainderPreview`) the cel does not have. A Duplicate's copy is drawn by the
+    /// overlay over everything, and a transformation layer's or an effect's box holds no pixels — the
+    /// composite itself moves under those — so none of the three names a host.
+    @MainActor
+    var floatHostLayerIndices: [Int] {
+        var ids = vectorFloat?.parts.filter(\.isShown).map(\.layerID) ?? []
+        if let piece = floatingPiece, piece.kind == .move { ids.append(piece.sourceLayerID) }
+        return ids.compactMap { id in layers.firstIndex { $0.id == id } }
+    }
+
+    /// **Whether the live hosts are drawn between two halves or over one picture** — TODO (160)'s
+    /// choice between `LivePairCut.aroundHost` and `.overHost`.
+    ///
+    /// Between the halves, the upper half is composited onto transparency. Source-over is
+    /// associative, so where nothing in the band above the hosts blends, grades, masks or buffers
+    /// (`needsCompositorOnCanvas`, asked of that band — a part-group carries a faded or blended
+    /// ancestor's properties, so that case is caught too) the three are the exact picture, and a
+    /// stroke or a lifted piece sits at its true place in the stack, under every layer above it.
+    ///
+    /// Where something in it does, the upper half over transparency is not the picture: an effect
+    /// above grades nothing — the drawing Guide draws its lines only over what it sits on — and a
+    /// blend mode blends against nothing, so the layers above changed or vanished for the length of
+    /// every stroke, lasso move and edit (the owner's *"if i also have my drawing guide over the
+    /// drawing and draw, it again disappears"*). Re-compositing them on every dab is what the owner
+    /// ruled out, so there the rest of the frame is composited once and the hosts draw over it.
+    ///
+    /// `run` is `liveHostRun(tree:)`, handed in because every caller has just asked for it.
+    @MainActor
+    func liveHostsSitBetweenTheHalves(_ run: [Int], in tree: [RenderNode]) -> Bool {
+        guard !run.isEmpty, let bands = tree.cut(around: [run]), let above = bands.last else { return true }
+        return !above.needsCompositorOnCanvas
     }
 
     /// **Whether a transformation layer anywhere in this document moves anything**
@@ -1181,7 +1254,7 @@ extension CanvasManager {
         }
         return SandwichKey(tree: tree ?? walk.tree,
                            activeLayerIndex: activeLayerIndex,
-                           streamLayers: streamLayerIndices(atFrame: frame, walk: walk),
+                           drawnByHosts: liveHostsBesidesTheActive(atFrame: frame, walk: walk),
                            contents: contents,
                            renderResolution: renderResolution,
                            canvasBackgroundColor: canvasBackgroundColor,

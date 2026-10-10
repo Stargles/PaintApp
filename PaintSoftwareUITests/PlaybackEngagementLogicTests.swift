@@ -153,10 +153,10 @@ final class PlaybackEngagementLogicTests: XCTestCase {
                        "Stopping puts it back on the flat row, so nothing about editing changes")
     }
 
-    /// **A float still refuses the compositor while playing**, which is not a detail: the two guards
-    /// under the first one are about pictures the composite genuinely does not contain
-    /// (`RenderRequest`'s own list), and a new clause above them must not reach past them.
-    func testAFloatingPieceStillRefusesTheCompositorWhilePlaying() {
+    /// **The scrub still refuses the compositor while playing**, which is not a detail: the guard
+    /// under the first one is a gesture the composite cannot keep up with (`sandwichEngagesOnCanvas`),
+    /// and a new clause above it must not reach past it.
+    func testTheInterpolationScrubStillRefusesTheCompositorWhilePlaying() {
         let manager = plainDocument(layers: 2, frames: 2, canvas: CGSize(width: 256, height: 256))
         manager.play()
         let tree = manager.renderTree(atFrame: 0)

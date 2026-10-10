@@ -425,6 +425,9 @@ class PaintUITestCase: XCTestCase {
         let r: Int, g: Int, b: Int
         var sum: Int { r + g + b }
         var description: String { "(r: \(r), g: \(g), b: \(b))" }
+        /// The drawing Guide's default colour (TODO (88)), over paper or over ink: markedly more blue
+        /// than red.
+        var isGuideBlue: Bool { b > r + 60 }
     }
 
     /// The pixel at `dx`, `dy` of `canvas`; black where there is no screenshot to read.
@@ -893,6 +896,32 @@ class PaintUITestCase: XCTestCase {
         let item = app.buttons["layerOptions.blendMode.brightnesscontrast"]
         XCTAssertTrue(item.waitForExistence(timeout: 5), "The Blend Mode menu should list the effect catalogue")
         item.tap()
+    }
+
+    /// **The drawing Guide (TODO (88)), added the way an artist adds one** — `+` → Value Layer, its row →
+    /// Blend Mode → Guide — with Line Width and Opacity at their ends so its blue reads unambiguously in
+    /// a probe (`isGuideBlue`). The value layer lands above the active one, at `layerIndex`, and is left
+    /// active with its settings bar up and the layer rail shut.
+    func addDrawingGuide(_ app: XCUIApplication, landingAt layerIndex: Int) {
+        if !app.buttons["layerPanel.addButton"].exists { openLayerPanel(app) }
+        addValueLayerFromAddMenu(app)
+        let row = app.staticTexts["layerPanel.row.\(layerIndex)"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "the value layer landed at \(layerIndex)")
+        row.tap()
+        app.buttons["layerOptions.blendModeButton"].tap()
+        let guide = app.buttons["layerOptions.blendMode.guide"]
+        XCTAssertTrue(guide.waitForExistence(timeout: 5), "the Blend Mode menu lists Guide")
+        guide.tap()
+        closeLayerRail(app)
+        let lineWidth = app.sliders["effectSettings.lineWidth"]
+        XCTAssertTrue(lineWidth.waitForExistence(timeout: 5), "the Guide's bar is up with its Line Width")
+        lineWidth.adjust(toNormalizedSliderPosition: 1)
+        app.sliders["effectSettings.opacity"].adjust(toNormalizedSliderPosition: 1)
+    }
+
+    /// `RGB.isGuideBlue`, of one pixel as `rgbaPixel` and `MidGestureSampler` read it.
+    func isGuideBlue(_ pixel: RGBA?) -> Bool {
+        pixel.map { RGB(r: Int($0.r), g: Int($0.g), b: Int($0.b)).isGuideBlue } ?? false
     }
 
     /// Same menu again, for §4.5's value layer — one flat colour across the canvas.
@@ -1611,6 +1640,76 @@ class PaintUITestCase: XCTestCase {
     /// flag is set: a menu whose rows exist but whose card does not has been presented some other way.
     func canvasMenu(_ app: XCUIApplication, _ presentation: String) -> XCUIElement {
         app.descendants(matching: .any)["canvasPresentation.\(presentation)"].firstMatch
+    }
+
+    // MARK: - Sampling the screen while a gesture is in flight
+
+    /// **Reads screen pixels from a background thread while the test's main thread is blocked inside a
+    /// synchronous gesture** — `press(forDuration:thenDragTo:…)` or the event synthesiser.
+    /// `XCUIScreen.main.screenshot()` is what makes that possible: it asks the device for its
+    /// framebuffer rather than resolving any element, so it does not contend with the gesture being
+    /// synthesised. Points are in screen coordinates.
+    ///
+    /// Each screenshot is drawn into one buffer and every point read from it, so a sample of hundreds
+    /// of points — a patch over a region, to find a thin line in — costs one decode, not one per point.
+    ///
+    /// **Only samples that finished well before the gesture call returned are mid-gesture**: the call
+    /// returns some time after the lift (MEASURED at ~0.6 s on this simulator), so a caller that holds
+    /// the finger still for a few seconds at the end and keeps the samples finished two seconds before
+    /// the return has samples that can only have been taken with the finger down.
+    final class MidGestureSampler {
+        typealias Sample = (finished: CFAbsoluteTime, pixels: [RGBA?])
+        private let points: [CGPoint]
+        private let interval: TimeInterval
+        private var stopped = false
+        private var samples: [Sample] = []
+        private let lock = NSLock()
+        private let group = DispatchGroup()
+
+        init(points: [CGPoint], interval: TimeInterval = 0.2) {
+            self.points = points
+            self.interval = interval
+        }
+
+        func start() {
+            group.enter()
+            DispatchQueue.global(qos: .userInitiated).async { [self] in
+                defer { group.leave() }
+                while true {
+                    lock.lock(); let done = stopped; lock.unlock()
+                    if done { return }
+                    let image = XCUIScreen.main.screenshot().image
+                    let finished = CFAbsoluteTimeGetCurrent()
+                    let read = Self.pixels(in: image, at: points)
+                    lock.lock(); samples.append((finished, read)); lock.unlock()
+                    Thread.sleep(forTimeInterval: interval)
+                }
+            }
+        }
+
+        func stop() -> [Sample] {
+            lock.lock(); stopped = true; lock.unlock()
+            group.wait()
+            return samples
+        }
+
+        private static func pixels(in image: UIImage, at points: [CGPoint]) -> [RGBA?] {
+            guard let cg = image.cgImage else { return points.map { _ in nil } }
+            let width = cg.width, height = cg.height
+            var buffer = [UInt8](repeating: 0, count: width * height * 4)
+            guard let context = CGContext(data: &buffer, width: width, height: height, bitsPerComponent: 8,
+                                          bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+            else { return points.map { _ in nil } }
+            context.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
+            let scale = image.scale
+            return points.map { point in
+                let x = Int(point.x * scale), y = Int(point.y * scale)
+                guard x >= 0, y >= 0, x < width, y < height else { return nil }
+                let offset = (y * width + x) * 4
+                return (buffer[offset], buffer[offset + 1], buffer[offset + 2], buffer[offset + 3])
+            }
+        }
     }
 
     /// How far `tapAway`'s touch must land from any top-toolbar icon: a touch 20 pt off the Move

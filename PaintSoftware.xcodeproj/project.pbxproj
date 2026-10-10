@@ -176,6 +176,8 @@
 		E748D57AB79B0B2632FD9C00 /* VectorLayerEffectUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08A3C75537F85394C787A31B /* VectorLayerEffectUITests.swift */; };
 		1930421BD77B58AED1E84806 /* VectorLayerEffectLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 523EB63C9D093C688C522E4B /* VectorLayerEffectLogicTests.swift */; };
 		54584DF7D28E24C20FACC976 /* GuideUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1F9FB5A6E28AEDEF2460543 /* GuideUITests.swift */; };
+		8BB7D438C425855DCF10ED6D /* GuideOverStrokeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29EF3F368D1AA6C8325A64F8 /* GuideOverStrokeUITests.swift */; };
+		2F5D3B0AEAFEB5359E8CE0CF /* GuideUnderLassoMoveUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA035DAC01F130A020B02B65 /* GuideUnderLassoMoveUITests.swift */; };
 		7A54F01C6DC3BFE5A6CB5C58 /* GuideEffectLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97EAC0AFE8551C7BCB0784AF /* GuideEffectLogicTests.swift */; };
 		0DC3FA8A2141BD915C11CAC7 /* LensBlurUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C8D32C3E835AD05BDC423C9 /* LensBlurUITests.swift */; };
 		A587AE13E245F7124189EFA0 /* LensBlurEffectLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 936918B9DC7A08EFFEEF65ED /* LensBlurEffectLogicTests.swift */; };
@@ -265,6 +267,7 @@
 		DEC0DE00000000000000009D /* PaintSoftware/Engine/MetalCompositor.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE00000000000000009C /* PaintSoftware/Engine/MetalCompositor.swift */; };
 		DEC0DE00000000000000009F /* CompositorParityLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE00000000000000009E /* CompositorParityLogicTests.swift */; };
 		DEC0DE0000000000000000A5 /* SandwichLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE0000000000000000A4 /* SandwichLogicTests.swift */; };
+		700B2A905B4AA5160E5D1DE9 /* SandwichLiveHostsLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C5FBF2C1E06970E5A3AFBDB /* SandwichLiveHostsLogicTests.swift */; };
 		1B7DB41EDE745888FB405323 /* SandwichKeyLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BA164334D58068D2EE45523 /* SandwichKeyLogicTests.swift */; };
 		DEC0DE9F0000000000000002 /* PaintSoftware/Models/Effect.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE9F0000000000000001 /* PaintSoftware/Models/Effect.swift */; };
 		DEC0DE9F0000000000000004 /* PaintSoftware/Engine/EffectKernels.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE9F0000000000000003 /* PaintSoftware/Engine/EffectKernels.swift */; };
@@ -762,6 +765,8 @@
 		08A3C75537F85394C787A31B /* VectorLayerEffectUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VectorLayerEffectUITests.swift; sourceTree = "<group>"; };
 		523EB63C9D093C688C522E4B /* VectorLayerEffectLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VectorLayerEffectLogicTests.swift; sourceTree = "<group>"; };
 		F1F9FB5A6E28AEDEF2460543 /* GuideUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GuideUITests.swift; sourceTree = "<group>"; };
+		29EF3F368D1AA6C8325A64F8 /* GuideOverStrokeUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "GuideOverStrokeUITests.swift"; sourceTree = "<group>"; };
+		DA035DAC01F130A020B02B65 /* GuideUnderLassoMoveUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "GuideUnderLassoMoveUITests.swift"; sourceTree = "<group>"; };
 		97EAC0AFE8551C7BCB0784AF /* GuideEffectLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GuideEffectLogicTests.swift; sourceTree = "<group>"; };
 		0C8D32C3E835AD05BDC423C9 /* LensBlurUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LensBlurUITests.swift; sourceTree = "<group>"; };
 		936918B9DC7A08EFFEEF65ED /* LensBlurEffectLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LensBlurEffectLogicTests.swift; sourceTree = "<group>"; };
@@ -851,6 +856,7 @@
 		DEC0DE00000000000000009C /* PaintSoftware/Engine/MetalCompositor.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Engine/MetalCompositor.swift"; sourceTree = "<group>"; };
 		DEC0DE00000000000000009E /* CompositorParityLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CompositorParityLogicTests.swift; sourceTree = "<group>"; };
 		DEC0DE0000000000000000A4 /* SandwichLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SandwichLogicTests.swift; sourceTree = "<group>"; };
+		0C5FBF2C1E06970E5A3AFBDB /* SandwichLiveHostsLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "SandwichLiveHostsLogicTests.swift"; sourceTree = "<group>"; };
 		3BA164334D58068D2EE45523 /* SandwichKeyLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SandwichKeyLogicTests.swift; sourceTree = "<group>"; };
 		DEC0DE9F0000000000000001 /* PaintSoftware/Models/Effect.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/Effect.swift"; sourceTree = "<group>"; };
 		DEC0DE9F0000000000000003 /* PaintSoftware/Engine/EffectKernels.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Engine/EffectKernels.swift"; sourceTree = "<group>"; };
@@ -1443,6 +1449,8 @@
 				08A3C75537F85394C787A31B /* VectorLayerEffectUITests.swift */,
 				523EB63C9D093C688C522E4B /* VectorLayerEffectLogicTests.swift */,
 				F1F9FB5A6E28AEDEF2460543 /* GuideUITests.swift */,
+				29EF3F368D1AA6C8325A64F8 /* GuideOverStrokeUITests.swift */,
+				DA035DAC01F130A020B02B65 /* GuideUnderLassoMoveUITests.swift */,
 				97EAC0AFE8551C7BCB0784AF /* GuideEffectLogicTests.swift */,
 				0C8D32C3E835AD05BDC423C9 /* LensBlurUITests.swift */,
 				936918B9DC7A08EFFEEF65ED /* LensBlurEffectLogicTests.swift */,
@@ -1542,6 +1550,7 @@
 				DEC0DE9F0000000000000009 /* EffectMultiPassLogicTests.swift */,
 				DEC0DE00000000000000009E /* CompositorParityLogicTests.swift */,
 				DEC0DE0000000000000000A4 /* SandwichLogicTests.swift */,
+				0C5FBF2C1E06970E5A3AFBDB /* SandwichLiveHostsLogicTests.swift */,
 				3BA164334D58068D2EE45523 /* SandwichKeyLogicTests.swift */,
 				DEC0DE6A0000000000000005 /* MaskParityLogicTests.swift */,
 				3775EADEBE5F8CF8F5FE2401 /* AddMenuUITests.swift */,
@@ -2139,6 +2148,8 @@
 				E748D57AB79B0B2632FD9C00 /* VectorLayerEffectUITests.swift in Sources */,
 				1930421BD77B58AED1E84806 /* VectorLayerEffectLogicTests.swift in Sources */,
 				54584DF7D28E24C20FACC976 /* GuideUITests.swift in Sources */,
+				8BB7D438C425855DCF10ED6D /* GuideOverStrokeUITests.swift in Sources */,
+				2F5D3B0AEAFEB5359E8CE0CF /* GuideUnderLassoMoveUITests.swift in Sources */,
 				7A54F01C6DC3BFE5A6CB5C58 /* GuideEffectLogicTests.swift in Sources */,
 				0DC3FA8A2141BD915C11CAC7 /* LensBlurUITests.swift in Sources */,
 				A587AE13E245F7124189EFA0 /* LensBlurEffectLogicTests.swift in Sources */,
@@ -2320,6 +2331,7 @@
 				DEC0DE00000000000000009D /* PaintSoftware/Engine/MetalCompositor.swift in Sources */,
 				DEC0DE00000000000000009F /* CompositorParityLogicTests.swift in Sources */,
 				DEC0DE0000000000000000A5 /* SandwichLogicTests.swift in Sources */,
+				700B2A905B4AA5160E5D1DE9 /* SandwichLiveHostsLogicTests.swift in Sources */,
 				1B7DB41EDE745888FB405323 /* SandwichKeyLogicTests.swift in Sources */,
 				DEC0DE6A0000000000000006 /* MaskParityLogicTests.swift in Sources */,
 				DEC0DE9F0000000000000002 /* PaintSoftware/Models/Effect.swift in Sources */,

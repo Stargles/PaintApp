@@ -877,6 +877,30 @@ extension Array where Element == RenderNode {
         return out
     }
 
+    /// **The tree with these leaves drawn by nothing** — `LivePairCut.overHost`'s one picture, the
+    /// whole frame but the hosts that draw over it (TODO (160)).
+    ///
+    /// Hidden rather than pruned, and that is what makes it exact where `cut(around:)` is not: every
+    /// group keeps its one buffer, so a faded or blended folder, an effect and a blend mode above the
+    /// hidden leaves all act on everything else once, exactly as they do in the bake. A hidden leaf
+    /// still lends its alpha to a mask it is the source of, which is the mask rule (`leafSnapshots`'
+    /// `alsoIncluding`) and the right answer here too: what it clips is not being drawn over.
+    func hidingLeaves(_ hidden: Set<Int>) -> [RenderNode] {
+        map { node in
+            switch node.content {
+            case .leaf(let index):
+                guard hidden.contains(index), node.isVisible else { return node }
+                return RenderNode(id: node.id, content: node.content, opacity: node.opacity, isVisible: false,
+                                  blendMode: node.blendMode, isIsolated: node.isIsolated, masks: node.masks,
+                                  effect: node.effect)
+            case .node(let op, let inputs):
+                return RenderNode(id: node.id, content: .node(op: op, inputs: inputs.map { $0.hidingLeaves(hidden) }),
+                                  opacity: node.opacity, isVisible: node.isVisible, blendMode: node.blendMode,
+                                  isIsolated: node.isIsolated, masks: node.masks, effect: node.effect)
+            }
+        }
+    }
+
     /// The tree pruned to everything strictly below, and strictly above, one leaf in evaluation
     /// order — `cut(around:)` with one run of one leaf, the stroke's sandwich. Nil when `layerIndex`
     /// is not a leaf anywhere in this tree.

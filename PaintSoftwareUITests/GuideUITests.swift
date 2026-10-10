@@ -113,7 +113,5 @@ final class GuideUITests: PaintUITestCase {
 }
 
 private extension PaintUITestCase.RGB {
-    /// The guide's default colour is a blue: markedly more blue than red.
-    var isGuideBlue: Bool { b > r + 60 }
     var isPaper: Bool { r > 235 && g > 235 && b > 235 }
 }
