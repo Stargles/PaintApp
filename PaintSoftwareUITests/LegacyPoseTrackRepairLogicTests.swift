@@ -342,12 +342,13 @@ final class LegacyPoseTrackRepairLogicTests: XCTestCase {
         let sidecar = try animationFile(in: url)
         let (zeroTrack, _) = try zeroBoxKeys()
         try JSONSerialization.data(withJSONObject: ["tracks": ["cel": zeroTrack,
-                                                               "group.1": ["box": try zeroBox(), "curves": [String: Any]()]]])
+                                                               "group.1": ["box": try zeroBox(), "curves": [String: Any]()],
+                                                               "group.2": ["box": try object(canvasBox), "curves": [String: Any]()]]])
             .write(to: sidecar)
 
         let result = LegacyPoseTrackRepair.repair(packageAt: url)
         XCTAssertEqual(result.rebased, 1)
-        XCTAssertEqual(result.dropped, 1)
+        XCTAssertEqual(result.dropped, 2, "Empty channels go, on whatever box")
 
         let opened = try XCTUnwrap(ProjectStore.load(from: url))
         let tracks = opened.layers[0].cels[0].transformTracks
