@@ -122,6 +122,23 @@ moving do not have to be rendered"*) from moving to always.
 
 ---
 
+## (163) Follow-ups ruled 2026-10-10 on (159) and (161)
+
+**Status** — the owner's answers to the questions those two items left.
+
+- [ ] **Backup cap to ~4 GB.** `ProjectBackupManager.maxTotalBackupBytes` counts logical bytes (clones
+      counted in full, ~3× the real cost); a month of tiered versions per scene reached 1 GB at three or
+      four active scenes. Ruled: raise the one constant, no clone accounting.
+- [ ] **The colour panel's hex field clears the keyboard.** On the owner's iPad 9 in landscape the
+      keyboard (top at 457 pt) covers the hex row (446–468 pt). Ruled: move the hex row higher in the
+      panel so it sits above the keyboard on every iPad — nothing moves while typing.
+- [ ] **A low rename row scrolls into view inside its own list**, as the layer rail already does (the
+      list scrolls; the screen does not): the gallery folder rename and the timeline animation-group
+      rename, and any other inline rename in a scrolling list.
+- Ruled to stay: the Text panel's docked card sits under the keyboard while typing.
+
+---
+
 ## (27) Stream the computer's screen as a layer
 
 **Status** — briefed 2026-09-13, designed the same day ([STREAM.md](docs/STREAM.md)), and **built through
