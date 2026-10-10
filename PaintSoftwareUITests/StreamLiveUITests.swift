@@ -89,6 +89,7 @@ final class StreamLiveUITests: StreamUITestCase {
                 if !value.isEmpty { marked.append(value) }
             }
         }
+        attachScreenshot(app, "hidden-stream-after-a-moving-screen")
         XCTAssertEqual(marked, [], """
             The stream is hidden, so nothing it receives can change a frame, yet the bar marked frames \
             unbaked while the computer's screen moved and rested. Each rest settles the stream onto its \
@@ -99,6 +100,7 @@ final class StreamLiveUITests: StreamUITestCase {
         app.buttons["layerPanel.row.1.visibility"].tap()
         closeLayerRail(app)
         waitForPicture(.blue, on: canvas, "shown again, the layer is the computer as it is now")
+        attachScreenshot(app, "shown-again-current")
     }
 
     /// **Standing on another layer**: the stream bar goes with the selection, the stream does not.
