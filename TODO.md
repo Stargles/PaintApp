@@ -60,17 +60,6 @@ very laggy. I have added a recording of the lagspikes."*
 
 ---
 
-## (155) Name the curves in the graph editor
-
-**Status** — reported 2026-10-10. The owner: *"When in the graph editor, I cant tell which coloured line
-is which. To remedy this, add a list of the known transformations (X, Y) in their colors beside the graph
-to the left, in the blank space under the layer name."*
-
-- [ ] A legend of the channels the graph shows (X, Y, Scale, Rotation, …), each in its curve colour, in
-      the blank space under the layer name on the left of the graph.
-
----
-
 ## (157) The fill tool's gap-closing slider is janky
 
 **Status** — reported 2026-10-10 with `recording-20261009-235645.jsonl`. The owner: *"The gap closing

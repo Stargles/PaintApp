@@ -163,6 +163,112 @@ final class GraphEditorUITests: PaintUITestCase {
                        "Closing the band takes the option with it — it is not a timeline control")
     }
 
+    /// **TODO (155) — the owner: *"When in the graph editor, I cant tell which coloured line is which."*** Cold
+    /// from a fresh document, driven the artist's way: a transformation layer, two marks, a Move dragged
+    /// across and down at the second (which keys X and Y), the graph editor opened on it. The name column
+    /// beside the band names the two curves, **in the colours they are drawn in**.
+    ///
+    /// What is read is what is drawn: the legend's lines by identifier and label, where they sit (in the
+    /// name column, inside the band's own strip, under the layer's name), and the colours — a pixel of each
+    /// line's dot, and how many pixels of exactly that colour the band itself holds, which is the curve the
+    /// line names. Then a channel is switched off in the channel list and its line leaves the legend with
+    /// its curve. What the artist does next: reads the legend, and knows which line to grab.
+    func testTheLegendNamesTheCurvesInTheColoursTheyAreDrawnIn() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        openLayerPanel(app)
+        addTransformLayerFromAddMenu(app)
+        app.buttons["toolbar.layersButton"].tap() // the rail covers the timeline block taps below
+        let block = app.otherElements["timeline.cel.1.0"]
+        XCTAssertTrue(block.waitForExistence(timeout: 5), "The transformation layer should have a track")
+        let cel = try XCTUnwrap(readCel(app, layerIndex: 1, celIndex: 0))
+        addKeysMark(app, on: block, ofLength: cel.length, atFrame: 0)
+        addKeysMark(app, on: block, ofLength: cel.length, atFrame: 6)
+
+        openLayerPanel(app)
+        app.staticTexts["layerPanel.row.1"].tap() // still selected: opens the transform layer's options
+        let moveRow = app.buttons["layerOptions.transformMove"]
+        XCTAssertTrue(moveRow.waitForExistence(timeout: 5))
+        moveRow.tap()
+        XCTAssertTrue(app.buttons["moveBar.doneButton"].waitForExistence(timeout: 5), "Move raised the box")
+        let start = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45))
+        start.press(forDuration: 0.6, thenDragTo: start.withOffset(CGVector(dx: 120, dy: 80)),
+                    withVelocity: XCUIGestureVelocity(240), thenHoldForDuration: 0.3)
+        app.buttons["moveBar.doneButton"].tap()
+        XCTAssertTrue(app.buttons["moveBar.doneButton"].waitForNonExistence(timeout: 5), "The box should have committed")
+        if app.buttons["layerPanel.addButton"].exists { app.buttons["toolbar.layersButton"].tap() }
+
+        let band = app.otherElements["timeline.graphBand"]
+        XCTAssertFalse(band.exists, "PREMISE: the graph editor is closed")
+        for entry in [PoseChannelID.container.parameterID(.x), PoseChannelID.container.parameterID(.y)] {
+            XCTAssertFalse(app.descendants(matching: .any)["timeline.graphLegend.\(entry)"].exists,
+                           "…and so is its legend: nothing is named while nothing is drawn")
+        }
+        tapWhenHittable(app.buttons["timeline.graphEditorButton"], "the graph editor button")
+        XCTAssertTrue(band.waitForExistence(timeout: 5))
+        let xID = PoseChannelID.container.parameterID(.x), yID = PoseChannelID.container.parameterID(.y)
+        XCTAssertEqual(band.value as? String, "\(xID):0,6|\(yID):0,6", "PREMISE: a Move across and down draws X and Y")
+
+        let x = app.descendants(matching: .any)["timeline.graphLegend.\(xID)"]
+        let y = app.descendants(matching: .any)["timeline.graphLegend.\(yID)"]
+        XCTAssertTrue(x.waitForExistence(timeout: 5), "the legend names X beside the band")
+        XCTAssertTrue(y.waitForExistence(timeout: 5), "…and Y")
+        XCTAssertEqual(x.label, "X")
+        XCTAssertEqual(y.label, "Y")
+        attachScreenshot(app, "graph-legend-x-and-y")
+
+        // Where they sit: in the name column, left of the band, inside the strip the band occupies, and
+        // one under the other — the blank space under the layer's name.
+        let bandFrame = band.frame
+        for line in [x, y] {
+            XCTAssertLessThanOrEqual(line.frame.maxX, bandFrame.minX + 1,
+                                     "\(line.label)'s line is in the name column, left of the band (\(line.frame) vs \(bandFrame))")
+            XCTAssertGreaterThanOrEqual(line.frame.minY, bandFrame.minY - 1, "…and no higher than the band")
+            XCTAssertLessThanOrEqual(line.frame.maxY, bandFrame.maxY + 1, "…and no lower")
+        }
+        XCTAssertLessThan(x.frame.minY, y.frame.minY, "X is listed above Y, the band's own order")
+
+        // The colours: each line's dot is the colour of exactly one curve in the band, and the two differ.
+        let window = app.windows.firstMatch
+        let windowFrame = window.frame // read once: every `.frame` is a query of the app
+        let probe = try pixelProbe(window)
+        func colour(at point: CGPoint) -> RGBA {
+            probe(Double((point.x - windowFrame.minX) / windowFrame.width),
+                  Double((point.y - windowFrame.minY) / windowFrame.height))
+        }
+        func distance(_ a: RGBA, _ b: RGBA) -> Double {
+            let dr = Double(a.0) - Double(b.0), dg = Double(a.1) - Double(b.1), db = Double(a.2) - Double(b.2)
+            return (dr * dr + dg * dg + db * db).squareRoot()
+        }
+        func bandPixels(matching wanted: RGBA) -> Int {
+            var count = 0
+            for px in stride(from: bandFrame.minX, to: bandFrame.maxX, by: 0.5) {
+                for py in stride(from: bandFrame.minY, to: bandFrame.maxY, by: 0.5)
+                where distance(colour(at: CGPoint(x: px, y: py)), wanted) < 14 { count += 1 }
+            }
+            return count
+        }
+        // The dot is the first thing in the line: 8 pt wide, a little in from the line's own left edge.
+        let xDot = colour(at: CGPoint(x: x.frame.minX + 4, y: x.frame.midY))
+        let yDot = colour(at: CGPoint(x: y.frame.minX + 4, y: y.frame.midY))
+        XCTAssertGreaterThan(distance(xDot, yDot), 60, "X and Y are told apart by colour (\(xDot) vs \(yDot))")
+        XCTAssertGreaterThan(bandPixels(matching: xDot), 25, "the band draws a curve in X's legend colour \(xDot)")
+        XCTAssertGreaterThan(bandPixels(matching: yDot), 25, "…and one in Y's legend colour \(yDot)")
+
+        // It follows what is shown: Y switched off in the channel list leaves the legend with its curve.
+        app.buttons["timeline.graphChannelsButton"].tap()
+        let yBox = app.buttons["timeline.graphChannels.\(yID)"]
+        XCTAssertTrue(yBox.waitForExistence(timeout: 5), "Y is a row of the channel list")
+        yBox.tap()
+        app.buttons["timeline.graphChannelsButton"].tap()
+        XCTAssertTrue(y.waitForNonExistence(timeout: 5), "Y's curve is off the band, so its line is off the legend")
+        XCTAssertTrue(x.exists, "…and X's stays")
+        attachScreenshot(app, "graph-legend-y-switched-off")
+    }
+
     /// **What D2's repurposed button had to leave behind, and did not.**
     ///
     /// §2.22's keyframe button became the graph editor toggle on the reasoning that Add / Remove /
@@ -363,22 +469,12 @@ final class GraphEditorUITests: PaintUITestCase {
         let cel = try XCTUnwrap(readCel(app, layerIndex: 0, celIndex: 0))
         XCTAssertGreaterThan(cel.length, 8, "PREMISE: the starting block is long enough for two marks")
 
-        /// One frame's column of that block, tapped through the two-stage cel contract — the same
-        /// technique `authorAnAnimatedBrightnessCurve` uses, and for its stated reason.
+        /// One frame's column of that block, for the taps further down that are not a mark.
         func slot(_ frame: Int) -> XCUICoordinate {
             block.coordinate(withNormalizedOffset:
                 CGVector(dx: (Double(frame) + 0.5) / Double(cel.length), dy: 0.5))
         }
-        func mark(_ frame: Int) {
-            let add = app.buttons["timeline.menu.Add Keys"]
-            slot(frame).tap()
-            if !add.waitForExistence(timeout: 2) {
-                slot(frame).tap()
-                XCTAssertTrue(add.waitForExistence(timeout: 5),
-                              "No Add Keys on frame \(frame)'s menu — the artist's only way in")
-            }
-            add.tap()
-        }
+        func mark(_ frame: Int) { addKeysMark(app, on: block, ofLength: cel.length, atFrame: frame) }
 
         // Step 1 and 2: the artist marks A and then B, exactly as §2.26 describes.
         mark(0)
@@ -639,17 +735,7 @@ final class GraphEditorGestureUITests: PaintUITestCase {
         let block = app.otherElements["timeline.cel.1.0"]
         XCTAssertTrue(block.waitForExistence(timeout: 5), "The transformation layer should have a track")
         let cel = try XCTUnwrap(readCel(app, layerIndex: 1, celIndex: 0))
-        func mark(_ frame: Int) {
-            let slot = block.coordinate(withNormalizedOffset:
-                CGVector(dx: (Double(frame) + 0.5) / Double(cel.length), dy: 0.5))
-            let add = app.buttons["timeline.menu.Add Keys"]
-            slot.tap()
-            if !add.waitForExistence(timeout: 2) {
-                slot.tap()
-                XCTAssertTrue(add.waitForExistence(timeout: 5), "No Add Keys on frame \(frame)'s menu")
-            }
-            add.tap()
-        }
+        func mark(_ frame: Int) { addKeysMark(app, on: block, ofLength: cel.length, atFrame: frame) }
         mark(0)
         mark(6)
 
@@ -930,6 +1016,29 @@ private extension PaintUITestCase {
         let end: Double
     }
 
+    /// **A mark on a frame, put there the only way an artist can: tap the frame's column of the block,
+    /// then Add Keys on the menu it raises.** A frame's column is a fraction of the block, which reaches
+    /// past its right edge for a frame the block does not cover — the only handle a test has on an empty
+    /// slot (`testAnEmptySlotCanStillBeGivenAKeyframe`'s technique).
+    ///
+    /// **One tap or two, decided by what happened rather than assumed.** `handleTapOnCel` and
+    /// `handleTapOnGap` are a two-stage contract: a tap on a frame that is *not* already selected only
+    /// selects it, and the menu comes up on the next one. So a frame the playhead is already sitting on —
+    /// frame 0 on a fresh document — needs a single tap, and tapping twice there opens the menu and
+    /// dismisses it again, which is indistinguishable from the menu never having opened.
+    func addKeysMark(_ app: XCUIApplication, on block: XCUIElement, ofLength length: Int, atFrame frame: Int) {
+        let slot = block.coordinate(withNormalizedOffset:
+            CGVector(dx: (Double(frame) + 0.5) / Double(length), dy: 0.5))
+        let add = app.buttons["timeline.menu.Add Keys"]
+        slot.tap()
+        if !add.waitForExistence(timeout: 2) {
+            slot.tap()
+            XCTAssertTrue(add.waitForExistence(timeout: 5),
+                          "No Add Keys on frame \(frame)'s menu — the artist's only way in")
+        }
+        add.tap()
+    }
+
     /// **A layer with one genuinely animated effect channel, authored the only way the app can author
     /// one: two keyframe marks and one slider drag.**
     ///
@@ -953,27 +1062,7 @@ private extension PaintUITestCase {
         let block = app.otherElements["timeline.cel.1.0"]
         XCTAssertTrue(block.waitForExistence(timeout: 5), "The effect layer should have a track")
         let cel = try XCTUnwrap(readCel(app, layerIndex: 1, celIndex: 0))
-        func mark(_ frame: Int) {
-            // A frame's column as a fraction of the block, which reaches past its right edge for a
-            // frame the block does not cover — the only handle a test has on an empty slot, and
-            // `testAnEmptySlotCanStillBeGivenAKeyframe`'s technique.
-            let slot = block.coordinate(withNormalizedOffset:
-                CGVector(dx: (Double(frame) + 0.5) / Double(cel.length), dy: 0.5))
-            let add = app.buttons["timeline.menu.Add Keys"]
-            // **One tap or two, decided by what happened rather than assumed.**
-            // `handleTapOnCel`/`handleTapOnGap` are a two-stage contract: a tap on a frame that is
-            // *not* already selected only selects it, and the menu comes up on the next one. So a
-            // frame the playhead is already sitting on — frame 0 on a fresh document — needs a
-            // single tap, and tapping twice there opens the menu and dismisses it again, which is
-            // indistinguishable from the menu never having opened.
-            slot.tap()
-            if !add.waitForExistence(timeout: 2) {
-                slot.tap()
-                XCTAssertTrue(add.waitForExistence(timeout: 5),
-                              "No Add Keys on frame \(frame)'s menu")
-            }
-            add.tap()
-        }
+        func mark(_ frame: Int) { addKeysMark(app, on: block, ofLength: cel.length, atFrame: frame) }
         mark(from)
         mark(to)
         XCTAssertEqual(app.otherElements["timeline.keyMarkers.1"].value as? String,

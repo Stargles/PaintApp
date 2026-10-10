@@ -916,4 +916,93 @@ final class PoseBandLogicTests: XCTestCase {
         XCTAssertEqual(storedTrack(manager)?.curve(.rotation), rotationBefore,
                        "Rotation's keys, handles and tangent modes are exactly what they were")
     }
+
+    // MARK: - The legend names the curves the band draws
+
+    /// The owner, 2026-10-10: *"When in the graph editor, I cant tell which coloured line is which."* The
+    /// legend is the answer, and it is read off the band's own content — so this pins that it is *that* list,
+    /// in that order, in those colours, rather than a second walk of the model.
+
+    /// **A diagonal slide draws X and Y, and the legend says which hue is which.** Each line carries the
+    /// colour its curve is drawn in (`colour(forDescriptorIndex:)` of the channel's own index), and the two
+    /// are different colours — otherwise the legend would be a list of names beside two identical lines.
+    func testTheLegendNamesXAndYInTheColoursTheirCurvesAreDrawnIn() throws {
+        let manager = slidingBothWays()
+        let drawn = try content(manager).channels
+        XCTAssertEqual(drawn.map(\.name), ["X", "Y"], "PREMISE: a diagonal slide draws X and Y")
+
+        let legend = TimelineGraphBand.legend(of: try content(manager))
+        XCTAssertEqual(legend.map(\.name), ["X", "Y"], "the legend lists what the band draws, in its order")
+        XCTAssertEqual(legend.map(\.parameterID), drawn.map(\.parameterID))
+        for (entry, channel) in zip(legend, drawn) {
+            XCTAssertEqual(entry.colour, TimelineGraphBand.colour(forDescriptorIndex: channel.descriptorIndex),
+                           "\(entry.name) is named in the colour its curve is drawn in")
+            XCTAssertTrue(entry.isAnimated, "\(entry.name) is an animation")
+        }
+        XCTAssertNotEqual(legend[0].colour, legend[1].colour, "X and Y are told apart by colour")
+    }
+
+    /// **The legend follows the band, not the model**: the three flat rows a transform channel starts with
+    /// switched off (TODO (59)) are not drawn and so are not named, and switching one on adds its line and
+    /// marks it as not animated — it is drawn dashed, and a legend that named it in full colour would be
+    /// describing a different line.
+    func testTheLegendFollowsWhatTheBandDrawsAndMarksAFlatCurve() throws {
+        let (manager, layerID, celID) = celFixture()
+        animateCelWithFlatRows(manager, layerID: layerID, celID: celID)
+        XCTAssertEqual(TimelineGraphBand.legend(of: try content(manager)).map(\.name), ["X", "Y", "Rotation"],
+                       "Scale X, Scale Y and Skew are off the band, so they are off the legend")
+
+        manager.setGraphChannels([celScaleX], visible: true)
+        let legend = TimelineGraphBand.legend(of: try content(manager))
+        XCTAssertEqual(legend.map(\.name), ["X", "Y", "Scale X", "Rotation"], "switching a row on brings its line in")
+        XCTAssertEqual(legend.map(\.isAnimated), [true, false, false, false],
+                       "…and a flat curve is named as the dashed, dimmed line it is drawn as")
+    }
+
+    func testAClosedBandHasNoLegend() {
+        XCTAssertEqual(TimelineGraphBand.legend(of: nil), [])
+    }
+
+    /// **More curves than lines say so**, rather than shrinking the text past reading or scrolling inside a
+    /// column that is itself scrolled: as many entries as leave room for a last "+N more" line.
+    func testMoreCurvesThanLinesLeaveALastLineSayingHowManyAreLeftOut() {
+        func entries(_ count: Int) -> [TimelineGraphBand.LegendEntry] {
+            (0..<count).map {
+                TimelineGraphBand.LegendEntry(parameterID: "c\($0)", name: "Channel \($0)",
+                                              colour: TimelineGraphBand.colour(forDescriptorIndex: $0),
+                                              isAnimated: true)
+            }
+        }
+        let capacity = TimelineGraphBand.legendCapacity
+        XCTAssertGreaterThanOrEqual(capacity, 6, "PREMISE: the band's strip holds at least six lines")
+        XCTAssertEqual(CGFloat(capacity) * TimelineGraphBand.legendLineHeight <= TimelineGraphBand.height, true,
+                       "…and every line, the last included, fits inside it")
+
+        let exact = TimelineGraphBand.legendLines(of: entries(capacity))
+        XCTAssertEqual(exact.shown.count, capacity, "as many as there is room for is all shown")
+        XCTAssertEqual(exact.more, 0)
+
+        let over = TimelineGraphBand.legendLines(of: entries(capacity + 3))
+        XCTAssertEqual(over.shown.count, capacity - 1, "one line is given up to say how many are not shown")
+        XCTAssertEqual(over.more, 4, "…and it counts the one that line replaced")
+        XCTAssertEqual(over.shown.map(\.name), (0..<capacity - 1).map { "Channel \($0)" }, "in the band's order")
+
+        XCTAssertEqual(TimelineGraphBand.legendLines(of: []), .init(shown: [], more: 0))
+    }
+
+    /// A transformation layer whose own pose slides between frames 0 and 9 along both axes, so the band
+    /// draws X and Y.
+    private func slidingBothWays() -> CanvasManager {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.addTransformLayer()
+        let canvasBox = CGRect(origin: .zero, size: size)
+        manager.layers[1].transform = LayerPose(
+            pose: PoseQuad(restingIn: canvasBox),
+            track: CanvasFixture.poseTrack(box: canvasBox, [
+                (0, PoseQuad(restingIn: canvasBox)),
+                (9, PoseQuad(box: canvasBox, mappedBy: CGAffineTransform(translationX: 40, y: 24)))]))
+        manager.currentLayerIndex = 1
+        manager.isGraphEditorOpen = true
+        return manager
+    }
 }

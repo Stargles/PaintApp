@@ -1485,6 +1485,60 @@ enum TimelineGraphBand {
                       brightness: channelBrightness)
     }
 
+    // MARK: - Naming the curves
+
+    /// **One line of the legend: what a curve is called, in the colour it is drawn in.**
+    ///
+    /// The owner, 2026-10-10: *"When in the graph editor, I cant tell which coloured line is which."* The
+    /// colour is a hue per channel (`colour(forDescriptorIndex:)`) and nothing on the band said which
+    /// hue was which channel, so the name column says it, in the blank space under the layer's name. It
+    /// carries what the line is drawn with — the same `Colour` the stroke takes, and the same
+    /// `isAnimated` that dashes it — so the legend cannot disagree with the band about either.
+    struct LegendEntry: Equatable {
+        /// The channel's id, which is what a test names the entry by.
+        let parameterID: String
+        /// `Channel.name` — the artist-facing label ("X", "Scale X", "Brightness").
+        let name: String
+        let colour: Colour
+        /// Whether the line is an animation or a curve merely in force — a flat one is drawn dashed and
+        /// dimmed (`flatDash`, `flatAlpha`), and its legend line is dimmed with it.
+        let isAnimated: Bool
+    }
+
+    /// **What the legend lists: the curves the band draws, in the order it draws them.** Read off the
+    /// band's own `Content`, after the channel filter has been applied — so a channel the artist
+    /// switches off leaves the legend with it, and one that appears comes in the same pass as its
+    /// curve. Empty when the band is closed.
+    static func legend(of content: Content?) -> [LegendEntry] {
+        (content?.channels ?? []).map {
+            LegendEntry(parameterID: $0.parameterID, name: $0.name,
+                        colour: colour(forDescriptorIndex: $0.descriptorIndex), isAnimated: $0.isAnimated)
+        }
+    }
+
+    /// The height of one legend line. The legend lives in the strip of the name column the band's own
+    /// height makes (`height`), so this and that decide how many lines there is room for.
+    static let legendLineHeight: CGFloat = 14
+
+    /// How many lines fit beside the band.
+    static var legendCapacity: Int { Int(height / legendLineHeight) }
+
+    /// The lines the legend draws: every entry when they fit, and otherwise as many as leave room for
+    /// a last line that says how many were left out ("+3 more"). A band can draw more curves than the
+    /// strip has lines — a Distort keys eight — and the choice made here is to say so rather than to
+    /// shrink the text past reading or to scroll inside a column that is itself in a scroll view. The
+    /// curves left out are still drawn, and the channel list names every one.
+    struct LegendLines: Equatable {
+        let shown: [LegendEntry]
+        let more: Int
+    }
+
+    static func legendLines(of entries: [LegendEntry], capacity: Int = legendCapacity) -> LegendLines {
+        guard entries.count > capacity else { return LegendLines(shown: entries, more: 0) }
+        let shown = Array(entries.prefix(max(capacity - 1, 0)))
+        return LegendLines(shown: shown, more: entries.count - shown.count)
+    }
+
     // MARK: - What a test can see
 
     /// The band's accessibility value: each channel as `id:frame,frame,…`, joined by `|`, and

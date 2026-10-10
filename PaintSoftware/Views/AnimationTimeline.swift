@@ -110,6 +110,10 @@ struct AnimationTimeline: View {
     /// The ruler pinned above the rows. Held here because SwiftUI places it (`TimelineRulerStrip`) and
     /// the track drives it (`TimelineTrackView`), and neither can own what the other is handed.
     @StateObject private var rulerStrip = TimelineRulerStripHost()
+    /// The graph editor band's legend, written by the track (`TimelineTrackView`) and drawn in this
+    /// panel's name column under the layer the band is open on. Owned here for the reason the ruler
+    /// strip is: the track is rebuilt whenever the panel collapses and expands again.
+    @StateObject private var graphLegend = GraphLegend()
 
     /// Timed, so that "what a SwiftUI pass costs" is a row of a `PlaybackTrace` report
     /// rather than part of its unattributed remainder — see `PlaybackTrace.Phase.bodyTimeline`.
@@ -169,6 +173,7 @@ struct AnimationTimeline: View {
                             canvasManager: canvasManager,
                             rowHeight: rowHeight,
                             rulerStrip: rulerStrip.view,
+                            graphLegend: graphLegend,
                             onRequestMenu: { request, anchor in
                                 timelineMenu = (request, anchor)
                             },
@@ -1236,8 +1241,6 @@ struct AnimationTimeline: View {
         // The swatch is the band's colour for this curve, taken from the **descriptor** index the
         // row carries — the same input the band draws with, so hiding a channel repaints nothing.
         let colour = TimelineGraphBand.colour(forDescriptorIndex: row.descriptorIndex)
-        let swatch = Color(hue: colour.hue, saturation: colour.saturation,
-                           brightness: colour.brightness)
         // **The box and the body are two buttons, §11.7's gesture split.** The box is the filter it
         // always was; the body raises the Move box for the channel the row names, and is disabled on
         // a grade's row because a Brightness curve has no subject to raise. The identifier stays on
@@ -1257,15 +1260,8 @@ struct AnimationTimeline: View {
             .accessibilityValue((row.isVisible ? "on" : "off") + (row.isAnimated ? "" : ",flat"))
             Button(action: { revealGraphChannel(row.navigation) }) {
                 HStack(spacing: 8) {
-                    Group {
-                        if row.isAnimated {
-                            Circle().fill(swatch)
-                        } else {
-                            Circle().strokeBorder(swatch, lineWidth: 1.5)
-                        }
-                    }
-                    .frame(width: 8, height: 8)
-                    .opacity(row.isVisible ? 1 : 0.3)
+                    GraphChannelSwatch(colour: colour, isAnimated: row.isAnimated)
+                        .opacity(row.isVisible ? 1 : 0.3)
                     Text(row.name).font(.caption)
                     if !row.isAnimated {
                         Text("not animated").font(.caption2).foregroundColor(.secondary)
@@ -1414,6 +1410,7 @@ struct AnimationTimeline: View {
                     .frame(height: layout.blockHeight(ofRow: position), alignment: .leading)
                     .frame(height: layout.height(ofRow: position), alignment: .top)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .overlay(alignment: .bottomLeading) { graphLegendSlot(ofRow: position, in: layout) }
                     .background(liftedBackground(isLifted: isLifted))
                     .contentShape(Rectangle())
                     // **A tap on a name picks its row** — TODO (21)'s folder band. A layer's row
@@ -1436,6 +1433,20 @@ struct AnimationTimeline: View {
         }
         .frame(width: nameColumnWidth)
         .padding(.vertical, TimelineRowLayout.verticalInset)
+    }
+
+    /// **The legend of the graph editor band, in the strip under the layer's name** — the strip the band
+    /// itself is laid beside, which the name column leaves blank. It names the curves the band draws,
+    /// each in the colour it is drawn in (`GraphLegendView`), and only for the row the band is open on
+    /// *and* the band the legend was last told about: the track writes the legend a turn after it lays the
+    /// band out, and a legend for the band that was open before must not be drawn under the one that is.
+    @ViewBuilder
+    private func graphLegendSlot(ofRow position: Int, in layout: TimelineRowLayout) -> some View {
+        let strip = layout.expansion(ofRow: position)
+        if strip > 0, graphLegend.listing.target == canvasManager.graphBandTarget {
+            GraphLegendView(lines: TimelineGraphBand.legendLines(of: graphLegend.listing.entries))
+                .frame(height: strip, alignment: .top)
+        }
     }
 
     /// The picked-up row gets a card of its own — dark fill, blue rim — so it reads as detached from

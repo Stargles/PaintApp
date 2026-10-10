@@ -3016,3 +3016,30 @@ perform slowly and still land keys at the **full 24 fps density**, so the finish
 with their slow-performed motion mapped onto it. That is the only capability lost, and the honest version
 of it is not a knob on the recorder at all — it is a capture rate that is independent of the document's
 frame rate, which is a larger idea and one nobody has asked for.
+
+### 11.8 The legend — which coloured line is which (TODO (155), 2026-10-10)
+
+The owner: *"When in the graph editor, I cant tell which coloured line is which. To remedy this, add a list
+of the known transformations (X, Y) in their colors beside the graph to the left, in the blank space under
+the layer name."* Every curve takes a hue from its descriptor index (`colour(forDescriptorIndex:)`) and
+nothing on the band said which hue was which channel; the channel list (§11.5) names them but is a popup the
+artist has to raise and read and put away.
+
+**The name column draws it, in the strip the band occupies** — the 96 pt under the layer's name that the
+column leaves blank (`AnimationTimeline.graphLegendSlot`, `GraphLegendView`). One line per curve the band
+**draws**, in the band's own order, each in the colour its curve is drawn in, and a flat curve (§11.4's dashed,
+dimmed line) with a hollow swatch and a dimmed name, so the legend cannot describe a different line from the
+one drawn. It is read off the band's `Content` — after the channel filter — by `TimelineGraphBand.legend(of:)`,
+so a channel the artist switches off leaves with its curve and one that appears arrives with it. **One
+colour, one name:** `Channel.name` and `Colour.uiColor`, the single conversion the strokes, the channel list's
+swatches and the legend all take.
+
+**It costs a node drag nothing.** The track writes the legend (`GraphLegend.show`) from the one branch of
+`relayout()` where the band's content can have changed, the value is the names, colours and flatness of the
+channels and not their keys, and a write that changes nothing publishes nothing — so the SwiftUI side, which
+observes only the legend, is not re-run by a drag.
+
+**More curves than lines is decided, not left to fall out.** The strip holds `legendCapacity` lines (96 pt at
+14 pt a line: six); a band drawing more shows one fewer and a last line, "+N more", that counts the rest —
+`legendLines(of:)`. Shrinking the text past reading and scrolling a column that is itself inside a scroll
+view were the two alternatives, and the curves left out are still drawn and still named in the channel list.

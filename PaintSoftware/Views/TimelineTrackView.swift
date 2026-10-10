@@ -26,6 +26,9 @@ struct TimelineTrackView: UIViewRepresentable {
     /// driven from here because everything it shows — the zoom, the offset, the frame count — is this
     /// track's.
     let rulerStrip: TimelineRulerStripView
+    /// Where the graph editor band's legend is kept — the track writes it from the same `Content` it
+    /// draws the band out of, and the name column beside it draws it. See `GraphLegend`.
+    let graphLegend: GraphLegend
     /// What a tap resolved to: which of the timeline's three menus, and the values needed to build
     /// it, so `AnimationTimeline` never has to re-derive anything from raw indices.
     ///
@@ -117,7 +120,7 @@ struct TimelineTrackView: UIViewRepresentable {
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(canvasManager: canvasManager, rulerStrip: rulerStrip)
+        Coordinator(canvasManager: canvasManager, rulerStrip: rulerStrip, graphLegend: graphLegend)
     }
 
     @MainActor
@@ -181,9 +184,12 @@ struct TimelineTrackView: UIViewRepresentable {
         private let dragGhostView = CelBlockView()
         private let dropIndicatorView = TimelineDropIndicatorView()
 
-        init(canvasManager: CanvasManager, rulerStrip: TimelineRulerStripView) {
+        private let graphLegend: GraphLegend
+
+        init(canvasManager: CanvasManager, rulerStrip: TimelineRulerStripView, graphLegend: GraphLegend) {
             self.canvasManager = canvasManager
             self.rulerStrip = rulerStrip
+            self.graphLegend = graphLegend
             super.init()
             observeThumbnailInstalls()
             // The strip outlives this coordinator (it belongs to `AnimationTimeline`, which rebuilds the
@@ -423,6 +429,9 @@ struct TimelineTrackView: UIViewRepresentable {
             PlaybackTrace.span(.timelineRebuild, value: stackRows.count) {
                 laidOutKey = built
                 laidOutFrameCount = laidOutCount
+                // The name column's legend names what this pass draws, so it is told here — in the one
+                // branch where the band's content can have changed — and not asked for again by a view.
+                graphLegend.show(built.graphBand)
 
                 contentView.frame = CGRect(x: 0, y: 0, width: totalWidth, height: totalHeight)
                 if scrollView.contentSize != contentView.frame.size {
@@ -2116,10 +2125,7 @@ private final class TimelineGraphBandView: UIView {
             // `TimelineGraphBand.Channel.isAnimated`. The hue is what says *which* channel and must
             // not move; what the dash says is that this line is flat because there is nothing to
             // animate, rather than because the artist authored a hold.
-            let stroke = UIColor(hue: CGFloat(colour.hue),
-                                 saturation: CGFloat(colour.saturation),
-                                 brightness: CGFloat(colour.brightness),
-                                 alpha: channel.isAnimated ? 1 : TimelineGraphBand.flatAlpha)
+            let stroke = colour.uiColor(alpha: channel.isAnimated ? 1 : TimelineGraphBand.flatAlpha)
 
             // One sample per point of width — `CurveEditor.curvePath`'s density, which is what makes
             // a bezier read as a curve rather than as a chain of chords. The overshoot a bezier can
