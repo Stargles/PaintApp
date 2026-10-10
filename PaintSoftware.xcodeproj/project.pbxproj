@@ -571,6 +571,7 @@
 		B75C30A58272ECFCF4AB6451 /* TimelineRulerUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B2D16401C350509A598DCF9 /* TimelineRulerUITests.swift */; };
 		C22E6537891D093E6DA00AB4 /* PaintSoftware/Utilities/ScribbleRefusal.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7314B29DEFE5AA782B16C182 /* PaintSoftware/Utilities/ScribbleRefusal.swift */; };
 		6854117B2DA3B34FDBB41CD3 /* PaintSoftware/Views/InlineNameField.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B44AB3C598F0A8043A7606D /* PaintSoftware/Views/InlineNameField.swift */; };
+		8903CF1EE2CE1913D6E9FE62 /* PaintSoftware/Utilities/Keyboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B4FF4C2F7FDAC16A3A5D76 /* PaintSoftware/Utilities/Keyboard.swift */; };
 		08E80CC1479500DEFC328863 /* PaintSoftware/Models/ViewportFollow.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEDE4CED334236A5702F845A /* PaintSoftware/Models/ViewportFollow.swift */; };
 		C6A71BA050DFF338B92638E5 /* ScribbleRefusalLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1ED8F0919D4414CB74EC6C0E /* ScribbleRefusalLogicTests.swift */; };
 		1CCB6AED8F4FED7A19F67B8C /* InlineRenameUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8995E207841DE8B58CC054AA /* InlineRenameUITests.swift */; };
@@ -1155,6 +1156,7 @@
 		9B2D16401C350509A598DCF9 /* TimelineRulerUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TimelineRulerUITests.swift; sourceTree = "<group>"; };
 		7314B29DEFE5AA782B16C182 /* PaintSoftware/Utilities/ScribbleRefusal.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Utilities/ScribbleRefusal.swift; sourceTree = "<group>"; };
 		6B44AB3C598F0A8043A7606D /* PaintSoftware/Views/InlineNameField.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Views/InlineNameField.swift; sourceTree = "<group>"; };
+		A1B4FF4C2F7FDAC16A3A5D76 /* PaintSoftware/Utilities/Keyboard.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Utilities/Keyboard.swift; sourceTree = "<group>"; };
 		AEDE4CED334236A5702F845A /* PaintSoftware/Models/ViewportFollow.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/ViewportFollow.swift; sourceTree = "<group>"; };
 		1ED8F0919D4414CB74EC6C0E /* ScribbleRefusalLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ScribbleRefusalLogicTests.swift; sourceTree = "<group>"; };
 		8995E207841DE8B58CC054AA /* InlineRenameUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = InlineRenameUITests.swift; sourceTree = "<group>"; };
@@ -1772,6 +1774,7 @@
 				DEC0DE000000000000000027 /* PaintSoftware/Utilities/ColorMath.swift */,
 				7314B29DEFE5AA782B16C182 /* PaintSoftware/Utilities/ScribbleRefusal.swift */,
 				6B44AB3C598F0A8043A7606D /* PaintSoftware/Views/InlineNameField.swift */,
+				A1B4FF4C2F7FDAC16A3A5D76 /* PaintSoftware/Utilities/Keyboard.swift */,
 				AEDE4CED334236A5702F845A /* PaintSoftware/Models/ViewportFollow.swift */,
 				DEC0DE000000000000000029 /* PaintSoftware/Utilities/ThumbnailRenderer.swift */,
 				6821B3D844A703EA08DC6D76 /* PaintSoftware/Utilities/TouchTypeResolution.swift */,
@@ -2436,6 +2439,7 @@
 				DEC0DE000000000000000028 /* PaintSoftware/Utilities/ColorMath.swift in Sources */,
 				C22E6537891D093E6DA00AB4 /* PaintSoftware/Utilities/ScribbleRefusal.swift in Sources */,
 				6854117B2DA3B34FDBB41CD3 /* PaintSoftware/Views/InlineNameField.swift in Sources */,
+				8903CF1EE2CE1913D6E9FE62 /* PaintSoftware/Utilities/Keyboard.swift in Sources */,
 				08E80CC1479500DEFC328863 /* PaintSoftware/Models/ViewportFollow.swift in Sources */,
 				DEC0DE00000000000000002A /* PaintSoftware/Utilities/ThumbnailRenderer.swift in Sources */,
 				A6AF64FEBB766643C446D78B /* PaintSoftware/Utilities/TouchTypeResolution.swift in Sources */,

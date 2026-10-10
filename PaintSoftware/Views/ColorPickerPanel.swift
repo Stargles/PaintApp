@@ -92,7 +92,7 @@ struct ColorPickerPanel: View {
     /// the Recent strip and the whole selected palette are in view without a scroll. The owner,
     /// 2026-10-01: *"the color picker should be extended downwards. I want both the recent and color
     /// palette to be fully shown in horizontal mode."* Measured from the layout rather than guessed:
-    /// the header, the 280 pt ring, the opacity and hex rows and the tab bar are ~480 pt, and the two
+    /// the header (which carries the hex field), the 280 pt ring, the opacity row and the tab bar are ~445 pt, and the two
     /// swatch sections under them are ~200 pt for twenty Recent colours (two rows of ten) and a
     /// twenty-colour palette with its row of empty cells (three). At 700 the dropdown ends 760 pt down,
     /// inside the 810 pt of a 9th-generation iPad in landscape; a screen shorter than that proposes
@@ -126,9 +126,12 @@ struct ColorPickerPanel: View {
     private static var innerDiameter: CGFloat { ringDiameter - ringThickness * 2 - 8 }
     /// The square inscribed in the inner circle (its diagonal, not its side, fills that circle).
     private static var squareSide: CGFloat { innerDiameter / 1.4142135623730951 }
-    /// The opacity bar's fixed width — the panel's content width once `opacityAndHex`'s own
+    /// The opacity bar's fixed width — the panel's content width once `opacityRow`'s own
     /// horizontal padding (16pt a side, `.padding(.horizontal)`'s default) is taken out.
     private static var opacityBarWidth: CGFloat { popoverSize.width - 32 }
+    /// What the header leaves the hex field: a `#` and six digits, between the swatches and the eyedropper's
+    /// mode switch.
+    private static let hexRowWidth: CGFloat = 96
 
     private var currentColor: Color {
         Color.fromHSBA(h: hue, s: saturation, b: brightness, a: alpha)
@@ -220,7 +223,7 @@ struct ColorPickerPanel: View {
                 HSLTriangle(saturation: hslComponents.s, lightness: hslComponents.l, hue: hue,
                            diameter: Self.innerDiameter, onChanged: applyTriangleSL)
             }
-            opacityAndHex
+            opacityRow
         }
     }
 
@@ -231,7 +234,7 @@ struct ColorPickerPanel: View {
                 SaturationBrightnessSquare(saturation: $saturation, brightness: $brightness, hue: hue,
                                            size: Self.squareSide, onChanged: commitColor)
             }
-            opacityAndHex
+            opacityRow
         }
     }
 
@@ -285,7 +288,7 @@ struct ColorPickerPanel: View {
                 labeledSlider("Brightness", value: $brightness, id: "colorPanel.value.brightnessSlider")
             }
             .padding(.horizontal)
-            opacityAndHex
+            opacityRow
         }
     }
 
@@ -300,7 +303,7 @@ struct ColorPickerPanel: View {
         }
     }
 
-    // MARK: - Opacity + hex (shared by every type tab)
+    // MARK: - Opacity (shared by every type tab)
 
     /// TODO (106): *"The opacity slider should also display the color like in the image"* —
     /// `OpacityBar` replaces the native `Slider` with a checkerboard fading into the panel's own
@@ -308,24 +311,22 @@ struct ColorPickerPanel: View {
     /// and a round thumb. Its own `onChanged` is `commitColor` directly, the same as every other
     /// shape here, rather than a `Slider`'s `.onChange(of:)` — there is no longer a `Slider` to hang
     /// that off.
-    private var opacityAndHex: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if supportsOpacity {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Opacity: \(Int(alpha * 100))%")
-                        .font(.caption)
-                        .foregroundColor(.white)
-                    OpacityBar(alpha: $alpha, color: Color.fromHSBA(h: hue, s: saturation, b: brightness, a: 1),
-                              width: Self.opacityBarWidth, onChanged: commitColor)
-                }
+    @ViewBuilder
+    private var opacityRow: some View {
+        if supportsOpacity {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Opacity: \(Int(alpha * 100))%")
+                    .font(.caption)
+                    .foregroundColor(.white)
+                OpacityBar(alpha: $alpha, color: Color.fromHSBA(h: hue, s: saturation, b: brightness, a: 1),
+                          width: Self.opacityBarWidth, onChanged: commitColor)
             }
-            hexRow
+            .padding(.horizontal)
         }
-        .padding(.horizontal)
     }
 
     private var hexRow: some View {
-        HStack {
+        HStack(spacing: 2) {
             Text("#")
                 .foregroundColor(.gray)
             TextField("Hex", text: $hexText)
@@ -339,6 +340,7 @@ struct ColorPickerPanel: View {
                     if !focused { applyHexText() }
                 }
         }
+        .frame(width: Self.hexRowWidth)
     }
 
     // MARK: - Header: current/previous (TODO (106) — the panel's own top-left corner)
@@ -350,7 +352,23 @@ struct ColorPickerPanel: View {
     /// regardless of which tab is open, and repeating it per tab was most of what made the old row
     /// expensive. Identifiers are unchanged from (73) — `colorPanel.currentSwatch`/`previousSwatch`
     /// — only their shape, size and position moved.
+    ///
+    /// **The hex field stands beside the swatch whose colour it spells.** It is the one control here that is
+    /// typed into, so it is at the top of the panel, above where any iPad's keyboard reaches (on the 9th
+    /// generation in landscape the keyboard's top is at 457 pt of 810).
     private var header: some View {
+        HStack(spacing: 8) {
+            swatchPair
+            hexRow
+            Spacer(minLength: 0)
+        }
+        .padding(.leading, 10)
+        .padding(.top, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .topTrailing) { eyedropperModeSwitch }
+    }
+
+    private var swatchPair: some View {
         ZStack(alignment: .topLeading) {
             Button {
                 swapWithPrevious()
@@ -373,10 +391,6 @@ struct ColorPickerPanel: View {
                 .accessibilityValue(currentColor.hexString)
         }
         .frame(width: 40, height: 40, alignment: .topLeading)
-        .padding(.leading, 10)
-        .padding(.top, 8)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .overlay(alignment: .topTrailing) { eyedropperModeSwitch }
     }
 
     // MARK: - Header: the eyedropper's mode (TODO (119) — the panel's own top-right corner)

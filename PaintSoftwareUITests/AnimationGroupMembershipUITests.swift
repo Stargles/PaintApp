@@ -293,24 +293,17 @@ final class AnimationGroupMembershipUITests: PaintUITestCase {
 
     // MARK: - The channel list's rename menu
 
-    /// **Pressing and holding a group in the graph editor's channel list raises Rename Group**, and the
-    /// menu is the app's own, hung off a row of a list that is itself a menu.
-    ///
-    /// The group exists only because a Move on vector ink minted it, so the fixture is the first half
-    /// of the journey above — two marks, a keyframe, a Move, a second keyframe — and the rest is the
-    /// channel list. A touch on the list's own fold chevron then closes the rename menu **and folds the
-    /// group** while the list stays up: the nesting rule (`Placement.parent`) and "still acts" in one
-    /// touch, since the chevron is outside the menu and inside the list.
-    func testPressingAndHoldingAGroupInTheChannelListRenamesItAndATouchInTheListClosesTheMenu() throws {
-        let app = XCUIApplication()
+    /// A brand-new document taken to the graph editor's channel list with one animation group in it: two
+    /// marks, a keyframe, a Move of the first mark alone (a Move that carried every drawing on the cel would
+    /// be the whole cel's own Move, which is no group), a second keyframe, and the list opened. Answers the
+    /// group's header row and its id.
+    private func openTheChannelListOnAMintedGroup(_ app: XCUIApplication) -> (header: XCUIElement, groupID: String) {
         XCTAssertTrue(launchIntoEditor(app), "setup: a brand-new document")
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
         let paper = paperRect(in: canvas)
 
         setBrushSize(app, normalized: 0.75)
-        // Two marks, and only the first moved: a Move that carried every drawing on the cel would be the
-        // whole cel's own Move, which is no group.
         dragOnCanvas(app, from: onHost(paper, 0.14, 0.12), to: onHost(paper, 0.26, 0.24))
         dragOnCanvas(app, from: onHost(paper, 0.62, 0.12), to: onHost(paper, 0.74, 0.24))
         markKeyframe(app, onCelAt: 0.04)
@@ -330,6 +323,20 @@ final class AnimationGroupMembershipUITests: PaintUITestCase {
             format: "identifier BEGINSWITH 'timeline.graphChannels.reveal.' AND label CONTAINS 'Group 1'")).firstMatch
         XCTAssertTrue(header.waitForExistence(timeout: 5), "PREMISE: the Move minted Group 1, and the list names it")
         let groupID = header.identifier.replacingOccurrences(of: "timeline.graphChannels.reveal.", with: "")
+        return (header, groupID)
+    }
+
+    /// **Pressing and holding a group in the graph editor's channel list raises Rename Group**, and the
+    /// menu is the app's own, hung off a row of a list that is itself a menu.
+    ///
+    /// The group exists only because a Move on vector ink minted it, so the fixture is the first half
+    /// of the journey above — two marks, a keyframe, a Move, a second keyframe — and the rest is the
+    /// channel list. A touch on the list's own fold chevron then closes the rename menu **and folds the
+    /// group** while the list stays up: the nesting rule (`Placement.parent`) and "still acts" in one
+    /// touch, since the chevron is outside the menu and inside the list.
+    func testPressingAndHoldingAGroupInTheChannelListRenamesItAndATouchInTheListClosesTheMenu() throws {
+        let app = XCUIApplication()
+        let (header, groupID) = openTheChannelListOnAMintedGroup(app)
         header.press(forDuration: 1.0)
         let menu = canvasMenu(app, "graphGroupMenu")
         XCTAssertTrue(menu.waitForExistence(timeout: 5), "pressing and holding the group raises the app's own menu")
@@ -362,6 +369,47 @@ final class AnimationGroupMembershipUITests: PaintUITestCase {
         XCTAssertTrue(field.waitForNonExistence(timeout: 5), "Return ended the edit")
         let renamedRow = app.descendants(matching: .any)["timeline.graphChannels.reveal.\(groupID)"]
         let renamed = expectation(for: NSPredicate(format: "label CONTAINS 'Wing'"), evaluatedWith: renamedRow)
+        wait(for: [renamed], timeout: 5)
+    }
+
+    /// **A group renamed in the channel list is brought above the keyboard, inside the list** — the list hangs
+    /// over the timeline at the foot of the screen, which is where the keyboard is drawn, so a name typed there
+    /// would be typed blind. In landscape, the owner's orientation, from the fixture above: press and hold the
+    /// group, Rename Group. The list scrolls to the field and the screen does not move: the scene's name above
+    /// and the canvas stand where they stood.
+    ///
+    /// What the artist does next: types the name where it is on screen, and Return shows it in the list.
+    func testAGroupBeingRenamedStandsAboveTheKeyboardAndNothingElseMoves() throws {
+        XCUIDevice.shared.orientation = .landscapeLeft
+        defer { XCUIDevice.shared.orientation = .portrait }
+        let app = XCUIApplication()
+        let (header, groupID) = openTheChannelListOnAMintedGroup(app)
+        let window = app.windows.firstMatch.frame
+        XCTAssertGreaterThan(window.width, window.height, "PREMISE: the app is in landscape (\(window))")
+        let landmarks = ["timeline.projectNameField", "toolbar.brushButton", "canvas.host"]
+        func frames() -> [CGRect] { landmarks.map { app.descendants(matching: .any)[$0].frame } }
+        let before = frames()
+
+        header.press(forDuration: 1.0)
+        let rename = app.buttons["timeline.graphChannels.rename.\(groupID)"]
+        XCTAssertTrue(rename.waitForExistence(timeout: 5), "Rename Group is offered")
+        rename.tap()
+        let field = app.textFields["timeline.graphChannels.nameField"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5), "the group's name is a field in its header")
+        let keyboard = app.keyboards.firstMatch
+        try XCTSkipUnless(keyboard.waitForExistence(timeout: 5),
+                          "a hardware keyboard is connected to this simulator, so no software keyboard rises")
+        Thread.sleep(forTimeInterval: 1.0)   // the keyboard settles and the list scrolls
+        attachScreenshot(app, "animation-group-renamed-above-the-keyboard")
+        XCTAssertLessThanOrEqual(field.frame.maxY, keyboard.frame.minY,
+                                 "the name being typed (bottom \(field.frame.maxY)) is above the keyboard (top \(keyboard.frame.minY))")
+        XCTAssertTrue(window.contains(field.frame), "…and on the screen (\(field.frame) in \(window))")
+        XCTAssertEqual(frames(), before, "nothing on screen moved for the keyboard: the list scrolled, the screen did not")
+
+        field.typeText("Wing\n")
+        XCTAssertTrue(field.waitForNonExistence(timeout: 5), "Return ended the edit")
+        let renamed = expectation(for: NSPredicate(format: "label CONTAINS 'Wing'"),
+                                  evaluatedWith: app.descendants(matching: .any)["timeline.graphChannels.reveal.\(groupID)"])
         wait(for: [renamed], timeout: 5)
     }
 }

@@ -17,7 +17,7 @@ final class BackupManagerLogicTests: XCTestCase {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         ProjectBackupManager.rootDirectoryOverride = root
         ProjectBackupManager.trashRetentionInterval = 7 * 24 * 60 * 60
-        ProjectBackupManager.maxTotalBackupBytes = 1_000_000_000
+        ProjectBackupManager.maxTotalBackupBytes = ProjectBackupManager.defaultMaxTotalBackupBytes
         UserDefaults.standard.removeObject(forKey: ProjectBackupManager.signatureDefaultsKey)
     }
 

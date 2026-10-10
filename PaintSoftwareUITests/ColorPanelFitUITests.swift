@@ -54,5 +54,11 @@ final class ColorPanelFitUITests: PaintUITestCase {
         XCTAssertEqual(switchFrame.midY, currentFrame.midY, accuracy: 24,
                        "the switch shares a row with the previous/current colour indicator")
         XCTAssertGreaterThan(switchFrame.midX, currentFrame.midX, "…at its right")
+        // The hex field is on that row too, between the two: typed into, so it stands where no keyboard reaches.
+        let hexFrame = element("colorPanel.hexField").frame
+        XCTAssertEqual(hexFrame.midY, currentFrame.midY, accuracy: 24, "the hex field shares the row as well")
+        XCTAssertGreaterThan(hexFrame.minX, currentFrame.maxX, "…at the swatches' right")
+        XCTAssertLessThan(hexFrame.maxX, element("colorPanel.eyedropperMode.layer").frame.minX - 18,
+                          "…clear of the eyedropper's glyph and switch")
     }
 }

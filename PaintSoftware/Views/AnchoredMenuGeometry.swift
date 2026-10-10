@@ -55,9 +55,13 @@ enum AnchoredMenuPlacement {
     /// Above the anchor if it fits there, below if it fits there, and otherwise on whichever side
     /// has more room — clamped either way, so a menu taller than the screen shows its **top** rather
     /// than running off it.
+    ///
+    /// **Above the anchor means inside `bounds` as well**: when the keyboard is up, `bounds` stops at
+    /// its top, and an anchor under the keyboard has no room above it that is not also under it — the
+    /// menu is pulled up to rest on `bounds`' bottom edge instead.
     static func verticalOrigin(anchor: CGRect, height: CGFloat, bounds: CGRect) -> CGFloat {
         let above = anchor.minY - gap - height
-        if above >= bounds.minY + margin { return above }
+        if above >= bounds.minY + margin, above + height <= bounds.maxY - margin { return above }
 
         let below = anchor.maxY + gap
         if below + height <= bounds.maxY - margin { return below }

@@ -230,4 +230,62 @@ final class InlineRenameUITests: PaintUITestCase {
         editor.typeText("Base\n")
         XCTAssertEqual(first.label, "Base")
     }
+
+    /// **The last tile of the gallery's grid is brought above the keyboard, inside the grid** — the grid runs to
+    /// the bottom of the screen and the keyboard is drawn over it, and the last row has no content below it to
+    /// scroll up, so a folder named there would be typed into blind. Cold from an empty gallery, in landscape,
+    /// the owner's orientation: New Folder eighteen times, each named by Return — three rows of the grid on
+    /// either iPad, the last of them under the keyboard's top and all of them on screen without scrolling —
+    /// then the folder that sorts last is renamed from its menu. The grid scrolls and the screen does not: the
+    /// toolbar above it stands where it stood.
+    ///
+    /// What the artist does next: types the name where it is, and Return puts the grid back.
+    func testTheLastFolderTileBeingRenamedStandsAboveTheKeyboardAndNothingElseMoves() throws {
+        XCUIDevice.shared.orientation = .landscapeLeft
+        defer { XCUIDevice.shared.orientation = .portrait }
+        let app = XCUIApplication()
+        app.launchArguments = ["-resetGallery"]
+        app.launch()
+        let newFolder = app.buttons["gallery.newFolderButton"]
+        XCTAssertTrue(newFolder.waitForExistence(timeout: 15))
+        let window = app.windows.firstMatch.frame
+        XCTAssertGreaterThan(window.width, window.height, "PREMISE: the app is in landscape (\(window))")
+        let field = app.textFields["gallery.folderRenameField"]
+        for _ in 0..<18 {
+            newFolder.tap()
+            XCTAssertTrue(field.waitForExistence(timeout: 10), "PREMISE: New Folder puts the new tile's name into edit")
+            field.typeText("\n")
+            XCTAssertTrue(field.waitForNonExistence(timeout: 10))
+        }
+        let toolbarBefore = newFolder.frame
+
+        // The grid is in name order as text, so "Folder 9" is its last tile, in the third row.
+        let menu = app.buttons["gallery.folderMenu.Folder 9"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 10), "PREMISE: the last tile is Folder 9")
+        menu.tap()
+        let rename = app.buttons["Rename…"]
+        XCTAssertTrue(rename.waitForExistence(timeout: 10), "the folder's own menu offers a rename")
+        rename.tap()
+        XCTAssertTrue(field.waitForExistence(timeout: 10), "the tile's name is a field")
+        let keyboard = app.keyboards.firstMatch
+        try XCTSkipUnless(keyboard.waitForExistence(timeout: 10),
+                          "a hardware keyboard is connected to this simulator, so no software keyboard rises")
+        Thread.sleep(forTimeInterval: 1.0)   // the keyboard settles and the grid scrolls
+        attachScreenshot(app, "last-folder-tile-above-the-keyboard")
+        XCTAssertEqual(field.value as? String, "Folder 9", "PREMISE: it is the last tile")
+        XCTAssertLessThanOrEqual(field.frame.maxY, keyboard.frame.minY,
+                                 "the tile being named (bottom \(field.frame.maxY)) is above the keyboard (top \(keyboard.frame.minY))")
+        XCTAssertTrue(window.contains(field.frame), "…and on the screen (\(field.frame) in \(window))")
+        XCTAssertEqual(newFolder.frame, toolbarBefore, "the gallery's toolbar stood still: the grid scrolled, the screen did not")
+
+        field.typeText("Rooftop Chase\n")
+        XCTAssertTrue(keyboard.waitForNonExistence(timeout: 10), "Return put the keyboard away")
+        let renamed = app.buttons["gallery.folderTile.Rooftop Chase"]
+        XCTAssertTrue(renamed.waitForExistence(timeout: 10), "the grid redraws under the typed name")
+        // Without the keyboard's room under it the grid has less to scroll than it was scrolled by, and must
+        // come back to its own end rather than rest with its tiles above the top of the screen.
+        let deadline = Date().addingTimeInterval(5)
+        while !renamed.isHittable, Date() < deadline { Thread.sleep(forTimeInterval: 0.25) }
+        XCTAssertTrue(renamed.isHittable, "…and the grid is back with its tiles on screen")
+    }
 }

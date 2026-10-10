@@ -74,6 +74,21 @@ final class InlineNameField: UITextField, UITextFieldDelegate, UIGestureRecogniz
             + 2 * Self.inset
     }
 
+    /// While the keyboard is up, the scroll view this field stands in (a list's) keeps it above the keyboard.
+    private var clearance: KeyboardScrollClearance?
+
+    override func becomeFirstResponder() -> Bool {
+        guard !isFirstResponder else { return super.becomeFirstResponder() }
+        // Before the keyboard is asked for, so the notification of its first frame is heard.
+        let clearance = KeyboardScrollClearance(keeping: self)
+        guard super.becomeFirstResponder() else {
+            clearance?.end()
+            return false
+        }
+        self.clearance = clearance
+        return true
+    }
+
     override func didMoveToWindow() {
         super.didMoveToWindow()
         guard window != nil, beginsEditingWhenShown else { return }
@@ -103,6 +118,8 @@ final class InlineNameField: UITextField, UITextFieldDelegate, UIGestureRecogniz
     }
 
     func textFieldDidEndEditing(_ textField: UITextField) {
+        clearance?.end()
+        clearance = nil
         tapAway.view?.removeGestureRecognizer(tapAway)
         backgroundColor = .clear
         let typed = (text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)

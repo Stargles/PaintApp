@@ -139,6 +139,48 @@ final class EditorKeyboardLayoutUITests: PaintUITestCase {
         try assertTextMovesNothing(leavingBy: "toolbar.selectButton")
     }
 
+    // MARK: - The colour panel's hex field
+
+    /// **The keyboard's top on the owner's iPad (9th generation) in landscape** — 457 pt of its 810, MEASURED
+    /// by (159)'s worker, and the shortest landscape screen the app runs on. A field at or below it is under
+    /// the keyboard there, whatever the simulator this test runs on says.
+    private static let ownersKeyboardTop: CGFloat = 457
+
+    /// **The hex field is typed into, so it stands at the top of the panel, where no keyboard reaches** — the
+    /// owner, 2026-10-10: on their iPad in landscape the keyboard covered the hex row, which stood under the
+    /// ring. Cold from a fresh document, the artist's own sequence: the colour button, a tap on the hex
+    /// field, a code typed, Return. Held against the keyboard's frame and against the owner's iPad's line
+    /// (so a taller simulator cannot hide a field that is too low), with the panel's own controls where they
+    /// stood — nothing shifts for the keyboard.
+    ///
+    /// What the artist does next: types the code where they can see it, and the swatch beside it turns that
+    /// colour.
+    func testTheColourPanelsHexFieldStandsAboveTheKeyboard() throws {
+        let (app, _) = launch()
+        openColorPanel(app)
+        let hex = app.textFields["colorPanel.hexField"]
+        XCTAssertTrue(hex.waitForExistence(timeout: 5), "PREMISE: the panel has a hex field")
+        let ring = app.otherElements["colorPanel.svSquare"]
+        let before = (hex: hex.frame, ring: ring.frame)
+
+        hex.tap()
+        let keyboard = try softwareKeyboard(app)
+        attachScreenshot(app, "hex-field-above-the-keyboard")
+        XCTAssertLessThanOrEqual(hex.frame.maxY, keyboard.frame.minY,
+                                 "the hex field (bottom \(hex.frame.maxY)) is above the keyboard (top \(keyboard.frame.minY))")
+        XCTAssertLessThanOrEqual(hex.frame.maxY, Self.ownersKeyboardTop,
+                                 "…and above where the keyboard reaches on the owner's iPad (\(Self.ownersKeyboardTop))")
+        XCTAssertEqual(hex.frame, before.hex, "the field stood still for the keyboard")
+        XCTAssertEqual(ring.frame, before.ring, "…and so did the rest of the panel")
+
+        hex.typeText(String(repeating: "\u{8}", count: (hex.value as? String ?? "").count) + "336699")
+        app.keyboards.buttons["Return"].tap()
+        XCTAssertTrue(keyboard.waitForNonExistence(timeout: 5), "Return put the keyboard away")
+        XCTAssertEqual((hex.value as? String ?? "").uppercased(), "336699")
+        XCTAssertEqual((app.otherElements["colorPanel.currentSwatch"].value as? String ?? "").uppercased(), "336699",
+                       "…and the current swatch beside it is that colour")
+    }
+
     // MARK: - The canvas follows the box being typed in
 
     /// The text box on the glass, in screen points, from `canvas.host`'s `textbox:` field (the box's hull

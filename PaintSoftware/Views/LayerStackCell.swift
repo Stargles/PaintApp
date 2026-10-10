@@ -34,8 +34,6 @@ final class LayerStackCell: UITableViewCell {
     var onOpenFolderOptions: (() -> Void)?
     /// The artist typed a new name for this row — non-empty, trimmed, and not the one it had.
     var onRename: ((String) -> Void)?
-    /// The row's name is no longer being edited, whether or not it changed.
-    var onRenameEnded: (() -> Void)?
     /// §6.5's source pick: whether this row clips the node whose options menu is open.
     var onToggleMaskSource: (() -> Void)?
     /// §6.6's fill boundary for this row's own layer — a per-layer property rather than anything to
@@ -807,7 +805,6 @@ final class LayerStackCell: UITableViewCell {
     private func endRenaming() {
         renameField.isHidden = true
         refreshOpacityReadout()
-        onRenameEnded?()
     }
 
     override func prepareForReuse() {

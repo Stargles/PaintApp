@@ -198,11 +198,19 @@ struct AnchoredMenu<Content: View>: View {
     /// `AnchoredMenuDismissal` reads as "not laid out yet".
     @State private var measured: CGSize = .zero
 
+    /// How much of the menu layer's bottom the keyboard covers. A menu with a name being typed in it
+    /// (an animation group's, in the graph editor's channel list) hangs over the foot of the screen,
+    /// where the keyboard is drawn; the keyboard is one more edge it may not leave, so it is placed
+    /// in what is left above it. Nothing else moves for the keyboard.
+    @State private var keyboardCovered: CGFloat = 0
+
     @Environment(\.anchoredMenuRouter) private var router
 
     var body: some View {
         GeometryReader { proxy in
-            let bounds = proxy.frame(in: .global)
+            let layer = proxy.frame(in: .global)
+            let bounds = CGRect(x: layer.minX, y: layer.minY, width: layer.width,
+                                height: max(0, layer.height - keyboardCovered))
             let placed = AnchoredMenuPlacement.frame(anchor: anchor, menuSize: measured, bounds: bounds)
 
             content()
@@ -248,6 +256,7 @@ struct AnchoredMenu<Content: View>: View {
                     router?.place(presentation, placement, dismiss: onDismiss)
                 }
         }
+        .keyboardCoveredBottom($keyboardCovered)
         .onPreferenceChange(AnchoredMenuSizeKey.self) { measured = $0 }
         .onDisappear { router?.remove(presentation) }
         // One identity per presentation, so a drawer that swaps which menu it shows in the same slot

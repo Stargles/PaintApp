@@ -131,6 +131,26 @@ final class AnchoredMenuLogicTests: XCTestCase {
         XCTAssertGreaterThan(frame.minY, anchor.maxY, "and it is genuinely below, not overlapping")
     }
 
+    /// **A menu hung off an anchor the keyboard covers rests on the keyboard's top.** The keyboard shortens
+    /// `bounds` to what is above it; the anchor, at the foot of the screen, is under it, and "above the anchor"
+    /// is then a place the keyboard covers too. The menu is pulled up until its bottom edge is one margin
+    /// clear of `bounds`' own — the graph editor's channel list, with a group's name being typed in it.
+    func testAMenuWhoseAnchorIsUnderTheKeyboardRestsOnTheKeyboardsTop() {
+        let keyboardTop: CGFloat = 900
+        let aboveTheKeyboard = CGRect(x: 0, y: 0, width: screen.width, height: keyboardTop)
+        let anchor = CGRect(x: 200, y: 1100, width: 24, height: 24)   // under the keyboard
+        let menuSize = CGSize(width: 250, height: 200)
+
+        let frame = AnchoredMenuPlacement.frame(anchor: anchor, menuSize: menuSize, bounds: aboveTheKeyboard)
+
+        // PREMISE: with the whole screen the menu sits above the anchor, in the keyboard's way.
+        XCTAssertGreaterThan(AnchoredMenuPlacement.frame(anchor: anchor, menuSize: menuSize, bounds: screen).maxY,
+                             keyboardTop, "the ordinary placement is under the keyboard")
+        XCTAssertEqual(frame.maxY, keyboardTop - AnchoredMenuPlacement.margin, accuracy: 0.001,
+                       "…and with the keyboard's top as the bound it rests one margin above it")
+        XCTAssertEqual(frame.height, menuSize.height, "the menu is not squeezed, only moved")
+    }
+
     /// A menu taller than the space it has — the onion-skin panel is 640 points tall, so a timeline
     /// dragged up to most of the screen reaches this.
     func testAMenuThatFitsNeitherSideKeepsItsTopOnScreen() {

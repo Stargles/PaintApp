@@ -39,7 +39,10 @@ nonisolated enum ProjectBackupManager {
     nonisolated(unsafe) static var rootDirectoryOverride: URL?
 
     nonisolated(unsafe) static var trashRetentionInterval: TimeInterval = 7 * 24 * 60 * 60
-    nonisolated(unsafe) static var maxTotalBackupBytes: UInt64 = 1_000_000_000
+    /// The shipped cap on all backups together. **Logical bytes** — a clone is counted in full, so
+    /// the real disk cost is about a third of this; the owner ruled that stay uncounted (2026-10-10).
+    static let defaultMaxTotalBackupBytes: UInt64 = 4_000_000_000
+    nonisolated(unsafe) static var maxTotalBackupBytes: UInt64 = defaultMaxTotalBackupBytes
 
     /// UserDefaults key holding the app signature (version + build + binary mtime) seen at the
     /// previous launch. Internal (not private) so logic tests can clear it between runs.

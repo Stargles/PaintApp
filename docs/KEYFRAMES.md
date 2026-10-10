@@ -1333,7 +1333,7 @@ anyone with zero loss is the only kind worth having.
 **Where the disk tier lives is a genuine departure and should be taken knowingly.** The app has **no
 on-disk derived-data store of any kind** — no `Library/Caches`, no temporary directory, not one hit.
 Its only "outside the package" precedent is `ProjectBackupManager`'s named sibling folders under
-`Documents/` (`Projects/`, `Backups/`, `Trash/`), app-managed, rotated by count with a 1 GB global cap
+`Documents/` (`Projects/`, `Backups/`, `Trash/`), app-managed, rotated by count with a 4 GB global cap
 and purged at launch, never on a low-disk signal. **INFERRED recommendation: use `Library/Caches`
 anyway.** It is the platform's home for exactly this — evictable derived data, purged by the OS under
 disk pressure, excluded from backup — and `Documents/` is backed up and counted against the artist's

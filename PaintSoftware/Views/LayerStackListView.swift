@@ -230,7 +230,6 @@ struct LayerStackListView: UIViewRepresentable {
                     // resolved from the id in `DrawingView.layerPanelRail`.
                     cell.onOpenFolderOptions = { [weak self] in self?.onRequestOptions?(model.id) }
                     cell.onRename = { [weak self] name in self?.rename(model, to: name) }
-                    cell.onRenameEnded = { [weak self] in self?.renameEnded() }
                     // §6.5's picker, now a per-row control rather than the row's whole tap. Routed
                     // through `maskEditAllows` — the same `canMask` call the row's own glyph used to
                     // decide whether to offer itself — so a stale row still on screen from just
@@ -342,13 +341,10 @@ struct LayerStackListView: UIViewRepresentable {
         // MARK: - Renaming a row in place
 
         private var renameSubscription: AnyCancellable?
-        private var keyboardSubscription: AnyCancellable?
-        /// The row being typed into, or nil — what the keyboard's inset and the end of the edit are about.
-        private var renamingRowID: UUID?
 
         /// **The Rename command: the row's name becomes a field, and the keyboard is its.** The row is
-        /// scrolled into view first — it may be off the rail — and the rail is kept clear of the
-        /// keyboard while the edit lasts (`keyboardFrameChanged`), because the rail runs to the bottom
+        /// scrolled into view first — it may be off the rail — and the field keeps the rail clear of the
+        /// keyboard while the edit lasts (`KeyboardScrollClearance`), because the rail runs to the bottom
         /// of the screen and the keyboard is drawn over it.
         private func beginRenaming(rowID: UUID) {
             guard let tableView, let row = rows.firstIndex(where: { $0.id == rowID }) else { return }
@@ -356,9 +352,6 @@ struct LayerStackListView: UIViewRepresentable {
             tableView.scrollToRow(at: path, at: .none, animated: false)
             tableView.layoutIfNeeded()
             guard let cell = tableView.cellForRow(at: path) as? LayerStackCell else { return }
-            renamingRowID = rowID
-            keyboardSubscription = KeyboardFrame.willChange
-                .sink { [weak self] frame in self?.keyboardFrameChanged(frame) }
             cell.beginRenaming()
         }
 
@@ -371,24 +364,6 @@ struct LayerStackListView: UIViewRepresentable {
             } else if let index = canvasManager.layers.firstIndex(where: { $0.id == model.id }) {
                 canvasManager.renameLayer(at: index, to: name)
             }
-        }
-
-        private func renameEnded() {
-            renamingRowID = nil
-            keyboardSubscription = nil
-            tableView?.contentInset.bottom = 0
-            tableView?.verticalScrollIndicatorInsets.bottom = 0
-        }
-
-        /// **Keeps the row being typed into above the keyboard.** The inset is how much of the rail the
-        /// keyboard's frame covers, and the row is scrolled to inside what is left.
-        private func keyboardFrameChanged(_ keyboardFrame: CGRect) {
-            guard let tableView, let renamingRowID, let row = rows.firstIndex(where: { $0.id == renamingRowID })
-            else { return }
-            let overlap = tableView.keyboardOverlap(keyboardFrame)
-            tableView.contentInset.bottom = overlap
-            tableView.verticalScrollIndicatorInsets.bottom = overlap
-            tableView.scrollToRow(at: IndexPath(row: row, section: 0), at: .none, animated: true)
         }
 
         private func toggleVisibility(_ model: LayerRowModel) {

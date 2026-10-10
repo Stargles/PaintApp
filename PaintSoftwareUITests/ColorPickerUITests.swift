@@ -336,33 +336,26 @@ final class ColorPickerUITests: PaintUITestCase {
         attachScreenshot(XCUIScreen.main, "Palettes tab, cell filled")
     }
 
-    // MARK: - Opacity, with the hex field right under it
+    // MARK: - Opacity
 
     /// **TODO (148) — the owner: *"in the colour picker, when I try to adjust the opacity, it
     /// automatically just registers my apple pencil near the hex code and calls on apple scribble,
     /// meaning I adjust the scribble instead of adjusting opacity."*** From a fresh document: open the
-    /// panel, find the opacity bar with the hex field directly beneath it, and drag along the bar — the
-    /// opacity must follow the finger.
+    /// panel and drag along the opacity bar — the opacity must follow the finger.
     ///
-    /// **What this cannot drive.** The report is about a *Pencil* resting near the field, which hands
+    /// **What this cannot drive.** The report is about a *Pencil* resting near a text field, which hands
     /// the touch to handwriting before the bar ever sees it; XCUITest cannot synthesise a Pencil, so a
     /// finger stands in. A finger was never intercepted, so this passes without the fix — what it pins
-    /// is the part that is reachable: the field and the bar are neighbours, the drag lands on the bar
-    /// and moves the opacity, and the field is still a working text input beside it (the refusal is a
+    /// is the part that is reachable: the drag lands on the bar and moves the opacity (the refusal is a
     /// hook on every text field, and a field it broke would fail `testValueTabSlidersPick…` and every
     /// other test that types a hex). `ScribbleRefusalLogicTests` pins the refusal itself.
-    func testDraggingTheOpacityBarDirectlyAboveTheHexFieldChangesTheOpacityFromAFreshDocument() throws {
+    func testDraggingTheOpacityBarChangesTheOpacityFromAFreshDocument() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
         openColorPanel(app)
 
         let bar = app.descendants(matching: .any)["colorPanel.opacitySlider"]
         XCTAssertTrue(bar.waitForExistence(timeout: 5), "The colour panel's opacity bar")
-        let hex = app.textFields["colorPanel.hexField"]
-        XCTAssertTrue(hex.waitForExistence(timeout: 5), "…and the hex field")
-        XCTAssertLessThan(hex.frame.minY - bar.frame.maxY, 24,
-                          "Fixture check: the hex field sits right under the bar — bar \(bar.frame), field \(hex.frame)")
-        XCTAssertGreaterThanOrEqual(hex.frame.minY, bar.frame.maxY - 1, "…and below it, not over it")
 
         let swatch = app.descendants(matching: .any)["colorPanel.currentSwatch"]
         XCTAssertEqual((swatch.value as? String)?.count, 6, "Premise: the colour starts fully opaque, got \(swatch.value ?? "nil")")
