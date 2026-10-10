@@ -50,16 +50,6 @@ their files are repaired. Build `2974b33` broke this rule and lost the owner's k
 
 ---
 
-## (154) The graph editor still lags while dragging a Move node
-
-**Status** — reported 2026-10-10 with an ActionRecorder file (`recording-20261009-234428.jsonl`, pulled
-from the iPad into the session scratchpad). The owner: *"The graph editor adjusting move nodes is still
-very laggy. I have added a recording of the lagspikes."*
-
-- [ ] Find the cost per drag tick on the device-class path, remove it at the root, MEASURED before/after.
-
----
-
 ## (157) The fill tool's gap-closing slider is janky
 
 **Status** — reported 2026-10-10 with `recording-20261009-235645.jsonl`. The owner: *"The gap closing

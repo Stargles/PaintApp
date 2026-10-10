@@ -5452,8 +5452,61 @@ raises — `layers` (and the box's `floatingPiece`) are written on every tick �
 unattributed body evaluation; §18.7 measured a whole-editor pass at ~35 ms on the owner's iPad 9, so on
 the device the box should now be bound by that pass rather than by any render, INFERRED at ~25–30
 updates a second. Keeping the live pose off the published model for the length of the gesture (the
-vector float's own rule) is the lever if that is not enough. The first update of a graph drag waits for
-the bands' one mint (~300 ms here) because the finger lands on the node and moves almost at once.
+vector float's own rule) is the lever if that is not enough — §24.3 pulled it for the graph node. The
+first update of a graph drag waits for the bands' one mint (~300 ms here) because the finger lands on
+the node and moves almost at once.
+
+### 24.3 The graph node's pass is gone (2026-10-10)
+
+TODO (154), with `recording-20261009-234428.jsonl`: *"The graph editor adjusting move nodes is still
+very laggy."* MEASURED in the recording (iPad 9, Release), per two-second window of the drag: 41–72
+`updateUIView`/`reconcile`/`bodyTimeline` — one SwiftUI pass per tick — and `mainBusy` 1005–1477 ms,
+**20–26 ms of main thread a tick**, of which the named phases explain ~3.5 ms.
+
+**Why.** Each tick wrote the dragged curves through `setPoseChannelTrack`, whose `applyKeyframeState`
+and `applyPoseDelta` write six fields of `layers[i]` — six `objectWillChange` — and every view in the
+editor observes `CanvasManager`. So a tick was a whole-editor pass: the canvas's `reconcileLayers`,
+sandwich key and bake sync, every body, and — because the band's curves are in `TimelineLayoutKey` — a
+full timeline rebuild, all for a picture §24's bands already showed without any of it.
+
+**The fix** is §24.2's lever: the drag holds its curves as the pose under the finger
+(`CanvasManager.livePose`, not published). The canvas re-poses the bands from it on the tick
+(`onLivePoseMoved` → `showMovingBands`, the walk reading the held pose through
+`renderTreeAndPoses(…holding:)`), the band draws it (`Content.holding`), and the lift writes it once
+through `setPoseChannelTracks` — one undo step — from the same fold (`poseDelta(replacing:of:)`).
+
+**How it was taken.** MEASURED, **Release**, iPad Pro 13-inch M4 simulator (iOS 26.5), 95–98% idle
+before each run. The artist's gesture by XCUITest: a rotation node pressed 0.6 s and dragged 40 pt at
+20 pt/s — ~70 ticks in 1.98 s. A temporary instrument, not merged, armed `PlaybackTrace` and counted
+`objectWillChange` from the drag's first tick to its lift. Two documents: a cold start (one mark, one
+transformation layer keyed at 0 and 6) and **the owner's scene** (`evidence-153/1.paintproj`: 2048×1024,
+eight layers, two folders, its first transformation layer keyed the same way). Two runs a cell.
+
+| per drag tick | before (`cc46aef`) | after |
+|---|---|---|
+| `objectWillChange` | **6** | **0** |
+| SwiftUI passes (`updateUIView`, `reconcile`, `updateSandwich`, `syncBake`, `bodyDrawing`) | **1** | **0** |
+| `bodyToolbars` / `timelineKey` / `timelineRebuild` | 2 / 2 / 1 | 0 / 0 / 0 |
+| `viewDraw` | 3 | 1 (the band) |
+| main thread, cold start | **9.05, 9.35 ms** | **3.38, 2.93 ms** |
+| main thread, owner's scene | **10.87, 10.59 ms** | **4.06, 3.42 ms** |
+
+The lift costs what one tick used to: 7 `objectWillChange` (the commit's six and the edit's end) and
+one pass. **What is left** per tick in the simulator is the band's own redraw (0.77 ms on the owner's
+scene, every channel re-sampled across the visible width), the coordinator's tick with the canvas's
+re-pose inside it (0.50 ms, of which the walk and the band transforms are 0.35 ms), and ~2 ms the
+runloop spends outside any named span — touch delivery and Core Animation.
+`LiveTransformEditUITests` pins it as a count: the drag follows 37 updates over 2 passes (`passes:` on
+`canvas.host`), where it used to raise one per update.
+
+**On the device, INFERRED.** The recording's 20–26 ms against this harness's 10.6–10.9 ms for the same
+pass puts this path's iPad 9 at ~2.2× the simulator (§25's ~9× is a different path). At that ratio a
+tick is ~6.5–9 ms, inside the 16.7 ms of a 60 Hz frame with room to spare where it was over it. The
+band's redraw is the largest named cost left and the first lever if the device says otherwise.
+
+**Not changed:** a *grade's* or a target scalar's node still writes the document on every tick — the
+canvas can show those only by compositing the document, so the pass is the price of seeing them change.
+A sideways drag's key diamond in the row above the band follows at the lift, with the document.
 
 ## 25. A stream on a hidden layer was the busiest thing on an idle iPad (2026-10-10)
 
