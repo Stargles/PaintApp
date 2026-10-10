@@ -106,6 +106,22 @@ down. That is an acceptable fix. You decide."*
 
 ---
 
+## (162) A live stream is reference: it is never baked
+
+**Status** — ruled 2026-10-10, out of TODO (156)'s fix (a stream on a hidden layer is no longer fed).
+Asked what should happen when a *visible* stream settles after the laptop screen moves — every frame its
+cel spans is re-baked, ~16 × 350 ms on the iPad — the owner: *"a live stream does not require to be
+rendered because it is only used as reference."* This extends (27)'s point 11 (*"stream layers actively
+moving do not have to be rendered"*) from moving to always.
+
+- [ ] A live stream element never enters the frame bake or its keys: a settle re-bakes nothing, and the
+      stream is presented live in its layer's place in the stack. Bake Frame still turns a frame into an
+      image object, which renders like any image.
+- [ ] Decide and say what export does with a live stream (reference → left out, like a guide?) and what
+      the (2026-10-01) "a stream under a blend mode or effect is not live" limitation becomes.
+
+---
+
 ## (27) Stream the computer's screen as a layer
 
 **Status** — briefed 2026-09-13, designed the same day ([STREAM.md](docs/STREAM.md)), and **built through
