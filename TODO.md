@@ -157,6 +157,27 @@ shift up feature. Again, remember the important section on refactors."*
 
 ---
 
+## (160) A drawing guide vanishes during a lasso move, and during a stroke beneath it
+
+**Status** — reported 2026-10-10. The owner, verbatim: *"when I have a drawing guide on the bottom of my
+drawing disappears if i try to lasso move. If i also have my drawing guide over the drawing and draw, it
+again disappears but when I am drawing brushstrokes. The first of these issues I would rather like fixed.
+It suggests to me an non full implementation of the sandwich. The second problem I think i might be ok
+with sticking, given a solution which does not have side effects exists. The problem is that if layers on
+top of the layer you are drawing are effects or blend modes, it has to redo those calculations every tick
+to ensure real time brush stroke feedback. There may be a cheap way to do it or not, or an implementation
+that is possible but takes way too much code or memory, so I'm a bit skeptical on that. There's also the
+solution of rendering only the brush stroke without the compositing, and once the stroke ends, it joins
+down. That is an acceptable fix. You decide."*
+
+- [ ] A lasso move (and any floating piece) keeps every layer below and above it on screen — the
+      sandwich carries the float rather than being refused for it.
+- [ ] A live stroke keeps the layers above it on screen. Ruled acceptable by the owner: the stroke is
+      drawn without re-compositing what is above it, and joins down into its place when the stroke ends —
+      no per-tick re-composite of effects or blend modes, no side effects.
+
+---
+
 ## (27) Stream the computer's screen as a layer
 
 **Status** — briefed 2026-09-13, designed the same day ([STREAM.md](docs/STREAM.md)), and **built through
