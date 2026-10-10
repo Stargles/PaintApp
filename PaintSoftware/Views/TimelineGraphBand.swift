@@ -243,6 +243,27 @@ enum TimelineGraphBand {
         /// once and freeze. Half of it is already in the key (the channels' own keys) and half is not
         /// (the scene's length), which is precisely the shape that makes such a field silently stale.
         let frameCount: Int
+
+        /// **This content with a drag's curves in place of the document's** — what the band draws
+        /// while a pose drag holds them off the document (`CanvasManager.livePose`, TODO (154)), so
+        /// the node follows the finger with no layout pass. A curve for a channel the band does not
+        /// list is ignored. `frameCount` is derived again, since a key dragged past the scene's end
+        /// widens it and one dragged back narrows it. `uiRange` and `frameWindows` are carried as
+        /// they were: a drag draws against the axes it froze at touch-down and walls its keys with
+        /// the channels it captured there, never with what is drawn.
+        func holding(_ curves: [String: AnimationCurve], contentEndFrame: Int) -> Content {
+            guard !curves.isEmpty else { return self }
+            let held = channels.map { channel -> Channel in
+                guard let curve = curves[channel.parameterID] else { return channel }
+                return Channel(parameterID: channel.parameterID, name: channel.name, curve: curve,
+                               uiRange: channel.uiRange, modelDomain: channel.modelDomain,
+                               format: channel.format, descriptorIndex: channel.descriptorIndex,
+                               isAnimated: curve.isAnimated, frameWindows: channel.frameWindows)
+            }
+            return Content(target: target, height: height, channels: held, hiddenCount: hiddenCount,
+                           frameCount: TimelineGraphBand.drawnFrameCount(contentEndFrame: contentEndFrame,
+                                                                         channels: held))
+        }
     }
 
     /// **How many frames the band draws its curves over.** The scene's own length, widened to hold any

@@ -18,9 +18,16 @@ final class LiveTransformEditUITests: PaintUITestCase {
         Int(readField(app, "moves:")) ?? -1
     }
 
+    /// SwiftUI passes that have reached the canvas — `passes:`, one per `updateUIView`.
+    private func passes(_ app: XCUIApplication) -> Int {
+        Int(readField(app, "passes:")) ?? -1
+    }
+
     /// How many pixels are ink in exactly one of two same-sized screenshots of the canvas — the mark
-    /// moving shows up twice, where it left and where it went; the same picture is zero.
-    private func darkPixelsThatMoved(_ a: CGImage, _ b: CGImage) throws -> Int {
+    /// moving shows up twice, where it left and where it went; the same picture is zero. `above` is a
+    /// host fraction to count rows above only — the dock's top, so the timeline's own chrome (a node's
+    /// ring, the bake bar) is not read as the picture.
+    private func darkPixelsThatMoved(_ a: CGImage, _ b: CGImage, above: Double = 1) throws -> Int {
         func bytes(_ image: CGImage) throws -> [UInt8] {
             var buffer = [UInt8](repeating: 0, count: image.width * image.height * 4)
             let context = try XCTUnwrap(CGContext(data: &buffer, width: image.width, height: image.height,
@@ -33,7 +40,8 @@ final class LiveTransformEditUITests: PaintUITestCase {
         XCTAssertEqual(a.width, b.width, "PREMISE: one layout, two pictures")
         let x = try bytes(a), y = try bytes(b)
         var count = 0
-        for pixel in stride(from: 0, to: min(x.count, y.count), by: 4) where (x[pixel] < 100) != (y[pixel] < 100) {
+        let end = min(x.count, y.count, a.width * 4 * Int(Double(a.height) * above))
+        for pixel in stride(from: 0, to: end, by: 4) where (x[pixel] < 100) != (y[pixel] < 100) {
             count += 1
         }
         return count
@@ -139,6 +147,12 @@ final class LiveTransformEditUITests: PaintUITestCase {
     /// transformation layer, keyframe marks at 0 and 6, one Move at 6, the graph editor with only
     /// Rotation drawn. Dragging the node at the frame the playhead is on re-poses the bands on every
     /// update and turns the mark on screen before the bake of the result lands.
+    ///
+    /// **And it does so without a SwiftUI pass per update** — TODO (154), *"the graph editor adjusting
+    /// move nodes is still very laggy"*. The drag holds its pose off the document until the lift
+    /// (`CanvasManager.livePose`), so the canvas follows on `moves:` while `passes:` stands still but
+    /// for the touch-down and the lift; it used to rise by one for every update. The lift is one
+    /// undo step: one press of Undo puts the mark back where the drag found it.
     func testAGraphEditorPoseNodeDragIsDrawnUnderTheFingerOnEveryUpdate() throws {
         let app = XCUIApplication()
         app.launchArguments += ["-uiTestSlowBakeMillis", "\(Int(Self.bakeDelay * 1000))"]
@@ -189,18 +203,43 @@ final class LiveTransformEditUITests: PaintUITestCase {
             dx: TimelineGraphBand.x(ofFrame: 6, pixelsPerFrame: TimelineKeyMarkers.basePixelsPerFrame),
             dy: TimelineGraphBand.y(ofValue: -45, in: range, bandHeight: band.frame.height)))
         let before = moves(app)
+        let passesBefore = passes(app)
         node.press(forDuration: 0.6, thenDragTo: node.withOffset(CGVector(dx: 0, dy: -30)),
                    withVelocity: XCUIGestureVelocity(40), thenHoldForDuration: 0.3)
         let followed = moves(app) - before
+        let raised = passes(app) - passesBefore
         let state = sandwichState(app)
         let after = try XCTUnwrap(canvas.screenshot().image.cgImage)
         attachScreenshot(canvas, "after-the-node-drag-before-its-bake")
-        XCTContext.runActivity(named: "the picture followed \(followed) updates; canvas \(state)") { _ in }
+        XCTContext.runActivity(named: "the picture followed \(followed) updates over \(raised) passes; "
+                               + "canvas \(state)") { _ in }
         XCTAssertGreaterThan(followed, 10, "the picture should have followed the node, update by update")
+        XCTAssertLessThanOrEqual(raised, 4, "the drag raised \(raised) SwiftUI passes for \(followed) updates — "
+                                 + "a tick that publishes the document is a pass over the whole editor; only "
+                                 + "the touch-down and the lift may raise one")
         XCTAssertTrue(["moving", "live"].contains(state),
                       "the drag's own bands, or the pair minted for its result — not the held bake (\(state))")
         let changed = try darkPixelsThatMoved(turned, after)
         XCTAssertGreaterThan(changed, 200, "the mark turned on screen with the node, before the bake of the "
                              + "turn — \(changed) pixels of ink differ between the two screenshots")
+
+        XCTAssertTrue(waitForSandwichState(app, "rest", timeout: 40, "the drag's bake lands"))
+        let picture = dockTop(app, canvas)
+        let landed = try XCTUnwrap(canvas.screenshot().image.cgImage)
+        XCTAssertGreaterThan(try darkPixelsThatMoved(turned, landed, above: picture), 200,
+                             "the lift wrote the turn the drag showed — the bake carries it")
+        app.buttons["sideToolbar.undoButton"].tap()
+        // Read off the pixels until they settle back, since the canvas shows the undone turn through
+        // its live pair and then its bake, and a state read could catch the last bake before either.
+        var left = Int.max
+        let deadline = Date().addingTimeInterval(40)
+        while Date() < deadline, left >= 40 {
+            left = try darkPixelsThatMoved(turned, try XCTUnwrap(canvas.screenshot().image.cgImage),
+                                           above: picture)
+            if left >= 40 { Thread.sleep(forTimeInterval: 0.5) }
+        }
+        attachScreenshot(canvas, "after-one-undo")
+        XCTAssertLessThan(left, 40, "one press of Undo puts the whole drag back — \(left) pixels of ink still "
+                          + "differ from the picture before it")
     }
 }

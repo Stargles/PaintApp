@@ -188,10 +188,14 @@ final class FloatingPieceOverlayView: TransformOverlayView, UIGestureRecognizerD
         isHidden = newPiece == nil
         isUserInteractionEnabled = isInteractive
         guard newPiece != nil else {
-            // A piece settled out from under a touch takes the claim with it; the sequence's own end
-            // would clear it too, a moment later.
-            drag?.abandon()
-            drag = nil
+            // **A piece settled out from under a touch ends its drag here**, `onBoxTouchUp` and all —
+            // the sequence's own end, a moment later, finds no claim and says nothing, so this is the
+            // only touch-up that drag gets, and the live transform edit's hold on the baker ends with it.
+            if let ended = drag {
+                drag = nil
+                ended.abandon()
+                onBoxTouchUp?()
+            }
             return
         }
         layoutFromPiece()

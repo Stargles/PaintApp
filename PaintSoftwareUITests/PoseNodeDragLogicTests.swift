@@ -6,8 +6,10 @@ import CoreGraphics
 ///
 /// `PoseComponentsLogicTests` pins the arithmetic and `PoseBandLogicTests` pins what the band draws.
 /// This one pins the **edit**, and every test in it goes through the *shipped* dispatch —
-/// `TimelineGraphBand.grab`, then `moves`, then `applying`, then
-/// `CanvasManager.setPoseChannelTrack` — the same three steps a grade's node drag takes.
+/// `TimelineGraphBand.grab`, then `moves`, then `applying`, then the pose under the finger
+/// (`CanvasManager.holdLivePose`, committed at the lift by `commitLivePose` — TODO (154)), or
+/// `setPoseChannelTrack` on every tick for an animation group's row, which the canvas cannot show
+/// held.
 ///
 /// **The property the whole file exists for is the opposite of what it pinned before TODO (139).**
 /// A whole-pose key had one frame for all six rows, so a sideways drag on Scale X moved X, Y and
@@ -131,11 +133,13 @@ final class PoseNodeDragLogicTests: XCTestCase {
 
     /// **`TimelineTrackView.Coordinator`'s three steps, in order and with nothing else.**
     ///
-    /// Touch-down resolves through `grab`, every tick resolves `moves` against the *starting*
-    /// channels and writes the whole curves `applying` returns, and a cancel writes the starting
-    /// curves back — the coordinator's own arrangement. The undo bracket is opened and committed
-    /// exactly where the coordinator opens and commits it, because "one drag is one press of Undo" is
-    /// one of the things under test. Written here because `TimelineTrackView.swift` is not compiled
+    /// Touch-down resolves through `grab` and begins the live edit `graphBandEdit` names; every tick
+    /// resolves `moves` against the *starting* channels and holds the whole curves `applying` returns;
+    /// the lift commits them and a cancel lets them go — the coordinator's own arrangement. A row the
+    /// canvas cannot show held (an animation group's) writes on every tick inside the undo bracket
+    /// instead, and a cancel writes the starting curves back. Both are arranged exactly as the
+    /// coordinator arranges them, because "one drag is one press of Undo" is one of the things under
+    /// test. Written here because `TimelineTrackView.swift` is not compiled
     /// into `PaintSoftwareUITests`; every choice below is a call into the function the recogniser
     /// calls.
     ///
@@ -161,17 +165,27 @@ final class PoseNodeDragLogicTests: XCTestCase {
     private func dragKeys(_ manager: CanvasManager, _ carried: Set<TimelineGraphBand.KeyRef>,
                           by translation: CGSize, ticks: Int = 2, cancelled: Bool = false) throws -> Bool {
         let content = try content(manager)
-        manager.beginStructureGesture()
+        let edit = manager.graphBandEdit(target: content.target, parameterIDs: Set(carried.map(\.parameterID)))
+        if let edit { manager.beginLiveTransformEdit(edit) } else { manager.beginStructureGesture() }
         var wrote = false
         for tick in 1...max(ticks, 1) {
             let step = CGSize(width: translation.width * CGFloat(tick) / CGFloat(max(ticks, 1)),
                               height: translation.height * CGFloat(tick) / CGFloat(max(ticks, 1)))
             let moves = TimelineGraphBand.moves(of: carried, in: content.channels, translation: step,
                                                 pixelsPerFrame: ppf, bandHeight: height)
-            for (id, curve) in TimelineGraphBand.applying(moves, to: content.channels)
-            where manager.setPoseChannelTrack(content.target, parameterID: id, to: curve) {
-                wrote = true
+            let curves = TimelineGraphBand.applying(moves, to: content.channels)
+            if edit != nil {
+                manager.holdLivePose(curves, of: content.target)
+            } else {
+                for (id, curve) in curves where manager.setPoseChannelTrack(content.target, parameterID: id, to: curve) {
+                    wrote = true
+                }
             }
+        }
+        if edit != nil {
+            if !cancelled { wrote = manager.commitLivePose() }
+            manager.endLiveTransformEdit()
+            return wrote
         }
         if cancelled {
             for channel in content.channels where carried.contains(where: { $0.parameterID == channel.parameterID }) {

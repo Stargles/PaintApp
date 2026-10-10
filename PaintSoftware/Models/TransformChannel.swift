@@ -335,13 +335,16 @@ extension CanvasManager {
 
     /// `inkPose(forLayerID:)` from a render walk the caller already holds — `frame` is the frame the
     /// layer is showing and `container` its container pose, both read off that walk — so a caller
-    /// asking for every layer at once pays one walk rather than one per layer.
-    func inkPose(ofLayerAt index: Int, showing frame: Int, inheriting container: PoseMap?) -> PoseMap? {
+    /// asking for every layer at once pays one walk rather than one per layer. `held` is a pose under
+    /// the finger to read the cel's tracks from in place of the document's (`LivePose`).
+    func inkPose(ofLayerAt index: Int, showing frame: Int, inheriting container: PoseMap?,
+                 holding held: LivePose? = nil) -> PoseMap? {
         var mappings: [(TransformChannelID, PoseMap)] = []
         if let celIndex = activeCelIndex(inLayer: index, atFrame: frame) {
             let cel = layers[index].cels[celIndex]
             guard cel.interpolation == nil else { return nil }
-            mappings = Self.poseMappings(cel.transformTracks, atCelLocalFrame: frame - cel.startFrame)
+            mappings = Self.poseMappings(held?.transformTracks(ofCel: cel.id) ?? cel.transformTracks,
+                                         atCelLocalFrame: frame - cel.startFrame)
         }
         return Self.composedPose(movedBy: { $0 == .cel }, through: mappings, inheriting: container)
     }

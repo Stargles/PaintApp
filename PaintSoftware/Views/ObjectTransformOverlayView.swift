@@ -194,12 +194,15 @@ final class ObjectTransformOverlayView: CanvasPlaneView {
 
     func deactivate() {
         guard isActive else { return }
+        // **A drag the box stands down under ends here, as every drag ends** — `onBoxTouchUp`
+        // included, which is what ends the live transform edit and with it the baker's hold. Dropped
+        // without it, a box that vanished mid-drag left `FrameBaker.isSuspended` held until some later
+        // box gesture happened to end.
+        endDrag(abandoned: true)
         isActive = false
         isHidden = true
         isUserInteractionEnabled = false
         frameModel = nil
-        drag?.abandon()
-        drag = nil
         distorting = false
         clearHandles()
         outlineLayer.path = nil
@@ -362,10 +365,12 @@ final class ObjectTransformOverlayView: CanvasPlaneView {
         endDrag()
     }
 
-    private func endDrag() {
+    /// **The one way a drag ends** — lifted, cancelled, or `abandoned` by the box standing down under
+    /// it — so `onBoxTouchDown` is answered by exactly one `onBoxTouchUp` whichever happened.
+    private func endDrag(abandoned: Bool = false) {
         guard let ended = drag else { return }
         drag = nil
-        ended.finish()
+        abandoned ? ended.abandon() : ended.finish()
         onHandleDragEnded?()
         onBoxTouchUp?()
     }

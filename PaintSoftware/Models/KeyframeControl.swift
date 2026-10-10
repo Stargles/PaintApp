@@ -1382,51 +1382,78 @@ extension CanvasManager {
     /// **Through `commitKeyframeState`**, the funnel every keyframe writer reaches, so §2.28's
     /// `marks(_:droppingKeyed:)` runs against the keys either side of the write — a pose key dragged
     /// off a primed frame takes the mark with it, as a grade's does — and the write is one undo step,
-    /// or none inside a gesture bracket, which is what a drag's per-tick writes need.
+    /// or none inside a gesture bracket.
     ///
     /// - Returns: whether the document changed.
     @discardableResult
     func setPoseChannelTrack(_ target: KeyframeTarget, parameterID: String,
                              to curve: AnimationCurve?) -> Bool {
-        guard case .layer(let layerID) = target,
-              let index = layers.firstIndex(where: { $0.id == layerID }),
-              let (channel, component) = PoseChannelID.resolve(parameterID: parameterID)
-        else { return false }
-        var poses = KeyframePoseDelta()
-        var posesBefore = KeyframePoseDelta()
+        setPoseChannelTracks(target, curves: [parameterID: curve])
+    }
 
-        switch channel {
-        case .container:
-            guard let container = containerPose(of: target) else { return false }
-            var now = container
-            now.track.setCurve(curve, for: component)
-            guard now != container else { return false }
-            poses.container = now
-            posesBefore.container = container
-        case .cel(let id):
-            for cel in layers[index].cels {
-                guard let track = cel.transformTracks[id.id] else { continue }
-                let span = cel.startFrame..<cel.endFrame
-                let keys = (curve?.keys ?? []).filter { span.contains($0.frame) }.map { key -> AnimationCurve.Key in
-                    var local = key
-                    local.frame -= cel.startFrame
-                    return local
-                }
-                var rewritten = track
-                rewritten.setCurve(AnimationCurve(keys: keys, step: track.curve(component)?.step ?? curve?.step ?? 1),
-                                   for: component)
-                guard rewritten != track else { continue }
-                let was = CelPoseState(tracks: cel.transformTracks, baselines: cel.pendingPoseBaselines)
-                var now = was
-                now.tracks[id.id] = rewritten.isEmpty ? nil : rewritten
-                posesBefore.cels[cel.id] = was
-                poses.cels[cel.id] = now
-            }
-            guard !poses.isEmpty else { return false }
-        }
+    /// `setPoseChannelTrack` for several components at once, as **one** undo step — what a graph
+    /// drag's lift writes (`commitLivePose`), whose finger may carry keys of several rows.
+    @discardableResult
+    func setPoseChannelTracks(_ target: KeyframeTarget, curves: [String: AnimationCurve?]) -> Bool {
+        guard let delta = poseDelta(replacing: curves, of: target) else { return false }
         let state = keyframeState(of: target)
         commitKeyframeState(state, from: state, to: target, label: .effectKeys,
-                            poses: poses, posesBefore: posesBefore)
+                            poses: delta.poses, posesBefore: delta.before)
         return true
+    }
+
+    /// **What `curves` — whole-curve replacements of pose components — make of `target`'s pose**:
+    /// the delta `commitKeyframeState` writes and the state it replaces, or nil when nothing would
+    /// change or a curve names a pose `target` does not carry. Reads the document, writes nothing.
+    ///
+    /// **The one fold, for two readers that must agree** (TODO (154)): the write above, and a graph
+    /// drag's held pose (`holdLivePose`), which the canvas shows while the finger is down and the lift
+    /// then commits through the write — so the picture under the finger and the document after it
+    /// cannot differ.
+    ///
+    /// The curves apply in parameter order, each to the pose the ones before it left, which is what
+    /// the same curves written one call at a time would leave.
+    func poseDelta(replacing curves: [String: AnimationCurve?], of target: KeyframeTarget)
+        -> (poses: KeyframePoseDelta, before: KeyframePoseDelta)? {
+        guard case .layer(let layerID) = target,
+              let index = layers.firstIndex(where: { $0.id == layerID }) else { return nil }
+        var poses = KeyframePoseDelta()
+        var before = KeyframePoseDelta()
+
+        for (parameterID, curve) in curves.sorted(by: { $0.key < $1.key }) {
+            guard let (channel, component) = PoseChannelID.resolve(parameterID: parameterID) else { return nil }
+            switch channel {
+            case .container:
+                guard let container = containerPose(of: target) else { return nil }
+                var now = poses.container ?? container
+                now.track.setCurve(curve, for: component)
+                poses.container = now
+                before.container = container
+            case .cel(let id):
+                for cel in layers[index].cels {
+                    let was = CelPoseState(tracks: cel.transformTracks, baselines: cel.pendingPoseBaselines)
+                    var now = poses.cels[cel.id] ?? was
+                    guard let track = now.tracks[id.id] else { continue }
+                    let span = cel.startFrame..<cel.endFrame
+                    let keys = (curve?.keys ?? []).filter { span.contains($0.frame) }.map { key -> AnimationCurve.Key in
+                        var local = key
+                        local.frame -= cel.startFrame
+                        return local
+                    }
+                    var rewritten = track
+                    rewritten.setCurve(AnimationCurve(keys: keys, step: track.curve(component)?.step ?? curve?.step ?? 1),
+                                       for: component)
+                    guard rewritten != track else { continue }
+                    now.tracks[id.id] = rewritten.isEmpty ? nil : rewritten
+                    before.cels[cel.id] = was
+                    poses.cels[cel.id] = now
+                }
+            }
+        }
+        if poses.container == before.container {
+            poses.container = nil
+            before.container = nil
+        }
+        return poses.isEmpty ? nil : (poses, before)
     }
 }

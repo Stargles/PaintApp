@@ -1,3 +1,4 @@
+import Combine
 import XCTest
 import CoreGraphics
 import UIKit
@@ -297,6 +298,145 @@ final class LiveTransformEditLogicTests: XCTestCase {
         s.manager.endLiveTransformEdit()
         s.manager.syncFrameBake(suspended: false)
         XCTAssertFalse(s.manager.frameBaker.isSuspended, "and the pass that ends it lets it bake the result")
+    }
+
+    // MARK: - The pose under the finger — TODO (154)
+
+    private var containerX: String { PoseChannelID.container.parameterID(.x) }
+
+    private func xCurve(_ value: Double) -> AnimationCurve {
+        AnimationCurve(keys: [AnimationCurve.Key(frame: 0, value: value)])
+    }
+
+    /// The scene with `mover` keyed on X, at rest, at frame 0 — a node a graph drag can carry.
+    private func keyedScene() -> Scene {
+        let s = scene()
+        s.manager.layers[index(s.mover, s.manager)].transform?.track =
+            TransformTrack(box: canvasBox, curves: [.x: xCurve(canvasBox.midX)])
+        return s
+    }
+
+    private func tx(from minted: PoseMap, to now: PoseMap) throws -> CGFloat {
+        try XCTUnwrap(minted.inverse?.concatenating(now).affine).tx
+    }
+
+    /// **A graph drag's tick moves the bands and nothing else** — the owner's *"still very laggy"*:
+    /// each tick used to write the pose into `layers`, six `objectWillChange`s and a SwiftUI pass over
+    /// the whole editor. Held, the canvas is told directly, the document does not move, and the walk
+    /// under the held pose is the drag's own distance from the mint.
+    func testAHeldPoseMovesTheBandsAndPublishesNothing() throws {
+        let s = keyedScene()
+        let edit = LiveTransformEdit.container(layerID: s.mover)
+        let runs = s.manager.liveTransformRuns(edit, atFrame: 0)
+        let minted = s.manager.liveTransformMaps(edit, runs: runs, atFrame: 0)
+        let stored = s.manager.layers[index(s.mover, s.manager)].transform
+        s.manager.beginLiveTransformEdit(edit)
+
+        var publishes = 0, told = 0
+        let token = s.manager.objectWillChange.sink { _ in publishes += 1 }
+        s.manager.onLivePoseMoved = { told += 1 }
+        for dx in [2.0, 5.0, 8.0] {
+            s.manager.holdLivePose([containerX: xCurve(canvasBox.midX + dx)], of: .layer(id: s.mover))
+        }
+        token.cancel()
+
+        XCTAssertEqual(publishes, 0, "a tick held off the document raises no SwiftUI pass")
+        XCTAssertEqual(told, 3, "and the canvas hears every tick directly")
+        XCTAssertEqual(s.manager.layers[index(s.mover, s.manager)].transform, stored,
+                       "the document does not hold the pose under the finger")
+        let held = s.manager.liveTransformMaps(edit, runs: runs, atFrame: 0, holding: s.manager.livePose)
+        XCTAssertEqual(try tx(from: minted[0], to: held[0]), 8, accuracy: 1e-6,
+                       "the bands are re-posed by the drag's whole distance — read inside the folder too")
+        let document = s.manager.liveTransformMaps(edit, runs: runs, atFrame: 0)
+        XCTAssertEqual(try tx(from: minted[0], to: document[0]), 0, accuracy: 1e-9,
+                       "and a mint, which reads the document alone, still sees the pose at rest")
+    }
+
+    /// **The lift writes the held pose, as one press of Undo** — and what the document then shows is
+    /// what the finger was showing.
+    func testTheLiftWritesTheHeldPoseAsOneUndoStep() throws {
+        let s = keyedScene()
+        let edit = LiveTransformEdit.container(layerID: s.mover)
+        let runs = s.manager.liveTransformRuns(edit, atFrame: 0)
+        let minted = s.manager.liveTransformMaps(edit, runs: runs, atFrame: 0)
+        let mover = index(s.mover, s.manager)
+        let steps = s.manager.history.undoStack.count
+        s.manager.beginLiveTransformEdit(edit)
+        s.manager.holdLivePose([containerX: xCurve(canvasBox.midX + 3)], of: .layer(id: s.mover))
+        s.manager.holdLivePose([containerX: xCurve(canvasBox.midX + 8)], of: .layer(id: s.mover))
+        let shown = s.manager.liveTransformMaps(edit, runs: runs, atFrame: 0, holding: s.manager.livePose)
+
+        XCTAssertTrue(s.manager.commitLivePose(), "the lift changed the document")
+        s.manager.endLiveTransformEdit()
+        XCTAssertNil(s.manager.livePose)
+        XCTAssertEqual(s.manager.layers[mover].transform?.track.curve(.x), xCurve(canvasBox.midX + 8),
+                       "the last tick's curve is what lands — every tick replaced the one before it")
+        XCTAssertEqual(s.manager.history.undoStack.count, steps + 1, "one drag, one step")
+        let landed = s.manager.liveTransformMaps(edit, runs: runs, atFrame: 0)
+        XCTAssertEqual(try tx(from: shown[0], to: landed[0]), 0, accuracy: 1e-9,
+                       "the document shows exactly what the finger was showing")
+
+        s.manager.undo()
+        XCTAssertEqual(s.manager.layers[mover].transform?.track.curve(.x), xCurve(canvasBox.midX),
+                       "one Undo puts the node back")
+        XCTAssertEqual(try tx(from: minted[0], to: s.manager.liveTransformMaps(edit, runs: runs, atFrame: 0)[0]),
+                       0, accuracy: 1e-9)
+    }
+
+    /// **A cancelled drag, or one that came back to where it began, writes nothing** — no edit and no
+    /// step — and the held pose goes with the edit whichever way it ended.
+    func testAnEndedEditDropsTheHeldPoseAndWritesNothing() {
+        let s = keyedScene()
+        let mover = index(s.mover, s.manager)
+        let stored = s.manager.layers[mover].transform
+        let steps = s.manager.history.undoStack.count
+        s.manager.beginLiveTransformEdit(.container(layerID: s.mover))
+        s.manager.holdLivePose([containerX: xCurve(canvasBox.midX + 8)], of: .layer(id: s.mover))
+        XCTAssertNotNil(s.manager.livePose)
+        s.manager.endLiveTransformEdit()
+        XCTAssertNil(s.manager.livePose, "ending the edit drops what it held")
+        XCTAssertFalse(s.manager.commitLivePose(), "and nothing is left to commit")
+
+        s.manager.beginLiveTransformEdit(.container(layerID: s.mover))
+        s.manager.holdLivePose([:], of: .layer(id: s.mover))
+        XCTAssertNil(s.manager.livePose, "a finger back where it began holds nothing")
+        XCTAssertFalse(s.manager.commitLivePose())
+        s.manager.endLiveTransformEdit()
+
+        XCTAssertEqual(s.manager.layers[mover].transform, stored)
+        XCTAssertEqual(s.manager.history.undoStack.count, steps, "no step for a drag that changed nothing")
+    }
+
+    /// A pose is held only inside an edit the canvas draws as bands — what shows it, and what drops it.
+    func testAPoseIsHeldOnlyInsideAnEditThatMovesBands() {
+        let s = keyedScene()
+        let curves = [containerX: xCurve(canvasBox.midX + 8)]
+        s.manager.holdLivePose(curves, of: .layer(id: s.mover))
+        XCTAssertNil(s.manager.livePose, "no edit, nothing to show it")
+        s.manager.beginLiveTransformEdit(.floatingPiece)
+        s.manager.holdLivePose(curves, of: .layer(id: s.mover))
+        XCTAssertNil(s.manager.livePose, "a floating piece draws its own picture")
+    }
+
+    /// **A cel channel's held pose reaches the bands through `inkPose`**, the cel's own tracks read
+    /// from the hold in place of the document's.
+    func testAHeldCelPoseIsReadThroughInkPose() throws {
+        let s = scene()
+        let inner = index(s.inner, s.manager)
+        s.manager.layers[inner].cels[0].transformTracks = [
+            TransformChannelID.cel.id: TransformTrack(box: canvasBox, curves: [.x: xCurve(canvasBox.midX)])]
+        let edit = LiveTransformEdit.cel(layerID: s.inner)
+        let runs = s.manager.liveTransformRuns(edit, atFrame: 0)
+        let minted = s.manager.liveTransformMaps(edit, runs: runs, atFrame: 0)
+        let celX = PoseChannelID.cel(.cel).parameterID(.x)
+        let restX = try XCTUnwrap(s.manager.layers[inner].cels[0].transformTracks[TransformChannelID.cel.id]?
+            .curve(.x)?.keys.first?.value)
+        s.manager.beginLiveTransformEdit(edit)
+        s.manager.holdLivePose([celX: xCurve(restX - 5)], of: .layer(id: s.inner))
+        let held = s.manager.liveTransformMaps(edit, runs: runs, atFrame: 0, holding: s.manager.livePose)
+        XCTAssertEqual(try tx(from: minted[0], to: held[0]), -5, accuracy: 1e-6)
+        XCTAssertNotEqual(s.manager.layers[inner].cels[0].transformTracks[TransformChannelID.cel.id]?.curve(.x),
+                          xCurve(restX - 5), "the cel itself is untouched until the lift")
     }
 
     // MARK: - The entry points' answers

@@ -332,6 +332,10 @@ struct CanvasView: UIViewRepresentable {
             [weak coordinator = context.coordinator] in
             coordinator?.timingStrokeFrameAdvanced()
         }
+        // TODO (154): a graph-node drag's tick reaches the bands here, with no SwiftUI pass.
+        context.coordinator.canvasManager.onLivePoseMoved = { [weak coordinator = context.coordinator] in
+            coordinator?.livePoseMoved()
+        }
 
         // One undo step per whole move/scale/rotate drag, not per intermediate value — see
         // `CanvasManager.beginStructureGesture`'s doc comment. (Covers object-layer transforms;
@@ -459,6 +463,7 @@ struct CanvasView: UIViewRepresentable {
     }
 
     private func updateUIViewNow(_ uiView: CanvasHostView, context: Context) {
+        context.coordinator.passCount += 1
         context.coordinator.activePanel = activePanel
         context.coordinator.onEditorOpened = onEditorOpened
         context.coordinator.coveredBottom = coveredBottom
@@ -1294,6 +1299,7 @@ struct CanvasView: UIViewRepresentable {
                 + " derived:\(derivedRenderCount)"
                 + " rebuilds:\(sandwichRebuildCount)"
                 + " moves:\(liveMoveCount)"
+                + " passes:\(passCount)"
                 // **The third cost of a frame, and the one playback was actually spending.**
                 // `derived:` counts posed and interpolated pictures and `rebuilds:` counts sandwich
                 // composites; neither sees the cel's *own* committed render, which is what a layer
@@ -1455,6 +1461,13 @@ struct CanvasView: UIViewRepresentable {
         /// synchronous, so a test cannot look *during* one, and a count taken after it is the only
         /// way to say the picture followed the finger rather than jumping at the end.
         private var liveMoveCount = 0
+
+        /// **How many SwiftUI passes have reached the canvas** — one per `updateUIView`, which runs on
+        /// every pass over the editor, since every view in it observes `CanvasManager`. Published on
+        /// `canvas.host` (`passes:`) beside `moves:`, so a test can say a gesture's picture followed the
+        /// finger *without* a pass per update: a graph-node drag holds its pose off the document
+        /// (TODO (154)), and this count is what fails if a tick ever publishes it again.
+        var passCount = 0
 
         /// The rest picture, from the baker (§3.6), wrapped once for the same identity reason.
         ///
@@ -1871,8 +1884,9 @@ struct CanvasView: UIViewRepresentable {
         /// is the delta from there to the map the walk resolves now — `LiveLayerTransform.viewMap`,
         /// the vector float's own conjugation, so the projective case (a Distort box) is the same
         /// path. Static bands between runs are shown untransformed. Read from the model rather than
-        /// from the gesture, so whatever writes the pose — the box, a take, a graph node, an undo
-        /// while the bands are still up — is what the band shows.
+        /// from the gesture, so whatever writes the pose — the box, a take, an undo while the bands
+        /// are still up — is what the band shows; and through the pose a graph-node drag holds off
+        /// the document (`CanvasManager.livePose`), which is the one pose the model has not yet got.
         private func showMovingBands(_ picture: LivePicture, editIsLive: Bool) {
             guard let container = containerView, let edit = picture.edit,
                   case .aroundRuns(let ids) = picture.cut else { return }
@@ -1891,7 +1905,8 @@ struct CanvasView: UIViewRepresentable {
             }
             let layers = canvasManager.layers
             let runs = ids.map { run in run.compactMap { id in layers.firstIndex { $0.id == id } } }
-            let maps = canvasManager.liveTransformMaps(edit, runs: runs, atFrame: canvasManager.currentFrame)
+            let maps = canvasManager.liveTransformMaps(edit, runs: runs, atFrame: canvasManager.currentFrame,
+                                                       holding: canvasManager.livePose)
             let size = canvasManager.canvasSize ?? .zero
             var moved = false
             for (index, view) in bandViews.enumerated() {
@@ -1918,6 +1933,17 @@ struct CanvasView: UIViewRepresentable {
                 liveMoveCount += 1
                 publishCanvasState()
             }
+        }
+
+        /// **The pose under the finger moved** — `CanvasManager.onLivePoseMoved`, a graph-node drag's
+        /// tick (TODO (154)). The bands on screen are re-posed to it now, and that is the whole of the
+        /// tick's cost to the canvas: the pose is held off the document, so no SwiftUI pass comes.
+        /// Before the bands land there is nothing to re-pose, and the pass that lands them reads the
+        /// held pose.
+        func livePoseMoved() {
+            guard sandwichPresentation == .moving, let picture = livePicture,
+                  case .aroundRuns = picture.cut else { return }
+            showMovingBands(picture, editIsLive: true)
         }
 
         // MARK: §6.4's live mask
@@ -2285,14 +2311,15 @@ struct CanvasView: UIViewRepresentable {
             publishCanvasState()
         }
 
-        /// Hides the box, and ends any drag it was in the middle of.
+        /// Hides the box, which ends any drag it was in the middle of
+        /// (`ObjectTransformOverlayView.deactivate`): its `onHandleDragEnded` lands the drag's nudge,
+        /// and its `onBoxTouchUp` ends the live edit.
         ///
-        /// The second half is not belt and braces. A float can be settled out from under the artist's
+        /// The drag's end is not belt and braces. A float can be settled out from under the artist's
         /// own finger — `rasterizeLayer` and `handleActiveContextChanged` both do it — and a live drag
         /// left latched on the stroke view would leave the piece showing a Core Animation transform
         /// nothing ever clears.
         private func deactivateTransformOverlay() {
-            endObjectTransformDrag()
             transformOverlay?.deactivate()
         }
 

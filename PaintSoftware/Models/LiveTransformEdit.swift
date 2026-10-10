@@ -28,6 +28,10 @@ import Foundation
 /// the brush already uses, as the owner suggested. A floating piece needs no bands: its picture is
 /// already its own.
 ///
+/// **A graph-node drag holds its pose off the document** (`LivePose`, TODO (154)): the bands are
+/// re-posed from the pose under the finger, the band draws its curves, and the lift writes them once.
+/// The box still writes the document on every tick (`BoxNudge`).
+///
 /// **And the baker holds off** (`FrameBaker.isSuspended`, the stroke's own seam) until the finger
 /// lifts — the owner's *"pause the background renderer until the user raises their pen off the move
 /// tool"* — then bakes the result once. The bands stay up until a picture of the result lands
@@ -48,6 +52,33 @@ enum LiveTransformEdit: Equatable {
 
     /// Whether the canvas draws this edit as bands re-posed by Core Animation.
     var movesBands: Bool { self != .floatingPiece }
+}
+
+/// **A pose held under the finger and not yet in the document** — `CanvasManager.livePose`, TODO (154).
+///
+/// A graph-band drag of a pose node used to write its curves into the document on every tick, and
+/// each write was a SwiftUI pass over the whole editor. It holds them here instead: the walk shows
+/// the layer through `pose` (`renderTreeAndPoses(atFrame:excluding:holding:)`, `inkPose`), the band
+/// draws `curves`, and the lift writes `curves` through the funnel that folded `pose` from them
+/// (`CanvasManager.poseDelta(replacing:of:)`) — one source for the value under the finger, read three ways.
+struct LivePose {
+    /// The layer whose pose the curves replace.
+    let layerID: UUID
+    /// Whole-curve replacements, by pose parameter id — what the band draws and the lift writes.
+    let curves: [String: AnimationCurve]
+    /// The pose those curves make, folded once when they were held.
+    let pose: CanvasManager.KeyframePoseDelta
+
+    /// The transformation layer's own pose as the finger holds it, or nil for any other layer and
+    /// for a drag of a cel's channel — which the walk then reads off the document as ever.
+    func containerPose(ofLayer id: UUID) -> LayerPose? {
+        id == layerID ? pose.container : nil
+    }
+
+    /// One cel's pose tracks as the finger holds them, or nil where the drag leaves the cel alone.
+    func transformTracks(ofCel id: UUID) -> [String: TransformTrack]? {
+        pose.cels[id]?.tracks
+    }
 }
 
 extension CanvasManager {
@@ -161,8 +192,13 @@ extension CanvasManager {
     /// A transformation layer's edit reads the container pose the walk carries to the leaf; a cel
     /// channel's reads `inkPose`, which composes the cel's own whole-drawing pose under it. Nil maps
     /// are the identity: a leaf at rest.
-    func liveTransformMaps(_ edit: LiveTransformEdit, runs: [[Int]], atFrame frame: Int) -> [PoseMap] {
-        let walk = renderTreeAndPoses(atFrame: frame)
+    ///
+    /// `held` is the pose under the finger (`livePose`), shown in place of the document's — what the
+    /// bands are re-posed to on every update. Nil reads the document alone, which is what a mint
+    /// wants: its maps have to describe the state its recipe froze, and the recipe reads the document.
+    func liveTransformMaps(_ edit: LiveTransformEdit, runs: [[Int]], atFrame frame: Int,
+                           holding held: LivePose? = nil) -> [PoseMap] {
+        let walk = renderTreeAndPoses(atFrame: frame, holding: held)
         return runs.map { run in
             guard let leaf = run.first else { return .identity }
             switch edit {
@@ -170,7 +206,7 @@ extension CanvasManager {
                 return walk.poses[leaf] ?? .identity
             case .cel:
                 return inkPose(ofLayerAt: leaf, showing: walk.frames[leaf] ?? frame,
-                               inheriting: walk.poses[leaf]) ?? .identity
+                               inheriting: walk.poses[leaf], holding: held) ?? .identity
             }
         }
     }

@@ -1013,10 +1013,60 @@ final class CanvasManager: ObservableObject {
         if liveTransformEdit != edit { liveTransformEdit = edit }
     }
 
-    /// The finger lifted, or the gesture was cancelled.
+    /// The finger lifted, or the gesture was cancelled. A pose still held is dropped with it — a lift
+    /// commits first (`commitLivePose`), so what is dropped here is a gesture that wrote nothing.
     func endLiveTransformEdit() {
+        livePose = nil
         if liveTransformEdit != nil { liveTransformEdit = nil }
     }
+
+    /// **The pose under the finger, which the document does not hold yet** — TODO (154). A graph-band
+    /// drag of a pose node holds its curves here for the length of the gesture (`holdLivePose`): the
+    /// canvas re-poses its bands from them and the band draws them, and the lift writes them once, as
+    /// one undo step (`commitLivePose`). Nil between gestures.
+    ///
+    /// **Not `@Published`, and that is the fix.** The drag used to write its curves into `layers` on
+    /// every tick, and every `ObservedObject` in the editor watches this object, so each tick was a
+    /// SwiftUI pass over the whole editor — six `objectWillChange`s, the canvas's `reconcileLayers`, a
+    /// full timeline rebuild — for a picture only two views draw. MEASURED in PERFORMANCE.md §24.3.
+    /// The vector float's live pose is the same rule (`CanvasView.Coordinator.liveVectorFloatPose`).
+    private(set) var livePose: LivePose?
+
+    /// **Called synchronously when `livePose` moves**, so the canvas re-poses its bands on the tick
+    /// rather than on a SwiftUI pass nothing raises any more. A closure for
+    /// `onTimingStrokeFrameAdvanced`'s reason; installed by `CanvasView.Coordinator`, nil headless.
+    var onLivePoseMoved: (() -> Void)?
+
+    /// **Holds `curves` — whole-curve replacements of `target`'s pose components — as the pose under
+    /// the finger**: shown by the canvas and the band, written nowhere. Each call replaces the last,
+    /// since a drag hands over everything it has moved since touch-down. Curves that change nothing —
+    /// the finger back where it began — hold nothing, and the canvas shows the document.
+    ///
+    /// Only inside a live edit the canvas draws as bands, which is what shows the pose and what drops
+    /// it (`endLiveTransformEdit`). Raises no SwiftUI pass: `onLivePoseMoved` tells the canvas.
+    func holdLivePose(_ curves: [String: AnimationCurve], of target: KeyframeTarget) {
+        guard liveTransformEdit?.movesBands == true, case .layer(let layerID) = target else { return }
+        livePose = poseDelta(replacing: curves, of: target).map {
+            LivePose(layerID: layerID, curves: curves, pose: $0.poses)
+        }
+        onLivePoseMoved?()
+    }
+
+    /// **Writes the pose under the finger into the document — the lift** — through
+    /// `setPoseChannelTracks`, as one undo step, and lets it go.
+    ///
+    /// The curves are folded afresh against the document as it is now rather than written as the pose
+    /// held, so whatever else reached the document while the finger was down is not overwritten with
+    /// the state the drag began from.
+    ///
+    /// - Returns: whether the document changed; false for a drag that held nothing.
+    @discardableResult
+    func commitLivePose() -> Bool {
+        guard let held = livePose else { return false }
+        livePose = nil
+        return setPoseChannelTracks(.layer(id: held.layerID), curves: held.curves.mapValues { $0 })
+    }
+
     /// Single-slot clipboard for the timeline's Copy/Paste block menu — holds a cel's content (not
     /// its position), set by `copyCel` and consumed non-destructively by `pasteCel`.
     @Published var copiedCel: CopiedCel?
@@ -2648,11 +2698,15 @@ final class CanvasManager: ObservableObject {
             : state.tracks[parameterID]
     }
 
-    /// `graphNodeCurve`'s write half, routed to the same store — so a node menu action reaches the
-    /// funnel that applies §2.28's mark rule for that kind rather than the one that would refuse it.
+    /// `graphNodeCurve`'s write half, routed to the same store — so a node menu action, and every
+    /// band gesture (`TimelineTrackView`'s `writeGraphBandCurves`), reaches the funnel that applies
+    /// §2.28's mark rule for that kind rather than the one that would refuse it. **Three stores, one
+    /// shape**: a pose component's (TODO (139)), a target scalar's and a grade's each take a whole
+    /// curve and refuse the others' ids silently, so an id routed to the wrong one would move the
+    /// node under the finger and spring it back.
     @discardableResult
-    private func writeGraphNodeCurve(target: KeyframeTarget, parameterID: String,
-                                     to curve: AnimationCurve?) -> Bool {
+    func writeGraphNodeCurve(target: KeyframeTarget, parameterID: String,
+                             to curve: AnimationCurve?) -> Bool {
         if PoseChannelID.isPose(parameterID: parameterID) {
             return setPoseChannelTrack(target, parameterID: parameterID, to: curve)
         }
