@@ -821,9 +821,6 @@ extension CanvasManager {
         let activeLayerID = layers.indices.contains(currentLayerIndex) ? layers[currentLayerIndex].id : nil
         let activeCel = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame)
         let activeCelID = activeCel.map { layers[currentLayerIndex].cels[$0].id }
-        // A box's gesture is about one frame: one still open as the playhead leaves it lands where it
-        // was made, and the box — which a scrub within its block leaves up — starts the next one here.
-        if floatingPiece?.nudge.map({ $0.frame != currentFrame }) == true { settleBoxNudge() }
         if let piece = floatingPiece {
             let stillTargeted = piece.targetLayerID == activeLayerID && piece.targetCelID == activeCelID
             if !stillTargeted, !recordingOwnsMoveBox {
@@ -1512,8 +1509,9 @@ extension CanvasManager {
 
     /// **Ends the gesture on the box that is up: what it did lands as one undo step, routed at the
     /// frame it was made on, and the box stays up holding nothing** — the finger lifting off the box
-    /// (`CanvasView`'s `moveBoxTouchUp`), each press of Mirror, Rotate and Reset, and a playhead that
-    /// moves under an open gesture.
+    /// (`CanvasView`'s `moveBoxTouchUp`), and each press of Mirror, Rotate and Reset. The frame it
+    /// routes at is the gesture's own (`BoxNudge.frame`), so a settle that comes late — the box taken
+    /// down mid-drag by a save or a tool switch — still lands where the drag was made.
     ///
     /// **Not while a live take owns the box.** A take *is* playback, the finger can lift and land again
     /// inside one, and its samples compose onto the state the take found; settling between them would
