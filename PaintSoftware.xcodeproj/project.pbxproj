@@ -306,6 +306,7 @@
 		51DB58993758F2DD963DEF08 /* PoseBakeLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDEECFCF28940EF39034A157 /* PoseBakeLogicTests.swift */; };
 		BD2F1D1B3518CB33920D8EE9 /* LayerBakeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45217E86C1B04AF5ADF7DD11 /* LayerBakeUITests.swift */; };
 		E3FDF1ADA97A7160456E873E /* BakeTransformLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1E6261002713FC13B6D7142 /* BakeTransformLogicTests.swift */; };
+		A0148C84D741541F93F307B4 /* TransformKeysSurviveUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E8ABBBA0718260B8DB17B39 /* TransformKeysSurviveUITests.swift */; };
 		31B22FD570BA633434C7AF80 /* BakeInvariantLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDBE90B3C8DC887C2F3BEB66 /* BakeInvariantLogicTests.swift */; };
 		2A3C0B4AA61807B7D4ED787C /* TransformKeysSurviveLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED361F646033600F170121AF /* TransformKeysSurviveLogicTests.swift */; };
 		9DA38E4772E48B08401D6B6D /* BakeLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38EF3525B5168D96EB3A4256 /* BakeLogicTests.swift */; };
@@ -887,6 +888,7 @@
 		CDEECFCF28940EF39034A157 /* PoseBakeLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PoseBakeLogicTests.swift; sourceTree = "<group>"; };
 		45217E86C1B04AF5ADF7DD11 /* LayerBakeUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LayerBakeUITests.swift; sourceTree = "<group>"; };
 		A1E6261002713FC13B6D7142 /* BakeTransformLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BakeTransformLogicTests.swift; sourceTree = "<group>"; };
+		4E8ABBBA0718260B8DB17B39 /* TransformKeysSurviveUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TransformKeysSurviveUITests.swift; sourceTree = "<group>"; };
 		BDBE90B3C8DC887C2F3BEB66 /* BakeInvariantLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BakeInvariantLogicTests.swift; sourceTree = "<group>"; };
 		ED361F646033600F170121AF /* TransformKeysSurviveLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TransformKeysSurviveLogicTests.swift; sourceTree = "<group>"; };
 		38EF3525B5168D96EB3A4256 /* BakeLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BakeLogicTests.swift; sourceTree = "<group>"; };
@@ -1366,6 +1368,7 @@
 				CDEECFCF28940EF39034A157 /* PoseBakeLogicTests.swift */,
 				45217E86C1B04AF5ADF7DD11 /* LayerBakeUITests.swift */,
 				A1E6261002713FC13B6D7142 /* BakeTransformLogicTests.swift */,
+				4E8ABBBA0718260B8DB17B39 /* TransformKeysSurviveUITests.swift */,
 				BDBE90B3C8DC887C2F3BEB66 /* BakeInvariantLogicTests.swift */,
 				ED361F646033600F170121AF /* TransformKeysSurviveLogicTests.swift */,
 				38EF3525B5168D96EB3A4256 /* BakeLogicTests.swift */,
@@ -2380,6 +2383,7 @@
 				51DB58993758F2DD963DEF08 /* PoseBakeLogicTests.swift in Sources */,
 				BD2F1D1B3518CB33920D8EE9 /* LayerBakeUITests.swift in Sources */,
 				E3FDF1ADA97A7160456E873E /* BakeTransformLogicTests.swift in Sources */,
+				A0148C84D741541F93F307B4 /* TransformKeysSurviveUITests.swift in Sources */,
 				31B22FD570BA633434C7AF80 /* BakeInvariantLogicTests.swift in Sources */,
 				2A3C0B4AA61807B7D4ED787C /* TransformKeysSurviveLogicTests.swift in Sources */,
 				9DA38E4772E48B08401D6B6D /* BakeLogicTests.swift in Sources */,
