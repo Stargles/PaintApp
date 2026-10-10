@@ -48,6 +48,87 @@ rather than assuming it still holds.
 
 ---
 
+## (153) Baking a transform layer destroyed another layer's keys — and every bake must keep the picture
+
+**Status** — reported 2026-10-10 from the iPad (build `2974b33`); a scene was damaged. The owner can try
+gallery → **Versions…** to restore a pre-bake save (five auto slots).
+
+The owner, verbatim: *"whatever baking a transform layer was supposed to do, the implementation was
+improper, and now one of my scenes are ruined with no way to return. I had two transform layers one as
+a static move and the other on top as a keyframed move. I tried to bake the static one. The keyframes
+are now gone from the keyframed move. This could be a bigger scope issue than just this, make sure that
+any bake down behaviour in a move layer or effect layer works properly with multiple layers. Rules are
+that baking down should not change the image (colors should remain near identical except for
+peculiarities. Think of it as applying the correct transformation to brushstroke colors, not in the
+compositor)."*
+
+- [ ] Root cause of the lost keys on the upper transform layer; fixed at the bake core (`(131)`'s one core).
+- [ ] Every bake path (transform / effect / value layers, Bake Animation, the Repeat bake) proven with
+      **stacks of several such layers**, in any order: the composite before and after is near-identical,
+      and no layer the bake did not consume changes.
+- [ ] The bake is one undo step that restores everything, including other layers' keys.
+
+---
+
+## (154) The graph editor still lags while dragging a Move node
+
+**Status** — reported 2026-10-10 with an ActionRecorder file (`recording-20261009-234428.jsonl`, pulled
+from the iPad into the session scratchpad). The owner: *"The graph editor adjusting move nodes is still
+very laggy. I have added a recording of the lagspikes."*
+
+- [ ] Find the cost per drag tick on the device-class path, remove it at the root, MEASURED before/after.
+
+---
+
+## (155) Name the curves in the graph editor
+
+**Status** — reported 2026-10-10. The owner: *"When in the graph editor, I cant tell which coloured line
+is which. To remedy this, add a list of the known transformations (X, Y) in their colors beside the graph
+to the left, in the blank space under the layer name."*
+
+- [ ] A legend of the channels the graph shows (X, Y, Scale, Rotation, …), each in its curve colour, in
+      the blank space under the layer name on the left of the graph.
+
+---
+
+## (156) Random lag spikes with the first ~16 frames flashing orange, with no input
+
+**Status** — reported 2026-10-10 with `recording-20261009-234547.jsonl`. The owner: *"Im getting these
+weird lagspikes randomly where I can see the first 16 or so frames turn orange momentairly with 0 input.
+Fix this bug and investigate if the previous session made more bugs."* The recording shows the main
+thread ~33% busy with no touch, a thumbnail render and ~14 store decodes every 2 s, and ~45 ms
+observer-phase spikes — something re-dirties the document on its own.
+
+- [ ] Root cause of the idle re-dirtying; fixed; an idle document does no work.
+- [ ] An audit of session 46's merges for other defects of the same family.
+
+---
+
+## (157) The fill tool's gap-closing slider is janky
+
+**Status** — reported 2026-10-10 with `recording-20261009-235645.jsonl`. The owner: *"The gap closing
+slider in the fill tool is being janky for some reason."*
+
+- [ ] Root cause from the recording; the slider tracks the finger smoothly.
+
+---
+
+## (158) Gap closing that does not curl in at the edges
+
+**Status** — asked 2026-10-10. The owner, verbatim: *"Right now when it is turned up and the user fills a
+square with a small opening, the feature works as intended, but also leaves the places near the edges of
+the squares not filled in. That is due to it using a SDF, so it counts it as a gap even though it is just
+an edge. I wonder if there is a way to fix that. Think of it like this: In areas where it is an edge and
+I move the slider, the fill grows to fill the edge on gap fill low, and smoothly recedes on gap fill
+high. However on actual gaps, there is a point where there is a sudden jump in the area of the filled
+shape due to the fill escaping. I wonder if a smart and fast system can be developed to fix this, so
+that gap fill works normally, but does not curl in close to the edges of a shape even on high."*
+
+- [ ] Gap closing still stops a fill escaping through an opening narrower than the slider's width.
+- [ ] Edges and corners fill right up to the ink at every slider setting; fast enough for the live slider.
+
+---
+
 ## (27) Stream the computer's screen as a layer
 
 **Status** — briefed 2026-09-13, designed the same day ([STREAM.md](docs/STREAM.md)), and **built through
