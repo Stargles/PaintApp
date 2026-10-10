@@ -5419,8 +5419,8 @@ both, and they agreed to within the noise shown.
 ### 24.1 Why each lagged — three different bottlenecks
 
 - **The Move box re-rasterized every posed drawing on the main thread, on every tick.** Its box was a
-  floating piece, and `sandwichEngagesOnCanvas` refuses the compositor for any floating piece — correct
-  for a lifted bitmap or lassoed ink, wrong for a box that holds a clear pixel. On the flat row every
+  floating piece, and `sandwichEngagesOnCanvas` refused the compositor for any floating piece — wrong
+  for a box that holds a clear pixel, and since §26 refused for none: lifted ink is carried by the pair. On the flat row every
   layer the transformation layer poses is drawn by its own host from a posed picture
   (`updateInterpolationPreviews`), and `showContainerPoseLive` writes the pose on every tick, so every
   tick was three canvas-sized rest-space dab bakes on the main actor. This is §14's 71.9 ms posed render,
@@ -5555,3 +5555,43 @@ as the screen keeps moving and resting. **TODO (162) removed that cost whole**: 
 (STREAM.md §2.13), no bake contains it, and the settle that re-marked the cel's span is gone — a frame,
 visible or hidden, now dirties no frame and raises no pass (`StreamInsertLogicTests`
 `testAStreamsFramesDirtyNoFrameAndPublishNothing`).
+
+## 26. The sandwich carries a floating piece, and a guide above the pen stays (2026-10-10)
+
+TODO (160). The owner: *"when I have a drawing guide on the bottom of my drawing disappears if i try to
+lasso move. If i also have my drawing guide over the drawing and draw, it again disappears but when I
+am drawing brushstrokes."* The drawing guide is the Guide effect (TODO (88)), drawn by the compositor
+and nothing else. **Two causes.** A floating piece took the compositor away for the whole move, so the
+canvas fell back to Core Animation's flat row, which draws no effect — and every host repainted itself
+at the lift. And a stroke's live pair composited the layers above it onto transparency, where the
+Guide's lines, which go only over what they sit on, are nothing. **The fix**: the pair is cut around the
+hosts that carry a piece (`liveHostRun`, `floatHostLayerIndices`), and where the band above the live
+hosts blends or grades (`liveHostsSitBetweenTheHalves`) the rest of the frame is one composite with
+their leaves hidden (`[RenderNode].hidingLeaves`) and the hosts draw over it (`LivePairCut.overHost`) —
+the stroke joins down into its place when its bake lands. Nothing is composited per dab or per drag
+tick, and the over picture is one canvas-sized image where the halves are two.
+
+**How it was taken.** MEASURED, **Release**, iPad Pro 13-inch M4 simulator (iOS 26.5), 96% idle before
+the first run. A temporary instrument, not merged, armed `PlaybackTrace` from a stroke's touch-down to
+its lift, from a Move-box drag's start to its end, and for the 1.5 s after a lasso float's first latch,
+and counted the touch-moves delivered; per tick is the main thread's busy time over the gesture divided
+by those. The gestures by XCUITest on a new document with the Guide below the drawing layer and, in a
+second document, above it: two strokes of 0.5 of the paper at 200 pt/s (~150 ticks), a rectangle lasso,
+Move, and two drags of 0.15 of the paper at 200 pt/s (~44 ticks). Two runs per build; each cell is the
+four strokes or drags (the two lifts) of both runs. `f29e2e4` is before.
+
+| main thread | Guide below — before | after | Guide above — before | after |
+|---|---|---|---|---|
+| per stroke tick (ms) | 2.31–2.99, median 2.65 | 2.19–3.01, median 2.63 | 2.61–3.05, median 2.83 | 2.27–2.97, median 2.53 |
+| per lasso-drag tick (ms) | 1.10–2.26, median 2.00 | 1.05–2.25, median 1.71 | 1.20–2.15, median 1.57 | 1.39–2.26, median 2.12 |
+| the lift, 1.5 s after the latch (ms) | 37.0, 40.9 | 53.7, 55.9 | 36.4, 36.2 | 45.2, 47.7 |
+
+**Per tick: no change.** Every cell's spread overlaps the other build's, and the two medians move in
+opposite directions between the two documents, which is what noise does. Neither gesture's tick touches
+the change: a dab stamps the host's scratch and a drag moves a Core Animation transform, whichever cut
+the pair is in. **The lift costs the main thread ~10–15 ms more**: the pair's recipe is minted on the
+main actor and its landing reconciles once, where the flat row only un-blanked the hosts — and then
+re-rendered each one off the main thread, which this column does not count (and drew no effect at all,
+which is the report). **Not measured**: the device; the over picture's own composite on `sandwichQueue`
+(it replaces the two halves and composites the same leaves once).
+

@@ -1822,10 +1822,9 @@ struct CanvasView: UIViewRepresentable {
             // The hosts the pair is cut around are its middle and the only ones that draw themselves —
             // the active layer, every stream's layer and every floating piece's, with whatever lies
             // between (`liveHostRun`); everything else is in the composite already, in one of the two
-            // halves or, over them, in the one picture beneath. Over them they draw above every
-            // other host as well as above that picture, since every other host is blanked. At rest even they are
-            // blanked, because `full` includes them, and under a transform edit every host is,
-            // because every leaf is in one of the bands.
+            // halves or, cut over them, in the one picture beneath them — which they draw over, every
+            // other host being blanked. At rest even they are blanked, because `full` includes them,
+            // and under a transform edit every host is, because every leaf is in one of the bands.
             //
             // A stroke clips with the mask it resolved at touch-down, and only the active layer's host
             // wears it. An edit's live pair draws its layers plain — no mask, as no blend mode or

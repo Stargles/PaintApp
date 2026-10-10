@@ -480,9 +480,11 @@ presentation stays `live` as long as the stream is on the frame, and `rest` only
 **The price is the near picture, now a rule rather than a stage** (owner, 2026-10-01, *"for the fast
 one it can be just the layer without any effects added"*, and 2026-10-10, *"a live stream does not
 require to be rendered"*): the layers in the run are drawn plain — the stream, the stream layer's own
-ink, and every layer between the stream and the active one — and a blended or graded layer above the
-run is composited onto transparency, so **a blend mode, mask or effect never reaches a stream**. When
-the stream sits at the bottom and the artist draws on a layer above, the run is all of it. The
+ink, and every layer between the stream and the active one — and where a layer above the run blends or
+grades, the run is drawn over one exact picture of everything else (`LivePairCut.overHost`, TODO (160))
+rather than under that layer composited onto transparency, so **a blend mode, mask or effect never
+reaches a stream**. When the stream sits at the bottom and the artist draws on a layer above, the run
+is all of it. The
 2026-10-02 *"Live, then exact when still"* — a settle that committed the frames after
 `settleInterval` (0.6 s, outlasting Windows' 530 ms caret blink) so the sweep re-baked the cel's span
 and the exact, effected picture replaced the pair — is gone with the settle: it re-baked every frame
