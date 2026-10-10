@@ -367,7 +367,7 @@ struct BoxNudge {
     /// when it settles.
     let frame: Int
     /// The box as the gesture found it. A container gesture carries the content through the box's
-    /// travel **from here** (`CanvasManager.containerPose(_:movedBy:)`), so a second drag composes
+    /// travel **from here** (`CanvasManager.containerPose(_:movedBy:since:)`), so a second drag composes
     /// onto what the first one committed.
     let originTransform: FloatingTransform
     let originQuad: Quad?
@@ -857,8 +857,8 @@ extension CanvasManager {
     ///  * **`handleActiveContextChanged`** commits a floating piece the moment the active cel changes.
     ///    The first boundary a take crossed would settle the box mid-drag, `commitContainerNudge` would
     ///    write one key at that frame, and the take would end against a base it had already overwritten.
-    ///    `settleBoxNudge` asks it too, for the same reason one frame finer: a take's playhead leaves
-    ///    the frame its gesture began on at every tick.
+    ///    `settleBoxNudge` asks it too: a take spans more than one touch, and landing the gesture at a
+    ///    lift inside one would key the take's own preview.
     ///  * **`canvasInteractionBegan`** stops playback on any canvas touch, and
     ///    `CanvasView.handleCatchAllTap` fires it at `.began` for *every* touch on a layer with no
     ///    drawing surface — which a transformation layer is, by definition. MEASURED by driving it: the
