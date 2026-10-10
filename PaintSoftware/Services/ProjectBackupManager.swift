@@ -22,8 +22,8 @@ extension Notification.Name {
 ///    newest intact backup; the damaged package goes to Trash, never silent destruction.
 /// 5. Trash — "delete" is a move to `Documents/Trash/`, auto-purged after 7 days.
 ///
-/// Space is bounded by rotation counts (`maxAutosaveBackupsPerProject`,
-/// `maxPreUpdateBackupsPerProject`), the trash retention window, and a global
+/// Space is bounded by the age schedule `VersionRetention` applies to every dated restore point
+/// (at most 44 a project, spread over a month), the trash retention window, and a global
 /// `maxTotalBackupBytes` cap — which never deletes a project's last remaining restore point.
 ///
 /// This type is deliberately pure Foundation (no UIKit/SwiftUI, no app-model dependencies — the
@@ -38,12 +38,6 @@ nonisolated enum ProjectBackupManager {
     /// Documents directory. Logic tests point this at a per-test temp folder.
     nonisolated(unsafe) static var rootDirectoryOverride: URL?
 
-    nonisolated(unsafe) static var maxAutosaveBackupsPerProject = 5
-    nonisolated(unsafe) static var maxPreUpdateBackupsPerProject = 3
-    /// How many "saved without touching the project file" slots to keep — see
-    /// `unsavedChangesSlotURL`. Rotated like the others so a project the artist keeps backgrounding
-    /// without ever answering the damaged-save banner cannot grow its history without bound.
-    nonisolated(unsafe) static var maxUnsavedBackupsPerProject = 5
     nonisolated(unsafe) static var trashRetentionInterval: TimeInterval = 7 * 24 * 60 * 60
     nonisolated(unsafe) static var maxTotalBackupBytes: UInt64 = 1_000_000_000
 
@@ -324,7 +318,7 @@ nonisolated enum ProjectBackupManager {
             let dir = backupsDirectory(projectID: id)
             writeOriginMarker(directory: dir, projectFileName: url.lastPathComponent)
             _ = cloneItem(at: url, to: uniqueSlotURL(directory: dir, prefix: "preupdate-\(sig)"))
-            pruneSlots(directory: dir, prefix: "preupdate-", keep: maxPreUpdateBackupsPerProject)
+            pruneBackups(forProjectID: id)
         }
     }
 
@@ -337,16 +331,15 @@ nonisolated enum ProjectBackupManager {
     /// Which restore point a save's stash of the live package becomes.
     ///
     /// **The autosave is why there are two.** Before it, a save happened when the artist left the
-    /// editor, so the five rotated "Before save" slots were five sessions' opening states. A save
-    /// every thirty seconds through the same rotation would turn them into the last two and a half
-    /// minutes, and the state the artist opened the document in — the one worth going back to
-    /// after a bad session — would be gone within the session. So the first save of a document
-    /// session stashes into the rotation as before, and every save after it refreshes one rolling
-    /// slot instead: "Before save" keeps meaning *as opened*, and "Before last save" is the thirty
-    /// seconds the autosave just replaced. `ProjectStore.PackageLedger.landedAt` is what tells the
-    /// two apart.
+    /// editor, so every "Before save" slot was a session's opening state. A save every thirty
+    /// seconds through the same slots would make each of them thirty seconds of work, and the state
+    /// the artist opened the document in — the one worth going back to after a bad session — would
+    /// be lost within the session. So the first save of a document session stashes a dated version
+    /// as before, and every save after it refreshes one rolling slot instead: "Before save" keeps
+    /// meaning *as opened*, and "Before last save" is the thirty seconds the autosave just
+    /// replaced. `ProjectStore.PackageLedger.landedAt` is what tells the two apart.
     enum SaveStash {
-        /// A fresh `auto-<timestamp>` slot, count-rotated by `pruneBackups`.
+        /// A fresh `auto-<timestamp>` slot, thinned by age in `pruneBackups`.
         case sessionStart
         /// The one `before-last-save` slot, replaced in place.
         case rolling
@@ -411,22 +404,25 @@ nonisolated enum ProjectBackupManager {
         return uniqueSlotURL(directory: dir, prefix: "unsaved")
     }
 
-    /// Count-rotation for one project's autosave, pre-update and unsaved-changes slots (`latest` is
-    /// never rotated).
-    static func pruneBackups(forProjectID id: UUID) {
-        let dir = backupsDirectory(projectID: id)
-        pruneSlots(directory: dir, prefix: "auto-", keep: maxAutosaveBackupsPerProject)
-        pruneSlots(directory: dir, prefix: "preupdate-", keep: maxPreUpdateBackupsPerProject)
-        pruneSlots(directory: dir, prefix: "unsaved-", keep: maxUnsavedBackupsPerProject)
-    }
+    /// The slots that carry their own date: one per session (`auto-`), per app update (`preupdate-`)
+    /// and per save made aside (`unsaved-`). `latest` and the rolling slot are replaced in place and
+    /// never thinned.
+    private static let datedSlotPrefixes = ["auto-", "preupdate-", "unsaved-"]
 
-    private static func pruneSlots(directory: URL, prefix: String, keep: Int) {
+    /// Thins one project's dated restore points to what `VersionRetention` keeps, whatever kind each
+    /// is — an app update's snapshot is a version like any other, and keeps its "Before app update"
+    /// label in the list for as long as the schedule keeps it. Run after every save and every update
+    /// snapshot.
+    static func pruneBackups(forProjectID id: UUID, now: Date = Date()) {
         let fm = FileManager.default
-        guard let urls = try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else { return }
-        let slots = urls
-            .filter { $0.pathExtension == "paintproj" && $0.lastPathComponent.hasPrefix(prefix) }
-            .sorted { slotDate($0) > slotDate($1) } // newest first
-        for url in slots.dropFirst(max(keep, 0)) {
+        guard let urls = try? fm.contentsOfDirectory(at: backupsDirectory(projectID: id), includingPropertiesForKeys: nil) else { return }
+        let slots = urls.filter { url in
+            url.pathExtension == "paintproj" && datedSlotPrefixes.contains { url.lastPathComponent.hasPrefix($0) }
+        }
+        let kept = VersionRetention.keep(
+            slots.map { VersionRetention.Version(id: $0.deletingPathExtension().lastPathComponent, date: slotDate($0)) },
+            now: now)
+        for url in slots where !kept.contains(url.deletingPathExtension().lastPathComponent) {
             try? fm.removeItem(at: url)
         }
     }
@@ -1005,8 +1001,12 @@ nonisolated enum ProjectBackupManager {
         timestampFromName(url.deletingPathExtension().lastPathComponent) ?? fileDate(url)
     }
 
+    /// The stamp is the end of the name, before an optional collision counter. Anchored there because
+    /// an update snapshot's name carries the app signature first, and a signature's own digits can
+    /// look like a stamp — and now that a version's date decides whether it is deleted, a wrong one
+    /// is no longer just an odd sort order.
     private static func timestampFromName(_ name: String) -> Date? {
-        guard let regex = try? NSRegularExpression(pattern: "[0-9]{8}-[0-9]{6}"),
+        guard let regex = try? NSRegularExpression(pattern: "[0-9]{8}-[0-9]{6}(?=(?:-[0-9]+)?$)"),
               let match = regex.firstMatch(in: name, range: NSRange(name.startIndex..., in: name)),
               let range = Range(match.range, in: name) else { return nil }
         return parseTimestamp(String(name[range]))
@@ -1026,7 +1026,7 @@ nonisolated enum ProjectBackupManager {
         return formatter
     }()
 
-    private static func timestampString(_ date: Date = Date()) -> String {
+    static func timestampString(_ date: Date = Date()) -> String {
         timestampFormatter.string(from: date)
     }
 

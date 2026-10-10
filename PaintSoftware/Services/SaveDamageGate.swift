@@ -223,10 +223,11 @@ nonisolated enum SaveDecision: Equatable {
 /// one is renamed into place — verified in the code, not taken from the doc. So the intact original
 /// does survive the first overwrite.
 ///
-/// **It does not survive the sixth.** `pruneBackups` keeps `maxAutosaveBackupsPerProject` (5) auto
-/// slots, and `refreshLatestSnapshot` overwrites `latest.paintproj` with the just-saved — degraded —
-/// package on every save. A damaged project opened and saved six times has no intact copy anywhere,
-/// and nothing along the way said a word. That is the difference between a safety net and a decision,
+/// **It does not survive for ever.** `pruneBackups` thins every dated restore point by age
+/// (`VersionRetention` — weeks, not saves), and `refreshLatestSnapshot` overwrites `latest.paintproj`
+/// with the just-saved — degraded — package on every save. A damaged project saved on past the
+/// schedule has no intact copy anywhere, and nothing along the way said a word. That is the
+/// difference between a safety net and a decision,
 /// and it is why this asks rather than merely surfacing what already exists: the artist gets the
 /// choice while the good copy is still there.
 ///

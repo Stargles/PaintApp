@@ -30,8 +30,6 @@ final class SaveDamageGateLogicTests: XCTestCase {
             .appendingPathComponent("save-damage-tests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         ProjectBackupManager.rootDirectoryOverride = root
-        ProjectBackupManager.maxAutosaveBackupsPerProject = 5
-        ProjectBackupManager.maxUnsavedBackupsPerProject = 5
     }
 
     override func tearDownWithError() throws {
@@ -387,18 +385,21 @@ final class SaveDamageGateLogicTests: XCTestCase {
                       "The edit made after the damaged open is in the recovered package")
     }
 
-    /// Rotation applies to these slots too, so an artist who keeps backgrounding a damaged project
-    /// without ever answering cannot grow its history without bound.
-    func testUnsavedChangeSlotsRotate() throws {
-        ProjectBackupManager.maxUnsavedBackupsPerProject = 2
+    /// The age schedule thins these slots too, so an artist who keeps backgrounding a damaged project
+    /// without ever answering cannot grow its history without bound: a run of saves in one stretch
+    /// of the clock leaves its first and its newest three.
+    func testUnsavedChangeSlotsAreThinnedByAge() throws {
         let url = writtenProject()
         try breakFirstStroke(in: url)
         let reopened = try XCTUnwrap(ProjectStore.load(from: url))
 
-        for _ in 0..<4 {
+        let started = Date()
+        for _ in 0..<6 {
             XCTAssertEqual(saveAndWait(reopened, to: url, intent: .automatic), .writeAside)
         }
-        XCTAssertEqual(ProjectBackupManager.listBackups(forProjectAt: url).filter { $0.label == "Unsaved changes" }.count, 2)
+        try XCTSkipIf(Int(started.timeIntervalSince1970 / 600) != Int(Date().timeIntervalSince1970 / 600),
+                      "The run crossed a ten-minute boundary, which keeps one more")
+        XCTAssertEqual(ProjectBackupManager.listBackups(forProjectAt: url).filter { $0.label == "Unsaved changes" }.count, 4)
     }
 
     // MARK: - What the banner says

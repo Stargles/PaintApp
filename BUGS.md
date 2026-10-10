@@ -1415,10 +1415,10 @@ never blocks — it writes a complete package into the project's version history
 file untouched — so an unanswered damaged document cannot be overwritten by a backgrounding.
 
 The paragraph this replaces said the loss was "recoverable, not final" because the pre-save stash
-keeps the intact original. That is true for five saves. `pruneBackups` keeps
-`maxAutosaveBackupsPerProject` (5) `auto-` slots and `refreshLatestSnapshot` overwrites
-`latest.paintproj` with the just-saved *degraded* package on every save — so a damaged project opened
-and saved six times has no intact copy left anywhere, silently. Surfacing the existing net was
+keeps the intact original. That is true for as long as the schedule keeps it. `pruneBackups` thins
+the `auto-` slots by age (`VersionRetention` — weeks, not saves) and `refreshLatestSnapshot`
+overwrites `latest.paintproj` with the just-saved *degraded* package on every save — so a damaged
+project saved on past that has no intact copy left anywhere, silently. Surfacing the existing net was
 therefore not enough on its own, and the ruling asks while the good copy is still there.
 
 **The blind spot itself is still open and this does not close it.** `validateProject` still cannot see

@@ -1,9 +1,11 @@
 import SwiftUI
 
 /// Per-project version history (see ProjectBackupManager): the last saved state is always kept as
-/// `latest`, every save stashes the previous state as an autosave, and every app update snapshots
-/// the project beforehand. Restoring any entry moves the current live package to Trash (not a hard
-/// delete), so even a restore is itself undoable.
+/// `latest`, the first save of each editing session stashes the previous state, and every app update
+/// snapshots the project beforehand. Those dated versions are thinned by age (`VersionRetention`) to
+/// at most 44 — recent ones close together, older ones further apart, back about a month. Restoring
+/// any entry moves the current live package to Trash (not a hard delete), so even a restore is
+/// itself undoable.
 struct ProjectVersionsView: View {
     let project: ProjectSummary
     var onRestored: () -> Void

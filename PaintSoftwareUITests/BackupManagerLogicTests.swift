@@ -16,8 +16,6 @@ final class BackupManagerLogicTests: XCTestCase {
         root = FileManager.default.temporaryDirectory.appendingPathComponent("backup-logic-tests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         ProjectBackupManager.rootDirectoryOverride = root
-        ProjectBackupManager.maxAutosaveBackupsPerProject = 5
-        ProjectBackupManager.maxPreUpdateBackupsPerProject = 3
         ProjectBackupManager.trashRetentionInterval = 7 * 24 * 60 * 60
         ProjectBackupManager.maxTotalBackupBytes = 1_000_000_000
         UserDefaults.standard.removeObject(forKey: ProjectBackupManager.signatureDefaultsKey)
@@ -172,16 +170,103 @@ final class BackupManagerLogicTests: XCTestCase {
         XCTAssertTrue(ProjectBackupManager.validateProject(at: latest))
     }
 
-    func testRotationStashesPreviousStatesAndPrunesToFive() {
+    /// Eight sessions' opening states inside one ten-minute stretch: the schedule keeps the newest
+    /// three and the first, and the rest are the thinning.
+    func testRapidSavesKeepTheNewestThreeAndTheFirst() throws {
         let id = UUID()
         let url = makeProject(id: id)
-        for _ in 0..<8 {
+        let started = Date()
+        simulateSaveCycle(projectURL: url, id: id)
+        let first = try XCTUnwrap(backupDirFileNames(id).first { $0.hasPrefix("auto-") })
+        for _ in 1..<8 {
             simulateSaveCycle(projectURL: url, id: id)
         }
+        try XCTSkipIf(Int(started.timeIntervalSince1970 / 600) != Int(Date().timeIntervalSince1970 / 600),
+                      "The run crossed a ten-minute boundary, which keeps one more")
         let names = backupDirFileNames(id)
-        XCTAssertEqual(names.filter { $0.hasPrefix("auto-") }.count, 5, "autos must rotate at maxAutosaveBackupsPerProject")
+        XCTAssertEqual(names.filter { $0.hasPrefix("auto-") }.count, 4, "the first of the stretch and the newest three")
+        XCTAssertTrue(names.contains(first), "the first state of the stretch is the one a run of saves must not rotate out")
         XCTAssertTrue(names.contains("latest.paintproj"), "latest must survive rotation")
         XCTAssertTrue(ProjectBackupManager.validateProject(at: url), "the live package must be intact after every cycle")
+    }
+
+    // MARK: - Version retention on disk
+
+    /// Mid-way through every slot of the schedule — 5½ minutes into its ten-minute slot, 45½ into its
+    /// hour, 12¾ hours into its day, 3½ days into its week — so a version's age says where it falls.
+    private let now = Date(timeIntervalSince1970: 2960 * 604_800 + 3 * 86_400 + 12 * 3_600 + 45 * 60 + 30)
+    private func ago(_ seconds: TimeInterval) -> Date { now.addingTimeInterval(-seconds) }
+
+    /// Plants a restore point named as `ProjectBackupManager` would have named it at `date`.
+    @discardableResult
+    private func plant(_ prefix: String, _ id: UUID, at date: Date, from project: URL) -> String {
+        let name = "\(prefix)-\(ProjectBackupManager.timestampString(date)).paintproj"
+        let dir = ProjectBackupManager.backupsDirectory(projectID: id)
+        XCTAssertTrue(ProjectBackupManager.cloneItem(at: project, to: dir.appendingPathComponent(name)))
+        return name
+    }
+
+    /// **One schedule for every dated kind.** Session starts, update snapshots and saves made aside
+    /// are all versions; the schedule thins them together, and the two fixed slots are not versions.
+    func testPruneThinsEveryKindOfDatedSlotAndLeavesTheFixedOnes() {
+        let id = UUID()
+        let url = makeProject(id: id)
+        ProjectBackupManager.refreshLatestSnapshot(projectURL: url, projectID: id)
+        let dir = ProjectBackupManager.backupsDirectory(projectID: id)
+        XCTAssertTrue(ProjectBackupManager.cloneItem(at: url, to: dir.appendingPathComponent(ProjectBackupManager.rollingSlotName)))
+
+        let newest = [10, 20, 30].map { plant("auto", id, at: ago(TimeInterval($0)), from: url) }
+        let installFirst = plant("preupdate-1-0-43-1-1791438480-0", id, at: ago(150 * 60), from: url)
+        let installSecond = plant("preupdate-1-0-43-2-1791438480-0", id, at: ago(120 * 60), from: url)
+        let asideFirst = plant("unsaved", id, at: ago(26 * 3600), from: url)
+        let asideSecond = plant("unsaved", id, at: ago(25 * 3600), from: url)
+
+        ProjectBackupManager.pruneBackups(forProjectID: id, now: now)
+
+        let names = Set(backupDirFileNames(id))
+        XCTAssertTrue(names.isSuperset(of: newest + [installFirst, asideFirst]),
+                      "the newest three, and the first of the hour and of the day, stay")
+        XCTAssertTrue(names.isDisjoint(with: [installSecond, asideSecond]),
+                      "the second of an hour and the second of a day go")
+        XCTAssertTrue(names.isSuperset(of: ["latest.paintproj", ProjectBackupManager.rollingSlotName, "origin.name"]),
+                      "the slots that are replaced in place are not versions and are never thinned")
+        XCTAssertEqual(ProjectBackupManager.listBackups(forProjectAt: url).filter { $0.label == "Before app update" }.count, 1,
+                       "an update snapshot is a version like the rest, and keeps its label while it lasts")
+    }
+
+    /// **Installs alone cannot push an earlier snapshot out** — the hourly re-signer reinstalls, and
+    /// a dev loop does it every few minutes. Eight installs in one stretch leave the first of them
+    /// and the newest three, and the snapshot from three hours ago is not among the thinned.
+    func testAnInstallBurstDoesNotPushOutAnEarlierSnapshot() throws {
+        let id = UUID()
+        let url = makeProject(id: id)
+        let earlier = plant("preupdate-1-0-43-1-1791438480-0", id, at: Date().addingTimeInterval(-3 * 3600), from: url)
+
+        let started = Date()
+        for install in 1...8 {
+            ProjectBackupManager.snapshotAllProjectsForAppUpdate(signature: "build \(install)")
+        }
+        try XCTSkipIf(Int(started.timeIntervalSince1970 / 600) != Int(Date().timeIntervalSince1970 / 600),
+                      "The run crossed a ten-minute boundary, which keeps one more")
+
+        XCTAssertTrue(backupDirFileNames(id).contains(earlier), "the snapshot taken before the burst is still there")
+        XCTAssertEqual(ProjectBackupManager.listBackups(forProjectAt: url).filter { $0.label == "Before app update" }.count, 5,
+                       "…beside the first install of the burst and the newest three")
+    }
+
+    /// A version's date is read from the end of its name, because it now decides whether the version
+    /// is deleted. An update snapshot's name leads with the app signature, whose own digits can look
+    /// like a stamp, and a collision counter follows the stamp.
+    func testAVersionIsDatedByTheStampAtTheEndOfItsName() {
+        let id = UUID()
+        let url = makeProject(id: id)
+        let dir = ProjectBackupManager.backupsDirectory(projectID: id)
+        let stamp = DateComponents(calendar: .current, year: 2026, month: 10, day: 8, hour: 1, minute: 52, second: 53).date!
+        for name in ["preupdate-1-0-43-1-1791438480-481766-20261008-015253.paintproj", "auto-20261008-015253-2.paintproj"] {
+            XCTAssertTrue(ProjectBackupManager.cloneItem(at: url, to: dir.appendingPathComponent(name)))
+        }
+        let dates = ProjectBackupManager.listBackups(forProjectAt: url).map(\.date)
+        XCTAssertEqual(dates, [stamp, stamp])
     }
 
     // MARK: - Restore
