@@ -538,6 +538,17 @@ final class StreamBarStateLogicTests: XCTestCase {
         XCTAssertNotEqual(shown, hidden)
     }
 
+    /// What the Export sheet's caption keys on: a screen stream on a layer the artist can see.
+    func testTheDocumentSaysWhenAVisibleStreamIsLeftOutOfAnExport() throws {
+        let plain = CanvasFixture.manager(layerCount: 1)
+        XCTAssertFalse(plain.documentHoldsAVisibleStream, "a document with no stream")
+        let (manager, _) = streaming()
+        let layerIndex = manager.currentLayerIndex
+        XCTAssertTrue(manager.documentHoldsAVisibleStream)
+        manager.layers[layerIndex].isVisible = false
+        XCTAssertFalse(manager.documentHoldsAVisibleStream, "a hidden stream is nothing to say")
+    }
+
     // MARK: - A stream is reference: no bake has it (TODO (162))
 
     private func solid(_ color: UIColor) -> UIImage {

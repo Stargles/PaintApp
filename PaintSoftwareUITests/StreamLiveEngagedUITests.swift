@@ -179,6 +179,10 @@ final class StreamLiveEngagedUITests: StreamUITestCase {
         waitForSandwichState(app, "live")
         waitForPicture(.red, on: canvas, "the layer below the stream is under it: the middle is the computer's")
 
+        // A new layer lands directly above the active one, so stand on the stream's layer first.
+        openLayerPanel(app)
+        app.staticTexts["layerPanel.row.1"].tap()
+        closeLayerRail(app)
         addVectorLayer(app)   // a new layer, active, above the stream
         for dy in [0.49, 0.5, 0.51] {
             drawLine(on: canvas, from: CGVector(dx: 0.3, dy: dy), to: CGVector(dx: 0.7, dy: dy))

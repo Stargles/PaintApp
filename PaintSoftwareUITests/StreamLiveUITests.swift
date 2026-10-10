@@ -139,6 +139,25 @@ final class StreamLiveUITests: StreamUITestCase {
         attachScreenshot(app, "shown-again-current")
     }
 
+    /// **The Export sheet says a screen stream is not included** — it is reference and in no frame the
+    /// baker writes (STREAM.md §2.13), and an artist about to hand the file to somebody is entitled to
+    /// know before they do.
+    func testTheExportSheetSaysAVisibleStreamIsNotIncluded() throws {
+        let app = XCUIApplication()
+        let canvas = launchWithALiveStream(app)
+        laptop.show(.red)
+        waitForPicture(.red, on: canvas)
+
+        app.buttons["toolbar.actionsButton"].tap()
+        let row = app.buttons["actions.exportRow"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "Export is a row in the Actions menu")
+        row.tap()
+        let caption = app.staticTexts["export.caption"]
+        XCTAssertTrue(caption.waitForExistence(timeout: 5), "the row opens the export sheet")
+        XCTAssertTrue(caption.label.contains("screen stream not included"),
+                      "the caption names what the file leaves out. It reads \(caption.label).")
+    }
+
     /// **Standing on another layer**: the stream bar goes with the selection, the stream does not.
     func testSwitchingToAnotherLayerAndBackKeepsTheStreamFollowing() throws {
         let app = XCUIApplication()
