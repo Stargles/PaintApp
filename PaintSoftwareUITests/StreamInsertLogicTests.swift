@@ -246,13 +246,13 @@ final class StreamInsertLogicTests: XCTestCase {
         XCTAssertEqual(fixture.vector.version, version)
     }
 
-    /// The bake key stays still across ticks: `committedVersion` does not move, so nothing is
+    /// The bake key stays still across ticks: `documentVersion` does not move, so nothing is
     /// re-baked to disk thirty times a second.
-    func testATickDoesNotMoveTheCommittedVersion() {
+    func testATickDoesNotMoveTheDocumentVersion() {
         let fixture = tickFixture(image: solidImage(.green))
-        let committed = fixture.vector.committedVersion
+        let committed = fixture.vector.documentVersion
         fixture.manager.streamCoordinator.tick()
-        XCTAssertEqual(fixture.vector.committedVersion, committed)
+        XCTAssertEqual(fixture.vector.documentVersion, committed)
         XCTAssertNotNil(fixture.vector.streams.first?.displayFrame, "the frame did land")
     }
 
@@ -414,7 +414,7 @@ final class StreamInsertLogicTests: XCTestCase {
         (0..<manager.contentEndFrame).filter { baker.bakeQueue.isPending($0) }
     }
 
-    /// Spins the main run loop until `condition` holds — the armed tick and settle are timers.
+    /// Spins the main run loop until `condition` holds — the armed tick is a timer.
     private func waitUntil(_ what: String, timeout: TimeInterval = 3, file: StaticString = #filePath,
                            line: UInt = #line, _ condition: () -> Bool) {
         let deadline = Date().addingTimeInterval(timeout)
@@ -422,13 +422,11 @@ final class StreamInsertLogicTests: XCTestCase {
         XCTAssertTrue(condition(), "Timed out waiting for: \(what)", file: file, line: line)
     }
 
-    /// **A frame written to a layer nobody can see changes no picture, and it used to cost the most
-    /// expensive thing the stream does.** The owner, 2026-10-10: *"weird lagspikes randomly where I
-    /// can see the first 16 or so frames turn orange momentarily, with 0 input."* The stream sat on a
-    /// hidden layer; the laptop's screen kept changing; and every pause in that motion settled the
-    /// frame onto the cel (`commitStreamFrames`), which the dirty sweep read as an edit to the cel's
-    /// whole span. So a hidden layer is not written at all — by its own switch or a folder above it —
-    /// and keeps the picture it had.
+    /// **A frame written to a layer nobody can see changes no picture, so it is not written.** The
+    /// owner, 2026-10-10: *"weird lagspikes randomly where I can see the first 16 or so frames turn
+    /// orange momentarily, with 0 input."* The stream sat on a hidden layer and the laptop's screen
+    /// kept changing. A layer nobody can see — by its own switch or a folder above it — is not
+    /// written at all, and keeps the picture it had.
     func testAHiddenStreamLayerIsNotWritten() throws {
         for viaFolder in [false, true] {
             let fixture = tickFixture(image: solidImage(.green))
@@ -448,34 +446,37 @@ final class StreamInsertLogicTests: XCTestCase {
         }
     }
 
-    /// **The settle of a hidden layer commits nothing and dirties no frame** — the owner's symptom at
-    /// the model: a frame the sweep marks pending is a frame the timeline's bake bar draws orange.
-    /// Driven through the real `FrameBaker.syncDirty`, with a visible layer as the control that the
-    /// sweep does see a commit, so the hidden case's empty answer is not the sweep being blind.
-    func testAHiddenStreamLayersSettleDirtiesNoFrame() throws {
-        for viaFolder in [false, true] {
+    /// **A stream's frames dirty no frame and publish nothing — visible or hidden, in a burst or after
+    /// it** (TODO (162), which finished what (156) began: the owner, *"a live stream does not require
+    /// to be rendered because it is only used as reference"*). Where every pause in the computer's
+    /// motion used to settle the picture onto the cel and re-mark its whole span for the bake, nothing
+    /// now moves: the sweep, driven through the real `FrameBaker.syncDirty`, has no frame pending, no
+    /// SwiftUI pass is raised, and the cel's `documentVersion` is the one the bake keyed. A real edit
+    /// to the same cel is the control, so the empty answer is not the sweep being blind.
+    func testAStreamsFramesDirtyNoFrameAndPublishNothing() throws {
+        for hidden in [false, true] {
             let fixture = tickFixture(image: solidImage(.green))
             let manager = fixture.manager
             let baker = makeBaker(manager)
             let index = try XCTUnwrap(manager.layers.indices.last)
-
-            manager.streamCoordinator.tick()
-            XCTAssertTrue(fixture.vector.holdsUncommittedStreamFrame, "Setup: a frame the bake lacks")
-            hide(index, in: manager, viaFolder: viaFolder)
-            // Baked in the hidden state, so the hiding itself — a structural edit — is absorbed before
-            // the settle is judged.
+            if hidden { hide(index, in: manager, viaFolder: false) }
             bakeEverything(baker)
-            XCTAssertEqual(pending(baker, manager), [], "Setup: every frame baked")
-            fixture.slot(2, solidImage(.red))
-            manager.streamCoordinator.tick()
-            let committed = fixture.vector.committedVersion
+            XCTAssertEqual(pending(baker, manager), [], "Setup: every frame baked (hidden: \(hidden))")
+            let documentVersion = fixture.vector.documentVersion
             var published = 0
             let sink = manager.objectWillChange.sink { published += 1 }
 
-            manager.streamCoordinator.settle()
+            for step in 1...6 {
+                fixture.slot(step, solidImage(step.isMultiple(of: 2) ? .red : .green))
+                manager.streamCoordinator.tick()
+            }
+            // Longer than the interval a settle once waited out (0.6 s): a still computer must do
+            // nothing at all, and the run loop is where a timer armed by a frame would fire.
+            RunLoop.main.run(until: Date().addingTimeInterval(1.0))
             baker.syncDirty()
 
-            XCTAssertEqual(fixture.vector.committedVersion, committed, "nothing was committed (viaFolder: \(viaFolder))")
+            XCTAssertEqual(fixture.vector.documentVersion, documentVersion,
+                           "nothing was committed (hidden: \(hidden))")
             XCTAssertEqual(published, 0, "and nothing was published: no SwiftUI pass, no thumbnail")
             XCTAssertEqual(pending(baker, manager), [], "so no frame is unbaked")
             sink.cancel()
@@ -486,21 +487,20 @@ final class StreamInsertLogicTests: XCTestCase {
         control.manager.streamCoordinator.tick()
         bakeEverything(baker)
         XCTAssertEqual(pending(baker, control.manager), [], "Setup: every frame baked")
-        control.manager.streamCoordinator.settle()
+        control.vector.bumpVersion()
         baker.syncDirty()
         XCTAssertEqual(pending(baker, control.manager), Array(0..<control.manager.contentEndFrame),
-                       "CONTROL: a visible stream's settle dirties the cel's whole span, as it must")
+                       "CONTROL: an edit to the cel dirties its whole span, as it must")
     }
 
-    /// **Showing the layer again is the edge that feeds it** — the newest picture reaches it, and the
-    /// settle puts that picture into the bake, with no frame arriving from the laptop to carry either.
-    /// This is TODO (96)'s *"same with hidden streams made visible"*, kept: the layer is written when
-    /// it is shown instead of thirty times a second while it is not.
-    func testShowingAHiddenStreamLayerFeedsItTheNewestPictureAndSettlesIt() throws {
+    /// **Showing the layer again is the edge that feeds it** — the newest picture reaches it, with no
+    /// frame arriving from the laptop to carry it. This is TODO (96)'s *"same with hidden streams made
+    /// visible"*, kept: the layer is written when it is shown instead of thirty times a second while
+    /// it is not.
+    func testShowingAHiddenStreamLayerFeedsItTheNewestPicture() throws {
         for viaFolder in [false, true] {
             let fixture = tickFixture(image: solidImage(.green))
             let coordinator = fixture.manager.streamCoordinator
-            coordinator.settleInterval = 0.05
             coordinator.tick()
             let index = try XCTUnwrap(fixture.manager.layers.indices.last)
             hide(index, in: fixture.manager, viaFolder: viaFolder)
@@ -508,16 +508,11 @@ final class StreamInsertLogicTests: XCTestCase {
             fixture.slot(2, solidImage(.red))
             coordinator.tick()
             XCTAssertTrue(centreIs(.green, fixture.vector), "Setup: the hidden layer did not follow the laptop")
-            let committed = fixture.vector.committedVersion
 
             show(index, in: fixture.manager)
             coordinator.sync()
 
             waitUntil("the pass that shows the layer wrote the newest picture") { centreIs(.red, fixture.vector) }
-            waitUntil("and its settle put that picture into the bake") {
-                fixture.vector.committedVersion > committed
-            }
-            XCTAssertFalse(fixture.vector.holdsUncommittedStreamFrame)
         }
     }
 
@@ -556,7 +551,7 @@ final class StreamInsertLogicTests: XCTestCase {
     /// placement where it was.
     func testAStatusUpdatesTheSizeAndLabelAndNotThePlacement() throws {
         let fixture = tickFixture(image: solidImage(.green))
-        let committed = fixture.vector.committedVersion
+        let committed = fixture.vector.documentVersion
         let placement = fixture.stream.transform
 
         fixture.manager.streamCoordinator.statusArrived(status(width: 1280, height: 720, name: "Screen 2"),
@@ -566,18 +561,18 @@ final class StreamInsertLogicTests: XCTestCase {
         XCTAssertEqual(stream.naturalSize, CGSize(width: 1280, height: 720))
         XCTAssertEqual(stream.sourceLabel, "Screen 2")
         XCTAssertEqual(stream.transform, placement, "the placement stays")
-        XCTAssertGreaterThan(fixture.vector.committedVersion, committed, "a size is a document change")
+        XCTAssertGreaterThan(fixture.vector.documentVersion, committed, "a size is a document change")
         XCTAssertEqual(fixture.manager.streamCoordinator.status(for: StreamEndpoint(host: "laptop", port: 47301))?.width, 1280)
     }
 
     /// A STATUS for another endpoint touches nothing.
     func testAStatusForAnotherEndpointTouchesNothing() throws {
         let fixture = tickFixture(image: solidImage(.green))
-        let committed = fixture.vector.committedVersion
+        let committed = fixture.vector.documentVersion
         fixture.manager.streamCoordinator.statusArrived(status(width: 1280, height: 720),
                                                         from: StreamEndpoint(host: "elsewhere", port: 1))
         XCTAssertEqual(try XCTUnwrap(fixture.vector.streams.first).naturalSize, CGSize(width: 8, height: 4))
-        XCTAssertEqual(fixture.vector.committedVersion, committed)
+        XCTAssertEqual(fixture.vector.documentVersion, committed)
     }
 
     // MARK: - Close

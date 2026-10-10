@@ -462,9 +462,9 @@ enum InterpolationEvaluator {
                 guard !hidden(nil) else { return nil }
                 return element
             case .stream:
-                // The video arm's refusal, one kind over: passed through unwarped.
-                guard !hidden(nil) else { return nil }
-                return element
+                // Reference is in no picture the document keeps (`VectorElement.isReference`): left
+                // out of an in-between, which is such a picture.
+                return nil
             case .text:
                 // Passed through unwarped. A text object's geometry is a layout box plus the four
                 // points its corners map to (`TextFrame`), and warping the box's *corners* through

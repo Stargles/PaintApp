@@ -1779,7 +1779,7 @@ struct CanvasView: UIViewRepresentable {
             let presentation = SandwichPresentation.next(
                 from: sandwichPresentation,
                 live: .init(stroke: isSandwichStrokeLive, transformEdit: edit != nil,
-                            stream: canvasManager.liveStreamIsMoving()),
+                            stream: !canvasManager.streamLayerIndices().isEmpty),
                 held: .init(bakeIsCurrent: sandwichFullKey == key,
                             livePair: LivePairFit(held: livePicture.map { (key: $0.key, cut: $0.cut) },
                                                   key: key, cut: cut),
@@ -1821,7 +1821,7 @@ struct CanvasView: UIViewRepresentable {
             if aboveView.isHidden != !showsAbove { aboveView.isHidden = !showsAbove }
 
             // The hosts the pair is cut around are its middle and the only ones that draw themselves —
-            // the active layer, and a live stream's layer with whatever lies between (`liveHostRun`);
+            // the active layer, and a stream's layer with whatever lies between (`liveHostRun`);
             // everything else is in one of the two composites already. At rest even they are
             // blanked, because `full` includes them, and under a transform edit every host is,
             // because every leaf is in one of the bands.

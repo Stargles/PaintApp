@@ -308,6 +308,8 @@ struct ExportSheet: View {
             parts.append(range.count == 1 ? "1 frame"
                          : "frames \(range.lowerBound + 1)–\(range.upperBound + 1)")
         }
+        // A screen stream is reference and in no frame the baker writes (STREAM.md §2.13).
+        if canvasManager.documentHoldsAVisibleStream { parts.append("screen stream not included") }
         return parts.joined(separator: " · ")
     }
 

@@ -11,7 +11,7 @@ import UIKit
 ///
 /// The frame path is the interesting one. `VectorCanvas.setStreamFrame(id:image:index:)` is the one seam a
 /// live frame comes through, and it makes two claims a test can check without a network: the render
-/// changes (the tick must repaint) and `committedVersion` does not (the bake must not). Both are
+/// changes (the tick must repaint) and `documentVersion` does not (the bake must not). Both are
 /// pinned here, the second by mutation — the version is compared before and after, and a
 /// `setStreamFrame` that reached `invalidate(.everything)` would move it.
 @MainActor
@@ -225,32 +225,32 @@ final class StreamElementLogicTests: XCTestCase {
 
     // MARK: - The bake key stays still
 
-    /// **A frame moves `version` and not `committedVersion`.** The first is what the layer host and
+    /// **A frame moves `version` and not `documentVersion`.** The first is what the layer host and
     /// the render memo key on, so the tick repaints; the second is what `LayerContentVersion` and
     /// so the frame bake key read, so the tick does not re-bake the stream cel's span to disk. A
     /// `setStreamFrame` routed through `invalidate(.everything)` — the ordinary mutation seam —
     /// would move both and this would go red.
-    func testAFrameMovesTheDisplayVersionAndNotTheCommittedVersion() {
+    func testAFrameMovesTheDisplayVersionAndNotTheDocumentVersion() {
         let stream = defaultElement()
         let canvas = VectorCanvas(size: Self.canvasSize, elements: [.stream(stream)])
         let version = canvas.version
-        let committed = canvas.committedVersion
+        let committed = canvas.documentVersion
 
         canvas.setStreamFrame(id: stream.id, image: solidImage(.red, size: CGSize(width: 2, height: 2)), index: 1)
 
         XCTAssertGreaterThan(canvas.version, version, "the display is stale and must say so")
-        XCTAssertEqual(canvas.committedVersion, committed, "the bake must not see a live frame")
+        XCTAssertEqual(canvas.documentVersion, committed, "the bake must not see a live frame")
     }
 
-    /// The complement, so the test above cannot pass on a `committedVersion` that never moves: an
+    /// The complement, so the test above cannot pass on a `documentVersion` that never moves: an
     /// ordinary edit moves both counters together.
     func testAnOrdinaryEditMovesBothVersions() {
         let canvas = VectorCanvas(size: Self.canvasSize, elements: [.stream(defaultElement())])
         let version = canvas.version
-        let committed = canvas.committedVersion
+        let committed = canvas.documentVersion
         canvas.bumpVersion()
         XCTAssertGreaterThan(canvas.version, version)
-        XCTAssertGreaterThan(canvas.committedVersion, committed)
+        XCTAssertGreaterThan(canvas.documentVersion, committed)
     }
 
     /// `LayerContentVersion` — the bake key's leaf half — is byte-identical across a frame and
@@ -267,6 +267,45 @@ final class StreamElementLogicTests: XCTestCase {
 
         canvas.bumpVersion()
         XCTAssertNotEqual(LayerContentVersion(cel: cel), before, "an edit is")
+    }
+
+    // MARK: - Reference is in no picture the document keeps (TODO (162))
+
+    /// **The document's picture of a canvas holding a stream is the canvas without it** — the single
+    /// seam every render the document keeps goes through (`VectorCanvas.freeze`), with the host's own
+    /// picture as the control: the same canvas, drawn by `render()`, shows the stream. The ink the
+    /// stream sits under is in both, in its z-order.
+    func testTheDocumentsPictureLeavesTheStreamOutAndKeepsTheInk() throws {
+        var stream = defaultElement()
+        stream.naturalSize = CGSize(width: 40, height: 40)
+        stream.transform = LayerTransform(position: CGPoint(x: 32, y: 32), scale: 1, rotation: 0)
+        let ink = VectorFillElement(path: CGPath(rect: CGRect(x: 30, y: 30, width: 4, height: 4), transform: nil),
+                                    color: CodableColor(red: 1, green: 0, blue: 0, alpha: 1), opacity: 1)
+        let canvas = VectorCanvas(size: Self.canvasSize, elements: [.stream(stream), .fill(ink)])
+        canvas.setStreamFrame(id: stream.id, image: solidImage(.green, size: CGSize(width: 40, height: 40)), index: 1)
+
+        let host = try XCTUnwrap(pixels(canvas.render()))
+        XCTAssertGreaterThan(Int(host(20, 20).g), Int(host(20, 20).r) + 100, "CONTROL: the host draws the stream")
+        XCTAssertGreaterThan(Int(host(32, 32).r), Int(host(32, 32).g) + 100, "with the ink over it")
+
+        let frozen = canvas.freeze(quality: .full)
+        let document = try XCTUnwrap(pixels(frozen.render(quality: .full)))
+        XCTAssertEqual(document(20, 20).a, 0, "the document's picture has no stream")
+        XCTAssertGreaterThan(Int(document(32, 32).r), Int(document(32, 32).g) + 100, "and has the ink")
+        let fitted = try XCTUnwrap(pixels(frozen.render(quality: .full, fittingInto: CGSize(width: 32, height: 32))))
+        XCTAssertEqual(fitted(10, 10).a, 0, "at a reduced size too")
+        XCTAssertTrue(canvas.render() === canvas.render(), "and the host's memo was neither shared nor spoiled")
+        XCTAssertGreaterThan(Int(try XCTUnwrap(pixels(canvas.render()))(20, 20).g), 100, "still the stream's")
+    }
+
+    /// The complement: a canvas with no stream is untouched by the seam — its freeze still hands back
+    /// the memo the host holds, so no document without a stream pays for this.
+    func testAFreezeOfACanvasWithNoStreamStillSharesItsMemo() {
+        let ink = VectorFillElement(path: CGPath(rect: CGRect(x: 10, y: 10, width: 8, height: 8), transform: nil),
+                                    color: CodableColor(red: 1, green: 0, blue: 0, alpha: 1), opacity: 1)
+        let canvas = VectorCanvas(size: Self.canvasSize, elements: [.fill(ink)])
+        let rendered = canvas.render()
+        XCTAssertTrue(canvas.freeze(quality: .full).render(quality: .full) === rendered)
     }
 
     // MARK: - A suppressed element

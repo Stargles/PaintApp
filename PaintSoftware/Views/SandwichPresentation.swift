@@ -40,16 +40,14 @@ enum SandwichPresentation: String {
     /// lands. A layer above that blends is the same class of approximation as the active layer's own
     /// mode, so it takes the same rule rather than a wait of its own.
     ///
-    /// **A stream the laptop is still sending to is the other thing the pair is for, and there the
-    /// bake does not replace it** (TODO (112)). A frame reaches the screen through its layer's host,
-    /// never through a composite (`ScreenStreamCoordinator`), so on a canvas the compositor draws the
-    /// host has to be the middle of the pair or the stream stands on whatever the last bake froze — the
-    /// owner's *"pauses and refuses to update until I draw something"*, where the drawing was the one
-    /// thing that put a host there. While frames keep arriving the pair is the picture and the bake is
-    /// not waited for. **Then exact when still** (owner, 2026-10-02): once the laptop has sent nothing
-    /// for `ScreenStreamCoordinator.settleInterval` its frames are committed, the key moves, and the
-    /// stream is an edit like any other — this pair until the bake of the newest picture lands, then
-    /// the bake.
+    /// **A stream is the other thing the pair is for, and there the bake never replaces it**
+    /// (TODO (112), TODO (162)). A stream is reference (STREAM.md §2.13): no bake contains it, and a
+    /// frame reaches the screen through its layer's host, never through a composite
+    /// (`ScreenStreamCoordinator`). So on a canvas the compositor draws, the host has to be the middle
+    /// of the pair for as long as a stream is on the frame — the pair is the picture, not a picture to
+    /// wait out. The owner's *"a live stream does not require to be rendered because it is only used
+    /// as reference"* is why this has no exact picture to come to: the stream is drawn plain, and so
+    /// is every layer from the stream to the active one.
     case live
 
     /// **A transform edit's bands** — TODO (125): the frame cut around the leaves the edit moves,
@@ -80,13 +78,11 @@ enum SandwichPresentation: String {
     /// - Otherwise a bake for this key is the whole truth, and wins.
     /// - Otherwise a transform edit's bands stay up, after the finger has lifted, while they are of
     ///   this frame — until the bake or the live pair minted for the result replaces them.
-    /// - **A moving stream keeps the canvas on the pair** whatever the bake says: the bake of a key
-    ///   that has not moved is the picture that lacks the frames since, so it is not the picture to
-    ///   wait for. The pair is shown once it is current, kept while it is stale, and a lifted stroke
-    ///   leaves `.midStroke` for `.live` the moment its pair is current rather than when a bake lands.
-    ///   A pair cut around other hosts at this frame (`.regrouped`) is kept on screen until the new
-    ///   cut's pair lands. Once the stream has settled none of this applies: the commit moved the key,
-    ///   and the rules below are an edit's.
+    /// - **A stream on the frame keeps the canvas on the pair** whatever the bake says: no bake
+    ///   contains the stream, so it is never the picture to wait for. The pair is shown once it is
+    ///   current, kept while it is stale, and a lifted stroke leaves `.midStroke` for `.live` the
+    ///   moment its pair is current rather than when a bake lands. A pair cut around other hosts at
+    ///   this frame (`.regrouped`) is kept on screen until the new cut's pair lands.
     /// - Otherwise a lifted stroke stays on its pair while the pair is cut here (trap 2).
     /// - Otherwise an edit's pair is shown if it is for this key, and **kept** if it is merely stale —
     ///   one edit behind, at most, and that edit's rebuild is already on its way. Falling back to the
@@ -125,8 +121,8 @@ enum SandwichPresentation: String {
         var stroke = false
         /// A transform edit is under a finger.
         var transformEdit = false
-        /// A stream the laptop is still sending to — drawn by its host, which only a live presentation
-        /// has (TODO (112)). Once it has been still the bake is exact, and an edit's rule applies.
+        /// A stream is on the frame — drawn by its host, which only a live presentation has
+        /// (TODO (112)); no bake contains it, so the bake is never the picture (TODO (162)).
         var stream = false
     }
 
@@ -151,10 +147,10 @@ enum LivePairFit: Equatable {
     /// the previous frame's bake, which is RENDER.md §2.10's picture for a frame not yet baked.
     case none
 
-    /// **Cut for this frame around other hosts** — a layer switch, or a stream going live or frozen,
+    /// **Cut for this frame around other hosts** — a layer switch, or a stream shown or hidden,
     /// moved the cut while the content stood still. The held pair is still a coherent picture of this
-    /// frame (every host it names draws itself, every other layer is in a half), so a moving stream —
-    /// whose bake lacks its newest frames and is therefore not a picture to fall back on — keeps it on
+    /// frame (every host it names draws itself, every other layer is in a half), so a stream on the
+    /// frame — which no bake contains, so the bake is not a picture to fall back on — keeps it on
     /// screen while the pair for the new cut is minted. Everything else treats it as `.none`: the bake is the picture on hand.
     case regrouped
 
@@ -193,7 +189,7 @@ enum LivePairFit: Equatable {
 /// below it, and a pair cut at the old one would then be drawn around the wrong host.
 enum LivePairCut: Equatable {
 
-    /// A stroke's pair, or an edit's, or a live stream's: the layers `CanvasManager.liveHostRun`
+    /// A stroke's pair, or an edit's, or a stream's: the layers `CanvasManager.liveHostRun`
     /// names — the active layer, with every live stream and what lies between — drawn by their own
     /// hosts between two halves. **With its frame**, because the hosts draw the frame the canvas is
     /// on and must not stand between halves from another.

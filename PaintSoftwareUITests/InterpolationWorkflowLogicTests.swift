@@ -310,6 +310,27 @@ final class InterpolationWorkflowLogicTests: XCTestCase {
         XCTAssertEqual(half.forward.compactMap(\.stroke).count, 1)
     }
 
+    /// **A screen stream is reference, and an in-between is a picture the document keeps**
+    /// (STREAM.md §2.13): the evaluation drops a stream the subject carries, where it used to pass it
+    /// through unwarped — and a stream passed through is a live picture baked into a derived frame
+    /// that nothing ever refreshes. The stroke beside it is evaluated as it always was.
+    func testAnEvaluationLeavesAScreenStreamOut() throws {
+        let manager = manager()
+        let cels = threeCels(manager, layerIndex: 1)
+        drawSubject(into: cels[1])
+        let recipe = try XCTUnwrap(reprojected(manager, cels: cels))
+        let stream = VectorStreamElement(naturalSize: CGSize(width: 32, height: 18), host: "laptop", port: 47301,
+                                         sourceLabel: "screen",
+                                         transform: LayerTransform(position: CGPoint(x: 32, y: 32), scale: 1, rotation: 0))
+        let subject = (manager.layers[1].cels[1].vector?.elements ?? []) + [.stream(stream)]
+
+        let evaluated = try XCTUnwrap(InterpolationEvaluator.evaluate(
+            recipe: recipe, at: 0.5, content: manager.interpolationContentProvider, subject: subject))
+
+        XCTAssertEqual(evaluated.forward.compactMap(\.stream).count, 0, "no stream in the in-between")
+        XCTAssertEqual(evaluated.forward.compactMap(\.stroke).count, 1, "and the drawing is evaluated as ever")
+    }
+
     /// The claim the mechanism has to earn: sliding `t` **moves** the drawing, and it moves it the
     /// way the keyframes move. A's bar sits at x = 10…30 and C's at 34…54, so the motion is +24 in
     /// x; the subject is drawn elsewhere entirely and must ride that same motion rather than sit

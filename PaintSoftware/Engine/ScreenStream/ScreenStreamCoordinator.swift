@@ -13,9 +13,10 @@ import UIKit
 /// 1. for each endpoint with a decoded frame, **write it into every unfrozen stream element that
 ///    names the endpoint — on every cel, displayed or not** — through
 ///    `VectorCanvas.setStreamFrame(id:image:index:)`: the element's picture, a `.region`
-///    invalidation of the element's own footprint, `version` moved and `committedVersion` not. A
-///    canvas already told about that frame index answers false, so a tick on an unchanged slot
-///    writes nothing;
+///    invalidation of the element's own footprint, `version` moved and `documentVersion` not (a
+///    stream is reference, STREAM.md §2.13: no picture the document keeps contains it, so a frame
+///    changes none of them). A canvas already told about that frame index answers false, so a tick
+///    on an unchanged slot writes nothing;
 /// 2. for each of those elements on a visible layer whose cel is the one at the current frame,
 ///    **present it** through `onStreamFrame`, which `CanvasView` installs — the same shape as
 ///    `StrokeCanvasView.guideOverlayNeedsUpdate`: a per-tick signal that must not go through
@@ -34,53 +35,40 @@ import UIKit
 /// the canvas and handed Core Animation a fresh canvas-sized image per frame; the render server on
 /// the owner's iPad grew to its limit and was killed.
 ///
-/// Once a second — not per tick — it also calls `celContentChangedOutsideStroke` for the displayed
-/// cel, which is the ordinary publish: the layer-panel thumbnail catches up through its 400 ms
-/// debounce (which a per-tick call would reset forever), and anything else observing the document
-/// sees the frame.
+/// **It publishes nothing to the document.** A frame is not an edit and no picture the document
+/// keeps contains it — not the bake, not a thumbnail — so there is no dirty cel, no re-bake and no
+/// SwiftUI pass for a frame to raise; the layer host's surface is the whole of its reach.
 ///
 /// ## When it does not tick
 ///
 /// - while `isPlaying` — STREAM.md §2.9: a stream layer that is actively moving need not be
-///   rendered, and playback reads the bake, which `committedVersion` keeps blind to a *moving* stream;
+///   rendered, and playback reads the bake, which has no stream in it;
 /// - while the app is in the background — the connection is paused from this end too, so the
 ///   laptop stops encoding for nobody;
-/// - **for a layer nobody can see** — a hidden layer, or one inside a hidden folder, is neither
-///   written nor settled. A frame written there changes no picture, but the settle that follows it
-///   moves `committedVersion`, so the dirty sweep re-marks the whole cel's span, the timeline's bake
-///   bar shows those frames as unbaked, the cel's thumbnail is redrawn and the editor takes a full
-///   SwiftUI pass — for every pause in a moving screen, with the artist's hands off the iPad.
+/// - **for a layer nobody can see** — a hidden layer, or one inside a hidden folder, is not written:
+///   a frame written there changes no picture.
 ///
-/// The first two are `tickIsSuppressed`, and so is the settle: a commit mid-playback would re-key the
-/// frames the player is reading. The tick is armed by a frame's arrival alone — so the edge out of
-/// any of the three arms one and a settle (`syncFeeding`), or the layer would wait for a
-/// next frame a still screen never sends. **The decoder keeps the newest frame whatever the layer
-/// shows**, so the tick that edge arms writes the computer as it is now (TODO (96)): the layer
-/// comes back current, and was not rewritten thirty times a second while it was away.
+/// The first two are `tickIsSuppressed`. The tick is armed by a frame's arrival alone — so the edge
+/// out of any of the three arms one (`syncFeeding`), or the layer would wait for a next frame a still
+/// screen never sends. **The decoder keeps the newest frame whatever the layer shows**, so the tick
+/// that edge arms writes the computer as it is now (TODO (96)): the layer comes back current, and was
+/// not rewritten thirty times a second while it was away.
 ///
 /// An element the Move box holds is written like any other (`setStreamFrame` invalidates nothing
 /// for a suppressed element) and presented inside the float: `CanvasView`'s closure hands the host
 /// the lifted ids and their poses, and the surface rides the box.
 ///
-/// ## Live, then exact when still — what it does not do per frame, and what it does once
+/// ## Live is the only presentation — STREAM.md §2.13
 ///
-/// A tick never bumps `committedVersion`, so the frame bake, the dirty sweep and the sandwich key are
-/// blind to a frame by construction — which is why a frame cannot reach the canvas through the baked
-/// composite, and why a document the compositor draws (a blend mode, a mask, an effect, a container
-/// pose) shows its stream the way an edit's near picture is shown: the canvas stands on the live
-/// pair, cut around the stream's layer, whose own host presents the frames
-/// (`CanvasManager.liveHostRun`, `SandwichPresentation.live`). A per-tick composite of the frame was
-/// the alternative and MEASURED tens of milliseconds at 2048² (`StreamSandwichBench`), an order of
-/// magnitude over the ~4 ms the tick could carry.
-///
-/// **Once no frame has landed for `settleInterval` it moves it once** (`settle`,
-/// `VectorCanvas.commitStreamFrames`): the frames the canvases hold become their committed content, the
-/// sweep dirties the cel's span, and the bake of the newest picture is the exact one — the live pair
-/// stands until it lands, then the canvas rests on it, exactly as after any edit. The next frame goes
-/// live again (the first one after a rest publishes at once, so the canvas leaves the bake for the
-/// pair without waiting for the second a still screen never sends). The artist's *"live, then exact
-/// when still"*, and the stream is one more producer of fast-now-exact-when-it-settles beside an
-/// edit's pair and a transform's bands.
+/// A tick never bumps `documentVersion`, and nothing else does on a stream's behalf: no picture the
+/// document keeps contains a stream (`VectorCanvas.freeze`), so the frame bake, the dirty sweep and
+/// the sandwich key are blind to a frame by construction and a pause in the computer's motion re-bakes
+/// nothing. The stream is reference — it reaches the screen through its layer's host and no other way.
+/// A document the compositor draws (a blend mode, a mask, an effect, a container pose) therefore
+/// stands on the live pair for as long as a stream is on the frame, cut around the stream's layer,
+/// whose own host presents the frames (`CanvasManager.liveHostRun`, `SandwichPresentation.live`). A
+/// per-tick composite of the frame was the alternative and MEASURED tens of milliseconds at 2048²
+/// (Debug, 2048², three layers), an order of magnitude over the ~4 ms the tick could carry.
 ///
 /// ## What the bar reads — STREAM.md §5.6, §5.7
 ///
@@ -101,20 +89,8 @@ final class ScreenStreamCoordinator: ObservableObject {
 
     /// The most often the tick runs — STREAM.md §5.3's 33 ms.
     static let tickInterval: TimeInterval = 1.0 / 30.0
-    /// How often the ordinary publish (`celContentChangedOutsideStroke`) runs while frames flow.
-    static let publishInterval: TimeInterval = 1.0
-    /// **How long the laptop must send nothing before the stream is "still"** and the exact picture
-    /// replaces the live one (`settle`). The capture is damage-driven (STREAM.md §3): a still screen
-    /// sends *nothing*, so the interval only has to outlast the gaps *inside* a burst of motion — the
-    /// ~55 ms between frames of a moving desktop (MEASURED at ~18 fps), a typist's pauses — and the
-    /// slowest regular damage a desktop makes, **Windows' 530 ms caret blink**, which a text field
-    /// under the cursor sends for as long as it is focused. 0.6 s clears that last one, so a blinking
-    /// caret keeps the picture live and plain where a shorter interval would flip it between plain and
-    /// exact twice a second, each flip an exact bake spent and thrown away; it is also short enough
-    /// that the exact picture follows the end of a motion by 0.6 s plus the bake (~0.35 s on the
-    /// owner's iPad), which reads as the settle the owner asked for and not as lag.
-    static let settleInterval: TimeInterval = 0.6
-
+    /// How often the tick's numbers are summarised while frames flow.
+    static let summaryInterval: TimeInterval = 1.0
     private(set) weak var manager: CanvasManager?
 
     private var clients: [StreamEndpoint: ScreenStreamClient] = [:]
@@ -137,12 +113,7 @@ final class ScreenStreamCoordinator: ObservableObject {
 
     private var tickScheduled = false
     private var lastTick: CFAbsoluteTime = 0
-    private var lastPublish: CFAbsoluteTime = 0
-    /// When the tick last wrote a frame into a canvas — what `settleInterval` is measured from.
-    private var lastFrameWrite: CFAbsoluteTime = 0
-    private var settleScheduled = false
-    /// `settleInterval`, as a property so a logic test can shorten it.
-    var settleInterval = ScreenStreamCoordinator.settleInterval
+    private var lastSummary: CFAbsoluteTime = 0
     private var isInBackground = false
     /// The stream layers the last look found fed (`fedStreamLayers()`) — so the edge that feeds one
     /// again can arm a tick. Nil before the first look, which is a document opening rather than an
@@ -161,7 +132,7 @@ final class ScreenStreamCoordinator: ObservableObject {
     private(set) var lastTickDuration: TimeInterval = 0
 
     /// **The measurement's own outlet.** Every tick is an `OSSignposter` interval, and once a
-    /// second — on the same cadence as the ordinary publish — one `Logger` line (at `.notice`, the
+    /// second (`summaryInterval`) one `Logger` line (at `.notice`, the
     /// level `log stream` shows without `--level info`) carries the ticks since the last one with
     /// their mean and worst main-actor cost. Read it on a device with
     /// `log stream --predicate 'subsystem == "PaintSoftware" && category == "ScreenStream"'`, or
@@ -169,9 +140,9 @@ final class ScreenStreamCoordinator: ObservableObject {
     /// is the frame rate the tick actually delivered to the canvas. Costs one string a second.
     private static let log = Logger(subsystem: "PaintSoftware", category: "ScreenStream")
     private static let signposter = OSSignposter(subsystem: "PaintSoftware", category: "ScreenStream")
-    private var tickDurationsSincePublish: [TimeInterval] = []
+    private var tickDurationsSinceSummary: [TimeInterval] = []
 
-    /// The last log line's numbers, published once a second on the same cadence, for the one reader
+    /// The last log line's numbers, published on the same cadence, for the one reader
     /// that cannot open the unified log: an XCUITest on a device (`log collect --device` needs
     /// root). `StreamBar` puts it on a hidden marker, `streamBar.tickSummary`, the way
     /// `CanvasHostView` publishes the sandwich's state on `canvas.host` — none of it is otherwise
@@ -510,7 +481,7 @@ final class ScreenStreamCoordinator: ObservableObject {
 
     /// STATUS carries the laptop's picture size and source name, and both are stored on the
     /// element — **a document change, and charged as one**: the elements are rewritten through
-    /// `elements =` with `bumpVersion()`, so `committedVersion` moves, the bake re-keys, and a save
+    /// `elements =` with `bumpVersion()`, so `documentVersion` moves, the bake re-keys, and a save
     /// writes the new size. The placement is left exactly where it is (the brief's default): a
     /// source switch from a 1080p monitor to a 720p window shrinks the rectangle on canvas rather
     /// than re-fitting it. Not an undo step — nobody in the room did it.
@@ -747,9 +718,7 @@ final class ScreenStreamCoordinator: ObservableObject {
         let signpost = Self.signposter.beginInterval("tick")
         defer { Self.signposter.endInterval("tick", signpost) }
         let shownFrames = manager.displayedFrames(atFrame: manager.currentFrame)
-        let publishDue = started - lastPublish >= Self.publishInterval
-        var published = false
-        var wroteAFrame = false
+        var presentedAFrame = false
         // One `UIImage` per endpoint per tick, shared by every element it lands on: the wrapper is
         // what a split's shared `StreamPicture` compares, and a wrapper per cel would defeat that.
         var frames: [StreamEndpoint: (index: Int, image: UIImage)?] = [:]
@@ -760,11 +729,6 @@ final class ScreenStreamCoordinator: ObservableObject {
                                                       atFrame: shownFrames[layerIndex] ?? manager.currentFrame)
             for (celIndex, cel) in layer.cels.enumerated() {
                 guard let vector = cel.vector, vector.holdsStream else { continue }
-                var presented = false
-                // **The first frame after the stream was still publishes at once**: the canvas rests
-                // on the exact picture then, and only a pass takes it back to the live pair — the
-                // second frame a still screen never sends would be too late.
-                let wasStill = !vector.holdsUncommittedStreamFrame
                 for stream in vector.streams where !stream.isFrozen {
                     let endpoint = StreamEndpoint(host: stream.host, port: stream.port)
                     let frame: (index: Int, image: UIImage)?
@@ -775,79 +739,34 @@ final class ScreenStreamCoordinator: ObservableObject {
                         frames[endpoint] = frame
                     }
                     guard let frame,
-                          vector.setStreamFrame(id: stream.id, image: frame.image, index: frame.index)
-                    else { continue }
-                    wroteAFrame = true
-                    guard celIndex == displayedCel else { continue }
+                          vector.setStreamFrame(id: stream.id, image: frame.image, index: frame.index),
+                          celIndex == displayedCel else { continue }
                     onStreamFrame?(layer.id, stream.id)
-                    presented = true
-                }
-                if presented, publishDue || wasStill {
-                    manager.celContentChangedOutsideStroke(layerID: layer.id, celID: cel.id)
-                    if publishDue { published = true }
+                    presentedAFrame = true
                 }
             }
         }
-        if wroteAFrame {
-            lastFrameWrite = started
-            scheduleSettle()
-        }
         lastTickDuration = CFAbsoluteTimeGetCurrent() - started
-        tickDurationsSincePublish.append(lastTickDuration)
-        if published {
-            let elapsed = started - lastPublish
-            let durations = tickDurationsSincePublish
+        tickDurationsSinceSummary.append(lastTickDuration)
+        if presentedAFrame, started - lastSummary >= Self.summaryInterval {
+            let elapsed = started - lastSummary
+            let durations = tickDurationsSinceSummary
             let mean = durations.reduce(0, +) / Double(max(durations.count, 1))
             let worst = durations.max() ?? 0
-            if lastPublish > 0 {
+            if lastSummary > 0 {
                 lastTickSummary = String(format: "%d/%.2fs mean:%.3f max:%.3f",
                                          durations.count, elapsed, mean * 1000, worst * 1000)
                 Self.log.notice("tick \(durations.count) in \(elapsed, format: .fixed(precision: 2)) s (\(Double(durations.count) / max(elapsed, 0.001), format: .fixed(precision: 1)) /s): mean \(mean * 1000, format: .fixed(precision: 3)) ms, max \(worst * 1000, format: .fixed(precision: 3)) ms on the main actor")
             }
-            tickDurationsSincePublish.removeAll(keepingCapacity: true)
-            lastPublish = started
+            tickDurationsSinceSummary.removeAll(keepingCapacity: true)
+            lastSummary = started
         }
     }
 
-    // MARK: - Settling (live, then exact when still)
-
-    /// **Arms a check that the laptop has been still**, coalesced as `frameArrived` coalesces the tick:
-    /// at most one is pending, and it asks again if a frame landed after it was armed.
-    private func scheduleSettle() {
-        guard !settleScheduled else { return }
-        settleScheduled = true
-        let deadline = lastFrameWrite + settleInterval
-        DispatchQueue.main.asyncAfter(deadline: .now() + max(0, deadline - CFAbsoluteTimeGetCurrent())) { [weak self] in
-            guard let self else { return }
-            self.settleScheduled = false
-            if CFAbsoluteTimeGetCurrent() - self.lastFrameWrite < self.settleInterval {
-                self.scheduleSettle()
-            } else {
-                self.settle()
-            }
-        }
-    }
-
-    /// **The laptop has been still: commits every frame the document's streams hold** — each canvas
-    /// whose newest frame the bake lacks (`VectorCanvas.commitStreamFrames`), and the ordinary publish
-    /// for it, so the canvas pass that runs the new key is what takes the picture from the live pair to
-    /// the exact bake. Not while the tick stands down (`tickIsSuppressed`): the edge out of it comes
-    /// back here. Public so a logic test can settle without waiting.
-    func settle() {
-        guard let manager, !tickIsSuppressed else { return }
-        for (layerIndex, layer) in manager.layers.enumerated()
-        where layer.kind == .vector && manager.isLayerEffectivelyVisible(layerIndex) {
-            for cel in layer.cels {
-                guard let vector = cel.vector, vector.holdsStream, vector.commitStreamFrames() else { continue }
-                manager.celContentChangedOutsideStroke(layerID: layer.id, celID: cel.id)
-            }
-        }
-    }
-
-    /// STREAM.md §2.9's playback and the background: the two states the tick and the settle stand down in.
+    /// STREAM.md §2.9's playback and the background: the two states the tick stands down in.
     private var tickIsSuppressed: Bool { manager?.isPlaying == true || isInBackground }
 
-    /// **The stream layers the tick and the settle serve right now** — those that hold a stream, can be
+    /// **The stream layers the tick serves right now** — those that hold a stream, can be
     /// seen, and are not standing down for playback or the background. A layer is the unit rather than
     /// an element because visibility is a layer's (and its folders') and the edge below is about a
     /// layer coming back.
@@ -865,20 +784,18 @@ final class ScreenStreamCoordinator: ObservableObject {
     /// **Keeps the decoders' announcements and the tick's arming in step with what is fed.** With no
     /// layer fed the decoders stop waking the main thread (`H264StreamDecoder.announcesFrames`); on
     /// every edge that feeds a stream layer again — playback stopping, the app coming back, the layer
-    /// being shown — it arms a tick and a settle. The tick is armed by a frame's arrival and by
-    /// nothing else, and a frame that lands while a layer is not fed is held in the decoder's slot
-    /// with no tick to carry it — a laptop whose screen then stays still sends no further frame to
-    /// arrive, so the picture on the canvas would stay one the computer no longer shows until the
-    /// screen next changed. The same goes for frames the canvases already hold: a settle that came
-    /// due while the layer was away committed nothing. Run from `sync()`, which a canvas pass makes
-    /// when playback stops or a layer is shown, and from the background and foreground notifications.
+    /// being shown — it arms a tick. The tick is armed by a frame's arrival and by nothing else, and
+    /// a frame that lands while a layer is not fed is held in the decoder's slot with no tick to
+    /// carry it — a laptop whose screen then stays still sends no further frame to arrive, so the
+    /// picture on the canvas would stay one the computer no longer shows until the screen next
+    /// changed. Run from `sync()`, which a canvas pass makes when playback stops or a layer is
+    /// shown, and from the background and foreground notifications.
     private func syncFeeding() {
         let fed = fedStreamLayers()
         defer { lastFedStreamLayers = fed }
         for client in clients.values { client.decoder.announcesFrames = !fed.isEmpty }
         guard let before = lastFedStreamLayers, !fed.subtracting(before).isEmpty else { return }
         frameArrived()
-        scheduleSettle()
     }
 
     private func latestFrame(for endpoint: StreamEndpoint) -> (index: Int, image: CGImage)? {

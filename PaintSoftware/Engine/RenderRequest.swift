@@ -211,10 +211,10 @@ struct LayerContentVersion: Hashable {
         rasterVersion = cel.raster.version
         vector = cel.vector.map(ObjectIdentifier.init)
         // -1 rather than 0 for "no vector tier at all", so acquiring an empty one is a change.
-        // `committedVersion`, not `version`: this key reaches `FrameBakeKey` and `FrameBaker`'s cel
+        // `documentVersion`, not `version`: this key reaches `FrameBakeKey` and `FrameBaker`'s cel
         // stamps, and a live stream frame must not re-bake a cel's span per tick — see
-        // `VectorCanvas.committedVersion`.
-        vectorVersion = cel.vector?.committedVersion ?? -1
+        // `VectorCanvas.documentVersion`.
+        vectorVersion = cel.vector?.documentVersion ?? -1
         fillPreview = cel.fillPreview.map { ObjectIdentifier($0.image) }
         bakedImage = cel.bakedImage.map(ObjectIdentifier.init)
     }
@@ -1181,7 +1181,7 @@ extension CanvasManager {
         }
         return SandwichKey(tree: tree ?? walk.tree,
                            activeLayerIndex: activeLayerIndex,
-                           liveStreamLayers: liveStreamLayerIndices(atFrame: frame, walk: walk),
+                           streamLayers: streamLayerIndices(atFrame: frame, walk: walk),
                            contents: contents,
                            renderResolution: renderResolution,
                            canvasBackgroundColor: canvasBackgroundColor,

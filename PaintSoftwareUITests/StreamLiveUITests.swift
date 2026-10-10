@@ -57,13 +57,57 @@ final class StreamLiveUITests: StreamUITestCase {
         waitForPicture(.blue, on: canvas, "and it is live again")
     }
 
+    /// How long the computer rests between changes in the bake-bar tests below: well past the 0.6 s
+    /// a "settle" once waited for, which is what re-marked a stream cel's whole span for the bake.
+    private static let restBetweenChanges: TimeInterval = 1.6
+
+    /// Moves the computer through five screens, resting after each, while reading the bake bar as
+    /// fast as XCUITest can ask for the whole of it. Returns every non-empty reading — a frame the
+    /// baker had not got to.
+    private func bakeBarReadingsWhileTheComputerMovesAndRests(_ app: XCUIApplication) -> [String] {
+        var marked: [String] = []
+        for screen in [FakeLaptopStreamer.Screen.green, .blue, .red, .green, .blue] {
+            laptop.show(screen)
+            let rest = Date().addingTimeInterval(Self.restBetweenChanges)
+            while Date() < rest {
+                let value = bakeBarValue(app)
+                if !value.isEmpty { marked.append(value) }
+            }
+        }
+        return marked
+    }
+
+    /// **A visible stream on a screen that keeps moving and resting leaves the timeline's bake bar
+    /// blank, and stays live in its place** — TODO (162). The owner: *"a live stream does not require
+    /// to be rendered because it is only used as reference."* From a fresh document: the stream layer
+    /// is connected, the document bakes once (inserting a stream is an edit), and from there every
+    /// pause in the computer's motion used to settle the picture onto the cel and re-bake its whole
+    /// span — the bar showed those frames orange. Now a frame is not a change to anything the baker
+    /// reads, so the bar is read through five moves and rests and never marks a frame, while the
+    /// canvas — read as pixels — follows the computer the whole way and ends on its last colour.
+    func testAVisibleStreamOnAMovingScreenNeverMarksTheTimelineUnbakedAndStaysLiveInPlace() throws {
+        let app = XCUIApplication()
+        let canvas = launchWithALiveStream(app)
+        laptop.show(.red)
+        waitForPicture(.red, on: canvas)
+        XCTAssertTrue(bakeBar(app).waitForExistence(timeout: 5))
+        XCTAssertNotNil(waitForBakeBar(app, timeout: 30) { $0.isEmpty },
+                        "Setup: the document has baked with the stream in it (the bar reads \"\(bakeBarValue(app))\")")
+
+        let marked = bakeBarReadingsWhileTheComputerMovesAndRests(app)
+
+        attachScreenshot(app, "visible-stream-after-a-moving-screen")
+        XCTAssertEqual(marked, [], """
+            The stream is reference, so nothing it receives can change a frame, yet the bar marked \
+            frames unbaked while the computer's screen moved and rested.
+            """)
+        waitForPicture(.blue, on: canvas, "and the canvas shows the computer as it is: live, in place")
+        XCTAssertEqual(barState(app), "live")
+    }
+
     /// **A hidden stream on a screen that keeps moving leaves the timeline's bake bar blank** — TODO
     /// (156). The owner, with no hand on the iPad: *"I can see the first 16 or so frames turn orange
-    /// momentarily."* Their stream sat on a hidden layer; every pause in the computer's motion settled a
-    /// frame onto the cel, the dirty sweep read that as an edit to the cel's whole span, and the bar —
-    /// which marks the frames the baker has not got to — flashed them. The computer here moves, rests
-    /// past the settle interval, moves again, five times over, and the bar is read as fast as XCUITest
-    /// can ask for the whole of it.
+    /// momentarily."* Their stream sat on a hidden layer.
     func testAHiddenStreamLayerOnAMovingScreenNeverMarksTheTimelineUnbaked() throws {
         let app = XCUIApplication()
         let canvas = launchWithALiveStream(app)
@@ -80,20 +124,12 @@ final class StreamLiveUITests: StreamUITestCase {
         XCTAssertNotNil(waitForBakeBar(app, timeout: 30) { $0.isEmpty },
                         "Setup: the document has baked with the stream layer hidden (the bar reads \"\(bakeBarValue(app))\")")
 
-        var marked: [String] = []
-        for screen in [FakeLaptopStreamer.Screen.green, .blue, .red, .green, .blue] {
-            laptop.show(screen)
-            let rest = Date().addingTimeInterval(ScreenStreamCoordinator.settleInterval * 2 + 0.6)
-            while Date() < rest {
-                let value = bakeBarValue(app)
-                if !value.isEmpty { marked.append(value) }
-            }
-        }
+        let marked = bakeBarReadingsWhileTheComputerMovesAndRests(app)
+
         attachScreenshot(app, "hidden-stream-after-a-moving-screen")
         XCTAssertEqual(marked, [], """
             The stream is hidden, so nothing it receives can change a frame, yet the bar marked frames \
-            unbaked while the computer's screen moved and rested. Each rest settles the stream onto its \
-            cel, and a settle that reaches the dirty sweep re-marks the cel's whole span.
+            unbaked while the computer's screen moved and rested.
             """)
 
         openLayerPanel(app)

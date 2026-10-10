@@ -540,9 +540,10 @@ extension CanvasManager {
         let elements = suppressed.isEmpty ? vector.elements
                                           : vector.elements.filter { !suppressed.contains($0.id) }
         let carried = vector.transform
-        // `committedVersion`: a posed stream cel must not mint a fresh identity — and with it a
-        // fresh bake key — per live frame. See `VectorCanvas.committedVersion`.
-        let version = vector.committedVersion
+        // `documentVersion`: a posed stream cel must not mint a fresh identity — and with it a
+        // fresh bake key — per live frame. The thunk below draws it without the stream, as every
+        // render the document keeps does (`VectorCanvas.freeze`). See `VectorCanvas.documentVersion`.
+        let version = vector.documentVersion
 
         let identity = PosedCelIdentity(
             celID: cel.id,
@@ -575,7 +576,8 @@ extension CanvasManager {
             // **every SwiftUI pass** of a posed document and throw it away on the memo hit that
             // follows. `livePreview` asks on every pass, which is what makes the difference visible.
             VectorCanvas(size: canvasSize,
-                         elements: Self.posed(elements, through: mappings, inheriting: container),
+                         elements: Self.posed(elements.withoutReference, through: mappings,
+                                              inheriting: container),
                          transform: carried).render(quality: quality)
         }
     }

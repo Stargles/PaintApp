@@ -5193,7 +5193,7 @@ memo uses (`VectorCanvas.drawStreamWindow`, `renderLocalContent`'s body factored
 `drawLocalContent`). The surfaces are the layer's contents for the life of the window: nothing
 canvas-sized is allocated, rasterized or uploaded per frame, and the render server maps two objects
 once. The memo is still region-damaged per frame (a thumbnail or a composite that reads it repairs
-it), but the host no longer redraws its base for a `version` move that left `committedVersion`
+it), but the host no longer redraws its base for a `version` move that left `documentVersion`
 still while a surface is up. `StreamSurfaceViewLogicTests` pins the count: a hundred frames are two
 contents objects, both `IOSurface`s.
 
@@ -5520,7 +5520,7 @@ input."* The recording's idle windows carried, every two seconds: the main threa
 (`~/PaintWork/evidence-153/1.paintproj`) holds a stream element on a *hidden* layer in a *hidden*
 folder, in a 16-frame cel — the "first 16 frames". `ScreenStreamCoordinator` fed every stream cel
 whatever its layer showed: a frame per tick, and after each pause in the computer's motion the settle
-(`commitStreamFrames`) moved the cel's `committedVersion`. The dirty sweep read that as an edit to the
+(`commitStreamFrames`) moved the cel's `committedVersion` (now `documentVersion`). The dirty sweep read that as an edit to the
 cel's span, so the 16 frames went unbaked (orange) and were each revisited (16 `bakeKeyMint`, 31
 landings, 14 ring refills), the cel's thumbnail was redrawn, and `objectWillChange` took the whole editor
 through a SwiftUI pass — for a picture no frame shows. The layer being hidden is why no frame
@@ -5551,4 +5551,7 @@ and still keeps the newest frame, so the pass that shows the layer arms a tick t
 it is now. A *visible* stream on a screen that moves and rests is still the live-then-exact design's
 cost: MEASURED in the same harness (Debug) with the stream layer and its folder shown, 3–11 real
 composites and writes in every two-second window (900–1,700 ms of worker time on the Mac), for as long
-as the screen keeps moving and resting.
+as the screen keeps moving and resting. **TODO (162) removed that cost whole**: a stream is reference
+(STREAM.md §2.13), no bake contains it, and the settle that re-marked the cel's span is gone — a frame,
+visible or hidden, now dirties no frame and raises no pass (`StreamInsertLogicTests`
+`testAStreamsFramesDirtyNoFrameAndPublishNothing`).

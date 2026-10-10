@@ -688,12 +688,12 @@ final class StrokeCanvasView: CanvasPlaneView {
     func refreshDisplayIfStale(waitingForTheRender wait: Bool = false) {
         if let vectorCanvas {
             guard displayedVectorVersion != vectorCanvas.version else { return }
-            // **A stream frame moves `version` and not `committedVersion`** (`VectorCanvas.setStreamFrame`),
+            // **A stream frame moves `version` and not `documentVersion`** (`VectorCanvas.setStreamFrame`),
             // and while a surface is presenting the element the base underneath need not be redrawn
             // for it: the surface covers exactly the pixels that changed. Redrawing it anyway is what
             // TODO (97) was — a canvas-sized rasterize and upload per frame. The base catches up on
             // the next committed change, or when the surfaces go (a cel switch, a blanked host).
-            if !streamSurfaces.isEmpty, baseCommittedVersion == vectorCanvas.committedVersion { return }
+            if !streamSurfaces.isEmpty, baseDocumentVersion == vectorCanvas.documentVersion { return }
             refreshDisplay(waitingForTheRender: wait)
         } else if let raster, displayedRasterVersion != raster.version {
             refreshDisplay()
@@ -707,9 +707,9 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// cel switch, a blanked host, a derived base, the Move box lifting or landing.
     private var streamSurfaces: [UUID: StreamSurfaceView] = [:]
 
-    /// `VectorCanvas.committedVersion` when the base slot was last refreshed — what
+    /// `VectorCanvas.documentVersion` when the base slot was last refreshed — what
     /// `refreshDisplayIfStale` compares to tell a stream frame's `version` move from an edit's.
-    private var baseCommittedVersion = StrokeCanvasView.nothingDisplayed
+    private var baseDocumentVersion = StrokeCanvasView.nothingDisplayed
 
     /// **Presents one stream element's newest frame** — `ScreenStreamCoordinator.onStreamFrame`'s
     /// half of the tick, and `refreshDisplay`'s way of keeping a surface current when the ink
@@ -720,9 +720,8 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// `isolating`/`posedBy` are the Move box's case: the surface goes inside `floatView`, so it
     /// rides the box's transform, and the window is the lifted ids alone as the float shows them.
     /// Refused — and any surface dropped — while nothing this view draws reaches the screen, or
-    /// while a derived picture owns the base slot (a posed frame shows the stream where the pose
-    /// puts it, which the memo's own coordinates cannot say; that frame is held by design, and
-    /// catches up when the laptop has been still — `VectorCanvas.commitStreamFrames`).
+    /// while a derived picture owns the base slot (a posed cel is drawn without its stream, which
+    /// is reference and in no picture the document keeps — `CanvasManager.StreamNote.hiddenByAPose`).
     func presentStreamFrame(elementID: UUID, isolating ids: Set<UUID>? = nil,
                             posedBy: [UUID: PoseMap] = [:]) {
         guard let vectorCanvas, !hostIsBlanked, interpolationImage == nil,
@@ -824,7 +823,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         // Move with no selection lifts a float now, so there is one latch for both.
         guard vectorFloatBase == nil else { return }
         displayedRasterVersion = raster?.version ?? Self.nothingDisplayed
-        baseCommittedVersion = vectorCanvas?.committedVersion ?? Self.nothingDisplayed
+        baseDocumentVersion = vectorCanvas?.documentVersion ?? Self.nothingDisplayed
         // A committed change under a live stream — ink drawn over it, an undo — is in the surface's
         // window too, and the surface is what the artist sees there. Redrawn from the same list the
         // base is about to be, so the two agree; dropped where `presentStreamFrame` refuses.

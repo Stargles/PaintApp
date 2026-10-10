@@ -537,7 +537,7 @@ enum ProjectStore {
     /// matched such a texture would clone last save's pixels over this save's. A zeroing weak
     /// reference cannot be matched by anything but the object it was taken from. Versions are the
     /// same counters `LayerContentVersion` keys every in-memory cache on (`RasterLayerTexture.version`,
-    /// `VectorCanvas.version` — not `committedVersion`, so a stream's newest picture is written too).
+    /// `VectorCanvas.version` — not `documentVersion`, so a stream's newest picture is written too).
     /// `hasRaster` and `canvasSize` are folded in for the two ways a texture's *bytes* can change
     /// without its identity: a blank tier acquiring a bitmap, and the sample origin the vector
     /// encoder quantises about (`writeCel`'s `sampleOrigin`).

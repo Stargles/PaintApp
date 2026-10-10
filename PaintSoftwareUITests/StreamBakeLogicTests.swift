@@ -113,6 +113,26 @@ final class StreamBakeLogicTests: XCTestCase {
         return (bytes[i], bytes[i + 1], bytes[i + 2], bytes[i + 3])
     }
 
+    /// RGBA at a canvas point of the cel at `frame` **as its layer's host draws it** — the stream
+    /// in, which is how the artist sees a live stream, and which no composite has (a stream is
+    /// reference, STREAM.md §2.13).
+    private func hostedPixel(_ fixture: Fixture, atFrame frame: Int, x: Int, y: Int,
+                             file: StaticString = #filePath, line: UInt = #line)
+        -> (r: UInt8, g: UInt8, b: UInt8, a: UInt8) {
+        guard let celIndex = fixture.manager.activeCelIndex(inLayer: fixture.layerIndex, atFrame: frame),
+              let vector = fixture.cels[celIndex].vector, let cg = vector.render().cgImage else {
+            XCTFail("No cel to draw at frame \(frame)", file: file, line: line)
+            return (0, 0, 0, 0)
+        }
+        var bytes = [UInt8](repeating: 0, count: cg.width * cg.height * 4)
+        let ctx = CGContext(data: &bytes, width: cg.width, height: cg.height, bitsPerComponent: 8,
+                            bytesPerRow: cg.width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
+        let i = (y * cg.width + x) * 4
+        return (bytes[i], bytes[i + 1], bytes[i + 2], bytes[i + 3])
+    }
+
     private func assertGreen(_ p: (r: UInt8, g: UInt8, b: UInt8, a: UInt8), _ what: String,
                              file: StaticString = #filePath, line: UInt = #line) {
         XCTAssertEqual(p.a, 255, "\(what): opaque", file: file, line: line)
@@ -221,7 +241,7 @@ final class StreamBakeLogicTests: XCTestCase {
         // A newer frame, red, reaches the restored cel through the tick.
         f.manager.currentFrame = 1
         feed(f, color: .red, index: 2)
-        assertRed(compositedPixel(f, atFrame: 1, x: 32, y: 32), "after undo the stream is live again")
+        assertRed(hostedPixel(f, atFrame: 1, x: 32, y: 32), "after undo the stream is live again")
 
         f.manager.redo()
         XCTAssertEqual(f.spans, [0..<1, 1..<2, 2..<4], "redo bakes again")
@@ -231,8 +251,9 @@ final class StreamBakeLogicTests: XCTestCase {
     // MARK: - What is drawn
 
     /// **The baked frame holds its picture while the stream moves on.** Green is fed, frame 2 is
-    /// baked, then red is fed: frame 2 composites green (the snapshot) and frames 1 and 3 composite
-    /// red (the stream, live). Two operands that differ, through the real compositor.
+    /// baked, then red is fed: frame 2 composites green (the snapshot) and frames 1 and 3 show red
+    /// in their hosts (the stream, live) and composite to nothing — a stream is reference, in no
+    /// picture the document keeps. Two operands that differ, through the real compositor.
     func testTheBakedCelKeepsItsPictureWhileTheNeighboursFollowTheStream() throws {
         let f = fixture(color: .green)
         XCTAssertEqual(bake(f, atFrame: 1), .baked)
@@ -249,8 +270,10 @@ final class StreamBakeLogicTests: XCTestCase {
         f.manager.currentFrame = 1
         feed(f, color: .red, index: 2)
 
-        assertRed(compositedPixel(f, atFrame: 0, x: 32, y: 32), "[1] follows the stream")
-        assertRed(compositedPixel(f, atFrame: 3, x: 32, y: 32), "[3–4] follows the stream")
+        assertRed(hostedPixel(f, atFrame: 0, x: 32, y: 32), "[1] follows the stream")
+        assertRed(hostedPixel(f, atFrame: 3, x: 32, y: 32), "[3–4] follows the stream")
+        XCTAssertEqual(compositedPixel(f, atFrame: 0, x: 32, y: 32).a, 0, "[1] is not in the composite")
+        XCTAssertEqual(compositedPixel(f, atFrame: 3, x: 32, y: 32).a, 0, "[3–4] is not in the composite")
         assertGreen(compositedPixel(f, atFrame: 1, x: 32, y: 32), "[2] is baked and holds green")
         XCTAssertEqual(compositedPixel(f, atFrame: 1, x: 2, y: 2).a, 0, "and nothing outside the rect")
     }
@@ -263,11 +286,11 @@ final class StreamBakeLogicTests: XCTestCase {
         XCTAssertEqual(bake(f, atFrame: 1), .baked)
         f.manager.currentFrame = 0
         feed(f, color: .red, index: 2)
-        assertRed(compositedPixel(f, atFrame: 0, x: 32, y: 32), "Setup: [1] drew slot 2")
+        assertRed(hostedPixel(f, atFrame: 0, x: 32, y: 32), "Setup: [1] drew slot 2")
         // Same slot index, other cel. A memo keyed on the element alone would skip this.
         f.manager.currentFrame = 3
         feed(f, color: .red, index: 2)
-        assertRed(compositedPixel(f, atFrame: 3, x: 32, y: 32), "[3–4] drew slot 2 too")
+        assertRed(hostedPixel(f, atFrame: 3, x: 32, y: 32), "[3–4] drew slot 2 too")
     }
 
     // MARK: - Refusals
@@ -326,7 +349,7 @@ final class StreamBakeLogicTests: XCTestCase {
                                                  elementID: stream.id, true), "already frozen: no change")
 
         feed(f, color: .red, index: 2)
-        assertGreen(compositedPixel(f, atFrame: 0, x: 32, y: 32), "frozen: the red frame did not land")
+        assertGreen(hostedPixel(f, atFrame: 0, x: 32, y: 32), "frozen: the red frame did not land")
 
         XCTAssertEqual(bake(f, atFrame: 1), .baked)
         assertGreen(compositedPixel(f, atFrame: 1, x: 32, y: 32), "the bake is the frozen green")
@@ -337,28 +360,29 @@ final class StreamBakeLogicTests: XCTestCase {
         XCTAssertEqual(f.manager.history.undoStack.count, stepsBefore + 1, "only the bake was a step")
         f.manager.currentFrame = 0
         feed(f, color: .red, index: 3)
-        assertRed(compositedPixel(f, atFrame: 0, x: 32, y: 32), "unfrozen: the next frame lands")
+        assertRed(hostedPixel(f, atFrame: 0, x: 32, y: 32), "unfrozen: the next frame lands")
     }
 
-    /// **Freezing drops no memo and commits the picture.** `version` moves with `committedVersion`
-    /// (both by `invalidateRenderOnly`) but its damage is the null region — the proof that no pixel
-    /// changed — so every memo stands; and the committed move is what re-keys the bake for the
-    /// picture the artist froze on (`VectorCanvas.setStreamFrozen`). Unfreezing moves nothing.
-    func testFreezeCommitsThePictureAndDropsNoMemo() throws {
+    /// **Freezing is a viewing state and moves nothing the document keeps.** `version` stays and so
+    /// does `documentVersion`, and no memo drops: the picture on the cel is exactly the picture that
+    /// was there (`VectorCanvas.setStreamFrozen`). A stream is reference, so there is no bake for a
+    /// freeze to re-key — the frozen frame is the same reference, held still.
+    func testFreezeMovesNothingAndDropsNoMemo() throws {
         let f = fixture()
         let vector = try XCTUnwrap(f.cels[0].vector)
         let stream = try XCTUnwrap(vector.streams.first)
-        let committed = vector.committedVersion
+        let documentVersion = vector.documentVersion
+        let version = vector.version
         let rendered = vector.render()
         XCTAssertTrue(f.manager.setStreamFrozen(layerIndex: f.layerIndex, celIndex: 0,
                                                 elementID: stream.id, true))
-        XCTAssertEqual(vector.committedVersion, committed + 1, "the frozen picture is the document's now")
-        XCTAssertTrue(vector.render() === rendered, "and the memo of the picture that did not change stands")
+        XCTAssertEqual(vector.documentVersion, documentVersion, "the document's picture did not change")
+        XCTAssertEqual(vector.version, version, "and nothing is stale")
+        XCTAssertTrue(vector.render() === rendered, "so the memo of the picture that did not change stands")
 
-        let afterFreeze = vector.committedVersion
         XCTAssertTrue(f.manager.setStreamFrozen(layerIndex: f.layerIndex, celIndex: 0,
                                                 elementID: stream.id, false))
-        XCTAssertEqual(vector.committedVersion, afterFreeze, "unfreezing changes no picture")
+        XCTAssertEqual(vector.documentVersion, documentVersion, "unfreezing changes no picture either")
     }
 
     // MARK: - The snapshot's size

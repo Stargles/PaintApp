@@ -101,6 +101,17 @@ the laptop.
   (§4.2), which the owner left to us: *"there are open source low latency high performance streaming
   systems you could probably use. Your choice."*
 - **2.12 The laptop is reached over Tailscale** (point 12).
+- **2.13 A stream is reference: no picture the document keeps contains it** (owner, 2026-10-10, TODO
+  (162): *"a live stream does not require to be rendered because it is only used as reference"* —
+  point 11's *"actively moving"* extended to always). The frame bake, its keys and its store, an
+  export, a thumbnail, an onion skin, the compositor's halves and a derived (posed or interpolated)
+  picture are all drawn **without** the stream, frozen or not; the one place a stream is drawn is its
+  own layer's host, in that layer's place in the stack — layers above still cover it, layers below
+  are under it. A frame therefore changes nothing a bake reads and a pause in the computer's motion
+  re-bakes nothing. **Bake Frame (2.4) is the one way a stream's picture becomes part of the drawing**:
+  the image object it makes is an ordinary image and renders like any. This replaces 2026-10-01's
+  *"a stream under a blend mode or effect is not live"* and 2026-10-02's *"Live, then exact when
+  still"*, both gone with the settle that served them. The consequences nobody ruled on are in §6.
 
 ## 3. The wire protocol — `paintstream/1`
 
@@ -403,23 +414,19 @@ them is TODO (96) and TODO (97) respectively:
    buffer between them; the canvas records the decoder index it was last told, so a tick on an
    unchanged slot writes nothing and a split's far cel is still told about a frame its shared box
    already holds. `version` moves (the memo re-walks on its next read, the host knows the picture
-   is stale) and a new `committedVersion` — which `LayerContentVersion` and the posed/video
+   is stale) and `documentVersion` — which `LayerContentVersion` and the posed/video
    identities read — does not, so the bake, the dirty sweep and the sandwich key are blind to a
    live frame by construction. **A cel the artist is not looking at is written all the same**; when
    they change frame onto it the host's ordinary repaint draws the newest picture, and no further
    frame has to arrive — which matters because a laptop whose screen is not changing sends nothing
    that would. **A layer nobody can see is not written at all** — hidden, or inside a hidden folder
-   (TODO (156)): the frame would change no picture, and the settle below, which follows every pause
-   in the computer's motion, moves `committedVersion` and so re-marks the cel's whole span for the
-   bake, redraws the timeline's bake bar orange, redraws the cel's thumbnail and takes a full SwiftUI
-   pass. The owner's recording with no touch in it shows exactly that in every two-second window — 14
-   store decodes, 31 baker landings, one thumbnail render, one pass, ~45 ms observer-phase spikes, the
-   main thread a third busy — and the same signature reproduces in the simulator (MEASURED, Debug) from
-   the owner's own scene, whose stream sits on a hidden layer in a hidden folder, with a source that
-   moves and rests. Showing the layer is the edge
-   that feeds it: the decoder keeps the newest frame whatever the layer shows, so the tick that edge
-   arms writes the computer as it is now (TODO (96)'s *"hidden streams made visible"*, kept) without
-   a round trip to the laptop.
+   (TODO (156)): the frame would change no picture. (The owner's recording of a hidden stream on a
+   moving source is what found what the settle that (162) later removed cost: in every two-second
+   window 14 store decodes, 31 baker landings, one thumbnail render, one pass, ~45 ms observer-phase
+   spikes, the main thread a third busy — MEASURED, Debug, from the owner's own scene.) Showing the
+   layer is the edge that feeds it: the decoder keeps the newest frame whatever the layer shows, so
+   the tick that edge arms writes the computer as it is now (TODO (96)'s *"hidden streams made
+   visible"*, kept) without a round trip to the laptop.
 2. **For the elements on a visible layer whose cel is the one at the current frame, it presents the
    frame** through a closure `CanvasView` installs (`onStreamFrame`, the shape of
    `StrokeCanvasView.guideOverlayNeedsUpdate` — never `objectWillChange`, which is a whole SwiftUI
@@ -429,8 +436,8 @@ them is TODO (96) and TODO (97) respectively:
    `IOSurface`s the host owns per stream element (`StreamSurfaceView`), frame-positioned over the
    base the way the scratch is positioned at a stroke's window. **Nothing canvas-sized is allocated,
    rasterized or uploaded per frame, and the render server maps two objects once.** The base under
-   the surface is not redrawn for a `version` move that left `committedVersion` still while a
-   surface is up (`refreshDisplayIfStale`); it catches up on the next committed change, or when the
+   the surface is not redrawn for a `version` move that left `documentVersion` still while a
+   surface is up (`refreshDisplayIfStale`); it catches up on the next change to the document, or when the
    surfaces go — a cel switch, a blanked host, a derived (posed) base, the Move box lifting or
    landing. While the Move box holds the element the surface rides inside the float, drawn from the
    lifted ids alone as the float shows them; a Distort float has no window and keeps the picture it
@@ -440,8 +447,12 @@ them is TODO (96) and TODO (97) respectively:
    canvas-sized `CGImage` thirty times a second; on the owner's iPad the render server reached its
    1850 MB limit and was killed four times in two days. PERFORMANCE.md §21 is the measurement.
 
-Once a second — not per tick — the coordinator also publishes (`celContentChangedOutsideStroke`)
-for the displayed cel, so the layer-panel thumbnail catches up through its 400 ms debounce. The tick
+**The tick publishes nothing to the document** (2.13). A frame is not an edit and no picture the
+document keeps contains it — the bake, the thumbnails and the halves are all drawn without a stream
+(`VectorCanvas.freeze`) — so there is no dirty cel, no re-bake, no thumbnail to redraw and no SwiftUI
+pass for a frame to raise; the layer host's surface is the whole of its reach. (Until TODO (162) it
+also published once a second for the thumbnail, and committed the frames the canvases held once the
+computer had been still — the settle, below.) The tick
 does nothing while `isPlaying` (2.9), while the app is backgrounded, or for a layer nobody can see —
 and **the edge that feeds a layer again arms one** (`syncFeeding`): the tick is armed by a frame's
 arrival alone, a frame that lands while it stands down waits in the decoder's slot, and a laptop whose
@@ -451,46 +462,42 @@ decoder stops announcing frames (`H264StreamDecoder.announcesFrames`) — it sti
 P-frame needs its reference, and still keeps the newest frame in its slot — so a moving screen does not
 wake the main thread thirty times a second for a canvas that can draw none of them.
 
-**A canvas the compositor draws shows a live stream through the live pair** — TODO (112). A blend
-mode, a mask, an effect or a container pose anywhere in the document puts the canvas on a composite
-image, and a frame reaches the screen through its layer host's surface and nowhere else: a tick moves
-no `committedVersion`, so the bake is blind to a frame while frames keep arriving, and a per-tick
-composite MEASURED **45.8 ms on CoreGraphics and 72.7 ms on Metal** (Debug, 2048², three layers, a
-1920×1080 frame; `StreamSandwichBench`) and a canvas-sized image per frame is what killed the render
-server (§5.3's TODO (97)). Until (112) the canvas simply stood on whatever the last bake froze —
-*"pauses and refuses to update until I draw something"* — and the bar said *"Live picture pauses while
-a blend mode, mask, effect or transformation layer is in the document"*; a stroke un-stuck it because it
-was the one thing that put a host between the halves of a live pair, and its commit re-baked. Now **a
-stream the laptop is still sending to is what the pair is for** (`SandwichPresentation.live`,
-`SandwichPresentation.Live.stream`): `CanvasManager.liveHostRun` is the leaves from the lowest to the highest of the
-active layer and every live stream (`liveStreamLayerIndices`: visible, unfrozen, a stream on the cel
-shown at this frame, a leaf, not posed), the pair is cut around that run and those hosts draw
-themselves between the two halves, and the bake — which lacks the frames since its key — is not the
-picture to wait for. **The price is the near picture** (owner, 2026-10-01, *"for the fast one it can be
-just the layer without any effects added"*): the layers in the run are drawn plain, and a blended or
-graded layer above it is composited onto transparency.
+**A canvas the compositor draws shows a stream through the live pair, for as long as it is on the
+frame** — TODO (112), made permanent by TODO (162). A blend mode, a mask, an effect or a container pose
+anywhere in the document puts the canvas on a composite image, and a frame reaches the screen through
+its layer host's surface and nowhere else. A per-tick composite of the frame is not the alternative: it
+MEASURED **45.8 ms on CoreGraphics and 72.7 ms on Metal** (Debug, 2048², three layers, a 1920×1080
+frame; a bench since retired with the question it priced), and a canvas-sized image per frame is what killed the render server
+(TODO (97)). Until (112) the canvas simply stood on whatever the last bake froze — *"pauses and
+refuses to update until I draw something"*. Now **a stream on the frame is what the pair is for**
+(`SandwichPresentation.live`, `SandwichPresentation.Live.stream`): `CanvasManager.liveHostRun` is the
+leaves from the lowest to the highest of the active layer and every stream
+(`CanvasManager.streamLayerIndices`: on a visible layer, a stream on the cel shown at this frame, a
+leaf, not posed — frozen or not), the pair is cut around that run, those hosts draw themselves between
+the two halves, and **the bake, which no stream is in (2.13), is never the picture to wait for** — so the
+presentation stays `live` as long as the stream is on the frame, and `rest` only once it has left it
+(hidden, played past, or the animation playing — playback reads the bake and shows no stream, §2.9).
+**The price is the near picture, now a rule rather than a stage** (owner, 2026-10-01, *"for the fast
+one it can be just the layer without any effects added"*, and 2026-10-10, *"a live stream does not
+require to be rendered"*): the layers in the run are drawn plain — the stream, the stream layer's own
+ink, and every layer between the stream and the active one — and a blended or graded layer above the
+run is composited onto transparency, so **a blend mode, mask or effect never reaches a stream**. When
+the stream sits at the bottom and the artist draws on a layer above, the run is all of it. The
+2026-10-02 *"Live, then exact when still"* — a settle that committed the frames after
+`settleInterval` (0.6 s, outlasting Windows' 530 ms caret blink) so the sweep re-baked the cel's span
+and the exact, effected picture replaced the pair — is gone with the settle: it re-baked every frame
+the cel spans, ~16 × 350 ms on the owner's iPad 9, for a picture that is only reference.
 
-**Then exact when still** (owner, 2026-10-02, *"Live, then exact when still"*). Once the laptop has
-sent nothing for **`ScreenStreamCoordinator.settleInterval`, 0.6 s**, the coordinator commits the
-frames its canvases hold (`settle` → `VectorCanvas.commitStreamFrames`, one move of `committedVersion`,
-not an undo step), and from there the stream is an edit like any other: the sweep dirties the cel's
-span, the pair stands until the bake of the newest picture lands, and the canvas rests on that bake —
-the exact, effected picture. The next frame goes live again; the first one after a rest publishes at
-once so the canvas leaves the bake without waiting for a second frame a still screen never sends. The
-interval is chosen against the damage-driven capture (§3): a still screen sends *nothing*, so it only
-has to outlast the gaps inside a burst of motion (~55 ms between frames at the MEASURED ~18 fps) and
-the slowest regular damage a desktop makes, Windows' 530 ms caret blink — a shorter one would flip a
-blinking caret between plain and exact twice a second, each flip an exact bake spent and discarded.
-The settle stands down while the animation plays, while the app is backgrounded (a commit mid-playback
-would re-key the frames the player is reading) and for a layer nobody can see, and is armed again by
-the edge out of any of them, like the tick. **A stream a transformation layer or a Move channel of its own moves is held**, not live — it is
-drawn from a derived image the surface cannot sit over (`presentStreamFrame` refuses a derived base) —
-and the bar does not say so; it catches up at the same settle, because the derived picture is keyed on
-`committedVersion` too. **Freeze commits at once**, so the frozen frame is the exact one wherever the
-compositor draws. The bar says what the picture is while the computer moves, and nothing when it is
-exact (`CanvasManager.activeStreamIsPlainWhileMoving`, `streamBar.pictureNote`): *"Blend modes, masks
-and effects show once the computer's screen is still."* A *dimmed* reference is a layer opacity, which
-stays on the flat row and says nothing.
+**A stream a transformation layer or a Move channel of its own poses is not shown.** It cannot be
+drawn by its host — the cel is drawn from a derived image, which the surface cannot sit over
+(`presentStreamFrame` refuses a derived base) — and a derived image is a picture the document keeps,
+so it carries no stream (`posedCelContent`, `videoCelContent` and the interpolation evaluator drop it).
+The bar says so (`CanvasManager.activeStreamNote`, `streamBar.pictureNote`, value `hiddenByAPose`): *"A
+pose moves this layer, so the live screen isn't shown."* Where the document is the compositor's the
+same note slot says what the artist is looking at, value `plain`: *"A live screen is drawn plain: blend
+modes, masks and effects don't apply to it."* A *dimmed* reference is a layer opacity, which stays on
+the flat row and says nothing. **Freeze changes none of this**: it is a viewing state, not an edit, and
+the frozen stream is the same reference held still, drawn by the same host.
 
 MEASURED on the simulator (Debug, 2048² canvas, a 1280×720 `testsrc` from the fake streamer,
 2026-09-17): the tick delivers **23–29 frames/s at 0.38–0.48 ms mean, ≤1.5 ms max** on the main
@@ -506,10 +513,9 @@ Freeze sets `isFrozen` and stops the tick for that element; Unfreeze clears it a
 keyframe. When every stream element on the connection is frozen the client sends `pause`; the first
 unfreeze sends `resume` (whose keyframe §3 guarantees — no second request rides with it), and an
 unfreeze on a connection that was not paused sends `keyframe`. **Freeze is not an undo step** — it is
-a viewing state like the render-resolution knob, persisted with the document — **but it commits the
-picture**: the freeze moves `committedVersion` at once, so the bake holds the frame frozen on (§5.3)
-and a canvas the compositor draws rests on the exact frozen picture, without waiting for the settle.
-Bake works while frozen and bakes the frozen picture.
+a viewing state like the render-resolution knob, persisted with the document — **and it moves nothing
+the document keeps**: a frozen stream is the same reference (2.13), held still, drawn by the same
+host and in no bake. Bake works while frozen and bakes the frozen picture.
 
 **Built (stage 2), with two corrections.** *"Writes the current frame to `lastFrameFileName` at
 once"* is gone: `ProjectStore` stages a whole new package on every save and swaps it in by rename, so
@@ -552,7 +558,8 @@ STATUS-reported `naturalSize` is resampled to `naturalSize` on the way, because 
 frame *into* that rect and a placed image's rect is its own pixel size. A pose channel on the cel is baked into the geometry
 and dropped, the video bake's rule. `StreamBakeLogicTests` pins [1] [2] [3–4], [1] [2–4], [1–3]
 [4], the one-frame swap, four cels after a second bake, undo to one ticking stream cel, and the baked
-frame green through the real compositor while both neighbours follow the stream to red.
+frame green through the real compositor while both neighbours follow the stream to red in their hosts
+and composite to nothing (2.13).
 
 ### 5.6 Surviving the computer being off (2.8)
 
@@ -610,8 +617,8 @@ cannot close it — a two-finger pan keeps it up.
 
 **Built (stage 2).** `DrawingView.bottomDock` reads `CanvasManager.activeStreamCel`; the bar observes
 `ScreenStreamCoordinator` (an `ObservableObject` now — connection states and STATUSes published,
-never frames) and shows `barState(for:)`'s word, with the sandwich note (§5.3) under it while the
-canvas is on the composite. The address row opens `StreamConnectSheet` with a `StreamRetarget`, and a
+never frames) and shows `barState(for:)`'s word, with the picture note (§5.3) under it where the
+document's grading does not reach the stream or a pose hides it. The address row opens `StreamConnectSheet` with a `StreamRetarget`, and a
 successful connect there is `CanvasManager.retargetStream` — host, port, label and size rewritten on
 the element in one undo step, placement and picture kept — rather than a second layer. Identifiers
 `streamBar.sourceLabel` / `stateLabel` (value: `live` · `frozen` · `connecting` · `reconnecting` ·
@@ -861,9 +868,17 @@ updated to observe directly; §7's deploy step is that.
 - The last frame is saved as JPEG q0.9, on save alone (§5.6); the bake snapshot as the image
   path's existing format.
 - A bake's neighbours keep the stream element's id; only the baked cel is re-identified (§5.5).
-- A live stream on a canvas the compositor draws is drawn by its host between the two halves, the
-  layers around it plain, while the laptop keeps sending, and the bar says so; once the laptop has
-  been still for 0.6 s the exact, effected picture replaces it (§5.3).
+- A stream on a canvas the compositor draws is drawn by its host between the two halves, the layers
+  around it plain, for as long as it is on the frame, and the bar says so; there is no exact picture
+  to come to, because a stream is reference (2.13, §5.3). Consequently **blend modes, masks and
+  effects never reach a stream**, and the layers from the stream up to the active one are drawn plain
+  beside it.
+- **Export, thumbnails, onion skin and playback show the frame without the stream** (2.13). The Export
+  sheet's caption says *"screen stream not included"* while a visible stream is in the document.
+- **A stream a transformation layer or a Move channel poses is not shown**, and the bar says so (§5.3).
+  A posed picture is one the document keeps, so it carries no stream.
+- **Freeze is the same reference held still**: it moves nothing the document keeps and a frozen stream
+  is drawn by its host like a live one (§5.4).
 - Bitrate ~6 Mbit/s, 30 fps cap, GOP 2 s — tune on measurement.
 - During playback the picture holds; on stop the next tick resumes it.
 
@@ -878,7 +893,7 @@ only what is stored (CLAUDE.md, *"A feature is not finished because its model is
 |---|---|---|
 | **0** ✓ | STREAM.md; `tools/stream/fake-streamer.py` — a Python `paintstream/1` server on this Mac (ffmpeg `avfoundation` screen or `testsrc -re` → `h264_videotoolbox` → Annex-B; also `--send <file>` and a save folder; `stream-client-check.py` is the conformance client both servers are proved against; `--screen` needs Screen Recording permission for the terminal, `--pattern` is the CI path); a ≤200 KB H.264 fixture of `testsrc` for logic tests | the protocol has a reference implementation the iPad is tested against before the laptop exists |
 | **1** ✓ | ~~iPad: `VectorStreamElement`, Codable round trip, `ScreenStreamClient` + `H264StreamDecoder` (logic tests decode the fixture through the real framing, no network), the coordinator tick, `.stream` draw, Actions → Stream Screen sheet, Move box~~ **Built.** `Engine/ScreenStream/`, `Views/StreamConnectSheet.swift`, `CanvasManager.insertStream(host:port:status:)`; five suites (`StreamElementLogicTests`, `StreamFramingLogicTests`, `H264StreamDecoderLogicTests`, `StreamInsertLogicTests`, `StreamScreenUITests`). §5.3 carries what the build corrected | driven against `fake-streamer.py --pattern`: the pattern moves in the Move box and on the committed layer (two screenshots 2 s apart differ in 15–18% of the rect's sampled pixels); the cold-start XCUITest reaches the sheet |
-| **2** ✓ | ~~iPad: `StreamBar`, Freeze, Bake Frame via `splitCel` (logic tests pin [1] [2] [3–4] and the one-frame case, undo restores the stream), `lastFrameFileName` and reload, playback gating, reconnect (kill the fake streamer, restart it)~~ **Built.** `Views/StreamBar.swift`, `CanvasManager+StreamBake.swift`, the coordinator's pause/resume and published state, the save's JPEG; four suites (`StreamBakeLogicTests`, `StreamBarStateLogicTests`, `StreamPersistenceLogicTests`, `StreamSandwichBench`). §5.3–5.7 carry what the build corrected | driven against `fake-streamer.py --pattern` on the simulator with a throwaway XCUITest: the pattern moves at rest (13% of the rect's pixels differ 2 s apart) and holds during playback (0.0%), resumes on stop; the streamer killed → **Reconnecting…** in 0.9 s with the last picture kept, restarted → **Live** in 1.0 s; Freeze holds (0.0%) and the server log shows `CONTROL pause`, Unfreeze shows `resume`; Bake Frame on a 12-frame cel gives three cels with the middle one still (0.0%) and no bar on it; a pinch leaves the bar up; six strokes on a layer above while live. The tick delivered ~28.5 frames/s at **0.2–0.5 ms mean, ≤2.5 ms typical max** on the main actor (simulator, Debug). **The device figure was not taken**: the iPad was reachable and the Release build (stage 2) installed, but XCUITest cannot start on a locked device and nothing on the Mac unlocks it — the outlet is in place (§5.3) for the run that can |
+| **2** ✓ | ~~iPad: `StreamBar`, Freeze, Bake Frame via `splitCel` (logic tests pin [1] [2] [3–4] and the one-frame case, undo restores the stream), `lastFrameFileName` and reload, playback gating, reconnect (kill the fake streamer, restart it)~~ **Built.** `Views/StreamBar.swift`, `CanvasManager+StreamBake.swift`, the coordinator's pause/resume and published state, the save's JPEG; four suites (`StreamBakeLogicTests`, `StreamBarStateLogicTests`, `StreamPersistenceLogicTests`). §5.3–5.7 carry what the build corrected | driven against `fake-streamer.py --pattern` on the simulator with a throwaway XCUITest: the pattern moves at rest (13% of the rect's pixels differ 2 s apart) and holds during playback (0.0%), resumes on stop; the streamer killed → **Reconnecting…** in 0.9 s with the last picture kept, restarted → **Live** in 1.0 s; Freeze holds (0.0%) and the server log shows `CONTROL pause`, Unfreeze shows `resume`; Bake Frame on a 12-frame cel gives three cels with the middle one still (0.0%) and no bar on it; a pinch leaves the bar up; six strokes on a layer above while live. The tick delivered ~28.5 frames/s at **0.2–0.5 ms mean, ≤2.5 ms typical max** on the main actor (simulator, Debug). **The device figure was not taken**: the iPad was reachable and the Release build (stage 2) installed, but XCUITest cannot start on a locked device and nothing on the Mac unlocks it — the outlet is in place (§5.3) for the run that can |
 | **3** ✓ | Windows: `Streamer.Core`, `Streamer.Tray` (WPF + WinForms tray icon), 44 xunit tests, `install-streamer.ps1`, `streamer.ps1`, `streamer-remote.sh`; installed on the laptop and running as the `PaintStreamer` task in kevin's session | proved from this Mac with `stream-client-check.py`: 602 frames / 11 keyframes / 0 violations with motion, a decoded frame is the laptop's real desktop, a window source shows only that window, a killed process reconnects with a keyframe in ~1.2 s. Six bugs found only on hardware are in `f17df26`'s message. The iPad-to-Blender drive is stage 5's |
 | **4** | ~~Files both ways: drop box → insert, Ctrl+V bitmap, refusal reasons; Send to Computer~~ **iPad half built** — `ScreenStreamClient`'s FILE_BEGIN/CHUNK/END both ways, `ScreenStreamCoordinator.routeReceivedFile`, `ExportSheet`'s Send to Computer, §6's document-level connection and its pause-rule correction; two suites (`StreamFileTransferLogicTests`, `StreamFileSendLogicTests`). §5.8 carries what the build corrected. Windows half (the drop box, Ctrl+V) is the sibling worktree's | driven against `fake-streamer.py --pattern --send <png> --send <mp4>` with a throwaway XCUITest, two passes (the first pass's own `rm *.png` swept the queued PNG out from under the streamer before it read it — the second pass's own bug, not the product's): connecting via Stream Screen with **no prior stream layer** gets an mp4 auto-sent moments after HELLO inserted as its own new video layer, and a PNG sent the same way joins the **active vector layer** (the stream layer itself, since it was still active) rather than making a new one — `insertImage`'s ordinary rule, visible on screen as the dropped picture composited into the live layer. Undoing the stream insert then reads `CONTROL pause` in the streamer's own log — confirming live, not just in `StreamBarStateLogicTests`, that §6's ambient connection pauses once nothing names it. Export → Send to Computer round-tripped `Untitled-frame-0.png` into `--save-dir` byte-for-byte (78139 bytes both ends) with the sheet reading "Saved on Julias-MacBook-Pro", sent successfully **while the connection was paused** — confirming FILE_* is not gated on streaming. Killing the fake streamer afterward raised no alert and left the toolbar usable |
 | **5** | Latency and quality pass on the real link: end-to-end latency MEASURED (a clock on the laptop screen photographed beside the iPad), bitrate/GOP tuned, the dirty-screen idle cost | numbers in PERFORMANCE.md |

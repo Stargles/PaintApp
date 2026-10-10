@@ -1374,9 +1374,9 @@ extension CanvasManager {
             guides: guideStrokes,
             thicknessFade: options.thicknessFade,
             hiddenGroups: options.hiddenGroups,
-            // `committedVersion`, not `version`: a live stream frame must not mint a new pose
-            // identity per tick — see `VectorCanvas.committedVersion`.
-            subjectVersion: cel.vector?.committedVersion ?? -1,
+            // `documentVersion`, not `version`: a live stream frame must not mint a new pose
+            // identity per tick — see `VectorCanvas.documentVersion`.
+            subjectVersion: cel.vector?.documentVersion ?? -1,
             canvasWidth: Int(canvasSize.width.rounded()),
             canvasHeight: Int(canvasSize.height.rounded()))
 
@@ -1451,7 +1451,7 @@ extension CanvasManager {
         let identity = VideoCelIdentity(
             celID: cel.id,
             canvas: ObjectIdentifier(vector),
-            vectorVersion: vector.committedVersion,
+            vectorVersion: vector.documentVersion,
             suppressed: suppressed.map(\.uuidString).sorted(),
             carried: [carried.a, carried.b, carried.c, carried.d, carried.tx, carried.ty],
             maps: Dictionary(uniqueKeysWithValues: mappings.map { ($0.0.id, $0.1.encoded) }),
@@ -1462,7 +1462,7 @@ extension CanvasManager {
 
         let source = VideoFrameSource.shared
         return DerivedCelContent(identity: AnyHashable(identity)) { quality in
-            let resolved = elements.map { element -> VectorElement in
+            let resolved = elements.withoutReference.map { element -> VectorElement in
                 guard case .video(var video) = element, let time = times[video.id] else { return element }
                 if let decoded = source.frame(assetURL: video.assetURL, at: time),
                    let image = decoded.makeImage() {

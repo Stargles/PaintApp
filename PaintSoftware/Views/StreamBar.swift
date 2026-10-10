@@ -17,10 +17,9 @@ import SwiftUI
 /// coming or going and not thirty times a second.
 ///
 /// **No control here is allowed to be pressed and do nothing.** Bake Frame with no picture yet
-/// raises `CanvasNotice.streamBakeRefused` and says why; while the canvas is the compositor's the bar
-/// says in words what the picture is while the computer moves
-/// (`CanvasManager.activeStreamIsPlainWhileMoving`), rather than leaving the artist to wonder why a
-/// Live stream looks as it does.
+/// raises `CanvasNotice.streamBakeRefused` and says why; where the document's grading does not reach
+/// the stream, or a pose hides it, the bar says so in words (`CanvasManager.activeStreamNote`), rather
+/// than leaving the artist to wonder why a Live stream looks as it does.
 struct StreamBar: View {
     @ObservedObject var canvasManager: CanvasManager
     @ObservedObject var coordinator: ScreenStreamCoordinator
@@ -101,12 +100,13 @@ struct StreamBar: View {
                 Spacer(minLength: 0)
             }
 
-            if canvasManager.activeStreamIsPlainWhileMoving {
-                Text("Blend modes, masks and effects show once the computer's screen is still.")
+            if let note = canvasManager.activeStreamNote {
+                Text(note.sentence)
                     .font(.caption2)
                     .foregroundColor(.gray)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("streamBar.pictureNote")
+                    .accessibilityValue(note.code)
             }
         }
         .padding(.horizontal, 16)

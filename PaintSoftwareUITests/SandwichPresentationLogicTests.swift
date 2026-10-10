@@ -19,7 +19,7 @@ final class SandwichPresentationLogicTests: XCTestCase {
     private static let fits: [LivePairFit] = [.none, .stale, .current, .regrouped]
 
     /// `SandwichPresentation.next` with every fact not under test at its quiet value: no transform
-    /// edit, no bands held of this frame, and no stream still moving.
+    /// edit, no bands held of this frame, and no stream on the frame.
     private func next(_ current: SandwichPresentation, stroke: Bool = false, edit: Bool = false,
                       bake: Bool, pair: LivePairFit, bands: Bool = false,
                       stream: Bool = false) -> SandwichPresentation {
@@ -29,7 +29,7 @@ final class SandwichPresentationLogicTests: XCTestCase {
 
     /// Distinct keys, cheaply: everything equal but the cut index.
     private func key(_ n: Int) -> SandwichKey {
-        SandwichKey(tree: [], activeLayerIndex: n, liveStreamLayers: [], contents: [], renderResolution: .full,
+        SandwichKey(tree: [], activeLayerIndex: n, streamLayers: [], contents: [], renderResolution: .full,
                     canvasBackgroundColor: .white, isCanvasBackgroundVisible: true)
     }
 
@@ -189,12 +189,12 @@ final class SandwichPresentationLogicTests: XCTestCase {
         XCTAssertEqual(pass(edit: false, bake: true, pair: .current, bands: false), .rest, "its bake lands")
     }
 
-    // MARK: - A moving stream (TODO (112)), and one that has settled
+    // MARK: - A stream on the frame (TODO (112), TODO (162))
 
-    /// **A moving stream's frames reach the screen through its layer's host and no other way**, so on a
-    /// canvas the compositor draws, the pair — whose middle is that host — is the picture, and the
-    /// bake, which lacks the frames since its key moved, is not waited for.
-    func testAMovingStreamKeepsTheCanvasOnItsPairWhateverTheBakeSays() {
+    /// **A stream reaches the screen through its layer's host and no other way**, so on a canvas the
+    /// compositor draws, the pair — whose middle is that host — is the picture, and the bake, which
+    /// no stream is in, is never the picture to wait for.
+    func testAStreamOnTheFrameKeepsTheCanvasOnItsPairWhateverTheBakeSays() {
         for current in [SandwichPresentation.disengaged, .rest, .live, .midStroke] {
             for bake in [false, true] {
                 XCTAssertEqual(next(current, bake: bake, pair: .current, stream: true), .live,
@@ -203,9 +203,9 @@ final class SandwichPresentationLogicTests: XCTestCase {
         }
     }
 
-    /// The pair keeps its two guards with a stream moving: a stale pair is kept where it is on screen
+    /// The pair keeps its two guards with a stream on the frame: a stale pair is kept where it is on screen
     /// and never entered from the bake, and no pair means the bake is the picture on hand.
-    func testAMovingStreamsStalePairIsKeptNeverEnteredAndNoPairFallsBackToTheBake() {
+    func testAStreamsStalePairIsKeptNeverEnteredAndNoPairFallsBackToTheBake() {
         for bake in [false, true] {
             XCTAssertEqual(next(.live, bake: bake, pair: .stale, stream: true), .live)
             XCTAssertEqual(next(.midStroke, bake: bake, pair: .stale, stream: true), .midStroke)
@@ -218,21 +218,22 @@ final class SandwichPresentationLogicTests: XCTestCase {
         }
     }
 
-    /// Trap 2 waits for a bake, and a moving stream's canvas does not rest on one: a lifted stroke
-    /// leaves the mid-stroke presentation for the live one the moment its pair is current.
-    func testAStrokeLiftedOverAMovingStreamSettlesOnTheLivePairNotOnABake() {
+    /// Trap 2 waits for a bake, and a stream's canvas does not rest on one: a lifted stroke leaves the
+    /// mid-stroke presentation for the live one the moment its pair is current.
+    func testAStrokeLiftedOverAStreamSettlesOnTheLivePairNotOnABake() {
         XCTAssertEqual(next(.midStroke, bake: false, pair: .stale, stream: true), .midStroke, "the key moved at lift")
         XCTAssertEqual(next(.midStroke, bake: false, pair: .current, stream: true), .live, "its pair landed")
         XCTAssertEqual(next(.midStroke, stroke: true, bake: true, pair: .current, stream: true), .midStroke,
                        "and a stroke under the pen still wins")
     }
 
-    /// The owner's report, pass by pass: a canvas the compositor draws, a stream going live on it.
-    /// The first pass has no pair (the bake is the only picture), the pair lands and takes over, the
-    /// bake landing changes nothing while frames keep arriving, and **once the laptop has been still the
-    /// stream is an edit like any other** (*"live, then exact when still"*): the commit moved the key, so
-    /// the pair stays until the bake of the newest picture lands, and then the canvas rests on it.
-    func testAStreamIsLiveWhileTheLaptopMovesAndExactOnceItIsStill() {
+    /// The owner's report, pass by pass: a canvas the compositor draws, a stream appearing on it. The
+    /// first pass has no pair (the bake is the only picture), the pair lands and takes over, and the
+    /// bake landing changes nothing — **no bake has the stream in it, so the pair is the picture for
+    /// as long as the stream is on the frame** (TODO (162): *"a live stream does not require to be
+    /// rendered because it is only used as reference"*). The bake is the picture again only once the
+    /// stream has left the frame — hidden, or played past.
+    func testAStreamIsLiveForAsLongAsItIsOnTheFrame() {
         var shown = SandwichPresentation.disengaged
         func pass(bake: Bool, pair: LivePairFit, stream: Bool) -> SandwichPresentation {
             shown = next(shown, bake: bake, pair: pair, stream: stream)
@@ -241,14 +242,10 @@ final class SandwichPresentationLogicTests: XCTestCase {
         XCTAssertEqual(pass(bake: false, pair: .none, stream: true), .rest, "engage: nothing minted yet")
         XCTAssertEqual(pass(bake: false, pair: .current, stream: true), .live, "the pair lands")
         XCTAssertEqual(pass(bake: true, pair: .current, stream: true), .live,
-                       "the bake lands: the stream's newest frames are not in it, so the pair stays")
-        XCTAssertEqual(pass(bake: false, pair: .stale, stream: false), .live,
-                       "the laptop is still: the commit moved the key, and the pair is kept while its rebuild is on the way")
-        XCTAssertEqual(pass(bake: false, pair: .current, stream: false), .live, "…and while the exact bake is")
-        XCTAssertEqual(pass(bake: true, pair: .current, stream: false), .rest, "the exact bake lands")
-        XCTAssertEqual(pass(bake: true, pair: .current, stream: true), .live, "the next frame goes live again")
+                       "the bake lands: the stream is not in it, so the pair stays")
+        XCTAssertEqual(pass(bake: true, pair: .current, stream: true), .live, "and it stays however long it is on the frame")
         XCTAssertEqual(pass(bake: true, pair: .none, stream: false), .rest,
-                       "frozen: the cut moved, the bake holds the frozen frame")
+                       "hidden: the stream has left the frame, and the bake is the picture")
     }
 
     func testTheHostDrawsItselfExactlyInTheTwoLivePresentations() {
@@ -301,11 +298,11 @@ final class SandwichPresentationLogicTests: XCTestCase {
         XCTAssertEqual(LivePairFit(held: held, key: key(1), cut: nil), .none, "no active layer")
     }
 
-    /// **A layer switch under a moving stream keeps the live picture on screen** while the pair for the
+    /// **A layer switch under a stream keeps the live picture on screen** while the pair for the
     /// new cut is minted — the held pair names every host that draws, so it is a coherent picture of
     /// this frame — and **everything else treats a regrouped pair as no pair**: the bake is the
     /// picture on hand, exactly as before TODO (112).
-    func testARegroupedPairIsKeptOnlyUnderAMovingStreamAndOnlyWhereItIsAlreadyOnScreen() {
+    func testARegroupedPairIsKeptOnlyUnderAStreamAndOnlyWhereItIsAlreadyOnScreen() {
         for bake in [false, true] {
             XCTAssertEqual(next(.live, bake: bake, pair: .regrouped, stream: true), .live)
             XCTAssertEqual(next(.midStroke, bake: bake, pair: .regrouped, stream: true), .midStroke)
@@ -314,7 +311,7 @@ final class SandwichPresentationLogicTests: XCTestCase {
             for current in Self.all {
                 XCTAssertEqual(next(current, bake: bake, pair: .regrouped, stream: false),
                                next(current, bake: bake, pair: .none, stream: false),
-                               "with no moving stream it is no pair: from \(current)")
+                               "with no stream on the frame it is no pair: from \(current)")
             }
         }
     }

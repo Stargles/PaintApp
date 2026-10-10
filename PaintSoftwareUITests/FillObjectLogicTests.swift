@@ -346,7 +346,7 @@ final class FillObjectLogicTests: XCTestCase {
     }
 
     /// **An edit made to the gradient has to move the keys the caches use.** The vector tier's
-    /// `committedVersion` is part of `LayerContentVersion`, and `FrameBakeKey` digests that version —
+    /// `documentVersion` is part of `LayerContentVersion`, and `FrameBakeKey` digests that version —
     /// so a recoloured gradient names a different frame on disk. Without this a baked frame would be
     /// served with the old colours.
     func testEditingAGradientMovesTheLayerContentVersionAndTheBakeKey() throws {

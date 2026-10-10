@@ -328,7 +328,6 @@
 		3EBA31A979F55BD192F65CFE /* StreamFramingLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AD66CD8F109808E8A21CBF2 /* StreamFramingLogicTests.swift */; };
 		3C3A30C71E4ABB064F4B057C /* H264StreamDecoderLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 037AF953F7EB901D3D7C8F20 /* H264StreamDecoderLogicTests.swift */; };
 		9A7B54DDA8E9527036FB976D /* StreamInsertLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7085445339FC5EF8443854B8 /* StreamInsertLogicTests.swift */; };
-		B71BD3ACB50C92CE26862CBD /* StreamSandwichBench.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6DB84D220B564A2791F97EB /* StreamSandwichBench.swift */; };
 		39B969EF7962C516BBD306B2 /* StreamPersistenceLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85BA807DFADEA08160D89CC1 /* StreamPersistenceLogicTests.swift */; };
 		8065C7B0ED1E3CAE3426D29E /* StreamBarStateLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B983033FD465C80DAADE9017 /* StreamBarStateLogicTests.swift */; };
 		0F71EB2E4D4EE006595A4A8F /* StreamLiveEngagedUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDF4EF53620742925A893D99 /* StreamLiveEngagedUITests.swift */; };
@@ -914,7 +913,6 @@
 		1AD66CD8F109808E8A21CBF2 /* StreamFramingLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StreamFramingLogicTests.swift; sourceTree = "<group>"; };
 		037AF953F7EB901D3D7C8F20 /* H264StreamDecoderLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = H264StreamDecoderLogicTests.swift; sourceTree = "<group>"; };
 		7085445339FC5EF8443854B8 /* StreamInsertLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StreamInsertLogicTests.swift; sourceTree = "<group>"; };
-		D6DB84D220B564A2791F97EB /* StreamSandwichBench.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StreamSandwichBench.swift; sourceTree = "<group>"; };
 		85BA807DFADEA08160D89CC1 /* StreamPersistenceLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StreamPersistenceLogicTests.swift; sourceTree = "<group>"; };
 		B983033FD465C80DAADE9017 /* StreamBarStateLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StreamBarStateLogicTests.swift; sourceTree = "<group>"; };
 		EDF4EF53620742925A893D99 /* StreamLiveEngagedUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StreamLiveEngagedUITests.swift; sourceTree = "<group>"; };
@@ -1359,7 +1357,6 @@
 				1AD66CD8F109808E8A21CBF2 /* StreamFramingLogicTests.swift */,
 				037AF953F7EB901D3D7C8F20 /* H264StreamDecoderLogicTests.swift */,
 				7085445339FC5EF8443854B8 /* StreamInsertLogicTests.swift */,
-				D6DB84D220B564A2791F97EB /* StreamSandwichBench.swift */,
 				85BA807DFADEA08160D89CC1 /* StreamPersistenceLogicTests.swift */,
 				B983033FD465C80DAADE9017 /* StreamBarStateLogicTests.swift */,
 				EDF4EF53620742925A893D99 /* StreamLiveEngagedUITests.swift */,
@@ -2417,7 +2414,6 @@
 				3EBA31A979F55BD192F65CFE /* StreamFramingLogicTests.swift in Sources */,
 				3C3A30C71E4ABB064F4B057C /* H264StreamDecoderLogicTests.swift in Sources */,
 				9A7B54DDA8E9527036FB976D /* StreamInsertLogicTests.swift in Sources */,
-				B71BD3ACB50C92CE26862CBD /* StreamSandwichBench.swift in Sources */,
 				39B969EF7962C516BBD306B2 /* StreamPersistenceLogicTests.swift in Sources */,
 				8065C7B0ED1E3CAE3426D29E /* StreamBarStateLogicTests.swift in Sources */,
 				0F71EB2E4D4EE006595A4A8F /* StreamLiveEngagedUITests.swift in Sources */,
