@@ -11,8 +11,8 @@ import XCTest
 /// panel wired to nothing would leave correct.
 final class TextSessionUITests: PaintUITestCase {
 
-    /// A tap at an absolute screen point — **points, not the host's normalised space**, because once
-    /// the keyboard is up the host's accessibility frame shrinks while the picture stays where it was.
+    /// A tap at an absolute screen point — **points, not the host's normalised space**, because the
+    /// canvas pans to keep the box clear of the keyboard.
     private func tap(_ app: XCUIApplication, at point: CGPoint) {
         app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: point.x, dy: point.y)).tap()
     }
@@ -70,9 +70,7 @@ final class TextSessionUITests: PaintUITestCase {
         // after it can still say "none" — hold the question open for a moment.
         Thread.sleep(forTimeInterval: 1.0)
         XCTAssertEqual(readTextState(app), "none", "…and placed nothing under the finger")
-        waitForTheLayoutToSettle(app, canvas, restoring: host)
-        // Not compared with the reading taken under the keyboard: the editor is laid out differently
-        // with it gone, so the same window is a different part of the paper.
+        waitForTheKeyboardToLeave(app)
         let after = try inkReading(canvas, in: words)
         XCTAssertGreaterThan(after.ink, 40, "the words are still on the canvas, put down where they were written")
         XCTAssertTrue(app.buttons["textPanel.fontButton"].exists, "the Text panel is still up for the next box")
@@ -94,7 +92,7 @@ final class TextSessionUITests: PaintUITestCase {
         let boxTopLeft = writeWords("Hello", app, canvas)
         app.buttons["toolbar.brushButton"].tap()
         XCTAssertTrue(waitForTextState(app, "none"), "PREMISE: the brush puts the box down (text:\(readTextState(app)))")
-        waitForTheLayoutToSettle(app, canvas, restoring: host)
+        waitForTheKeyboardToLeave(app)
 
         app.buttons["toolbar.selectButton"].tap()
         let rectangle = app.buttons["selectPanel.mode.rectangle"]

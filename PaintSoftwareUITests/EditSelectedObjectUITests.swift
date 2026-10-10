@@ -39,9 +39,9 @@ final class EditSelectedObjectUITests: PaintUITestCase {
         app.buttons["toolbar.brushButton"].tap()
         XCTAssertTrue(waitForTextState(app, "none"), "PREMISE: the brush puts the box down (text:\(readTextState(app)))")
 
-        // 2. Select tool → Rectangle. **Before measuring anything**: the editor was laid out above the
-        //    keyboard that has just gone, and its dismissal is still animating the layout back.
-        waitForTheLayoutToSettle(app, canvas, restoring: host)
+        // 2. Select tool → Rectangle. **Before measuring anything**: the keyboard that has just gone is
+        //    still sliding away over the bottom of the screen.
+        waitForTheKeyboardToLeave(app)
         app.buttons["toolbar.selectButton"].tap()
         let rectangle = app.buttons["selectPanel.mode.rectangle"]
         XCTAssertTrue(rectangle.waitForExistence(timeout: 5))
@@ -142,7 +142,7 @@ final class EditSelectedObjectUITests: PaintUITestCase {
         typeIntoTextBox("Hello", app, at: CGPoint(x: boxTopLeft.x + 0.01 * host.width, y: boxTopLeft.y + 0.01 * host.height))
         app.buttons["toolbar.brushButton"].tap()
         XCTAssertTrue(waitForTextState(app, "none"), "PREMISE: the brush puts the box down (text:\(readTextState(app)))")
-        waitForTheLayoutToSettle(app, canvas, restoring: host)
+        waitForTheKeyboardToLeave(app)
 
         // 3. Select → Rectangle, a loop round the words — which the gradient under them is under too.
         app.buttons["toolbar.selectButton"].tap()

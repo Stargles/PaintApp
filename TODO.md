@@ -96,23 +96,6 @@ that gap fill works normally, but does not curl in close to the edges of a shape
 
 ---
 
-## (159) The keyboard pushes the whole screen up
-
-**Status** — reported 2026-10-10 (iPad, landscape). The owner, verbatim: *"When trying to rename the title,
-the keyboard comes up, and for some reason the entire screen gets shifted up. Since the title is on the
-top of the screen, it disappears and I cannot see what I am writing. Note that I am using the ipad in
-landscape mode. This bug may apply to other places where I type something, so check that. I think the
-best idea is to remove everything getting moved up. Note that for writing text, the keyboard may block
-you from seeing what you are writing too, so in that case I think it could be a good idea to implement a
-shift up feature. Again, remember the important section on refactors."*
-
-- [ ] Nothing in the app shifts up when the keyboard appears — the title rename and every other place
-      that types (inline renames, text fields in panels and sheets), found by an audit, not by memory.
-- [ ] The text tool on the canvas: when the keyboard would cover the text being written, the canvas view
-      shifts so the text stays visible above it, and returns when the keyboard goes.
-
----
-
 ## (160) A drawing guide vanishes during a lasso move, and during a stroke beneath it
 
 **Status** — reported 2026-10-10. The owner, verbatim: *"when I have a drawing guide on the bottom of my

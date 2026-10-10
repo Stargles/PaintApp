@@ -41,11 +41,16 @@ struct ViewportFollow {
 
     /// A text session is live and its box stands at `box` on the screen, with `visible` the part of the
     /// canvas the artist can see. Answers the pan to add to the canvas now.
+    ///
+    /// **The pan wanted is a function of where the box stands without the session's own pan**, not an
+    /// increment on it, so it relaxes as readily as it grows: the keyboard going away while the box is still
+    /// being edited gives back what only the keyboard needed, and a box that shrinks comes down again.
     mutating func follow(box: CGRect, within visible: CGRect) -> CGFloat {
         isLive = true
         guard !yielded else { return 0 }
-        let pan = Self.pan(toKeep: box, within: visible)
-        added += pan
+        let wanted = Self.pan(toKeep: box.offsetBy(dx: 0, dy: -added), within: visible)
+        let pan = wanted - added
+        added = wanted
         return pan
     }
 

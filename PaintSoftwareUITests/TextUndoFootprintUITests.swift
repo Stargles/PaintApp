@@ -25,12 +25,10 @@ final class TextUndoFootprintUITests: PaintUITestCase {
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
         // **Every pixel below is read in screen coordinates fixed here, before the keyboard has
-        // ever been up.** While the software keyboard is up the editor is laid out above it (the
-        // timeline moves up over the lower canvas), so `canvas.host`'s frame — and with it every
-        // host-normalised coordinate — means something else mid-session. The canvas *content* stays
-        // where it was on screen, anchored at the host's top-left, which is what makes a screen
-        // coordinate the stable one. The text also goes in the upper half of the canvas for the same
-        // reason.
+        // ever been up.** The canvas pans to keep a box clear of the keyboard, so a host-normalised
+        // coordinate means something else mid-session; a screen coordinate is the stable one once the
+        // session is over and the pan has been given back. The text also goes in the upper half of the
+        // canvas, where nothing needs to pan.
         let host = canvas.frame
         func screenPoint(_ v: CGVector) -> CGPoint {
             CGPoint(x: host.minX + v.dx * host.width, y: host.minY + v.dy * host.height)
@@ -53,7 +51,7 @@ final class TextUndoFootprintUITests: PaintUITestCase {
         //    What the artist does next: Actions → Add Text, tap where the words go, type them.
         let boxOrigin = CGVector(dx: 0.62, dy: 0.32)
         placeText("Hello", app, on: canvas, at: boxOrigin)
-        waitForTheLayoutToSettle(app, canvas, restoring: host)
+        waitForTheKeyboardToLeave(app)
         let textRegion = Self.regionUnderTheWords(from: screenPoint(boxOrigin), hostWidth: host.width)
         XCTAssertTrue(waitUntilInk(in: textRegion),
                       "PREMISE: committing the text puts glyph pixels on the canvas under the box")
@@ -79,7 +77,7 @@ final class TextUndoFootprintUITests: PaintUITestCase {
         reopenText(app, at: CGPoint(x: wordsOnScreen.x + host.width * 0.02, y: wordsOnScreen.y + host.width * 0.012))
         deleteCharacters(5, app, at: wordsOnScreen)
         leaveTextForTheBrush(app)
-        waitForTheLayoutToSettle(app, canvas, restoring: host)
+        waitForTheKeyboardToLeave(app)
         XCTAssertTrue(waitUntilNoInk(in: textRegion), "Emptying the box did not remove the words from the canvas")
         XCTAssertTrue(hasInk(around: strokeProbe, radius: 2), "Emptying the box took the stroke with it")
 

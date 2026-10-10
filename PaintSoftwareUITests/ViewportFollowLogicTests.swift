@@ -2,9 +2,9 @@ import XCTest
 import CoreGraphics
 
 /// **The canvas pans itself to keep the text box being typed in view, and back** — the owner,
-/// 2026-10-02. `ViewportFollow` is the rule and the session's bookkeeping, with no view and no clock;
-/// `EditorKeyboardLayoutUITests` drives the same thing on the real canvas, from a fresh document, with
-/// the real keyboard.
+/// 2026-10-02, and clear of the keyboard — 2026-10-10. `ViewportFollow` is the rule and the session's
+/// bookkeeping, with no view and no clock; `EditorKeyboardLayoutUITests` drives the same thing on the real
+/// canvas, from a fresh document, with the real keyboard.
 final class ViewportFollowLogicTests: XCTestCase {
 
     /// The part of the host above the strip the timeline and the panel cover: 1000 wide, 600 tall.
@@ -65,6 +65,29 @@ final class ViewportFollowLogicTests: XCTestCase {
         XCTAssertEqual(follow.end(), -total, accuracy: 1e-9, "the end gives all of it back")
         XCTAssertEqual(follow.end(), 0, "and a session that is over gives back nothing twice")
         XCTAssertEqual(follow.added, 0)
+    }
+
+    /// **The pan relaxes as readily as it grows**: the keyboard going while the box is still open gives back
+    /// what only the keyboard needed, down to the pan the strip alone asks for, and a box that shrinks comes
+    /// down again. Ending the session gives back exactly what is still added, so the sum of every answer is
+    /// the pan the canvas is carrying — never more, whichever way the room moved.
+    func testThePanRelaxesWhenTheRoomGrowsBack() {
+        var follow = ViewportFollow()
+        let strip = CGRect(x: 0, y: 0, width: 1000, height: 600)
+        let withKeyboard = CGRect(x: 0, y: 0, width: 1000, height: 300)
+        var carried: CGFloat = 0
+        func ask(_ rest: CGRect, within room: CGRect) {
+            carried += follow.follow(box: rest.offsetBy(dx: 0, dy: carried), within: room)
+        }
+        let rest = box(top: 400)
+        ask(rest, within: strip)
+        XCTAssertEqual(carried, 0, "in view above the strip: no pan")
+        ask(rest, within: withKeyboard)
+        XCTAssertEqual(carried, 300 - margin - 480, accuracy: 1e-9, "lifted clear of the keyboard")
+        ask(rest, within: strip)
+        XCTAssertEqual(carried, 0, accuracy: 1e-9, "the keyboard went: the canvas is back where the strip alone leaves it")
+        XCTAssertEqual(follow.added, carried, accuracy: 1e-9)
+        XCTAssertEqual(follow.end(), -carried, accuracy: 1e-9)
     }
 
     /// **A pan the artist makes while typing is theirs**: the follow stops moving the canvas, and gives

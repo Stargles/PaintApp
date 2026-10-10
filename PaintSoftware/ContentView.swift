@@ -51,6 +51,11 @@ struct ContentView: View {
                             onCancelDamagedSave: keepDamagedOriginal)
             }
         }
+        // **Nothing in the app moves for the keyboard** — the owner, 2026-10-10: *"the keyboard comes up, and
+        // for some reason the entire screen gets shifted up."* One declaration at the root of every screen
+        // — gallery, size picker, editor — and a field the keyboard covers is the keyboard's to cover; the
+        // text tool alone pans the canvas to stay clear of it (`CanvasView.Coordinator.followTextBox`).
+        .ignoringTheKeyboard()
         #if os(iOS)
         .statusBar(hidden: true)
         #endif

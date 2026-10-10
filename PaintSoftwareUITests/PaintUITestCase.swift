@@ -1317,11 +1317,10 @@ class PaintUITestCase: XCTestCase {
     // MARK: - Measuring in screen points (shared by the text editor's UI tests)
     //
     // **Everything is in absolute screen points, converted to `canvas.host`'s normalised space only at
-    // the instant of a reading.** Once the software keyboard is up the editor's *accessibility* frame
-    // shrinks (973 pt against 1356 here) while the picture stays exactly where it was, so a normalised
-    // coordinate means two different screen points before and after — which is how this test's first
-    // drafts aimed a drag 100 pt above the words and measured the Text panel's card as ink. Points are
-    // the one currency that does not move.
+    // the instant of a reading.** The canvas pans to keep a box clear of the keyboard, so a normalised
+    // coordinate read before the pan is a different screen point after it — which is how this test's
+    // first drafts aimed a drag 100 pt above the words and measured the Text panel's card as ink.
+    // Points are the one currency that does not move.
 
     /// `rect` (screen points) as a window of `canvas.host`'s own frame *now*.
     func canvasWindow(_ rect: CGRect, in canvas: XCUIElement) -> CGRect {
@@ -1358,34 +1357,24 @@ class PaintUITestCase: XCTestCase {
                    withVelocity: .slow, thenHoldForDuration: 0.1)
     }
 
-    /// **A tap synthesised while the keyboard is still leaving lands where a control *was*.** The
-    /// editor is laid out above the software keyboard and its dismissal animates the layout back;
-    /// XCUITest reads a button's frame and then taps a point, and the undo button at the bottom of
-    /// the side toolbar moves a few hundred points during that animation — MEASURED: an undo tapped
-    /// one second after leaving text mode did nothing at all, and the recording showed the layout
-    /// still settling. So wait for the keyboard to be gone and the host's frame to be back where it
-    /// started before pressing anything — and fail if it never is, since a layout that stays
-    /// compressed is the defect `EditorKeyboardLayoutUITests` pins.
-    func waitForTheLayoutToSettle(_ app: XCUIApplication, _ canvas: XCUIElement, restoring host: CGRect) {
-        let deadline = Date().addingTimeInterval(15)
-        while Date() < deadline {
-            let frame = canvas.frame
-            if app.keyboards.count == 0 && abs(frame.minY - host.minY) < 1 && abs(frame.height - host.height) < 1 {
-                Thread.sleep(forTimeInterval: 0.6)
-                return
-            }
-            Thread.sleep(forTimeInterval: 0.25)
-        }
-        XCTFail("canvas.host's frame did not return to \(host) within 15 s of the keyboard leaving; it reads "
-                + "\(canvas.frame), keyboards: \(app.keyboards.count)")
+    /// **A tap synthesised while the keyboard is still leaving can land on the keyboard.** It slides away
+    /// over the bottom of the screen — over the side toolbar's undo button among much else — and
+    /// XCUITest reads a button's frame and then taps a point, so a press on anything down there during the
+    /// slide is a press on the keyboard. Wait for it to be gone, and a moment more for the slide's last
+    /// frames, before pressing anything. (Nothing is laid out around the keyboard — `ContentView` — so
+    /// there is no layout to wait for.)
+    func waitForTheKeyboardToLeave(_ app: XCUIApplication) {
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 15),
+                      "the keyboard did not go away within 15 s")
+        Thread.sleep(forTimeInterval: 0.6)
     }
 
     // MARK: - Writing words
 
-    /// **Where the first words go, and why it is high.** With the keyboard up the editor is laid out
-    /// above it and the docked Text panel covers the lower part of the visible paper — MEASURED, from
-    /// 0.24 of the host's height down — so a box placed lower than that is written under its own menu
-    /// and a pixel probe reads the panel's dark card instead of the words.
+    /// **Where the first words go, and why it is high.** The docked Text panel and the keyboard cover the
+    /// lower part of the paper, so a box placed there is panned up to clear them, and a pixel probe aimed
+    /// at the spot it was placed reads the panel's dark card instead of the words. Placed this high it
+    /// needs no pan at all.
     static let wordsOffset = CGVector(dx: 0.55, dy: 0.16)
 
     /// The words' window on the host, in screen points — above the Text panel's top edge, so a probe

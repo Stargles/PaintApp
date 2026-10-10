@@ -316,6 +316,7 @@ struct CanvasView: UIViewRepresentable {
         ])
 
         context.coordinator.hostView = host
+        context.coordinator.observeKeyboard()
         context.coordinator.containerView = container
         context.coordinator.onionSkinView = onionSkin
         context.coordinator.paperView = paper
@@ -1327,6 +1328,20 @@ struct CanvasView: UIViewRepresentable {
         /// the text box's follow (`followTextBox`) both keep clear of.
         var coveredBottom: CGFloat = 0 {
             didSet { handleAssist.readout?.coveredBottom = coveredBottom }
+        }
+
+        /// How much of the host's bottom the keyboard covers. The keyboard moves nothing in the editor
+        /// (`ContentView`), so this is only the text box's follow reading it: a box being typed into is
+        /// panned clear of it.
+        private var keyboardOverlap: CGFloat = 0
+        private var keyboardSubscription: AnyCancellable?
+
+        func observeKeyboard() {
+            keyboardSubscription = KeyboardFrame.willChange.sink { [weak self] frame in
+                guard let self, let host = self.hostView else { return }
+                self.keyboardOverlap = host.keyboardOverlap(frame)
+                self.followTextBox()
+            }
         }
 
         /// The pill's text changed: the host's label follows it now, not on the next SwiftUI pass.
@@ -2762,13 +2777,15 @@ struct CanvasView: UIViewRepresentable {
         /// **The canvas's own pan, kept in step with the text box being typed in** — `ViewportFollow`
         /// holds the rule and the session's bookkeeping; this is the one place it touches the view. A
         /// live session pans the canvas, by the same committed offset the artist's two fingers write, so
-        /// that the box stands above the strip the timeline, the Text panel and (in a layout the keyboard
-        /// has compressed) the keyboard cover; the session's end pans it back. Animated, gently: the
-        /// canvas is moving for the artist, not under them.
+        /// that the box stands above the strip the timeline, the Text panel and the keyboard cover; the
+        /// keyboard going gives back what only it needed, and the session's end pans the rest back.
+        /// Animated, gently: the canvas is moving for the artist, not under them. The pan is the view's
+        /// and never the document's: `canvasManager.viewTransform`, the saved record of the view, is
+        /// written only when the artist's own fingers commit a gesture.
         ///
         /// Asked on every pass that can have moved the box or the strip — a typed character that grew it,
-        /// the panel arriving, the keyboard compressing the host — and idempotent, since a box that is in
-        /// view asks for no pan. **Not while a finger holds the box or a grip** (`textFingerDown`): the
+        /// the panel arriving, the keyboard rising or going — and idempotent, since a box that is where
+        /// it should be asks for no pan. **Not while a finger holds the box or a grip** (`textFingerDown`): the
         /// drag is measured through the canvas's transform, and a canvas that moved under it would chase
         /// its own finger.
         func followTextBox() {
@@ -2777,7 +2794,7 @@ struct CanvasView: UIViewRepresentable {
             if canvasManager.textGestureActive {
                 guard !canvasManager.textFingerDown else { return }
                 let visible = CGRect(x: 0, y: 0, width: host.bounds.width,
-                                     height: max(0, host.bounds.height - coveredBottom))
+                                     height: max(0, host.bounds.height - max(coveredBottom, keyboardOverlap)))
                 let box = container.convert(canvasManager.textFrame.boundingBox, to: host)
                 pan = textFollow.follow(box: box, within: visible)
             } else {
@@ -3656,7 +3673,7 @@ struct CanvasView: UIViewRepresentable {
                 }
             }
             applyTransform()
-            // The keyboard compressing or releasing the host is what moves the strip a box is lost in.
+            // A host that changed size — a turn, Split View — moves the strip a box is lost in.
             followTextBox()
         }
 

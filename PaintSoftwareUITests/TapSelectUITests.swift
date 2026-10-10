@@ -50,7 +50,7 @@ final class TapSelectUITests: PaintUITestCase {
         let boxTopLeft = writeWords("Hello", app, canvas)
         app.buttons["toolbar.brushButton"].tap()
         XCTAssertTrue(waitForTextState(app, "none"), "PREMISE: the brush puts the words down (text:\(readTextState(app)))")
-        waitForTheLayoutToSettle(app, canvas, restoring: host)
+        waitForTheKeyboardToLeave(app)
         XCTAssertGreaterThan(try inkReading(canvas, in: wordsWindow(in: host)).ink, 40, "PREMISE: the words are on the canvas")
 
         chooseTapMode(app)

@@ -1,62 +1,48 @@
 import XCTest
 
-/// **The editor's layout comes back when the keyboard a text box raised goes away.** The symptom,
-/// found driving Select → Edit Text: after the keyboard left, the canvas host stayed at the height the
-/// keyboard had pushed it to (973 pt against 1356) and the timeline and side rail stayed a few hundred
-/// points above their places, until a touch landed on a control — which was then not delivered as a
-/// press. BUGS.md carried it for three weeks and two UI tests carried workarounds for it.
+/// **Nothing in the editor moves for the keyboard** — the owner, 2026-10-10, on the iPad in landscape:
+/// *"the keyboard comes up, and for some reason the entire screen gets shifted up. Since the title is on the
+/// top of the screen, it disappears and I cannot see what I am writing."* SwiftUI squeezed the editor into
+/// what the keyboard left, and an editor taller than that overflowed it centred, so the top of the screen
+/// went off the top. `ContentView` now keeps the keyboard out of every layout; the keyboard is drawn over
+/// the bottom of the screen and moves nothing.
 ///
-/// **The cause was where the keyboard was dismissed, not the keyboard**: ending a text session hid the
-/// overlay from `CanvasView.updateUIView`, which made UIKit resign the text view *inside SwiftUI's
-/// update pass* — and the hosting view's keyboard avoidance is not told to relay out from there.
-/// `CanvasManager.commitInteractiveText` now drops the keyboard first, from the action that ends the
-/// session. Typing is what exposed it (a keyboard dismissed before the first key did not): the keys are
-/// typed here, and every leaving route is driven from a fresh document the way the artist drives it.
+/// **The one exception is the canvas, and only for the text tool:** a box being typed into is panned clear
+/// of the keyboard — the canvas's own view pan, never the document's — and the canvas goes back when the box
+/// is put down.
 ///
-/// Each test reads the **drawn geometry** — `canvas.host`'s frame and the undo button's — rather than any
-/// model value, since the model was never wrong. A hardware keyboard on the simulator raises none, which
+/// Each test reads the **drawn geometry** — the frames of controls and of the canvas host, the text box's
+/// hull, the canvas's transform — rather than any model value, since the model was never wrong. All of it in
+/// landscape, the orientation the report named. A hardware keyboard on the simulator raises none, which
 /// skips these rather than passing them.
 final class EditorKeyboardLayoutUITests: PaintUITestCase {
 
-    private struct Geometry: Equatable {
-        var host: CGRect
-        var undo: CGRect
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        XCUIDevice.shared.orientation = .landscapeLeft
     }
 
-    private func geometry(_ app: XCUIApplication) -> Geometry {
-        Geometry(host: app.otherElements["canvas.host"].frame,
-                 undo: app.buttons["sideToolbar.undoButton"].frame)
+    override func tearDown() {
+        XCUIDevice.shared.orientation = .portrait
+        super.tearDown()
     }
 
-    /// Whether the editor is where `then` had it, to within a point — polled, because a layout answers
-    /// the keyboard's going away over an animation rather than at an instant.
-    private func waitForGeometry(_ app: XCUIApplication, toBe then: Geometry, timeout: TimeInterval = 6) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            let now = geometry(app)
-            if abs(now.host.height - then.host.height) < 1, abs(now.host.minY - then.host.minY) < 1,
-               abs(now.undo.minY - then.undo.minY) < 1 { return true }
-            Thread.sleep(forTimeInterval: 0.25)
-        } while Date() < deadline
-        return false
+    /// Every control the artist reads or reaches, by identifier — the frames the keyboard must not move.
+    private static let landmarks = ["timeline.projectNameField", "toolbar.brushButton", "toolbar.layersButton",
+                                    "sideToolbar.undoButton", "timeline.frameLabel", "canvas.host"]
+
+    private func landmarkFrames(_ app: XCUIApplication) -> [String: CGRect] {
+        Dictionary(uniqueKeysWithValues: Self.landmarks.map { ($0, app.descendants(matching: .any)[$0].frame) })
     }
 
-    /// Add → Add Text, a tap on the canvas, the keyboard up and still, and two letters typed. What the
-    /// artist does next: put the text down, by picking a tool.
-    private func typeSomeText(_ app: XCUIApplication, _ canvas: XCUIElement) throws {
-        app.buttons["toolbar.addButton"].tap()
-        let addText = app.buttons["add.addTextRow"]
-        XCTAssertTrue(addText.waitForExistence(timeout: 5), "PREMISE: the Add menu lists Add Text")
-        addText.tap()
-        XCTAssertTrue(app.buttons["textPanel.fontButton"].waitForExistence(timeout: 5), "PREMISE: the text panel is up")
-        canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.20)).tap()
-        XCTAssertTrue(waitForTextState(app, "editing"), "PREMISE: a live text box (text:\(readTextState(app)))")
-        let keyboard = app.keyboards.firstMatch
-        try XCTSkipUnless(keyboard.waitForExistence(timeout: 5),
-                          "a hardware keyboard is connected to this simulator, so no software keyboard rises")
-        waitForTheKeyboardToStopMoving(keyboard)
-        let frame = canvas.frame
-        typeIntoTextBox("Hi", app, at: CGPoint(x: frame.minX + 0.56 * frame.width, y: frame.minY + 0.21 * frame.height))
+    private func launch() -> (app: XCUIApplication, canvas: XCUIElement) {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app), "setup: a brand-new document")
+        let window = app.windows.firstMatch.frame
+        XCTAssertGreaterThan(window.width, window.height, "PREMISE: the app is in landscape (\(window))")
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        return (app, canvas)
     }
 
     /// A key tapped while the keyboard is still sliding up is tapped where it was: XCUITest reports its
@@ -73,46 +59,84 @@ final class EditorKeyboardLayoutUITests: PaintUITestCase {
         }
     }
 
-    /// Leaving by picking the brush — the commonest way to put text down, and the one that left the
-    /// editor compressed.
-    func testTheLayoutComesBackWhenTheTextIsPutDownWithTheBrush() throws {
-        let app = XCUIApplication()
-        XCTAssertTrue(launchIntoEditor(app))
-        let canvas = app.otherElements["canvas.host"]
-        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
-        let before = geometry(app)
-
-        try typeSomeText(app, canvas)
-        let during = geometry(app)
-        XCTAssertLessThan(during.host.height, before.host.height - 100,
-                          "PREMISE: the keyboard really did push the editor up while it was there")
-
-        app.buttons["toolbar.brushButton"].tap()
-        XCTAssertTrue(waitForTextState(app, "none"), "PREMISE: the brush puts the box down")
-        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5), "the keyboard is gone")
-        let settled = waitForGeometry(app, toBe: before)
-        attachScreenshot(app, "text-put-down-with-the-brush")
-        XCTAssertTrue(settled, "the editor did not come back after the text was put down: host \(before.host) -> \(during.host) -> \(geometry(app).host)")
+    /// The software keyboard, up and still — or the test is skipped, because a hardware keyboard is
+    /// connected to this simulator and none rises.
+    private func softwareKeyboard(_ app: XCUIApplication) throws -> XCUIElement {
+        let keyboard = app.keyboards.firstMatch
+        try XCTSkipUnless(keyboard.waitForExistence(timeout: 5),
+                          "a hardware keyboard is connected to this simulator, so no software keyboard rises")
+        let deadline = Date().addingTimeInterval(5)
+        while keyboard.frame.height < 200, Date() < deadline { Thread.sleep(forTimeInterval: 0.2) }
+        waitForTheKeyboardToStopMoving(keyboard)
+        XCTAssertGreaterThan(keyboard.frame.height, 200, "PREMISE: a real software keyboard is up (\(keyboard.frame))")
+        return keyboard
     }
 
-    /// Leaving by picking another tool — the same route through a different button, so a fix that
-    /// lived in one toolbar action rather than in the session's end would pass the test above and not
-    /// this one.
-    func testTheLayoutComesBackWhenTheTextIsPutDownWithTheSelectTool() throws {
-        let app = XCUIApplication()
-        XCTAssertTrue(launchIntoEditor(app))
-        let canvas = app.otherElements["canvas.host"]
-        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
-        let before = geometry(app)
+    // MARK: - Nothing moves for the keyboard
+
+    /// **The owner's report, cold from a fresh document:** the scene's name tapped, the keyboard up and
+    /// still, then the name typed and committed. The name's field, the toolbars, the timeline and the canvas
+    /// stand exactly where they stood, and the name is on screen above the keyboard where it can be read.
+    /// What the artist does next: types the name where they can see it.
+    func testRenamingTheSceneMovesNothingOnScreen() throws {
+        let (app, _) = launch()
+        let before = landmarkFrames(app)
+        let field = app.textFields["timeline.projectNameField"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+
+        field.tap()
+        let keyboard = try softwareKeyboard(app)
+        attachScreenshot(app, "renaming-the-scene-in-landscape")
+        let window = app.windows.firstMatch.frame
+        XCTAssertTrue(window.contains(field.frame) && field.isHittable,
+                      "the name being typed into is on screen (\(field.frame) in \(window))")
+        XCTAssertLessThanOrEqual(field.frame.maxY, keyboard.frame.minY, "…and above the keyboard")
+        XCTAssertEqual(landmarkFrames(app), before, "nothing on screen moved for the keyboard")
+
+        field.typeText("Moonrise\n")
+        XCTAssertTrue(keyboard.waitForNonExistence(timeout: 5), "Return put the keyboard away")
+        XCTAssertEqual(field.value as? String, "Moonrise")
+        XCTAssertEqual(landmarkFrames(app), before, "…and nothing moved back, because nothing had moved")
+    }
+
+    /// Add → Add Text, a tap on the canvas, the keyboard up and still, and two letters typed. What the
+    /// artist does next: put the text down, by picking a tool.
+    private func typeSomeText(_ app: XCUIApplication, _ canvas: XCUIElement) throws {
+        app.buttons["toolbar.addButton"].tap()
+        let addText = app.buttons["add.addTextRow"]
+        XCTAssertTrue(addText.waitForExistence(timeout: 5), "PREMISE: the Add menu lists Add Text")
+        addText.tap()
+        XCTAssertTrue(app.buttons["textPanel.fontButton"].waitForExistence(timeout: 5), "PREMISE: the text panel is up")
+        canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.20)).tap()
+        XCTAssertTrue(waitForTextState(app, "editing"), "PREMISE: a live text box (text:\(readTextState(app)))")
+        _ = try softwareKeyboard(app)
+        let frame = canvas.frame
+        typeIntoTextBox("Hi", app, at: CGPoint(x: frame.minX + 0.56 * frame.width, y: frame.minY + 0.21 * frame.height))
+    }
+
+    /// Typing into the text tool's box moves no control either, and leaving by picking the brush or the
+    /// select tool — the two ways text is commonly put down, which reach the end of the session through
+    /// different buttons — leaves them where they were.
+    private func assertTextMovesNothing(leavingBy button: String) throws {
+        let (app, canvas) = launch()
+        let before = landmarkFrames(app)
 
         try typeSomeText(app, canvas)
+        XCTAssertEqual(landmarkFrames(app), before, "nothing moved while the text was typed")
 
-        app.buttons["toolbar.selectButton"].tap()
-        XCTAssertTrue(waitForTextState(app, "none"), "PREMISE: picking Select puts the box down")
-        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5), "the keyboard is gone")
-        let settled = waitForGeometry(app, toBe: before)
-        attachScreenshot(app, "text-put-down-with-the-select-tool")
-        XCTAssertTrue(settled, "the editor did not come back after the text was put down: host \(before.host) -> \(geometry(app).host)")
+        app.buttons[button].tap()
+        XCTAssertTrue(waitForTextState(app, "none"), "PREMISE: \(button) puts the box down")
+        waitForTheKeyboardToLeave(app)
+        attachScreenshot(app, "text-put-down-with-\(button)")
+        XCTAssertEqual(landmarkFrames(app), before, "…and nothing moved when it was put down")
+    }
+
+    func testTypingTextMovesNothingAndPuttingItDownWithTheBrushLeavesTheEditorAsItWas() throws {
+        try assertTextMovesNothing(leavingBy: "toolbar.brushButton")
+    }
+
+    func testTypingTextMovesNothingAndPuttingItDownWithTheSelectToolLeavesTheEditorAsItWas() throws {
+        try assertTextMovesNothing(leavingBy: "toolbar.selectButton")
     }
 
     // MARK: - The canvas follows the box being typed in
@@ -132,9 +156,8 @@ final class EditorKeyboardLayoutUITests: PaintUITestCase {
         Double(readTransform(app).split(separator: ",").last ?? "") ?? .nan
     }
 
-    /// Polls until the box on the glass stands above `limit` or the time is up — the follow animates, and
-    /// the keyboard compresses the layout over its own animation, so the answer arrives, it is not
-    /// instant.
+    /// Polls until the box on the glass stands above `limit` or the time is up — the follow animates over
+    /// the keyboard's own slide, so the answer arrives, it is not instant.
     private func waitForTheBox(_ app: XCUIApplication, in canvas: XCUIElement, toStandAbove limit: () -> CGFloat,
                                timeout: TimeInterval = 8) -> CGRect? {
         let deadline = Date().addingTimeInterval(timeout)
@@ -147,10 +170,21 @@ final class EditorKeyboardLayoutUITests: PaintUITestCase {
         return last
     }
 
-    /// Add → Add Text, a tap low on the paper — a hand's width above the Text panel's top edge, the lowest
-    /// the tap can land and still be on the paper — the keyboard up and still. Answers the Text panel's
-    /// docked card, whose frame is the line the box has to stand above.
-    private func placeABoxLow(_ app: XCUIApplication, _ canvas: XCUIElement) throws -> XCUIElement {
+    /// The timeline taken down to its bar, so that the keyboard, and not the timeline and the panel riding
+    /// on it, is what covers the most of the paper.
+    private func collapseTheTimeline(_ app: XCUIApplication) {
+        let collapse = app.buttons["timeline.collapseButton"]
+        XCTAssertTrue(collapse.waitForExistence(timeout: 5), "PREMISE: the timeline has a collapse chevron")
+        collapse.tap()
+        Thread.sleep(forTimeInterval: 0.5)
+    }
+
+    /// Add → Add Text, a tap on the paper a hand's width above the Text panel's top edge — the lowest the
+    /// tap can land and still be on the paper, and **below where the keyboard's top is about to be** (the
+    /// timeline is collapsed first) — and the keyboard up and still. Answers the panel's docked card and
+    /// the keyboard, whose frames are the lines the box has to stand above.
+    private func placeABoxBelowTheKeyboardsTop(_ app: XCUIApplication, _ canvas: XCUIElement) throws
+        -> (card: XCUIElement, keyboard: XCUIElement) {
         app.buttons["toolbar.addButton"].tap()
         let addText = app.buttons["add.addTextRow"]
         XCTAssertTrue(addText.waitForExistence(timeout: 5), "PREMISE: the Add menu lists Add Text")
@@ -161,87 +195,76 @@ final class EditorKeyboardLayoutUITests: PaintUITestCase {
         let lowest = (card.frame.minY - 40 - canvas.frame.minY) / canvas.frame.height
         canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: lowest)).tap()
         XCTAssertTrue(waitForTextState(app, "editing"), "PREMISE: a live text box (text:\(readTextState(app)))")
-        let keyboard = app.keyboards.firstMatch
-        try XCTSkipUnless(keyboard.waitForExistence(timeout: 5),
-                          "a hardware keyboard is connected to this simulator, so no software keyboard rises")
-        waitForTheKeyboardToStopMoving(keyboard)
-        return card
+        let keyboard = try softwareKeyboard(app)
+        XCTAssertLessThan(keyboard.frame.minY, card.frame.minY - 40,
+                          "PREMISE: the keyboard (top \(keyboard.frame.minY)) reaches higher than the place the box "
+                          + "was put (\(card.frame.minY - 40)), so only the keyboard can take it out of view")
+        return (card, keyboard)
     }
 
-    /// **A box placed low is scrolled into view above the Text panel, typed into there, and the canvas
-    /// goes back when the box is put down** — the owner: *"the canvas scrolls to keep the text box being
-    /// typed visible above the Text panel and keyboard, and back after."* Cold from a fresh document, the
-    /// artist's own sequence: Add Text, a tap low on the paper — just above the Text panel's top — and the
-    /// keyboard rises and compresses the layout, which takes the box under the panel; then two letters, then
-    /// the brush to put it down.
+    /// **A box placed below where the keyboard will reach is panned up above it, typed into there, and the
+    /// canvas goes back when the box is put down** — the owner: *"for writing text, the keyboard may block
+    /// you from seeing what you are writing too, so … a shift up feature."* Cold from a fresh document, the
+    /// artist's own sequence: Add Text, a tap low on the paper, and the keyboard rises over the lower part of
+    /// the screen without moving anything in it; the box would be under it, so the canvas pans — the editor
+    /// does not — and the box stands in view; two letters; then the brush to put it down.
     ///
-    /// What is read is what is drawn: the box's hull on the glass (`textbox:`) held against the panel's own
-    /// frame (`bottomDock.card`), and the canvas's transform (`xform:`) before, during and after. What the
-    /// artist does next: nothing — the words are where they can be read.
-    func testTheCanvasScrollsToKeepTheBoxAboveThePanelAndBackAfter() throws {
-        let app = XCUIApplication()
-        XCTAssertTrue(launchIntoEditor(app))
-        let canvas = app.otherElements["canvas.host"]
-        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
-        let before = geometry(app)
-        let panBefore = verticalPan(app)
+    /// What is read is what is drawn: the box's hull on the glass (`textbox:`) held against the keyboard's
+    /// frame, the canvas's transform (`xform:`) before, during and after, and the editor's landmarks, which
+    /// stay put throughout. What the artist does next: nothing — the words are where they can be read.
+    func testTheCanvasPansToKeepTheBoxAboveTheKeyboardAndBackAfter() throws {
+        let (app, canvas) = launch()
+        collapseTheTimeline(app)
+        let landmarksBefore = landmarkFrames(app)
         let transformBefore = readTransform(app)
+        let panBefore = verticalPan(app)
 
-        let panel = try placeABoxLow(app, canvas)
+        let (_, keyboard) = try placeABoxBelowTheKeyboardsTop(app, canvas)
 
-        let lifted = try XCTUnwrap(waitForTheBox(app, in: canvas, toStandAbove: { panel.frame.minY }),
+        let lifted = try XCTUnwrap(waitForTheBox(app, in: canvas, toStandAbove: { keyboard.frame.minY }),
                                    "the session has a box on the glass")
         attachScreenshot(app, "box-placed-low-with-the-keyboard-up")
-        XCTAssertLessThanOrEqual(lifted.maxY, panel.frame.minY,
-                                 "the box (bottom \(lifted.maxY)) stands above the Text panel (top \(panel.frame.minY)) "
-                                 + "— the canvas scrolled to keep it in view; xform \(readTransform(app))")
+        XCTAssertLessThanOrEqual(lifted.maxY, keyboard.frame.minY,
+                                 "the box (bottom \(lifted.maxY)) stands above the keyboard (top \(keyboard.frame.minY)) "
+                                 + "— the canvas panned to keep it in view; xform \(readTransform(app))")
         XCTAssertLessThan(verticalPan(app), panBefore, "…and it did so by panning the canvas up, as the artist does")
+        XCTAssertEqual(landmarkFrames(app), landmarksBefore, "…while nothing in the editor moved, the host included")
 
         typeIntoTextBox("Hi", app, at: CGPoint(x: lifted.minX + 4, y: lifted.midY))
         let typed = try XCTUnwrap(textBox(app, in: canvas))
-        XCTAssertLessThanOrEqual(typed.maxY, panel.frame.minY, "still above the panel once the words are typed")
-        attachScreenshot(app, "words-typed-above-the-panel")
+        XCTAssertLessThanOrEqual(typed.maxY, keyboard.frame.minY, "still above the keyboard once the words are typed")
+        attachScreenshot(app, "words-typed-above-the-keyboard")
 
         app.buttons["toolbar.brushButton"].tap()
         XCTAssertTrue(waitForTextState(app, "none"), "PREMISE: the brush puts the box down")
-        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5), "the keyboard is gone")
-        XCTAssertTrue(waitForGeometry(app, toBe: before), "PREMISE: the editor is back at full height")
+        waitForTheKeyboardToLeave(app)
         let deadline = Date().addingTimeInterval(6)
         while readTransform(app) != transformBefore, Date() < deadline { Thread.sleep(forTimeInterval: 0.25) }
         attachScreenshot(app, "box-put-down-canvas-back")
         XCTAssertEqual(readTransform(app), transformBefore, "the canvas went back to where it was before the box")
     }
 
-    /// **A pan the artist makes while typing is theirs**: the canvas is not pulled back to where it was when
-    /// the box is put down, and the follow does not fight the pan while the keyboard is up.
-    func testAPanMadeWhileTypingIsLeftAlone() throws {
-        let app = XCUIApplication()
-        XCTAssertTrue(launchIntoEditor(app))
-        let canvas = app.otherElements["canvas.host"]
-        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+    /// **A view change the artist makes while typing is theirs**: the canvas is not pulled back to where it was
+    /// when the box is put down, and the follow does not fight the artist's own pinch while the keyboard is up.
+    func testAPinchMadeWhileTypingIsLeftAlone() throws {
+        let (app, canvas) = launch()
+        collapseTheTimeline(app)
         let transformBefore = readTransform(app)
 
-        let panel = try placeABoxLow(app, canvas)
-        XCTAssertNotNil(waitForTheBox(app, in: canvas, toStandAbove: { panel.frame.minY }))
+        let (_, keyboard) = try placeABoxBelowTheKeyboardsTop(app, canvas)
+        XCTAssertNotNil(waitForTheBox(app, in: canvas, toStandAbove: { keyboard.frame.minY }))
         let followed = readTransform(app)
         XCTAssertNotEqual(followed, transformBefore, "PREMISE: the canvas followed the box")
 
-        // The artist pans by hand, where no panel and no keyboard reaches: two fingers, 60 points right.
-        let frame = canvas.frame
-        let at = CGPoint(x: frame.minX + frame.width * 0.2, y: frame.minY + frame.height * 0.12)
-        try twoFingerGesture(from: (CGPoint(x: at.x - 30, y: at.y), CGPoint(x: at.x + 30, y: at.y)),
-                             to: (CGPoint(x: at.x + 30, y: at.y), CGPoint(x: at.x + 90, y: at.y)), stagger: 0)
-        let panned = readTransform(app)
-        XCTAssertNotEqual(panned, followed, "PREMISE: the artist's two fingers moved the canvas")
+        canvas.pinch(withScale: 1.4, velocity: 1.5)
+        let pinched = readTransform(app)
+        XCTAssertNotEqual(pinched, followed, "PREMISE: the artist's two fingers moved the canvas")
 
         app.buttons["toolbar.brushButton"].tap()
         XCTAssertTrue(waitForTextState(app, "none"), "PREMISE: the brush puts the box down")
-        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5), "the keyboard is gone")
+        waitForTheKeyboardToLeave(app)
         Thread.sleep(forTimeInterval: 1.0)
-        // The offset, not the whole transform: its first field is the fit scale, which is the host's own
-        // height divided by the paper's and moves when the keyboard leaves, pan or no pan.
-        func offset(_ transform: String) -> [Substring] { Array(transform.split(separator: ",").suffix(2)) }
-        XCTAssertEqual(offset(readTransform(app)), offset(panned),
+        XCTAssertEqual(readTransform(app), pinched,
                        "the canvas stays where the artist left it, not where it began (\(transformBefore))")
     }
 

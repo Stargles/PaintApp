@@ -50,9 +50,11 @@ struct CanvasSizePickerView: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            // A scroll view that only scrolls when it must: on a small iPad with the number pad up the
-            // presets would otherwise push Create off the bottom of the screen. `minHeight` keeps the
-            // content centred whenever it does fit.
+            // A scroll view that only scrolls when it must: on a small iPad the presets would otherwise
+            // push Create off the bottom of the screen. `minHeight` keeps the content centred whenever it
+            // does fit. **No field is focused on arrival**: the keyboard moves nothing (`ContentView`), so a
+            // number pad raised by the sheet itself would sit over Create before the artist had asked to
+            // type a size, and a preset needs no keyboard.
             GeometryReader { proxy in
                 ScrollView {
                     content
@@ -64,7 +66,6 @@ struct CanvasSizePickerView: View {
                 .padding()
                 .accessibilityIdentifier("sizePicker.cancelButton")
         }
-        .onAppear { focusedField = .width }
     }
 
     private var content: some View {

@@ -357,9 +357,8 @@ struct LayerStackListView: UIViewRepresentable {
             tableView.layoutIfNeeded()
             guard let cell = tableView.cellForRow(at: path) as? LayerStackCell else { return }
             renamingRowID = rowID
-            keyboardSubscription = NotificationCenter.default
-                .publisher(for: UIResponder.keyboardWillChangeFrameNotification)
-                .sink { [weak self] note in self?.keyboardFrameChanged(note) }
+            keyboardSubscription = KeyboardFrame.willChange
+                .sink { [weak self] frame in self?.keyboardFrameChanged(frame) }
             cell.beginRenaming()
         }
 
@@ -383,12 +382,10 @@ struct LayerStackListView: UIViewRepresentable {
 
         /// **Keeps the row being typed into above the keyboard.** The inset is how much of the rail the
         /// keyboard's frame covers, and the row is scrolled to inside what is left.
-        private func keyboardFrameChanged(_ note: Notification) {
-            guard let tableView, let renamingRowID, let row = rows.firstIndex(where: { $0.id == renamingRowID }),
-                  let screenFrame = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue
+        private func keyboardFrameChanged(_ keyboardFrame: CGRect) {
+            guard let tableView, let renamingRowID, let row = rows.firstIndex(where: { $0.id == renamingRowID })
             else { return }
-            let covered = tableView.convert(screenFrame, from: UIScreen.main.coordinateSpace)
-            let overlap = max(0, tableView.bounds.maxY - max(covered.minY, tableView.bounds.minY))
+            let overlap = tableView.keyboardOverlap(keyboardFrame)
             tableView.contentInset.bottom = overlap
             tableView.verticalScrollIndicatorInsets.bottom = overlap
             tableView.scrollToRow(at: IndexPath(row: row, section: 0), at: .none, animated: true)
