@@ -20,8 +20,8 @@ import CoreGraphics
 ///
 /// **And a document keyed before TODO (139) lost its keys the moment this build opened it.** A track
 /// then stored whole-pose `keys`; (139)'s decoder read only per-component `curves`, so it read *no
-/// keys*, without a word, and the next autosave wrote the empty track — with a zero box no Move could
-/// ever key against again — over the file. The saved versions still held the old form, but nothing
+/// keys*, without a word, and the next autosave wrote the empty track — on a box of no size — over the
+/// file. The saved versions still held the old form, but nothing
 /// could read it, so every one of them looked unkeyed. The last section here writes that old form into
 /// real packages and opens them.
 ///
@@ -496,11 +496,11 @@ final class TransformKeysSurviveLogicTests: XCTestCase {
         }
     }
 
-    /// **The file this build wrote over such a document opens keyable again.** The build that read old
-    /// tracks as empty wrote each back as no curves on a zero box — against which no Move decomposes —
-    /// so the owner's new keys could not land. An empty track takes the pose's box on the way in, and a
-    /// Move between two primed frames keys again.
-    func testATransformLayerSavedWithAZeroBoxCanBeKeyedAgain() throws {
+    /// **The file the last build wrote over such a document reads against the frame again.** That build
+    /// wrote each old track back as no curves on a box of no size, and the next key would have been read
+    /// against it — X and Y the canvas origin's place, not the frame centre's. An empty track takes the
+    /// pose's box on the way in, and a Move between two primed frames keys as on any layer.
+    func testAnEmptyTrackSavedWithAZeroBoxReadsAgainstTheFrameAgain() throws {
         let manager = CanvasFixture.manager(layerCount: 0)
         manager.addVectorLayer(name: "Ink")
         manager.addTransformLayer(name: "Keyed")

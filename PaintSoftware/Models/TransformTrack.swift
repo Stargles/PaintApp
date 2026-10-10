@@ -536,9 +536,9 @@ extension LayerPose: Codable {
         pose = try c.decode(PoseQuad.self, forKey: .pose)
         // **An empty track takes the pose's box**, whatever box the file gave it. A box means nothing
         // until a key is read against it (`TransformTrack.box` is latched at the first write), and the
-        // build that read pre-(139) tracks as empty wrote every one of them back with a zero box —
-        // against which no Move could decompose, so a layer opened from such a file could never be
-        // keyed again (TODO (153)).
+        // build that read pre-(139) tracks as empty wrote every one of them back with a zero box — so
+        // the next key on such a layer would have been read against a box of no size, its X and Y the
+        // canvas origin's place rather than the frame centre's, and a keystone not at all (TODO (153)).
         let stored = try c.decodeIfPresent(TransformTrack.self, forKey: .track)
         track = stored.flatMap { $0.isEmpty ? nil : $0 } ?? TransformTrack(box: pose.box)
         baseline = try c.decodeIfPresent(PoseQuad.self, forKey: .baseline)
