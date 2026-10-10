@@ -62,7 +62,18 @@ that baking down should not change the image (colors should remain near identica
 peculiarities. Think of it as applying the correct transformation to brushstroke colors, not in the
 compositor)."*
 
-- [ ] Root cause of the lost keys on the upper transform layer; fixed at the bake core (`(131)`'s one core).
+**Then, the same day, worse — it is not only the bake.** The owner restored earlier versions: *"it wiped
+the new keyframes i made on the version after keyframes got wiped yet again. No version in history
+appears to have the original keyed transformation anymore nor the new keyed transformation i made, which
+is weird. It just wiped it from every version."* Keys made *after* the bake were gone from every saved
+version too, so keys on a transformation layer are being lost on **save, load or restore** — possibly by a
+step that runs on load and on bake alike (e.g. cropping keys to a bar measured before it is known). The
+library is in a folder the owner chose (`ProjectLocation`), outside the app container, so it cannot be
+pulled over the cable.
+
+- [ ] Keys on transformation layers survive save → load and Versions → Restore (round-trip proven on
+      the real package path, several layers, keyed and static).
+- [ ] Root cause of the lost keys on the upper transform layer; fixed at the root.
 - [ ] Every bake path (transform / effect / value layers, Bake Animation, the Repeat bake) proven with
       **stacks of several such layers**, in any order: the composite before and after is near-identical,
       and no layer the bake did not consume changes.
