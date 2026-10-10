@@ -190,24 +190,30 @@ final class SandwichLiveHostsLogicTests: XCTestCase {
 
     // MARK: - The picture the hosts draw over
 
-    /// **The rest of the frame, exactly**: the over recipe's one band composites to the bake's picture
-    /// of the same document with the hosts' layers switched off — every group buffering once, the
-    /// effect above grading everything else. Watched failing with `hidingLeaves` replaced by the two
-    /// halves of `cut(around:)` concatenated, which grades the lower half twice.
+    /// **The rest of the frame, exactly**: the over recipe's one band composites to the picture of the
+    /// same document with the hosts' layer switched off — a folder spanning the hosts buffers once and
+    /// fades once, and the effect above grades everything else. Watched failing with `hidingLeaves`
+    /// replaced by the two halves of `cut(around:)` laid one over the other, which fades the folder once
+    /// per half and lets the black under the red show through.
     func testThePictureUnderTheHostsIsTheFrameWithoutThem() throws {
         let manager = CanvasFixture.manager(layerCount: 3)
-        for index in 0..<3 {
-            CanvasFixture.setBakedContent(manager, layerIndex: index,
-                                          CanvasFixture.solidImage(.black, rect: CGRect(x: 8, y: 8 + index * 16,
-                                                                                        width: 40, height: 8)))
-        }
+        CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                      CanvasFixture.solidImage(.black, rect: CGRect(x: 8, y: 8, width: 40, height: 12)))
+        CanvasFixture.setBakedContent(manager, layerIndex: 1,
+                                      CanvasFixture.solidImage(.black, rect: CGRect(x: 8, y: 40, width: 40, height: 8)))
+        CanvasFixture.setBakedContent(manager, layerIndex: 2,
+                                      CanvasFixture.solidImage(.red, rect: CGRect(x: 8, y: 8, width: 40, height: 12)))
+        let folder = manager.addFolder(name: "Faded")
+        for index in 0..<3 { manager.layers[index].parentFolderID = folder }
+        manager.setFolderOpacity(folder, to: 0.5)
         manager.currentLayerIndex = 2
-        manager.addValueLayer(effect: .brightnessContrast(.init(brightness: 1.6, contrast: 0.5)))
+        manager.addValueLayer(effect: .brightnessContrast(.init(brightness: 1.2, contrast: 0.8)))
+        manager.layers[manager.currentLayerIndex].parentFolderID = nil
         manager.currentLayerIndex = 1
         let tree = manager.renderTree(atFrame: 0)
         let run = manager.liveHostRun(tree: tree)
         XCTAssertEqual(run, [1])
-        XCTAssertFalse(manager.liveHostsSitBetweenTheHalves(run, in: tree), "PREMISE: an effect above")
+        XCTAssertFalse(manager.liveHostsSitBetweenTheHalves(run, in: tree), "PREMISE: a faded folder spans the host")
 
         let recipe = try XCTUnwrap(manager.makeSandwichRecipe(atFrame: 0, over: run))
         XCTAssertEqual(recipe.bands.count, 1, "one picture, no halves")
@@ -221,10 +227,10 @@ final class SandwichLiveHostsLogicTests: XCTestCase {
         let a = try XCTUnwrap(CanvasFixture.rgbaBytes(over)), b = try XCTUnwrap(CanvasFixture.rgbaBytes(without))
         XCTAssertEqual(a.count, b.count, "one size")
         let delta = zip(a, b).map { abs(Int($0) - Int($1)) }.max() ?? 255
-        XCTAssertLessThanOrEqual(delta, 1, "the picture the hosts draw over is the frame with their layers off")
+        XCTAssertLessThanOrEqual(delta, 1, "the picture the hosts draw over is the frame with their layer off")
         // PREMISE that the comparison could fail: the host's own line is in the whole frame, here.
         let w = try XCTUnwrap(CanvasFixture.rgbaBytes(whole))
-        let line = ((8 + 16 + 4) * Int(over.width) + 20) * 4
+        let line = ((40 + 4) * Int(over.width) + 20) * 4
         XCTAssertGreaterThan(abs(Int(w[line]) - Int(a[line])), 32, "the host's line is not in the picture under it")
     }
 
