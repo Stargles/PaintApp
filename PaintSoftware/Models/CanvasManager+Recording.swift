@@ -773,19 +773,20 @@ extension CanvasManager {
     /// nothing, and the shared rule in `commitRecordingTake` is what turns "nothing" into the right
     /// sentence.
     ///
-    /// **The box is dismissed on success, and that is load-bearing rather than tidy.** The float's own
-    /// commit (`commitContainerFloat`) restores `containerRest` and writes one key at the playhead — so
-    /// a box left up after a take would overwrite the recorded track the moment the artist tapped away,
-    /// and `showContainerPoseLive` would wipe it on the very next tick of a drag they are still making,
-    /// because it composes onto the pre-take `containerRest` every time. Dismissing is therefore the
-    /// take *taking* its content. On failure the box is deliberately left alone: the artist's drag was
+    /// **The box is dismissed on success, and that is load-bearing rather than tidy.** A take leaves
+    /// the box's gesture open (`settleBoxNudge` does not settle a box a take owns), and that gesture's
+    /// commit (`commitContainerNudge`) restores the pose it found *before the take* and writes one key
+    /// at the playhead — so a box left up would overwrite the recorded track the moment the artist
+    /// lifted or tapped away, and `showContainerPoseLive` would wipe it on the very next tick of a drag
+    /// they are still making, because it composes onto that same found pose. Dismissing is therefore
+    /// the take *taking* its content. On failure the box is deliberately left alone: the artist's drag was
     /// not recorded, and what they have is the ordinary Move they were making.
     ///
     /// - Returns: how many stores it wrote (0 or 1), and whether the resample produced two stops —
     ///   which is the operand the shared refusal rule needs and not something this function decides.
     private func commitRecordedPoseTrack(_ take: RecordingTake)
         -> (wrote: Int, sawTwoStops: Bool) {
-        // **`containerPose(of:)` is re-asked, which is `commitContainerFloat`'s own guard** and needed
+        // **`containerPose(of:)` is re-asked, which is `commitContainerNudge`'s own guard** and needed
         // for its reason one door over: the artist can leave Transform mode while the box is up, and
         // `applyContainerPose` writes the raw field — so without this a take would put a `LayerPose`
         // back onto a layer that has stopped posing, as storage the accessor ignores and a later mode
@@ -796,7 +797,7 @@ extension CanvasManager {
         // scratch-pad restore for this surface: `showContainerPoseLive` has been writing the stored pose
         // on every tick of the drag so the artist can see the box move, so the live value *is* the drag
         // — and writing a `LayerPose` derived from it would leave the move in the base **and** on the
-        // curve, applying it twice. `commitContainerFloat` records the same reason for an unrecorded
+        // curve, applying it twice. `commitContainerNudge` records the same reason for an unrecorded
         // Move: *"one press of Undo would put the drawing back exactly where the artist had just
         // dragged it, which is a control that appears not to work."*
         var after = base
@@ -831,7 +832,7 @@ extension CanvasManager {
     /// `commitRecordedPoseTrack` for why a box left up destroys the take that recorded it.
     ///
     /// **`floatingPiece = nil` rather than `commitFloatingPieceIfNeeded()`**, which is the whole point:
-    /// that funnel routes a container float through `commitContainerFloat`, and what this take wrote is
+    /// that funnel routes the box's open gesture through `commitContainerNudge`, and what this take wrote is
     /// already the answer that commit would have tried to write.
     ///
     /// Narrow on purpose — it touches nothing unless the box still up is the very one the take is aimed

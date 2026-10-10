@@ -4158,8 +4158,11 @@ struct CanvasView: UIViewRepresentable {
             if let edit = canvasManager.moveBoxEdit { canvasManager.beginLiveTransformEdit(edit) }
         }
 
-        /// The finger on the Move box lifted — both overlays' `onBoxTouchUp`.
+        /// The finger on the Move box lifted — both overlays' `onBoxTouchUp`. A transformation layer's
+        /// or a Duplicate Offset's box lands the drag here, as one undo step, and stays up holding
+        /// nothing (`settleBoxNudge`, TODO (153)); the end of the live edit then lets the baker bake it.
         func moveBoxTouchUp() {
+            canvasManager.settleBoxNudge()
             canvasManager.endLiveTransformEdit()
         }
 

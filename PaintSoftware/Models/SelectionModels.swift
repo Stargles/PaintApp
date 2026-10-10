@@ -335,12 +335,42 @@ enum FloatingPieceKind {
     var acceptsDistort: Bool { self != .effectBox }
 }
 
-/// **What a `.effectBox` found when it came up** — the stored grade and its curves, put back before
-/// the commit so the routed write's undo baseline is the value the drag started from rather than the
-/// value the preview left. `FloatingPiece.containerRest`'s job, one payload over.
+/// **What an `.effectBox` gesture found when it began** — the stored grade and its curves, put back
+/// before the commit so the routed write's undo baseline is the value the drag started from rather
+/// than the value the preview left. A container gesture's `LayerPose`, one payload over.
 struct EffectBoxRest: Equatable {
     var effect: Effect
     var tracks: [String: AnimationCurve]
+}
+
+/// **One gesture on a box that writes the document live** — a drag of a transformation layer's or a
+/// Duplicate Offset's box, or one press of Mirror, Rotate or Reset — and everything its commit needs:
+/// what the document held when the gesture began, the frame it began on, and where the box was.
+///
+/// **Taken when the gesture begins and settled when it ends** (`CanvasManager.settleBoxNudge`), never
+/// held between gestures — TODO (153). The preview writes the document on every tick, so the commit
+/// has to put the found state back before it routes, or one press of Undo would leave the drawing
+/// where the drag had just put it. But the box stays up across scrubs, Add Keys, graph-editor edits
+/// and undo, each of which writes the very layer it is over; a copy kept for the box's whole life and
+/// put back when it went away overwrote every one of them, at whatever frame the playhead had reached
+/// — and the autosave, waiting on the box, had written none of them. That is how a keyed transformation
+/// layer lost its keys from every saved version. Between gestures the box holds no copy of anything,
+/// so there is nothing to put back.
+struct BoxNudge {
+    enum Rest {
+        case container(LayerPose)
+        case effect(EffectBoxRest)
+    }
+
+    let rest: Rest
+    /// The frame the gesture was made on — the frame its commit routes at, wherever the playhead is
+    /// when it settles.
+    let frame: Int
+    /// The box as the gesture found it. A container gesture carries the content through the box's
+    /// travel **from here** (`CanvasManager.containerPose(_:movedBy:)`), so a second drag composes
+    /// onto what the first one committed.
+    let originTransform: FloatingTransform
+    let originQuad: Quad?
 }
 
 /// A piece of pixel content lifted out for interactive move/resize/rotate, not yet committed back
@@ -415,28 +445,13 @@ struct FloatingPiece {
     /// type's own doc comment), so Distort owes no file-format change at all.
     var distortQuad: Quad?
 
-    /// **The container payload exactly as this box found it** — `.containerPose` only, nil on every
-    /// other kind.
+    /// **The gesture in progress on a `.containerPose` or `.effectBox` box, or nil between gestures**
+    /// — and always nil on the two pixel kinds. `BoxNudge` carries why it never outlives one gesture.
     ///
-    /// The **whole** `LayerPose` rather than the one quad the box composes onto, and that is the
-    /// field's second job rather than generosity. The live preview writes wherever the render reads —
-    /// the stored base on an unkeyed container, a key at the playhead on a keyed one — so putting the
-    /// preview back is putting a whole payload back. And it must be put back: `commitContainerPose`
-    /// reads the stored pose to take its undo baseline from, so without this the baseline would be
-    /// the *dragged* pose and one press of Undo would leave the drawing exactly where the artist had
-    /// just dragged it.
-    ///
-    /// **Resolved at the playhead, which cannot move under it**: `CanvasManager.commitFloatingPiece\
-    /// IfNeeded` is called *"whenever the layer/frame changes"* (this type's own doc), so a float
-    /// lifted at frame `n` is committed at frame `n` and there is no second frame to store.
-    var containerRest: LayerPose?
-
-    /// **The grade exactly as an `.effectBox` found it** — `.effectBox` only, nil on every other
-    /// kind, and `containerRest`'s argument applied to a grade: `showEffectBoxLive` writes the five
-    /// scalars into the stored effect (or a key at the playhead, on a keyed channel) on every tick
-    /// of the drag, so the commit has to put this back before it routes, or one press of Undo would
-    /// restore the *dragged* copy.
-    var effectRest: EffectBoxRest?
+    /// The **whole** found payload rather than the one quad or five scalars the box writes: the live
+    /// preview writes wherever the render reads — the stored base on an unkeyed channel, a key at the
+    /// playhead on a keyed one — so putting the preview back is putting a whole payload back.
+    var nudge: BoxNudge?
 
     /// **What a `.containerPose` box actually poses** — a transformation layer, and nil on every
     /// other kind. **And which grade home an `.effectBox` writes** — the same `KeyframeTarget` naming
@@ -450,9 +465,19 @@ struct FloatingPiece {
     /// `currentLayerIndex`'s own id to decide whether the box survives a scrub — *when* this box was
     /// raised, not *what* it poses — so a box auto-commits under the same "did the active layer/cel
     /// change" rule, and no field that is typed and named for a layer ever has to hold anything but
-    /// one. This field is what `showContainerPoseLive`, `commitContainerFloat` and every writer
+    /// one. This field is what `showContainerPoseLive`, `commitContainerNudge` and every writer
     /// downstream of them read instead.
     var containerTarget: KeyframeTarget?
+
+    /// **Whether the document is still missing something this piece holds** — a lifted bitmap always
+    /// (it lands only when the piece is set down), a box only in the middle of a gesture. A box between
+    /// gestures has settled everything it did, so a save need neither wait for it nor take it down.
+    var holdsUnsettledEdit: Bool {
+        switch kind {
+        case .move, .duplicate: return true
+        case .containerPose, .effectBox: return nudge != nil
+        }
+    }
 
     /// The rectangle the piece's bitmap occupies in its own local space: `baseSize`, centred on the
     /// origin. `pieceImage`'s texel (0,0) is its `minX`/`minY` corner — which is the correspondence
@@ -796,6 +821,9 @@ extension CanvasManager {
         let activeLayerID = layers.indices.contains(currentLayerIndex) ? layers[currentLayerIndex].id : nil
         let activeCel = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame)
         let activeCelID = activeCel.map { layers[currentLayerIndex].cels[$0].id }
+        // A box's gesture is about one frame: one still open as the playhead leaves it lands where it
+        // was made, and the box — which a scrub within its block leaves up — starts the next one here.
+        if floatingPiece?.nudge.map({ $0.frame != currentFrame }) == true { settleBoxNudge() }
         if let piece = floatingPiece {
             let stillTargeted = piece.targetLayerID == activeLayerID && piece.targetCelID == activeCelID
             if !stillTargeted, !recordingOwnsMoveBox {
@@ -830,8 +858,10 @@ extension CanvasManager {
     /// what it is supposed to do:
     ///
     ///  * **`handleActiveContextChanged`** commits a floating piece the moment the active cel changes.
-    ///    The first boundary a take crossed would settle the box mid-drag, `commitContainerFloat` would
+    ///    The first boundary a take crossed would settle the box mid-drag, `commitContainerNudge` would
     ///    write one key at that frame, and the take would end against a base it had already overwritten.
+    ///    `settleBoxNudge` asks it too, for the same reason one frame finer: a take's playhead leaves
+    ///    the frame its gesture began on at every tick.
     ///  * **`canvasInteractionBegan`** stops playback on any canvas touch, and
     ///    `CanvasView.handleCatchAllTap` fires it at `.began` for *every* touch on a layer with no
     ///    drawing surface — which a transformation layer is, by definition. MEASURED by driving it: the
@@ -1040,8 +1070,8 @@ extension CanvasManager {
     /// `FloatingTransform` is position + scale + rotation and cannot express a skew, so a box seeded
     /// from a Freeform pose would have to go into `distortQuad` — which every other path in this file
     /// treats as *"the projective residue"* of a live gesture and which `resetFloating` documents as
-    /// always nil at a lift. `containerRestPose` carries the pose instead and each nudge composes its
-    /// delta onto it, which gives the same answer with none of that reinterpretation.
+    /// always nil at a lift. Each gesture composes the box's travel onto the pose it found instead
+    /// (`BoxNudge`), which gives the same answer with none of that reinterpretation.
     ///
     /// **A transform layer's box is refused at a frame its bar does not cover, and it says so** —
     /// TRANSFORM_LAYER.md §2 ruling 1. The bar means *"only here"*: `RenderTree.renderNodes` composes
@@ -1064,7 +1094,7 @@ extension CanvasManager {
         commitAllInteractiveState()
         guard let canvasSize, layers.indices.contains(currentLayerIndex) else { return false }
         let target = target ?? .layer(id: layers[currentLayerIndex].id)
-        guard let pose = containerPose(of: target), case .layer(let id) = target,
+        guard containerPose(of: target) != nil, case .layer(let id) = target,
               let index = layers.firstIndex(where: { $0.id == id }) else { return false }
         if activeCelIndex(inLayer: index, atFrame: currentFrame) == nil {
             raise(.moveOutsideTransformBlock(frame: currentFrame))
@@ -1094,7 +1124,6 @@ extension CanvasManager {
             remainderPreview: nil,
             transform: lift, liftTransform: lift,
             mode: transformMode,
-            containerRest: pose,
             containerTarget: target)
         return true
     }
@@ -1122,7 +1151,7 @@ extension CanvasManager {
     func beginEffectBoxMove(for target: KeyframeTarget) -> Bool {
         commitAllInteractiveState()
         guard let canvasSize, layers.indices.contains(currentLayerIndex),
-              let stored = storedEffect(of: target), case .duplicateOffset = stored,
+              case .duplicateOffset? = storedEffect(of: target),
               let resolved = resolvedEffect(of: target, atFrame: currentFrame),
               case .duplicateOffset(let dup) = resolved
         else { return false }
@@ -1151,7 +1180,6 @@ extension CanvasManager {
             remainderPreview: nil,
             transform: lift, liftTransform: lift,
             mode: transformMode,
-            effectRest: EffectBoxRest(effect: stored, tracks: keyframeState(of: target).tracks),
             containerTarget: target)
         return true
     }
@@ -1173,12 +1201,13 @@ extension CanvasManager {
 
     /// **The effect box's preview: write the five where the render reads them, and let the canvas
     /// draw the copy there.** `showContainerPoseLive`'s shape for a grade: the stored base on an
-    /// unkeyed channel, a key at the playhead on a keyed one — composed onto the *rest* state rather
-    /// than the live one, so a hundred ticks leave one key rather than a hundred baselines of drift.
-    /// Records no undo step; `commitEffectBoxFloat` puts the rest back before it routes.
+    /// unkeyed channel, a key at the playhead on a keyed one — composed onto the state the gesture
+    /// found rather than the live one, so a hundred ticks leave one key rather than a hundred
+    /// baselines of drift. Records no undo step; `commitEffectBoxNudge` puts the found state back
+    /// before it routes.
     private func showEffectBoxLive() {
         guard let piece = floatingPiece, piece.kind == .effectBox,
-              let target = piece.containerTarget, let rest = piece.effectRest,
+              let target = piece.containerTarget, case .effect(let rest)? = piece.nudge?.rest,
               let canvasSize, storedEffect(of: target) != nil
         else { return }
         var effect = rest.effect
@@ -1215,15 +1244,16 @@ extension CanvasManager {
         }
     }
 
-    /// **An effect box's whole commit** — put the grade back where the drag found it, then route each
-    /// of the five through the settings bar's own writer inside one gesture bracket, so the drag is
-    /// one undo step whether it wrote values or keys. `commitContainerFloat`'s shape, one payload
-    /// over, and with the same rule: a box that ended where it began writes nothing at all.
-    private func commitEffectBoxFloat(_ piece: FloatingPiece) {
-        guard let target = piece.containerTarget, let rest = piece.effectRest, let canvasSize,
+    /// **One effect-box gesture's commit** — put the grade back where the gesture found it, then route
+    /// each of the five through the settings bar's own writer at the frame the gesture was made on,
+    /// inside one gesture bracket, so the gesture is one undo step whether it wrote values or keys.
+    /// `commitContainerNudge`'s shape, one payload over, and with the same rule: a box that ended
+    /// where it began writes nothing at all.
+    private func commitEffectBoxNudge(_ rest: EffectBoxRest, atFrame frame: Int, of piece: FloatingPiece) {
+        guard let target = piece.containerTarget, let canvasSize,
               storedEffect(of: target) != nil else { return }
         writeEffectStateOffHistory(target, effect: rest.effect, tracks: rest.tracks)
-        guard let resolved = resolvedEffect(of: target, atFrame: currentFrame) else { return }
+        guard let resolved = resolvedEffect(of: target, atFrame: frame) else { return }
         let scalars = Self.effectBoxScalars(of: piece, canvasSize: canvasSize)
         let moved = rest.effect.parameters.filter { parameter in
             guard parameter.isScalarAnimatable, let value = scalars[parameter.id],
@@ -1236,14 +1266,14 @@ extension CanvasManager {
         for parameter in moved {
             let route = applyEffectParameterEdit(target, parameter: parameter,
                                                  newValue: scalars[parameter.id] ?? 0,
-                                                 atFrame: currentFrame)
+                                                 atFrame: frame)
             if route == .key || route == .seedAndKey { wroteKey = true }
         }
         commitStructureGesture(label: wroteKey ? .effectKeys : .valueLayerEffect)
     }
 
-    /// **The pose a container float is showing right now** — the rest pose it came up on, carried
-    /// through the delta the box has travelled.
+    /// **The pose a container box is showing right now** — the pose its gesture found, carried
+    /// through the delta the box has travelled since that gesture began (`BoxNudge.originTransform`).
     ///
     /// **The delta acts on the corners, not on the box**, which is what makes composition a
     /// one-liner: a pose *is* "these four corners for that box", so carrying the corners through the
@@ -1258,22 +1288,29 @@ extension CanvasManager {
     /// wrote `distortQuad`, the outline foreshortened under the finger and **the canvas did not
     /// follow**. That is this repo's "a refusal with no notice" wearing a caption. Both halves are
     /// gone: the residue is carried, and `distortUnavailableReason` no longer names the container.
+    /// The box's map is its quad carried through its transform, so the delta is the map now after
+    /// the inverse of the map the gesture found — a residue pulled by an earlier gesture is in both
+    /// and cancels.
     ///
-    /// **The affine arm is kept rather than folded into the projective one**, `antsMap`'s own
-    /// reason one type over: a box resting at its lift has to produce **exactly** the pose it came
-    /// up on, because `PoseQuad.isIdentity` is an exact comparison that decides whether the leaves
-    /// beneath get a derivation at all.
-    static func containerPose(_ rest: PoseQuad, movedBy piece: FloatingPiece) -> PoseQuad? {
-        guard let liftInverse = CanvasManager.invertedAffine(piece.liftTransform.affineTransform)
+    /// **A box resting where its gesture found it produces exactly the pose it found**, before any
+    /// arithmetic, because `PoseQuad.isIdentity` is an exact comparison that decides whether the
+    /// leaves beneath get a derivation at all, and an inverse composed with itself is not always
+    /// bit-exact. The affine arm is kept beside the projective one for `antsMap`'s own reason one
+    /// type over.
+    static func containerPose(_ rest: PoseQuad, movedBy piece: FloatingPiece, since nudge: BoxNudge) -> PoseQuad? {
+        guard piece.transform != nudge.originTransform || piece.distortQuad != nudge.originQuad else { return rest }
+        guard let originInverse = CanvasManager.invertedAffine(nudge.originTransform.affineTransform)
         else { return nil }
-        // The projective residue on its own, in the box's local space — `antsMap`'s expression, and
-        // nil for every gesture that is not a Distort.
-        guard piece.distortQuad != nil,
-              let residue = Homography(rect: piece.localBox, to: piece.localQuad) else {
-            let delta = liftInverse.concatenating(piece.transform.affineTransform)
+        guard piece.distortQuad != nil || nudge.originQuad != nil else {
+            let delta = originInverse.concatenating(piece.transform.affineTransform)
             return PoseQuad(box: rest.box, corners: rest.corners.mapped(by: delta))
         }
-        let delta = Homography(piece.transform.affineTransform) * residue * Homography(liftInverse)
+        // Each projective residue on its own, in the box's local space — `antsMap`'s expression.
+        guard let residue = Homography(rect: piece.localBox, to: piece.localQuad),
+              let originResidue = Homography(rect: piece.localBox, to: nudge.originQuad ?? Quad.rect(piece.localBox)),
+              let originResidueInverse = originResidue.inverse else { return nil }
+        let delta = Homography(piece.transform.affineTransform) * residue * originResidueInverse
+            * Homography(originInverse)
         guard let corners = PoseInterpolation.mapped(rest.corners, through: delta) else { return nil }
         return PoseQuad(box: rest.box, corners: corners)
     }
@@ -1434,6 +1471,7 @@ extension CanvasManager {
     /// the overlay's drag produces both — `nil` from the arms that do not distort, which is the whole
     /// of what "this gesture left the corners alone" means.
     func updateFloatingPose(transform: FloatingTransform, distortQuad: Quad?) {
+        beginBoxNudgeIfNeeded()
         floatingPiece?.transform = transform
         floatingPiece?.distortQuad = distortQuad
         // **§5.1 step 3 for the Move box: the quad surface routes its continuous values through the
@@ -1446,27 +1484,76 @@ extension CanvasManager {
         showEffectBoxLive()
     }
 
+    // MARK: One gesture on a box that writes the document — TODO (153)
+
+    /// **Latches what a box's gesture is about to change, if no gesture is already open** — the first
+    /// tick of a drag, or a press of Mirror, Rotate or Reset, before the box moves. `BoxNudge` says
+    /// why this is per gesture and never per box.
+    ///
+    /// Read from the document as it stands, which between gestures is exactly what every other writer
+    /// left it as: a key placed by Add Keys, a node dragged in the graph editor, an undo — none of it is
+    /// in a copy that could be put back over it.
+    private func beginBoxNudgeIfNeeded() {
+        guard let piece = floatingPiece, piece.nudge == nil, let target = piece.containerTarget else { return }
+        let rest: BoxNudge.Rest
+        switch piece.kind {
+        case .containerPose:
+            guard let pose = containerPose(of: target) else { return }
+            rest = .container(pose)
+        case .effectBox:
+            guard let effect = storedEffect(of: target) else { return }
+            rest = .effect(EffectBoxRest(effect: effect, tracks: keyframeState(of: target).tracks))
+        case .move, .duplicate:
+            return
+        }
+        floatingPiece?.nudge = BoxNudge(rest: rest, frame: currentFrame,
+                                        originTransform: piece.transform, originQuad: piece.distortQuad)
+    }
+
+    /// **Ends the gesture on the box that is up: what it did lands as one undo step, routed at the
+    /// frame it was made on, and the box stays up holding nothing** — the finger lifting off the box
+    /// (`CanvasView`'s `moveBoxTouchUp`), each press of Mirror, Rotate and Reset, and a playhead that
+    /// moves under an open gesture.
+    ///
+    /// **Not while a live take owns the box.** A take *is* playback, the finger can lift and land again
+    /// inside one, and its samples compose onto the state the take found; settling between them would
+    /// key the take's own preview. The take's commit writes from its base and takes the box down
+    /// (`dismissRecordedMoveBox`), and a take that captured nothing leaves the gesture open for the
+    /// next settle, which then lands the ordinary Move the artist made.
+    func settleBoxNudge() {
+        guard let piece = floatingPiece, let nudge = piece.nudge, !recordingOwnsMoveBox else { return }
+        floatingPiece?.nudge = nil
+        commitBoxNudge(nudge, of: piece)
+    }
+
+    private func commitBoxNudge(_ nudge: BoxNudge, of piece: FloatingPiece) {
+        switch nudge.rest {
+        case .container(let pose): commitContainerNudge(pose, atFrame: nudge.frame, of: piece, since: nudge)
+        case .effect(let rest): commitEffectBoxNudge(rest, atFrame: nudge.frame, of: piece)
+        }
+    }
+
     /// **The pose the box is at, handed to the recorder** — KEYFRAMES.md §5's Move-box surface.
     ///
     /// It computes exactly what `showContainerPoseLive` is about to preview and what
-    /// `commitContainerFloat` would commit, which is the point: a take's keys hold the same absolute
+    /// `commitContainerNudge` would commit, which is the point: a take's keys hold the same absolute
     /// poses an unrecorded Move would have written, so a recorded drag and a hand-keyed one cannot
     /// disagree about where the drawing went.
     ///
     /// **`resolvedPose(atFrame: currentFrame)` is re-read per sample rather than latched**, and that is
-    /// what makes a take over an *already animated* container right: `containerPose(_:movedBy:)`
+    /// what makes a take over an *already animated* container right: `containerPose(_:movedBy:since:)`
     /// composes the box's delta onto the pose in force at this frame, so the recorded curve carries the
     /// existing animation plus the drag — and the track it replaces is therefore not lost.
     private func recordContainerPoseSample() {
         guard isRecording, let piece = floatingPiece, piece.kind == .containerPose,
-              let target = piece.containerTarget, let restState = piece.containerRest,
-              let posed = Self.containerPose(restState.resolvedPose(atFrame: currentFrame),
-                                             movedBy: piece)
+              let target = piece.containerTarget, let nudge = piece.nudge,
+              case .container(let found) = nudge.rest,
+              let posed = Self.containerPose(found.resolvedPose(atFrame: currentFrame), movedBy: piece, since: nudge)
         else { return }
         recordMoveBoxSample(target, pose: posed)
     }
 
-    /// **The container float's preview: write the pose the box is at, and let the canvas draw it.**
+    /// **The container box's preview: write the pose the box is at, and let the canvas draw it.**
     ///
     /// A raster piece previews itself — it is a bitmap and the overlay holds it — and a vector float
     /// previews through a latched `CATransform3D`. A transformation layer can do neither, because
@@ -1474,17 +1561,16 @@ extension CanvasManager {
     /// *re-posed* rather than resampled. So the preview is the real thing: the stored pose is written
     /// on every tick and the ordinary render path composites through it.
     ///
-    /// **It records no undo step**, deliberately, which is the raster Move's rule (one step, at the
-    /// bake) rather than the vector float's (one per nudge). `containerRestPose` is what makes that
-    /// safe: the commit puts the stored pose back to it before routing, so the step the writer
-    /// records restores the pose the drag *started* from and not the one it was standing on.
+    /// **It records no undo step.** The gesture's settle does (`settleBoxNudge`), one per drag — the
+    /// vector float's one-per-nudge rule, LASSO_MOVE.md §5.5 — and it puts the stored pose back to
+    /// the one the gesture found before routing, so the step restores the pose the drag *started* from
+    /// and not the one it was standing on.
     private func showContainerPoseLive() {
         guard let piece = floatingPiece, piece.kind == .containerPose,
-              let target = piece.containerTarget,
-              let restState = piece.containerRest,
+              let target = piece.containerTarget, let nudge = piece.nudge,
+              case .container(let found) = nudge.rest,
               let current = containerPose(of: target),
-              let posed = Self.containerPose(restState.resolvedPose(atFrame: currentFrame),
-                                             movedBy: piece)
+              let posed = Self.containerPose(found.resolvedPose(atFrame: currentFrame), movedBy: piece, since: nudge)
         else { return }
         // **Written wherever `resolvedPose` reads**, or the preview shows nothing on exactly the
         // documents this feature is for: a keyed component shows its curve, not the base, so writing
@@ -1493,12 +1579,12 @@ extension CanvasManager {
         // commit will take — the changed components keyed here, an unkeyed one seeded — so letting go
         // changes nothing on screen.
         //
-        // Composed onto the **lift** state rather than onto the live one, so a hundred ticks of a
-        // drag leave one key rather than a hundred baselines of drift.
-        var live = restState
+        // Composed onto the state the **gesture found** rather than onto the live one, so a hundred
+        // ticks of a drag leave one key rather than a hundred baselines of drift.
+        var live = found
         live.pose = posed
         if !live.track.isEmpty, let new = PoseComponents.decompose(posed, inBox: live.track.box) {
-            live.track.key(new, over: restState.resolvedValues(atFrame: currentFrame),
+            live.track.key(new, over: found.resolvedValues(atFrame: currentFrame),
                            atFrame: currentFrame, placed: placedKeys(of: target))
         }
         guard current != live, case .layer(let id) = target,
@@ -1655,12 +1741,15 @@ extension CanvasManager {
     /// a piece the artist has already turned mirrors across the axis they can see, not the screen's.
     func mirrorFloating(horizontal: Bool) {
         if floatingPiece != nil {
+            beginBoxNudgeIfNeeded()
             if horizontal { floatingPiece!.transform.flipH.toggle() } else { floatingPiece!.transform.flipV.toggle() }
-            // The container float's preview lives in the document rather than in the overlay, so every
-            // site that moves a piece has to end here — `updateFloatingPose`'s tail. Free on a raster
-            // piece: the first guard fails and nothing is read.
+            // A box's preview lives in the document rather than in the overlay, so every site that
+            // moves a piece has to end here — `updateFloatingPose`'s tail — and a press is a whole
+            // gesture, so it settles at once. Free on a raster piece: the first guard fails and
+            // nothing is read.
             showContainerPoseLive()
             showEffectBoxLive()
+            settleBoxNudge()
             return
         }
         guard let float = vectorFloat else { return }
@@ -1678,11 +1767,13 @@ extension CanvasManager {
     /// lives and why eight presses of 45° land the piece bit-exactly where it started.
     func rotateFloating(eighths: Int) {
         if let piece = floatingPiece {
+            beginBoxNudgeIfNeeded()
             floatingPiece!.transform.rotation = FixedAngleRotation.stepped(from: piece.transform.rotation,
                                                                           lift: piece.liftTransform.rotation,
                                                                           eighths: eighths)
             showContainerPoseLive()
             showEffectBoxLive()
+            settleBoxNudge()
             return
         }
         guard let float = vectorFloat else { return }
@@ -1761,10 +1852,12 @@ extension CanvasManager {
     /// The raster arm records nothing, and that is the same rule rather than an exception: a raster
     /// Move puts **one** step on the stack, at the bake, and nothing about the in-flight transform is
     /// undoable — so there is no per-nudge step for Reset to sit beside. One Undo after the bake still
-    /// reverts the whole move, Reset or no Reset.
+    /// reverts the whole move, Reset or no Reset. The two boxes take the vector rule: a press is a
+    /// gesture, and it settles as one step like a drag does.
     func resetFloating() {
         guard canResetFloating else { return }
         if let piece = floatingPiece {
+            beginBoxNudgeIfNeeded()
             floatingPiece!.transform = piece.liftTransform
             // "Snap it back to where I picked it up" includes the shape it was picked up in, and a
             // lift is always undistorted — `beginMove` and `beginDuplicate` build the piece from a
@@ -1772,11 +1865,12 @@ extension CanvasManager {
             // the *same value* an unlifted one is, and every `distortQuad != nil` question above
             // answers the way it did before the drag.
             floatingPiece!.distortQuad = nil
-            // The container float's preview lives in the document, not in the overlay, so snapping
-            // the box back has to snap the pose back with it — `updateFloatingPose`'s tail, reached
-            // from the one other place that moves a piece without going through it.
+            // A box's preview lives in the document, not in the overlay, so snapping the box back has
+            // to snap the pose back with it — `updateFloatingPose`'s tail, reached from the one other
+            // place that moves a piece without going through it.
             showContainerPoseLive()
             showEffectBoxLive()
+            settleBoxNudge()
             return
         }
         guard let float = vectorFloat else { return }
@@ -1796,17 +1890,13 @@ extension CanvasManager {
     func commitFloatingPieceIfNeeded() -> Bool {
         guard let piece = floatingPiece, let canvasSize else { return false }
         floatingPiece = nil
-        // **The container float bakes nothing and returns here**, before a single line of the pixel
-        // path below. It has no `pieceImage` worth rendering, no remainder to composite against and
-        // no cel to write into — the whole of its commit is one routed write onto `Layer.transform`.
-        if piece.kind == .containerPose {
-            commitContainerFloat(piece)
-            return true
-        }
-        // And the effect box, for the same reason: no bitmap, no remainder, no cel — its commit is
-        // five routed writes onto a grade.
-        if piece.kind == .effectBox {
-            commitEffectBoxFloat(piece)
+        // **The two boxes bake nothing and return here**, before a single line of the pixel path
+        // below. Neither has a `pieceImage` worth rendering, a remainder to composite against or a cel
+        // to write into: every gesture they took has already landed at its own settle, and what is
+        // left is at most the one still open — a routed write onto `Layer.transform`, or five onto a
+        // grade.
+        if piece.kind == .containerPose || piece.kind == .effectBox {
+            if let nudge = piece.nudge { commitBoxNudge(nudge, of: piece) }
             return true
         }
         // §5.6, and since 2026-08-22 the raster tool's rule as well as the vector one: the ants clear
@@ -1848,8 +1938,8 @@ extension CanvasManager {
         return true
     }
 
-    /// **A container float's whole commit** — put the pose back where the drag found it, then route
-    /// the move through `commitContainerPose`.
+    /// **One container gesture's commit** — put the pose back where the gesture found it, then route
+    /// the move through `commitContainerPose` at the frame the gesture was made on.
     ///
     /// **The restore is not a no-op and it is not cosmetic.** `showContainerPoseLive` has been
     /// writing the stored pose on every tick, so by the time this runs the model already holds the
@@ -1857,22 +1947,22 @@ extension CanvasManager {
     /// without this line that baseline would *be* the drag — one press of Undo would put the drawing
     /// back exactly where the artist had just dragged it, which is a control that appears not to
     /// work. Writing the field directly rather than through `writeContainerPose` is what keeps the
-    /// restore off the history: it is undoing a preview, not an edit.
+    /// restore off the history: it is undoing a preview, not an edit. **And it is safe only because
+    /// `found` is this gesture's** — a copy older than the gesture would put back over whatever else
+    /// was written since (TODO (153)).
     ///
     /// **A move that ended where it began writes nothing at all** — including no undo step — which is
     /// the raster arm's own behaviour reached by comparing poses rather than pixels.
-    private func commitContainerFloat(_ piece: FloatingPiece) {
-        guard let target = piece.containerTarget,
-              let restState = piece.containerRest,
-              containerPose(of: target) != nil
-        else { return }
-        let rest = restState.resolvedPose(atFrame: currentFrame)
-        guard let posed = Self.containerPose(rest, movedBy: piece),
+    private func commitContainerNudge(_ found: LayerPose, atFrame frame: Int, of piece: FloatingPiece,
+                                      since nudge: BoxNudge) {
+        guard let target = piece.containerTarget, containerPose(of: target) != nil else { return }
+        let rest = found.resolvedPose(atFrame: frame)
+        guard let posed = Self.containerPose(rest, movedBy: piece, since: nudge),
               case .layer(let id) = target,
               let index = layers.firstIndex(where: { $0.id == id }) else { return }
-        layers[index].transform = restState
+        layers[index].transform = found
         guard posed != rest else { return }
-        commitContainerPose(target, restingAt: rest, movedTo: posed, atFrame: currentFrame)
+        commitContainerPose(target, restingAt: rest, movedTo: posed, atFrame: frame)
     }
 
     // MARK: Fill / Clear (one-shot pixel edits on the current selection)

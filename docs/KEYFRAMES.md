@@ -995,8 +995,12 @@ it — because §2.3's whole content is that the content beneath is re-posed rat
 bitmap preview would be a picture of the wrong feature. And **the commit puts the preview back before it
 routes**, since `commitContainerPose` reads the stored pose to take its undo baseline from; without that
 line one press of Undo leaves the drawing exactly where the artist had just dragged it.
-`FloatingPiece.containerRest` carries the whole `LayerPose` the lift found, which is also what lets a
-second Move compose onto the first instead of replacing it.
+`FloatingPiece.nudge` carries the whole `LayerPose` **the gesture** found — taken at the first tick of a
+drag and settled, as one undo step routed at the frame it was made on, when the finger lifts — which is
+also what lets a second Move compose onto the first instead of replacing it. **It is never held between
+gestures** (TODO (153)): the box stays up across scrubs, Add Keys and graph-editor edits, and a copy taken
+when the box was raised and put back when it went away overwrote all of them — a keyed transformation
+layer lost its keys from every saved version, because the autosave also waited on the box.
 
 **Every arm of the writer writes the stored base, and that is the one real difference from a cel
 channel.** `commitTransformPose`'s `.key` arm *takes the bake back* because a cel has no stored base and
@@ -1496,9 +1500,9 @@ that started a Move-box take ended it in the same run loop and the artist was to
 recorded"* for a drag they had just made. `CanvasManager.recordingOwnsMoveBox` is the narrow predicate
 both rules now ask, and it was found by driving the feature.
 
-**The box comes down when the take has taken it**, and that is load-bearing rather than tidy: the float's
-own commit restores `containerRest` and writes one key at the playhead, and `showContainerPoseLive`
-composes onto that same rest on every tick — so a box left up would overwrite the recorded track at the
+**The box comes down when the take has taken it**, and that is load-bearing rather than tidy: a take
+leaves the box's gesture open, that gesture's commit restores the pose it found before the take and
+writes one key at the playhead, and `showContainerPoseLive` composes onto that same pose on every tick — so a box left up would overwrite the recorded track at the
 next touch or the next tap-away. A take that wrote nothing leaves the box alone, because what the artist
 then has is the ordinary Move they were making.
 

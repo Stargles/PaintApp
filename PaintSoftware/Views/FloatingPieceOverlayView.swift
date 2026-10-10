@@ -23,14 +23,16 @@ final class FloatingPieceOverlayView: TransformOverlayView, UIGestureRecognizerD
     /// here decides anything.
     ///
     /// **Before the gesture's own `.began` latch**, which is the ordering §5.1 calls load-bearing: a
-    /// container float opens no undo bracket per nudge, so the take's bracket is the only one either
-    /// way, but the take must start before the first `apply()` or its first sample is not the pose the
-    /// artist started from.
+    /// box's gesture opens no undo bracket of its own — it records its one step when it settles at
+    /// `onBoxTouchUp` — so the take's bracket is the only one either way, but the take must start
+    /// before the first `apply()` or its first sample is not the pose the artist started from.
     var onBoxTouchDown: (() -> Void)?
 
     /// **The finger that landed on the box has lifted, or its gesture was cancelled** — the end of
     /// the live transform edit `onBoxTouchDown` began (TODO (125)), which is what lets the baker
-    /// bake the result. Fired once per claimed touch sequence, from the pan that claimed it.
+    /// bake the result, and where a box that writes the document lands its drag
+    /// (`CanvasManager.settleBoxNudge`). Fired once per claimed touch sequence, from the pan that
+    /// claimed it.
     var onBoxTouchUp: (() -> Void)?
 
     /// What a touch that joins a drag does to it, and the pill that says what angle the rotate knob

@@ -3435,7 +3435,7 @@ extension Effect {
                 extract: { if case .duplicateOffset(let p) = $0 { return p }; return nil },
                 embed: { .duplicateOffset($0) })
             // **The box's five scalars first, every one a continuous `Double`, keyable** — the ids
-            // the Move box writes through (`CanvasManager.commitEffectBoxFloat` looks them up by
+            // the Move box writes through (`CanvasManager.commitEffectBoxNudge` looks them up by
             // name, so these five strings are load-bearing twice: a saved track stores them and the
             // box's commit addresses them). The sliders are the precise way in; the box is the
             // gestural one, and both write the same address.

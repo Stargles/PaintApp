@@ -772,7 +772,14 @@ extension CanvasManager {
 
         var after = before
         // Every arm, for the reason above: the edit writes the stored base exactly as it always did.
-        after.pose = posed
+        // **A pose within the commit's own change tolerance of rest is written as rest** —
+        // `Values.isResting(in:)`, the threshold a keyed channel already reads. Each Move box gesture
+        // composes onto what the last one committed (`BoxNudge`), so a Reset, or a turn and its
+        // counter-turn, arrives carrying an inverse's rounding; stored raw it would fail
+        // `PoseQuad.isIdentity`'s exact test and cost every frame beneath a derivation.
+        let resting = PoseQuad(restingIn: posed.box)
+        after.pose = PoseComponents.decompose(posed, inBox: posed.box)?.isResting(in: posed.box) == true
+            ? resting : posed
 
         switch route {
         case .storedValue:
@@ -841,7 +848,7 @@ extension CanvasManager {
     /// this path may put back into force.
     ///
     /// **Not `private`: `CanvasManager+Recording.swift` restores a take's base pose through it**
-    /// (KEYFRAMES.md §5's Move box surface), for the same reason `commitContainerFloat` writes the
+    /// (KEYFRAMES.md §5's Move box surface), for the same reason `commitContainerNudge` writes the
     /// field directly — putting a *preview* back is not an edit and must stay off the history. That is
     /// `targetExists`' precedent one file over, and the alternative was a second spelling of this
     /// `switch` in the recorder, which is how two writers drift apart.

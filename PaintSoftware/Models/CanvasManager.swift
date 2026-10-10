@@ -1900,28 +1900,41 @@ final class CanvasManager: ObservableObject {
         commitGradientEdit()
     }
 
-    /// Whether `commitAllInteractiveState()` would settle anything. The autosave's hold — TODO (76):
+    /// Whether `settleInteractiveState()` would settle anything. The autosave's hold — TODO (76):
     /// a save nobody asked for must never bake the fill, shape, text, selection edit or floating
     /// piece the artist is still adjusting, so it waits for them instead of committing them.
+    ///
+    /// **A Move box between gestures is not among them** (`FloatingPiece.holdsUnsettledEdit`): every
+    /// drag on it has already landed, so there is nothing to wait for. Until TODO (153) it held the
+    /// autosave for as long as it was up, and a box raised from the graph editor's channel list stays
+    /// up through a whole keying session — so a session's keys were in no saved version at all.
     var hasInteractiveStatePending: Bool {
         fillGestureActive || shapeGestureActive || textGestureActive || selectionEdit != nil
-            || gradientEdit != nil || floatingPiece != nil || vectorFloat != nil
+            || gradientEdit != nil || floatingPiece?.holdsUnsettledEdit == true || vectorFloat != nil
     }
 
-    /// `beginCanvasEdit()` plus settling a floating Move/Duplicate piece — for the points where the
-    /// active tool is being replaced (tool switch, layer/frame change, save), at which a piece left
-    /// floating would otherwise be stranded or silently discarded.
-    func commitAllInteractiveState() {
+    /// **Lands every edit still in flight, and leaves a Move box between gestures up** — what a save
+    /// does before it snapshots. A save is not a tool switch: a box that holds nothing the document
+    /// lacks is left where the artist put it, so an autosave does not take it away from under them.
+    func settleInteractiveState() {
         beginCanvasEdit()
         // A selection edit still open when the tool changes out from under the artist is committed
         // as the one step it was going to be (TODO (42)) — the lifted-but-adjustable fill's rule. A
         // drag with nothing applied yet commits to nothing and records nothing.
         commitSelectionEdit()
-        commitFloatingPieceIfNeeded()
+        if floatingPiece?.holdsUnsettledEdit == true { commitFloatingPieceIfNeeded() }
         // A lasso move's float joins the raster piece at the same chokepoint, and that one line is
         // what covers tool switch, panel switch, save and backgrounding. Missing one of those is how
         // a float gets stranded — suppressed artwork in the saved document, rendering nowhere.
         commitVectorFloatIfNeeded()
+    }
+
+    /// `settleInteractiveState()` plus taking down a Move box — for the points where the active tool
+    /// is being replaced (tool switch, layer/frame change, an edit that needs the canvas to itself),
+    /// at which a piece left floating would otherwise be stranded or silently discarded.
+    func commitAllInteractiveState() {
+        settleInteractiveState()
+        commitFloatingPieceIfNeeded()
     }
 
     /// Enters the text tool — the Actions menu's "Add Text" row, and the only way in.

@@ -224,8 +224,9 @@ struct ContentView: View {
         }
         // An adjustable fill, an adjustable smart shape, and a mid-transform move/duplicate are all
         // UI-only state (see `CanvasManager.beginCanvasEdit`) — bake every one of them in before
-        // saving, or backgrounding the app silently drops whichever was still pending.
-        canvasManager.commitAllInteractiveState()
+        // saving, or backgrounding the app silently drops whichever was still pending. A Move box
+        // between gestures holds none, and stays up (`settleInteractiveState`).
+        canvasManager.settleInteractiveState()
         let url = canvasManager.projectURL
             ?? ProjectStore.createNewProjectURL(name: canvasManager.projectName,
                                                 in: newProjectFolder ?? ProjectStore.projectsDirectory)
@@ -264,7 +265,7 @@ struct ContentView: View {
         canvasManager.damagedSaveAnswered = true
         // Back through `saveIfNeeded`, not straight to `ProjectStore.save`: the banner does not block
         // the canvas, so the artist may have started an interactive fill or shape while it was up, and
-        // `commitAllInteractiveState` is what stops that being silently dropped.
+        // `settleInteractiveState` is what stops that being silently dropped.
         saveIfNeeded(intent: .artist, completion: pending.completion)
     }
 

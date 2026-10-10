@@ -16,9 +16,9 @@ import UIKit
 ///    neither `setStoredEffect` nor `setStoredValue`.
 /// 2. **A take starts playback, and a moving playhead commits a floating piece.** Unfixed, the first cel
 ///    boundary the take crossed would settle the box mid-drag and write one key at that frame.
-/// 3. **A box left up after a take destroys it.** `commitContainerFloat` restores `containerRest` and
-///    writes one key; `showContainerPoseLive` composes onto that same rest on every tick. Either would
-///    overwrite the recorded track.
+/// 3. **A box left up after a take destroys it.** The take leaves the box's gesture open, and that
+///    gesture's commit restores the pose it found and writes one key; `showContainerPoseLive` composes
+///    onto that same pose on every tick. Either would overwrite the recorded track.
 /// 4. **Two of the three Move boxes pose nothing a take can write**, and they look identical to the one
 ///    that does.
 ///
@@ -231,7 +231,7 @@ final class MoveBoxRecordingLogicTests: XCTestCase {
     ///
     /// `showContainerPoseLive` has been writing the stored pose on every tick so the artist can see the
     /// box move. If the take kept that, the move would apply twice — once from the base and once from
-    /// the curve — which is `commitContainerFloat`'s own recorded reason for making the identical
+    /// the curve — which is `commitContainerNudge`'s own recorded reason for making the identical
     /// restore on an unrecorded Move.
     ///
     /// Operands: the stored base after the take, and the resting pose the document started with, bit
@@ -276,8 +276,8 @@ final class MoveBoxRecordingLogicTests: XCTestCase {
     /// **The box is taken down when the take has taken it, and the commit that would have written it is
     /// then a no-op.**
     ///
-    /// This is hazard 3, and both halves are needed. `commitContainerFloat` restores `containerRest` and
-    /// writes one key at the playhead, so a box left up would overwrite the recorded track the moment
+    /// This is hazard 3, and both halves are needed. The open gesture's commit restores the pose it found
+    /// and writes one key at the playhead, so a box left up would overwrite the recorded track the moment
     /// the artist tapped away — and the track is what the take is *for*.
     func testTheBoxComesDownWithTheTakeSoNothingOverwritesTheCurve() throws {
         let (manager, clock) = movingDocument()

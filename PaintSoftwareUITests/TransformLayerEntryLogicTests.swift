@@ -228,8 +228,8 @@ final class TransformLayerEntryLogicTests: XCTestCase {
     ///
     /// The box lifts at rest every time — `FloatingTransform` cannot express a skew, so seeding it
     /// from an existing pose would mean writing `distortQuad`, which every other path treats as a
-    /// live gesture's projective residue. So the delta has to be composed onto the pose the lift
-    /// found, and `FloatingPiece.containerRest` is what carries it.
+    /// live gesture's projective residue. So the delta has to be composed onto the pose the gesture
+    /// found, and `FloatingPiece.nudge` is what carries it.
     ///
     /// If this went red the second drag would throw the first away, which is the "content teleports
     /// back" shape the rest of this file's Move paths are shaped to avoid.
@@ -296,7 +296,10 @@ final class TransformLayerEntryLogicTests: XCTestCase {
     ///
     /// Reset is the assertion that could not pass by accident: it is the only one whose *correct*
     /// answer is the pose the layer started at, so a `resetFloating` that forgot the preview would
-    /// leave the rotation on screen and this would go red.
+    /// leave the rotation on screen and this would go red. **Each press is a gesture of its own**
+    /// (`BoxNudge`, TODO (153)) — it lands when pressed, as one undo step — so Reset composes the box's
+    /// way back onto the mirror that landed before it, and the commit's rest tolerance is what makes
+    /// that land on the resting pose to the bit rather than an inverse's rounding away from it.
     func testTheMoveBarsOwnControlsCarryTheContainerPoseWithTheBox() {
         let manager = makeTransformLayer()
         let at = manager.layers.count - 1
@@ -313,10 +316,15 @@ final class TransformLayerEntryLogicTests: XCTestCase {
         manager.resetFloating()
         XCTAssertEqual(manager.layers[at].transform, rest,
                        "Snapping the box back snaps the content back — the preview is the document")
+        XCTAssertEqual(manager.layers[at].transform?.pose.isIdentity, true,
+                       "…exactly, so a layer turned and reset costs the frames beneath it no derivation")
 
         XCTAssertTrue(manager.commitFloatingPieceIfNeeded())
         XCTAssertEqual(manager.layers[at].transform, rest,
-                       "…and a reset gesture commits nothing, having ended where it began")
+                       "…and taking the box down writes nothing more, every press having landed")
+
+        manager.undo()
+        XCTAssertEqual(manager.layers[at].transform, mirrored, "One press of Undo takes back the Reset alone")
     }
 
     // MARK: - Routing (§2.27)
