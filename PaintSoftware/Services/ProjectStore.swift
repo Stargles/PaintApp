@@ -2116,9 +2116,9 @@ enum ProjectStore {
 
         // The pose channels. A cel whose animation file is missing or unreadable loads with its ink
         // where it stores it rather than failing the project — the same "the link, not the drawing"
-        // rule the recipe above follows, and the reason both are sidecars. **But the loss is counted**
-        // (TODO (153)): the motion is the artist's work, and an unreported loss is one the next save
-        // makes permanent, which `SaveDamageGate` exists to stop.
+        // rule the recipe above follows, and the reason both are sidecars. **But the loss is counted**:
+        // the motion is the artist's work, and an unreported loss is one the next save makes
+        // permanent, which `SaveDamageGate` exists to stop.
         var animation = CelAnimationData()
         if let animationFileName = celManifest.animationFileName {
             if let data = try? Data(contentsOf: fileURL(animationFileName, .animation)),

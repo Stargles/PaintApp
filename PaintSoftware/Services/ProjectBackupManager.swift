@@ -251,6 +251,10 @@ nonisolated enum ProjectBackupManager {
 
         repairCorruptedProjects()
 
+        // Throwaway: rewrites pose tracks that earlier builds wrote into the current format, across the
+        // library, saved versions included. After the snapshot, whose own clone it leaves as it was.
+        LegacyPoseTrackRepair.repairLibrary(leavingUntouched: "preupdate-\(sanitizedSignature(signature))")
+
         // TODO (57): move each project's JSON sidecars out from under `images/`. **After the repair**
         // so a damaged package is restored before we look at it, and **before the purges** so nothing
         // is name-matched against a half-reconciled tree. It is idempotent, it never copies, it

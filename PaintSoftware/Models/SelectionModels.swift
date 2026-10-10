@@ -348,14 +348,12 @@ struct EffectBoxRest: Equatable {
 /// what the document held when the gesture began, the frame it began on, and where the box was.
 ///
 /// **Taken when the gesture begins and settled when it ends** (`CanvasManager.settleBoxNudge`), never
-/// held between gestures — TODO (153). The preview writes the document on every tick, so the commit
-/// has to put the found state back before it routes, or one press of Undo would leave the drawing
-/// where the drag had just put it. But the box stays up across scrubs, Add Keys, graph-editor edits
-/// and undo, each of which writes the very layer it is over; a copy kept for the box's whole life and
-/// put back when it went away overwrote every one of them, at whatever frame the playhead had reached
-/// — and the autosave, waiting on the box, had written none of them. That is how a keyed transformation
-/// layer lost its keys from every saved version. Between gestures the box holds no copy of anything,
-/// so there is nothing to put back.
+/// held between gestures. The preview writes the document on every tick, so the commit has to put the
+/// found state back before it routes, or one press of Undo would leave the drawing where the drag had
+/// just put it. But the box stays up across scrubs, Add Keys, graph-editor edits and undo, each of
+/// which writes the very layer it is over; a copy kept for the box's whole life and put back when it
+/// went away would overwrite every one of them, at whatever frame the playhead had reached. Between
+/// gestures the box holds no copy of anything, so there is nothing to put back.
 struct BoxNudge {
     enum Rest {
         case container(LayerPose)
@@ -1204,7 +1202,7 @@ extension CanvasManager {
     /// before it routes.
     private func showEffectBoxLive() {
         guard let piece = floatingPiece, piece.kind == .effectBox,
-              let target = piece.containerTarget, case .effect(let rest)? = piece.nudge?.rest,
+              let target = piece.containerTarget, let nudge = piece.nudge, case .effect(let rest) = nudge.rest,
               let canvasSize, storedEffect(of: target) != nil
         else { return }
         var effect = rest.effect
@@ -1213,7 +1211,7 @@ extension CanvasManager {
         for parameter in effect.parameters where parameter.isScalarAnimatable {
             guard let value = scalars[parameter.id] else { continue }
             if var curve = tracks[parameter.id], !curve.isEmpty {
-                curve.setKey(AnimationCurve.Key(frame: currentFrame, value: value))
+                curve.setKey(AnimationCurve.Key(frame: nudge.frame, value: value))
                 tracks[parameter.id] = curve
             } else {
                 effect = parameter.write(effect, value)
@@ -1241,7 +1239,7 @@ extension CanvasManager {
         }
     }
 
-    /// **One effect-box gesture's commit** — put the grade back where the gesture found it, then route
+    /// **One effect-box gesture's commit, the grade already back where the gesture found it** — route
     /// each of the five through the settings bar's own writer at the frame the gesture was made on,
     /// inside one gesture bracket, so the gesture is one undo step whether it wrote values or keys.
     /// `commitContainerNudge`'s shape, one payload over, and with the same rule: a box that ended
@@ -1249,7 +1247,6 @@ extension CanvasManager {
     private func commitEffectBoxNudge(_ rest: EffectBoxRest, atFrame frame: Int, of piece: FloatingPiece) {
         guard let target = piece.containerTarget, let canvasSize,
               storedEffect(of: target) != nil else { return }
-        writeEffectStateOffHistory(target, effect: rest.effect, tracks: rest.tracks)
         guard let resolved = resolvedEffect(of: target, atFrame: frame) else { return }
         let scalars = Self.effectBoxScalars(of: piece, canvasSize: canvasSize)
         let moved = rest.effect.parameters.filter { parameter in
@@ -1481,7 +1478,7 @@ extension CanvasManager {
         showEffectBoxLive()
     }
 
-    // MARK: One gesture on a box that writes the document — TODO (153)
+    // MARK: One gesture on a box that writes the document
 
     /// **Latches what a box's gesture is about to change, if no gesture is already open** — the first
     /// tick of a drag, or a press of Mirror, Rotate or Reset, before the box moves. `BoxNudge` says
@@ -1524,12 +1521,52 @@ extension CanvasManager {
         commitBoxNudge(nudge, of: piece)
     }
 
+    /// **Drops the gesture that is open, leaving the document as the gesture found it** — Undo and
+    /// Redo pressed with a finger still on the box. A drag is not a step until the finger lifts, and
+    /// the two presses act on steps: settling it first would make the press undo the drag in the
+    /// artist's hand instead of the step before it, and a Redo would find its stack cleared by a step
+    /// nobody finished. The fill, the shape and the text session under a finger are discarded the same
+    /// way. The box stays up under the finger; the drag carries on from where the box is, and the
+    /// lift writes only what it moved since.
+    ///
+    /// Not while a live take owns the box, for `settleBoxNudge`'s reason.
+    func cancelBoxNudge() {
+        guard let piece = floatingPiece, let nudge = piece.nudge, !recordingOwnsMoveBox else { return }
+        floatingPiece?.nudge = nil
+        putBack(nudge.rest, of: piece)
+    }
+
     private func commitBoxNudge(_ nudge: BoxNudge, of piece: FloatingPiece) {
+        putBack(nudge.rest, of: piece)
         switch nudge.rest {
         case .container(let pose): commitContainerNudge(pose, atFrame: nudge.frame, of: piece, since: nudge)
         case .effect(let rest): commitEffectBoxNudge(rest, atFrame: nudge.frame, of: piece)
         }
     }
+
+    /// **Puts back what the gesture found, off the history** — the preview has been writing the
+    /// document on every tick, so what the gesture's commit measures its change from, and what a
+    /// dropped gesture leaves, is the state before it. Writing the field directly rather than through
+    /// `writeContainerPose` is what keeps the restore off the history: it is undoing a preview, not an
+    /// edit. **Safe only because `rest` is this gesture's** — a copy older than the gesture would put
+    /// back over whatever else was written since.
+    private func putBack(_ rest: BoxNudge.Rest, of piece: FloatingPiece) {
+        guard let target = piece.containerTarget else { return }
+        switch rest {
+        case .container(let found):
+            guard containerPose(of: target) != nil, case .layer(let id) = target,
+                  let index = layers.firstIndex(where: { $0.id == id }) else { return }
+            layers[index].transform = found
+        case .effect(let found):
+            guard storedEffect(of: target) != nil else { return }
+            writeEffectStateOffHistory(target, effect: found.effect, tracks: found.tracks)
+        }
+    }
+
+    /// **The frame a container box's live writes land on** — the gesture's own, so a scrub made while
+    /// the drag is open cannot move where the preview is written away from where the commit will land
+    /// it. A take is the exception: it is playback, and the playhead is the frame it writes at.
+    private func liveFrame(of nudge: BoxNudge) -> Int { recordingOwnsMoveBox ? currentFrame : nudge.frame }
 
     /// **The pose the box is at, handed to the recorder** — KEYFRAMES.md §5's Move-box surface.
     ///
@@ -1567,8 +1604,10 @@ extension CanvasManager {
         guard let piece = floatingPiece, piece.kind == .containerPose,
               let target = piece.containerTarget, let nudge = piece.nudge,
               case .container(let found) = nudge.rest,
-              let current = containerPose(of: target),
-              let posed = Self.containerPose(found.resolvedPose(atFrame: currentFrame), movedBy: piece, since: nudge)
+              let current = containerPose(of: target)
+        else { return }
+        let frame = liveFrame(of: nudge)
+        guard let posed = Self.containerPose(found.resolvedPose(atFrame: frame), movedBy: piece, since: nudge)
         else { return }
         // **Written wherever `resolvedPose` reads**, or the preview shows nothing on exactly the
         // documents this feature is for: a keyed component shows its curve, not the base, so writing
@@ -1582,8 +1621,8 @@ extension CanvasManager {
         var live = found
         live.pose = posed
         if !live.track.isEmpty, let new = PoseComponents.decompose(posed, inBox: live.track.box) {
-            live.track.key(new, over: found.resolvedValues(atFrame: currentFrame),
-                           atFrame: currentFrame, placed: placedKeys(of: target))
+            live.track.key(new, over: found.resolvedValues(atFrame: frame),
+                           atFrame: frame, placed: placedKeys(of: target))
         }
         guard current != live, case .layer(let id) = target,
               let index = layers.firstIndex(where: { $0.id == id }) else { return }
@@ -1936,18 +1975,14 @@ extension CanvasManager {
         return true
     }
 
-    /// **One container gesture's commit** — put the pose back where the gesture found it, then route
-    /// the move through `commitContainerPose` at the frame the gesture was made on.
+    /// **One container gesture's commit, the pose already back where the gesture found it** — route the
+    /// move through `commitContainerPose` at the frame the gesture was made on.
     ///
-    /// **The restore is not a no-op and it is not cosmetic.** `showContainerPoseLive` has been
-    /// writing the stored pose on every tick, so by the time this runs the model already holds the
-    /// dragged pose; `commitContainerPose` reads the stored pose to take its undo baseline from, and
-    /// without this line that baseline would *be* the drag — one press of Undo would put the drawing
-    /// back exactly where the artist had just dragged it, which is a control that appears not to
-    /// work. Writing the field directly rather than through `writeContainerPose` is what keeps the
-    /// restore off the history: it is undoing a preview, not an edit. **And it is safe only because
-    /// `found` is this gesture's** — a copy older than the gesture would put back over whatever else
-    /// was written since (TODO (153)).
+    /// **The put-back is not cosmetic.** `showContainerPoseLive` has been writing the stored pose on
+    /// every tick, so the model held the dragged pose; `commitContainerPose` reads the stored pose to
+    /// take its undo baseline from, and without the put-back that baseline would *be* the drag — one
+    /// press of Undo would put the drawing back exactly where the artist had just dragged it, which is
+    /// a control that appears not to work.
     ///
     /// **A move that ended where it began writes nothing at all** — including no undo step — which is
     /// the raster arm's own behaviour reached by comparing poses rather than pixels.
@@ -1955,10 +1990,7 @@ extension CanvasManager {
                                       since nudge: BoxNudge) {
         guard let target = piece.containerTarget, containerPose(of: target) != nil else { return }
         let rest = found.resolvedPose(atFrame: frame)
-        guard let posed = Self.containerPose(rest, movedBy: piece, since: nudge),
-              case .layer(let id) = target,
-              let index = layers.firstIndex(where: { $0.id == id }) else { return }
-        layers[index].transform = found
+        guard let posed = Self.containerPose(rest, movedBy: piece, since: nudge) else { return }
         guard posed != rest else { return }
         commitContainerPose(target, restingAt: rest, movedTo: posed, atFrame: frame)
     }

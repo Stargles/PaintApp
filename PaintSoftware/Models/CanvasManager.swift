@@ -1905,9 +1905,9 @@ final class CanvasManager: ObservableObject {
     /// piece the artist is still adjusting, so it waits for them instead of committing them.
     ///
     /// **A Move box between gestures is not among them** (`FloatingPiece.holdsUnsettledEdit`): every
-    /// drag on it has already landed, so there is nothing to wait for. Until TODO (153) it held the
-    /// autosave for as long as it was up, and a box raised from the graph editor's channel list stays
-    /// up through a whole keying session — so a session's keys were in no saved version at all.
+    /// drag on it has already landed, so there is nothing to wait for. A box raised from the graph
+    /// editor's channel list stays up through a whole keying session, and an autosave held for as long
+    /// as it was up would leave that session's keys out of every saved version.
     var hasInteractiveStatePending: Bool {
         fillGestureActive || shapeGestureActive || textGestureActive || selectionEdit != nil
             || gradientEdit != nil || floatingPiece?.holdsUnsettledEdit == true || vectorFloat != nil
@@ -4574,6 +4574,9 @@ final class CanvasManager: ObservableObject {
     /// one is committed so it becomes a real step the following `undo()` reverts, instead of the
     /// undo silently hitting the previous action while it lingers.
     private func finalizePendingGesturesForHistoryAction() {
+        // A drag still open on a Move box is dropped, like the fill and the shape under a finger
+        // below; `cancelBoxNudge` says why it is not settled instead.
+        cancelBoxNudge()
         if fillFingerDown {
             cancelInteractiveFill()
         } else if fillGestureActive {

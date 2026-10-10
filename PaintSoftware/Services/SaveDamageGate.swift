@@ -60,8 +60,8 @@ nonisolated struct ProjectLoadDamage: Equatable {
         /// there and it will not come back on its own.
         var videos: Int = 0
         /// A cel's animation file — its pose channels — that is missing or that this build cannot
-        /// read. The drawing loads where it rests; the motion is what is lost, and before TODO (153)
-        /// it was lost without a word and then overwritten by the next save.
+        /// read. The drawing loads where it rests; the motion is what is lost, and it is said so that
+        /// the next save does not make the loss permanent.
         var animations: Int = 0
         /// A mark whose own kind could not be read either — a legacy payload, or an entry broken at
         /// the discriminator. Counted rather than dropped: the artist lost it whether or not the file
