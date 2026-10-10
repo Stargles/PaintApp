@@ -534,7 +534,13 @@ extension LayerPose: Codable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         pose = try c.decode(PoseQuad.self, forKey: .pose)
-        track = try c.decodeIfPresent(TransformTrack.self, forKey: .track) ?? TransformTrack(box: pose.box)
+        // **An empty track takes the pose's box**, whatever box the file gave it. A box means nothing
+        // until a key is read against it (`TransformTrack.box` is latched at the first write), and the
+        // build that read pre-(139) tracks as empty wrote every one of them back with a zero box —
+        // against which no Move could decompose, so a layer opened from such a file could never be
+        // keyed again (TODO (153)).
+        let stored = try c.decodeIfPresent(TransformTrack.self, forKey: .track)
+        track = stored.flatMap { $0.isEmpty ? nil : $0 } ?? TransformTrack(box: pose.box)
         baseline = try c.decodeIfPresent(PoseQuad.self, forKey: .baseline)
         // Absent is Move — every document written before the modes existed, and every pose nobody
         // has switched. `decodeIfPresent` rather than a tolerant `try?`: a mode string this build
@@ -567,26 +573,41 @@ extension LayerPose: Codable {
 
 // MARK: - Codable
 
-/// Field-presence versioning, the idiom every persisted field in this tree follows. **The curves are
-/// keyed by component name** (`PoseComponents.Component.rawValue`), so the file reads as the graph
-/// editor does — one entry per curve — and a component this build does not know is ignored rather
-/// than failing the document. A track written before TODO (139), which stored whole-pose keys under
-/// `keys`, carries neither field and opens empty: no document so far has to survive (TODO.md's
-/// standing permission), so there is no second decoder for it.
+/// **The curves are keyed by component name** (`PoseComponents.Component.rawValue`), so the file reads
+/// as the graph editor does — one entry per curve.
+///
+/// **Two forms are read, and nothing else is.** A track written since TODO (139) carries `box` and
+/// `curves`; one written before it carries whole-pose `keys`, and is read as the curves it means
+/// (`init(migrating:step:)`). Anything else — neither field, a component this build does not know — is a
+/// decoding error rather than an empty track. TODO (153) is why: until then a pre-(139) track read as
+/// *no keys* without a word, the next autosave wrote the empty track over the file, and every saved
+/// version on the owner's iPad looked as though its transformation layer had never been keyed. A pose
+/// is decoded with `decode` for the same reason — a channel this build cannot read is a document it
+/// cannot read, which the gallery shows as damaged and nothing overwrites.
 extension TransformTrack: Codable {
 
-    private enum CodingKeys: String, CodingKey { case box, curves }
+    private enum CodingKeys: String, CodingKey { case box, curves, keys, step }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        box = try c.decodeIfPresent(CGRect.self, forKey: .box) ?? .zero
-        let named = try c.decodeIfPresent([String: AnimationCurve].self, forKey: .curves) ?? [:]
-        var curves: [PoseComponents.Component: AnimationCurve] = [:]
-        for (name, curve) in named {
-            guard let component = PoseComponents.Component(rawValue: name), !curve.isEmpty else { continue }
-            curves[component] = curve
+        if c.contains(.curves) {
+            box = try c.decode(CGRect.self, forKey: .box)
+            var curves: [PoseComponents.Component: AnimationCurve] = [:]
+            for (name, curve) in try c.decode([String: AnimationCurve].self, forKey: .curves) {
+                guard let component = PoseComponents.Component(rawValue: name) else {
+                    throw DecodingError.dataCorruptedError(
+                        forKey: .curves, in: c, debugDescription: "A pose component this build does not know: \(name)")
+                }
+                if !curve.isEmpty { curves[component] = curve }
+            }
+            self.curves = curves
+        } else if c.contains(.keys) {
+            self = try TransformTrack(migrating: c.decode([WholePoseKey].self, forKey: .keys),
+                                      step: c.decodeIfPresent(Int.self, forKey: .step) ?? 1)
+        } else {
+            throw DecodingError.dataCorrupted(DecodingError.Context(
+                codingPath: decoder.codingPath, debugDescription: "A pose channel with neither curves nor keys"))
         }
-        self.curves = curves
     }
 
     func encode(to encoder: Encoder) throws {
@@ -594,6 +615,90 @@ extension TransformTrack: Codable {
         try c.encode(box, forKey: .box)
         try c.encode(Dictionary(uniqueKeysWithValues: curves.map { ($0.key.rawValue, $0.value) }),
                      forKey: .curves)
+    }
+
+    /// **One key of a track written before TODO (139)**: a whole pose at a frame, on a timing spine
+    /// every component shared. Read, never written.
+    private struct WholePoseKey: Decodable {
+        let frame: Int
+        let pose: PoseQuad
+        let inHandle: AnimationCurve.Handle
+        let outHandle: AnimationCurve.Handle
+        let tangentMode: AnimationCurve.TangentMode
+        let interpolation: AnimationCurve.Interpolation
+
+        private enum CodingKeys: String, CodingKey { case frame, pose, inHandle, outHandle, tangentMode, interpolation }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            frame = try c.decode(Int.self, forKey: .frame)
+            pose = try c.decode(PoseQuad.self, forKey: .pose)
+            inHandle = try c.decodeIfPresent(AnimationCurve.Handle.self, forKey: .inHandle) ?? .zero
+            outHandle = try c.decodeIfPresent(AnimationCurve.Handle.self, forKey: .outHandle) ?? .zero
+            tangentMode = try c.decodeIfPresent(AnimationCurve.TangentMode.self, forKey: .tangentMode) ?? .autoClamped
+            interpolation = try c.decodeIfPresent(AnimationCurve.Interpolation.self, forKey: .interpolation) ?? .bezier
+        }
+    }
+
+    /// **A pre-(139) track read as the curves it means**, so a document keyed before the change opens
+    /// with its animation.
+    ///
+    /// The old track drew a pose at frame `f` as `blend(pose[i], pose[i+1], s)`, where `s` was its
+    /// *timing spine* — one curve through the key indices 0, 1, 2… with the keys' own handles — read at
+    /// `f`. Here every key's pose is decomposed against the first key's box, and each component that
+    /// moves (or sits off rest) gets a curve with a key at every old key's frame. **The spine's handles
+    /// are carried exactly**: each segment's handle heights are the spine's, scaled by how far that
+    /// component travels across the segment, as `.free` handles, so every component reaches every
+    /// fraction of its segment at the very frame the old pose did. The keys are the old poses exactly;
+    /// in between, a slide and a turn are the old blend exactly, since that blend moves the box's centre
+    /// and its angle linearly in the spine, as these curves do.
+    ///
+    /// A component no key moves off rest is left unkeyed, as a Move after (139) leaves it — so it shows
+    /// the channel's base, which for a cel is rest. A transformation layer's base is its stored pose,
+    /// which the old model rewrote on every keying Move to the pose it keyed, so the two agree.
+    private init(migrating legacy: [WholePoseKey], step: Int) throws {
+        var byFrame: [Int: WholePoseKey] = [:]
+        for key in legacy { byFrame[key.frame] = key }
+        let keys = byFrame.keys.sorted().compactMap { byFrame[$0] }
+        guard let first = keys.first else {
+            self.init(box: .zero)
+            return
+        }
+        let box = first.pose.box
+        var values: [PoseComponents.Values] = []
+        for key in keys {
+            guard var decomposed = PoseComponents.decompose(key.pose, inBox: box) else {
+                throw DecodingError.dataCorrupted(DecodingError.Context(
+                    codingPath: [], debugDescription: "A keyed pose at frame \(key.frame) that is not a map"))
+            }
+            if let previous = values.last { decomposed = decomposed.unwrappingRotation(near: previous.rotation) }
+            values.append(decomposed)
+        }
+        let spine = AnimationCurve(keys: keys.enumerated().map { index, key in
+            AnimationCurve.Key(frame: key.frame, value: Double(index), inHandle: key.inHandle,
+                               outHandle: key.outHandle, tangentMode: key.tangentMode,
+                               interpolation: key.interpolation)
+        }, step: step)
+        let handles = keys.indices.map { spine.effectiveHandles(at: $0) }
+        let rest = PoseComponents.Values.resting(in: box)
+
+        var curves: [PoseComponents.Component: AnimationCurve] = [:]
+        for component in PoseComponents.Component.allCases {
+            let series = values.map { $0[component] }
+            guard series.contains(where: { abs($0 - rest[component]) > component.flatTolerance }) else { continue }
+            curves[component] = AnimationCurve(keys: keys.indices.map { i in
+                let into = i > 0 ? series[i] - series[i - 1] : 0
+                let onward = i < keys.count - 1 ? series[i + 1] - series[i] : 0
+                return AnimationCurve.Key(
+                    frame: keys[i].frame, value: series[i],
+                    inHandle: AnimationCurve.Handle(deltaFrames: handles[i].inHandle.deltaFrames,
+                                                    deltaValue: handles[i].inHandle.deltaValue * into),
+                    outHandle: AnimationCurve.Handle(deltaFrames: handles[i].outHandle.deltaFrames,
+                                                     deltaValue: handles[i].outHandle.deltaValue * onward),
+                    tangentMode: .free, interpolation: keys[i].interpolation)
+            }, step: step)
+        }
+        self.init(box: box, curves: curves)
     }
 }
 
@@ -626,7 +731,10 @@ struct CelAnimationData: Codable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        tracks = try c.decodeIfPresent([String: TransformTrack].self, forKey: .tracks) ?? [:]
+        // **A channel with no keys is dropped on the way in** — `Cel.transformTracks` never holds one
+        // (`cropPoseKeysToSpan`), and the build that read pre-(139) tracks as empty wrote them back as
+        // exactly that (TODO (153)).
+        tracks = try (c.decodeIfPresent([String: TransformTrack].self, forKey: .tracks) ?? [:]).filter { !$0.value.isEmpty }
         baselines = try c.decodeIfPresent([String: PoseQuad].self, forKey: .baselines) ?? [:]
     }
 }

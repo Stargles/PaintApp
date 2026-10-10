@@ -18,6 +18,13 @@ import CoreGraphics
 /// ever held what was overwritten. The fix is `BoxNudge`: the box copies the layer for one gesture and
 /// lands that gesture when the finger lifts, and between gestures it holds nothing.
 ///
+/// **And a document keyed before TODO (139) lost its keys the moment this build opened it.** A track
+/// then stored whole-pose `keys`; (139)'s decoder read only per-component `curves`, so it read *no
+/// keys*, without a word, and the next autosave wrote the empty track — with a zero box no Move could
+/// ever key against again — over the file. The saved versions still held the old form, but nothing
+/// could read it, so every one of them looked unkeyed. The last section here writes that old form into
+/// real packages and opens them.
+///
 /// Every key here is placed through the artist's own writers — Add Keys, the Move box gesture
 /// (`updateFloatingPose`, then `settleBoxNudge`, which is what the box's touch-up calls), and the graph
 /// editor's whole-curve write — because the failure lived in how those writers met, and a fixture that
@@ -375,5 +382,199 @@ final class TransformKeysSurviveLogicTests: XCTestCase {
         let opened = try XCTUnwrap(ProjectStore.load(from: url))
         XCTAssertEqual(opened.layers.first { $0.id == scene.keyed }?.transform, keyedBefore.transform)
         XCTAssertEqual(try probeFrames.map { try composite(opened, frame: $0) }, pictures, "…and so does the file")
+    }
+
+    // MARK: - A document keyed before TODO (139)
+
+    /// One pre-(139) whole-pose key, in the form that build wrote it: a pose and the timing spine's
+    /// handle pair.
+    private func legacyKey(_ frame: Int, _ pose: PoseQuad, tangent: String = "autoClamped",
+                           interpolation: String = "bezier") throws -> [String: Any] {
+        let poseObject = try JSONSerialization.jsonObject(with: JSONEncoder().encode(pose))
+        return ["frame": frame, "pose": poseObject,
+                "inHandle": ["deltaFrames": 0, "deltaValue": 0], "outHandle": ["deltaFrames": 0, "deltaValue": 0],
+                "tangentMode": tangent, "interpolation": interpolation]
+    }
+
+    /// **What the old build drew at `frame`**, from the same keys — its timing spine (one curve through
+    /// the key indices, with the keys' own handles) read at the frame, and the two poses either side
+    /// blended at that fraction. Rebuilt here from the primitives it used, both still in the app.
+    private func legacyPose(_ keys: [(frame: Int, pose: PoseQuad)], atFrame frame: Int) -> PoseQuad? {
+        let spine = AnimationCurve(keys: keys.enumerated().map {
+            AnimationCurve.Key(frame: $1.frame, value: Double($0))
+        })
+        let index = spine.evaluate(at: Double(frame))
+        let lower = min(max(Int(index.rounded(.down)), 0), keys.count - 2)
+        return PoseInterpolation.blend(keys[lower].pose, keys[lower + 1].pose, t: CGFloat(index - Double(lower)))
+    }
+
+    /// Rewrites one layer's `transform.track` in a saved package's manifest — the file as the old build
+    /// left it.
+    private func rewriteTrack(ofLayer id: UUID, in package: URL, to track: [String: Any]) throws {
+        let url = package.appendingPathComponent("manifest.json")
+        var manifest = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        var layers = try XCTUnwrap(manifest["layers"] as? [[String: Any]])
+        let at = try XCTUnwrap(layers.firstIndex { ($0["id"] as? String) == id.uuidString })
+        var transform = try XCTUnwrap(layers[at]["transform"] as? [String: Any])
+        transform["track"] = track
+        layers[at]["transform"] = transform
+        manifest["layers"] = layers
+        try JSONSerialization.data(withJSONObject: manifest).write(to: url)
+    }
+
+    /// A slide and a turn keyed at 0, 4 and 10 — rest, part way, all the way — on a transformation layer
+    /// over a red square, saved, and the file's track put back in the pre-(139) form.
+    private func legacyPackage() throws -> (url: URL, layer: UUID, keys: [(frame: Int, pose: PoseQuad)]) {
+        let manager = CanvasFixture.manager(layerCount: 0)
+        manager.addVectorLayer(name: "Ink")
+        manager.layers[0].cels[0].vector!.addFill(
+            canvasSpacePath: CGPath(rect: CGRect(x: 8, y: 20, width: 12, height: 12), transform: nil),
+            color: CodableColor(red: 1, green: 0, blue: 0, alpha: 1))
+        manager.addTransformLayer(name: "Keyed")
+        let layer = manager.layers[1].id
+        func turned(_ dx: CGFloat, _ angle: CGFloat) -> PoseQuad {
+            PoseQuad(box: canvasBox, mappedBy: CGAffineTransform(translationX: canvasCentre.x + dx, y: canvasCentre.y)
+                        .rotated(by: angle).translatedBy(x: -canvasCentre.x, y: -canvasCentre.y))
+        }
+        let keys = [(0, PoseQuad(restingIn: canvasBox)), (4, turned(6, 0.15)), (10, turned(18, 0.4))]
+        // The old model rewrote the stored pose on every keying Move to the pose it keyed.
+        manager.layers[1].transform = LayerPose(pose: keys[2].1)
+        let url = ProjectStore.createNewProjectURL(name: "Pre-139")
+        saveAndWait(manager, to: url)
+        try rewriteTrack(ofLayer: layer, in: url, to: ["keys": try keys.map { try legacyKey($0.0, $0.1) }, "step": 1])
+        return (url, layer, keys.map { (frame: $0.0, pose: $0.1) })
+    }
+
+    /// **A transformation layer keyed before (139) opens with its keys, and draws what the old build
+    /// drew** — on the keys exactly, and between them to a millionth of a point, since a slide and a turn
+    /// blend linearly in both.
+    func testATransformLayerKeyedBeforeComponentCurvesOpensWithItsKeysAndItsMotion() throws {
+        let (url, layer, keys) = try legacyPackage()
+        let opened = try XCTUnwrap(ProjectStore.load(from: url), "the old file opens")
+        let pose = try XCTUnwrap(opened.layers.first { $0.id == layer }?.transform)
+        XCTAssertEqual(pose.track.keyedFrames, [0, 4, 10], "Every old key is a key")
+        XCTAssertEqual(Set(pose.track.curves.keys), [.x, .rotation],
+                       "…on the components the motion moves: a sideways slide and a turn about the centre move X and the angle")
+        for frame in 0...12 {
+            let want = try XCTUnwrap(legacyPose(keys, atFrame: frame))
+            let got = pose.resolvedPose(atFrame: frame)
+            for (a, b) in zip([got.corners.p0, got.corners.p1, got.corners.p2, got.corners.p3],
+                              [want.corners.p0, want.corners.p1, want.corners.p2, want.corners.p3]) {
+                XCTAssertEqual(Double(a.x), Double(b.x), accuracy: 1e-6, "frame \(frame): the old build's picture")
+                XCTAssertEqual(Double(a.y), Double(b.y), accuracy: 1e-6, "frame \(frame): the old build's picture")
+            }
+        }
+    }
+
+    /// **The handles the old spine carried are carried too**: a key eased by hand, and a step held, reach
+    /// each fraction of the segment at the same frame. The first segment is held flat (`.constant`) and
+    /// the second eases with a hand-pulled out handle.
+    func testTheOldTimingIsKeptHandleForHandle() throws {
+        let rest = PoseQuad(restingIn: canvasBox)
+        let slid = PoseQuad(box: canvasBox, mappedBy: CGAffineTransform(translationX: 20, y: 0))
+        let far = PoseQuad(box: canvasBox, mappedBy: CGAffineTransform(translationX: 32, y: 10))
+        var eased = try legacyKey(4, slid, tangent: "free")
+        eased["outHandle"] = ["deltaFrames": 3.5, "deltaValue": 0.9]
+        eased["inHandle"] = ["deltaFrames": -1, "deltaValue": -0.2]
+        let json = try JSONSerialization.data(withJSONObject: [
+            "keys": [try legacyKey(0, rest, interpolation: "constant"), eased, try legacyKey(12, far)], "step": 1])
+        let track = try JSONDecoder().decode(TransformTrack.self, from: json)
+
+        let spine = AnimationCurve(keys: [AnimationCurve.Key(frame: 0, value: 0, interpolation: .constant),
+                         AnimationCurve.Key(frame: 4, value: 1, inHandle: .init(deltaFrames: -1, deltaValue: -0.2),
+                                            outHandle: .init(deltaFrames: 3.5, deltaValue: 0.9), tangentMode: .free),
+                         AnimationCurve.Key(frame: 12, value: 2)])
+        let poses = [rest, slid, far]
+        for frame in 0...14 {
+            let index = spine.evaluate(at: Double(frame))
+            let lower = min(max(Int(index.rounded(.down)), 0), 1)
+            let want = try XCTUnwrap(PoseInterpolation.blend(poses[lower], poses[lower + 1], t: CGFloat(index - Double(lower))))
+            let got = try XCTUnwrap(PoseComponents.recompose(track.values(atTime: Double(frame), base: track.restValues),
+                                                             box: track.box))
+            XCTAssertEqual(Double(got.corners.p0.x), Double(want.corners.p0.x), accuracy: 1e-6, "frame \(frame)")
+            XCTAssertEqual(Double(got.corners.p0.y), Double(want.corners.p0.y), accuracy: 1e-6, "frame \(frame)")
+        }
+    }
+
+    /// **The file this build wrote over such a document opens keyable again.** The build that read old
+    /// tracks as empty wrote each back as no curves on a zero box — against which no Move decomposes —
+    /// so the owner's new keys could not land. An empty track takes the pose's box on the way in, and a
+    /// Move between two primed frames keys again.
+    func testATransformLayerSavedWithAZeroBoxCanBeKeyedAgain() throws {
+        let manager = CanvasFixture.manager(layerCount: 0)
+        manager.addVectorLayer(name: "Ink")
+        manager.addTransformLayer(name: "Keyed")
+        let layer = manager.layers[1].id
+        let url = ProjectStore.createNewProjectURL(name: "Zero box")
+        saveAndWait(manager, to: url)
+        let zero = try JSONSerialization.jsonObject(with: JSONEncoder().encode(CGRect.zero))
+        try rewriteTrack(ofLayer: layer, in: url, to: ["box": zero, "curves": [String: Any]()])
+
+        let opened = try XCTUnwrap(ProjectStore.load(from: url))
+        let at = try XCTUnwrap(opened.layers.firstIndex { $0.id == layer })
+        XCTAssertEqual(opened.layers[at].transform?.track.box, canvasBox, "The empty track reads against the pose's box")
+        opened.currentLayerIndex = at
+        let target = KeyframeTarget.layer(id: layer)
+        opened.currentFrame = 0
+        XCTAssertTrue(opened.addKeys(target, atFrame: 0))
+        opened.currentFrame = 8
+        XCTAssertTrue(opened.addKeys(target, atFrame: 8))
+        XCTAssertTrue(move(opened, by: CGVector(dx: 9, dy: 0)))
+        XCTAssertEqual(opened.layers[at].transform?.track.keyedFrames, [0, 8], "The Move keys, as on any layer")
+    }
+
+    /// **A cel's own channel written before (139) opens with its keys too** — the same reader, through
+    /// the cel's animation file.
+    func testACelChannelKeyedBeforeComponentCurvesOpensWithItsKeys() throws {
+        let manager = CanvasFixture.manager(layerCount: 0)
+        manager.addVectorLayer(name: "Ink")
+        let ink = manager.layers[0]
+        let rest = PoseQuad(restingIn: canvasBox)
+        let slid = PoseQuad(box: canvasBox, mappedBy: CGAffineTransform(translationX: 16, y: 0))
+        CanvasFixture.setPoseTrack(manager, layerID: ink.id, celID: ink.cels[0].id,
+                                   CanvasFixture.poseTrack([(0, rest), (8, slid)], interpolation: .linear))
+        let url = ProjectStore.createNewProjectURL(name: "Pre-139 cel")
+        saveAndWait(manager, to: url)
+        let sidecar = try XCTUnwrap(FileManager.default.enumerator(at: url, includingPropertiesForKeys: nil)?
+            .compactMap { $0 as? URL }.first { $0.lastPathComponent.hasSuffix("-animation.json") },
+                                    "the cel's animation file")
+        let legacy: [String: Any] = ["tracks": ["cel": ["keys": [try legacyKey(0, rest), try legacyKey(8, slid)], "step": 1]]]
+        try JSONSerialization.data(withJSONObject: legacy).write(to: sidecar)
+
+        let opened = try XCTUnwrap(ProjectStore.load(from: url))
+        let track = try XCTUnwrap(opened.layers[0].cels[0].transformTracks["cel"], "the channel opens")
+        XCTAssertEqual(track.keyedFrames, [0, 8])
+        XCTAssertEqual(track.curve(.x)?.key(atFrame: 8)?.value ?? .nan, Double(canvasBox.midX) + 16, accuracy: 1e-9)
+        XCTAssertFalse(opened.loadDamage.isDamaged, "Read, so nothing is reported lost")
+    }
+
+    /// **What this build cannot read is said, and is not overwritten.** A cel's animation file it cannot
+    /// read is counted as damage — so `SaveDamageGate` keeps the next save off the original — and a
+    /// pose channel in neither form, or naming a component this build does not know, is a decoding
+    /// error rather than an empty track.
+    func testAnUnreadablePoseChannelIsReportedAndNeverReadAsNoKeys() throws {
+        XCTAssertThrowsError(try JSONDecoder().decode(TransformTrack.self, from: Data(#"{"step":1}"#.utf8)),
+                             "Neither curves nor keys")
+        let box = String(data: try JSONEncoder().encode(canvasBox), encoding: .utf8)!
+        XCTAssertThrowsError(try JSONDecoder().decode(TransformTrack.self, from: Data(
+            #"{"box":\#(box),"curves":{"wobble":{"keys":[{"frame":0,"value":1}]}}}"#.utf8)),
+                             "A component this build does not know")
+
+        let manager = CanvasFixture.manager(layerCount: 0)
+        manager.addVectorLayer(name: "Ink")
+        let ink = manager.layers[0]
+        CanvasFixture.setPoseTrack(manager, layerID: ink.id, celID: ink.cels[0].id, CanvasFixture.poseTrack(
+            [(0, PoseQuad(restingIn: canvasBox)), (8, PoseQuad(box: canvasBox, mappedBy: .init(translationX: 9, y: 0)))]))
+        let url = ProjectStore.createNewProjectURL(name: "Unreadable")
+        saveAndWait(manager, to: url)
+        let sidecar = try XCTUnwrap(FileManager.default.enumerator(at: url, includingPropertiesForKeys: nil)?
+            .compactMap { $0 as? URL }.first { $0.lastPathComponent.hasSuffix("-animation.json") })
+        try Data(#"{"tracks":{"cel":{"step":1}}}"#.utf8).write(to: sidecar)
+
+        let opened = try XCTUnwrap(ProjectStore.load(from: url), "The drawing still opens")
+        XCTAssertEqual(opened.loadDamage.layers.map(\.animations), [1], "…and the lost animation is counted")
+        XCTAssertTrue(opened.loadDamage.summary.contains("animation"), "…in words: \(opened.loadDamage.summary)")
+        XCTAssertNotEqual(SaveDamageGate.decide(damage: opened.loadDamage, answered: false, intent: .automatic), .write,
+                          "…so an autosave does not write over the file that still has it")
     }
 }

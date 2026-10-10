@@ -375,20 +375,6 @@ final class TransformTrackLogicTests: XCTestCase {
         XCTAssertEqual(back.tracks["cel"], t)
     }
 
-    /// **No legacy decode** — a channel written before TODO (139), whose keys were whole poses, opens
-    /// empty rather than failing the cel (TODO.md's standing permission: nothing written so far has
-    /// to survive). A component name this build does not know is ignored the same way.
-    func testAWholePoseTrackOpensEmptyAndAnUnknownComponentIsIgnored() throws {
-        let old = #"{"tracks":{"cel":{"step":1,"keys":[{"frame":0}]}}}"#
-        let back = try JSONDecoder().decode(CelAnimationData.self, from: Data(old.utf8))
-        XCTAssertEqual(back.tracks["cel"]?.isEmpty, true)
-        XCTAssertTrue(back.baselines.isEmpty)
-
-        let later = #"{"box":[[0,0],[4,4]],"curves":{"x":{"keys":[{"frame":0,"value":1}]},"wobble":{"keys":[{"frame":0,"value":1}]}}}"#
-        let track = try JSONDecoder().decode(TransformTrack.self, from: Data(later.utf8))
-        XCTAssertEqual(Set(track.curves.keys), [.x])
-    }
-
     // MARK: - Channel ids
 
     /// The id format is the `effectTracks` idiom — `"<prefix>.<rest>"`.

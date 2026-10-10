@@ -59,12 +59,16 @@ nonisolated struct ProjectLoadDamage: Equatable {
         /// knows and cannot read. Counted for the placed image's reason exactly: the artist put it
         /// there and it will not come back on its own.
         var videos: Int = 0
+        /// A cel's animation file — its pose channels — that is missing or that this build cannot
+        /// read. The drawing loads where it rests; the motion is what is lost, and before TODO (153)
+        /// it was lost without a word and then overwritten by the next save.
+        var animations: Int = 0
         /// A mark whose own kind could not be read either — a legacy payload, or an entry broken at
         /// the discriminator. Counted rather than dropped: the artist lost it whether or not the file
         /// can say what it was.
         var unnamed: Int = 0
 
-        var total: Int { drawings + brushStrokes + fills + images + texts + videos + unnamed }
+        var total: Int { drawings + brushStrokes + fills + images + texts + videos + animations + unnamed }
         var isEmpty: Bool { total == 0 }
 
         /// Folds another cel's losses on the same layer into this one. The load fans out per cel, so a
@@ -76,6 +80,7 @@ nonisolated struct ProjectLoadDamage: Equatable {
             images += other.images
             texts += other.texts
             videos += other.videos
+            animations += other.animations
             unnamed += other.unnamed
         }
 
@@ -101,6 +106,7 @@ nonisolated struct ProjectLoadDamage: Equatable {
             if images > 0 { parts.append(ProjectLoadDamage.counted(images, "image")) }
             if texts > 0 { parts.append(ProjectLoadDamage.counted(texts, "text object")) }
             if videos > 0 { parts.append(ProjectLoadDamage.counted(videos, "video")) }
+            if animations > 0 { parts.append(ProjectLoadDamage.counted(animations, "animation")) }
             if unnamed > 0 { parts.append(ProjectLoadDamage.counted(unnamed, "mark")) }
             return ProjectLoadDamage.list(parts)
         }

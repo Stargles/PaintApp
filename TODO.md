@@ -48,39 +48,6 @@ rather than assuming it still holds.
 
 ---
 
-## (153) Baking a transform layer destroyed another layer's keys — and every bake must keep the picture
-
-**Status** — reported 2026-10-10 from the iPad (build `2974b33`); a scene was damaged. The owner can try
-gallery → **Versions…** to restore a pre-bake save (five auto slots).
-
-The owner, verbatim: *"whatever baking a transform layer was supposed to do, the implementation was
-improper, and now one of my scenes are ruined with no way to return. I had two transform layers one as
-a static move and the other on top as a keyframed move. I tried to bake the static one. The keyframes
-are now gone from the keyframed move. This could be a bigger scope issue than just this, make sure that
-any bake down behaviour in a move layer or effect layer works properly with multiple layers. Rules are
-that baking down should not change the image (colors should remain near identical except for
-peculiarities. Think of it as applying the correct transformation to brushstroke colors, not in the
-compositor)."*
-
-**Then, the same day, worse — it is not only the bake.** The owner restored earlier versions: *"it wiped
-the new keyframes i made on the version after keyframes got wiped yet again. No version in history
-appears to have the original keyed transformation anymore nor the new keyed transformation i made, which
-is weird. It just wiped it from every version."* Keys made *after* the bake were gone from every saved
-version too, so keys on a transformation layer are being lost on **save, load or restore** — possibly by a
-step that runs on load and on bake alike (e.g. cropping keys to a bar measured before it is known). The
-library is in a folder the owner chose (`ProjectLocation`), outside the app container, so it cannot be
-pulled over the cable.
-
-- [ ] Keys on transformation layers survive save → load and Versions → Restore (round-trip proven on
-      the real package path, several layers, keyed and static).
-- [ ] Root cause of the lost keys on the upper transform layer; fixed at the root.
-- [ ] Every bake path (transform / effect / value layers, Bake Animation, the Repeat bake) proven with
-      **stacks of several such layers**, in any order: the composite before and after is near-identical,
-      and no layer the bake did not consume changes.
-- [ ] The bake is one undo step that restores everything, including other layers' keys.
-
----
-
 ## (154) The graph editor still lags while dragging a Move node
 
 **Status** — reported 2026-10-10 with an ActionRecorder file (`recording-20261009-234428.jsonl`, pulled
