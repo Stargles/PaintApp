@@ -37,11 +37,13 @@ item to this file to make a citation resolve.
 assertions here that the code contradicted — features called unbuilt that shipped weeks ago, a blocker
 called live that had lifted, and two commit shas that are not on `main`.
 
-**No document written so far has to survive.** The owner, 2026-08-27: *"Don't worry about legacy
-documents right now, everything on the ipad right now is expendable."* A format change needs no
-migration and no "existing documents change appearance" warning. This is standing permission, and it
-lapses the day the owner starts keeping real artwork in the app — whoever notices that should say so
-rather than assuming it still holds.
+**Old files are repaired once, never read forever.** The owner, 2026-10-10, retiring the earlier "no
+document has to survive" permission now that real scenes live in the app: *"I will still keep the rule of
+no legacy code. If an update causes existing files to be outdated, then they should be automatically
+repaired by a throwaway script the session makes."* So a format change ships with a **one-shot repair**
+that rewrites the owner's existing files (Projects, Backups, Trash) to the new format at launch, and the
+app's decoder knows only the current format. The repair is deleted, whole, once the owner confirms
+their files are repaired. Build `2974b33` broke this rule and lost the owner's keys (TODO (153)).
 
 **The measurement baseline is [PERFORMANCE.md](PERFORMANCE.md) §1, not here**: the owner works at
 2048x1024, and every figure taken before 2026-08-17 was at 4096², eight times the pixels.
