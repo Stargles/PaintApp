@@ -476,9 +476,11 @@ reasoning is what stops a later session reinstating it by rediscovering the argu
     two disjoint: a mark a key lands on goes, so the frame draws as the key it is.
 
     **Superseded by it**: §2.14 and §2.15, and the parts of §2.5 and §11.7 that described a whole-pose
-    key (one shared ease, six rows written through `PoseEdit`, a projective channel declined). Nothing
-    written before it has to open animated (TODO.md's standing permission): a track that stored
-    whole-pose keys decodes empty.
+    key (one shared ease, six rows written through `PoseEdit`, a projective channel declined). A track
+    that stored whole-pose keys is read as the curves it means, its timing spine's handles carried
+    exactly (`TransformTrack.init(migrating:step:)`). It decoded empty until TODO (153), on a standing
+    permission that had already lapsed: the owner's keyed scene opened with no keys, the next autosave
+    wrote the empty track over the file, and no saved version could be read as keyed.
 
 ---
 
