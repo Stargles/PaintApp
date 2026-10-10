@@ -35,32 +35,6 @@ import XCTest
 /// is a single full-width span rather than a scatter.
 final class TimelineBakeIndicationUITests: PaintUITestCase {
 
-    private func bakeBar(_ app: XCUIApplication) -> XCUIElement {
-        app.otherElements["timeline.bakeBar"]
-    }
-
-    private func bakeBarValue(_ app: XCUIApplication) -> String {
-        bakeBar(app).value as? String ?? "?"
-    }
-
-    /// Polls until the bar's value satisfies `predicate`, and returns the value that satisfied it.
-    ///
-    /// A deadline rather than an instant read, for `waitForSandwichState`'s reason: the bar clears
-    /// on `FrameBaker`'s frame-finished callback, which arrives when a `.utility` worker has written
-    /// a file, and it is throttled to ten updates a second on top of that
-    /// (`TimelineBakeBar.refreshInterval`). No sleep in the loop — the window this is hunting is a
-    /// few hundred milliseconds and an XCUITest query already costs tens of them.
-    @discardableResult
-    private func waitForBakeBar(_ app: XCUIApplication, timeout: TimeInterval = 30,
-                                where predicate: (String) -> Bool) -> String? {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            let value = bakeBarValue(app)
-            if predicate(value) { return value }
-        }
-        return nil
-    }
-
     /// **The bar exists, and a document that has finished baking wears nothing.**
     ///
     /// The polarity ruling in one assertion: ink marks what is *not* ready, so the steady state of a

@@ -71,6 +71,18 @@ nonisolated final class H264StreamDecoder {
     /// coordinator arms its coalesced tick from here; it must not do work of its own.
     var onFrame: (() -> Void)?
 
+    /// **Whether `onFrame` is called.** The coordinator turns it off while no layer can show a frame —
+    /// the layer is hidden, playback is running, the app is in the background — because each call
+    /// is a main-thread wake-up, and a moving screen sends thirty a second to a canvas that cannot
+    /// draw any of them. **The decoder still decodes** (a P-frame needs its reference) **and still
+    /// keeps the newest frame in the slot**, which is what the edge that feeds a layer again reads, so
+    /// a layer comes back showing the computer as it is now. Lock-confined with the slot.
+    var announcesFrames: Bool {
+        get { slotLock.lock(); defer { slotLock.unlock() }; return _announcesFrames }
+        set { slotLock.lock(); _announcesFrames = newValue; slotLock.unlock() }
+    }
+    private var _announcesFrames = true
+
     /// Called on the decode queue when a decode error or a missing reference means the stream
     /// cannot continue without a keyframe. Fires once per gap, not once per dropped AU.
     var onNeedsKeyframe: (() -> Void)?
@@ -235,8 +247,9 @@ nonisolated final class H264StreamDecoder {
         latestBuffer = buffer
         latestIndex += 1
         decodedCount += 1
+        let announces = _announcesFrames
         slotLock.unlock()
-        onFrame?()
+        if announces { onFrame?() }
     }
 
     private func noteDecodeError() {

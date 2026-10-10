@@ -57,6 +57,50 @@ final class StreamLiveUITests: StreamUITestCase {
         waitForPicture(.blue, on: canvas, "and it is live again")
     }
 
+    /// **A hidden stream on a screen that keeps moving leaves the timeline's bake bar blank** — TODO
+    /// (156). The owner, with no hand on the iPad: *"I can see the first 16 or so frames turn orange
+    /// momentarily."* Their stream sat on a hidden layer; every pause in the computer's motion settled a
+    /// frame onto the cel, the dirty sweep read that as an edit to the cel's whole span, and the bar —
+    /// which marks the frames the baker has not got to — flashed them. The computer here moves, rests
+    /// past the settle interval, moves again, five times over, and the bar is read as fast as XCUITest
+    /// can ask for the whole of it.
+    func testAHiddenStreamLayerOnAMovingScreenNeverMarksTheTimelineUnbaked() throws {
+        let app = XCUIApplication()
+        let canvas = launchWithALiveStream(app)
+        laptop.show(.red)
+        waitForPicture(.red, on: canvas)
+
+        openLayerPanel(app)
+        let visibility = app.buttons["layerPanel.row.1.visibility"]
+        XCTAssertTrue(visibility.waitForExistence(timeout: 5), "the stream layer is row 1")
+        visibility.tap()
+        closeLayerRail(app)
+        XCTAssertTrue(bakeBar(app).waitForExistence(timeout: 5))
+        // Hiding a layer is a structural edit, so every frame bakes again; the test starts when it has.
+        XCTAssertNotNil(waitForBakeBar(app, timeout: 30) { $0.isEmpty },
+                        "Setup: the document has baked with the stream layer hidden (the bar reads \"\(bakeBarValue(app))\")")
+
+        var marked: [String] = []
+        for screen in [FakeLaptopStreamer.Screen.green, .blue, .red, .green, .blue] {
+            laptop.show(screen)
+            let rest = Date().addingTimeInterval(ScreenStreamCoordinator.settleInterval * 2 + 0.6)
+            while Date() < rest {
+                let value = bakeBarValue(app)
+                if !value.isEmpty { marked.append(value) }
+            }
+        }
+        XCTAssertEqual(marked, [], """
+            The stream is hidden, so nothing it receives can change a frame, yet the bar marked frames \
+            unbaked while the computer's screen moved and rested. Each rest settles the stream onto its \
+            cel, and a settle that reaches the dirty sweep re-marks the cel's whole span.
+            """)
+
+        openLayerPanel(app)
+        app.buttons["layerPanel.row.1.visibility"].tap()
+        closeLayerRail(app)
+        waitForPicture(.blue, on: canvas, "shown again, the layer is the computer as it is now")
+    }
+
     /// **Standing on another layer**: the stream bar goes with the selection, the stream does not.
     func testSwitchingToAnotherLayerAndBackKeepsTheStreamFollowing() throws {
         let app = XCUIApplication()

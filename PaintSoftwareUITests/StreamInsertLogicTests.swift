@@ -15,6 +15,21 @@ final class StreamInsertLogicTests: XCTestCase {
 
     private static let size = CanvasFixture.canvasSize   // 64 × 64
 
+    /// A temp store for the baker the dirty-sweep test builds.
+    private let bakeRoot = FileManager.default.temporaryDirectory
+        .appendingPathComponent("StreamInsertLogicTests-" + UUID().uuidString, isDirectory: true)
+
+    override func setUp() {
+        super.setUp()
+        Compositor.backend = .coreGraphics
+    }
+
+    override func tearDown() {
+        try? FileManager.default.removeItem(at: bakeRoot)
+        Compositor.backend = Compositor.defaultBackend
+        super.tearDown()
+    }
+
     private func status(width: Int = 1920, height: Int = 1080, name: String = "Blender") -> StreamStatus {
         StreamStatus(source: StreamStatus.Source(kind: "window", name: name),
                      width: width, height: height, fps: 30, streaming: true)
@@ -277,29 +292,6 @@ final class StreamInsertLogicTests: XCTestCase {
 
     // MARK: - TODO (96): a cel that is not on screen still gets the frame
 
-    /// **A hidden layer's element is written and not presented, so showing the layer shows the
-    /// newest picture.** The owner: *"Same with hidden streams made visible."* Before the fix the
-    /// tick skipped a hidden layer outright, and the layer came back showing whatever it showed
-    /// when it was hidden until a frame arrived *after* — which a laptop whose screen is not
-    /// changing never sends. The picture is what the host draws when the layer comes back, and
-    /// `version` moving is what makes it draw at all.
-    func testAHiddenLayerIsFedAndNotPresented() throws {
-        let fixture = tickFixture(image: solidImage(.green))
-        let index = try XCTUnwrap(fixture.manager.layers.indices.last)
-        fixture.manager.layers[index].isVisible = false
-        let version = fixture.vector.version
-
-        fixture.manager.streamCoordinator.tick()
-
-        XCTAssertEqual(fixture.presents(), 0, "nothing on screen to present")
-        XCTAssertGreaterThan(fixture.vector.version, version, "the host will repaint when the layer shows")
-        XCTAssertTrue(centreIs(.green, fixture.vector), "the picture is already the newest frame")
-        fixture.manager.layers[index].isVisible = true
-        fixture.manager.streamCoordinator.tick()
-        XCTAssertEqual(fixture.presents(), 0, "no new frame, so nothing to present — the repaint drew it")
-        XCTAssertTrue(centreIs(.green, fixture.vector))
-    }
-
     /// **A cel on another frame is written and not presented, and the frame change onto it finds
     /// the newest picture.** The owner's first sentence: *"The stream does not reload when the
     /// computer updated while on a different frame, and then the frame changes onto the one with
@@ -375,6 +367,187 @@ final class StreamInsertLogicTests: XCTestCase {
         XCTAssertNotNil(try XCTUnwrap(fixture.vector.streams.first).displayFrame, "held for the commit")
         fixture.manager.commitVectorFloatIfNeeded()
         XCTAssertTrue(centreIs(.green, fixture.vector), "the commit draws the newest frame")
+    }
+
+    // MARK: - TODO (156): a layer nobody can see is not fed
+
+    /// A layer made invisible one of the two ways the artist can: its own switch, or a hidden folder
+    /// above it.
+    private func hide(_ index: Int, in manager: CanvasManager, viaFolder: Bool) {
+        guard viaFolder else {
+            manager.layers[index].isVisible = false
+            return
+        }
+        let folderID = manager.addFolder()
+        manager.layers[index].parentFolderID = folderID
+        if let folder = manager.folders.firstIndex(where: { $0.id == folderID }) {
+            manager.folders[folder].isVisible = false
+        }
+    }
+
+    private func show(_ index: Int, in manager: CanvasManager) {
+        manager.layers[index].parentFolderID = nil
+        manager.layers[index].isVisible = true
+    }
+
+    private func makeBaker(_ manager: CanvasManager) -> FrameBaker {
+        FrameBaker(manager: manager, store: FrameBakeStore(root: bakeRoot),
+                   ring: DecodedFrameRing(byteBudget: 1 << 20))
+    }
+
+    /// Runs the baker's own loop to a stop — `noteDocumentChanged` is the call the app makes, so the
+    /// sweep and the kick are the real ones — and returns when it has nothing left.
+    private func bakeEverything(_ baker: FrameBaker) {
+        let idle = expectation(description: "the bake queue drains")
+        var fulfilled = false
+        baker.onIdle = {
+            guard !fulfilled else { return }
+            fulfilled = true
+            idle.fulfill()
+        }
+        baker.noteDocumentChanged()
+        wait(for: [idle], timeout: 60)
+        baker.onIdle = nil
+    }
+
+    private func pending(_ baker: FrameBaker, _ manager: CanvasManager) -> [Int] {
+        (0..<manager.contentEndFrame).filter { baker.bakeQueue.isPending($0) }
+    }
+
+    /// Spins the main run loop until `condition` holds — the armed tick and settle are timers.
+    private func waitUntil(_ what: String, timeout: TimeInterval = 3, file: StaticString = #filePath,
+                           line: UInt = #line, _ condition: () -> Bool) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition(), Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
+        XCTAssertTrue(condition(), "Timed out waiting for: \(what)", file: file, line: line)
+    }
+
+    /// **A frame written to a layer nobody can see changes no picture, and it used to cost the most
+    /// expensive thing the stream does.** The owner, 2026-10-10: *"weird lagspikes randomly where I
+    /// can see the first 16 or so frames turn orange momentarily, with 0 input."* The stream sat on a
+    /// hidden layer; the laptop's screen kept changing; and every pause in that motion settled the
+    /// frame onto the cel (`commitStreamFrames`), which the dirty sweep read as an edit to the cel's
+    /// whole span. So a hidden layer is not written at all — by its own switch or a folder above it —
+    /// and keeps the picture it had.
+    func testAHiddenStreamLayerIsNotWritten() throws {
+        for viaFolder in [false, true] {
+            let fixture = tickFixture(image: solidImage(.green))
+            fixture.manager.streamCoordinator.tick()
+            XCTAssertTrue(centreIs(.green, fixture.vector), "Setup: green on screen")
+            let index = try XCTUnwrap(fixture.manager.layers.indices.last)
+            hide(index, in: fixture.manager, viaFolder: viaFolder)
+            fixture.slot(2, solidImage(.red))
+            let version = fixture.vector.version
+
+            fixture.manager.streamCoordinator.tick()
+
+            XCTAssertEqual(fixture.vector.version, version,
+                           "a layer nobody can see is not repainted (viaFolder: \(viaFolder))")
+            XCTAssertTrue(centreIs(.green, fixture.vector), "and keeps the picture it had")
+            XCTAssertEqual(fixture.presents(), 1, "and presents nothing: only the visible tick did")
+        }
+    }
+
+    /// **The settle of a hidden layer commits nothing and dirties no frame** — the owner's symptom at
+    /// the model: a frame the sweep marks pending is a frame the timeline's bake bar draws orange.
+    /// Driven through the real `FrameBaker.syncDirty`, with a visible layer as the control that the
+    /// sweep does see a commit, so the hidden case's empty answer is not the sweep being blind.
+    func testAHiddenStreamLayersSettleDirtiesNoFrame() throws {
+        for viaFolder in [false, true] {
+            let fixture = tickFixture(image: solidImage(.green))
+            let manager = fixture.manager
+            let baker = makeBaker(manager)
+            let index = try XCTUnwrap(manager.layers.indices.last)
+
+            manager.streamCoordinator.tick()
+            XCTAssertTrue(fixture.vector.holdsUncommittedStreamFrame, "Setup: a frame the bake lacks")
+            hide(index, in: manager, viaFolder: viaFolder)
+            // Baked in the hidden state, so the hiding itself — a structural edit — is absorbed before
+            // the settle is judged.
+            bakeEverything(baker)
+            XCTAssertEqual(pending(baker, manager), [], "Setup: every frame baked")
+            fixture.slot(2, solidImage(.red))
+            manager.streamCoordinator.tick()
+            let committed = fixture.vector.committedVersion
+            var published = 0
+            let sink = manager.objectWillChange.sink { published += 1 }
+
+            manager.streamCoordinator.settle()
+            baker.syncDirty()
+
+            XCTAssertEqual(fixture.vector.committedVersion, committed, "nothing was committed (viaFolder: \(viaFolder))")
+            XCTAssertEqual(published, 0, "and nothing was published: no SwiftUI pass, no thumbnail")
+            XCTAssertEqual(pending(baker, manager), [], "so no frame is unbaked")
+            sink.cancel()
+        }
+
+        let control = tickFixture(image: solidImage(.green))
+        let baker = makeBaker(control.manager)
+        control.manager.streamCoordinator.tick()
+        bakeEverything(baker)
+        XCTAssertEqual(pending(baker, control.manager), [], "Setup: every frame baked")
+        control.manager.streamCoordinator.settle()
+        baker.syncDirty()
+        XCTAssertEqual(pending(baker, control.manager), Array(0..<control.manager.contentEndFrame),
+                       "CONTROL: a visible stream's settle dirties the cel's whole span, as it must")
+    }
+
+    /// **Showing the layer again is the edge that feeds it** — the newest picture reaches it, and the
+    /// settle puts that picture into the bake, with no frame arriving from the laptop to carry either.
+    /// This is TODO (96)'s *"same with hidden streams made visible"*, kept: the layer is written when
+    /// it is shown instead of thirty times a second while it is not.
+    func testShowingAHiddenStreamLayerFeedsItTheNewestPictureAndSettlesIt() throws {
+        for viaFolder in [false, true] {
+            let fixture = tickFixture(image: solidImage(.green))
+            let coordinator = fixture.manager.streamCoordinator
+            coordinator.settleInterval = 0.05
+            coordinator.tick()
+            let index = try XCTUnwrap(fixture.manager.layers.indices.last)
+            hide(index, in: fixture.manager, viaFolder: viaFolder)
+            coordinator.sync()
+            fixture.slot(2, solidImage(.red))
+            coordinator.tick()
+            XCTAssertTrue(centreIs(.green, fixture.vector), "Setup: the hidden layer did not follow the laptop")
+            let committed = fixture.vector.committedVersion
+
+            show(index, in: fixture.manager)
+            coordinator.sync()
+
+            waitUntil("the pass that shows the layer wrote the newest picture") { centreIs(.red, fixture.vector) }
+            waitUntil("and its settle put that picture into the bake") {
+                fixture.vector.committedVersion > committed
+            }
+            XCTAssertFalse(fixture.vector.holdsUncommittedStreamFrame)
+        }
+    }
+
+    /// **While no stream layer is fed the decoder stops waking the main thread** — a moving screen
+    /// sends thirty frames a second, each a main-queue hop and a coalesced tick, to a canvas that can
+    /// draw none of them. MEASURED 2026-10-10 in the simulator (Debug) against a hidden stream on a
+    /// moving source: 1,492 main run-loop wake-ups in 22 s before this change, 97 after — the 97 are
+    /// the recorder's own flush.
+    func testTheDecoderStopsAnnouncingFramesWhileNoStreamLayerIsFed() throws {
+        let fixture = tickFixture(image: solidImage(.green))
+        let coordinator = fixture.manager.streamCoordinator
+        let index = try XCTUnwrap(fixture.manager.layers.indices.last)
+        coordinator.sync()
+        let decoder = try XCTUnwrap(coordinator.client(for: StreamEndpoint(host: "laptop", port: 47301))).decoder
+        XCTAssertTrue(decoder.announcesFrames, "a visible stream layer wants every frame")
+
+        fixture.manager.layers[index].isVisible = false
+        coordinator.sync()
+        XCTAssertFalse(decoder.announcesFrames, "hidden")
+
+        fixture.manager.layers[index].isVisible = true
+        coordinator.sync()
+        XCTAssertTrue(decoder.announcesFrames, "shown again")
+
+        fixture.manager.play()
+        coordinator.sync()
+        XCTAssertFalse(decoder.announcesFrames, "playing: the bake is what plays")
+        fixture.manager.stopPlayback()
+        coordinator.sync()
+        XCTAssertTrue(decoder.announcesFrames, "and it listens again when playback stops")
     }
 
     // MARK: - STATUS

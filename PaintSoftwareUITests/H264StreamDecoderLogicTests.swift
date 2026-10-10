@@ -139,6 +139,31 @@ final class H264StreamDecoderLogicTests: XCTestCase {
         XCTAssertGreaterThan(brightest, 100, "a black picture would fail here")
     }
 
+    /// **A decoder that is not announcing still decodes and still fills the slot** — it only stops
+    /// calling `onFrame`, which is a main-thread wake-up per frame. A P-frame needs its reference, so
+    /// dropping the decode would not be an option; and the slot holding the newest picture is what lets
+    /// a layer the artist shows again come back showing the computer as it is now.
+    func testADecoderThatIsNotAnnouncingStillFillsTheSlot() throws {
+        let decoder = H264StreamDecoder()
+        var arrivals = 0
+        let arrivalsLock = NSLock()
+        decoder.onFrame = { arrivalsLock.lock(); arrivals += 1; arrivalsLock.unlock() }
+        decoder.announcesFrames = false
+
+        for payload in try wireFrames(from: accessUnits(in: try fixtureBytes())) {
+            decoder.feed(payload)
+        }
+        decoder.finishPendingDecodes()
+        let deadline = Date().addingTimeInterval(1)
+        while decoder.decodedFrameCount < 60, Date() < deadline { Thread.sleep(forTimeInterval: 0.01) }
+
+        XCTAssertGreaterThanOrEqual(decoder.decodedFrameCount, 55, "it decoded the clip")
+        XCTAssertEqual(decoder.latestFrameIndex, decoder.decodedFrameCount, "and the slot holds the newest")
+        XCTAssertNotNil(decoder.latestCGImage(), "as a picture")
+        arrivalsLock.lock(); let arrived = arrivals; arrivalsLock.unlock()
+        XCTAssertEqual(arrived, 0, "without one main-thread wake-up")
+    }
+
     /// The memo: two reads of one frame convert once, and a new frame is a new image.
     func testTheSlotMemoizesTheImagePerFrame() throws {
         let decoder = H264StreamDecoder()

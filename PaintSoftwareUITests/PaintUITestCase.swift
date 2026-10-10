@@ -81,6 +81,36 @@ class PaintUITestCase: XCTestCase {
         app.buttons["toolbar.layersButton"].tap()
     }
 
+    // MARK: - The timeline's baked-frame bar
+
+    /// `timeline.bakeBar` — its accessibility value is `TimelineBakeBar.encode`'s string, and `""` is a
+    /// scene whose every frame is baked.
+    func bakeBar(_ app: XCUIApplication) -> XCUIElement {
+        app.otherElements["timeline.bakeBar"]
+    }
+
+    func bakeBarValue(_ app: XCUIApplication) -> String {
+        bakeBar(app).value as? String ?? "?"
+    }
+
+    /// Polls until the bar's value satisfies `predicate`, and returns the value that satisfied it.
+    ///
+    /// A deadline rather than an instant read, for `waitForSandwichState`'s reason: the bar clears
+    /// on `FrameBaker`'s frame-finished callback, which arrives when a `.utility` worker has written
+    /// a file, and it is throttled to ten updates a second on top of that
+    /// (`TimelineBakeBar.refreshInterval`). No sleep in the loop — the window this is hunting is a
+    /// few hundred milliseconds and an XCUITest query already costs tens of them.
+    @discardableResult
+    func waitForBakeBar(_ app: XCUIApplication, timeout: TimeInterval = 30,
+                        where predicate: (String) -> Bool) -> String? {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            let value = bakeBarValue(app)
+            if predicate(value) { return value }
+        }
+        return nil
+    }
+
     /// Gallery -> New Canvas -> Create Canvas (default 2048x2048), landing in the editor.
     /// Also serves as the regression test for the launch-time freeze: if that bug ever
     /// comes back, `waitForExistence` below times out and the test fails.

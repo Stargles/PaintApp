@@ -44,12 +44,19 @@ import UIKit
 /// - while `isPlaying` — STREAM.md §2.9: a stream layer that is actively moving need not be
 ///   rendered, and playback reads the bake, which `committedVersion` keeps blind to a *moving* stream;
 /// - while the app is in the background — the connection is paused from this end too, so the
-///   laptop stops encoding for nobody.
+///   laptop stops encoding for nobody;
+/// - **for a layer nobody can see** — a hidden layer, or one inside a hidden folder, is neither
+///   written nor settled. A frame written there changes no picture, but the settle that follows it
+///   moves `committedVersion`, so the dirty sweep re-marks the whole cel's span, the timeline's bake
+///   bar shows those frames as unbaked, the cel's thumbnail is redrawn and the editor takes a full
+///   SwiftUI pass — for every pause in a moving screen, with the artist's hands off the iPad.
 ///
-/// Both are `tickIsSuppressed`, and so is the settle: a commit mid-playback would re-key the frames
-/// the player is reading. The tick is armed by a frame's arrival alone — so the edge out of either
-/// arms one and a settle (`tickSuppressionMayHaveEnded`), or a frame that landed meanwhile would wait
-/// for a next one a still screen never sends.
+/// The first two are `tickIsSuppressed`, and so is the settle: a commit mid-playback would re-key the
+/// frames the player is reading. The tick is armed by a frame's arrival alone — so the edge out of
+/// any of the three arms one and a settle (`syncFeeding`), or the layer would wait for a
+/// next frame a still screen never sends. **The decoder keeps the newest frame whatever the layer
+/// shows**, so the tick that edge arms writes the computer as it is now (TODO (96)): the layer
+/// comes back current, and was not rewritten thirty times a second while it was away.
 ///
 /// An element the Move box holds is written like any other (`setStreamFrame` invalidates nothing
 /// for a suppressed element) and presented inside the float: `CanvasView`'s closure hands the host
@@ -137,9 +144,10 @@ final class ScreenStreamCoordinator: ObservableObject {
     /// `settleInterval`, as a property so a logic test can shorten it.
     var settleInterval = ScreenStreamCoordinator.settleInterval
     private var isInBackground = false
-    /// Whether the tick was held off (`tickIsSuppressed`) the last time anything looked — so the edge
-    /// out of it can arm one.
-    private var tickWasSuppressed = false
+    /// The stream layers the last look found fed (`fedStreamLayers()`) — so the edge that feeds one
+    /// again can arm a tick. Nil before the first look, which is a document opening rather than an
+    /// edge: nothing was withheld from a layer that was never fed.
+    private var lastFedStreamLayers: Set<UUID>?
     private var observers: [NSObjectProtocol] = []
 
     /// Installed by `CanvasView.Coordinator`: this element on this layer holds a new frame and is
@@ -269,7 +277,7 @@ final class ScreenStreamCoordinator: ObservableObject {
             if !stillWanted { client.stop() }
         }
         syncPauseState()
-        tickSuppressionMayHaveEnded()
+        syncFeeding()
     }
 
     /// Stops every client and forgets every status. The document is closing.
@@ -564,8 +572,10 @@ final class ScreenStreamCoordinator: ObservableObject {
     /// it is the moment between the sheet's connect and its insert (or the moment before `sync()`
     /// stops a client nothing needs), and a pause there restarted the laptop's pipeline on every
     /// connect — MEASURED in the stage-2 drive as a `pause`/`resume` pair four milliseconds apart.
-    /// A hidden layer's element still counts as wanting frames: the tick writes them into it, so the
-    /// artist can show the layer again and see the newest picture without a round trip to the laptop.
+    /// A hidden layer's element still counts as wanting frames: the laptop keeps sending and the
+    /// decoder keeps the newest, so the artist can show the layer again and see the computer as it is
+    /// now — the pass that shows it arms the tick that writes it (`syncFeeding`) — without
+    /// a round trip to the laptop.
     private func everyElementIsFrozen(at endpoint: StreamEndpoint) -> Bool? {
         everyElementIsFrozen(atAnyOf: [endpoint])
     }
@@ -744,11 +754,10 @@ final class ScreenStreamCoordinator: ObservableObject {
         // what a split's shared `StreamPicture` compares, and a wrapper per cel would defeat that.
         var frames: [StreamEndpoint: (index: Int, image: UIImage)?] = [:]
 
-        for (layerIndex, layer) in manager.layers.enumerated() where layer.kind == .vector {
-            let displayedCel = manager.isLayerEffectivelyVisible(layerIndex)
-                ? manager.activeCelIndex(inLayer: layerIndex,
-                                         atFrame: shownFrames[layerIndex] ?? manager.currentFrame)
-                : nil
+        for (layerIndex, layer) in manager.layers.enumerated()
+        where layer.kind == .vector && manager.isLayerEffectivelyVisible(layerIndex) {
+            let displayedCel = manager.activeCelIndex(inLayer: layerIndex,
+                                                      atFrame: shownFrames[layerIndex] ?? manager.currentFrame)
             for (celIndex, cel) in layer.cels.enumerated() {
                 guard let vector = cel.vector, vector.holdsStream else { continue }
                 var presented = false
@@ -826,7 +835,8 @@ final class ScreenStreamCoordinator: ObservableObject {
     /// back here. Public so a logic test can settle without waiting.
     func settle() {
         guard let manager, !tickIsSuppressed else { return }
-        for layer in manager.layers where layer.kind == .vector {
+        for (layerIndex, layer) in manager.layers.enumerated()
+        where layer.kind == .vector && manager.isLayerEffectivelyVisible(layerIndex) {
             for cel in layer.cels {
                 guard let vector = cel.vector, vector.holdsStream, vector.commitStreamFrames() else { continue }
                 manager.celContentChangedOutsideStroke(layerID: layer.id, celID: cel.id)
@@ -837,20 +847,38 @@ final class ScreenStreamCoordinator: ObservableObject {
     /// STREAM.md §2.9's playback and the background: the two states the tick and the settle stand down in.
     private var tickIsSuppressed: Bool { manager?.isPlaying == true || isInBackground }
 
-    /// **Arms a tick and a settle on every edge out of `tickIsSuppressed`.** The tick is armed by a
-    /// frame's arrival and by nothing else, and a frame that lands while it stands down is held in the
-    /// decoder's slot with no tick to carry it — a laptop whose screen then stays still sends no further
-    /// frame to arrive, so the picture on the canvas would stay one the computer no longer shows until
-    /// the screen next changed. The same goes for frames the canvases already hold: a settle that came
-    /// due while playing committed nothing. Run from `sync()`, which a canvas pass makes when playback
-    /// stops, and from the foreground notification.
-    private func tickSuppressionMayHaveEnded() {
-        let suppressed = tickIsSuppressed
-        defer { tickWasSuppressed = suppressed }
-        if tickWasSuppressed, !suppressed {
-            frameArrived()
-            scheduleSettle()
+    /// **The stream layers the tick and the settle serve right now** — those that hold a stream, can be
+    /// seen, and are not standing down for playback or the background. A layer is the unit rather than
+    /// an element because visibility is a layer's (and its folders') and the edge below is about a
+    /// layer coming back.
+    private func fedStreamLayers() -> Set<UUID> {
+        guard let manager, !tickIsSuppressed else { return [] }
+        var fed = Set<UUID>()
+        for (index, layer) in manager.layers.enumerated()
+        where layer.kind == .vector && manager.isLayerEffectivelyVisible(index)
+            && layer.cels.contains(where: { $0.vector?.holdsStream == true }) {
+            fed.insert(layer.id)
         }
+        return fed
+    }
+
+    /// **Keeps the decoders' announcements and the tick's arming in step with what is fed.** With no
+    /// layer fed the decoders stop waking the main thread (`H264StreamDecoder.announcesFrames`); on
+    /// every edge that feeds a stream layer again — playback stopping, the app coming back, the layer
+    /// being shown — it arms a tick and a settle. The tick is armed by a frame's arrival and by
+    /// nothing else, and a frame that lands while a layer is not fed is held in the decoder's slot
+    /// with no tick to carry it — a laptop whose screen then stays still sends no further frame to
+    /// arrive, so the picture on the canvas would stay one the computer no longer shows until the
+    /// screen next changed. The same goes for frames the canvases already hold: a settle that came
+    /// due while the layer was away committed nothing. Run from `sync()`, which a canvas pass makes
+    /// when playback stops or a layer is shown, and from the background and foreground notifications.
+    private func syncFeeding() {
+        let fed = fedStreamLayers()
+        defer { lastFedStreamLayers = fed }
+        for client in clients.values { client.decoder.announcesFrames = !fed.isEmpty }
+        guard let before = lastFedStreamLayers, !fed.subtracting(before).isEmpty else { return }
+        frameArrived()
+        scheduleSettle()
     }
 
     private func latestFrame(for endpoint: StreamEndpoint) -> (index: Int, image: CGImage)? {
@@ -863,7 +891,7 @@ final class ScreenStreamCoordinator: ObservableObject {
     private func appDidEnterBackground() {
         isInBackground = true
         syncPauseState()
-        tickSuppressionMayHaveEnded()
+        syncFeeding()
     }
 
     private func appWillEnterForeground() {
@@ -871,7 +899,7 @@ final class ScreenStreamCoordinator: ObservableObject {
         // `resume` carries a keyframe by §3, so nothing here asks for a second one; an endpoint
         // every element of which is frozen stays paused, which is what the artist left it as.
         syncPauseState()
-        tickSuppressionMayHaveEnded()
+        syncFeeding()
     }
 }
 
