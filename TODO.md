@@ -134,30 +134,6 @@ down. That is an acceptable fix. You decide."*
 
 ---
 
-## (161) Keep versions spread out in time, not the last five saves
-
-**Status** — asked 2026-10-10, after (153). The five auto slots (`maxAutosaveBackupsPerProject`) covered
-nine minutes of the owner's scene (00:09–00:18), so a build that loaded the scene wrong and autosaved
-rotated the last good copy out within minutes; only the three install snapshots
-(`maxPreUpdateBackupsPerProject`, one added per install, the oldest pruned) still held the keys, and
-each further install would have dropped one. The owner: *"I think i would definitely like at least 10m,
-hour and day, with day containing a few entries (like 3 days ago)."*
-
-Then: *"a better architecture could be something like a certain amount of 10m slots, hour slots, daily
-and weekly slots. You decide a good number, since it looks like we have alot of room. If you find a
-better way that other programs use, be my guest."* Settled as the grandfather–father–son thinning that
-Time Machine uses: versions are bucketed by age and the newest in each bucket survives.
-
-- [ ] Tiers: the newest **3** saves; **6** ten-minute slots (the last hour); **24** hourly (the last
-      day); **7** daily (the last week); **4** weekly (the last month) — at most ~44 per scene, under
-      the existing global byte cap that never deletes a scene's last restore point.
-- [ ] Install snapshots are not pushed out by installs alone (the hourly re-signer reinstalls).
-- [ ] Space stays near what changed: versions keep sharing unchanged files as APFS clones (they do
-      today — `ProjectStore`'s cel reuse and `ProjectBackupManager`'s `clonefile`); measure what a week
-      of versions costs on a real scene.
-
----
-
 ## (27) Stream the computer's screen as a layer
 
 **Status** — briefed 2026-09-13, designed the same day ([STREAM.md](docs/STREAM.md)), and **built through
