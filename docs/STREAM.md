@@ -396,8 +396,8 @@ frame-arrived signal and runs a **tick at most every 33 ms** (coalesced, `CADisp
 `DispatchQueue.main.asyncAfter` armed on arrival). The tick does two things, and the split between
 them is TODO (96) and TODO (97) respectively:
 
-1. **It writes the newest frame into every unfrozen stream element naming the endpoint — on every
-   cel, displayed or not** — through `VectorCanvas.setStreamFrame(id:image:index:)`. The picture
+1. **It writes the newest frame into every unfrozen stream element naming the endpoint on a layer the
+   artist can see — on every cel, displayed or not** — through `VectorCanvas.setStreamFrame(id:image:index:)`. The picture
    lives in a `StreamPicture` box the element holds by reference, so every copy of the element (an
    undo step's list, a split's neighbour, a float) shows the one newest frame and pins one decoder
    buffer between them; the canvas records the decoder index it was last told, so a tick on an
@@ -406,9 +406,20 @@ them is TODO (96) and TODO (97) respectively:
    is stale) and a new `committedVersion` — which `LayerContentVersion` and the posed/video
    identities read — does not, so the bake, the dirty sweep and the sandwich key are blind to a
    live frame by construction. **A cel the artist is not looking at is written all the same**; when
-   they change frame onto it, or show its layer, the host's ordinary repaint draws the newest
-   picture, and no further frame has to arrive — which matters because a laptop whose screen is not
-   changing sends nothing that would.
+   they change frame onto it the host's ordinary repaint draws the newest picture, and no further
+   frame has to arrive — which matters because a laptop whose screen is not changing sends nothing
+   that would. **A layer nobody can see is not written at all** — hidden, or inside a hidden folder
+   (TODO (156)): the frame would change no picture, and the settle below, which follows every pause
+   in the computer's motion, moves `committedVersion` and so re-marks the cel's whole span for the
+   bake, redraws the timeline's bake bar orange, redraws the cel's thumbnail and takes a full SwiftUI
+   pass. The owner's recording with no touch in it shows exactly that in every two-second window — 14
+   store decodes, 31 baker landings, one thumbnail render, one pass, ~45 ms observer-phase spikes, the
+   main thread a third busy — and the same signature reproduces in the simulator (MEASURED, Debug) from
+   the owner's own scene, whose stream sits on a hidden layer in a hidden folder, with a source that
+   moves and rests. Showing the layer is the edge
+   that feeds it: the decoder keeps the newest frame whatever the layer shows, so the tick that edge
+   arms writes the computer as it is now (TODO (96)'s *"hidden streams made visible"*, kept) without
+   a round trip to the laptop.
 2. **For the elements on a visible layer whose cel is the one at the current frame, it presents the
    frame** through a closure `CanvasView` installs (`onStreamFrame`, the shape of
    `StrokeCanvasView.guideOverlayNeedsUpdate` — never `objectWillChange`, which is a whole SwiftUI
@@ -431,11 +442,14 @@ them is TODO (96) and TODO (97) respectively:
 
 Once a second — not per tick — the coordinator also publishes (`celContentChangedOutsideStroke`)
 for the displayed cel, so the layer-panel thumbnail catches up through its 400 ms debounce. The tick
-does nothing while `isPlaying` (2.9) or while the app is backgrounded — and **the edge out of either
-arms one** (`tickSuppressionMayHaveEnded`): the tick is armed by a frame's arrival alone, a frame that
-lands while it stands down waits in the decoder's slot, and a laptop whose screen then sits still
-sends no further frame to arrive. TODO (112): without that the canvas kept a picture the computer no
-longer showed until its screen next changed.
+does nothing while `isPlaying` (2.9), while the app is backgrounded, or for a layer nobody can see —
+and **the edge that feeds a layer again arms one** (`syncFeeding`): the tick is armed by a frame's
+arrival alone, a frame that lands while it stands down waits in the decoder's slot, and a laptop whose
+screen then sits still sends no further frame to arrive. TODO (112): without that the canvas kept a
+picture the computer no longer showed until its screen next changed. While no stream layer is fed the
+decoder stops announcing frames (`H264StreamDecoder.announcesFrames`) — it still decodes, because a
+P-frame needs its reference, and still keeps the newest frame in its slot — so a moving screen does not
+wake the main thread thirty times a second for a canvas that can draw none of them.
 
 **A canvas the compositor draws shows a live stream through the live pair** — TODO (112). A blend
 mode, a mask, an effect or a container pose anywhere in the document puts the canvas on a composite
@@ -467,9 +481,9 @@ interval is chosen against the damage-driven capture (§3): a still screen sends
 has to outlast the gaps inside a burst of motion (~55 ms between frames at the MEASURED ~18 fps) and
 the slowest regular damage a desktop makes, Windows' 530 ms caret blink — a shorter one would flip a
 blinking caret between plain and exact twice a second, each flip an exact bake spent and discarded.
-The settle stands down while the animation plays and the app is backgrounded (a commit mid-playback
-would re-key the frames the player is reading) and is armed again by the edge out of either, like the
-tick. **A stream a transformation layer or a Move channel of its own moves is held**, not live — it is
+The settle stands down while the animation plays, while the app is backgrounded (a commit mid-playback
+would re-key the frames the player is reading) and for a layer nobody can see, and is armed again by
+the edge out of any of them, like the tick. **A stream a transformation layer or a Move channel of its own moves is held**, not live — it is
 drawn from a derived image the surface cannot sit over (`presentStreamFrame` refuses a derived base) —
 and the bar does not say so; it catches up at the same settle, because the derived picture is keyed on
 `committedVersion` too. **Freeze commits at once**, so the frozen frame is the exact one wherever the

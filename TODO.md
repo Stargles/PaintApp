@@ -71,19 +71,6 @@ to the left, in the blank space under the layer name."*
 
 ---
 
-## (156) Random lag spikes with the first ~16 frames flashing orange, with no input
-
-**Status** — reported 2026-10-10 with `recording-20261009-234547.jsonl`. The owner: *"Im getting these
-weird lagspikes randomly where I can see the first 16 or so frames turn orange momentairly with 0 input.
-Fix this bug and investigate if the previous session made more bugs."* The recording shows the main
-thread ~33% busy with no touch, a thumbnail render and ~14 store decodes every 2 s, and ~45 ms
-observer-phase spikes — something re-dirties the document on its own.
-
-- [ ] Root cause of the idle re-dirtying; fixed; an idle document does no work.
-- [ ] An audit of session 46's merges for other defects of the same family.
-
----
-
 ## (157) The fill tool's gap-closing slider is janky
 
 **Status** — reported 2026-10-10 with `recording-20261009-235645.jsonl`. The owner: *"The gap closing

@@ -5454,3 +5454,48 @@ the device the box should now be bound by that pass rather than by any render, I
 updates a second. Keeping the live pose off the published model for the length of the gesture (the
 vector float's own rule) is the lever if that is not enough. The first update of a graph drag waits for
 the bands' one mint (~300 ms here) because the finger lands on the node and moves almost at once.
+
+## 25. A stream on a hidden layer was the busiest thing on an idle iPad (2026-10-10)
+
+TODO (156), from `recording-20261009-234547.jsonl` — 6.85 s, two touches at the very end. The owner:
+*"weird lagspikes randomly where I can see the first 16 or so frames turn orange momentarily with 0
+input."* The recording's idle windows carried, every two seconds: the main thread ~33% busy
+(`mainBusy` 650–685 ms over ~340 run-loop wake-ups), 14 `storeDecode`, 31 `renderLanded`, one
+`thumbnailRender`, one `updateUIView`, and a 43–46 ms `observerPhase` spike.
+
+**The cause was the stream, not a loop in the baker.** The owner's scene
+(`~/PaintWork/evidence-153/1.paintproj`) holds a stream element on a *hidden* layer in a *hidden*
+folder, in a 16-frame cel — the "first 16 frames". `ScreenStreamCoordinator` fed every stream cel
+whatever its layer showed: a frame per tick, and after each pause in the computer's motion the settle
+(`commitStreamFrames`) moved the cel's `committedVersion`. The dirty sweep read that as an edit to the
+cel's span, so the 16 frames went unbaked (orange) and were each revisited (16 `bakeKeyMint`, 31
+landings, 14 ring refills), the cel's thumbnail was redrawn, and `objectWillChange` took the whole editor
+through a SwiftUI pass — for a picture no frame shows. The layer being hidden is why no frame
+re-composited (the key did not move, so each revisit deduped): the cost was all bookkeeping, and it
+repeated for as long as the laptop's screen did.
+
+**How it was taken.** MEASURED, iPad Pro 13-inch M4 simulator (iOS 26.5) on the 8-core MacBook, the
+owner's scene opened from the gallery, `PlaybackTrace` armed by Record My Actions, no touch for the
+whole window. The stream pointed at `tools/stream/fake-streamer.py --pattern` on the Mac, its ffmpeg
+stopped for 1.2 s and continued for 1.4 s in a loop so the screen moves and rests like a desktop's.
+Windows 10–30 s after the document opened. (The same signature — 14 / 31 / 1 / 16 / 1 per window —
+appeared first, once per frame the owner's real laptop sent, when the simulator reached it over the
+LAN.) **The device was not measured**; the simulator's main thread is ~9× quicker than the A13's by
+the ratio of the owner's recording to the same windows here.
+
+| per two-second window (mean) | before | after |
+|---|---|---|
+| Release: main thread busy | 74 ms | 9 ms |
+| Release: run-loop wake-ups | 139 | 9.5 |
+| Release: store decodes / baker landings / thumbnail renders / passes | 10 / 22 / 0.7 / 0.7 | 0 / 0 / 0 / 0 |
+| Debug: main thread busy | 65 ms | 7.5 ms |
+| Debug: run-loop wake-ups | 136 | 8.8 |
+
+The 9 ms that is left is the recorder's own flush and the XCUITest runner. **The fix is one rule:** a
+layer nobody can see (hidden, or inside a hidden folder) is neither fed nor settled, and while no stream
+layer is fed the decoder stops announcing frames (`H264StreamDecoder.announcesFrames`) — it still decodes
+and still keeps the newest frame, so the pass that shows the layer arms a tick that writes the computer as
+it is now. A *visible* stream on a screen that moves and rests is still the live-then-exact design's
+cost: MEASURED in the same harness (Debug) with the stream layer and its folder shown, 3–11 real
+composites and writes in every two-second window (900–1,700 ms of worker time on the Mac), for as long
+as the screen keeps moving and resting.
