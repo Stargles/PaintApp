@@ -407,6 +407,8 @@ final class LegacyPoseTrackRepairLogicTests: XCTestCase {
         let filed = folder.appendingPathComponent("Filed.paintproj")
         try FileManager.default.copyItem(at: project, to: filed)
         let original = try Data(contentsOf: snapshot.appendingPathComponent("manifest.json"))
+        let dated = Date(timeIntervalSince1970: 1_600_000_000)
+        try FileManager.default.setAttributes([.modificationDate: dated], ofItemAtPath: version.path)
 
         let report = LegacyPoseTrackRepair.repairLibrary(leavingUntouched: "preupdate-1-0-43-9")
 
@@ -419,6 +421,9 @@ final class LegacyPoseTrackRepairLogicTests: XCTestCase {
             XCTAssertEqual(opened.layers.first { $0.id == layer }?.transform?.track.keyedFrames, [0, 8],
                            "\(package.lastPathComponent) holds its keys")
         }
+        let kept = try XCTUnwrap(FileManager.default.attributesOfItem(atPath: version.path)[.modificationDate] as? Date)
+        XCTAssertEqual(kept.timeIntervalSince1970, dated.timeIntervalSince1970, accuracy: 1,
+                       "A saved version keeps its date, which the Versions list sorts by")
         XCTAssertEqual(try Data(contentsOf: snapshot.appendingPathComponent("manifest.json")), original,
                        "The running build's snapshot keeps the untouched original")
         XCTAssertNil(ProjectStore.load(from: snapshot), "…which the current decoder refuses rather than reading as no keys")

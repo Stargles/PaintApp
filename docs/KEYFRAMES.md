@@ -477,10 +477,13 @@ reasoning is what stops a later session reinstating it by rediscovering the argu
 
     **Superseded by it**: §2.14 and §2.15, and the parts of §2.5 and §11.7 that described a whole-pose
     key (one shared ease, six rows written through `PoseEdit`, a projective channel declined). A track
-    that stored whole-pose keys is read as the curves it means, its timing spine's handles carried
-    exactly (`TransformTrack.init(migrating:step:)`). It decoded empty until TODO (153), on a standing
-    permission that had already lapsed: the owner's keyed scene opened with no keys, the next autosave
-    wrote the empty track over the file, and no saved version could be read as keyed.
+    that stored whole-pose keys is rewritten as the curves it means, its timing spine's handles carried
+    exactly, by a one-shot repair at launch over `Projects/`, `Backups/` and `Trash/`, saved versions
+    included. The decoder reads the current format only and refuses anything else, so a
+    file it cannot read is shown as damaged and never as a track with no keys. It decoded empty until
+    TODO (153), on a standing permission that had already lapsed: the owner's keyed scene opened with
+    no keys, the next autosave wrote the empty track over the file, and no saved version could be read
+    as keyed.
 
 ---
 
@@ -1002,7 +1005,10 @@ drag and settled, as one undo step routed at the frame it was made on, when the 
 also what lets a second Move compose onto the first instead of replacing it. **It is never held between
 gestures** (TODO (153)): the box stays up across scrubs, Add Keys and graph-editor edits, and a copy taken
 when the box was raised and put back when it went away overwrote all of them — a keyed transformation
-layer lost its keys from every saved version, because the autosave also waited on the box.
+layer lost its keys from every saved version, because the autosave also waited on the box. **A drag
+still open when Undo or Redo is pressed is dropped, not settled** (`cancelBoxNudge`): a drag is not a
+step until the finger lifts, the press acts on the steps, and settling it first would make Undo take
+back the drag in the other hand and Redo find its stack cleared.
 
 **Every arm of the writer writes the stored base, and that is the one real difference from a cel
 channel.** `commitTransformPose`'s `.key` arm *takes the bake back* because a cel has no stored base and

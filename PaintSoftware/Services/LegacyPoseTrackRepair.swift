@@ -109,10 +109,16 @@ nonisolated enum LegacyPoseTrackRepair {
     @discardableResult
     static func repair(packageAt package: URL) -> PackageResult {
         var result = PackageResult()
+        let modified = (try? FileManager.default.attributesOfItem(atPath: package.path))?[.modificationDate] as? Date
         repairManifest(in: package, result: &result)
         lazy var canvas = readCanvas(of: package)
         for sidecar in animationFiles(in: package) {
             repairSidecar(at: sidecar, canvas: { canvas }, result: &result)
+        }
+        // A saved version without a timestamp in its name is dated by its package folder, which the
+        // rewrite just touched.
+        if result.changed, let modified {
+            try? FileManager.default.setAttributes([.modificationDate: modified], ofItemAtPath: package.path)
         }
         return result
     }
