@@ -439,6 +439,66 @@ final class LiveTransformEditLogicTests: XCTestCase {
                           xCurve(restX - 5), "the cel itself is untouched until the lift")
     }
 
+    // MARK: - The box's hold ends with its drag
+
+    /// **A vector float's box that stands down mid-drag still ends the drag** — `onBoxTouchUp`, which
+    /// is what ends the live transform edit and with it the baker's hold. Dropped silently, as it used
+    /// to be, a box that vanished under the finger (`rasterizeLayer`, `handleActiveContextChanged`)
+    /// left `FrameBaker.isSuspended` held until some later box gesture happened to end.
+    func testAVectorBoxThatStandsDownMidDragEndsTheDrag() {
+        let overlay = ObjectTransformOverlayView(frame: canvasBox)
+        overlay.update(isActive: true,
+                       frame: ObjectTransformFrame(
+                           transform: LayerTransform(position: CGPoint(x: canvasBox.midX, y: canvasBox.midY),
+                                                     scale: 1, rotation: 0),
+                           contentSize: canvasBox.size),
+                       canvasScale: 1, distorting: false)
+        var downs = 0, ups = 0, ended = 0
+        overlay.onBoxTouchDown = { downs += 1 }
+        overlay.onBoxTouchUp = { ups += 1 }
+        overlay.onHandleDragEnded = { ended += 1 }
+        // A bare touch reads the origin, which is the box's top-left grip.
+        let touch = UITouch()
+        overlay.touchesBegan([touch], with: nil)
+        XCTAssertEqual(downs, 1, "PREMISE: the touch took a grip")
+
+        overlay.deactivate()
+        XCTAssertEqual(ended, 1, "the drag's nudge lands")
+        XCTAssertEqual(ups, 1, "and the touch-up is said, so the live edit ends")
+        overlay.touchesEnded([touch], with: nil)
+        XCTAssertEqual(ups, 1, "the touch's own end, later, says nothing a second time")
+    }
+
+    /// The same for the box over a floating piece — a transformation layer's, lifted pixels, a
+    /// folder's — settled out from under the finger: its pan's own end finds no claim, so the
+    /// settle is the only touch-up the drag gets.
+    func testAFloatingBoxSettledMidDragEndsTheDrag() throws {
+        let overlay = FloatingPieceOverlayView(frame: canvasBox)
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).image { ctx in
+            UIColor.black.setFill()
+            ctx.cgContext.fill(CGRect(x: 0, y: 0, width: 4, height: 4))
+        }
+        let pose = FloatingTransform(position: CGPoint(x: canvasBox.midX, y: canvasBox.midY),
+                                     scaleX: 1, scaleY: 1, rotation: 0)
+        overlay.update(FloatingPiece(kind: .move, sourceLayerID: UUID(), sourceCelID: UUID(),
+                                     targetLayerID: UUID(), targetCelID: UUID(), pieceImage: image,
+                                     baseSize: CGSize(width: 20, height: 20), remainderPreview: nil,
+                                     transform: pose, liftTransform: pose, mode: .freeform),
+                       isInteractive: true)
+        var downs = 0, ups = 0
+        overlay.onBoxTouchDown = { downs += 1 }
+        overlay.onBoxTouchUp = { ups += 1 }
+        let pan = try XCTUnwrap(overlay.subviews.flatMap { $0.gestureRecognizers ?? [] }
+            .compactMap { $0 as? TouchDownPanGestureRecognizer }.first)
+        pan.onTouchDown?()
+        XCTAssertEqual(downs, 1, "PREMISE: the pan took the box's touch")
+
+        overlay.update(nil, isInteractive: false)
+        XCTAssertEqual(ups, 1, "the settle says the drag is over, so the live edit ends")
+        pan.onSequenceEnded?()
+        XCTAssertEqual(ups, 1, "and the pan's own end, a moment later, says nothing a second time")
+    }
+
     // MARK: - The entry points' answers
 
     func testTheMoveBoxEditsWhatItHolds() throws {
