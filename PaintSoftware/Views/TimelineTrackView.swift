@@ -729,18 +729,21 @@ struct TimelineTrackView: UIViewRepresentable {
                 graphBandSelection = []
                 graphBandFocus = nil
             }
-            // **The focus is pruned against what the band actually draws.** Undo, a neighbour's drag
-            // and the node menu's own Delete can all take the focused node out from under it, and a
-            // focus naming a frame no channel keys draws no handles while still answering the next
-            // tap on that spot with a menu — the two-stage tap's first stage, silently skipped.
+            // **The focus is pruned against what the band actually draws** — the held curves of a
+            // drag in flight included, whose focus has followed its node off the document's frame.
+            // Undo, a neighbour's drag and the node menu's own Delete can all take the focused node out
+            // from under it, and a focus naming a frame no channel keys draws no handles while still
+            // answering the next tap on that spot with a menu — the two-stage tap's first stage,
+            // silently skipped.
+            let shown = shownGraphBand(content)
             if let focus = graphBandFocus,
-               content.channels.first(where: { $0.parameterID == focus.parameterID })?
+               shown.channels.first(where: { $0.parameterID == focus.parameterID })?
                    .curve.key(atFrame: focus.frame) == nil {
                 graphBandFocus = nil
             }
             graphBandView.setSelection(graphBandSelection)
             graphBandView.setFocus(graphBandFocus)
-            drawGraphBand(content)
+            graphBandView.update(content: shown, pixelsPerFrame: pixelsPerFrame, visibleX: visibleBandX)
         }
 
         /// **The band's x window, in the track's own coordinates.**
@@ -1077,23 +1080,29 @@ struct TimelineTrackView: UIViewRepresentable {
         /// behind its node. A held pose redraws the band alone; a written one takes the layout pass
         /// the document moved.
         private func redrawGraphBand(after drag: GraphBandDrag) {
-            if drag.beganLiveEdit, let content = laidOutKey?.graphBand {
-                drawGraphBand(content)
+            if drag.beganLiveEdit {
+                redrawHeldGraphBand()
             } else {
                 relayout()
             }
         }
 
-        /// **Draws `content` as the open drag holds it** — the held pose's curves in place of the
-        /// document's (TODO (154)). The one place the band is handed its content, so a layout pass
-        /// that lands mid-drag — something else in the editor publishing — draws the finger's curves
-        /// and not the document's it has not been told about.
-        private func drawGraphBand(_ content: TimelineGraphBand.Content) {
-            var shown = content
-            if let held = canvasManager.livePose, content.target == .layer(id: held.layerID) {
-                shown = content.holding(held.curves, contentEndFrame: canvasManager.contentEndFrame)
+        /// Redraws the band alone, from the laid-out content and what a drag holds over it.
+        private func redrawHeldGraphBand() {
+            guard let content = laidOutKey?.graphBand else { return }
+            graphBandView.update(content: shownGraphBand(content), pixelsPerFrame: pixelsPerFrame,
+                                 visibleX: visibleBandX)
+        }
+
+        /// **What the band shows of `content`**: the held pose's curves in place of the document's
+        /// while a drag holds one (`CanvasManager.livePose`, TODO (154)), and `content` otherwise. Asked
+        /// by every path that hands the band its content, so a layout pass that lands mid-drag —
+        /// something else in the editor publishing — draws the finger's curves and not the document's.
+        private func shownGraphBand(_ content: TimelineGraphBand.Content) -> TimelineGraphBand.Content {
+            guard let held = canvasManager.livePose, content.target == .layer(id: held.layerID) else {
+                return content
             }
-            graphBandView.update(content: shown, pixelsPerFrame: pixelsPerFrame, visibleX: visibleBandX)
+            return content.holding(held.curves, contentEndFrame: canvasManager.contentEndFrame)
         }
 
         private func finishGraphBandTouch(at point: CGPoint) {
@@ -1188,7 +1197,7 @@ struct TimelineTrackView: UIViewRepresentable {
             if drag.beganLiveEdit {
                 if !cancelled { canvasManager.commitLivePose() }
                 canvasManager.endLiveTransformEdit()
-                if cancelled, let content = laidOutKey?.graphBand { drawGraphBand(content) }
+                if cancelled { redrawHeldGraphBand() }
             }
             guard drag.didMove else { return }
             if cancelled {
