@@ -103,6 +103,13 @@ struct DrawingView: View {
                 // drawn *from* the panel, upward over the canvas (`AnimationTimeline.anchoredMenuLayer`), and
                 // a dock card drawn later covered them: on the owner's 1080 pt window the Select card hid
                 // the right half of the graph editor's channel list.
+                //
+                // **Except while a piece floats**, when the one card up is the Move bar — the card that
+                // cannot narrow (`dockClearance`), so it takes its full width and overlaps the layer rail
+                // when that is open. Beneath the rail, its Done — the control at its right end — took no
+                // touch: a tap on it landed on the rail (`GraphEditorGestureUITests`, a Move raised from a
+                // transformation layer's options with the rail open). So the dock stands above the rail
+                // for exactly as long as the Move bar is in it.
                 // The card's width is a function of the canvas area (`BottomDock.width(in:)`), so
                 // the dock needs that area's width — and it is not the screen's: the side toolbar
                 // and Split View both take from it. The `GeometryReader` is filled explicitly
@@ -116,6 +123,7 @@ struct DrawingView: View {
                         .padding(.leading, BottomDock.leadingInset(cardWidth: card, in: room))
                         .frame(width: proxy.size.width, height: proxy.size.height, alignment: .leading)
                 }
+                .zIndex(canvasManager.isAnyPieceFloating ? 1 : 0)
 
                 // GeometryReader to tell the timeline how much room it may claim when the user drags
                 // it taller, and the notice below how much of the width the layer rail has taken —

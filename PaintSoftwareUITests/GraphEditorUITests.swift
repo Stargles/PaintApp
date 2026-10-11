@@ -747,8 +747,13 @@ final class GraphEditorGestureUITests: PaintUITestCase {
         XCTAssertTrue(app.buttons["moveBar.doneButton"].waitForExistence(timeout: 5),
                      "Tapping Move should raise the box, exactly as it does beneath a value layer")
         app.buttons["moveBar.rotate45LeftButton"].tap()
-        app.buttons["moveBar.doneButton"].tap()
-        XCTAssertFalse(app.buttons["moveBar.doneButton"].exists, "The box should have committed")
+        // **The rail is still open, and the Move bar — which cannot narrow — stands over it**: Done is the
+        // control at the bar's right end, where the rail is, and a tap there that lands on the rail
+        // commits nothing.
+        let done = app.buttons["moveBar.doneButton"]
+        XCTAssertTrue(done.isHittable, "Done is on top of the open layer rail, not under it")
+        done.tap()
+        XCTAssertTrue(done.waitForNonExistence(timeout: 5), "The box should have committed")
 
         if app.buttons["layerPanel.addButton"].exists { app.buttons["toolbar.layersButton"].tap() }
         app.buttons["timeline.graphEditorButton"].tap()
