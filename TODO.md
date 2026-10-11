@@ -93,6 +93,19 @@ that snaps smart shapes like drawn lines into 15 degree increments so you should
 
 ---
 
+## (167) Scroll and pan with fingers inside the graph editor
+
+**Status** — asked 2026-10-11. The owner: *"when the user tries to the scroll and pan with fingers inside
+the graph editor box it doesnt work right now, i think it should. Keep the previous behavior where
+touching a node moves it obviously."* The (154) recording shows the shape of it: a touch in the band
+begins `timeline.graphBand` and fails `timeline.scroll` at once, wherever it lands.
+
+- [ ] A finger drag inside the graph band that does not start on a node or handle scrolls/pans the
+      timeline as it does outside the band; a drag that starts on a node or handle moves it, as now.
+- [ ] Whatever else a tap in empty band space does today (deselect, add?) keeps working.
+
+---
+
 ## (27) Stream the computer's screen as a layer
 
 **Status** — briefed 2026-09-13, designed the same day ([STREAM.md](docs/STREAM.md)), and **built through
