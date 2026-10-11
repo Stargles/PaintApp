@@ -31,11 +31,13 @@ enum SandwichPresentation: String {
     /// thread for one key (`startSandwichRebuild`). Two of the three are cheap — everything strictly
     /// below the active layer and everything strictly above, MEASURED at 14–23 ms on the same iPad
     /// (`sandwichComposite`) — so the edit is on screen a rebuild after it lands rather than a bake.
+    /// Where a layer above the active one blends or grades, the halves are one picture of everything
+    /// but the active layer and its host draws over it (`LivePairCut.overHost`, TODO (160)).
     ///
     /// **Fast, then exact — on every document** (owner, 2026-10-01, TODO (125)). Where the pair is
     /// not the picture it is §5.2's near picture: the active layer drawn *plain* — its host draws its
-    /// own ink, with no blend mode, grade or mask — and a blended layer above it composited onto
-    /// transparency. The owner chose that over waiting: *"for the fast one it can be just the layer
+    /// own ink, with no blend mode, grade or mask — over a blended or graded layer above it rather
+    /// than under it. The owner chose that over waiting: *"for the fast one it can be just the layer
     /// without any effects added, no need to try and approximate"*, and the bake replaces it when it
     /// lands. A layer above that blends is the same class of approximation as the active layer's own
     /// mode, so it takes the same rule rather than a wait of its own.
