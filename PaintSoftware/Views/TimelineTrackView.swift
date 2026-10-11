@@ -715,6 +715,8 @@ struct TimelineTrackView: UIViewRepresentable {
                 graphBandView.panRecognizer.name = "timeline.graphBand"
                 graphBandView.panRecognizer.delegate = self
                 graphBandView.panRecognizer.addTarget(self, action: #selector(handleGraphBandTouch(_:)))
+                graphBandView.tapRecognizer.name = "timeline.graphBand.tap"
+                graphBandView.tapRecognizer.addTarget(self, action: #selector(handleGraphBandTap(_:)))
                 scrollView?.panGestureRecognizer.require(toFail: graphBandView.panRecognizer)
             }
             graphBandView.isHidden = false
@@ -799,21 +801,6 @@ struct TimelineTrackView: UIViewRepresentable {
             let bandHeight: CGFloat
             /// The keys being carried. Empty means the touch began on nothing, which is a marquee.
             let carried: Set<TimelineGraphBand.KeyRef>
-            /// **Whether this touch may draw a rubber band** — TODO (59), the owner 2026-09-10:
-            /// *"right now in the graph menu, the finger can be used for the box select on nodes.
-            /// Should only be the pen (in pen mode)"*.
-            ///
-            /// `pencilOnlyDrawingAllows`, answered **at touch-down** and carried, which is this
-            /// file's rule for every recogniser it owns: a touch resolves to what it is when it
-            /// lands and never changes its mind. The alternative — asking the recogniser on each
-            /// `.changed` — would read `lastTouchType` after a second contact had joined the
-            /// sequence and could flip a live marquee off mid-drag.
-            ///
-            /// **It gates the marquee alone**, not the whole band. Dragging a node the finger
-            /// landed on is unaffected, and so is tap-to-add: the owner named the box select, and
-            /// each of the others is a touch aimed at something the artist can see, which is the
-            /// distinction `CanvasView.Coordinator.setUpGestures`' gating list turns on.
-            let allowsMarquee: Bool
             /// **The node the finger actually took**, as opposed to the set it carries. Nil for a
             /// marquee and for a handle drag.
             ///
@@ -900,18 +887,20 @@ struct TimelineTrackView: UIViewRepresentable {
         /// - The undo bracket opens on the first real movement, not on touch-down.
         ///
         /// **Arbitration, in full.** The scroll view's pan `require(toFail:)`s this recogniser (see
-        /// `layoutGraphBand`), so a touch that lands on the band belongs to the band; the band is a
+        /// `layoutGraphBand`), so a touch the band claims belongs to the band — and `shouldReceive`
+        /// below claims only a touch that lands on a node or a handle or may rubber-band, so any
+        /// other is never offered to it and the scroll view pans from it (TODO (167)); the band is a
         /// sibling of the row pool and never a subview of a row, so a row's pan, tap and 0.5 s long
         /// press — which pick their zone from x alone and would read the band as a cel body — are on
         /// views this touch never reaches; the pinch is a two-touch recogniser on `contentView` and
         /// this is `numberOfTouchesRequired = 1`, the same coexistence `TimelineRulerView` already
         /// relies on; and the playhead, which lies *over* the band by §11.3's z-order ruling, is
         /// `isUserInteractionEnabled = false`, so a key hidden under 120 pt of blue is still grabbable.
-        @objc func handleGraphBandTouch(_ gr: TouchTypeLongPressGestureRecognizer) {
+        @objc func handleGraphBandTouch(_ gr: UILongPressGestureRecognizer) {
             let point = gr.location(in: graphBandView)
             switch gr.state {
             case .began:
-                beginGraphBandTouch(at: point, touchType: gr.lastTouchType)
+                beginGraphBandTouch(at: point)
             case .changed:
                 updateGraphBandTouch(at: point)
             case .ended:
@@ -928,15 +917,22 @@ struct TimelineTrackView: UIViewRepresentable {
             }
         }
 
-        private func beginGraphBandTouch(at point: CGPoint, touchType: UITouch.TouchType) {
+        /// **What a touch at `point` on the band takes hold of** — the one arbitration, at touch-down,
+        /// that `TimelineGraphBand.grab` carries, including the rule that a handle only beats the key it
+        /// belongs to when it is strictly nearer, which is what stops a short handle at a pinched-out
+        /// zoom making its own node ungrabbable. Asked by `shouldReceive`, to decide whether the band
+        /// takes the touch, and again by `beginGraphBandTouch`, to decide what it takes.
+        private func graphBandGrab(at point: CGPoint) -> TimelineGraphBand.Grab {
+            guard let content = laidOutKey?.graphBand else { return .nothing }
+            return TimelineGraphBand.grab(at: point, focused: graphBandFocus, channels: content.channels,
+                                          pixelsPerFrame: pixelsPerFrame,
+                                          bandHeight: graphBandView.bounds.height)
+        }
+
+        private func beginGraphBandTouch(at point: CGPoint) {
             guard let content = laidOutKey?.graphBand else { return }
             let height = graphBandView.bounds.height
-            // **One arbitration, at touch-down** — `TimelineGraphBand.grab` carries it, including the
-            // rule that a handle only beats the key it belongs to when it is strictly nearer, which is
-            // what stops a short handle at a pinched-out zoom making its own node ungrabbable.
-            let grab = TimelineGraphBand.grab(at: point, focused: graphBandFocus,
-                                              channels: content.channels,
-                                              pixelsPerFrame: pixelsPerFrame, bandHeight: height)
+            let grab = graphBandGrab(at: point)
             let hit: TimelineGraphBand.KeyRef?
             let handle: TimelineGraphBand.HandleRef?
             switch grab {
@@ -969,8 +965,6 @@ struct TimelineTrackView: UIViewRepresentable {
                                           channels: content.channels,
                                           frameCount: content.frameCount, bandHeight: height,
                                           carried: carried,
-                                          allowsMarquee: pencilOnlyDrawingAllows(
-                                              touchType, pencilOnly: canvasManager.pencilOnlyDrawing),
                                           grabbed: hit, handle: handle,
                                           startSelection: graphBandSelection,
                                           axisLock: AxisLock(touchesDown: graphBandView.touchesDown(
@@ -1027,11 +1021,9 @@ struct TimelineTrackView: UIViewRepresentable {
             }
 
             guard !drag.carried.isEmpty else {
-                // **TODO (59): the box select is the pen's.** Refused whole — no rubber band drawn
-                // and the standing selection left exactly as it was — rather than drawn-and-ignored,
-                // because a rectangle that follows the finger and selects nothing is the "refusal
-                // with no notice" defect wearing the opposite costume: it says something happened.
-                guard drag.allowsMarquee else { return }
+                // **The box select is the touch's that may draw** (TODO (59)) — settled at
+                // touch-down, by `shouldReceive` declining the rest, so a drag that reaches this
+                // line is entitled to the rubber band.
                 let rect = CGRect(x: drag.start.x, y: drag.start.y,
                                   width: translation.width, height: translation.height)
                 graphBandView.setMarquee(rect)
@@ -1144,10 +1136,32 @@ struct TimelineTrackView: UIViewRepresentable {
             guard TimelineGraphBand.isTap(didMove: drag.didMove, translation: translation)
             else { return }
 
-            switch TimelineGraphBand.tap(at: point, channels: drag.channels,
+            resolveGraphBandTap(at: point, target: drag.target, channels: drag.channels,
+                                frameCount: drag.frameCount, bandHeight: drag.bandHeight)
+        }
+
+        /// **A tap by a touch the drag recogniser was never offered** — TODO (167). In pencil-only mode
+        /// a finger on empty band is declined at touch-down so the scroll view can pan from it, which
+        /// takes with it the began/ended pair a tap used to be; this is the tap, resolved by the same
+        /// function against the content as it is laid out now. It is not offered a touch while one is
+        /// being tracked (`shouldReceive`), so a finger held down beside a drag lifts without adding a
+        /// key.
+        @objc func handleGraphBandTap(_ gr: UITapGestureRecognizer) {
+            guard gr.state == .ended, let content = laidOutKey?.graphBand else { return }
+            resolveGraphBandTap(at: gr.location(in: graphBandView), target: content.target,
+                                channels: content.channels, frameCount: content.frameCount,
+                                bandHeight: graphBandView.bounds.height)
+        }
+
+        /// **What a tap at `point` does**, whichever recogniser it came from: focus a node, raise its
+        /// menu, add a key to the curve it aimed at, or drop the selection.
+        private func resolveGraphBandTap(at point: CGPoint, target: KeyframeTarget,
+                                         channels: [TimelineGraphBand.Channel], frameCount: Int,
+                                         bandHeight: CGFloat) {
+            switch TimelineGraphBand.tap(at: point, channels: channels,
                                          focused: graphBandFocus,
-                                         frameCount: drag.frameCount,
-                                         pixelsPerFrame: pixelsPerFrame, bandHeight: drag.bandHeight) {
+                                         frameCount: frameCount,
+                                         pixelsPerFrame: pixelsPerFrame, bandHeight: bandHeight) {
             case .focus(let ref):
                 // **The first of the two stages, and what a single tap does instead of deleting** —
                 // (38)(b). It writes nothing to the document: it puts the node's two bezier handles
@@ -1158,14 +1172,14 @@ struct TimelineTrackView: UIViewRepresentable {
             case .menu(let ref):
                 // The second stage — `handleTapOnCel`'s contract exactly, on a fourth surface. The
                 // popover is `AnimationTimeline`'s, anchored on the node's own column.
-                onRequestMenu?(.graphNode(target: drag.target,
+                onRequestMenu?(.graphNode(target: target,
                                           parameterID: ref.parameterID, frame: ref.frame),
                                graphBandView.nodeRectInWindow(ref, pixelsPerFrame: pixelsPerFrame))
             case .add(let parameterID, let frame, let value):
-                guard var curve = drag.channels.first(where: { $0.parameterID == parameterID })?.curve
+                guard var curve = channels.first(where: { $0.parameterID == parameterID })?.curve
                 else { return }
                 curve.setKey(AnimationCurve.Key(frame: frame, value: value))
-                _ = writeGraphBandCurves([parameterID: curve], target: drag.target)
+                _ = writeGraphBandCurves([parameterID: curve], target: target)
                 relayout()
             case .nothing:
                 // A tap on genuinely empty band drops the selection, which is the only gesture that
@@ -1593,18 +1607,32 @@ extension TimelineTrackView.Coordinator: UIScrollViewDelegate {
 }
 
 extension TimelineTrackView.Coordinator: UIGestureRecognizerDelegate {
-    /// **Whether the graph band's recogniser is offered a touch** — TODO (166). The touch it is offered
-    /// is remembered, so the drag's touch-count baseline can include it before the window's counter
-    /// has heard of it; and **while one is tracked, no other is offered**. A second finger is a hold
-    /// (`AxisLock`), wherever it lands, and the recogniser carries one touch's drag: offered the
-    /// second, it could hand the drag to it when the first lifts, and `endGraphBandDrag` records a
-    /// second touch cancelling it outright. A finger landing on the band was not seen to do either in
-    /// the simulator — this is the guard, not a fix for a reproduced defect.
+    /// **Whether the graph band's recognisers are offered a touch at all, decided at touch-down** —
+    /// TODO (167) and (166). A touch the band does not want is not refused later, by a recogniser that
+    /// has already begun and so already failed the scroll view's pan: it is never offered, so the pan
+    /// proceeds from the first point of travel, exactly as it does over a row's gap
+    /// (`TimelineRowView`'s `shouldReceive`).
+    ///
+    ///  * **A touch is the band's if it lands on a node or a handle, or may rubber-band**
+    ///    (`TimelineGraphBand.claims`), and the touch it keeps is remembered, so the drag's touch-count
+    ///    baseline can include it before the window's counter has heard of it.
+    ///  * **While one is tracked, no other is offered to either recogniser.** A second finger is a
+    ///    hold (`AxisLock`), wherever it lands. The drag's recogniser carries one touch's drag: offered
+    ///    the second, it could hand the drag to it when the first lifts, and `endGraphBandDrag` records
+    ///    a second touch cancelling it outright (a finger landing on the band was not seen to do either
+    ///    in the simulator — a guard, not a fix for a reproduced defect). The tap recogniser, offered
+    ///    it, would add a key or drop the selection when it lifted, which `testASecondFingerHeldBesideAKeyDragKeepsItToOneAxis`
+    ///    does see.
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-        guard gestureRecognizer === graphBandView.panRecognizer else { return true }
+        guard gestureRecognizer === graphBandView.panRecognizer
+                || gestureRecognizer === graphBandView.tapRecognizer else { return true }
         if let tracked = graphBandTouch, tracked.phase != .ended, tracked.phase != .cancelled {
             return false
         }
+        guard gestureRecognizer === graphBandView.panRecognizer else { return true }
+        let grab = graphBandGrab(at: touch.location(in: graphBandView))
+        let mayBoxSelect = pencilOnlyDrawingAllows(touch.type, pencilOnly: canvasManager.pencilOnlyDrawing)
+        guard TimelineGraphBand.claims(grab, mayBoxSelect: mayBoxSelect) else { return false }
         graphBandTouch = touch
         return true
     }
@@ -1917,10 +1945,14 @@ private final class TimelineRepeatGhostBand: UIView {
 /// whole life, which a `UIPanGestureRecognizer` would not do until ~10 pt of movement — three times
 /// `tapSlop`.
 ///
-/// **The band claims its own drags, and gives up scrolling over itself to do it.** §11.4 rules the
-/// marquee to be the band's own drag-in-empty-space, so there is no empty space left for the
-/// enclosing scroll view to pan from; the ruler and every cel row still scroll (a row's pan declines
-/// everything but a resize handle), so what is lost is a 96 pt strip and not the gesture.
+/// **The band claims a touch at touch-down, and only one that means something to it** — TODO (167).
+/// A touch on a node or a handle is the band's, and so is one that may rubber-band: §11.4 rules the
+/// marquee to be the band's own drag-in-empty-space, and it is the pen's (or any touch's, while
+/// fingers draw). A finger on empty band in pencil-only mode has nothing to do here, so the
+/// coordinator's `shouldReceive` declines it before the recogniser is offered it — a row's pan
+/// declines a gap touch the same way — and the enclosing scroll view pans from it, as it does
+/// everywhere else on the timeline. Its tap, which the recogniser would have carried, is
+/// `tapRecognizer`'s.
 ///
 /// **This view goes above the playhead, and the sentence here used to say the opposite.** D2 ruled
 /// the playhead in front — it is a *column* the width of a frame, not a hairline, so at full zoom
@@ -2021,20 +2053,24 @@ private final class TimelineGraphBandView: UIView {
 
     /// **The band's own touch, and the reason it is a long press with no minimum duration.** See the
     /// class doc: it is `TimelineRulerView.panRecognizer`'s configuration, which is this file's UIKit
-    /// answer to `DragGesture(minimumDistance: 0)`. The coordinator adds itself as the target and
-    /// makes the scroll view's own pan `require(toFail:)` this — both exactly once, in
-    /// `layoutGraphBand`.
-    ///
-    /// **A `TouchTypeLongPressGestureRecognizer` since TODO (59)**, so the handler can ask what kind
-    /// of touch it is holding — the marquee is the pen's in pencil-only mode and a plain
-    /// `UILongPressGestureRecognizer`'s `@objc` action never sees a `UITouch`, which is the same
-    /// shape of hole `SelectionPencilOnlyUITests` records three earlier closures of.
-    let panRecognizer: TouchTypeLongPressGestureRecognizer = {
-        let gr = TouchTypeLongPressGestureRecognizer()
+    /// answer to `DragGesture(minimumDistance: 0)`. The coordinator adds itself as the target and the
+    /// delegate (which decides at touch-down whether the band takes the touch at all) and makes the
+    /// scroll view's own pan `require(toFail:)` this — all exactly once, in `layoutGraphBand`.
+    let panRecognizer: UILongPressGestureRecognizer = {
+        let gr = UILongPressGestureRecognizer()
         gr.minimumPressDuration = 0
         gr.numberOfTouchesRequired = 1
         return gr
     }()
+
+    /// **A tap on empty band that `panRecognizer` declined to be offered** — a finger in pencil-only
+    /// mode, whose drag there scrolls (TODO (167)). A tap in empty space still adds a key to the curve
+    /// it aimed at or drops the selection, exactly as `panRecognizer`'s began/ended pair does for the
+    /// touches it claims; the coordinator resolves both through one function.
+    ///
+    /// It never competes with `panRecognizer`: that one recognises at touch-down, which fails this
+    /// one, and a touch that one declined is only ever this one's.
+    let tapRecognizer = UITapGestureRecognizer()
 
     /// **Every touch on the window, counted** — what "a second finger held down anywhere" is read
     /// from. The canvas has its own `TouchCountRecognizer`, which sees the canvas alone (the Move box
@@ -2058,7 +2094,6 @@ private final class TimelineGraphBandView: UIView {
         super.didMoveToWindow()
         window?.addGestureRecognizer(touchCounter)
     }
-
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = UIColor(white: TimelineGraphBand.backgroundWhite,
@@ -2079,6 +2114,7 @@ private final class TimelineGraphBandView: UIView {
         addSubview(marqueeView)
 
         addGestureRecognizer(panRecognizer)
+        addGestureRecognizer(tapRecognizer)
         touchCounter.delegate = self
     }
 

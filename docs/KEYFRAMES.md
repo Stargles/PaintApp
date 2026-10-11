@@ -2247,10 +2247,18 @@ the pinch is two-touch on `contentView` against this recogniser's one, the coexi
 already relies on; and the playhead is already `isUserInteractionEnabled = false`, so a key under
 120 pt of blue is grabbable — that was checked rather than assumed.
 
-**The cost is that a finger on the band no longer scrolls the timeline.** Deliberate, and the marquee
-is what spends it: §11.4's ruling makes the rubber band *the* meaning of a drag in the band's empty
-space, so there is nothing left for the scroll view to pan from. The ruler and every cel row still
-scroll, so what is given up is a 96 pt strip and not the gesture.
+**The band takes a touch at touch-down, and only one that means something to it** — TODO (167), the
+owner's *"when the user tries to scroll and pan with fingers inside the graph editor box it doesnt work
+right now … keep the previous behavior where touching a node moves it"*. D3 had a finger on the band
+never scroll the timeline: the marquee was *the* meaning of a drag in empty space, so nothing was left
+for the scroll view to pan from — and in pencil-only mode, where the marquee refuses a finger, the
+drag simply did nothing. Now `shouldReceive` asks `TimelineGraphBand.grab` once, at touch-down: a node
+or a handle is the band's, and so is empty band for a touch that may rubber-band (the pen; a finger
+only while fingers draw, which is TODO (59)'s ruling and unchanged). Any other touch is never offered
+to the recogniser — the way a row declines a gap — so the scroll view's pan runs from the first point
+of travel, both axes, as it does over the ruler and the rows. Its tap is a `UITapGestureRecognizer`'s
+and resolves through the same function as the long press's began/ended pair, so a tap on empty band
+still adds a key to the curve it aimed at or drops the selection.
 
 **A second finger held down anywhere keeps a node or handle drag to one axis** — TODO (166), the
 owner's *"pressing and holding their other finger down anywhere should snap it to a cardinal axis

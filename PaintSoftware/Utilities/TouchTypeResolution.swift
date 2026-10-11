@@ -101,27 +101,3 @@ final class TouchTypeTapGestureRecognizer: UITapGestureRecognizer {
         super.touchesBegan(touches, with: event)
     }
 }
-
-/// **`TouchTypePanGestureRecognizer` for a `UILongPressGestureRecognizer`** — the shape the timeline
-/// uses for a drag that must keep its touch from the first point of travel
-/// (`TimelineGraphBandView.panRecognizer`, `TimelineRulerView.panRecognizer`), which is UIKit's
-/// answer to `DragGesture(minimumDistance: 0)`.
-///
-/// The third copy of one four-line override, and the reason it is a copy is stated on
-/// `TouchTypePanGestureRecognizer`: there is no common ancestor below `UIGestureRecognizer` to hang
-/// one implementation on, and only the tie-break (`resolvedLastTouchType`) is shared. It is *not*
-/// `CanvasView.TouchTypePressRecognizer` reused, because that type lives in a file this one cannot
-/// be reached from — `CanvasView.swift` is not in the "app sources shared with PaintSoftwareUITests"
-/// group and this file is, which is the whole reason the tie-break lives here.
-final class TouchTypeLongPressGestureRecognizer: UILongPressGestureRecognizer {
-    /// The touch type of the most recent touch to land on this recognizer. `.direct` (finger) is the
-    /// conservative initial value, `TouchTypePanGestureRecognizer.lastTouchType`'s rule.
-    private(set) var lastTouchType: UITouch.TouchType = .direct
-
-    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
-        if let type = resolvedLastTouchType(from: touches.map(\.type)) {
-            lastTouchType = type
-        }
-        super.touchesBegan(touches, with: event)
-    }
-}

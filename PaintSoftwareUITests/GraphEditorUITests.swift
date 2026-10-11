@@ -1002,16 +1002,20 @@ final class GraphEditorGestureUITests: PaintUITestCase {
 
 }
 
-/// **A finger held beside a graph-editor drag** — TODO (166), through real fingers on the band.
+/// **A finger beside a graph-editor drag, and a finger scrolling past it** — TODO (166) and (167),
+/// through real fingers on the band.
 ///
 /// **A third class beside the other two, for their reason**: the gesture class is indivisible, and
 /// each test here spends its ~45 s on authoring a curve (`authorAnAnimatedBrightnessCurve`) rather than
-/// on the gesture. Everything the lock *decides* is `AxisLockLogicTests` and
-/// `TimelineGraphBandLogicTests`; what only this tier sees is that a second touch reaches it wherever it
-/// lands — the toolbar, or the band itself — and that the drag keeps the dragging finger's whole travel.
+/// on the gesture. Everything these gestures *decide* is `AxisLockLogicTests` and
+/// `TimelineGraphBandLogicTests`; what only this tier sees is that a second touch reaches the lock
+/// wherever it lands — the toolbar, or the band itself — and does not add a key when it lifts, and that a
+/// touch the band declines reaches the scroll view.
 ///
 /// **What cannot be driven, and is said so:** the pen. XCUITest synthesises fingers only, so a finger
-/// stands in for the dragging pen; the lock counts any touch.
+/// stands in for the dragging pen in the first test, and pencil-only mode — the mode in which a finger
+/// on empty band means nothing to the band — is switched on for the second by the launch argument that
+/// sets the preference for one process without writing it back.
 final class GraphEditorFingerUITests: PaintUITestCase {
 
     private let brightnessID = "brightnessContrast.brightness"
@@ -1042,8 +1046,9 @@ final class GraphEditorFingerUITests: PaintUITestCase {
     /// 2. **Held to time, by a finger resting in the toolbar** — nowhere near the timeline. It lands
     ///    before the drag moves, so the axis is read from the way the drag first goes.
     /// 3. **Held to value, by a finger resting on the band itself**, landing in the middle of the drag
-    ///    and so landing on the view the band's own recogniser is attached to. The key must still be
-    ///    carried by the dragging finger's whole travel.
+    ///    and so landing on the view the band's own recogniser is attached to — on the curve, where a
+    ///    finger that lifted as a tap would add a key. The key must still be carried by the dragging
+    ///    finger's whole travel, and the band must come out with the keys it went in with.
     func testASecondFingerHeldBesideAKeyDragKeepsItToOneAxis() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
@@ -1098,12 +1103,16 @@ final class GraphEditorFingerUITests: PaintUITestCase {
                        "…and keeps the value it was grabbed with: the second finger held it to time")
         undo()
 
-        // 3. Held to value by a finger resting on empty band, landing mid-drag.
-        let emptyBand = origin.withOffset(CGVector(dx: TimelineGraphBand.x(ofFrame: 16, pixelsPerFrame: ppf),
-                                                   dy: height / 2)).screenPoint
-        try drag(by: CGVector(dx: -ppf, dy: 50 * towardsMiddle), holding: emptyBand, landsAt: 0.8)
+        // 3. Held to value by a finger resting on the band, landing mid-drag — on the curve itself, two
+        // frames in, where a finger that lifted as a tap would add a key.
+        let onTheCurve = origin.withOffset(CGVector(
+            dx: TimelineGraphBand.x(ofFrame: 2, pixelsPerFrame: ppf),
+            dy: TimelineGraphBand.y(ofValue: authored.start, in: 0...2, bandHeight: height))).screenPoint
+        try drag(by: CGVector(dx: -ppf, dy: 50 * towardsMiddle), holding: onTheCurve, landsAt: 0.8)
         let heldValue = try XCTUnwrap(sliderBrightness(app))
-        XCTAssertEqual(band.value as? String, start, "held to value, the key keeps its frame")
+        XCTAssertEqual(band.value as? String, start,
+                       "held to value, the key keeps its frame — and the finger that rested on the curve "
+                       + "added no key when it lifted")
         // The value of the point fifty points below (or above) where the key was grabbed — the whole of
         // the finger's travel. A recogniser that were offered the resting finger would read the pair's
         // centroid and carry the key half as far, which only this operand tells from the lock.
@@ -1113,6 +1122,60 @@ final class GraphEditorFingerUITests: PaintUITestCase {
         XCTAssertEqual(heldValue, expected, accuracy: 0.05,
                        "…and its value followed the dragging finger the whole way, not the pair's centre")
         undo()
+    }
+
+    /// **A finger drag on empty band scrolls the timeline; one that starts on a node moves it and the
+    /// timeline stands still; a tap on empty band still adds a key** — TODO (167). In pencil-only mode,
+    /// which is where a finger has nothing to do on empty band but scroll.
+    func testAFingerDragOnEmptyBandScrollsTheTimelineAndOneOnANodeMovesIt() throws {
+        let app = XCUIApplication()
+        // `CanvasManager.pencilOnlyDefaultsKey`, which this target cannot see. As an argument it sets the
+        // preference for this process alone — the stored value is never written, so no later test inherits it.
+        app.launchArguments += ["-paintapp.pencilOnlyDrawing", "YES"]
+        XCTAssertTrue(launchIntoEditor(app))
+        let authored = try authorAnAnimatedBrightnessCurve(app, from: 0, to: 6)
+
+        app.buttons["timeline.graphEditorButton"].tap()
+        let band = app.otherElements["timeline.graphBand"]
+        XCTAssertTrue(band.waitForExistence(timeout: 5))
+        let start = "\(brightnessID):0,6"
+        XCTAssertEqual(band.value as? String, start, "PREMISE: the band draws the curve just authored")
+        let block = app.otherElements["timeline.cel.1.0"]
+        let ppf = TimelineKeyMarkers.basePixelsPerFrame
+        let height = band.frame.height
+        let origin = band.coordinate(withNormalizedOffset: .zero)
+        func inBand(frame: CGFloat, y: CGFloat) -> XCUICoordinate {
+            origin.withOffset(CGVector(dx: frame * ppf, dy: y))
+        }
+
+        // 1. A tap on empty band still adds a key to the curve it aimed at. The point is two frames in
+        // and level with the first key, near the line and clear of both nodes.
+        inBand(frame: 2, y: TimelineGraphBand.y(ofValue: authored.start, in: 0...2, bandHeight: height)).tap()
+        waitForBand(band, "\(brightnessID):0,2,6", "a finger tap on empty band in pencil-only mode adds a key")
+        app.buttons["sideToolbar.undoButton"].tap()
+        waitForBand(band, start, "…and is one press of Undo")
+
+        // 2. A finger dragged left across empty band scrolls the timeline with it.
+        let blockBefore = block.frame.minX
+        let from = inBand(frame: 14, y: height / 2)
+        from.press(forDuration: 0.1, thenDragTo: from.withOffset(CGVector(dx: -150, dy: 0)),
+                   withVelocity: .slow, thenHoldForDuration: 0.2)
+        let scrolled = blockBefore - block.frame.minX
+        XCTAssertGreaterThan(scrolled, 100,
+                             "a finger drag on empty band scrolls the timeline (it moved \(scrolled) pt)")
+        XCTAssertEqual(band.value as? String, start, "…and touched no key")
+        XCTAssertEqual(band.label, TimelineGraphBand.encodeGesture(focus: nil, readout: nil),
+                       "…nor drew a rubber band")
+
+        // 3. A drag that starts on a node moves it, and the timeline does not scroll.
+        let resting = block.frame.minX
+        // `origin` resolves the band where it is now, scrolled or not.
+        let node = inBand(frame: 6, y: TimelineGraphBand.y(ofValue: authored.end, in: 0...2, bandHeight: height))
+        node.press(forDuration: 0.2, thenDragTo: node.withOffset(CGVector(dx: ppf * 2, dy: 0)),
+                   withVelocity: .slow, thenHoldForDuration: 0.3)
+        waitForBand(band, "\(brightnessID):0,8", "a finger drag that starts on a node moves it")
+        XCTAssertEqual(block.frame.minX, resting, accuracy: 1,
+                       "…and the timeline stood still under it")
     }
 }
 

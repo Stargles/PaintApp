@@ -822,6 +822,24 @@ final class TimelineGraphBandLogicTests: XCTestCase {
                        accuracy: 1e-9, "…and its value is the finger's alone")
     }
 
+    // MARK: Which touches the band takes
+
+    /// **The band takes a node or a handle always, and empty band only from a touch that may
+    /// rubber-band** — TODO (167). Everything else is never offered to its recogniser, which is what
+    /// lets the scroll view pan from it.
+    func testTheBandTakesANodeOrHandleAlwaysAndEmptyBandOnlyForATouchThatMayBoxSelect() {
+        let key = TimelineGraphBand.KeyRef(parameterID: radiusID, frame: 0)
+        let handle = TimelineGraphBand.HandleRef(key: key, side: .outgoing)
+        for mayBoxSelect in [false, true] {
+            XCTAssertTrue(TimelineGraphBand.claims(.key(key), mayBoxSelect: mayBoxSelect))
+            XCTAssertTrue(TimelineGraphBand.claims(.handle(handle), mayBoxSelect: mayBoxSelect))
+        }
+        XCTAssertTrue(TimelineGraphBand.claims(.nothing, mayBoxSelect: true),
+                      "the pen, or a finger while fingers draw, may draw the rubber band")
+        XCTAssertFalse(TimelineGraphBand.claims(.nothing, mayBoxSelect: false),
+                       "a finger in pencil-only mode has nothing to do on empty band: it scrolls the timeline")
+    }
+
     /// **The clamp is `modelDomain`'s, and `uiRange` is not a wall.** `Effect.swift` says to draw the
     /// axis over `uiRange` and allow a key anywhere in `modelDomain`; clamping to the axis instead
     /// would make the model's own reachable values unreachable through the only UI that edits them.

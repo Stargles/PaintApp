@@ -1256,6 +1256,19 @@ enum TimelineGraphBand {
         case nothing
     }
 
+    /// **Whether the band takes a touch that landed on `grab`** — TODO (167), decided at touch-down so
+    /// that the touches it does not take are never offered to its recogniser, and so reach the
+    /// timeline's scroll view as if the band were not there.
+    ///
+    /// A node or a handle is always the band's: the artist who aimed at one meant to move it. Empty
+    /// band is the band's only for a touch that may draw a rubber band (`pencilOnlyDrawingAllows`) —
+    /// the pen always, a finger only while fingers draw. A finger in pencil-only mode has no use for
+    /// empty band, and what it does there is scroll and pan the timeline, as it does everywhere else
+    /// on it.
+    static func claims(_ grab: Grab, mayBoxSelect: Bool) -> Bool {
+        grab != .nothing || mayBoxSelect
+    }
+
     /// **The arbitration KEYFRAMES.md §11.4 named as the reason tangent handles were a stage rather
     /// than an afternoon**: *"the second hit target per key and the arbitration between grabbing a
     /// handle and grabbing the key it belongs to."*
