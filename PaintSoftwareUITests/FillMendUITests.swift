@@ -208,8 +208,15 @@ final class FillMendUITests: PaintUITestCase {
         scrollFillPanel(app, to: buffer)
         buffer.adjust(toNormalizedSliderPosition: 1)
         fillButton.tap()
-        Thread.sleep(forTimeInterval: 1.5)
-        let after = try screen(of: canvas)
+        // A wait, never an instant look: moving the paper's edge out is a new structure for the fill
+        // (`MetalFillSession.Structure`), and the window grows with it, so the picture lands a press —
+        // or a few — after the slider rather than a tick.
+        var after = try screen(of: canvas)
+        let deadline = Date().addingTimeInterval(10)
+        while after.light(inPadding.dx, inPadding.dy), Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.25)
+            after = try screen(of: canvas)
+        }
         attachScreenshot(app, "extension-buffer-at-the-padding")
         XCTAssertFalse(after.light(inPadding.dx, inPadding.dy),
                        "With the buffer at the padding's width the fill reaches out to the padded canvas's edge")
