@@ -63,8 +63,8 @@ struct DrawingView: View {
     ///
     /// **Read rather than owned**, which is the point: the panel's height is still decided in one
     /// place, `AnimationTimeline` (the window's default, `TimelinePanelSize`, until the artist drags
-    /// it), and this is the rendered result of that decision. The initial value is a first-frame guess only — the preference
-    /// arrives on the first layout pass.
+    /// it), and this is the rendered result of that decision. The initial value is a first-frame
+    /// guess only — the preference arrives on the first layout pass.
     @State private var timelineOccupiedHeight: CGFloat = 250
     /// How tall the docked card is, reported by `bottomDockCard` through `BottomDockCardHeightKey` —
     /// zero while nothing is docked. With the timeline's, what the canvas is told it is covered by.
@@ -172,9 +172,9 @@ struct DrawingView: View {
                     }
                 }
 
-                // The perf HUD's numbers (see PerfHUD.swift) — below the top toolbar on the leading side, **under
-                // the layer rail and the dropdowns that follow**, so a leading dropdown covers them and
-                // never the other way round. They take no touch; the switch is in the side rail.
+                // The perf HUD's numbers (see PerfHUD.swift) — below the top toolbar on the leading side,
+                // **under the layer rail and the dropdowns that follow**, so a leading dropdown covers them
+                // and never the other way round. They take no touch; the switch is in the side rail.
                 PerfHUDReadout(hud: perfHUD, canvasManager: canvasManager)
                     .padding(.top, 72)
                     .padding(.leading, 8)
@@ -221,9 +221,9 @@ struct DrawingView: View {
                 // "You are being recorded", and "the last 90 s were saved" (see
                 // ActionRecorderControls.swift). Renders nothing at all unless one of those is true,
                 // and never hit-tests. On the leading side, under where the perf HUD's numbers sit,
-                // rather than trailing: the trailing edge is where the
-                // layer rail and every dropdown live, and a badge sitting on top of the panel the
-                // artist is trying to photograph for a bug report is worse than useless.
+                // rather than trailing: the trailing edge is where the layer rail and every dropdown
+                // live, and a badge sitting on top of the panel the artist is trying to photograph for
+                // a bug report is worse than useless.
                 ActionRecorderIndicator()
                     .padding(.top, 104)
                     .padding(.leading, 8)
