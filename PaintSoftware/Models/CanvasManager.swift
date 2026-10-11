@@ -1436,6 +1436,9 @@ final class CanvasManager: ObservableObject {
     /// recognizer; see `CanvasView.Coordinator.updateSelectionOverlay`.
     @Published var fillMode: FillMode = .flood
 
+    /// **Gap Closing**, in canvas pixels: the widest opening in the ink that a fill will not escape
+    /// through. It seals openings and nothing else — an edge or a corner fills right up to the ink at
+    /// every setting (TODO (158); `FillBasins` is the rule).
     @Published var fillGapClosingDistance: CGFloat = 8
     /// Colour-distance threshold (0..1) above which a boundary counts as a wall. Higher = the fill
     /// spreads across bigger colour differences (fewer walls); lower = subtle borders stop it.
@@ -1470,14 +1473,14 @@ final class CanvasManager: ObservableObject {
     /// - the artwork rect's boundary **bounds the flood**, on both sides — a fill started on the
     ///   paper stops at the paper's edge instead of spreading onto the grey margin, and a fill
     ///   started on the margin stays there. This does not consult `fillGapClosingDistance` at all.
-    /// - gap-closing may additionally **bridge to that edge**, so a boundary stroke ending a few px
-    ///   short of it seals against it rather than letting the fill run around its end. This half is
-    ///   the one that does nothing while `fillGapClosingDistance` is 0.
+    /// - the paper's edge counts as **ink for gap closing**, so a boundary stroke ending a few px
+    ///   short of it leaves an opening that seals rather than letting the fill run around its end.
+    ///   This half is the one that does nothing while `fillGapClosingDistance` is 0.
     ///
     /// At `canvasPadding == 0` the two rectangles coincide, the flood already could not leave the
-    /// buffer, and the option reduces exactly to the bridge — byte-for-byte the behaviour it had
-    /// before padding was considered. See `edgeBridge` in Fill.metal for both mechanisms and for why
-    /// the boundary is a barrier between pixels rather than ink added to the wall mask.
+    /// buffer, and the option reduces exactly to the second half. See `gapLevels` in Fill.metal for
+    /// both mechanisms and for why the boundary is a barrier between pixels rather than ink added to
+    /// the wall mask.
     @Published var fillCanvasEdgeIsBoundary: Bool = true
 
     /// How far the canvas edge's boundary sits **outside the paper, into the padding**, in canvas

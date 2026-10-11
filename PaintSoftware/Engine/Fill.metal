@@ -2,7 +2,7 @@
 using namespace metal;
 
 // Shared parameter block for every fill kernel. Field order/padding is mirrored exactly by
-// `MetalFillEngine.FillParams` on the Swift side (eleven scalars, then SIMD4 forces 16-byte
+// `MetalFillEngine.FillParams` on the Swift side (ten scalars, then SIMD4 forces 16-byte
 // alignment → seedColor at offset 48, fillColor at 64, total size 80).
 struct FillParams {
     uint  width;
@@ -10,7 +10,6 @@ struct FillParams {
     uint  seedX;
     uint  seedY;
     float threshold;    // 0..1 normalized colour distance above which a pixel is a wall
-    float gapRadius;    // px, disk radius for the morphological close (gap bridging)
     // px, disk radius. **Its direction is the algorithm's, not the field's**: the bucket path grows
     // the filled region under the walls (`edgeDilate`), the lasso path erodes the painted *coverage*
     // back inside the artwork's outer silhouette (`lassoEdgeErode`). Those are the same operation
@@ -48,7 +47,7 @@ static inline float colourDistance(float4 a, float4 b) {
 // **One reference colour per dispatch, deliberately, even though the lasso fill has up to two.**
 // LASSO_FILL.md §6 step 3 defines the reached set as the union over `c ∈ C` of *per-colour*
 // reachability — a path may not switch reference colours halfway — so the lasso runs this kernel
-// (and the close, and the flood) once per reference against its own buffers, rather than widening
+// (and the flood, and gap closing's basins) once per reference against its own buffers, rather than widening
 // the test here to "passable under any `c`". Merging them into one passability field would let a
 // collar walk paper → flat → paper and hold out an interior pocket the spec says to fill.
 //
@@ -83,17 +82,16 @@ kernel void computeWalls(const device uchar4* reference [[buffer(0)]],
 
 // MARK: - Jump Flooding Algorithm (approximate Euclidean distance transform)
 
-// Seed each pixel whose mask equals `seedValue` with its own coordinate; everything else gets a
-// far-away sentinel. seedValue = 1 seeds on the walls (for the dilate distance); seedValue = 0 seeds
-// on the background (for the erode distance, i.e. distance to the nearest non-set pixel).
-kernel void jfaInit(const device uchar*  mask      [[buffer(0)]],
-                    device float2*        coord     [[buffer(1)]],
-                    constant FillParams&  params    [[buffer(2)]],
-                    constant uint&        seedValue [[buffer(3)]],
+// Seed every wall pixel with its own coordinate; everything else gets a far-away sentinel. The
+// jump flood then carries each pixel the coordinate of its nearest wall, which `gapLevels` turns into
+// the distance map gap closing is cut from.
+kernel void jfaInit(const device uchar*  wall   [[buffer(0)]],
+                    device float2*        coord  [[buffer(1)]],
+                    constant FillParams&  params [[buffer(2)]],
                     uint2 gid [[thread_position_in_grid]]) {
     if (gid.x >= params.width || gid.y >= params.height) return;
     uint i = pixelIndex(gid.x, gid.y, params.width);
-    coord[i] = (uint(mask[i]) == seedValue) ? float2(gid) : float2(1e20);
+    coord[i] = wall[i] != 0 ? float2(gid) : float2(1e20);
 }
 
 // One JFA pass at the given step: adopt the nearest seed coordinate among the 8 neighbours at
@@ -122,22 +120,6 @@ kernel void jfaStep(const device float2* inCoord  [[buffer(0)]],
     outCoord[i] = best;
 }
 
-// Threshold a JFA distance field into a binary mask. `keepInside` picks the morphology op:
-//   dilate → out = (distanceToSeed <= radius)      (keepInside = 1)
-//   erode  → out = (distanceToSeed  > radius)      (keepInside = 0)
-kernel void thresholdDistance(const device float2* coord      [[buffer(0)]],
-                              device uchar*         out        [[buffer(1)]],
-                              constant FillParams&  params     [[buffer(2)]],
-                              constant float&       radius     [[buffer(3)]],
-                              constant uint&        keepInside [[buffer(4)]],
-                              uint2 gid [[thread_position_in_grid]]) {
-    if (gid.x >= params.width || gid.y >= params.height) return;
-    uint i = pixelIndex(gid.x, gid.y, params.width);
-    float d = distance(float2(gid), coord[i]);
-    bool inside = d <= radius;
-    out[i] = (keepInside ? inside : !inside) ? 1 : 0;
-}
-
 // MARK: - The canvas edge as a boundary
 //
 // **"The canvas edge" is the edge of the artwork rect, not the edge of this buffer, and the two are
@@ -155,77 +137,74 @@ static inline bool insideArtworkRect(uint x, uint y, constant FillParams& params
         && fy >= params.artworkMinY && fy < params.artworkMaxY;
 }
 
-// Distance from a pixel to the ring one pixel *outside* the artwork rect. With the rect at the
-// buffer that ring is one pixel beyond it: column 0 is 1 away from the ring at x = -1, and so on —
-// the original formula. The absolute value lets a pixel out on the margin measure to the same ring
-// from the other side, so gap-closing seals against the paper edge from whichever side the artwork
-// approaches it.
+// Distance from a pixel to the ring one pixel *outside* the artwork rect — the paper's edge as gap
+// closing's distance map sees it. From inside the rect that is the nearest of its four sides: with the
+// rect at the buffer, column 0 is 1 away from the ring at x = -1, and so on. From out on the margin it
+// is the distance to the ring's outline, so the paper's edge reads as ink from whichever side the
+// artwork approaches it — and the lines the paper's sides run along do not carry on across the
+// margin, which they would if the inside formula were used there and would cut the ring into pieces.
 static inline float distanceToCanvasEdge(uint2 gid, constant FillParams& params) {
     float x = float(gid.x), y = float(gid.y);
-    float dx = min(fabs(x - (params.artworkMinX - 1.0f)), fabs(params.artworkMaxX - x));
-    float dy = min(fabs(y - (params.artworkMinY - 1.0f)), fabs(params.artworkMaxY - y));
-    return min(dx, dy);
+    float left = params.artworkMinX - 1.0f, right = params.artworkMaxX;
+    float top = params.artworkMinY - 1.0f, bottom = params.artworkMaxY;
+    if (x > left && x < right && y > top && y < bottom) {
+        return min(min(x - left, right - x), min(y - top, bottom - y));
+    }
+    float dx = max(max(left - x, x - right), 0.0f);
+    float dy = max(max(top - y, y - bottom), 0.0f);
+    return sqrt(dx * dx + dy * dy);
 }
 
-// **The canvas edge bounds a fill through two separate mechanisms, and this kernel is the second,
-// smaller one.** They are kept apart on purpose:
+// **The canvas edge bounds a fill through two separate mechanisms, and they are kept apart on
+// purpose:**
 //
 //   1. **The barrier** (`floodHoriz`/`floodVert` below). The artwork rect's boundary is a limit on
 //      where the flood may *travel*, exactly the way the buffer rim already was. It is
 //      unconditional — independent of the gap slider — and it is what stops a fill escaping onto the
 //      padding margin. This is the mechanism the artist means by "the canvas is a border".
-//   2. **The bridge** (this kernel). Gap-closing may reach *to* that edge, so a stroke that stops a
-//      few pixels short of it still seals instead of letting the fill run around its tip. Scoped to
-//      the gap radius, and needed even with the barrier in place: the barrier stops a fill leaving
-//      the paper, not one running around the end of a bar that never reached the paper's edge.
+//   2. **Ink for gap closing** (`gapLevels`). The paper's edge counts as ink in the distance map gap
+//      closing is cut from, so a stroke that stops a few pixels short of it leaves an *opening*
+//      between its tip and the edge, sealed like any other once the slider is that wide. Needed even
+//      with the barrier in place: the barrier stops a fill leaving the paper, not one running around
+//      the end of a bar that never reached the paper's edge.
 //
-// **The barrier is deliberately not ink in the wall mask.** Adding the rect's boundary to the walls
-// before the morphological close would contain the same scenes and would silently cost what the
-// paragraph below measures: a closed r-disk cannot reach into a rectangle's interior corner, so every
-// corner grows an unfillable notch. Measured on this engine, a 1 px wall ring left 92 px of a blank
-// 128x128 canvas unfillable, 23 per corner. A barrier lives *between* pixels instead — it consumes no
-// pixel, never enters the dilate/erode, and grows no notch: a blank canvas still fills every pixel of
-// its artwork rect.
-//
-// Wall in the sliver between artwork and the canvas edge, so a boundary stroke that stops just short
-// of the border seals against it instead of letting the fill run around its end.
-//
-// A pixel joins the wall when the nearest artwork *and* the canvas edge are together within the
-// gap-closing radius of it — `distanceToWall + distanceToCanvasEdge <= radius`. Walking the straight
-// line from the artwork's tip to the border, that sum is the width of the gap the whole way across,
-// so the test seals a gap of up to `radius - 1` px and nothing wider, and the sealed patch is a thin
-// lens spanning exactly that gap.
-//
-// **This is deliberately not the same thing as adding the outside of the canvas to the wall set and
-// closing that, which was the first implementation and is wrong for the product even though it is
-// right for the mathematics.** A true close of "everything outside is wall" rounds off the interior
-// corners of the canvas — a disk of radius r that has to stay inside the rectangle can never cover
-// the corner pixel — so every corner grows an unfillable notch r px deep *with no artwork present at
-// all*, scaling with the slider up to 40 px. Measured: 92 px of a blank 128x128 canvas became
-// unfillable, 23 per corner. Keying the bridge off the distance to real artwork removes that
-// entirely: with nothing drawn near a border, nothing is added.
-//
-// It is also purely **additive** — it only ever turns a background pixel into a wall, never the
-// reverse — so switching the option on cannot break a fill that already worked *inside* the artwork
-// rect. What the option does now take away is the margin: with it on, a fill started on the paper
-// stops at the paper's edge rather than spilling onto the grey. That is the reported bug, not a
-// regression, and it is the barrier's doing rather than this kernel's.
-kernel void edgeBridge(const device float2* wallCoord [[buffer(0)]],
-                       device uchar*         out       [[buffer(1)]],
-                       constant FillParams&  params    [[buffer(2)]],
-                       constant float&       radius    [[buffer(3)]],
-                       uint2 gid [[thread_position_in_grid]]) {
+// **The barrier is deliberately not ink in the wall mask.** It lives *between* pixels — it consumes no
+// pixel and the flood simply cannot carry across it — so a blank canvas still fills every pixel of its
+// artwork rect. And counting the edge as ink in the distance map costs no corner either: gap closing
+// seals *openings between two open areas* (`FillBasins`), and a corner of the paper is not one.
+
+// Each open pixel's distance to the nearest ink, in quarter pixels — the distance map `FillBasins`
+// partitions the plain fill by (TODO (158)). `wallCoord` is the jump flood seeded on the walls; with
+// the canvas edge a boundary, the ring one pixel outside the artwork rect is ink too, from whichever
+// side the pixel lies. Walls write 0. The JFA's 1e20 sentinel (no walls at all) clamps to the top
+// level, so an empty canvas is one flat plateau and one basin.
+kernel void gapLevels(const device float2* wallCoord        [[buffer(0)]],
+                      device ushort*        levels           [[buffer(1)]],
+                      constant FillParams&  params           [[buffer(2)]],
+                      constant uint&        canvasEdgeIsInk  [[buffer(3)]],
+                      uint2 gid [[thread_position_in_grid]]) {
     if (gid.x >= params.width || gid.y >= params.height) return;
     uint i = pixelIndex(gid.x, gid.y, params.width);
-    // The JFA seeds unreached pixels with a 1e20 sentinel rather than an infinity, so a canvas with
-    // no walls at all gives a huge finite distance here and simply fails the test.
-    float toWall = distance(float2(gid), wallCoord[i]);
-    out[i] = (toWall + distanceToCanvasEdge(gid, params) <= radius) ? 1 : 0;
+    float d = distance(float2(gid), wallCoord[i]);
+    if (canvasEdgeIsInk != 0u) d = min(d, distanceToCanvasEdge(gid, params));
+    levels[i] = ushort(clamp(round(d * 4.0), 0.0, 65535.0));
 }
 
-// `dst = max(dst, src)`: folds the edge bridge into the closed wall mask after the erode has run, and
-// the mend into a fill's coverage. Both flags (0 or 1) and a coverage (0 to 255) are held to "non-zero
-// is set, and the larger is the stronger", so one kernel serves both.
+// The region for one slider value: every pixel whose basin the cut joined to the seed. `labels` is
+// `FillBasins`' watershed (−1 outside the plain fill) and `reached` its table for this gap width.
+kernel void basinRegion(const device int*   labels  [[buffer(0)]],
+                        const device uchar* reached [[buffer(1)]],
+                        device uchar*       region  [[buffer(2)]],
+                        constant FillParams& params [[buffer(3)]],
+                        uint2 gid [[thread_position_in_grid]]) {
+    if (gid.x >= params.width || gid.y >= params.height) return;
+    uint i = pixelIndex(gid.x, gid.y, params.width);
+    int basin = labels[i];
+    region[i] = basin < 0 ? 0 : reached[basin];
+}
+
+// `dst = max(dst, src)`: folds the mend into a fill's coverage. Flags (0 or 1) and coverage (0 to 255)
+// are both held to "non-zero is set, and the larger is the stronger".
 kernel void unionMask(const device uchar* src   [[buffer(0)]],
                       device uchar*        dst   [[buffer(1)]],
                       constant FillParams& params [[buffer(2)]],
@@ -286,14 +265,17 @@ kernel void floodInitFromRing(const device uchar* wall   [[buffer(0)]],
 // so they stay floodable and the flood enters them. What the barrier blocks is the pixel *beyond*
 // the fence. "The loop is a wall" is a property of the finished result — it comes out of the final
 // intersect in `lassoInvert`, not out of the passability field.
-kernel void lassoBarrier(const device uchar* closed [[buffer(0)]],
+//
+// The walls are the plain ones: gap closing is applied to what this flood reaches afterwards, by
+// `FillBasins`' cut, exactly as the bucket's is.
+kernel void lassoBarrier(const device uchar* wall   [[buffer(0)]],
                          const device uchar*  lasso  [[buffer(1)]],
                          constant FillParams& params [[buffer(2)]],
                          device uchar*        out    [[buffer(3)]],
                          uint2 gid [[thread_position_in_grid]]) {
     if (gid.x >= params.width || gid.y >= params.height) return;
     uint i = pixelIndex(gid.x, gid.y, params.width);
-    out[i] = (closed[i] != 0 || lasso[i] == 0) ? 1 : 0;
+    out[i] = (wall[i] != 0 || lasso[i] == 0) ? 1 : 0;
 }
 
 // One contiguous run of the sweep: forward then backward over `k` in `[k0, k1)`, filling every open

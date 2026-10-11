@@ -19,11 +19,11 @@ final class FillWindowLogicTests: XCTestCase {
 
     // MARK: - The window's arithmetic
 
-    func testTheHaloIsTwoCloseRadiiPlusTheEdgeRadiusPlusTwo() {
-        XCTAssertEqual(FillWindow.halo(gapRadius: 40, edgeRadius: 6), 88,
-                       "a dilate and an erode of the gap radius, the edge operator's own reach, and two for the JFA")
-        XCTAssertEqual(FillWindow.halo(gapRadius: 0, edgeRadius: 0), 2)
-        XCTAssertEqual(CanvasManager.fillWindowHalo, 88,
+    func testTheHaloIsGapClosingsReachPlusTheEdgeRadiusPlusTwo() {
+        XCTAssertEqual(FillWindow.halo(gapWidth: 40, edgeRadius: 6), 38,
+                       "the 30 px gap closing reads at 40 (a 20 px saddle, and a peak half as high again), the edge operator's own reach, and two for the JFA")
+        XCTAssertEqual(FillWindow.halo(gapWidth: 0, edgeRadius: 0), 2)
+        XCTAssertEqual(CanvasManager.fillWindowHalo, 38,
                        "the app's halo is taken at the top of both slider ranges, because the sliders move after the window is cut")
     }
 
@@ -131,7 +131,7 @@ final class FillWindowLogicTests: XCTestCase {
         let side = 64
         let blank = [UInt8](repeating: 0, count: side * side * 4)
         let open = try XCTUnwrap(engine.makeSession(referenceRGBA: blank, width: side, height: side).session)
-        _ = open.fill(seedX: 32, seedY: 32, seedColor: .zero, threshold: 0.15, gapRadius: 0, edgeOverlap: 0,
+        _ = open.fill(seedX: 32, seedY: 32, seedColor: .zero, threshold: 0.15, gapWidth: 0, edgeOverlap: 0,
                       fillColor: SIMD4<Float>(1, 0, 0, 1))
         XCTAssertEqual(open.paintedReaches(band: 4, of: [.left, .top, .right, .bottom]), [.left, .top, .right, .bottom],
                        "a flood over blank paper reaches every rim")
@@ -145,7 +145,7 @@ final class FillWindowLogicTests: XCTestCase {
             boxed[o] = 0; boxed[o + 1] = 0; boxed[o + 2] = 0; boxed[o + 3] = 255
         } }
         let walled = try XCTUnwrap(engine.makeSession(referenceRGBA: boxed, width: side, height: side).session)
-        _ = walled.fill(seedX: 32, seedY: 32, seedColor: .zero, threshold: 0.15, gapRadius: 0, edgeOverlap: 0,
+        _ = walled.fill(seedX: 32, seedY: 32, seedColor: .zero, threshold: 0.15, gapWidth: 0, edgeOverlap: 0,
                         fillColor: SIMD4<Float>(1, 0, 0, 1))
         XCTAssertEqual(walled.paintedReaches(band: 4, of: [.left, .top, .right, .bottom]), [],
                        "an enclosed fill reaches no rim")
@@ -255,8 +255,8 @@ final class FillWindowLogicTests: XCTestCase {
         settle()
 
         let render = try XCTUnwrap(manager.fillLastRender, "the loop previewed nothing")
-        XCTAssertEqual(render.window.rect, CGRect(x: 512, y: 512, width: 376, height: 376),
-                       "the loop's rect inset by the 88-pixel halo, and not a pixel of the canvas beyond it")
+        XCTAssertEqual(render.window.rect, CGRect(x: 562, y: 562, width: 276, height: 276),
+                       "the loop's rect outset by the 38-pixel halo, and not a pixel of the canvas beyond it")
         XCTAssertTrue(manager.isPointInPendingFill(at: CGPoint(x: 700, y: 700)), "the shape inside the loop is filled")
         XCTAssertFalse(manager.isPointInPendingFill(at: CGPoint(x: 610, y: 610)), "the paper between the loop and the shape is not")
 
@@ -285,9 +285,9 @@ final class FillWindowLogicTests: XCTestCase {
         let canvas = VectorCanvas(size: Self.largeCanvas, strokes: [outline])
         manager.layers[0].cels[0].vector = canvas
 
-        // A budget that holds a lasso session of 160² working pixels, against a loop whose window
-        // is 376² — so the window has to come down to about 0.43.
-        CompositorBudget.budgetOverrideBytes = MetalFillSession.bytesPerPixel(isLasso: true, twoReferenceColours: true) * 160 * 160
+        // A budget that holds a lasso session of 120² working pixels, against a loop whose window
+        // is 276² — so the window has to come down to about 0.43.
+        CompositorBudget.budgetOverrideBytes = MetalFillSession.bytesPerPixel(isLasso: true, twoReferenceColours: true) * 120 * 120
         let loop = CGMutablePath()
         loop.addRect(CGRect(x: 600, y: 600, width: 200, height: 200))
         manager.beginInteractiveLassoFill(path: loop)
@@ -297,8 +297,8 @@ final class FillWindowLogicTests: XCTestCase {
 
         let render = try XCTUnwrap(manager.fillLastRender, "the loop previewed nothing")
         XCTAssertLessThan(render.window.scale, 0.5, "the window was worked below scale 1")
-        XCTAssertEqual(render.window.rect, CGRect(x: 512, y: 512, width: 376, height: 376), "…over the same rect it would have had")
-        XCTAssertLessThanOrEqual(render.window.workingWidth * render.window.workingHeight, 160 * 160)
+        XCTAssertEqual(render.window.rect, CGRect(x: 562, y: 562, width: 276, height: 276), "…over the same rect it would have had")
+        XCTAssertLessThanOrEqual(render.window.workingWidth * render.window.workingHeight, 120 * 120)
         XCTAssertTrue(manager.isPointInPendingFill(at: CGPoint(x: 700, y: 700)), "the shape inside the loop is filled")
         XCTAssertFalse(manager.isPointInPendingFill(at: CGPoint(x: 610, y: 610)), "the paper between the loop and the shape is not")
 

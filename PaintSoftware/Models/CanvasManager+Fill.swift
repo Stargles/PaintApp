@@ -100,7 +100,7 @@ extension CanvasManager {
     /// top of both slider ranges, because a lasso's window is cut once per gesture and the sliders
     /// move after it is.
     static var fillWindowHalo: CGFloat {
-        FillWindow.halo(gapRadius: fillGapRange.upperBound, edgeRadius: fillExpandRange.upperBound)
+        FillWindow.halo(gapWidth: fillGapRange.upperBound, edgeRadius: fillExpandRange.upperBound)
     }
 
     /// The live gesture's render inputs, for the two schedulers that don't start a gesture of their
@@ -1084,7 +1084,7 @@ extension CanvasManager {
             : nil
         return session.fill(seedX: seed.x, seedY: seed.y, seedColor: seedColor,
                             threshold: Float(Double(key.threshold) / 1000.0),
-                            gapRadius: Float(key.gap) * scale, edgeOverlap: Float(key.edge) * scale,
+                            gapWidth: Float(key.gap) * scale, edgeOverlap: Float(key.edge) * scale,
                             artworkRect: paper, mendReach: Float(key.mendReach) * scale, fillColor: context.color)
     }
 

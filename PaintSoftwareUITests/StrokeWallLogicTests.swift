@@ -113,7 +113,7 @@ final class StrokeWallLogicTests: XCTestCase {
     /// difference. Defaults mirror the app's (`fillThreshold` 0.15, `fillGapClosingDistance` 8) and
     /// `edgeOverlap` is 0 so a "is this pixel filled" answer is not blurred by a two-pixel dilate.
     private func fill(_ reference: [UInt8], seed: (x: Int, y: Int), pathWall: [UInt8]?,
-                      gapRadius: Float = 8, threshold: Float = 0.15) throws -> [UInt8] {
+                      gapWidth: Float = 8, threshold: Float = 0.15) throws -> [UInt8] {
         let engine = try XCTUnwrap(MetalFillEngine.shared,
                                    "No Metal device, or Fill.metal is not a member of this test target")
         let session = try XCTUnwrap(engine.makeSession(referenceRGBA: reference, width: Self.side,
@@ -122,7 +122,7 @@ final class StrokeWallLogicTests: XCTestCase {
                        "the session must actually be holding the wall this test thinks it handed over")
         let seedColour = session.seedColor(atX: seed.x, y: seed.y)
         return try XCTUnwrap(session.fill(seedX: seed.x, seedY: seed.y, seedColor: seedColour,
-                                          threshold: threshold, gapRadius: gapRadius,
+                                          threshold: threshold, gapWidth: gapWidth,
                                           edgeOverlap: 0, artworkRect: nil,
                                           fillColor: SIMD4<Float>(1, 0, 0, 1)))
     }

@@ -12,15 +12,15 @@ import UIKit
 ///
 /// **Exact at scale 1, and scale 1 is every window that fits the budget.** A lasso's window is the
 /// loop's bounds plus `halo`, and nothing a lasso fill computes can reach past it: the collar flood
-/// never leaves the loop (LASSO_FILL.md §6 step 3), and every neighbourhood operator — the gap
-/// close's dilate and erode, the edge bridge, the coverage erosion — reads at most `halo` pixels
-/// from the pixel it writes. A bucket's window starts as `initialBucketSide` around the tap and
-/// **grows** while the painted region reaches the halo band along any edge that is not the
-/// canvas's own (`MetalFillSession.paintedReaches`): a flood at the band may have more to reach, and
-/// a close computed in the band was computed without the walls beyond it, so the window is trusted
-/// only where the paint keeps clear of it. Each growth doubles the window toward the sides that were
-/// reached, so a fill converges in a logarithmic number of re-runs and the window is never more than
-/// about four times the region's own box.
+/// never leaves the loop (LASSO_FILL.md §6 step 3), gap closing's answer reads the distance to ink
+/// only as far as `FillBasins.reach` and that distance is exact wherever it is shorter than the way
+/// to the window's rim, and the coverage erosion reads `edgeRadius`. A bucket's window starts as
+/// `initialBucketSide` around the tap and **grows** while the painted region reaches the halo band
+/// along any edge that is not the canvas's own (`MetalFillSession.paintedReaches`): a flood at the
+/// band may have more to reach, and a distance measured in the band was measured without the ink
+/// beyond it, so the window is trusted only where the paint keeps clear of it. Each growth doubles
+/// the window toward the sides that were reached, so a fill converges in a logarithmic number of
+/// re-runs and the window is never more than about four times the region's own box.
 ///
 /// **Below scale 1 only when the region alone exceeds the budget.** Then the window is worked at the
 /// largest scale whose pixels fit, the kernel radii scale with it, and the picture comes back
@@ -37,11 +37,11 @@ struct FillWindow: Equatable {
     let workingWidth: Int
     let workingHeight: Int
 
-    /// How far a fill's picture can depend on pixels beyond a window's rim, in canvas pixels: the gap
-    /// close is a dilate then an erode of `gapRadius` each, the edge dilate and the coverage erosion
-    /// read `edgeRadius`, and the two extra pixels cover the JFA's own rounding.
-    static func halo(gapRadius: CGFloat, edgeRadius: CGFloat) -> CGFloat {
-        (2 * gapRadius + edgeRadius + 2).rounded(.up)
+    /// How far a fill's picture can depend on pixels beyond a window's rim, in canvas pixels: gap
+    /// closing reads the distance to ink as far as `FillBasins.reach`, the edge dilate and the coverage
+    /// erosion read `edgeRadius`, and the two extra pixels cover the JFA's own rounding.
+    static func halo(gapWidth: CGFloat, edgeRadius: CGFloat) -> CGFloat {
+        (CGFloat(FillBasins.reach(forGapWidth: Float(gapWidth))) + edgeRadius + 2).rounded(.up)
     }
 
     /// The side of a bucket fill's first window. Deliberately small: a fill of a shape in line art —

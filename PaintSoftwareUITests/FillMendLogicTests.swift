@@ -137,9 +137,8 @@ final class FillMendLogicTests: XCTestCase {
 
     /// What the option changed, as the difference between the same two fills made with it on and off.
     ///
-    /// A flood does not fill its cell to the corners — Gap Closing's close rounds them, and the canvas
-    /// edge's bridge claims a pixel along the outer wall — so "the cells are covered" is not a
-    /// statement about the mend. The difference is: **outside `seam` the two layers are pixel for
+    /// "The cells are covered" is true with the option off too, so it is not a statement about the
+    /// mend. The difference is: **outside `seam` the two layers are pixel for
     /// pixel the same** (nothing moved, nothing was painted over, the paper is paper), and inside
     /// `mustMend` the one that was bare is covered.
     private func assertTheOptionOnlyAdds(_ on: Pixels, to off: Pixels, seam: (Int, Int) -> Bool,
@@ -189,9 +188,8 @@ final class FillMendLogicTests: XCTestCase {
     }
 
     /// The feature, on both kinds of fill layer: the second fill grows across the divider to meet the
-    /// first, and **only** across the divider. Rows 16 to 48 are where both fills reach the divider —
-    /// above and below them Gap Closing's rounded corners leave the cells' own corners bare, which is
-    /// the close and not the seam.
+    /// first, and **only** across the divider. Rows 16 to 48 are the stretch every assertion here
+    /// probes.
     func testTheSecondFloodFillMendsTheSeamOnARasterAndOnAVectorLayer() throws {
         let columns = Self.dividerColumns(width: 6)
         for kind in [LayerKind.raster, .vector] {

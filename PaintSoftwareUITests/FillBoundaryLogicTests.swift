@@ -68,9 +68,9 @@ final class FillBoundaryLogicTests: XCTestCase {
     /// would blur every "is this pixel filled" answer by two pixels, which is exactly the resolution
     /// the border questions below are asked at.
     private func fill(_ reference: [UInt8], seed: (x: Int, y: Int),
-                      gapRadius: Float = 8, threshold: Float = 0.15, edgeOverlap: Float = 0,
+                      gapWidth: Float = 8, threshold: Float = 0.15, edgeOverlap: Float = 0,
                       canvasEdgeIsWall: Bool, edgeInset: Float = 0) throws -> [UInt8] {
-        try fill(reference, side: Self.canvasW, seed: seed, gapRadius: gapRadius,
+        try fill(reference, side: Self.canvasW, seed: seed, gapWidth: gapWidth,
                  threshold: threshold, edgeOverlap: edgeOverlap,
                  canvasEdgeIsWall: canvasEdgeIsWall, edgeInset: edgeInset)
     }
@@ -82,17 +82,17 @@ final class FillBoundaryLogicTests: XCTestCase {
     /// them; the session takes the paper as a rect in buffer pixels (`artworkRect`), so this is the
     /// same arithmetic `CanvasManager.runFill` does for a buffer that is the whole canvas.
     private func fill(_ reference: [UInt8], side: Int, seed: (x: Int, y: Int),
-                      gapRadius: Float = 8, threshold: Float = 0.15, edgeOverlap: Float = 0,
+                      gapWidth: Float = 8, threshold: Float = 0.15, edgeOverlap: Float = 0,
                       canvasEdgeIsWall: Bool, edgeInset: Float = 0) throws -> [UInt8] {
         let inset = CGFloat(edgeInset)
         let paper = canvasEdgeIsWall
             ? CGRect(x: 0, y: 0, width: side, height: side).insetBy(dx: inset, dy: inset) : nil
-        return try fill(reference, side: side, seed: seed, gapRadius: gapRadius, threshold: threshold,
+        return try fill(reference, side: side, seed: seed, gapWidth: gapWidth, threshold: threshold,
                         edgeOverlap: edgeOverlap, artworkRect: paper)
     }
 
     private func fill(_ reference: [UInt8], side: Int, seed: (x: Int, y: Int),
-                      gapRadius: Float = 8, threshold: Float = 0.15, edgeOverlap: Float = 0,
+                      gapWidth: Float = 8, threshold: Float = 0.15, edgeOverlap: Float = 0,
                       artworkRect: CGRect?) throws -> [UInt8] {
         let engine = try XCTUnwrap(MetalFillEngine.shared,
                                    "No Metal device, or Fill.metal is not a member of this test target")
@@ -100,7 +100,7 @@ final class FillBoundaryLogicTests: XCTestCase {
                                                        width: side, height: side).session)
         let seedColour = session.seedColor(atX: seed.x, y: seed.y)
         return try XCTUnwrap(session.fill(seedX: seed.x, seedY: seed.y, seedColor: seedColour,
-                                          threshold: threshold, gapRadius: gapRadius,
+                                          threshold: threshold, gapWidth: gapWidth,
                                           edgeOverlap: edgeOverlap, artworkRect: artworkRect,
                                           fillColor: SIMD4<Float>(1, 0, 0, 1)))
     }
@@ -132,9 +132,9 @@ final class FillBoundaryLogicTests: XCTestCase {
     /// stops short of the edge — here a bar whose tip is 6 px below the top, leaving a 6 px strip the
     /// fill walks through into the far compartment.
     ///
-    /// Gap-closing does not save it, and that is the point: the close bridges a gap between two
-    /// pieces of *artwork*, and there is no second piece of artwork here — the other side of the gap
-    /// is the canvas edge, which was not part of the wall set at all.
+    /// Gap-closing at the default does not save it, and that is the point: with the option off the
+    /// canvas edge is not ink, so the strip is not an opening between two pieces of artwork — see the
+    /// next test for what it does measure as.
     func testWithTheOptionOffAFillEscapesAroundABarThatStopsShortOfTheCanvasEdge() throws {
         let reference = verticalBarLeavingATopGap(fromY: 6)
         let region = try fill(reference, seed: (x: 20, y: 60), canvasEdgeIsWall: false)
@@ -144,25 +144,18 @@ final class FillBoundaryLogicTests: XCTestCase {
                       "Today the fill walks through the 6 px strip above the bar's tip into the other compartment")
     }
 
-    /// **A surprise from the measurement, and the reason the option is a modifier rather than a new
-    /// idea: at a big enough radius the old code already sealed to the edge, by accident.**
-    ///
-    /// Turning gap-closing all the way up (40 px, the top of `CanvasManager.fillGapRange`) contains
-    /// this same leak with the option off. The close is dilate-then-erode, and the erode's JFA is
-    /// seeded on the *background*, which exists only inside the buffer — so out-of-canvas neighbours
-    /// have always counted as wall on that half of the operation while the dilate half ignored them.
-    /// A 40 px dilate of the bar reaches the top border and the erode then cannot eat it back off.
-    ///
-    /// It is not a fix and was never a decision: the artist has to abandon the gap setting they
-    /// wanted, and every gap in the *artwork* up to 80 px wide gets bridged as collateral. But it
-    /// means the option is making an existing asymmetry deliberate and available at any radius,
-    /// rather than introducing a behaviour the engine did not have.
-    func testALargeEnoughGapRadiusAlreadySealedToTheEdgeBeforeTheOptionExisted() throws {
+    /// **With the option off the strip still seals — at twice its width.** The fill cannot leave the
+    /// buffer, so the way round the bar's tip is the strip whatever the option says; what the option
+    /// decides is whether the canvas edge is *ink* in the distance map gap closing reads. Off, the
+    /// strip's pixels measure their distance to the bar's tip alone, so the 6 px strip reads as an
+    /// opening twice that wide and seals only once the slider covers 12 — here at the top of the range.
+    func testWithTheOptionOffTheStripSealsOnlyAtTwiceItsWidth() throws {
         let reference = verticalBarLeavingATopGap(fromY: 6)
-        let region = try fill(reference, seed: (x: 20, y: 60), gapRadius: 40, canvasEdgeIsWall: false)
+        let below = try fill(reference, seed: (x: 20, y: 60), gapWidth: 11, canvasEdgeIsWall: false)
+        XCTAssertTrue(isFilled(below, 100, 60), "At 11 px the 6 px strip, read as 12, is still open")
 
-        XCTAssertFalse(isFilled(region, 100, 60),
-                       "At 40 px the erode's one-sided treatment of out-of-canvas already seals the gap")
+        let maxed = try fill(reference, seed: (x: 20, y: 60), gapWidth: 40, canvasEdgeIsWall: false)
+        XCTAssertFalse(isFilled(maxed, 100, 60), "At 40 px it seals")
     }
 
     // MARK: - What the option changes
@@ -178,11 +171,10 @@ final class FillBoundaryLogicTests: XCTestCase {
                        "The bar's tip now seals against the canvas edge, so the far compartment is untouched")
     }
 
-    /// **The cost side of the same change, and the reason it is applied to the dilate alone.**
-    ///
-    /// Treating the outside as wall must not cost the artist a strip of unfillable canvas along every
-    /// border. Away from any artwork the closing erodes the border band straight back off, so the
-    /// fill still reaches the outermost row and column.
+    /// **The cost side of the same change.** Treating the canvas edge as ink must not cost the artist
+    /// a strip of unfillable canvas along every border: it is ink only in the distance map gap closing
+    /// reads, and a stretch of border with no artwork near it is no opening, so the fill still reaches
+    /// the outermost row and column.
     func testTheOptionDoesNotLeaveAnUnfillableStripAlongTheBorder() throws {
         let reference = verticalBarLeavingATopGap(fromY: 6)
         let region = try fill(reference, seed: (x: 20, y: 60), canvasEdgeIsWall: true)
@@ -193,22 +185,12 @@ final class FillBoundaryLogicTests: XCTestCase {
     }
 
     /// A bar that genuinely reaches the top edge already splits the canvas, with the option off or
-    /// on — and the option's cost in that already-working scene is **56 pixels, all of them in the
-    /// two corners where the bar meets a border.**
-    ///
-    /// The number is derived rather than recorded. The left compartment is 63 columns of 128 rows =
-    /// 8064 px. Beside the bar at row *y*, the nearest artwork is `63 - x` away and the canvas edge
-    /// is `y + 1` away, so the bridge claims every pixel with `(63 - x) + (y + 1) <= 8`, which is
-    /// `7 + 6 + … + 1 = 28` pixels — once at the top junction and once at the bottom. 8064 − 56 =
-    /// 8008, exactly what runs.
-    ///
-    /// **That fillet is the option behaving correctly, not a defect**, and it is what the artist
-    /// already gets everywhere else: a morphological close rounds off any concave corner an r-disk
-    /// cannot reach into, so a fill has always stopped a hair short of the corner where two strokes
-    /// meet. Treating the border as a stroke gives the corner where a stroke meets the border the
-    /// same treatment. Asserting the exact count rather than "unchanged" is what keeps it that
-    /// small — a mechanism that walled the whole border band would sail past a looser check.
-    func testABarThatTouchesTheEdgeCostsOnlyTheCornerFillet() throws {
+    /// on — and the option costs that already-working scene **nothing**, not even the two corners
+    /// where the bar meets a border. Gap closing seals openings between open areas (`FillBasins`),
+    /// and a corner is not one, so the left compartment fills to every pixel of its 63 columns by
+    /// 128 rows either way. Asserting the exact count rather than "contained" is what holds the
+    /// corners: a fill that curled in from them — the owner's TODO (158) — fails it.
+    func testABarThatTouchesTheEdgeCostsNothing() throws {
         let reference = verticalBarLeavingATopGap(fromY: 0)
         let off = try fill(reference, seed: (x: 20, y: 60), canvasEdgeIsWall: false)
         let on = try fill(reference, seed: (x: 20, y: 60), canvasEdgeIsWall: true)
@@ -216,50 +198,48 @@ final class FillBoundaryLogicTests: XCTestCase {
         XCTAssertFalse(isFilled(off, 100, 60), "A closed boundary contains the fill without the option")
         XCTAssertFalse(isFilled(on, 100, 60), "…and with it")
         XCTAssertEqual(filledCount(off), 63 * Self.canvasH, "The whole left compartment, to the border")
-        XCTAssertEqual(filledCount(on), 63 * Self.canvasH - 56,
-                       "…less one 28 px fillet at each of the bar's two junctions with a border")
+        XCTAssertEqual(filledCount(on), 63 * Self.canvasH, "…and the same with the option, corners included")
     }
 
     /// **The option is a modifier on gap-closing, and composes with it exactly — at padding 0.** At a
-    /// gap radius of 0 the artist has said "bridge nothing", and the canvas edge is a zero-width line
+    /// gap closing of 0 the artist has said "bridge nothing", and the canvas edge is a zero-width line
     /// one pixel outside a buffer the flood cannot leave anyway — so there is nothing left for it to
     /// block and the two settings must agree to the pixel.
     ///
     /// **The invariant this pins narrowed when padding entered the picture, and the narrowing is
-    /// deliberate.** It used to read "the option is inert at gapRadius 0"; it now reads "…at
-    /// gapRadius 0 *and* padding 0". With padding, the option also makes the artwork rect a barrier
+    /// deliberate.** It used to read "the option is inert at gapWidth 0"; it now reads "…at
+    /// gapWidth 0 *and* padding 0". With padding, the option also makes the artwork rect a barrier
     /// to the flood, which is not a gap-closing behaviour and does not consult the slider — see
     /// `testTheBarrierDoesNotNeedGapClosingAtAll`. This canvas has no padding, so the old sentence
     /// still holds here and the test is unchanged.
     func testTheOptionIsInertWhenGapClosingIsZero() throws {
         let reference = verticalBarLeavingATopGap(fromY: 6)
-        let off = try fill(reference, seed: (x: 20, y: 60), gapRadius: 0, canvasEdgeIsWall: false)
-        let on = try fill(reference, seed: (x: 20, y: 60), gapRadius: 0, canvasEdgeIsWall: true)
+        let off = try fill(reference, seed: (x: 20, y: 60), gapWidth: 0, canvasEdgeIsWall: false)
+        let on = try fill(reference, seed: (x: 20, y: 60), gapWidth: 0, canvasEdgeIsWall: true)
 
         XCTAssertEqual(off, on, "With no gap-closing the option has nothing to add")
         XCTAssertTrue(isFilled(on, 100, 60), "…and the fill still crosses, since nothing is being bridged")
     }
 
-    /// **How far the option reaches, pinned as a number rather than left to the reader.** The bridge
-    /// test is `distanceToWall + distanceToCanvasEdge <= gapRadius`, and along the straight line from
-    /// the tip to the border that sum is the width of the gap the whole way across — so a gap of
-    /// `gapRadius - 1` px seals and one of `gapRadius` px does not. At the default 8 px setting that
-    /// is "up to 7 px of daylight".
+    /// **How far the option reaches, pinned as a number rather than left to the reader.** With the
+    /// canvas edge ink, the daylight between the bar's tip and the border is an opening like any
+    /// other, and the slider seals openings up to its own number: at the default 8 px, 8 px of
+    /// daylight seals and 9 does not.
     ///
     /// The point of the assertion is the *and no further* half: an option that sealed regardless of
     /// the slider would silently wall off any narrow region that happens to touch a border.
     func testTheSealReachesTheGapClosingDistanceAndNoFurther() throws {
-        let sealed = try fill(verticalBarLeavingATopGap(fromY: 7), seed: (x: 20, y: 60),
-                              gapRadius: 8, canvasEdgeIsWall: true)
-        XCTAssertFalse(isFilled(sealed, 100, 60), "7 px of daylight is inside an 8 px gap-closing radius")
+        let sealed = try fill(verticalBarLeavingATopGap(fromY: 8), seed: (x: 20, y: 60),
+                              gapWidth: 8, canvasEdgeIsWall: true)
+        XCTAssertFalse(isFilled(sealed, 100, 60), "8 px of daylight is within an 8 px gap closing")
 
-        let open = try fill(verticalBarLeavingATopGap(fromY: 8), seed: (x: 20, y: 60),
-                            gapRadius: 8, canvasEdgeIsWall: true)
-        XCTAssertTrue(isFilled(open, 100, 60), "8 px is not, so the fill still crosses")
+        let open = try fill(verticalBarLeavingATopGap(fromY: 9), seed: (x: 20, y: 60),
+                            gapWidth: 8, canvasEdgeIsWall: true)
+        XCTAssertTrue(isFilled(open, 100, 60), "9 px is not, so the fill still crosses")
     }
 
-    /// An empty canvas fills entirely either way — the option adds walls to the *closing*, not to the
-    /// flood, so it cannot shrink a fill that meets no artwork.
+    /// An empty canvas fills entirely either way — the option makes the edge ink for gap closing, not
+    /// for the flood, and a canvas with no artwork has no opening to seal.
     func testAnEmptyCanvasFillsCompletelyWithTheOptionOn() throws {
         let reference = [UInt8](repeating: 0, count: Self.canvasW * Self.canvasH * 4)
         let region = try fill(reference, seed: (x: 64, y: 64), canvasEdgeIsWall: true)
@@ -346,19 +326,11 @@ final class FillBoundaryLogicTests: XCTestCase {
 
     /// The enclosure's interior, worked out rather than recorded, and the spine of every count below.
     ///
-    /// - raw interior: 42 columns (artwork-local x 43...84) x 88 rows (y 0...87) = **3696**, asserted
-    ///   directly at a gap radius of 0 by `testTheBarrierDoesNotNeedGapClosingAtAll`.
-    /// - less **23 px at each of the two corners where an arm meets the bar**: the morphological close
-    ///   rounds every concave corner an r-disk cannot reach into, and at r = 8 that is exactly
-    ///   `|{(i, j) : 1 <= i, j <= 8, i² + j² > 64}|` = 23. (The same 23-per-corner figure session 41
-    ///   measured for the wall-ring design it rejected — same geometry, arrived at from the other end.)
-    /// - less **28 px at each of the two junctions with the paper's border**: the bridge claims every
-    ///   interior pixel with `distanceToWall + distanceToCanvasEdge <= 8`, i.e. `(i+1) + (j+1) <= 8`,
-    ///   which is 7 + 6 + … + 1 = 28. Confirmed against the option-off run, which is 3650 — exactly
-    ///   56 more, the two lenses being the only thing the option adds inside an already-closed shape.
-    ///
-    /// 3696 − 46 − 56 = **3594**, and that is what runs, *at both paddings*.
-    private static let enclosureInterior = 3594
+    /// 42 columns (artwork-local x 43...84) x 88 rows (y 0...87) = **3696** — the raw interior, at a
+    /// gap closing of 0 (`testTheBarrierDoesNotNeedGapClosingAtAll`) and at the default 8 alike,
+    /// corners and the junctions with the paper's border included, *at both paddings*. Gap closing
+    /// seals openings, and the enclosure has none (TODO (158)).
+    private static let enclosureInterior = 3696
 
     /// Filled pixels split into the two compartments padding creates. `paper` is the artwork rect,
     /// `margin` the grey ring around it. Both are needed on every padded assertion: a count alone
@@ -401,12 +373,12 @@ final class FillBoundaryLogicTests: XCTestCase {
 
         let before = filledSplit(try fill(reference, side: Self.paddedSide, seed: seed,
                                           canvasEdgeIsWall: true, edgeInset: 0))
-        XCTAssertEqual(Double(before.paper) / Double(paperArea), 0.9562, accuracy: 0.001,
+        XCTAssertEqual(Double(before.paper) / Double(paperArea), 0.9590, accuracy: 0.001,
                        "Aimed at the buffer rim, the enclosure is open along its whole top and the fill takes the page")
         XCTAssertEqual(before.margin, 33744, "…and 33744 px of the padding with it")
 
         // The sharpest single statement of the bug: with padding, turning the option on changed
-        // nothing whatsoever. Both runs are the same 15666 + 33744 px.
+        // nothing whatsoever. Both runs are the same 15712 + 33744 px.
         let optionOff = filledSplit(try fill(reference, side: Self.paddedSide, seed: seed,
                                              canvasEdgeIsWall: false))
         XCTAssertEqual(optionOff.paper, before.paper, "The option was inert in exactly the scene it is named for")
@@ -416,9 +388,9 @@ final class FillBoundaryLogicTests: XCTestCase {
                                          canvasEdgeIsWall: true, edgeInset: Float(Self.paddingInset)))
         XCTAssertEqual(after.margin, 0, "Nothing on the grey")
         XCTAssertEqual(after.paper, Self.enclosureInterior,
-                       "The fill is the enclosure's interior — see `enclosureInterior` for all 3594 px of it")
-        XCTAssertEqual(Double(after.paper) / Double(paperArea), 0.2194, accuracy: 0.001,
-                       "21.9% of the paper, not 95.6% of it plus the padding")
+                       "The fill is the enclosure's interior — see `enclosureInterior` for all 3696 px of it")
+        XCTAssertEqual(Double(after.paper) / Double(paperArea), 0.2256, accuracy: 0.001,
+                       "22.6% of the paper, not 95.9% of it plus the padding")
     }
 
     /// **The pair, and the property the owner actually lost: the same enclosure fills the same
@@ -426,9 +398,9 @@ final class FillBoundaryLogicTests: XCTestCase {
     ///
     /// At padding 0 the arms cannot overhang, so they start on the paper's top row; at padding 48
     /// they cross the border and stop 8 px out on the margin. Different reference bitmaps, different
-    /// buffer sizes, and the fill is the same 3594 px both times — because in both the paper's border
+    /// buffer sizes, and the fill is the same 3696 px both times — because in both the paper's border
     /// is the fourth side of the enclosure. Getting *the same number twice here* is the fix; before
-    /// it, the padded run was 15666 px of paper plus 33744 px of margin.
+    /// it, the padded run took the paper and 33744 px of margin.
     func testTheOwnersEnclosureFillsTheSameAmountAtPaddingZeroAndAtPaddingFortyEight() throws {
         let unpadded = try fill(ownersEnclosureUnpadded(), seed: (x: 64, y: 40), canvasEdgeIsWall: true)
         let padded = filledSplit(try fill(ownersEnclosure(), side: Self.paddedSide,
@@ -445,11 +417,11 @@ final class FillBoundaryLogicTests: XCTestCase {
     /// has asked for the canvas edge to bound the fill; getting the whole page instead, because a
     /// *different* slider reads 0, would be indefensible.
     ///
-    /// At radius 0 nothing is bridged and nothing is closed, so the count is the enclosure's raw
-    /// interior exactly: 42 columns (artwork-local x 43...84) by 88 rows (y 0...87).
+    /// At gap closing 0 nothing is sealed, so the count is the enclosure's raw interior exactly: 42
+    /// columns (artwork-local x 43...84) by 88 rows (y 0...87).
     func testTheBarrierDoesNotNeedGapClosingAtAll() throws {
         let region = try fill(ownersEnclosure(), side: Self.paddedSide, seed: Self.onPaper(64, 40),
-                              gapRadius: 0, canvasEdgeIsWall: true,
+                              gapWidth: 0, canvasEdgeIsWall: true,
                               edgeInset: Float(Self.paddingInset))
         let split = filledSplit(region)
 
@@ -462,10 +434,8 @@ final class FillBoundaryLogicTests: XCTestCase {
     /// **The 92-pixel guard, and the most important test in this file.**
     ///
     /// There is an implementation of "the canvas border is a wall" that passes every other test here
-    /// and is wrong: adding the border to the wall mask before the morphological close. A closed
-    /// r-disk cannot reach into a rectangle's interior corner, so each corner grows an unfillable
-    /// notch that scales with the Gap Closing slider — measured on this engine at 92 px of a blank
-    /// 128x128 canvas, 23 per corner. That is the design session 41 measured and threw out.
+    /// and is wrong: adding the border to the wall mask, which consumes a ring of pixels and, under
+    /// any gap closing that rounds corners, grows an unfillable notch in each corner of the paper.
     ///
     /// A barrier costs nothing, because it lives *between* pixels rather than consuming one. So the
     /// assertion is the exact area of the artwork rect, not a bound: 16292 would pass "most of it".
@@ -535,7 +505,7 @@ final class FillBoundaryLogicTests: XCTestCase {
     func testArtworkDrawnOnTheMarginDividesTheRing() throws {
         let reference = paddedReference(bars: [(x: 60...62, y: -Self.paddingInset ... -1)])
         let region = try fill(reference, side: Self.paddedSide, seed: (x: 10, y: 10),
-                              gapRadius: 0, canvasEdgeIsWall: true,
+                              gapWidth: 0, canvasEdgeIsWall: true,
                               edgeInset: Float(Self.paddingInset))
         let split = filledSplit(region)
 
@@ -552,13 +522,12 @@ final class FillBoundaryLogicTests: XCTestCase {
     /// proves the bridge was re-aimed rather than switched off.**
     ///
     /// A bar inside the paper stopping *g* px short of the paper's top border, with the two halves of
-    /// the paper joined only by that strip. The bridge test is `distanceToWall + distanceToCanvasEdge
-    /// <= gapRadius`, and along the strip that sum is `g + 1` the whole way across — so g = 7 seals at
-    /// a radius of 8 and g = 8 does not, exactly as at padding 0. The barrier cannot do this: the
-    /// strip is *inside* the artwork rect, so nothing about the rect's boundary blocks it.
+    /// the paper joined only by that strip — an opening *g* px wide, with the paper's edge as ink, so
+    /// g = 8 seals at the default 8 and g = 9 does not, exactly as at padding 0. The barrier cannot do
+    /// this: the strip is *inside* the artwork rect, so nothing about the rect's boundary blocks it.
     ///
-    /// The third fill is the before-state. With the edge measured to the buffer rim the same sum is
-    /// 56, so nothing sealed at any usable radius once padding exceeded the slider's 40 px cap.
+    /// The third fill is the before-state. With the edge measured to the buffer rim the same strip is
+    /// 56 px from it, so nothing sealed at any usable setting once padding exceeded the slider's cap.
     func testTheBridgeReachesTheArtworkRectsEdgeAndNoFurther() throws {
         func barLeavingATopGap(_ g: Int) -> [UInt8] {
             paddedReference(bars: [(x: 63...65, y: g...(Self.artworkSide - 1))])
@@ -566,27 +535,27 @@ final class FillBoundaryLogicTests: XCTestCase {
         let inset = Float(Self.paddingInset)
         let seed = Self.onPaper(20, 60)
 
-        let sealed = try fill(barLeavingATopGap(7), side: Self.paddedSide, seed: seed,
+        let sealed = try fill(barLeavingATopGap(8), side: Self.paddedSide, seed: seed,
                               canvasEdgeIsWall: true, edgeInset: inset)
         XCTAssertFalse(isFilledOnPaper(sealed, 100, 60),
-                       "7 px of daylight below the paper's border is inside an 8 px gap-closing radius")
+                       "8 px of daylight below the paper's border is within an 8 px gap closing")
 
-        let open = try fill(barLeavingATopGap(8), side: Self.paddedSide, seed: seed,
+        let open = try fill(barLeavingATopGap(9), side: Self.paddedSide, seed: seed,
                             canvasEdgeIsWall: true, edgeInset: inset)
-        XCTAssertTrue(isFilledOnPaper(open, 100, 60), "8 px is not, so the fill still crosses")
+        XCTAssertTrue(isFilledOnPaper(open, 100, 60), "9 px is not, so the fill still crosses")
 
-        let before = try fill(barLeavingATopGap(7), side: Self.paddedSide, seed: seed,
+        let before = try fill(barLeavingATopGap(8), side: Self.paddedSide, seed: seed,
                               canvasEdgeIsWall: true, edgeInset: 0)
         XCTAssertTrue(isFilledOnPaper(before, 100, 60),
-                      "Aimed at the buffer rim the same gap measures 56 px, so it never sealed")
+                      "Aimed at the buffer rim the same strip is 56 px from the edge, so it never sealed")
     }
 
     // MARK: - Nothing moves at inset 0
 
     /// **The no-regression proof, stated directly rather than left to the nine tests above.**
     ///
-    /// Those nine still assert their original numbers — 63 * canvasH, the 56 px fillet, the
-    /// 7-seals/8-does-not pair, 100% of a blank canvas — and that they still pass is the real
+    /// Those nine still assert their numbers — 63 * canvasH with and without the option, the
+    /// 8-seals/9-does-not pair, 100% of a blank canvas — and that they still pass is the real
     /// evidence. This adds the one thing they cannot see: that the *segmenting* the barrier does to
     /// the flood sweeps is a no-op at inset 0. An off-by-one there (splitting at `width - inset - 1`,
     /// say) would fence off the buffer's last row and column at every inset, including 0, and every

@@ -48,12 +48,8 @@ final class LassoFillLogicTests: XCTestCase {
     /// A closed black box, plus the same box with a break `missingRows` tall in the middle of its
     /// right wall. The box is the enclosure a loop drawn around it should find.
     ///
-    /// Three rows is a deliberately modest break, and the reason is worth recording: the folklore that
-    /// a morphological close bridges anything narrower than `2 * radius` holds for two *parallel*
-    /// walls, not for two wall **ends** facing each other across a gap. A disk can approach an end
-    /// from the side, so the reachable set is much larger and the bridging much weaker — measured
-    /// here, a 7-row break in a 3 px wall is still open at the default 8 px radius while a 3-row one
-    /// is closed.
+    /// Three rows is a modest break, well inside the default 8 px gap closing, which seals a break up
+    /// to its own number of rows whether the wall ends facing each other are thick or thin.
     private func box(breakInRightWall missingRows: Int) -> [UInt8] {
         var bytes = [UInt8](repeating: 0, count: Self.w * Self.h * 4)
         func ink(_ x: Int, _ y: Int) {
@@ -135,12 +131,12 @@ final class LassoFillLogicTests: XCTestCase {
     /// asserting what an *artist* gets goes through `lassoFillAtSlider`, which takes that mapping from
     /// the production code; this one is for assertions about the operator itself.
     private func lassoFill(_ reference: [UInt8], loop: CGPath,
-                           gapRadius: Float = 8, threshold: Float = 0.15,
+                           gapWidth: Float = 8, threshold: Float = 0.15,
                            edgeRadius: Float = 0,
                            canvasEdgeIsWall: Bool = true) throws -> [UInt8] {
         let session = try lassoSession(reference, loop: loop)
         return try XCTUnwrap(session.fill(seedX: 0, seedY: 0, seedColor: .zero, threshold: threshold,
-                                          gapRadius: gapRadius, edgeOverlap: edgeRadius,
+                                          gapWidth: gapWidth, edgeOverlap: edgeRadius,
                                           artworkRect: canvasEdgeIsWall ? session.bufferRect : nil,
                                           fillColor: SIMD4<Float>(1, 0, 0, 1)))
     }
@@ -166,7 +162,7 @@ final class LassoFillLogicTests: XCTestCase {
         manager.setFillSetting(.edgeOverlap, slider)
         let session = try lassoSession(reference, loop: loop)
         let region = try XCTUnwrap(session.fill(seedX: 0, seedY: 0, seedColor: .zero, threshold: 0.15,
-                                                gapRadius: 8,
+                                                gapWidth: 8,
                                                 edgeOverlap: Float(manager.fillEdgeRadius(lasso: true)),
                                                 artworkRect: session.bufferRect,
                                                 fillColor: SIMD4<Float>(1, 0, 0, 1)))
@@ -306,32 +302,19 @@ final class LassoFillLogicTests: XCTestCase {
     /// stated as a sweep: cost and correctness are bounded by the loop, not by canvas connectivity.
     /// The same table run against the old engine read 1.000 in every cell.
     ///
-    /// Measured 2026-08-18. Gap closing is `fillGapRange` 0...40, default 8; the canvas-edge option is
-    /// the only other knob that could plausibly move a boundary:
-    ///
-    /// | gap | 0 | 4 | 8 | 16 | 24 | 32 | 40 |
-    /// |---|---|---|---|---|---|---|---|
-    /// | edge is wall | .4004 | .4004 | **.4004** | .4004 | .5367 | .7619 | .7656 |
-    /// | edge is not | .4004 | .4004 | .4004 | .4004 | .5023 | .6683 | .7656 |
-    ///
-    /// Across the whole usable half of the slider the answer is exactly the shape. Past 16 the result
-    /// *grows*, and that is the close destroying the fixture rather than the fill escaping: a disk that
-    /// big closes the box's 75 px interior into solid wall, so the collar cannot get in and the
-    /// interior counts as held out. At 40 the number is 112x112/128x128 = .7656 — the loop's own
-    /// footprint, everything inside it wall. Degenerate, still bounded by the loop, and reachable only
-    /// by putting a 40 px radius on a 128 px canvas.
+    /// Gap closing is `fillGapRange` 0...40, default 8; the canvas-edge option is the only other knob
+    /// that could plausibly move a boundary. Across the whole slider, either way, the answer is exactly
+    /// the shape: the box has no opening, so gap closing has nothing to seal, and the paper around it
+    /// is reached into every corner (TODO (158)).
     func testNoGapOrEdgeSettingLetsTheFillEscapeTheLoop() throws {
-        for gap in [Float(0), 4, 8, 16] {
+        for gap in [Float(0), 4, 8, 16, 24, 32, 40] {
             for edgeIsWall in [true, false] {
                 let f = filledFraction(try lassoFill(box(breakInRightWall: 0), loop: loopAroundEverything,
-                                                     gapRadius: gap, canvasEdgeIsWall: edgeIsWall))
+                                                     gapWidth: gap, canvasEdgeIsWall: edgeIsWall))
                 XCTAssertEqual(f, Self.boxFootprint, accuracy: 0.002,
                                "gap \(gap), canvas edge \(edgeIsWall): still exactly the shape")
             }
         }
-        let maxed = try lassoFill(box(breakInRightWall: 0), loop: loopAroundEverything, gapRadius: 40)
-        XCTAssertEqual(filledFraction(maxed), 112.0 * 112.0 / (128.0 * 128.0), accuracy: 0.001,
-                       "At maximum gap closing everything inside the loop is wall — but still inside the loop")
     }
 
     // MARK: - Gap closing, and what a leak looks like
@@ -339,7 +322,7 @@ final class LassoFillLogicTests: XCTestCase {
     /// **The tool's reason to exist**: a break in the outline narrower than Gap Closing still counts as
     /// an enclosure, so a scruffy hand-drawn shape fills the same as a clean one.
     func testABreakNarrowerThanGapClosingIsStillAnEnclosure() throws {
-        let region = try lassoFill(box(breakInRightWall: 3), loop: loopAroundEverything, gapRadius: 8)
+        let region = try lassoFill(box(breakInRightWall: 3), loop: loopAroundEverything, gapWidth: 8)
 
         XCTAssertEqual(filledFraction(region), 0.4003, accuracy: 0.002, "Bridged, so the shape fills")
         XCTAssertTrue(isFilled(region, 61, 61), "…interior and all")
@@ -362,7 +345,7 @@ final class LassoFillLogicTests: XCTestCase {
     /// signal a tool can give; the cost is that the §7 notice does not fire on this path, because the
     /// result genuinely is not empty.
     func testALeakThroughAWideGapPaintsOnlyTheOutlineTheCollarCouldNotEnter() throws {
-        let region = try lassoFill(box(breakInRightWall: 3), loop: loopAroundEverything, gapRadius: 0)
+        let region = try lassoFill(box(breakInRightWall: 3), loop: loopAroundEverything, gapWidth: 0)
 
         XCTAssertEqual(filledFraction(region), 927.0 / (128.0 * 128.0), accuracy: 0.002,
                        "The outline's own pixels, and nothing the collar could walk into")
@@ -400,7 +383,7 @@ final class LassoFillLogicTests: XCTestCase {
         let session = try XCTUnwrap(engine.makeSession(referenceRGBA: bandAcrossTheMiddle(),
                                                        width: Self.w, height: Self.h).session)
         let region = try XCTUnwrap(session.fill(seedX: 64, seedY: 40, seedColor: session.seedColor(atX: 64, y: 40),
-                                                threshold: 0.15, gapRadius: 8, edgeOverlap: 0,
+                                                threshold: 0.15, gapWidth: 8, edgeOverlap: 0,
                                                 artworkRect: session.bufferRect, fillColor: SIMD4<Float>(1, 0, 0, 1)))
 
         XCTAssertTrue(isFilled(region, 64, 40), "The tapped compartment fills")
@@ -478,7 +461,7 @@ final class LassoFillLogicTests: XCTestCase {
     /// strip of paper beside it is never reached, and it fills solid. The assertion that catches it is
     /// the strip, not the box.
     ///
-    /// The box sits 20 px from the border on purpose. Nearer than the gap-closing radius and the
+    /// The box sits 20 px from the border on purpose. Nearer than the gap-closing width and the
     /// canvas-edge option would seal the strip into a genuine enclosure of its own, which is that
     /// option working rather than this one failing — but it would make the test say nothing about the
     /// ring.
@@ -532,26 +515,19 @@ final class LassoFillLogicTests: XCTestCase {
 
     /// **A loop traced along the artwork is not an error** (§4 case 1) — it is the gesture of an artist
     /// being careful, and it still fills the shape. The ring is entirely ink here, so ink joins the
-    /// reference set; the shape fills either way, and only the traced line's own pixels move.
+    /// reference set; the shape fills, and the traced line's own pixels are the ink collar's walk.
     ///
-    /// Measured 2026-08-18, and the two numbers are worth having because they show what gap closing
-    /// does to the *second* reference. At gap 0 the ink collar walks the 3 px wall it was traced along,
-    /// so those 616 px are reached and left blank — 75x75 = the interior alone. At the default gap 8
-    /// the close is applied to that reference's walls (which are the paper), and a close with an 8 px
-    /// disk seals straight over a 3 px line: the ink is wall to its own collar, nothing is reached, and
-    /// the whole loop fills.
+    /// The ink collar walks the 3 px wall it was traced along, so those 616 px are reached and left
+    /// blank — 75x75 = the interior alone — and gap closing does not change that at any setting: the
+    /// wall is one strip the ring runs the length of, not an opening between two areas.
     func testALoopTracedAlongTheArtworkStillFillsTheShape() throws {
         let alongTheOutline = rectangleLoop(CGRect(x: 21, y: 21, width: 79, height: 79))
-
-        let closed = try lassoFill(box(breakInRightWall: 0), loop: alongTheOutline, gapRadius: 8)
-        XCTAssertTrue(isFilled(closed, 61, 61), "The shape fills")
-        XCTAssertEqual(filledFraction(closed), 79.0 * 79.0 / (128.0 * 128.0), accuracy: 0.002,
-                       "Gap closing seals over the 3 px line, so the traced wall fills too")
-
-        let open = try lassoFill(box(breakInRightWall: 0), loop: alongTheOutline, gapRadius: 0)
-        XCTAssertTrue(isFilled(open, 61, 61), "Still fills the shape with no bridging…")
-        XCTAssertEqual(filledFraction(open), 75.0 * 75.0 / (128.0 * 128.0), accuracy: 0.002,
-                       "…but now the ink collar walks the traced wall, so the wall itself stays blank")
+        for gap in [Float(0), 8, 40] {
+            let region = try lassoFill(box(breakInRightWall: 0), loop: alongTheOutline, gapWidth: gap)
+            XCTAssertTrue(isFilled(region, 61, 61), "gap \(gap): the shape fills")
+            XCTAssertEqual(filledFraction(region), 75.0 * 75.0 / (128.0 * 128.0), accuracy: 0.002,
+                           "gap \(gap): the ink collar walks the traced wall, so the wall itself stays blank")
+        }
     }
 
     /// **The question a bucket fill never has to answer, and getting it wrong inverts the tool.** With
@@ -937,41 +913,37 @@ final class LassoFillLogicTests: XCTestCase {
     }
 
     /// **"Moving the gap closing slider up means bigger gaps get filled" — the owner, 2026-08-21.**
-    /// The other of the two artist-facing properties, and the one that turned out to need no change:
-    /// a lasso session runs the identical `encodeWallsAndClose` a bucket fill does, and a
-    /// morphological close is monotone in its radius by construction. Pinned anyway, because
-    /// "unchanged" is a claim about behaviour and this file's whole history is of that claim being
-    /// made from the code rather than from the pixels.
+    /// The other of the two artist-facing properties: a lasso session runs the same gap closing a
+    /// bucket fill does — `FillBasins`' cut, which is monotone in the slider by construction. Pinned
+    /// anyway, because "unchanged" is a claim about behaviour and this file's whole history is of that
+    /// claim being made from the code rather than from the pixels.
     ///
-    /// The measure is the widest break in the box's wall that still fills, swept over the slider.
-    /// Breaks are counted in rows through a 3 px wall, where the folklore figure of `2 * radius`
-    /// badly over-states what bridges — see `box(breakInRightWall:)` for why wall *ends* are not
-    /// parallel walls.
+    /// The measure is the widest break in the box's wall that still fills, swept over the slider, in
+    /// rows through a 3 px wall.
     ///
     /// **Note what this does not assert**, and deliberately: that the lasso and the bucket produce
     /// the same pixels at the same radius. They do not, and the owner has ruled that they need not —
     /// dilating the wall set confines a flood and equally confines the *collar*, so the same slider
     /// motion shrinks one result and grows the other. That divergence is the algorithm, not a defect.
     ///
-    /// Measured 2026-08-21, widest break still filling at radius 0, 2, 4, 8, 16 px: 0, 2, 4, 6, 10
-    /// rows. Note how far short of `2 * radius` the last two fall — the wall-ends caveat in
-    /// `box(breakInRightWall:)` is worth more than the folklore.
+    /// The widest break still filling is the slider's own number — 0, 2, 4 and 8 rows at 0, 2, 4 and 8
+    /// px — and at 16 it is the sweep's own last row, 15 (an odd break seals at one more than its
+    /// width, `FillBasins` says why).
     func testGapClosingBridgesWiderBreaksAsItRises() throws {
-        func widestBreakThatFills(gapRadius: Float) throws -> Int {
+        func widestBreakThatFills(gapWidth: Float) throws -> Int {
             var widest = -1
             for rows in stride(from: 0, through: 15, by: 1) {
                 let region = try lassoFill(box(breakInRightWall: rows), loop: loopAroundEverything,
-                                           gapRadius: gapRadius, edgeRadius: 0)
-                // A break the close cannot bridge lets the collar into the box, and the interior
+                                           gapWidth: gapWidth, edgeRadius: 0)
+                // A break gap closing does not seal lets the collar into the box, and the interior
                 // stops being filled — that is the leak, and it is the thing the slider buys off.
                 guard isFilled(region, 60, 60) else { break }
                 widest = rows
             }
             return widest
         }
-        let sealed = try [Float(0), 2, 4, 8, 16].map { try widestBreakThatFills(gapRadius: $0) }
-        XCTAssertEqual(sealed, sealed.sorted(), "Wider breaks seal as the slider rises — \(sealed)")
-        XCTAssertGreaterThan(sealed.last ?? 0, sealed.first ?? 0, "…and it is a real range, not a plateau")
+        let sealed = try [Float(0), 2, 4, 8, 16].map { try widestBreakThatFills(gapWidth: $0) }
+        XCTAssertEqual(sealed, [0, 2, 4, 8, 15], "The slider's number is the widest break it seals")
     }
 
     /// The §6 step 6 fixture, shared by the coverage test and the Edge Overlap one: a box whose walls
@@ -1037,9 +1009,9 @@ final class LassoFillLogicTests: XCTestCase {
     /// `CanvasManager` commits anything at all. Counting the coverage ramp too would make a leaked fill
     /// — which is almost all collar — look non-empty and defeat the §7 signal entirely.
     func testTheEmptyCheckCountsOnlyWhatIsActuallyPainted() throws {
-        func count(_ reference: [UInt8], _ loop: CGPath, gapRadius: Float = 8) throws -> Int {
+        func count(_ reference: [UInt8], _ loop: CGPath, gapWidth: Float = 8) throws -> Int {
             let session = try lassoSession(reference, loop: loop)
-            _ = session.fill(seedX: 0, seedY: 0, seedColor: .zero, threshold: 0.15, gapRadius: gapRadius,
+            _ = session.fill(seedX: 0, seedY: 0, seedColor: .zero, threshold: 0.15, gapWidth: gapWidth,
                              edgeOverlap: 0, artworkRect: session.bufferRect, fillColor: SIMD4<Float>(1, 0, 0, 1))
             return session.lastFilledPixelCount
         }
@@ -1348,7 +1320,7 @@ final class LassoFillLogicTests: XCTestCase {
     func testTheCollarIsTheRingOfPaperInsideTheFenceAndNothingOutsideIt() throws {
         let session = try lassoSession(box(breakInRightWall: 0), loop: loopAroundEverything)
         _ = session.fill(seedX: 0, seedY: 0, seedColor: .zero, threshold: 0.15,
-                         gapRadius: 8, edgeOverlap: 0, artworkRect: session.bufferRect,
+                         gapWidth: 8, edgeOverlap: 0, artworkRect: session.bufferRect,
                          fillColor: SIMD4<Float>(1, 0, 0, 1))
         let reached = try XCTUnwrap(session.lastReachedMask())
 
@@ -1374,7 +1346,7 @@ final class LassoFillLogicTests: XCTestCase {
     func testTheCollarMaskCarriesTheLeakEvenWhereTheSignalDoesNotFire() throws {
         let session = try lassoSession(box(breakInRightWall: 3), loop: loopAroundEverything)
         _ = session.fill(seedX: 0, seedY: 0, seedColor: .zero, threshold: 0.15,
-                         gapRadius: 0, edgeOverlap: 0, artworkRect: session.bufferRect,
+                         gapWidth: 0, edgeOverlap: 0, artworkRect: session.bufferRect,
                          fillColor: SIMD4<Float>(1, 0, 0, 1))
         let reached = try XCTUnwrap(session.lastReachedMask())
 
@@ -1391,7 +1363,7 @@ final class LassoFillLogicTests: XCTestCase {
         let session = try XCTUnwrap(engine.makeSession(referenceRGBA: box(breakInRightWall: 0),
                                                        width: Self.w, height: Self.h).session)
         _ = session.fill(seedX: 60, seedY: 60, seedColor: .zero, threshold: 0.15,
-                         gapRadius: 0, edgeOverlap: 0, fillColor: SIMD4<Float>(1, 0, 0, 1))
+                         gapWidth: 0, edgeOverlap: 0, fillColor: SIMD4<Float>(1, 0, 0, 1))
 
         XCTAssertNil(session.lastReachedMask())
     }

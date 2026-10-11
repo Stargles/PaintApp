@@ -285,9 +285,9 @@ final class FillGestureRestartLogicTests: XCTestCase {
     /// `testATapWhoseFloodHasNotRunYetStillBakes` below drives the identical interleaving through
     /// the bucket fill and fails identically without the fix, so nothing here is lasso-only. What is
     /// lasso-only is how long the window stays open: a lasso session derives a ring mask and its
-    /// reference colours over the whole canvas on the CPU before it starts, then runs
-    /// `encodeWallsAndClose` — two JFA distance transforms — *once per reference colour*, and floods
-    /// both in lockstep. A bucket tap does one wall pass and one flood. The artist cannot out-run a
+    /// reference colours over the whole canvas on the CPU before it starts, then runs its walls, its
+    /// flood and gap closing's distance map and basins *once per reference colour*. A bucket tap does
+    /// one of each. The artist cannot out-run a
     /// tap; drawing the next loop while the last one is still on the GPU is ordinary use.
     ///
     /// **The gate is signalled off a background queue, and that is not decoration.** The fix waits on
