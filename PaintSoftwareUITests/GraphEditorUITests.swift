@@ -1166,6 +1166,7 @@ final class GraphEditorFingerUITests: PaintUITestCase {
         XCTAssertEqual(band.value as? String, start, "…and touched no key")
         XCTAssertEqual(band.label, TimelineGraphBand.encodeGesture(focus: nil, readout: nil),
                        "…nor drew a rubber band")
+        attachScreenshot(XCUIScreen.main, "after-the-finger-scrolled-the-band")
 
         // 3. A drag that starts on a node moves it, and the timeline does not scroll.
         let resting = block.frame.minX
@@ -1176,6 +1177,7 @@ final class GraphEditorFingerUITests: PaintUITestCase {
         waitForBand(band, "\(brightnessID):0,8", "a finger drag that starts on a node moves it")
         XCTAssertEqual(block.frame.minX, resting, accuracy: 1,
                        "…and the timeline stood still under it")
+        attachScreenshot(XCUIScreen.main, "after-the-node-drag-on-the-scrolled-band")
     }
 }
 
