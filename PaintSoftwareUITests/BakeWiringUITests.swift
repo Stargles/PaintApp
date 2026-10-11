@@ -327,7 +327,7 @@ final class BakeWiringUITests: PaintUITestCase {
     /// **The row is the host's own centre row, not the middle of the white that is visible.** The
     /// canvas is centred on the host (`CanvasView.Coordinator.baseCenter`) and the seeded stroke is
     /// at its mid-height, so the host's centre row is the stroke's row. The visible white's middle
-    /// is not: the timeline panel overlays the host's lower part (375 pt since TODO (122)) and cuts
+    /// is not: the timeline panel overlays the host's lower part (375 pt on the suite's portrait iPad) and cuts
     /// the paper short, which moved that middle off the stroke and made this ruler find no ink.
     ///
     /// One screenshot, then across that row: `rgbaPixel` captures once per sample, which is far too

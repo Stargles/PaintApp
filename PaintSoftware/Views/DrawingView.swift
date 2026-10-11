@@ -54,17 +54,17 @@ struct DrawingView: View {
     /// open" and "is the editor up" are two questions, and `CanvasTouchOwner` is fed the first one
     /// unchanged.
     @State private var brushEditing: StrokeSettingsSpec?
-    // Perf HUD: default OFF (see PerfHUD.swift — nothing runs while hidden), toggled via its own
-    // discreet corner button. Lives entirely in its own view; this is just the overlay + state.
-    @State private var isPerfHUDVisible: Bool = false
+    // Perf HUD: default OFF (see PerfHUD.swift — nothing runs while hidden). Its switch is at the head
+    // of the side rail and its numbers sit under the dropdowns; this is just the state both read.
+    @StateObject private var perfHUD = PerfHUD()
     /// How much of the canvas area the timeline currently occupies, reported by `AnimationTimeline`
     /// through `TimelineOccupiedHeightKey` — the whole of what makes the bottom dock ride up when
     /// the artist drags the timeline taller (TODO item (49)).
     ///
     /// **Read rather than owned**, which is the point: the panel's height is still decided in one
-    /// place, by the drag gesture on `AnimationTimeline`'s own `@State`, and this is the rendered
-    /// result of that decision. The initial value is a first-frame guess only — the preference
-    /// arrives on the first layout pass — and it is the timeline's own default so nothing jumps.
+    /// place, `AnimationTimeline` (the window's default, `TimelinePanelSize`, until the artist drags
+    /// it), and this is the rendered result of that decision. The initial value is a first-frame guess only — the preference
+    /// arrives on the first layout pass.
     @State private var timelineOccupiedHeight: CGFloat = 250
     /// How tall the docked card is, reported by `bottomDockCard` through `BottomDockCardHeightKey` —
     /// zero while nothing is docked. With the timeline's, what the canvas is told it is covered by.
@@ -84,6 +84,9 @@ struct DrawingView: View {
         HStack(spacing: 0) {
             SideToolbar(canvasManager: canvasManager)
                 .frame(width: SideToolbar.railWidth)
+                // The perf HUD's switch, in the rail's empty head — see `PerfHUDToggle` for why it is not
+                // over the canvas.
+                .overlay(alignment: .top) { PerfHUDToggle(hud: perfHUD).padding(.top, 8) }
                 .cornerRadius(16)
                 .padding(.vertical, 12)
                 .padding(.leading, 12)
@@ -106,9 +109,11 @@ struct DrawingView: View {
                 // because it is otherwise top-leading and the column below relies on being the
                 // full height.
                 GeometryReader { proxy in
-                    let clearance = dockClearance(canvasWidth: proxy.size.width)
-                    bottomDock(width: BottomDock.width(in: proxy.size.width - clearance))
-                        .frame(width: proxy.size.width - clearance, height: proxy.size.height)
+                    let room = max(0, proxy.size.width - dockClearance(canvasWidth: proxy.size.width))
+                    let card = BottomDock.width(in: room)
+                    bottomDock(width: card)
+                        .frame(width: card, height: proxy.size.height)
+                        .padding(.leading, BottomDock.leadingInset(cardWidth: card, in: room))
                         .frame(width: proxy.size.width, height: proxy.size.height, alignment: .leading)
                 }
 
@@ -167,6 +172,15 @@ struct DrawingView: View {
                     }
                 }
 
+                // The perf HUD's numbers (see PerfHUD.swift) — below the top toolbar on the leading side, **under
+                // the layer rail and the dropdowns that follow**, so a leading dropdown covers them and
+                // never the other way round. They take no touch; the switch is in the side rail.
+                PerfHUDReadout(hud: perfHUD, canvasManager: canvasManager)
+                    .padding(.top, 72)
+                    .padding(.leading, 8)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .allowsHitTesting(false)
+
                 // The layer panel is its own thing: a tall translucent rail down the trailing edge,
                 // wide enough to show nesting and thumbnails, with the per-layer options menu
                 // hanging off its left edge.
@@ -204,17 +218,10 @@ struct DrawingView: View {
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
 
-                // Discreet, default-off FPS/frame-time HUD (see PerfHUD.swift) — tucked below the
-                // top toolbar on the leading side, clear of the toolbar's own icons, the trailing
-                // panel, and the bottom timeline/transform bar.
-                PerfHUDOverlay(canvasManager: canvasManager, isVisible: $isPerfHUDVisible)
-                    .padding(.top, 64)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-
                 // "You are being recorded", and "the last 90 s were saved" (see
                 // ActionRecorderControls.swift). Renders nothing at all unless one of those is true,
-                // and never hit-tests. Tucked under the perf HUD's
-                // toggle on the leading side rather than trailing: the trailing edge is where the
+                // and never hit-tests. On the leading side, under where the perf HUD's numbers sit,
+                // rather than trailing: the trailing edge is where the
                 // layer rail and every dropdown live, and a badge sitting on top of the panel the
                 // artist is trying to photograph for a bug report is worse than useless.
                 ActionRecorderIndicator()

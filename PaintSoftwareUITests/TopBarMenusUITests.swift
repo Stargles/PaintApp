@@ -234,4 +234,33 @@ final class TopBarMenusUITests: PaintUITestCase {
             pixel there read \(darkest(marginSamples)).
             """)
     }
+
+    /// **The performance HUD's switch is on no dropdown** — TODO (169), the owner's audit: it sat on the
+    /// title corner of the leading dropdowns and covered the "A" of "Actions", at every window size. It is
+    /// a child of the side rail now; each of the three menus that open at the leading edge is opened in
+    /// turn, and none of what they show is under the switch, which stays tappable beside them. The row
+    /// each menu leads with is what is read, because the dropdown's own frame is not exposed.
+    func testThePerfHUDSwitchSitsOnNoneOfTheLeadingDropdowns() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let hud = app.buttons["perfHUD.toggle"]
+        XCTAssertTrue(hud.waitForExistence(timeout: 5), "the switch is on screen on a new document")
+
+        let leadingMenus: [(button: String, shows: [XCUIElement], name: String)] = [
+            ("toolbar.actionsButton", [app.staticTexts["Actions"], app.buttons["actions.cutRow"]], "Actions"),
+            ("toolbar.addButton", [app.buttons["add.addTextRow"]], "Add"),
+            ("toolbar.settingsButton", [app.descendants(matching: .any)["settings.resizeCanvasRow"]], "Settings"),
+        ]
+        for menu in leadingMenus {
+            app.buttons[menu.button].tap()
+            for shown in menu.shows {
+                XCTAssertTrue(shown.waitForExistence(timeout: 5), "the \(menu.name) menu is up")
+                XCTAssertFalse(hud.frame.intersects(shown.frame),
+                               "the performance HUD's switch at \(hud.frame) is on top of the \(menu.name) menu's \(shown.frame)")
+            }
+            XCTAssertTrue(hud.isHittable, "the switch can be tapped with the \(menu.name) menu open")
+            attachScreenshot(app, "perf-hud-switch-beside-\(menu.name)")
+            app.buttons[menu.button].tap() // close it
+        }
+    }
 }

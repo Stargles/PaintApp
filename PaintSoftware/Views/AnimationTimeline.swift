@@ -2,10 +2,16 @@ import SwiftUI
 
 struct AnimationTimeline: View {
     @ObservedObject var canvasManager: CanvasManager
-    /// How tall the panel is right now. The user sets this by dragging the top bar; it does *not*
-    /// grow on its own when layers are added (the tracks scroll instead), so the timeline never
-    /// takes canvas space back without being asked.
-    @State private var timelineHeight: CGFloat = AnimationTimeline.defaultHeight
+    /// **The height the artist chose, in points, or nil while they have not.** Set by dragging the top
+    /// bar (and by collapsing it); it does *not* grow on its own when layers are added (the tracks
+    /// scroll instead), so the timeline never takes canvas space back without being asked.
+    ///
+    /// Nil is "the default for this window" (`TimelinePanelSize.defaultHeight`), and the default is
+    /// re-derived from `availableHeight` every time it is read — so a timeline the artist never touched
+    /// follows the window through a rotation or a Split View resize, and one they dragged stays the
+    /// number of points they dragged it to (the rows are a fixed size, so *how many layers I can see*
+    /// is what they chose). Not kept between launches, as it never was.
+    @State private var artistHeight: CGFloat?
     /// Height at the start of the current resize drag, so the drag tracks its own translation
     /// rather than accumulating rounding from each `onChanged`.
     @State private var resizeStartHeight: CGFloat?
@@ -14,11 +20,11 @@ struct AnimationTimeline: View {
     /// respects Split View instead of assuming the whole screen.
     var availableHeight: CGFloat = 1024
 
-    /// **How tall the panel opens** — TODO (122), the owner: *"make it around 1.5x taller"*, of the 250
-    /// pt it opened at, so 375. The chrome above the rows (grab handle, toolbar, ruler) is a fixed 71 pt,
-    /// so everything the extra height adds is rows: about eight layers in view before the tracks scroll.
-    /// The artist can still drag it to anywhere between the collapsed bar and `maxTimelineHeight`.
-    static let defaultHeight: CGFloat = 375
+    /// How tall the panel is right now: what the artist chose, else the default for this window.
+    private var timelineHeight: CGFloat {
+        get { artistHeight ?? TimelinePanelSize.defaultHeight(in: availableHeight) }
+        nonmutating set { artistHeight = newValue }
+    }
 
     private let rowHeight: CGFloat = 34
     /// The pinned ruler strip's height, above the scrolling rows.
@@ -26,15 +32,13 @@ struct AnimationTimeline: View {
     /// How wide the pinned layer-name column is — which is also how far right the ruler strip starts,
     /// so a frame's number sits above the frame's column.
     private let nameColumnWidth: CGFloat = 110
-    private let collapsedHeight: CGFloat = 48
-    private let minExpandedHeight: CGFloat = 130
     private let dragHandleHeight: CGFloat = 12
     private let collapsedBarHeight: CGFloat = 48
     private let miniToolbarHeight: CGFloat = 40
     private let dividerHeight: CGFloat = 1
 
     private var isCollapsed: Bool {
-        timelineHeight <= collapsedHeight + 2
+        timelineHeight <= TimelinePanelSize.collapsedHeight + 2
     }
 
     // The timeline's three menus (block options / gap "Add Drawing" / ruler loop-range) are a
@@ -135,8 +139,8 @@ struct AnimationTimeline: View {
             timelinePanel
         }
         // **What the bottom dock rides on** — TODO item (49). The *rendered* height rather than
-        // `timelineHeight`, deliberately: that state stays the one place the panel's size is
-        // decided, and this reports what the whole timeline actually came to, so the interpolate
+        // `timelineHeight`, deliberately: that stays the one place the panel's size is decided
+        // (`TimelinePanelSize` and the artist's drag), and this reports what the whole timeline actually came to, so the interpolate
         // strip above the panel is included without `BottomDock` having to know it exists.
         .background(GeometryReader { geometry in
             Color.clear.preference(key: TimelineOccupiedHeightKey.self, value: geometry.size.height)
@@ -291,10 +295,9 @@ struct AnimationTimeline: View {
                                expansion: canvasManager.graphBandExpansion)
     }
 
-    /// How tall the panel is drawn: what the artist has dragged it to, and never taller than the canvas
-    /// can spare. The larger default (`defaultHeight`) can exceed that in a short window, and the
-    /// window can shrink under a panel that was already open, so the bound is applied where the height
-    /// is *used* and not only while a drag is in flight (`clampedHeight`).
+    /// How tall the panel is drawn: `timelineHeight`, and never taller than the canvas can spare. The
+    /// window can shrink under a panel the artist already dragged tall, so the bound is applied where
+    /// the height is *used* and not only while a drag is in flight (`clampedHeight`).
     private var panelHeight: CGFloat {
         isCollapsed ? timelineHeight : min(timelineHeight, maxTimelineHeight)
     }
@@ -729,7 +732,7 @@ struct AnimationTimeline: View {
                 resizeStartHeight = nil
                 // Anything below the halfway point of the first real row settles as collapsed, so a
                 // drag can't leave the timeline stuck at an unusable in-between height.
-                if timelineHeight < minExpandedHeight { timelineHeight = collapsedHeight }
+                if timelineHeight < TimelinePanelSize.minExpandedHeight { timelineHeight = TimelinePanelSize.collapsedHeight }
             }
     }
 
@@ -737,14 +740,10 @@ struct AnimationTimeline: View {
     /// crowds out the canvas. `availableHeight` comes from the parent rather than the screen, so
     /// this stays correct in Split View and Slide Over.
     private func clampedHeight(_ proposed: CGFloat) -> CGFloat {
-        min(max(proposed, collapsedHeight), maxTimelineHeight)
+        min(max(proposed, TimelinePanelSize.collapsedHeight), maxTimelineHeight)
     }
 
-    /// Leaves just enough room for the top toolbar to stay visible above the panel; otherwise the
-    /// timeline is free to grow across essentially the whole available height, not just half of it.
-    private var maxTimelineHeight: CGFloat {
-        max(availableHeight - 64, minExpandedHeight)
-    }
+    private var maxTimelineHeight: CGFloat { TimelinePanelSize.maxHeight(in: availableHeight) }
 
     // MARK: - Transport
 
@@ -1374,7 +1373,7 @@ struct AnimationTimeline: View {
 
                 frameRateButton
 
-                Button(action: { withAnimation(.easeOut(duration: 0.2)) { timelineHeight = collapsedHeight } }) {
+                Button(action: { withAnimation(.easeOut(duration: 0.2)) { timelineHeight = TimelinePanelSize.collapsedHeight } }) {
                     Image(systemName: "chevron.down")
                 }
                 .accessibilityIdentifier("timeline.collapseButton")

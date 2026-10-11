@@ -101,6 +101,28 @@ final class BottomDockLogicTests: XCTestCase {
         XCTAssertEqual(BottomDock.width(in: floorRoom - 300), BottomDock.minimumWidth, accuracy: 1e-9)
     }
 
+    /// **The card's leading edge is never left of its margin, whatever room it is given** — the owner's
+    /// iPad in portrait, with the layer rail and its options panel open, gave it 146 points to a 360-point
+    /// minimum and the centred card started 107 points off the window. The room is swept from nothing to
+    /// wider than any iPad; no room gets a card that starts outside it.
+    func testTheCardNeverStartsLeftOfItsMargin() {
+        for room in stride(from: 0.0, through: 1600.0, by: 10.0) {
+            let card = BottomDock.width(in: room)
+            XCTAssertGreaterThanOrEqual(BottomDock.leadingInset(cardWidth: card, in: room), BottomDock.sideMargin,
+                                        "at \(room) the card starts left of its margin")
+        }
+    }
+
+    /// And the margin is only a floor: a card with room to spare is still centred in it, which is what the
+    /// dock did before and what a lone card on a wide canvas is for.
+    func testACardThatFitsStaysCentredInItsRoom() {
+        for room in [800.0, 1024.0, 1312.0] {
+            let card = BottomDock.width(in: room)
+            let inset = BottomDock.leadingInset(cardWidth: card, in: room)
+            XCTAssertEqual(inset, room - card - inset, accuracy: 1e-9, "at \(room) the two sides differ")
+        }
+    }
+
     /// **The flatness cost the sliders nothing** — the claim `BottomDock.inlineSliderTravel` and
     /// `EffectSettingsBar.sliderRow` both make, and the reason `preferredWidth` is 760 rather than
     /// something rounder.

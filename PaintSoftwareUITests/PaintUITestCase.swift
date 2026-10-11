@@ -485,8 +485,8 @@ class PaintUITestCase: XCTestCase {
     ///
     /// The canvas extends *beneath* both (`BottomDock.coveredBottom`), so a host fraction below this is
     /// the chrome's pixel, not the picture's: a probe there reads a dark card and calls it "the effect
-    /// did nothing". The panel opens 375 pt tall and a settings card stands up to ~300 pt above it, so
-    /// on a portrait iPad the middle of the host is under the card.
+    /// did nothing". The panel opens 375 pt tall on a portrait iPad (`TimelinePanelSize`) and a settings card
+    /// stands up to ~300 pt above it, so there the middle of the host is under the card.
     func dockTop(_ app: XCUIApplication, _ canvas: XCUIElement) -> Double {
         let host = canvas.frame
         let panel = app.otherElements["timeline.panel"]
@@ -1459,6 +1459,24 @@ class PaintUITestCase: XCTestCase {
         XCTAssertTrue(waitForTextState(app, "editing"), "PREMISE: a live text box (text:\(readTextState(app)))")
         typeIntoTextBox(string, app, at: CGPoint(x: topLeft.x + 0.01 * host.width, y: topLeft.y + 0.01 * host.height))
         return topLeft
+    }
+
+    // MARK: - Turning the device
+
+    /// Turns the device and waits until the app is laid out for it, answering the window's frame. The
+    /// suite is portrait (`setUpWithError`); a test that wants landscape sets `XCUIDevice.shared.orientation`
+    /// before it launches, and one that turns mid-test uses this.
+    @discardableResult
+    func rotateDevice(_ app: XCUIApplication, to orientation: UIDeviceOrientation) -> CGRect {
+        XCUIDevice.shared.orientation = orientation
+        let wantsLandscape = orientation.isLandscape
+        let deadline = Date().addingTimeInterval(8)
+        while Date() < deadline {
+            let window = app.windows.firstMatch.frame
+            if (window.width > window.height) == wantsLandscape { break }
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        return app.windows.firstMatch.frame
     }
 
     // MARK: - The timeline's size

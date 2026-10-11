@@ -81,6 +81,19 @@ enum BottomDock {
         max(minimumWidth, min(preferredWidth, available - 2 * sideMargin))
     }
 
+    /// **Where the card's leading edge sits in the `room` it is given** — centred while it fits, and at
+    /// `sideMargin` once it does not.
+    ///
+    /// The second half is the point. The room is the canvas area less what the open layer rail and its
+    /// options panel take (`DrawingView.dockClearance`), and on a portrait 9th-generation iPad that is 146
+    /// points against a card that will not go below `minimumWidth`. Centred on a room it does not fit, the
+    /// card hung 107 points off *both* sides: its left half stood outside the window, a gradient stop's
+    /// swatch at x = -32 with no way to reach it. A card that cannot narrow further starts at the margin
+    /// and runs on over the rail's leading edge instead, which is drawn above it.
+    static func leadingInset(cardWidth: CGFloat, in room: CGFloat) -> CGFloat {
+        max(sideMargin, (room - cardWidth) / 2)
+    }
+
     /// How far above the bottom of the canvas area the dock's own bottom edge sits, given how much
     /// of that area the timeline currently occupies.
     ///

@@ -103,23 +103,123 @@ final class TimelineRulerUITests: PaintUITestCase {
                       "Pinched back in far enough, the numbers fit their columns again: \(rulerValue(app))")
     }
 
-    // MARK: - Taller
+    // MARK: - The timeline's size
 
-    /// **The panel opens 1.5× the 250 pt it was asked to be taller than** — 375 — and the canvas above it is still
-    /// a canvas. Read off the panel's own frame (`timeline.panel`), which is what the artist sees.
-    func testTheTimelineOpensOneAndAHalfTimesTaller() throws {
+    /// The panel's height once it has stopped moving — a rotation re-lays the editor out over a few frames.
+    private func settledHeight(of panel: XCUIElement) -> CGFloat {
+        var last = panel.frame.height
+        var steadyFor = 0
+        let deadline = Date().addingTimeInterval(5)
+        while steadyFor < 3, Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.2)
+            let now = panel.frame.height
+            steadyFor = now == last ? steadyFor + 1 : 0
+            last = now
+        }
+        return last
+    }
+
+    /// **A new document's timeline is about a third of the window tall** — TODO (169), the owner: *"the
+    /// timeline's default height is a fraction of the window, not a fixed 375 pt"*. Read off the panel's
+    /// own frame (`timeline.panel`), which is what the artist sees, in landscape — the orientation the
+    /// owner holds the iPad in, where the window is the shortest (810 pt on their 9th generation) and a
+    /// fixed 375 pt was nearly half of it.
+    ///
+    /// **The bounds are the ruling, not `TimelinePanelSize`'s own constant**, so a change to that constant
+    /// that leaves the share outside a third-ish fails here rather than agreeing with itself.
+    func testTheTimelineOpensAtAboutAThirdOfTheWindowInLandscape() throws {
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let window = app.windows.firstMatch.frame
+        XCTAssertGreaterThan(window.width, window.height, "PREMISE: the app is in landscape (\(window))")
+        let panel = app.otherElements["timeline.panel"]
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(panel.waitForExistence(timeout: 5))
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let height = settledHeight(of: panel)
+        attachScreenshot(app, "timeline-default-landscape-\(Int(window.width))x\(Int(window.height))")
+
+        let share = height / canvas.frame.height
+        XCTAssertEqual(share, 0.35, accuracy: 0.02,
+                       "The panel is \(height) pt of a \(canvas.frame.height) pt window — \(share) of it")
+        XCTAssertLessThan(height, 375, "Shorter than the fixed height it replaces, so the canvas gains room")
+        XCTAssertLessThanOrEqual(app.otherElements["timeline.ruler"].frame.minY, panel.frame.maxY,
+                                 "The ruler is inside the panel, not pushed off the bottom of it")
+    }
+
+    /// **A window with room to spare keeps the 375 pt it had, so the 13-inch iPad is where it was.** The
+    /// untouched default is a share of the window *until it reaches that ceiling*, and follows the window
+    /// when it turns: a portrait iPad is taller than it needs to be for the paper, which is as wide as the
+    /// window, so a larger share there would only cover more of the picture.
+    func testTheDefaultFollowsTheWindowThroughARotationAndStopsAt375() throws {
+        XCUIDevice.shared.orientation = .landscapeLeft
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
         let panel = app.otherElements["timeline.panel"]
         XCTAssertTrue(panel.waitForExistence(timeout: 5))
-        attachScreenshot(app, "06-default-height")
-        XCTAssertEqual(panel.frame.height, 250 * 1.5, accuracy: 2,
-                       "A new document opens its timeline 1.5× the 250 pt it was")
+        let landscape = settledHeight(of: panel)
 
+        rotateDevice(app, to: .portrait)
+        let portrait = settledHeight(of: panel)
+        attachScreenshot(app, "timeline-default-portrait")
+        // The 9th-generation iPad is 1060 pt of editor in portrait — 371 at its share, 4 short of the ceiling.
+        XCTAssertEqual(portrait, 375, accuracy: 6,
+                       "In portrait the window is tall enough for the ceiling (landscape was \(landscape))")
+        XCTAssertGreaterThan(portrait, landscape, "The panel the artist never touched is re-derived for the new window")
+    }
+
+    /// **A height the artist dragged is theirs: it stays the same number of points through a rotation.**
+    /// The rows are a fixed 34 pt each, so "how many layers I can see" is what they chose, and it does
+    /// not change with the window. (It is not kept between launches — it never was.)
+    func testAHeightTheArtistDraggedSurvivesARotation() throws {
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let panel = app.otherElements["timeline.panel"]
+        XCTAssertTrue(panel.waitForExistence(timeout: 5))
+        let before = settledHeight(of: panel)
+
+        let grew = dragTimelineGrabHandle(app, by: 60)
+        XCTAssertGreaterThan(grew, 20, "PREMISE: the drag made the panel taller")
+        let dragged = settledHeight(of: panel)
+        XCTAssertEqual(dragged - before, grew, accuracy: 2, "The panel is as tall as the drag left it")
+
+        rotateDevice(app, to: .portrait)
+        XCTAssertEqual(settledHeight(of: panel), dragged, accuracy: 2,
+                       "Dragged to \(dragged) pt in landscape, still that tall in portrait")
+    }
+
+    /// **The Text card leaves paper to look at**, in landscape on the owner's iPad (810 pt). With the
+    /// timeline at a fixed 375 pt the card and the timeline between them left ~90 pt of the 810 under the
+    /// top bar. Measured from the paper's own geometry: the stretch between the top bar and whatever is
+    /// standing over the lower part (`dockTop`), in points.
+    func testTheTextCardLeavesPaperAboveItInLandscape() throws {
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
-        XCTAssertGreaterThan(canvas.frame.height, 400, "The canvas keeps room to draw in")
-        XCTAssertLessThanOrEqual(app.otherElements["timeline.ruler"].frame.minY, panel.frame.maxY,
-                                 "The ruler is inside the panel, not pushed off the bottom of it")
+
+        app.buttons["toolbar.addButton"].tap()
+        let addText = app.buttons["add.addTextRow"]
+        XCTAssertTrue(addText.waitForExistence(timeout: 5))
+        addText.tap()
+        XCTAssertTrue(app.buttons["textPanel.fontButton"].waitForExistence(timeout: 5), "PREMISE: the text card is up")
+        _ = settledHeight(of: app.otherElements["timeline.panel"])
+        let card = app.descendants(matching: .any)["bottomDock.card"].firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 5))
+        Thread.sleep(forTimeInterval: 0.5)
+        attachScreenshot(app, "text-card-landscape")
+
+        let host = canvas.frame
+        let clearPaper = CGFloat(dockTop(app, canvas) - toolbarBottom(app, canvas)) * host.height
+        let timeline = app.otherElements["timeline.panel"].frame.height
+        let note = XCTAttachment(string: "text card, landscape editor \(Int(host.width))x\(Int(host.height)): timeline \(timeline), card \(card.frame.height), paper clear of both \(clearPaper)")
+        note.name = "measured"
+        note.lifetime = .keepAlways
+        add(note)
+        XCTAssertGreaterThanOrEqual(clearPaper, 170,
+                                    "Between the top bar and the Text card there are \(clearPaper) pt of paper to look at")
     }
 }

@@ -70,8 +70,8 @@ final class TransformLayerModesUITests: PaintUITestCase {
     /// along the centre row and the centre column.
     ///
     /// **This is the *visible* paper, and its bottom edge is the timeline panel's top, not the
-    /// paper's.** The panel overlays the host's lower part (375 pt since TODO (122), which covers the
-    /// paper's lower third on this device), so the centre of this rectangle is not the centre of the
+    /// paper's.** The panel overlays the host's lower part (375 pt on the suite's portrait iPad, which
+    /// covers the paper's lower third), so the centre of this rectangle is not the centre of the
     /// canvas — the canvas is centred on the host (`CanvasView.Coordinator.baseCenter`), and that is
     /// where a box turns about. A measurement that depends on the canvas's centre takes it from the
     /// host's own centre, `(0.5, 0.5)` in these coordinates, and never from this rectangle's.

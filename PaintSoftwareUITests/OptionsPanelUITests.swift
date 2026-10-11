@@ -417,6 +417,56 @@ final class OptionsPanelUITests: PaintUITestCase {
             """)
     }
 
+    /// A new effect layer, set to Gradient Map — its settings card (the stop rows) is up when this returns.
+    private func openGradientMapSettings(_ app: XCUIApplication) {
+        openLayerPanel(app)
+        addEffectLayerFromAddMenu(app)
+        app.buttons["layerOptions.blendModeButton"].tap()
+        let gradientItem = app.buttons["layerOptions.blendMode.gradientmap"]
+        XCTAssertTrue(gradientItem.waitForExistence(timeout: 5),
+                      "The Blend Mode menu should list Gradient Map")
+        gradientItem.tap()
+        XCTAssertTrue(app.buttons["effectSettings.gradientStop.0.color"].waitForExistence(timeout: 5),
+                      "Gradient Map's first stop did not open")
+    }
+
+    /// **Every stop's row is on the glass, in either orientation, on the owner's iPad.** A swatch the
+    /// artist cannot reach is a gradient they cannot edit, and a row can be in the tree, correct, and
+    /// hanging off the window's edge: `OptionsPanelUITests` on the 9th-generation simulator once found
+    /// stop 0's swatch at x = -32.
+    private func assertEveryGradientStopControlIsOnScreen(_ app: XCUIApplication, _ orientation: String) {
+        let window = app.windows.firstMatch.frame
+        attachScreenshot(app, "gradient-stops-\(orientation)-\(Int(window.width))x\(Int(window.height))")
+        let card = app.descendants(matching: .any)["bottomDock.card"].firstMatch
+        XCTAssertTrue(card.exists, "the settings card is up (\(orientation))")
+        XCTAssertTrue(window.contains(card.frame), "the card is at \(card.frame), outside the \(window) window (\(orientation))")
+        for stop in 0..<2 {
+            for part in ["color", "position", "remove"] {
+                let control = app.descendants(matching: .any)["effectSettings.gradientStop.\(stop).\(part)"]
+                XCTAssertTrue(control.exists, "stop \(stop)'s \(part) is in the card (\(orientation))")
+                XCTAssertTrue(window.contains(control.frame),
+                              "stop \(stop)'s \(part) is at \(control.frame), outside the \(window) window (\(orientation))")
+            }
+            XCTAssertTrue(app.buttons["effectSettings.gradientStop.\(stop).color"].isHittable,
+                          "stop \(stop)'s swatch is on screen but cannot be tapped (\(orientation))")
+        }
+    }
+
+    func testEveryGradientStopControlIsOnScreenInLandscape() throws {
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        openGradientMapSettings(app)
+        assertEveryGradientStopControlIsOnScreen(app, "landscape")
+    }
+
+    func testEveryGradientStopControlIsOnScreenInPortrait() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        openGradientMapSettings(app)
+        assertEveryGradientStopControlIsOnScreen(app, "portrait")
+    }
+
     /// **Small-defects batch, 2026-09-11: the gradient-stop colour swatch's popover was unreachable
     /// by name.** `EffectSection.stopRow` wrapped its `ColorPickerPanel` in its own
     /// `.accessibilityIdentifier("effectSettings.gradientStop.\(index).picker")` — the same
@@ -431,14 +481,7 @@ final class OptionsPanelUITests: PaintUITestCase {
     func testTheGradientStopColourSwatchOpensAReachableColourPicker() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
-
-        openLayerPanel(app)
-        addEffectLayerFromAddMenu(app)
-        app.buttons["layerOptions.blendModeButton"].tap()
-        let gradientItem = app.buttons["layerOptions.blendMode.gradientmap"]
-        XCTAssertTrue(gradientItem.waitForExistence(timeout: 5),
-                      "The Blend Mode menu should list Gradient Map")
-        gradientItem.tap()
+        openGradientMapSettings(app)
 
         let stopSwatch = app.buttons["effectSettings.gradientStop.0.color"]
         XCTAssertTrue(stopSwatch.waitForExistence(timeout: 5), "Gradient Map's first stop did not open")
