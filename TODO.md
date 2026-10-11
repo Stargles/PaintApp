@@ -62,6 +62,25 @@ canvas. The owner: a finger used as the hold is ignored when it lifts.
 
 ---
 
+## (169) Room for the canvas on the owner's iPad (1080×810 landscape)
+
+**Status** — from the 2026-10-11 screen-size audit (`52dc221` fixed the Select card covering the graph's
+channel list). With the timeline at its fixed default 375 pt, a docked card leaves little paper: the Text
+card about 90 pt, the Select card with an animation-group band under 180 pt. The owner ruled: the
+timeline's default height is a **fraction of the window**, not a fixed 375 pt (still draggable taller).
+Ruled to stay: at 1080 wide the open Layers panel covers the transport's go-to-end, frame, fps and
+collapse controls (closing the panel reaches them).
+
+- [ ] The timeline's default (and reset) height scales with the window; choose the fraction so the 13"
+      layout is about what it is today and the iPad 9 gains canvas; say what happens to a height the
+      artist dragged themselves.
+- [ ] The perf HUD's gauge toggle no longer sits on the title corner of the leading dropdowns (it covers
+      the "A" of "Actions") — at every window size.
+- [ ] A gradient-stop swatch sat at x = −32 on the iPad 9 simulator (`OptionsPanelUITests`): verify on
+      screen and fix if real.
+
+---
+
 ## (27) Stream the computer's screen as a layer
 
 **Status** — briefed 2026-09-13, designed the same day ([STREAM.md](docs/STREAM.md)), and **built through
