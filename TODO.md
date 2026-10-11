@@ -50,22 +50,6 @@ their files are repaired. Build `2974b33` broke this rule and lost the owner's k
 
 ---
 
-## (164) The Move box holds its pose off the document while the finger is down
-
-**Status** — ruled 2026-10-10, out of (154). (154) made a graph-node drag hold the live pose off the
-published document (`CanvasManager.livePose`, `holdLivePose` per update, `commitLivePose` once at the
-lift as one undo step; the canvas re-poses its bands via `heldPictureMoved()` with no SwiftUI pass). The Move
-box still writes the document on every update through `BoxNudge` (TODO (153)). The owner chose one
-mechanism for both: *"Yes, same mechanism."*
-
-- [ ] The Move box (and the Duplicate Offset box, which shares its path) hold the pose gesture-locally
-      and commit once at the lift — zero document publishes per update, one undo step per drag.
-- [ ] `BoxNudge`'s copy-and-restore folds into it, or is shown still to be needed — not two mechanisms.
-- [ ] (153)'s guarantees hold: keys made with the box up survive a bake beneath and a relaunch; undo
-      during an open drag does not resurrect the undone step.
-
----
-
 ## (165) An effect layer's own slider may blink its picture
 
 **Status** — found by reading during (160), 2026-10-10, not yet seen on screen. When the selected layer

@@ -5452,7 +5452,7 @@ raises — `layers` (and the box's `floatingPiece`) are written on every tick �
 unattributed body evaluation; §18.7 measured a whole-editor pass at ~35 ms on the owner's iPad 9, so on
 the device the box should now be bound by that pass rather than by any render, INFERRED at ~25–30
 updates a second. Keeping the live pose off the published model for the length of the gesture (the
-vector float's own rule) is the lever if that is not enough — §24.3 pulled it for the graph node. The
+vector float's own rule) is the lever if that is not enough — §24.3 pulled it for the graph node, §24.4 for the box. The
 first update of a graph drag waits for the bands' one mint (~300 ms here) because the finger lands on
 the node and moves almost at once.
 
@@ -5507,6 +5507,49 @@ band's redraw is the largest named cost left and the first lever if the device s
 **Not changed:** a *grade's* or a target scalar's node still writes the document on every tick — the
 canvas can show those only by compositing the document, so the pass is the price of seeing them change.
 A sideways drag's key diamond in the row above the band follows at the lift, with the document.
+
+### 24.4 The Move box's pass is gone too (2026-10-11)
+
+TODO (164), the owner's *"Yes, same mechanism"*: the transformation layer's Move box held the last
+per-update pass §24.2 named. Each tick wrote the pose into `layers` (`showContainerPoseLive`) and the box
+into the published `floatingPiece` — **3 `objectWillChange` and one SwiftUI pass per update** — and the
+gesture kept a copy of the layer (`BoxNudge`'s `LayerPose`) to put back before its commit.
+
+**The fix** is §24.3's lever, one entry point over. The box's gesture (`CanvasManager.boxNudge`, off the
+published model) carries its travel; the pose under the finger is held in `livePose` and reaches the
+bands through `onHeldPictureMoved`; the overlay lays itself out and is fed `shownFloatingPiece` on a
+pass; the lift routes the travel once through `commitContainerPose` as one undo step, from the fold the
+held pose came from (`containerPoseMove`). Nothing is written mid-gesture, so nothing is put back.
+
+**How it was taken.** MEASURED, **Release**, iPad Pro 13-inch M4 simulator (iOS 26.5), on a machine
+running nothing but this simulator. A temporary instrument, not merged, armed `PlaybackTrace` and counted
+`objectWillChange` from the box's touch-down to its lift, and for the second after the lift. The gesture
+by XCUITest: §24's box drag, 240 × 60 pt at 120 pt/s after a 0.3 s press (~115 updates in 2.6 s), twice
+per run. Two documents: a cold start (one mark, one transformation layer keyed at 0 and 6 by Add Keys)
+and **the owner's scene** (`evidence-153/1.paintproj` in the simulator's `Documents/Projects`: 2048×1024,
+eight layers, two folders, its `Transform 6` keyed at 0 and 6 the same way). Two runs a cell, two drags a
+run. `5c58638` is before.
+
+| per drag (~115 updates) | before (`5c58638`) | after |
+|---|---|---|
+| `objectWillChange` | **347–350** (3 a tick) | **1** (the touch-down's live edit) |
+| SwiftUI passes (`updateUIView`) | **116–118** (one a tick) | **1–2** (the touch-down, the bands' mint) |
+| `passes:` on `canvas.host`, the drag and its lift | 117–119 | 2–3 |
+| main thread a tick, cold start | **9.05–9.22 ms** | **1.29–1.47 ms** |
+| main thread a tick, owner's scene | **9.86–9.98 ms** | **1.29–1.51 ms** |
+| the lift (the second after it): `objectWillChange` / passes / main thread | 4–5 / 1 / 15.4–28.0 ms | 3–4 / 1 / 12.6–16.8 ms |
+
+The canvas follows every update either way (`moves:` 112–116 a drag, before and after). **What is left**
+a tick is ~1.3 ms the runloop spends outside any named span — touch delivery, the overlay's own layout
+and Core Animation — the walk and band transforms being §24.3's ~0.35 ms. At §24.3's INFERRED ~2.2× for
+this path, a tick on the owner's iPad 9 is ~3 ms where it was ~20–22 ms.
+`LiveTransformEditUITests.testATransformLayersMoveIsDrawnUnderTheFingerOnEveryUpdate` pins it as a count
+(≤ 4 passes for the drag), and `LiveTransformEditLogicTests` pins 0 publishes a tick.
+
+**Not changed:** the Duplicate Offset's box shares the gesture but still writes its grade preview each
+tick, for the reason above — a grade is shown only by compositing the document — so it keeps the grade
+its gesture found and puts it back before its commit (`BoxNudge.foundGrade`). A raster Move's piece
+still writes `floatingPiece` per tick: its marching ants are drawn from it.
 
 ## 25. A stream on a hidden layer was the busiest thing on an idle iPad (2026-10-10)
 
