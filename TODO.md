@@ -54,7 +54,7 @@ their files are repaired. Build `2974b33` broke this rule and lost the owner's k
 
 **Status** — ruled 2026-10-10, out of (154). (154) made a graph-node drag hold the live pose off the
 published document (`CanvasManager.livePose`, `holdLivePose` per update, `commitLivePose` once at the
-lift as one undo step; the canvas re-poses its bands via `livePoseMoved()` with no SwiftUI pass). The Move
+lift as one undo step; the canvas re-poses its bands via `heldPictureMoved()` with no SwiftUI pass). The Move
 box still writes the document on every update through `BoxNudge` (TODO (153)). The owner chose one
 mechanism for both: *"Yes, same mechanism."*
 
