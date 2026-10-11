@@ -50,19 +50,6 @@ their files are repaired. Build `2974b33` broke this rule and lost the owner's k
 
 ---
 
-## (165) An effect layer's own slider may blink its picture
-
-**Status** — found by reading during (160), 2026-10-10, not yet seen on screen. When the selected layer
-is itself an effect layer (e.g. a Guide), the quick live picture shown after an edit is cut around the
-selected layer — and an effect layer cannot be drawn by a host, so the effect is left out until the bake
-lands: dragging a Guide's slider likely makes the grid blink. (160)'s suggested root fix: never cut the
-live picture around an effect layer, since nothing can draw on it.
-
-- [ ] Reproduce on screen (cold start → Guide layer selected → drag one of its sliders → probe the grid
-      mid-drag); fix at the root; pin it.
-
----
-
 ## (167) Scroll and pan with fingers inside the graph editor
 
 **Status** — asked 2026-10-11. The owner: *"when the user tries to the scroll and pan with fingers inside

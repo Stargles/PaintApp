@@ -1066,18 +1066,25 @@ extension CanvasManager {
     /// **The leaves whose own hosts draw the engaged canvas's picture** — the live pair's middle
     /// (`LivePairCut.aroundHost`, `.overHost`), everything else being in the composite:
     ///
-    /// - the active layer, so a stroke lands on a host that is already drawing;
+    /// - the active layer, so a stroke lands on a host that is already drawing — **unless it is an
+    ///   effect layer** (`Layer.isAnEffectLayer`): a Guide's lines exist only in the composite, so a
+    ///   middle cut around its leaf leaves them out — the grid blinking for as long as one of its
+    ///   sliders is held — and no host can draw them. Its edits are shown by the bake, from the
+    ///   previous picture, like any frame no pair is cut for;
     /// - every other layer `liveHostsBesidesTheActive` names — streams, floating pieces and an
     ///   adjustable fill, which are in no composite.
     ///
     /// Every leaf between the lowest and the highest of them draws too: the pair has one middle, and a
     /// run that is one span of the leaf order is what `[RenderNode].cut(around:)` can cut. Those
     /// between layers are drawn plain, as the active layer is (`SandwichPresentation.live`); with no
-    /// stream and nothing floating this is the active layer alone. Empty when none of them is a leaf.
+    /// stream and nothing floating this is the active layer alone, or nothing when that is an effect
+    /// layer. Empty when none of them is a leaf.
     @MainActor
     func liveHostRun(tree: [RenderNode]) -> [Int] {
         var hosts = Set(liveHostsBesidesTheActive())
-        if layers.indices.contains(currentLayerIndex) { hosts.insert(currentLayerIndex) }
+        if layers.indices.contains(currentLayerIndex), !layers[currentLayerIndex].isAnEffectLayer {
+            hosts.insert(currentLayerIndex)
+        }
         let order = tree.leafLayerIndices
         let positions = order.indices.filter { hosts.contains(order[$0]) }
         guard let first = positions.first, let last = positions.last else { return [] }

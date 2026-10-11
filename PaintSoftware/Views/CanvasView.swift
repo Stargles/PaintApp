@@ -1722,14 +1722,22 @@ struct CanvasView: UIViewRepresentable {
             let key = PlaybackTrace.span(.sandwichKey) { makeSandwichKey(tree: tree) }
             sandwichKey = key
             // **Where the live picture is cut this pass**: around the runs a transform edit moves while
-            // one is live, around the active layer's host otherwise. A rebuild is due when the key has
+            // one is live, around the hosts that draw otherwise. A rebuild is due when the key has
             // moved, or when the picture held is of the other kind of cut — beginning a drag moves the
             // cut before it moves any content. Not when a pair was merely cut at another frame: equal
             // keys are byte-identical halves (`LivePairFit`), which is what lets a hold step for free.
+            //
+            // **No cut is no pair**: with nothing a host draws — an effect layer selected, and no
+            // stream or piece up — the picture is the bake's, and a pair held from the last cut is of
+            // no use to it, so it goes rather than sit in memory for as long as the layer is selected.
             let edit = movingBandsEdit
             let cut = wantedLiveCut(for: edit, tree: tree)
-            let heldFits = livePicture.map { held in cut.map { held.cut.isSameKind(as: $0) } ?? true } ?? false
-            if key != livePicture?.key || !heldFits { startSandwichRebuild(for: key) }
+            if let cut {
+                let heldFits = livePicture.map { $0.cut.isSameKind(as: cut) } ?? false
+                if key != livePicture?.key || !heldFits { startSandwichRebuild(for: key) }
+            } else {
+                livePicture = nil
+            }
             // **The rest picture comes off the bake now** (§3.6), so this is a lookup and not a
             // composite: ring, then store, then a miss. A miss changes nothing on screen (§2.10) and
             // `FrameBaker.onFrameFinished` brings the pass that turns it into a hit.

@@ -4,6 +4,20 @@ Open items only — fixed entries are pruned, and the fix lives in the commit an
 One section per bug, newest first.
 
 
+## An effect layer between two live hosts is left out of the live picture (2026-10-11)
+
+`CanvasManager.liveHostRun` is one span of the leaf order, from the lowest to the highest of the
+layers whose hosts draw (the active layer, every stream, every floating piece), and every layer
+inside it is drawn by its own host, plain. An effect layer *inside* that span — a Guide between a
+stream's layer and the active layer above it, or between a folder float's parts and the selected
+layer — has no host to draw it, so its lines are absent from the live picture for as long as the
+pair is on screen, which for a stream is as long as the stream is on the frame. TODO (165) fixed the
+selected layer being an effect layer; this is the other way in. Found by reading, not seen on
+screen. The fix would composite the effect layer in the one picture of `LivePairCut.overHost` and
+hide only the layers whose hosts draw — a change to how `makeSandwichRecipe(atFrame:over:)` and
+`liveHostsSitBetweenTheHalves` read the run, and worth doing only if a stream or a folder float with
+a guide between is something the owner meets.
+
 ## A scene-update watchdog fired inside a `LazyVStack`'s layout, and no collection in the app explains it (2026-09-16)
 
 `PaintSoftware-2026-09-16-133830.ips` (pulled from the iPad, TODO (97)): `0x8BADF00D`, the main

@@ -22,22 +22,6 @@ import XCTest
 /// what the canvas shows from the lift to the drop's bake.
 final class GuideUnderLassoMoveUITests: PaintUITestCase {
 
-    /// Screen points over a patch of the paper, `x` and `y` in paper fractions — dense along x (every
-    /// point and a half) so the grid's verticals cannot fall between two probes.
-    private func patch(_ canvas: XCUIElement, _ paper: CGRect,
-                       x: ClosedRange<Double>, y: ClosedRange<Double>) -> [CGPoint] {
-        let frame = canvas.frame
-        func point(_ px: Double, _ py: Double) -> CGPoint {
-            CGPoint(x: frame.minX + frame.width * (paper.minX + paper.width * px),
-                    y: frame.minY + frame.height * (paper.minY + paper.height * py))
-        }
-        let width = Double(frame.width * paper.width) * (x.upperBound - x.lowerBound)
-        let columns = max(2, Int(width / 1.5))
-        return stride(from: y.lowerBound, through: y.upperBound, by: (y.upperBound - y.lowerBound) / 4).flatMap { py in
-            (0...columns).map { point(x.lowerBound + (x.upperBound - x.lowerBound) * Double($0) / Double(columns), py) }
-        }
-    }
-
     /// One screen point at paper fractions.
     private func screenPoint(_ canvas: XCUIElement, _ paper: CGRect, _ px: Double, _ py: Double) -> CGPoint {
         let frame = canvas.frame
@@ -49,14 +33,6 @@ final class GuideUnderLassoMoveUITests: PaintUITestCase {
     /// ink after; a row rather than a point, because a guide above crosses ink with its own lines.
     private func movedEnd(_ canvas: XCUIElement, _ paper: CGRect) -> [CGPoint] {
         (0...10).map { screenPoint(canvas, paper, 0.44 + 0.005 * Double($0), 0.27) }
-    }
-
-    /// The screen read once, at `points`, now — the sampler's own read, for a moment with no gesture.
-    private func readNow(_ points: [CGPoint]) -> [RGBA?] {
-        let sampler = MidGestureSampler(points: points, interval: 0)
-        sampler.start()
-        Thread.sleep(forTimeInterval: 0.3)
-        return sampler.stop().last?.pixels ?? []
     }
 
     private enum Placement { case below, above }
@@ -87,12 +63,12 @@ final class GuideUnderLassoMoveUITests: PaintUITestCase {
             closeLayerRail(app)
         }
         XCTAssertTrue(waitForSandwichState(app, "rest", timeout: 30, "PREMISE: the Guide engages the compositor and its bake lands"))
-        let guide = patch(canvas, paper, x: 0.55...0.85, y: 0.15...0.35)
+        let guide = paperPatch(canvas, paper, x: 0.55...0.85, y: 0.15...0.35)
         assertAboveTheDock(app, canvas, dy: onHost(paper, 0, 0.35).dy, "the guide's patch")
-        let blue = readNow(guide).filter(isGuideBlue).count
+        let blue = readScreenNow(guide).filter(isGuideBlue).count
         XCTAssertGreaterThan(blue, 10, "PREMISE: the guide's grid is on the paper beside the line (\(blue) of \(guide.count) probes)")
         let line = (0...20).map { screenPoint(canvas, paper, 0.2 + 0.01 * Double($0), 0.27) }
-        XCTAssertGreaterThan(readNow(line).filter(isInk).count, line.count / 2,
+        XCTAssertGreaterThan(readScreenNow(line).filter(isInk).count, line.count / 2,
                              "PREMISE: the line is drawn (a guide over it crosses it with its own lines)")
 
         app.buttons["toolbar.selectButton"].tap()
@@ -111,7 +87,7 @@ final class GuideUnderLassoMoveUITests: PaintUITestCase {
     private func dragHoldingAndReading(_ app: XCUIApplication, _ canvas: XCUIElement, _ paper: CGRect,
                                        guide: [CGPoint], blue: Int, _ what: String) {
         let moved = movedEnd(canvas, paper)
-        XCTAssertEqual(readNow(moved).filter(isInk).count, 0, "PREMISE: paper where the line's end will be dragged to")
+        XCTAssertEqual(readScreenNow(moved).filter(isInk).count, 0, "PREMISE: paper where the line's end will be dragged to")
         let sampler = MidGestureSampler(points: guide + moved)
         let start = canvas.coordinate(withNormalizedOffset: onHost(paper, 0.27, 0.27))
         let end = start.withOffset(CGVector(dx: canvas.frame.width * paper.width * 0.1, dy: 0))
@@ -145,10 +121,10 @@ final class GuideUnderLassoMoveUITests: PaintUITestCase {
                              guide: [CGPoint], blue: Int, _ what: String) {
         app.buttons["moveBar.doneButton"].tap()
         XCTAssertTrue(waitForSandwichState(app, "rest", timeout: 30, "\(what): the drop's bake lands"))
-        let shown = readNow(guide).filter(isGuideBlue).count
+        let shown = readScreenNow(guide).filter(isGuideBlue).count
         XCTAssertGreaterThan(shown, blue / 3, "\(what): the guide after the drop (\(shown) blue, \(blue) before)")
         let moved = movedEnd(canvas, paper)
-        XCTAssertGreaterThan(readNow(moved).filter(isInk).count, moved.count / 2,
+        XCTAssertGreaterThan(readScreenNow(moved).filter(isInk).count, moved.count / 2,
                              "\(what): the line is set down where it was dragged")
     }
 

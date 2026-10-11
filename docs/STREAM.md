@@ -471,7 +471,8 @@ frame; a bench since retired with the question it priced), and a canvas-sized im
 (TODO (97)). Until (112) the canvas simply stood on whatever the last bake froze — *"pauses and
 refuses to update until I draw something"*. Now **a stream on the frame is what the pair is for**
 (`SandwichPresentation.live`, `SandwichPresentation.Live.stream`): `CanvasManager.liveHostRun` is the
-leaves from the lowest to the highest of the active layer and every stream
+leaves from the lowest to the highest of the active layer (unless it is an effect layer, which no host
+can draw: TODO (165)) and every stream
 (`CanvasManager.streamLayerIndices`: on a visible layer, a stream on the cel shown at this frame, a
 leaf, not posed — frozen or not), the pair is cut around that run, those hosts draw themselves between
 the two halves, and **the bake, which no stream is in (2.13), is never the picture to wait for** — so the

@@ -103,6 +103,27 @@ final class LayerKindLogicTests: XCTestCase {
         }
     }
 
+    /// **An effect layer is a grade and nothing else** — a value layer in effect mode. A vector layer
+    /// that carries a grade is not one (its ink is a picture its host draws), a flat colour is not, and
+    /// neither is a transformation layer, whatever else it carries (`Layer.isAnEffectLayer`). Asked of
+    /// every kind in every mode it has.
+    func testOnlyAValueLayerInEffectModeIsAnEffectLayer() {
+        let grade = Effect.posterize(Effect.Posterize())
+        for kind in LayerKind.allCases {
+            let m = manager(with: kind)
+            let index = m.currentLayerIndex
+            XCTAssertFalse(m.layers[index].isAnEffectLayer, "\(kind) as made")
+            guard kind.carriesEffect else { continue }
+            m.setLayerEffect(layerIndex: index, to: grade)
+            XCTAssertNotNil(m.layers[index].layerEffect, "PREMISE: \(kind) carries the grade")
+            XCTAssertEqual(m.layers[index].isAnEffectLayer, kind == .value, "\(kind) with a grade")
+        }
+        let poser = manager(with: .transform)
+        var transform = poser.layers[poser.currentLayerIndex]
+        transform.effect = grade
+        XCTAssertFalse(transform.isAnEffectLayer, "a transformation layer reads no grade, whatever it carries")
+    }
+
     /// **The raw value is the document's spelling, so it round-trips for every case** — and the
     /// decoder that migrates the retired `"compositing"` string reads every live one unchanged.
     func testEveryKindRoundTripsThroughItsRawValueAndTheMigratingDecoder() throws {

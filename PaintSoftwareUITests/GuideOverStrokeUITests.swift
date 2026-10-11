@@ -16,54 +16,15 @@ import XCTest
 /// pen is held still at the end of the stroke (`MidGestureSampler` — the press is synchronous).
 final class GuideOverStrokeUITests: PaintUITestCase {
 
-    /// Screen points along a row of the paper, `x` and `y` in paper fractions, every point and a half
-    /// — dense enough that the grid's verticals cannot fall between two probes.
-    private func row(_ canvas: XCUIElement, _ paper: CGRect, x: ClosedRange<Double>, y: Double) -> [CGPoint] {
-        let frame = canvas.frame
-        let width = Double(frame.width * paper.width) * (x.upperBound - x.lowerBound)
-        let columns = max(2, Int(width / 1.5))
-        return (0...columns).map { column in
-            let px = x.lowerBound + (x.upperBound - x.lowerBound) * Double(column) / Double(columns)
-            return CGPoint(x: frame.minX + frame.width * (paper.minX + paper.width * px),
-                           y: frame.minY + frame.height * (paper.minY + paper.height * y))
-        }
-    }
-
-    /// Five rows of `row` — a patch, so a row that happens to lie along one of the grid's horizontals
-    /// cannot read the line's colour end to end and pass for a grid.
-    private func patch(_ canvas: XCUIElement, _ paper: CGRect, x: ClosedRange<Double>,
-                       y: ClosedRange<Double>) -> [CGPoint] {
-        stride(from: y.lowerBound, through: y.upperBound, by: (y.upperBound - y.lowerBound) / 4)
-            .flatMap { row(canvas, paper, x: x, y: $0) }
-    }
-
-    /// The screen read once, at `points`, now.
-    private func readNow(_ points: [CGPoint]) -> [RGBA?] {
-        let sampler = MidGestureSampler(points: points, interval: 0)
-        sampler.start()
-        Thread.sleep(forTimeInterval: 0.3)
-        return sampler.stop().last?.pixels ?? []
-    }
-
     /// The stroke drawn from `from` to `to` (paper fractions), held four seconds at its end while the
     /// screen is read at `points`; returns the samples taken with the pen certainly down.
     private func strokeHolding(_ canvas: XCUIElement, _ paper: CGRect, from: (Double, Double), to: (Double, Double),
                                reading points: [CGPoint], _ what: String) -> [MidGestureSampler.Sample] {
-        let sampler = MidGestureSampler(points: points)
         let start = canvas.coordinate(withNormalizedOffset: onHost(paper, from.0, from.1))
         let end = canvas.coordinate(withNormalizedOffset: onHost(paper, to.0, to.1))
-        sampler.start()
-        start.press(forDuration: 0.3, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 4.0)
-        let returned = CFAbsoluteTimeGetCurrent()
-        let taken = sampler.stop()
-        let trace = XCTAttachment(string: taken.map { String(format: "%+.2fs", $0.finished - returned) }
-            .joined(separator: "\n"))
-        trace.name = "\(what): sample times relative to the press returning"
-        trace.lifetime = .keepAlways
-        add(trace)
-        let held = taken.filter { $0.finished < returned - 2.0 }
-        XCTAssertFalse(held.isEmpty, "\(what): no sample finished with the pen still down (\(taken.count) taken)")
-        return held
+        return samplesDuring(points, what) {
+            start.press(forDuration: 0.3, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 4.0)
+        }
     }
 
     /// **The owner's report**: the Guide over the drawing, a stroke held on the drawing. The grid stays
@@ -89,10 +50,10 @@ final class GuideOverStrokeUITests: PaintUITestCase {
         closeLayerRail(app)
         XCTAssertTrue(waitForSandwichState(app, "rest", timeout: 30, "PREMISE: the Guide engages the compositor and its bake lands"))
 
-        let guide = patch(canvas, paper, x: 0.55...0.85, y: 0.12...0.2)
-        let stroke = row(canvas, paper, x: 0.2...0.4, y: 0.3)
+        let guide = paperPatch(canvas, paper, x: 0.55...0.85, y: 0.12...0.2)
+        let stroke = paperRow(canvas, paper, x: 0.2...0.4, y: 0.3)
         assertAboveTheDock(app, canvas, dy: onHost(paper, 0, 0.3).dy, "the stroke's row")
-        let before = readNow(guide).filter(isGuideBlue).count
+        let before = readScreenNow(guide).filter(isGuideBlue).count
         XCTAssertGreaterThan(before, 10, "PREMISE: the grid is on the paper (\(before) of \(guide.count) probes)")
 
         let held = strokeHolding(canvas, paper, from: (0.15, 0.3), to: (0.45, 0.3), reading: guide + stroke, "guide above")
@@ -111,7 +72,7 @@ final class GuideOverStrokeUITests: PaintUITestCase {
         }
 
         XCTAssertTrue(waitForSandwichState(app, "rest", timeout: 30, "the stroke's bake lands"))
-        let after = readNow(guide + stroke)
+        let after = readScreenNow(guide + stroke)
         let joined = after.suffix(stroke.count)
         attachScreenshot(app, "stroke-joined-down-under-the-guide")
         XCTAssertGreaterThan(joined.filter(isInk).count, stroke.count / 3, "the stroke is still drawn")
@@ -149,8 +110,8 @@ final class GuideOverStrokeUITests: PaintUITestCase {
 
         let crossing = CGPoint(x: canvas.frame.minX + canvas.frame.width * onHost(paper, 0.3, 0.3).dx,
                                y: canvas.frame.minY + canvas.frame.height * onHost(paper, 0.3, 0.3).dy)
-        let guide = patch(canvas, paper, x: 0.55...0.85, y: 0.12...0.2)
-        let before = readNow(guide + [crossing])
+        let guide = paperPatch(canvas, paper, x: 0.55...0.85, y: 0.12...0.2)
+        let before = readScreenNow(guide + [crossing])
         XCTAssertTrue(isRed(before.last ?? nil), "PREMISE: the red line above is where the stroke will cross it")
         let blue = before.prefix(guide.count).filter(isGuideBlue).count
         XCTAssertGreaterThan(blue, 10, "PREMISE: the grid below is on the paper")
@@ -163,6 +124,6 @@ final class GuideOverStrokeUITests: PaintUITestCase {
                                  "the guide below left the canvas while the pen was down")
         }
         XCTAssertTrue(waitForSandwichState(app, "rest", timeout: 30, "the stroke's bake lands"))
-        XCTAssertTrue(isRed(readNow([crossing]).first ?? nil), "and the red line is over the stroke at rest")
+        XCTAssertTrue(isRed(readScreenNow([crossing]).first ?? nil), "and the red line is over the stroke at rest")
     }
 }

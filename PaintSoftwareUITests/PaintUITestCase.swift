@@ -1724,6 +1724,56 @@ class PaintUITestCase: XCTestCase {
         }
     }
 
+    /// Screen points along a row of the paper, `x` and `y` in paper fractions — every point and a half,
+    /// dense enough that a grid's verticals cannot fall between two probes.
+    func paperRow(_ canvas: XCUIElement, _ paper: CGRect, x: ClosedRange<Double>, y: Double) -> [CGPoint] {
+        let frame = canvas.frame
+        let width = Double(frame.width * paper.width) * (x.upperBound - x.lowerBound)
+        let columns = max(2, Int(width / 1.5))
+        return (0...columns).map { column in
+            let px = x.lowerBound + (x.upperBound - x.lowerBound) * Double(column) / Double(columns)
+            return CGPoint(x: frame.minX + frame.width * (paper.minX + paper.width * px),
+                           y: frame.minY + frame.height * (paper.minY + paper.height * y))
+        }
+    }
+
+    /// Five rows of `paperRow` — a patch, so a row that happens to lie along one of a grid's horizontals
+    /// cannot read the line's colour end to end and pass for a grid.
+    func paperPatch(_ canvas: XCUIElement, _ paper: CGRect, x: ClosedRange<Double>,
+                    y: ClosedRange<Double>) -> [CGPoint] {
+        stride(from: y.lowerBound, through: y.upperBound, by: (y.upperBound - y.lowerBound) / 4)
+            .flatMap { paperRow(canvas, paper, x: x, y: $0) }
+    }
+
+    /// The screen read once, at `points`, now — the sampler's own read, for a moment with no gesture.
+    func readScreenNow(_ points: [CGPoint]) -> [RGBA?] {
+        let sampler = MidGestureSampler(points: points, interval: 0)
+        sampler.start()
+        Thread.sleep(forTimeInterval: 0.3)
+        return sampler.stop().last?.pixels ?? []
+    }
+
+    /// **Runs `gesture` — which must hold the finger or pen still at its end, for longer than the
+    /// reading it wants taken there — while the screen is read at `points`**, and returns the samples
+    /// taken with the touch certainly down (`MidGestureSampler` says why two seconds before the gesture
+    /// returns is the margin). Fails, naming `what`, when none finished in that window. The sample
+    /// times are attached.
+    func samplesDuring(_ points: [CGPoint], _ what: String, _ gesture: () -> Void) -> [MidGestureSampler.Sample] {
+        let sampler = MidGestureSampler(points: points)
+        sampler.start()
+        gesture()
+        let returned = CFAbsoluteTimeGetCurrent()
+        let taken = sampler.stop()
+        let trace = XCTAttachment(string: taken.map { String(format: "%+.2fs", $0.finished - returned) }
+            .joined(separator: "\n"))
+        trace.name = "\(what): sample times relative to the gesture returning"
+        trace.lifetime = .keepAlways
+        add(trace)
+        let held = taken.filter { $0.finished < returned - 2.0 }
+        XCTAssertFalse(held.isEmpty, "\(what): no sample finished with the touch still down (\(taken.count) taken)")
+        return held
+    }
+
     /// How far `tapAway`'s touch must land from any top-toolbar icon: a touch 20 pt off the Move
     /// icon's edge MEASURED as a Move press, so the margin is the 44 pt minimum touch target.
     private static let tapAwayClearance: CGFloat = 44

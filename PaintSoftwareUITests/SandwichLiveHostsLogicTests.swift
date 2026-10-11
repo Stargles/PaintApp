@@ -94,6 +94,9 @@ final class SandwichLiveHostsLogicTests: XCTestCase {
         XCTAssertTrue(s.manager.sandwichEngagesOnCanvas(tree: s.tree))
         XCTAssertTrue(parts.isSubset(of: s.manager.liveHostRun(tree: s.tree)),
                       "a part outside the run would be blanked, its piece with it")
+        XCTAssertEqual(s.manager.liveHostRun(tree: s.tree), [s.below, s.drawing],
+                       "and the grade selected above them is no host (TODO (165)): it stays in the half above, "
+                       + "grading what is under it, rather than stretching the middle up over the layer between")
     }
 
     /// **A raster Move's source draws the hole the cel does not have yet** (`remainderPreview`), so it
@@ -241,5 +244,54 @@ final class SandwichLiveHostsLogicTests: XCTestCase {
         XCTAssertNotNil(s.manager.makeSandwichRecipe(atFrame: 0, over: [s.drawing]), "hidden is still a leaf")
         XCTAssertNil(s.manager.makeSandwichRecipe(atFrame: 0, over: []))
         XCTAssertNil(s.manager.makeSandwichRecipe(atFrame: 0, over: [99]))
+    }
+
+    // MARK: - (c) An effect layer is never the middle
+
+    private let grade = Effect.brightnessContrast(.init(brightness: 1.2, contrast: 1.5))
+
+    /// **A selected effect layer names no host** — TODO (165). A Guide has no pixels of its own: its
+    /// lines exist only in the composite, so a pair cut around it has an empty middle and leaves them
+    /// out for as long as an edit's bake is on its way (the grid blinking under a slider). The canvas
+    /// then holds the bake's picture, which is the whole frame. Watched failing with the active layer
+    /// put back into the run unconditionally.
+    func testASelectedEffectLayerIsNotAHost() {
+        let s = guideStack()
+        s.manager.currentLayerIndex = s.above
+        s.manager.addValueLayer(effect: grade)
+        XCTAssertEqual(s.manager.currentLayerIndex, 3, "PREMISE: the grade lands on top, selected")
+        XCTAssertTrue(s.manager.sandwichEngagesOnCanvas(tree: s.tree), "PREMISE: a grade engages the compositor")
+        XCTAssertEqual(s.manager.liveHostRun(tree: s.tree), [])
+    }
+
+    /// **A selected transformation layer stays the middle**: its leaf draws nothing, and the pose it
+    /// carries is already in the leaves beneath it, so a pair cut around it is the exact picture — and
+    /// it is the pair a lifted Move box's bands hand over to (`SandwichPresentation.Held`).
+    func testASelectedPoseStaysTheMiddle() {
+        let s = guideStack()
+        s.manager.addTransformLayer()
+        let pose = s.manager.currentLayerIndex
+        XCTAssertEqual(s.manager.layers[pose].kind, .transform, "PREMISE: selected")
+        XCTAssertEqual(s.manager.liveHostRun(tree: s.tree), [pose])
+    }
+
+    /// **Every other layer is its own host**: a drawing layer's host shows its ink, a flat colour's its
+    /// background, and a vector layer that carries a grade is drawn by its host too — its ink, plain,
+    /// which is the live picture's ruling for a layer a grade belongs to — so none of them may lose the
+    /// middle to the rule above.
+    func testEveryLayerButAnEffectLayerIsItsOwnHost() {
+        let s = guideStack()
+        s.manager.setLayerEffect(layerIndex: s.drawing, to: grade)
+        XCTAssertNotNil(s.manager.layers[s.drawing].layerEffect, "PREMISE: the vector layer carries the grade")
+        XCTAssertEqual(s.manager.liveHostRun(tree: s.tree), [s.drawing], "a vector layer with a grade")
+
+        s.manager.addValueLayer()
+        let flat = s.manager.currentLayerIndex
+        XCTAssertNotNil(s.manager.layers[flat].valueFill, "PREMISE: a flat colour")
+        XCTAssertEqual(s.manager.liveHostRun(tree: s.tree), [flat], "a flat colour")
+
+        let raster = CanvasFixture.manager(layerCount: 2)
+        raster.currentLayerIndex = 1
+        XCTAssertEqual(raster.liveHostRun(tree: raster.renderTree(atFrame: 0)), [1], "a raster layer")
     }
 }

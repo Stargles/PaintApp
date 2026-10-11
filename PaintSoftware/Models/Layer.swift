@@ -392,6 +392,14 @@ extension Layer {
     /// own now (`LayerKind.transform`) and the kind test above already excludes it.
     var valueFill: ValueFill? { kind == .value && effect == nil ? fill : nil }
 
+    /// **Whether this layer is an effect layer** — a grade and nothing else: no ink, no flat colour. Its
+    /// whole contribution is the grade its leaf applies to the composite beneath it, which is the one
+    /// thing a layer host cannot draw and the one contribution a cut around its leaf leaves out
+    /// (`CanvasManager.liveHostRun`). A vector layer that carries a grade is not one — its ink is a
+    /// picture its host draws — and neither is a transformation layer: its leaf draws nothing, and the
+    /// pose it carries is already in the leaves beneath it.
+    var isAnEffectLayer: Bool { !kind.holdsPixels && layerEffect != nil }
+
     /// Whether a brush stroke has anywhere to land on this layer.
     ///
     /// **Asked of the `kind`, not of the configuration**, and deliberately: a `.value` layer with no
