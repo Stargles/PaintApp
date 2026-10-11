@@ -5595,3 +5595,30 @@ re-rendered each one off the main thread, which this column does not count (and 
 which is the report). **Not measured**: the device; the over picture's own composite on `sandwichQueue`
 (it replaces the two halves and composites the same leaves once).
 
+
+## 27. Gap closing is a cut, not a re-run — the slider tick fell from ~32 ms to ~2.5 ms (2026-10-10)
+
+TODO (158). Gap closing was a morphological close (two jump floods, a dilate and an erode) ahead of a
+GPU scanline flood, and every value of the slider re-ran all of it. It is now `FillBasins`: one distance
+map and one watershed per press, from which each slider value is a union-find over the merge tree and a
+table lookup on the GPU (`basinRegion`). The watershed is also the flood — the GPU scanline flood and the
+lasso's barrier pass are deleted — and the distance map is capped at what the slider's top can read
+(`FillBasins.ceiling`), so the deep interior of a big fill is one plateau.
+
+**How it was taken.** MEASURED, **Release**, iPad Pro 13-inch M4 simulator (iOS 26.5), machine 95–97%
+idle, `FillGapClosingBench`: `MetalFillSession` on a 2048×1024 buffer (the size a bucket window grows to
+on the owner's document) holding a 600 px box with a 6 px opening. A press is a fresh session's first
+`fill`; a tick is each later `fill` with only Gap Closing changed (9…39 px). Five presses and 55 ticks per
+scene; both scenes' plain fills are the whole page, since the box leaks at 0. `c89d8a5` is before.
+
+| per call (ms, median) | tapped inside the box — before | after | tapped on the open page — before | after |
+|---|---|---|---|---|
+| press | 39.4 | 48.8 | 34.5 | 45.8 |
+| slider tick | 34.7 | 3.2 | 30.0 | 2.0 |
+
+**The tick is what the slider feels, and it is 11–15× cheaper.** The press costs ~10 ms more: the
+watershed over 1.7 M open pixels is ~25 ms on the CPU where the deleted flood and second jump flood were
+~30 ms on the GPU, and the distance map's own jump flood is kept. Profiled before the cap and the
+raw-buffer rewrite, the watershed alone was 63 ms; the cap took a big open fill's to ~24 (standalone,
+`swiftc -O`, MEASURED). **Not measured**: the device, where the CPU half is likely the larger share; a
+press on an enclosed shape inside the first 1024² window, which covers half the pixels.

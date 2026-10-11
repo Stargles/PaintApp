@@ -59,22 +59,6 @@ slider in the fill tool is being janky for some reason."*
 
 ---
 
-## (158) Gap closing that does not curl in at the edges
-
-**Status** — asked 2026-10-10. The owner, verbatim: *"Right now when it is turned up and the user fills a
-square with a small opening, the feature works as intended, but also leaves the places near the edges of
-the squares not filled in. That is due to it using a SDF, so it counts it as a gap even though it is just
-an edge. I wonder if there is a way to fix that. Think of it like this: In areas where it is an edge and
-I move the slider, the fill grows to fill the edge on gap fill low, and smoothly recedes on gap fill
-high. However on actual gaps, there is a point where there is a sudden jump in the area of the filled
-shape due to the fill escaping. I wonder if a smart and fast system can be developed to fix this, so
-that gap fill works normally, but does not curl in close to the edges of a shape even on high."*
-
-- [ ] Gap closing still stops a fill escaping through an opening narrower than the slider's width.
-- [ ] Edges and corners fill right up to the ink at every slider setting; fast enough for the live slider.
-
----
-
 ## (164) The Move box holds its pose off the document while the finger is down
 
 **Status** — ruled 2026-10-10, out of (154). (154) made a graph-node drag hold the live pose off the
