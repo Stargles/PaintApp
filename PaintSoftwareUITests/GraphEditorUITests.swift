@@ -1002,6 +1002,116 @@ final class GraphEditorGestureUITests: PaintUITestCase {
 
 }
 
+/// **A finger held beside a graph-editor drag** — TODO (166), through real fingers on the band.
+///
+/// **A third class beside the other two, for their reason**: the gesture class is indivisible, and
+/// each test here spends its ~45 s on authoring a curve (`authorAnAnimatedBrightnessCurve`) rather than
+/// on the gesture. Everything the lock *decides* is `AxisLockLogicTests` and
+/// `TimelineGraphBandLogicTests`; what only this tier sees is that a second touch reaches it wherever it
+/// lands, and that one landing on the band does not cancel the drag it qualifies.
+///
+/// **What cannot be driven, and is said so:** the pen. XCUITest synthesises fingers only, so a finger
+/// stands in for the dragging pen; the lock counts any touch.
+final class GraphEditorFingerUITests: PaintUITestCase {
+
+    private let brightnessID = "brightnessContrast.brightness"
+
+    /// The brightness the settings bar's slider shows at the playhead — the second operand every
+    /// assertion about a *value* is made on, since the band's own accessibility value names frames alone.
+    private func sliderBrightness(_ app: XCUIApplication) -> Double? {
+        (app.sliders["effectSettings.brightness"].value as? String).flatMap(Double.init)
+    }
+
+    private func waitForBand(_ band: XCUIElement, _ value: String, _ message: String,
+                             file: StaticString = #filePath, line: UInt = #line) {
+        let reached = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", value),
+                                                object: band)
+        XCTAssertEqual(XCTWaiter().wait(for: [reached], timeout: 5), .completed,
+                       "\(message) — the band reads \(band.value as? String ?? "nothing")",
+                       file: file, line: line)
+    }
+
+    /// **A second finger held down anywhere keeps a node drag to one axis, and lifting it frees the
+    /// drag** — TODO (166). One curve, authored once: keys at frames 0 and 6, the playhead on 6, so the
+    /// slider reads the later key's value (or, with that key moved earlier, still its value: a curve
+    /// holds its last key). Each drag is undone before the next.
+    ///
+    /// 1. **The control**: the diagonal drag with nothing beside it retimes the key *and* revalues it,
+    ///    which is what makes the assertions after it about the lock and not about a drag that
+    ///    happened to be straight.
+    /// 2. **Held to time, by a finger resting in the toolbar** — nowhere near the timeline. It lands
+    ///    before the drag moves, so the axis is read from the way the drag first goes.
+    /// 3. **Held to value, by a finger resting on the band itself**, landing in the middle of the drag.
+    ///    This is the one that would cancel the drag if the band's recogniser were offered the second
+    ///    touch.
+    func testASecondFingerHeldBesideAKeyDragKeepsItToOneAxis() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let authored = try authorAnAnimatedBrightnessCurve(app, from: 0, to: 6)
+
+        app.buttons["timeline.graphEditorButton"].tap()
+        let band = app.otherElements["timeline.graphBand"]
+        XCTAssertTrue(band.waitForExistence(timeout: 5))
+        let start = "\(brightnessID):0,6"
+        XCTAssertEqual(band.value as? String, start, "PREMISE: the band draws the curve just authored")
+        XCTAssertEqual(try XCTUnwrap(sliderBrightness(app)), authored.end, accuracy: 0.03,
+                       "PREMISE: the playhead is on the later key, so the slider reads its value")
+
+        let window = app.windows.firstMatch
+        func normalized(_ point: CGPoint) -> CGVector {
+            CGVector(dx: (point.x - window.frame.minX) / window.frame.width,
+                     dy: (point.y - window.frame.minY) / window.frame.height)
+        }
+        let ppf = TimelineKeyMarkers.basePixelsPerFrame
+        let height = band.frame.height
+        let origin = band.coordinate(withNormalizedOffset: .zero)
+        let key = origin.withOffset(CGVector(
+            dx: TimelineGraphBand.x(ofFrame: 6, pixelsPerFrame: ppf),
+            dy: TimelineGraphBand.y(ofValue: authored.end, in: 0...2, bandHeight: height))).screenPoint
+        // Towards the middle of the band, wherever the key sits, so a value drag has room.
+        let towardsMiddle: CGFloat = authored.end > 1 ? 1 : -1
+
+        func drag(by delta: CGVector, holding: CGPoint?, landsAt: TimeInterval = 0.1) throws {
+            try dragWithAFingerHeldBeside(window, from: normalized(key), delta: delta,
+                                          holding: holding.map(normalized), holdLandsAt: landsAt)
+        }
+        func undo() {
+            app.buttons["sideToolbar.undoButton"].tap()
+            waitForBand(band, start, "one press of Undo puts the drag back")
+        }
+
+        // 1. The control: three frames earlier and thirty points toward the middle, nothing beside it.
+        let diagonal = CGVector(dx: -ppf * 3, dy: 30 * towardsMiddle)
+        try drag(by: diagonal, holding: nil)
+        waitForBand(band, "\(brightnessID):0,3", "PREMISE: the free drag retimes the key")
+        let freeValue = try XCTUnwrap(sliderBrightness(app))
+        XCTAssertGreaterThan(abs(freeValue - authored.end), 0.2,
+                             "PREMISE: …and revalues it (\(freeValue) against \(authored.end))")
+        undo()
+
+        // 2. Held to time by a finger in the toolbar's empty stretch.
+        let toolbar = try XCTUnwrap(emptyToolbarPoint(app))
+        try drag(by: diagonal, holding: toolbar)
+        waitForBand(band, "\(brightnessID):0,3", "held to time, the key still follows the finger's time")
+        attachScreenshot(XCUIScreen.main, "after-the-drag-held-to-time")
+        XCTAssertEqual(try XCTUnwrap(sliderBrightness(app)), authored.end, accuracy: 0.03,
+                       "…and keeps the value it was grabbed with: the second finger held it to time")
+        undo()
+
+        // 3. Held to value by a finger resting on empty band, landing mid-drag.
+        let emptyBand = origin.withOffset(CGVector(dx: TimelineGraphBand.x(ofFrame: 16, pixelsPerFrame: ppf),
+                                                   dy: height / 2)).screenPoint
+        try drag(by: CGVector(dx: -ppf, dy: 50 * towardsMiddle), holding: emptyBand, landsAt: 0.8)
+        let heldValue = try XCTUnwrap(sliderBrightness(app))
+        XCTAssertEqual(band.value as? String, start,
+                       "held to value, the key keeps its frame — and the finger resting on the band "
+                       + "did not cancel the drag")
+        XCTAssertGreaterThan(abs(heldValue - authored.end), 0.2,
+                             "…while its value followed the finger (\(heldValue) against \(authored.end))")
+        undo()
+    }
+}
+
 /// **The fixture both graph-editor classes share**, on `PaintUITestCase` rather than on either of
 /// them because the split of 2026-08-30 left it needed on both sides — a layout test authors a curve
 /// for the band to draw and a gesture test authors one to edit. `fileprivate`, so it stays this

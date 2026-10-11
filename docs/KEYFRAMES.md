@@ -2252,6 +2252,22 @@ is what spends it: §11.4's ruling makes the rubber band *the* meaning of a drag
 space, so there is nothing left for the scroll view to pan from. The ruler and every cel row still
 scroll, so what is given up is a 96 pt strip and not the gesture.
 
+**A second finger held down anywhere keeps a node or handle drag to one axis** — TODO (166), the
+owner's *"pressing and holding their other finger down anywhere should snap it to a cardinal axis
+(laterally through time, or vertically for the variable)"*, which is the smart shape's 15° hold read
+across. `AxisLock` is `PrecisionDrag`'s sibling: the count is `JoinedTouches` (a hand already resting
+when the drag began is not the gesture) read off a `TouchCountRecognizer` that sits on the **window**,
+since the canvas's counts the canvas alone. The axis is the larger component of the drag's translation
+**at the moment the lock has a direction to read** — when the finger lands on a drag under way, then;
+when it was down first, at the first tick that travels 10 pt — and is **held until the finger lifts**,
+because a drag along a diagonal is within a point of either axis for its whole length and re-reading it
+would swing the key between time and value on every wobble. Lifting frees the drag and the key jumps to
+the finger; pressing again reads the way the drag is going by then. It applies to **handles as well as
+nodes** (a handle held to time keeps its value offset, one held to value keeps its frame offset) and not
+to the marquee, which held to an axis is a line. The second finger is never offered to the band's
+recogniser — a long press with `numberOfTouchesRequired = 1` cancels the drag when a second touch
+joins it.
+
 **Three decisions the stage had to make, none of which the brief settled.**
 
 - **A key is stopped by its neighbour rather than consuming it.** `setKey` replaces on collision, so

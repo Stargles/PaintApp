@@ -790,6 +790,38 @@ final class TimelineGraphBandLogicTests: XCTestCase {
                        "The value axis is the band's own and the pinch does not touch it")
     }
 
+    /// **A drag held to an axis moves the key along that axis alone, through the real move** — TODO (166).
+    /// `AxisLockLogicTests` pins the translation; this pins what the band does with it, so a key held
+    /// to time comes out on its own value and a key held to value on its own frame. The free drag is
+    /// the control: the same finger moves both.
+    func testAKeyHeldToAnAxisChangesOnlyThatAxis() {
+        let manager = blurredManager()
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: radiusID,
+                                        to: linear([(0, 8.0), (40, 32.0)]))
+        let drawn = channels(manager)
+        let ref = TimelineGraphBand.KeyRef(parameterID: radiusID, frame: 0)
+        func moved(_ translation: CGSize) -> TimelineGraphBand.Move? {
+            TimelineGraphBand.moves(of: [ref], in: drawn, translation: translation,
+                                    pixelsPerFrame: base, bandHeight: band)[ref]
+        }
+        let finger = CGSize(width: 90, height: -30)
+        let free = moved(finger)
+        XCTAssertEqual(free?.frame, 3, "PREMISE: the free drag retimes the key")
+        XCTAssertNotEqual(free?.value ?? 8, 8, accuracy: 1e-9, "…and revalues it")
+
+        var lock = AxisLock(touchesDown: 1)
+        let held = moved(lock.translation(for: finger, touchesDown: 2))
+        XCTAssertEqual(held?.frame, 3, "held to time, the key still follows the finger's time")
+        XCTAssertEqual(held?.value ?? 0, 8, accuracy: 1e-9, "…and keeps the value it was grabbed with")
+
+        var valueLock = AxisLock(touchesDown: 1)
+        let tall = CGSize(width: 14, height: -60)
+        let heldToValue = moved(valueLock.translation(for: tall, touchesDown: 2))
+        XCTAssertEqual(heldToValue?.frame, 0, "held to value, the key keeps its frame")
+        XCTAssertEqual(heldToValue?.value ?? 8, moved(CGSize(width: 0, height: -60))?.value ?? -1,
+                       accuracy: 1e-9, "…and its value is the finger's alone")
+    }
+
     /// **The clamp is `modelDomain`'s, and `uiRange` is not a wall.** `Effect.swift` says to draw the
     /// axis over `uiRange` and allow a key anywhere in `modelDomain`; clamping to the axis instead
     /// would make the model's own reachable values unreachable through the only UI that edits them.

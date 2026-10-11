@@ -565,10 +565,12 @@
 		3A98D5E049E71D23E9DC95B1 /* HandleDragLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8020BFB6082F592C6BE757F9 /* HandleDragLogicTests.swift */; };
 		674B9D22D85AE10214B90A4B /* ToolReturnPathLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18AD451484C4AE161A3E7CD1 /* ToolReturnPathLogicTests.swift */; };
 		06E1D2A76E84F1D749518316 /* JoinedTouchesLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0F0231FFF9A4F2EF26D173F /* JoinedTouchesLogicTests.swift */; };
+		3999BD4D3D56D0C2E3807574 /* AxisLockLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34229C332D4C2E3A15E83EA4 /* AxisLockLogicTests.swift */; };
 		7CE83813927AD8AFD21510D5 /* PaintSoftware/Models/CanvasTouchSettle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 560FB5DCBEBF9A683AC6BCAB /* PaintSoftware/Models/CanvasTouchSettle.swift */; };
 		2626A581BD6893AFAA98B695 /* PaintSoftware/Models/PrecisionDrag.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBFEB71ABEDE995DAD88537E /* PaintSoftware/Models/PrecisionDrag.swift */; };
 		3E774A98BF22A4CA5B81BC96 /* PaintSoftware/Models/ToolReturnPath.swift in Sources */ = {isa = PBXBuildFile; fileRef = 854AEED7E0BEB66C493D6324 /* PaintSoftware/Models/ToolReturnPath.swift */; };
 		941AD63A0C8C6C9FCA5F39CB /* PaintSoftware/Models/JoinedTouches.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7348E3A0ED2D95D1E63957CA /* PaintSoftware/Models/JoinedTouches.swift */; };
+		22D8F574200BDAFD3BFA2C24 /* PaintSoftware/Models/AxisLock.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3BF94BB87FE88ED447EF9E9 /* PaintSoftware/Models/AxisLock.swift */; };
 		5C7CFE45E5FF8D501A1894F9 /* PaintSoftware/Models/RotationAngle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F2AB28DC112CC0537E3EA93 /* PaintSoftware/Models/RotationAngle.swift */; };
 		7448FF7B2B8CF5BAF87B8257 /* TimelineZoomPanUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5760D363254C97661D9A8DD2 /* TimelineZoomPanUITests.swift */; };
 		165452FDC5824EFE48B88308 /* ViewportAnchorLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45EB6D54AEC6AE783758CE2C /* ViewportAnchorLogicTests.swift */; };
@@ -1159,10 +1161,12 @@
 		8020BFB6082F592C6BE757F9 /* HandleDragLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "HandleDragLogicTests.swift"; sourceTree = "<group>"; };
 		18AD451484C4AE161A3E7CD1 /* ToolReturnPathLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "ToolReturnPathLogicTests.swift"; sourceTree = "<group>"; };
 		F0F0231FFF9A4F2EF26D173F /* JoinedTouchesLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "JoinedTouchesLogicTests.swift"; sourceTree = "<group>"; };
+		34229C332D4C2E3A15E83EA4 /* AxisLockLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "AxisLockLogicTests.swift"; sourceTree = "<group>"; };
 		560FB5DCBEBF9A683AC6BCAB /* PaintSoftware/Models/CanvasTouchSettle.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/CanvasTouchSettle.swift; sourceTree = "<group>"; };
 		BBFEB71ABEDE995DAD88537E /* PaintSoftware/Models/PrecisionDrag.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/PrecisionDrag.swift; sourceTree = "<group>"; };
 		854AEED7E0BEB66C493D6324 /* PaintSoftware/Models/ToolReturnPath.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/ToolReturnPath.swift; sourceTree = "<group>"; };
 		7348E3A0ED2D95D1E63957CA /* PaintSoftware/Models/JoinedTouches.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/JoinedTouches.swift; sourceTree = "<group>"; };
+		E3BF94BB87FE88ED447EF9E9 /* PaintSoftware/Models/AxisLock.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/AxisLock.swift; sourceTree = "<group>"; };
 		3F2AB28DC112CC0537E3EA93 /* PaintSoftware/Models/RotationAngle.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/RotationAngle.swift; sourceTree = "<group>"; };
 		5760D363254C97661D9A8DD2 /* TimelineZoomPanUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TimelineZoomPanUITests.swift; sourceTree = "<group>"; };
 		45EB6D54AEC6AE783758CE2C /* ViewportAnchorLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ViewportAnchorLogicTests.swift; sourceTree = "<group>"; };
@@ -1580,6 +1584,7 @@
 				8020BFB6082F592C6BE757F9 /* HandleDragLogicTests.swift */,
 				18AD451484C4AE161A3E7CD1 /* ToolReturnPathLogicTests.swift */,
 				F0F0231FFF9A4F2EF26D173F /* JoinedTouchesLogicTests.swift */,
+				34229C332D4C2E3A15E83EA4 /* AxisLockLogicTests.swift */,
 			);
 			path = PaintSoftwareUITests;
 			sourceTree = "<group>";
@@ -1827,6 +1832,7 @@
 				BBFEB71ABEDE995DAD88537E /* PaintSoftware/Models/PrecisionDrag.swift */,
 				854AEED7E0BEB66C493D6324 /* PaintSoftware/Models/ToolReturnPath.swift */,
 				7348E3A0ED2D95D1E63957CA /* PaintSoftware/Models/JoinedTouches.swift */,
+				E3BF94BB87FE88ED447EF9E9 /* PaintSoftware/Models/AxisLock.swift */,
 				3F2AB28DC112CC0537E3EA93 /* PaintSoftware/Models/RotationAngle.swift */,
 			);
 			name = "App sources shared with PaintSoftwareUITests";
@@ -2510,10 +2516,12 @@
 				3A98D5E049E71D23E9DC95B1 /* HandleDragLogicTests.swift in Sources */,
 				674B9D22D85AE10214B90A4B /* ToolReturnPathLogicTests.swift in Sources */,
 				06E1D2A76E84F1D749518316 /* JoinedTouchesLogicTests.swift in Sources */,
+				3999BD4D3D56D0C2E3807574 /* AxisLockLogicTests.swift in Sources */,
 				7CE83813927AD8AFD21510D5 /* PaintSoftware/Models/CanvasTouchSettle.swift in Sources */,
 				2626A581BD6893AFAA98B695 /* PaintSoftware/Models/PrecisionDrag.swift in Sources */,
 				3E774A98BF22A4CA5B81BC96 /* PaintSoftware/Models/ToolReturnPath.swift in Sources */,
 				941AD63A0C8C6C9FCA5F39CB /* PaintSoftware/Models/JoinedTouches.swift in Sources */,
+				22D8F574200BDAFD3BFA2C24 /* PaintSoftware/Models/AxisLock.swift in Sources */,
 				5C7CFE45E5FF8D501A1894F9 /* PaintSoftware/Models/RotationAngle.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

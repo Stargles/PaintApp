@@ -1542,6 +1542,8 @@ class PaintUITestCase: XCTestCase {
     /// - Parameters:
     ///   - from: where the dragging finger lands, normalised within `element`.
     ///   - holding: where the second lands, normalised within `element`; nil for none.
+    ///   - holdLandsAt: when it lands, in seconds from the dragging finger's touch-down. The drag moves
+    ///     from 0.3 s to 1.3 s, so a value past 0.3 lands the second finger in the middle of it.
     func dragWithAFingerHeldBeside(_ element: XCUIElement, from: CGVector, delta: CGVector,
                                    holding: CGVector?, holdDrift: CGVector = .zero,
                                    holdLandsAt: TimeInterval = 0.1, travel: TimeInterval = 1.0) throws {
@@ -1563,8 +1565,10 @@ class PaintUITestCase: XCTestCase {
         let held = try SynthesizedTouch.path(at: rest, offset: holdLandsAt)
         for step in 1...steps {
             let t = Double(step) / Double(steps)
+            // A finger that lands during the travel moves only after it lands: the synthesiser refuses a
+            // path whose offsets go backwards.
             try SynthesizedTouch.move(held, to: CGPoint(x: rest.x + holdDrift.dx * t, y: rest.y + holdDrift.dy * t),
-                                      at: begin + travel * t)
+                                      at: max(begin + travel * t, holdLandsAt + 0.001 * Double(step)))
         }
         try SynthesizedTouch.lift(held, at: heldLifts)
         try SynthesizedTouch.lift(dragging, at: heldLifts + 0.2)
@@ -1599,17 +1603,27 @@ class PaintUITestCase: XCTestCase {
     /// (`bottomDock`), and the tests calling this lost a swatch or a Close button a mile from the bar.
     /// The clearance assertion turns the next layout change that crowds the gap into a sentence.
     func tapAway(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
+        guard let gap = emptyToolbarPoint(app, file: file, line: line) else { return }
+        app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: gap.x, dy: gap.y)).tap()
+    }
+
+    /// **The middle of the widest empty stretch of the top toolbar, in window points** — where a
+    /// finger can rest, or a tap can land, without pressing anything. `tapAway` taps it; a drag that
+    /// wants a second finger held down somewhere harmless rests one there.
+    func emptyToolbarPoint(_ app: XCUIApplication, file: StaticString = #filePath,
+                           line: UInt = #line) -> CGPoint? {
         guard let tree = try? app.snapshot() else {
-            XCTFail("tapAway: could not snapshot the app to find the top toolbar", file: file, line: line)
-            return
+            XCTFail("emptyToolbarPoint: could not snapshot the app to find the top toolbar", file: file, line: line)
+            return nil
         }
         func flattened(_ node: XCUIElementSnapshot) -> [XCUIElementSnapshot] {
             [node] + node.children.flatMap(flattened)
         }
         let nodes = flattened(tree)
         guard let anchor = nodes.first(where: { $0.identifier == "toolbar.galleryButton" })?.frame else {
-            XCTFail("tapAway: no `toolbar.galleryButton` on screen, so there is no top toolbar to tap", file: file, line: line)
-            return
+            XCTFail("emptyToolbarPoint: no `toolbar.galleryButton` on screen, so there is no top toolbar", file: file, line: line)
+            return nil
         }
         // Buttons and the scene's name field: the name sits in the middle of the bar, so a gap measured
         // without it would be the one it stands in.
@@ -1620,17 +1634,15 @@ class PaintUITestCase: XCTestCase {
             .sorted { $0.minX < $1.minX }
         let gaps = zip(rowButtons, rowButtons.dropFirst()).map { (from: $0.maxX, to: $1.minX) }
         guard let widest = gaps.max(by: { $0.to - $0.from < $1.to - $1.from }) else {
-            XCTFail("tapAway: the top toolbar row holds fewer than two buttons", file: file, line: line)
-            return
+            XCTFail("emptyToolbarPoint: the top toolbar row holds fewer than two buttons", file: file, line: line)
+            return nil
         }
         let clearance = (widest.to - widest.from) / 2
         XCTAssertGreaterThanOrEqual(clearance, Self.tapAwayClearance, """
-            tapAway: the top toolbar's widest gap (x \(widest.from)–\(widest.to)) leaves only \(clearance) pt \
-            to the nearest icon, inside SwiftUI's touch radius — a tap there would press that icon
+            emptyToolbarPoint: the top toolbar's widest gap (x \(widest.from)–\(widest.to)) leaves only \(clearance) pt \
+            to the nearest icon, inside SwiftUI's touch radius — a touch there would press that icon
             """, file: file, line: line)
-        app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
-            .withOffset(CGVector(dx: (widest.from + widest.to) / 2, dy: anchor.midY))
-            .tap()
+        return CGPoint(x: (widest.from + widest.to) / 2, y: anchor.midY)
     }
 
     /// **A menu `CanvasPresentationHost` draws, by the case it carries** — `layerBlendMenu`,
