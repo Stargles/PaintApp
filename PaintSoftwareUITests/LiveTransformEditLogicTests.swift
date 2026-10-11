@@ -439,6 +439,131 @@ final class LiveTransformEditLogicTests: XCTestCase {
                           xCurve(restX - 5), "the cel itself is untouched until the lift")
     }
 
+    // MARK: - The Move box holds its pose too — TODO (164)
+
+    /// One tick of the box's drag: the overlay reports the whole box, carried `dx`, `dy` from where it
+    /// came up.
+    private func dragBox(_ manager: CanvasManager, by dx: CGFloat, _ dy: CGFloat = 0) {
+        guard var box = manager.floatingPiece?.liftTransform else { return XCTFail("no box is up") }
+        box.position.x += dx
+        box.position.y += dy
+        manager.updateFloatingPose(transform: box, distortQuad: nil)
+    }
+
+    /// **A Move-box drag's tick moves the bands and nothing else, and its lift is one step** — the
+    /// graph node's mechanism, one entry point over. Each tick used to write the pose into `layers` and
+    /// the box into the published piece: a SwiftUI pass over the whole editor per update, and a copy of
+    /// the layer to put back at the lift. Operands: the publishes and the canvas's notices across three
+    /// ticks, the document and the piece mid-drag, the walk under the held pose against the mint, and
+    /// the document after the lift against what the finger showed.
+    func testABoxDragHoldsItsPoseOffTheDocumentAndLandsItAsOneStep() throws {
+        let s = scene()
+        let m = s.manager
+        let mover = index(s.mover, m)
+        m.currentLayerIndex = mover
+        XCTAssertTrue(m.beginContainerPoseMove())
+        let edit = LiveTransformEdit.container(layerID: s.mover)
+        let runs = m.liveTransformRuns(edit, atFrame: 0)
+        let minted = m.liveTransformMaps(edit, runs: runs, atFrame: 0)
+        let stored = m.layers[mover].transform
+        let box = try XCTUnwrap(m.floatingPiece).transform
+        m.moveBoxTouched()
+        XCTAssertEqual(m.liveTransformEdit, edit, "PREMISE: the touch put the drag on the bands")
+        let steps = m.history.undoStack.count
+
+        var publishes = 0, told = 0
+        let token = m.objectWillChange.sink { _ in publishes += 1 }
+        m.onHeldPictureMoved = { told += 1 }
+        for dx: CGFloat in [3, 7, 12] { dragBox(m, by: dx) }
+        token.cancel()
+
+        XCTAssertEqual(publishes, 0, "a box tick raises no SwiftUI pass")
+        XCTAssertEqual(told, 3, "and the canvas hears every tick directly")
+        XCTAssertEqual(m.layers[mover].transform, stored, "the document holds none of the drag")
+        XCTAssertEqual(m.floatingPiece?.transform, box, "nor does the published piece — it learns at the lift")
+        XCTAssertEqual(try XCTUnwrap(m.shownFloatingPiece).transform.position.x, box.position.x + 12,
+                       accuracy: 1e-9, "while the overlay draws the box under the finger")
+        let held = m.liveTransformMaps(edit, runs: runs, atFrame: 0, holding: m.livePose)
+        XCTAssertEqual(try tx(from: minted[0], to: held[0]), 12, accuracy: 1e-6,
+                       "the bands are re-posed by the drag's whole distance")
+
+        m.moveBoxLifted()
+        XCTAssertNil(m.livePose, "the lift lets the held pose go…")
+        XCTAssertNil(m.liveTransformEdit, "…and the baker's hold")
+        XCTAssertEqual(m.history.undoStack.count, steps + 1, "one drag, one step")
+        XCTAssertEqual(try tx(from: held[0], to: m.liveTransformMaps(edit, runs: runs, atFrame: 0)[0]), 0,
+                       accuracy: 1e-9, "the document shows exactly what the finger was showing")
+        XCTAssertEqual(try XCTUnwrap(m.floatingPiece).transform.position.x, box.position.x + 12, accuracy: 1e-9,
+                       "and the box stays where the finger left it")
+
+        m.undo()
+        XCTAssertEqual(m.layers[mover].transform, stored, "one Undo puts the whole drag back")
+        XCTAssertNotNil(m.floatingPiece, "with the box still up")
+    }
+
+    /// **The pose held under the finger is the pose the lift writes, on every route the commit takes** —
+    /// no keys, primed marks, standing on a mark, between two keys. They are folded by one function
+    /// (`containerPoseMove`), so the operands are the whole `LayerPose` the finger held just before the
+    /// lift and the whole `LayerPose` the document holds just after it: base, baseline, track and mode.
+    func testTheHeldPoseIsTheLandedPoseOnEveryRoute() throws {
+        let s = scene()
+        let m = s.manager
+        let mover = index(s.mover, m)
+        let target = KeyframeTarget.layer(id: s.mover)
+        m.currentLayerIndex = mover
+        CanvasFixture.setCelLayout(m, layerIndex: mover, [(start: 0, length: 12)])
+
+        func dragAndLand(atFrame frame: Int, _ dx: CGFloat, _ dy: CGFloat, _ route: String) throws {
+            m.currentFrame = frame
+            XCTAssertTrue(m.beginContainerPoseMove(), "\(route): the box comes up")
+            m.moveBoxTouched()
+            dragBox(m, by: dx, dy)
+            let held = try XCTUnwrap(m.livePose?.containerPose(ofLayer: s.mover), "\(route): the drag holds a pose")
+            XCTAssertNotEqual(m.layers[mover].transform, held, "\(route): PREMISE: the document does not have it yet")
+            m.moveBoxLifted()
+            XCTAssertEqual(m.layers[mover].transform, held, "\(route): the lift lands exactly the pose held")
+            XCTAssertTrue(m.commitFloatingPieceIfNeeded())
+        }
+
+        try dragAndLand(atFrame: 4, 6, 0, "no keys")
+        XCTAssertTrue(m.addKeys(target, atFrame: 0))
+        try dragAndLand(atFrame: 6, 0, 5, "primed, between marks")
+        XCTAssertTrue(m.addKeys(target, atFrame: 8))
+        try dragAndLand(atFrame: 8, 9, 2, "on a mark")
+        try dragAndLand(atFrame: 4, -4, 3, "between keys")
+        XCTAssertFalse(try XCTUnwrap(m.layers[mover].transform).track.isEmpty,
+                       "PREMISE: the keyed routes were taken")
+    }
+
+    /// **Undo or Redo pressed mid-drag drops the held pose** — the drag in the other hand is not a step,
+    /// so the press acts on the steps and the canvas shows the document it leaves; the box stays under
+    /// the finger and the lift lands only what it moved since.
+    func testUndoMidDragLetsTheHeldPoseGo() throws {
+        let s = scene()
+        let m = s.manager
+        let mover = index(s.mover, m)
+        m.currentLayerIndex = mover
+        XCTAssertTrue(m.beginContainerPoseMove())
+        m.moveBoxTouched()
+        dragBox(m, by: 10)
+        m.moveBoxLifted()
+        let afterFirst = m.layers[mover].transform
+        m.moveBoxTouched()
+        dragBox(m, by: 20)
+        XCTAssertNotNil(m.livePose, "PREMISE: the second drag holds a pose")
+
+        m.undo()
+        XCTAssertNil(m.livePose, "the press lets the held pose go")
+        XCTAssertNotEqual(m.layers[mover].transform, afterFirst, "and undid the first drag, the one step there was")
+        XCTAssertEqual(try XCTUnwrap(m.shownFloatingPiece).transform.position.x,
+                       try XCTUnwrap(m.floatingPiece).liftTransform.position.x + 20, accuracy: 1e-9,
+                       "the box stays under the finger")
+        dragBox(m, by: 25)
+        m.moveBoxLifted()
+        let landed = try XCTUnwrap(m.layers[mover].transform?.pose.affine)
+        XCTAssertEqual(Double(landed.tx), 5, accuracy: 1e-9, "the lift lands only the 5 pt moved since the press")
+    }
+
     // MARK: - The box's hold ends with its drag
 
     /// **A vector float's box that stands down mid-drag still ends the drag** — `onBoxTouchUp`, which

@@ -229,7 +229,7 @@ final class TransformLayerEntryLogicTests: XCTestCase {
     /// The box lifts at rest every time — `FloatingTransform` cannot express a skew, so seeding it
     /// from an existing pose would mean writing `distortQuad`, which every other path treats as a
     /// live gesture's projective residue. So the delta has to be composed onto the pose the gesture
-    /// found, and `FloatingPiece.nudge` is what carries it.
+    /// found, and `CanvasManager.boxNudge` is what carries it.
     ///
     /// If this went red the second drag would throw the first away, which is the "content teleports
     /// back" shape the rest of this file's Move paths are shaped to avoid.
@@ -265,11 +265,10 @@ final class TransformLayerEntryLogicTests: XCTestCase {
 
     /// **Undo after a Move puts the pose back where the drag found it — not where it left it.**
     ///
-    /// This is the one hazard the live preview creates. `showContainerPoseLive` writes
-    /// `Layer.transform` on every tick so the canvas can composite through the real path (§2.3 refuses
-    /// a resampled preview), and `commitContainerPose` reads the *stored* pose to take its undo
-    /// baseline from — so unless the commit puts the preview back first, the baseline is the drag and
-    /// one press of Undo leaves the drawing exactly where the artist had just dragged it.
+    /// `commitContainerPose` reads the *stored* pose to take its undo baseline from, so a preview that
+    /// wrote `Layer.transform` on every tick would make the baseline the drag, and one press of Undo
+    /// would leave the drawing exactly where the artist had just dragged it. The preview is held off the
+    /// document since TODO (164); this pins that nothing reaches the baseline either way.
     ///
     /// If this went red, Undo would appear not to work on this layer alone.
     func testUndoAfterAMovePutsThePoseBackWhereTheDragFoundIt() {
@@ -288,11 +287,11 @@ final class TransformLayerEntryLogicTests: XCTestCase {
 
     /// **Every control on the Move bar carries the container's pose with the box, not just the drag.**
     ///
-    /// The preview is a document write rather than an overlay transform, so *each* site that moves a
-    /// piece has to make it: `updateFloatingPose` for the drag, and `mirrorFloating`, `rotateFloating`
-    /// and `resetFloating`, which write `floatingPiece.transform` directly. A missed one is a box that
-    /// turns with the content standing still, and it would go unnoticed until the commit put the
-    /// content somewhere the artist never saw it.
+    /// The content moves with the pose rather than with the overlay, so *each* site that moves a piece
+    /// has to carry it: `updateFloatingPose` for the drag, and `mirrorFloating`, `rotateFloating` and
+    /// `resetFloating`, which are presses. A missed one is a box that turns with the content standing
+    /// still, and it would go unnoticed until the commit put the content somewhere the artist never saw
+    /// it.
     ///
     /// Reset is the assertion that could not pass by accident: it is the only one whose *correct*
     /// answer is the pose the layer started at, so a `resetFloating` that forgot the preview would

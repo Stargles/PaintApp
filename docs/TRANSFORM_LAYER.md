@@ -28,9 +28,10 @@ model and render path are specified there and this document does not restate the
   transformation layer used to pose exactly as a shown one, where a hidden grade grades nothing;
   every mode below inherits both fixes.
 - **The Move box is `FloatingPieceKind.containerPose`**, a box the size of the canvas with no pixels;
-  `showContainerPoseLive` writes the pose on every tick so the preview *is* the render path — **drawn, since
-  TODO (125), as bands Core Animation re-poses per update** (`LiveTransformEdit`), the box keeping the
-  compositor rather than putting every posed drawing back on the flat row to be re-rasterized per tick;
+  the pose under the finger is the preview — **drawn, since TODO (125), as bands Core Animation re-poses
+  per update** (`LiveTransformEdit`), the box keeping the compositor rather than putting every posed
+  drawing back on the flat row to be re-rasterized per tick, and **held off the document until the lift
+  since TODO (164)** (`CanvasManager.livePose`), so a tick raises no SwiftUI pass;
   `commitContainerPose` routes through `KeyframeControl.write`'s five-arm rule and **every arm writes
   the stored base** (`LayerPose.resolvedPose` is a precedence, not a composition). `seedingContainer`
   seeds the *old* pose onto the immediate neighbouring keyframes. The graph band draws the pose as six
@@ -270,8 +271,9 @@ effect had:
   and composing, because a `FloatingTransform` is exactly a position, two scales and a turn — so the
   box the artist sees is drawn around the copy, `CanvasManager.effectBoxScalars` reads the five straight
   back off it, and a mirror is a negative scale seeded as the flip bit. The preview writes the five
-  live (a key at the playhead on a keyed channel, the base otherwise — `showContainerPoseLive`'s shape),
-  the commit restores the rest state and routes each through `applyEffectParameterEdit` inside one
+  live (a key at the gesture's frame on a keyed channel, the base otherwise) — written, unlike the
+  transformation layer's held pose, because a grade is shown only by compositing the document — the
+  commit restores the rest state and routes each through `applyEffectParameterEdit` inside one
   gesture bracket, and a box that ended where it began writes nothing.
 - **A colour**: `Outline.color`'s exact shape, `colorR/G/B`, refused at the writer as not animatable.
 - **A blend mode inside a kernel.** The Metal side is a `switch` on a mode code calling the blend

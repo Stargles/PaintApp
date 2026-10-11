@@ -398,8 +398,8 @@ struct LayerPose: Equatable {
     /// is stored beside it for `track`'s reason: there is exactly one container channel, so "a mode
     /// never outlives the pose it qualifies" stays structural.
     ///
-    /// **The three writers of the pose leave it alone**: `showContainerPoseLive`, `commitContainerPose`
-    /// and the keyframe arms all copy a `LayerPose` and change `pose`, `track` or `baseline`, so the
+    /// **The writers of the pose leave it alone**: `containerPoseMove` (the Move box's held pose and its
+    /// commit) and the keyframe arms all copy a `LayerPose` and change `pose`, `track` or `baseline`, so the
     /// mode rides through a Move made in any mode — which is §6's factorisation, *"the pose is
     /// `authored(f) ∘ mode(f)`, and the writers key `authored`"*.
     ///

@@ -1013,23 +1013,78 @@ final class CanvasManager: ObservableObject {
     }
 
     /// The finger lifted, or the gesture was cancelled. A pose still held is dropped with it — a lift
-    /// commits first (`commitLivePose`), so what is dropped here is a gesture that wrote nothing.
+    /// commits first (`commitLivePose`, `settleBoxNudge`), so what is dropped here is a gesture that
+    /// wrote nothing.
     func endLiveTransformEdit() {
         livePose = nil
         if liveTransformEdit != nil { liveTransformEdit = nil }
     }
 
-    /// **The pose under the finger, which the document does not hold yet** — TODO (154). A graph-band
-    /// drag of a pose node holds its curves here for the length of the gesture (`holdLivePose`): the
-    /// canvas re-poses its bands from them and the band draws them, and the lift writes them once, as
-    /// one undo step (`commitLivePose`). Nil between gestures.
+    /// **A touch landed on a Move box** — either overlay's `onBoxTouchDown`, a grip, the knob or the
+    /// body alike. A touch on the box is a touch on the canvas, so it does what every other canvas
+    /// touch does first, with `mayContinueTake` because the box is KEYFRAMES.md §5's second recordable
+    /// surface; then the take, which may start one, after the canvas-touch rule because what that rule
+    /// closes may record a step that has to land before the take's bracket opens; then the live edit,
+    /// after the take so its bracket is the outer one (§5.1), which puts the drag on the canvas's
+    /// bands and holds the baker until the finger lifts (TODO (125)).
+    func moveBoxTouched() {
+        canvasInteractionBegan(mayContinueTake: true, mayBeATransform: true)
+        beginMoveBoxTake()
+        moveBoxIsTouched = true
+        if let edit = moveBoxEdit { beginLiveTransformEdit(edit) }
+    }
+
+    /// **The finger on the Move box lifted** — either overlay's `onBoxTouchUp`. A transformation
+    /// layer's or a Duplicate Offset's box lands the drag here, as one undo step, and stays up holding
+    /// nothing (`settleBoxNudge`); the end of the live edit then lets the baker bake it.
     ///
-    /// **Not `@Published`, and that is the fix.** The drag used to write its curves into `layers` on
-    /// every tick, and every `ObservedObject` in the editor watches this object, so each tick was a
-    /// SwiftUI pass over the whole editor — six `objectWillChange`s, the canvas's `reconcileLayers`, a
-    /// full timeline rebuild — for a picture only two views draw. MEASURED in PERFORMANCE.md §24.3.
+    /// **Not while a take owns the box**: the take is playback and outlives the finger, so its gesture,
+    /// the pose that gesture holds and the bands showing it stay up until the take ends
+    /// (`releaseMoveBoxAfterTake`) — let go here, the drawing would jump back to where the take found
+    /// it for the rest of the take.
+    func moveBoxLifted() {
+        moveBoxIsTouched = false
+        guard !recordingOwnsMoveBox else { return }
+        settleBoxNudge()
+        endLiveTransformEdit()
+    }
+
+    /// **A take that owned the Move box ended** — what `moveBoxLifted` left up for it, released unless a
+    /// finger is still on the box, whose lift then releases it. A take that wrote its curve has already
+    /// taken the box down (`dismissRecordedMoveBox`); one that captured nothing leaves the ordinary Move
+    /// the artist made, which lands here.
+    func releaseMoveBoxAfterTake() {
+        guard !moveBoxIsTouched else { return }
+        settleBoxNudge()
+        endLiveTransformEdit()
+    }
+
+    /// **The pose under the finger, which the document does not hold yet** — TODO (154), (164). Two
+    /// gestures hold one here for their length: a graph-band drag of a pose node (`holdLivePose(_:of:)`,
+    /// whose lift writes its curves once through `commitLivePose`), and a drag of a transformation
+    /// layer's Move box (`boxNudge`, whose lift routes the box's travel once through
+    /// `commitContainerPose`). The canvas re-poses its bands from it, the graph band draws its curves,
+    /// and each lift is one undo step. Nil between gestures.
+    ///
+    /// **Not `@Published`, and that is the fix.** Both drags used to write `layers` on every tick, and
+    /// every `ObservedObject` in the editor watches this object, so each tick was a SwiftUI pass over
+    /// the whole editor — six `objectWillChange`s, the canvas's `reconcileLayers`, a full timeline
+    /// rebuild — for a picture only two views draw. MEASURED in PERFORMANCE.md §24.3 and §24.4.
     /// The vector float's live pose is the same rule (`CanvasView.Coordinator.liveVectorFloatPose`).
     private(set) var livePose: LivePose?
+
+    /// **The gesture open on a Move box that poses or grades, or nil between gestures** — a drag of a
+    /// transformation layer's or a Duplicate Offset's box, or one press of Mirror, Rotate or Reset.
+    /// `BoxNudge` carries what it holds and why it never outlives one gesture.
+    ///
+    /// **Not on the `@Published` piece**, for `livePose`'s reason: the box's travel under the finger is
+    /// written here on every tick and reaches the piece once, when the gesture settles. The overlay
+    /// draws the box from `shownFloatingPiece`, which reads it.
+    var boxNudge: BoxNudge?
+
+    /// **Whether a finger is on a Move box** — between `moveBoxTouched` and `moveBoxLifted`. Asked by
+    /// the end of a take that owned the box, which leaves a gesture still under the finger to its lift.
+    private(set) var moveBoxIsTouched = false
 
     /// **Called synchronously when a picture the canvas shows but the document does not hold yet
     /// moves** — the pose under the finger (`livePose`) or the adjustable fill's preview (`liveFill`) —
@@ -1047,9 +1102,16 @@ final class CanvasManager: ObservableObject {
     /// it (`endLiveTransformEdit`). Raises no SwiftUI pass: `onHeldPictureMoved` tells the canvas.
     func holdLivePose(_ curves: [String: AnimationCurve], of target: KeyframeTarget) {
         guard liveTransformEdit?.movesBands == true, case .layer(let layerID) = target else { return }
-        livePose = poseDelta(replacing: curves, of: target).map {
+        holdLivePose(poseDelta(replacing: curves, of: target).map {
             LivePose(layerID: layerID, curves: curves, pose: $0.poses)
-        }
+        })
+    }
+
+    /// **Holds `held` as the pose under the finger, or nothing, and tells the canvas** — the one write
+    /// of `livePose` a tick makes, from a graph-node drag (above) or a Move-box drag
+    /// (`holdContainerBoxPose`). Raises no SwiftUI pass.
+    func holdLivePose(_ held: LivePose?) {
+        livePose = held
         onHeldPictureMoved?()
     }
 
@@ -1914,13 +1976,13 @@ final class CanvasManager: ObservableObject {
     /// a save nobody asked for must never bake the fill, shape, text, selection edit or floating
     /// piece the artist is still adjusting, so it waits for them instead of committing them.
     ///
-    /// **A Move box between gestures is not among them** (`FloatingPiece.holdsUnsettledEdit`): every
+    /// **A Move box between gestures is not among them** (`floatingPieceHoldsUnsettledEdit`): every
     /// drag on it has already landed, so there is nothing to wait for. A box raised from the graph
     /// editor's channel list stays up through a whole keying session, and an autosave held for as long
     /// as it was up would leave that session's keys out of every saved version.
     var hasInteractiveStatePending: Bool {
         fillGestureActive || shapeGestureActive || textGestureActive || selectionEdit != nil
-            || gradientEdit != nil || floatingPiece?.holdsUnsettledEdit == true || vectorFloat != nil
+            || gradientEdit != nil || floatingPieceHoldsUnsettledEdit || vectorFloat != nil
     }
 
     /// **Lands every edit still in flight, and leaves a Move box between gestures up** — what a save
@@ -1932,7 +1994,7 @@ final class CanvasManager: ObservableObject {
         // as the one step it was going to be (TODO (42)) — the lifted-but-adjustable fill's rule. A
         // drag with nothing applied yet commits to nothing and records nothing.
         commitSelectionEdit()
-        if floatingPiece?.holdsUnsettledEdit == true { commitFloatingPieceIfNeeded() }
+        if floatingPieceHoldsUnsettledEdit { commitFloatingPieceIfNeeded() }
         // A lasso move's float joins the raster piece at the same chokepoint, and that one line is
         // what covers tool switch, panel switch, save and backgrounding. Missing one of those is how
         // a float gets stranded — suppressed artwork in the saved document, rendering nowhere.

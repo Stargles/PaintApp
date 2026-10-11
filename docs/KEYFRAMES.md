@@ -994,21 +994,23 @@ where the layer has a cel, and a Move raised outside its bar is refused with
 
 **Moving one is the Move box, with three things that are new.** `FloatingPieceKind.containerPose` is a
 piece that carries no pixels: a container holds no geometry, so the box is *the canvas frame*, which is
-the fallback `beginMove` already takes for a cel with no opaque pixels in it. **The preview is the real
-render path** — `showContainerPoseLive` writes the pose on every tick and the canvas composites through
-it — because §2.3's whole content is that the content beneath is re-posed rather than resampled, so a
-bitmap preview would be a picture of the wrong feature. And **the commit puts the preview back before it
-routes**, since `commitContainerPose` reads the stored pose to take its undo baseline from; without that
-line one press of Undo leaves the drawing exactly where the artist had just dragged it.
-`FloatingPiece.nudge` carries the whole `LayerPose` **the gesture** found — taken at the first tick of a
-drag and settled, as one undo step routed at the frame it was made on, when the finger lifts — which is
-also what lets a second Move compose onto the first instead of replacing it. **It is never held between
-gestures** (TODO (153)): the box stays up across scrubs, Add Keys and graph-editor edits, and a copy taken
-when the box was raised and put back when it went away overwrote all of them — a keyed transformation
-layer lost its keys from every saved version, because the autosave also waited on the box. **A drag
-still open when Undo or Redo is pressed is dropped, not settled** (`cancelBoxNudge`): a drag is not a
-step until the finger lifts, the press acts on the steps, and settling it first would make Undo take
-back the drag in the other hand and Redo find its stack cleared.
+the fallback `beginMove` already takes for a cel with no opaque pixels in it. **The preview is the pose
+itself, held off the document** (TODO (164)) — the canvas re-poses its bands from it per tick
+(`CanvasManager.livePose`, the graph-node drag's mechanism) — because §2.3's whole content is that the
+content beneath is re-posed rather than resampled, so a bitmap preview would be a picture of the wrong
+feature; it used to be written into the document on every tick, a SwiftUI pass per update. The held pose
+and the commit are one fold (`containerPoseMove`), so letting go changes nothing on screen.
+`CanvasManager.boxNudge` carries **the gesture** — the frame it was made on and the box's travel since
+it began, opened at the first tick of a drag and settled, as one undo step routed at that frame onto the
+pose the document holds there, when the finger lifts — which is also what lets a second Move compose onto
+the first instead of replacing it. **It is never held between gestures** (TODO (153)): the box stays up
+across scrubs, Add Keys and graph-editor edits, and a copy taken when the box was raised and put back
+when it went away overwrote all of them — a keyed transformation layer lost its keys from every saved
+version, because the autosave also waited on the box. Since nothing is written mid-gesture, nothing is
+put back, and the autosave never waits on this box at all. **A drag still open when Undo or Redo is
+pressed is dropped, not settled** (`cancelBoxNudge`): a drag is not a step until the finger lifts, the
+press acts on the steps, and settling it first would make Undo take back the drag in the other hand and
+Redo find its stack cleared.
 
 **Every arm of the writer writes the stored base, and that is the one real difference from a cel
 channel.** `commitTransformPose`'s `.key` arm *takes the bake back* because a cel has no stored base and
@@ -1509,10 +1511,12 @@ recorded"* for a drag they had just made. `CanvasManager.recordingOwnsMoveBox` i
 both rules now ask, and it was found by driving the feature.
 
 **The box comes down when the take has taken it**, and that is load-bearing rather than tidy: a take
-leaves the box's gesture open, that gesture's commit restores the pose it found before the take and
-writes one key at the playhead, and `showContainerPoseLive` composes onto that same pose on every tick — so a box left up would overwrite the recorded track at the
-next touch or the next tap-away. A take that wrote nothing leaves the box alone, because what the artist
-then has is the ordinary Move they were making.
+leaves the box's gesture open, and that gesture's commit would route the box's whole travel onto the
+recorded track as one more key at the next touch or the next tap-away. A take that wrote nothing leaves
+the box alone, because what the artist then has is the ordinary Move they were making, which lands when
+the take ends (or at the lift of a finger still on the box). **A finger lifted inside a take leaves the
+drag on the canvas** — the held pose and its bands stay up until the take ends, since the take outlives
+the finger (TODO (164)).
 
 **A touch beside the pen makes the drag a fifth as fast, and the take records the slowed path** (owner,
 2026-10-01, TODO (146): *"if the user presses a finger onto the canvas while moving the box with their

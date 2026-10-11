@@ -30,8 +30,8 @@ final class FloatingPieceOverlayView: TransformOverlayView, UIGestureRecognizerD
 
     /// **The finger that landed on the box has lifted, or its gesture was cancelled** — the end of
     /// the live transform edit `onBoxTouchDown` began (TODO (125)), which is what lets the baker
-    /// bake the result, and where a box that writes the document lands its drag
-    /// (`CanvasManager.settleBoxNudge`). Fired once per claimed touch sequence, from the pan that
+    /// bake the result, and where a box that poses or grades lands its drag
+    /// (`CanvasManager.moveBoxLifted`). Fired once per claimed touch sequence, from the pan that
     /// claimed it.
     var onBoxTouchUp: (() -> Void)?
 

@@ -53,6 +53,11 @@ final class LiveTransformEditUITests: PaintUITestCase {
     /// canvas keeps the compositor under the box — it used to leave it for the flat row and
     /// re-rasterize every posed drawing per tick — re-poses the bands on every update, and shows the
     /// mark where the box put it while the bake of the result is still compositing.
+    ///
+    /// **And it does so without a SwiftUI pass per update** — TODO (164): the box holds its pose off the
+    /// document until the lift (`CanvasManager.livePose`, the graph node's mechanism), so `passes:`
+    /// stands still but for the touch-down and the lift, where it used to rise by one for every update.
+    /// The lift is one undo step: one press of Undo puts the mark back where the drag found it.
     func testATransformLayersMoveIsDrawnUnderTheFingerOnEveryUpdate() throws {
         let app = XCUIApplication()
         app.launchArguments += ["-uiTestSlowBakeMillis", "\(Int(Self.bakeDelay * 1000))"]
@@ -72,15 +77,21 @@ final class LiveTransformEditUITests: PaintUITestCase {
         XCTAssertTrue(app.buttons["moveBar.doneButton"].waitForExistence(timeout: 5), "Move raised the box")
 
         let before = moves(app)
+        let passesBefore = passes(app)
         let lifted = paperRect(in: canvas)
         dragAcross(canvas, from: onHost(lifted, 0.5, 0.5), paperDX: 0.2, paper: lifted)
         let followed = moves(app) - before
+        let raised = passes(app) - passesBefore
         let state = sandwichState(app)
         let probe = try inkProbe(canvas)
         attachScreenshot(canvas, "after-the-drag-before-its-bake")
-        XCTContext.runActivity(named: "the picture followed \(followed) updates; canvas \(state)") { _ in }
+        XCTContext.runActivity(named: "the picture followed \(followed) updates over \(raised) passes; "
+                               + "canvas \(state)") { _ in }
         XCTAssertGreaterThan(followed, 10, "the picture should have followed the finger through the "
                              + "drag, update by update, not once at the end")
+        XCTAssertLessThanOrEqual(raised, 4, "the drag raised \(raised) SwiftUI passes for \(followed) updates — "
+                                 + "a tick that publishes the document is a pass over the whole editor; only "
+                                 + "the touch-down and the lift may raise one")
         XCTAssertTrue(["moving", "live"].contains(state),
                       "the drag's own bands, or the pair minted for its result — the bake was held "
                       + "for \(Self.bakeDelay) s and cannot be what is on screen (canvas: \(state))")
@@ -94,6 +105,21 @@ final class LiveTransformEditUITests: PaintUITestCase {
                                                                width: lifted.width, height: lifted.height * 0.2))
         XCTAssertGreaterThan(inkColumnCount(settled, lifted, row: 0.6, span: 0.41...0.49), 50,
                              "and the bake agrees with what the drag showed")
+
+        app.buttons["sideToolbar.undoButton"].tap()
+        // Read off the pixels until they settle back, since the canvas shows the undone drag through
+        // its live pair and then its bake, and a state read could catch the last bake before either.
+        var back = 0
+        let deadline = Date().addingTimeInterval(40)
+        while Date() < deadline, back <= 50 {
+            back = inkColumnCount(try inkProbe(canvas), lifted, row: 0.6, span: 0.21...0.29)
+            if back <= 50 { Thread.sleep(forTimeInterval: 0.5) }
+        }
+        attachScreenshot(canvas, "after-one-undo")
+        XCTAssertGreaterThan(back, 50, "one press of Undo puts the mark back where the drag found it")
+        XCTAssertEqual(inkColumnCount(try inkProbe(canvas), lifted, row: 0.6, span: 0.41...0.49), 0,
+                       "…the whole drag, not part of it")
+        XCTAssertTrue(app.buttons["moveBar.doneButton"].exists, "…with the box still up")
     }
 
     // MARK: - (136) A folder's Move

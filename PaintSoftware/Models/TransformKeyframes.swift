@@ -767,7 +767,25 @@ extension CanvasManager {
     @discardableResult
     func commitContainerPose(_ target: KeyframeTarget, restingAt restPose: PoseQuad, movedTo posed: PoseQuad,
                              atFrame frame: Int) -> KeyframeControl.Write {
-        guard let before = containerPose(of: target) else { return .storedValue }
+        guard let move = containerPoseMove(target, restingAt: restPose, movedTo: posed, atFrame: frame)
+        else { return .storedValue }
+        guard move.after != move.before else { return move.route }
+        writeContainerPose(move.after, from: move.before, target: target, label: .effectKeys)
+        return move.route
+    }
+
+    /// **What one Move on a transformation layer makes of its pose** — the arm `commitContainerPose`
+    /// takes and the `LayerPose` before and after it — or nil for a target that poses nothing. Reads
+    /// the document, writes nothing.
+    ///
+    /// **The one fold, for two readers that must agree** (TODO (164)): the commit above, and the Move
+    /// box's pose held under the finger (`holdContainerBoxPose`), which the canvas shows while the
+    /// finger is down and the lift then commits through the write — so the picture under the finger
+    /// and the document after it cannot differ. `poseDelta(replacing:of:)` is the graph-node drag's.
+    func containerPoseMove(_ target: KeyframeTarget, restingAt restPose: PoseQuad, movedTo posed: PoseQuad,
+                           atFrame frame: Int)
+        -> (route: KeyframeControl.Write, before: LayerPose, after: LayerPose)? {
+        guard let before = containerPose(of: target) else { return nil }
         let route = containerPoseWrite(target, atFrame: frame)
 
         var after = before
@@ -797,10 +815,7 @@ extension CanvasManager {
                             placed: placedKeys(of: target))
             after.baseline = nil
         }
-
-        guard after != before else { return route }
-        writeContainerPose(after, from: before, target: target, label: .effectKeys)
-        return route
+        return (route, before, after)
     }
 
     /// **The one funnel every container-pose write goes through**, marks pruned and one undo step
@@ -846,13 +861,7 @@ extension CanvasManager {
     /// **The raw field is written and the accessor is read**: nil is a real value here, so a restore
     /// has to be able to write it, while a pose left inert by a kind change must not be treated as one
     /// this path may put back into force.
-    ///
-    /// **Not `private`: `CanvasManager+Recording.swift` restores a take's base pose through it**
-    /// (KEYFRAMES.md §5's Move box surface), for the same reason `commitContainerNudge` writes the
-    /// field directly — putting a *preview* back is not an edit and must stay off the history. That is
-    /// `targetExists`' precedent one file over, and the alternative was a second spelling of this
-    /// `switch` in the recorder, which is how two writers drift apart.
-    func applyContainerPose(_ pose: LayerPose?, target: KeyframeTarget, marks: [Int]? = nil) {
+    private func applyContainerPose(_ pose: LayerPose?, target: KeyframeTarget, marks: [Int]? = nil) {
         guard case .layer(let id) = target,
               let index = layers.firstIndex(where: { $0.id == id }) else { return }
         if layers[index].transform != pose { layers[index].transform = pose }

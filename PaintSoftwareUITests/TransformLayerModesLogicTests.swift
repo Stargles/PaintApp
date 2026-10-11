@@ -382,9 +382,9 @@ final class TransformLayerModesLogicTests: XCTestCase {
                        "…and the render at A is what it was before the edit")
     }
 
-    /// **The box drag moves each item live**: the preview writes the pose the render reads
-    /// (`showContainerPoseLive`), so with the box lifted and carried 40 pt the four items are at
-    /// 40/30/20/10 before anything is committed.
+    /// **The box drag moves each item live**: the drag holds the pose the canvas walks
+    /// (`holdContainerBoxPose`, TODO (164)), so with the box lifted and carried 40 pt the four items are
+    /// at 40/30/20/10 under the finger before anything is committed — and the document holds none of it.
     func testTheBoxDragMovesEachItemByItsShareBeforeTheCommit() throws {
         let fx = fourDrawings(mover: pose(.identity, mode: .parallax))
         fx.manager.currentLayerIndex = fx.mover
@@ -392,16 +392,18 @@ final class TransformLayerModesLogicTests: XCTestCase {
         var carried = try XCTUnwrap(fx.manager.floatingPiece).transform
         carried.position.x += 40
         // The overlay's tick: `updateFloatingPose` is what every drag of the box ends in, and its
-        // tail is the preview's write of the pose into the document.
+        // tail is the pose held under the finger.
         fx.manager.updateFloatingPose(transform: carried, distortQuad: nil)
-        let poses = fx.manager.layerPoses(atFrame: 0)
+        let poses = fx.manager.renderTreeAndPoses(atFrame: 0, holding: fx.manager.livePose).poses
+        XCTAssertEqual(fx.manager.layerPoses(atFrame: 0)[fx.a]?.affine?.tx ?? 0, 0, accuracy: 1e-9,
+                       "the document still rests until the lift")
 
         XCTAssertEqual(poses[fx.a]?.affine?.tx ?? 0, 40, accuracy: 1e-6)
         XCTAssertEqual(poses[fx.b]?.affine?.tx ?? 0, 30, accuracy: 1e-6)
         XCTAssertEqual(poses[fx.c]?.affine?.tx ?? 0, 20, accuracy: 1e-6)
         XCTAssertEqual(poses[fx.d]?.affine?.tx ?? 0, 10, accuracy: 1e-6, "the back item follows at a quarter, live")
-        XCTAssertEqual(fx.manager.layers[fx.mover].transform?.mode, .parallax,
-                       "the preview's write of the pose did not lose the mode")
+        XCTAssertEqual(fx.manager.livePose?.containerPose(ofLayer: fx.manager.layers[fx.mover].id)?.mode,
+                       .parallax, "the held pose did not lose the mode")
     }
 
     // MARK: - The picker's model half

@@ -2747,7 +2747,9 @@ struct CanvasView: UIViewRepresentable {
             // `.update(...)`: `handleTapOutside` can fire from the touch that this very pass is
             // reacting to, so the flag has to be current before the recognizer might ask for it.
             floatingOverlay?.pencilOnlyDrawing = canvasManager.pencilOnlyDrawing
-            floatingOverlay?.update(canvasManager.floatingPiece,
+            // The piece as its box shows it: a pass that lands mid-drag draws the box under the finger,
+            // whose travel the piece learns only at the lift (`CanvasManager.boxNudge`).
+            floatingOverlay?.update(canvasManager.shownFloatingPiece,
                                     isInteractive: canvasTouchInputs().floatingOverlayIsInteractive)
             guard let overlay = floatingOverlay, let container = containerView else { return }
 
@@ -4210,15 +4212,9 @@ struct CanvasView: UIViewRepresentable {
         /// **A touch landed on a Move box** — the vector float's (`ObjectTransformOverlayView`) or
         /// the raster piece's (`FloatingPieceOverlayView`), a grip, the knob or the body alike.
         ///
-        /// A touch on the box is a touch on the canvas, so it does what every other canvas touch
-        /// does first: `canvasInteractionBegan`, with `mayContinueTake` true because the box is
-        /// KEYFRAMES.md §5's second recordable surface, exactly as `strokeRecognizer.onSingleTouchBegan`
-        /// passes true for §7's — the touch that continues a take must not be the one that stops it.
-        /// Then the take itself, `beginMoveBoxTake`, which may start one — after the canvas-touch
-        /// rule for the reason `StrokeCanvasView.handleBegin` orders its own take after it: what the
-        /// rule closes may record an undo step on the way out, and that step has to land before the
-        /// take's bracket opens. The overlay calls this before its drag's latch and bracket
-        /// (`ObjectTransformOverlayView.touchesBegan`), which keeps the take's the outer one.
+        /// A touch on the box is a touch on the canvas, the take's surface and the live edit's start, in
+        /// that order — `CanvasManager.moveBoxTouched`. The overlay calls this before its drag's latch
+        /// and bracket (`ObjectTransformOverlayView.touchesBegan`), which keeps the take's the outer one.
         ///
         /// **This used to happen by accident, at the wrong end.** The box's chrome reached
         /// `moveBoxCommitRecognizer` as a tap, and `handleMoveBoxCommit` ran `canvasInteractionBegan`
@@ -4230,19 +4226,13 @@ struct CanvasView: UIViewRepresentable {
         /// `MoveBoxCommitUITests.testDraggingAGripClosesAnOpenTopBarDropdown` pins it, at touch-down
         /// like every other canvas touch.
         func moveBoxTouchDown() {
-            canvasManager.canvasInteractionBegan(mayContinueTake: true, mayBeATransform: true)
-            canvasManager.beginMoveBoxTake()
-            // After the take, so its bracket is the outer one (§5.1); the edit is what puts the drag
-            // on the live bands and holds the baker until the finger lifts (TODO (125)).
-            if let edit = canvasManager.moveBoxEdit { canvasManager.beginLiveTransformEdit(edit) }
+            canvasManager.moveBoxTouched()
         }
 
-        /// The finger on the Move box lifted — both overlays' `onBoxTouchUp`. A transformation layer's
-        /// or a Duplicate Offset's box lands the drag here, as one undo step, and stays up holding
-        /// nothing (`settleBoxNudge`); the end of the live edit then lets the baker bake it.
+        /// The finger on the Move box lifted — both overlays' `onBoxTouchUp`; `CanvasManager.moveBoxLifted`
+        /// lands the drag and ends the live edit.
         func moveBoxTouchUp() {
-            canvasManager.settleBoxNudge()
-            canvasManager.endLiveTransformEdit()
+            canvasManager.moveBoxLifted()
         }
 
         /// **Whether the Move box's tap-away is offered this touch at all — decided where the touch

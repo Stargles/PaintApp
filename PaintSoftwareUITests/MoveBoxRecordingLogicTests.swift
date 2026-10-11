@@ -11,14 +11,13 @@ import UIKit
 /// the hand moved. What is here is the joins, which is where the surface-specific hazards are. Four of
 /// them, ordered by how expensive each is to discover later:
 ///
-/// 1. **The box is a preview that writes the document on every tick**, so the take's base is a scratch
-///    pad in a way a slider's is too — but the restore lives in a third store (`LayerPose`), reached by
-///    neither `setStoredEffect` nor `setStoredValue`.
+/// 1. **The box's preview is a pose the take does not record into the base.** It is held off the
+///    document (`livePose`, TODO (164)), and the take writes the motion once, as a curve on the pose it
+///    found (`LayerPose`, a third store reached by neither `setStoredEffect` nor `setStoredValue`).
 /// 2. **A take starts playback, and a moving playhead commits a floating piece.** Unfixed, the first cel
 ///    boundary the take crossed would settle the box mid-drag and write one key at that frame.
 /// 3. **A box left up after a take destroys it.** The take leaves the box's gesture open, and that
-///    gesture's commit restores the pose it found and writes one key; `showContainerPoseLive` composes
-///    onto that same pose on every tick. Either would overwrite the recorded track.
+///    gesture's commit would route the box's whole travel onto the recorded track as one more key.
 /// 4. **Two of the three Move boxes pose nothing a take can write**, and they look identical to the one
 ///    that does.
 ///
@@ -229,10 +228,8 @@ final class MoveBoxRecordingLogicTests: XCTestCase {
     /// **The stored base is put back and the motion is on the curve** — the scratch-pad rule, and the
     /// one assertion that would be green if the restore were deleted *and* nothing else were checked.
     ///
-    /// `showContainerPoseLive` has been writing the stored pose on every tick so the artist can see the
-    /// box move. If the take kept that, the move would apply twice — once from the base and once from
-    /// the curve — which is `commitContainerNudge`'s own recorded reason for making the identical
-    /// restore on an unrecorded Move.
+    /// The box shows the drag on every tick so the artist can see it move. If the take kept that in the
+    /// base, the move would apply twice — once from the base and once from the curve.
     ///
     /// Operands: the stored base after the take, and the resting pose the document started with, bit
     /// for bit.
@@ -389,6 +386,79 @@ final class MoveBoxRecordingLogicTests: XCTestCase {
                        "PREMISE: a raster Move box is up now instead")
         XCTAssertFalse(manager.recordingOwnsMoveBox,
                        "…and it does not inherit the exception: the take is not recording it")
+    }
+
+    // MARK: - The picture a take shows — TODO (164)
+
+    /// **A finger lifted inside a take leaves the drag on the canvas until the take ends** — the box's
+    /// pose is held off the document (`livePose`), and the take outlives the finger, so the held pose
+    /// and the bands showing it stay up for the rest of the take; let go at the lift, the drawing would
+    /// jump back to where the take found it until the take wrote its curve. The take's end lets both go.
+    ///
+    /// Operands: the live edit, the held pose and the document after the lift and after the take's end,
+    /// with a negative control — the same lift with nothing recording ends the edit at once.
+    func testAFingerLiftedInsideATakeKeepsTheDragOnTheCanvasUntilTheTakeEnds() throws {
+        let (manager, clock) = movingDocument()
+        let stored = manager.layers[moverIndex].transform
+        manager.armRecording()
+        XCTAssertTrue(manager.beginContainerPoseMove())
+        manager.moveBoxTouched()
+        XCTAssertTrue(manager.isRecording, "PREMISE: the landing started the take")
+        for i in 1...24 {
+            dragBox(manager, clock, to: CGVector(dx: CGFloat(i), dy: 0), at: 1_000 + TimeInterval(i) / 24)
+        }
+        manager.moveBoxLifted()
+
+        XCTAssertNotNil(manager.liveTransformEdit, "the bands stay up for the rest of the take")
+        XCTAssertNotNil(manager.livePose, "showing the drawing where the finger left it")
+        XCTAssertEqual(manager.layers[moverIndex].transform, stored,
+                       "which the document does not hold — the take writes it once, as its curve")
+
+        XCTAssertNil(manager.stopRecording(), "PREMISE: the take wrote its curve")
+        XCTAssertNil(manager.floatingPiece, "the take took its content…")
+        XCTAssertNil(manager.livePose, "…and let go of the held pose")
+        XCTAssertNil(manager.liveTransformEdit, "…and of the canvas, so the result can bake")
+
+        let (idle, idleClock) = movingDocument()
+        XCTAssertTrue(idle.beginContainerPoseMove())
+        idle.moveBoxTouched()
+        dragBox(idle, idleClock, to: CGVector(dx: 8, dy: 0), at: 1_000.1)
+        idle.moveBoxLifted()
+        XCTAssertNil(idle.liveTransformEdit, "NEGATIVE CONTROL: with nothing recording the lift ends the edit")
+        XCTAssertNil(idle.livePose)
+    }
+
+    /// **A take that recorded nothing lands the Move the artist made when it ends** — with the finger
+    /// already off the box; with it still on, at its lift. Operands: the stored base and the history
+    /// after each.
+    func testATakeThatRecordedNothingLandsTheMoveAtItsEndOrAtTheLift() throws {
+        let (manager, clock) = movingDocument()
+        manager.armRecording()
+        XCTAssertTrue(manager.beginContainerPoseMove())
+        manager.moveBoxTouched()
+        dragBox(manager, clock, to: CGVector(dx: 9, dy: 0), at: 1_000.002)
+        manager.moveBoxLifted()
+        let steps = manager.history.undoStack.count
+        XCTAssertEqual(manager.stopRecording(), .tooShort, "PREMISE: the take was refused")
+        let base = try XCTUnwrap(PoseComponents.decompose(
+            try XCTUnwrap(manager.layers[moverIndex].layerTransform).pose, inBox: canvasBox))
+        XCTAssertEqual(base.x, Double(canvasCentre.x) + 9, accuracy: 1e-6, "the ordinary Move landed")
+        XCTAssertEqual(manager.history.undoStack.count, steps + 1, "…as one step")
+        XCTAssertNil(manager.liveTransformEdit, "…and the canvas is let go")
+
+        let (held, heldClock) = movingDocument()
+        held.armRecording()
+        XCTAssertTrue(held.beginContainerPoseMove())
+        held.moveBoxTouched()
+        dragBox(held, heldClock, to: CGVector(dx: 9, dy: 0), at: 1_000.002)
+        XCTAssertEqual(held.stopRecording(), .tooShort)
+        XCTAssertNotNil(held.liveTransformEdit, "a finger still on the box keeps its drag")
+        XCTAssertNotNil(held.boxNudge)
+        held.moveBoxLifted()
+        let heldBase = try XCTUnwrap(PoseComponents.decompose(
+            try XCTUnwrap(held.layers[moverIndex].layerTransform).pose, inBox: canvasBox))
+        XCTAssertEqual(heldBase.x, Double(canvasCentre.x) + 9, accuracy: 1e-6, "which lands at its lift")
+        XCTAssertNil(held.liveTransformEdit)
     }
 
     // MARK: - The refusals

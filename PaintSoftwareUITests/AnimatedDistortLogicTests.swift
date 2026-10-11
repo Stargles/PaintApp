@@ -397,9 +397,9 @@ final class AnimatedDistortLogicTests: XCTestCase {
                         "A float carrying a placed image is still refused, and by kind")
     }
 
-    /// **A container Distort reaches the stored pose.** The drag writes `distortQuad`; the preview
-    /// and the commit both go through `CanvasManager.containerPose(_:movedBy:)`, which took the
-    /// *affine* delta and silently dropped the residue until this stage.
+    /// **A container Distort reaches the stored pose.** The drag carries `distortQuad`; the pose held
+    /// under the finger and the commit both go through `CanvasManager.containerPose(_:movedBy:in:)`,
+    /// which took the *affine* delta and silently dropped the residue until this stage.
     ///
     /// The second assertion is what a reader can check: the pose's own top edge is where the artist
     /// pulled the box's top edge to, and a foreshortening that had been flattened would leave it a
@@ -420,15 +420,16 @@ final class AnimatedDistortLogicTests: XCTestCase {
                           CGPoint(x: local.minX, y: local.maxY))
         manager.updateFloatingPose(transform: piece.transform, distortQuad: pulled)
 
-        let posed = try XCTUnwrap(manager.layers[at].layerTransform?.pose)
+        let posed = try XCTUnwrap(manager.livePose?.containerPose(ofLayer: manager.layers[at].id)?.pose,
+                                  "the drag holds the keystone under the finger")
         XCTAssertNil(posed.affine, "The stored container pose is a keystone")
         XCTAssertEqual(posed.map?.isProjective, true)
         let width = posed.corners.p1.x - posed.corners.p0.x
         XCTAssertEqual(width, local.width / 2, accuracy: 0.5,
                        "The pose's top edge is half the box wide, which is where the corner went")
         XCTAssertTrue(manager.commitFloatingPieceIfNeeded())
-        XCTAssertNil(try XCTUnwrap(manager.layers[at].layerTransform).pose.affine,
-                     "…and the commit keeps it rather than flattening on the way out")
+        XCTAssertEqual(try XCTUnwrap(manager.layers[at].layerTransform).pose, posed,
+                       "…and the commit stores exactly it rather than flattening on the way out")
     }
 
     /// **A plain drag at a keystoned in-between is conjugated through the keystone**, which is the

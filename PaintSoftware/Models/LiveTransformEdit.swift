@@ -28,9 +28,9 @@ import Foundation
 /// the brush already uses, as the owner suggested. A floating piece needs no bands: its picture is
 /// already its own.
 ///
-/// **A graph-node drag holds its pose off the document** (`LivePose`, TODO (154)): the bands are
-/// re-posed from the pose under the finger, the band draws its curves, and the lift writes them once.
-/// The box still writes the document on every tick (`BoxNudge`).
+/// **A pose under the finger is held off the document** (`LivePose`, TODO (154), (164)) — a graph
+/// node's and the Move box's alike: the bands are re-posed from it, the graph band draws its curves,
+/// and the lift writes the document once, as one undo step.
 ///
 /// **And the baker holds off** (`FrameBaker.isSuspended`, the stroke's own seam) until the finger
 /// lifts — the owner's *"pause the background renderer until the user raises their pen off the move
@@ -54,17 +54,21 @@ enum LiveTransformEdit: Equatable {
     var movesBands: Bool { self != .floatingPiece }
 }
 
-/// **A pose held under the finger and not yet in the document** — `CanvasManager.livePose`, TODO (154).
+/// **A pose held under the finger and not yet in the document** — `CanvasManager.livePose`, TODO (154),
+/// (164).
 ///
-/// A graph-band drag of a pose node used to write its curves into the document on every tick, and
-/// each write was a SwiftUI pass over the whole editor. It holds them here instead: the walk shows
-/// the layer through `pose` (`renderTreeAndPoses(atFrame:excluding:holding:)`, `inkPose`), the band
-/// draws `curves`, and the lift writes `curves` through the funnel that folded `pose` from them
-/// (`CanvasManager.poseDelta(replacing:of:)`) — one source for the value under the finger, read three ways.
+/// A graph-band drag of a pose node and a drag of a transformation layer's Move box each used to write
+/// the document on every tick, and each write was a SwiftUI pass over the whole editor. They hold the
+/// pose here instead: the walk shows the layer through `pose`
+/// (`renderTreeAndPoses(atFrame:excluding:holding:)`, `inkPose`), the band draws `curves`, and the lift
+/// writes through the fold that made `pose` — `CanvasManager.poseDelta(replacing:of:)` for a node's
+/// curves, `containerPoseMove` for the box's travel — one source for the value under the finger, read
+/// three ways.
 struct LivePose {
-    /// The layer whose pose the curves replace.
+    /// The layer whose pose is held.
     let layerID: UUID
-    /// Whole-curve replacements, by pose parameter id — what the band draws and the lift writes.
+    /// The held pose's curves, by pose parameter id — what the band draws. A graph drag's are its
+    /// whole-curve replacements, which its lift writes (`CanvasManager.commitLivePose`).
     let curves: [String: AnimationCurve]
     /// The pose those curves make, folded once when they were held.
     let pose: CanvasManager.KeyframePoseDelta
@@ -78,6 +82,18 @@ struct LivePose {
     /// One cel's pose tracks as the finger holds them, or nil where the drag leaves the cel alone.
     func transformTracks(ofCel id: UUID) -> [String: TransformTrack]? {
         pose.cels[id]?.tracks
+    }
+}
+
+extension LivePose {
+    /// **A transformation layer's own pose held whole** — the Move box's (`holdContainerBoxPose`). The
+    /// band draws its track's curves.
+    init(layerID: UUID, holding container: LayerPose) {
+        self.init(layerID: layerID,
+                  curves: Dictionary(uniqueKeysWithValues: container.track.curves.map {
+                      (PoseChannelID.container.parameterID($0.key), $0.value)
+                  }),
+                  pose: CanvasManager.KeyframePoseDelta(container: container))
     }
 }
 

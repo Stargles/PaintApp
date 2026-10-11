@@ -15,8 +15,9 @@ import CoreGraphics
 /// scrubs, Add Keys and graph-editor edits, all of which write that layer — so every one of them was
 /// overwritten when the box went away, which a bake (or leaving the editor, or any tool switch) makes it
 /// do. And the autosave waited on the box the whole time it was up, so no save — and so no version —
-/// ever held what was overwritten. The fix is `BoxNudge`: the box copies the layer for one gesture and
-/// lands that gesture when the finger lifts, and between gestures it holds nothing.
+/// ever held what was overwritten. The fix is `BoxNudge`: the box opens a gesture when the finger lands
+/// and lands it when the finger lifts, and between gestures it holds nothing. Since TODO (164) a
+/// gesture holds its pose off the document (`livePose`), so it holds no copy of the layer at all.
 ///
 /// **A file whose track this build cannot read is a file it cannot read**, said so and never read as a
 /// track with no keys — the last section. The library repair that rewrites older files is
@@ -280,8 +281,10 @@ final class TransformKeysSurviveLogicTests: XCTestCase {
         manager.currentFrame = 8
         XCTAssertTrue(manager.beginContainerPoseMove())
         drag(manager, by: CGVector(dx: 10, dy: 0))
-        let atEight = try XCTUnwrap(scene.layer(scene.keyed).transform).resolvedValues(atFrame: 8).x
-        let atTwo = try XCTUnwrap(scene.layer(scene.keyed).transform).resolvedValues(atFrame: 2).x
+        let held = try XCTUnwrap(manager.livePose?.containerPose(ofLayer: scene.keyed),
+                                 "the drag holds its pose under the finger")
+        let atEight = held.resolvedValues(atFrame: 8).x
+        let atTwo = held.resolvedValues(atFrame: 2).x
 
         manager.currentFrame = 2
         manager.commitAllInteractiveState()
@@ -340,6 +343,7 @@ final class TransformKeysSurviveLogicTests: XCTestCase {
         drag(manager, by: CGVector(dx: 20, dy: 9))                  // C, finger down
         manager.undo()                                              // the other hand
         XCTAssertEqual(manager.layers[1].transform, afterA, "Undo took back B, and the drag in the other hand is not in the document")
+        XCTAssertNil(manager.livePose, "…nor on the canvas: the pose it held went with it")
         manager.settleBoxNudge()                                    // C lifts
         XCTAssertEqual(manager.layers[1].transform, afterA, "…and its lift writes nothing over the undone step")
 
@@ -357,10 +361,10 @@ final class TransformKeysSurviveLogicTests: XCTestCase {
         XCTAssertEqual(carried.x, a.x, accuracy: 1e-9, "…and nothing sideways, the box not having moved that way")
     }
 
-    /// **A scrub made while a drag is open writes no preview at the frame it reached** — the drag
-    /// previews where it will land, the frame it was made on, and settles to what it would have been
-    /// with no scrub.
-    func testAScrubWhileADragIsOpenWritesNoPreviewAtTheFrameItReached() throws {
+    /// **A scrub made while a drag is open shows no key at the frame it reached** — the drag previews
+    /// where it will land, the frame it was made on, and settles to what it would have been with no
+    /// scrub.
+    func testAScrubWhileADragIsOpenShowsNoKeyAtTheFrameItReached() throws {
         func drag2(_ scrub: Bool) throws -> (live: [Int], settled: LayerPose?) {
             let scene = ownersScene()
             let manager = scene.manager
@@ -370,7 +374,7 @@ final class TransformKeysSurviveLogicTests: XCTestCase {
             drag(manager, by: CGVector(dx: 1, dy: 2))
             if scrub { manager.currentFrame = 6 }
             drag(manager, by: CGVector(dx: 3, dy: 7))
-            let live = scene.layer(scene.keyed).transform?.track.keyedFrames ?? []
+            let live = manager.livePose?.containerPose(ofLayer: scene.keyed)?.track.keyedFrames ?? []
             manager.settleBoxNudge()
             XCTAssertTrue(manager.commitFloatingPieceIfNeeded())
             return (live, scene.layer(scene.keyed).transform)
@@ -382,26 +386,54 @@ final class TransformKeysSurviveLogicTests: XCTestCase {
         XCTAssertEqual(scrubbed.settled, still.settled, "…and the drag lands as if there had been none")
     }
 
-    /// **A box between gestures does not hold the autosave, and a save leaves it up** — it holds nothing
-    /// the document lacks. A box in the middle of a drag still holds the save off, because what the
-    /// preview wrote is not yet an edit.
-    func testABoxBetweenGesturesDoesNotHoldTheAutosaveAndASaveLeavesItUp() {
+    /// **A transformation layer's box never holds the autosave, and a save leaves it — and a drag on
+    /// it — up.** Between gestures it holds nothing the document lacks; in the middle of a drag it holds
+    /// its pose off the document (TODO (164)), so a save writes the document as it was before the drag
+    /// and the drag lands at its own lift.
+    func testATransformBoxNeverHoldsTheAutosaveAndASaveLeavesItAndItsDragUp() {
         let manager = CanvasFixture.manager(layerCount: 0)
         manager.addVectorLayer(name: "Ink")
         manager.addTransformLayer(name: "Move")
         manager.currentLayerIndex = 1
         XCTAssertTrue(manager.beginContainerPoseMove())
         XCTAssertFalse(manager.hasInteractiveStatePending, "A box nobody has dragged holds nothing")
+        let before = manager.layers[1].transform
 
         drag(manager, by: CGVector(dx: 10, dy: 0))
-        XCTAssertTrue(manager.hasInteractiveStatePending, "Mid-drag, the save waits")
+        XCTAssertFalse(manager.hasInteractiveStatePending, "Mid-drag, the save need not wait…")
+        manager.settleInteractiveState()
+        XCTAssertEqual(manager.layers[1].transform, before, "…because it writes none of the drag")
+        XCTAssertNotNil(manager.boxNudge, "and the drag is still in the artist's hand")
         manager.settleBoxNudge()
-        XCTAssertFalse(manager.hasInteractiveStatePending, "Let go, it does not")
+        XCTAssertNotEqual(manager.layers[1].transform, before, "It lands at the lift")
+        XCTAssertFalse(manager.hasInteractiveStatePending, "Let go, nothing is pending")
 
         manager.settleInteractiveState()
         XCTAssertNotNil(manager.floatingPiece, "A save does not take the box away from the artist")
         manager.commitAllInteractiveState()
         XCTAssertNil(manager.floatingPiece, "A tool switch does")
+    }
+
+    /// **An effect box in the middle of a drag does hold the autosave** — its grade preview is written
+    /// (`BoxNudge.foundGrade`), and is not yet an edit — and lets it go at the lift, which lands the
+    /// drag as one step and leaves the box up.
+    func testAnEffectBoxMidDragHoldsTheAutosaveUntilItsLift() throws {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.addValueLayer(effect: .duplicateOffset(Effect.DuplicateOffset(offsetX: 6)))
+        let index = manager.layers.count - 1
+        manager.currentLayerIndex = index
+        XCTAssertTrue(manager.beginEffectBoxMove(for: .layer(id: manager.layers[index].id)))
+        XCTAssertFalse(manager.hasInteractiveStatePending, "A box nobody has dragged holds nothing")
+        let steps = manager.history.undoStack.count
+
+        var box = try XCTUnwrap(manager.floatingPiece).transform
+        box.position.x += 10
+        manager.updateFloatingPose(transform: box, distortQuad: nil)
+        XCTAssertTrue(manager.hasInteractiveStatePending, "Mid-drag, the save waits for the written preview")
+        manager.settleBoxNudge()
+        XCTAssertFalse(manager.hasInteractiveStatePending, "Let go, it does not")
+        XCTAssertEqual(manager.history.undoStack.count, steps + 1, "…and the drag is one step")
+        XCTAssertNotNil(manager.floatingPiece, "…with the box still up")
     }
 
     /// **The Duplicate Offset's box has the same cause and the same cure**: a key placed on the grade

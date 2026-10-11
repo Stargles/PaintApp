@@ -1192,8 +1192,8 @@ struct TimelineTrackView: UIViewRepresentable {
             // undo step, or none for a drag that came back to where it began — committed before the
             // edit ends, so the bake the end releases is of the result. A cancel has nothing to put
             // back but the band, which was drawing the held curves. Only a drag that began one:
-            // `layoutGraphBand` reaches here on every timeline layout while the band is shut, which is
-            // every tick of a Move-box drag, and that edit is not this drag's to end.
+            // `layoutGraphBand` reaches here on every timeline layout while the band is shut, which a
+            // Move-box drag's touch-down raises, and that edit is not this drag's to end.
             if drag.beganLiveEdit {
                 if !cancelled { canvasManager.commitLivePose() }
                 canvasManager.endLiveTransformEdit()
