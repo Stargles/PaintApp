@@ -1008,7 +1008,7 @@ final class GraphEditorGestureUITests: PaintUITestCase {
 /// each test here spends its ~45 s on authoring a curve (`authorAnAnimatedBrightnessCurve`) rather than
 /// on the gesture. Everything the lock *decides* is `AxisLockLogicTests` and
 /// `TimelineGraphBandLogicTests`; what only this tier sees is that a second touch reaches it wherever it
-/// lands, and that one landing on the band does not cancel the drag it qualifies.
+/// lands — the toolbar, or the band itself — and that the drag keeps the dragging finger's whole travel.
 ///
 /// **What cannot be driven, and is said so:** the pen. XCUITest synthesises fingers only, so a finger
 /// stands in for the dragging pen; the lock counts any touch.
@@ -1041,9 +1041,9 @@ final class GraphEditorFingerUITests: PaintUITestCase {
     ///    happened to be straight.
     /// 2. **Held to time, by a finger resting in the toolbar** — nowhere near the timeline. It lands
     ///    before the drag moves, so the axis is read from the way the drag first goes.
-    /// 3. **Held to value, by a finger resting on the band itself**, landing in the middle of the drag.
-    ///    This is the one that would cancel the drag if the band's recogniser were offered the second
-    ///    touch.
+    /// 3. **Held to value, by a finger resting on the band itself**, landing in the middle of the drag
+    ///    and so landing on the view the band's own recogniser is attached to. The key must still be
+    ///    carried by the dragging finger's whole travel.
     func testASecondFingerHeldBesideAKeyDragKeepsItToOneAxis() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
@@ -1111,8 +1111,7 @@ final class GraphEditorFingerUITests: PaintUITestCase {
             atY: TimelineGraphBand.y(ofValue: authored.end, in: 0...2, bandHeight: height) + 50 * towardsMiddle,
             in: 0...2, bandHeight: height)
         XCTAssertEqual(heldValue, expected, accuracy: 0.05,
-                       "…and its value followed the finger the whole way, the resting finger on the band "
-                       + "having neither cancelled the drag nor dragged its centre")
+                       "…and its value followed the dragging finger the whole way, not the pair's centre")
         undo()
     }
 }

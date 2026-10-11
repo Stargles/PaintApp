@@ -1596,8 +1596,10 @@ extension TimelineTrackView.Coordinator: UIGestureRecognizerDelegate {
     /// **Whether the graph band's recogniser is offered a touch** — TODO (166). The touch it is offered
     /// is remembered, so the drag's touch-count baseline can include it before the window's counter
     /// has heard of it; and **while one is tracked, no other is offered**. A second finger is a hold
-    /// (`AxisLock`), and it must be that wherever it lands: offered to the drag's long press
-    /// (`numberOfTouchesRequired` is one) it would cancel the drag.
+    /// (`AxisLock`), wherever it lands, and the recogniser carries one touch's drag: offered the
+    /// second, it could hand the drag to it when the first lifts, and `endGraphBandDrag` records a
+    /// second touch cancelling it outright. A finger landing on the band was not seen to do either in
+    /// the simulator — this is the guard, not a fix for a reproduced defect.
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
         guard gestureRecognizer === graphBandView.panRecognizer else { return true }
         if let tracked = graphBandTouch, tracked.phase != .ended, tracked.phase != .cancelled {

@@ -2265,8 +2265,7 @@ would swing the key between time and value on every wobble. Lifting frees the dr
 the finger; pressing again reads the way the drag is going by then. It applies to **handles as well as
 nodes** (a handle held to time keeps its value offset, one held to value keeps its frame offset) and not
 to the marquee, which held to an axis is a line. The second finger is never offered to the band's
-recogniser — a long press with `numberOfTouchesRequired = 1` cancels the drag when a second touch
-joins it.
+recogniser, which carries one touch's drag: a lift of the first must not hand the drag to the second.
 
 **Three decisions the stage had to make, none of which the brief settled.**
 
