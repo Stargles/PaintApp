@@ -79,6 +79,20 @@ live picture around an effect layer, since nothing can draw on it.
 
 ---
 
+## (166) A second finger held down locks a graph-editor key drag to one axis
+
+**Status** — asked 2026-10-11. The owner, verbatim: *"when the user is in the graph editor and is moving a
+key, pressing and holding their other finger down anywhere should snap it to a cardinal axis (laterally
+through time, or vertically for the variable). This should be pretty much the same second finger tap hold
+that snaps smart shapes like drawn lines into 15 degree increments so you should reuse those."*
+
+- [ ] While a graph-editor key (node) is being dragged, a second finger held anywhere locks the drag to
+      the axis the drag is mostly along — time only, or value only — and releasing it frees the drag.
+- [ ] The same second-finger hold the shape tool uses (`ShapeGeometry`'s two-finger constraint,
+      `RotationAngle.snapIncrement`) — one hold detector, reused, not a copy.
+
+---
+
 ## (27) Stream the computer's screen as a layer
 
 **Status** — briefed 2026-09-13, designed the same day ([STREAM.md](docs/STREAM.md)), and **built through
