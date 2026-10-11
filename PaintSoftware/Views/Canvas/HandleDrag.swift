@@ -6,12 +6,12 @@ import UIKit
 /// source and wiring it is one assignment each.
 final class HandleDragAssist {
 
-    /// How many touches are on the canvas right now, the dragging one included — the host's
-    /// `TouchCountRecognizer`, which sees every touch however it landed. A touch that joins mid-drag
-    /// is what slows the drag or snaps a turn (`PrecisionDrag`, TODO (146), (151)).
+    /// How many touches are down right now, the dragging one included — the window's one counter
+    /// (`ModifierHold`), which sees every touch however it landed. A touch that joins mid-drag is what
+    /// slows the drag or snaps a turn (`PrecisionDrag`, TODO (146), (151)), and is a hold.
     ///
     /// The touch asked about is counted whether or not the counter has heard of it, which is how the
-    /// baseline is taken at the drag's own touch-down (`TouchCountRecognizer.activeCount(including:)`);
+    /// baseline is taken at the drag's own touch-down (`ModifierHold.touchesDown(including:)`);
     /// nil asks for the count as it stands.
     var touchesDown: (UITouch?) -> Int = { _ in 0 }
 

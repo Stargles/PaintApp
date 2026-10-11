@@ -408,6 +408,15 @@ final class RotationSnapUITests: PaintUITestCase {
         return (point(0.5, 0.4), point(0.5, -0.06))
     }
 
+    /// Whether there is ink within a few points of `spot`, in the canvas's normalised space.
+    private func inkNear(_ spot: CGVector, _ probe: (Double, Double) -> Bool) -> Bool {
+        (-3...3).contains { dy in
+            (-3...3).contains { dx in
+                probe(Double(spot.dx) + Double(dx) * 0.004, Double(spot.dy) + Double(dy) * 0.004)
+            }
+        }
+    }
+
     /// Whether the line's ink reaches the point `fraction` of the way from `pivot` to where a line at
     /// `bearing` degrees ends, `length` out — read just beside the line's centre, where the shape's blue
     /// guide outline is drawn over the ink and is not dark.
@@ -440,6 +449,8 @@ final class RotationSnapUITests: PaintUITestCase {
         let length = hypot(ends.start.x - ends.end.x, ends.start.y - ends.end.y)
         let transform = readTransform(app)
         let aside = CGVector(dx: 0.12, dy: 0.62)
+        XCTAssertFalse(inkNear(aside, try settledProbe(canvas, window: CGRect(x: 0.0, y: 0.0, width: 1, height: 1))),
+                       "PREMISE: the spot the second finger rests on is bare paper")
 
         // 1. A finger beside the drag: the start end, dragged to 79° about the far end, is held at 75°.
         let snapped = try dragALineEnd(app, canvas, held: ends.start, pivot: ends.end, toBearing: 79, holding: aside)
@@ -453,6 +464,8 @@ final class RotationSnapUITests: PaintUITestCase {
                       "the line on the glass lies along 75°")
         XCTAssertFalse(inked(probe, canvas, pivot: ends.end, length: length, bearing: 79, fraction: 0.6),
                        "…and not along the pen's own 79°")
+        // The finger that rested at `aside` is a hold (TODO (168)): with fingers painting it left no dab.
+        XCTAssertFalse(inkNear(aside, probe), "…and the finger that rested at \(aside) left no dab where it lifted")
 
         // 2. The pen alone, from where the end now stands: dragged on to 86° it is at 86°, off the grid.
         let landed = CGPoint(x: ends.end.x + length * CGFloat(cos(75 * Double.pi / 180)),

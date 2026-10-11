@@ -1124,6 +1124,105 @@ final class GraphEditorFingerUITests: PaintUITestCase {
         undo()
     }
 
+    /// **A finger that held a node drag to an axis does nothing when it lifts, wherever it rests** —
+    /// TODO (168). One drag is made three times with the second finger resting somewhere a finger that
+    /// lifted as a tap would act, and each time the key still goes where the finger took it (it was a
+    /// hold) and nothing else happened:
+    ///
+    ///  1. **On another layer's cel row** — a tap there moves the playhead (and selects the layer, which
+    ///     takes the band away from the key the drag is carrying).
+    ///  2. **On the canvas** — a finger there is told the active layer has no drawing surface. (The
+    ///     paint layer's own dab, which is what the owner saw, cannot be reached from here: the band
+    ///     belongs to the layer it grades. Both are the touch-down of the same recogniser.)
+    ///  3. **On a toolbar button** — the layers button, whose tap opens the layer panel.
+    ///
+    /// The control is each of those taps with no drag under way, which must still do what it does:
+    /// only a finger that actually served as a hold is swallowed.
+    func testAFingerHeldBesideAKeyDragDoesNothingWhenItLiftsWhereverItRests() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let authored = try authorAnAnimatedBrightnessCurve(app, from: 0, to: 6)
+
+        app.buttons["timeline.graphEditorButton"].tap()
+        let band = app.otherElements["timeline.graphBand"]
+        XCTAssertTrue(band.waitForExistence(timeout: 5))
+        let start = "\(brightnessID):0,6"
+        XCTAssertEqual(band.value as? String, start, "PREMISE: the band draws the curve just authored")
+        let playhead = try XCTUnwrap(readFrameLabel(app)?.current)
+
+        let window = app.windows.firstMatch
+        func normalized(_ point: CGPoint) -> CGVector {
+            CGVector(dx: (point.x - window.frame.minX) / window.frame.width,
+                     dy: (point.y - window.frame.minY) / window.frame.height)
+        }
+        let ppf = TimelineKeyMarkers.basePixelsPerFrame
+        let height = band.frame.height
+        let origin = band.coordinate(withNormalizedOffset: .zero)
+        let key = origin.withOffset(CGVector(
+            dx: TimelineGraphBand.x(ofFrame: 6, pixelsPerFrame: ppf),
+            dy: TimelineGraphBand.y(ofValue: authored.end, in: 0...2, bandHeight: height))).screenPoint
+
+        // Where the second finger rests, and what a tap there does.
+        let row = app.otherElements["timeline.cel.0.0"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "PREMISE: the picture layer's cel is on the timeline")
+        let onTheRow = CGPoint(x: row.frame.minX + ppf * (playhead < 4 ? 8.5 : 1.5), y: row.frame.midY)
+        XCTAssertTrue(row.frame.contains(onTheRow), "PREMISE: the resting point is on the cel block")
+        let canvas = app.otherElements["canvas.host"]
+        let onTheCanvas = CGPoint(x: canvas.frame.midX, y: canvas.frame.minY + canvas.frame.height * 0.25)
+        let layersButton = app.buttons["toolbar.layersButton"]
+        let onTheButton = CGPoint(x: layersButton.frame.midX, y: layersButton.frame.midY)
+        let noSurface = app.staticTexts["This layer has no drawing surface."]
+        let layerPanel = app.buttons["layerPanel.addButton"]
+
+        /// The drag with the second finger resting at `holding`, which lands mid-drag and lifts first.
+        func drag(holding: CGPoint) throws {
+            try dragWithAFingerHeldBeside(window, from: normalized(key), delta: CGVector(dx: -ppf * 3, dy: 0),
+                                          holding: normalized(holding), holdLandsAt: 0.8)
+        }
+        func assertNothingElseHappened(_ place: String, file: StaticString = #filePath, line: UInt = #line) {
+            XCTAssertEqual(band.value as? String, "\(brightnessID):0,3",
+                           "held on \(place), the key still went where the finger took it — on the layer it began on",
+                           file: file, line: line)
+            XCTAssertEqual(readFrameLabel(app)?.current, playhead,
+                           "the finger held on \(place) moved the playhead when it lifted", file: file, line: line)
+            XCTAssertFalse(noSurface.exists, "the finger held on \(place) was told the layer has no drawing surface",
+                           file: file, line: line)
+            XCTAssertFalse(layerPanel.exists, "the finger held on \(place) opened the layer panel when it lifted",
+                           file: file, line: line)
+        }
+        func undo() {
+            app.buttons["sideToolbar.undoButton"].tap()
+            waitForBand(band, start, "one press of Undo puts the drag back")
+        }
+
+        try drag(holding: onTheRow)
+        attachScreenshot(XCUIScreen.main, "after-the-held-finger-lifted-off-a-cel-row")
+        assertNothingElseHappened("a cel row")
+        undo()
+
+        try drag(holding: onTheCanvas)
+        attachScreenshot(XCUIScreen.main, "after-the-held-finger-lifted-off-the-canvas")
+        assertNothingElseHappened("the canvas")
+        undo()
+
+        try drag(holding: onTheButton)
+        attachScreenshot(XCUIScreen.main, "after-the-held-finger-lifted-off-a-toolbar-button")
+        assertNothingElseHappened("a toolbar button")
+        undo()
+
+        // The controls: with no drag under way each of those is the tap it always was.
+        window.coordinate(withNormalizedOffset: normalized(onTheCanvas)).tap()
+        XCTAssertTrue(noSurface.waitForExistence(timeout: 3),
+                      "PREMISE: a finger tapped on the canvas with nothing held is told the layer has no drawing surface")
+        window.coordinate(withNormalizedOffset: normalized(onTheButton)).tap()
+        XCTAssertTrue(layerPanel.waitForExistence(timeout: 3),
+                      "PREMISE: a finger tapped on the layers button with nothing held opens the layer panel")
+        window.coordinate(withNormalizedOffset: normalized(onTheButton)).tap()
+        window.coordinate(withNormalizedOffset: normalized(onTheRow)).tap()
+        XCTAssertNotEqual(readFrameLabel(app)?.current, playhead,
+                          "PREMISE: a finger tapped on that row with nothing held moves the playhead")
+    }
+
     /// **A finger drag on empty band scrolls the timeline; one that starts on a node moves it and the
     /// timeline stands still; a tap on empty band still adds a key** — TODO (167). In pencil-only mode,
     /// which is where a finger has nothing to do on empty band but scroll.

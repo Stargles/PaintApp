@@ -589,6 +589,9 @@
 		1CCB6AED8F4FED7A19F67B8C /* InlineRenameUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8995E207841DE8B58CC054AA /* InlineRenameUITests.swift */; };
 		DD55F90432C897982BA82994 /* InlineNameFieldLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C717AEFA898BA9FD78D69010 /* InlineNameFieldLogicTests.swift */; };
 		D95F111531A26851B70D2719 /* ViewportFollowLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 934AE15F8D3904DB9063F227 /* ViewportFollowLogicTests.swift */; };
+		FB33E707CDFFBACBC4BB166A /* PaintSoftware/Models/ModifierHold.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39CC0A38D04CF1B886B0D9EF /* PaintSoftware/Models/ModifierHold.swift */; };
+		1486ACB5DC9C24C805DCB4A7 /* ModifierHoldLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71D523D4CBFDCEFA9DC75754 /* ModifierHoldLogicTests.swift */; };
+		F34E55E1C81E6DB18AE8C2A0 /* HeldFingerUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2017B06D57A10538766C9A69 /* HeldFingerUITests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -1186,6 +1189,9 @@
 		8995E207841DE8B58CC054AA /* InlineRenameUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = InlineRenameUITests.swift; sourceTree = "<group>"; };
 		C717AEFA898BA9FD78D69010 /* InlineNameFieldLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = InlineNameFieldLogicTests.swift; sourceTree = "<group>"; };
 		934AE15F8D3904DB9063F227 /* ViewportFollowLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ViewportFollowLogicTests.swift; sourceTree = "<group>"; };
+		39CC0A38D04CF1B886B0D9EF /* PaintSoftware/Models/ModifierHold.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/ModifierHold.swift; sourceTree = "<group>"; };
+		71D523D4CBFDCEFA9DC75754 /* ModifierHoldLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "ModifierHoldLogicTests.swift"; sourceTree = "<group>"; };
+		2017B06D57A10538766C9A69 /* HeldFingerUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "HeldFingerUITests.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -1587,6 +1593,8 @@
 				8020BFB6082F592C6BE757F9 /* HandleDragLogicTests.swift */,
 				18AD451484C4AE161A3E7CD1 /* ToolReturnPathLogicTests.swift */,
 				F0F0231FFF9A4F2EF26D173F /* JoinedTouchesLogicTests.swift */,
+				2017B06D57A10538766C9A69 /* HeldFingerUITests.swift */,
+				71D523D4CBFDCEFA9DC75754 /* ModifierHoldLogicTests.swift */,
 				34229C332D4C2E3A15E83EA4 /* AxisLockLogicTests.swift */,
 			);
 			path = PaintSoftwareUITests;
@@ -1835,6 +1843,7 @@
 				BBFEB71ABEDE995DAD88537E /* PaintSoftware/Models/PrecisionDrag.swift */,
 				854AEED7E0BEB66C493D6324 /* PaintSoftware/Models/ToolReturnPath.swift */,
 				7348E3A0ED2D95D1E63957CA /* PaintSoftware/Models/JoinedTouches.swift */,
+				39CC0A38D04CF1B886B0D9EF /* PaintSoftware/Models/ModifierHold.swift */,
 				E3BF94BB87FE88ED447EF9E9 /* PaintSoftware/Models/AxisLock.swift */,
 				3F2AB28DC112CC0537E3EA93 /* PaintSoftware/Models/RotationAngle.swift */,
 			);
@@ -2520,11 +2529,14 @@
 				3A98D5E049E71D23E9DC95B1 /* HandleDragLogicTests.swift in Sources */,
 				674B9D22D85AE10214B90A4B /* ToolReturnPathLogicTests.swift in Sources */,
 				06E1D2A76E84F1D749518316 /* JoinedTouchesLogicTests.swift in Sources */,
+				F34E55E1C81E6DB18AE8C2A0 /* HeldFingerUITests.swift in Sources */,
+				1486ACB5DC9C24C805DCB4A7 /* ModifierHoldLogicTests.swift in Sources */,
 				3999BD4D3D56D0C2E3807574 /* AxisLockLogicTests.swift in Sources */,
 				7CE83813927AD8AFD21510D5 /* PaintSoftware/Models/CanvasTouchSettle.swift in Sources */,
 				2626A581BD6893AFAA98B695 /* PaintSoftware/Models/PrecisionDrag.swift in Sources */,
 				3E774A98BF22A4CA5B81BC96 /* PaintSoftware/Models/ToolReturnPath.swift in Sources */,
 				941AD63A0C8C6C9FCA5F39CB /* PaintSoftware/Models/JoinedTouches.swift in Sources */,
+				FB33E707CDFFBACBC4BB166A /* PaintSoftware/Models/ModifierHold.swift in Sources */,
 				22D8F574200BDAFD3BFA2C24 /* PaintSoftware/Models/AxisLock.swift in Sources */,
 				5C7CFE45E5FF8D501A1894F9 /* PaintSoftware/Models/RotationAngle.swift in Sources */,
 			);

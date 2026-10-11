@@ -9,7 +9,7 @@ import CoreGraphics
 /// handle drag slows to a fifth or rounds its turn (`PrecisionDrag`), a smart shape rounds to 15°
 /// (`CanvasView.Coordinator`), and a key drag keeps to one axis. All three count the touch the same
 /// way — `JoinedTouches`, so a hand already resting on the glass when the drag began is not the
-/// gesture — and read the count off a `TouchCountRecognizer`.
+/// gesture — and read the count off the window's one counter (`ModifierHold`).
 ///
 /// ## Which axis, and when it is decided
 ///

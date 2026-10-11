@@ -1,7 +1,8 @@
 import UIKit
 
-/// Reports how many touches are currently on the canvas without ever recognizing anything itself,
-/// so it can sit alongside every other recognizer without competing for a single touch.
+/// Reports how many touches are currently on the view it is installed on — the canvas, or the whole
+/// window (`ModifierHold`) — without ever recognizing anything itself, so it can sit alongside every
+/// other recognizer without competing for a single touch.
 ///
 /// This exists because the smart-shape snap constraint has to engage when a finger joins a touch
 /// sequence that is *already* under way — the pen has been drawing for a second or more by then.
@@ -15,8 +16,8 @@ import UIKit
 /// it is *not* reached by pen-plus-one-finger in whichever direction UIKit happens to deliver the
 /// pencil to a container-level recognizer. The recognizer already holds each `UITouch`, so the type
 /// was free all along — it was only being thrown away at the callback boundary.
-final class TouchCountRecognizer: UIGestureRecognizer {
-    var onTouchesChanged: ((_ total: Int, _ fingers: Int) -> Void)?
+final class TouchCountRecognizer: UIGestureRecognizer, ModifierHold.Counter {
+    var onTouchesChanged: ((_ total: Int) -> Void)?
 
     /// Touches currently down, for anything that needs the count at a moment no touch event is
     /// arriving — e.g. a shape appearing under fingers that were already resting on the canvas.
@@ -39,7 +40,7 @@ final class TouchCountRecognizer: UIGestureRecognizer {
         active.count + (touch.map { active.contains($0) ? 0 : 1 } ?? 0)
     }
 
-    private func report() { onTouchesChanged?(active.count, fingerCount) }
+    private func report() { onTouchesChanged?(active.count) }
 
     override init(target: Any?, action: Selector?) {
         super.init(target: target, action: action)
@@ -58,8 +59,8 @@ final class TouchCountRecognizer: UIGestureRecognizer {
         // the finger lands 0.48 s later, and `counter:0/0` when the *pencil* lifts while the finger
         // is still on the glass. A recognizer whose only job is counting touches was counting one of
         // two. `ignore(_:for:)` above is silent throughout, because this filtering happens at
-        // binding, not at refusal — see `StrokeGestureRecognizer`'s own initialiser for the full
-        // reading of that capture.
+        // binding, not at refusal: the finger's `began` line named only the recognizers holding no
+        // pencil, and touch **type** is the only axis that partitions them that way.
         //
         // Counting a resting palm is the price, and it is paid in `JoinedTouches`, which subtracts the
         // fingers already down when the shape began following rather than narrowing anything here. This recognizer must keep reporting
@@ -101,6 +102,6 @@ final class TouchCountRecognizer: UIGestureRecognizer {
         super.reset()
         guard !active.isEmpty else { return }
         active.removeAll()
-        onTouchesChanged?(0, 0)
+        onTouchesChanged?(0)
     }
 }

@@ -2264,16 +2264,20 @@ still adds a key to the curve it aimed at or drops the selection.
 owner's *"pressing and holding their other finger down anywhere should snap it to a cardinal axis
 (laterally through time, or vertically for the variable)"*, which is the smart shape's 15° hold read
 across. `AxisLock` is `PrecisionDrag`'s sibling: the count is `JoinedTouches` (a hand already resting
-when the drag began is not the gesture) read off a `TouchCountRecognizer` that sits on the **window**,
-since the canvas's counts the canvas alone. The axis is the larger component of the drag's translation
+when the drag began is not the gesture) read off the **window's** one counter (`ModifierHold`), since
+the canvas's counts the canvas alone. The axis is the larger component of the drag's translation
 **at the moment the lock has a direction to read** — when the finger lands on a drag under way, then;
 when it was down first, at the first tick that travels 10 pt — and is **held until the finger lifts**,
 because a drag along a diagonal is within a point of either axis for its whole length and re-reading it
 would swing the key between time and value on every wobble. Lifting frees the drag and the key jumps to
 the finger; pressing again reads the way the drag is going by then. It applies to **handles as well as
 nodes** (a handle held to time keeps its value offset, one held to value keeps its frame offset) and not
-to the marquee, which held to an axis is a line. The second finger is never offered to the band's
-recogniser, which carries one touch's drag: a lift of the first must not hand the drag to the second.
+to the marquee, which held to an axis is a line. **The second finger is a hold and does nothing else**
+— TODO (168), the owner's *"a finger used as the hold is ignored when it lifts"*: a touch that lands
+while a node or handle drag (or a Move-box handle drag, or a smart shape following the pen) is live
+hit-tests to a transparent shield over the window instead of to whatever is under it, so it taps,
+presses, scrubs and paints nothing, on landing or on lift, wherever it rests. It stays a hold until it
+lifts even if the drag ends first, and it is decided at touch-down (`ModifierHold`).
 
 **Three decisions the stage had to make, none of which the brief settled.**
 

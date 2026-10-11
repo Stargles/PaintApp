@@ -270,6 +270,8 @@ struct DrawingView: View {
         // Every picker and menu raised over the canvas is drawn here, and closed by the one router
         // this installs — never as a UIKit `.popover` (`CanvasPresentation`'s header says why).
         .canvasPresentationHost()
+        // The window's one touch counter and the shield a held finger lands on (`ModifierHold`).
+        .background(ModifierHoldHost(hold: canvasManager.modifierHold))
         .animation(.easeInOut(duration: 0.2), value: activePanel)
         // One flag drives both docked bars now — the Move menu arriving and the Select menu standing
         // down are the same transition, so they have to be keyed on the same value or they cross.

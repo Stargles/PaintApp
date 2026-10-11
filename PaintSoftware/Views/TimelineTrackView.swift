@@ -134,6 +134,7 @@ struct TimelineTrackView: UIViewRepresentable {
             didSet {
                 guard canvasManager !== oldValue else { return }
                 observeThumbnailInstalls()
+                declareGraphDrag()
             }
         }
         var rowHeight: CGFloat = 34
@@ -192,6 +193,7 @@ struct TimelineTrackView: UIViewRepresentable {
             self.graphLegend = graphLegend
             super.init()
             observeThumbnailInstalls()
+            declareGraphDrag()
             // The strip outlives this coordinator (it belongs to `AnimationTimeline`, which rebuilds the
             // track whenever the panel is collapsed and expanded again), so every closure is assigned
             // afresh here rather than added to: a second coordinator replaces the first's wiring.
@@ -200,6 +202,17 @@ struct TimelineTrackView: UIViewRepresentable {
                 self?.onRequestMenu?(.loop(frame: frame), columnRect)
             }
             rulerStrip.zoomHandler = { [weak self] recognizer in self?.handleZoomPan(recognizer) }
+        }
+
+        /// **A node or handle drag is a drag a held finger qualifies** (`ModifierHold`): live from its
+        /// touch-down until that touch lifts.
+        private func declareGraphDrag() {
+            canvasManager.modifierHold.register(self) { [weak self] in
+                guard let self, let touch = self.graphBandTouch, self.graphBandDrag?.takesAxisLock == true else {
+                    return false
+                }
+                return touch.phase != .ended && touch.phase != .cancelled
+            }
         }
 
         /// Holds the `thumbnailInstalled` subscription. One, replaced rather than added to, so a
@@ -839,11 +852,14 @@ struct TimelineTrackView: UIViewRepresentable {
             /// (`CanvasManager.holdLivePose`, TODO (154)) rather than writing them on every tick, and
             /// whose end must commit and end the edit.
             var beganLiveEdit = false
+            /// Whether a finger held beside this drag means anything to it: a node or a handle is kept to
+            /// one axis, a marquee is not (`axisLock`).
+            var takesAxisLock: Bool { handle != nil || !carried.isEmpty }
         }
         private var graphBandDrag: GraphBandDrag?
         /// The touch the band accepted at touch-down (`shouldReceive`), so the drag's touch-count
         /// baseline can include it before the window's counter has heard of it —
-        /// `TouchCountRecognizer.activeCount(including:)`.
+        /// `ModifierHold.touchesDown(including:)`.
         private weak var graphBandTouch: UITouch?
         /// The marquee's standing selection, surviving between gestures so a set picked up by one
         /// drag can be moved by the next.
@@ -967,7 +983,7 @@ struct TimelineTrackView: UIViewRepresentable {
                                           carried: carried,
                                           grabbed: hit, handle: handle,
                                           startSelection: graphBandSelection,
-                                          axisLock: AxisLock(touchesDown: graphBandView.touchesDown(
+                                          axisLock: AxisLock(touchesDown: canvasManager.modifierHold.touchesDown(
                                               including: graphBandTouch)))
             // **A finger on a pose node is a live transform edit** (TODO (140)): the canvas re-poses
             // what the channel moves instead of re-rendering it per tick, and the baker waits for the
@@ -989,9 +1005,8 @@ struct TimelineTrackView: UIViewRepresentable {
             // lock sits in front of everything below, which reads `translation` and nothing else, so
             // neither the moves nor the handle shaping know it is there. A marquee is not held: a
             // rubber band kept to an axis is a line.
-            let isShaping = drag.handle != nil || !drag.carried.isEmpty
-            let translation = isShaping
-                ? drag.axisLock.translation(for: raw, touchesDown: graphBandView.touchesDown(including: graphBandTouch))
+            let translation = drag.takesAxisLock
+                ? drag.axisLock.translation(for: raw, touchesDown: canvasManager.modifierHold.touchesDown(including: graphBandTouch))
                 : raw
 
             if !drag.didMove {
@@ -1614,14 +1629,12 @@ extension TimelineTrackView.Coordinator: UIGestureRecognizerDelegate {
     ///  * **A touch is the band's if it lands on a node or a handle, or may rubber-band**
     ///    (`TimelineGraphBand.claims`), and the touch it keeps is remembered, so the drag's touch-count
     ///    baseline can include it before the window's counter has heard of it.
-    ///  * **While one is tracked, no other is offered to either recogniser.** A second finger is a
-    ///    hold (`AxisLock`), wherever it lands. The drag's recogniser carries one touch's drag: offered
-    ///    the second, it could hand the drag to it when the first lifts, and `endGraphBandDrag` records
-    ///    a second touch cancelling it outright. The tap recogniser, offered it, would add a key or drop
-    ///    the selection when it lifted. **Neither was seen to happen in the simulator** — UIKit already
-    ///    fails the tap for the whole sequence once the press has recognised, and a finger landing on
-    ///    the band did not disturb the press — so this is a guard that no test can turn red, kept for
-    ///    the pen-and-finger sequences only a device can make.
+    ///  * **While one is tracked, no other is offered to either recogniser.** A second finger beside a
+    ///    node or handle drag is a hold (`ModifierHold`, `AxisLock`) and never reaches the band at all;
+    ///    this is the same refusal for a rubber band, which takes no hold. The drag's recogniser carries
+    ///    one touch's drag: offered a second, it could hand the drag to it when the first lifts, and
+    ///    `endGraphBandDrag` records a second touch cancelling it outright. The tap recogniser, offered
+    ///    it, would add a key or drop the selection when it lifted.
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
         guard gestureRecognizer === graphBandView.panRecognizer
                 || gestureRecognizer === graphBandView.tapRecognizer else { return true }
@@ -2071,28 +2084,6 @@ private final class TimelineGraphBandView: UIView {
     /// one, and a touch that one declined is only ever this one's.
     let tapRecognizer = UITapGestureRecognizer()
 
-    /// **Every touch on the window, counted** — what "a second finger held down anywhere" is read
-    /// from. The canvas has its own `TouchCountRecognizer`, which sees the canvas alone (the Move box
-    /// and the smart shape's snap are about touches there); the finger that holds a graph drag may
-    /// land on the timeline, a panel or the canvas, so this one sits on the window and is on it for
-    /// as long as the band is. It recognises nothing and takes nothing from anyone.
-    private let touchCounter = TouchCountRecognizer(target: nil, action: nil)
-
-    /// How many touches are down, with `touch` — the one the band is tracking — counted whether or not
-    /// the counter has heard of it yet (`TouchCountRecognizer.activeCount(including:)`).
-    func touchesDown(including touch: UITouch?) -> Int {
-        touchCounter.activeCount(including: touch)
-    }
-
-    override func willMove(toWindow newWindow: UIWindow?) {
-        super.willMove(toWindow: newWindow)
-        touchCounter.view?.removeGestureRecognizer(touchCounter)
-    }
-
-    override func didMoveToWindow() {
-        super.didMoveToWindow()
-        window?.addGestureRecognizer(touchCounter)
-    }
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = UIColor(white: TimelineGraphBand.backgroundWhite,
@@ -2114,7 +2105,6 @@ private final class TimelineGraphBandView: UIView {
 
         addGestureRecognizer(panRecognizer)
         addGestureRecognizer(tapRecognizer)
-        touchCounter.delegate = self
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -2420,18 +2410,6 @@ private final class TimelineGraphBandView: UIView {
         UIColor.black.withAlphaComponent(0.75).setFill()
         plate.fill()
         text.draw(at: CGPoint(x: origin.x + inset.width, y: origin.y + inset.height))
-    }
-}
-
-extension TimelineGraphBandView: UIGestureRecognizerDelegate {
-    /// **The window's counter recognises alongside everything.** It never recognises anything itself,
-    /// but UIKit makes recognisers exclusive by default and fails the rest of a touch's recognisers the
-    /// moment one of them recognises: the band's own press does so at touch-down, which would end the
-    /// count on the very touch whose drag it is there to qualify. `CanvasView.Coordinator` lists its
-    /// counter among its always-concurrent recognisers for the same reason.
-    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
-                           shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
-        gestureRecognizer === touchCounter
     }
 }
 

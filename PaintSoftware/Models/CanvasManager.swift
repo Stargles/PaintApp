@@ -1791,6 +1791,11 @@ final class CanvasManager: ObservableObject {
     /// close themselves on any outside touch (`AnchoredMenuRouter`).
     let interactionBegan = PassthroughSubject<Void, Never>()
 
+    /// **A finger held down beside a drag, and what it does** — see `ModifierHold`. Here because the
+    /// canvas's handle drags and smart shape, and the timeline's graph drags, both declare themselves
+    /// to it, and this is the one object they share.
+    let modifierHold = ModifierHold()
+
     /// The lone finger `canvasInteractionBegan` is waiting on, if there is one — see
     /// `CanvasTouchSettle`.
     private var touchSettle = CanvasTouchSettle()

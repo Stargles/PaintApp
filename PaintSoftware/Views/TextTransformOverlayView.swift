@@ -92,8 +92,8 @@ final class TextTransformOverlayView: CanvasPlaneView {
     /// the model, on `TextFrameDrag`. Only the rotation knob takes a joined touch.
     private var drag: HandleDrag<TextFrame.Handle>?
     /// Whether the rotation knob is held — the canvas's pan, pinch and rotate stand down while it is
-    /// (`CanvasView.Coordinator.assistedDragIsLive`), or the finger that snaps the turn would move the
-    /// canvas out from under it.
+    /// (`CanvasView.Coordinator.assistedDragIsLive`), or a hand resting beside the pen would move the
+    /// canvas out from under it. A finger that lands during the turn is a hold.
     var isTurning: Bool { drag?.turns == true && isDragging }
     private var isDragging: Bool { drag?.isLive ?? false }
 
