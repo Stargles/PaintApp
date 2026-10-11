@@ -1143,9 +1143,7 @@ struct TimelineTrackView: UIViewRepresentable {
         /// **A tap by a touch the drag recogniser was never offered** — TODO (167). In pencil-only mode
         /// a finger on empty band is declined at touch-down so the scroll view can pan from it, which
         /// takes with it the began/ended pair a tap used to be; this is the tap, resolved by the same
-        /// function against the content as it is laid out now. It is not offered a touch while one is
-        /// being tracked (`shouldReceive`), so a finger held down beside a drag lifts without adding a
-        /// key.
+        /// function against the content as it is laid out now.
         @objc func handleGraphBandTap(_ gr: UITapGestureRecognizer) {
             guard gr.state == .ended, let content = laidOutKey?.graphBand else { return }
             resolveGraphBandTap(at: gr.location(in: graphBandView), target: content.target,
@@ -1619,10 +1617,11 @@ extension TimelineTrackView.Coordinator: UIGestureRecognizerDelegate {
     ///  * **While one is tracked, no other is offered to either recogniser.** A second finger is a
     ///    hold (`AxisLock`), wherever it lands. The drag's recogniser carries one touch's drag: offered
     ///    the second, it could hand the drag to it when the first lifts, and `endGraphBandDrag` records
-    ///    a second touch cancelling it outright (a finger landing on the band was not seen to do either
-    ///    in the simulator — a guard, not a fix for a reproduced defect). The tap recogniser, offered
-    ///    it, would add a key or drop the selection when it lifted, which `testASecondFingerHeldBesideAKeyDragKeepsItToOneAxis`
-    ///    does see.
+    ///    a second touch cancelling it outright. The tap recogniser, offered it, would add a key or drop
+    ///    the selection when it lifted. **Neither was seen to happen in the simulator** — UIKit already
+    ///    fails the tap for the whole sequence once the press has recognised, and a finger landing on
+    ///    the band did not disturb the press — so this is a guard that no test can turn red, kept for
+    ///    the pen-and-finger sequences only a device can make.
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
         guard gestureRecognizer === graphBandView.panRecognizer
                 || gestureRecognizer === graphBandView.tapRecognizer else { return true }
