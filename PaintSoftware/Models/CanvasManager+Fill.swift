@@ -285,7 +285,8 @@ extension CanvasManager {
                                                width: width, height: height, transform: window.transform)
             outcome = MetalFillEngine.shared?.makeSession(referenceRGBA: refBytes, width: width,
                                                           height: height, lassoMask: lassoMask,
-                                                          pathWall: pathWall)
+                                                          pathWall: pathWall,
+                                                          gapWidthLimit: Float(Self.fillGapRange.upperBound * window.scale))
         }
         let session = outcome?.session
         if session == nil { reportFillRefusal(context) }

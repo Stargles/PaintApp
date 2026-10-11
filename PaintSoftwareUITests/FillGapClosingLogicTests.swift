@@ -274,6 +274,34 @@ final class FillGapClosingLogicTests: XCTestCase {
         }
     }
 
+    /// **The app's sessions cap the distance map at the slider's reach, and that changes no answer.**
+    /// Two big rooms joined by a 20 px neck, with a pocket behind a 3 px gap in one of them — rooms deep
+    /// enough that the cap bites — cut on a session built for the top of the slider and on an uncapped
+    /// one, at every setting up to that top: the same pixels each time.
+    func testCappingTheDistanceMapAtTheSlidersReachChangesNoCut() throws {
+        var rooms = Ink(width: 240, height: 120)
+        rooms.rect(0, 0, 239, 119)
+        rooms.rect(4, 4, 115, 115, false); rooms.rect(124, 4, 235, 115, false)
+        rooms.rect(116, 50, 123, 69, false)
+        for y in 0..<120 { for x in 0..<240 {
+            let dx = Double(x - 60), dy = Double(y - 60), d = (dx * dx + dy * dy).squareRoot()
+            if d >= 14 && d <= 16 { rooms.set(x, y) }
+        } }
+        rooms.rect(74, 59, 76, 61, false)
+        let engine = try XCTUnwrap(MetalFillEngine.shared)
+        let capped = try XCTUnwrap(engine.makeSession(referenceRGBA: rooms.bytes, width: 240, height: 120,
+                                                      gapWidthLimit: 40).session)
+        let exact = try session(rooms)
+        for gap in [Float(0), 2, 3, 4, 8, 16, 20, 21, 24, 40] {
+            for seed in [(20, 20), (200, 60), (60, 60)] {
+                XCTAssertEqual(try fill(capped, seed: seed, gap: gap).bytes, try fill(exact, seed: seed, gap: gap).bytes,
+                               "gap \(gap), seed \(seed)")
+            }
+        }
+        XCTAssertFalse(try fill(capped, seed: (20, 20), gap: 24).isFilled(200, 60), "Fixture check: the neck seals at 24")
+        XCTAssertTrue(try fill(capped, seed: (20, 20), gap: 16).isFilled(200, 60), "…and is open at 16")
+    }
+
     // MARK: - The owner's scene
 
     /// **A hand-drawn square with an opening, at the owner's 2048×1024, through the app's own fill.**

@@ -132,8 +132,14 @@ final class MetalFillEngine {
     ///
     ///   Per gesture like the lasso mask, and for the same reason: the artwork cannot change while
     ///   the artist drags a slider, so a sweep re-runs only the GPU stages.
+    ///
+    /// - Parameter gapWidthLimit: the widest gap closing, in working pixels, any `fill` of this session
+    ///   will ask for — the top of the slider, at the window's scale. Gap closing's distance map is
+    ///   capped where no cut that narrow reads it (`FillBasins.ceiling`), which is what keeps a press
+    ///   over a big open fill cheap. Unlimited by default: exact at every width, at full cost.
     func makeSession(referenceRGBA: [UInt8], width: Int, height: Int,
-                     lassoMask: [UInt8]? = nil, pathWall: [UInt8]? = nil) -> SessionOutcome {
+                     lassoMask: [UInt8]? = nil, pathWall: [UInt8]? = nil,
+                     gapWidthLimit: Float = .infinity) -> SessionOutcome {
         let needed = MetalFillSession.predictedBytes(width: width, height: height,
                                                      isLasso: lassoMask != nil)
         guard CompositorBudget.hasHeadroom(for: needed) else {
@@ -142,7 +148,8 @@ final class MetalFillEngine {
         }
         guard let session = MetalFillSession(engine: self, referenceRGBA: referenceRGBA,
                                              width: width, height: height,
-                                             lassoMask: lassoMask, pathWall: pathWall) else {
+                                             lassoMask: lassoMask, pathWall: pathWall,
+                                             gapWidthLimit: gapWidthLimit) else {
             return .unavailable(needed: needed)
         }
         return .ready(session)
@@ -362,8 +369,11 @@ final class MetalFillSession {
         return reached
     }
 
+    /// The widest gap closing this session is built for — see `makeSession`.
+    private let gapWidthLimit: Float
+
     fileprivate init?(engine: MetalFillEngine, referenceRGBA: [UInt8], width: Int, height: Int,
-                      lassoMask: [UInt8]? = nil, pathWall: [UInt8]? = nil) {
+                      lassoMask: [UInt8]?, pathWall: [UInt8]?, gapWidthLimit: Float) {
         guard width > 0, height > 0, referenceRGBA.count >= width * height * 4 else { return nil }
         if let lassoMask, lassoMask.count < width * height { return nil }
         if let pathWall, pathWall.count < width * height * 4 { return nil }
@@ -395,6 +405,7 @@ final class MetalFillSession {
         self.pathWallBuf = pathWallBuf
         self.hasPathWall = pathWall != nil
         self.engine = engine
+        self.gapWidthLimit = gapWidthLimit
         self.width = width
         self.height = height
         self.count = count
@@ -640,8 +651,9 @@ final class MetalFillSession {
         let key = Structure.Key(seedX: seedX, seedY: seedY, seedColor: primary, threshold: threshold,
                                 paper: boundary)
         let closesGaps = gapWidth >= 1
-        if structure?.key != key || (closesGaps && structure?.basins == nil) {
-            guard let built = buildStructure(key, closesGaps: closesGaps) else { return nil }
+        let ceiling = FillBasins.ceiling(forGapWidth: max(gapWidth, gapWidthLimit))
+        if structure?.key != key || (closesGaps && (structure?.basins == nil || structure!.ceiling < ceiling)) {
+            guard let built = buildStructure(key, closesGaps: closesGaps, ceiling: ceiling) else { return nil }
             structure = built
             structureBuilds += 1
         }
@@ -747,6 +759,9 @@ final class MetalFillSession {
         let key: Key
         /// One per flood pass, in `floodPasses`' order. Nil when built with no gap closing.
         let basins: [GapBasins]?
+        /// The level the distance map was capped at: every cut whose `FillBasins.ceiling` is no higher
+        /// is exact on these basins.
+        let ceiling: Int
     }
 
     /// One flood pass's basins, the basins its seeds lie in, and the table its cut is written to.
@@ -780,7 +795,7 @@ final class MetalFillSession {
     /// Walls, the plain flood from the seed (or the lasso's ring) to its fixed point, and — when gap
     /// closing is on — the distance map and its basins. `paramsBuf` (and `params2Buf`) already hold
     /// `key`'s values.
-    private func buildStructure(_ key: Structure.Key, closesGaps: Bool) -> Structure? {
+    private func buildStructure(_ key: Structure.Key, closesGaps: Bool, ceiling: Int) -> Structure? {
         let p = engine.pipelines
         let passes = floodPasses
 
@@ -833,7 +848,7 @@ final class MetalFillSession {
             cb.waitUntilCompleted()
             if changedPtr.pointee == 0 { break }
         }
-        guard closesGaps else { return Structure(key: key, basins: nil) }
+        guard closesGaps else { return Structure(key: key, basins: nil, ceiling: 0) }
 
         // Stage 3: each pass's distance map, and the basins `FillBasins` partitions its plain fill into.
         var basins: [GapBasins] = []
@@ -842,11 +857,13 @@ final class MetalFillSession {
             let coords = encodeJFA(enc, wall: pass.ink)
             let levels = coords === jfaA ? jfaB : jfaA
             var canvasEdgeIsInk = UInt32(key.paper == nil ? 0 : 1)
+            var cap = UInt32(ceiling)
             enc.setComputePipelineState(p.gapLevels)
             enc.setBuffer(coords, offset: 0, index: 0)
             enc.setBuffer(levels, offset: 0, index: 1)
             enc.setBuffer(paramsBuf, offset: 0, index: 2)
             enc.setBytes(&canvasEdgeIsInk, length: MemoryLayout<UInt32>.size, index: 3)
+            enc.setBytes(&cap, length: MemoryLayout<UInt32>.size, index: 4)
             engine.dispatch2D(enc, p.gapLevels, width: width, height: height)
             enc.endEncoding()
             cb.commit()
@@ -872,7 +889,7 @@ final class MetalFillSession {
                                                        options: .storageModeShared) else { return nil }
             basins.append(GapBasins(basins: built, seeds: seeds, table: table))
         }
-        return Structure(key: key, basins: basins)
+        return Structure(key: key, basins: basins, ceiling: ceiling)
     }
 
     /// Which of `sides` the **last** `fill(...)` painted within `band` pixels of — the question

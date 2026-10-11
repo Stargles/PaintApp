@@ -75,14 +75,17 @@ final class FillGapClosingBench: XCTestCase {
                              artworkRect: session.bufferRect, fillColor: colour)
         }
         // One warm session, so pipeline and allocator first-touch costs are not what is reported.
-        if let warm = engine.makeSession(referenceRGBA: reference, width: Self.width, height: Self.height).session {
+        // At scale 1 the app builds every session for the top of the slider (`installFillSession`).
+        let limit = Float(CanvasManager.fillGapRange.upperBound)
+        if let warm = engine.makeSession(referenceRGBA: reference, width: Self.width, height: Self.height,
+                                         gapWidthLimit: limit).session {
             run(warm, gap: 8)
         }
         var presses: [Double] = []
         var ticks: [Double] = []
         for _ in 0..<5 {
             let session = try XCTUnwrap(engine.makeSession(referenceRGBA: reference, width: Self.width,
-                                                           height: Self.height).session)
+                                                           height: Self.height, gapWidthLimit: limit).session)
             presses.append(milliseconds { run(session, gap: 8) })
             for gap in stride(from: Float(9), through: 40, by: 3) {
                 ticks.append(milliseconds { run(session, gap: gap) })

@@ -174,20 +174,22 @@ static inline float distanceToCanvasEdge(uint2 gid, constant FillParams& params)
 // seals *openings between two open areas* (`FillBasins`), and a corner of the paper is not one.
 
 // Each open pixel's distance to the nearest ink, in quarter pixels — the distance map `FillBasins`
-// partitions the plain fill by (TODO (158)). `wallCoord` is the jump flood seeded on the walls; with
+// partitions the plain fill by (TODO (158)) — capped at `ceiling` (`FillBasins.ceiling`), above which
+// no cut the session will be asked for looks. `wallCoord` is the jump flood seeded on the walls; with
 // the canvas edge a boundary, the ring one pixel outside the artwork rect is ink too, from whichever
-// side the pixel lies. Walls write 0. The JFA's 1e20 sentinel (no walls at all) clamps to the top
-// level, so an empty canvas is one flat plateau and one basin.
+// side the pixel lies. Walls write 0. The JFA's 1e20 sentinel (no walls at all) clamps to the
+// ceiling, so an empty canvas is one flat plateau and one basin.
 kernel void gapLevels(const device float2* wallCoord        [[buffer(0)]],
                       device ushort*        levels           [[buffer(1)]],
                       constant FillParams&  params           [[buffer(2)]],
                       constant uint&        canvasEdgeIsInk  [[buffer(3)]],
+                      constant uint&        ceiling          [[buffer(4)]],
                       uint2 gid [[thread_position_in_grid]]) {
     if (gid.x >= params.width || gid.y >= params.height) return;
     uint i = pixelIndex(gid.x, gid.y, params.width);
     float d = distance(float2(gid), wallCoord[i]);
     if (canvasEdgeIsInk != 0u) d = min(d, distanceToCanvasEdge(gid, params));
-    levels[i] = ushort(clamp(round(d * 4.0), 0.0, 65535.0));
+    levels[i] = ushort(clamp(round(d * 4.0), 0.0, float(ceiling)));
 }
 
 // The region for one slider value: every pixel whose basin the cut joined to the seed. `labels` is
