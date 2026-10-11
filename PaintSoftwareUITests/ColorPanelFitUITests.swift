@@ -16,7 +16,6 @@ final class ColorPanelFitUITests: PaintUITestCase {
 
     func testTheRecentStripAndTheWholePaletteAreHittableWithoutScrollingInLandscape() throws {
         XCUIDevice.shared.orientation = .landscapeLeft
-        defer { XCUIDevice.shared.orientation = .portrait }
         let app = XCUIApplication()
         app.launchArguments += ["-resetGallery", "-resetPalettes", "-uiTestSeedColorHistory"]
         XCTAssertTrue(launchIntoEditor(app))

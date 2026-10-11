@@ -22,11 +22,6 @@ final class EditorKeyboardLayoutUITests: PaintUITestCase {
         XCUIDevice.shared.orientation = .landscapeLeft
     }
 
-    override func tearDown() {
-        XCUIDevice.shared.orientation = .portrait
-        super.tearDown()
-    }
-
     /// Every control the artist reads or reaches, by identifier — the frames the keyboard must not move.
     private static let landmarks = ["timeline.projectNameField", "toolbar.brushButton", "toolbar.layersButton",
                                     "sideToolbar.undoButton", "timeline.frameLabel", "canvas.host"]

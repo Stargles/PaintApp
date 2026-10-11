@@ -242,7 +242,6 @@ final class InlineRenameUITests: PaintUITestCase {
     /// What the artist does next: types the name where it is, and Return puts the grid back.
     func testTheLastFolderTileBeingRenamedStandsAboveTheKeyboardAndNothingElseMoves() throws {
         XCUIDevice.shared.orientation = .landscapeLeft
-        defer { XCUIDevice.shared.orientation = .portrait }
         let app = XCUIApplication()
         app.launchArguments = ["-resetGallery"]
         app.launch()

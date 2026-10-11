@@ -10,6 +10,12 @@ class PaintUITestCase: XCTestCase {
 
     override func setUpWithError() throws {
         continueAfterFailure = false
+        // **Every test starts upright, whatever the simulator was left in.** The pixel probes read a
+        // screenshot whose pixels are in the device's portrait frame, so the suite is portrait unless a
+        // test says otherwise — and a test cannot be trusted to put it back itself: with
+        // `continueAfterFailure` off, a failed assertion raises and Swift runs no `defer` through it.
+        // A landscape test therefore sets landscape and leaves the restoring to this line.
+        XCUIDevice.shared.orientation = .portrait
     }
 
     /// Whether this test has launched the app through `launchIntoEditor` yet — XCTest makes a fresh
@@ -526,6 +532,31 @@ class PaintUITestCase: XCTestCase {
         let top = dockTop(app, canvas)
         XCTAssertLessThan(dy, top, "\(what): host row \(dy) is under the dock, whose top edge is at \(top) — "
                           + "a pixel read there is the card's or the timeline's, not the picture's", file: file, line: line)
+    }
+
+    /// The host row (a fraction of the host's height) the top bar stands down to. The square paper is
+    /// centred on a host that runs the whole height of the window, so the bar covers the paper's own top
+    /// — 7% of it on the owner's 810 pt iPad, 5% on the 13-inch simulator.
+    func toolbarBottom(_ app: XCUIApplication, _ canvas: XCUIElement) -> Double {
+        let host = canvas.frame
+        let bar = app.buttons["toolbar.galleryButton"].frame
+        // The bar is its buttons plus 8 pt of padding (`TopToolbar`), and a touch inside the buttons'
+        // own frames never reaches the canvas.
+        return Double((bar.maxY + 8 - host.minY) / host.height)
+    }
+
+    /// Fails, naming `what`, when host row `dy` is under the top bar, where a touch lands on a toolbar
+    /// button — or on the bar — and not on the paper.
+    ///
+    /// **A fraction of the paper that clears the bar on one window does not clear it on another**, and a
+    /// drag that starts under it fails nowhere near where it started: no selection is made, and the
+    /// step after it acts on something else.
+    func assertBelowTheToolbar(_ app: XCUIApplication, _ canvas: XCUIElement, dy: Double, _ what: String,
+                               file: StaticString = #filePath, line: UInt = #line) {
+        let bottom = toolbarBottom(app, canvas)
+        XCTAssertGreaterThan(dy, bottom, "\(what): host row \(dy) is under the top bar, which stands down to "
+                             + "\(bottom) — a touch there reaches a toolbar button and not the canvas",
+                             file: file, line: line)
     }
 
     /// Swipes to delete a layer panel row at the given absolute layer index, tapping the

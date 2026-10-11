@@ -94,6 +94,24 @@ struct DrawingView: View {
                            coveredBottom: BottomDock.coveredBottom(timeline: timelineOccupiedHeight,
                                                                    card: dockedCardHeight))
 
+                // **The dock is drawn above the canvas and below everything else that stands over it**,
+                // which is why it comes before the timeline's column and the rail and dropdowns after it. A
+                // card stands above the timeline panel and never overlaps it, but the timeline's menus are
+                // drawn *from* the panel, upward over the canvas (`AnimationTimeline.anchoredMenuLayer`), and
+                // a dock card drawn later covered them: on the owner's 1080 pt window the Select card hid
+                // the right half of the graph editor's channel list.
+                // The card's width is a function of the canvas area (`BottomDock.width(in:)`), so
+                // the dock needs that area's width — and it is not the screen's: the side toolbar
+                // and Split View both take from it. The `GeometryReader` is filled explicitly
+                // because it is otherwise top-leading and the column below relies on being the
+                // full height.
+                GeometryReader { proxy in
+                    let clearance = dockClearance(canvasWidth: proxy.size.width)
+                    bottomDock(width: BottomDock.width(in: proxy.size.width - clearance))
+                        .frame(width: proxy.size.width - clearance, height: proxy.size.height)
+                        .frame(width: proxy.size.width, height: proxy.size.height, alignment: .leading)
+                }
+
                 // GeometryReader to tell the timeline how much room it may claim when the user drags
                 // it taller, and the notice below how much of the width the layer rail has taken —
                 // using the screen instead would over-report both in Split View.
@@ -184,18 +202,6 @@ struct DrawingView: View {
                         .padding(.horizontal, 12)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: panelAlignment)
                         .transition(.move(edge: .top).combined(with: .opacity))
-                }
-
-                // The card's width is a function of the canvas area (`BottomDock.width(in:)`), so
-                // the dock needs that area's width — and it is not the screen's: the side toolbar
-                // and Split View both take from it. The `GeometryReader` is filled explicitly
-                // because it is otherwise top-leading and the column below relies on being the
-                // full height.
-                GeometryReader { proxy in
-                    let clearance = dockClearance(canvasWidth: proxy.size.width)
-                    bottomDock(width: BottomDock.width(in: proxy.size.width - clearance))
-                        .frame(width: proxy.size.width - clearance, height: proxy.size.height)
-                        .frame(width: proxy.size.width, height: proxy.size.height, alignment: .leading)
                 }
 
                 // Discreet, default-off FPS/frame-time HUD (see PerfHUD.swift) — tucked below the

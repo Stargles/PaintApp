@@ -100,14 +100,40 @@ final class AnimationGroupMembershipUITests: PaintUITestCase {
     /// after the first. That cost one run: the second selection failed to find Rectangle on a panel
     /// this helper had just put away. Asking whether the panel is already up is the whole fix, and it
     /// is what makes this safe to call four times.
+    ///
+    /// **The loop's start is checked against the top bar** (`assertBelowTheToolbar`): a start under it
+    /// makes no selection at all, and the Move after it lifts the whole cel instead.
     private func selectRectangle(_ app: XCUIApplication, _ paper: CGRect,
                                  from: (Double, Double), to: (Double, Double)) {
         let rectangle = app.buttons["selectPanel.mode.rectangle"]
         if !rectangle.exists { app.buttons["toolbar.selectButton"].tap() }
         XCTAssertTrue(rectangle.waitForExistence(timeout: 5), "the Select panel offers Rectangle")
         rectangle.tap()
-        dragOnCanvas(app, from: onHost(paper, from.0, from.1), to: onHost(paper, to.0, to.1))
+        let start = onHost(paper, from.0, from.1)
+        assertBelowTheToolbar(app, app.otherElements["canvas.host"], dy: Double(start.dy),
+                              "the selection loop's start (paper row \(from.1))")
+        dragOnCanvas(app, from: start, to: onHost(paper, to.0, to.1))
+        let selected = expectation(for: NSPredicate(format: "isEnabled == true"),
+                                   evaluatedWith: app.buttons["selectPanel.deselectButton"])
+        wait(for: [selected], timeout: 5)
     }
+
+    /// **The two fat marks the fixtures draw**, on the default vector layer so they lift as geometry
+    /// and so each Move box is big enough to drag by its middle. D1 on the left is the drawing that
+    /// changes group; D2 on the right exists only to carry the second group.
+    ///
+    /// **Every row is below the top bar and above the timeline on the owner's 810 pt iPad**, where the
+    /// paper's top 7% is under the bar and everything below 52% is under the timeline: a mark or a
+    /// loop at a row that clears both only on the 13-inch simulator is a mark the test cannot reach.
+    private func drawTheTwoMarks(_ app: XCUIApplication, _ paper: CGRect) {
+        setBrushSize(app, normalized: 0.75)
+        dragOnCanvas(app, from: onHost(paper, 0.14, 0.16), to: onHost(paper, 0.26, 0.28))
+        dragOnCanvas(app, from: onHost(paper, 0.62, 0.16), to: onHost(paper, 0.74, 0.28))
+    }
+
+    /// The loop that lifts D1 alone at the rest pose, and the one that lifts D2 alone.
+    private let loopAroundD1 = (from: (0.08, 0.10), to: (0.32, 0.34))
+    private let loopAroundD2 = (from: (0.56, 0.10), to: (0.80, 0.34))
 
     /// Lifts whatever is selected, drags it, and puts it down. The drag starts at the box's middle,
     /// which is why the marks below are fat diagonal bars rather than thin lines: every point of a
@@ -172,9 +198,7 @@ final class AnimationGroupMembershipUITests: PaintUITestCase {
         // as pixels and so each Move box is big enough to drag by its middle. D1 on the left is the
         // drawing that changes group; D2 on the right exists only to carry the second group, and it is
         // parked outside the measured window for the whole test.
-        setBrushSize(app, normalized: 0.75)
-        dragOnCanvas(app, from: onHost(paper, 0.14, 0.12), to: onHost(paper, 0.26, 0.24))
-        dragOnCanvas(app, from: onHost(paper, 0.62, 0.12), to: onHost(paper, 0.74, 0.24))
+        drawTheTwoMarks(app, paper)
         let drawn = try settledProbe(canvas, window: paper, timeout: 8)
         let rest = try XCTUnwrap(inkBox(drawn, paper, windowAroundD1),
                                  "setup: D1 is on the paper inside the measured window")
@@ -191,10 +215,10 @@ final class AnimationGroupMembershipUITests: PaintUITestCase {
         // At the far end of the block, move each mark. Each Move mints a group of its own and parks a
         // held baseline (§2.27), which the second mark commits.
         scrub(app, toCelFraction: 0.95)
-        selectRectangle(app, paper, from: (0.08, 0.06), to: (0.32, 0.30))
-        moveSelection(app, paper, from: (0.20, 0.18), by: (0.25, 0))
-        selectRectangle(app, paper, from: (0.56, 0.06), to: (0.80, 0.30))
-        moveSelection(app, paper, from: (0.68, 0.18), by: (0, 0.25))
+        selectRectangle(app, paper, from: loopAroundD1.from, to: loopAroundD1.to)
+        moveSelection(app, paper, from: (0.20, 0.22), by: (0.25, 0))
+        selectRectangle(app, paper, from: loopAroundD2.from, to: loopAroundD2.to)
+        moveSelection(app, paper, from: (0.68, 0.22), by: (0, 0.25))
 
         // Keyframe B: the second mark commits both held poses and makes both pairs animations.
         markKeyframe(app, onCelAt: 0.95)
@@ -226,7 +250,7 @@ final class AnimationGroupMembershipUITests: PaintUITestCase {
         // **The edit.** Lasso D1 where it *looks* on this frame — LASSO_MOVE §5.27 — and send it to
         // the other group.
         selectRectangle(app, paper,
-                        from: (midBefore.minX - 0.05, midBefore.minY - 0.05),
+                        from: (midBefore.minX - 0.05, midBefore.minY - 0.03),
                         to: (midBefore.maxX + 0.05, midBefore.maxY + 0.05))
         // **The band is up only while the graph editor is** — TODO (59), the owner: *"the animation
         // group section only really needs to be up when in graph editor."* So this is the artist's
@@ -296,22 +320,27 @@ final class AnimationGroupMembershipUITests: PaintUITestCase {
     /// A brand-new document taken to the graph editor's channel list with one animation group in it: two
     /// marks, a keyframe, a Move of the first mark alone (a Move that carried every drawing on the cel would
     /// be the whole cel's own Move, which is no group), a second keyframe, and the list opened. Answers the
-    /// group's header row and its id.
-    private func openTheChannelListOnAMintedGroup(_ app: XCUIApplication) -> (header: XCUIElement, groupID: String) {
+    /// group's header row and its id. `withTheSelectPanelUp` leaves the Select panel standing under the
+    /// list — the artist's own state when they are about to move a drawing into a group.
+    private func openTheChannelListOnAMintedGroup(_ app: XCUIApplication, withTheSelectPanelUp: Bool = false)
+        -> (header: XCUIElement, groupID: String) {
         XCTAssertTrue(launchIntoEditor(app), "setup: a brand-new document")
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
         let paper = paperRect(in: canvas)
 
-        setBrushSize(app, normalized: 0.75)
-        dragOnCanvas(app, from: onHost(paper, 0.14, 0.12), to: onHost(paper, 0.26, 0.24))
-        dragOnCanvas(app, from: onHost(paper, 0.62, 0.12), to: onHost(paper, 0.74, 0.24))
+        drawTheTwoMarks(app, paper)
         markKeyframe(app, onCelAt: 0.04)
         scrub(app, toCelFraction: 0.95)
-        selectRectangle(app, paper, from: (0.08, 0.06), to: (0.32, 0.30))
-        moveSelection(app, paper, from: (0.20, 0.18), by: (0.25, 0))
+        selectRectangle(app, paper, from: loopAroundD1.from, to: loopAroundD1.to)
+        moveSelection(app, paper, from: (0.20, 0.22), by: (0.25, 0))
         markKeyframe(app, onCelAt: 0.95)
         clearTheCanvasOfChrome(app)
+        if withTheSelectPanelUp {
+            app.buttons["toolbar.selectButton"].tap()
+            XCTAssertTrue(app.buttons["selectPanel.mode.rectangle"].waitForExistence(timeout: 5),
+                          "setup: the Select panel is up")
+        }
 
         app.buttons["timeline.graphEditorButton"].tap()
         let channels = app.buttons["timeline.graphChannelsButton"]
@@ -372,6 +401,32 @@ final class AnimationGroupMembershipUITests: PaintUITestCase {
         wait(for: [renamed], timeout: 5)
     }
 
+    /// **The channel list is drawn over the Select panel, not under it.** The list hangs from the timeline's
+    /// own bar and rises over the canvas, where the Select panel's card stands — and the Animation Group band
+    /// that makes the two a pair (moving a drawing into a group) is in that card only while the graph editor
+    /// is open. A card drawn after the timeline covered the list: its rows were on screen and a touch on
+    /// them landed on the card's buttons.
+    ///
+    /// Read as **hittability** of the group's header row, the first thing the artist presses: the row can
+    /// be seen, and be drawn, and still not be the thing a finger reaches. **This can go red only where the
+    /// card reaches the row** — the owner's 9th-generation iPad, whose window is the narrower one; on the
+    /// 13-inch simulator the card stops short of the row and the assertion cannot fail.
+    ///
+    /// What the artist does next: presses and holds the group, and Rename Group is offered.
+    func testTheChannelListStandsAboveTheSelectPanelsCard() throws {
+        let app = XCUIApplication()
+        let (header, groupID) = openTheChannelListOnAMintedGroup(app, withTheSelectPanelUp: true)
+        let card = app.descendants(matching: .any)["bottomDock.card"].firstMatch
+        XCTAssertTrue(card.exists, "PREMISE: the Select panel's card is up")
+        XCTAssertTrue(card.frame.intersects(header.frame),
+                      "PREMISE: the group's row (\(header.frame)) is within the card's reach (\(card.frame))")
+        attachScreenshot(app, "channel-list-over-the-select-panel")
+        XCTAssertTrue(header.isHittable, "the group's row is under the Select panel's card: a touch on it lands on the card")
+        header.press(forDuration: 1.0)
+        XCTAssertTrue(app.buttons["timeline.graphChannels.rename.\(groupID)"].waitForExistence(timeout: 5),
+                      "pressing and holding the group offers Rename Group")
+    }
+
     /// **A group renamed in the channel list is brought above the keyboard, inside the list** — the list hangs
     /// over the timeline at the foot of the screen, which is where the keyboard is drawn, so a name typed there
     /// would be typed blind. In landscape, the owner's orientation, from the fixture above: press and hold the
@@ -381,7 +436,6 @@ final class AnimationGroupMembershipUITests: PaintUITestCase {
     /// What the artist does next: types the name where it is on screen, and Return shows it in the list.
     func testAGroupBeingRenamedStandsAboveTheKeyboardAndNothingElseMoves() throws {
         XCUIDevice.shared.orientation = .landscapeLeft
-        defer { XCUIDevice.shared.orientation = .portrait }
         let app = XCUIApplication()
         let (header, groupID) = openTheChannelListOnAMintedGroup(app)
         let window = app.windows.firstMatch.frame
