@@ -5622,3 +5622,43 @@ watershed over 1.7 M open pixels is ~25 ms on the CPU where the deleted flood an
 raw-buffer rewrite, the watershed alone was 63 ms; the cap took a big open fill's to ~24 (standalone,
 `swiftc -O`, MEASURED). **Not measured**: the device, where the CPU half is likely the larger share; a
 press on an enclosed shape inside the first 1024² window, which covers half the pixels.
+
+## 28. A fill slider's tick is a render and nothing else (2026-10-11)
+
+TODO (157), with `recording-20261009-235645.jsonl`: *"The gap closing slider in the fill tool is being
+janky for some reason."* MEASURED in the recording (iPad 9), per two-second window of the drag:
+`mainBusy` 718–1498 ms, 5–7 `bakeComposite` and 5–10 `sandwichComposite` off the main thread, 46–112
+`storeDecode` of which 34–83 **on** it (`ringMiss`), 38–113 `updateUIView`.
+
+**Why.** The slider's value was `@Published` on `CanvasManager`, which every view in the editor observes,
+so each tick was a SwiftUI pass; and each render wrote its picture into the cel (`Cel.fillPreview`), so
+each tick was also a document change — a new bake key, a re-bake, a re-minted live pair, a thumbnail, and
+the canvas at rest reading the new bake back off the store with an LZ4 decode on the main thread.
+
+**The fix.** The slider values live in `FillSettings`, observed only by the two views that draw them;
+the picture lives off the document in `CanvasManager.liveFill`, reaches the fill's host through
+`onHeldPictureMoved` (§24.3's closure, generalised), and the host stays live while a fill is up
+(`heldHostLayerIndices`, the float hosts' set, generalised). The commit writes the document once.
+`Cel.fillPreview` is deleted, and with it a tier of `PixelOps`, the thumbnail and every cache key.
+
+**How it was taken.** MEASURED, **Release**, iPad Pro 13-inch M4 simulator (iOS 26.5), 96–97% idle. A
+temporary XCUITest, not merged: a new document with its layer set to Multiply (so the canvas rests on the
+baked frame, as the owner's did), a square with a gap, the Action Recorder on, a fill tapped inside with
+Gap Closing at 0, then the Fill panel's slider dragged across its track and back at 80 pt/s (~10 s). The
+windows below are the recorder's, during the drags. `197fb34` is before.
+
+| per 2 s of drag | before | after |
+|---|---|---|
+| `mainBusy` | 1375–1577 ms | 515–914 ms |
+| `updateUIView` (one per SwiftUI pass) | 112–116 | 0 |
+| `bakeComposite` / `sandwichComposite` (off main) | 5–10 / 18–20 | 0 / 0 |
+| `storeDecode`, on main | 73–115, 36–99 | 0 |
+| across both drags: `passes:` / `rebuilds:` / `moves:` on `canvas.host` | 477 / 74 / — | 0 / 0 / 74 |
+
+**What is left** is the slider itself: the same drag over a fill that is not adjustable (so nothing
+re-renders) costs 685–711 ms a window in this harness — touch delivery, the panel's own redraw and Core
+Animation — so the fill's share of a tick is ~1.5–2 ms, down from ~6–7.5 (INFERRED from the two
+differences at ~114 ticks a window). `FillSliderLiveUITests` pins it as counts: the picture follows the
+drag (`moves:`) with at most 2 passes across it, where each tick used to be one. **Not measured**: the
+device; the preview is still a window-sized image handed to Core Animation per tick, the first lever if
+the device says otherwise.

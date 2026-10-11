@@ -50,15 +50,6 @@ their files are repaired. Build `2974b33` broke this rule and lost the owner's k
 
 ---
 
-## (157) The fill tool's gap-closing slider is janky
-
-**Status** — reported 2026-10-10 with `recording-20261009-235645.jsonl`. The owner: *"The gap closing
-slider in the fill tool is being janky for some reason."*
-
-- [ ] Root cause from the recording; the slider tracks the finger smoothly.
-
----
-
 ## (164) The Move box holds its pose off the document while the finger is down
 
 **Status** — ruled 2026-10-10, out of (154). (154) made a graph-node drag hold the live pose off the
