@@ -1103,11 +1103,16 @@ final class GraphEditorFingerUITests: PaintUITestCase {
                                                    dy: height / 2)).screenPoint
         try drag(by: CGVector(dx: -ppf, dy: 50 * towardsMiddle), holding: emptyBand, landsAt: 0.8)
         let heldValue = try XCTUnwrap(sliderBrightness(app))
-        XCTAssertEqual(band.value as? String, start,
-                       "held to value, the key keeps its frame — and the finger resting on the band "
-                       + "did not cancel the drag")
-        XCTAssertGreaterThan(abs(heldValue - authored.end), 0.2,
-                             "…while its value followed the finger (\(heldValue) against \(authored.end))")
+        XCTAssertEqual(band.value as? String, start, "held to value, the key keeps its frame")
+        // The value of the point fifty points below (or above) where the key was grabbed — the whole of
+        // the finger's travel. A recogniser that were offered the resting finger would read the pair's
+        // centroid and carry the key half as far, which only this operand tells from the lock.
+        let expected = TimelineGraphBand.value(
+            atY: TimelineGraphBand.y(ofValue: authored.end, in: 0...2, bandHeight: height) + 50 * towardsMiddle,
+            in: 0...2, bandHeight: height)
+        XCTAssertEqual(heldValue, expected, accuracy: 0.05,
+                       "…and its value followed the finger the whole way, the resting finger on the band "
+                       + "having neither cancelled the drag nor dragged its centre")
         undo()
     }
 }
