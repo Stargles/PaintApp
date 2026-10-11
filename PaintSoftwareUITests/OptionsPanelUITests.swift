@@ -262,6 +262,11 @@ final class OptionsPanelUITests: PaintUITestCase {
         return (width, height, buffer)
     }
 
+    /// How far above and below the stroke's row (`rowAboveTheDock`) the Sobel and Bloom tests scan — a
+    /// few strokes' widths either side, short enough that the scan's lowest row is still above the card
+    /// on the 9th-generation iPad, where the Bloom card is the tallest.
+    private static let scanReach = 0.05
+
     /// The brightest red channel byte in a vertical strip at `dx`, over `dyRange` — a *scan* rather
     /// than one exact point, because neither Sobel's edge nor Bloom's glow lands at a pixel this file
     /// can compute in advance (stroke width and glow radius are both screen-scale-dependent). Sobel's
@@ -325,11 +330,11 @@ final class OptionsPanelUITests: PaintUITestCase {
         let gainSlider = app.sliders["effectSettings.gain"]
         XCTAssertTrue(gainSlider.waitForExistence(timeout: 5),
                       "Sobel's Gain slider did not open — the artist cannot reach it")
-        assertAboveTheDock(app, canvas, dy: row + 0.1, "The scan's lowest row")
+        assertAboveTheDock(app, canvas, dy: row + Self.scanReach, "The scan's lowest row")
         gainSlider.adjust(toNormalizedSliderPosition: 0.0)   // gain 0.25, the dimmest on offer
         app.buttons["layerOptions.close"].tap()
         openLayerPanel(app)   // close the panel so the canvas is clear
-        let dim = try settled { try maxRedChannel(canvas, dx: 0.5, dyRange: (row - 0.1)...(row + 0.1)) }
+        let dim = try settled { try maxRedChannel(canvas, dx: 0.5, dyRange: (row - Self.scanReach)...(row + Self.scanReach)) }
         attachScreenshot(app, "sobel-gain-dim")
 
         openLayerPanel(app)
@@ -338,7 +343,7 @@ final class OptionsPanelUITests: PaintUITestCase {
         gainSlider.adjust(toNormalizedSliderPosition: 1.0)   // gain 8, the brightest
         app.buttons["layerOptions.close"].tap()
         openLayerPanel(app)
-        let bright = try settled { try maxRedChannel(canvas, dx: 0.5, dyRange: (row - 0.1)...(row + 0.1)) }
+        let bright = try settled { try maxRedChannel(canvas, dx: 0.5, dyRange: (row - Self.scanReach)...(row + Self.scanReach)) }
         attachScreenshot(app, "sobel-gain-bright")
 
         XCTAssertGreaterThan(bright, dim, """
@@ -382,13 +387,13 @@ final class OptionsPanelUITests: PaintUITestCase {
 
         let radiusSlider = app.sliders["effectSettings.radius"]
         XCTAssertTrue(radiusSlider.waitForExistence(timeout: 5), "Bloom's settings did not open")
-        assertAboveTheDock(app, canvas, dy: row + 0.1, "The scan's lowest row")
+        assertAboveTheDock(app, canvas, dy: row + Self.scanReach, "The scan's lowest row")
         radiusSlider.adjust(toNormalizedSliderPosition: 1.0)                        // the widest glow
         app.sliders["effectSettings.intensity"].adjust(toNormalizedSliderPosition: 1.0)  // the strongest
 
         app.buttons["layerOptions.close"].tap()
         openLayerPanel(app)   // close the panel so the canvas is clear
-        let beforeRedness = try settled { try maxRedness(canvas, dx: 0.5, dyRange: (row - 0.1)...(row + 0.1)) }
+        let beforeRedness = try settled { try maxRedness(canvas, dx: 0.5, dyRange: (row - Self.scanReach)...(row + Self.scanReach)) }
         attachScreenshot(app, "bloom-colour-before")
 
         openLayerPanel(app)
@@ -417,7 +422,7 @@ final class OptionsPanelUITests: PaintUITestCase {
 
         app.buttons["layerOptions.close"].tap()
         openLayerPanel(app)
-        let afterRedness = try settled { try maxRedness(canvas, dx: 0.5, dyRange: (row - 0.1)...(row + 0.1)) }
+        let afterRedness = try settled { try maxRedness(canvas, dx: 0.5, dyRange: (row - Self.scanReach)...(row + Self.scanReach)) }
         attachScreenshot(app, "bloom-colour-after")
 
         XCTAssertGreaterThan(afterRedness, beforeRedness + 15, """
