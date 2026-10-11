@@ -125,17 +125,18 @@ final class MemoryBudgetLogicTests: XCTestCase {
         XCTAssertEqual(mask, 16 * Self.mib)
         XCTAssertEqual(onion, 64 * Self.mib)
         XCTAssertEqual(vectorRender, 96 * Self.mib, "twelve of the owner's canvases, inside the byte budget")
-        // 51 bytes a pixel — the lasso worst case, two reference colours, read off the buffer list
-        // `MetalFillSession.bytesPerPixel` sums, TODO (158)'s basin labels four bytes a pass of it. 44
-        // for a lasso over a uniform reference, which resolves
-        // to one colour and skips the second pass's buffers; the prediction the budget weighs is
-        // deliberately the upper one. A rate rather than a total, because the rate is the durable fact
-        // and the total follows from the canvas.
-        XCTAssertEqual(fill / (ownersCanvasBytes / 4), 51, "51 bytes a canvas pixel, worst case")
-        // The fill's two counters and two `FillParams` are the only bytes here that do not scale.
-        let fillConstants = 2 * (MemoryLayout<UInt32>.stride + MemoryLayout<MetalFillEngine.FillParams>.stride)
-        XCTAssertEqual(fillConstants, 168, "a `FillParams` is 80 bytes — ten scalars and two float4s")
-        XCTAssertEqual(total, 854 * Self.mib + fillConstants, "the seven budgets at the owner's canvas")
+        // 49 bytes a pixel — the lasso worst case, two reference colours, read off the buffer list
+        // `MetalFillSession.bytesPerPixel` sums, TODO (158)'s basin labels four bytes a pass of it. 43
+        // for a lasso over a uniform reference, which resolves to one colour and skips the second
+        // pass's buffers; the prediction the budget weighs is deliberately the upper one. A rate
+        // rather than a total, because the rate is the durable fact and the total follows from the
+        // canvas.
+        XCTAssertEqual(fill / (ownersCanvasBytes / 4), 49, "49 bytes a canvas pixel, worst case")
+        // The lasso's two `FillParams` and its filled-pixel counter are the only bytes here that do
+        // not scale.
+        let fillConstants = 2 * MemoryLayout<MetalFillEngine.FillParams>.stride + MemoryLayout<UInt32>.stride
+        XCTAssertEqual(fillConstants, 164, "a `FillParams` is 80 bytes — ten scalars and two float4s")
+        XCTAssertEqual(total, 850 * Self.mib + fillConstants, "the seven budgets at the owner's canvas")
         XCTAssertLessThan(total, ceiling,
                           "seven ceilings added together must still fit inside the process limit, or the arithmetic is asking for a jetsam")
 

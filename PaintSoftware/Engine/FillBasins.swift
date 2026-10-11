@@ -41,9 +41,10 @@ import Foundation
 /// a union-find over the merge tree — one entry per basin — plus a table lookup per pixel on the GPU
 /// (`basinRegion`).
 ///
-/// **Only the seed's plain fill is looked at.** The watershed runs over `inDomain` — the pixels the
-/// flood reaches with no gap closing at all — so its cost is the region being filled, and it cannot
-/// put paint anywhere the plain fill could not reach.
+/// **It is the flood, too.** The watershed covers every open pixel of the window, joining only
+/// neighbours of one compartment (`fillDomain`), so the basins' adjacency *is* the plain fill's
+/// connectivity: at a gap closing of 0 every edge of the merge tree joins and a seed reaches exactly
+/// what a flood with no gap closing would, and at any setting it reaches no more.
 struct FillBasins {
 
     /// D is quantised to this many levels a pixel, so the watershed's priority queue is a bucket queue
@@ -102,7 +103,8 @@ struct FillBasins {
     ///
     /// - Parameters:
     ///   - levels: D per pixel, in `levelsPerPixel`ths of a pixel.
-    ///   - inDomain: non-zero where the plain fill reached.
+    ///   - inDomain: one byte a pixel, 0 where a fill may not go and otherwise the compartment the
+    ///     pixel lies in (`fillDomain`): two pixels are neighbours only when they carry the same one.
     ///   - scratch: two `Int32` a pixel, overwritten — the bucket order and the queue's links.
     init(levels: UnsafePointer<UInt16>, inDomain: UnsafePointer<UInt8>, width: Int, height: Int,
          labels: UnsafeMutablePointer<Int32>, scratch: UnsafeMutablePointer<Int32>) {
@@ -156,10 +158,11 @@ struct FillBasins {
                     head[level] = after
                     if after < 0 { tail[level] = -1 }
                     let basin = labels[p]
+                    let compartment = inDomain[p]
                     let x = p % width
                     // 4-connected, as the flood is: a diagonal step would cross a one-pixel diagonal line.
                     @inline(__always) func visit(_ q: Int) {
-                        guard inDomain[q] != 0 else { return }
+                        guard inDomain[q] == compartment else { return }
                         let other = labels[q]
                         if other < 0 {
                             labels[q] = basin

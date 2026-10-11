@@ -1315,7 +1315,7 @@ final class LassoFillLogicTests: XCTestCase {
     /// **The collar is the paper the fence could walk to, and it stops dead at the fence.** This is
     /// the mask §7.2 tints, so what it covers is what the artist is shown, and the two properties
     /// that matter are both here: it is the ring of paper *between* the loop and the artwork, and it
-    /// is empty outside the loop — because `lassoBarrier` makes everything outside `loopMask` a wall,
+    /// is empty outside the loop — because `fillDomain` leaves everything outside `loopMask` out of reach,
     /// which is §6 step 3's "the flood must never leave `loopMask`".
     func testTheCollarIsTheRingOfPaperInsideTheFenceAndNothingOutsideIt() throws {
         let session = try lassoSession(box(breakInRightWall: 0), loop: loopAroundEverything)

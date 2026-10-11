@@ -47,7 +47,7 @@ static inline float colourDistance(float4 a, float4 b) {
 // **One reference colour per dispatch, deliberately, even though the lasso fill has up to two.**
 // LASSO_FILL.md §6 step 3 defines the reached set as the union over `c ∈ C` of *per-colour*
 // reachability — a path may not switch reference colours halfway — so the lasso runs this kernel
-// (and the flood, and gap closing's basins) once per reference against its own buffers, rather than widening
+// (and its domain and gap closing's basins) once per reference against its own buffers, rather than widening
 // the test here to "passable under any `c`". Merging them into one passability field would let a
 // collar walk paper → flat → paper and hold out an interior pocket the spec says to fill.
 //
@@ -158,8 +158,8 @@ static inline float distanceToCanvasEdge(uint2 gid, constant FillParams& params)
 // **The canvas edge bounds a fill through two separate mechanisms, and they are kept apart on
 // purpose:**
 //
-//   1. **The barrier** (`floodHoriz`/`floodVert` below). The artwork rect's boundary is a limit on
-//      where the flood may *travel*, exactly the way the buffer rim already was. It is
+//   1. **The barrier** (`fillDomain` below). The artwork rect's boundary is a limit on where a fill
+//      may *travel*, exactly the way the buffer rim already was. It is
 //      unconditional — independent of the gap slider — and it is what stops a fill escaping onto the
 //      padding margin. This is the mechanism the artist means by "the canvas is a border".
 //   2. **Ink for gap closing** (`gapLevels`). The paper's edge counts as ink in the distance map gap
@@ -216,149 +216,39 @@ kernel void unionMask(const device uchar* src   [[buffer(0)]],
     dst[i] = max(dst[i], src[i]);
 }
 
-// MARK: - Flood fill (parallel scanline / span propagation)
+// MARK: - Where a fill may go
 
-kernel void floodInit(const device uchar* wall   [[buffer(0)]],
-                      device uchar*        region [[buffer(1)]],
-                      constant FillParams& params [[buffer(2)]],
-                      uint2 gid [[thread_position_in_grid]]) {
-    if (gid.x >= params.width || gid.y >= params.height) return;
-    uint i = pixelIndex(gid.x, gid.y, params.width);
-    bool isSeed = (gid.x == params.seedX && gid.y == params.seedY);
-    region[i] = (isSeed && wall[i] == 0) ? 1 : 0;
-}
-
-// The lasso fill's seed: the passable pixels of the loop's **ring** — the one-pixel collar just
-// inside the fence the artist drew — and nothing else. See LASSO_FILL.md §6 step 3.
+// **The open pixels a fill may cover, each tagged with the compartment it lies in** — the input
+// `FillBasins` partitions, which is the whole of the flood: a fill is the basins its seeds reach, and
+// a basin is made of open pixels that are neighbours *and* carry the same tag.
 //
-// **This is the reported bug's fix, and it is one line.** The kernel this replaced seeded *every*
-// open pixel inside the loop, so a loop drawn *around* a shape (which is what "circle something"
-// means) seeded the paper between the fence and the drawing, and the flood ran from there across the
-// whole page — the shipped defect, characterized in `LassoFillLogicTests`. Seeding only the ring, and
-// confining the flood to the loop (see `lassoBarrier`), makes the flood's extent depend on the loop
-// the artist controls rather than on canvas connectivity they do not.
+//   * 0 — a wall, or, for a lasso, a pixel outside the loop the artist drew. Never part of a fill's
+//     reach. LASSO_FILL.md §6 step 3: *"the flood must never leave `loopMask` — that single
+//     constraint is the whole leak fix."*
+//   * 2 — open paper inside the artwork rect; 1 — open paper out on the padding margin. **This is the
+//     barrier**, and it is why the canvas edge costs no pixel: the rect's boundary lies *between* two
+//     pixels that carry different tags, so nothing walks across it, in either direction, and nothing is
+//     consumed. With the option off the rect is the buffer and every pixel is a 2.
 //
-// **A stretch of ring lying on ink contributes no seed, and that is not an error condition**
-// (LASSO_FILL.md §4 case 1) — it just means the collar has zero width there, which is exactly right:
+// **The loop is not a wall.** Its ring pixels lie inside it, so they are open and tagged, and the
+// lasso's collar starts from them (`MetalFillSession`'s ring seeds) — anyone "simplifying" this by
+// making the loop a wall breaks the tool completely: the ring would be unreachable, nothing would be
+// reached, and every loop would paint a solid slab of its own shape over the artwork. "The loop is a
+// wall" is a property of the finished result, from the final intersect in `lassoInvert`. A stretch of
+// ring lying on ink is simply not open, so it seeds nothing, which is right (LASSO_FILL.md §4 case 1):
 // the artist drew their fence through the drawing.
 //
-// The seeds are what the flood grows *from*, and the flood marks what must **not** be filled: the
-// paper the fence can walk to. `lassoInvert` then keeps the loop minus everything the flood reached.
-// So the loop is emphatically **not** added to the wall set — the flood has to be able to enter the
-// ring in order to exclude it — and anyone "simplifying" this by making the loop a wall breaks the
-// tool completely: the ring would be unreachable, nothing would be reached, and every loop would
-// paint a solid slab of its own shape over the artwork.
-kernel void floodInitFromRing(const device uchar* wall   [[buffer(0)]],
-                              device uchar*        region [[buffer(1)]],
-                              constant FillParams& params [[buffer(2)]],
-                              const device uchar*  ring   [[buffer(3)]],
-                              uint2 gid [[thread_position_in_grid]]) {
+// `loop` is bound to `wall` when there is none (`hasLoop` 0), because Metal has no unbound argument.
+kernel void fillDomain(const device uchar* wall    [[buffer(0)]],
+                       const device uchar* loop    [[buffer(1)]],
+                       device uchar*       domain  [[buffer(2)]],
+                       constant FillParams& params [[buffer(3)]],
+                       constant uint&      hasLoop [[buffer(4)]],
+                       uint2 gid [[thread_position_in_grid]]) {
     if (gid.x >= params.width || gid.y >= params.height) return;
     uint i = pixelIndex(gid.x, gid.y, params.width);
-    region[i] = (ring[i] != 0 && wall[i] == 0) ? 1 : 0;
-}
-
-// The wall set the collar flood actually runs against: the artwork's walls, **plus everything
-// outside the loop**. LASSO_FILL.md §6 step 3: *"the flood must never leave `loopMask` — that single
-// constraint is the whole leak fix."*
-//
-// A separate buffer rather than a union into the wall set, and the distinction is the one a later
-// reader is most likely to collapse. The loop is *not* a wall: its ring pixels are inside `lasso`,
-// so they stay floodable and the flood enters them. What the barrier blocks is the pixel *beyond*
-// the fence. "The loop is a wall" is a property of the finished result — it comes out of the final
-// intersect in `lassoInvert`, not out of the passability field.
-//
-// The walls are the plain ones: gap closing is applied to what this flood reaches afterwards, by
-// `FillBasins`' cut, exactly as the bucket's is.
-kernel void lassoBarrier(const device uchar* wall   [[buffer(0)]],
-                         const device uchar*  lasso  [[buffer(1)]],
-                         constant FillParams& params [[buffer(2)]],
-                         device uchar*        out    [[buffer(3)]],
-                         uint2 gid [[thread_position_in_grid]]) {
-    if (gid.x >= params.width || gid.y >= params.height) return;
-    uint i = pixelIndex(gid.x, gid.y, params.width);
-    out[i] = (wall[i] != 0 || lasso[i] == 0) ? 1 : 0;
-}
-
-// One contiguous run of the sweep: forward then backward over `k` in `[k0, k1)`, filling every open
-// pixel connected through non-walls to an already-filled one. `stride` is 1 along a row and `width`
-// along a column. `prev` starts false at each end, so **splitting a line into runs is exactly what
-// makes a barrier**: the flood cannot carry across a run boundary in either direction, and the
-// boundary consumes no pixel of its own.
-static inline void sweepRun(device uchar* region, const device uchar* wall,
-                            uint base, uint stride, uint k0, uint k1,
-                            device atomic_uint* changed) {
-    if (k1 <= k0) return;
-    bool prev = false;
-    for (uint k = k0; k < k1; k++) {
-        uint i = base + k * stride;
-        if (wall[i]) { prev = false; }
-        else if (region[i]) { prev = true; }
-        else if (prev) { region[i] = 1; atomic_fetch_or_explicit(changed, 1u, memory_order_relaxed); }
-    }
-    prev = false;
-    for (uint k = k1; k-- > k0; ) {
-        uint i = base + k * stride;
-        if (wall[i]) { prev = false; }
-        else if (region[i]) { prev = true; }
-        else if (prev) { region[i] = 1; atomic_fetch_or_explicit(changed, 1u, memory_order_relaxed); }
-    }
-}
-
-// **The barrier, and it is a rectangle rather than four full-width cuts.** A row only crosses the
-// artwork rect's left and right edges if the row itself is beside the paper — a row up in the top
-// margin crosses no edge of the rect at all, and cutting it would slice the margin into corner
-// pieces instead of leaving it the single continuous ring the artist sees. So the split is decided
-// **once per line, from the thread's own coordinate**, and the inner loop keeps exactly the cost it
-// had: no per-pixel branch, no extra compare.
-//
-// With the rect at the buffer the guard is always true and the cuts land on k == 0 and k == extent,
-// which no sweep ever crossed anyway — so the three runs collapse to the one full-line run, and a
-// padding-0 fill is byte-identical to the code before the rect. A rect edge past the buffer clamps
-// to the buffer's own end for the same reason.
-static inline uint2 runSplit(uint alongExtent, uint acrossPos,
-                             float alongMin, float alongMax, float acrossMin, float acrossMax) {
-    float pos = float(acrossPos);
-    bool crossesTheRect = pos >= acrossMin && pos < acrossMax;
-    if (!crossesTheRect) return uint2(0u, alongExtent);
-    float extent = float(alongExtent);
-    uint lo = uint(clamp(alongMin, 0.0f, extent) + 0.5f);
-    uint hi = uint(clamp(alongMax, 0.0f, extent) + 0.5f);
-    return uint2(lo, max(lo, hi));
-}
-
-// One thread per row: fill every open pixel in the row that is horizontally connected (through
-// non-wall pixels) to an already-filled pixel, sweeping both directions. Whole horizontal spans
-// fill in a single pass; the vertical pass then seeds new rows.
-kernel void floodHoriz(device uchar*        region  [[buffer(0)]],
-                       const device uchar*  wall    [[buffer(1)]],
-                       constant FillParams& params  [[buffer(2)]],
-                       device atomic_uint*  changed [[buffer(3)]],
-                       uint y [[thread_position_in_grid]]) {
-    if (y >= params.height) return;
-    uint w = params.width;
-    uint base = y * w;
-    uint2 split = runSplit(w, y, params.artworkMinX, params.artworkMaxX,
-                           params.artworkMinY, params.artworkMaxY);
-    sweepRun(region, wall, base, 1u, 0u, split.x, changed);
-    sweepRun(region, wall, base, 1u, split.x, split.y, changed);
-    sweepRun(region, wall, base, 1u, split.y, w, changed);
-}
-
-// One thread per column: the vertical analogue of floodHoriz.
-kernel void floodVert(device uchar*        region  [[buffer(0)]],
-                      const device uchar*  wall    [[buffer(1)]],
-                      constant FillParams& params  [[buffer(2)]],
-                      device atomic_uint*  changed [[buffer(3)]],
-                      uint x [[thread_position_in_grid]]) {
-    if (x >= params.width) return;
-    uint w = params.width;
-    uint h = params.height;
-    uint2 split = runSplit(h, x, params.artworkMinY, params.artworkMaxY,
-                           params.artworkMinX, params.artworkMaxX);
-    sweepRun(region, wall, x, w, 0u, split.x, changed);
-    sweepRun(region, wall, x, w, split.x, split.y, changed);
-    sweepRun(region, wall, x, w, split.y, h, changed);
+    bool open = wall[i] == 0 && (hasLoop == 0u || loop[i] != 0);
+    domain[i] = open ? (insideArtworkRect(gid.x, gid.y, params) ? 2 : 1) : 0;
 }
 
 // MARK: - Edge overlap + paint
@@ -417,7 +307,7 @@ kernel void paintRegion(const device uchar* region [[buffer(0)]],
 //  * *"the fill shouldn't even touch the loop"* — nothing outside `lasso` is ever written, so the
 //    fence bounds the result absolutely. That is the wall property, and it lives **here**, in the
 //    intersect, not in the passability field. Making the loop a wall instead would leave the ring
-//    unreachable and paint a slab (see `floodInitFromRing`).
+//    unreachable and paint a slab (see `fillDomain`).
 //  * *"all inner lines are filled over"* — the complement includes ink, because ink is not
 //    *reached*: the collar flood cannot walk through it. §6 step 4 says so in one line.
 //  * *a face's eyes fill with the face* (§4 case 5) — the eyes' interiors are walled off by their own

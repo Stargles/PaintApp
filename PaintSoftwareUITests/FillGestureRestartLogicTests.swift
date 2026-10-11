@@ -45,7 +45,7 @@ final class FillGestureRestartLogicTests: XCTestCase {
     /// A tap at `onTheSquare` samples green and floods the square; a tap at `onThePaper` samples
     /// transparent paper and floods everything else. Pair either seed with the *other* tap's sampled
     /// colour — which is precisely what a superseded worker did — and the seed pixel is a wall, so
-    /// `floodInit` plants nothing and the result is empty. An empty region is therefore the exact
+    /// it lies in no basin and the result is empty. An empty region is therefore the exact
     /// signature of a fill rendered against the wrong session, and it cannot be confused with a fill
     /// that merely landed somewhere unexpected.
     private static let square = CGRect(x: 40, y: 40, width: 20, height: 20)

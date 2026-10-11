@@ -27,7 +27,7 @@ enum LassoFillMask {
     /// most careful. Winding fills it solid.
     ///
     /// **Antialiasing off, also deliberately.** The mask is a stencil the GPU reads as a boolean —
-    /// it bounds the collar flood (`lassoBarrier`) and it is one operand of the final intersect
+    /// it bounds the collar flood (`fillDomain`) and it is one operand of the final intersect
     /// (`lassoInvert`); a half-covered edge pixel would be rounded to one side or the other anyway,
     /// and leaving it on would put a ring of ambiguous values around every loop for no benefit. The
     /// fill's own soft edge comes from the coverage ramp in `lassoInvert`, which reads the artwork's

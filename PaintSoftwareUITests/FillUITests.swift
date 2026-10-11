@@ -36,66 +36,139 @@ final class FillContainmentUITests: PaintUITestCase {
         XCTAssertTrue(waitUntilFilled(canvas, dx: 0.5, dy: 0.5), "Tapping inside the closed square with the fill tool should color its interior")
     }
 
-    /// Leaves a deliberate gap in one edge of the lineart square (an "open contour"), maxes out the
-    /// gap-closing slider, and expects the fill to still stay contained rather than leaking out through
-    /// the gap into the rest of the canvas.
+    /// **TODO (158), from a new document**: a square drawn by hand with a gap in its right side, Gap
+    /// Closing at the top of its slider, and a tap inside. The owner: *"gap fill works normally, but
+    /// does not curl in close to the edges of a shape even on high."*
     ///
-    /// Currently disabled — still fails after fixing two confirmed bugs (unbridgeable gap size, and
-    /// `app.sliders.firstMatch` grabbing the wrong slider). See BUGS.md ("Fill tool: gap-closing test /
-    /// possible feature bug") for the full investigation and what's left to check.
-    func testFillToolBridgesOpenContourGapWhenGapClosingEnabled() throws {
-        throw XCTSkip("Disabled pending investigation — see BUGS.md")
-
+    /// Both halves are read off the screen. The fill stops at the gap: the paper just outside it and
+    /// the page beyond stay paper. And it reaches the ink everywhere else: along rays from the middle
+    /// into all four corners and onto three sides, every pixel up to the first stroke is the fill's red
+    /// — never paper, and never the grey of a stroke's soft edge over paper. A fill that curled in from
+    /// a corner shows paper on that ray before the ink.
+    ///
+    /// The gap is shown to be a real way out at the end: the same tap with Gap Closing at 0 floods the
+    /// page through it.
+    func testGapClosingStopsAtTheGapAndStillFillsTheCornersAndEdges() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
-
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
-        // Same square as above, but the bottom edge stops just short of closing, leaving a small
-        // open contour in the lineart — about 30pt wide on the default 2048pt canvas. The gap-closing
-        // slider maxes out at a 40pt radius (FillSettingsPanel), and morphological closing can only
-        // bridge a gap up to ~2x its radius (~80pt here), so the opening has to stay well under that,
-        // not merely "a fraction of the square" — a gap sized as a fraction of the drawn shape (e.g.
-        // 60% of this edge) would be hundreds of points wide and structurally unbridgeable at any
-        // slider setting.
-        //
-        // The bottom stroke is drawn starting exactly at the intended gap boundary (0.315) and
-        // dragging *into and slightly past* the already-solid right corner (to 0.72, just past 0.7)
-        // rather than the other way around: XCUITest's synthetic drags can undershoot their requested
-        // travel distance (see `performDrag`'s doc comment above), and a drag *from* the corner *to* a
-        // precise midpoint would, if undershot, stop short and leave a far bigger — unbridgeable — gap
-        // than intended. Starting at the gap boundary and overshooting the target means undershoot just
-        // eats into the margin instead of widening the gap. The overshoot is deliberately modest (0.72,
-        // not e.g. 0.9): dragging a synthetic touch all the way toward the physical screen edge risks
-        // colliding with iOS's edge-swipe system gestures, which was observed to silently drop the next
-        // synthetic stroke entirely.
-        drawLine(on: canvas, from: CGVector(dx: 0.3, dy: 0.3), to: CGVector(dx: 0.7, dy: 0.3)) // top
-        drawLine(on: canvas, from: CGVector(dx: 0.7, dy: 0.3), to: CGVector(dx: 0.7, dy: 0.7)) // right
-        drawLine(on: canvas, from: CGVector(dx: 0.315, dy: 0.7), to: CGVector(dx: 0.72, dy: 0.7)) // bottom, short of closing
-        drawLine(on: canvas, from: CGVector(dx: 0.3, dy: 0.7), to: CGVector(dx: 0.3, dy: 0.3)) // left
+        // The square in fractions of the paper the dock leaves visible; the gap in canvas pixels of the
+        // 2048² default document, centre to centre of the strokes either side of it.
+        let visible = visiblePaperRect(app, in: canvas)
+        let paper = paperRect(in: canvas)
+        let (left, right, top, bottom) = (0.25, 0.65, 0.2, 0.75)
+        let gapMid = (top + bottom) / 2
+        let halfGap = 15.0 / 2048 * Double(paper.height) / Double(visible.height)
+        func at(_ x: Double, _ y: Double) -> CGVector { onHost(visible, x, y) }
 
+        drawLine(on: canvas, from: at(left, top), to: at(right, top))
+        drawLine(on: canvas, from: at(right, bottom), to: at(left, bottom))
+        drawLine(on: canvas, from: at(left, bottom), to: at(left, top))
+        // The right side as two strokes, each starting at the gap and running past its corner, so a
+        // synthetic drag that falls short shortens the overshoot and never widens the gap.
+        drawLine(on: canvas, from: at(right, gapMid - halfGap), to: at(right, top - 0.03))
+        drawLine(on: canvas, from: at(right, gapMid + halfGap), to: at(right, bottom + 0.03))
+
+        setBrushColor(app, hex: "FF0000")
         let fillButton = app.buttons["toolbar.fillButton"]
         XCTAssertTrue(fillButton.waitForExistence(timeout: 5))
-        fillButton.tap() // Opens the fill settings panel.
-
-        // Must be looked up by its own identifier, not `app.sliders.firstMatch`: the side toolbar's
-        // brush-size/opacity sliders are earlier in the accessibility tree and would match first,
-        // silently adjusting the wrong control while this one stayed at its default (8px) — which is
-        // exactly what happened here originally, masking a gap-closing bug behind a slider that was
-        // never actually being moved.
+        fillButton.tap()   // selects the fill tool
+        fillButton.tap()   // opens its menu
         let gapSlider = app.sliders["fillPanel.gapClosingSlider"]
+        XCTAssertTrue(gapSlider.waitForExistence(timeout: 5), "the fill menu's Gap Closing slider")
+        gapSlider.adjust(toNormalizedSliderPosition: 1.0)
+        fillButton.tap()   // closes the menu so it cannot cover the canvas
+
+        let middle = at((left + right) / 2, gapMid)
+        canvas.coordinate(withNormalizedOffset: middle).tap()
+        XCTAssertNotNil(waitForPixel(canvas, at: middle, matches: { isRed($0) }), "the fill lands inside the square")
+        let screen = try settledScreen(canvas)
+        attachScreenshot(app, "gap closing at 40 over a square with a gap")
+
+        let outsideTheGap = at(right + 0.04, gapMid)
+        XCTAssertTrue(isWhitish(screen.pixel(at: outsideTheGap)),
+                      "the paper just outside the gap stays paper: \(String(describing: screen.pixel(at: outsideTheGap)))")
+        XCTAssertTrue(isWhitish(screen.pixel(at: safeOutsideCornerPoint(canvas))), "…and so does the page beyond")
+
+        let corners = [("top-left", at(left - 0.05, top - 0.05)), ("top-right", at(right + 0.05, top - 0.05)),
+                       ("bottom-left", at(left - 0.05, bottom + 0.05)), ("bottom-right", at(right + 0.05, bottom + 0.05)),
+                       ("left side", at(left - 0.05, gapMid)), ("top side", at((left + right) / 2, top - 0.05)),
+                       ("bottom side", at((left + right) / 2, bottom + 0.05))]
+        for (name, target) in corners {
+            let ray = screen.ray(from: middle, to: target)
+            let firstInk = try XCTUnwrap(ray.firstIndex { isInk($0) }, "the ray to the \(name) meets the stroke")
+            XCTAssertGreaterThan(firstInk, 10, "Fixture check: the \(name) ray starts inside the fill")
+            let notFill = ray[..<firstInk].filter { $0.g >= 100 }
+            XCTAssertTrue(notFill.isEmpty, "the fill reaches the ink toward the \(name): \(notFill.count) of the "
+                          + "\(firstInk) pixels before the stroke are paper or a soft edge over paper, e.g. \(String(describing: notFill.last))")
+        }
+
+        // The control: the gap is a real way out.
+        app.buttons["sideToolbar.undoButton"].tap()
+        fillButton.tap()
         XCTAssertTrue(gapSlider.waitForExistence(timeout: 5))
-        gapSlider.adjust(toNormalizedSliderPosition: 1.0) // Max out gap-closing distance.
+        gapSlider.adjust(toNormalizedSliderPosition: 0.0)
+        fillButton.tap()
+        canvas.coordinate(withNormalizedOffset: middle).tap()
+        XCTAssertNotNil(waitForPixel(canvas, at: outsideTheGap, matches: { isRed($0) }),
+                        "with Gap Closing at 0 the same tap floods out through the gap")
+    }
 
-        fillButton.tap() // Close the panel so it can't cover the canvas.
+    /// The canvas as one screenshot, read only once two in a row agree — the fill lands off the main
+    /// thread, and a picture taken mid-render is not the one the rays should reason about.
+    private func settledScreen(_ canvas: XCUIElement) throws -> Screen {
+        var last: Screen?
+        for _ in 0..<20 {
+            let current = try Screen(canvas)
+            if let last, last.bytes == current.bytes { return current }
+            last = current
+            Thread.sleep(forTimeInterval: 0.25)
+        }
+        return try XCTUnwrap(last)
+    }
 
-        canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-        XCTAssertTrue(waitUntilFilled(canvas, dx: 0.5, dy: 0.5), "Fill should still land inside the square despite the open contour")
+    /// `canvas.host`'s pixels, top-left origin, addressed by host fraction like every other probe.
+    private struct Screen {
+        let bytes: [UInt8]
+        let width: Int, height: Int
 
-        // A point clearly outside the square should remain untouched — if gap-closing failed to bridge
-        // the opening, the fill would have leaked out and colored this too.
-        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: 0.05, dy: 0.05)), "Fill must not leak out through the open contour onto the rest of the canvas")
+        init(_ element: XCUIElement) throws {
+            let cg = try XCTUnwrap(element.screenshot().image.cgImage)
+            width = cg.width; height = cg.height
+            var buffer = [UInt8](repeating: 0, count: width * height * 4)
+            let drew: Bool = buffer.withUnsafeMutableBytes { raw in
+                guard let context = CGContext(data: raw.baseAddress, width: cg.width, height: cg.height,
+                                              bitsPerComponent: 8, bytesPerRow: cg.width * 4,
+                                              space: CGColorSpaceCreateDeviceRGB(),
+                                              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+                context.draw(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
+                return true
+            }
+            XCTAssertTrue(drew, "the screenshot could not be read")
+            bytes = buffer
+        }
+
+        func pixel(x: Int, y: Int) -> RGBA {
+            let o = (min(max(y, 0), height - 1) * width + min(max(x, 0), width - 1)) * 4
+            return (bytes[o], bytes[o + 1], bytes[o + 2], bytes[o + 3])
+        }
+
+        func pixel(at point: CGVector) -> RGBA? {
+            pixel(x: Int(point.dx * Double(width)), y: Int(point.dy * Double(height)))
+        }
+
+        /// Every screen pixel on the straight line from one host point toward another, in order.
+        func ray(from: CGVector, to: CGVector) -> [RGBA] {
+            let x0 = from.dx * Double(width), y0 = from.dy * Double(height)
+            let x1 = to.dx * Double(width), y1 = to.dy * Double(height)
+            let steps = Int(max(abs(x1 - x0), abs(y1 - y0)).rounded(.up))
+            return (0...max(steps, 1)).map { i in
+                let t = Double(i) / Double(max(steps, 1))
+                return pixel(x: Int(x0 + (x1 - x0) * t), y: Int(y0 + (y1 - y0) * t))
+            }
+        }
     }
 
     /// The scenario from the fill tool's design brief: lineart on one layer, a separate blank layer
