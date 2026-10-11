@@ -51,6 +51,23 @@ final class FillGapClosingLogicTests: XCTestCase {
             }
         }
         func isInk(_ x: Int, _ y: Int) -> Bool { bytes[(y * width + x) * 4 + 3] != 0 }
+
+        /// Every paper pixel 4-connected to `seed`, counted without the engine — the region a fill
+        /// with no gap closing must be, worked out independently of the code that makes it.
+        func paperReachable(from seed: (x: Int, y: Int)) -> [Bool] {
+            var reached = [Bool](repeating: false, count: width * height)
+            var stack = [seed.y * width + seed.x]
+            reached[stack[0]] = true
+            while let p = stack.popLast() {
+                let x = p % width, y = p / width
+                for (nx, ny) in [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)]
+                where nx >= 0 && ny >= 0 && nx < width && ny < height && !isInk(nx, ny) && !reached[ny * width + nx] {
+                    reached[ny * width + nx] = true
+                    stack.append(ny * width + nx)
+                }
+            }
+            return reached
+        }
     }
 
     /// A 3 px outline of the square [16, 79]², its right side broken by an opening `opening` rows
@@ -117,17 +134,21 @@ final class FillGapClosingLogicTests: XCTestCase {
         }
     }
 
-    /// An acute corner fills to its tip at the top of the slider, to the pixel the plain fill reaches.
+    /// An acute corner fills to its tip at the top of the slider: every paper pixel the wedge holds, as
+    /// counted without the engine.
     func testAnAcuteCornerFillsToItsTip() throws {
         var wedge = Ink()
         wedge.line(CGPoint(x: 8, y: 8), CGPoint(x: 88, y: 28), thickness: 3)
         wedge.line(CGPoint(x: 8, y: 8), CGPoint(x: 88, y: 60), thickness: 3)
         wedge.line(CGPoint(x: 88, y: 28), CGPoint(x: 88, y: 60), thickness: 3)
-        let session = try session(wedge)
-        let plain = try fill(session, seed: (70, 40), gap: 0)
-        let maxed = try fill(session, seed: (70, 40), gap: 40)
-        XCTAssertGreaterThan(plain.count, 500, "Fixture check: the wedge's interior")
-        XCTAssertEqual(maxed.bytes, plain.bytes, "At 40 px the wedge fills exactly as with no gap closing")
+        let interior = wedge.paperReachable(from: (70, 40))
+        XCTAssertGreaterThan(interior.filter { $0 }.count, 500, "Fixture check: the wedge's interior")
+        let maxed = try fill(wedge, seed: (70, 40), gap: 40)
+        var wrong = 0
+        for y in 0..<wedge.height { for x in 0..<wedge.width where maxed.isFilled(x, y) != interior[y * wedge.width + x] {
+            wrong += 1
+        } }
+        XCTAssertEqual(wrong, 0, "At 40 px the wedge fills to its tip, exactly its paper")
     }
 
     /// A shape outlined by hand wobbles, and every bump in its outline is a little rise and fall in the
@@ -147,10 +168,11 @@ final class FillGapClosingLogicTests: XCTestCase {
         strand.line(CGPoint(x: 4, y: 12), CGPoint(x: 4, y: 28), thickness: 3)
         strand.line(CGPoint(x: 124, y: 12), CGPoint(x: 124, y: 28), thickness: 3)
         let session = try session(strand)
-        let plain = try fill(session, seed: (60, 20), gap: 0)
-        for gap in [Float(4), 8, 16, 40] {
-            XCTAssertEqual(try fill(session, seed: (60, 20), gap: gap).bytes, plain.bytes,
-                           "gap \(gap): the whole strand, as with no gap closing")
+        let paper = strand.paperReachable(from: (60, 20))
+        for gap in [Float(0), 4, 8, 16, 40] {
+            let region = try fill(session, seed: (60, 20), gap: gap)
+            let wrong = (0..<paper.count).filter { region.isFilled($0 % strand.width, $0 / strand.width) != paper[$0] }.count
+            XCTAssertEqual(wrong, 0, "gap \(gap): the whole strand, every paper pixel of it")
         }
     }
 
@@ -335,6 +357,28 @@ final class FillGapClosingLogicTests: XCTestCase {
         XCTAssertNotEqual(leaked[(40 * 2048 + 40) * 4 + 3], 0, "Fixture check: at 0 the fill leaks out through the gap")
         XCTAssertEqual(missed, 0, "every pixel of the square's interior away from the gap — edges and corners")
         XCTAssertEqual(spilled, 0, "and nothing outside the square: the gap held")
+
+        // And the control is not merely self-consistent: along rays from the middle into each corner
+        // and onto three sides, the fill runs up to the first pixel the ink walls off — alpha past the
+        // 0.15 threshold's 77 — read off the outline's own render rather than off any fill.
+        let ink = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(
+            VectorCanvas(size: CGSize(width: 2048, height: 1024), strokes: ownersOutline().strokes).render().cgImage)))
+        let middle = CGPoint(x: 600, y: 460)
+        for (name, target) in [("top-left", CGPoint(x: 250, y: 110)), ("top-right", CGPoint(x: 950, y: 100)),
+                               ("bottom-right", CGPoint(x: 960, y: 820)), ("bottom-left", CGPoint(x: 240, y: 810)),
+                               ("left", CGPoint(x: 240, y: 460)), ("top", CGPoint(x: 600, y: 100)),
+                               ("bottom", CGPoint(x: 600, y: 820))] {
+            let steps = Int(max(abs(target.x - middle.x), abs(target.y - middle.y)))
+            var short = 0, reachedInk = false
+            for i in 0...steps {
+                let t = CGFloat(i) / CGFloat(steps)
+                let o = (Int(middle.y + (target.y - middle.y) * t) * 2048 + Int(middle.x + (target.x - middle.x) * t)) * 4 + 3
+                if ink[o] >= 77 { reachedInk = true; break }
+                if filled[o] == 0 { short += 1 }
+            }
+            XCTAssertTrue(reachedInk, "Fixture check: the ray to the \(name) meets the outline")
+            XCTAssertEqual(short, 0, "the fill reaches the ink toward the \(name)")
+        }
     }
 
     /// Where the owner's outline skips, on its right side.
