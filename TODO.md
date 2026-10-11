@@ -50,6 +50,18 @@ their files are repaired. Build `2974b33` broke this rule and lost the owner's k
 
 ---
 
+## (168) A finger held as a modifier does nothing when it lifts
+
+**Status** — ruled 2026-10-11, out of (166). A second finger held for the axis lock (and, by the same
+`TouchCountRecognizer` / `JoinedTouches` hold, the shape snap and the Move box's precision slowdown) still
+acts when it lifts: on a cel row it moves the playhead; with finger painting on it leaves a dab on the
+canvas. The owner: a finger used as the hold is ignored when it lifts.
+
+- [ ] A touch that counted as a held modifier never taps, presses, scrubs or paints anything — on lift
+      or before — wherever it rests; one rule in the shared hold, not per surface.
+
+---
+
 ## (27) Stream the computer's screen as a layer
 
 **Status** — briefed 2026-09-13, designed the same day ([STREAM.md](docs/STREAM.md)), and **built through
