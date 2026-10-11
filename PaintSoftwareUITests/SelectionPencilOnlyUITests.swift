@@ -217,6 +217,9 @@ final class SelectionPencilOnlyUITests: PaintUITestCase {
     /// deliberately not implied: what this covers is the refusal of a *finger*, which is the half the
     /// owner reported. `SelectionOverlayLogicTests` pins the predicate's other three rows.
     ///
+    /// **TODO (167): the finger the band refuses scrolls the timeline instead of doing nothing**, so
+    /// the drag below is also what scrolls it, and the self-check scrolls it back before it begins.
+    ///
     /// **The operand is the ring count the band publishes**, `TimelineGraphBand.encodeGesture`'s
     /// `sel:` field, which is `TimelineGraphBandView.selection.count` — the same set the rings are
     /// drawn from. The two halves are the *same drag* with the preference flipped, so a run where the
@@ -258,10 +261,23 @@ final class SelectionPencilOnlyUITests: PaintUITestCase {
         }
 
         setFingersCanPaint(app, to: false)             // pencil-only mode on
+        let bandLeft = band.frame.minX
         boxSelect()
         XCTAssertEqual(band.label, TimelineGraphBand.encodeGesture(focus: nil, readout: nil),
                        "a finger must not box-select nodes while pencil-only mode is on — this is the "
                        + "reported bug. Got \(band.label)")
+        // TODO (167): the finger the band declines is the timeline's, so the same drag scrolled it —
+        // and the self-check below has to start from where the timeline was, so it is scrolled back
+        // first, from a point in the band that is on screen wherever the timeline stands.
+        XCTAssertLessThan(band.frame.minX, bandLeft - 100,
+                          "the finger the band declined scrolled the timeline (\(bandLeft) → \(band.frame.minX))")
+        let window = app.windows.firstMatch
+        let back = window.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: band.frame.midY / window.frame.height))
+        back.press(forDuration: 0.1, thenDragTo: back.withOffset(CGVector(dx: 900, dy: 0)))
+        let home = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in abs(band.frame.minX - bandLeft) < 1 }, object: nil)
+        XCTAssertEqual(XCTWaiter().wait(for: [home], timeout: 5), .completed,
+                       "the timeline scrolled back to its start (\(band.frame.minX) against \(bandLeft))")
 
         // Self-check: the same drag with the preference off rings nodes, which is what makes the
         // assertion above about the *gate* rather than about a rectangle that caught nothing.
