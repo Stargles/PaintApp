@@ -117,7 +117,7 @@ final class FillGestureRestartLogicTests: XCTestCase {
 
     /// **The owner's sentence, tested literally: the first fill has to bake before the second one
     /// starts.** `beginInteractiveFill` calls `beginCanvasEdit()`, whose whole job is to settle the
-    /// transient fill — but it settled it by asking `guard cel.fillPreview != nil`, and `fillPreview` is
+    /// transient fill — but it settled it by asking whether a preview was shown, and the preview is
     /// written by the render's hop to main. So for as long as that hop was outstanding the answer was
     /// "nothing was previewed", and a fill that had already been computed was thrown away in silence:
     /// no pixels, no undo entry, no message.
@@ -129,7 +129,7 @@ final class FillGestureRestartLogicTests: XCTestCase {
         let before = manager.history.undoStack.count
 
         tapAndRenderWithoutPublishing(manager, at: Self.onTheSquare)
-        XCTAssertNil(manager.layers[0].cels[try celIndex(manager)].fillPreview,
+        XCTAssertNil(manager.liveFill?.preview,
                      "Fixture check: the render is done and its preview has not reached the main thread")
 
         manager.brushColor = Self.blue
@@ -153,8 +153,7 @@ final class FillGestureRestartLogicTests: XCTestCase {
         manager.beginInteractiveLassoFill(path: rectangleLoop(CGRect(x: 30, y: 30, width: 32, height: 32)))
         manager.endInteractiveFill()
         manager.fillQueue.sync {}
-        XCTAssertNil(manager.layers[0].cels[try celIndex(manager)].fillPreview,
-                     "Fixture check: rendered, not yet published")
+        XCTAssertNil(manager.liveFill?.preview, "Fixture check: rendered, not yet published")
 
         manager.beginInteractiveLassoFill(path: rectangleLoop(CGRect(x: 2, y: 2, width: 24, height: 24)))
 
@@ -240,8 +239,7 @@ final class FillGestureRestartLogicTests: XCTestCase {
 
         XCTAssertNil(manager.notice, "The retired loop does not report onto the fill that replaced it")
         XCTAssertNil(manager.lassoFillDiagnostic, "…nor tint a canvas it is no longer describing")
-        XCTAssertNotNil(manager.layers[0].cels[try celIndex(manager)].fillPreview,
-                        "…and the new fill's own preview stands")
+        XCTAssertNotNil(manager.liveFill?.preview, "…and the new fill's own preview stands")
     }
 
     // MARK: - The ordinary case, unchanged

@@ -334,7 +334,7 @@ final class LiveTransformEditLogicTests: XCTestCase {
 
         var publishes = 0, told = 0
         let token = s.manager.objectWillChange.sink { _ in publishes += 1 }
-        s.manager.onLivePoseMoved = { told += 1 }
+        s.manager.onHeldPictureMoved = { told += 1 }
         for dx in [2.0, 5.0, 8.0] {
             s.manager.holdLivePose([containerX: xCurve(canvasBox.midX + dx)], of: .layer(id: s.mover))
         }

@@ -197,7 +197,7 @@ The filled shape therefore inherits the artwork's own edge softness: the outer f
 
 The slider therefore keeps the direction it has in the bucket — **up is more colour** — while its whole range slides down by its own width. The artist-facing statement is *at the top the colour reaches the outer edge of your line, and lower it tucks further underneath*. **No setting can put paint on paper the drawing does not occupy**, which is the ruling: the owner, 2026-08-21, *"right now the low setting has the fill start on the outer edge of the line and if you increase it the paint goes further out. I want it so on the high setting it is on the outer edge, and when you lower it, it shrinks inwards."*
 
-The lasso stores its own Edge Overlap (`CanvasManager.fillLassoExpand`), defaulting to the top of the range rather than to the bucket's 2. Read through this mapping the bucket's 2 would be a 4 px inward retreat — a pale seam all round the drawing — so per-mode storage is what stops one mode's sensible default being the other's defect. One slider still, showing whichever value belongs to the mode in front of the artist.
+The lasso stores its own Edge Overlap (`FillSettings.lassoEdgeOverlap`), defaulting to the top of the range rather than to the bucket's 2. Read through this mapping the bucket's 2 would be a 4 px inward retreat — a pale seam all round the drawing — so per-mode storage is what stops one mode's sensible default being the other's defect. One slider still, showing whichever value belongs to the mode in front of the artist.
 
 **Two rules the erosion does not apply uniformly, and both are deliberate.**
 

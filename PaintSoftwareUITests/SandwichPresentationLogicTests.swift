@@ -22,9 +22,9 @@ final class SandwichPresentationLogicTests: XCTestCase {
     /// edit, no bands held of this frame, no stream on the frame and nothing floating.
     private func next(_ current: SandwichPresentation, stroke: Bool = false, edit: Bool = false,
                       bake: Bool, pair: LivePairFit, bands: Bool = false,
-                      stream: Bool = false, float: Bool = false) -> SandwichPresentation {
+                      stream: Bool = false, held: Bool = false) -> SandwichPresentation {
         SandwichPresentation.next(from: current,
-                                  live: .init(stroke: stroke, transformEdit: edit, stream: stream, float: float),
+                                  live: .init(stroke: stroke, transformEdit: edit, stream: stream, held: held),
                                   held: .init(bakeIsCurrent: bake, livePair: pair, bandsOfThisFrame: bands))
     }
 
@@ -346,13 +346,13 @@ final class SandwichPresentationLogicTests: XCTestCase {
     func testAFloatingPieceKeepsTheCanvasOnItsPairWhateverTheBakeSays() {
         for current in [SandwichPresentation.rest, .live] {
             for bake in [false, true] {
-                XCTAssertEqual(next(current, bake: bake, pair: .current, float: true), .live,
+                XCTAssertEqual(next(current, bake: bake, pair: .current, held: true), .live,
                                "from \(current), bake current \(bake)")
             }
         }
-        XCTAssertEqual(next(.live, bake: true, pair: .stale, float: true), .live,
+        XCTAssertEqual(next(.live, bake: true, pair: .stale, held: true), .live,
                        "a nudge's commit moved the key: the pair on screen is kept while the next one mints")
-        XCTAssertEqual(next(.rest, bake: true, pair: .stale, float: true), .rest,
+        XCTAssertEqual(next(.rest, bake: true, pair: .stale, held: true), .rest,
                        "but a stale pair is still never entered")
     }
 
@@ -361,18 +361,18 @@ final class SandwichPresentationLogicTests: XCTestCase {
     /// the piece is down.
     func testALassoMoveIsOnItsPairFromTheLiftToTheDropsBake() {
         var shown = SandwichPresentation.rest
-        func pass(bake: Bool, pair: LivePairFit, float: Bool) -> SandwichPresentation {
-            shown = next(shown, bake: bake, pair: pair, float: float)
+        func pass(bake: Bool, pair: LivePairFit, held: Bool) -> SandwichPresentation {
+            shown = next(shown, bake: bake, pair: pair, held: held)
             return shown
         }
-        XCTAssertEqual(pass(bake: false, pair: .stale, float: true), .rest,
+        XCTAssertEqual(pass(bake: false, pair: .stale, held: true), .rest,
                        "the lift: the pair is a key behind, and a stale pair is never entered")
-        XCTAssertEqual(pass(bake: false, pair: .current, float: true), .live, "its pair lands")
-        XCTAssertEqual(pass(bake: true, pair: .current, float: true), .live,
+        XCTAssertEqual(pass(bake: false, pair: .current, held: true), .live, "its pair lands")
+        XCTAssertEqual(pass(bake: true, pair: .current, held: true), .live,
                        "the bake of the lifted state lands: it has a hole where the piece is, so it is not the picture")
-        XCTAssertEqual(pass(bake: false, pair: .stale, float: false), .live,
+        XCTAssertEqual(pass(bake: false, pair: .stale, held: false), .live,
                        "the drop: the pair is kept while the bake of the result composites")
-        XCTAssertEqual(pass(bake: true, pair: .stale, float: false), .rest, "and the bake is the picture again")
+        XCTAssertEqual(pass(bake: true, pair: .stale, held: false), .rest, "and the bake is the picture again")
     }
 
     // MARK: - Over the hosts (TODO (160))

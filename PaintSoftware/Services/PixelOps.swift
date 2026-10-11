@@ -210,16 +210,15 @@ enum PixelOps {
 
         /// Identity of a flatten, drawn entirely from model state.
         ///
-        /// The two `UIImage` tiers are compared by object identity rather than content because that
-        /// is how they change: a fill or a bake *replaces* `fillPreview`/`bakedImage` wholesale rather
-        /// than drawing into them, so a new object is exactly the signal that the pixels are new.
+        /// The `UIImage` tier is compared by object identity rather than content because that is how
+        /// it changes: a bake *replaces* `bakedImage` wholesale rather than drawing into it, so a new
+        /// object is exactly the signal that the pixels are new.
         struct Identity: Hashable {
             let celID: UUID
             let raster: ObjectIdentifier
             let rasterVersion: Int
             let vector: ObjectIdentifier?
             let vectorVersion: Int
-            let fillPreview: ObjectIdentifier?
             let bakedImage: ObjectIdentifier?
             /// **The seam's half of the key.** Nil for a cel that shows what it stores, which is
             /// every cel in a document using neither animation system — so an untouched document's
@@ -261,7 +260,6 @@ enum PixelOps {
                 vector = cel.vector.map(ObjectIdentifier.init)
                 // -1 rather than 0 for "no vector tier at all", so acquiring an empty one is a change.
                 vectorVersion = cel.vector?.version ?? -1
-                fillPreview = cel.fillPreview.map { ObjectIdentifier($0.image) }
                 bakedImage = cel.bakedImage.map(ObjectIdentifier.init)
             }
         }
@@ -273,7 +271,6 @@ enum PixelOps {
         /// under the draw. Every vector cel has an empty raster tier, so nil is the common case.
         let strokesImage: UIImage?
         let vector: VectorCanvas.Frozen?
-        let fillPreview: FillPreview?
         /// Already values-only and thread-safe by its own contract — see `DerivedCelContent.render`.
         let derived: DerivedCelContent?
         /// **§4.4's container pose, applied to the *stored* tiers** — see `Identity.pose` for why it
@@ -286,7 +283,6 @@ enum PixelOps {
             self.derived = derived
             self.pose = pose
             bakedImage = cel.bakedImage
-            fillPreview = cel.fillPreview
             strokesImage = cel.raster.hasContent ? cel.raster.renderToUIImage() : nil
             // Frozen even when `derived` will replace it: the thunk answers nil for a recipe that
             // is not evaluable yet, and the fallback is this tier (see `rasterizeUncached`).
@@ -600,27 +596,6 @@ enum PixelOps {
                 cel.strokesImage?.draw(in: cel.pose == nil ? content : frameRect)
             }
             vectorImage?.draw(in: content)
-            // **`fillPreview` is last, and that is the whole of LASSO_FILL.md §2a on the preview side.**
-            // A fill covers everything already on the cel, so the live preview has to stack the way
-            // the commit will (`commitInteractiveFill` composites the preview over the raster tier) or
-            // the artist watches the picture rearrange itself when they lift the pencil.
-            //
-            // Only the *live* preview is ever in this tier: every commit path passes `newFill: nil`
-            // (see `commitInteractiveFill`), so a cel at rest has `fillPreview == nil` and nothing
-            // else that flattens a cel — thumbnails, onion skin, export, Move's lift, the merge — sees
-            // any difference from this line at all.
-            //
-            // It also settles a disagreement that predates the fill ruling: `LayerHostView` has stacked
-            // `fillImageView` above `bakedImageView` since the fill preview became a recolour preview,
-            // while this drew it below. The two now agree, in the one order the commit produces.
-            //
-            // It covers its own window of the canvas rather than the whole of it (`FillWindow`), so
-            // it is drawn at its rect, shifted by whatever shift `content` carries.
-            posedTiers {
-                guard let preview = cel.fillPreview else { return }
-                let shift = cel.pose == nil ? content.origin : frameRect.origin
-                preview.image.draw(in: preview.rect.offsetBy(dx: shift.x, dy: shift.y))
-            }
         }
     }
 

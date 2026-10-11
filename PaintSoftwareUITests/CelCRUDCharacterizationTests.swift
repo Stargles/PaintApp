@@ -828,21 +828,17 @@ final class CelCRUDCharacterizationTests: XCTestCase {
                        "The vector tier has its own version and it is part of the key")
     }
 
-    func testReplacingTheFillOrBakedImageInvalidatesTheMemo() {
+    /// Wholesale replacement is how a bake actually lands, which is why the key compares the baked
+    /// tier by object identity rather than content.
+    func testReplacingTheBakedImageInvalidatesTheMemo() {
         PixelOps.clearRasterizeCache()
         let manager = CanvasFixture.manager(layerCount: 1)
         var cel = manager.layers[0].cels[0]
         let before = PixelOps.rasterize(cel: cel, canvasSize: size())
 
-        // Wholesale replacement is how a fill or a bake actually lands, which is why the key
-        // compares these by object identity rather than content.
-        cel.fillPreview = CanvasFixture.solidPreview(.green, rect: CGRect(x: 0, y: 0, width: 20, height: 20))
-        let afterFill = PixelOps.rasterize(cel: cel, canvasSize: size())
-        XCTAssertFalse(afterFill === before, "A new fillPreview is a new flatten")
-
         cel.bakedImage = CanvasFixture.solidImage(.blue, rect: CGRect(x: 10, y: 10, width: 20, height: 20))
-        XCTAssertFalse(PixelOps.rasterize(cel: cel, canvasSize: size()) === afterFill,
-                       "And so is a new bakedImage")
+        XCTAssertFalse(PixelOps.rasterize(cel: cel, canvasSize: size()) === before,
+                       "A new bakedImage is a new flatten")
     }
 
     /// The collision the key's object-identity half exists to prevent, in the form it actually

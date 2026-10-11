@@ -58,8 +58,8 @@ final class FillMendLogicTests: XCTestCase {
         let manager = CanvasFixture.manager(layerCount: 1)
         CanvasFixture.setBakedContent(manager, layerIndex: 0, lineArt(dividerWidth: dividerWidth))
         if kind == .vector { manager.addVectorLayer() } else { manager.addLayer() }
-        manager.fillExpand = 0
-        manager.fillGapClosingDistance = gapClosing
+        manager.fillSettings.bucketEdgeOverlap = 0
+        manager.fillSettings.gapClosing = gapClosing
         manager.setFillMendsNeighbourGap(mend)
         return manager
     }
@@ -225,7 +225,7 @@ final class FillMendLogicTests: XCTestCase {
     /// remainder and, unlike a bigger overlap, does not move either fill's outer edge.
     func testTheMendClosesWhatEdgeOverlapLeavesWithoutMovingEitherOuterEdge() throws {
         let manager = sceneManager(mend: false)
-        manager.fillExpand = 2
+        manager.fillSettings.bucketEdgeOverlap = 2
         let columns = Self.dividerColumns(width: 6)
         bucket(manager, at: leftSeed, colour: Self.red)
         bucket(manager, at: rightSeed, colour: Self.blue)
@@ -234,7 +234,7 @@ final class FillMendLogicTests: XCTestCase {
         XCTAssertTrue(overlapOnly.isBare(columns.lowerBound + 3, 32))
 
         let mended = sceneManager(mend: true)
-        mended.fillExpand = 2
+        mended.fillSettings.bucketEdgeOverlap = 2
         bucket(mended, at: leftSeed, colour: Self.red)
         bucket(mended, at: rightSeed, colour: Self.blue)
         let pixels = try fillLayerPixels(mended)
@@ -262,7 +262,7 @@ final class FillMendLogicTests: XCTestCase {
             }
             CanvasFixture.setBakedContent(manager, layerIndex: 0, art)
             manager.addLayer()
-            manager.fillExpand = 0
+            manager.fillSettings.bucketEdgeOverlap = 0
             manager.setFillMendsNeighbourGap(mend)
             bucket(manager, at: CGPoint(x: 16, y: 32), colour: Self.red)
             bucket(manager, at: CGPoint(x: 48, y: 32), colour: Self.blue)
@@ -285,7 +285,7 @@ final class FillMendLogicTests: XCTestCase {
         for gap in [CGFloat(0), 2, 8] {
             for (reach, mends) in [(CGFloat(12), true), (11, false)] {
                 let manager = sceneManager(dividerWidth: 12, gapClosing: gap, mend: true)
-                manager.fillMendReach = reach
+                manager.fillSettings.mendReach = reach
                 bucket(manager, at: leftSeed, colour: Self.red)
                 bucket(manager, at: rightSeed, colour: Self.blue)
 
@@ -309,8 +309,8 @@ final class FillMendLogicTests: XCTestCase {
         let columns = Self.dividerColumns(width: 14)
         func layer(overlap: CGFloat, mend: Bool) throws -> Pixels {
             let manager = sceneManager(dividerWidth: 14, mend: mend)
-            manager.fillExpand = overlap
-            manager.fillMendReach = 10
+            manager.fillSettings.bucketEdgeOverlap = overlap
+            manager.fillSettings.mendReach = 10
             bucket(manager, at: leftSeed, colour: Self.red)
             bucket(manager, at: rightSeed, colour: Self.blue)
             return try fillLayerPixels(manager)
@@ -347,9 +347,9 @@ final class FillMendLogicTests: XCTestCase {
             }
             CanvasFixture.setBakedContent(manager, layerIndex: 0, art)
             manager.addLayer()
-            XCTAssertEqual(manager.fillGapClosingDistance, 8, "Fixture check: Gap Closing is at its default")
-            XCTAssertEqual(manager.fillExpand, 2, "…and Edge Overlap")
-            XCTAssertEqual(manager.fillMendReach, 12, "…and Mend Reach")
+            XCTAssertEqual(manager.fillSettings.gapClosing, 8, "Fixture check: Gap Closing is at its default")
+            XCTAssertEqual(manager.fillSettings.bucketEdgeOverlap, 2, "…and Edge Overlap")
+            XCTAssertEqual(manager.fillSettings.mendReach, 12, "…and Mend Reach")
             manager.setFillMendsNeighbourGap(mend)
             bucket(manager, at: leftSeed, colour: Self.red)
             bucket(manager, at: rightSeed, colour: Self.blue)
@@ -404,7 +404,7 @@ final class FillMendLogicTests: XCTestCase {
     func testTheMendReachIsPartOfTheKeyTheFillRendersWith() {
         let manager = CanvasFixture.manager()
         XCTAssertFalse(manager.fillMendsNeighbourGap, "An option, off until the artist asks")
-        XCTAssertEqual(manager.fillMendReach, 12, "Mend Reach defaults to 12 px")
+        XCTAssertEqual(manager.fillSettings.mendReach, 12, "Mend Reach defaults to 12 px")
         XCTAssertEqual(manager.currentFillKey().mendReach, 0)
         manager.setFillMendReach(30)
         XCTAssertEqual(manager.currentFillKey().mendReach, 0, "A slider moved with the option off changes nothing the render reads")
@@ -413,8 +413,8 @@ final class FillMendLogicTests: XCTestCase {
         manager.setFillMendReach(5.4)
         XCTAssertEqual(manager.currentFillKey().mendReach, 5, "Whole pixels")
         manager.setFillMendReach(500)
-        XCTAssertEqual(manager.fillMendReach, CanvasManager.fillMendReachRange.upperBound, "clamped to the slider's range")
-        manager.fillGapClosingDistance = 0
+        XCTAssertEqual(manager.fillSettings.mendReach, CanvasManager.fillMendReachRange.upperBound, "clamped to the slider's range")
+        manager.fillSettings.gapClosing = 0
         XCTAssertEqual(manager.currentFillKey().mendReach, 40, "…and Gap Closing has no say in it")
     }
 

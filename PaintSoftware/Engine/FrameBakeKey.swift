@@ -219,7 +219,7 @@ struct FrameBakeKey: Hashable {
         var e = BakeKeyEncoder()
         // A version byte for the *encoding*, distinct from the store's file format version: changing
         // how a field is written must invalidate every digest even if the file layout is unchanged.
-        e.tag(0x01)
+        e.tag(0x02)
         e.u16(formatVersion)
 
         // The buffer. `FrameRecipe.canvasSize` is a `RenderSizing` already applied and rounded to
@@ -359,7 +359,6 @@ private extension BakeKeyEncoder {
         int(version.rasterVersion)
         optional(version.vector) { e, v in e.objectID(v) }
         int(version.vectorVersion)
-        optional(version.fillPreview) { e, v in e.objectID(v) }
         optional(version.bakedImage) { e, v in e.objectID(v) }
         optional(version.valueFill) { e, fill in
             e.uuid(fill.color.id)

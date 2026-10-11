@@ -416,7 +416,6 @@ extension CanvasManager {
         withStructureUndo(label: .clearFrame) {
             let size = canvasSize ?? CGSize(width: 1, height: 1)
             layers[layerIndex].cels[celIndex].raster = .empty(size: size)
-            layers[layerIndex].cels[celIndex].fillPreview = nil
             layers[layerIndex].cels[celIndex].bakedImage = nil
             if layers[layerIndex].cels[celIndex].vector != nil {
                 layers[layerIndex].cels[celIndex].vector = .empty(size: size)

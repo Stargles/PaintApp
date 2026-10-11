@@ -869,8 +869,8 @@ final class RasterLayerTexture: DabTarget {
     }
 
     /// The single implementation of canvas-flip geometry: `image` mirrored about the centre of a
-    /// `canvasSize` canvas. A canvas flip has to move all three raster tiers — this texture (the
-    /// live-stroke tier) plus the cel's `fillPreview` and `bakedImage` — in exact lockstep, or content
+    /// `canvasSize` canvas. A canvas flip has to move both raster tiers — this texture (the
+    /// live-stroke tier) and the cel's `bakedImage` — in exact lockstep, or content
     /// lands on the wrong side of the canvas relative to the rest. Both `flipped(horizontal:)` below
     /// and `CanvasManager.flipCanvas` route through here so there is only one translate+scale to keep
     /// in step. Infrequent (whole-canvas op), so it renders through `UIGraphicsImageRenderer` rather

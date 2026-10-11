@@ -422,8 +422,8 @@ final class FillGapClosingLogicTests: XCTestCase {
         manager.canvasSize = size
         manager.addVectorLayer()
         manager.addLayer()
-        manager.fillExpand = 0
-        manager.fillGapClosingDistance = gapClosing
+        manager.fillSettings.bucketEdgeOverlap = 0
+        manager.fillSettings.gapClosing = gapClosing
         manager.brushColor = Color(.sRGB, red: 1, green: 0, blue: 0, opacity: 1)
         let outline = ownersOutline()
         manager.layers[0].cels[0].vector = VectorCanvas(size: size,

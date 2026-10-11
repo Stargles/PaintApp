@@ -2,6 +2,14 @@ import SwiftUI
 
 struct FillSettingsPanel: View {
     @ObservedObject var canvasManager: CanvasManager
+    /// The slider values, observed here so a slider tick redraws this panel and not the editor
+    /// (`FillSettings`, TODO (157)).
+    @ObservedObject var settings: FillSettings
+
+    init(canvasManager: CanvasManager) {
+        self.canvasManager = canvasManager
+        self.settings = canvasManager.fillSettings
+    }
 
     /// The vivid blue for the setting the fill tool's sideways drag currently adjusts, and the lighter
     /// blue for the others — so it's obvious at a glance which slider the drag is wired to. Changing any
@@ -10,7 +18,7 @@ struct FillSettingsPanel: View {
     private static let unselectedTint = Color(red: 0.60, green: 0.78, blue: 1.0)
 
     private func tint(_ axis: CanvasManager.FillAxis) -> Color {
-        canvasManager.fillSelectedAxis == axis ? Self.selectedTint : Self.unselectedTint
+        settings.selectedAxis == axis ? Self.selectedTint : Self.unselectedTint
     }
 
     var body: some View {
@@ -54,10 +62,10 @@ struct FillSettingsPanel: View {
                     .padding(.horizontal)
 
                 VStack(alignment: .leading) {
-                    Text("Gap Closing: \(Int(canvasManager.fillGapClosingDistance)) px")
+                    Text("Gap Closing: \(Int(settings.gapClosing)) px")
                         .foregroundColor(.white)
                     Slider(value: Binding(
-                        get: { canvasManager.fillGapClosingDistance },
+                        get: { settings.gapClosing },
                         set: { canvasManager.setFillSetting(.gapClosing, $0) }
                     ), in: CanvasManager.fillGapRange)
                         .tint(tint(.gapClosing))
@@ -69,10 +77,10 @@ struct FillSettingsPanel: View {
                 .padding(.horizontal)
 
                 VStack(alignment: .leading) {
-                    Text("Threshold: \(Int(canvasManager.fillThreshold * 100))%")
+                    Text("Threshold: \(Int(settings.threshold * 100))%")
                         .foregroundColor(.white)
                     Slider(value: Binding(
-                        get: { canvasManager.fillThreshold },
+                        get: { settings.threshold },
                         set: { canvasManager.setFillSetting(.threshold, $0) }
                     ), in: CanvasManager.fillThresholdRange)
                         .tint(tint(.threshold))
@@ -129,11 +137,11 @@ struct FillSettingsPanel: View {
                     // tool's sideways drag adjusts, so it is not in the left rail. Dimmed while the
                     // option is off, like the Extension Buffer below: present, so the artist can see
                     // what the option has, and saying by its colour that it does nothing yet.
-                    Text("Mend Reach: \(Int(canvasManager.fillMendReach)) px")
+                    Text("Mend Reach: \(Int(settings.mendReach)) px")
                         .foregroundColor(canvasManager.fillMendsNeighbourGap ? .white : .gray)
                         .padding(.top, 4)
                     Slider(value: Binding(
-                        get: { canvasManager.fillMendReach },
+                        get: { settings.mendReach },
                         set: { canvasManager.setFillMendReach($0) }
                     ), in: CanvasManager.fillMendReachRange, step: 1)
                         .tint(Self.selectedTint)
@@ -173,11 +181,11 @@ struct FillSettingsPanel: View {
                     // artist to wonder where the option went.
                     let padding = canvasManager.canvasPadding
                     let canExtend = canvasManager.fillCanvasEdgeIsBoundary && padding >= 1
-                    Text("Extension Buffer: \(Int(min(canvasManager.fillCanvasEdgeExtension, padding))) px")
+                    Text("Extension Buffer: \(Int(min(settings.canvasEdgeExtension, padding))) px")
                         .foregroundColor(canExtend ? .white : .gray)
                         .padding(.top, 4)
                     Slider(value: Binding(
-                        get: { min(canvasManager.fillCanvasEdgeExtension, padding) },
+                        get: { min(settings.canvasEdgeExtension, padding) },
                         set: { canvasManager.setFillCanvasEdgeExtension($0) }
                     ), in: 0...max(padding, 1), step: 1)
                         .tint(Self.selectedTint)
@@ -197,15 +205,6 @@ struct FillSettingsPanel: View {
                     .font(.caption)
                     .foregroundColor(.gray)
                     .padding(.horizontal)
-
-                if canvasManager.isFilling {
-                    HStack {
-                        ProgressView()
-                        Text("Filling…")
-                            .foregroundColor(.gray)
-                    }
-                    .padding(.horizontal)
-                }
             }
             .padding(.bottom, 16)
         }

@@ -195,7 +195,6 @@ extension CanvasManager {
                 image = PixelOps.rasterize(cel: cel, canvasSize: canvasSize, pose: run.inherited)
             }
             layers[at.layer].cels[at.cel].raster = bakedRasterTexture(image: image, likeExisting: cel.raster)
-            layers[at.layer].cels[at.cel].fillPreview = nil
             layers[at.layer].cels[at.cel].bakedImage = nil
         }
         celContentChangedOutsideStroke(layerID: layerID, celID: celID)

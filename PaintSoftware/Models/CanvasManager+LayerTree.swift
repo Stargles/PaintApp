@@ -759,7 +759,6 @@ extension CanvasManager {
         )
         layers[bottomIndex].cels[bottomCel].raster =
             bakedRasterTexture(image: flattened, likeExisting: layers[bottomIndex].cels[bottomCel].raster)
-        layers[bottomIndex].cels[bottomCel].fillPreview = nil
         layers[bottomIndex].cels[bottomCel].bakedImage = nil
     }
 
@@ -856,13 +855,12 @@ extension CanvasManager {
         return VectorCanvas.splitPreservesTheWalk(head + tail, after: head.count)
     }
 
-    /// **A cel whose picture is its display list and nothing else.** The three pixel tiers
+    /// **A cel whose picture is its display list and nothing else.** The two pixel tiers
     /// `rasterizeUncached` draws around the vector ink, asked for emptiness — `Cel.isCertainlyBlank`'s
     /// test with the vector clause taken out, and conservative in the same direction: `raster.version`
     /// having moved means the tier may hold pixels this cannot see without scanning them.
     func holdsOnlyVectorInk(_ cel: Cel) -> Bool {
-        cel.fillPreview == nil && cel.bakedImage == nil
-            && cel.raster.strokeCount == 0 && cel.raster.version == 0
+        cel.bakedImage == nil && cel.raster.strokeCount == 0 && cel.raster.version == 0
     }
 
     /// Writes `A ++ B` into the survivor's cel. Only ever called behind `vectorMergeIsExact`.

@@ -11,7 +11,7 @@ import UIKit
 /// made in the model and read by `CanvasView.Coordinator` in a file this target does not compile:
 ///
 /// - a floating piece keeps the compositor — the live pair is cut around the hosts that carry it
-///   (`liveHostRun`, `floatHostLayerIndices`), so a guide below stays in the picture;
+///   (`liveHostRun`, `heldHostLayerIndices`), so a guide below stays in the picture;
 /// - the hosts sit between two halves only where the layers above them composite onto transparency
 ///   exactly; where something above blends or grades, the rest of the frame is one picture with the
 ///   hosts' leaves hidden and the hosts draw over it (`liveHostsSitBetweenTheHalves`,
@@ -71,7 +71,7 @@ final class SandwichLiveHostsLogicTests: XCTestCase {
         XCTAssertTrue(s.manager.sandwichEngagesOnCanvas(tree: s.tree),
                       "a float must not take the compositor away: that is what dropped the guides' blend and "
                       + "made every host repaint at the lift")
-        XCTAssertEqual(s.manager.floatHostLayerIndices, [s.drawing])
+        XCTAssertEqual(s.manager.heldHostLayerIndices, [s.drawing])
         XCTAssertEqual(s.manager.liveHostRun(tree: s.tree), [s.drawing],
                        "the guides stay in the halves; only the float's host draws itself")
     }
@@ -89,7 +89,7 @@ final class SandwichLiveHostsLogicTests: XCTestCase {
         XCTAssertEqual(top, 3, "PREMISE: the effect lands on top, outside the folder")
         XCTAssertTrue(s.manager.beginVectorFolderMove(folder), "PREMISE: the folder lifts")
         s.manager.currentLayerIndex = top
-        let parts = Set(s.manager.floatHostLayerIndices)
+        let parts = Set(s.manager.heldHostLayerIndices)
         XCTAssertEqual(parts, [s.below, s.drawing])
         XCTAssertTrue(s.manager.sandwichEngagesOnCanvas(tree: s.tree))
         XCTAssertTrue(parts.isSubset(of: s.manager.liveHostRun(tree: s.tree)),
@@ -114,7 +114,7 @@ final class SandwichLiveHostsLogicTests: XCTestCase {
         XCTAssertEqual(manager.floatingPiece?.kind, .move, "PREMISE: a raster lift")
         let tree = manager.renderTree(atFrame: 0)
         XCTAssertTrue(manager.sandwichEngagesOnCanvas(tree: tree))
-        XCTAssertEqual(manager.floatHostLayerIndices, [1])
+        XCTAssertEqual(manager.heldHostLayerIndices, [1])
         XCTAssertEqual(manager.liveHostRun(tree: tree), [1])
     }
 
@@ -125,7 +125,7 @@ final class SandwichLiveHostsLogicTests: XCTestCase {
         s.manager.addTransformLayer()
         XCTAssertTrue(s.manager.beginContainerPoseMove(), "PREMISE: the transformation layer's box comes up")
         XCTAssertEqual(s.manager.floatingPiece?.kind, .containerPose)
-        XCTAssertEqual(s.manager.floatHostLayerIndices, [])
+        XCTAssertEqual(s.manager.heldHostLayerIndices, [])
     }
 
     // MARK: - (b) Between the halves, or over the rest of the frame

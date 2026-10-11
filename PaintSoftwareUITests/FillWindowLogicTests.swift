@@ -230,7 +230,7 @@ final class FillWindowLogicTests: XCTestCase {
         XCTAssertFalse(manager.isPointInPendingFill(at: CGPoint(x: 500, y: 500)), "outside it is not")
         XCTAssertFalse(manager.isPointInPendingFill(at: CGPoint(x: 5, y: 5)), "…and neither is anything outside the window")
 
-        let preview = try XCTUnwrap(manager.layers[0].cels[0].fillPreview)
+        let preview = try XCTUnwrap(manager.liveFill?.preview)
         XCTAssertEqual(preview.rect, render.window.rect, "the preview covers the window")
         XCTAssertEqual(preview.image.size, CGSize(width: 1024, height: 1024))
 

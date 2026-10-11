@@ -110,7 +110,7 @@ final class StrokeWallLogicTests: XCTestCase {
     }
 
     /// One fill through the production session, with and without the path wall being the only
-    /// difference. Defaults mirror the app's (`fillThreshold` 0.15, `fillGapClosingDistance` 8) and
+    /// difference. Defaults mirror the app's (`FillSettings`: threshold 0.15, gap closing 8) and
     /// `edgeOverlap` is 0 so a "is this pixel filled" answer is not blurred by a two-pixel dilate.
     private func fill(_ reference: [UInt8], seed: (x: Int, y: Int), pathWall: [UInt8]?,
                       gapWidth: Float = 8, threshold: Float = 0.15) throws -> [UInt8] {

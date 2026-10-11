@@ -887,7 +887,6 @@ final class CanvasManager: ObservableObject {
                                                    derived: derived[celIndex])
                 layers[layerIndex].cels[celIndex].raster = bakedRasterTexture(image: flattened, likeExisting: cel.raster)
                 layers[layerIndex].cels[celIndex].bakedImage = nil
-                layers[layerIndex].cels[celIndex].fillPreview = nil
                 layers[layerIndex].cels[celIndex].vector = nil
                 // The recipe has to go with the geometry, and **both** modes, not just `.reproject`.
                 // The frame is now stored pixels; leaving the recipe would evaluate it a second time
@@ -1032,10 +1031,12 @@ final class CanvasManager: ObservableObject {
     /// The vector float's live pose is the same rule (`CanvasView.Coordinator.liveVectorFloatPose`).
     private(set) var livePose: LivePose?
 
-    /// **Called synchronously when `livePose` moves**, so the canvas re-poses its bands on the tick
-    /// rather than on a SwiftUI pass nothing raises any more. A closure for
-    /// `onTimingStrokeFrameAdvanced`'s reason; installed by `CanvasView.Coordinator`, nil headless.
-    var onLivePoseMoved: (() -> Void)?
+    /// **Called synchronously when a picture the canvas shows but the document does not hold yet
+    /// moves** — the pose under the finger (`livePose`) or the adjustable fill's preview (`liveFill`) —
+    /// so the canvas re-shows it on the tick rather than on a SwiftUI pass nothing raises any more. A
+    /// closure for `onTimingStrokeFrameAdvanced`'s reason; installed by `CanvasView.Coordinator`, nil
+    /// headless.
+    var onHeldPictureMoved: (() -> Void)?
 
     /// **Holds `curves` — whole-curve replacements of `target`'s pose components — as the pose under
     /// the finger**: shown by the canvas and the band, written nowhere. Each call replaces the last,
@@ -1043,13 +1044,13 @@ final class CanvasManager: ObservableObject {
     /// the finger back where it began — hold nothing, and the canvas shows the document.
     ///
     /// Only inside a live edit the canvas draws as bands, which is what shows the pose and what drops
-    /// it (`endLiveTransformEdit`). Raises no SwiftUI pass: `onLivePoseMoved` tells the canvas.
+    /// it (`endLiveTransformEdit`). Raises no SwiftUI pass: `onHeldPictureMoved` tells the canvas.
     func holdLivePose(_ curves: [String: AnimationCurve], of target: KeyframeTarget) {
         guard liveTransformEdit?.movesBands == true, case .layer(let layerID) = target else { return }
         livePose = poseDelta(replacing: curves, of: target).map {
             LivePose(layerID: layerID, curves: curves, pose: $0.poses)
         }
-        onLivePoseMoved?()
+        onHeldPictureMoved?()
     }
 
     /// **Writes the pose under the finger into the document — the lift** — through
@@ -1425,40 +1426,19 @@ final class CanvasManager: ObservableObject {
         eraserOpacity = brush.opacity
     }
 
-    /// Which fill setting the fill tool's sideways (horizontal) drag adjusts, and which slider is shown
-    /// highlighted in the Fill panel. Defaults to gap-closing; changing any panel slider re-points it at
-    /// that setting (see `setFillSetting`).
+    /// The three fill settings the fill tool's sideways (horizontal) drag can adjust — which one it does
+    /// is `fillSettings.selectedAxis`.
     enum FillAxis { case gapClosing, threshold, edgeOverlap }
-    @Published var fillSelectedAxis: FillAxis = .gapClosing
+
+    /// The fill tool's slider values — observed by the views that show them and by nothing else, so a
+    /// slider tick is not a pass over the editor (TODO (157); see `FillSettings`).
+    let fillSettings = FillSettings()
 
     /// Which kind of fill the fill tool performs — a type option under the one tool, not a second
     /// tool. `.lasso` takes its gesture from `SelectionOverlayView` instead of the fill press
     /// recognizer; see `CanvasView.Coordinator.updateSelectionOverlay`.
     @Published var fillMode: FillMode = .flood
 
-    /// **Gap Closing**, in canvas pixels: the widest opening in the ink that a fill will not escape
-    /// through. It seals openings and nothing else — an edge or a corner fills right up to the ink at
-    /// every setting (TODO (158); `FillBasins` is the rule).
-    @Published var fillGapClosingDistance: CGFloat = 8
-    /// Colour-distance threshold (0..1) above which a boundary counts as a wall. Higher = the fill
-    /// spreads across bigger colour differences (fewer walls); lower = subtle borders stop it.
-    @Published var fillThreshold: CGFloat = 0.15
-    /// Edge Overlap for the **bucket** fill, in px: how far the finished region is grown under the
-    /// wall it stopped against. The lasso keeps its own value below; they are separate settings
-    /// wearing one slider, and `fillEdgeOverlap` is the accessor that picks between them.
-    @Published var fillExpand: CGFloat = 2
-
-    /// Edge Overlap for the **lasso** fill, and it defaults to the top of the range rather than to
-    /// the bucket's 2.
-    ///
-    /// Under the anchoring the owner ruled on 2026-08-21 the lasso reads this slider as *how far out
-    /// the colour reaches, with the top being the ink's own outer edge* — `fillEdgeRadius(lasso:)`
-    /// turns it into an erosion of `upperBound - v`. Sharing the bucket's stored 2 would therefore
-    /// ship a 4 px inward retreat by default: a pale seam all round the drawing, which is a version
-    /// of the very complaint that opened the day. Per-mode storage is the smallest thing that stops
-    /// one mode's sensible default from being the other's defect, and the slider itself is unchanged
-    /// — it shows and writes whichever value belongs to the mode in front of the artist.
-    @Published var fillLassoExpand: CGFloat = CanvasManager.fillExpandRange.upperBound
     /// Whether the canvas rectangle's edge bounds the fill the way a drawn line does. On by default,
     /// at the owner's request.
     ///
@@ -1472,10 +1452,10 @@ final class CanvasManager: ObservableObject {
     /// Two things happen when it is on, and only the first is what the artist means by the name:
     /// - the artwork rect's boundary **bounds the flood**, on both sides — a fill started on the
     ///   paper stops at the paper's edge instead of spreading onto the grey margin, and a fill
-    ///   started on the margin stays there. This does not consult `fillGapClosingDistance` at all.
+    ///   started on the margin stays there. This does not consult Gap Closing at all.
     /// - the paper's edge counts as **ink for gap closing**, so a boundary stroke ending a few px
     ///   short of it leaves an opening that seals rather than letting the fill run around its end.
-    ///   This half is the one that does nothing while `fillGapClosingDistance` is 0.
+    ///   This half is the one that does nothing while Gap Closing is 0.
     ///
     /// At `canvasPadding == 0` the two rectangles coincide, the flood already could not leave the
     /// buffer, and the option reduces exactly to the second half. See `gapLevels` in Fill.metal for
@@ -1483,36 +1463,13 @@ final class CanvasManager: ObservableObject {
     /// the wall mask.
     @Published var fillCanvasEdgeIsBoundary: Bool = true
 
-    /// How far the canvas edge's boundary sits **outside the paper, into the padding**, in canvas
-    /// pixels — the owner's *"if I set it to 100px, then the canvas edge fill boundary will be
-    /// extended 100px into the padding."* 0 is the boundary at the paper's own edge, which is what the
-    /// option has always meant.
-    ///
-    /// Only read while `fillCanvasEdgeIsBoundary` is on, and it cannot reach past the padded canvas:
-    /// the fill's boundary rect is the artwork rect outset by this and clamped to `canvasSize`
-    /// (`currentFillKey` does the arithmetic, in the one place the rect is decided). A value larger
-    /// than the padding is therefore the boundary at the canvas's own edge — the same fill the option
-    /// off gives — which is why the slider's range follows the padding and the stored value need not.
-    ///
-    /// Not persisted, and neither is the toggle it belongs to: both are `CanvasManager` state for the
-    /// session, like every other fill setting.
-    @Published var fillCanvasEdgeExtension: CGFloat = 0
-
     /// Whether a fill grows into the gap between itself and paint already on its layer — the owner's
     /// *"have fill B smartly detect its edge is near fill A, and mend the gap"* (TODO (113)). Off by
     /// default: it is an option, and what it changes is where a fill's edge lands.
     ///
-    /// How far it reaches is `fillMendReach`, its own setting. Both fill types honour it.
+    /// How far it reaches is `fillSettings.mendReach`, its own setting. Both fill types honour it.
     @Published var fillMendsNeighbourGap: Bool = false
 
-    /// **Mend Reach**, in canvas pixels: the widest strip of ink between a fill and its neighbour that
-    /// the mend will close, counted from the fill's edge *after* Edge Overlap has tucked it under the
-    /// line — so the two add, and a mend that Edge Overlap already covered has nothing left to do
-    /// rather than hiding behind it. The owner's *"its own slider … with a default set to 12px"*
-    /// (TODO (113)): it was twice Gap Closing, which left the mend with no reach at all for an artist
-    /// who keeps Gap Closing low. Only read while `fillMendsNeighbourGap` is on.
-    @Published var fillMendReach: CGFloat = 12
-    @Published var isFilling: Bool = false
 
     @Published var canvasBackgroundColor: Color = .white
     @Published var isCanvasBackgroundVisible: Bool = true
@@ -3651,7 +3608,7 @@ final class CanvasManager: ObservableObject {
     static func celThumbnailImage(for cel: Cel, canvasSize: CGSize,
                                   derived: DerivedCelContent? = nil) -> UIImage {
         if derived != nil || cel.bakedImage != nil || cel.vector != nil {
-            // PixelOps.rasterize folds fillPreview/bakedImage/raster/vector into one image already —
+            // PixelOps.rasterize folds bakedImage/raster/vector into one image already —
             // into `celThumbnailRasterBound` rather than the whole canvas, which is what keeps its
             // memo entry out of the compositor's way (see the constant).
             // Two rows, because the two halves scale with different things and only one of them is
@@ -3669,8 +3626,7 @@ final class CanvasManager: ObservableObject {
                                          thumbnailSize: celThumbnailSize)
             }
         }
-        return ThumbnailRenderer.render(cel.raster, fillPreview: cel.fillPreview,
-                                        canvasSize: canvasSize, thumbnailSize: celThumbnailSize)
+        return ThumbnailRenderer.render(cel.raster, canvasSize: canvasSize, thumbnailSize: celThumbnailSize)
     }
 
     func regenerateThumbnail(layerIndex: Int, celIndex: Int) {
@@ -3843,6 +3799,18 @@ final class CanvasManager: ObservableObject {
     var fillGestureLayerID: UUID?
     var fillGestureCelID: UUID?
     var fillGestureBaseBaked: UIImage?  // layer's baked pixels before this gesture (undo/composite base)
+
+    /// **The adjustable fill's picture, which the document does not hold** — TODO (157). Set when a
+    /// fill gesture begins, its preview replaced by every render while the artist drags a slider, and
+    /// let go when the fill commits or is cancelled; nil between fills.
+    ///
+    /// **Not in `layers`.** A preview in the cel makes every render a document write — a SwiftUI pass
+    /// over the editor, a new bake key and a re-bake, a re-minted live pair, a thumbnail and a
+    /// main-thread decode of the new bake — per slider tick, for a picture one host draws
+    /// (PERFORMANCE.md §28). The fill's host draws it (`onHeldPictureMoved`), the canvas keeps that host
+    /// drawing while it is up (`heldHostLayerIndices`), and the commit writes the document once, as
+    /// one undo step.
+    var liveFill: LiveFill?
 
     /// Records the artist's own answer for whether a layer bounds the fill (§6.6) — written by the
     /// row's drop button, which is the only control that sets it.

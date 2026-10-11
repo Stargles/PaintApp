@@ -2,6 +2,14 @@ import SwiftUI
 
 struct SideToolbar: View {
     @ObservedObject var canvasManager: CanvasManager
+    /// The fill tool's slider values — observed here too, so a fill slider's tick redraws the rail
+    /// and not the editor (`FillSettings`, TODO (157)).
+    @ObservedObject var fillSettings: FillSettings
+
+    init(canvasManager: CanvasManager) {
+        self.canvasManager = canvasManager
+        self.fillSettings = canvasManager.fillSettings
+    }
 
     /// **The rail's width, and the owner's ask is why it is this small** — TODO (144): *"The left
     /// side menu (with the size, opacity adjusters) I think could be made a lot slimmer for more space
@@ -52,13 +60,13 @@ struct SideToolbar: View {
                     // without re-tapping.
                     labeledSlider(
                         title: "Gap Closing",
-                        value: Binding(get: { Double(canvasManager.fillGapClosingDistance) }, set: { canvasManager.setFillSetting(.gapClosing, CGFloat($0)) }),
+                        value: Binding(get: { Double(fillSettings.gapClosing) }, set: { canvasManager.setFillSetting(.gapClosing, CGFloat($0)) }),
                         range: Double(CanvasManager.fillGapRange.lowerBound)...Double(CanvasManager.fillGapRange.upperBound),
                         identifier: "sideToolbar.gapClosingSlider"
                     )
                     labeledSlider(
                         title: "Threshold",
-                        value: Binding(get: { Double(canvasManager.fillThreshold) }, set: { canvasManager.setFillSetting(.threshold, CGFloat($0)) }),
+                        value: Binding(get: { Double(fillSettings.threshold) }, set: { canvasManager.setFillSetting(.threshold, CGFloat($0)) }),
                         range: Double(CanvasManager.fillThresholdRange.lowerBound)...Double(CanvasManager.fillThresholdRange.upperBound),
                         identifier: "sideToolbar.thresholdSlider"
                     )
@@ -314,11 +322,11 @@ struct SideToolbar: View {
 
     private func resetSettings() {
         if isFillMode {
-            canvasManager.fillGapClosingDistance = 8
+            fillSettings.gapClosing = FillSettings.defaultGapClosing
             // Both Edge Overlaps, because the slider shows only the active mode's and a reset that
             // left the other one where the artist dragged it is a reset the artist cannot see.
-            canvasManager.fillExpand = 2
-            canvasManager.fillLassoExpand = CanvasManager.fillExpandRange.upperBound
+            fillSettings.bucketEdgeOverlap = FillSettings.defaultBucketEdgeOverlap
+            fillSettings.lassoEdgeOverlap = CanvasManager.fillExpandRange.upperBound
         } else if isEraserMode {
             canvasManager.eraserSize = 20
             canvasManager.eraserOpacity = 1.0

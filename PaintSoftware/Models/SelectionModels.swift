@@ -2008,8 +2008,6 @@ extension CanvasManager {
               layers[currentLayerIndex].id == selection.layerID,
               let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame),
               layers[currentLayerIndex].cels[celIndex].id == selection.celID else { return }
-        // Clear the transient tier first, or a stale pre-edit fill preview composites over the top.
-        setFillPreview(layerIndex: currentLayerIndex, celIndex: celIndex, nil)
         // The same add path the fill tool and Add → Rectangle take, so "Fill" means one thing
         // whichever door it arrives from: a vector layer gets an element on top of everything
         // (LASSO_FILL.md §2a's *"cover everything"*), a raster layer gets pixels.
@@ -2134,8 +2132,6 @@ extension CanvasManager {
             // arrivals; `bumpVersion()` here used to clear them, which is why the undo's rectangle
             // was described below as unmeasurable.
             vectorCanvas.restoreElements(newElements, changedInk: nil)
-            // Clear the transient tier, or a stale pre-clear fill preview composites over the top.
-            setFillPreview(layerIndex: currentLayerIndex, celIndex: celIndex, nil)
             registerVectorElementsUndo(vectorCanvas: vectorCanvas, oldElements: elementsBefore,
                                        newElements: newElements,
                                        layerID: layers[currentLayerIndex].id, celID: cel.id, label: .clearSelection,
@@ -2146,10 +2142,8 @@ extension CanvasManager {
                                        swap: .addsAndRemoves(ink: nil))
             // The timeline and layer-panel thumbnails are a third thing, and
             // `registerVectorElementsUndo` refreshes them on the undo and redo sides but **not** on
-            // the initial apply. This used to lean on `setFillPreview` publishing through
-            // `@Published layers`, which an earlier recolour's comment already called an accident of
-            // that function's shape rather than a guarantee — so it is asked for explicitly, as the
-            // recolour and `bakePreciseStrokes` both do.
+            // the initial apply, so it is asked for explicitly, as the recolour and
+            // `bakePreciseStrokes` both do.
             celContentChangedOutsideStroke(layerID: layers[currentLayerIndex].id, celID: cel.id)
             // Tapped objects are their own selection (`Selection.elements`), and Clear has just
             // deleted them; a loop is a region and outlives what it cleared.
@@ -2277,8 +2271,6 @@ extension CanvasManager {
         // rewritten stroke's rectangle is `strokeInkHint(of:)` at the *new* brush's reach rather
         // than the old measurement, and the render's escape check stands behind it.
         vectorCanvas.restoreElements(newElements, changedInk: nil, rewriting: caught)
-        // A stale pre-apply fill preview would composite over the top, exactly as it would a recolour.
-        setFillPreview(layerIndex: currentLayerIndex, celIndex: celIndex, nil)
         registerVectorElementsUndo(vectorCanvas: vectorCanvas, oldElements: elementsBefore,
                                    newElements: vectorCanvas.elements,
                                    layerID: layers[currentLayerIndex].id,
@@ -2323,9 +2315,6 @@ extension CanvasManager {
     /// the "ghost layer" bug: the eraser only ever stamps `Cel.raster`, so content left in
     /// `bakedImage` becomes permanently uneraseable, and any code that reasons about "the raster
     /// tier" (Move's lift, undo snapshots) silently disagrees with what's on screen.
-    ///
-    /// The fill preview is not a tier a step records: every caller runs behind `beginCanvasEdit`,
-    /// which has already committed it, so a cel here holds none (`Cel.fillPreview`).
     func registerUndoableCelChange(layerID: UUID, celID: UUID,
                                     oldRaster: RasterLayerTexture, oldBaked: UIImage?,
                                     newRaster: RasterLayerTexture, newBaked: UIImage?,

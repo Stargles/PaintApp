@@ -50,8 +50,8 @@ struct LayerRenderSource {
     // a zero hit rate and removed.
     //
     // A key that *would* hit has to come from the model rather than from the rendered result — the
-    // cel's ID with `RasterLayerTexture.version`, `VectorCanvas.version`, and the identities of
-    // `fillPreview`/`bakedImage`, plus the request's quality, since `.preview` and `.full` are
+    // cel's ID with `RasterLayerTexture.version`, `VectorCanvas.version`, and the identity of
+    // `bakedImage`, plus the request's quality, since `.preview` and `.full` are
     // different pixels. That is real work with an ABA hazard to handle, and it belongs with the cache
     // that needs it. §5.2's sandwich is that cache, and it caches *composites* of everything above
     // and below the active layer rather than one texture per layer — which is both the thing §5.3
@@ -173,7 +173,6 @@ struct LayerContentVersion: Hashable {
     let rasterVersion: Int
     let vector: ObjectIdentifier?
     let vectorVersion: Int
-    let fillPreview: ObjectIdentifier?
     let bakedImage: ObjectIdentifier?
     let valueFill: ValueFill?
     let effect: Effect?
@@ -215,7 +214,6 @@ struct LayerContentVersion: Hashable {
         // stamps, and a live stream frame must not re-bake a cel's span per tick — see
         // `VectorCanvas.documentVersion`.
         vectorVersion = cel.vector?.documentVersion ?? -1
-        fillPreview = cel.fillPreview.map { ObjectIdentifier($0.image) }
         bakedImage = cel.bakedImage.map(ObjectIdentifier.init)
     }
 
@@ -225,7 +223,6 @@ struct LayerContentVersion: Hashable {
         hasher.combine(rasterVersion)
         hasher.combine(vector)
         hasher.combine(vectorVersion)
-        hasher.combine(fillPreview)
         hasher.combine(bakedImage)
         hasher.combine(valueFill)
         hasher.combine(derived)
@@ -951,7 +948,7 @@ extension CanvasManager {
     /// canvas suppresses `insideIDs`), and a Duplicate's copy (the overlay alone). None of them is in
     /// any composite, so the canvas draws the hosts that carry them itself: `liveHostRun` cuts the
     /// live pair around them, every layer below and above stays in the two halves, and
-    /// `SandwichPresentation.Live.float` keeps the canvas on that pair for as long as the piece is up
+    /// `SandwichPresentation.Live.held` keeps the canvas on that pair for as long as the piece is up
     /// — the bake of the lifted state has a hole where the piece is. This used to be a clause that
     /// took the compositor away for the whole move, which dropped every blend mode, effect and mask
     /// on the canvas and made every host repaint itself at the lift: the owner's guide layers
@@ -1070,8 +1067,8 @@ extension CanvasManager {
     /// (`LivePairCut.aroundHost`, `.overHost`), everything else being in the composite:
     ///
     /// - the active layer, so a stroke lands on a host that is already drawing;
-    /// - every other layer `liveHostsBesidesTheActive` names — streams and floating pieces, which are
-    ///   in no composite.
+    /// - every other layer `liveHostsBesidesTheActive` names — streams, floating pieces and an
+    ///   adjustable fill, which are in no composite.
     ///
     /// Every leaf between the lowest and the highest of them draws too: the pair has one middle, and a
     /// run that is one span of the leaf order is what `[RenderNode].cut(around:)` can cut. Those
@@ -1089,23 +1086,25 @@ extension CanvasManager {
 
     /// **The layers whose hosts draw themselves whichever layer is active**, ascending: every stream
     /// on the frame (`streamLayerIndices`) — reference, in no picture the document keeps — and every
-    /// host carrying a floating piece (`floatHostLayerIndices`), which is in no cel (TODO (160)).
+    /// host drawing what no cel holds yet (`heldHostLayerIndices`, TODO (160), (157)).
     /// What `liveHostRun` cuts around beside the active layer, and what `SandwichKey.drawnByHosts`
     /// carries, so a pair minted for one cut is never taken for another's.
     @MainActor
     func liveHostsBesidesTheActive(atFrame frame: Int? = nil, walk: RenderWalk? = nil) -> [Int] {
-        Set(streamLayerIndices(atFrame: frame, walk: walk)).union(floatHostLayerIndices).sorted()
+        Set(streamLayerIndices(atFrame: frame, walk: walk)).union(heldHostLayerIndices).sorted()
     }
 
-    /// **The layers whose hosts draw a floating piece the document does not hold yet** — every part of
-    /// a lasso's or a folder's float on the glass, and a raster Move's source, whose host shows the
-    /// hole (`piece.remainderPreview`) the cel does not have. A Duplicate's copy is drawn by the
+    /// **The layers whose hosts draw what the document does not hold yet** — every part of a lasso's
+    /// or a folder's float on the glass, a raster Move's source, whose host shows the hole
+    /// (`piece.remainderPreview`) the cel does not have, and the layer an adjustable fill lands on,
+    /// whose host shows its preview (`liveFill`, TODO (157)). A Duplicate's copy is drawn by the
     /// overlay over everything, and a transformation layer's or an effect's box holds no pixels — the
     /// composite itself moves under those — so none of the three names a host.
     @MainActor
-    var floatHostLayerIndices: [Int] {
+    var heldHostLayerIndices: [Int] {
         var ids = vectorFloat?.parts.filter(\.isShown).map(\.layerID) ?? []
         if let piece = floatingPiece, piece.kind == .move { ids.append(piece.sourceLayerID) }
+        if let liveFill { ids.append(liveFill.layerID) }
         return ids.compactMap { id in layers.firstIndex { $0.id == id } }
     }
 

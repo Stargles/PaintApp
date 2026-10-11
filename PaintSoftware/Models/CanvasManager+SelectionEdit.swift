@@ -514,13 +514,6 @@ extension CanvasManager {
             selectionEdit = session
             return
         }
-        if !session.edit.applied,
-           let layerIndex = layers.firstIndex(where: { $0.id == session.edit.layerID }),
-           let celIndex = layers[layerIndex].cels.firstIndex(where: { $0.id == session.edit.celID }) {
-            // Clear the transient tier once, or a stale pre-edit fill preview composites over the top —
-            // `applyBrushToSelection`'s line, at the first tick rather than the press.
-            setFillPreview(layerIndex: layerIndex, celIndex: celIndex, nil)
-        }
         session.edit.applied = true
         selectionEdit = session
         // **Told the ids** (`writeElementEdit`) — `caught` rather than the exact changed set, for

@@ -62,8 +62,8 @@ final class FillBoundaryLogicTests: XCTestCase {
 
     /// Runs one fill through the production session and returns its painted region.
     ///
-    /// Defaults mirror the app's own (`CanvasManager.fillThreshold` 0.15, `fillGapClosingDistance` 8,
-    /// `fillExpand` 2) so a result here is the result an artist gets, not one tuned for the test.
+    /// Defaults mirror the app's own (`FillSettings`: threshold 0.15, gap closing 8, bucket edge overlap
+    /// 2) so a result here is the result an artist gets, not one tuned for the test.
     /// `edgeOverlap` is the exception and is 0 by default: it grows the finished region by a disk and
     /// would blur every "is this pixel filled" answer by two pixels, which is exactly the resolution
     /// the border questions below are asked at.
@@ -466,7 +466,7 @@ final class FillBoundaryLogicTests: XCTestCase {
 
     /// **Edge Overlap must not bleed onto the grey.** It is a post-flood disk dilate, so it grows the
     /// finished region without consulting the walls at all — and a region that correctly stopped at
-    /// the paper's edge would otherwise get `fillExpand` px of paint on the margin, which is what the
+    /// the paper's edge would otherwise get Edge Overlap's px of paint on the margin, which is what the
     /// artist would actually see, since every other test in this file runs it at 0.
     func testEdgeOverlapDoesNotGrowTheFillOntoThePadding() throws {
         let region = try fill(paddedReference(bars: []), side: Self.paddedSide,
@@ -745,6 +745,6 @@ final class FillBoundaryLogicTests: XCTestCase {
         manager.setFillCanvasEdgeExtension(100)
         XCTAssertEqual(manager.currentFillKey().inset, 0, "…and no further than the padded canvas")
         manager.setFillCanvasEdgeExtension(-4)
-        XCTAssertEqual(manager.fillCanvasEdgeExtension, 0, "The boundary does not come in from the paper's edge")
+        XCTAssertEqual(manager.fillSettings.canvasEdgeExtension, 0, "The boundary does not come in from the paper's edge")
     }
 }

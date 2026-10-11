@@ -85,8 +85,6 @@ final class VectorDuplicateLogicTests: XCTestCase {
                        "The copy carries the artist's samples, not a rasterization of them")
         XCTAssertNil(copy.cels.first?.bakedImage,
                      "A vector duplicate puts nothing in the raster tiers; pixels there are the old rasterize")
-        XCTAssertNil(copy.cels.first?.fillPreview,
-                     "A vector duplicate puts nothing in the raster tiers; pixels there are the old rasterize")
     }
 
     /// Duplicate is a copy, not a cut: whatever the loop caught has to still be on the layer it came

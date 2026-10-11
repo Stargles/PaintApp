@@ -1061,8 +1061,8 @@ final class LassoFillLogicTests: XCTestCase {
     /// undo entry.** A no-op that eats an undo slot means the next Undo silently does nothing, which
     /// reads as a broken history rather than as a fill that missed.
     ///
-    /// The mechanism is that no preview is installed at all, so `commitInteractiveFill`'s existing
-    /// `guard ... fillPreview != nil` returns before it records anything — there is no second guard to
+    /// The mechanism is that no preview is shown at all, so `commitInteractiveFill`'s "nothing was
+    /// previewed" guard returns before it records anything — there is no second guard to
     /// keep in step. The notice is the other half: doing nothing *and saying nothing* is the experience
     /// Krita's users report as "it just won't fill anything" (§7).
     func testAnEmptyLassoFillCommitsNothingAndPushesNoUndoEntry() {
@@ -1213,11 +1213,11 @@ final class LassoFillLogicTests: XCTestCase {
         XCTAssertNotNil(canvas.elements.last?.fill, "…which is the end of the list, not the fills bucket")
     }
 
-    /// **The half a test of the engine alone would miss.** The preview lives in `Cel.fillPreview` and the
-    /// commit flattens into `Cel.raster`; if those two disagree about stacking, the artist watches the
-    /// picture rearrange itself the instant they lift the pencil. Both are read here through
-    /// `PixelOps.rasterize`, which is the one flatten the canvas, the thumbnails and the compositor
-    /// all go through.
+    /// **The half a test of the engine alone would miss.** The preview is shown by the layer's host over
+    /// its picture (`CanvasManager.liveFill`, `LayerHostView.fillImageView`) and the commit flattens
+    /// into `Cel.raster`; if those two disagree about stacking, the artist watches the picture
+    /// rearrange itself the instant they lift the pencil. The preview is read here as the host shows
+    /// it — over `PixelOps.rasterize` of the cel — and the commit through that same flatten.
     func testTheLivePreviewShowsTheSameStackingTheCommitProduces() throws {
         let manager = CanvasFixture.manager(layerCount: 1)
         try setStrokeContent(manager, CanvasFixture.solidImage(.black, rect: CGRect(x: 20, y: 20, width: 20, height: 20)))
@@ -1229,9 +1229,14 @@ final class LassoFillLogicTests: XCTestCase {
         settle()
 
         let cel = try XCTUnwrap(manager.layers[0].cels.first)
-        XCTAssertNotNil(cel.fillPreview, "Fixture check: the preview is installed and nothing is committed yet")
-        let previewed = try pixelOf(PixelOps.rasterize(cel: cel, canvasSize: CanvasFixture.canvasSize, memoize: false),
-                                    at: onTheInk)
+        let preview = try XCTUnwrap(manager.liveFill?.preview,
+                                    "Fixture check: the preview is shown and nothing is committed yet")
+        let underneath = PixelOps.rasterize(cel: cel, canvasSize: CanvasFixture.canvasSize, memoize: false)
+        let shown = UIGraphicsImageRenderer(size: CanvasFixture.canvasSize, format: PixelOps.transparentFormat()).image { _ in
+            underneath.draw(in: CGRect(origin: .zero, size: CanvasFixture.canvasSize))
+            preview.draw()
+        }
+        let previewed = try pixelOf(shown, at: onTheInk)
         XCTAssertGreaterThan(previewed.r, 200, "The preview already shows the fill over the ink")
 
         manager.commitInteractiveFill()
@@ -1465,8 +1470,8 @@ final class LassoFillLogicTests: XCTestCase {
     func testEdgeOverlapIsStoredPerModeAndTheLassoAnchorsAtTheTopOfTheRange() {
         let manager = CanvasFixture.manager(layerCount: 1)
 
-        XCTAssertEqual(manager.fillExpand, 2, "The bucket's default is unchanged")
-        XCTAssertEqual(manager.fillLassoExpand, CanvasManager.fillExpandRange.upperBound,
+        XCTAssertEqual(manager.fillSettings.bucketEdgeOverlap, 2, "The bucket's default is unchanged")
+        XCTAssertEqual(manager.fillSettings.lassoEdgeOverlap, CanvasManager.fillExpandRange.upperBound,
                        "The lasso's default is the top: flush with the ink, nothing on paper")
 
         XCTAssertEqual(manager.fillMode, .flood)
@@ -1482,12 +1487,12 @@ final class LassoFillLogicTests: XCTestCase {
         }
 
         manager.setFillSetting(.edgeOverlap, 3)
-        XCTAssertEqual(manager.fillLassoExpand, 3)
-        XCTAssertEqual(manager.fillExpand, 2, "Adjusting one mode must not move the other")
+        XCTAssertEqual(manager.fillSettings.lassoEdgeOverlap, 3)
+        XCTAssertEqual(manager.fillSettings.bucketEdgeOverlap, 2, "Adjusting one mode must not move the other")
         manager.fillMode = .flood
         XCTAssertEqual(manager.fillEdgeOverlap, 2, "Switching back shows the bucket its own value")
         manager.setFillSetting(.edgeOverlap, 5)
-        XCTAssertEqual(manager.fillExpand, 5)
-        XCTAssertEqual(manager.fillLassoExpand, 3)
+        XCTAssertEqual(manager.fillSettings.bucketEdgeOverlap, 5)
+        XCTAssertEqual(manager.fillSettings.lassoEdgeOverlap, 3)
     }
 }

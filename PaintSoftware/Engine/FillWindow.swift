@@ -141,7 +141,7 @@ struct FillWindow: Equatable {
 }
 
 /// A picture of part of the canvas: `image` covers `rect`, in canvas pixels, and nothing outside it.
-/// The fill tool's live preview (`Cel.fillPreview`) and its §7 collar are both one of these, sized
+/// The fill tool's live preview (`CanvasManager.liveFill`) and its §7 collar are both one of these, sized
 /// to the window the fill worked in rather than to the canvas.
 struct FillPreview {
     let image: UIImage

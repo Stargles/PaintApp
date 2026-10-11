@@ -1153,7 +1153,6 @@ enum OnionSkinRasterCache {
         let rasterVersion: Int
         let vector: ObjectIdentifier?
         let vectorVersion: Int
-        let fillPreview: ObjectIdentifier?
         let bakedImage: ObjectIdentifier?
         let width: Int
         let height: Int
@@ -1172,7 +1171,6 @@ enum OnionSkinRasterCache {
             rasterVersion = cel.raster.version
             vector = cel.vector.map(ObjectIdentifier.init)
             vectorVersion = cel.vector?.version ?? -1
-            fillPreview = cel.fillPreview.map { ObjectIdentifier($0.image) }
             bakedImage = cel.bakedImage.map(ObjectIdentifier.init)
             width = Int(size.width.rounded())
             height = Int(size.height.rounded())

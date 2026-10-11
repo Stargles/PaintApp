@@ -34,14 +34,14 @@ extension CanvasManager {
     /// Swift scopes `private` to the file rather than the type.
     ///
     /// `inset` is how far the artwork rect sits inside the canvas: `canvasPadding`, less the
-    /// extension the artist asked the boundary to reach into it (`fillCanvasEdgeExtension`) —
+    /// extension the artist asked the boundary to reach into it (`fillSettings.canvasEdgeExtension`) —
     /// carried here rather than read in `drainFillWork` because that runs on `fillQueue` and both are
     /// `@Published` main-thread state. The key is already the main-thread-captured carrier for
     /// everything the render used, so putting it here keeps that invariant. The padding cannot change
     /// mid-gesture (`setCanvasPadding` calls `commitAllInteractiveState` first); the extension can,
     /// from its slider, and that is a re-render of the live fill like any other setting.
     ///
-    /// `mendReach` is `fillMendReach` while `fillMendsNeighbourGap` is on and 0 while it is off — one
+    /// `mendReach` is `fillSettings.mendReach` while `fillMendsNeighbourGap` is on and 0 while it is off — one
     /// field for both, so a slider moved with the option off changes nothing the render reads and
     /// schedules no work.
     struct FillKey: Equatable {
@@ -72,12 +72,12 @@ extension CanvasManager {
     /// A finished render, as `fillQueue` produced it — stored under `fillLock` the instant it exists,
     /// *before* the `DispatchQueue.main.async` that installs it as the preview.
     ///
-    /// **The commit path reads this, and that is the point.** `cel.fillPreview` and
+    /// **The commit path reads this, and that is the point.** `liveFill`'s preview and
     /// `fillLastRender` are both written by that main hop, and `beginCanvasEdit` calls
     /// `commitInteractiveFill` from inside `beginInteractiveFill` — so "the artist tapped twice
     /// quickly" arrives at the commit with the first fill *rendered and about to be shown* but not
-    /// yet on the main thread. Against `guard cel.fillPreview != nil` alone that fill was silently
-    /// dropped: no pixels, no undo entry, no message.
+    /// yet on the main thread. Against the shown preview alone that fill was silently dropped: no
+    /// pixels, no undo entry, no message.
     ///
     /// Not `private`, for `FillKey`'s reason: `fillRenderedRegion` in CanvasManager.swift is typed
     /// with it. Carries no extra memory — `bytes` is the same COW buffer `fillLastRender` gets.
@@ -94,6 +94,40 @@ extension CanvasManager {
             CanvasManager.imageFromRGBA(bytes, width: window.workingWidth, height: window.workingHeight)
                 .map { FillPreview(image: $0, rect: window.rect) }
         }
+    }
+
+    /// **The adjustable fill as the canvas shows it** — `CanvasManager.liveFill`: the layer and cel it
+    /// will land on, and the latest render's picture, which nothing in the document holds.
+    struct LiveFill {
+        let layerID: UUID
+        let celID: UUID
+        /// Nil until the first render lands, and for a lasso that enclosed nothing.
+        var preview: FillPreview?
+    }
+
+    /// Starts showing a fill gesture over its cel. **The press publishes once**, so the canvas cuts its
+    /// live picture around the fill's host (`heldHostLayerIndices`); the renders after it publish
+    /// nothing (`showLiveFill`).
+    private func beginLiveFill(layerID: UUID, celID: UUID) {
+        liveFill = LiveFill(layerID: layerID, celID: celID, preview: nil)
+        objectWillChange.send()
+    }
+
+    /// A render's picture, shown by the fill's host and written nowhere — the whole of a slider tick's
+    /// cost to the main thread (TODO (157)).
+    private func showLiveFill(_ preview: FillPreview?) {
+        guard liveFill != nil else { return }
+        liveFill?.preview = preview
+        onHeldPictureMoved?()
+    }
+
+    /// Lets the gesture's picture go — its pixels are in the document by now, or were thrown away —
+    /// and publishes once, so the canvas re-cuts without the fill's host.
+    private func endLiveFill() {
+        guard liveFill != nil else { return }
+        liveFill = nil
+        onHeldPictureMoved?()
+        objectWillChange.send()
     }
 
     /// How far a fill's picture can depend on pixels beyond its window — `FillWindow.halo` at the
@@ -197,7 +231,8 @@ extension CanvasManager {
     /// fill-reference layer into a reference image once, uploads it to a GPU `MetalFillSession`, samples
     /// the tapped colour, and paints an initial fill. A plain tap is just this immediately followed by
     /// `endInteractiveFill`; a press-and-drag streams `updateInteractiveFill` calls in between. The fill
-    /// preview lives in `fillPreview` until `commitInteractiveFill` bakes it into the layer proper.
+    /// preview lives in `liveFill`, off the document, until `commitInteractiveFill` bakes it into the
+    /// layer proper.
     ///
     /// **Every buffer of the gesture is the size of a window of the canvas, not the canvas** — TODO
     /// (86), `FillWindow`. A tap starts in a small window about the seed and `drainFillWork` grows
@@ -241,6 +276,7 @@ extension CanvasManager {
         fillGestureLayerID = layerID
         fillGestureCelID = celID
         fillGestureBaseBaked = layers[layerIndex].cels[celIndex].bakedImage
+        beginLiveFill(layerID: layerID, celID: celID)
         refreshUndoRedoState() // the fill is undoable from the moment it starts, even on a blank canvas
 
         let context = FillGestureContext(generation: beginFillGeneration(), seedX: seedX, seedY: seedY,
@@ -335,20 +371,20 @@ extension CanvasManager {
     }
 
     /// The Edge Overlap value the slider shows and writes: the bucket's or the lasso's, whichever mode
-    /// the artist has in front of them. Two stored settings, one control — see `fillLassoExpand` for
+    /// the artist has in front of them. Two stored settings, one control — see `FillSettings.lassoEdgeOverlap` for
     /// why they cannot share a number.
     ///
     /// Every UI path goes through here (`FillSettingsPanel`, `SideToolbar`, the fill tool's sideways
     /// drag in `CanvasView`, and `setFillSetting`/`updateInteractiveFill` below), so "which mode owns
     /// this value" is decided in exactly one place.
     var fillEdgeOverlap: CGFloat {
-        get { fillMode == .lasso ? fillLassoExpand : fillExpand }
+        get { fillMode == .lasso ? fillSettings.lassoEdgeOverlap : fillSettings.bucketEdgeOverlap }
         set {
             let v = min(max(newValue, Self.fillExpandRange.lowerBound), Self.fillExpandRange.upperBound)
             if fillMode == .lasso {
-                if fillLassoExpand != v { fillLassoExpand = v }
+                if fillSettings.lassoEdgeOverlap != v { fillSettings.lassoEdgeOverlap = v }
             } else {
-                if fillExpand != v { fillExpand = v }
+                if fillSettings.bucketEdgeOverlap != v { fillSettings.bucketEdgeOverlap = v }
             }
         }
     }
@@ -373,7 +409,7 @@ extension CanvasManager {
     /// sits* is a fact about `fillExpandRange`, which is a UI range, and the engine should not have to
     /// know it to run a morphological operator. `lassoEdgeErode` in Fill.metal is the operator.
     func fillEdgeRadius(lasso: Bool) -> CGFloat {
-        lasso ? Self.fillExpandRange.upperBound - fillLassoExpand : fillExpand
+        lasso ? Self.fillExpandRange.upperBound - fillSettings.lassoEdgeOverlap : fillSettings.bucketEdgeOverlap
     }
 
     /// **Edge Overlap used to be forced to 0 for a lasso gesture, then briefly grew the fill outward,
@@ -391,12 +427,12 @@ extension CanvasManager {
     /// fill test builds a raw buffer and drives `MetalFillSession` directly, which would let a
     /// correct shader ship behind a `canvasPadding` that never reaches it.
     func currentFillKey() -> FillKey {
-        FillKey(gap: Int(fillGapClosingDistance.rounded()),
-                threshold: Int((fillThreshold * 1000).rounded()),
+        FillKey(gap: Int(fillSettings.gapClosing.rounded()),
+                threshold: Int((fillSettings.threshold * 1000).rounded()),
                 edge: Int(fillEdgeRadius(lasso: fillGestureIsLasso).rounded()),
                 edgeIsWall: fillCanvasEdgeIsBoundary,
-                inset: Int(max(0, canvasPadding - fillCanvasEdgeExtension).rounded()),
-                mendReach: fillMendsNeighbourGap ? Int(fillMendReach.rounded()) : 0)
+                inset: Int(max(0, canvasPadding - fillSettings.canvasEdgeExtension).rounded()),
+                mendReach: fillMendsNeighbourGap ? Int(fillSettings.mendReach.rounded()) : 0)
     }
 
     /// Toggles "the canvas edge bounds the fill" and, if a fill is currently adjustable, re-runs it so
@@ -414,8 +450,8 @@ extension CanvasManager {
     /// not come in from the paper's edge, which is the option's own meaning.
     func setFillCanvasEdgeExtension(_ pixels: CGFloat) {
         let v = max(0, pixels.rounded())
-        guard fillCanvasEdgeExtension != v else { return }
-        fillCanvasEdgeExtension = v
+        guard fillSettings.canvasEdgeExtension != v else { return }
+        fillSettings.canvasEdgeExtension = v
         if fillGestureActive { scheduleFillRender() }
     }
 
@@ -434,8 +470,8 @@ extension CanvasManager {
     /// the fill dropdown alone.
     func setFillMendReach(_ pixels: CGFloat) {
         let v = min(max(pixels.rounded(), Self.fillMendReachRange.lowerBound), Self.fillMendReachRange.upperBound)
-        guard fillMendReach != v else { return }
-        fillMendReach = v
+        guard fillSettings.mendReach != v else { return }
+        fillSettings.mendReach = v
         if fillGestureActive { scheduleFillRender() }
     }
 
@@ -477,8 +513,8 @@ extension CanvasManager {
         guard fillGestureActive else { return }
         let clampedGap = min(max(gapClosing, Self.fillGapRange.lowerBound), Self.fillGapRange.upperBound)
         let clampedThreshold = min(max(threshold, Self.fillThresholdRange.lowerBound), Self.fillThresholdRange.upperBound)
-        if fillGapClosingDistance != clampedGap { fillGapClosingDistance = clampedGap }
-        if fillThreshold != clampedThreshold { fillThreshold = clampedThreshold }
+        if fillSettings.gapClosing != clampedGap { fillSettings.gapClosing = clampedGap }
+        if fillSettings.threshold != clampedThreshold { fillSettings.threshold = clampedThreshold }
         // Clamped by the setter, and written to whichever mode's stored value the slider is showing.
         fillEdgeOverlap = edgeOverlap
         scheduleFillRender()
@@ -489,14 +525,14 @@ extension CanvasManager {
     /// it live so the user sees the change without re-tapping. Called from the panel's slider bindings;
     /// the interactive drag writes the `@Published` values directly instead, so it never re-selects here.
     func setFillSetting(_ axis: FillAxis, _ value: CGFloat) {
-        fillSelectedAxis = axis
+        if fillSettings.selectedAxis != axis { fillSettings.selectedAxis = axis }
         switch axis {
         case .gapClosing:
             let v = min(max(value, Self.fillGapRange.lowerBound), Self.fillGapRange.upperBound)
-            if fillGapClosingDistance != v { fillGapClosingDistance = v }
+            if fillSettings.gapClosing != v { fillSettings.gapClosing = v }
         case .threshold:
             let v = min(max(value, Self.fillThresholdRange.lowerBound), Self.fillThresholdRange.upperBound)
-            if fillThreshold != v { fillThreshold = v }
+            if fillSettings.threshold != v { fillSettings.threshold = v }
         case .edgeOverlap:
             fillEdgeOverlap = value
         }
@@ -597,17 +633,24 @@ extension CanvasManager {
         defer { fillGestureBaseBaked = nil; fillGestureLayerID = nil; fillGestureCelID = nil; refreshUndoRedoState() }
         guard let layerID = fillGestureLayerID, let celID = fillGestureCelID,
               let layerIndex = layers.firstIndex(where: { $0.id == layerID }),
-              let celIndex = layers[layerIndex].cels.firstIndex(where: { $0.id == celID }) else { return }
-        // The preview may be rendered but not yet installed (see `endFillGeneration` above). Build it
+              let celIndex = layers[layerIndex].cels.firstIndex(where: { $0.id == celID }) else {
+            endLiveFill()
+            return
+        }
+        // The preview may be rendered but not yet shown (see `endFillGeneration` above). Build it
         // from the bytes the queue produced, clipped exactly as the hop would have clipped it, so the
         // guard below asks *"was anything filled?"* rather than *"did the main thread get there in
         // time?"*. An empty lasso result stores no bytes at all, so §7.1's "no undo entry for a loop
         // that enclosed nothing" still falls out of that same guard.
-        if layers[layerIndex].cels[celIndex].fillPreview == nil, let render, let rebuilt = render.preview() {
-            setFillPreview(layerIndex: layerIndex, celIndex: celIndex,
-                           clippedForSelection(rebuilt, through: render.window, layerIndex: layerIndex, celIndex: celIndex))
+        let shown = liveFill?.preview ?? render.flatMap { render in
+            render.preview().flatMap {
+                clippedForSelection($0, through: render.window, layerIndex: layerIndex, celIndex: celIndex)
+            }
         }
-        guard let preview = layers[layerIndex].cels[celIndex].fillPreview else { return }  // nothing was previewed
+        // Let go of the gesture's picture before the document takes its pixels, so the pass the write
+        // raises finds no fill to show over them.
+        endLiveFill()
+        guard let preview = shown else { return }  // nothing was previewed
 
         if layers[layerIndex].kind == .vector {
             // --- Vector layer: the fill becomes a VectorFillElement, never raster pixels ---
@@ -618,8 +661,6 @@ extension CanvasManager {
             // thumbnails, fill references, Move lifts and merges — the vector twin of the raster
             // "ghost layer" bug. An unextractable mask means an empty fill, so dropping the preview
             // is the correct outcome; nothing is recorded.
-            // Clear the transient raster preview either way so it isn't drawn a second time.
-            setFillPreview(layerIndex: layerIndex, celIndex: celIndex, nil)
             // `minimumAlpha` because a vector fill is a *path*: it has no coverage ramp to inherit, so
             // the lasso's antialiased fringe (LASSO_FILL.md §6 step 6) has to be rounded to one side
             // or the other. Half the gesture's own opacity puts the contour where the artwork's line
@@ -858,6 +899,7 @@ extension CanvasManager {
         fillGestureLayerID = layerID
         fillGestureCelID = celID
         fillGestureBaseBaked = layers[layerIndex].cels[celIndex].bakedImage
+        beginLiveFill(layerID: layerID, celID: celID)
         refreshUndoRedoState()
 
         // A lasso session seeds from its mask, so the seed coordinate is unused — but the generation
@@ -896,11 +938,7 @@ extension CanvasManager {
         fillGestureIsLasso = false
         _ = endFillGeneration()   // …and retires it on `fillQueue`, so a restart can't inherit its work
         fillLastRender = nil
-        if let layerID = fillGestureLayerID, let celID = fillGestureCelID,
-           let layerIndex = layers.firstIndex(where: { $0.id == layerID }),
-           let celIndex = layers[layerIndex].cels.firstIndex(where: { $0.id == celID }) {
-            setFillPreview(layerIndex: layerIndex, celIndex: celIndex, nil)
-        }
+        endLiveFill()
         fillGestureLayerID = nil
         fillGestureCelID = nil
         fillQueue.async { [weak self] in self?.endFillSession() }
@@ -981,8 +1019,8 @@ extension CanvasManager {
             // A loop that encloses nothing — because it leaked through a gap, or because there was
             // nothing inside it — has to commit nothing *and push no undo entry*: a no-op that eats
             // an undo slot is a bug artists notice immediately (§8). The mechanism is simply that no
-            // preview is installed, which makes `commitInteractiveFill`'s existing
-            // `guard ... fillPreview != nil` return before it records anything.
+            // preview is shown, which makes `commitInteractiveFill`'s "nothing was previewed" guard
+            // return before it records anything.
             //
             // `session.isLasso` rather than `fillGestureIsLasso`: this runs on `fillQueue` and that
             // flag is main-thread state. The count is the session's own, read on the same queue that
@@ -1028,8 +1066,8 @@ extension CanvasManager {
                 guard let self, context.generation == self.fillGeneration, self.fillGestureActive,
                       let layerIndex = self.layers.firstIndex(where: { $0.id == context.layerID }),
                       let celIndex = self.layers[layerIndex].cels.firstIndex(where: { $0.id == context.celID }) else { return }
-                let clipped = self.clippedForSelection(preview, through: window, layerIndex: layerIndex, celIndex: celIndex)
-                self.setFillPreview(layerIndex: layerIndex, celIndex: celIndex, clipped)
+                self.showLiveFill(self.clippedForSelection(preview, through: window,
+                                                           layerIndex: layerIndex, celIndex: celIndex))
                 self.fillLastRender = rendered
                 // The two halves of §7, raised together: the sentence naming both causes, and the
                 // picture that lets the artist tell which one it was. `diagnostic` is non-nil exactly
@@ -1041,8 +1079,9 @@ extension CanvasManager {
                 } else if !enclosedNothing {
                     // A fill that landed retires the last one's picture rather than leaving it under
                     // the new colour: the artist recovered the near-miss on a slider, and the tint is
-                    // now describing a state that no longer exists.
-                    self.lassoFillDiagnostic = nil
+                    // now describing a state that no longer exists. Only when there is one: it is
+                    // published, and this runs on every render of every slider tick.
+                    if self.lassoFillDiagnostic != nil { self.lassoFillDiagnostic = nil }
                 }
             }
         }
@@ -1122,8 +1161,8 @@ extension CanvasManager {
 
     /// Composites the fill-reference layers (bottom-to-top) into a top-left-origin, premultiplied-last
     /// RGBA byte buffer the GPU reads its walls from — the window's part of them, at the window's
-    /// working size. Excludes each layer's own transient fill preview (`fillPreview`) but includes
-    /// committed fills (now baked into `bakedImage`), so recolouring works.
+    /// working size. Holds committed fills (baked into the cels' tiers), so recolouring works, and
+    /// never the adjustable one, which is in no cel (`liveFill`).
     ///
     /// The tiers are the canvas-sized pictures the layer hosts already display — the raster tier's
     /// memoized readback and the vector canvas's own memo — drawn through the window's transform, so
@@ -1189,10 +1228,4 @@ extension CanvasManager {
         return UIImage(cgImage: cg, scale: 1, orientation: .up)
     }
 
-
-    func setFillPreview(layerIndex: Int, celIndex: Int, _ preview: FillPreview?) {
-        guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
-        layers[layerIndex].cels[celIndex].fillPreview = preview
-        scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: celIndex)
-    }
 }

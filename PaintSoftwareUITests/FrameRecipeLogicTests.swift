@@ -22,9 +22,9 @@ final class FrameRecipeLogicTests: XCTestCase {
     // fixture whose leaves are identical flat squares proves nothing about a dropped field: the
     // parity assertion below re-draws each leaf from the values `PixelOps.FrozenCel` froze, and a
     // field that never differs between two leaves is a field the comparison cannot see. So the six
-    // leaves are: a raster tier with real stamped dabs, a cel carrying *both* a `bakedImage` and a
-    // `fillPreview` in patterns that differ from each other, a vector tier with strokes, a value layer,
-    // a grading layer (pixels: none), and a hidden layer named as somebody's mask source.
+    // leaves are: a raster tier with real stamped dabs, a cel carrying a `bakedImage`, a vector tier
+    // with strokes, a value layer, a grading layer (pixels: none), and a hidden layer named as
+    // somebody's mask source.
 
     private func stroke(_ points: [CGPoint], colour: CodableColor, width: CGFloat = 7) -> VectorStroke {
         VectorStroke(id: UUID(), brush: TestBrushes.hardRound, color: colour, size: width, opacity: 1,
@@ -49,14 +49,10 @@ final class FrameRecipeLogicTests: XCTestCase {
                                  brush: TestBrushes.hardRound, color: .green, brushSize: 6,
                                  brushOpacity: 1, random: DabRandom(seed: 0))
 
-        // 1 — baked and fill in one cel, in **different** rects and colours. `fillPreview` draws last
-        //     (LASSO_FILL §2a), so swapping or dropping either changes bytes.
-        manager.addLayer(name: "Baked and fill")
+        // 1 — a baked tier.
+        manager.addLayer(name: "Baked")
         manager.layers[1].cels[0].bakedImage =
             CanvasFixture.solidImage(.red, rect: CGRect(x: 2, y: 2, width: 30, height: 30))
-        manager.layers[1].cels[0].fillPreview =
-            CanvasFixture.solidPreview(UIColor.blue.withAlphaComponent(0.6),
-                                       rect: CGRect(x: 18, y: 18, width: 30, height: 30))
 
         // 2 — a vector tier.
         manager.addVectorLayer(name: "Vector")
@@ -99,12 +95,12 @@ final class FrameRecipeLogicTests: XCTestCase {
     /// One resolved image per `layers` index, walked on the main actor straight off the live model —
     /// exactly what `renderSources` did before `FrameRecipe` existed.
     ///
-    /// **It draws the four tiers itself rather than calling `PixelOps.rasterize`, and the first
+    /// **It draws the three tiers itself rather than calling `PixelOps.rasterize`, and the first
     /// version of this file did call it — which made the parity assertion prove nothing.** Both sides
     /// would then go through `PixelOps.FrozenCel`, so a field dropped from the freeze would be dropped
-    /// from the oracle too and the comparison would pass. MEASURED by mutation, 2026-09-02: with
-    /// `FrozenCel.fillPreview` deliberately set to nil, the `rasterize`-based oracle passed and this one
-    /// fails. Two implementations of a four-line draw order is exactly the duplication
+    /// from the oracle too and the comparison would pass. MEASURED by mutation, 2026-09-02: with a
+    /// field of the freeze deliberately set to nil, the `rasterize`-based oracle passed and this one
+    /// fails. Two implementations of a three-line draw order is exactly the duplication
     /// `CompositorParityLogicTests.flatWalkComposite` accepts one tier up, and for the same reason: an
     /// oracle that shares an implementation with the thing it checks is not an oracle.
     private func referenceSources(_ manager: CanvasManager, atFrame frame: Int,
@@ -126,7 +122,7 @@ final class FrameRecipeLogicTests: XCTestCase {
                 continue
             }
             // The flatten, frozen: baked → the raster tier's own pixels → the vector tier, replaced
-            // by a derivation where there is one → the live fill preview on top (LASSO_FILL §2a).
+            // by a derivation where there is one.
             let cel = layer.cels[celIndex]
             let strokes = cel.raster.hasContent ? cel.raster.renderToUIImage() : nil
             let vector = derived?.render(quality) ?? cel.vector?.render(quality: quality)
@@ -135,7 +131,6 @@ final class FrameRecipeLogicTests: XCTestCase {
                 cel.bakedImage?.draw(in: bounds)
                 strokes?.draw(in: bounds)
                 vector?.draw(in: bounds)
-                cel.fillPreview?.draw()
             }.cgImage
         }
         return sources
@@ -292,7 +287,6 @@ final class FrameRecipeLogicTests: XCTestCase {
                                  random: DabRandom(seed: 0))
         manager.layers[1].cels[0].bakedImage =
             CanvasFixture.solidImage(.yellow, rect: CGRect(x: 0, y: 0, width: 64, height: 64))
-        manager.layers[1].cels[0].fillPreview = nil
 
         PixelOps.clearRasterizeCache()
         let request = recipe.resolve()

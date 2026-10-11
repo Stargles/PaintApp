@@ -80,8 +80,9 @@ enum SandwichPresentation: String {
     /// - Otherwise a bake for this key is the whole truth, and wins.
     /// - Otherwise a transform edit's bands stay up, after the finger has lifted, while they are of
     ///   this frame — until the bake or the live pair minted for the result replaces them.
-    /// - **A stream or a floating piece on the frame keeps the canvas on the pair** whatever the bake
-    ///   says: no bake contains either, so it is never the picture to wait for. The pair is shown once it is
+    /// - **A stream, a floating piece or an adjustable fill on the frame keeps the canvas on the
+    ///   pair** whatever the bake says: no bake contains any of them, so it is never the picture to
+    ///   wait for. The pair is shown once it is
     ///   current, kept while it is stale, and a lifted stroke leaves `.midStroke` for `.live` the
     ///   moment its pair is current rather than when a bake lands. A pair cut around other hosts at
     ///   this frame (`.regrouped`) is kept on screen until the new cut's pair lands.
@@ -126,15 +127,16 @@ enum SandwichPresentation: String {
         /// A stream is on the frame — drawn by its host, which only a live presentation has
         /// (TODO (112)); no bake contains it, so the bake is never the picture (TODO (162)).
         var stream = false
-        /// **A floating piece is up** — a lasso's, a folder's or a raster Move's, drawn by the hosts
-        /// that carry it (`CanvasManager.floatHostLayerIndices`) in the middle of the pair (TODO
-        /// (160)). The bake of the lifted state has a hole where the piece is, so, as for a stream,
-        /// the bake is never the picture while it floats.
-        var float = false
+        /// **Something the document does not hold yet is up** — a floating piece (a lasso's, a
+        /// folder's or a raster Move's) or an adjustable fill, drawn by the hosts that carry it
+        /// (`CanvasManager.heldHostLayerIndices`) in the middle of the pair (TODO (160), (157)). The
+        /// bake has a hole where a piece was lifted from and no fill that has not landed, so, as for
+        /// a stream, the bake is never the picture while either is up.
+        var held = false
 
         /// Something on the frame reaches the screen only through its own host — what keeps the canvas
         /// on the live pair whatever the bake says.
-        var drawnByHostsAlone: Bool { stream || float }
+        var drawnByHostsAlone: Bool { stream || held }
     }
 
     /// **The pictures the canvas has in hand** to choose between.

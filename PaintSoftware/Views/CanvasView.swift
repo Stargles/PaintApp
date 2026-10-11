@@ -332,9 +332,10 @@ struct CanvasView: UIViewRepresentable {
             [weak coordinator = context.coordinator] in
             coordinator?.timingStrokeFrameAdvanced()
         }
-        // TODO (154): a graph-node drag's tick reaches the bands here, with no SwiftUI pass.
-        context.coordinator.canvasManager.onLivePoseMoved = { [weak coordinator = context.coordinator] in
-            coordinator?.livePoseMoved()
+        // TODO (154), (157): a graph-node drag's tick and an adjustable fill's render reach the canvas
+        // here, with no SwiftUI pass.
+        context.coordinator.canvasManager.onHeldPictureMoved = { [weak coordinator = context.coordinator] in
+            coordinator?.heldPictureMoved()
         }
 
         // One undo step per whole move/scale/rotate drag, not per intermediate value — see
@@ -1118,10 +1119,8 @@ struct CanvasView: UIViewRepresentable {
                         host.strokeView.refreshDisplayIfStale()
                     }
                 }
-                let targetPreview = celIdx.flatMap { canvasManager.layers[index].cels[$0].fillPreview }
-                if host.fillImageView.image !== targetPreview?.image {
-                    host.showFillPreview(targetPreview)
-                }
+                showLiveFill(on: host, layerID: layer.id,
+                             celID: celIdx.map { canvasManager.layers[index].cels[$0].id })
                 // Disabling only strokeView.isUserInteractionEnabled isn't enough: each LayerHostView
                 // fully covers the container, so an inactive host still swallows touches via UIView's
                 // default hitTest, blocking an active layer underneath. Disabling the host itself
@@ -1777,7 +1776,7 @@ struct CanvasView: UIViewRepresentable {
                 from: sandwichPresentation,
                 live: .init(stroke: isSandwichStrokeLive, transformEdit: edit != nil,
                             stream: !canvasManager.streamLayerIndices().isEmpty,
-                            float: !canvasManager.floatHostLayerIndices.isEmpty),
+                            held: !canvasManager.heldHostLayerIndices.isEmpty),
                 held: .init(bakeIsCurrent: sandwichFullKey == key,
                             livePair: LivePairFit(held: livePicture.map { (key: $0.key, cut: $0.cut) },
                                                   key: key, cut: cut),
@@ -1945,15 +1944,38 @@ struct CanvasView: UIViewRepresentable {
             }
         }
 
-        /// **The pose under the finger moved** — `CanvasManager.onLivePoseMoved`, a graph-node drag's
-        /// tick (TODO (154)). The bands on screen are re-posed to it now, and that is the whole of the
-        /// tick's cost to the canvas: the pose is held off the document, so no SwiftUI pass comes.
-        /// Before the bands land there is nothing to re-pose, and the pass that lands them reads the
-        /// held pose.
-        func livePoseMoved() {
-            guard sandwichPresentation == .moving, let picture = livePicture,
-                  case .aroundRuns = picture.cut else { return }
-            showMovingBands(picture, editIsLive: true)
+        /// **A picture the document does not hold yet moved** — `CanvasManager.onHeldPictureMoved`: a
+        /// graph-node drag's tick (TODO (154)) or an adjustable fill's render (TODO (157)). Each is
+        /// re-shown now, and that is the whole of its cost to the canvas: it is held off the document,
+        /// so no SwiftUI pass comes.
+        ///
+        /// The pose re-poses the bands on screen; before they land there is nothing to re-pose, and the
+        /// pass that lands them reads the held pose. The fill is drawn by its own host, which the canvas
+        /// keeps drawing while the fill is up (`CanvasManager.heldHostLayerIndices`).
+        func heldPictureMoved() {
+            if sandwichPresentation == .moving, let picture = livePicture, case .aroundRuns = picture.cut {
+                showMovingBands(picture, editIsLive: true)
+            }
+            var moved = false
+            for (layerID, host) in layerHosts {
+                let celID = canvasManager.liveFill?.layerID == layerID ? canvasManager.liveFill?.celID : nil
+                moved = showLiveFill(on: host, layerID: layerID, celID: celID) || moved
+            }
+            if moved {
+                liveMoveCount += 1
+                publishCanvasState()
+            }
+        }
+
+        /// Shows on `host` the adjustable fill's picture when it lands on `celID` of `layerID`, and
+        /// nothing otherwise (`CanvasManager.liveFill`). Returns whether the host's picture changed.
+        @discardableResult
+        private func showLiveFill(on host: LayerHostView, layerID: UUID, celID: UUID?) -> Bool {
+            let live = canvasManager.liveFill
+            let preview = live.flatMap { $0.layerID == layerID && $0.celID == celID ? $0.preview : nil }
+            guard host.fillImageView.image !== preview?.image else { return false }
+            host.showFillPreview(preview)
+            return true
         }
 
         // MARK: §6.4's live mask
@@ -2588,7 +2610,7 @@ struct CanvasView: UIViewRepresentable {
             let cel = canvasManager.layers[index].cels[celIdx]
             host.strokeView.raster = cel.raster
             host.strokeView.vectorCanvas = cel.vector
-            host.showFillPreview(cel.fillPreview)
+            showLiveFill(on: host, layerID: canvasManager.layers[index].id, celID: cel.id)
             host.bakedImageView.image = cel.bakedImage
             host.bakedImageView.isHidden = cel.bakedImage == nil
         }
@@ -4761,8 +4783,8 @@ struct CanvasView: UIViewRepresentable {
                 guard CanvasTouchOwner.owner(in: canvasTouchInputs(chrome: canvasChrome(at: canvasPoint))) == .fillPress else { return }
                 // The drag delta is measured in fixed screen (host) space so feel is zoom-independent.
                 fillDragStartHost = recognizer.location(in: host)
-                fillDragStartGap = canvasManager.fillGapClosingDistance
-                fillDragStartThreshold = canvasManager.fillThreshold
+                fillDragStartGap = canvasManager.fillSettings.gapClosing
+                fillDragStartThreshold = canvasManager.fillSettings.threshold
                 fillDragStartEdge = canvasManager.fillEdgeOverlap
                 // Pressing back inside the current adjustable fill resumes drag-adjusting it. A
                 // press elsewhere bakes it first via `beginInteractiveFill`'s `beginCanvasEdit`.
@@ -4778,7 +4800,7 @@ struct CanvasView: UIViewRepresentable {
                 func perPoint(_ range: ClosedRange<CGFloat>) -> CGFloat {
                     (range.upperBound - range.lowerBound) / Self.fillDragSweepPoints
                 }
-                switch canvasManager.fillSelectedAxis {
+                switch canvasManager.fillSettings.selectedAxis {
                 case .gapClosing:
                     let gap = fillDragStartGap + dx * perPoint(CanvasManager.fillGapRange)
                     canvasManager.updateInteractiveFill(gapClosing: gap, threshold: fillDragStartThreshold, edgeOverlap: fillDragStartEdge)
