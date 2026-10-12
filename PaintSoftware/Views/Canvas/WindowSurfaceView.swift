@@ -93,6 +93,16 @@ final class WindowSurfaceView: UIView {
             guard self.surfaces.count == 2 else { return nil }
             let target = self.surfaces[self.back]
             return {
+                // **The back surface may still be on screen.** It was the contents until the swap that
+                // put the other one up, and that swap reaches the render server only when the main
+                // thread's transaction commits — while this draw is minted *in* the landing's turn
+                // (`LatestWins` mints as the last draw lands). Cleared now, the server would show one
+                // frame of whatever is under the view. So the draw waits, here off the main thread,
+                // until the server has let the surface go — bounded at half a second, past the
+                // longest busy turn the owner's iPad 9 recorded (182 ms), so a server that never says
+                // so costs one wait rather than the picture.
+                let released = DispatchTime.now() + .milliseconds(500)
+                while target.surface.isInUse, DispatchTime.now() < released { usleep(500) }
                 _ = target.surface.lock(options: [], seed: nil)
                 let cg = target.context
                 cg.clear(CGRect(origin: .zero, size: window.size))
