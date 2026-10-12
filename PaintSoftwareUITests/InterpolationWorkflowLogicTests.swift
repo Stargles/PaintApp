@@ -1002,7 +1002,7 @@ final class InterpolationWorkflowLogicTests: XCTestCase {
     func testTheThicknessFadeToggleReachesTheEvaluatorOptions() {
         let manager = manager()
         XCTAssertEqual(manager.interpolationOptions.thicknessFade, .none)
-        manager.interpolationThicknessFade = true
+        manager.toolSwitches.interpolationThicknessFade = true
         XCTAssertEqual(manager.interpolationOptions.thicknessFade, .weighted(exponent: 1))
     }
 

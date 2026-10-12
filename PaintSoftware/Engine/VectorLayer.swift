@@ -1493,10 +1493,9 @@ enum VectorUndoCost {
 /// count is unchanged. `VectorCanvas.liftWholeCel` is the working proof that a float which splits
 /// nothing shares every nudge, bake and teardown path with one that does.
 ///
-/// **Not persisted, deliberately** (owner's ask, 2026-08-28): this is per-drawing intent, the line
-/// `CanvasManager.preserveMovePrecision` already draws. Storing it would make *last used* the
-/// default, which is not what was asked for. It lives on `CanvasManager.lassoMoveMembership` for the
-/// length of a session and nowhere else — there is no `@AppStorage` anywhere in this project.
+/// **Not saved across launches, deliberately** (owner's ask, 2026-08-28): this is per-drawing intent.
+/// Storing it would make *last used* the default, which is not what was asked for. It lives on
+/// `CanvasManager.selectionMembership` for the length of a session and nowhere else.
 enum LassoMembership: String, CaseIterable, Identifiable {
     /// **Enclosed** — only what lies *entirely* inside the loop travels, whole and uncut. A stroke
     /// that pokes out anywhere is left where it is.

@@ -124,7 +124,7 @@ final class SelectionCompositionLogicTests: XCTestCase {
         draw(aroundAandB, on: manager)
         XCTAssertTrue(contains(manager.selection, centreOfB), "PREMISE: the big loop holds b")
 
-        manager.selectionComposition = .subtract
+        manager.toolSwitches.subtractsSelection = true
         draw(aroundB, on: manager)
         XCTAssertTrue(contains(manager.selection, centreOfA), "a survives the subtract")
         XCTAssertFalse(contains(manager.selection, centreOfB), "b is taken out")
@@ -141,7 +141,7 @@ final class SelectionCompositionLogicTests: XCTestCase {
     func testSubtractingTheWholeSelectionDeselects() {
         let (manager, _, _, _, _, _) = fixture()
         draw(aroundA, on: manager)
-        manager.selectionComposition = .subtract
+        manager.toolSwitches.subtractsSelection = true
         draw(aroundA, on: manager)
         XCTAssertNil(manager.selection, "nothing is left, so nothing is selected")
     }
@@ -151,7 +151,7 @@ final class SelectionCompositionLogicTests: XCTestCase {
     /// (LASSO_MOVE.md §5.24's rule, one switch over).
     func testSubtractWithNothingSelectedRaisesANoticeAndSelectsNothing() {
         let (manager, _, _, _, _, _) = fixture()
-        manager.selectionComposition = .subtract
+        manager.toolSwitches.subtractsSelection = true
         draw(aroundA, on: manager)
         XCTAssertNil(manager.selection, "the loop did not become a selection under Subtract")
         XCTAssertEqual(manager.notice?.code, "nothingToSubtractFrom", "and the artist is told why")
@@ -161,7 +161,7 @@ final class SelectionCompositionLogicTests: XCTestCase {
     /// operand that keeps every other test in the suite meaning what it meant.
     func testTheFirstLoopUnderAddIsAPlainSelection() {
         let (manager, layerIndex, _, _, _, _) = fixture()
-        XCTAssertEqual(manager.selectionComposition, .add, "the default is Add")
+        XCTAssertEqual(manager.toolSwitches.selectionComposition, .add, "the default is Add")
         draw(aroundA, on: manager)
         XCTAssertEqual(manager.selection?.bounds, aroundA)
         XCTAssertEqual(manager.selection?.layerID, manager.layers[layerIndex].id)

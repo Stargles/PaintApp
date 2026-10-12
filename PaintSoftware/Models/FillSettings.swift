@@ -11,7 +11,7 @@ import CoreGraphics
 /// so a tick redraws its slider and nothing else. `CanvasManager.fillSettings` holds the one instance;
 /// `CanvasManager.setFillSetting` and its siblings are the writers that also re-run an adjustable fill.
 ///
-/// Not persisted: session state, like every fill setting.
+/// Not saved across launches: session state. The fill tool's switches are kept (`ToolSwitches`); these values are not.
 final class FillSettings: ObservableObject {
 
     /// Which setting the fill tool's sideways drag adjusts, and which slider the Fill panel highlights.
@@ -53,7 +53,7 @@ final class FillSettings: ObservableObject {
     /// line — so the two add, and a mend that Edge Overlap already covered has nothing left to do
     /// rather than hiding behind it. The owner's *"its own slider … with a default set to 12px"*
     /// (TODO (113)): it was twice Gap Closing, which left the mend with no reach at all for an artist
-    /// who keeps Gap Closing low. Only read while `CanvasManager.fillMendsNeighbourGap` is on.
+    /// who keeps Gap Closing low. Only read while `CanvasManager.toolSwitches.fillMendsNeighbourGap` is on.
     @Published var mendReach: CGFloat = 12
 
     /// How far the canvas edge's boundary sits **outside the paper, into the padding**, in canvas
@@ -61,7 +61,7 @@ final class FillSettings: ObservableObject {
     /// extended 100px into the padding."* 0 is the boundary at the paper's own edge, which is what the
     /// option has always meant.
     ///
-    /// Only read while `CanvasManager.fillCanvasEdgeIsBoundary` is on, and it cannot reach past the
+    /// Only read while `CanvasManager.toolSwitches.fillCanvasEdgeIsBoundary` is on, and it cannot reach past the
     /// padded canvas: the fill's boundary rect is the artwork rect outset by this and clamped to
     /// `canvasSize` (`CanvasManager.currentFillKey` does the arithmetic, in the one place the rect is
     /// decided). A value larger than the padding is therefore the boundary at the canvas's own edge —

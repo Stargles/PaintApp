@@ -45,7 +45,7 @@ struct InterpolatePanel: View {
     /// real drawings. Deliberately view-level and not persisted per recipe — where it eventually
     /// lives (global preference, per recipe, per group) is a decision to take *after* looking at it.
     private var options: some View {
-        Toggle(isOn: $canvasManager.interpolationThicknessFade) {
+        Toggle(isOn: $canvasManager.toolSwitches.interpolationThicknessFade) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Thickness Fade").font(.caption).foregroundColor(.white)
                 Text("Fading content thins instead of ghosting")
@@ -64,7 +64,7 @@ struct InterpolatePanel: View {
     /// set once and not reached for mid-flow, this popover's whole remit — and a drawing with one
     /// motion group is not tinted at all, so most artists will never need it.
     private var groupOverlayOption: some View {
-        Toggle(isOn: $canvasManager.showMotionGroupOverlay) {
+        Toggle(isOn: $canvasManager.toolSwitches.showMotionGroupOverlay) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Colour by Motion Group").font(.caption).foregroundColor(.white)
                 Text("Keyframe strokes take their group's tag colour")

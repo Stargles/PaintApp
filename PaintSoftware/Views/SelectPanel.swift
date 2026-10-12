@@ -438,7 +438,7 @@ struct SelectPanel: View {
     /// XCUITest), while every other control in this bar is a Button and taps it consistently.
     private var paintOutsideToggle: some View {
         Button {
-            canvasManager.allowsPaintingOutsideSelection.toggle()
+            canvasManager.toolSwitches.allowsPaintingOutsideSelection.toggle()
         } label: {
             HStack(spacing: 8) {
                 // **Wrapped in a fixed column rather than shortened**, because "Paint Outside" alone
@@ -457,12 +457,12 @@ struct SelectPanel: View {
                     // unreadable there (it was before this row gained a third column); giving
                     // rather than overflowing is the difference between cramped and broken.
                     .frame(maxWidth: 96, alignment: .leading)
-                switchIndicator(isOn: canvasManager.allowsPaintingOutsideSelection)
+                switchIndicator(isOn: canvasManager.toolSwitches.allowsPaintingOutsideSelection)
             }
             .contentShape(Rectangle())
         }
         .accessibilityIdentifier("selectPanel.allowOutsideToggle")
-        .accessibilityAddTraits(canvasManager.allowsPaintingOutsideSelection ? [.isSelected] : [])
+        .accessibilityAddTraits(canvasManager.toolSwitches.allowsPaintingOutsideSelection ? [.isSelected] : [])
     }
 
     /// **TODO (95) — Subtract.** Off, a new loop is added to the selection already up; on, it is
@@ -482,9 +482,9 @@ struct SelectPanel: View {
     /// a switch for how the next *loop* meets the last has no loop to act on there, and beside a Subtract
     /// segment it would be a second Subtract that does something else.
     private var subtractToggle: some View {
-        let isOn = canvasManager.selectionComposition == .subtract
+        let isOn = canvasManager.toolSwitches.subtractsSelection
         return Button {
-            canvasManager.selectionComposition = isOn ? .add : .subtract
+            canvasManager.toolSwitches.subtractsSelection.toggle()
         } label: {
             VStack(spacing: 6) {
                 Text("Subtract")

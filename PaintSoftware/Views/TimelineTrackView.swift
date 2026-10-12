@@ -1643,7 +1643,7 @@ extension TimelineTrackView.Coordinator: UIGestureRecognizerDelegate {
         }
         guard gestureRecognizer === graphBandView.panRecognizer else { return true }
         let grab = graphBandGrab(at: touch.location(in: graphBandView))
-        let mayBoxSelect = pencilOnlyDrawingAllows(touch.type, pencilOnly: canvasManager.pencilOnlyDrawing)
+        let mayBoxSelect = pencilOnlyDrawingAllows(touch.type, pencilOnly: canvasManager.toolSwitches.pencilOnlyDrawing)
         guard TimelineGraphBand.claims(grab, mayBoxSelect: mayBoxSelect) else { return false }
         graphBandTouch = touch
         return true

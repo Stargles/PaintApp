@@ -11,6 +11,10 @@ struct ContentView: View {
     @State private var canvasManager = CanvasManager()
     @Environment(\.scenePhase) private var scenePhase
 
+    /// Keeps the artist's tool switches across launches (TODO (175)): hands them to each document as
+    /// it enters the editor and saves every change to them as it is made.
+    @State private var toolSwitchesKeeper = ToolSwitchesKeeper()
+
     /// The autosave — TODO (76). `AutosaveClock` decides *when*; this view supplies the edits, the
     /// hold and the save, because it is the one object that can see all three: the manager's edit
     /// signal, the screen, and `saveIfNeeded`. See `AutosaveDriver`.
@@ -176,12 +180,14 @@ struct ContentView: View {
     /// tool and eraser they last had in hand, stored by `saveIfNeeded` so every save keeps the record
     /// current. The other order would let a preset edited weeks ago overwrite the size set an hour
     /// ago. Here, before the editor appears, rather than in an `onAppear`, so the first stroke and
-    /// the first frame both see the finished state.
+    /// the first frame both see the finished state. The tool switches (`ToolSwitches`) are the third
+    /// part, and the only one saved as it changes rather than with the next document save.
     private func handToolsToArtist() {
         canvasManager.adoptLibrarySelections()
         if let preferences = EditorPreferences.stored() {
             canvasManager.applyEditorPreferences(preferences)
         }
+        toolSwitchesKeeper.follow(canvasManager)
     }
 
     // MARK: - Autosave (TODO (76))

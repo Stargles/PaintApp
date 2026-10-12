@@ -944,9 +944,9 @@ final class InterpolationMotionGroupLogicTests: XCTestCase {
         XCTAssertNil(manager.motionGroupOverlayImage(forCel: cels[1].id, inLayer: layerID),
                      "the derived in-between has no strokes of its own to tint")
 
-        manager.showMotionGroupOverlay = false
+        manager.toolSwitches.showMotionGroupOverlay = false
         XCTAssertNil(manager.motionGroupOverlayImage(forCel: cels[0].id, inLayer: layerID))
-        manager.showMotionGroupOverlay = true
+        manager.toolSwitches.showMotionGroupOverlay = true
         manager.exitInterpolateMode()
         XCTAssertNil(manager.motionGroupOverlayImage(forCel: cels[0].id, inLayer: layerID),
                      "and it is view state that belongs to the mode")

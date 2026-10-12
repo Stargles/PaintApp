@@ -138,7 +138,13 @@ class PaintUITestCase: XCTestCase {
         }
         hasLaunchedIntoEditor = true
         app.launch()
+        return openNewCanvas(app)
+    }
 
+    /// Gallery -> New Canvas -> Create Canvas, landing in the editor: the half of `launchIntoEditor`
+    /// after the launch, for a test that relaunches under launch arguments of its own.
+    @discardableResult
+    func openNewCanvas(_ app: XCUIApplication) -> Bool {
         let newCanvas = app.buttons["gallery.newCanvasButton"]
         guard newCanvas.waitForExistence(timeout: 10) else { return false }
         newCanvas.tap()
@@ -149,6 +155,41 @@ class PaintUITestCase: XCTestCase {
 
         let frameLabel = app.staticTexts["timeline.frameLabel"]
         return frameLabel.waitForExistence(timeout: 10)
+    }
+
+    /// Opens the Fill panel and answers whether it came up. The tool's button selects the tool on a first
+    /// tap and opens the panel on the second, and a launch that restored the Fill tool opens it on the
+    /// first — so the second tap is made only if the panel is not up after the first.
+    @discardableResult
+    func openFillPanel(_ app: XCUIApplication) -> Bool {
+        let fillButton = app.buttons["toolbar.fillButton"]
+        guard fillButton.waitForExistence(timeout: 5) else { return false }
+        let panel = app.sliders["fillPanel.edgeOverlapSlider"]
+        fillButton.tap()
+        if panel.waitForExistence(timeout: 2) { return true }
+        fillButton.tap()
+        return panel.waitForExistence(timeout: 5)
+    }
+
+    /// Brings a control of the open fill panel into view. The panel is a scroll view of its own that
+    /// holds more than its height, and **a swipe has to start on it** — one aimed at "the first scroll
+    /// view" lands on the canvas, where a vertical drag is the fill tool's own Gap Closing gesture.
+    ///
+    /// **Anchored on the scroll view's own frame, and in its left gutter.** The frame stays put while
+    /// the rows move, where a row's frame (the title's, which an earlier version offset from) scrolls
+    /// off the top and carries the swipe's start with it — onto a slider, which a drag moves rather
+    /// than scrolls. The gutter holds no control at all, so the swipe scrolls whatever is under it.
+    func scrollFillPanel(_ app: XCUIApplication, to control: XCUIElement) {
+        let panel = app.scrollViews.containing(.staticText, identifier: "Fill").firstMatch
+        var drags = 0
+        while !(control.exists && control.isHittable) && drags < 8, panel.exists {
+            let frame = panel.frame
+            let origin = app.coordinate(withNormalizedOffset: .zero)
+            let from = origin.withOffset(CGVector(dx: frame.minX + 6, dy: frame.midY + frame.height * 0.35))
+            let to = origin.withOffset(CGVector(dx: frame.minX + 6, dy: frame.midY - frame.height * 0.35))
+            from.press(forDuration: 0.1, thenDragTo: to)
+            drags += 1
+        }
     }
 
     /// One space-separated field of `canvas.host`'s accessibility label, with its `prefix` removed, or

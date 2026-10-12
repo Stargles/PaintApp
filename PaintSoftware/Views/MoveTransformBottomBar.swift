@@ -137,7 +137,7 @@ struct MoveTransformBottomBar: View {
     }
 
     /// **TODO item (14) — "Keep Full Precision".** Named for what the artist gets rather than for what
-    /// it stores: `CanvasManager.preserveMovePrecision` is the flag, `float32` is the layout, and
+    /// it stores: `CanvasManager.toolSwitches.preserveMovePrecision` is the flag, `float32` is the layout, and
     /// neither is a thing anybody drawing has an opinion about. What they *do* have an opinion about
     /// is shrinking a drawing, saving, coming back and finding it grew back rough.
     ///
@@ -153,11 +153,11 @@ struct MoveTransformBottomBar: View {
     /// **"Keep Stroke Width" sits beside it — TODO (75)**, the same shape for the same kind of thing:
     /// a rule about what a Move writes, named for what the artist gets. Off, a scaled piece's strokes
     /// scale with it (LASSO_MOVE.md §5.17, the ruling and the default); on, they keep the width they
-    /// were drawn at. `CanvasManager.keepsStrokeWidthOnMove` carries the one limit — a keystoned
+    /// were drawn at. `CanvasManager.toolSwitches.keepsStrokeWidthOnMove` carries the one limit — a keystoned
     /// stroke has no single width to keep.
     private var precisionRow: some View {
         HStack(alignment: .center, spacing: 16) {
-            Toggle(isOn: $canvasManager.keepsStrokeWidthOnMove) {
+            Toggle(isOn: $canvasManager.toolSwitches.keepsStrokeWidthOnMove) {
                 Text("Keep Stroke Width").foregroundColor(.white)
             }
             .tint(.blue)
@@ -166,7 +166,7 @@ struct MoveTransformBottomBar: View {
 
             divider
 
-            Toggle(isOn: $canvasManager.preserveMovePrecision) {
+            Toggle(isOn: $canvasManager.toolSwitches.preserveMovePrecision) {
                 Text("Keep Full Precision").foregroundColor(.white)
             }
             .tint(.blue)

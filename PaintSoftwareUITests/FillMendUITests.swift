@@ -37,27 +37,6 @@ final class FillMendUITests: PaintUITestCase {
         return Screen(bytes: buffer, width: width, height: height)
     }
 
-    /// Brings a control of the open fill panel into view. The panel is a scroll view of its own that
-    /// holds more than its height, and **a swipe has to start on it** — one aimed at "the first scroll
-    /// view" lands on the canvas, where a vertical drag is the fill tool's own Gap Closing gesture.
-    ///
-    /// **Anchored on the scroll view's own frame, and in its left gutter.** The frame stays put while
-    /// the rows move, where a row's frame (the title's, which an earlier version offset from) scrolls
-    /// off the top and carries the swipe's start with it — onto a slider, which a drag moves rather
-    /// than scrolls. The gutter holds no control at all, so the swipe scrolls whatever is under it.
-    private func scrollFillPanel(_ app: XCUIApplication, to control: XCUIElement) {
-        let panel = app.scrollViews.containing(.staticText, identifier: "Fill").firstMatch
-        var drags = 0
-        while !(control.exists && control.isHittable) && drags < 8, panel.exists {
-            let frame = panel.frame
-            let origin = app.coordinate(withNormalizedOffset: .zero)
-            let from = origin.withOffset(CGVector(dx: frame.minX + 6, dy: frame.midY + frame.height * 0.35))
-            let to = origin.withOffset(CGVector(dx: frame.minX + 6, dy: frame.midY - frame.height * 0.35))
-            from.press(forDuration: 0.1, thenDragTo: to)
-            drags += 1
-        }
-    }
-
     // MARK: - (113) Mend Gap to Neighbouring Fill
 
     /// A box with two dividers, line art on its own layer above the colour. The left cell is filled

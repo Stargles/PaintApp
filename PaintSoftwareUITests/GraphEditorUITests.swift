@@ -1233,8 +1233,8 @@ final class GraphEditorFingerUITests: PaintUITestCase {
     /// which is where a finger has nothing to do on empty band but scroll.
     func testAFingerDragOnEmptyBandScrollsTheTimelineAndOneOnANodeMovesIt() throws {
         let app = XCUIApplication()
-        // `CanvasManager.pencilOnlyDefaultsKey`, which this target cannot see. As an argument it sets the
-        // preference for this process alone — the stored value is never written, so no later test inherits it.
+        // `ToolSwitches`' key for `pencilOnlyDrawing`. As an argument it sets the preference for this
+        // process alone — the stored value is never written, so no later test inherits it.
         app.launchArguments += ["-paintapp.pencilOnlyDrawing", "YES"]
         XCTAssertTrue(launchIntoEditor(app))
         let authored = try authorAnAnimatedBrightnessCurve(app, from: 0, to: 6)

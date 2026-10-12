@@ -923,10 +923,10 @@ extension CanvasManager {
         // that is up is on this cel; the check is what keeps that a fact rather than an assumption.
         if let existing = selection, existing.layerID == layerID, existing.celID == celID,
            existing.elements == nil {
-            selection = existing.composed(with: path, by: selectionComposition, within: canvasRect)
+            selection = existing.composed(with: path, by: toolSwitches.selectionComposition, within: canvasRect)
             return
         }
-        if selectionComposition == .subtract {
+        if toolSwitches.subtractsSelection {
             raise(.nothingToSubtractFrom)
             return
         }

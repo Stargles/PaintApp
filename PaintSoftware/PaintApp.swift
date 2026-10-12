@@ -31,6 +31,7 @@ struct PaintApp: App {
         // container while the artist's real library sat untouched in Files.
         ProjectLocation.resolveOnLaunch()
         EditorPreferences.forgetIfRequested()
+        ToolSwitches.forgetIfRequested()
         ColorPickerType.forgetIfRequested()
         StreamEndpoint.forgetLastUsedIfRequested()
         // Launch-time safety pass (off the main thread): snapshot every project if the app binary

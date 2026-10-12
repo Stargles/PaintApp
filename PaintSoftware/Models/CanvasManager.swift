@@ -407,14 +407,6 @@ final class CanvasManager: ObservableObject {
     /// `InterpolationReference`s, by frame.
     @Published var interpolationReferences: [CelRef] = []
 
-    /// View-level toggle for `InterpolationEvaluator.Options.thicknessFade`, so the two behaviours
-    /// can be compared on real drawings.
-    ///
-    /// Deliberately **not** persisted and **not** per-recipe: where it eventually belongs is a
-    /// decision to take after looking at it. Off matches the evaluator's default; the reason it is
-    /// off is in `InterpolationEvaluator.ThicknessFade`.
-    @Published var interpolationThicknessFade: Bool = false
-
     /// True while a registration is running. Registration is the expensive step of the feature — an
     /// ARAP fit over the keyframes' point clouds — and it is synchronous, so this exists for the UI
     /// to show that something is happening rather than to gate anything.
@@ -462,15 +454,6 @@ final class CanvasManager: ObservableObject {
     /// without that the preview is memoized against inputs that don't mention it, and muting appears
     /// to do nothing until something unrelated forces a re-render.
     @Published var hiddenMotionGroups: Set<UUID> = []
-
-    /// Whether a keyframe's strokes are drawn in their motion groups' tag colours while interpolate
-    /// mode is on.
-    ///
-    /// **On by default** — "what did it decide?" is the question this exists to answer, and an
-    /// overlay nobody switches on answers nothing. Shows only where there is a decision to show — a
-    /// drawing that grouped into one part is not tinted at all — and the switch is in the mode's
-    /// options popover for the artist who wants their own colours back for a moment.
-    @Published var showMotionGroupOverlay: Bool = true
 
     /// Whether the next canvas drag draws a **guide stroke** rather than ink.
     ///
@@ -901,38 +884,10 @@ final class CanvasManager: ObservableObject {
     // MARK: - Select & Move tool state (see SelectionModels.swift for the operations)
     @Published var selectionMode: SelectionMode = .lasso
     @Published var transformMode: TransformMode = .uniform
-    /// **TODO item (14) — "Keep full precision" on the Move bar.** While this is on, every stroke a
-    /// committed vector Move writes is marked `VectorStroke.precise`, so its samples are *stored* as
-    /// float32 instead of on the quarter-pixel grid.
-    ///
-    /// Off by default, and that is the ruling rather than caution: the packed form is the compaction
-    /// feature item (8) shipped, and the precise one costs ~1.7x the bytes a sample. It buys exactly
-    /// one thing — a stroke the artist shrinks, saves, reopens and grows again comes back where it
-    /// was — and only a Move can shrink one, so only a Move turns it on.
-    ///
-    /// Not persisted across launches, unlike `pencilOnlyDrawing`: that one is about the artist's
-    /// hardware and this one is about the drawing in front of them.
-    @Published var preserveMovePrecision: Bool = false
-    /// **TODO (75) — "Keep Stroke Width" on the Move bar.** The owner: *"there should be a toggle
-    /// where there is the option that the brushstroke size is constant. Right now I believe it scales
-    /// with the move."* It does, by ruling — LASSO_MOVE.md §5.17's `sqrt(|det|)` — and that stays the
-    /// default. While this is on, a scaled Move leaves every stroke's `VectorStroke.size` exactly what
-    /// it was at the lift; `applyToVectorFloat` is the one place a Move writes geometry and the one
-    /// place this is read.
-    ///
-    /// **A keystoned stroke is outside it, and that is the shape of the thing rather than a gap.** Under
-    /// Distort a stroke's width is not one number: each dab takes its radius from the map's local scale
-    /// where it lands (`StrokeDistort`, KEYFRAMES.md §8), so "unchanged" has no single width to name.
-    /// The toggle governs the two affine arms, which is every Move, scale, turn, Freeform and Mirror.
-    ///
-    /// Not persisted, for `preserveMovePrecision`'s reason one line up: it is about the drawing in
-    /// front of the artist, not about their hardware.
-    @Published var keepsStrokeWidthOnMove: Bool = false
     /// **TODO (135) — which cels a folder's Move carries**, the picker on the Move bar while a folder's
     /// box is up. `.thisCel` is the shipped behaviour and the default.
     ///
-    /// Not persisted, for `preserveMovePrecision`'s reason two properties up: it is about the move in
-    /// front of the artist, not about their hardware. **Written through
+    /// Not saved across launches: it is about the move in front of the artist. **Written through
     /// `setFolderMoveScope(_:)`, never assigned from a view** — a folder float lifted under one scope
     /// has to be lifted again under the other, so the value and the float cannot disagree.
     @Published var folderMoveScope: FolderMoveScope = .thisCel
@@ -948,25 +903,17 @@ final class CanvasManager: ObservableObject {
     /// reads it — `beginVectorLassoMove` and `recolorSelection` today — instead of each growing its
     /// own copy.
     ///
-    /// **Not persisted, and that is the ruling rather than an omission** — it draws exactly the line
-    /// `preserveMovePrecision` above draws, one line up. This is per-drawing intent; storing it would
-    /// make *last used* the default, which is not what the owner asked for. There is no `@AppStorage`
-    /// anywhere in this project and this does not introduce one.
+    /// **Not saved across launches, and that is the ruling rather than an omission** — it is
+    /// per-drawing intent; storing it would make *last used* the default, which is not what the owner
+    /// asked for. (A picker, not one of the `toolSwitches` the owner asked to keep.)
     ///
     /// Written through `setSelectionMembership(_:)`, never assigned directly from a view: a float
     /// lifted under the old rule has to be re-lifted under the new one, and the order that re-lift
     /// happens in is load-bearing (see `CanvasManager+LassoMove.swift`).
     @Published var selectionMembership: LassoMembership = .cutting
-    /// **TODO (95) — "Add / Subtract", in the Select panel's rule row.** How the next loop meets the
-    /// one already up: added to it, or taken from it. Read in one place, `finishSelection`, so a
-    /// freehand loop, a rectangle and the wand all compose the same way.
-    ///
-    /// Not persisted, for `selectionMembership`'s reason one line up — per-drawing intent, and a
-    /// switch that came back on across launches would eat the first loop of the next session.
-    @Published var selectionComposition: SelectionComposition = .add
     /// **How the next tap in Select → Tap meets the objects already selected** — the picker that stands
     /// where the membership picker does while Tap is the mode. Read in one place,
-    /// `selectObject(at:)`. Not persisted, for `selectionComposition`'s reason one line up.
+    /// `selectObject(at:)`. Not saved across launches, for `selectionMembership`'s reason one line up.
     @Published var tapComposition: TapComposition = .single
     @Published var magicWandTolerance: Double = 0.15
     @Published var selection: Selection? {
@@ -1133,10 +1080,6 @@ final class CanvasManager: ObservableObject {
     /// Single-slot clipboard for the timeline's Copy/Paste block menu — holds a cel's content (not
     /// its position), set by `copyCel` and consumed non-destructively by `pasteCel`.
     @Published var copiedCel: CopiedCel?
-    /// Whether painting/erasing/filling is allowed to touch pixels outside the active selection.
-    /// Defaults to false (deny), matching Procreate-style selections. Shown as a toggle in the
-    /// Select bottom bar; only meaningful while `selection` is non-nil.
-    @Published var allowsPaintingOutsideSelection: Bool = false
 
     /// The active brush's stroke diameter, **in canvas points** — same unit as `Brush.size`, which
     /// this is copied from on every preset pick (see the two writers below). Persisted and shared
@@ -1227,27 +1170,28 @@ final class CanvasManager: ObservableObject {
     /// with the document (`EditorStateManifest`) and switched from the colour panel's top right
     /// (`ColorPickerPanel.eyedropperMode`). `@Published` because that switch renders it.
     @Published var eyedropperMode: Eyedropper.Mode = .layer
-    /// Defaults key for `pencilOnlyDrawing`. About the user's *hardware*, not any one drawing, so it
-    /// belongs to the app rather than a project's manifest.
-    static let pencilOnlyDefaultsKey = "paintapp.pencilOnlyDrawing"
-
-    // Absent a stored preference this is false: an ON-by-default gate would silently swallow every
-    // finger touch on a device with no Apple Pencil, reading as "drawing is broken". Users with a
-    // Pencil who want to rest a palm switch it on, and it stays on from then on.
-    @Published var pencilOnlyDrawing: Bool = UserDefaults.standard.bool(forKey: CanvasManager.pencilOnlyDefaultsKey) {
+    /// **The artist's on/off choices for their tools** — fill's mend and canvas-edge switches, the
+    /// Select panel's, the Move bar's, interpolation's and the finger/Pencil gate (`ToolSwitches`
+    /// names each and carries its default). One value so the tools in the artist's hand are kept
+    /// across launches by one mechanism, `ToolSwitchesKeeper`, rather than by a `UserDefaults` call
+    /// per switch; the model itself touches no defaults.
+    ///
+    /// Every change is handed to the action recorder by name, because a recording that shows a tool
+    /// behaving unexpectedly is often explained entirely by one of these being flipped above it.
+    @Published var toolSwitches = ToolSwitches() {
         didSet {
-            guard oldValue != pencilOnlyDrawing else { return }
-            UserDefaults.standard.set(pencilOnlyDrawing, forKey: Self.pencilOnlyDefaultsKey)
-            // Recorded because it is the gate that decides whether a `.direct` touch draws at all —
-            // a recording showing finger touches that produce no stroke is explained entirely by
-            // this line being `true` somewhere above them.
-            ActionRecorder.ifRecording { $0.model("pencilOnlyDrawing", pencilOnlyDrawing ? "true" : "false") }
+            guard oldValue != toolSwitches else { return }
+            ActionRecorder.ifRecording { recorder in
+                for (name, field) in ToolSwitches.saved where oldValue[keyPath: field] != toolSwitches[keyPath: field] {
+                    recorder.model(name, toolSwitches[keyPath: field] ? "true" : "false")
+                }
+            }
         }
     }
 
     /// Defaults key for `renderResolution`. About the *machine* and the artist's tolerance for a soft
-    /// preview, not about any one drawing — the same argument `pencilOnlyDefaultsKey` makes, and the
-    /// reason neither of these is in a project's manifest. A document carried to a faster iPad should
+    /// preview, not about any one drawing — the same argument `ToolSwitches.pencilOnlyDrawing` makes, and
+    /// the reason neither of these is in a project's manifest. A document carried to a faster iPad should
     /// not bring a downgraded canvas with it.
     static let renderResolutionDefaultsKey = "paintapp.renderResolution"
 
@@ -1500,38 +1444,6 @@ final class CanvasManager: ObservableObject {
     /// tool. `.lasso` takes its gesture from `SelectionOverlayView` instead of the fill press
     /// recognizer; see `CanvasView.Coordinator.updateSelectionOverlay`.
     @Published var fillMode: FillMode = .flood
-
-    /// Whether the canvas rectangle's edge bounds the fill the way a drawn line does. On by default,
-    /// at the owner's request.
-    ///
-    /// **"The canvas edge" is the edge of the artwork rect — `canvasSize` inset by `canvasPadding` on
-    /// every side — and not the edge of the pixel buffer.** With padding those are different
-    /// rectangles, and confusing them is what made this option not work: the flood has always been
-    /// clamped to the *buffer*, which is free and needs no option, but with a margin around the
-    /// artwork that clamp sits `canvasPadding` px too far out and an enclosure that leans on the
-    /// paper's border is open along that whole border.
-    ///
-    /// Two things happen when it is on, and only the first is what the artist means by the name:
-    /// - the artwork rect's boundary **bounds the flood**, on both sides — a fill started on the
-    ///   paper stops at the paper's edge instead of spreading onto the grey margin, and a fill
-    ///   started on the margin stays there. This does not consult Gap Closing at all.
-    /// - the paper's edge counts as **ink for gap closing**, so a boundary stroke ending a few px
-    ///   short of it leaves an opening that seals rather than letting the fill run around its end.
-    ///   This half is the one that does nothing while Gap Closing is 0.
-    ///
-    /// At `canvasPadding == 0` the two rectangles coincide, the flood already could not leave the
-    /// buffer, and the option reduces exactly to the second half. See `gapLevels` in Fill.metal for
-    /// both mechanisms and for why the boundary is a barrier between pixels rather than ink added to
-    /// the wall mask.
-    @Published var fillCanvasEdgeIsBoundary: Bool = true
-
-    /// Whether a fill grows into the gap between itself and paint already on its layer — the owner's
-    /// *"have fill B smartly detect its edge is near fill A, and mend the gap"* (TODO (113)). On by
-    /// default (owner, 2026-10-12): a fill that ends short of the one beside it is a defect the artist
-    /// would otherwise have to remember to switch off, and the switch is still in the fill menu.
-    ///
-    /// How far it reaches is `fillSettings.mendReach`, its own setting. Both fill types honour it.
-    @Published var fillMendsNeighbourGap: Bool = true
 
 
     @Published var canvasBackgroundColor: Color = .white

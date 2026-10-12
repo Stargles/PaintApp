@@ -1424,8 +1424,8 @@ extension CanvasManager {
             let newElements = oldElements.map { element in
                 Self.nudged(element, in: part, localDelta: localDelta, projected: projected,
                             isStretched: aspect != 1 || !part.poses.isEmpty,
-                            keepsStrokeWidth: keepsStrokeWidthOnMove,
-                            preservesPrecision: preserveMovePrecision)
+                            keepsStrokeWidth: toolSwitches.keepsStrokeWidthOnMove,
+                            preservesPrecision: toolSwitches.preserveMovePrecision)
             }
             swaps.append(VectorFloatSwap(vector: vector, part: part,
                                          oldElements: oldElements, newElements: newElements))
@@ -1493,7 +1493,7 @@ extension CanvasManager {
         // at every gesture end.
         if float.mayDiverge || mirror != oldMirror || aspect != oldAspect
             || stretchAxis != oldStretchAxis || distort != oldDistort
-            || (keepsStrokeWidthOnMove && transform.scale != oldFrameTransform.scale) {
+            || (toolSwitches.keepsStrokeWidthOnMove && transform.scale != oldFrameTransform.scale) {
             float.wantsLatch = false
             for vector in canvases { vector.suppressedElementIDs = [] }
         }

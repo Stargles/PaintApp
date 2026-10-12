@@ -17,7 +17,7 @@ final class SelectionOverlayView: CanvasPlaneView {
         didSet { isUserInteractionEnabled = isCapturingGestures }
     }
 
-    /// Mirrors `CanvasManager.pencilOnlyDrawing`, pushed down every `updateSelectionOverlay()` call
+    /// Mirrors `CanvasManager.toolSwitches.pencilOnlyDrawing`, pushed down every `updateSelectionOverlay()` call
     /// the same way `reconcileLayers` mirrors it to `StrokeCanvasView.pencilOnlyDrawing`. Selection
     /// is a drawing-type edit under the "would this input have drawn" test in `CanvasView`'s gesture
     /// doc comment — it replaces what a later fill/paint sees as paintable — so a finger must be

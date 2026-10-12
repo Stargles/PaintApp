@@ -307,7 +307,7 @@ enum CompositeProbe {
 enum Compositor {
 
     /// The active backend. A `static var` rather than a `UserDefaults`-backed setting because this is
-    /// a development seam, not something a user chooses — `CanvasManager.pencilOnlyDrawing` is what a
+    /// a development seam, not something a user chooses — `CanvasManager.toolSwitches.pencilOnlyDrawing` is what a
     /// real persisted preference looks like in this codebase, and this is deliberately not that.
     ///
     /// It stays a development seam now that the default has moved, and more so rather than less: the

@@ -1,7 +1,7 @@
 import XCTest
 
 /// End-to-end coverage for the pencil-only-mode fix to the Select tool's lasso/rectangle/automatic
-/// gestures — the third hole in `CanvasManager.pencilOnlyDrawing` gating, after `fillPress` and
+/// gestures — the third hole in `CanvasManager.toolSwitches.pencilOnlyDrawing` gating, after `fillPress` and
 /// `catchAll` (see `CanvasView`'s "Which of these reject a finger" doc comment). `SelectionOverlayView`
 /// used plain `UIPanGestureRecognizer`/`UITapGestureRecognizer`, whose `@objc` action never receives a
 /// `UITouch`, so nothing there could ask whether the touch was a finger — the same shape of hole the
@@ -27,11 +27,8 @@ import XCTest
 final class SelectionPencilOnlyUITests: PaintUITestCase {
 
     /// Sets "Fingers Can Paint" to the requested state via the Actions menu, tapping only if it
-    /// isn't already there. `pencilOnlyDrawing` persists in `UserDefaults` across app launches (see
-    /// `CanvasManager.pencilOnlyDefaultsKey`) and nothing resets it between test runs the way
-    /// `-resetGallery` resets project data, so this reads the toggle's actual current state rather
-    /// than assuming a fresh-install default — otherwise a run that stops mid-test on a failure
-    /// would leave the next run starting from the wrong state on the same simulator.
+    /// isn't already there. `pencilOnlyDrawing` is one of the `ToolSwitches` kept across app launches,
+    /// so this reads the toggle's actual current state rather than assuming a fresh-install default.
     ///
     /// Phrased in the UI as the state the artist chooses ("fingers can paint"), inverted from the
     /// `pencilOnlyDrawing` flag it sets (see `SettingsMenu.pencilOnlyToggle`'s doc comment) — so
@@ -210,7 +207,7 @@ final class SelectionPencilOnlyUITests: PaintUITestCase {
 
     /// **TODO (59)'s sixth hole: the graph editor's box select.** The owner, 2026-09-10: *"right now
     /// in the graph menu, the finger can be used for the box select on nodes. Should only be the pen
-    /// (in pen mode)"* — i.e. it obeys `CanvasManager.pencilOnlyDrawing` rather than inventing a
+    /// (in pen mode)"* — i.e. it obeys `CanvasManager.toolSwitches.pencilOnlyDrawing` rather than inventing a
     /// second preference, which is what `pencilOnlyDrawingAllows` makes literal.
     ///
     /// **XCUITest cannot synthesise a pencil**, so the pen half of the ask is unprovable here and is

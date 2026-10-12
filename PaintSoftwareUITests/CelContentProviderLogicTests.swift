@@ -346,7 +346,7 @@ final class CelContentProviderLogicTests: XCTestCase {
             manager.layers[1].cels[1].interpolation?.localEdits.append(
                 LocalEdit(stroke: self.stroke([CGPoint(x: 4, y: 4), CGPoint(x: 20, y: 20)])))
         }
-        try assertMoves("the thickness-fade option") { $0.interpolationThicknessFade.toggle() }
+        try assertMoves("the thickness-fade option") { $0.toolSwitches.interpolationThicknessFade.toggle() }
         try assertMoves("a muted motion group") { manager in
             // Solo/mute is only an input inside the mode — `interpolationOptions` says so — so the
             // mutation has to put the document in it, or this would assert about nothing.

@@ -1026,8 +1026,8 @@ struct CanvasView: UIViewRepresentable {
             let shownFrames = canvasManager.displayedFrames(atFrame: canvasManager.currentFrame)
             for (index, layer) in canvasManager.layers.enumerated() {
                 guard let host = layerHosts[layer.id] else { continue }
-                if host.strokeView.pencilOnlyDrawing != canvasManager.pencilOnlyDrawing {
-                    host.strokeView.pencilOnlyDrawing = canvasManager.pencilOnlyDrawing
+                if host.strokeView.pencilOnlyDrawing != canvasManager.toolSwitches.pencilOnlyDrawing {
+                    host.strokeView.pencilOnlyDrawing = canvasManager.toolSwitches.pencilOnlyDrawing
                 }
                 // `layer.isVisible`/`.opacity` are the layer's own switches; whether it actually
                 // reaches the canvas also folds in every enclosing group's (§4.1) — Core Animation
@@ -2719,7 +2719,7 @@ struct CanvasView: UIViewRepresentable {
             // `StrokeCanvasView.pencilOnlyDrawing` — see `SelectionOverlayView.pencilOnlyDrawing`'s
             // doc comment for why a selection drag needs this too. A lasso fill is a drawing edit by
             // the same test, so borrowing this recognizer also inherits the fix for free.
-            overlay.pencilOnlyDrawing = canvasManager.pencilOnlyDrawing
+            overlay.pencilOnlyDrawing = canvasManager.toolSwitches.pencilOnlyDrawing
             // `CanvasTouchInputs.selectionOverlayIsCapturing` — the same value
             // `updateActiveLayerAndTool` reads for the eyedropper's recognizer, which is the point:
             // its `!isEyedropperArmed` term is this overlay's half of the 2026-08-22 fix, and the two
@@ -2731,7 +2731,7 @@ struct CanvasView: UIViewRepresentable {
             // line the piece up against. The outline still shows, and travels with the piece.
             let floating = canvasManager.vectorFloat != nil || canvasManager.floatingPiece?.kind == .move
             overlay.updateSelection(canvasManager.selection,
-                                    allowsOutsideInteraction: canvasManager.allowsPaintingOutsideSelection || floating)
+                                    allowsOutsideInteraction: canvasManager.toolSwitches.allowsPaintingOutsideSelection || floating)
             // LASSO_FILL.md §7.2/§7.4, pushed down the same way everything else here is: the overlay
             // decides whether this is new and owns the fade, so a pass that changes nothing costs a
             // UUID comparison. It is drawn here rather than over the layer stack because the tint has
@@ -2751,7 +2751,7 @@ struct CanvasView: UIViewRepresentable {
             // `SelectionOverlayView.pencilOnlyDrawing` — see that property's doc comment. Before
             // `.update(...)`: `handleTapOutside` can fire from the touch that this very pass is
             // reacting to, so the flag has to be current before the recognizer might ask for it.
-            floatingOverlay?.pencilOnlyDrawing = canvasManager.pencilOnlyDrawing
+            floatingOverlay?.pencilOnlyDrawing = canvasManager.toolSwitches.pencilOnlyDrawing
             // The piece as its box shows it: a pass that lands mid-drag draws the box under the finger,
             // whose travel the piece learns only at the lift (`CanvasManager.boxNudge`).
             floatingOverlay?.update(canvasManager.shownFloatingPiece,
@@ -2965,7 +2965,7 @@ struct CanvasView: UIViewRepresentable {
             // any of that struct's fields. Only applies to the layer/cel the selection belongs to.
             let celIdx = canvasManager.displayedCelIndex(inLayer: canvasManager.currentLayerIndex, atFrame: canvasManager.currentFrame)
             let celID = celIdx.map { layer.cels[$0].id }
-            if let selection = canvasManager.selection, !canvasManager.allowsPaintingOutsideSelection,
+            if let selection = canvasManager.selection, !canvasManager.toolSwitches.allowsPaintingOutsideSelection,
                selection.layerID == layer.id, selection.celID == celID {
                 host.strokeView.selectionClipPath = selection.path
             } else {
@@ -3158,7 +3158,7 @@ struct CanvasView: UIViewRepresentable {
         /// identity is a different *type* from a derivation's, which is what keeps the two from
         /// colliding on one cel — see `InterpolationPreviewKey`.
         private func updateMotionGroupOverlay(layer: Layer, cel: Cel, host: LayerHostView) {
-            guard canvasManager.isInterpolateMode, canvasManager.showMotionGroupOverlay,
+            guard canvasManager.isInterpolateMode, canvasManager.toolSwitches.showMotionGroupOverlay,
                   let version = cel.vector?.version else {
                 interpolationPreviewKeys.removeValue(forKey: layer.id)
                 host.strokeView.setInterpolationImage(nil)
@@ -3918,7 +3918,7 @@ struct CanvasView: UIViewRepresentable {
         }
 
         /// **Which of these reject a finger while pencil-only drawing is on, and which must not.**
-        /// The preference is `CanvasManager.pencilOnlyDrawing`, and the question is not "is this a
+        /// The preference is `CanvasManager.toolSwitches.pencilOnlyDrawing`, and the question is not "is this a
         /// touch?" but "would this input have drawn?" — pencil-only means *drawing* is the pen's job,
         /// never that the canvas stops listening to hands.
         ///
@@ -4202,7 +4202,7 @@ struct CanvasView: UIViewRepresentable {
             // declines still closes an open top-bar dropdown. A touch on the box itself never
             // arrives here — `moveBoxTouchDown` is its site.
             canvasManager.canvasInteractionBegan()
-            guard !canvasManager.pencilOnlyDrawing || recognizer.lastTouchType == .pencil else { return }
+            guard !canvasManager.toolSwitches.pencilOnlyDrawing || recognizer.lastTouchType == .pencil else { return }
             canvasManager.commitVectorFloatIfNeeded()
         }
 
@@ -4287,7 +4287,7 @@ struct CanvasView: UIViewRepresentable {
             // This was the app's one bare `interactionBegan.send()` until 2026-08-26 — see that
             // function's own comment for how a clean merge produced it.
             canvasManager.canvasInteractionBegan(mayBeATransform: recognizer.lastTouchType != .pencil)
-            guard !canvasManager.pencilOnlyDrawing || recognizer.lastTouchType == .pencil else { return }
+            guard !canvasManager.toolSwitches.pencilOnlyDrawing || recognizer.lastTouchType == .pencil else { return }
             // container's bounds equal canvasSize, so `location(in:)` there is canvas-pixel space —
             // the same mapping `handleFillPress` uses.
             let canvasPoint = recognizer.location(in: container)
@@ -4669,7 +4669,7 @@ struct CanvasView: UIViewRepresentable {
             // The same test `StrokeGestureRecognizer.touchesBegan` applies, read straight off the
             // source flag that `reconcileLayers` mirrors down to `StrokeCanvasView.pencilOnlyDrawing`
             // — not off a third copy of the preference, so the two paths cannot drift apart.
-            guard !canvasManager.pencilOnlyDrawing || recognizer.lastTouchType == .pencil else { return }
+            guard !canvasManager.toolSwitches.pencilOnlyDrawing || recognizer.lastTouchType == .pencil else { return }
             if canvasManager.layers.isEmpty {
                 canvasManager.raise(.noLayers)
             } else if canvasManager.layers.indices.contains(canvasManager.currentLayerIndex),
@@ -4716,7 +4716,7 @@ struct CanvasView: UIViewRepresentable {
                 // The same test `StrokeGestureRecognizer.touchesBegan` applies, read straight off the
                 // source flag rather than off a third copy of the preference, so the fill path and the
                 // stroke path cannot drift apart.
-                guard !canvasManager.pencilOnlyDrawing || recognizer.lastTouchType == .pencil else { return }
+                guard !canvasManager.toolSwitches.pencilOnlyDrawing || recognizer.lastTouchType == .pencil else { return }
                 // **Rule (i): whatever chrome the artist grabbed wins.** This recognizer is on the
                 // container with `cancelsTouchesInView = false`, so an overlay claiming the point
                 // takes nothing away from it — dragging a guide grip, a smart shape's handle or a
@@ -4790,7 +4790,7 @@ struct CanvasView: UIViewRepresentable {
             switch recognizer.state {
             case .began:
                 canvasManager.canvasInteractionBegan(mayBeATransform: recognizer.lastTouchType != .pencil)
-                guard !canvasManager.pencilOnlyDrawing || recognizer.lastTouchType == .pencil else { return }
+                guard !canvasManager.toolSwitches.pencilOnlyDrawing || recognizer.lastTouchType == .pencil else { return }
                 let canvasPoint = recognizer.location(in: container)
                 guard CanvasTouchOwner.owner(in: canvasTouchInputs(chrome: canvasChrome(at: canvasPoint))) == .placementPress,
                       canvasManager.beginPlacement(at: canvasPoint) else { return }
@@ -4877,7 +4877,7 @@ struct CanvasView: UIViewRepresentable {
             // Before the gate, as every canvas touch is: a declined finger still closes an open
             // top-bar dropdown, because closing a menu by tapping away from it is not drawing.
             canvasManager.canvasInteractionBegan(mayBeATransform: recognizer.lastTouchType != .pencil)
-            guard !canvasManager.pencilOnlyDrawing || recognizer.lastTouchType == .pencil else { return }
+            guard !canvasManager.toolSwitches.pencilOnlyDrawing || recognizer.lastTouchType == .pencil else { return }
             guard !eyedropperPickInFlight else { return }
             // **Rule (i)**, the same line the other four container recognizers now open with: with
             // the pick armed, dragging a guide grip or a shape handle used to move the chrome *and*
