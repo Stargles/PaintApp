@@ -2,10 +2,11 @@ import IOSurface
 import XCTest
 import UIKit
 
-/// **What a live stream frame hands Core Animation** — `WindowSurfaceView`, TODO (97).
+/// **What a live picture hands Core Animation** — `WindowSurfaceView`, TODO (97) and (173).
 ///
 /// The property under test is the one the old path lacked and the render server on the owner's
-/// iPad died of: across any number of frames, the layer's contents cycle between **two** objects
+/// iPad died of — twice, once for a stream and once for a recolour: across any number of pictures,
+/// the layer's contents cycle between **two** objects
 /// this view owns, both `IOSurface`s the render server maps once. A view that minted a surface, or
 /// a `CGImage`, per frame would fail the identity count; a view whose contents were not an
 /// `IOSurface` would be handing the render server a copy to make. Headless — no window, no host —
@@ -105,6 +106,31 @@ final class WindowSurfaceViewLogicTests: XCTestCase {
         XCTAssertEqual(view.presentedCount, 1)
         XCTAssertTrue(view.present(window: window, placement: .identity, on: queue) { _ in window },
                       "and the next one after it lands is accepted")
+    }
+
+    /// **`finished` says how every draw ended, in the turn it ended** — a caller waiting to punch a
+    /// hole under the picture waits for `true`, and a caller whose newest picture arrived mid-draw
+    /// draws it from either answer.
+    func testFinishedReportsWhetherTheDrawBecameTheContents() {
+        let view = WindowSurfaceView()
+        let window = CGRect(x: 0, y: 0, width: 8, height: 4)
+        var outcomes: [Bool] = []
+        func settle(_ count: Int) {
+            let deadline = Date().addingTimeInterval(2)
+            while outcomes.count < count, Date() < deadline {
+                RunLoop.main.run(until: Date().addingTimeInterval(0.005))
+            }
+        }
+        XCTAssertTrue(view.present(window: window, placement: .identity, on: queue, draw: { _ in window },
+                                   finished: { outcomes.append($0) }))
+        settle(1)
+        XCTAssertEqual(outcomes, [true], "a draw of the window it was asked for became the contents")
+        XCTAssertTrue(view.present(window: window, placement: .identity, on: queue,
+                                   draw: { _ in CGRect(x: 1, y: 0, width: 8, height: 4) },
+                                   finished: { outcomes.append($0) }))
+        settle(2)
+        XCTAssertEqual(outcomes, [true, false], "a draw of another rectangle did not")
+        XCTAssertEqual(view.presentedCount, 1)
     }
 
     /// A draw that answers a different rectangle — the element moved between the window being

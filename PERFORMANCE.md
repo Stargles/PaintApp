@@ -3564,6 +3564,10 @@ wholesale swap and stays `.everything`.
 
 ### 11.11g The live slider over a selection, and the frame that used to be thrown away (2026-09-11)
 
+*§29 superseded the tick this section measures: a tick no longer writes the document, so there is no
+render to land and no landing rule to choose for an edit. What follows is the measurement of the path
+as it was, kept for what it established about the walk.*
+
 TODO (42) shipped on §11.11f's seam: the Select panel's Colour, Size and Opacity each open a session
 (`CanvasManager.beginSelectionEdit`), rewrite the caught elements in place on every tick through
 `restoreElements(_:changedInk:rewriting:)` (`previewSelectionEdit`), and commit one undo step on lift
@@ -5180,7 +5184,7 @@ the mechanism; what was MEASURED is that the churn is gone.
 | sim, 2048², 1280×720 pattern, 150 s | render server (guest `backboardd`) | app |
 |---|---|---|
 | before, 30 Hz canvas-sized contents | 69–101 MB footprint, **154–187 MB RSS, oscillating** | 152–214 MB |
-| after, `WindowSurfaceView` | 69 MB footprint, **126,592 KB RSS, constant** to the byte | 200–204 MB |
+| after, the surface view (`StreamSurfaceView` then, `WindowSurfaceView` since §29) | 69 MB footprint, **126,592 KB RSS, constant** to the byte | 200–204 MB |
 
 (`SimRenderServer` on the host: 375–396 MB before, 363–388 after — noise.) The tick's own
 main-actor cost is unchanged: MEASURED **23–29 ticks/s, mean 0.38–0.48 ms, max ≤1.5 ms** from the
@@ -5704,4 +5708,148 @@ Animation — so the fill's share of a tick is ~1.5–2 ms, down from ~6–7.5 (
 differences at ~114 ticks a window). `FillSliderLiveUITests` pins it as counts: the picture follows the
 drag (`moves:`) with at most 2 passes across it, where each tick used to be one. **Not measured**: the
 device; the preview is still a window-sized image handed to Core Animation per tick, the first lever if
-the device says otherwise.
+the device says otherwise. (§29 builds that lever for the Select panel's edit — a persistent surface
+pair — and the fill's preview is still the image.)
+
+---
+
+## 29. A live element edit was a document write per tick, and the render server died of the pictures (2026-10-12)
+
+TODO (173), with `JetsamEvent-2026-10-12-014605.ips` and `-014655.ips` and
+`recording-20261012-014643.jsonl` (owner's iPad 9, build `6bccc68`): *"just recorded a crash … used the
+select edit tool on some fills, and changed the color around a bit."*
+
+### 29.1 What the reports say, and what they refute
+
+**The process jetsam killed is `backboardd`, not the app.** Both reports carry `reason:
+per-process-limit` on `backboardd` — the render server — at **1,940 MB** (118,400 pages, an instance
+eight days old) and **1,993 MB** (121,637 pages, an instance *50 seconds* old, started by the respring
+the first kill caused). PaintSoftware stood at 1,299 MB and 1,057 MB, never the process killed, with a
+lifetime peak of 1,833 MB in the first report. A black screen and a respring is what the owner calls a
+crash; §21 is the same death by another door (four `backboardd` reports at 1,940 MB while a stream
+played).
+
+**It is not an accumulation.** The second `backboardd` went from nothing to its limit inside 50 s of
+life, ~35 s of which the app had been up and ~12 s of which the recording covers: one Select, one loop,
+one picker, two drags of the hue ring. The recording's last two-second window reads like §28's *before*
+column — `sandwichComposite` ×4 (up to 472 ms), a 1,218 ms `bakeComposite`, 25 `storeDecode`s on the
+main thread, `mainBusy` 1,057 ms, 20 SwiftUI passes — on a **4096² document** (`canvasW/H` in the
+header; the owner's default is 2048×1024, a sixth the area).
+
+**The brief's suspects, refuted.** (157)'s held fill picture is the *template* for the fix, not the
+cause: nothing in a Select recolour calls it. (158)'s `FillBasins` is built per *press* and there is no
+press. (160)/(165)'s live pair is engaged by the edit (below) and minted once. (161)'s versions are not
+read. **Nothing in the app leaks**: every run below ends at its starting footprint.
+
+### 29.2 The mechanism
+
+`previewSelectionEdit` (and the gradient panel's tick) wrote the document through `restoreElements` on
+every tick — TODO (42) had made that write cost *the selection's rectangle* (§11.11f, §11.11g), and left
+it a write. A document write is a new version, so each tick was a SwiftUI pass, a new bake key and a
+re-bake, a re-minted live pair (two canvas-sized halves), a re-built onion skin — the Behind ghost is cut
+around the current layer's ink, and that ink's key is the cel's version — a debounced thumbnail, and, in
+the host, a region repair whose result is **a fresh canvas-sized `CGImage` as layer contents**: 64 MB at
+4096², handed to Core Animation as fast as walks finish. §28 measured the same shape for a fill slider at
+2048². Ten ticks a second for as long as a finger is on a picker is hundreds of MB a second at 4096².
+
+**MEASURED, Release, iPad (9th generation) simulator (iOS 26.5), `PlaybackProbe -probeMode recolour`**
+(new with this item): a 4096² document of five vector layers × two frames, the iPad 9's 192 MiB
+`CompositorBudget` (`-probeBudgetBytes`), six fills on layer 1, the whole canvas lassoed, Select's Colour
+session driven through the shipped verbs for 100 ticks 80 ms apart (the interval the owner's drag
+delivered). A temporary swizzle of `UIImageView.image`, not merged, counted every image of 4 MB or more
+handed to Core Animation. Footprint is `phys_footprint` sampled each tick; "growth" is the peak over the
+session minus its value when the session opened. **The machine was shared with other sessions and
+simulator runs** (5–50% idle across the runs; `before` is the run-to-run spread of two takes, which is
+why it is a range), the figures are about magnitudes, and a loaded host moves the *before* column more
+than the *after* one because the before column is the one doing the work.
+
+| 100 ticks, 4096² | footprint growth over the session | canvas-sized images handed to Core Animation | `bakeComposite` / `sandwichComposite` / `onionComposite` / host renders landed |
+|---|---|---|---|
+| blending layer (the owner's shape), onion on — before | **+740 to +1,000 MB**, peak 1.52–1.76 GB | **55–68, 1.07–1.29 GB** | 7–9 / 10–11 / 76–84 / 85–95 |
+| the same — after | **+237 to +242 MB**, peak 0.96–1.03 GB | **7, 373 MB** | 1 / 2 / 1 / 5 |
+| blending layer, onion off — before | +730 to +1,020 MB, peak 1.48–1.73 GB | 2–3, 134–201 MB (the host is blanked; the pair is what changes) | 5–9 / 8–13 / — / 7–11 |
+| the same — after | +188 to +213 MB, peak 0.94–0.97 GB | 6, 356 MB | 1 / 2 / — / 4 |
+| no blending layer, onion on — before | +384 to +493 MB, peak 0.89–1.01 GB | **64–153, 4.0–7.6 GB** | 1–9 / — / 40–78 / 142–190 |
+| the same — after | **0 MB**, peak 0.51–0.58 GB | **3, 105 MB** | 1 / — / 1 / 4 |
+| no blending layer, onion off — before | +550 to +795 MB, peak 1.02–1.38 GB | **88–100, 5.9–6.7 GB** | 4–10 / — / — / 106–113 |
+| the same — after | **0 MB**, peak 0.55–0.59 GB | **2, 88 MB** | 1 / — / — / 3 |
+
+(One of the five before takes on the blending layer with onion on ran while the host was loaded and read 2
+images and 35 onion composites; it is left out of the first row's ranges.)
+
+The after column's counts are *per session, not per tick*: a 400-tick session on the blending layer
+reads **7 images, 373 MB, +242 MB, peak 1.03 GB** — the same as 100 — where the before column's 400-tick
+run reached a **2.0 GB** peak with 187 onion composites, 20 sandwich composites and 11 bakes. The 240 MB
+the blending document keeps over the session is INFERRED to be the live pair, which has to exist for the
+active layer's host to be drawn between its halves: canvas-sized pictures minted once at the session's
+open.
+
+**What this does not show, and the simulator cannot.** The render server's side — the pictures in
+`backboardd` — is out of process there (§9 item 5, §21). The device's `backboardd` growth is INFERRED
+from the reports and the count above: 1,940 MB is about 23 pictures at 4096²'s 64 MB plus its third again for
+the mipmap chain `.trilinear` costs, and the before column hands it 55–153 inside a drag. The device
+figure is the one measurement this item does not have.
+
+### 29.3 The fix — the fill slider's shape, applied to the other slider
+
+An element edit is **held off the document** (`CanvasManager.liveElementEdit`, `holdElementEdit`): a tick
+moves the held list and tells the canvas (`onHeldPictureMoved`), and the commit writes the cel once, as
+one undo step. `ElementEditSession`'s four verbs — begin, hold, commit, revert — are the one seam the
+Select panel and the gradient panel share, so both are fixed together. The host draws the held list in a
+**window** (`StrokeCanvasView.showHeldEdit`): the base is punched out under it exactly as a vector
+eraser's stroke punches it, and a `WindowSurfaceView` — `StreamSurfaceView`, generalised — draws the
+cel's content in that rectangle off the main thread, into one of two `IOSurface`s the render server maps
+once. A tick therefore allocates nothing and hands Core Animation nothing; the document's version does
+not move, so no bake, pair, onion skin, thumbnail or SwiftUI pass is asked for until the lift.
+
+Three decisions the measurement forced:
+
+- **The window is cut once, for the widest the control can make the ink** (`SelectionEditKind.widest`),
+  because a window that grew with a Size drag would remake its surfaces mid-gesture and blink. The
+  rectangle is `VectorCanvas.editWindow` — `restoreDamage`'s answer for the same swap, read without
+  making it — so it is exactly the rectangle the commit's region repair will redraw.
+- **Pixel-exact, asserted off two independent walks.** `LiveElementEditLogicTests` draws the window with
+  `drawEditWindow` and renders the written list with `render()`, and requires them equal inside the
+  window and the standing picture already equal outside it. A window cut one pixel short, or drawing
+  only the edited ids, goes red.
+- **Landing is held ink.** At the lift the window's picture goes up as an `UnlandedInk` picture in the
+  same main-thread turn the surface comes down, and retires when the render of the written list lands
+  (`SelectionEditLiveUITests` slows that render to three seconds and reads the screen).
+
+**One frame the picture cannot be shown on**, stated rather than hidden: where an animation group's pose
+moves part of the cel somewhere the layer's own pose does not, the window's picture would sit in the
+wrong place. The edit is then held with no window — nothing moves under the finger, a banner says *"A pose
+moves part of this drawing, so the change shows when you let go"* (`CanvasNotice.Kind.editShownOnRelease`),
+and the change lands at the lift as one step. A cel posed as one is shown.
+
+### 29.4 What a tick and a picture cost now
+
+MEASURED, `SelectionEditBench` (retargeted from §11.11g's display model to the shipped path), Release,
+iPad Pro 13-inch M4 simulator, 2048×1024, §11's fixture, 180 ticks of the Size slider 16 ms apart over
+fifty strokes, shared machine:
+
+| n strokes | tick, main thread (median / max) | window draw, off main (median / max) | window | commit write | the one repair render |
+|---|---|---|---|---|---|
+| 200 | 0.1 / 2.7 ms (was 1.1 / 44.6) | 81 / 428 ms | 45% of the canvas | 1.3 ms | 86 ms |
+| 2000 | 0.9 / 7.2 ms (was 5.9 / 8.2) | 511 / 2,744 ms | 30% | 7.2 ms | 505 ms |
+
+The window draw is the walk §11.11g measured (81 and 547 ms, rectangles of 48.5% and 32.7%) — the same
+pictures at the same rate, now into a surface instead of a canvas-sized image — so the artist's frame
+rate under the finger is unchanged and what is gone is everything the frame cost *around* it.
+
+### 29.5 What is left
+
+- **The other slider-shaped edits write the document per tick too** — the layer panel's Opacity slider,
+  the effect parameter sliders (Lens Blur and the rest), the mask tuning and text panels' sliders. Each is
+  a bake key and a re-minted pair per tick; whether each also hands the render server a canvas-sized
+  picture per tick is INFERRED yes for the compositor-level ones (the sandwich is a canvas-sized composite)
+  and is not measured. They are the next items of this class, and each needs its own held picture (an
+  effect is not a window of ink).
+- **The device.** The fix is measured by what the app hands Core Animation, not by what `backboardd`
+  holds; the iPad should run `-playbackProbe -probeMode recolour` (arguments in `PlaybackProbe`'s header)
+  and the owner's own document is the check.
+- **The at-rest working set is large on a 4096² document**: ~0.5–0.8 GB of the app's footprint before any
+  edit (ten 64 MB bitmaps resident in `vmmap`), against the iPad 9's 3 GB. Nothing here changes it, and
+  the 4096² canvas is the owner's choice. BUGS.md's 2026-10-10 hang reports — the layer panel's reload
+  blocked at 83–89% memory pressure — are consistent with that working set on a busy device; this item
+  does not touch them.

@@ -214,6 +214,8 @@ enum PlaybackProbe {
             "onionSkinPlacement": canvasManager.onionSkin.placement.rawValue,
             "onionSkinCompositeEdge": Int(OnionSkinBudget.compositeSize(
                 for: size, resolution: canvasManager.onionSkin.resolution).width),
+            "vectorMemoBytes": VectorRenderCache.residentBytes,
+            "vectorMemoEntries": VectorRenderCache.entryCount,
             "ringResidentBytes": canvasManager.frameBaker.ring.byteCount,
             "ringResidentFrames": canvasManager.frameBaker.ring.count,
             // **A footprint proxy, named as one** — see `PlaybackProbe.footprintBytes()`. Reported

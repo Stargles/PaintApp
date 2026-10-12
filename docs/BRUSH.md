@@ -136,9 +136,10 @@ field and nothing else — `VectorStroke.size` is absolute, the same number the 
 wrote at draw time — so re-pointing a line at a new brush leaves its width alone and widening it leaves
 its tip alone. `CanvasManager+SelectionEdit.swift` is the session; the table (§12 stage 6) is what makes
 re-pointing cheap, since it is an index write rather than a per-stroke `Brush` rewrite; and **live
-adjustment is a middle-of-list edit on every tick**, which is the case TODO (41) bounded — a tick rewrites
-in place through `restoreElements(_:changedInk:rewriting:)` and costs the selection's rectangle rather
-than the cel (PERFORMANCE.md §11.11f, §11.11g).
+adjustment is a middle-of-list edit**, which is the case TODO (41) bounded — the lift rewrites the cel
+once through `restoreElements(_:changedInk:rewriting:)` at the selection's rectangle rather than the cel
+(PERFORMANCE.md §11.11f), and a tick is held off the document and drawn in a window of that rectangle
+(§29, TODO (173)).
 
 **2.11 Opacity and Flow are separate controls, and the per-stroke buffer they require is accepted.**
 Opacity caps what the whole stroke can reach however often it crosses itself; Flow is what one stamp

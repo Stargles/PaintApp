@@ -1106,9 +1106,9 @@ extension CanvasManager {
     /// (`piece.remainderPreview`) the cel does not have, and the layer an adjustable fill lands on,
     /// whose host shows its preview (`liveFill`, TODO (157)), and the layer a live element edit is
     /// on, whose host shows the edited window over the base (`liveElementEdit`, TODO (173)). A
-    /// Duplicate's copy is drawn by the
-    /// overlay over everything, and a transformation layer's or an effect's box holds no pixels — the
-    /// composite itself moves under those — so none of the three names a host.
+    /// Duplicate's copy is drawn by the overlay over everything, and a transformation layer's or an
+    /// effect's box holds no pixels — the composite itself moves under those — so none of the three
+    /// names a host.
     @MainActor
     var heldHostLayerIndices: [Int] {
         var ids = vectorFloat?.parts.filter(\.isShown).map(\.layerID) ?? []

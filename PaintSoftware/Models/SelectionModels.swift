@@ -2193,8 +2193,9 @@ extension CanvasManager {
     // `recolorSelection()` lived here until TODO (42) and read `brushColor` — the palette's current
     // colour, applied silently — which the owner ruled against. The tool that replaced it is
     // `CanvasManager+SelectionEdit.swift`: a colour picker that opens on the selection's own colour,
-    // plus Size and Opacity, each a live drag that rewrites the caught elements in place through
-    // `restoreElements(_:changedInk:rewriting:)` and commits as one undo step. The membership rules,
+    // plus Size and Opacity, each a live drag that holds the caught elements' rewritten list in a
+    // window the canvas draws (`CanvasManager+ElementEdit.swift`, TODO (173)) and commits as one write
+    // and one undo step. The membership rules,
     // the split under Cut, the §5.24 notice and the per-kind table (an eraser takes no colour, a
     // photograph takes nothing) all moved with it, unchanged.
 

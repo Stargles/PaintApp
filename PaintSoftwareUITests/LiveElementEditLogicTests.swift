@@ -61,18 +61,21 @@ final class LiveElementEditLogicTests: XCTestCase {
                                       celID: manager.layers[layerIndex].cels[0].id)
     }
 
-    /// **A scene with z-order in it**: a fill, a stroke across the fill, both inside the loop; a
-    /// second fill and a second stroke outside it, the stroke across the second fill. A window that
-    /// drew only the edited elements would lose the stroke that sits *over* the fill it edits.
+    /// **A scene with z-order in it**: a fill, a stroke across the fill, both inside the loop; a black
+    /// stroke over both that pokes out of the loop's right edge, so Enclosed leaves it alone though it
+    /// is drawn *inside the window*; a second fill and a second stroke outside the loop. A window that
+    /// drew only the edited elements would lose the black stroke over the fill it edits.
     private func scene() -> (manager: CanvasManager, layerIndex: Int, vector: VectorCanvas, caught: Set<UUID>) {
         let (manager, layerIndex, vector) = fixture()
+        manager.selectionMembership = .enclosed
         vector.addFill(canvasSpacePath: CGPath(rect: CGRect(x: 20, y: 20, width: 80, height: 60), transform: nil),
                        color: colour(0.8, 0.1, 0.1))
         vector.addStroke(stroke(y: 50, colour: colour(0.1, 0.1, 0.8)))
+        let caught = Set(vector.elements.map(\.id))
+        vector.addStroke(stroke(y: 40, size: 8, colour: colour(0.05, 0.05, 0.05), from: 70, to: 150))
         vector.addFill(canvasSpacePath: CGPath(rect: CGRect(x: 150, y: 150, width: 60, height: 60), transform: nil),
                        color: colour(0.1, 0.6, 0.1))
         vector.addStroke(stroke(y: 180, colour: colour(0.1, 0.1, 0.1), from: 120, to: 230))
-        let caught = Set(vector.elements.prefix(2).map(\.id))
         select(manager, layerIndex, CGRect(x: 10, y: 10, width: 100, height: 80))
         return (manager, layerIndex, vector, caught)
     }
