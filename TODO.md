@@ -50,6 +50,19 @@ their files are repaired. Build `2974b33` broke this rule and lost the owner's k
 
 ---
 
+## (173) The app is killed for memory while recolouring fills with Select's edit
+
+**Status** — reported 2026-10-12 01:47 (iPad 9, build `6bccc68`). The owner: *"just recorded a crash … used
+the select edit tool on some fills, and changed the color around a bit."* Not a code crash: two
+`JetsamEvent` reports (01:46:05, 01:46:55) show the app resident at ~1.3 GB and ~1.06 GB (lifetime peaks
+~1.8 / ~1.2 GB) with `backboardd` the largest process; the owner's recording
+(`recording-20261012-014643.jsonl`) ends without a stop line, its last window a 1 s main-thread stall.
+Evidence in `~/PaintWork/crash-1012/`.
+
+- [ ] Root cause of the memory growth on that path; fixed at the root; a recolour session stays flat.
+
+---
+
 ## (27) Stream the computer's screen as a layer
 
 **Status** — briefed 2026-09-13, designed the same day ([STREAM.md](docs/STREAM.md)), and **built through
