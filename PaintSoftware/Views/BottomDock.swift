@@ -89,9 +89,29 @@ enum BottomDock {
     /// points against a card that will not go below `minimumWidth`. Centred on a room it does not fit, the
     /// card hung 107 points off *both* sides: its left half stood outside the window, a gradient stop's
     /// swatch at x = -32 with no way to reach it. A card that cannot narrow further starts at the margin
-    /// and runs on over the rail's leading edge instead, which is drawn above it.
+    /// and runs on over the rail's leading edge instead, and stands above it where the two meet
+    /// (`standsAbove`).
     static func leadingInset(cardWidth: CGFloat, in room: CGFloat) -> CGFloat {
         max(sideMargin, (room - cardWidth) / 2)
+    }
+
+    /// The coordinate space the card and what it may stand above report their frames in: the canvas area.
+    static let areaSpace = "bottomDock.area"
+
+    /// **Whether the card meets the layer rail or its options panel, and so must stand above it** — the one
+    /// rule that orders the dock against the rail, for every card and none by name. A card that cannot narrow
+    /// into the room beside the rail (the Move bar at its full width; an effect's bar on a window too narrow
+    /// for it and the options) runs on over it, and beneath the rail a control of its takes no touch: the Move
+    /// bar's Done, a slider's top of range.
+    ///
+    /// **Rectangles that meet, not columns that share an x-range**, because the options panel is as tall as
+    /// its rows and the bar is at the foot of the window: on a 9th-generation iPad upright they share their
+    /// columns and are 300 points apart, and a bar lifted over the whole strip anyway stands over the
+    /// timeline's menus, which hang upward from its bar over the canvas and which the dock is otherwise under —
+    /// the onion-skin panel's Resolution picker was under the effect bar's card (`52dc221`: the Select card did
+    /// that to the graph editor's channel list).
+    static func standsAbove(_ frames: BottomDockOverlapKey.Frames) -> Bool {
+        frames.rails.contains { $0.intersects(frames.card) }
     }
 
     /// How far above the bottom of the canvas area the dock's own bottom edge sits, given how much
@@ -123,6 +143,23 @@ struct TimelineOccupiedHeightKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = max(value, nextValue())
+    }
+}
+
+/// Where the docked card is, and where the layer rail and the options panel hanging off it are, in the canvas
+/// area (`BottomDock.areaSpace`) — reported by `bottomDockCard` and `underBottomDockCards` to `DrawingView`,
+/// which stands the dock above the rail while `BottomDock.standsAbove` holds. A preference because the
+/// frames are the rendered result of three layers' own layout and the order is a sibling's.
+struct BottomDockOverlapKey: PreferenceKey {
+    struct Frames: Equatable {
+        var card = CGRect.null
+        var rails: [CGRect] = []
+    }
+    static let defaultValue = Frames()
+    static func reduce(value: inout Frames, nextValue: () -> Frames) {
+        let next = nextValue()
+        value.card = value.card.union(next.card)
+        value.rails += next.rails
     }
 }
 
@@ -167,8 +204,21 @@ extension View {
             .shadow(color: .black.opacity(0.5), radius: 12, y: 4)
             .background(cardFrameProbe)
             .background(GeometryReader { proxy in
-                Color.clear.preference(key: BottomDockCardHeightKey.self, value: proxy.size.height)
+                Color.clear
+                    .preference(key: BottomDockCardHeightKey.self, value: proxy.size.height)
+                    .preference(key: BottomDockOverlapKey.self,
+                                value: .init(card: proxy.frame(in: .named(BottomDock.areaSpace))))
             })
+    }
+
+    /// **Marks this view as one a docked card stands above wherever they meet** — the layer rail and the
+    /// options panels hanging off it (`BottomDock.standsAbove`). Measured, so there is no second copy of
+    /// where the rail is to drift from the layout that put it there.
+    func underBottomDockCards() -> some View {
+        background(GeometryReader { proxy in
+            Color.clear.preference(key: BottomDockOverlapKey.self,
+                                   value: .init(rails: [proxy.frame(in: .named(BottomDock.areaSpace))]))
+        })
     }
 
     /// The card's own frame, for a test to read — `bottomDock.floor`'s device. A container identifier

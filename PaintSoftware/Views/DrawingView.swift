@@ -69,6 +69,9 @@ struct DrawingView: View {
     /// How tall the docked card is, reported by `bottomDockCard` through `BottomDockCardHeightKey` —
     /// zero while nothing is docked. With the timeline's, what the canvas is told it is covered by.
     @State private var dockedCardHeight: CGFloat = 0
+    /// Whether the docked card meets the layer rail, derived from the frames they report through
+    /// `BottomDockOverlapKey` — what stands the dock above the rail.
+    @State private var dockStandsAboveRail = false
 
     /// Timed, so that "what a SwiftUI pass costs" is a row of a `PlaybackTrace` report
     /// rather than part of its unattributed remainder — see `PlaybackTrace.Phase.bodyDrawing`.
@@ -104,12 +107,13 @@ struct DrawingView: View {
                 // a dock card drawn later covered them: on the owner's 1080 pt window the Select card hid
                 // the right half of the graph editor's channel list.
                 //
-                // **Except while a piece floats**, when the one card up is the Move bar — the card that
-                // cannot narrow (`dockClearance`), so it takes its full width and overlaps the layer rail
-                // when that is open. Beneath the rail, its Done — the control at its right end — took no
-                // touch: a tap on it landed on the rail (`GraphEditorGestureUITests`, a Move raised from a
-                // transformation layer's options with the rail open). So the dock stands above the rail
-                // for exactly as long as the Move bar is in it.
+                // **Except where its card meets the layer rail** (`BottomDock.standsAbove`): a card that cannot
+                // narrow into the room beside the rail — the Move bar, whose Done sits at its right end, or an
+                // effect's bar on a window too narrow for it and the rail's options — runs on over the rail, and
+                // beneath the rail a control of its takes no touch (`GraphEditorGestureUITests`, a Move raised
+                // from a transformation layer's options with the rail open). A card beside the rail keeps the
+                // order above.
+                //
                 // The card's width is a function of the canvas area (`BottomDock.width(in:)`), so
                 // the dock needs that area's width — and it is not the screen's: the side toolbar
                 // and Split View both take from it. The `GeometryReader` is filled explicitly
@@ -123,7 +127,7 @@ struct DrawingView: View {
                         .padding(.leading, BottomDock.leadingInset(cardWidth: card, in: room))
                         .frame(width: proxy.size.width, height: proxy.size.height, alignment: .leading)
                 }
-                .zIndex(canvasManager.isAnyPieceFloating ? 1 : 0)
+                .zIndex(dockStandsAboveRail ? 1 : 0)
 
                 // GeometryReader to tell the timeline how much room it may claim when the user drags
                 // it taller, and the notice below how much of the width the layer rail has taken —
@@ -250,6 +254,7 @@ struct DrawingView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                     .allowsHitTesting(false)
             }
+            .coordinateSpace(name: BottomDock.areaSpace)
         }
         // The dock's anchor. It arrives from `AnimationTimeline`, two ZStack layers away, which is
         // why it travels as a preference rather than as a binding: the timeline is a sibling of the
@@ -259,6 +264,9 @@ struct DrawingView: View {
         }
         .onPreferenceChange(BottomDockCardHeightKey.self) { height in
             dockedCardHeight = height
+        }
+        .onPreferenceChange(BottomDockOverlapKey.self) { frames in
+            dockStandsAboveRail = BottomDock.standsAbove(frames)
         }
         .background(Color.black)
         // **Above everything, including the side toolbar** — which is why it is an overlay on the
@@ -903,12 +911,14 @@ struct DrawingView: View {
                                            showingEffectSettings: $showingNodeEffectSettings) {
                             self.layerOptionsID = nil
                         }
+                        .underBottomDockCards()
                         .transition(.move(edge: .trailing).combined(with: .opacity))
                     } else {
                         LayerOptionsPanel(canvasManager: canvasManager, layerID: layerOptionsID,
                                           showingTransformSettings: $showingTransformSettings) {
                             self.layerOptionsID = nil
                         }
+                        .underBottomDockCards()
                         .transition(.move(edge: .trailing).combined(with: .opacity))
                     }
                 }
@@ -916,6 +926,7 @@ struct DrawingView: View {
                 LayerPanel(canvasManager: canvasManager, optionsLayerID: $layerOptionsID)
                     .frame(width: LayerRail.width(in: geometry.size.width))
                     .frame(maxHeight: .infinity)
+                    .underBottomDockCards()
                     .background(Color.black.opacity(0.62))
                     .overlay(Rectangle().frame(width: 1).foregroundColor(Color.white.opacity(0.12)), alignment: .leading)
             }

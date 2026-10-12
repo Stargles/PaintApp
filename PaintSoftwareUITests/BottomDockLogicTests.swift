@@ -123,6 +123,70 @@ final class BottomDockLogicTests: XCTestCase {
         }
     }
 
+    /// The frames a dock reports, in the canvas area: the 13-inch iPad Pro upright (1032 wide, 956 after the
+    /// side toolbar) at the effect bar's own size, with the layer options open beside the rail.
+    private let optionsPanel = CGRect(x: 333, y: 56, width: 240, height: 322)
+    private let rail = CGRect(x: 583, y: 56, width: 440, height: 1250)
+
+    private func standsAbove(card: CGRect, rails: [CGRect]) -> Bool {
+        BottomDock.standsAbove(.init(card: card, rails: rails))
+    }
+
+    /// **Nothing to meet is nothing to stand above** — no rail on screen, or no card — which is what leaves the
+    /// dock under the timeline's menus nearly always: the Select panel's card on the owner's 1080 window hid half
+    /// of the graph editor's channel list when it stood over them (`52dc221`).
+    func testACardWithNoRailToMeetStandsAboveNothing() {
+        let card = CGRect(x: 72, y: 824, width: 360, height: 149)
+        XCTAssertFalse(standsAbove(card: card, rails: []), "no rail is on screen")
+        XCTAssertFalse(standsAbove(card: .null, rails: [rail, optionsPanel]), "no card is on screen")
+        XCTAssertFalse(BottomDock.standsAbove(BottomDockOverlapKey.defaultValue), "nothing has reported")
+    }
+
+    /// **A card beside the rail does not stand above it, and touching is not meeting.** The card at the margin
+    /// with the room the rail leaves it, ending exactly where the options panel begins.
+    func testACardBesideTheRailStandsAboveNothing() {
+        let card = CGRect(x: 16, y: 824, width: 317, height: 149)
+        XCTAssertEqual(card.maxX, optionsPanel.minX, "the fixture ends where the panel begins")
+        XCTAssertFalse(standsAbove(card: card, rails: [rail, optionsPanel]))
+    }
+
+    /// **The Move bar at its full width runs over the rail and stands above it** — the card whose Done sat under
+    /// the rail and took no touch (`GraphEditorGestureUITests`), now a case of the rule and not of its own.
+    func testTheMoveBarOverTheRailStandsAboveIt() {
+        let moveBar = CGRect(x: 98, y: 840, width: 760, height: 120)
+        XCTAssertTrue(standsAbove(card: moveBar, rails: [rail, optionsPanel]))
+        XCTAssertTrue(standsAbove(card: moveBar, rails: [rail]), "the rail alone is enough")
+        XCTAssertFalse(standsAbove(card: moveBar, rails: [optionsPanel]),
+                       "the options panel alone ends 460 points above the bar: they do not meet")
+    }
+
+    /// **An effect bar that shares the options panel's columns and not its rows stands above nothing** — the
+    /// owner's 9th-generation iPad upright, where the bar is 300 points under the panel: lifting it anyway put
+    /// it over the timeline's menus (the onion panel's Resolution picker, in a drive).
+    func testAnEffectBarUnderTheOptionsPanelsRowsStandsAboveNothing() {
+        let panel = CGRect(x: 213, y: 56, width: 240, height: 322)
+        let bar = CGRect(x: 72, y: 673, width: 360, height: 149)
+        XCTAssertGreaterThan(bar.maxX, panel.minX, "the bar runs on across the panel's columns")
+        XCTAssertFalse(standsAbove(card: bar, rails: [CGRect(x: 463, y: 56, width: 337, height: 950), panel]))
+    }
+
+    /// And once the artist drags the timeline up and the bar rides into the panel's rows, it stands above it.
+    func testAnEffectBarRaisedIntoTheOptionsPanelsRowsStandsAboveIt() {
+        let bar = CGRect(x: 72, y: 174, width: 360, height: 149)
+        XCTAssertTrue(standsAbove(card: bar, rails: [rail, optionsPanel]))
+    }
+
+    /// **The reports add up the way the dock is drawn**: cards stack into one rectangle, every rail is kept.
+    func testTheReportedFramesReduceToTheCardsUnionAndEveryRail() {
+        var value = BottomDockOverlapKey.defaultValue
+        BottomDockOverlapKey.reduce(value: &value, nextValue: { .init(card: CGRect(x: 72, y: 600, width: 360, height: 100)) })
+        BottomDockOverlapKey.reduce(value: &value, nextValue: { .init(rails: [rail]) })
+        BottomDockOverlapKey.reduce(value: &value, nextValue: { .init(card: CGRect(x: 72, y: 710, width: 360, height: 100)) })
+        BottomDockOverlapKey.reduce(value: &value, nextValue: { .init(rails: [optionsPanel]) })
+        XCTAssertEqual(value.card, CGRect(x: 72, y: 600, width: 360, height: 210))
+        XCTAssertEqual(value.rails, [rail, optionsPanel])
+    }
+
     /// **The flatness cost the sliders nothing** — the claim `BottomDock.inlineSliderTravel` and
     /// `EffectSettingsBar.sliderRow` both make, and the reason `preferredWidth` is 760 rather than
     /// something rounder.

@@ -846,9 +846,8 @@ final class LayerPanelControlsUITests: PaintUITestCase {
     ///
     /// **In landscape, because that is where the card has room to keep to the rail's left.** Rail, gap and
     /// options panel take 710 points, the card does not narrow below `BottomDock.minimumWidth` (360), and
-    /// beside the layout's own 16-point margin that needs a window about 1062 points wide: the 13-inch
-    /// simulator upright is 1032, where the card starts at the margin and runs 23 points under the options
-    /// panel (`BottomDock.leadingInset`, TODO (169)) — the trade for not hanging off the window's left.
+    /// beside the layout's own 16-point margin that needs a window about 1062 points wide. Upright it runs on
+    /// over the options panel and stands above it, which the next test holds.
     func testAnEffectLayersSettingsAreABottomBarBesideTheRailWithNoTap() throws {
         XCUIDevice.shared.orientation = .landscapeLeft
         let app = XCUIApplication()
@@ -880,6 +879,93 @@ final class LayerPanelControlsUITests: PaintUITestCase {
             The knobs are not in the bottom half of the window, so they are not the "same kind of \
             menu that the lasso or move tool uses" the owner asked for.
             """)
+    }
+
+    /// **Where the window is too narrow for the bar to keep to the rail's left, the bar stands above the
+    /// options panel it runs onto** — the owner, 2026-10-11 (TODO (170)): the Move bar's rule, for every card
+    /// (`BottomDock.reachesRail`). Upright the 13-inch simulator is 1032 points and a 9th-generation iPad 810; the
+    /// card does not narrow below `BottomDock.minimumWidth`, so it starts at its margin and runs on across the
+    /// panel (23 points of the Contrast slider's own travel at 1032, all of it at 810).
+    ///
+    /// **The overlap has to be in the picture, not only in the frames.** The effect layer's options panel is a
+    /// short column at the top of the rail, and the bar is under it, so the two meet only when the artist drags
+    /// the timeline taller and the bar rides up beside Duplicate — which is what this does first, and asserts
+    /// (`frame.intersects`) before it claims anything.
+    ///
+    /// **"Reachable" is a touch landing on the slider**, twice over. Its centre must be hittable, which is what
+    /// goes red on the 9th-generation iPad, where the panel covers the whole slider. And Contrast is put at its
+    /// top, then the thumb is taken *where it stands there* and moved back, which is what goes red at 1032,
+    /// where only the last 23 points of the slider are under the panel: a thumb under the panel is a press on
+    /// the panel, the slider stays at its top, and `adjustSlider` says so.
+    func testAnEffectBarThatRunsOntoTheOptionsPanelStandsAboveIt() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        openLayerPanel(app)
+        addEffectLayerFromAddMenu(app)
+
+        let contrast = app.sliders["effectSettings.contrast"]
+        XCTAssertTrue(contrast.waitForExistence(timeout: 5), "The effect layer is current, so its knobs are up")
+        let duplicate = app.buttons["layerOptions.duplicate"]
+        XCTAssertTrue(duplicate.exists, "Sanity: the layer's options are open beside the rail")
+
+        for _ in 0..<3 where !(duplicate.frame.minY...duplicate.frame.maxY).contains(contrast.frame.midY) {
+            dragTimelineGrabHandle(app, by: contrast.frame.midY - duplicate.frame.midY)
+        }
+        attachScreenshot(app, "effect-bar-over-the-options-panel")
+        XCTAssertTrue(contrast.frame.intersects(duplicate.frame), """
+            The Contrast slider (\(contrast.frame)) and the options panel's Duplicate row (\(duplicate.frame)) do not \
+            overlap, so there is no panel over a slider for this test to be about: this window leaves the bar room \
+            to keep to the rail's left, or the timeline would not rise far enough.
+            """)
+
+        XCTAssertTrue(contrast.isHittable, """
+            The Contrast slider is under the options panel: a touch at its centre lands on the panel's row \
+            (\(duplicate.frame)), not on the slider, so the bar is not standing above it.
+            """)
+
+        contrast.adjust(toNormalizedSliderPosition: 1.0)
+        adjustSlider(contrast, to: 0.3, tolerance: 0.15)
+    }
+
+    /// **And it stands above the options panel only where it meets it, never as a standing order** — the
+    /// other half of the owner's ruling, and the one a horizontal reading of "overlap" breaks. On the
+    /// owner's 9th-generation iPad upright the bar is at the window's left margin and runs on across the
+    /// options panel's columns, but sits under the panel's rows, so nothing of the two meets; a bar lifted
+    /// over the whole rail strip anyway stands over the timeline's menus, which hang upward from its bar over the
+    /// canvas — the onion-skin panel from its button — where the artist cannot see or press them
+    /// (`52dc221`: the Select card did that to the graph editor's channel list).
+    ///
+    /// Read as hittability of every control the menu has under the card, the way
+    /// `AnimationGroupMembershipUITests.testTheChannelListStandsAboveTheSelectPanelsCard` reads the list: the
+    /// premise asserts the menu reaches the card, so this goes red only where the two meet.
+    func testAnEffectBarOnANarrowWindowLeavesTheTimelinesMenusAboveIt() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        openLayerPanel(app)
+        addEffectLayerFromAddMenu(app)
+        XCTAssertTrue(app.sliders["effectSettings.contrast"].waitForExistence(timeout: 5), "PREMISE: the bar is up")
+        let card = app.otherElements["bottomDock.card"]
+        XCTAssertTrue(card.exists && app.buttons["layerOptions.rename"].exists,
+                      "PREMISE: the bar and the layer's options, which keep the rail open, are both up")
+
+        let onion = app.buttons["timeline.onionSkinToggle"]
+        XCTAssertTrue(onion.waitForExistence(timeout: 5))
+        onion.press(forDuration: 0.6)
+        let menu = app.descendants(matching: .any)["timeline.anchoredMenu.onionSkinOptions"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 5), "the onion panel opens on a hold")
+        XCTAssertTrue(menu.frame.intersects(card.frame),
+                      "PREMISE: the onion panel (\(menu.frame)) reaches the bar's card (\(card.frame))")
+
+        attachScreenshot(app, "onion-panel-over-the-effect-bar")
+        // Hittability is read at an element's centre, so the controls that count are the ones whose centre is
+        // under the card — the menu's lower rows, not the opacity sliders that only reach it by their ends.
+        let touchable: Set<XCUIElement.ElementType> = [.button, .slider, .switch, .segmentedControl, .textField, .stepper]
+        let covered = menu.descendants(matching: .any).allElementsBoundByIndex
+            .filter { touchable.contains($0.elementType) && card.frame.contains(CGPoint(x: $0.frame.midX, y: $0.frame.midY)) }
+        XCTAssertFalse(covered.isEmpty, "PREMISE: a control of the onion panel has its centre within the card's reach")
+        for control in covered {
+            XCTAssertTrue(control.isHittable, "\(control.identifier) \(control.frame) is under the effect bar's card: a touch on it lands on the card")
+        }
     }
 
     /// The owner's follow-up to the bar above, same day: *"Try to make that menu shorter vertically

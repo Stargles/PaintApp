@@ -50,19 +50,6 @@ their files are repaired. Build `2974b33` broke this rule and lost the owner's k
 
 ---
 
-## (170) An effect's slider bar stands above the layer options panel
-
-**Status** — ruled 2026-10-11, out of the full run at `38a3dd6`. Since (169)'s `BottomDock.leadingInset`
-starts a card that cannot narrow at the margin, on a window narrower than ~1062 pt (an upright iPad) with
-the layer options panel open on an effect layer, the effect bar's right end runs under the panel (23 pt
-at 1032 wide), hiding the top of a slider's range. The owner: the bar stands above the panel when they
-overlap — the rule the Move bar already follows (the dock's `zIndex` while a piece floats, `38a3dd6`).
-
-- [ ] One rule for any docked bar that cannot narrow and overlaps the rail/options panel: it stands
-      above it — the Move bar's case generalised, not a second case beside it.
-
----
-
 ## (27) Stream the computer's screen as a layer
 
 **Status** — briefed 2026-09-13, designed the same day ([STREAM.md](docs/STREAM.md)), and **built through
