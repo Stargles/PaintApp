@@ -106,6 +106,10 @@ final class PlaybackTrace: @unchecked Sendable {
         case sandwichComposite
         /// The baker compositing one frame, off the main thread.
         case bakeComposite
+        /// The whole frame of a grade held under an effect slider (TODO (179)), composited off the
+        /// main thread and drawn into the held frame's surface. Its count over a drag's seconds is the
+        /// preview rate the device actually achieved.
+        case heldFrameComposite
         /// The baker encoding and writing one frame.
         case bakeWrite
         /// `CanvasManager.flushPendingThumbnailRegens` — the 400 ms debounced cel thumbnail.
@@ -431,6 +435,9 @@ final class PlaybackTrace: @unchecked Sendable {
         /// Of `mainBusyMs`, the part the main thread actually spent on a core.
         let mainCpuMs: Double
         let phaseMs: [String: Double]
+        /// How many spans of each phase began in this interval — what a rate is read from (renders
+        /// landed per second of a drag), where `phaseMs` is what they cost.
+        let phaseCounts: [String: Int]
         let ringHits: Int
         let ringMisses: Int
         /// **Main-thread busy this interval that no named span covers**, in milliseconds.
@@ -568,6 +575,7 @@ final class PlaybackTrace: @unchecked Sendable {
             let (index, tick) = entry
             let nextStart = position + 1 < ticks.count ? ticks[position + 1].element.start : .infinity
             var phaseMs: [String: Double] = [:]
+            var phaseCounts: [String: Int] = [:]
             var busy = 0.0, cpu = 0.0
             var hits = 0, misses = 0
             var bursts: [(atMs: Double, ms: Double)] = []
@@ -584,6 +592,7 @@ final class PlaybackTrace: @unchecked Sendable {
                 guard event.phase != .tick || isThisTick else { continue }
                 let ms = (event.end - event.start) * 1000
                 phaseMs[event.phase.rawValue, default: 0] += ms
+                phaseCounts[event.phase.rawValue, default: 0] += 1
                 if event.phase == .mainBusy {
                     busy += ms
                     cpu += Double(event.value) / 1000
@@ -608,6 +617,7 @@ final class PlaybackTrace: @unchecked Sendable {
                                              mainBusyMs: busy,
                                              mainCpuMs: cpu,
                                              phaseMs: phaseMs,
+                                             phaseCounts: phaseCounts,
                                              ringHits: hits, ringMisses: misses,
                                              unattributedMs: max(busy - covered, 0),
                                              bursts: bursts))

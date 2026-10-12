@@ -532,7 +532,9 @@ extension CanvasManager {
     }
 
     /// **One settings-bar edit, routed and performed** — `KeyframeControl.write`'s five arms with the
-    /// four inputs read off the model and each arm's write carried out.
+    /// four inputs read off the model and each arm's write carried out. An effect slider calls it once,
+    /// at its lift (`commitHeldGrade`); its ticks are held and write nothing (TODO (179)), and a live
+    /// take catches them there (`holdEffectParameter`).
     ///
     /// **This lives in the model rather than in the settings bar's callback, and that is not tidiness.**
     /// `Views/DrawingView.swift` is not compiled into `PaintSoftwareUITests`, so a `switch` written
@@ -547,21 +549,6 @@ extension CanvasManager {
     @discardableResult
     func applyEffectParameterEdit(_ target: KeyframeTarget, parameter: EffectParameter,
                                   newValue: Double, atFrame frame: Int) -> KeyframeControl.Write {
-        // **A live take takes the routing decision away, and that is the whole of §5's intercept.**
-        // The five arms below each write a *key* or the *base*; keying per reported value is the
-        // aliased sample §5 forbids in its first paragraph, and would leave 72 keys a channel on a
-        // three-second take. So the value is captured with its wall time and the edit falls through
-        // to `.storedValue` — the base is a scratch pad for the length of the take and
-        // `stopRecording` puts it back. The artist sees the value move under their finger either
-        // way, which is what a recorder they cannot watch would fail to give them.
-        if parameter.isScalarAnimatable,
-           recordParameterSample(target, parameterID: parameter.id, value: newValue) {
-            if let stored = storedEffect(of: target) {
-                setStoredEffect(of: target, to: parameter.write(stored, newValue))
-            }
-            return .storedValue
-        }
-
         let route = keyframeWrite(target, parameter: parameter, atFrame: frame)
         // **The stored grade, never the resolved one.** The knobs show the value at the playhead;
         // writing that back would bake every *other* animated channel's value-at-this-frame into the
@@ -1216,10 +1203,12 @@ extension CanvasManager {
     @discardableResult
     func applyTargetChannelEdit(_ target: KeyframeTarget, channel: TargetChannel,
                                 newValue: Double, atFrame frame: Int) -> KeyframeControl.Write {
-        // **A live take takes the routing decision away** — §5's intercept, and it is the *same*
-        // intercept: `recordParameterSample` is keyed by an id string and knows nothing about which
-        // store the channel lives in, so a scalar surface plugs into the recorder by calling it.
-        // Keying per reported value is the aliased sample §5 forbids in its first paragraph.
+        // **A live take takes the routing decision away** — §5's intercept: `recordParameterSample`
+        // is keyed by an id string and knows nothing about which store the channel lives in, so a
+        // scalar surface plugs into the recorder by calling it (the effect sliders do, from
+        // `holdEffectParameter`). Keying per reported value is the aliased sample §5 forbids in its
+        // first paragraph. The stored value is a scratch pad here for the length of the take, which
+        // `stopRecording` puts back.
         if recordParameterSample(target, parameterID: channel.id, value: newValue) {
             setStoredValue(of: target, channel: channel, to: newValue)
             return .storedValue

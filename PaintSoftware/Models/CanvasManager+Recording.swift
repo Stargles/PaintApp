@@ -24,16 +24,16 @@ extension CanvasManager {
         /// moment — see `ValueRecording.resampled`.
         let startFrame: Int
 
-        /// The stored grade as it was at arm time. Restored at commit: the base is a **scratch pad**
-        /// during a take (the artist has to see the value move under their finger or they are
-        /// recording blind), and the motion belongs on the curve rather than in the base it is
-        /// resolved against.
+        /// The stored grade as it was at arm time — what the take's channels are resolved against when
+        /// they are written. A slider never writes it during a take: the value under the finger is
+        /// held (`HeldGrade`, TODO (179)), shown on the canvas and caught here, so the motion reaches
+        /// the document only as the curve.
         let baseEffect: Effect?
 
         /// **The stored value of every `TargetChannel` at arm time** — TODO (21)'s second channel
-        /// kind, and `baseEffect`'s counterpart in every respect including why it is restored at
-        /// commit: opacity is a scratch pad during a take, because an artist who cannot see the
-        /// layer fade under their finger is recording blind, and the motion belongs on the curve.
+        /// kind, restored at commit: opacity is a scratch pad during a take, because an artist who
+        /// cannot see the layer fade under their finger is recording blind, and the motion belongs on
+        /// the curve.
         ///
         /// **Captured for every channel rather than for the ones touched**, which costs one `Double`
         /// per channel per take and removes a hazard: a channel first touched mid-take would
@@ -573,7 +573,8 @@ extension CanvasManager {
     /// **Returns whether the recorder consumed the routing decision.** When it did, the caller must
     /// *not* run `KeyframeControl.write`'s five arms: keying per tick is precisely the aliased 24 Hz
     /// sample §5 forbids, and it would leave 72 keys a channel on a three-second take. The value is
-    /// still written to the stored base by the caller, which is what the artist sees move.
+    /// still shown by the caller — held for an effect slider (`holdEffectParameter`), written to the
+    /// stored base as a scratch pad for an opacity slider — which is what the artist sees move.
     ///
     /// The timestamp is `playbackNow()` — the same injectable wall clock playback derives the
     /// playhead from, so a test can hand the recorder numbers instead of sleeping through a take.
@@ -587,7 +588,7 @@ extension CanvasManager {
         return true
     }
 
-    /// **Stop the take and write what it caught**, as one undo step, then put the stored base back.
+    /// **Stop the take and write what it caught**, as one undo step, then put the stored opacity back.
     ///
     /// The three steps are §5's: the raw stream is resampled onto document frames at the current
     /// `fps`, simplified with a deviation tolerance in the channel's own units, and written as a
@@ -606,6 +607,8 @@ extension CanvasManager {
         if isPlaying { stopPlayback() }
 
         let written = commitRecordingTake(take)
+        // A slider still held when the scene ran out: what it showed of the take is on the curve now.
+        releaseTakePreview(of: take.target)
         let outcome = written.refusal
         // The bracket opened at `startRecording`. It closes whatever the outcome, or a refused take
         // would strand a snapshot for the next gesture to record a step spanning both — which is the
@@ -655,22 +658,21 @@ extension CanvasManager {
     ///   `stopRecording` whether its own bracket has anything in it — see there.
     private func commitRecordingTake(_ take: RecordingTake)
         -> (refusal: RecordingRefusal?, curvesWritten: Int) {
-        // The base first, whatever happens next: it was a scratch pad and the artist never asked for
-        // the value they let go on to become the stored grade.
-        if let base = take.baseEffect { setStoredEffect(of: take.target, to: base) }
-        // The same restore for the target's own scalars, and it is not conditional on the take
-        // having touched them: `setStoredValue` early-returns when the value is already there.
+        // The target's own scalars first, whatever happens next: they were a scratch pad, and the
+        // artist never asked for the value they let go on to become the stored one. Not conditional
+        // on the take having touched them: `setStoredValue` early-returns when the value is already
+        // there. A grade needs no such restore — its sliders hold rather than write (TODO (179)).
         for channel in TargetChannel.all {
             guard let base = take.baseChannelValues[channel.id] else { continue }
             setStoredValue(of: take.target, channel: channel, to: base)
         }
-        // **There is deliberately no third restore here for the container's own pose**, and the reason
+        // **There is deliberately no second restore here for the container's own pose**, and the reason
         // is an asymmetry worth stating rather than a gap — a line doing it was written, could not be
         // killed by any mutation, and was removed on that evidence.
         //
-        // The two restores above are load-bearing because `setEffectParameterCurves` and
-        // `setTargetChannelCurves` write only a channel's *track*: nothing in a successful take would
-        // otherwise put the stored grade or the stored opacity back, so the drag would apply twice.
+        // The restore above is load-bearing because `setTargetChannelCurves` writes only a channel's
+        // *track*: nothing in a successful take would otherwise put the stored opacity back, so the
+        // drag would apply twice.
         // **`writeContainerPose` writes the whole `LayerPose`, `pose` field included**, and
         // `commitRecordedPoseTrack` builds what it writes from `take.basePose` rather than from the live
         // model — so a successful pose take restores the base *as part of* its own write. Every other

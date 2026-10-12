@@ -1295,6 +1295,10 @@ struct CanvasView: UIViewRepresentable {
                 + " rebuilds:\(sandwichRebuildCount)"
                 + " moves:\(liveMoveCount)"
                 + " passes:\(passCount)"
+                // **How many whole frames of a held grade have landed** (TODO (179)) — an effect
+                // slider's preview, which reaches the screen through a surface rather than a pass, so a
+                // test that cannot look during its synchronous drag reads this after it.
+                + " held:\(heldFrameCount)"
                 // **The third cost of a frame, and the one playback was actually spending.**
                 // `derived:` counts posed and interpolated pictures and `rebuilds:` counts sandwich
                 // composites; neither sees the cel's *own* committed render, which is what a layer
@@ -1481,6 +1485,20 @@ struct CanvasView: UIViewRepresentable {
 
         /// The rebuilds of the live picture, one in flight at a time — see `requestSandwichRebuild`.
         private let sandwichRebuilds = LatestWins(queue: Coordinator.sandwichQueue)
+
+        /// **The whole frame of a grade held under an effect slider** (TODO (179)), over everything the
+        /// canvas draws and under the onion skin and the chrome — see `requestHeldFrame`. Made at the
+        /// first tick and dropped when it lands, so its two canvas-sized surfaces exist only while a
+        /// finger is down and a bake's length after.
+        private var heldFrameSurface: WindowSurfaceView?
+        /// Whether the held frame stays up — through the hold, and after it until the canvas's own
+        /// picture of what the lift wrote is on screen (`HeldFrameLanding`).
+        private var heldFrameLanding = HeldFrameLanding()
+        /// The document frame the held frame was last minted at — a pass that finds the playhead
+        /// elsewhere (a live take plays under the finger) asks for the frame it is on now.
+        private var heldFrameMintedAt: Int?
+        /// How many held frames have landed, ever — `held:` on `canvas.host`.
+        private var heldFrameCount = 0
         /// True from the first touch of a stroke to its lift. The only input to this whole section
         /// that a *dab* moves, and it moves nothing else: see `makeSandwichKey`.
         private var isSandwichStrokeLive = false
@@ -1680,6 +1698,7 @@ struct CanvasView: UIViewRepresentable {
             }
 
             guard engaged else {
+                landHeldFrame(key: nil, pictureIsCurrent: true)
                 paperIsNowPaintedBy(false)
                 // Before the early return below, which is reached on every pass once the canvas has
                 // settled onto Core Animation's path: a live mask installed while the sandwich was
@@ -1789,6 +1808,15 @@ struct CanvasView: UIViewRepresentable {
                                                   key: key, cut: cut),
                             bandsOfThisFrame: livePicture?.holdsBands(of: canvasManager.currentFrame) ?? false))
             let live = presentation.activeHostDrawsItself
+            // What the canvas shows of `key` under a held frame, once this presentation is applied.
+            let shownIsCurrent: Bool
+            switch presentation {
+            case .rest: shownIsCurrent = sandwichFullKey == key
+            case .live, .midStroke: shownIsCurrent = livePicture?.key == key
+            case .moving: shownIsCurrent = false
+            case .disengaged: shownIsCurrent = true
+            }
+            landHeldFrame(key: key, pictureIsCurrent: shownIsCurrent)
 
             // **Trap 1: do not blank the hosts until there is something to blank them in favour
             // of.** On the very first engage nothing is cached, and blanking now would flash an
@@ -1952,9 +1980,10 @@ struct CanvasView: UIViewRepresentable {
         }
 
         /// **A picture the document does not hold yet moved** — `CanvasManager.onHeldPictureMoved`: a
-        /// graph-node drag's tick (TODO (154)), an adjustable fill's render (TODO (157)) or a live
-        /// element edit's tick (TODO (173)). Each is re-shown now, and that is the whole of its cost to
-        /// the canvas: it is held off the document, so no SwiftUI pass comes.
+        /// graph-node drag's tick (TODO (154)), an adjustable fill's render (TODO (157)), a live
+        /// element edit's tick (TODO (173)) or an effect slider's (TODO (179)). Each is re-shown now,
+        /// and that is the whole of its cost to the canvas: it is held off the document, so no SwiftUI
+        /// pass comes. A grade changes the whole picture, so it is drawn whole (`requestHeldFrame`).
         ///
         /// The pose re-poses the bands on screen; before they land there is nothing to re-pose, and the
         /// pass that lands them reads the held pose. The fill is drawn by its own host, which the canvas
@@ -1974,6 +2003,96 @@ struct CanvasView: UIViewRepresentable {
             if moved {
                 liveMoveCount += 1
                 publishCanvasState()
+            }
+            // A grade changes the whole picture, so it is drawn whole rather than by a host.
+            heldFrameLanding.update(held: canvasManager.liveEdit?.grade != nil)
+            if heldFrameLanding.phase == .held { requestHeldFrame() }
+        }
+
+        // MARK: The held frame — a grade under an effect slider (TODO (179))
+
+        /// **Asks for the whole frame as the finger holds it** — the document's own walk with the held
+        /// grade resolved in (`makeFrameRecipe(holding:)`), composited at the live size off the main
+        /// thread and drawn into a canvas-sized surface pair (`WindowSurfaceView`). The surface's
+        /// `LatestWins` keeps one composite in flight and mints the next against the newest value when
+        /// it lands, so the preview runs exactly as fast as the device can composite the frame — and
+        /// presenting into surfaces the render server has already mapped hands Core Animation nothing
+        /// new per picture, which is what bounds `backboardd` (PERFORMANCE.md §29).
+        ///
+        /// On `sandwichQueue`, beside the live pair and the eyedropper's pick, so two canvas-sized
+        /// composites are never held at once.
+        private func requestHeldFrame() {
+            guard let container = containerView else { return }
+            let surface: WindowSurfaceView
+            if let existing = heldFrameSurface {
+                surface = existing
+            } else {
+                surface = WindowSurfaceView(queue: Coordinator.sandwichQueue)
+                // Under the onion skin, the padding cover and the chrome — each fronts itself every pass
+                // — and over everything the artwork is drawn in.
+                if let onion = onionSkinView, onion.superview === container {
+                    container.insertSubview(surface, belowSubview: onion)
+                } else {
+                    container.addSubview(surface)
+                }
+                heldFrameSurface = surface
+            }
+            surface.present { [weak self] in self?.mintHeldFrame() }
+        }
+
+        /// One held frame, minted when the surface is free: the recipe of the frame the playhead is on
+        /// now, with whatever is held now. Nil before there is a canvas.
+        ///
+        /// **The picture replaces the canvas rather than covering it.** The composite carries the paper
+        /// but not what is behind the paper — the margin's grey, which is also what shows through a
+        /// document whose paper is off — so the surface is filled with that first. Drawn over the old
+        /// picture with transparency left in it, the ink a grade had just faded out would still show.
+        private func mintHeldFrame() -> WindowSurfaceView.Frame? {
+            let frame = canvasManager.currentFrame
+            guard let canvasSize = canvasManager.canvasSize,
+                  let recipe = canvasManager.makeFrameRecipe(atFrame: frame, includeBackground: true,
+                                                             sizing: .liveComposite,
+                                                             holding: canvasManager.liveEdit)
+            else { return nil }
+            heldFrameMintedAt = frame
+            let window = CGRect(origin: .zero, size: recipe.canvasSize)
+            let placement = CGAffineTransform(scaleX: canvasSize.width / window.width,
+                                              y: canvasSize.height / window.height)
+            let budget = canvasManager.frameBaker.budgetBytes
+            let backdrop = PaddingCoverView.tint
+            return WindowSurfaceView.Frame(window: window, placement: placement, draw: { cg in
+                guard let image = PlaybackTrace.span(.heldFrameComposite, {
+                    recipe.composite(budgetBytes: budget)
+                }) else { return nil }
+                backdrop.setFill()
+                cg.fill(window)
+                UIImage(cgImage: image, scale: 1, orientation: .up).draw(in: window)
+                return window
+            }, finished: { [weak self] shown in
+                guard shown, let self else { return }
+                self.heldFrameCount += 1
+                self.publishCanvasState()
+            })
+        }
+
+        /// **One pass's answer for the held frame**: `key` is the key the canvas is on (nil when the
+        /// compositor is not drawing it), `pictureIsCurrent` whether what it shows under the held frame
+        /// is of that key. Takes the frame down once it has landed, keeps it over everything else while
+        /// it is up, and asks for the frame the playhead is on when a take has moved it.
+        private func landHeldFrame(key: SandwichKey?, pictureIsCurrent: Bool) {
+            heldFrameLanding.update(held: canvasManager.liveEdit?.grade != nil)
+            heldFrameLanding.pass(key: key, pictureIsCurrent: pictureIsCurrent)
+            guard heldFrameLanding.isUp else {
+                heldFrameSurface?.removeFromSuperview()
+                heldFrameSurface = nil
+                heldFrameMintedAt = nil
+                return
+            }
+            // `reconcileLayers` may have fronted the hosts and the halves this pass; the onion skin,
+            // the padding cover and the chrome front themselves after it.
+            if let surface = heldFrameSurface { surface.superview?.bringSubviewToFront(surface) }
+            if heldFrameLanding.phase == .held, heldFrameMintedAt != canvasManager.currentFrame {
+                requestHeldFrame()
             }
         }
 

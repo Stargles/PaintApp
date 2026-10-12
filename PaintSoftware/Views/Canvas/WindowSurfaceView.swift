@@ -78,28 +78,38 @@ final class WindowSurfaceView: UIView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    /// **Asks for one frame, drawn off the main thread and presented** — now if no draw is in flight,
-    /// or when the one in flight lands, unless a newer frame is asked for first.
+    /// **One frame, as the main thread mints it**: where it goes and how it is drawn.
     ///
-    /// `window` is the element's rectangle in canvas points; `placement` the canvas's own affine
-    /// (`VectorCanvas.transform`), which the picture is drawn *before* and this layer applies.
-    /// `draw` runs on the view's queue with a UIKit context whose origin is the window's top-left
-    /// corner and returns the rectangle it actually drew — `VectorCanvas.drawStreamWindow`'s answer —
-    /// or nil to abandon; a rectangle other than `window` means the element moved between the two
-    /// reads, and the frame is dropped rather than shown in the wrong place. The next present sizes
-    /// again.
+    /// `window` is the picture's rectangle in the parent's points before `placement`; `placement` is
+    /// the affine the picture is drawn *before* and this layer applies — a vector canvas's own
+    /// (`VectorCanvas.transform`), or the stretch of a reduced composite over the canvas. `draw` runs
+    /// on the view's queue with a UIKit context whose origin is the window's top-left corner and
+    /// returns the rectangle it actually drew — `VectorCanvas.drawStreamWindow`'s answer — or nil to
+    /// abandon; a rectangle other than `window` means the element moved between the two reads, and the
+    /// frame is dropped rather than shown in the wrong place. The next present sizes again.
     ///
     /// `finished` runs on the main queue when the draw is over, with whether it became the layer's
     /// contents — in the same turn, so a caller that has been waiting for something to show may stop
-    /// waiting (a base hole punched before it would show the pixels under it for a frame). A frame
-    /// replaced before it was drawn is never drawn, and its `finished` never runs.
-    func present(window: CGRect, placement: CGAffineTransform,
-                 draw: @escaping (CGContext) -> CGRect?,
-                 finished: ((_ shown: Bool) -> Void)? = nil) {
+    /// waiting (a base hole punched before it would show the pixels under it for a frame).
+    struct Frame {
+        let window: CGRect
+        let placement: CGAffineTransform
+        let draw: (CGContext) -> CGRect?
+        var finished: ((_ shown: Bool) -> Void)? = nil
+    }
+
+    /// **Asks for one frame, minted when no draw is in flight** — now if the surface is free, or when
+    /// the draw in flight lands, unless a newer frame is asked for first. `mint` runs on the main
+    /// thread against whatever it reads *then*, so a caller whose frame is expensive to describe (a
+    /// whole-frame recipe) describes it once per draw rather than once per request; nil skips. A frame
+    /// replaced before it was minted is never drawn, and its `finished` never runs.
+    func present(_ mint: @escaping () -> Frame?) {
         draws.request { [weak self] in
             // Minted only while no draw is in flight, so the surfaces may be remade here and the back
             // one is not being written.
-            guard let self else { return nil }
+            guard let self, let frame = mint() else { return nil }
+            let window = frame.window, placement = frame.placement
+            let draw = frame.draw, finished = frame.finished
             self.size(for: window)
             guard self.surfaces.count == 2 else { return nil }
             let target = self.surfaces[self.back]
@@ -150,6 +160,14 @@ final class WindowSurfaceView: UIView {
                 }
             }
         }
+    }
+
+    /// `present(_:)` for a frame whose description is already in hand — a stream element's newest
+    /// frame, an element edit's newest tick.
+    func present(window: CGRect, placement: CGAffineTransform,
+                 draw: @escaping (CGContext) -> CGRect?,
+                 finished: ((_ shown: Bool) -> Void)? = nil) {
+        present { Frame(window: window, placement: placement, draw: draw, finished: finished) }
     }
 
     /// Makes the two surfaces for `window`, or keeps the ones already that size. A window of a

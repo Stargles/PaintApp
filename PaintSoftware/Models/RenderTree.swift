@@ -981,9 +981,11 @@ extension CanvasManager {
     ///
     /// **`held` is what the finger holds that the walk shows in place of the document** — TODO (154),
     /// (179): a pose under a graph-node drag or a Move box (`CanvasManager.liveEdit`), held off the
-    /// document for the length of the gesture, and the canvas's bands are re-posed from this walk.
-    /// The same shape as `excluded`: asked of the walk, nothing mutated. Nil — every other caller,
-    /// and the baker always — reads the document alone.
+    /// document for the length of the gesture, and the canvas's bands are re-posed from this walk; or
+    /// a grade under an effect slider, which the walk resolves into its target's node and the canvas
+    /// composites the whole frame from. The same shape as `excluded`: asked of the walk, nothing
+    /// mutated. Nil — every other caller, and the baker always — reads the document alone, which is
+    /// what keeps the bake the document's truth.
     func renderTreeAndPoses(atFrame frame: Int, excluding excluded: UUID? = nil,
                             holding held: HeldEdit? = nil) -> RenderWalk {
         var poses: [Int: PoseMap] = [:]
@@ -1128,6 +1130,14 @@ extension CanvasManager {
     private func shownPose(ofLayerAt index: Int, holding held: HeldEdit?) -> LayerPose? {
         guard let stored = layers[index].layerTransform else { return nil }
         return held?.pose?.containerPose(ofLayer: layers[index].id) ?? stored
+    }
+
+    /// **A grade as the walk shows it** — the finger's where an effect slider holds one of `target`'s
+    /// parameters (`HeldGrade`), the document's resolved at this frame otherwise. The walk's only read
+    /// of a held grade, for a layer and a folder alike.
+    private func shownEffect(_ effect: Effect?, of target: KeyframeTarget, holding held: HeldEdit?) -> Effect? {
+        guard let effect, let grade = held?.grade, grade.target == target else { return effect }
+        return grade.applied(to: effect)
     }
 
     /// §4.4's map on its own, for the two callers that want the poses without the nodes —
@@ -1321,7 +1331,8 @@ extension CanvasManager {
                 // `.normal` pin for the frames outside the bar, which is what a leaf that contributes
                 // nothing should look like to the tree.
                 let effect = activeCelIndex(inLayer: index, atFrame: entryFrame) != nil
-                    ? layer.layerEffect(atFrame: entryFrame) : nil
+                    ? shownEffect(layer.layerEffect(atFrame: entryFrame), of: .layer(id: layer.id), holding: held)
+                    : nil
                 // **The one place a leaf's pose is recorded.** Absent rather than present-and-identity
                 // for `TransformTrack.mapping(atCelLocalFrame:)`'s reason reached from the tree side:
                 // an entry in this dictionary is what gives a cel a derivation, and a derivation costs
@@ -1480,7 +1491,8 @@ extension CanvasManager {
                                   // lands, and a raw field read is a grade frozen at whatever the
                                   // artist last typed. Today the two answer identically, which is
                                   // exactly what makes the mistake invisible until it is expensive.
-                                  effect: folder.resolvedEffect(atFrame: entryFrame)))
+                                  effect: shownEffect(folder.resolvedEffect(atFrame: entryFrame),
+                                                      of: .folder(id: folder.id), holding: held)))
             }
         }
         return result

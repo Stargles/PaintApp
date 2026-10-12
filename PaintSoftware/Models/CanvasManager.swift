@@ -1031,6 +1031,10 @@ final class CanvasManager: ObservableObject {
     /// (`CanvasView.Coordinator.liveVectorFloatPose`).
     var liveEdit: HeldEdit?
 
+    /// The held grade as the docked controls show it — observed by those controls and by nothing
+    /// else, so a slider tick redraws the slider and not the editor (`LiveEditState`, TODO (179)).
+    let liveEditState = LiveEditState()
+
     /// **The gesture open on a Move box that poses or grades, or nil between gestures** — a drag of a
     /// transformation layer's or a Duplicate Offset's box, or one press of Mirror, Rotate or Reset.
     /// `BoxNudge` carries what it holds and why it never outlives one gesture.
@@ -4620,6 +4624,9 @@ final class CanvasManager: ObservableObject {
         // is no lifted-but-adjustable state for it to have: the slider's lift *is* the commit, so a
         // session that is still open when undo lands is one the artist is still dragging.
         cancelSelectionEdit()
+        // An effect slider under the finger is the same case, and is let go the same way: its held
+        // grade was never written (TODO (179)).
+        revertHeldGrade()
         // The gradient panel is the opposite case: it has no finger to be under, so what is open is
         // an adjustable edit, and it commits so the undo that follows has a real step to revert.
         commitGradientEdit()

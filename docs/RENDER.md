@@ -436,6 +436,15 @@ memo is bought by the *size*:** `PixelOps.rasterize` and `MaskResolver.CacheKey`
 bake mints at `.liveComposite` and the three share their flattens across two queues. That also lets the halves keep
 `.userInitiated` while the bake keeps `.utility`, which is what §2 asks for. 
 
+**A grade under an effect slider is drawn whole — TODO (179), 2026-10-12.** A slider's value is held off the
+document while the finger is down (`CanvasManager.liveEdit`), so a tick dirties nothing and the baker idles; the
+canvas composites the frame itself with the held grade resolved in (`makeFrameRecipe(holding:)`), at
+`.liveComposite`, on `sandwichQueue`, one composite in flight and the newest value minted when it lands, and
+presents it through a canvas-sized `IOSurface` pair (`WindowSurfaceView`). That held frame is a *live picture*,
+the pair's product rather than a second producer of `full`: transient, never stored, byte-identical to the bake of
+what the lift writes (`LiveEditLogicTests`), and up after the lift only until that bake lands
+(`HeldFrameLanding`). The bake stays the one writer of the store.
+
 **A transform being dragged holds the baker and is drawn by bands — TODO (125), 2026-10-02.** While a pose is
 under the finger (a transformation layer's Move box, a take recorded through it, a pose node in the graph editor:
 `CanvasManager.liveTransformEdit`), `FrameBaker.isSuspended` holds — the stroke's own seam, set by the model —

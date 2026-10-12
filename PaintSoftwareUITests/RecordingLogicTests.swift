@@ -8,10 +8,10 @@ import Foundation
 /// `recordingTake`"*, and `ValueRecordingLogicTests`' header says *"The take itself is
 /// `RecordingLogicTests`."* Neither file existed until now.
 ///
-/// **Every test drives `CanvasManager.applyEffectParameterEdit` directly**, the same entry point
-/// `EffectSettingsBar`'s slider reaches through `DrawingView`'s `onParameterChange` — see
-/// `KeyframeControlLogicTests`' own header for why that boundary makes this a real pin rather than a
-/// pin against nothing. Wall time is supplied through `playbackNow`, the same injection point
+/// **Every test drives `CanvasManager.holdEffectParameter` and `commitHeldGrade` directly**, the same
+/// entry points `EffectSettingsBar`'s slider reaches through `DrawingView`'s `onParameterChange` and
+/// `onEditEnded` — see `KeyframeControlLogicTests`' own header for why that boundary makes this a real
+/// pin rather than a pin against nothing. Wall time is supplied through `playbackNow`, the same injection point
 /// `PlaybackBoundsCharacterizationTests` uses, so a take is driven in milliseconds rather than by
 /// sleeping through one.
 @MainActor
@@ -65,15 +65,20 @@ final class RecordingLogicTests: XCTestCase {
     /// One reported value, through the same entry point the settings bar's slider uses — named so a
     /// call below reads as the artist's finger rather than as a method call. Advances the fake clock
     /// to `time` first, since that is what `playbackNow()` will report when the recorder samples it.
-    @discardableResult
     private func drag(_ manager: CanvasManager, _ clock: FakeClock, _ target: KeyframeTarget,
-                      _ parameterID: String, to value: Double, at time: TimeInterval) -> KeyframeControl.Write? {
+                      _ parameterID: String, to value: Double, at time: TimeInterval) {
         guard let parameter = manager.storedEffect(of: target)?
             .parameters.first(where: { $0.id == parameterID })
-        else { return nil }
+        else { return }
         clock.now = time
-        return manager.applyEffectParameterEdit(target, parameter: parameter,
-                                                newValue: value, atFrame: manager.currentFrame)
+        manager.holdEffectParameter(target, parameter: parameter, value: value)
+    }
+
+    /// The finger lifting off the slider, as `DrawingView` wires the bar's `onEditEnded`: the held
+    /// grade's one write, then the bracket.
+    private func lift(_ manager: CanvasManager, label: HistoryActionLabel = .valueLayerEffect) {
+        manager.commitHeldGrade()
+        manager.commitStructureGesture(label: label)
     }
 
     // MARK: - Arming is not starting — the owner's ruling of 2026-09-09
@@ -501,26 +506,26 @@ final class RecordingLogicTests: XCTestCase {
         manager.stopRecording()
     }
 
-    // MARK: - `applyEffectParameterEdit` routing
+    // MARK: - A slider tick during a take
 
-    /// **The recorder takes the routing decision away while armed.** The five-arm keyframe writer
-    /// must not run — keying per reported value is the aliased 24 Hz sample §5 forbids — and the
-    /// stored base must still move, which is what lets the artist watch the value while they drag.
-    func testApplyEffectParameterEditRoutesThroughTheRecorderAndSkipsTheFiveArms() {
+    /// **The recorder catches the tick, and nothing is written.** Keying per reported value is the
+    /// aliased 24 Hz sample §5 forbids, and the stored base is not a scratch pad any more: the value
+    /// under the finger is held (TODO (179)), which is what the artist watches move while they drag.
+    func testASliderTickDuringATakeIsCaughtAndHeldAndWritesNothing() {
         let (manager, clock) = self.manager()
         let tgt = target(manager)
+        let original = storedValue(manager, tgt, brightnessID)
         manager.startRecording()
 
-        let write = drag(manager, clock, tgt, brightnessID, to: 1.4, at: clock.now + 0.05)
+        drag(manager, clock, tgt, brightnessID, to: 1.4, at: clock.now + 0.05)
 
-        XCTAssertEqual(write, .storedValue,
-                       "The recorder hands back the same answer a plain, unkeyed edit would")
         XCTAssertEqual(manager.recordingTake?.channels[brightnessID]?.samples.count, 1,
-                       "…but the recorder actually caught the sample")
+                       "The recorder caught the sample")
         XCTAssertNil(manager.keyframeState(of: tgt).tracks[brightnessID],
                     "No key was written mid-take — that would be the aliased sample §5 forbids")
-        XCTAssertEqual(storedValue(manager, tgt, brightnessID), 1.4,
-                      "The artist still sees the value move under their finger")
+        XCTAssertEqual(storedValue(manager, tgt, brightnessID), original, "The stored grade is not written")
+        XCTAssertEqual(manager.liveEdit?.grade?.values[brightnessID], 1.4,
+                      "The artist still sees the value move under their finger — it is held")
         manager.stopRecording()
     }
 
@@ -535,11 +540,12 @@ final class RecordingLogicTests: XCTestCase {
         manager.startRecording()
 
         clock.now += 0.05
-        _ = manager.applyEffectParameterEdit(tgt, parameter: parameter, newValue: 8,
-                                             atFrame: manager.currentFrame)
+        manager.holdEffectParameter(tgt, parameter: parameter, value: 8)
 
         XCTAssertNil(manager.recordingTake?.channels["posterize.levels"],
                     "A stepped field is refused at the writer, recorder included")
+        XCTAssertEqual(manager.liveEdit?.grade?.edited, ["posterize.levels"],
+                       "…so it is the artist's edit, which the lift writes")
         manager.stopRecording()
     }
 
@@ -592,12 +598,12 @@ final class RecordingLogicTests: XCTestCase {
         manager.beginStructureGesture()
         drag(manager, clock, tgt, brightnessID, to: 0.1, at: epoch)
         drag(manager, clock, tgt, brightnessID, to: 1.9, at: epoch + 1.0)
-        manager.commitStructureGesture(label: .effectKeys)
+        lift(manager, label: .effectKeys)
 
         manager.beginStructureGesture()
         drag(manager, clock, tgt, contrastID, to: 0.3, at: epoch + 1.0)
         drag(manager, clock, tgt, contrastID, to: 1.6, at: epoch + 2.0)
-        manager.commitStructureGesture(label: .effectKeys)
+        lift(manager, label: .effectKeys)
 
         let refusal = manager.stopRecording()
 
@@ -666,7 +672,7 @@ final class RecordingLogicTests: XCTestCase {
                        "Setup: and it could not record its step, because the artist is still holding on")
 
         // The artist lets go. `DrawingView` offers the label a plain drag would earn.
-        manager.commitStructureGesture(label: .valueLayerEffect)
+        lift(manager)
 
         XCTAssertEqual(manager.history.undoStack.count, before + 1, "One step for the whole take")
         XCTAssertEqual(manager.history.undoStack.last?.label, .recordAnimation,
@@ -689,13 +695,13 @@ final class RecordingLogicTests: XCTestCase {
         drag(manager, clock, tgt, brightnessID, to: 1.8, at: epoch + 1.0)
         clock.now = epoch + 47.5 / Double(manager.fps)
         manager.tickPlayback()
-        manager.commitStructureGesture(label: .valueLayerEffect)
+        lift(manager)
         XCTAssertEqual(manager.history.undoStack.last?.label, .recordAnimation, "Setup")
 
         // A second drag, this time with nothing armed and nothing recording.
         manager.beginStructureGesture()
         drag(manager, clock, tgt, contrastID, to: 1.4, at: clock.now + 0.1)
-        manager.commitStructureGesture(label: .valueLayerEffect)
+        lift(manager)
 
         XCTAssertEqual(manager.history.undoStack.last?.label, .valueLayerEffect,
                        "The claim was spent on the take's own step and does not colour the next drag")

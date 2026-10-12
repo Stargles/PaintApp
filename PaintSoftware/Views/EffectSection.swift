@@ -247,6 +247,10 @@ struct EffectSettingsBar: View {
     /// parameter, and one view that does not is one view whose dependencies do not show in its
     /// signature.
     @ObservedObject var canvasManager: CanvasManager
+    /// **What an effect slider holds while the finger is down** (TODO (179)) — the document does not
+    /// move until the lift, so every row shows `shown`, the grade with the held values in it. Observed
+    /// here so a tick redraws this bar and nothing else.
+    @ObservedObject var liveEdit: LiveEditState
     var onChange: (Effect) -> Void
     /// **Where a *slider* edit goes, named by the parameter that moved** — KEYFRAMES.md stage 3a.
     ///
@@ -337,9 +341,13 @@ struct EffectSettingsBar: View {
         // the header is what a test should look for to say this is on screen.
     }
 
+    /// The grade every row shows: the document's, resolved at the playhead, with whatever an effect
+    /// slider holds in it (`liveEdit`).
+    private var shown: Effect { liveEdit.shown(effect, on: pickTarget) }
+
     @ViewBuilder
     private var rows: some View {
-        switch effect {
+        switch shown {
         case .brightnessContrast:
             slider("brightnessContrast.brightness")
             slider("brightnessContrast.contrast")
@@ -653,7 +661,7 @@ struct EffectSettingsBar: View {
             // `onParameterChange` a slider row uses, so the keyframe routing, the take intercept and
             // the undo bracket are this bar's, unchanged.
             ColorWheelsEditor(wheels: params,
-                              parameters: effect.parameters,
+                              parameters: shown.parameters,
                               animatedChannelIDs: animatedChannelIDs,
                               onParameterChange: onParameterChange,
                               onEditBegan: onEditBegan,
@@ -677,7 +685,7 @@ struct EffectSettingsBar: View {
     private func slider(_ id: String) -> some View {
         if let parameter = sliderParameter(id),
            let range = parameter.uiRange,
-           let value = parameter.read(effect) {
+           let value = parameter.read(shown) {
             sliderRow(parameter.name, value, range,
                       parameter.controlIdentifier ?? parameter.id,
                       format: parameter.format ?? "%.2f",
@@ -692,7 +700,7 @@ struct EffectSettingsBar: View {
     /// `rows` named a parameter this effect does not have, and the symptom would otherwise be a
     /// missing knob rather than a failure.
     private func sliderParameter(_ id: String) -> EffectParameter? {
-        guard let parameter = effect.parameters.first(where: { $0.id == id }),
+        guard let parameter = shown.parameters.first(where: { $0.id == id }),
               parameter.uiRange != nil else {
             assertionFailure("\(effect.displayName) has no slider parameter \"\(id)\"")
             return nil

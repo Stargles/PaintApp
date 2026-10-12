@@ -696,14 +696,19 @@ extension CanvasManager {
     ///
     /// `sizing` picks the buffer — see `RenderSizing`, which carries the argument for each of the
     /// three. `.native` is the default and what every parity test and the eyedropper take.
+    ///
+    /// `held` is what the finger holds (`liveEdit`), resolved in place of the document — the canvas's
+    /// held frame, a grade under an effect slider (TODO (179)). **Only that live picture passes it**:
+    /// the baker never does, so a bake is always the document's.
     @MainActor
     func makeFrameRecipe(atFrame frame: Int,
                          quality: RenderQuality = .full,
                          includeBackground: Bool,
-                         sizing: RenderSizing = .native) -> FrameRecipe? {
+                         sizing: RenderSizing = .native,
+                         holding held: HeldEdit? = nil) -> FrameRecipe? {
         guard let canvasSize, canvasSize.width > 0, canvasSize.height > 0 else { return nil }
 
-        let (tree, poses, frames) = renderTreeAndPoses(atFrame: frame)
+        let (tree, poses, frames) = renderTreeAndPoses(atFrame: frame, holding: held)
         let renderSize: CGSize
         switch sizing {
         case .native:

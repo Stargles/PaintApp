@@ -50,7 +50,11 @@ import UIKit
 ///     -probeMode recolour            run Select's Colour drag over `-probeFills` fills on the first
 ///                                    cel instead of playing (TODO (173))
 ///     -probeFills <n>                fills on the first cel for `recolour` (default 6)
-///     -probeTicks <n>                picker ticks in one `recolour` drag (default 100)
+///     -probeMode effect              drag an effect slider instead of playing (TODO (179)): a
+///                                    Brightness / Contrast effect layer over the vector layers,
+///                                    selected, its Brightness driven through the effect bar's
+///                                    shipped verbs for `-probeTicks` ticks `-probeTickMs` apart
+///     -probeTicks <n>                picker or slider ticks in one drag (default 100)
 ///     -probeTickMs <n>               milliseconds between ticks (default 80, the owner's iPad 9)
 ///     -probeOnion <0|1>              the onion skin, on by default as it is for the artist
 ///     -probeLabel <s>                goes in the filename and the report
@@ -83,7 +87,7 @@ enum PlaybackProbe {
     /// redoes them, one operation per interval. Two modes rather than two probes because the
     /// document, the bake wait and the report are identical and only the middle differs — and
     /// because the whole question of this pass is whether the three symptoms are one cost.
-    enum Mode: String { case playback, edit, recolour }
+    enum Mode: String { case playback, edit, recolour, effect }
 
     // MARK: - The run
 
@@ -120,6 +124,10 @@ enum PlaybackProbe {
              strokesPerCel: strokesPerCel, size: size)
         if mode == .recolour {
             addFills(to: canvasManager, size: size, count: max(1, intArgument("-probeFills", default: 6)))
+        }
+        if mode == .effect {
+            canvasManager.addValueLayer(effect: .brightnessContrast(Effect.BrightnessContrast(brightness: 1,
+                                                                                               contrast: 1)))
         }
         let graded = ProcessInfo.processInfo.arguments.contains("-probeGraded")
         if graded, canvasManager.layers.count > 1 { canvasManager.layers[1].blendMode = .multiply }
@@ -170,6 +178,11 @@ enum PlaybackProbe {
                                            ticks: max(1, intArgument("-probeTicks", default: 100)),
                                            intervalMs: max(1, intArgument("-probeTickMs", default: 80)),
                                            footprint: { footprint.sample() })
+        case .effect:
+            operations = await runEffectSlider(canvasManager,
+                                               ticks: max(1, intArgument("-probeTicks", default: 100)),
+                                               intervalMs: max(1, intArgument("-probeTickMs", default: 80)),
+                                               footprint: { footprint.sample() })
         case .edit:
             operations = await runEdits(canvasManager, size: size,
                                         count: max(1, intArgument("-probeEdits", default: 4)),
@@ -255,6 +268,7 @@ enum PlaybackProbe {
              "unattributedMs": $0.unattributedMs,
              "ringHits": $0.ringHits, "ringMisses": $0.ringMisses,
              "phaseMs": $0.phaseMs,
+             "phaseCounts": $0.phaseCounts,
              "bursts": $0.bursts.map { ["at": $0.atMs, "ms": $0.ms] }]
         }
         // **The remainder, named at the top level of the report rather than left to be computed.**
@@ -380,6 +394,44 @@ enum PlaybackProbe {
         canvasManager.scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: celIndex)
         canvasManager.objectWillChange.send()
         canvasManager.refreshUndoRedoState()
+    }
+
+    // MARK: - Effect slider
+
+    /// **An effect slider dragged, tick by tick** — TODO (179). The effect layer is the top one and is
+    /// selected, which is how its bar is on screen; the drag runs what `DrawingView` wires the bar's
+    /// Brightness slider to — the bracket at touch-down, a held tick per reported value
+    /// (`holdEffectParameter`), the one write at the lift (`commitHeldGrade`) — sweeping the value
+    /// up and down its range `intervalMs` apart, and then lets the canvas settle so the footprint
+    /// samples cover what the session leaves behind.
+    @MainActor
+    private static func runEffectSlider(_ canvasManager: CanvasManager, ticks: Int, intervalMs: Int,
+                                        footprint: @escaping () -> Void) async -> [String] {
+        let layerIndex = canvasManager.layers.count - 1
+        canvasManager.currentLayerIndex = layerIndex
+        let target = KeyframeTarget.layer(id: canvasManager.layers[layerIndex].id)
+        guard let parameter = canvasManager.storedEffect(of: target)?.parameters
+            .first(where: { $0.id == "brightnessContrast.brightness" }), let range = parameter.uiRange
+        else { return ["no slider"] }
+        // Let the selection's own pass and bake settle before the finger lands.
+        try? await Task.sleep(nanoseconds: 1_500_000_000)
+        footprint()
+        PlaybackTrace.mark(.tick, value: 0)
+        canvasManager.beginStructureGesture()
+        for tick in 0..<ticks {
+            let phase = Double(tick % 40) / 20
+            let share = phase <= 1 ? phase : 2 - phase
+            let value = range.lowerBound + (range.upperBound - range.lowerBound) * (0.2 + 0.6 * share)
+            canvasManager.holdEffectParameter(target, parameter: parameter, value: value)
+            try? await Task.sleep(nanoseconds: UInt64(intervalMs) * 1_000_000)
+            footprint()
+        }
+        PlaybackTrace.mark(.tick, value: 1)
+        canvasManager.commitHeldGrade()
+        canvasManager.commitStructureGesture(label: .valueLayerEffect)
+        try? await Task.sleep(nanoseconds: 6_000_000_000)
+        footprint()
+        return ["effect"]
     }
 
     // MARK: - Recolour

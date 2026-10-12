@@ -503,17 +503,16 @@ struct DrawingView: View {
                 EffectSettingsBar(
                     effect: editing.effect,
                     canvasManager: canvasManager,
+                    liveEdit: canvasManager.liveEditState,
                     onChange: editing.onChange,
-                    // **The routing and every arm's write live in the model, not here** (§2.26's five
-                    // arms, `CanvasManager.applyEffectParameterEdit`). This file is not compiled into
-                    // `PaintSoftwareUITests`, so a `switch` written in the view would be a decision the
-                    // fast tier cannot see — the rule pinned and the wiring feeding it not. What is
-                    // left is which slider moved, by how much, and which undo label the drag earns.
+                    // **A tick is held, not written** (TODO (179)): the canvas redraws the whole frame
+                    // from the held grade as fast as the device can, the slider shows it, and nothing
+                    // else hears of it. The routing and every arm's write live in the model, not here
+                    // (§2.26's five arms, `CanvasManager.commitHeldGrade`), and run once, at the lift.
+                    // This file is not compiled into `PaintSoftwareUITests`, so a `switch` written in
+                    // the view would be a decision the fast tier cannot see.
                     onParameterChange: { parameter, newValue in
-                        let wrote = canvasManager.applyEffectParameterEdit(
-                            editing.target, parameter: parameter, newValue: newValue,
-                            atFrame: canvasManager.currentFrame)
-                        if wrote == .key || wrote == .seedAndKey { effectEditWroteKeyframe = true }
+                        canvasManager.holdEffectParameter(editing.target, parameter: parameter, value: newValue)
                     },
                     animatedChannelIDs: editing.animatedChannelIDs,
                     onEditBegan: {
@@ -527,6 +526,10 @@ struct DrawingView: View {
                     // and conclude the grade itself had gone. `.effectKeys` exists for exactly
                     // this distinction — see `HistoryActionLabel`.
                     onEditEnded: {
+                        // The lift: the held grade's one write, inside the bracket, so the drag is one
+                        // step under the label what it wrote earns.
+                        let wrote = canvasManager.commitHeldGrade()
+                        if wrote == .key || wrote == .seedAndKey { effectEditWroteKeyframe = true }
                         canvasManager.commitStructureGesture(
                             label: effectEditWroteKeyframe ? .effectKeys : .valueLayerEffect)
                     },
