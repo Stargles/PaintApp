@@ -66,7 +66,7 @@ Rulings on (175)'s questions, 2026-10-12: the **Subtract switch is not saved** (
 - [ ] Inventory of every option and its current level, shown to the owner.
 - [ ] Implement the owner's per-row ruling (one store per level, no second mechanism).
 
-## (179) Every slider previews at the rate the device can draw, and writes the scene once
+## (179) Everything live previews at the rate the device can draw, and writes the scene once
 
 **Status** — asked 2026-10-12; extends (173)'s held-edit mechanism (`CanvasManager.liveElementEdit`,
 `ElementEditSession`, `WindowSurfaceView`) to every control that still writes the document per tick.
@@ -76,11 +76,18 @@ the text panel) should get (173)'s fix: *"for all of them, cant there be a syste
 down the redrawing dynamically to not lag the main thread or crash, so that the user gets near live
 feedback? if so then implement it."*
 
+And, the same day: *"I feel like the throttle system should apply universally in the app for things that
+require live reupdating. See if the implmentation would not be too complex or big, and if so then
+implement it."* — so the scope is every live re-update (drags, sliders, scrubs, streams, previews), and
+the existing per-feature coalescers are folded into the one seam rather than kept beside it.
+
 So: one mechanism for every live control — the value is held off the document for the gesture and
 committed once at the lift as one undo step, and the preview redraws **latest-value-wins with one render
 in flight**, so its rate falls to what the device can draw and memory stays flat (PERFORMANCE.md §29 is
 why: pictures handed to Core Animation faster than the render server frees them).
 
+- [ ] Assessment first: every live re-update path and every existing throttle/coalescer, the one seam,
+      and its size. Built if it is one clean seam; brought to the owner if it means a renderer rewrite.
 - [ ] Inventory every control that writes the document per tick (incl. HANDOFF's "ruled to wait" grade
       sliders, grade graph nodes and the Duplicate Offset box, which this ruling supersedes).
 - [ ] One held-value + latest-wins preview seam they all use; no per-control copies.
