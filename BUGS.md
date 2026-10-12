@@ -4,6 +4,28 @@ Open items only — fixed entries are pruned, and the fix lives in the commit an
 One section per bug, newest first.
 
 
+## The layer panel's reload stalls the main thread for 1.2–1.7 s on the iPad 9, mostly blocked rather than computing (2026-10-10)
+
+Four `UIKit-runloop-PaintSoftware` reports from the owner's iPad (build 55c4fc7, PID 23037, 59 minutes
+into the process): 19:41:25 for 1.70 s, 19:42:20 for 1.19 s, 19:43:49 for 1.20 s, 19:46:35 for 1.44 s.
+In each the main thread is inside SwiftUI's update cycle, and in the first three the app frames are
+the layer panel: `LayerStackListView.updateUIView` → `Coordinator.reload()` → `LayerStackCell
+.configure(with:)` (about 0.85 s of the first and 0.6 s of the third), `LayerStackListView.makeUIView`
+building cells and `InlineNameFieldView.updateUIView` (the second), and in the first
+`LayerStackListView.Coordinator.handlePinch` → `CanvasManager.requestMerge` → `mergeLayers` on the main
+thread (about 0.25 s). **The main thread's CPU time is 0.06, 0.10, 0.09 and 0.01 s** — it is blocked
+under that work, in the kernel, not running it. The device says why it might be: memory pressure 83–89 %
+with 480–660 MB available of 2.87 GB, a footprint of 0.8–1.5 GB, the flash garbage-collecting for 81–95 %
+of the first two ("Must move data", 132 MB/s system-wide, 21 MB of it the app's), and `FrameBaker.bake`
+and `CanvasView.sandwich` busy on the other threads. Digitizer events were being delivered throughout
+(Scroll View Drag in the first), so these are the panel hitching under the owner's finger.
+
+Not reproduced, and no simulator has the device's memory. **Symbols come from a rebuild of 55c4fc7, whose
+UUID (E806C8F4…) is not the installed one (77AA3254…)**: the layer-panel names are a contiguous cluster and
+right to a function or two, but the frame addresses are not exact. What would settle it is a trace of
+the layer panel's `reload()` on the iPad 9 with a document the size of the owner's, and whether it
+reloads on SwiftUI passes that change nothing about the layers.
+
 ## The canvas's recognizers strand when a touch joins two others, and the repair caught it five times in thirty minutes (2026-10-10)
 
 **What the owner's iPad saved.** Build 55c4fc7 (Release), iPad 9 on iPadOS 26.6.2, landscape: five
@@ -41,6 +63,14 @@ main. `XCPointerEventPath` cannot cancel a touch, and the simulator's window car
 `HomeAffordanceGate` the iPad 9's does not; the simulator runtime is 26.5, the device 26.6.2. The
 system's own recognizers (`_UISystemGestureGateGestureRecognizer`, `_UIFlexInteraction.Pan`) are
 bound to every touch on both.
+
+**Not a main-thread hang.** The four `UIKit-runloop` hang reports from the same session (19:41–19:46,
+1.2–1.7 s, see the entry below) all come after the last flight, and no repair followed any of them
+though 73, 4 and 28 digitizer events were delivered during three. In the flights a canvas touch
+reaches the model 10–20 ms after its hardware stamp (150 ms at worst), at all five strands included;
+and a stall merges a late touch into the event of the others, which is the opposite of the shape. A
+400 ms and a 1 s main-thread stall per touch, so each synthesised gesture arrives whole in one pass
+(70 shapes each), stranded nothing either.
 
 **Main.** Nothing in TODO (159)–(168) touches `replaceStrandedRecognizers` or how pan, pinch,
 rotation and stroke are bound. (168) adds a second `TouchCountRecognizer` on the window
