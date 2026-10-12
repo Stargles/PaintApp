@@ -23,11 +23,11 @@ public partial class App : System.Windows.Application
     private SessionLockMonitor? _lockMonitor;
     private SessionLockPoller? _lockPoller;
     private MdnsAdvertiser? _mdns;
-    // TODO (99): held for the process lifetime of normal windowed mode only — see OnStartup's
-    // "Normal windowed mode" branch. The CLI diagnostics above it (--list-sources, --check-lock,
-    // --stream) are one-off tools that legitimately run alongside an already-running tray
-    // instance (streamer.ps1 sources reaches kevin's session with exactly such a one-off task
-    // while the main task may already be up) and must not fight this guard.
+    // Held for the process lifetime of normal windowed mode only — see OnStartup's "Normal windowed
+    // mode" branch. The CLI diagnostics above it (--list-sources, --check-lock, --stream) are
+    // one-off tools that legitimately run alongside an already-running tray instance
+    // (streamer.ps1 sources reaches kevin's session with exactly such a one-off task while the
+    // main task may already be up) and must not fight this guard.
     private SingleInstanceGuard? _singleInstance;
 
     /// <summary>STREAM.md §7 stage 4 deliverable 3: the CLI's remote hand, since a
@@ -112,21 +112,16 @@ public partial class App : System.Windows.Application
         }
 
         // Normal windowed mode: the Start Menu/desktop shortcut (TODO (99)) and the triggerless
-        // on-demand Scheduled Task (streamer-remote.sh start) both land here with no arguments,
-        // so this is the one guard against running twice at once — a real second instance would
-        // fail ProtocolServer.StartAsync on the already-bound port anyway, but silently or with a
-        // raw exception is not "just like any normal computer program."
-        _singleInstance = new SingleInstanceGuard(SingleInstanceGuard.AppMutexName);
-        if (!_singleInstance.TryAcquire())
+        // on-demand Scheduled Task (streamer-remote.sh start) both land here with no arguments, so
+        // this is the one guard against running twice at once. The instance usually sits hidden in
+        // the tray, so a second launch makes it show itself rather than quietly exiting (TODO (171)).
+        _singleInstance = new SingleInstanceGuard(SingleInstanceGuard.AppPipeName);
+        if (!_singleInstance.TryAcquire() && !await TakeOverFromRunningInstanceAsync(Log).ConfigureAwait(true))
         {
-            // Silently, as a tray program does: a modal here would sit unanswered for ever when
-            // the second launch is headless (the on-demand task while the shortcut's instance runs).
-            Log("Another PaintStreamer instance is already running — exiting without starting a second one.");
-            _singleInstance.Dispose();
-            _singleInstance = null;
             Shutdown(0);
             return;
         }
+        _singleInstance.ServeHandoffs(() => Dispatcher.InvokeAsync(ShowMainWindow).Task);
 
         // Probe the encoder, start the server, restore the last source (§2.8/§6 — the laptop may
         // reboot mid-session and should resume on its own), show the tray icon and the window.
@@ -215,6 +210,39 @@ public partial class App : System.Windows.Application
             _mainWindow!.Hide();
         };
         _mainWindow.Show();
+    }
+
+    /// <summary>A launch that found an instance running. True when that instance did not answer and was
+    /// evicted, so this launch is the instance now; false when this launch is finished — the instance
+    /// showed its window, or could not be replaced and the artist has been told.</summary>
+    private async Task<bool> TakeOverFromRunningInstanceAsync(Action<string> log)
+    {
+        try
+        {
+            bool tookOver = await _singleInstance!.HandOffOrEvictAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(true);
+            log(tookOver
+                ? "The running PaintStreamer did not answer; it was killed and this launch took its place."
+                : "PaintStreamer is already running — it showed its window; exiting without starting a second one.");
+            return tookOver;
+        }
+        catch (Exception ex)
+        {
+            log($"FATAL: cannot reach or replace the running PaintStreamer: {ex.Message}");
+            System.Windows.MessageBox.Show($"PaintStreamer is already running but does not respond, and could not be restarted:\n{ex.Message}\n\nEnd Streamer.Tray in Task Manager and open it again.",
+                AppName, MessageBoxButton.OK, MessageBoxImage.Error);
+            return false;
+        }
+    }
+
+    /// <summary>Brings the window to the front from wherever it is: hidden in the tray, minimized, or
+    /// both (closing a minimized window hides it still minimized). Before start-up has built the
+    /// window there is nothing to bring, and start-up ends by showing it.</summary>
+    private void ShowMainWindow()
+    {
+        if (_mainWindow == null) return;
+        _mainWindow.Show();
+        _mainWindow.WindowState = WindowState.Normal;
+        _mainWindow.Activate();
     }
 
     private void RunListSources(Action<string> log)
@@ -306,14 +334,14 @@ public partial class App : System.Windows.Application
             Text = AppName,
         };
         var menu = new System.Windows.Forms.ContextMenuStrip();
-        menu.Items.Add("Open", null, (_, _) => { _mainWindow?.Show(); _mainWindow?.Activate(); });
+        menu.Items.Add("Open", null, (_, _) => ShowMainWindow());
         menu.Items.Add("Quit", null, (_, _) =>
         {
             log("Quit from tray menu");
             Shutdown(0);
         });
         _trayIcon.ContextMenuStrip = menu;
-        _trayIcon.DoubleClick += (_, _) => { _mainWindow?.Show(); _mainWindow?.Activate(); };
+        _trayIcon.DoubleClick += (_, _) => ShowMainWindow();
     }
 
     private static int GetSessionId()

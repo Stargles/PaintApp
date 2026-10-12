@@ -108,7 +108,24 @@ public sealed class GstProcess : IAsyncDisposable
         }
     }
 
+    /// <summary>One pipeline's life. However it ends — the client closed, the pipeline died, a read
+    /// threw, we were cancelled — its process and its listener end with it: the next run replaces the
+    /// fields, and a pipeline left running would keep capturing the screen for as long as the app lives.</summary>
     private async Task RunOnceAsync(CancellationToken ct)
+    {
+        try
+        {
+            await StreamOnceAsync(ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            KillProcessQuiet();
+            _listener?.Stop();
+            _listener = null;
+        }
+    }
+
+    private async Task StreamOnceAsync(CancellationToken ct)
     {
         _listener = new TcpListener(IPAddress.Loopback, 0);
         _listener.Start();
@@ -177,10 +194,6 @@ public sealed class GstProcess : IAsyncDisposable
                 AccessUnitReady?.Invoke(this, new AccessUnitEventArgs { Unit = au, PtsUs = ptsUs });
             }
         }
-
-        KillProcessQuiet();
-        _listener.Stop();
-        _listener = null;
     }
 
     private static int SafeExitCode(Process p)
