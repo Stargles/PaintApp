@@ -1438,6 +1438,17 @@ class PaintUITestCase: XCTestCase {
         XCTAssertEqual(edit.value as? String, "expanded", "pressing Edit unfolds the band")
     }
 
+    /// **The worst difference of any one channel of any one pixel between two buffers** — what "the
+    /// canvas did not change" means in 8-bit: 0 is identical, and a held picture handing over to the
+    /// base that replaces it should read single digits, not tens.
+    func worstChannelDifference(_ a: [UInt8], _ b: [UInt8]) -> Int {
+        XCTAssertFalse(a.isEmpty, "Setup: the screenshot has pixels")
+        XCTAssertEqual(a.count, b.count, "Setup: two shots of one element are the same size")
+        var worst = 0
+        for i in 0..<min(a.count, b.count) { worst = max(worst, abs(Int(a[i]) - Int(b[i]))) }
+        return worst
+    }
+
     /// Keeps a screenshot in the test's result bundle, so a run can be looked at and not only read — the
     /// bar for a visible feature is that someone saw it. `subject` is the app, one element of it (the
     /// canvas) or `XCUIScreen.main`; `lifetime` is `.keepAlways` unless a suite that attaches a great many

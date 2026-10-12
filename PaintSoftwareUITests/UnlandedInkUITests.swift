@@ -161,12 +161,4 @@ final class UnlandedInkUITests: PaintUITestCase {
         guard let cropped = cg.cropping(to: region) else { return [] }
         return CanvasFixture.rgbaBytes(cropped) ?? []
     }
-
-    private func worstChannelDifference(_ a: [UInt8], _ b: [UInt8]) -> Int {
-        XCTAssertFalse(a.isEmpty, "Setup: the screenshot has pixels")
-        XCTAssertEqual(a.count, b.count, "Setup: two shots of one element are the same size")
-        var worst = 0
-        for i in 0..<min(a.count, b.count) { worst = max(worst, abs(Int(a[i]) - Int(b[i]))) }
-        return worst
-    }
 }
