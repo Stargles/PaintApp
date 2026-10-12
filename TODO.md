@@ -50,6 +50,66 @@ their files are repaired. Build `2974b33` broke this rule and lost the owner's k
 
 ---
 
+## (176) Where each option is saved — per document, global, or not at all
+
+**Status** — asked 2026-10-12; the inventory is being taken, then the owner rules row by row.
+
+*"For the options saving, there currently is 2 levels of saving if i recall correctly: per document and
+global. In my opinion, I think it is best if everything previously global is saved per document. However
+I dont yet know all the things that are saved per document, global, or not saved at all, so show me all
+of them first, and I will tell you which ones save with which method."*
+
+Rulings on (175)'s questions, 2026-10-12: the **Subtract switch is not saved** (it resets each launch);
+**tool sliders and pickers are saved** — at whichever level the inventory ruling gives them.
+
+- [ ] Subtract stops persisting.
+- [ ] Inventory of every option and its current level, shown to the owner.
+- [ ] Implement the owner's per-row ruling (one store per level, no second mechanism).
+
+## (35) Advanced masks — colour masks beside the alpha mask
+
+**Status** — promoted from "Later" 2026-10-12; the owner will describe what it is meant to be once told
+what is already recorded.
+
+The original ask (2026-09-01): *"right now we have alpha masks. I like the idea of more advanced masks.
+This includes the ability to mask specific sets of colours (with a deviation threshold range), and a new
+special blend mode called colour reassign, where you can select colours and reassign them to other
+colours of your choosing (you can recolour your drawings)."*
+
+2026-10-12: *"The idea I sort of have is that it is sort of like the recolour, where you can set specific
+colors as the mask. The previous alpha mask feature should also still be present. This probably will
+have a lot of overlapping code with that feature, so follow good architecture protocols."*
+
+- [ ] The owner's design, recorded here.
+- [ ] Built on the existing mask and recolour modules rather than beside them.
+
+## (177) A stream layer can draw in place in the layer stack
+
+**Status** — asked 2026-10-12.
+
+*"currently the stream layer renders on top of everything. It would be nice if the stream layer still
+followed the layer heigharchy. I'm pretty sure this measure was to prevent re-rendering every time the
+stream moves, but I feel like it is okay as long as we add a switch to the stream options menu where you
+can flip it from rendering on top or in place."*
+
+- [ ] A switch in the stream bar: on top (today) / in place.
+
+## (178) Liquify tool
+
+**Status** — asked 2026-10-12.
+
+*"It should be placed to the left of the brush tool in the top menu. When selected, it acts sort of like
+a brush (you can control the brush type, size, etc), and otherwise it does basically what a normal
+liquify tool does. The opacity slider turns into the liquify power, and the brush type also controls the
+liquify tool's power, so for example if the streaky brush is selected and the liquify tool is applied at
+a line, it sort of liquifies only parts of the line. One thing, All the liquify tool needs to do is
+adjust the position of stuff. It doesnt need to simulate blending, distortions, and all that."*
+
+- [ ] Design questions answered by the owner (which layer kinds; push only or other modes).
+- [ ] Built on the brush's dab pipeline for its strength field.
+
+---
+
 ## (27) Stream the computer's screen as a layer
 
 **Status** — briefed 2026-09-13, designed the same day ([STREAM.md](docs/STREAM.md)), and **built through
@@ -167,8 +227,6 @@ against a transcript this audit does not have.
   counter on the model, delivered by RENDER stage 1, which is exactly the hoist this item said it
   needed. `AVFoundation` is linked (for video), though no audio playback code exists.
 - **(30) Video editor.** Its RENDER dependency is met — (29) shipped in full on 2026-09-06.
-- **(35) Advanced masks** — colour-range masks and a colour-reassign blend mode. `MaskSource` has two
-  cases and there are 25 blend modes with no reassign.
 ---
 
 ## Carried — deliberate, and not an ask
