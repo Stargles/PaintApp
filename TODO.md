@@ -129,6 +129,18 @@ gets booleaned, then undos and selection 2 gets undone)"*
 - [ ] Undo after an add (and, by the same seam, a subtract) restores the selection as it was before that
       loop, not no selection; redo re-applies it. Driven: two loops, undo, the first loop's marching ants.
 
+## (183) Recolouring a filled selection flickers
+
+**Status** — reported 2026-10-12 with a recording; given to the (179) worker, whose seam owns the held
+element edit and `WindowSurfaceView`.
+
+*"Made a selection, clicked on fill, then clicked on edit and tried to change the color inside the
+selection. Lots of flickering."* — `~/PaintWork/recordings-1012/recording-20261012-173827.jsonl`
+(2668×1644, build `95e5507`): the colour drag runs 4.35–6.52 s and the main thread is busy 1,468 ms of
+that 2 s window (max 182 ms, all `sourcePhase`).
+
+- [ ] Cold-start XCUITest that samples the region mid-drag and fails on a flicker; root cause fixed in the seam.
+
 ## (35) Advanced masks — colour masks beside the alpha mask
 
 **Status** — promoted from "Later" 2026-10-12; the owner will describe what it is meant to be once told

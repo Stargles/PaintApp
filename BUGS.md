@@ -52,6 +52,14 @@ that land all three in one event, and one finger followed by two — reset norma
 stalls: the check ran on time (0.10–0.12 s after the lift) and the model lines trail the touches by
 10–20 ms.
 
+**Three more, with the census, 2026-10-12** (build `95e5507`, owner's iPad, files in
+`~/PaintWork/recordings-1012/`): `flight-20261012-140611` (2048×1024 "Test") replaced `canvas.pan`, found
+*"failed touches:2 on CanvasPlaneView"*; `-171926` (2668×1644) replaced pan, pinch, rotation and the stroke
+recognizer — pan *failed touches:2*, the other three *failed touches:0*; `-173237` replaced `canvas.pan`,
+found *"ended touches:0"*. So the stranded pan is usually **failed while still counting two touches**
+after every touch is up — its touches were never delivered an end or cancel — and once it was `ended`
+with none. Not yet analysed against the touch sequence before each.
+
 **Cause: not found.** The recognizers are left out of `.possible` after every touch is up:
 `StrokeGestureRecognizer.reset()` (which writes a line when it runs) never ran, and
 `canvas.touchCounter` read 0. **Not reproduced**: about 1,400 synthesised shapes
