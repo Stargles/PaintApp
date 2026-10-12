@@ -77,9 +77,9 @@ switches (Subtract, Paint Outside Selection, Keep Stroke Width, Keep Full Precis
 
 **Status** — asked 2026-10-12; extends (173)'s held-edit mechanism (`CanvasManager.liveElementEdit`,
 `ElementEditSession`, `WindowSurfaceView`) to every control that still writes the document per tick.
-The assessment's commits 1–3 are merged (`LatestWins`; the live pair, onion skin and eyedropper on it;
-one held slot, `CanvasManager.liveEdit`); commit 4 (the effect sliders' held frame) follows its
-measurement, PERFORMANCE.md §30.
+The assessment's commits 1–4 are merged: `LatestWins`; the live pair, onion skin and eyedropper on it;
+one held slot, `CanvasManager.liveEdit`; and the effect parameter sliders, held, with the whole frame
+composited from the held grade (measured in PERFORMANCE.md §30). Commits 5–10 wait for that to be read.
 
 The owner, asked whether the remaining per-tick sliders (layer Opacity, effect parameters, mask tuning,
 the text panel) should get (173)'s fix: *"for all of them, cant there be a system where it just slows
