@@ -173,17 +173,22 @@ final class TopBarMenusUITests: PaintUITestCase {
         attachScreenshot(app, "move-menu-without-paragraph")
     }
 
-    /// **TODO (133) — the padding covers what is drawn into it, and the artwork's edge stays an edge.**
-    /// *"Add the option to render canvas padding on top (not below), default on. This means that the
-    /// canvas border wont get covered up by the drawings."*
+    /// **TODO (133) / (180) — the padding is drawn over the ink as a veil: the artwork's edge stays an
+    /// edge, and ink drawn into the margin shows through it.** (133): *"Add the option to render canvas
+    /// padding on top (not below), default on. This means that the canvas border wont get covered up by
+    /// the drawings."* (180): *"the padding opacity is set to opaque so I cant see what I am drawing in
+    /// the padding. What I want is it to be translucent but on top."*
     ///
     /// Driven from a fresh document the way the artist reaches it: Settings, the padding slider, close,
     /// draw one stroke from the margin across the artwork's edge, then read **pixels** — a stored flag
-    /// would agree with a toggle that drew nothing. With the toggle on (its default) the margin pixels
-    /// under the stroke read the margin's grey and the part inside the artwork reads ink; turned off,
-    /// the same margin pixels read ink. The artwork half is what keeps the on-state assertion from
-    /// being satisfied by a stroke that never landed.
-    func testPaddingOnTopCoversInkDrawnIntoTheMarginAndTurningItOffShowsIt() throws {
+    /// would agree with a toggle that drew nothing. With the toggle on (its default) three things are
+    /// read: the part of the stroke inside the artwork is bare ink; the part inside the margin is
+    /// neither that ink nor the margin's plain grey but between them (an opaque cover reads the grey, a
+    /// cover that is gone reads the ink); and a stretch of margin the stroke never touched reads the
+    /// same grey it did before the stroke. Turned off, the stroke's margin part reads bare ink and the
+    /// untouched margin the same grey again — the cover adds nothing to an empty margin, which is what
+    /// "the same grey over the same grey" means and what keeps the backdrop under the paper opaque.
+    func testPaddingOnTopVeilsInkDrawnIntoTheMarginAndTurningItOffShowsItBare() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
         let canvas = app.otherElements["canvas.host"]
@@ -200,26 +205,41 @@ final class TopBarMenusUITests: PaintUITestCase {
         Thread.sleep(forTimeInterval: 1.0)
 
         // The visible canvas is the padded square the host letterboxes; at a 0.2 slider the margin is
-        // about 8% of its width a side, so 2% is inside it and 20% is well inside the artwork.
+        // about 8% of its width a side, so 2% is inside it and 20% is well inside the artwork. The
+        // stroke runs along the middle row; the untouched margin is read well below it.
         let paper = paperRect(in: canvas)
-        func x(_ fraction: Double) -> Double { onHost(paper, fraction, 0.5).dx }
-        dragOnCanvas(app, from: CGVector(dx: x(0.02), dy: 0.5), to: CGVector(dx: x(0.20), dy: 0.5))
-        Thread.sleep(forTimeInterval: 1.0)
-
-        func darkest(_ fractions: [Double]) -> Int {
-            fractions.compactMap { rgbaPixel(of: canvas, dx: x($0), dy: 0.5) }
-                .map { Int($0.r) }.min() ?? 255
+        func red(atPaper fx: Double, _ fy: Double) -> Int {
+            Int(rgbaPixel(of: canvas, at: onHost(paper, fx, fy))?.r ?? 255)
         }
+        func darkest(_ fractions: [Double]) -> Int { fractions.map { red(atPaper: $0, 0.5) }.min() ?? 255 }
         let marginSamples = [0.04, 0.05, 0.06, 0.07]
         let artworkSamples = [0.14, 0.16, 0.18]
+        let untouchedMargin = (fx: 0.05, fy: 0.8)
+
+        let plainGrey = red(atPaper: untouchedMargin.fx, untouchedMargin.fy)
+        XCTAssertTrue((205...229).contains(plainGrey),
+                      "PREMISE: an empty margin reads the margin's grey (217) with the cover up; it read \(plainGrey)")
+
+        dragOnCanvas(app, from: CGVector(dx: onHost(paper, 0.02, 0.5).dx, dy: 0.5),
+                     to: CGVector(dx: onHost(paper, 0.20, 0.5).dx, dy: 0.5))
+        Thread.sleep(forTimeInterval: 1.0)
+
+        let bareInk = darkest(artworkSamples)
+        let veiledInk = darkest(marginSamples)
         attachScreenshot(app, "padding-on-top-on")
-        XCTAssertLessThan(darkest(artworkSamples), 100,
+        XCTAssertLessThan(bareInk, 100,
                           "PREMISE: the stroke landed and is ink inside the artwork — without it the margin reads below prove nothing")
-        XCTAssertGreaterThan(darkest(marginSamples), 190, """
-            With Padding On Top on, the stroke's part inside the margin is covered by the margin. Its \
-            darkest sampled pixel read \(darkest(marginSamples)); ink reads under 100 and the margin's \
-            grey about 217.
+        XCTAssertGreaterThan(veiledInk, bareInk + 40, """
+            With Padding On Top on, the stroke's part inside the margin is veiled, not bare. Its darkest \
+            sampled pixel read \(veiledInk) against the artwork's \(bareInk) — a cover that is gone reads \
+            the ink.
             """)
+        XCTAssertLessThan(veiledInk, plainGrey - 40, """
+            …and the ink shows through the veil: its darkest sampled pixel read \(veiledInk) against the \
+            margin's plain \(plainGrey) — an opaque cover reads the grey and hides what is drawn there.
+            """)
+        XCTAssertEqual(red(atPaper: untouchedMargin.fx, untouchedMargin.fy), plainGrey, accuracy: 1,
+                       "A stretch of margin the stroke never touched reads the same grey it did before it")
 
         app.buttons["toolbar.settingsButton"].tap()
         XCTAssertTrue(toggle.waitForExistence(timeout: 5))
@@ -230,9 +250,11 @@ final class TopBarMenusUITests: PaintUITestCase {
 
         attachScreenshot(app, "padding-on-top-off")
         XCTAssertLessThan(darkest(marginSamples), 100, """
-            With Padding On Top off, the same stroke shows over the margin. Its darkest sampled \
-            pixel there read \(darkest(marginSamples)).
+            With Padding On Top off, the same stroke shows over the margin as bare ink. Its darkest \
+            sampled pixel there read \(darkest(marginSamples)).
             """)
+        XCTAssertEqual(red(atPaper: untouchedMargin.fx, untouchedMargin.fy), plainGrey, accuracy: 1,
+                       "With the cover down an empty margin reads the same grey as with it up — the backdrop is opaque, and the veil over it is the same grey")
     }
 
     /// **The performance HUD's switch is on no dropdown** — TODO (169), the owner's audit: it sat on the

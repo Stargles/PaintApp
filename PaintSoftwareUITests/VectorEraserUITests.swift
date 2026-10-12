@@ -16,50 +16,15 @@ import XCTest
 /// are the same number.
 /// Shared helpers for the three classes below, split out of the original single
 /// `VectorEraserUITests` class so xcodebuild — which parallelises by class, not by file — can
-/// distribute this file's 8 tests across more than one worker. See PaintUITestCase.swift:3-8 for
+/// distribute this file's tests across more than one worker. See PaintUITestCase.swift:3-8 for
 /// the same pattern applied to the file's siblings.
 ///
 /// Widened from `private` to `fileprivate` (rather than promoted to `internal` on
-/// `PaintUITestCase`) because every one of these six helpers is used only by tests in this file —
-/// there was no reason to widen their visibility past it.
+/// `PaintUITestCase`) because both of these helpers are used only by tests in this file. The panel
+/// and mode-picker helpers are on `PaintUITestCase`, since other files drive the picker too.
 class VectorEraserTestSupport: PaintUITestCase {
 
     // MARK: - Helpers
-
-    /// Selects the eraser and opens its settings panel. The toolbar button is
-    /// select-then-toggle (`TopToolbar.selectEraserToolAndTogglePanel`), so reaching the panel from
-    /// an arbitrary starting tool takes one tap to select and one to open — but only one if the
-    /// eraser was already the active tool. Probing for the panel's own slider is what makes this
-    /// work from either state.
-    fileprivate func openEraserPanel(_ app: XCUIApplication) {
-        openBrushLibrary(app, tool: "eraser")
-    }
-
-    fileprivate func closeEraserPanel(_ app: XCUIApplication) {
-        app.buttons["toolbar.eraserButton"].tap()
-        XCTAssertTrue(app.scrollViews["eraserPanel.groupList"].waitForNonExistence(timeout: 5),
-                      "The eraser panel should close, leaving the canvas unobstructed")
-        XCTAssertTrue(app.sliders["eraserPanel.sizeSlider"].waitForNonExistence(timeout: 5),
-                      "…and so should the editor behind it, whichever of the two was showing")
-    }
-
-    fileprivate var modePicker: (XCUIApplication) -> XCUIElement {
-        { $0.segmentedControls["eraserPanel.vectorModePicker"] }
-    }
-
-    /// Opens the eraser panel, taps the named segment, and closes the panel again — leaving the
-    /// eraser selected and the canvas clear to draw on.
-    fileprivate func selectVectorEraserMode(_ app: XCUIApplication, _ segment: String) {
-        openEraserPanel(app)
-        let picker = modePicker(app)
-        XCTAssertTrue(picker.waitForExistence(timeout: 5),
-                      "The vector mode picker should be present on a vector layer")
-        let button = picker.buttons[segment]
-        XCTAssertTrue(button.waitForExistence(timeout: 5), "The picker should offer a '\(segment)' segment")
-        button.tap()
-        XCTAssertTrue(button.isSelected, "Tapping '\(segment)' should select it")
-        closeEraserPanel(app)
-    }
 
     /// Sets the eraser's diameter via the editor's Size slider (range 1...200 — see
     /// `BrushEditorView`). It used to sit in the panel itself; BRUSH.md §2.20 moved every brush
@@ -80,8 +45,9 @@ class VectorEraserTestSupport: PaintUITestCase {
     }
 }
 
-/// The vector-mode-picker tests: does the three-way control appear on the right layer type, and
-/// does tapping a segment actually reach the commit.
+/// The vector-mode-picker tests: does the control appear on the right layer type, and does a new
+/// document's eraser start on Cut. That a tapped segment reaches the commit is what `Mode1UITests` and
+/// the cutting-mode tests below prove, each by a count only its own mode can produce.
 final class ModePickerUITests: VectorEraserTestSupport {
 
     // MARK: - The picker itself
@@ -98,57 +64,44 @@ final class ModePickerUITests: VectorEraserTestSupport {
         addRasterLayer(app)
 
         openEraserPanel(app)
-        XCTAssertFalse(modePicker(app).exists,
+        XCTAssertFalse(vectorEraserModePicker(app).exists,
                        "The vector mode picker must not appear while a raster layer is active")
         closeEraserPanel(app)
 
         addVectorLayer(app)
 
         openEraserPanel(app)
-        let picker = modePicker(app)
+        let picker = vectorEraserModePicker(app)
         XCTAssertTrue(picker.waitForExistence(timeout: 5),
                       "Switching to a vector layer should reveal the mode picker")
         for segment in ["Erase", "Cut", "To Cross", "Whole"] {
             XCTAssertTrue(picker.buttons[segment].exists, "The picker should offer '\(segment)'")
         }
-        XCTAssertTrue(picker.buttons["Erase"].isSelected,
-                      "Mode 1 is the default (VectorEraserMode.erase)")
     }
 
-    /// The picker is only worth having if the segment you tap is the mode that commits. This drives
-    /// the whole chain — segmented control -> `CanvasManager.vectorEraserMode` ->
-    /// `CanvasView.updateActiveLayerAndTool` -> `StrokeCanvasView.vectorEraserMode` ->
-    /// `VectorCanvas.erase(mode:)` — by picking the mode whose result is structurally different from
-    /// the default's. Both modes cut this stroke in two; what tells them apart is the punch. Mode 2 is
-    /// a pure geometric split and retains nothing, where Mode 1 always keeps the gesture as an
-    /// `.erase` element — so `erases == 0` is the assertion that proves the picker's selection reached
-    /// the commit. (The piece *count* alone no longer distinguishes them, which is exactly the sort
-    /// of thing that turns a test into a formality if nobody notices.)
-    func testPickingCutModeMakesTheGestureCutInsteadOfPunch() throws {
+    /// **A new document's eraser is on Cut** (`VectorEraserMode.default`, TODO (181)) — read from the
+    /// picker the artist sees, on the vector layer a new document opens with, before anything has
+    /// been tapped. A stored mode agreeing with a picker that shows another would pass a model test
+    /// and leave the artist erasing in a mode the panel does not name.
+    func testANewDocumentsEraserPanelShowsCutSelected() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
-        addVectorLayer(app)
 
-        let canvas = app.otherElements["canvas.host"]
-        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
-        drawLine(on: canvas, from: CGVector(dx: 0.3, dy: 0.5), to: CGVector(dx: 0.7, dy: 0.5))
-        XCTAssertEqual(vectorMarkerViaPanel(app, layerIndex: 1)?.strokes, 1, "Setup: one vector stroke")
-
-        selectVectorEraserMode(app, "Cut")
-        drawLine(on: canvas, from: CGVector(dx: 0.5, dy: 0.40), to: CGVector(dx: 0.5, dy: 0.60))
-
-        let after = vectorMarkerViaPanel(app, layerIndex: 1)
-        XCTAssertEqual(after?.strokes, 2, "Mode 2 cuts the stroke into two surviving pieces")
-        XCTAssertEqual(after?.erases, 0,
-                       "Mode 2 is a pure geometric split: it must never retain an .erase punch. This "
-                       + "is the assertion that proves the picker reached the commit — if it reads 1, "
-                       + "Mode 1 ran instead and the segment tap went nowhere")
+        openEraserPanel(app)
+        let picker = vectorEraserModePicker(app)
+        XCTAssertTrue(picker.waitForExistence(timeout: 5),
+                      "A new document opens on a vector layer, so the eraser panel carries the picker")
+        XCTAssertTrue(picker.buttons["Cut"].isSelected, "The new document's eraser starts on Cut")
+        for other in ["Erase", "To Cross", "Whole"] {
+            XCTAssertFalse(picker.buttons[other].isSelected, "…and not on '\(other)'")
+        }
+        attachScreenshot(app, "new-document-eraser-panel-on-cut")
     }
-
 }
 
-/// Mode 1 (the default `.erase` punch): cuts-and-punches, the end-to-end deletion exemption, and
-/// the live preview it publishes during the drag.
+/// Mode 1 (the `.erase` punch): cuts-and-punches, the end-to-end deletion exemption, and
+/// the live preview it publishes during the drag. Each test picks Erase — a new document's eraser is
+/// on Cut — so the retained punch they count also proves the segment tap reached the commit.
 final class Mode1UITests: VectorEraserTestSupport {
 
     // MARK: - Mode 1
@@ -175,7 +128,7 @@ final class Mode1UITests: VectorEraserTestSupport {
         XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.5, dy: 0.5)),
                        "Setup: the stroke should be on screen before erasing")
 
-        app.buttons["toolbar.eraserButton"].tap() // default mode, no panel needed
+        selectVectorEraserMode(app, "Erase")
         drawLine(on: canvas, from: CGVector(dx: 0.5, dy: 0.40), to: CGVector(dx: 0.5, dy: 0.60))
 
         XCTAssertTrue(waitUntilBlank(canvas, dx: 0.5, dy: 0.5, timeout: 5),
@@ -192,7 +145,8 @@ final class Mode1UITests: VectorEraserTestSupport {
                        + "never fired, and the two halves cannot be moved apart")
         XCTAssertEqual(after?.erases, 1,
                        "…and the gesture is still retained as exactly one .erase punch: the cut is "
-                       + "inset inside the footprint, so the punch is what makes the visible edge")
+                       + "inset inside the footprint, so the punch is what makes the visible edge. "
+                       + "Cut, the default, retains none — reading 0 means the Erase tap went nowhere")
     }
 
     /// The exemption that keeps "scribble a stroke out and it costs nothing" true: a stroke the
@@ -209,7 +163,7 @@ final class Mode1UITests: VectorEraserTestSupport {
         XCTAssertEqual(vectorMarkerViaPanel(app, layerIndex: 1)?.strokes, 1, "Setup: one short stroke")
 
         // A wide nib, and a gesture overshooting both ends, so the round end caps are covered too.
-        app.buttons["toolbar.eraserButton"].tap()
+        selectVectorEraserMode(app, "Erase")
         setEraserSize(app, normalized: 0.6)
         drawLine(on: canvas, from: CGVector(dx: 0.36, dy: 0.5), to: CGVector(dx: 0.64, dy: 0.5))
 
@@ -262,7 +216,7 @@ final class Mode1UITests: VectorEraserTestSupport {
                              + "the drag. Exactly 1 is the touch-down frame alone — ink that does "
                              + "not follow the pen")
 
-        app.buttons["toolbar.eraserButton"].tap()
+        selectVectorEraserMode(app, "Erase")
         setEraserSize(app, normalized: 0.5)
 
         let start = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.34))

@@ -1242,6 +1242,49 @@ class PaintUITestCase: XCTestCase {
                       "Done must take the editor down")
     }
 
+    // MARK: - The eraser panel's vector mode
+
+    /// Opens the eraser's brushes menu — the panel that carries the vector mode picker.
+    func openEraserPanel(_ app: XCUIApplication) {
+        openBrushLibrary(app, tool: "eraser")
+    }
+
+    /// Closes the eraser's panel (and the editor behind it, whichever of the two was showing), leaving
+    /// the canvas unobstructed.
+    func closeEraserPanel(_ app: XCUIApplication) {
+        app.buttons["toolbar.eraserButton"].tap()
+        XCTAssertTrue(app.scrollViews["eraserPanel.groupList"].waitForNonExistence(timeout: 5),
+                      "The eraser panel should close, leaving the canvas unobstructed")
+        XCTAssertTrue(app.sliders["eraserPanel.sizeSlider"].waitForNonExistence(timeout: 5),
+                      "…and so should the editor behind it, whichever of the two was showing")
+    }
+
+    /// The segmented control that picks the vector eraser's mode; present in the eraser panel on a
+    /// vector layer only.
+    func vectorEraserModePicker(_ app: XCUIApplication) -> XCUIElement {
+        app.segmentedControls["eraserPanel.vectorModePicker"]
+    }
+
+    /// Taps the named segment of the mode picker in the (open) eraser panel.
+    func pickVectorEraserMode(_ app: XCUIApplication, _ segment: String) {
+        let picker = vectorEraserModePicker(app)
+        XCTAssertTrue(picker.waitForExistence(timeout: 5),
+                      "The vector mode picker should be present on a vector layer")
+        let button = picker.buttons[segment]
+        XCTAssertTrue(button.waitForExistence(timeout: 5), "The picker should offer a '\(segment)' segment")
+        button.tap()
+        XCTAssertTrue(button.isSelected, "Tapping '\(segment)' should select it")
+    }
+
+    /// Opens the eraser panel, taps the named segment, and closes the panel again — leaving the
+    /// eraser selected and the canvas clear to draw on. **A new document's eraser is on Cut**
+    /// (`VectorEraserMode.default`), so a test that needs any other mode has to pick it.
+    func selectVectorEraserMode(_ app: XCUIApplication, _ segment: String) {
+        openEraserPanel(app)
+        pickVectorEraserMode(app, segment)
+        closeEraserPanel(app)
+    }
+
     // MARK: - The Move box on the glass
 
     /// The Move box as `x,y,w,h` in `canvas.host`'s unit square — `CanvasView.Coordinator

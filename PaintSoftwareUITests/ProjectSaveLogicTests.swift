@@ -52,6 +52,7 @@ final class ProjectSaveLogicTests: XCTestCase {
         manager.fps = 18
         manager.canvasPadding = 7
         manager.isPaddingOnTop = false   // the default is on, so a dropped field reads as a changed value
+        manager.vectorEraserMode = .erase   // the default is Cut, for the same reason
 
         for layerIndex in 0..<2 {
             let raster = manager.layers[layerIndex].cels[0].raster
@@ -270,6 +271,8 @@ final class ProjectSaveLogicTests: XCTestCase {
         XCTAssertEqual(reloaded.contentEndFrame, 14, "The scene is derived from the cels, and layer 0's second block ends at 14")
         XCTAssertEqual(reloaded.canvasPadding, 7)
         XCTAssertFalse(reloaded.isPaddingOnTop, "The padding's draw order is the document's, saved beside the padding")
+        XCTAssertEqual(reloaded.vectorEraserMode, .erase,
+                       "A document keeps the eraser mode it was saved with — the new-document default does not reach it")
         XCTAssertEqual(reloaded.canvasSize, CanvasFixture.canvasSize)
 
         XCTAssertEqual(reloaded.layers.count, 3, "All three layers should survive the round trip")
@@ -301,6 +304,33 @@ final class ProjectSaveLogicTests: XCTestCase {
                                               from: JSONSerialization.data(withJSONObject: object))
         XCTAssertTrue(legacy.isPaddingOnTop)
         XCTAssertEqual(legacy.canvasPadding, 4, "…and nothing else about the padding moved.")
+    }
+
+    /// TODO (181): a new document's eraser starts on Cut, through every route that starts one — the
+    /// manager a new canvas opens with and the manifest a new package is built from. The literal is the
+    /// assertion: changing `VectorEraserMode.default` is the owner's call and should cost a test edit.
+    func testANewDocumentAndANewManifestStartOnTheCutEraser() {
+        XCTAssertEqual(VectorEraserMode.default, .cutPoints)
+        XCTAssertEqual(CanvasFixture.manager(layerCount: 1).vectorEraserMode, .cutPoints,
+                       "A new document's eraser starts on Cut")
+        let manifest = ProjectManifest(id: UUID(), name: "New", canvasWidth: 64, canvasHeight: 64,
+                                       fps: 24, layers: [], modifiedAt: Date())
+        XCTAssertEqual(manifest.vectorEraserMode, .cutPoints, "…and so does a manifest built without one")
+    }
+
+    /// TODO (181): a package with no eraser-mode key was saved when Erase was the only eraser, so it
+    /// opens on Erase — changing what new documents start on must not change how that package opens.
+    func testAManifestWithNoEraserModeOpensOnErase() throws {
+        let manifest = ProjectManifest(id: UUID(), name: "Legacy", canvasWidth: 64, canvasHeight: 64,
+                                       fps: 24, layers: [], modifiedAt: Date(), vectorEraserMode: .wholeStroke)
+        let data = try JSONEncoder().encode(manifest)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(object["vectorEraserMode"] as? String, "wholeStroke", "Setup: the key is written")
+        object.removeValue(forKey: "vectorEraserMode")
+
+        let legacy = try JSONDecoder().decode(ProjectManifest.self,
+                                              from: JSONSerialization.data(withJSONObject: object))
+        XCTAssertEqual(legacy.vectorEraserMode, .erase)
     }
 
     /// The specific race the async write introduces: a caller that reloads the project the instant

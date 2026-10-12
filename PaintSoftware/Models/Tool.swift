@@ -265,6 +265,11 @@ enum VectorEraserMode: String, Codable, CaseIterable, Identifiable {
     /// every cutting mode.
     case wholeStroke
 
+    /// What a new document's eraser starts on (owner, 2026-10-12: *"default eraser should be cut
+    /// mode"*) — the one definition `CanvasManager`, `ProjectManifest` and `StrokeCanvasView` all
+    /// start from. A saved document reopens on the mode it was saved with.
+    static let `default`: VectorEraserMode = .cutPoints
+
     var id: String { rawValue }
 
     /// Label for the segmented control in `EraserSettingsPanel`. Short enough to fit four across.

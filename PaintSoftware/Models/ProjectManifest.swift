@@ -66,7 +66,7 @@ struct ProjectManifest: Codable {
          fps: Int, layers: [LayerManifest], modifiedAt: Date,
          backgroundColor: CodableColor = CodableColor(red: 1, green: 1, blue: 1, alpha: 1), isBackgroundVisible: Bool = true,
          selectedBrush: Brush = BrushLibrary.roundSoft, customBrushes: [Brush] = [],
-         vectorEraserMode: VectorEraserMode = .erase, universalEraser: Bool = false,
+         vectorEraserMode: VectorEraserMode = .default, universalEraser: Bool = false,
          folders: [FolderManifest] = [], viewPresets: [ViewPresetManifest] = [],
          motionGroups: [MotionGroup] = [], guideStrokes: [GuideStroke] = [],
          animationGroups: [AnimationGroup] = [], brushTableFileName: String? = nil,
@@ -114,6 +114,8 @@ struct ProjectManifest: Codable {
         isBackgroundVisible = try container.decodeIfPresent(Bool.self, forKey: .isBackgroundVisible) ?? true
         selectedBrush = try container.decodeIfPresent(Brush.self, forKey: .selectedBrush) ?? BrushLibrary.roundSoft
         customBrushes = try container.decodeIfPresent([Brush].self, forKey: .customBrushes) ?? []
+        // A package with no mode key was saved when Erase was the only eraser, so it opens on Erase
+        // and not on `VectorEraserMode.default` — that is what a *new* document starts on.
         vectorEraserMode = try container.decodeIfPresent(VectorEraserMode.self, forKey: .vectorEraserMode) ?? .erase
         universalEraser = try container.decodeIfPresent(Bool.self, forKey: .universalEraser) ?? false
         folders = try container.decodeIfPresent([FolderManifest].self, forKey: .folders) ?? []

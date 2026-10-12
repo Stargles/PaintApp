@@ -55,7 +55,7 @@ struct CanvasView: UIViewRepresentable {
         // Light-grey backing for the drawable padding margin: shows through wherever the paper is
         // inset by `canvasPadding`. Never seen at padding 0.
         let paddingBackdrop = UIView()
-        paddingBackdrop.backgroundColor = PaddingCoverView.tint
+        paddingBackdrop.backgroundColor = PaddingCoverView.marginGrey
         paddingBackdrop.isUserInteractionEnabled = false
         paddingBackdrop.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(paddingBackdrop)
@@ -66,8 +66,8 @@ struct CanvasView: UIViewRepresentable {
         paper.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(paper)
 
-        // TODO (133): the same margin drawn over the ink instead of under it. Added here and lifted by
-        // `updatePaddingCover` every pass, because the layer hosts are added after it.
+        // TODO (133): the same margin, veiled, drawn over the ink instead of under it. Added here and
+        // lifted by `updatePaddingCover` every pass, because the layer hosts are added after it.
         let paddingCover = PaddingCoverView()
         paddingCover.isHidden = true
         paddingCover.translatesAutoresizingMaskIntoConstraints = false
@@ -2059,7 +2059,7 @@ struct CanvasView: UIViewRepresentable {
             let placement = CGAffineTransform(scaleX: canvasSize.width / window.width,
                                               y: canvasSize.height / window.height)
             let budget = canvasManager.frameBaker.budgetBytes
-            let backdrop = PaddingCoverView.tint
+            let backdrop = PaddingCoverView.marginGrey
             return WindowSurfaceView.Frame(window: window, placement: placement, draw: { cg in
                 guard let image = PlaybackTrace.span(.heldFrameComposite, {
                     recipe.composite(budgetBytes: budget)

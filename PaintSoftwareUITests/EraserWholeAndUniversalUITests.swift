@@ -7,26 +7,6 @@ import XCTest
 /// `VectorEraserCommitLogicTests`; nothing there can see a segmented control or a switch.
 final class EraserWholeAndUniversalUITests: PaintUITestCase {
 
-    private func openEraserPanel(_ app: XCUIApplication) {
-        openBrushLibrary(app, tool: "eraser")
-    }
-
-    private func closeEraserPanel(_ app: XCUIApplication) {
-        app.buttons["toolbar.eraserButton"].tap()
-        XCTAssertTrue(app.scrollViews["eraserPanel.groupList"].waitForNonExistence(timeout: 5),
-                      "The eraser panel should close, leaving the canvas unobstructed")
-    }
-
-    /// Taps the named segment of the vector-mode picker in the (open) eraser panel.
-    private func pickMode(_ app: XCUIApplication, _ segment: String) {
-        let picker = app.segmentedControls["eraserPanel.vectorModePicker"]
-        XCTAssertTrue(picker.waitForExistence(timeout: 5), "The vector mode picker should be present on a vector layer")
-        let button = picker.buttons[segment]
-        XCTAssertTrue(button.waitForExistence(timeout: 5), "The picker should offer a '\(segment)' segment")
-        button.tap()
-        XCTAssertTrue(button.isSelected, "Tapping '\(segment)' should select it")
-    }
-
     // MARK: - (80)
 
     /// Two lines on a fresh vector layer; Whole picked; a short drag across one of them. That line is
@@ -43,9 +23,7 @@ final class EraserWholeAndUniversalUITests: PaintUITestCase {
         XCTAssertEqual(vectorMarkerViaPanel(app, layerIndex: 0)?.strokes, 2, "Setup: two lines on the new document's vector layer")
         XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.25, dy: 0.4)), "Setup: the upper line's far end is on screen")
 
-        openEraserPanel(app)
-        pickMode(app, "Whole")
-        closeEraserPanel(app)
+        selectVectorEraserMode(app, "Whole")
         // Across the upper line only: from well above it to just short of the lower one.
         drawLine(on: canvas, from: CGVector(dx: 0.5, dy: 0.33), to: CGVector(dx: 0.5, dy: 0.47))
 
@@ -77,7 +55,7 @@ final class EraserWholeAndUniversalUITests: PaintUITestCase {
         XCTAssertEqual(vectorMarkerViaPanel(app, layerIndex: 1)?.strokes, 1, "Setup: one line on the second, active, layer")
 
         openEraserPanel(app)
-        pickMode(app, "Cut")
+        pickVectorEraserMode(app, "Cut")
         let toggle = app.switches["eraserPanel.universalToggle"]
         XCTAssertTrue(toggle.waitForExistence(timeout: 5), "The eraser panel carries the Universal switch on a vector layer")
         XCTAssertEqual(toggle.value as? String, "0", "Off by default")

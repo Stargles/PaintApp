@@ -145,8 +145,9 @@ struct SettingsMenu: View {
             .tint(.blue)
             .accessibilityIdentifier("settings.paddingOnTopToggle")
 
-            Text("The padding covers anything drawn into it, so the canvas edge always shows. Turn it "
-                 + "off to see ink you drew in the margin.")
+            Text("The padding is drawn over your ink as a translucent grey, so the canvas edge always "
+                 + "shows and ink drawn into the margin shows through it. Turn it off to put the "
+                 + "padding under the ink instead.")
                 .font(.caption)
                 .foregroundColor(.gray)
                 .fixedSize(horizontal: false, vertical: true)

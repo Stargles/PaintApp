@@ -311,8 +311,9 @@ final class VectorLayerContentUITests: PaintUITestCase {
                        "A shape on a vector layer must not be stamped into the raster tier")
         app.buttons["toolbar.layersButton"].tap()
 
-        // Erase straight down through the middle of the shape, in the default mode (Mode 1).
-        app.buttons["toolbar.eraserButton"].tap()
+        // Erase straight down through the middle of the shape, in Mode 1 — picked, since a new
+        // document's eraser is on Cut.
+        selectVectorEraserMode(app, "Erase")
         drawLine(on: canvas, from: CGVector(dx: 0.5, dy: 0.42), to: CGVector(dx: 0.5, dy: 0.58))
 
         app.buttons["toolbar.layersButton"].tap()

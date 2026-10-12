@@ -1,8 +1,10 @@
 import UIKit
 
 /// TODO (133) — the canvas padding drawn **over** the artwork's ink: the whole canvas buffer minus
-/// the artwork rect, filled with the margin's grey. With it up, anything drawn into the margin is
-/// covered, so the artwork's edge is the edge of the grey however the strokes cross it.
+/// the artwork rect, filled with a translucent veil of the margin's grey (TODO (180)). With it up,
+/// ink drawn into the margin shows through, dimmed, and the artwork's edge is the edge of the grey
+/// however the strokes cross it. Over an empty margin the veil is grey over the same grey, so the
+/// margin reads exactly as it does with the cover down.
 ///
 /// A `CAShapeLayer` rather than a view with a `draw(_:)` or four edge strips: the canvas can be
 /// 4096² and a drawn view would carry a backing store of that size to paint four thin bars, and a
@@ -10,9 +12,18 @@ import UIKit
 /// the margin through it, exactly as they do with it down.
 final class PaddingCoverView: UIView {
 
-    /// The margin's grey — one definition for this and for the backdrop under the paper
-    /// (`CanvasView.makeUIView`), so the margin reads the same whichever of the two is showing it.
-    static let tint = UIColor(white: 0.85, alpha: 1)
+    /// The margin's grey, **opaque**: the backdrop under the paper (`CanvasView.makeUIView`) and the
+    /// backdrop a held frame is drawn on (`CanvasView.Coordinator.mintHeldFrame`), which replaces
+    /// the canvas and so must not let what is behind it show.
+    static let marginGrey = UIColor(white: 0.85, alpha: 1)
+
+    /// How much of the ink under the cover is hidden by it. Half: the ink is plainly there, and the
+    /// margin is plainly not artwork.
+    static let veilOpacity: CGFloat = 0.5
+
+    /// The cover's own colour — `marginGrey` at `veilOpacity`, so over the backdrop's `marginGrey` an
+    /// empty margin is the same grey with the cover up or down.
+    static let veil = marginGrey.withAlphaComponent(veilOpacity)
 
     override class var layerClass: AnyClass { CAShapeLayer.self }
 
@@ -27,7 +38,7 @@ final class PaddingCoverView: UIView {
         super.init(frame: frame)
         isUserInteractionEnabled = false
         backgroundColor = .clear
-        shapeLayer.fillColor = Self.tint.cgColor
+        shapeLayer.fillColor = Self.veil.cgColor
         shapeLayer.fillRule = .evenOdd
     }
 

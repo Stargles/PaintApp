@@ -42,9 +42,9 @@ final class StrokeCanvasView: CanvasPlaneView {
         didSet { stabilizer.stabilization = brush.stroke.stabilization }
     }
     var isEraser: Bool = false
-    /// Which of the three vector-eraser behaviours applies. Only consulted when `isEraser` is
+    /// Which of the vector-eraser behaviours applies. Only consulted when `isEraser` is
     /// true and this view drives a `vectorCanvas`; a raster layer's eraser has no modes.
-    var vectorEraserMode: VectorEraserMode = .erase
+    var vectorEraserMode: VectorEraserMode = .default
     /// `CanvasManager.universalEraser`, pushed down beside the mode: the lift then hands the gesture
     /// to `CanvasManager.commitUniversalErase` instead of this view's own canvas alone.
     var universalEraser = false

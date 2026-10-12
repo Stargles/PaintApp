@@ -1377,7 +1377,7 @@ final class CanvasManager: ObservableObject {
     @Published var eraserSize: CGFloat = 20
     @Published var eraserOpacity: Double = 1.0
 
-    /// Which of the three vector-eraser behaviours (see `VectorEraserMode` in Tool.swift) the eraser
+    /// Which of the vector-eraser behaviours (see `VectorEraserMode` in Tool.swift) the eraser
     /// uses. Only consulted while the active layer is `.vector`: on a raster layer the eraser is a
     /// plain `.destinationOut` brush, so `EraserSettingsPanel` hides its picker there entirely.
     ///
@@ -1387,8 +1387,8 @@ final class CanvasManager: ObservableObject {
     /// mode you're erasing in. Also what `VectorEraserMode.isStabilized` reads, so
     /// `StrokeCanvasView` can decide per-mode whether to smooth the input path.
     ///
-    /// Defaults to `.erase`, the mode that behaves like the raster eraser users already know.
-    @Published var vectorEraserMode: VectorEraserMode = .erase
+    /// A new document starts on `VectorEraserMode.default`.
+    @Published var vectorEraserMode: VectorEraserMode = .default
 
     /// **The universal eraser** — TODO (82). On, an eraser gesture on a vector layer is committed to
     /// *every* visible vector layer's shown cel that it erases something on, as one undo step

@@ -162,8 +162,8 @@ final class FillMendUITests: PaintUITestCase {
         let padding = app.sliders["settings.paddingSlider"]
         XCTAssertTrue(padding.waitForExistence(timeout: 5))
         padding.adjust(toNormalizedSliderPosition: 0.2)
-        // The padding is drawn over the artwork's ink by default (TODO (133)), which would hide the very
-        // band this test reads — so look at it with the cover off.
+        // The padding is drawn over the artwork's ink by default (TODO (133)), veiled (TODO (180)), which
+        // would dim the very band this test reads — so look at it with the cover off.
         let onTop = app.switches["settings.paddingOnTopToggle"]
         XCTAssertTrue(onTop.waitForExistence(timeout: 5))
         onTop.tap()
