@@ -141,6 +141,26 @@ that 2 s window (max 182 ms, all `sourcePhase`).
 
 - [ ] Cold-start XCUITest that samples the region mid-drag and fails on a flicker; root cause fixed in the seam.
 
+## (184) The lasso takes taps as corners and closes on its start node
+
+**Status** — asked and ruled 2026-10-12; batched with (182), the other Select change.
+
+*"The user lasso selects, and a node spawns in the place where they first put down their pen. When the
+node is clicked again it completes the selection, and the user can move on to the next selection which
+gets booleaned. Thus, if the user taps instead of draws, the select will automatically jump to the new
+location, forming a polygon like shape. For example if the user taps on the 4 edges of a square, the
+select forms a square. The previous drawing behaviour should also work"*
+
+**Ruled**: a drawn stroke that ends back on the start node **closes on lift**, as today; lifted anywhere
+else the lasso **stays open** — a tap adds a straight-edged corner, a new stroke joins from the open end
+with a straight edge to where the pen lands, and a tap on the start node closes it. The closed loop then
+composes onto the selection exactly as a loop does today (`finishSelection`, add/subtract). Orchestrator
+defaults, the owner may overrule: undo while open removes the last corner or drawn run; switching tool,
+mode or tapping the Select icon abandons an open lasso; it applies to the Freehand mode only.
+
+- [ ] Open-lasso state with its start node drawn; taps as corners; strokes joined; node tap closes.
+- [ ] Driven: four taps and a node tap make a square selection; a one-stroke loop still closes on lift.
+
 ## (35) Advanced masks — colour masks beside the alpha mask
 
 **Status** — promoted from "Later" 2026-10-12; the owner will describe what it is meant to be once told
