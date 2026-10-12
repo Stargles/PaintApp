@@ -63,6 +63,21 @@ overlap — the rule the Move bar already follows (the dock's `zIndex` while a p
 
 ---
 
+## (171) The PaintStreamer does not open from its icon until the laptop restarts
+
+**Status** — reported 2026-10-11. The owner: *"the paintstreamer app right now does not load up if you
+click on the icon on my windows pc right now. This issue has been here for a while, and corrects after
+the computer is restarted. Figure out what is wrong and fix it. You should be able to ssh via
+tailscale."* The laptop is `desktop-cbr0fl6` (CLAUDE.md "The Windows laptop"); the streamer is
+`Streamer.Tray.exe` with a named-mutex `SingleInstanceGuard` (TODO (99)). HANDOFF also notes
+`f84776f`'s C# half was merged uncompiled and never deployed.
+
+- [ ] Root cause, found on the laptop (processes, the mutex, the event log, the streamer's own log).
+- [ ] A click on the icon always opens the streamer (or brings the running one forward) — never a
+      silent nothing — without a restart.
+
+---
+
 ## (27) Stream the computer's screen as a layer
 
 **Status** — briefed 2026-09-13, designed the same day ([STREAM.md](docs/STREAM.md)), and **built through
