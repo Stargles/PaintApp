@@ -91,8 +91,8 @@ switch ($Command) {
         Start-Sleep -Seconds 1
         $lingering = Get-Process -Name "Streamer.Tray" -ErrorAction SilentlyContinue
         if ($lingering) {
-            Write-Host "Process outlived Stop-ScheduledTask; killing directly."
-            $lingering | Stop-Process -Force
+            Write-Host "Process outlived Stop-ScheduledTask; killing it and its capture pipeline."
+            $lingering | ForEach-Object { taskkill /F /T /PID $_.Id | Out-Null }
         }
         Show-Status
     }
@@ -145,7 +145,9 @@ switch ($Command) {
         # not copy ... Streamer.Tray.dll ... Exceeded retry count of 10").
         Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
         Start-Sleep -Seconds 1
-        Get-Process -Name "Streamer.Tray" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+        # /T: an instance the shortcut started is not in the task, and killing only it would leave
+        # its gst-launch capturing the screen with nobody to read it.
+        Get-Process -Name "Streamer.Tray" -ErrorAction SilentlyContinue | ForEach-Object { taskkill /F /T /PID $_.Id | Out-Null }
         Start-Sleep -Milliseconds 500
 
         Write-Host "=== deploy: re-publishing from $SourceDir and restarting the task ==="

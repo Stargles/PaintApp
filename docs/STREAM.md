@@ -229,7 +229,7 @@ streamer/
                      place the LAN admission rule is spelled out (§4.3)
     Discovery/       TODO (98): MdnsAdvertiser — a hand-rolled `_paintstream._tcp` responder, no
                      NuGet dependency (§4.3)
-  Streamer.Tray/     WPF — tray icon and one window (4.4); SingleInstanceGuard (TODO (99))
+  Streamer.Tray/     WPF — tray icon and one window (4.4); SingleInstanceGuard (TODO (99), (171))
   Streamer.Tests/    xunit — framing round trips, AU splitting, pipeline strings, file transfer
 ```
 
@@ -288,9 +288,19 @@ with an Interactive logon principal, but **carries no trigger**: nothing starts 
 schedule. It exists purely as `tools/windows/streamer.ps1 start|stop|status|log`'s remote-start
 mechanism — `Start-ScheduledTask` is how a non-interactive SSH connection reaches into kevin's
 already-open session 1, the same reason the task existed at all. The shortcut and the task launch the
-identical exe with no arguments, so `Streamer.Tray`'s own named-mutex guard
-(`SingleInstanceGuard`, `App.xaml.cs`) is what stops a double-click from starting a second instance
-while the task's is already running, rather than the two mechanisms being kept apart by convention.
+identical exe with no arguments, so `Streamer.Tray`'s own guard (`SingleInstanceGuard`,
+`App.xaml.cs`) is what stops a double-click from starting a second instance while another is
+running, rather than the two mechanisms being kept apart by convention. **A second launch is never
+a silent nothing (TODO (171)):** the instance owns a named pipe, created first-instance-only so the
+OS refuses a second owner and the name goes with the process however it ends; the second launch
+connects, the instance shows its window — from the tray, minimized, or both — and answers, and the
+launch exits. An instance that accepts the connection but does not answer within 5 s is hung: the
+pipe names its process, which the launch kills with its capture pipeline and replaces. A launch that
+can reach nothing says so in a message box. The report that found this had the instance healthy for
+nine days, its window minimized then closed to the tray (hidden and still minimized), its tray icon
+in the overflow, and every click of the shortcut logging "already running" and exiting. The task
+starts the same exe, so `streamer-remote.sh start` on a running streamer now brings its window
+forward on kevin's screen instead of doing nothing.
 Log either way: `%LOCALAPPDATA%\PaintStreamer\log.txt`.
 
 `tools/windows/install-streamer.ps1` (run as `PC` over SSH, idempotent — `streamer-remote.sh deploy`

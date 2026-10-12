@@ -34,8 +34,6 @@ expiry), arms a wake 120 s after expiry, and builds with the device destination;
 installs, not this session's manual ones, so its first run after 2026-10-15T03:52Z will rebuild.
 
 **The laptop streamer** has no autostart (TODO (99)); a stopped streamer reads on the iPad as a timeout.
-**`f84776f`'s C# half** (clear a stale pause on connect, idempotent resume) **is merged uncompiled** —
-run `tools/windows/streamer-remote.sh deploy` the next time the laptop is on.
 
 ## What is left
 
