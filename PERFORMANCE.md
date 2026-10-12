@@ -5799,7 +5799,7 @@ Select panel and the gradient panel share, so both are fixed together. The host 
 **window** (`StrokeCanvasView.showHeldEdit`): the base is punched out under it exactly as a vector
 eraser's stroke punches it, and a `WindowSurfaceView` — `StreamSurfaceView`, generalised — draws the
 cel's content in that rectangle off the main thread, into one of two `IOSurface`s the render server maps
-once. A tick therefore allocates nothing and hands Core Animation nothing; the document's version does
+once. A tick therefore allocates no picture and hands Core Animation nothing; the document's version does
 not move, so no bake, pair, onion skin, thumbnail or SwiftUI pass is asked for until the lift.
 
 Three decisions the measurement forced:
