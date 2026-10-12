@@ -15,7 +15,7 @@ namespace Streamer.Tests;
 ///
 /// Observed through the one thing a test can see without a capturable desktop: whether a new
 /// connection tries to start the pipeline. No encoder is probed here, so an attempt to start one
-/// throws — which is the proof it was attempted (StartPipelineLockedAsync's first line). A session
+/// throws — which is the proof it was attempted (CreateGstPipelineAsync's first line). A session
 /// that still held the old pause never reaches that line.
 /// </summary>
 public class StreamerSessionPauseTests

@@ -5,11 +5,23 @@ namespace Streamer.Core;
 
 /// <summary>
 /// Glue (STREAM.md §4.1): current source, pipeline lifecycle, pause when no client.
-/// Owns exactly one <see cref="GstProcess"/> at a time and pushes STATUS/VIDEO to
+/// Owns exactly one <see cref="ICapturePipeline"/> at a time and pushes STATUS/VIDEO to
 /// every registered <see cref="IFrameSink"/> — ProtocolServer's socket today, an
 /// in-process consumer tomorrow (§4.6). Nothing here is a static; a second
 /// StreamerSession in the same process is legal and independent, which is what makes
 /// hosting this inside the paint app later (rather than a second executable) possible.
+///
+/// **Every public transition runs one at a time, in the order it was called.** ProtocolServer raises
+/// its events fire-and-forget from whichever thread read the socket, and the iPad states its pause
+/// wish (`resume`) the instant its HELLO completes — so a connect and a control message arrive within
+/// milliseconds of each other, and a second connection replacing the first adds another. Unserialised,
+/// two of those each stopped "the" pipeline (finding none yet), each built one, and the later
+/// assignment to <c>_pipeline</c> lost the earlier one: a pipeline nothing referenced and nothing could
+/// stop, still capturing, still feeding the sinks. Its access units interleaved with the live
+/// pipeline's — two encoders' P-frames decoded against each other's references, which is the datamosh,
+/// and the decode errors that followed each asked for a keyframe, which restarts the live pipeline and
+/// shows "starting" (TODO 172: 1,115 relaunches in one run, 993 in one hour). With the lock there is
+/// never more than one pipeline, so a stop always finds the one that is running.
 /// </summary>
 public sealed class StreamerSession : IAsyncDisposable
 {
@@ -18,14 +30,16 @@ public sealed class StreamerSession : IAsyncDisposable
     private readonly List<IFrameSink> _sinks = new();
     private readonly object _gate = new();
 
-    private GstProcess? _pipeline;
+    private ICapturePipeline? _pipeline;
+    private readonly Func<CaptureSource, Task<ICapturePipeline>> _createPipeline;
+    private readonly SemaphoreSlim _transition = new(1, 1);
     private CaptureSource? _currentSource;
     private bool _pausedByClient;
     private bool _hasClient;
     // STREAM.md §4.5: set by SetEnvironmentBlockedAsync (SessionLockMonitor, via the tray
     // window's forwarded WM_WTSSESSION_CHANGE / WM_POWERBROADCAST). Distinct from
     // _pausedByClient — this is never client-initiated, so BroadcastStatus never reports
-    // it as "Paused", and StartPipelineLockedAsync refuses to run while it is set
+    // it as "Paused", and RestartPipelineAsync refuses to run while it is set
     // regardless of which caller (connect, resume, source pick) reached it.
     private bool _environmentBlocked;
     private string? _environmentBlockedReason;
@@ -54,10 +68,14 @@ public sealed class StreamerSession : IAsyncDisposable
 
     public (double fps, double kbps) CurrentRate => _rate.Snapshot();
 
-    public StreamerSession(string gstBinDir, Action<string>? log = null)
+    /// <param name="createPipeline">Builds the pipeline for a source. Defaults to the real
+    /// GStreamer one; a test passes a fake to count how many a session lets live.</param>
+    public StreamerSession(string gstBinDir, Action<string>? log = null,
+        Func<CaptureSource, Task<ICapturePipeline>>? createPipeline = null)
     {
         _gstBinDir = gstBinDir;
         _log = log ?? (_ => { });
+        _createPipeline = createPipeline ?? CreateGstPipelineAsync;
     }
 
     public void AddSink(IFrameSink sink)
@@ -72,85 +90,108 @@ public sealed class StreamerSession : IAsyncDisposable
         _log($"StreamerSession: encoder = {Encoder.ElementName} ({Encoder.Reason})");
     }
 
+    /// <summary>Runs one transition with the session to itself. <c>WaitAsync</c> is entered when this is
+    /// called, not when the caller first awaits, so transitions queue in the order they were raised.</summary>
+    private async Task SerializedAsync(Func<Task> transition)
+    {
+        await _transition.WaitAsync().ConfigureAwait(false);
+        try { await transition().ConfigureAwait(false); }
+        finally { _transition.Release(); }
+    }
+
+    /// <summary>A pipeline that has not yet connected has produced nothing, so its first access unit
+    /// is an IDR for whichever client is connected when it arrives: restarting it for a client that
+    /// wants a keyframe only throws that keyframe away.</summary>
+    private bool PipelineIsStarting
+    {
+        get { lock (_gate) return _pipeline is { IsRunning: false }; }
+    }
+
     /// <summary>Called by ProtocolServer.ClientConnected. A new connection is a new session:
     /// a pause is the connection's own (STREAM.md §3), so a pause the previous client asked for —
     /// one that was replaced, or whose socket died while its iPad was locked in the background,
     /// neither of which reaches OnClientDisconnectedAsync in time or at all — is not in force for
-    /// this one. Starts the pipeline and always sends a fresh STATUS to the new client.</summary>
-    public async Task OnClientConnectedAsync()
+    /// this one. Gives the new client a keyframe (a running pipeline is restarted for it; one still
+    /// starting already will) and always sends it a fresh STATUS.</summary>
+    public Task OnClientConnectedAsync() => SerializedAsync(async () =>
     {
         lock (_gate)
         {
             _hasClient = true;
             _pausedByClient = false;
         }
-        if (_currentSource != null)
+        if (_currentSource != null && !PipelineIsStarting)
         {
-            await StartPipelineLockedAsync().ConfigureAwait(false);
+            await RestartPipelineAsync().ConfigureAwait(false);
         }
         BroadcastStatus();
-    }
+    });
 
-    public async Task OnClientDisconnectedAsync()
+    public Task OnClientDisconnectedAsync() => SerializedAsync(async () =>
     {
         lock (_gate) _hasClient = false;
         await StopPipelineAsync().ConfigureAwait(false);
-    }
+    });
 
-    public async Task HandleControlAsync(ControlMessage control)
+    public Task HandleControlAsync(ControlMessage control) => SerializedAsync(async () =>
     {
+        _log($"StreamerSession: client asked for '{control.Cmd}'");
         switch (control.Cmd)
         {
             case ControlMessage.Pause:
-                _pausedByClient = true;
+                lock (_gate) _pausedByClient = true;
                 await StopPipelineAsync().ConfigureAwait(false);
                 BroadcastStatus("Paused by client");
                 break;
             case ControlMessage.Resume:
                 // Idempotent: a client states its wish on every connect (STREAM.md §3), and a
-                // pipeline that is already running has nothing to restart.
-                _pausedByClient = false;
-                if (_currentSource != null && !IsStreaming) await StartPipelineLockedAsync().ConfigureAwait(false);
+                // pipeline that exists — running, or still starting — has nothing to restart.
+                lock (_gate) _pausedByClient = false;
+                if (_currentSource != null && !PipelineExists) await RestartPipelineAsync().ConfigureAwait(false);
                 BroadcastStatus();
                 break;
             case ControlMessage.Keyframe:
-                if (_pipeline != null)
-                {
-                    // Kill+relaunch is the cheapest way to force a fresh IDR (matches
-                    // tools/stream/fake-streamer.py's VideoEngine.restart()).
-                    await _pipeline.StopAsync().ConfigureAwait(false);
-                    await _pipeline.StartAsync().ConfigureAwait(false);
-                }
+                // Kill+relaunch is the cheapest way to force a fresh IDR (matches
+                // tools/stream/fake-streamer.py's VideoEngine.restart()) — and a pipeline that
+                // is still starting will deliver one by itself.
+                if (PipelineExists && !PipelineIsStarting) await RestartPipelineAsync().ConfigureAwait(false);
                 BroadcastStatus();
                 break;
             default:
                 _log($"StreamerSession: unrecognized CONTROL cmd '{control.Cmd}', ignored");
                 break;
         }
+    });
+
+    private bool PipelineExists
+    {
+        get { lock (_gate) return _pipeline != null; }
     }
 
     /// <summary>Restarts the pipeline on this source (STREAM.md §4.5: "picking a source
     /// restarts the pipeline and sends STATUS then a keyframe").</summary>
-    public async Task SetSourceAsync(CaptureSource source)
+    public Task SetSourceAsync(CaptureSource source) => SerializedAsync(async () =>
     {
-        lock (_gate) { _currentSource = source; _pausedByClient = false; }
-        if (_hasClient)
+        bool hasClient;
+        lock (_gate) { _currentSource = source; _pausedByClient = false; hasClient = _hasClient; }
+        if (hasClient)
         {
-            await StartPipelineLockedAsync().ConfigureAwait(false);
+            await RestartPipelineAsync().ConfigureAwait(false);
         }
         BroadcastStatus();
-    }
+    });
 
-    private async Task StartPipelineLockedAsync()
+    /// <summary>Replaces the pipeline with a fresh one on the current source. Only called inside a
+    /// transition: the stop-then-build-then-publish below is not safe against another one.</summary>
+    private async Task RestartPipelineAsync()
     {
-        if (Encoder == null) throw new InvalidOperationException("ProbeEncoderAsync must run before streaming");
         CaptureSource source;
         lock (_gate)
         {
             if (_currentSource == null) return;
             // The one choke point: every caller (OnClientConnectedAsync, HandleControlAsync's
-            // Resume, SetSourceAsync, SetEnvironmentBlockedAsync's own unblock branch) funnels
-            // through here, so a single guard covers all of them rather than repeating the
+            // Resume and Keyframe, SetSourceAsync, SetEnvironmentBlockedAsync's own unblock branch)
+            // funnels through here, so a single guard covers all of them rather than repeating the
             // check at each call site. SetEnvironmentBlockedAsync clears the flag before
             // calling this on unblock, so that branch is unaffected.
             if (_environmentBlocked) return;
@@ -158,11 +199,7 @@ public sealed class StreamerSession : IAsyncDisposable
         }
         await StopPipelineAsync().ConfigureAwait(false);
 
-        bool downloadConvert = await ResolveConvertShapeAsync(source).ConfigureAwait(false);
-        var pipeline = new GstProcess(
-            Path.Combine(_gstBinDir, "gst-launch-1.0.exe"),
-            port => PipelineBuilder.BuildCaptureArgs(source, Encoder.ElementName, port, downloadAndConvert: downloadConvert),
-            _log);
+        var pipeline = await _createPipeline(source).ConfigureAwait(false);
         pipeline.AccessUnitReady += (_, e) =>
         {
             _rate.Note(e.Unit.Bytes.Length);
@@ -183,6 +220,16 @@ public sealed class StreamerSession : IAsyncDisposable
         // stayed "live" while the physical display went black underneath it.
         NativeMethods.SetThreadExecutionState(
             NativeMethods.ES_CONTINUOUS | NativeMethods.ES_SYSTEM_REQUIRED | NativeMethods.ES_DISPLAY_REQUIRED);
+    }
+
+    private async Task<ICapturePipeline> CreateGstPipelineAsync(CaptureSource source)
+    {
+        if (Encoder == null) throw new InvalidOperationException("ProbeEncoderAsync must run before streaming");
+        bool downloadConvert = await ResolveConvertShapeAsync(source).ConfigureAwait(false);
+        return new GstProcess(
+            Path.Combine(_gstBinDir, "gst-launch-1.0.exe"),
+            port => PipelineBuilder.BuildCaptureArgs(source, Encoder.ElementName, port, downloadAndConvert: downloadConvert),
+            _log);
     }
 
     /// <summary>
@@ -270,7 +317,7 @@ public sealed class StreamerSession : IAsyncDisposable
     /// a fresh connect would, but only if a client is actually present and not itself
     /// paused — an unattended laptop unlocking with nobody watching should not spin up an
     /// encoder no one receives.</summary>
-    public async Task SetEnvironmentBlockedAsync(bool blocked, string? reason)
+    public Task SetEnvironmentBlockedAsync(bool blocked, string? reason) => SerializedAsync(async () =>
     {
         lock (_gate)
         {
@@ -290,24 +337,23 @@ public sealed class StreamerSession : IAsyncDisposable
             lock (_gate) { hasClient = _hasClient; pausedByClient = _pausedByClient; source = _currentSource; }
             // Mirrors OnClientConnectedAsync's own "only if a source is actually picked"
             // guard — without it, unlocking with a client connected but no source chosen
-            // yet would call StartPipelineLockedAsync while Encoder might still be null
-            // (that method's very first line throws in that case; it is guarded by
-            // construction order everywhere else it's called from, and this is the one
-            // call site that did not, until it was checked here).
+            // yet would build a pipeline while Encoder might still be null (which throws; it is
+            // guarded by construction order everywhere else it's called from, and this is the
+            // one call site that did not, until it was checked here).
             if (hasClient && !pausedByClient && source != null)
             {
-                await StartPipelineLockedAsync().ConfigureAwait(false);
+                await RestartPipelineAsync().ConfigureAwait(false);
             }
             BroadcastStatus();
         }
-    }
+    });
 
     private async Task StopPipelineAsync()
     {
-        GstProcess? old;
+        ICapturePipeline? old;
         lock (_gate) { old = _pipeline; _pipeline = null; }
         if (old != null) await old.DisposeAsync().ConfigureAwait(false);
-        // Release the keep-awake request set in StartPipelineLockedAsync -- ES_CONTINUOUS
+        // Release the keep-awake request set in RestartPipelineAsync -- ES_CONTINUOUS
         // alone (no ES_SYSTEM_REQUIRED / ES_DISPLAY_REQUIRED) clears this thread's own
         // prior request without touching any other process's. Safe to call even if no
         // pipeline was actually running (pause with nothing picked, etc).
@@ -362,7 +408,7 @@ public sealed class StreamerSession : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        await StopPipelineAsync().ConfigureAwait(false);
+        await SerializedAsync(StopPipelineAsync).ConfigureAwait(false);
     }
 
     /// <summary>Parses "monitor:0" / "window:12345" — the --stream CLI switch and

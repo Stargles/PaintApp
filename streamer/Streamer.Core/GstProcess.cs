@@ -20,7 +20,7 @@ public sealed class AccessUnitEventArgs : EventArgs
 /// One GstProcess instance is one running pipeline; StreamerSession replaces it wholesale
 /// on a source or encoder change rather than trying to reconfigure gst-launch in place.
 /// </summary>
-public sealed class GstProcess : IAsyncDisposable
+public sealed class GstProcess : ICapturePipeline
 {
     private static readonly TimeSpan[] RestartBackoff =
     {
@@ -46,7 +46,8 @@ public sealed class GstProcess : IAsyncDisposable
     // convert-shape probe or first-launch negotiation may still be running).
     public event EventHandler? Started;
 
-    public bool IsRunning { get; private set; }
+    private volatile bool _isRunning;
+    public bool IsRunning => _isRunning;
 
     public GstProcess(string gstLaunchExe, Func<int, string> buildArgs, Action<string>? log = null)
     {
@@ -75,7 +76,7 @@ public sealed class GstProcess : IAsyncDisposable
         KillProcessQuiet();
         _listener?.Stop();
         _listener = null;
-        IsRunning = false;
+        _isRunning = false;
     }
 
     private async Task RunLoopAsync(CancellationToken ct)
@@ -99,7 +100,7 @@ public sealed class GstProcess : IAsyncDisposable
 
             if (!_wantRunning || ct.IsCancellationRequested) break;
 
-            IsRunning = false;
+            _isRunning = false;
             UnexpectedExit?.Invoke(this, "The capture pipeline exited unexpectedly");
             var wait = RestartBackoff[Math.Min(attempt, RestartBackoff.Length - 1)];
             attempt++;
@@ -168,7 +169,7 @@ public sealed class GstProcess : IAsyncDisposable
         }
 
         using TcpClient client = await acceptTask.ConfigureAwait(false);
-        IsRunning = true;
+        _isRunning = true;
         var startedAt = DateTime.UtcNow;
         _log("GstProcess: pipeline connected, streaming");
         Started?.Invoke(this, EventArgs.Empty);

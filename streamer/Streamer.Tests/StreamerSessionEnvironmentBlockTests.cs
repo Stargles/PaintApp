@@ -8,7 +8,7 @@ namespace Streamer.Tests;
 /// STREAM.md §4.5: StreamerSession.SetEnvironmentBlockedAsync, the one method a
 /// SessionLockMonitor.Changed event drives. Covers everything reachable without a real
 /// GstProcess — no test here calls ProbeEncoderAsync or SetSourceAsync, so _currentSource
-/// stays null and StartPipelineLockedAsync's first line (which throws if Encoder is still
+/// stays null and CreateGstPipelineAsync's first line (which throws if Encoder is still
 /// null) is never actually exercised; the case that matters, "does a call path reach that
 /// throw when it should not", is what RegressionUnblockingWithAConnectedClientButNoSourceDoesNotThrow
 /// pins. A real pipeline actually starting and reaching streaming:true is confirmed by
@@ -65,13 +65,13 @@ public class StreamerSessionEnvironmentBlockTests
     }
 
     /// <summary>
-    /// StartPipelineLockedAsync's very first line throws InvalidOperationException if
+    /// CreateGstPipelineAsync's very first line throws InvalidOperationException if
     /// Encoder is still null (ProbeEncoderAsync must run first) — every existing caller
-    /// (OnClientConnectedAsync, HandleControlAsync's Resume, SetSourceAsync) only reaches
+    /// (OnClientConnectedAsync, HandleControlAsync's Resume, SetSourceAsync) only reach
     /// that method when _currentSource is already non-null, so the throw cannot fire from
     /// them in practice. SetEnvironmentBlockedAsync's unblock branch did not have that
     /// same guard when first written — a client connecting while locked, then the laptop
-    /// unlocking with no source ever picked, would have called StartPipelineLockedAsync
+    /// unlocking with no source ever picked, would have called CreateGstPipelineAsync
     /// with Encoder still null and crashed the unlock handler. Fixed by checking
     /// `source != null` alongside `hasClient`/`!pausedByClient`, mirroring
     /// OnClientConnectedAsync's own guard; this test is what would have caught it.

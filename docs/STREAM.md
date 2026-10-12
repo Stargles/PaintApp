@@ -380,7 +380,7 @@ started-then-stopped. Unlocking was not exercised live — the laptop was locked
 and the rule is never to unlock it — so "unlock restarts the pipeline" is pinned instead by
 `StreamerSessionEnvironmentBlockTests.cs` and `SessionLockMonitorTests.cs`/`SessionLockPollerTests.cs`
 (Streamer.Tests), including a regression test for a bug the first version of the unblock path had: it
-could reach `StartPipelineLockedAsync` — whose first line throws if the encoder has not been probed
+could reach `CreateGstPipelineAsync` — whose first line throws if the encoder has not been probed
 yet — for a client that connected before any source was ever picked, a path every other caller of that
 method already guarded against and this one, until fixed, did not.
 

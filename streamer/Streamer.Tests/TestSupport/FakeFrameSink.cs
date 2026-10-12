@@ -6,7 +6,8 @@ namespace Streamer.Tests.TestSupport;
 /// <summary>
 /// A no-socket stand-in for <see cref="IFrameSink"/>, same shape as
 /// <see cref="FakeFileTransport"/>: captures every STATUS StreamerSession broadcasts so a
-/// test can assert on `streaming`/`reason` without a real ProtocolServer connection.
+/// test can assert on `streaming`/`reason` — and every VIDEO frame — without a real
+/// ProtocolServer connection.
 /// </summary>
 public sealed class FakeFrameSink : IFrameSink
 {
@@ -16,10 +17,8 @@ public sealed class FakeFrameSink : IFrameSink
 
     public void OnStatus(StatusMessage status) => StatusMessages.Add(status);
 
-    public void OnVideoFrame(bool keyframe, ulong ptsUs, ReadOnlyMemory<byte> accessUnit)
-    {
-        // Not needed by any test using this fake today — StreamerSession's pipeline
-        // never actually starts in those tests (StreamerSessionEnvironmentBlockTests'
-        // doc comment says why), so no VIDEO frame is ever produced to capture.
-    }
+    public List<(bool Keyframe, ulong PtsUs)> VideoFrames { get; } = new();
+
+    public void OnVideoFrame(bool keyframe, ulong ptsUs, ReadOnlyMemory<byte> accessUnit) =>
+        VideoFrames.Add((keyframe, ptsUs));
 }
