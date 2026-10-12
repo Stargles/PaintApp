@@ -161,6 +161,20 @@ mode or tapping the Select icon abandons an open lasso; it applies to the Freeha
 - [ ] Open-lasso state with its start node drawn; taps as corners; strokes joined; node tap closes.
 - [ ] Driven: four taps and a node tap make a square selection; a one-stroke loop still closes on lift.
 
+## (185) The selection stays when switching layers
+
+**Status** — asked 2026-10-12; batched with (182) and (184), the other Select changes.
+
+*"make the select stay when switching layers. Right now it disappears if you switch"*
+
+A selection is stamped with the cel it was made on (`finishSelection`) and is dropped when the active
+layer changes. Orchestrator defaults, the owner may overrule: a **drawn region** (freehand, rectangle,
+wand) stays up and applies to whichever layer is active — Move, Recolour, Clear and the paint clip act on
+the new layer's content inside it; **tapped objects** belong to their layer, so a tap selection still
+clears; switching *frames* keeps today's behaviour (the worker reports what that is).
+
+- [ ] Region selection survives a layer switch and acts on the new layer; driven on the device geometry.
+
 ## (35) Advanced masks — colour masks beside the alpha mask
 
 **Status** — promoted from "Later" 2026-10-12; the owner will describe what it is meant to be once told
