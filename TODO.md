@@ -79,7 +79,14 @@ switches (Subtract, Paint Outside Selection, Keep Stroke Width, Keep Full Precis
 `ElementEditSession`, `WindowSurfaceView`) to every control that still writes the document per tick.
 The assessment's commits 1–4 are merged: `LatestWins`; the live pair, onion skin and eyedropper on it;
 one held slot, `CanvasManager.liveEdit`; and the effect parameter sliders, held, with the whole frame
-composited from the held grade (measured in PERFORMANCE.md §30). Commits 5–10 wait for that to be read.
+composited from the held grade (measured in PERFORMANCE.md §30). §30 read 2026-10-12: 2048×1024 keeps up
+with every tick; 4096² previews ~1/s at full detail. Commits 5–10 of
+`~/PaintWork/design/s48-179-throttle-assessment.md` §5 are next.
+
+**Ruled 2026-10-12, on §30**: *lower detail only on big scenes* — above about 4 million pixels (twice the
+owner's usual 2048×1024) a drag preview is drawn at half detail while the finger is down and full detail
+at the lift; at or below it, full detail. This is a drag-only exception to RENDER.md §2.12 ("the knob is
+the truth"), made by the owner; the threshold is one named constant.
 
 The owner, asked whether the remaining per-tick sliders (layer Opacity, effect parameters, mask tuning,
 the text panel) should get (173)'s fix: *"for all of them, cant there be a system where it just slows
@@ -100,7 +107,10 @@ why: pictures handed to Core Animation faster than the render server frees them)
       and its size. Built if it is one clean seam; brought to the owner if it means a renderer rewrite.
 - [x] Inventory every control that writes the document per tick (incl. HANDOFF's "ruled to wait" grade
       sliders, grade graph nodes and the Duplicate Offset box, which this ruling supersedes).
-- [ ] One held-value + latest-wins preview seam they all use; no per-control copies.
+- [ ] One held-value + latest-wins preview seam they all use; no per-control copies — commits 1–4 merged
+      (`1a715ec`..`0f09447`); 5–10 (whole-effect editors, opacity, mask tuning, shape/text, interpolation,
+      fill fold) to go.
+- [ ] Half-detail drag preview above the size threshold.
 - [ ] Measured with `PlaybackProbe` before/after, as §29 was.
 
 ## (180) Padding On Top is translucent
@@ -159,7 +169,10 @@ without the wait, `EffectSliderLiveUITests`). The owner's iPad is the confirmati
 1,468 ms of main-thread busy is not the held edit's tick (`-probeMode recolour` at 2668×1644 on an iPad 9
 simulator: 79 ms over 34 ticks) — INFERRED to be the colour picker's own redraw, which nothing times.
 
-- [ ] Cold-start XCUITest that samples the region mid-drag and fails on a flicker; root cause fixed in the seam.
+- [x] Cold-start XCUITest that samples the region mid-drag and fails on a flicker; root cause fixed in the seam.
+- [ ] The owner confirms on the iPad.
+- [ ] The colour picker's own redraw during a drag measured and, if it is the ~1.4 s, fixed (a separate
+      worker — not the held edit's code).
 
 ## (184) The lasso takes taps as corners and closes on its start node
 
