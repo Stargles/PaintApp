@@ -90,6 +90,49 @@ enum UITestSeeds {
         FrameBaker.compositeDelay = TimeInterval(millis) / 1000
     }
 
+    /// **Makes a surface's draw take as long as it does on the owner's iPad** —
+    /// `-uiTestSlowWindowDrawMillis <n>`, armed from `PaintApp.init` into `WindowSurfaceView.drawDelay`.
+    ///
+    /// A live element edit's window over a fill on the owner's 2668×1644 canvas takes hundreds of
+    /// milliseconds to draw on the iPad 9 and a few here, and the hazard `WindowSurfaceView.present`
+    /// waits out — a surface redrawn while the render server is still showing it, which put a frame of
+    /// the punched-out base on screen between ticks (the owner's "lots of flickering", 2026-10-12) — is
+    /// on screen for as long as the draw takes. The sleep is on the surface's own queue, after the
+    /// clear, and nowhere else.
+    ///
+    /// Simulator-only, on `slowVectorRenderDelay`'s rule and for its reason.
+    static func applyWindowDrawDelayIfRequested() {
+        guard ProjectBackupManager.honoursGalleryReset(isSimulator: ProjectBackupManager.isSimulator)
+        else { return }
+        let args = ProcessInfo.processInfo.arguments
+        guard let flag = args.firstIndex(of: "-uiTestSlowWindowDrawMillis"),
+              args.index(after: flag) < args.endIndex,
+              let millis = Int(args[args.index(after: flag)]), millis > 0 else { return }
+        WindowSurfaceView.drawDelay = TimeInterval(millis) / 1000
+    }
+
+    /// **Keeps the main thread busy in the turn a surface's swap lands in, as the iPad 9 does** —
+    /// `-uiTestBusyLandingTurnMillis <n>`, armed from `PaintApp.init` into
+    /// `WindowSurfaceView.landingTurnDelay`.
+    ///
+    /// A swap of a surface's contents reaches the render server when that turn's transaction commits.
+    /// On the owner's iPad 9 the colour picker's own work runs in those turns — the 2026-10-12
+    /// recording reads 1,468 ms of main-thread busy in two seconds of the drag, in bursts of up to
+    /// 182 ms — so the surface just swapped out stays on screen that long; a draw into it in the
+    /// meantime is on screen as it happens. Here the turn is a few milliseconds and the hazard is
+    /// invisible. The wait runs after everything else the landing's block did, before the commit.
+    ///
+    /// Simulator-only, on `slowVectorRenderDelay`'s rule and for its reason.
+    static func applyBusyLandingTurnIfRequested() {
+        guard ProjectBackupManager.honoursGalleryReset(isSimulator: ProjectBackupManager.isSimulator)
+        else { return }
+        let args = ProcessInfo.processInfo.arguments
+        guard let flag = args.firstIndex(of: "-uiTestBusyLandingTurnMillis"),
+              args.index(after: flag) < args.endIndex,
+              let millis = Int(args[args.index(after: flag)]), millis > 0 else { return }
+        WindowSurfaceView.landingTurnDelay = TimeInterval(millis) / 1000
+    }
+
     /// **How long a `CanvasNotice` stays up, when a test needs to read one.**
     ///
     /// `CanvasNotice.duration` is 2.6 s, which is right for an artist and wrong for a harness: a

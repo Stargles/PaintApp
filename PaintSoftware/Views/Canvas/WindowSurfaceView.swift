@@ -41,6 +41,17 @@ final class WindowSurfaceView: UIView {
     /// The draws, on the queue the view was made with — see the class comment.
     private let draws: LatestWins
 
+    /// **How long every draw waits after its clear, on the view's queue** — zero on every ordinary
+    /// launch, and set only by `UITestSeeds.applyWindowDrawDelayIfRequested`
+    /// (`-uiTestSlowWindowDrawMillis`, simulator only), so a test can stage the iPad's draw time. Read
+    /// at the mint, with the rest of the frame's values.
+    static var drawDelay: TimeInterval = 0
+
+    /// **How long the main thread stays busy after a swap, before the turn commits** — zero on every
+    /// ordinary launch, and set only by `UITestSeeds.applyBusyLandingTurnIfRequested`
+    /// (`-uiTestBusyLandingTurnMillis`, simulator only), so a test can stage the iPad's busy turns.
+    static var landingTurnDelay: TimeInterval = 0
+
     /// How many frames have been presented — for tests, which spin the run loop until it moves.
     private(set) var presentedCount = 0
     /// The window the surfaces are sized to, in canvas points; `.null` before the first present.
@@ -92,6 +103,7 @@ final class WindowSurfaceView: UIView {
             self.size(for: window)
             guard self.surfaces.count == 2 else { return nil }
             let target = self.surfaces[self.back]
+            let delay = Self.drawDelay
             return {
                 // **The back surface may still be on screen.** It was the contents until the swap that
                 // put the other one up, and that swap reaches the render server only when the main
@@ -106,6 +118,7 @@ final class WindowSurfaceView: UIView {
                 _ = target.surface.lock(options: [], seed: nil)
                 let cg = target.context
                 cg.clear(CGRect(origin: .zero, size: window.size))
+                if delay > 0 { Thread.sleep(forTimeInterval: delay) }
                 UIGraphicsPushContext(cg)
                 let drawn = draw(cg)
                 UIGraphicsPopContext()
@@ -126,6 +139,14 @@ final class WindowSurfaceView: UIView {
                     self.back = 1 - self.back
                     self.presentedCount += 1
                     finished?(true)
+                    // After everything the landing's block does — `LatestWins` mints the next draw
+                    // once this returns — and before the turn's commit: see `landingTurnDelay`.
+                    if Self.landingTurnDelay > 0 {
+                        let busy = Self.landingTurnDelay
+                        CFRunLoopPerformBlock(CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue) {
+                            Thread.sleep(forTimeInterval: busy)
+                        }
+                    }
                 }
             }
         }

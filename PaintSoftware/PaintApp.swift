@@ -21,6 +21,8 @@ struct PaintApp: App {
         // Inert unless an XCUITest passed `-uiTestSlowBakeMillis`, and simulator-only; before the
         // first document's baker exists, which reads it at every mint.
         UITestSeeds.applyBakeDelayIfRequested()
+        UITestSeeds.applyWindowDrawDelayIfRequested()
+        UITestSeeds.applyBusyLandingTurnIfRequested()
         // Inert unless an XCUITest passed `-uiTestSeedColorHistory`: a full Recent strip, which only
         // twenty painted strokes in twenty colours would otherwise fill.
         UITestSeeds.seedColorHistoryIfRequested()
