@@ -10,10 +10,10 @@ import Foundation
 ///
 /// ## The queue reorders, it never discards
 ///
-/// That sentence in §3.6 is aimed at `CanvasView.isSandwichRebuilding`, a single `Bool` slot that
-/// *drops* a rebuild request arriving while one is in flight. The dropped request is simply lost:
-/// the picture is stale and nothing remembers to fix it. So the property is structural here rather
-/// than a comment. There is one container, it is a `Set<Int>`, and the only two things that ever
+/// That sentence in §3.6 was aimed at the live pair's rebuild flag, which it took for a slot that
+/// *drops* a rebuild request arriving while one is in flight (it never did; since TODO (179) it is a
+/// `LatestWins`, which keeps the newest). So the property is structural here rather than a
+/// comment. There is one container, it is a `Set<Int>`, and the only two things that ever
 /// take a frame out of it are `markClean(_:)` — the baker reporting a file on disk — and a document
 /// that got *shorter*, through `frameCount`. There is no capacity, no slot, no overwrite and no
 /// eviction, and `next` is not `mutating`, so asking cannot lose anything either.

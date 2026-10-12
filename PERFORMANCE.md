@@ -195,7 +195,7 @@ still computes `below` and `above` unconditionally even though they are shown on
 is true — item 4b explains why that was measured and left alone. The third composite is gone outright:
 the rest picture is read from the bake (RENDER §3.6), which is also what playback now plays. Every
 playback tick, scrub tick and undo still computes the two halves nobody sees. It runs off-main on
-`sandwichQueue`, so it burns cores rather than freezing the UI — but `isSandwichRebuilding` serialises,
+`sandwichQueue`, so it burns cores rather than freezing the UI — but one rebuild is in flight at a time,
 so a rebuild slower than the frame interval drops frames. A six-layer sandwich rebuild at 2048² costs
 **54.8 ms warm on Metal, 64.7 ms on CoreGraphics** (MEASURED, iPad 9, Release, `Compositor.swift:36`)
 against a 41.6 ms budget at 24 fps. **That figure is a rebuild of three composites and a rebuild is
@@ -1753,7 +1753,7 @@ session starts from a shortlist instead of a survey.
 **Read this first, because it reframes the whole item.** *Composited playback already misses 24 fps
 without any interpolation in the document* — §2 item 5, recorded 2026-08-20: a six-layer sandwich rebuild
 at 2048² is **54.8 ms Metal / 64.7 ms CoreGraphics against a 41.6 ms budget** on the owner's iPad 9 in
-**Release**, and `isSandwichRebuilding` serialises, so a rebuild slower than the frame interval drops
+**Release**, and one rebuild is in flight at a time, so a rebuild slower than the frame interval drops
 frames. In-betweens aggravate a recorded miss; they do not create it. Any plan that only addresses §7's
 +75.7 ms leaves the stated goal unmet.
 

@@ -24,12 +24,11 @@ import SwiftUI
 // so a request that arrives mid-bake waits one iteration rather than evaporating, and `BakeQueue` is
 // structurally incapable of losing a frame in the meantime.
 //
-// This paragraph used to say that behaviour was *not inherited* from `isSandwichRebuilding`, on the
-// grounds that the sandwich's flag loses a declined request outright. **It does not**, and stage 4d
-// checked: `finishSandwichRebuild` ends in `reconcileLayers()`, which re-derives the key from the
-// model and starts the rebuild the guard declined. The two flags are one contract in two places, and
-// the sandwich's is still load-bearing — the halves run on a *serial* queue, so deleting its guard
-// would queue one rebuild per SwiftUI pass and hand a scrub a backlog of pictures nobody will see.
+// The live pair's rebuilds keep the same contract by another shape (`CanvasView.Coordinator
+// .sandwichRebuilds`, a `LatestWins`, TODO (179)): one rebuild in flight, and a request made during it
+// waits, replaced by any newer one, rather than evaporating. It coalesces where this reorders, because
+// the halves are a picture of *now* and the bake is a picture of every frame — the halves run on a
+// *serial* queue, so one rebuild per SwiftUI pass would hand a scrub a backlog nobody will see.
 
 /// The background frame baker: one serial worker that keeps the store in step with the document.
 ///

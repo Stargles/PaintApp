@@ -453,7 +453,8 @@ the model and starts the rebuild the guard declined — the same "waits one iter
 contract `FrameBaker.isBaking` was written to provide, reached by coalescing on the latest key instead of by a
 queue. So the queue reorders and never discards on *both* sides, and always did.
 
-The flag therefore stays, and deleting it is not available. `sandwichQueue` is **serial**: without the guard every
+The flag therefore stays, and deleting it is not available (TODO (179) replaced it with `LatestWins`, the same
+contract made the app's one scheduler). `sandwichQueue` is **serial**: without the guard every
 SwiftUI pass that moves the key queues a rebuild, so a two-second scrub at display rate queues ~120 jobs — each a
 `resolve()` plus two composites, roughly 20 s of `.userInitiated` work for pictures nobody will ever see, starving
 the bake behind it. What was actually wrong was the *claim*, and it is corrected here rather than worked around.

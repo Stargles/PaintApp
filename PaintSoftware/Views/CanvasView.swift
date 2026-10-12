@@ -554,11 +554,12 @@ struct CanvasView: UIViewRepresentable {
         /// The eyedropper's tap. A third `TouchTypePressRecognizer` rather than a third mechanism —
         /// see `setUpGestures`.
         weak var eyedropperTapRecognizer: TouchTypePressRecognizer?
-        /// Guards against a second pick being scheduled while the first is still compositing off the
-        /// main thread. Without it, a double-tap on a 4K canvas queues two full composites and the
-        /// second one's result — taken from the same picture — arrives after the tool has already
-        /// reverted. Read and written on the main actor only.
-        var eyedropperPickInFlight = false
+        /// **The picks, one composite in flight** — on `sandwichQueue`, beside the live pair, so a pick
+        /// and a rebuild are never two canvas-sized composites held at once. A press made while one is
+        /// compositing waits, replaced by any newer press, and is picked when it lands; the tool is
+        /// reverted only once nothing is in flight or waiting (`finishEyedropperIfSettled`), so no pick
+        /// lands after the revert.
+        private let eyedropperPicks = LatestWins(queue: Coordinator.sandwichQueue)
         /// True from the moment the eyedropper's recognizer begins until it ends or is cancelled —
         /// "a touch that came in through the eyedropper is still on the glass". Half of the join in
         /// `finishEyedropperIfSettled`; see `handleEyedropperPress` for what the join is for.
@@ -1005,7 +1006,7 @@ struct CanvasView: UIViewRepresentable {
 
             // **Last, and on every pass, because the counts on that label move without anything
             // else about the canvas changing.** It used to be published only from the presentation's
-            // `didSet`, `startSandwichRebuild` and the two transform paths — so on a document that
+            // `didSet`, `mintSandwichRebuild` and the two transform paths — so on a document that
             // never engages the compositor it was written *once*, and `rasterizes:` then read the
             // same stale number however many frames the artist stepped. An XCUITest comparing it
             // either side of an action would have compared one value with itself and passed
@@ -1183,7 +1184,7 @@ struct CanvasView: UIViewRepresentable {
         // Both are cached, so switching state is an image swap — which is what lets the switch
         // happen on a stroke's first touch without a hitch, and what keeps the compositor off the
         // drawing path entirely (§2, §5.2). The two halves are still built here, by
-        // `startSandwichRebuild`, and deliberately: they are a different product from the bake — cut
+        // `mintSandwichRebuild`, and deliberately: they are a different product from the bake — cut
         // at the active leaf, wanted *now* on the artist's own gesture rather than eventually, and
         // never stored — so they belong on `sandwichQueue` at `.userInitiated` rather than behind a
         // frame queue at `.utility`. What they must share with the bake is not a thread but a
@@ -1404,7 +1405,7 @@ struct CanvasView: UIViewRepresentable {
         private var derivedRenderCount = 0
 
         /// **How many pairs of half-composites this canvas has dispatched** — one per
-        /// `startSandwichRebuild` that got past its guards, so two calls to `Compositor.composite`
+        /// `mintSandwichRebuild` that got past its guards, so two calls to `Compositor.composite`
         /// each (`FrameRecipe.compositeHalves`).
         ///
         /// **Published for `derivedRenderCount`'s reason, and it answers the same shape of question
@@ -1478,8 +1479,8 @@ struct CanvasView: UIViewRepresentable {
         /// `SandwichKey` that has not moved is a `FrameBakeKey` that has not moved.
         private var sandwichFullKey: SandwichKey?
 
-        /// One rebuild of the live picture in flight at a time. See `startSandwichRebuild`.
-        private var isSandwichRebuilding = false
+        /// The rebuilds of the live picture, one in flight at a time — see `requestSandwichRebuild`.
+        private let sandwichRebuilds = LatestWins(queue: Coordinator.sandwichQueue)
         /// True from the first touch of a stroke to its lift. The only input to this whole section
         /// that a *dab* moves, and it moves nothing else: see `makeSandwichKey`.
         private var isSandwichStrokeLive = false
@@ -1571,7 +1572,7 @@ struct CanvasView: UIViewRepresentable {
         /// **A timing stroke is not a mid-stroke, and latching it as one freezes the animation** —
         /// KEYFRAMES.md §7.2, stage 10.
         ///
-        /// The mid-stroke presentation wants the two halves, and `startSandwichRebuild` deliberately
+        /// The mid-stroke presentation wants the two halves, and `mintSandwichRebuild` deliberately
         /// declines to build them while the animation plays (*"a stroke cannot begin while the
         /// animation is playing"*, which stage 10 made false). So a take begun on a document that
         /// already has bakes would find `midStroke` true and no pair held, `updateSandwich`
@@ -1732,8 +1733,7 @@ struct CanvasView: UIViewRepresentable {
             let edit = movingBandsEdit
             let cut = wantedLiveCut(for: edit, tree: tree)
             if let cut {
-                let heldFits = livePicture.map { $0.cut.isSameKind(as: cut) } ?? false
-                if key != livePicture?.key || !heldFits { startSandwichRebuild(for: key) }
+                if liveRebuildIsDue(key: key, cut: cut) { requestSandwichRebuild() }
             } else {
                 livePicture = nil
             }
@@ -2220,17 +2220,29 @@ struct CanvasView: UIViewRepresentable {
             return .committed(canvas, version: canvas.version)
         }
 
-        private func startSandwichRebuild(for key: SandwichKey) {
-            // **Mutual exclusion, not a discard, and the difference is `finishSandwichRebuild`.**
-            // §3.6 rules that the bake queue *"reorders, it never discards"*, and `FrameBaker`
-            // honours that with `isBaking` — a flag every path clears before kicking again. This is
-            // the same contract in the same shape: the far end reconciles, which re-derives the key
-            // from the model and starts the rebuild this call declined, so a request arriving
-            // mid-rebuild waits one iteration rather than evaporating. What it does *not* do is
-            // start a second composite per SwiftUI pass, which on a serial queue during a scrub
-            // would queue a rebuild per display frame and hand the artist a minutes-long backlog of
-            // pictures nobody will see.
-            guard !isSandwichRebuilding else { return }
+        /// **Whether the live picture held is not the one this key and cut want** — a rebuild is due when
+        /// the key has moved, or when the picture held is of the other kind of cut. Asked by the pass that
+        /// requests one, and again by the mint, which may run a rebuild later against a newer pass.
+        private func liveRebuildIsDue(key: SandwichKey, cut: LivePairCut) -> Bool {
+            let heldFits = livePicture.map { $0.cut.isSameKind(as: cut) } ?? false
+            return key != livePicture?.key || !heldFits
+        }
+
+        /// **Asks for the live picture of the key the canvas is on** — through `sandwichRebuilds`, so one
+        /// rebuild is in flight and a request made during it waits, replaced by any newer one, and is
+        /// minted against the model when the rebuild in flight has landed (`LatestWins`). It does *not*
+        /// start a second composite per SwiftUI pass, which on a serial queue during a scrub would queue
+        /// a rebuild per display frame and hand the artist a minutes-long backlog of pictures nobody
+        /// will see; and a request arriving mid-rebuild is not lost either, which §3.6's *"reorders, it
+        /// never discards"* asks of every producer here.
+        private func requestSandwichRebuild() {
+            sandwichRebuilds.request { [weak self] in self?.mintSandwichRebuild() }
+        }
+
+        /// One rebuild, minted on the main actor from the model as it is now — or nil when none is due
+        /// any more: the pass that asked may be several passes old by the time the worker frees.
+        private func mintSandwichRebuild() -> LatestWins.Work? {
+            guard let key = sandwichKey else { return nil }
             // **The halves are a pre-warm for a stroke or an edit, and neither happens while the
             // animation is playing.** `SandwichKey` carries every layer's content version, so every
             // frame flip moves it — which queued *two canvas-sized composites per playback tick* for
@@ -2252,7 +2264,7 @@ struct CanvasView: UIViewRepresentable {
             // raises the pass that warms them, and until then trap 1 keeps the canvas on the picture
             // it already has.
             let edit = movingBandsEdit
-            guard !canvasManager.isPlaying || edit != nil else { return }
+            guard !canvasManager.isPlaying || edit != nil else { return nil }
             // Nil for a stale or non-leaf `activeLayerIndex`, runs that are not spans of this frame's
             // leaves, or a degenerate canvas — it does not fall back to `full`, deliberately, so that
             // a wrong cut is never composited. The canvas keeps showing whatever is cached (at most
@@ -2264,10 +2276,11 @@ struct CanvasView: UIViewRepresentable {
             let mint: LivePictureMint
             if let edit {
                 let runs = canvasManager.liveTransformRuns(edit, atFrame: frame)
-                guard let recipe = canvasManager.makeSandwichRecipe(atFrame: frame, runs: runs) else { return }
+                let cut = LivePairCut.aroundRuns(runs.map { run in run.map { canvasManager.layers[$0].id } })
+                guard liveRebuildIsDue(key: key, cut: cut),
+                      let recipe = canvasManager.makeSandwichRecipe(atFrame: frame, runs: runs) else { return nil }
                 mint = LivePictureMint(
-                    key: key, frame: frame, recipe: recipe,
-                    cut: .aroundRuns(runs.map { run in run.map { canvasManager.layers[$0].id } }),
+                    key: key, frame: frame, recipe: recipe, cut: cut,
                     edit: edit,
                     // On the main actor, from the same model state the recipe just froze — the two have
                     // to describe one moment, or the first update would jump by the difference.
@@ -2275,35 +2288,32 @@ struct CanvasView: UIViewRepresentable {
                     active: [])
             } else {
                 let walk = canvasManager.renderTreeAndPoses(atFrame: frame)
-                guard let host = hostCut(in: walk.tree) else { return }
+                guard let host = hostCut(in: walk.tree), liveRebuildIsDue(key: key, cut: host.cut)
+                else { return nil }
                 let recipe: SandwichRecipe?
                 if case .overHost = host.cut {
                     recipe = canvasManager.makeSandwichRecipe(atFrame: frame, over: host.run)
                 } else {
                     recipe = canvasManager.makeSandwichRecipe(atFrame: frame, runs: [host.run])
                 }
-                guard let recipe else { return }
+                guard let recipe else { return nil }
                 mint = LivePictureMint(
                     key: key, frame: frame, recipe: recipe, cut: host.cut, edit: nil, mintMaps: [],
                     active: host.run.compactMap { liveActivePicture(ofLayerAt: $0, in: walk) })
             }
 
-            isSandwichRebuilding = true
             sandwichRebuildCount += 1
             publishCanvasState()
-            Self.sandwichQueue.async { [weak self] in
+            return {
                 // **The flatten happens here, not on the main actor before the hop** — RENDER.md §3.2.
                 // The picture that lands is the one the recipe named, which is at worst one edit stale
                 // and is exactly what `finishSandwichRebuild`'s key check already tolerates.
                 let rendered = mint.render()
-                Task { @MainActor in
-                    self?.finishSandwichRebuild(mint, rendered)
-                }
+                return { [weak self] in self?.finishSandwichRebuild(mint, rendered) }
             }
         }
 
         private func finishSandwichRebuild(_ mint: LivePictureMint, _ rendered: LivePictureMint.Rendered) {
-            isSandwichRebuilding = false
             // All or none: a half-updated pair would put a `below` from this frame under an `above`
             // from the last one, and a pair whose middle is older than its halves is the flash TODO
             // (145) reported. `composite` returns nil only for a degenerate canvas.
@@ -2328,10 +2338,8 @@ struct CanvasView: UIViewRepresentable {
             }
             // The whole reconciliation rather than only the image swap: this result may be the first
             // one, and the first one is what unblocks blanking the hosts (trap 1 in `updateSandwich`).
-            // It is also what starts the next rebuild when this result was the stale one — the key it
-            // recomputes is the model's current answer, not the one this rebuild was asked for — and
-            // that is the whole of the "a declined request waits one iteration" contract the guard at
-            // the top of `startSandwichRebuild` rests on.
+            // A rebuild this pass asks for — this result was the stale one — waits for the landing to
+            // return and is minted against the model then (`LatestWins`, clause 4).
             reconcileLayers()
         }
 
@@ -3345,21 +3353,15 @@ struct CanvasView: UIViewRepresentable {
         /// in all three symptoms the owner reported, and it is the only renderer here that had no
         /// queue of its own.
         ///
-        /// Serial, `.userInitiated`, and coalescing on the latest key through `isOnionRebuilding` —
-        /// `startSandwichRebuild`'s contract, for its reasons: a scrub moves the key at display rate
-        /// and every job is a skin-sized render nobody will see.
+        /// Serial and `.userInitiated`, coalescing on the latest key through `onionRebuilds` — the live
+        /// pair's contract, for its reasons: a scrub moves the key at display rate and every job is a
+        /// skin-sized render nobody will see.
         private static let onionQueue = DispatchQueue(label: "com.paintapp.CanvasView.onion",
                                                       qos: .userInitiated)
 
-        /// Mutual exclusion with a retry, not a drop: a request that arrives mid-rebuild sets
-        /// `onionRebuildWasDeclined`, and `finishOnionRebuild` re-derives the key and starts it.
-        private var isOnionRebuilding = false
-
-        /// **Whether a pass asked for a ghost while one was being drawn**, and the whole reason the
-        /// far end does not simply re-derive unconditionally. `InterpolationReferenceOnionSkinSource`
-        /// mints a fresh `UIImage` on every call by design, so its key never compares equal — an
-        /// unconditional re-derive there would rebuild forever off a queue nobody was waiting on.
-        private var onionRebuildWasDeclined = false
+        /// The ghost's rebuilds, one in flight: a key asked for mid-rebuild waits, replaced by any newer
+        /// one, and is rendered when the rebuild in flight lands (`LatestWins`).
+        private let onionRebuilds = LatestWins(queue: Coordinator.onionQueue)
 
         /// What a rebuild has been asked for. Compared against the key this pass derives, so a pass
         /// that changes nothing schedules nothing.
@@ -3399,7 +3401,7 @@ struct CanvasView: UIViewRepresentable {
                 onionSkinKeyImages = []
                 onionSkinKeyMask = nil
                 onionRequestedKey = nil
-                onionRebuildWasDeclined = false
+                onionRebuilds.cancel()
                 onionSkinComposite = nil
                 onionSkinClipImage = nil
             }
@@ -3460,8 +3462,8 @@ struct CanvasView: UIViewRepresentable {
                 onionRequestedKey = key
                 onionSkinKeyImages = frames.map(\.image)
                 onionSkinKeyMask = mask
-                startOnionRebuild(for: key, frames: frames, size: size, mask: mask, ink: ink,
-                                  inkOpacity: canvasManager.onionSkinInkOpacity)
+                requestOnionRebuild(for: key, frames: frames, size: size, mask: mask, ink: ink,
+                                    inkOpacity: canvasManager.onionSkinInkOpacity)
             }
 
             applyOnionSkin(to: view, canvasSize: canvasSize)
@@ -3498,21 +3500,18 @@ struct CanvasView: UIViewRepresentable {
         /// `UIImage`s the reduced-source cache already produced, `mask` is the compositor's own
         /// shared coverage, and `ink` is an `OnionSkinInkRequest` — a cel and two sizes — whose
         /// `render()` goes through the same lock-protected store the main-thread spelling used.
-        private func startOnionRebuild(for key: OnionSkinRenderKey, frames: [OnionSkinFrame],
-                                       size: CGSize, mask: CGImage?, ink: OnionSkinInkRequest?,
-                                       inkOpacity: CGFloat) {
-            guard !isOnionRebuilding else {
-                onionRebuildWasDeclined = true
-                return
-            }
-            isOnionRebuilding = true
-            Self.onionQueue.async { [weak self] in
-                let composite = OnionSkinFrame.composite(frames, size: size)
-                let clip = OnionSkinClip.mask(layerMask: mask, subtracting: ink?.render(),
-                                              size: size, opacity: inkOpacity)
-                Task { @MainActor in
-                    PlaybackTrace.span(.renderLanded) {
-                        self?.finishOnionRebuild(key: key, composite: composite, clip: clip)
+        private func requestOnionRebuild(for key: OnionSkinRenderKey, frames: [OnionSkinFrame],
+                                         size: CGSize, mask: CGImage?, ink: OnionSkinInkRequest?,
+                                         inkOpacity: CGFloat) {
+            onionRebuilds.request {
+                return {
+                    let composite = OnionSkinFrame.composite(frames, size: size)
+                    let clip = OnionSkinClip.mask(layerMask: mask, subtracting: ink?.render(),
+                                                  size: size, opacity: inkOpacity)
+                    return { [weak self] in
+                        PlaybackTrace.span(.renderLanded) {
+                            self?.finishOnionRebuild(key: key, composite: composite, clip: clip)
+                        }
                     }
                 }
             }
@@ -3520,30 +3519,20 @@ struct CanvasView: UIViewRepresentable {
 
         /// **Both or neither, and only if it is still the picture that was asked for** — the same
         /// two rules `finishSandwichRebuild` keeps, for the same reason: a ghost from this frame
-        /// under a cut from the last one is a wrong picture rather than a stale one.
-        ///
-        /// It ends by calling `updateOnionSkin` again, which is how the declined request from
-        /// `startOnionRebuild`'s guard gets started — the key is re-derived from the model, so a
-        /// request that arrived mid-rebuild waits one iteration instead of evaporating.
+        /// under a cut from the last one is a wrong picture rather than a stale one. A newer key asked
+        /// for while this one rendered is minted when this landing returns (`LatestWins`).
         private func finishOnionRebuild(key: OnionSkinRenderKey, composite: UIImage?,
                                         clip: CGImage?) {
-            isOnionRebuilding = false
-            if key == onionRequestedKey {
-                onionSkinComposite = composite
-                onionSkinClipImage = clip
+            guard key == onionRequestedKey else { return }
+            onionSkinComposite = composite
+            onionSkinClipImage = clip
+            // `showsOnionSkin` rather than `isOnionSkinEnabled`, and the difference is a real race
+            // rather than tidiness: a rebuild in flight when the artist presses play would otherwise
+            // put its ghost on screen *after* `blank()` had taken the last one off.
+            if let view = onionSkinView, let canvasSize = canvasManager.canvasSize,
+               canvasManager.showsOnionSkin {
+                applyOnionSkin(to: view, canvasSize: canvasSize)
             }
-            guard onionRebuildWasDeclined else {
-                // `showsOnionSkin` rather than `isOnionSkinEnabled`, and the difference is a real
-                // race rather than tidiness: a rebuild in flight when the artist presses play would
-                // otherwise put its ghost on screen *after* `blank()` had taken the last one off.
-                if let view = onionSkinView, let canvasSize = canvasManager.canvasSize,
-                   canvasManager.showsOnionSkin {
-                    applyOnionSkin(to: view, canvasSize: canvasSize)
-                }
-                return
-            }
-            onionRebuildWasDeclined = false
-            updateOnionSkin()
         }
 
         /// Installs (or removes) the clip on whichever onion view is showing.
@@ -4895,7 +4884,6 @@ struct CanvasView: UIViewRepresentable {
             // top-bar dropdown, because closing a menu by tapping away from it is not drawing.
             canvasManager.canvasInteractionBegan(mayBeATransform: recognizer.lastTouchType != .pencil)
             guard !canvasManager.toolSwitches.pencilOnlyDrawing || recognizer.lastTouchType == .pencil else { return }
-            guard !eyedropperPickInFlight else { return }
             // **Rule (i)**, the same line the other four container recognizers now open with: with
             // the pick armed, dragging a guide grip or a shape handle used to move the chrome *and*
             // replace the brush colour and revert the tool — so the artist finished the drag holding
@@ -4910,29 +4898,30 @@ struct CanvasView: UIViewRepresentable {
             let canvasPoint = recognizer.location(in: container)
             guard CanvasTouchOwner.owner(in: canvasTouchInputs(chrome: canvasChrome(at: canvasPoint))) == .eyedropper else { return }
 
-            guard let probe = canvasManager.eyedropperProbe(atCanvasPoint: canvasPoint) else {
-                canvasManager.applyEyedropperResult(nil, revertTool: false)
-                eyedropperRevertPending = true
-                finishEyedropperIfSettled()
-                return
-            }
-
-            eyedropperPickInFlight = true
-            // **`sandwichQueue`, not a global queue.** That queue is serial and its stated job is to
-            // serialise "the composite half of every rebuild off the main thread" — a pick is one
-            // more of those. On a global queue a pick landing just after an edit would composite the
-            // whole stack *concurrently* with the sandwich rebuild doing the same, holding two
-            // canvas-sized results at once on a canvas where `CompositorBudget` is already cutting
-            // one composite into strips to fit. The cost of sharing it is that a pick can wait a rebuild out,
-            // which is tens of milliseconds on a deliberate tap.
-            Self.sandwichQueue.async { [weak self] in
-                let picked = CanvasManager.sampledColor(from: probe, atCanvasPoint: canvasPoint)
-                DispatchQueue.main.async {
-                    guard let self else { return }
-                    self.eyedropperPickInFlight = false
-                    self.canvasManager.applyEyedropperResult(picked, revertTool: false)
+            // **`sandwichQueue`, not a global queue** (`eyedropperPicks`). That queue is serial and its
+            // stated job is to serialise "the composite half of every rebuild off the main thread" — a
+            // pick is one more of those. On a global queue a pick landing just after an edit would
+            // composite the whole stack *concurrently* with the sandwich rebuild doing the same,
+            // holding two canvas-sized results at once on a canvas where `CompositorBudget` is already
+            // cutting one composite into strips to fit. The cost of sharing it is that a pick can wait
+            // a rebuild out, which is tens of milliseconds on a deliberate tap. The probe is minted when
+            // the queue frees, so a press made during a pick samples the picture as it is then.
+            eyedropperPicks.request { [weak self] in
+                guard let self else { return nil }
+                guard let probe = self.canvasManager.eyedropperProbe(atCanvasPoint: canvasPoint) else {
+                    self.canvasManager.applyEyedropperResult(nil, revertTool: false)
                     self.eyedropperRevertPending = true
                     self.finishEyedropperIfSettled()
+                    return nil
+                }
+                return {
+                    let picked = CanvasManager.sampledColor(from: probe, atCanvasPoint: canvasPoint)
+                    return { [weak self] in
+                        guard let self else { return }
+                        self.canvasManager.applyEyedropperResult(picked, revertTool: false)
+                        self.eyedropperRevertPending = true
+                        self.finishEyedropperIfSettled()
+                    }
                 }
             }
         }
@@ -4941,7 +4930,7 @@ struct CanvasView: UIViewRepresentable {
         /// glass — the join `handleEyedropperPress` describes. Idempotent and cheap, so both sides
         /// call it unconditionally rather than deciding which of them is last.
         private func finishEyedropperIfSettled() {
-            guard eyedropperRevertPending, !eyedropperTouchIsDown, !eyedropperPickInFlight else { return }
+            guard eyedropperRevertPending, !eyedropperTouchIsDown, !eyedropperPicks.isBusy else { return }
             eyedropperRevertPending = false
             canvasManager.leaveEyedropper()
         }
