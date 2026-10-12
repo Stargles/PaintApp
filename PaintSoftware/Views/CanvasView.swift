@@ -1633,7 +1633,8 @@ struct CanvasView: UIViewRepresentable {
         /// runs thirty times a second while a laptop is streaming, and `objectWillChange` re-runs
         /// every view body observing the manager. `presentStreamFrame` draws the element's window
         /// off the main thread into a surface of its own and coalesces on its own — a frame that
-        /// lands while one is drawing is dropped, and the next draw shows the newest picture.
+        /// lands while one is drawing waits, replaced by any newer one, so the newest picture is
+        /// always the one left up (`WindowSurfaceView`, `LatestWins`).
         /// While the Move box holds the element the surface rides inside the float, drawn from the
         /// lifted ids alone as the float shows them.
         private func syncStreamCoordinator() {

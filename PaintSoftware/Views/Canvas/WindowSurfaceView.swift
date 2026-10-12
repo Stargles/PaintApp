@@ -21,11 +21,13 @@ import UIKit
 ///
 /// **Two surfaces, not one**, so the render server never samples the pixels being written: the
 /// front surface is what is on screen while the back one is drawn, and they swap at the present.
-/// **One draw in flight at a time**, and a picture that arrives during one is dropped rather than
-/// queued — a caller that must show its newest picture even when it was the last (an edit's final
-/// tick has no successor) draws again from `finished`. The window is cleared before each draw because
-/// the picture's shape can change between frames (a nudge in the Move box) and the pixels outside
-/// the new shape must be transparent, not last frame's.
+/// **The draws go through a `LatestWins`** (TODO (179)): one in flight, and a picture asked for
+/// during it waits — replaced by any newer one — and is drawn when it lands, so the newest picture
+/// asked for is always the one left on screen, a burst's last stream frame and an edit's last tick
+/// alike, with no caller drawing again to catch up. The back surface is free whenever a draw is
+/// minted, because only one is in flight. The window is cleared before each draw because the
+/// picture's shape can change between frames (a nudge in the Move box) and the pixels outside the
+/// new shape must be transparent, not last frame's.
 final class WindowSurfaceView: UIView {
 
     private struct Surface {
@@ -36,14 +38,18 @@ final class WindowSurfaceView: UIView {
     /// Both surfaces, once `size(for:)` has made them; empty before the first present.
     private var surfaces: [Surface] = []
     private var back = 0
-    private var drawInFlight = false
+    /// The draws, on the queue the view was made with — see the class comment.
+    private let draws: LatestWins
 
     /// How many frames have been presented — for tests, which spin the run loop until it moves.
     private(set) var presentedCount = 0
     /// The window the surfaces are sized to, in canvas points; `.null` before the first present.
     private(set) var surfaceWindow = CGRect.null
 
-    init() {
+    /// `queue` is where every picture is drawn — serial, so the draws of every view sharing it
+    /// take turns (`StrokeCanvasView.renderQueue`).
+    init(queue: DispatchQueue) {
+        draws = LatestWins(queue: queue)
         super.init(frame: .zero)
         isUserInteractionEnabled = false
         isHidden = true
@@ -61,58 +67,58 @@ final class WindowSurfaceView: UIView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    /// **Draws one frame off the main thread and presents it.**
+    /// **Asks for one frame, drawn off the main thread and presented** — now if no draw is in flight,
+    /// or when the one in flight lands, unless a newer frame is asked for first.
     ///
     /// `window` is the element's rectangle in canvas points; `placement` the canvas's own affine
     /// (`VectorCanvas.transform`), which the picture is drawn *before* and this layer applies.
-    /// `draw` runs on `queue` with a UIKit context whose origin is the window's top-left corner and
-    /// returns the rectangle it actually drew — `VectorCanvas.drawStreamWindow`'s answer — or nil
-    /// to abandon; a rectangle other than `window` means the element moved between the two reads,
-    /// and the frame is dropped rather than shown in the wrong place. The next present sizes again.
+    /// `draw` runs on the view's queue with a UIKit context whose origin is the window's top-left
+    /// corner and returns the rectangle it actually drew — `VectorCanvas.drawStreamWindow`'s answer —
+    /// or nil to abandon; a rectangle other than `window` means the element moved between the two
+    /// reads, and the frame is dropped rather than shown in the wrong place. The next present sizes
+    /// again.
     ///
     /// `finished` runs on the main queue when the draw is over, with whether it became the layer's
     /// contents — in the same turn, so a caller that has been waiting for something to show may stop
-    /// waiting (a base hole punched before it would show the pixels under it for a frame), and a
-    /// caller whose newest picture arrived during this draw may draw it now.
-    ///
-    /// Returns false when a draw is already in flight and this frame was dropped.
-    @discardableResult
-    func present(window: CGRect, placement: CGAffineTransform, on queue: DispatchQueue,
+    /// waiting (a base hole punched before it would show the pixels under it for a frame). A frame
+    /// replaced before it was drawn is never drawn, and its `finished` never runs.
+    func present(window: CGRect, placement: CGAffineTransform,
                  draw: @escaping (CGContext) -> CGRect?,
-                 finished: ((_ shown: Bool) -> Void)? = nil) -> Bool {
-        guard !drawInFlight else { return false }
-        size(for: window)
-        guard surfaces.count == 2 else { return false }
-        drawInFlight = true
-        let target = surfaces[back]
-        queue.async { [weak self] in
-            _ = target.surface.lock(options: [], seed: nil)
-            let cg = target.context
-            cg.clear(CGRect(origin: .zero, size: window.size))
-            UIGraphicsPushContext(cg)
-            let drawn = draw(cg)
-            UIGraphicsPopContext()
-            _ = target.surface.unlock(options: [], seed: nil)
-            DispatchQueue.main.async {
-                guard let self else { return }
-                self.drawInFlight = false
-                guard drawn == window, self.surfaces.count == 2, self.surfaceWindow == window else {
-                    finished?(false)
-                    return
+                 finished: ((_ shown: Bool) -> Void)? = nil) {
+        draws.request { [weak self] in
+            // Minted only while no draw is in flight, so the surfaces may be remade here and the back
+            // one is not being written.
+            guard let self else { return nil }
+            self.size(for: window)
+            guard self.surfaces.count == 2 else { return nil }
+            let target = self.surfaces[self.back]
+            return {
+                _ = target.surface.lock(options: [], seed: nil)
+                let cg = target.context
+                cg.clear(CGRect(origin: .zero, size: window.size))
+                UIGraphicsPushContext(cg)
+                let drawn = draw(cg)
+                UIGraphicsPopContext()
+                _ = target.surface.unlock(options: [], seed: nil)
+                return { [weak self] in
+                    guard let self else { return }
+                    guard drawn == window, self.surfaces.count == 2, self.surfaceWindow == window else {
+                        finished?(false)
+                        return
+                    }
+                    self.layer.contents = target.surface
+                    self.layer.bounds = CGRect(origin: .zero, size: window.size)
+                    self.layer.position = window.origin.applying(placement)
+                    self.layer.setAffineTransform(CGAffineTransform(a: placement.a, b: placement.b,
+                                                                    c: placement.c, d: placement.d,
+                                                                    tx: 0, ty: 0))
+                    self.isHidden = false
+                    self.back = 1 - self.back
+                    self.presentedCount += 1
+                    finished?(true)
                 }
-                self.layer.contents = target.surface
-                self.layer.bounds = CGRect(origin: .zero, size: window.size)
-                self.layer.position = window.origin.applying(placement)
-                self.layer.setAffineTransform(CGAffineTransform(a: placement.a, b: placement.b,
-                                                                c: placement.c, d: placement.d,
-                                                                tx: 0, ty: 0))
-                self.isHidden = false
-                self.back = 1 - self.back
-                self.presentedCount += 1
-                finished?(true)
             }
         }
-        return true
     }
 
     /// Makes the two surfaces for `window`, or keeps the ones already that size. A window of a

@@ -9,8 +9,10 @@ import UIKit
 /// the layer's contents cycle between **two** objects
 /// this view owns, both `IOSurface`s the render server maps once. A view that minted a surface, or
 /// a `CGImage`, per frame would fail the identity count; a view whose contents were not an
-/// `IOSurface` would be handing the render server a copy to make. Headless — no window, no host —
-/// so it runs in the fast tier; the present lands on the main queue, which the test spins.
+/// `IOSurface` would be handing the render server a copy to make. And since TODO (179) the draws go
+/// through a `LatestWins`, so a frame asked for during a draw is not lost: the newest one waiting is
+/// drawn when the draw in flight lands. Headless — no window, no host — so it runs in the fast tier;
+/// the present lands on the main queue, which the test spins.
 @MainActor
 final class WindowSurfaceViewLogicTests: XCTestCase {
 
@@ -24,11 +26,11 @@ final class WindowSurfaceViewLogicTests: XCTestCase {
             autoreleasepool {
                 let fill = color(index)
                 let before = view.presentedCount
-                XCTAssertTrue(view.present(window: window, placement: .identity, on: queue) { cg in
+                view.present(window: window, placement: .identity) { cg in
                     fill.setFill()
                     cg.fill(CGRect(origin: .zero, size: window.size))
                     return window
-                }, "frame \(index) was accepted", file: file, line: line)
+                }
                 let deadline = Date().addingTimeInterval(2)
                 while view.presentedCount == before, Date() < deadline {
                     RunLoop.main.run(until: Date().addingTimeInterval(0.005))
@@ -42,7 +44,7 @@ final class WindowSurfaceViewLogicTests: XCTestCase {
     /// own pool so the count is of what a frame leaves on the layer and not of what the loop has
     /// not released — CLAUDE.md's growth-measurement rule.
     func testAHundredFramesCycleBetweenTwoSurfaces() {
-        let view = WindowSurfaceView()
+        let view = WindowSurfaceView(queue: queue)
         let window = CGRect(x: 10, y: 20, width: 32, height: 16)
         var contents = Set<ObjectIdentifier>()
         for _ in 0..<100 {
@@ -58,7 +60,7 @@ final class WindowSurfaceViewLogicTests: XCTestCase {
     /// the view hands the draw reads back green and opaque from the surface's own memory — which
     /// is the flip, the format and the push all being right at once.
     func testTheDrawLandsOnTheSurfaceOpaque() throws {
-        let view = WindowSurfaceView()
+        let view = WindowSurfaceView(queue: queue)
         let window = CGRect(x: 0, y: 0, width: 8, height: 4)
         present(view, window: window, count: 1)
         let surface = try XCTUnwrap(view.layer.contents as? IOSurface)
@@ -76,7 +78,7 @@ final class WindowSurfaceViewLogicTests: XCTestCase {
     /// A window of a new size makes new surfaces and hides the view until one lands; the same size
     /// keeps them.
     func testANewWindowSizeRemakesTheSurfacesAndTheSameSizeKeepsThem() throws {
-        let view = WindowSurfaceView()
+        let view = WindowSurfaceView(queue: queue)
         present(view, window: CGRect(x: 0, y: 0, width: 8, height: 4), count: 2)
         let first = try XCTUnwrap(view.layer.contents as AnyObject?)
         present(view, window: CGRect(x: 5, y: 5, width: 8, height: 4), count: 2)
@@ -87,32 +89,50 @@ final class WindowSurfaceViewLogicTests: XCTestCase {
         XCTAssertEqual(view.layer.bounds.width, 16)
     }
 
-    /// One draw in flight: a frame that arrives during it is dropped, and reported as dropped.
-    func testAFrameDuringADrawIsDropped() {
-        let view = WindowSurfaceView()
+    /// **One draw in flight, and the newest frame asked for during it is the one drawn next** — the
+    /// stream's last frame of a burst and an edit's last tick, which have no successor to catch them
+    /// up. A frame replaced while it waited is never drawn at all.
+    func testTheNewestFrameAskedForDuringADrawIsDrawnWhenItLands() throws {
+        let view = WindowSurfaceView(queue: queue)
         let window = CGRect(x: 0, y: 0, width: 8, height: 4)
         let gate = DispatchSemaphore(value: 0)
-        XCTAssertTrue(view.present(window: window, placement: .identity, on: queue) { _ in
+        var drawn: [String] = []
+        let lock = NSLock()
+        func record(_ name: String) { lock.lock(); drawn.append(name); lock.unlock() }
+        view.present(window: window, placement: .identity) { _ in
             gate.wait()
+            record("first")
             return window
-        })
-        XCTAssertFalse(view.present(window: window, placement: .identity, on: queue) { _ in window },
-                       "a second frame while the first is drawing is dropped")
+        }
+        view.present(window: window, placement: .identity) { _ in
+            record("replaced")
+            return window
+        }
+        view.present(window: window, placement: .identity) { cg in
+            record("newest")
+            UIColor.red.setFill()
+            cg.fill(CGRect(origin: .zero, size: window.size))
+            return window
+        }
         gate.signal()
         let deadline = Date().addingTimeInterval(2)
-        while view.presentedCount == 0, Date() < deadline {
+        while view.presentedCount < 2, Date() < deadline {
             RunLoop.main.run(until: Date().addingTimeInterval(0.005))
         }
-        XCTAssertEqual(view.presentedCount, 1)
-        XCTAssertTrue(view.present(window: window, placement: .identity, on: queue) { _ in window },
-                      "and the next one after it lands is accepted")
+        XCTAssertEqual(view.presentedCount, 2, "the draw in flight and the newest waiting frame both landed")
+        lock.lock(); let order = drawn; lock.unlock()
+        XCTAssertEqual(order, ["first", "newest"], "the frame replaced while it waited was never drawn")
+        let surface = try XCTUnwrap(view.layer.contents as? IOSurface)
+        _ = surface.lock(options: [.readOnly], seed: nil)
+        defer { _ = surface.unlock(options: [.readOnly], seed: nil) }
+        let bytes = surface.baseAddress.assumingMemoryBound(to: UInt8.self)
+        XCTAssertGreaterThan(Int(bytes[2]), Int(bytes[1]) + 100, "the newest frame (red) is what is on the layer")
     }
 
     /// **`finished` says how every draw ended, in the turn it ended** — a caller waiting to punch a
-    /// hole under the picture waits for `true`, and a caller whose newest picture arrived mid-draw
-    /// draws it from either answer.
+    /// hole under the picture waits for `true`.
     func testFinishedReportsWhetherTheDrawBecameTheContents() {
-        let view = WindowSurfaceView()
+        let view = WindowSurfaceView(queue: queue)
         let window = CGRect(x: 0, y: 0, width: 8, height: 4)
         var outcomes: [Bool] = []
         func settle(_ count: Int) {
@@ -121,13 +141,13 @@ final class WindowSurfaceViewLogicTests: XCTestCase {
                 RunLoop.main.run(until: Date().addingTimeInterval(0.005))
             }
         }
-        XCTAssertTrue(view.present(window: window, placement: .identity, on: queue, draw: { _ in window },
-                                   finished: { outcomes.append($0) }))
+        view.present(window: window, placement: .identity, draw: { _ in window },
+                     finished: { outcomes.append($0) })
         settle(1)
         XCTAssertEqual(outcomes, [true], "a draw of the window it was asked for became the contents")
-        XCTAssertTrue(view.present(window: window, placement: .identity, on: queue,
-                                   draw: { _ in CGRect(x: 1, y: 0, width: 8, height: 4) },
-                                   finished: { outcomes.append($0) }))
+        view.present(window: window, placement: .identity,
+                     draw: { _ in CGRect(x: 1, y: 0, width: 8, height: 4) },
+                     finished: { outcomes.append($0) })
         settle(2)
         XCTAssertEqual(outcomes, [true, false], "a draw of another rectangle did not")
         XCTAssertEqual(view.presentedCount, 1)
@@ -136,11 +156,11 @@ final class WindowSurfaceViewLogicTests: XCTestCase {
     /// A draw that answers a different rectangle — the element moved between the window being
     /// read and the draw — is not shown.
     func testADrawOfAnotherRectangleIsNotShown() {
-        let view = WindowSurfaceView()
+        let view = WindowSurfaceView(queue: queue)
         let window = CGRect(x: 0, y: 0, width: 8, height: 4)
-        XCTAssertTrue(view.present(window: window, placement: .identity, on: queue) { _ in
+        view.present(window: window, placement: .identity) { _ in
             CGRect(x: 1, y: 0, width: 8, height: 4)
-        })
+        }
         RunLoop.main.run(until: Date().addingTimeInterval(0.2))
         XCTAssertEqual(view.presentedCount, 0)
         XCTAssertTrue(view.isHidden)

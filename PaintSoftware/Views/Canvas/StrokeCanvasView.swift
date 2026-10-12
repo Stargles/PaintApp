@@ -738,7 +738,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         if let existing = streamSurfaces[elementID] {
             surface = existing
         } else {
-            surface = WindowSurfaceView()
+            surface = WindowSurfaceView(queue: Self.renderQueue)
             if ids != nil {
                 floatView.addSubview(surface)
             } else {
@@ -746,7 +746,7 @@ final class StrokeCanvasView: CanvasPlaneView {
             }
             streamSurfaces[elementID] = surface
         }
-        surface.present(window: window, placement: vectorCanvas.transform, on: Self.renderQueue) { cg in
+        surface.present(window: window, placement: vectorCanvas.transform) { cg in
             vectorCanvas.drawStreamWindow(id: elementID, into: cg, isolating: ids, posedBy: posedBy)
         }
     }
@@ -794,30 +794,26 @@ final class StrokeCanvasView: CanvasPlaneView {
         return true
     }
 
-    /// Asks the surface for the newest tick. One draw is in flight at a time, so a tick that arrives
-    /// during one is not drawn — and the edit's last tick has no successor to catch it up, so the
-    /// draw that finishes draws it.
+    /// Asks the surface for the newest tick — drawn now, or when the draw in flight lands unless a
+    /// newer tick replaces it first, so the edit's last tick is always the picture left up.
     private func presentHeldEdit() {
         guard let edit = heldEdit, let canvas = vectorCanvas, edit.vectorCanvas === canvas else { return }
         let surface: WindowSurfaceView
         if let existing = heldEditSurface {
             surface = existing
         } else {
-            surface = WindowSurfaceView()
+            surface = WindowSurfaceView(queue: Self.renderQueue)
             // Below the held ink and the live stroke, which are newer than any edit.
             poseSpace.insertSubview(surface, at: 0)
             heldEditSurface = surface
         }
-        let tick = edit.tick, window = edit.window, elements = edit.elements, rewriting = edit.rewriting
-        surface.present(window: window, placement: .identity, on: Self.renderQueue, draw: { cg in
+        let window = edit.window, elements = edit.elements, rewriting = edit.rewriting
+        surface.present(window: window, placement: .identity, draw: { cg in
             canvas.drawEditWindow(of: elements, in: window, into: cg, rewriting: rewriting)
         }, finished: { [weak self] shown in
-            guard let self, self.heldEditSurface === surface else { return }
-            if shown, self.heldEditHole != window {
-                self.heldEditHole = window
-                self.showOverlays(self.scratch)
-            }
-            if let latest = self.heldEdit?.tick, latest != tick { self.presentHeldEdit() }
+            guard let self, self.heldEditSurface === surface, shown, self.heldEditHole != window else { return }
+            self.heldEditHole = window
+            self.showOverlays(self.scratch)
         })
     }
 
