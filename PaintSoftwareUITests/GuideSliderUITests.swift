@@ -53,7 +53,11 @@ final class GuideSliderUITests: PaintUITestCase {
         XCTAssertTrue(waitForSandwichState(app, "rest", timeout: 30, "PREMISE: the Guide engages the compositor and its bake lands"))
 
         let guide = paperPatch(canvas, paper, x: 0.55...0.85, y: 0.12...0.2)
-        let line = paperRow(canvas, paper, x: 0.2...0.4, y: 0.3)
+        // **Across the line's thickness, not along its centre**: the Guide draws its lines *over* the ink,
+        // and a spacing that puts a horizontal on the line's centre row turns that whole row blue while
+        // the line plainly stays — the held frame shows every spacing the slider passes through
+        // (TODO (179)), so one of them is reached.
+        let line = paperPatch(canvas, paper, x: 0.2...0.4, y: 0.29...0.31)
         assertAboveTheDock(app, canvas, dy: onHost(paper, 0, 0.3).dy, "the line's row")
         let before = readScreenNow(guide + line)
         let blue = before.prefix(guide.count).filter(isGuideBlue).count
