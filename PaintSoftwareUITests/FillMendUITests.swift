@@ -120,8 +120,11 @@ final class FillMendUITests: PaintUITestCase {
         XCTAssertTrue(waitUntilFilled(canvas, dx: 0.5, dy: 0.5), "The second cell fills")
 
         // Cold start, so the fill menu is the only place the option is reached: it reads on there, and
-        // switching it off is what leaves the seam for the third fill.
-        fillButton.tap()
+        // switching it off is what leaves the seam for the third fill. Another tool first, so the second
+        // fill is settled — a switch flipped over a fill that is still adjustable re-runs *that* fill.
+        app.buttons["toolbar.brushButton"].tap()
+        fillButton.tap()   // selects the tool again
+        fillButton.tap()   // opens the panel
         let mend = app.switches["fillPanel.mendGapToggle"]
         XCTAssertTrue(app.sliders["fillPanel.edgeOverlapSlider"].waitForExistence(timeout: 5), "The fill menu is open")
         scrollFillPanel(app, to: mend)
