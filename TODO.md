@@ -62,9 +62,16 @@ of them first, and I will tell you which ones save with which method."*
 Rulings on (175)'s questions, 2026-10-12: the **Subtract switch is not saved** (it resets each launch);
 **tool sliders and pickers are saved** — at whichever level the inventory ruling gives them.
 
-- [ ] Subtract stops persisting.
-- [ ] Inventory of every option and its current level, shown to the owner.
-- [ ] Implement the owner's per-row ruling (one store per level, no second mechanism).
+**Ruled row by row 2026-10-12** — `~/PaintWork/design/s48-176-ruling.md` is the ruling and the brief
+(row ids from `s48-settings-inventory.md`). In short: the tool options become **per scene** (tool, brush
+size/opacity/colour, eraser, fill, text, interpolate switches, colour picker tab, recent colours, selected
+palette, active view); the **brush library, preset edits, imported tips and the Palettes library stay
+app-wide**, as do Fingers Can Paint, Render Resolution and the gallery's folders; Select's and Move's
+switches (Subtract, Paint Outside Selection, Keep Stroke Width, Keep Full Precision) **reset each launch**
+— the owner confirmed that over (175)'s saving them. Mask tuning goes per mask, in (35).
+
+- [ ] One store per level; the per-tool settings profile; a one-shot repair carrying today's global
+      values into every existing scene.
 
 ## (179) Everything live previews at the rate the device can draw, and writes the scene once
 
@@ -175,6 +182,15 @@ clears; switching *frames* keeps today's behaviour (the worker reports what that
 
 - [ ] Region selection survives a layer switch and acts on the new layer; driven on the device geometry.
 
+## (186) The fill's sideways drag adjusts Gap Closing only, and right decreases it
+
+**Status** — asked 2026-10-12 (a note on the option-saving page, row C6).
+
+*"just fix it to gap closing (no other sliders). Also invert the direction, so that drag right decreases
+gap fill."* — `FillSettings.selectedAxis` and its highlight go; the drag always moves Gap Closing.
+
+- [ ] One axis, inverted; the highlight removed whole; driven.
+
 ## (35) Advanced masks — colour masks beside the alpha mask
 
 **Status** — promoted from "Later" 2026-10-12; the owner will describe what it is meant to be once told
@@ -199,6 +215,8 @@ shared rather than copied); with no colours picked it is today's alpha mask, and
 it to those colours. The survey is `~/PaintWork/design/s48-survey-masks-stream-liquify.md` §A (four
 colour-distance definitions exist; the mask uses Recolour's; per-pixel Oklab wants memoising per value).
 
+- [ ] Mask tuning (threshold, antialias) becomes **per mask** — the owner on 2026-10-12 — replacing
+      `MaskResolver`'s process-wide statics.
 - [ ] Built on the existing mask and recolour modules rather than beside them.
 - [ ] After (179), which touches mask tuning's per-tick path.
 
