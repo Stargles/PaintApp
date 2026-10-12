@@ -672,19 +672,38 @@ class PaintUITestCase: XCTestCase {
         return value
     }
 
-    /// **Puts `slider` at `position`, and fails naming where it ended if it will not go.**
-    /// `adjust(toNormalizedSliderPosition:)` is a synthetic drag whose endpoint is not guaranteed: under
-    /// four parallel clones it ended at 58° for a Hue slider asked for 0° in two consecutive full runs,
-    /// and landed on the mark alone every time. Either end of the track clamps the drag and cannot miss;
-    /// any position between them can, so a test that reads what the slider *paints* must first know where
-    /// the slider *is*. It asks again, from wherever the last try ended, up to `attempts` times.
-    func adjustSlider(_ slider: XCUIElement, to position: CGFloat, tolerance: CGFloat = 0.02, attempts: Int = 4,
+    /// **Puts `slider` within `tolerance` of `position` by taking hold of its thumb and moving it the
+    /// distance still to go, and fails naming where it ended if it will not get there.**
+    /// `adjust(toNormalizedSliderPosition:)` is a synthetic drag whose endpoint is not the test's to
+    /// decide: asked for the middle of a Hue slider it ended at 0.62 in a serial run and 0.66 under four
+    /// clones — a yellow where the test wanted a red, in two consecutive full runs — and asked again it
+    /// stood where it was. Either end of a track clamps it and cannot miss; any position between can.
+    /// A thumb the finger holds goes where the finger goes, so each try measures the error and moves the
+    /// thumb that far from where it reports itself. **It converges to a few hundredths and then stops
+    /// answering a correction that small** (a 0.06 one moved it nowhere), which is why the caller says how
+    /// near it needs the slider rather than being given a default it cannot always keep.
+    func adjustSlider(_ slider: XCUIElement, to position: CGFloat, tolerance: CGFloat, attempts: Int = 4,
                       file: StaticString = #filePath, line: UInt = #line) {
-        for _ in 0..<attempts {
-            slider.adjust(toNormalizedSliderPosition: position)
-            if abs(slider.normalizedSliderPosition - position) <= tolerance { return }
+        // The thumb's centre runs from half its width in from the frame's left to half its width in from
+        // the right; the move is the difference between two such points, which the half-width barely
+        // touches.
+        let thumbInset: CGFloat = 18
+        let frame = slider.frame
+        func point(_ p: CGFloat) -> XCUICoordinate {
+            slider.coordinate(withNormalizedOffset: .zero)
+                .withOffset(CGVector(dx: thumbInset + p * (frame.width - 2 * thumbInset), dy: frame.height / 2))
         }
-        XCTFail("The slider stands at \(slider.normalizedSliderPosition) after \(attempts) tries at \(position)",
+        var reached: [CGFloat] = []
+        for _ in 0..<attempts {
+            let current = slider.normalizedSliderPosition
+            if abs(current - position) <= tolerance { return }
+            reached.append(current)
+            point(current).press(forDuration: 0.1, thenDragTo: point(position), withVelocity: .slow,
+                                 thenHoldForDuration: 0.1)
+        }
+        let last = slider.normalizedSliderPosition
+        if abs(last - position) <= tolerance { return }
+        XCTFail("The slider will not stand within \(tolerance) of \(position): it went \(reached) and ended at \(last)",
                 file: file, line: line)
     }
 

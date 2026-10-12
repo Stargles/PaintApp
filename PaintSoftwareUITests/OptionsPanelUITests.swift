@@ -715,7 +715,9 @@ final class OptionsPanelUITests: PaintUITestCase {
         openLayerPanel(app)
         app.staticTexts["layerPanel.row.1"].tap()
         XCTAssertTrue(hueSlider.waitForExistence(timeout: 5), "Reopening should show the same Hue slider")
-        adjustSlider(hueSlider, to: 0.5)   // 0°, red
+        // 0°, red — and ±0.1 of the track is ±36°, where red − green is still above 100 (yellow, at 58°,
+        // reads 9).
+        adjustSlider(hueSlider, to: 0.5, tolerance: 0.1)
         app.buttons["layerOptions.close"].tap()
         openLayerPanel(app)
         let reddish = try settled { try maxRedness(canvas, dx: 0.5, dyRange: 0.4...0.6) }

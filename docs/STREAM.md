@@ -111,7 +111,14 @@ the laptop.
   re-bakes nothing. **Bake Frame (2.4) is the one way a stream's picture becomes part of the drawing**:
   the image object it makes is an ordinary image and renders like any. This replaces 2026-10-01's
   *"a stream under a blend mode or effect is not live"* and 2026-10-02's *"Live, then exact when
-  still"*, both gone with the settle that served them. The consequences nobody ruled on are in §6.
+  still"*, both gone with the settle that served them. The one consequence the owner has since ruled on
+  is 2.14; the rest are defaults in §6.
+- **2.14 The plain run stays plain** (owner, 2026-10-10, asked whether the layers between a visible
+  stream and the active layer should keep their blend modes and effects on screen: *"Keep today's plain
+  run"*). While a live stream is visible, the run from the stream up to the active layer
+  (`CanvasManager.liveHostRun`, §5.3) is drawn plain on screen — the stream, its layer's own ink and every
+  layer between them and the active one, each without its blend mode, mask or effect — and the bar says
+  so (`plain`, §5.3). Every picture the document keeps still has them.
 
 ## 3. The wire protocol — `paintstream/1`
 
@@ -874,8 +881,7 @@ updated to observe directly; §7's deploy step is that.
 - A stream on a canvas the compositor draws is drawn by its host between the two halves, the layers
   around it plain, for as long as it is on the frame, and the bar says so; there is no exact picture
   to come to, because a stream is reference (2.13, §5.3). Consequently **blend modes, masks and
-  effects never reach a stream**, and the layers from the stream up to the active one are drawn plain
-  beside it.
+  effects never reach a stream**, and the layers from it up to the active one are drawn plain (2.14).
 - **Export, thumbnails, onion skin and playback show the frame without the stream** (2.13). The Export
   sheet's caption says *"screen stream not included"* while a visible stream is in the document.
 - **A stream a transformation layer or a Move channel poses is not shown**, and the bar says so (§5.3).
