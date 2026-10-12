@@ -77,6 +77,9 @@ switches (Subtract, Paint Outside Selection, Keep Stroke Width, Keep Full Precis
 
 **Status** — asked 2026-10-12; extends (173)'s held-edit mechanism (`CanvasManager.liveElementEdit`,
 `ElementEditSession`, `WindowSurfaceView`) to every control that still writes the document per tick.
+The assessment's commits 1–3 are merged (`LatestWins`; the live pair, onion skin and eyedropper on it;
+one held slot, `CanvasManager.liveEdit`); commit 4 (the effect sliders' held frame) follows its
+measurement, PERFORMANCE.md §30.
 
 The owner, asked whether the remaining per-tick sliders (layer Opacity, effect parameters, mask tuning,
 the text panel) should get (173)'s fix: *"for all of them, cant there be a system where it just slows
@@ -93,9 +96,9 @@ committed once at the lift as one undo step, and the preview redraws **latest-va
 in flight**, so its rate falls to what the device can draw and memory stays flat (PERFORMANCE.md §29 is
 why: pictures handed to Core Animation faster than the render server frees them).
 
-- [ ] Assessment first: every live re-update path and every existing throttle/coalescer, the one seam,
+- [x] Assessment first: every live re-update path and every existing throttle/coalescer, the one seam,
       and its size. Built if it is one clean seam; brought to the owner if it means a renderer rewrite.
-- [ ] Inventory every control that writes the document per tick (incl. HANDOFF's "ruled to wait" grade
+- [x] Inventory every control that writes the document per tick (incl. HANDOFF's "ruled to wait" grade
       sliders, grade graph nodes and the Duplicate Offset box, which this ruling supersedes).
 - [ ] One held-value + latest-wins preview seam they all use; no per-control copies.
 - [ ] Measured with `PlaybackProbe` before/after, as §29 was.
@@ -145,6 +148,16 @@ element edit and `WindowSurfaceView`.
 selection. Lots of flickering."* — `~/PaintWork/recordings-1012/recording-20261012-173827.jsonl`
 (2668×1644, build `95e5507`): the colour drag runs 4.35–6.52 s and the main thread is busy 1,468 ms of
 that 2 s window (max 182 ms, all `sourcePhase`).
+
+Merged with (179)'s first half: a window draw was minted in the turn the last one landed, into the
+surface that swap had just retired and the render server still showed until the turn committed; the
+draw now waits until `IOSurface.isInUse` says the server has let it go (`WindowSurfaceView.present`).
+`SelectionFillRecolourUITests` stages the iPad's draw time and busy turns (two simulator-only seams) and
+passes — but it **did not reproduce the flicker on the shipped build either**: the simulator's render
+server did not show the swapped-out surface. The held frame's canvas-sized surface did (3 of 3 runs red
+without the wait, `EffectSliderLiveUITests`). The owner's iPad is the confirmation still owed. The
+1,468 ms of main-thread busy is not the held edit's tick (`-probeMode recolour` at 2668×1644 on an iPad 9
+simulator: 79 ms over 34 ticks) — INFERRED to be the colour picker's own redraw, which nothing times.
 
 - [ ] Cold-start XCUITest that samples the region mid-drag and fails on a flicker; root cause fixed in the seam.
 
