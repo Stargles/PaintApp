@@ -67,7 +67,7 @@ final class FillMendUITests: PaintUITestCase {
     /// the one between the last two is the owner's *"tiny unfilled region directly under the line"*.
     /// With the line layer hidden, a pixel that is still paper is a pixel no fill covers.
     ///
-    /// Edge Overlap is dragged to the bottom, and each divider is drawn twice, so the seam is several
+    /// Edge Overlap is dragged to the bottom, and each divider is drawn three times, so the seam is several
     /// screen pixels wide rather than the sliver the default tucks under a single thin line.
     func testTheMendOptionIsOnFromAFreshDocumentAndClosesTheSeamBetweenTwoFills() throws {
         let app = XCUIApplication()
@@ -85,9 +85,12 @@ final class FillMendUITests: PaintUITestCase {
         drawLine(on: canvas, from: CGVector(dx: right, dy: top), to: CGVector(dx: right, dy: bottom))
         drawLine(on: canvas, from: CGVector(dx: right, dy: bottom), to: CGVector(dx: left, dy: bottom))
         drawLine(on: canvas, from: CGVector(dx: left, dy: bottom), to: CGVector(dx: left, dy: top))
-        // Each divider is two strokes a hair apart, so it is as wide as the seam needs to be seen.
+        // Each divider is three strokes a hair apart, so it is as wide as the seam needs to be seen and
+        // **solid ink across its whole width**: two left a hairline of paper at one divider, and a mend
+        // rightly never crosses paper — the seam there stayed open for a reason that had nothing to do
+        // with the option under test.
         for x in dividers {
-            for offset in [0.0, 0.0025] {
+            for offset in [0.0, 0.00125, 0.0025] {
                 drawLine(on: canvas, from: CGVector(dx: x + offset, dy: top), to: CGVector(dx: x + offset, dy: bottom))
             }
         }
