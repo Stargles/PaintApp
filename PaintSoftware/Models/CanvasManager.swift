@@ -3792,6 +3792,19 @@ final class CanvasManager: ObservableObject {
     /// one undo step.
     var liveFill: LiveFill?
 
+    /// **A live element edit's picture, which the document does not hold** — TODO (173): the Select
+    /// panel's Colour, Size and Opacity drag and the gradient panel's, from the moment the session
+    /// opens until it commits or is thrown away; nil between edits.
+    ///
+    /// `liveFill`'s shape for `liveFill`'s reason, applied to the other slider-shaped edit. Each tick
+    /// used to be a document write — a SwiftUI pass, a new bake key and a re-bake, a re-minted live
+    /// pair, a re-built onion skin, and a fresh canvas-sized picture handed to Core Animation — at
+    /// ten ticks a second on a 4096² canvas on an iPad 9, which is the render server's death
+    /// (PERFORMANCE.md §29). Now a tick moves this and tells the canvas (`onHeldPictureMoved`); the
+    /// edited cel's host draws a window of it, the canvas keeps that host drawing while it is up
+    /// (`heldHostLayerIndices`), and the commit writes the document once, as one undo step.
+    var liveElementEdit: LiveElementEdit?
+
     /// Records the artist's own answer for whether a layer bounds the fill (§6.6) — written by the
     /// row's drop button, which is the only control that sets it.
     ///

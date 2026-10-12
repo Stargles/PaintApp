@@ -1,29 +1,32 @@
 import IOSurface
 import UIKit
 
-/// **Where a live stream frame reaches the screen** — STREAM.md §5.3, TODO (97).
+/// **Where a live picture of part of a layer reaches the screen** — STREAM.md §5.3, TODO (97), and
+/// the display of a live element edit, TODO (173).
 ///
-/// One per stream element a layer host is showing, sized to the element's window
-/// (`VectorCanvas.streamWindow`) and frame-positioned over `StrokeCanvasView.imageView` in canvas
-/// points, the way the scratch is positioned at a stroke's window. Its layer's contents is an
-/// `IOSurface` — one of two this view owns and alternates between. A frame is drawn into the back
-/// surface off the main thread and presenting it is one `contents` assignment of an object the render
-/// server already has mapped: **nothing is copied per frame, and nothing new is handed to Core
-/// Animation per frame.** That is the property the old path lacked. It presented a frame by
-/// invalidating the layer's memo and re-rasterizing the canvas, so every frame was a canvas-sized
-/// allocation, a canvas-sized blit, and a fresh canvas-sized `CGImage` on `imageView` for Core
-/// Animation to copy to the render server — thirty times a second, for as long as the laptop was
-/// on. On the owner's iPad the render server reached its 1850 MB limit and was killed, which is a
-/// black screen and a respring: the four `backboardd` jetsam events of 2026-09-14/15 behind TODO (97).
+/// One per live picture a layer host is showing, sized to the picture's window and frame-positioned
+/// over `StrokeCanvasView.imageView` in canvas points, the way the scratch is positioned at a
+/// stroke's window. Its layer's contents is an `IOSurface` — one of two this view owns and
+/// alternates between. A picture is drawn into the back surface off the main thread and presenting
+/// it is one `contents` assignment of an object the render server already has mapped: **nothing is
+/// copied per picture, and nothing new is handed to Core Animation per picture.**
+///
+/// That is the property the alternative lacks. A picture presented by invalidating the layer's memo
+/// and re-rasterizing the canvas costs a canvas-sized allocation, a canvas-sized blit and a fresh
+/// canvas-sized `CGImage` on `imageView` for Core Animation to copy to the render server — per
+/// frame of a live stream (thirty a second), per tick of a live edit (ten or more a second, at 64 MB
+/// a time on a 4096² canvas). On the owner's iPad the render server reached its limit and was killed
+/// both ways, which is a black screen and a respring: the four `backboardd` jetsam events of
+/// 2026-09-14/15 behind TODO (97), and the two of 2026-10-12 behind TODO (173).
 ///
 /// **Two surfaces, not one**, so the render server never samples the pixels being written: the
 /// front surface is what is on screen while the back one is drawn, and they swap at the present.
-/// **One draw in flight at a time**, and a frame that arrives during one is dropped rather than
-/// queued — the element holds only its newest frame, so the next draw shows the newest picture
-/// whatever was skipped. The window is cleared before each draw because the element's quad can
-/// change between frames (a nudge in the Move box) and the pixels outside the new quad must be
-/// transparent, not last frame's.
-final class StreamSurfaceView: UIView {
+/// **One draw in flight at a time**, and a picture that arrives during one is dropped rather than
+/// queued — a caller that must show its newest picture even when it was the last (an edit's final
+/// tick has no successor) draws again from `finished`. The window is cleared before each draw because
+/// the picture's shape can change between frames (a nudge in the Move box) and the pixels outside
+/// the new shape must be transparent, not last frame's.
+final class WindowSurfaceView: UIView {
 
     private struct Surface {
         let surface: IOSurface
@@ -67,10 +70,16 @@ final class StreamSurfaceView: UIView {
     /// to abandon; a rectangle other than `window` means the element moved between the two reads,
     /// and the frame is dropped rather than shown in the wrong place. The next present sizes again.
     ///
+    /// `finished` runs on the main queue when the draw is over, with whether it became the layer's
+    /// contents — in the same turn, so a caller that has been waiting for something to show may stop
+    /// waiting (a base hole punched before it would show the pixels under it for a frame), and a
+    /// caller whose newest picture arrived during this draw may draw it now.
+    ///
     /// Returns false when a draw is already in flight and this frame was dropped.
     @discardableResult
     func present(window: CGRect, placement: CGAffineTransform, on queue: DispatchQueue,
-                 draw: @escaping (CGContext) -> CGRect?) -> Bool {
+                 draw: @escaping (CGContext) -> CGRect?,
+                 finished: ((_ shown: Bool) -> Void)? = nil) -> Bool {
         guard !drawInFlight else { return false }
         size(for: window)
         guard surfaces.count == 2 else { return false }
@@ -87,7 +96,10 @@ final class StreamSurfaceView: UIView {
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.drawInFlight = false
-                guard drawn == window, self.surfaces.count == 2, self.surfaceWindow == window else { return }
+                guard drawn == window, self.surfaces.count == 2, self.surfaceWindow == window else {
+                    finished?(false)
+                    return
+                }
                 self.layer.contents = target.surface
                 self.layer.bounds = CGRect(origin: .zero, size: window.size)
                 self.layer.position = window.origin.applying(placement)
@@ -97,6 +109,7 @@ final class StreamSurfaceView: UIView {
                 self.isHidden = false
                 self.back = 1 - self.back
                 self.presentedCount += 1
+                finished?(true)
             }
         }
         return true

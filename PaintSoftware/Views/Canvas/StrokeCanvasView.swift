@@ -287,6 +287,9 @@ final class StrokeCanvasView: CanvasPlaneView {
                 // A stream surface shows a window of the canvas it was drawn from, at that
                 // canvas's element's rectangle; the next tick presents the new cel's own.
                 removeStreamSurfaces()
+                // A live edit's window shows the canvas it was drawn from; the next pass presents
+                // the new cel's own, if it has one.
+                takeDownHeldEdit(landing: false)
             }
             refreshDisplay()
         }
@@ -349,6 +352,7 @@ final class StrokeCanvasView: CanvasPlaneView {
             // is not refreshed for stream frames — so the surfaces go, and the edge that comes back
             // repaints the base with the element's newest frame in it.
             removeStreamSurfaces()
+            takeDownHeldEdit(landing: false)
         } else {
             refreshDisplayIfStale()
         }
@@ -702,10 +706,10 @@ final class StrokeCanvasView: CanvasPlaneView {
 
     // MARK: - A live stream's window
 
-    /// One `StreamSurfaceView` per stream element this host is presenting live, keyed by element
+    /// One `WindowSurfaceView` per stream element this host is presenting live, keyed by element
     /// id — see that class. Removed whenever the picture they cover changes shape under them: a
     /// cel switch, a blanked host, a derived base, the Move box lifting or landing.
-    private var streamSurfaces: [UUID: StreamSurfaceView] = [:]
+    private var streamSurfaces: [UUID: WindowSurfaceView] = [:]
 
     /// `VectorCanvas.documentVersion` when the base slot was last refreshed — what
     /// `refreshDisplayIfStale` compares to tell a stream frame's `version` move from an edit's.
@@ -730,11 +734,11 @@ final class StrokeCanvasView: CanvasPlaneView {
             removeStreamSurface(elementID)
             return
         }
-        let surface: StreamSurfaceView
+        let surface: WindowSurfaceView
         if let existing = streamSurfaces[elementID] {
             surface = existing
         } else {
-            surface = StreamSurfaceView()
+            surface = WindowSurfaceView()
             if ids != nil {
                 floatView.addSubview(surface)
             } else {
@@ -754,6 +758,98 @@ final class StrokeCanvasView: CanvasPlaneView {
     private func removeStreamSurfaces() {
         for surface in streamSurfaces.values { surface.removeFromSuperview() }
         streamSurfaces.removeAll()
+    }
+
+    // MARK: - A live element edit's window
+
+    /// **Where a live element edit reaches the screen** — `CanvasManager.liveElementEdit`, TODO (173).
+    /// One `WindowSurfaceView` the size of the edit's window, in `poseSpace` over the base and under
+    /// every other overlay, drawn off the main thread from the list the edit's newest tick holds.
+    /// The base is punched out under the window (`heldEditHole`), so the picture *replaces* the
+    /// cel's own there — the vector eraser's arrangement — and what is drawn is the cel's whole
+    /// content in the window, in true z-order, which the edited elements are part of.
+    private var heldEditSurface: WindowSurfaceView?
+    /// The edit this view is showing — its newest tick, whether or not the surface has drawn it yet.
+    private var heldEdit: LiveElementEdit?
+    /// **The window the base is punched out under, set only once the surface has put a picture in
+    /// it.** A hole punched first would show nothing for the frames it takes the first draw to land.
+    private var heldEditHole: CGRect?
+    /// `VectorCanvas.version` when the edit's first tick arrived — the commit is what moves it, and
+    /// a revert does not, which is how `takeDownHeldEdit` tells the two ends apart.
+    private var heldEditBaseVersion = 0
+
+    /// **Shows the live edit when it is this cel's, and takes down whatever this view was showing when
+    /// it is not or has ended** — the one writer of the window, called by the canvas whenever a held
+    /// picture moves and on every reconciliation pass. A tick the surface has already been given is
+    /// one comparison. Returns whether the picture changed.
+    @discardableResult
+    func showHeldEdit(_ edit: LiveElementEdit?) -> Bool {
+        guard let edit, let vectorCanvas, edit.vectorCanvas === vectorCanvas, !hostIsBlanked else {
+            return takeDownHeldEdit(landing: edit == nil)
+        }
+        if heldEditSurface != nil, heldEdit?.tick == edit.tick { return false }
+        if heldEdit == nil { heldEditBaseVersion = vectorCanvas.version }
+        heldEdit = edit
+        presentHeldEdit()
+        return true
+    }
+
+    /// Asks the surface for the newest tick. One draw is in flight at a time, so a tick that arrives
+    /// during one is not drawn — and the edit's last tick has no successor to catch it up, so the
+    /// draw that finishes draws it.
+    private func presentHeldEdit() {
+        guard let edit = heldEdit, let canvas = vectorCanvas, edit.vectorCanvas === canvas else { return }
+        let surface: WindowSurfaceView
+        if let existing = heldEditSurface {
+            surface = existing
+        } else {
+            surface = WindowSurfaceView()
+            // Below the held ink and the live stroke, which are newer than any edit.
+            poseSpace.insertSubview(surface, at: 0)
+            heldEditSurface = surface
+        }
+        let tick = edit.tick, window = edit.window, elements = edit.elements, rewriting = edit.rewriting
+        surface.present(window: window, placement: .identity, on: Self.renderQueue, draw: { cg in
+            canvas.drawEditWindow(of: elements, in: window, into: cg, rewriting: rewriting)
+        }, finished: { [weak self] shown in
+            guard let self, self.heldEditSurface === surface else { return }
+            if shown, self.heldEditHole != window {
+                self.heldEditHole = window
+                self.showOverlays(self.scratch)
+            }
+            if let latest = self.heldEdit?.tick, latest != tick { self.presentHeldEdit() }
+        })
+    }
+
+    /// Takes the window down. **When the edit ended in a write — the canvas has moved past the
+    /// version the edit began over — the final picture goes up as held ink first**, in the same
+    /// main-thread turn, so the base is never on screen with the old colours in it: the render of the
+    /// written list is off the main thread (RENDER.md §2.13) and the held picture stands in for it
+    /// until it lands (`UnlandedInk`). A revert wrote nothing, so the base underneath is already the
+    /// picture the artist started from.
+    @discardableResult
+    private func takeDownHeldEdit(landing: Bool) -> Bool {
+        guard heldEdit != nil || heldEditSurface != nil else { return false }
+        let edit = heldEdit
+        heldEdit = nil
+        heldEditHole = nil
+        heldEditSurface?.removeFromSuperview()
+        heldEditSurface = nil
+        if landing, let edit, let canvas = vectorCanvas, edit.vectorCanvas === canvas,
+           canvas.version != heldEditBaseVersion {
+            let window = edit.window
+            let format = PixelOps.transparentFormat()
+            format.preferredRange = .standard
+            let image = UIGraphicsImageRenderer(size: window.size, format: format).image { ctx in
+                canvas.drawEditWindow(of: canvas.elements, in: window, into: ctx.cgContext, rewriting: [])
+            }
+            unlandedInk.hold(UnlandedInk.Picture(id: nextUnlandedInkID, version: canvas.version,
+                                                 windowRect: window, alpha: 1, replacesBase: true,
+                                                 image: image))
+            nextUnlandedInkID += 1
+        }
+        showOverlays(scratch)
+        return true
     }
 
     /// A derived frame to show in place of this cel's own content — an in-between, or the cel's
@@ -1147,7 +1243,7 @@ final class StrokeCanvasView: CanvasPlaneView {
             // A timing stroke is never an eraser (`beginTimingTakeIfArmed` refuses one), so the live
             // window never replaces the base — but held ink from an earlier eraser stroke can still
             // be up, and it owns the hole. The same call the ordinary path makes with `liveHole` nil.
-            setBaseHole(unlandedInk.baseHole)
+            setBaseHole(heldEditHole ?? unlandedInk.baseHole)
             return
         }
         let image = scratch?.image
@@ -1156,7 +1252,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         // eraser's touch-down renders the canvas synchronously and so retires everything held (see
         // `UnlandedInk.hold`), and `UnlandedInk` holds at most one removal in any case.
         let liveHole = scratch.flatMap { $0.replacesBase ? $0.windowRect : nil }
-        setBaseHole(liveHole ?? unlandedInk.baseHole)
+        setBaseHole(liveHole ?? heldEditHole ?? unlandedInk.baseHole)
         // **BRUSH.md §2.11's cap, on the display side.** An `.additive` window holds the stroke's
         // ink at full flow and is shown at the stroke's own opacity, which is exactly what
         // `StrokeScratch.commit` will do to it at lift — so what the artist watches build up under

@@ -70,7 +70,7 @@ extension CanvasManager {
     /// document keeps, so on a canvas the compositor draws it reaches the screen through its layer's
     /// host and nowhere else: these are the layers whose hosts draw themselves between the halves of
     /// the live pair (`liveHostRun`). Frozen or moving makes no difference — a frozen stream is the
-    /// same reference, held still. A frame reaches the host through its `StreamSurfaceView`, which
+    /// same reference, held still. A frame reaches the host through its `WindowSurfaceView`, which
     /// draws the element where the cel's own coordinates put it; a cel the walk poses (a
     /// transformation layer above it, a Move channel of its own) is shown through a derived picture
     /// instead, which the surface cannot sit over and which never carries a stream, so a posed stream

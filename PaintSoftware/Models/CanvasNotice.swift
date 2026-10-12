@@ -109,6 +109,13 @@ struct CanvasNotice: Identifiable, Equatable {
         /// The fix is to move to one of the drawn cels either side, which is a decision the artist
         /// makes at the timeline rather than a button this banner could press.
         case cannotMoveDerivedFrame
+        /// **A live Colour, Size, Opacity or gradient edit has no picture to show on this frame** —
+        /// TODO (173). The edit's window draws the cel's ink in the layer's own space, shown through
+        /// the one pose the layer carries; where an animation group's pose moves part of the cel
+        /// somewhere that pose does not, the picture would sit in the wrong place. The edit is held
+        /// all the same and lands when the artist lets go, and the banner says so, rather than the
+        /// control moving and drawing nothing — CLAUDE.md's "a refusal with no notice".
+        case editShownOnRelease
         /// A Move caught **some but not all** of an animation group's members — the owner's ruling of
         /// 2026-09-03: *"Lets say animation A is a movement of a selection to a location. Now if you
         /// select half of the selection, then it shouldn't allow you to move it because that would
@@ -372,6 +379,7 @@ struct CanvasNotice: Identifiable, Equatable {
         case .nothingToSubtractFrom: return "There is no selection to subtract from — switch to Add, or draw a selection first."
         case .nothingTappedToSubtractFrom: return "No tapped objects are selected to subtract from — switch to Add, or tap an object first."
         case .cannotMoveDerivedFrame: return "This frame is an in-between — move the drawing on one of the keyframes either side."
+        case .editShownOnRelease: return "A pose moves part of this drawing, so the change shows when you let go."
         // **Each now names the second way out as well**, and that is TODO (21)'s membership editing
         // rather than a rewording. Until 2026-09-10 the only fix either sentence could offer was to
         // redraw the loop, because membership was unreachable; an artist who wanted *this ink out of
@@ -493,6 +501,8 @@ struct CanvasNotice: Identifiable, Equatable {
         // Nor this one, and for the same reason once more: the fix is to scrub to a drawn cel, which
         // is a move on the timeline the artist can already see.
         case .cannotMoveDerivedFrame: return nil
+        // Nor this one: nothing is wrong, and the change lands on its own.
+        case .editShownOnRelease: return nil
         // Nor this one. "Select the rest of the group" is a loop only the artist can draw, and the
         // alternative a button could offer — widen the selection to the whole group for them — is a
         // Move they did not ask for on ink they did not point at.
@@ -574,6 +584,7 @@ struct CanvasNotice: Identifiable, Equatable {
         case .nothingToSubtractFrom: return "nothingToSubtractFrom"
         case .nothingTappedToSubtractFrom: return "nothingTappedToSubtractFrom"
         case .cannotMoveDerivedFrame: return "cannotMoveDerivedFrame"
+        case .editShownOnRelease: return "editShownOnRelease"
         case .onlyPartOfAnAnimationGroup: return "onlyPartOfAnAnimationGroup"
         case .animationGroupNotAlone: return "animationGroupNotAlone"
         case .saveFailed:       return "saveFailed"

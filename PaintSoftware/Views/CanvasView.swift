@@ -1116,8 +1116,9 @@ struct CanvasView: UIViewRepresentable {
                         host.strokeView.refreshDisplayIfStale()
                     }
                 }
-                showLiveFill(on: host, layerID: layer.id,
-                             celID: celIdx.map { canvasManager.layers[index].cels[$0].id })
+                let hostCelID = celIdx.map { canvasManager.layers[index].cels[$0].id }
+                showLiveFill(on: host, layerID: layer.id, celID: hostCelID)
+                showLiveElementEdit(on: host, layerID: layer.id, celID: hostCelID)
                 // Disabling only strokeView.isUserInteractionEnabled isn't enough: each LayerHostView
                 // fully covers the container, so an inactive host still swallows touches via UIView's
                 // default hitTest, blocking an active layer underneath. Disabling the host itself
@@ -1950,9 +1951,9 @@ struct CanvasView: UIViewRepresentable {
         }
 
         /// **A picture the document does not hold yet moved** — `CanvasManager.onHeldPictureMoved`: a
-        /// graph-node drag's tick (TODO (154)) or an adjustable fill's render (TODO (157)). Each is
-        /// re-shown now, and that is the whole of its cost to the canvas: it is held off the document,
-        /// so no SwiftUI pass comes.
+        /// graph-node drag's tick (TODO (154)), an adjustable fill's render (TODO (157)) or a live
+        /// element edit's tick (TODO (173)). Each is re-shown now, and that is the whole of its cost to
+        /// the canvas: it is held off the document, so no SwiftUI pass comes.
         ///
         /// The pose re-poses the bands on screen; before they land there is nothing to re-pose, and the
         /// pass that lands them reads the held pose. The fill is drawn by its own host, which the canvas
@@ -1965,6 +1966,9 @@ struct CanvasView: UIViewRepresentable {
             for (layerID, host) in layerHosts {
                 let celID = canvasManager.liveFill?.layerID == layerID ? canvasManager.liveFill?.celID : nil
                 moved = showLiveFill(on: host, layerID: layerID, celID: celID) || moved
+                let editedCelID = canvasManager.liveElementEdit?.layerID == layerID
+                    ? canvasManager.liveElementEdit?.celID : nil
+                moved = showLiveElementEdit(on: host, layerID: layerID, celID: editedCelID) || moved
             }
             if moved {
                 liveMoveCount += 1
@@ -1981,6 +1985,17 @@ struct CanvasView: UIViewRepresentable {
             guard host.fillImageView.image !== preview?.image else { return false }
             host.showFillPreview(preview)
             return true
+        }
+
+        /// Shows on `host` the live element edit's window when it is on `celID` of `layerID`, and
+        /// takes down whatever the host was showing otherwise (`CanvasManager.liveElementEdit`, TODO
+        /// (173)). Returns whether the host's picture changed.
+        @discardableResult
+        private func showLiveElementEdit(on host: LayerHostView, layerID: UUID, celID: UUID?) -> Bool {
+            let live = canvasManager.liveElementEdit.flatMap {
+                $0.layerID == layerID && $0.celID == celID ? $0 : nil
+            }
+            return host.strokeView.showHeldEdit(live)
         }
 
         // MARK: §6.4's live mask
@@ -2616,6 +2631,7 @@ struct CanvasView: UIViewRepresentable {
             host.strokeView.raster = cel.raster
             host.strokeView.vectorCanvas = cel.vector
             showLiveFill(on: host, layerID: canvasManager.layers[index].id, celID: cel.id)
+            showLiveElementEdit(on: host, layerID: canvasManager.layers[index].id, celID: cel.id)
             host.bakedImageView.image = cel.bakedImage
             host.bakedImageView.isHidden = cel.bakedImage == nil
         }

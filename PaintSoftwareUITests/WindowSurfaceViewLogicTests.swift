@@ -2,7 +2,7 @@ import IOSurface
 import XCTest
 import UIKit
 
-/// **What a live stream frame hands Core Animation** — `StreamSurfaceView`, TODO (97).
+/// **What a live stream frame hands Core Animation** — `WindowSurfaceView`, TODO (97).
 ///
 /// The property under test is the one the old path lacked and the render server on the owner's
 /// iPad died of: across any number of frames, the layer's contents cycle between **two** objects
@@ -11,12 +11,12 @@ import UIKit
 /// `IOSurface` would be handing the render server a copy to make. Headless — no window, no host —
 /// so it runs in the fast tier; the present lands on the main queue, which the test spins.
 @MainActor
-final class StreamSurfaceViewLogicTests: XCTestCase {
+final class WindowSurfaceViewLogicTests: XCTestCase {
 
-    private let queue = DispatchQueue(label: "StreamSurfaceViewLogicTests.draw")
+    private let queue = DispatchQueue(label: "WindowSurfaceViewLogicTests.draw")
 
     /// Presents `count` frames of `color` into `window` and waits for each to land.
-    private func present(_ view: StreamSurfaceView, window: CGRect, count: Int,
+    private func present(_ view: WindowSurfaceView, window: CGRect, count: Int,
                          color: (Int) -> UIColor = { _ in .green },
                          file: StaticString = #filePath, line: UInt = #line) {
         for index in 0..<count {
@@ -41,7 +41,7 @@ final class StreamSurfaceViewLogicTests: XCTestCase {
     /// own pool so the count is of what a frame leaves on the layer and not of what the loop has
     /// not released — CLAUDE.md's growth-measurement rule.
     func testAHundredFramesCycleBetweenTwoSurfaces() {
-        let view = StreamSurfaceView()
+        let view = WindowSurfaceView()
         let window = CGRect(x: 10, y: 20, width: 32, height: 16)
         var contents = Set<ObjectIdentifier>()
         for _ in 0..<100 {
@@ -57,7 +57,7 @@ final class StreamSurfaceViewLogicTests: XCTestCase {
     /// the view hands the draw reads back green and opaque from the surface's own memory — which
     /// is the flip, the format and the push all being right at once.
     func testTheDrawLandsOnTheSurfaceOpaque() throws {
-        let view = StreamSurfaceView()
+        let view = WindowSurfaceView()
         let window = CGRect(x: 0, y: 0, width: 8, height: 4)
         present(view, window: window, count: 1)
         let surface = try XCTUnwrap(view.layer.contents as? IOSurface)
@@ -75,7 +75,7 @@ final class StreamSurfaceViewLogicTests: XCTestCase {
     /// A window of a new size makes new surfaces and hides the view until one lands; the same size
     /// keeps them.
     func testANewWindowSizeRemakesTheSurfacesAndTheSameSizeKeepsThem() throws {
-        let view = StreamSurfaceView()
+        let view = WindowSurfaceView()
         present(view, window: CGRect(x: 0, y: 0, width: 8, height: 4), count: 2)
         let first = try XCTUnwrap(view.layer.contents as AnyObject?)
         present(view, window: CGRect(x: 5, y: 5, width: 8, height: 4), count: 2)
@@ -88,7 +88,7 @@ final class StreamSurfaceViewLogicTests: XCTestCase {
 
     /// One draw in flight: a frame that arrives during it is dropped, and reported as dropped.
     func testAFrameDuringADrawIsDropped() {
-        let view = StreamSurfaceView()
+        let view = WindowSurfaceView()
         let window = CGRect(x: 0, y: 0, width: 8, height: 4)
         let gate = DispatchSemaphore(value: 0)
         XCTAssertTrue(view.present(window: window, placement: .identity, on: queue) { _ in
@@ -110,7 +110,7 @@ final class StreamSurfaceViewLogicTests: XCTestCase {
     /// A draw that answers a different rectangle — the element moved between the window being
     /// read and the draw — is not shown.
     func testADrawOfAnotherRectangleIsNotShown() {
-        let view = StreamSurfaceView()
+        let view = WindowSurfaceView()
         let window = CGRect(x: 0, y: 0, width: 8, height: 4)
         XCTAssertTrue(view.present(window: window, placement: .identity, on: queue) { _ in
             CGRect(x: 1, y: 0, width: 8, height: 4)

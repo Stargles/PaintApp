@@ -47,6 +47,15 @@ final class FillObjectLogicTests: XCTestCase {
                            canvasSize: CanvasFixture.canvasSize).cgImage
     }
 
+    /// What the gradient panel's window shows now: the live edit's list drawn as a canvas holding it
+    /// would draw it. A tick is held off the document (TODO (173)), so mid-session `flattened` still
+    /// says what the cel says.
+    private func heldFlattened(_ manager: CanvasManager) -> CGImage? {
+        guard let live = manager.liveElementEdit else { return nil }
+        return VectorCanvas(size: live.vectorCanvas.size, elements: live.elements,
+                            transform: live.vectorCanvas.transform).render().cgImage
+    }
+
     private func pixel(_ image: CGImage, _ x: Int, _ y: Int) -> [Int] {
         guard let bytes = CanvasFixture.rgbaBytes(image) else { return [] }
         let offset = (x + y * image.width) * 4
@@ -290,7 +299,8 @@ final class FillObjectLogicTests: XCTestCase {
     }
 
     /// **The panel's angle turns the ramp, live, and the whole session is one undo step.** 90 degrees
-    /// runs top to bottom: the rows now differ and a row is constant. Undo returns to the
+    /// runs top to bottom: the rows now differ and a row is constant — in the picture the panel's
+    /// window shows, while the document still holds the left-to-right gradient. Undo returns to the
     /// left-to-right gradient exactly.
     func testTurningTheAngleRunsTheRampDownTheCanvasAsOneUndoStep() throws {
         let (manager, layerIndex, vector) = vectorFixture()
@@ -298,9 +308,16 @@ final class FillObjectLogicTests: XCTestCase {
         let baseline = steps(manager)
         let original = try XCTUnwrap(manager.editedGradient)
 
+        let version = vector.version
         manager.setGradientAngle(.pi / 2)
         manager.setGradientAngle(.pi / 2)   // a second write of the same value changes nothing
-        let image = try XCTUnwrap(flattened(manager, layerIndex: layerIndex))
+        XCTAssertEqual(vector.version, version, "a tick holds the picture and writes nothing")
+        XCTAssertEqual(vector.elements.compactMap(\.fill).first?.gradient, original,
+                       "the document still holds the gradient the panel opened on")
+        let documentImage = try XCTUnwrap(flattened(manager, layerIndex: layerIndex))
+        XCTAssertEqual(pixel(documentImage, 32, 0)[0], pixel(documentImage, 32, side - 1)[0], accuracy: 1,
+                       "the document's own picture still runs left to right: a column is constant")
+        let image = try XCTUnwrap(heldFlattened(manager))
         XCTAssertLessThan(pixel(image, 32, 0)[0], 12, "black at the top")
         XCTAssertGreaterThan(pixel(image, 32, side - 1)[0], 243, "white at the bottom")
         // Within one 8-bit step: at 90 degrees `cos` is 6e-17 rather than 0, and with 257 stops a

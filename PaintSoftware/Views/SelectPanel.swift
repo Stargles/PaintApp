@@ -296,7 +296,7 @@ struct SelectPanel: View {
 
             bandSlider("Size", identifier: "selectPanel.sizeSlider",
                        current: style.size.map(Double.init), mixed: style.sizeIsMixed,
-                       range: 1...50, drag: $sizeDrag, live: live && style.size != nil,
+                       range: SelectionEditKind.sizeRange, drag: $sizeDrag, live: live && style.size != nil,
                        display: { String(format: "%.0f pt", $0) },
                        kind: .size, value: { .size(CGFloat($0)) })
 

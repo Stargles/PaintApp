@@ -5180,7 +5180,7 @@ the mechanism; what was MEASURED is that the churn is gone.
 | sim, 2048², 1280×720 pattern, 150 s | render server (guest `backboardd`) | app |
 |---|---|---|
 | before, 30 Hz canvas-sized contents | 69–101 MB footprint, **154–187 MB RSS, oscillating** | 152–214 MB |
-| after, `StreamSurfaceView` | 69 MB footprint, **126,592 KB RSS, constant** to the byte | 200–204 MB |
+| after, `WindowSurfaceView` | 69 MB footprint, **126,592 KB RSS, constant** to the byte | 200–204 MB |
 
 (`SimRenderServer` on the host: 375–396 MB before, 363–388 after — noise.) The tick's own
 main-actor cost is unchanged: MEASURED **23–29 ticks/s, mean 0.38–0.48 ms, max ≤1.5 ms** from the
@@ -5188,13 +5188,13 @@ coordinator's log line, against stage 2's 0.2–0.5 ms.
 
 **The fix is the shape of the scratch, applied to the stream.** A frame is presented by drawing the
 element's *window* — its footprint, quad-clipped, in true z-order — into one of two `IOSurface`s the
-host owns per stream element (`StreamSurfaceView`), off the main thread, through the same walk the
+host owns per stream element (`WindowSurfaceView`), off the main thread, through the same walk the
 memo uses (`VectorCanvas.drawStreamWindow`, `renderLocalContent`'s body factored out as
 `drawLocalContent`). The surfaces are the layer's contents for the life of the window: nothing
 canvas-sized is allocated, rasterized or uploaded per frame, and the render server maps two objects
 once. The memo is still region-damaged per frame (a thumbnail or a composite that reads it repairs
 it), but the host no longer redraws its base for a `version` move that left `documentVersion`
-still while a surface is up. `StreamSurfaceViewLogicTests` pins the count: a hundred frames are two
+still while a surface is up. `WindowSurfaceViewLogicTests` pins the count: a hundred frames are two
 contents objects, both `IOSurface`s.
 
 **Two smaller pins on the same path**, found reading the reports rather than measuring: Bake Frame

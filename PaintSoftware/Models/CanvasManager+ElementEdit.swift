@@ -1,6 +1,8 @@
+import Combine
+import CoreGraphics
 import Foundation
 
-// MARK: - A live edit of one cel's display list, settled as one undo step
+// MARK: - A live edit of one cel's display list, held off the document and settled as one undo step
 //
 // Two panels edit the objects already on a vector cel while the artist watches: the Select panel's
 // Colour, Size and Opacity (`SelectionEditSession`, a drag) and the gradient panel
@@ -8,12 +10,25 @@ import Foundation
 // here, and each session adds only what is its own — what the edit rewrites and who decides it changed
 // anything:
 //
-// - **begin** takes the list as the artist found it and names the ids the edit may rewrite;
-// - **write** (`writeElementEdit`) puts a rewritten list on the canvas in place, every tick, recording
-//   nothing;
-// - **commit** (`recordElementEdit`) registers one undo step from the list found to the list let go of;
-// - **revert** (`revertElementEdit`) puts the list found back and records nothing — a cancel, and an
-//   edit that ended where it began.
+// - **begin** (`beginElementEdit`) takes the list as the artist found it, names the ids the edit may
+//   rewrite, and lifts the cel's picture of them into a held window the canvas draws;
+// - **hold** (`holdElementEdit`) puts a rewritten list in that window, every tick, and writes
+//   **nothing** — not the cel, not the version, not a SwiftUI pass;
+// - **commit** (`recordElementEdit`) writes the final list into the cel once and registers one undo
+//   step from the list found to the list let go of;
+// - **revert** (`revertElementEdit`) lets the window go. The document was never touched, so there is
+//   nothing to put back — a cancel, and an edit that ended where it began.
+//
+// **Why the edit is held rather than written.** A tick used to be a document write
+// (`VectorCanvas.restoreElements`), and a document write is a lot: a new version, so a SwiftUI pass,
+// a new bake key and a re-bake, a re-minted live pair, a re-built onion skin, a thumbnail — and a new
+// canvas-sized picture of the cel for Core Animation to copy to the render server, ten times a second
+// for as long as a finger drags a slider. On the owner's 4096² document on an iPad 9 that killed the
+// render server twice in a minute (TODO (173), PERFORMANCE.md §29). It is the adjustable fill's
+// problem and its answer (`CanvasManager.liveFill`, TODO (157)): the picture lives off the document,
+// the cel's host draws it, and the commit writes once. What differs is that a fill adds pixels and an
+// edit *replaces* them, so the host punches the base out under the window (`StrokeCanvasView
+// .showHeldEdit`) the way a vector eraser's stroke does.
 //
 // **The text session is not one of these, and what differs is real.** Its draft lives in a tier of its
 // own (`textRecipe`, `textFrame`) while the object it reopened stays in the list, merely suppressed
@@ -22,38 +37,109 @@ import Foundation
 // it ends by `VectorCanvas.commitTextEdit` rather than by a write. What it shares is the commit's last
 // step, `registerVectorElementsUndo`, which already is the one door every whole-list undo goes through.
 
-/// **What one live edit of a cel's display list holds from the first write to its end** — the cel it
-/// is on, the list as the artist found it, and the ids it may rewrite.
+/// **What one live edit of a cel's display list holds from the first tick to its end** — the cel it
+/// is on, the list as the artist found it, the ids it may rewrite, the window its picture covers and
+/// the list its newest tick put there.
 struct ElementEditSession {
     let layerID: UUID
     let celID: UUID
     let vectorCanvas: VectorCanvas
-    /// The display list as the artist found it — what a revert puts back and the undo step's old side.
+    /// The display list as the artist found it — what the commit's undo step puts back.
     let elementsBefore: [VectorElement]
-    /// The ids a write may rewrite — `ElementSwap.rewritesInPlace`'s operand, over-declared on purpose:
-    /// an id here that did not change costs its own footprint of repair, an id left out that did is a
-    /// wrong picture.
+    /// The ids a tick may rewrite — `ElementSwap.rewritesInPlace`'s operand, over-declared on purpose:
+    /// an id here that did not change costs its own footprint of window, an id left out that did is
+    /// a wrong picture.
     let rewriting: Set<UUID>
-    /// Whether any write has reached the canvas. False for a panel opened and closed untouched, which
-    /// ends with no render and no step.
-    var applied = false
+    /// **The list the newest tick put in the window**, or nil before any has — the list the commit
+    /// writes. A tick is a pure function of the control's value (`working` rewritten), so this is
+    /// never read to compute the next one.
+    var held: [VectorElement]?
+
+    /// Whether any tick has been held. False for a panel opened and closed untouched, which ends with
+    /// no step.
+    var applied: Bool { held != nil }
+}
+
+/// **The picture of a live element edit, as the canvas shows it** — `CanvasManager.liveElementEdit`:
+/// the cel it is on, the rectangle it replaces and the list that rectangle is drawn from. The canvas's
+/// own picture of the cel is the base underneath, with a hole punched where this window is.
+struct LiveElementEdit {
+    let layerID: UUID
+    let celID: UUID
+    let vectorCanvas: VectorCanvas
+    /// **Where the picture is, in canvas points** — the union of what the edit's ids drew before and
+    /// everywhere any value of its control can make them draw (`VectorCanvas.editWindow`). Fixed for
+    /// the life of the edit, so the window's surfaces are made once; the whole canvas when no smaller
+    /// rectangle can be proved.
+    let window: CGRect
+    /// The ids the list holds under their own id with content the cel does not have — the edit's
+    /// `rewriting`, so a footprint measured for the cel's own copy is never used to skip one.
+    let rewriting: Set<UUID>
+    /// The display list the window is drawn from — the edit's newest tick.
+    var elements: [VectorElement]
+    /// Moves on every tick, so a host can tell a picture it has shown from one it has not.
+    var tick = 0
 }
 
 extension CanvasManager {
 
-    /// The edit's cel takes `elements` in place, and **nothing is recorded**. The seam is told the
-    /// ids, so the repair is bounded by where each rewritten object was and will be rather than
-    /// falling to the whole cel (`VectorCanvas.restoreElements(_:changedInk:rewriting:)`,
-    /// PERFORMANCE.md §11.11f) — which is what lets a slider drive it.
-    func writeElementEdit(_ elements: [VectorElement], on edit: ElementEditSession) {
-        edit.vectorCanvas.restoreElements(elements, changedInk: nil, rewriting: edit.rewriting)
-        celContentChangedOutsideStroke(layerID: edit.layerID, celID: edit.celID)
+    /// **Opens a live edit on `vectorCanvas`'s cel** and lifts its picture into a held window the
+    /// canvas draws. Writes nothing; publishes once, so the canvas cuts its live picture around the
+    /// edit's host (`heldHostLayerIndices`) before the first tick needs it.
+    ///
+    /// `extreme` is the list at the control's furthest value — what sizes the window. A recolour or a
+    /// fade changes no footprint, so it is the list found; a Size drag widens every stroke it reaches,
+    /// and the window is cut once, for the widest the slider allows, because a window that grew with
+    /// the drag would remake its surfaces mid-gesture and the picture would blink.
+    ///
+    /// **Whether the edit can be shown at all is a fact about the frame.** The window's picture is the
+    /// cel's own ink in its own space, shown through the one pose the layer carries
+    /// (`StrokeCanvasView.shownPose`) — exactly the live stroke's arrangement. Where an animation
+    /// group's pose moves some of the cel's ink somewhere that pose does not, that picture would sit
+    /// in the wrong place; the edit is then held with no window, the picture stays what it was, and
+    /// the change lands when the artist lets go (`CanvasNotice.Kind.editShownOnRelease`).
+    func beginElementEdit(layerID: UUID, celID: UUID, vectorCanvas: VectorCanvas,
+                          elementsBefore: [VectorElement], rewriting: Set<UUID>,
+                          extreme: [VectorElement]) -> ElementEditSession {
+        let session = ElementEditSession(layerID: layerID, celID: celID, vectorCanvas: vectorCanvas,
+                                         elementsBefore: elementsBefore, rewriting: rewriting)
+        let window = vectorCanvas.editWindow(replacingWith: extreme, rewriting: rewriting)
+        guard !window.isEmpty, shownThroughOnePose(celID: celID, in: layerID, elements: elementsBefore) else {
+            return session
+        }
+        liveElementEdit = LiveElementEdit(layerID: layerID, celID: celID, vectorCanvas: vectorCanvas,
+                                          window: window, rewriting: rewriting, elements: elementsBefore)
+        objectWillChange.send()
+        return session
+    }
+
+    /// **One tick: `elements` is what the edit's window shows now.** Nothing is written and nothing is
+    /// recorded; the canvas is told (`onHeldPictureMoved`) and that is the whole of a tick's cost to
+    /// the main thread — no SwiftUI pass, no bake key, no new picture handed to Core Animation.
+    func holdElementEdit(_ elements: [VectorElement], in edit: inout ElementEditSession) {
+        let first = !edit.applied
+        edit.held = elements
+        guard liveElementEdit?.celID == edit.celID else {
+            // No window to put it in (`beginElementEdit`): the artist is told once, on the first tick.
+            if first { raise(.editShownOnRelease) }
+            return
+        }
+        liveElementEdit?.elements = elements
+        liveElementEdit?.tick += 1
+        onHeldPictureMoved?()
     }
 
     /// Closes the edit as **one undo step** from the list the artist found to `finalElements`, the list
-    /// they let go of — whatever the edit wrote in between.
+    /// they let go of — the only write the edit makes. The seam is told the ids, so the repair is
+    /// bounded by where each rewritten object was and will be rather than falling to the whole cel
+    /// (`VectorCanvas.restoreElements(_:changedInk:rewriting:)`, PERFORMANCE.md §11.11f).
+    ///
+    /// The window is let go **after** the write, in the same turn: the host holds its last picture
+    /// over the cel until a render of the new version lands, so the base is never on screen with the
+    /// old colours in it.
     func recordElementEdit(_ edit: ElementEditSession, finalElements: [VectorElement],
                            label: HistoryActionLabel) {
+        edit.vectorCanvas.restoreElements(finalElements, changedInk: nil, rewriting: edit.rewriting)
         registerVectorElementsUndo(vectorCanvas: edit.vectorCanvas,
                                    oldElements: edit.elementsBefore, newElements: finalElements,
                                    layerID: edit.layerID, celID: edit.celID, label: label,
@@ -61,10 +147,28 @@ extension CanvasManager {
         // The layer-panel thumbnail is a third thing, and `registerVectorElementsUndo` refreshes it
         // on the undo and redo sides but not on the initial apply.
         celContentChangedOutsideStroke(layerID: edit.layerID, celID: edit.celID)
+        endLiveElementEdit()
     }
 
-    /// Puts the list the artist found back and **records nothing**.
+    /// Lets the window go and **records nothing**. The cel was never written, so the picture under the
+    /// window is already the one the artist started from.
     func revertElementEdit(_ edit: ElementEditSession) {
-        writeElementEdit(edit.elementsBefore, on: edit)
+        endLiveElementEdit()
+    }
+
+    private func endLiveElementEdit() {
+        guard liveElementEdit != nil else { return }
+        liveElementEdit = nil
+        onHeldPictureMoved?()
+        objectWillChange.send()
+    }
+
+    /// **Whether the cel's picture on this frame is the one pose's** — the cel at rest, or every
+    /// element of it shown through the same map the layer is (`inkPose(forLayerID:)`).
+    private func shownThroughOnePose(celID: UUID, in layerID: UUID, elements: [VectorElement]) -> Bool {
+        let maps = celPoseMaps(elements, layerID: layerID, celID: celID, atFrame: currentFrame)
+        if maps.isEmpty { return true }
+        guard maps.count == elements.count, let layerPose = inkPose(forLayerID: layerID) else { return false }
+        return maps.values.allSatisfy { $0 == layerPose }
     }
 }

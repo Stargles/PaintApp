@@ -329,7 +329,7 @@ final class StreamElementLogicTests: XCTestCase {
 
     // MARK: - The window a live frame is presented in (TODO (97))
 
-    /// A bitmap context of `window`'s size set up the way `StreamSurfaceView` sets its surface up —
+    /// A bitmap context of `window`'s size set up the way `WindowSurfaceView` sets its surface up —
     /// UIKit-flipped, current, origin at the window's corner — and a reader of its pixels after
     /// `draw` has run in it.
     private func drawWindow(_ window: CGRect, _ draw: (CGContext) -> Void)

@@ -3,14 +3,16 @@ import SwiftUI
 
 /// **TODO (42) — Colour, Size and Opacity on a selection, live, as one undo step.** The session in
 /// `CanvasManager+SelectionEdit.swift`: `beginSelectionEdit` resolves the loop, `previewSelectionEdit`
-/// rewrites the caught elements in place on every tick, `commitSelectionEdit` records the one step,
-/// `cancelSelectionEdit` puts the pre-drag list back.
+/// holds the caught elements' rewritten list on every tick, `commitSelectionEdit` writes it once and
+/// records the one step, `cancelSelectionEdit` lets the held list go.
 ///
 /// Every assertion here is on a stored field, and the file says so: what is *drawn* is
-/// `SelectionEditUITests`' business, from a fresh document, off the screen. What these pin is the
-/// arithmetic a drag has to get right whatever the picture looks like — which ids a tick may touch,
-/// what "one step" means across ten ticks, what a cancel puts back, and which kinds each control
-/// reaches. The mutation each test caught is in its doc comment.
+/// `SelectionEditUITests`' business, from a fresh document, off the screen — and, for the held
+/// window's own picture, `LiveElementEditLogicTests`'. What these pin is the arithmetic a drag has to
+/// get right whatever the picture looks like — which ids a tick may touch, what "one step" means
+/// across ten ticks, what a cancel leaves, and which kinds each control reaches. **Mid-drag the
+/// document is not the thing to read** (TODO (173)): a tick is held off it, so `shown` is — the live
+/// edit's list while one is up. The mutation each test caught is in its doc comment.
 final class SelectionEditLogicTests: XCTestCase {
 
     // MARK: - Fixtures (`LassoMoveLogicTests`' shape)
@@ -57,6 +59,15 @@ final class SelectionEditLogicTests: XCTestCase {
     }
 
     private func sizes(_ vector: VectorCanvas) -> [CGFloat] { vector.elements.compactMap { $0.stroke?.size } }
+    /// What the canvas shows of the cel mid-drag: the live edit's list while one is held, the
+    /// document's otherwise. A tick is not a document write (TODO (173)), so mid-drag the document
+    /// still says what it said before the finger went down.
+    private func shown(_ manager: CanvasManager, _ vector: VectorCanvas) -> [VectorElement] {
+        manager.liveElementEdit?.elements ?? vector.elements
+    }
+    private func shownSizes(_ manager: CanvasManager, _ vector: VectorCanvas) -> [CGFloat] {
+        shown(manager, vector).compactMap { $0.stroke?.size }
+    }
     private func opacities(_ vector: VectorCanvas) -> [Double] { vector.elements.compactMap { $0.stroke?.opacity } }
 
     /// Three strokes at y = 10, 20 and 50, sizes 4, 6 and 8; a loop that catches the first two whole.
@@ -181,11 +192,14 @@ final class SelectionEditLogicTests: XCTestCase {
         XCTAssertEqual(before, [4, 6, 8])
 
         XCTAssertTrue(manager.beginSelectionEdit(.size))
+        let version = vector.version
         for tick in 1...10 {
             manager.previewSelectionEdit(.size(CGFloat(10 + tick)))
             XCTAssertEqual(stepsSince(baseline, manager), 0, "tick \(tick) recorded a step")
-            XCTAssertEqual(sizes(vector), [CGFloat(10 + tick), CGFloat(10 + tick), 8],
-                           "tick \(tick) is on the canvas — the preview is live, not deferred")
+            XCTAssertEqual(shownSizes(manager, vector), [CGFloat(10 + tick), CGFloat(10 + tick), 8],
+                           "tick \(tick) is what the canvas shows — the preview is live, not deferred")
+            XCTAssertEqual(sizes(vector), before, "tick \(tick) wrote the document")
+            XCTAssertEqual(vector.version, version, "tick \(tick) moved the canvas's version")
         }
         XCTAssertTrue(manager.commitSelectionEdit())
         XCTAssertEqual(stepsSince(baseline, manager), 1, "ten ticks, one step")
@@ -249,8 +263,9 @@ final class SelectionEditLogicTests: XCTestCase {
 
         XCTAssertTrue(manager.beginSelectionEdit(.size))
         manager.previewSelectionEdit(.size(20))
-        XCTAssertEqual(vector.elements.count, 2, "mid-drag the stroke is split and the inside piece is 20 pt")
-        XCTAssertEqual(Set(sizes(vector)), [6, 20])
+        XCTAssertEqual(shown(manager, vector).count, 2, "mid-drag the stroke is split and the inside piece is 20 pt")
+        XCTAssertEqual(Set(shownSizes(manager, vector)), [6, 20])
+        XCTAssertEqual(vector.elements.count, 1, "and none of it is in the document yet")
         manager.previewSelectionEdit(.size(6))
         XCTAssertFalse(manager.commitSelectionEdit(), "back at 6 pt: nothing to record")
         XCTAssertEqual(stepsSince(baseline, manager), 0)
@@ -283,9 +298,9 @@ final class SelectionEditLogicTests: XCTestCase {
     /// **Cancel puts the pre-drag list back with no entry** — by the call, by the selection being
     /// cleared mid-drag, and by undo pressed mid-drag, which then undoes the *previous* step.
     ///
-    /// Mutation caught: `cancelSelectionEdit` dropping the session without restoring
-    /// `elementsBefore` leaves the last tick's sizes on the canvas — the first assertion after each
-    /// cancel goes red.
+    /// Mutation caught: `cancelSelectionEdit` dropping the session and leaving the window up
+    /// (`revertElementEdit` not ending the live edit) leaves the last tick's sizes on screen — the
+    /// `shownSizes` assertion after each cancel goes red.
     func testCancelRestoresThePreDragStateWithNoEntryHoweverItIsReached() {
         let (manager, _, vector, _, _) = threeStrokes()
         // One real step to undo past, so the mid-drag undo below has something to land on.
@@ -296,9 +311,11 @@ final class SelectionEditLogicTests: XCTestCase {
         // 1. The call.
         XCTAssertTrue(manager.beginSelectionEdit(.size))
         manager.previewSelectionEdit(.size(30))
-        XCTAssertEqual(sizes(vector), [30, 30, 8])
+        XCTAssertEqual(shownSizes(manager, vector), [30, 30, 8])
         manager.cancelSelectionEdit()
-        XCTAssertEqual(sizes(vector), before, "cancel: the sizes the artist started with")
+        XCTAssertEqual(shownSizes(manager, vector), before, "cancel: the sizes the artist started with")
+        XCTAssertEqual(sizes(vector), before, "and the document is what it was")
+        XCTAssertNil(manager.liveElementEdit, "and the window is gone")
         XCTAssertEqual(stepsSince(baseline, manager), 0, "and no step")
         XCTAssertNil(manager.selectionEdit)
 
@@ -306,7 +323,7 @@ final class SelectionEditLogicTests: XCTestCase {
         XCTAssertTrue(manager.beginSelectionEdit(.size))
         manager.previewSelectionEdit(.size(31))
         manager.deselect()
-        XCTAssertEqual(sizes(vector), before, "deselect mid-drag: the sizes the artist started with")
+        XCTAssertEqual(shownSizes(manager, vector), before, "deselect mid-drag: the sizes the artist started with")
         XCTAssertEqual(stepsSince(baseline, manager), 0)
         XCTAssertNil(manager.selectionEdit, "the session is closed, not merely detached from its loop")
         manager.previewSelectionEdit(.size(32))
@@ -318,6 +335,7 @@ final class SelectionEditLogicTests: XCTestCase {
         XCTAssertEqual(opacities(vector2), [0.9, 0.9, 0.8])
         XCTAssertTrue(manager2.beginSelectionEdit(.size))
         manager2.previewSelectionEdit(.size(33))
+        XCTAssertEqual(shownSizes(manager2, vector2), [33, 33, 8], "the drag is on screen")
         manager2.undo()
         XCTAssertEqual(sizes(vector2), [4, 6, 8], "undo mid-drag: the drag is thrown away")
         XCTAssertEqual(opacities(vector2), [0.4, 0.6, 0.8], "and the press undid the step before it")

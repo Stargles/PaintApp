@@ -1104,7 +1104,9 @@ extension CanvasManager {
     /// **The layers whose hosts draw what the document does not hold yet** — every part of a lasso's
     /// or a folder's float on the glass, a raster Move's source, whose host shows the hole
     /// (`piece.remainderPreview`) the cel does not have, and the layer an adjustable fill lands on,
-    /// whose host shows its preview (`liveFill`, TODO (157)). A Duplicate's copy is drawn by the
+    /// whose host shows its preview (`liveFill`, TODO (157)), and the layer a live element edit is
+    /// on, whose host shows the edited window over the base (`liveElementEdit`, TODO (173)). A
+    /// Duplicate's copy is drawn by the
     /// overlay over everything, and a transformation layer's or an effect's box holds no pixels — the
     /// composite itself moves under those — so none of the three names a host.
     @MainActor
@@ -1112,6 +1114,7 @@ extension CanvasManager {
         var ids = vectorFloat?.parts.filter(\.isShown).map(\.layerID) ?? []
         if let piece = floatingPiece, piece.kind == .move { ids.append(piece.sourceLayerID) }
         if let liveFill { ids.append(liveFill.layerID) }
+        if let liveElementEdit { ids.append(liveElementEdit.layerID) }
         return ids.compactMap { id in layers.firstIndex { $0.id == id } }
     }
 

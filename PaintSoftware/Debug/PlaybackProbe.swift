@@ -47,6 +47,12 @@ import UIKit
 ///     -probeGraded                   give the second layer a Multiply blend mode, so the document
 ///                                    is one the sandwich composites — the graded working set is
 ///                                    the one PERFORMANCE.md §15.5 could only estimate
+///     -probeMode recolour            run Select's Colour drag over `-probeFills` fills on the first
+///                                    cel instead of playing (TODO (173))
+///     -probeFills <n>                fills on the first cel for `recolour` (default 6)
+///     -probeTicks <n>                picker ticks in one `recolour` drag (default 100)
+///     -probeTickMs <n>               milliseconds between ticks (default 80, the owner's iPad 9)
+///     -probeOnion <0|1>              the onion skin, on by default as it is for the artist
 ///     -probeLabel <s>                goes in the filename and the report
 ///
 /// The report lands in `Documents/Probe/` and the process exits when it is written, so the caller
@@ -77,7 +83,7 @@ enum PlaybackProbe {
     /// redoes them, one operation per interval. Two modes rather than two probes because the
     /// document, the bake wait and the report are identical and only the middle differs — and
     /// because the whole question of this pass is whether the three symptoms are one cost.
-    enum Mode: String { case playback, edit }
+    enum Mode: String { case playback, edit, recolour }
 
     // MARK: - The run
 
@@ -112,8 +118,12 @@ enum PlaybackProbe {
         canvasManager.addVectorLayer()
         seed(into: canvasManager, layers: layerCount, frames: frameCount,
              strokesPerCel: strokesPerCel, size: size)
+        if mode == .recolour {
+            addFills(to: canvasManager, size: size, count: max(1, intArgument("-probeFills", default: 6)))
+        }
         let graded = ProcessInfo.processInfo.arguments.contains("-probeGraded")
         if graded, canvasManager.layers.count > 1 { canvasManager.layers[1].blendMode = .multiply }
+        canvasManager.isOnionSkinEnabled = intArgument("-probeOnion", default: 1) != 0
         showEditor()
 
         // One turn for the editor to build its views and run the first reconciliation pass, which is
@@ -155,6 +165,11 @@ enum PlaybackProbe {
                 footprint.sample()
             }
             canvasManager.stopPlayback()
+        case .recolour:
+            operations = await runRecolour(canvasManager, size: size,
+                                           ticks: max(1, intArgument("-probeTicks", default: 100)),
+                                           intervalMs: max(1, intArgument("-probeTickMs", default: 80)),
+                                           footprint: { footprint.sample() })
         case .edit:
             operations = await runEdits(canvasManager, size: size,
                                         count: max(1, intArgument("-probeEdits", default: 4)),
@@ -365,6 +380,42 @@ enum PlaybackProbe {
         canvasManager.refreshUndoRedoState()
     }
 
+    // MARK: - Recolour
+
+    /// **Select's Colour drag on fills, tick by tick** — TODO (173). Lassoes the whole canvas and runs
+    /// the session the Select panel's picker runs: `beginSelectionEdit`, `ticks` writes of a sweeping
+    /// hue `intervalMs` apart (the owner's drag delivered one about every 80 ms on the iPad 9), then
+    /// `commitSelectionEdit` — and lets the canvas settle, so the report's footprint samples cover the
+    /// whole of a session and what it leaves behind.
+    @MainActor
+    private static func runRecolour(_ canvasManager: CanvasManager, size: CGSize, ticks: Int,
+                                    intervalMs: Int,
+                                    footprint: @escaping () -> Void) async -> [String] {
+        let layerIndex = canvasManager.currentLayerIndex
+        guard let celIndex = canvasManager.activeCelIndex(inLayer: layerIndex, atFrame: canvasManager.currentFrame) else { return ["no cel"] }
+        let whole = CGPath(rect: CGRect(origin: .zero, size: size), transform: nil)
+        canvasManager.selection = Selection(path: whole, bounds: whole.boundingBoxOfPath,
+                                            layerID: canvasManager.layers[layerIndex].id,
+                                            celID: canvasManager.layers[layerIndex].cels[celIndex].id)
+        footprint()
+        PlaybackTrace.mark(.tick, value: 0)
+        guard canvasManager.beginSelectionEdit(.color) else { return ["session refused"] }
+        for tick in 0..<ticks {
+            let hue = Double(tick % 360) / 360
+            let c = UIColor(hue: hue, saturation: 0.8, brightness: 0.9, alpha: 1)
+            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0
+            c.getRed(&r, green: &g, blue: &b, alpha: nil)
+            canvasManager.previewSelectionEdit(.color(CodableColor(red: Double(r), green: Double(g), blue: Double(b), alpha: 1)))
+            try? await Task.sleep(nanoseconds: UInt64(intervalMs) * 1_000_000)
+            footprint()
+        }
+        canvasManager.commitSelectionEdit()
+        PlaybackTrace.mark(.tick, value: 1)
+        try? await Task.sleep(nanoseconds: 6_000_000_000)
+        footprint()
+        return ["recolour"]
+    }
+
     // MARK: - The document
 
     /// `UITestSeeds.seedPlainAnimationIfRequested`'s document with its three constants made
@@ -404,6 +455,21 @@ enum PlaybackProbe {
         }
         canvasManager.currentLayerIndex = 0
         canvasManager.currentFrame = 0
+    }
+
+    /// `count` flat rounded-rectangle fills on the first layer's first cel, in rows of three — what
+    /// `runRecolour` recolours. Added before the bake wait, so the baked frame holds them.
+    @MainActor
+    private static func addFills(to canvasManager: CanvasManager, size: CGSize, count: Int) {
+        guard let vector = canvasManager.layers[0].cels.first?.vector else { return }
+        let cols = 3
+        for index in 0..<count {
+            let cell = CGRect(x: size.width * (0.08 + 0.3 * CGFloat(index % cols)),
+                              y: size.height * (0.08 + 0.2 * CGFloat(index / cols)),
+                              width: size.width * 0.26, height: size.height * 0.16)
+            vector.addFill(canvasSpacePath: CGPath(roundedRect: cell, cornerWidth: 80, cornerHeight: 80, transform: nil),
+                           color: CodableColor(red: 0.2, green: 0.4, blue: 0.9, alpha: 1))
+        }
     }
 
     /// Blocks until every frame of the scene reports baked, or the timeout runs out.

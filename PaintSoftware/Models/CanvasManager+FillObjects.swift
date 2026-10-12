@@ -128,11 +128,11 @@ extension CanvasManager {
 
     /// Opens the gradient `elementID` on the active cel for editing — the panel's whole life.
     ///
-    /// **A session, not a gesture**: it stays open while the panel is up, every change re-renders the
-    /// element in place (`restoreElements(_:changedInk:rewriting:)`, so a change costs the gradient's
-    /// own rectangle), and it closes as **one undo step** when the next canvas edit, tool change or
-    /// undo settles it (`commitGradientEdit`). The text session's shape, for its reason: undo is the
-    /// artist's way back to *before they opened the panel*, not through every slider tick.
+    /// **A session, not a gesture**: it stays open while the panel is up, every change re-draws the
+    /// element in a held window (`beginElementEdit`, so a change costs the gradient's own rectangle
+    /// and writes nothing), and it closes as **one undo step** when the next canvas edit, tool change
+    /// or undo settles it (`commitGradientEdit`). The text session's shape, for its reason: undo is
+    /// the artist's way back to *before they opened the panel*, not through every slider tick.
     ///
     /// - Returns: false when the element is not a gradient on the cel under the playhead.
     @discardableResult
@@ -144,12 +144,13 @@ extension CanvasManager {
               let vector = layers[currentLayerIndex].cels[celIndex].vector else { return false }
         let elements = vector.elements
         guard elements.contains(where: { $0.id == elementID && $0.fill?.gradient != nil }) else { return false }
+        // A paint changes no footprint, so the list found sizes the window.
         gradientEdit = GradientEditSession(
             elementID: elementID,
-            edit: ElementEditSession(layerID: layers[currentLayerIndex].id,
-                                     celID: layers[currentLayerIndex].cels[celIndex].id,
-                                     vectorCanvas: vector, elementsBefore: elements,
-                                     rewriting: [elementID]))
+            edit: beginElementEdit(layerID: layers[currentLayerIndex].id,
+                                   celID: layers[currentLayerIndex].cels[celIndex].id,
+                                   vectorCanvas: vector, elementsBefore: elements,
+                                   rewriting: [elementID], extreme: elements))
         return true
     }
 
@@ -161,7 +162,7 @@ extension CanvasManager {
 
     private var editedGradientElement: VectorElement? {
         guard let session = gradientEdit else { return nil }
-        return session.edit.vectorCanvas.elements.first { $0.id == session.elementID }
+        return (session.edit.held ?? session.edit.elementsBefore).first { $0.id == session.elementID }
     }
 
     /// One end's colour, previewed live. The alpha travels with the pick — a gradient to transparent
@@ -187,11 +188,11 @@ extension CanvasManager {
         rewriteEditedGradient { gradient, bounds in gradient.turned(to: angle, over: bounds) }
     }
 
-    /// Writes one change to the edited element in place. Nothing is recorded; a no-change write
-    /// touches nothing, so a slider grabbed and not moved leaves no trace.
+    /// Holds one change to the edited element in the session's window. Nothing is written or
+    /// recorded; a no-change tick holds nothing, so a slider grabbed and not moved leaves no trace.
     private func rewriteEditedGradient(_ change: (LinearGradientPaint, CGRect) -> LinearGradientPaint) {
         guard var session = gradientEdit else { return }
-        var elements = session.edit.vectorCanvas.elements
+        var elements = session.edit.held ?? session.edit.elementsBefore
         guard let index = elements.firstIndex(where: { $0.id == session.elementID }),
               case .fill(var fill) = elements[index],
               let gradient = fill.gradient, let bounds = fill.cgPath?.boundingBoxOfPath else { return }
@@ -199,12 +200,8 @@ extension CanvasManager {
         guard changed != gradient else { return }
         fill.paint = .linearGradient(changed)
         elements[index] = .fill(fill)
-        session.edit.applied = true
+        holdElementEdit(elements, in: &session.edit)
         gradientEdit = session
-        // **The id is declared** (`ElementEditSession.rewriting`), so the repair is bounded by the
-        // gradient's own rectangle rather than falling to the whole cel — the Select panel's seam, for
-        // the same slider-driven rate.
-        writeElementEdit(elements, on: session.edit)
         refreshUndoRedoState()
     }
 
@@ -217,11 +214,16 @@ extension CanvasManager {
         guard let session = gradientEdit else { return false }
         gradientEdit = nil
         defer { refreshUndoRedoState() }
-        guard session.edit.applied else { return false }
-        let final = session.edit.vectorCanvas.elements
+        guard let final = session.edit.held else {
+            revertElementEdit(session.edit)
+            return false
+        }
         let paintBefore = session.edit.elementsBefore.first { $0.id == session.elementID }?.fill?.paint
         let paintAfter = final.first { $0.id == session.elementID }?.fill?.paint
-        guard paintBefore != paintAfter else { return false }
+        guard paintBefore != paintAfter else {
+            revertElementEdit(session.edit)
+            return false
+        }
         recordElementEdit(session.edit, finalElements: final, label: .editGradient)
         return true
     }

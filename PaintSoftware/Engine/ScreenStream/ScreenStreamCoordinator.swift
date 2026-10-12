@@ -31,7 +31,7 @@ import UIKit
 /// moved, and the host's ordinary repaint on a frame change or a layer coming back draws it.
 ///
 /// **Presenting into a surface rather than repainting the host is what TODO (97) needed** — see
-/// `StreamSurfaceView`. The old tick asked the host to `refreshDisplayIfStale`, which rasterized
+/// `WindowSurfaceView`. The old tick asked the host to `refreshDisplayIfStale`, which rasterized
 /// the canvas and handed Core Animation a fresh canvas-sized image per frame; the render server on
 /// the owner's iPad grew to its limit and was killed.
 ///

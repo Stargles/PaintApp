@@ -1736,7 +1736,7 @@ final class VectorCanvas {
     ///   either: the bake never draws the frame (`freeze(quality:)`), so there is nothing for it to
     ///   catch up with. See `documentVersion`.
     ///   (The layer host tells the two apart too, and does not redraw its base for a frame while a
-    ///   `StreamSurfaceView` presents the element — TODO (97).)
+    ///   `WindowSurfaceView` presents the element — TODO (97).)
     /// - **The damage is the element's own rectangle**, declared as `.region`, so the re-walk is
     ///   TODO (41)'s bounded repair rather than a whole-cel walk: everything under and over the
     ///   stream inside its footprint is redrawn in z-order, and nothing outside it is touched.
@@ -2682,9 +2682,33 @@ final class VectorCanvas {
                          rewriting rewritten: Set<UUID>) {
         lock.lock()
         defer { lock.unlock() }
+        let change = replacement(by: newValue, rewriting: rewritten)
+        let damage = restoreDamage(to: newValue, departed: change.departed, rewrites: change.rewrites,
+                                   changedInk: changedInk)
+        _elements = newValue
+        // No `dropIncrementalBase()` here, though the `elements` setter has one: `restoreDamage`
+        // returns only `.everything` or `.region` and `applyToIncrementalBase` drops the base for
+        // both, so the call was unobservable. MEASURED by mutation — deleting it left all thirteen
+        // of `UndoRepairLogicTests` green, which is what a line that cannot be reddened means.
+        //
+        // **Before the forget, which is the only ordering constraint here**: the footprints being
+        // handed to `vacatedInk` are the ones about to be removed.
+        rememberVacatedInk(departed: change.departed, arriving: change.arriving)
+        forgetPaintedBounds(change.departed.lazy.map(\.id))
+        // A rewritten element's entry was a promise it has not changed, and it has. Forgotten rather
+        // than moved to `vacatedInk`: the id is still in the list, and the next walk measures it.
+        forgetPaintedBounds(change.rewrites.lazy.map(\.new.id))
+        invalidate(damage)
+    }
+
+    /// **How a list that replaces the standing one differs from it by id** — what left, and the
+    /// standing/new pair of each element the caller may have rewritten under its own id. Taken
+    /// before any splice, because afterwards the list no longer holds what left it and a rewritten
+    /// element's old value is gone. Caller must hold `lock`.
+    private func replacement(by newValue: [VectorElement], rewriting rewritten: Set<UUID>)
+        -> (arriving: Set<UUID>, departed: [VectorElement],
+            rewrites: [(old: VectorElement, new: VectorElement)]) {
         let arriving = Set(newValue.lazy.map(\.id))
-        // Taken before the splice, because afterwards the list no longer holds what left it — and
-        // the same is true of a rewritten element's old value, which is why the pair is built here.
         var departed: [VectorElement] = []
         var standingRewritten: [UUID: VectorElement] = [:]
         standingRewritten.reserveCapacity(rewritten.count)
@@ -2703,22 +2727,7 @@ final class VectorCanvas {
                 rewrites.append((old, element))
             }
         }
-        let damage = restoreDamage(to: newValue, departed: departed, rewrites: rewrites,
-                                   changedInk: changedInk)
-        _elements = newValue
-        // No `dropIncrementalBase()` here, though the `elements` setter has one: `restoreDamage`
-        // returns only `.everything` or `.region` and `applyToIncrementalBase` drops the base for
-        // both, so the call was unobservable. MEASURED by mutation — deleting it left all thirteen
-        // of `UndoRepairLogicTests` green, which is what a line that cannot be reddened means.
-        //
-        // **Before the forget, which is the only ordering constraint here**: the footprints being
-        // handed to `vacatedInk` are the ones about to be removed.
-        rememberVacatedInk(departed: departed, arriving: arriving)
-        forgetPaintedBounds(departed.lazy.map(\.id))
-        // A rewritten element's entry was a promise it has not changed, and it has. Forgotten rather
-        // than moved to `vacatedInk`: the id is still in the list, and the next walk measures it.
-        forgetPaintedBounds(rewrites.lazy.map(\.new.id))
-        invalidate(damage)
+        return (arriving, departed, rewrites)
     }
 
     /// Moves the departing elements' measured footprints into `vacatedInk`, and takes out the ids
@@ -6854,7 +6863,7 @@ final class VectorCanvas {
     /// current `displayFrame` and the ink around it, not a picture the canvas keeps.
     ///
     /// `cg` is a UIKit context (flipped, current) whose origin is the window's own top-left corner;
-    /// `StreamSurfaceView` makes one over an `IOSurface`. `isolating` is the Move box's case — the
+    /// `WindowSurfaceView` makes one over an `IOSurface`. `isolating` is the Move box's case — the
     /// lifted ids alone, posed as the float shows them — and takes the float's list exactly as
     /// `renderIsolated` does. Returns the window drawn, so the caller can tell a surface sized for a
     /// different rectangle to try again, or nil when the id is not a stream here.
@@ -6888,6 +6897,75 @@ final class VectorCanvas {
         cg.clear(window)
         _ = Self.drawLocalContent(into: cg, elements: listed, quality: .full,
                                   clippedTo: window, known: known)
+        cg.restoreGState()
+        return window
+    }
+
+    // MARK: - A live element edit's window (TODO (173))
+
+    /// **The rectangle of this canvas that a held edit shows in place of the canvas's own picture**
+    /// — where the display list `newValue` draws differently from the standing one, which is
+    /// `restoreDamage`'s answer for the same swap, read without making the swap. The whole canvas
+    /// when the damage cannot be bounded (a derivation it has no footprint for) or when the canvas
+    /// carries a transform the region repair does not run under; empty when no pixel differs.
+    ///
+    /// **Integral, and rounded out**, for `repairClip`'s measured reason: a clip that falls between
+    /// pixels is antialiased, so the window's outermost row would be part-cleared and part-drawn.
+    ///
+    /// A hold is told the ids it may rewrite exactly as `restoreElements(_:changedInk:rewriting:)` is,
+    /// and for the same reason: an element standing under its own id keeps its measured footprint,
+    /// which is a promise it has not changed.
+    func editWindow(replacingWith newValue: [VectorElement], rewriting rewritten: Set<UUID>) -> CGRect {
+        lock.lock()
+        defer { lock.unlock() }
+        let change = replacement(by: newValue, rewriting: rewritten)
+        let damage = restoreDamage(to: newValue, departed: change.departed, rewrites: change.rewrites,
+                                   changedInk: nil)
+        let whole = CGRect(origin: .zero, size: size)
+        guard _transform.isIdentity, case .region(let rect) = damage else { return whole }
+        if rect.isNull { return .zero }
+        return Self.repairClip(rect, in: size, resolution: 1)?.intersection(whole) ?? whole
+    }
+
+    /// **Draws `elements` into `window` of `cg` — the picture a held edit shows over the base, which
+    /// has its hole there.** The pixels `render()` would put in `window` if the canvas held
+    /// `elements`, produced by the same walk (z-order, erasers, blend runs) and *without* a
+    /// canvas-sized renderer: the display of a live edit is a window the size of the edit, drawn into
+    /// a persistent surface (`WindowSurfaceView`), so a slider's tick allocates and hands Core
+    /// Animation nothing new — the canvas's own picture, memo and version are not touched, which is
+    /// also why a tick is not a document change.
+    ///
+    /// `rewritten` are the ids whose content is not what the standing list holds under them: their
+    /// measured footprints are the old content's, so they are never used to skip one.
+    ///
+    /// `cg` is a UIKit context (flipped, current) whose origin is the window's own top-left corner,
+    /// as `drawStreamWindow` takes one. Returns the window drawn, for `present`'s check that the
+    /// surface it drew into is the one the window was read for.
+    @discardableResult
+    func drawEditWindow(of elements: [VectorElement], in window: CGRect, into cg: CGContext,
+                        rewriting rewritten: Set<UUID>) -> CGRect {
+        lock.lock()
+        var known = paintedBounds
+        let transform = _transform
+        let suppressed = _suppressedElementIDs
+        lock.unlock()
+        for id in rewritten { known[id] = nil }
+        let listed = suppressed.isEmpty ? elements : elements.filter { !suppressed.contains($0.id) }
+
+        cg.saveGState()
+        cg.translateBy(x: -window.minX, y: -window.minY)
+        cg.clip(to: window)
+        cg.clear(window)
+        if transform.isIdentity {
+            _ = Self.drawLocalContent(into: cg, elements: listed, quality: .full,
+                                      clippedTo: window, known: known)
+        } else {
+            // Through the canvas's own transform, as `render()` applies it — and unclipped, since the
+            // clip is in local space and the window is not.
+            cg.concatenate(transform)
+            _ = Self.drawLocalContent(into: cg, elements: listed, quality: .full,
+                                      clippedTo: nil, known: [:])
+        }
         cg.restoreGState()
         return window
     }

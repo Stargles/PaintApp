@@ -463,7 +463,7 @@ them is TODO (96) and TODO (97) respectively:
    pass thirty times a second). The host answers with `presentStreamFrame`: the element's *window*
    — its footprint, clipped to its quad, in true z-order with the ink under and over it — is drawn
    off the main thread by the memo's own walk (`VectorCanvas.drawStreamWindow`) into one of two
-   `IOSurface`s the host owns per stream element (`StreamSurfaceView`), frame-positioned over the
+   `IOSurface`s the host owns per stream element (`WindowSurfaceView`), frame-positioned over the
    base the way the scratch is positioned at a stroke's window. **Nothing canvas-sized is allocated,
    rasterized or uploaded per frame, and the render server maps two objects once.** The base under
    the surface is not redrawn for a `version` move that left `documentVersion` still while a

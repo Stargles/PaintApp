@@ -63,6 +63,18 @@ enum SelectionEditValue: Equatable {
 enum SelectionEditKind: Equatable {
     case color, size, opacity
 
+    /// The Size slider's range, in canvas points — one number for the control and for the window the
+    /// edit's picture is cut to (`widest`).
+    static let sizeRange: ClosedRange<Double> = 1...50
+
+    /// **The value at which this control reaches furthest from where the elements are now**, or nil
+    /// when no value of it moves ink — a colour or a fade repaints the footprint it already had. What
+    /// sizes the window of a live edit (`CanvasManager.beginElementEdit`), which is cut once for the
+    /// whole drag.
+    var widest: SelectionEditValue? {
+        self == .size ? .size(CGFloat(Self.sizeRange.upperBound)) : nil
+    }
+
     /// The one undo step a drag becomes, named for the artist.
     var label: HistoryActionLabel {
         switch self {
@@ -418,8 +430,9 @@ extension CanvasManager {
     // MARK: - The session
 
     /// Opens a drag on the selection: resolves the loop under the rule the artist picked, splits under
-    /// Cut, and remembers the list as it stands. **Records nothing and renders nothing** — a session
-    /// that is opened and closed untouched leaves no trace, which is what a picker opened to *look* at
+    /// Cut, remembers the list as it stands and lifts the caught elements' picture into a held window
+    /// (`beginElementEdit`). **Writes nothing and records nothing** — a session that is opened and
+    /// closed untouched leaves no trace in the document, which is what a picker opened to *look* at
     /// the current colour must cost.
     ///
     /// Membership is the selection's with no exception (LASSO_MOVE.md §5.26), read through the same
@@ -478,16 +491,25 @@ extension CanvasManager {
                 return false
             }
         }
+        // The list at the control's furthest value, which sizes the window the drag's picture is cut
+        // to — the list found for a recolour or a fade, whose footprint no value moves.
+        var extreme = working
+        if let widest = kind.widest {
+            for (index, element) in working.enumerated() where caught.contains(element.id) {
+                if let rewritten = SelectionEditKind.rewritten(element, to: widest) { extreme[index] = rewritten }
+            }
+        }
         selectionEdit = SelectionEditSession(
             kind: kind,
-            edit: ElementEditSession(layerID: layerID, celID: celID, vectorCanvas: vectorCanvas,
-                                     elementsBefore: elementsBefore, rewriting: caught),
+            edit: beginElementEdit(layerID: layerID, celID: celID, vectorCanvas: vectorCanvas,
+                                   elementsBefore: elementsBefore, rewriting: caught, extreme: extreme),
             working: working)
         return true
     }
 
-    /// One tick: every caught element the control reaches takes `value`, in place, and the selection's
-    /// rectangle re-renders. **No undo entry.**
+    /// One tick: every caught element the control reaches takes `value`, and the edit's window shows
+    /// the result. **The document is not written and no undo entry is made** — a tick is a held
+    /// picture (`holdElementEdit`), and the lift is the commit.
     ///
     /// Begins a session when none is open — a slider's first value write can land before its
     /// `onEditingChanged(true)`, and a tick with nowhere to go would be a control that moved and drew
@@ -496,10 +518,10 @@ extension CanvasManager {
     /// **Rewrites from `working`, never from the canvas's current list**, so a tick is a function of
     /// the value alone and not of the ticks before it: dragging Size to 30 and back to 12 leaves every
     /// stroke at exactly the size it started with, bit for bit. A first tick that changes nothing —
-    /// the picker opened on the selection's own colour, the slider grabbed without moving — assigns
-    /// nothing, so no render is asked for; once a tick has reached the canvas every later one does,
-    /// because the canvas now holds the *previous* tick's values and the one that puts them back is as
-    /// real an edit as the one that took them away.
+    /// the picker opened on the selection's own colour, the slider grabbed without moving — holds
+    /// nothing, so no picture is asked for; once a tick has been held every later one is, because the
+    /// window shows the *previous* tick's values and the one that puts them back is as real an edit
+    /// as the one that took them away.
     func previewSelectionEdit(_ value: SelectionEditValue) {
         guard beginSelectionEdit(value.kind), var session = selectionEdit else { return }
         var newElements = session.working
@@ -514,25 +536,23 @@ extension CanvasManager {
             selectionEdit = session
             return
         }
-        session.edit.applied = true
+        holdElementEdit(newElements, in: &session.edit)
         selectionEdit = session
-        // **Told the ids** (`writeElementEdit`) — `caught` rather than the exact changed set, for
-        // `ElementSwap.rewritesInPlace`'s over-declare rule, so a tick landing before the previous
-        // tick's render has measured anything is bounded the same way rather than falling to the cel.
-        writeElementEdit(newElements, on: session.edit)
     }
 
     /// Closes the drag as **one undo step** from the list the artist started with to the list they
-    /// let go of — or, when the drag ended where it began, puts the first list back and records
-    /// nothing, which under Cut also throws the split away.
+    /// let go of — or, when the drag ended where it began, lets the window go and records nothing,
+    /// which under Cut also throws the split away.
     ///
     /// - Returns: whether a step was recorded.
     @discardableResult
     func commitSelectionEdit() -> Bool {
         guard let session = selectionEdit else { return false }
         selectionEdit = nil
-        guard session.edit.applied else { return false }
-        let final = session.edit.vectorCanvas.elements
+        guard let final = session.edit.held else {
+            revertElementEdit(session.edit)
+            return false
+        }
         // "Changed" is asked of the fields, not of the lists: under Cut the lists differ by the split
         // alone, and a split nobody's tick coloured, widened or faded is not an edit the artist made.
         var before: [UUID: SelectionEditValue] = [:]
@@ -554,14 +574,14 @@ extension CanvasManager {
         return true
     }
 
-    /// Throws the drag away: the list the artist started with goes back and **nothing is recorded**.
+    /// Throws the drag away: the window goes and **nothing is recorded** — the document was never
+    /// written, so the list the artist started with is still there.
     /// Reached when the selection is cleared mid-drag (`selection`'s `didSet`) and when undo is pressed
     /// mid-drag (`finalizePendingGesturesForHistoryAction`), which is the fill's and the shape's rule
     /// for a gesture still under the finger: it is discarded, not stepped back from.
     func cancelSelectionEdit() {
         guard let session = selectionEdit else { return }
         selectionEdit = nil
-        guard session.edit.applied else { return }
         revertElementEdit(session.edit)
     }
 
