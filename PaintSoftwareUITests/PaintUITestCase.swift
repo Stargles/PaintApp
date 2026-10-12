@@ -672,6 +672,22 @@ class PaintUITestCase: XCTestCase {
         return value
     }
 
+    /// **Puts `slider` at `position`, and fails naming where it ended if it will not go.**
+    /// `adjust(toNormalizedSliderPosition:)` is a synthetic drag whose endpoint is not guaranteed: under
+    /// four parallel clones it ended at 58° for a Hue slider asked for 0° in two consecutive full runs,
+    /// and landed on the mark alone every time. Either end of the track clamps the drag and cannot miss;
+    /// any position between them can, so a test that reads what the slider *paints* must first know where
+    /// the slider *is*. It asks again, from wherever the last try ended, up to `attempts` times.
+    func adjustSlider(_ slider: XCUIElement, to position: CGFloat, tolerance: CGFloat = 0.02, attempts: Int = 4,
+                      file: StaticString = #filePath, line: UInt = #line) {
+        for _ in 0..<attempts {
+            slider.adjust(toNormalizedSliderPosition: position)
+            if abs(slider.normalizedSliderPosition - position) <= tolerance { return }
+        }
+        XCTFail("The slider stands at \(slider.normalizedSliderPosition) after \(attempts) tries at \(position)",
+                file: file, line: line)
+    }
+
     /// Polls the given point until it reads (or stops reading) whitish, since fill/undo re-render off the
     /// main thread. Returns whether the target state was reached before `timeout`.
     @discardableResult

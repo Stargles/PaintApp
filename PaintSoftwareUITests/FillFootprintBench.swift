@@ -136,10 +136,12 @@ final class FillFootprintBench: XCTestCase {
         let sides = [2048, 6000, 8192]
         let deltas = try sides.map { try measure(side: $0) }
 
-        // The windows are the fixture's shape, not the canvas's: the lasso's is the loop plus the
-        // halo (280 + 2·88 = 456), the bucket's is its first window, and neither moves with `side`.
+        // The windows are the fixture's shape, not the canvas's: the lasso's is the loop (the 200-pixel
+        // box and 40 pixels of slack either side) plus the halo, the bucket's is its first window, and
+        // neither moves with `side`.
+        let lassoSide = 280 + 2 * CanvasManager.fillWindowHalo
         for (side, delta) in zip(sides, deltas) {
-            XCTAssertEqual(delta.lassoWindow.size, CGSize(width: 456, height: 456), "the lasso's window at \(side)²")
+            XCTAssertEqual(delta.lassoWindow.size, CGSize(width: lassoSide, height: lassoSide), "the lasso's window at \(side)²")
             XCTAssertEqual(delta.bucketWindow.size, CGSize(width: 1024, height: 1024), "the tap's window at \(side)²")
         }
 

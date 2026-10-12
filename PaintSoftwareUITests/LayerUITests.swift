@@ -843,7 +843,14 @@ final class LayerPanelControlsUITests: PaintUITestCase {
     /// **The geometry assertions are deliberately coarse.** "In the bottom half of the window" and "left
     /// of the options panel" are what an XCUITest can honestly say about a layout; the exact card is a
     /// design decision that should be free to change without a red test.
+    ///
+    /// **In landscape, because that is where the card has room to keep to the rail's left.** Rail, gap and
+    /// options panel take 710 points, the card does not narrow below `BottomDock.minimumWidth` (360), and
+    /// beside the layout's own 16-point margin that needs a window about 1062 points wide: the 13-inch
+    /// simulator upright is 1032, where the card starts at the margin and runs 23 points under the options
+    /// panel (`BottomDock.leadingInset`, TODO (169)) — the trade for not hanging off the window's left.
     func testAnEffectLayersSettingsAreABottomBarBesideTheRailWithNoTap() throws {
+        XCUIDevice.shared.orientation = .landscapeLeft
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
         openLayerPanel(app)
