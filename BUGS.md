@@ -4,6 +4,62 @@ Open items only — fixed entries are pruned, and the fix lives in the commit an
 One section per bug, newest first.
 
 
+## The canvas's recognizers strand when a touch joins two others, and the repair caught it five times in thirty minutes (2026-10-10)
+
+**What the owner's iPad saved.** Build 55c4fc7 (Release), iPad 9 on iPadOS 26.6.2, landscape: five
+`flight-…` files at 19:11, 19:15, 19:23, 19:34 and 19:40, all with trigger `stranded` — 0.10 s after
+the last touch lifted, `CanvasView.Coordinator.replaceStrandedRecognizers` found `canvas.pan` (all
+five), `canvas.pinch`, `canvas.rotation` and the active layer's stroke recognizer (four) out of
+`.possible` and replaced them. The fifth was on the Select tool, where pan waits on no stroke
+recognizer, and only `canvas.pan` was stranded. The last six seconds of each are in
+[stranded-recognizers-2026-10-10.jsonl](docs/bug-evidence/stranded-recognizers-2026-10-10.jsonl).
+
+**The sequence, every time.** Each is the last sequence of its 90 s, which also holds 22–57 two-finger
+sequences (undo taps and pans) and 23–37 pencil strokes that did not strand:
+
+| file | the stranding sequence |
+|---|---|
+| 191141, 191559, 192305 | two fingers land in one event; 20–30 ms later one is **cancelled** and a new touch begins on the same spot within a millisecond; the pair then pans |
+| 193435 | a three-finger tap (redo), the fifth in a second: two land in one event, the third 20 ms later; 50 ms of contact |
+| 194056 | the same, on a vector layer with Select |
+
+In all five the touch that begins last is bound to `canvas.pan` but to neither pinch nor rotation
+(nor stroke, where there is one). Of the 442 sequences in the five files **exactly these five** begin
+a touch in a later event than two that landed together; the other 437 — including three-finger taps
+that land all three in one event, and one finger followed by two — reset normally. Not main-thread
+stalls: the check ran on time (0.10–0.12 s after the lift) and the model lines trail the touches by
+10–20 ms.
+
+**Cause: not found.** The recognizers are left out of `.possible` after every touch is up:
+`StrokeGestureRecognizer.reset()` (which writes a line when it runs) never ran, and
+`canvas.touchCounter` read 0. **Not reproduced**: about 1,400 synthesised shapes
+(`XCPointerEventPath`: three fingers with the third landing 10–40 ms late, lifts staggered, drifting
+pans, a second finger lifted and replaced within 3–10 ms) on an iPad Pro 13" and an iPad 9th
+generation simulator, Debug and Release, pencil-only on, with the main thread stalled 15/30/60 ms
+per touch so the late touch arrives in the same run-loop pass — none stranded, on 55c4fc7 or on
+main. `XCPointerEventPath` cannot cancel a touch, and the simulator's window carries a
+`HomeAffordanceGate` the iPad 9's does not; the simulator runtime is 26.5, the device 26.6.2. The
+system's own recognizers (`_UISystemGestureGateGestureRecognizer`, `_UIFlexInteraction.Pan`) are
+bound to every touch on both.
+
+**Main.** Nothing in TODO (159)–(168) touches `replaceStrandedRecognizers` or how pan, pinch,
+rotation and stroke are bound. (168) adds a second `TouchCountRecognizer` on the window
+(`window.touchCounter`, always `.possible`, like `canvas.touchCounter`) and removes the stroke
+recognizer's snap-companion paths, which only act while a pencil stroke or a handle drag is running.
+Nothing fixed it, and nothing in the evidence says anything worsened it.
+
+**What it costs, and the open question.** The repair makes it a lost gesture at worst (a touch
+landing inside the 0.1 s defers the repair to its own lift), and it costs five files in half an hour.
+`ActionRecorder.canvasRecognizersReplaced` now also writes what else under the window was out of
+`.possible` or still counting a touch (`WindowEventTap.unquietRecognizers`) — the one thing these
+files could not say, and the difference between a recognizer UIKit thinks is still being touched
+(`touches:3`) and one left terminal with nothing to wait for (`touches:0`). The repair has no
+simulator trigger any more (the popover that stranded it is gone), so that note is covered by a logic
+test of the census and by reading, not by a run. **To get the answer from the device:** after the
+next install, make the shape on purpose — three fingers, two down together and one a hair late, the
+way a fast redo tap lands — until the "Caught a canvas freeze and fixed it" badge shows, and send the
+newest `flight-…` from the recordings list. Once the cause is known, the file-per-repair can stop.
+
 ## An effect layer between two live hosts is left out of the live picture (2026-10-11)
 
 `CanvasManager.liveHostRun` is one span of the leaf order, from the lowest to the highest of the

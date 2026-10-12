@@ -806,7 +806,35 @@ struct TouchSample {
 
     /// The name a recognizer is known by in the file, for the `requireFailure` lines — which name two
     /// recognizers that may not both be in the registry yet.
-    func displayName(for recognizer: UIGestureRecognizer) -> String {
+    func displayName(for recognizer: UIGestureRecognizer) -> String { Self.name(of: recognizer) }
+
+    static func name(of recognizer: UIGestureRecognizer) -> String {
         recognizer.name ?? String(describing: type(of: recognizer))
+    }
+
+    /// **Every recognizer under `root`, UIKit's and the system's included, that is not at rest** — out
+    /// of `.possible`, or holding a touch — one line each: its name, its state, how many touches UIKit
+    /// still has it tracking, and the view it hangs on.
+    ///
+    /// For the moment `CanvasView.Coordinator.replaceStrandedRecognizers` finds the canvas's
+    /// recognizers out of `.possible` with no touch down. The flight file names what it replaced, and
+    /// the registry sweep sees only named recognizers, at touch edges: nothing in it says what else
+    /// UIKit was holding — a system gate, the window's observer, a recognizer that still counts a
+    /// touch the glass lost. A stranded recognizer that reads `touches:3` is one UIKit believes is
+    /// still being touched; one that reads `touches:0` was left in a terminal state with nothing to
+    /// wait for. That is the difference between two causes, and the files from 2026-10-10 could not
+    /// show it.
+    static func unquietRecognizers(under root: UIView) -> [String] {
+        var found: [String] = []
+        func visit(_ view: UIView) {
+            for recognizer in view.gestureRecognizers ?? []
+            where recognizer.state != .possible || recognizer.numberOfTouches > 0 {
+                found.append("\(name(of: recognizer)) \(ActionRecorder.stateName(recognizer.state))"
+                             + " touches:\(recognizer.numberOfTouches) on \(type(of: view))")
+            }
+            view.subviews.forEach(visit)
+        }
+        visit(root)
+        return found
     }
 }

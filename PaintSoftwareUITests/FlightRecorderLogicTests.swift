@@ -77,6 +77,55 @@ final class FlightRecorderLogicTests: XCTestCase {
         XCTAssertTrue(detector.touchBegan(startsSequence: true, boundRecognizers: stranded))
     }
 
+    // MARK: - What the repair finds not at rest
+
+    /// A recognizer a test can leave anywhere: `state` is writable only from inside a subclass, and
+    /// `numberOfTouches` — what UIKit says it is still tracking — can only be moved by real touches,
+    /// so it is overridden.
+    private final class Driven: UIGestureRecognizer {
+        var held = 0
+        override var numberOfTouches: Int { held }
+        func settle(in state: UIGestureRecognizer.State) { self.state = state }
+    }
+
+    /// The stranded canvas's flight file names what was replaced; this is what it adds — every
+    /// recognizer under the window out of `.possible` or still holding a touch, wherever in the tree
+    /// it hangs, named by what the file already calls it.
+    func testTheCensusListsEveryRecognizerNotAtRestAndNoneAtRest() {
+        let window = UIView()
+        let canvas = UIView()
+        window.addSubview(canvas)
+        let pan = Driven(target: nil, action: nil)
+        pan.name = "canvas.pan"
+        canvas.addGestureRecognizer(pan)
+        let gate = Driven(target: nil, action: nil)
+        window.addGestureRecognizer(gate)
+        let pinch = Driven(target: nil, action: nil)
+        pinch.name = "canvas.pinch"
+        canvas.addGestureRecognizer(pinch)
+
+        XCTAssertEqual(WindowEventTap.unquietRecognizers(under: window), [], "PREMISE: nothing is out of place yet")
+
+        pan.settle(in: .began)
+        gate.settle(in: .ended)
+        let census = WindowEventTap.unquietRecognizers(under: window)
+        XCTAssertEqual(census.count, 2, "the one on the subview and the one on the root, not the resting pinch: \(census)")
+        XCTAssertTrue(census.contains("canvas.pan began touches:0 on UIView"), "\(census)")
+        XCTAssertTrue(census.contains("Driven ended touches:0 on UIView"),
+                      "an unnamed recognizer is known by its class, as everywhere else in the file: \(census)")
+    }
+
+    /// A recognizer UIKit has back in `.possible` but believes is still being touched is the other
+    /// way a canvas gets stuck, and the only one `numberOfTouches` shows.
+    func testTheCensusListsARecognizerAtRestThatStillCountsATouch() {
+        let view = UIView()
+        let counting = Driven(target: nil, action: nil)
+        counting.name = "canvas.pinch"
+        counting.held = 2
+        view.addGestureRecognizer(counting)
+        XCTAssertEqual(WindowEventTap.unquietRecognizers(under: view), ["canvas.pinch possible touches:2 on UIView"])
+    }
+
     // MARK: - The ring
 
     func testTheRingKeepsOnlyTheWindowAndNeverMoreThanItsCapacity() {

@@ -203,8 +203,11 @@ final class ActionRecorder: ObservableObject {
     /// The canvas found recognizers UIKit had stranded and replaced them
     /// (`CanvasView.Coordinator.replaceStrandedRecognizers`) — the freeze, repaired as it happened.
     /// The ring holds how it came about, so it is saved.
-    func canvasRecognizersReplaced(_ names: [String]) {
+    /// `notAtRest` is what `WindowEventTap.unquietRecognizers` found under the window just before the
+    /// replacement took the old ones away.
+    func canvasRecognizersReplaced(_ names: [String], notAtRest: [String]) {
         emit("note", [("text", .str("stranded recognizers replaced: \(names.joined(separator: ","))"))])
+        emit("note", [("text", .str("not at rest when they were found: \(notAtRest.joined(separator: "; "))"))])
         saveFlight(trigger: "stranded")
     }
 

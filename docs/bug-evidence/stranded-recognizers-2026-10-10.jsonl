@@ -1,0 +1,483 @@
+{"t":0,"event":"flight","file":"flight-20261010-191141.jsonl","startedAt":"2026-10-10T23:11:41Z","app":"v1.0.43 (1)","build":"2026-10-10T08:14:28Z","device":"iPad12,1","os":"26.6.2","keptFrom":83.96,"keptTo":89.96,"note":"trimmed to the last 6 s before the repair; requireFailure lines and the touches' repeated per-line fields dropped"}
+{"t":84.78,"event":"touch","phase":"ended","type":"pencil","touch":1060,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":242,"wy":688.5,"down":0,"force":0,"maxForce":4.17,"altitude":0.79,"azimuth":0.17}
+{"t":84.79,"event":"recognizer","name":"stroke.306B345E","obj":"ba2971","from":"changed","to":"ended","src":"inline"}
+{"t":84.79,"event":"model","key":"shape.touches","value":"counter:0/0 base:0 stroke:0 joined:0 following:false"}
+{"t":84.79,"event":"note","text":"ignore stroke.306B345E <- pencil phase:3 tracking:false"}
+{"t":84.79,"event":"recognizer","name":"stroke.306B345E","obj":"ba2971","from":"ended","to":"possible","src":"reset"}
+{"t":84.79,"event":"recognizer","name":"canvas.pan","obj":"14e4ba","from":"failed","to":"possible","src":"sweep"}
+{"t":84.79,"event":"recognizer","name":"canvas.pinch","obj":"c13077","from":"failed","to":"possible","src":"sweep"}
+{"t":84.79,"event":"recognizer","name":"canvas.rotation","obj":"16cad5","from":"failed","to":"possible","src":"sweep"}
+{"t":87.05,"event":"touch","phase":"began","type":"pencil","touch":1061,"target":"canvas.host","via":"view","hitClass":"ShapeOverlayView","wx":887,"wy":240.5,"down":1,"force":0.33,"maxForce":4.17,"altitude":0.74,"azimuth":0.54,"touchView":"ShapeOverlayView","gr":12,"grNames":"canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,PKTextInputDrawingGestureRecognizer"}
+{"t":87.06,"event":"model","key":"shape.touches","value":"counter:1/0 base:0 stroke:0 joined:0 following:false"}
+{"t":87.78,"event":"touch","phase":"ended","type":"pencil","touch":1061,"target":"canvas.host","via":"view","hitClass":"ShapeOverlayView","wx":838.5,"wy":294,"down":0,"force":0,"maxForce":4.17,"altitude":0.74,"azimuth":0.46}
+{"t":87.79,"event":"model","key":"shape.touches","value":"counter:0/0 base:0 stroke:0 joined:0 following:false"}
+{"t":88.2,"event":"touch","phase":"began","type":"direct","touch":1062,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":970.5,"wy":171,"down":1,"touchView":"StrokeCanvasView","gr":12,"grNames":"stroke.306B345E,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":88.23,"event":"model","key":"shape.touches","value":"counter:1/1 base:0 stroke:0 joined:1 following:false"}
+{"t":88.23,"event":"recognizer","name":"stroke.306B345E","obj":"ba2971","from":"possible","to":"failed","src":"inline"}
+{"t":88.23,"event":"note","text":"ignore stroke.306B345E <- finger phase:0 tracking:false"}
+{"t":88.25,"event":"touch","phase":"began","type":"direct","touch":1063,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":840.5,"wy":537,"down":2,"touchView":"StrokeCanvasView","gr":11,"grNames":"canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":88.26,"event":"model","key":"shape.touches","value":"counter:2/2 base:0 stroke:0 joined:2 following:false"}
+{"t":88.31,"event":"recognizer","name":"canvas.pan","obj":"14e4ba","from":"possible","to":"began","src":"action"}
+{"t":88.32,"event":"recognizer","name":"canvas.pan","obj":"14e4ba","from":"began","to":"changed","src":"action"}
+{"t":88.5,"event":"touch","phase":"ended","type":"direct","touch":1063,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":699.5,"wy":469.5,"down":1}
+{"t":88.52,"event":"model","key":"shape.touches","value":"counter:1/1 base:0 stroke:0 joined:1 following:false"}
+{"t":88.52,"event":"recognizer","name":"canvas.pinch","obj":"c13077","from":"possible","to":"changed","src":"sweep"}
+{"t":88.51,"event":"touch","phase":"ended","type":"direct","touch":1062,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":817,"wy":320.5,"down":0}
+{"t":88.52,"event":"model","key":"shape.touches","value":"counter:0/0 base:0 stroke:0 joined:0 following:false"}
+{"t":88.52,"event":"recognizer","name":"canvas.pan","obj":"14e4ba","from":"changed","to":"ended","src":"action"}
+{"t":88.52,"event":"recognizer","name":"stroke.306B345E","obj":"ba2971","from":"failed","to":"possible","src":"reset"}
+{"t":88.52,"event":"recognizer","name":"canvas.pan","obj":"14e4ba","from":"ended","to":"possible","src":"sweep"}
+{"t":88.52,"event":"recognizer","name":"canvas.pinch","obj":"c13077","from":"changed","to":"possible","src":"sweep"}
+{"t":88.8,"event":"touch","phase":"began","type":"direct","touch":1064,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":755.5,"wy":540.5,"down":1,"touchView":"StrokeCanvasView","gr":12,"grNames":"stroke.306B345E,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":88.82,"event":"model","key":"shape.touches","value":"counter:1/1 base:0 stroke:0 joined:1 following:false"}
+{"t":88.82,"event":"recognizer","name":"stroke.306B345E","obj":"ba2971","from":"possible","to":"failed","src":"inline"}
+{"t":88.83,"event":"note","text":"ignore stroke.306B345E <- finger phase:0 tracking:false"}
+{"t":88.81,"event":"touch","phase":"began","type":"direct","touch":1065,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":886,"wy":228.5,"down":2,"touchView":"StrokeCanvasView","gr":11,"grNames":"canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":88.83,"event":"model","key":"shape.touches","value":"counter:2/2 base:0 stroke:0 joined:2 following:false"}
+{"t":88.89,"event":"recognizer","name":"canvas.pan","obj":"14e4ba","from":"possible","to":"began","src":"action"}
+{"t":88.89,"event":"recognizer","name":"canvas.pan","obj":"14e4ba","from":"began","to":"changed","src":"action"}
+{"t":89.04,"event":"touch","phase":"ended","type":"direct","touch":1065,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":840,"wy":292.5,"down":1}
+{"t":89.06,"event":"model","key":"shape.touches","value":"counter:1/1 base:0 stroke:0 joined:1 following:false"}
+{"t":89.06,"event":"recognizer","name":"canvas.pinch","obj":"c13077","from":"possible","to":"changed","src":"sweep"}
+{"t":89.06,"event":"recognizer","name":"canvas.rotation","obj":"16cad5","from":"possible","to":"changed","src":"sweep"}
+{"t":89.05,"event":"touch","phase":"ended","type":"direct","touch":1064,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":695.5,"wy":505,"down":0}
+{"t":89.06,"event":"model","key":"shape.touches","value":"counter:0/0 base:0 stroke:0 joined:0 following:false"}
+{"t":89.06,"event":"recognizer","name":"canvas.pan","obj":"14e4ba","from":"changed","to":"ended","src":"action"}
+{"t":89.06,"event":"recognizer","name":"stroke.306B345E","obj":"ba2971","from":"failed","to":"possible","src":"reset"}
+{"t":89.06,"event":"recognizer","name":"canvas.pan","obj":"14e4ba","from":"ended","to":"possible","src":"sweep"}
+{"t":89.06,"event":"recognizer","name":"canvas.pinch","obj":"c13077","from":"changed","to":"possible","src":"sweep"}
+{"t":89.06,"event":"recognizer","name":"canvas.rotation","obj":"16cad5","from":"changed","to":"possible","src":"sweep"}
+{"t":89.38,"event":"touch","phase":"began","type":"direct","touch":1066,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":740,"wy":469,"down":2,"touchView":"StrokeCanvasView","gr":12,"grNames":"stroke.306B345E,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":89.38,"event":"touch","phase":"began","type":"direct","touch":1067,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":809,"wy":235,"down":2,"touchView":"StrokeCanvasView","gr":12,"grNames":"stroke.306B345E,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":89.39,"event":"model","key":"shape.touches","value":"counter:2/2 base:0 stroke:0 joined:2 following:false"}
+{"t":89.39,"event":"recognizer","name":"stroke.306B345E","obj":"ba2971","from":"possible","to":"failed","src":"inline"}
+{"t":89.4,"event":"note","text":"ignore stroke.306B345E <- finger phase:0 tracking:false"}
+{"t":89.4,"event":"note","text":"ignore stroke.306B345E <- finger phase:0 tracking:false"}
+{"t":89.41,"event":"touch","phase":"cancelled","type":"direct","touch":1067,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":809,"wy":235,"down":1}
+{"t":89.42,"event":"model","key":"shape.touches","value":"counter:1/1 base:0 stroke:0 joined:1 following:false"}
+{"t":89.42,"event":"recognizer","name":"canvas.rotation","obj":"16cad5","from":"possible","to":"failed","src":"sweep"}
+{"t":89.42,"event":"touch","phase":"began","type":"direct","touch":1068,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":809,"wy":235,"down":2,"touchView":"StrokeCanvasView","gr":9,"grNames":"canvas.pan,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":89.44,"event":"model","key":"shape.touches","value":"counter:2/2 base:0 stroke:0 joined:2 following:false"}
+{"t":89.8,"event":"touch","phase":"ended","type":"direct","touch":1068,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":919,"wy":151,"down":1}
+{"t":89.82,"event":"model","key":"shape.touches","value":"counter:1/1 base:0 stroke:0 joined:1 following:false"}
+{"t":89.82,"event":"recognizer","name":"canvas.pan","obj":"14e4ba","from":"possible","to":"began","src":"sweep"}
+{"t":89.82,"event":"touch","phase":"ended","type":"direct","touch":1066,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":808.5,"wy":610,"down":0}
+{"t":89.84,"event":"model","key":"shape.touches","value":"counter:0/0 base:0 stroke:0 joined:0 following:false"}
+{"t":89.84,"event":"recognizer","name":"canvas.pan","obj":"14e4ba","from":"began","to":"ended","src":"sweep"}
+{"t":89.84,"event":"recognizer","name":"canvas.pinch","obj":"c13077","from":"possible","to":"failed","src":"sweep"}
+{"t":89.96,"event":"note","text":"stranded recognizers replaced: canvas.pan,canvas.pinch,canvas.rotation,stroke.306B345E"}
+{"t":0,"event":"flight","file":"flight-20261010-191559.jsonl","startedAt":"2026-10-10T23:15:59Z","app":"v1.0.43 (1)","build":"2026-10-10T08:14:28Z","device":"iPad12,1","os":"26.6.2","keptFrom":83.99,"keptTo":89.99,"note":"trimmed to the last 6 s before the repair; requireFailure lines and the touches' repeated per-line fields dropped"}
+{"t":83.99,"event":"model","key":"shape.touches","value":"counter:0/0 base:0 stroke:0 joined:0 following:false"}
+{"t":83.99,"event":"recognizer","name":"stroke.306B345E","obj":"57664c","from":"changed","to":"ended","src":"inline"}
+{"t":83.99,"event":"note","text":"ignore stroke.306B345E <- pencil phase:3 tracking:false"}
+{"t":83.99,"event":"recognizer","name":"stroke.306B345E","obj":"57664c","from":"ended","to":"possible","src":"reset"}
+{"t":83.99,"event":"recognizer","name":"canvas.pan","obj":"540c94","from":"failed","to":"possible","src":"sweep"}
+{"t":83.99,"event":"recognizer","name":"canvas.pinch","obj":"344e66","from":"failed","to":"possible","src":"sweep"}
+{"t":83.99,"event":"recognizer","name":"canvas.rotation","obj":"81445d","from":"failed","to":"possible","src":"sweep"}
+{"t":84.84,"event":"touch","phase":"began","type":"pencil","touch":1388,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":642.5,"wy":214,"down":1,"force":0.33,"maxForce":4.17,"altitude":0.69,"azimuth":5.51,"touchView":"StrokeCanvasView","gr":13,"grNames":"stroke.306B345E,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,PKTextInputDrawingGestureRecognizer"}
+{"t":84.86,"event":"recognizer","name":"stroke.306B345E","obj":"57664c","from":"possible","to":"began","src":"inline"}
+{"t":84.86,"event":"model","key":"shape.touches","value":"counter:1/0 base:0 stroke:0 joined:0 following:false"}
+{"t":84.86,"event":"recognizer","name":"canvas.pan","obj":"540c94","from":"possible","to":"failed","src":"sweep"}
+{"t":84.86,"event":"recognizer","name":"canvas.pinch","obj":"344e66","from":"possible","to":"failed","src":"sweep"}
+{"t":84.86,"event":"recognizer","name":"canvas.rotation","obj":"81445d","from":"possible","to":"failed","src":"sweep"}
+{"t":84.86,"event":"recognizer","name":"stroke.306B345E","obj":"57664c","from":"began","to":"changed","src":"inline"}
+{"t":84.9,"event":"touch","phase":"ended","type":"pencil","touch":1388,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":722,"wy":256.5,"down":0,"force":0,"maxForce":4.17,"altitude":0.69,"azimuth":5.51}
+{"t":84.91,"event":"model","key":"shape.touches","value":"counter:0/0 base:0 stroke:0 joined:0 following:false"}
+{"t":84.91,"event":"recognizer","name":"stroke.306B345E","obj":"57664c","from":"changed","to":"ended","src":"inline"}
+{"t":84.91,"event":"note","text":"ignore stroke.306B345E <- pencil phase:3 tracking:false"}
+{"t":84.91,"event":"recognizer","name":"stroke.306B345E","obj":"57664c","from":"ended","to":"possible","src":"reset"}
+{"t":84.91,"event":"recognizer","name":"canvas.pan","obj":"540c94","from":"failed","to":"possible","src":"sweep"}
+{"t":84.91,"event":"recognizer","name":"canvas.pinch","obj":"344e66","from":"failed","to":"possible","src":"sweep"}
+{"t":84.91,"event":"recognizer","name":"canvas.rotation","obj":"81445d","from":"failed","to":"possible","src":"sweep"}
+{"t":86.34,"event":"touch","phase":"began","type":"pencil","touch":1389,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":351,"wy":439,"down":1,"force":0.33,"maxForce":4.17,"altitude":0.72,"azimuth":5.7,"touchView":"StrokeCanvasView","gr":13,"grNames":"stroke.306B345E,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,PKTextInputDrawingGestureRecognizer"}
+{"t":86.36,"event":"recognizer","name":"stroke.306B345E","obj":"57664c","from":"possible","to":"began","src":"inline"}
+{"t":86.36,"event":"model","key":"shape.touches","value":"counter:1/0 base:0 stroke:0 joined:0 following:false"}
+{"t":86.36,"event":"recognizer","name":"canvas.pan","obj":"540c94","from":"possible","to":"failed","src":"sweep"}
+{"t":86.36,"event":"recognizer","name":"canvas.pinch","obj":"344e66","from":"possible","to":"failed","src":"sweep"}
+{"t":86.36,"event":"recognizer","name":"canvas.rotation","obj":"81445d","from":"possible","to":"failed","src":"sweep"}
+{"t":86.37,"event":"recognizer","name":"stroke.306B345E","obj":"57664c","from":"began","to":"changed","src":"inline"}
+{"t":86.74,"event":"touch","phase":"ended","type":"pencil","touch":1389,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":425,"wy":489.5,"down":0,"force":0,"maxForce":4.17,"altitude":0.74,"azimuth":5.58}
+{"t":86.75,"event":"model","key":"shape.touches","value":"counter:0/0 base:0 stroke:0 joined:0 following:false"}
+{"t":86.75,"event":"recognizer","name":"stroke.306B345E","obj":"57664c","from":"changed","to":"ended","src":"inline"}
+{"t":86.76,"event":"note","text":"ignore stroke.306B345E <- pencil phase:3 tracking:false"}
+{"t":86.76,"event":"recognizer","name":"stroke.306B345E","obj":"57664c","from":"ended","to":"possible","src":"reset"}
+{"t":86.76,"event":"recognizer","name":"canvas.pan","obj":"540c94","from":"failed","to":"possible","src":"sweep"}
+{"t":86.76,"event":"recognizer","name":"canvas.pinch","obj":"344e66","from":"failed","to":"possible","src":"sweep"}
+{"t":86.76,"event":"recognizer","name":"canvas.rotation","obj":"81445d","from":"failed","to":"possible","src":"sweep"}
+{"t":87.39,"event":"touch","phase":"began","type":"direct","touch":1390,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":299,"wy":378,"down":1,"touchView":"StrokeCanvasView","gr":12,"grNames":"stroke.306B345E,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":87.41,"event":"model","key":"shape.touches","value":"counter:1/1 base:0 stroke:0 joined:1 following:false"}
+{"t":87.41,"event":"recognizer","name":"stroke.306B345E","obj":"57664c","from":"possible","to":"failed","src":"inline"}
+{"t":87.41,"event":"note","text":"ignore stroke.306B345E <- finger phase:0 tracking:false"}
+{"t":87.41,"event":"touch","phase":"began","type":"direct","touch":1391,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":466,"wy":481,"down":2,"touchView":"StrokeCanvasView","gr":11,"grNames":"canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":87.42,"event":"model","key":"shape.touches","value":"counter:2/2 base:0 stroke:0 joined:2 following:false"}
+{"t":87.44,"event":"recognizer","name":"canvas.pan","obj":"540c94","from":"possible","to":"began","src":"action"}
+{"t":87.45,"event":"recognizer","name":"canvas.pan","obj":"540c94","from":"began","to":"changed","src":"action"}
+{"t":87.64,"event":"touch","phase":"ended","type":"direct","touch":1391,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":448.5,"wy":615,"down":0}
+{"t":87.64,"event":"touch","phase":"ended","type":"direct","touch":1390,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":578,"wy":336.5,"down":0}
+{"t":87.65,"event":"model","key":"shape.touches","value":"counter:0/0 base:0 stroke:0 joined:0 following:false"}
+{"t":87.65,"event":"recognizer","name":"canvas.pan","obj":"540c94","from":"changed","to":"ended","src":"action"}
+{"t":87.66,"event":"recognizer","name":"stroke.306B345E","obj":"57664c","from":"failed","to":"possible","src":"reset"}
+{"t":87.66,"event":"recognizer","name":"canvas.pan","obj":"540c94","from":"ended","to":"possible","src":"sweep"}
+{"t":87.77,"event":"touch","phase":"began","type":"direct","touch":1392,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":501,"wy":614,"down":2,"touchView":"StrokeCanvasView","gr":12,"grNames":"stroke.306B345E,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":87.77,"event":"touch","phase":"began","type":"direct","touch":1393,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":524,"wy":308,"down":2,"touchView":"StrokeCanvasView","gr":12,"grNames":"stroke.306B345E,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":87.79,"event":"model","key":"shape.touches","value":"counter:2/2 base:0 stroke:0 joined:2 following:false"}
+{"t":87.79,"event":"recognizer","name":"stroke.306B345E","obj":"57664c","from":"possible","to":"failed","src":"inline"}
+{"t":87.8,"event":"note","text":"ignore stroke.306B345E <- finger phase:0 tracking:false"}
+{"t":87.8,"event":"note","text":"ignore stroke.306B345E <- finger phase:0 tracking:false"}
+{"t":87.81,"event":"touch","phase":"ended","type":"direct","touch":1392,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":501,"wy":614,"down":1}
+{"t":87.82,"event":"model","key":"shape.touches","value":"counter:1/1 base:0 stroke:0 joined:1 following:false"}
+{"t":87.82,"event":"recognizer","name":"canvas.threeFingerTap","obj":"24d814","from":"possible","to":"failed","src":"sweep"}
+{"t":87.84,"event":"touch","phase":"ended","type":"direct","touch":1393,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":524,"wy":308,"down":0}
+{"t":87.85,"event":"model","key":"shape.touches","value":"counter:0/0 base:0 stroke:0 joined:0 following:false"}
+{"t":87.86,"event":"recognizer","name":"canvas.twoFingerTap","obj":"87b9e","from":"possible","to":"ended","src":"action"}
+{"t":87.86,"event":"recognizer","name":"stroke.306B345E","obj":"57664c","from":"failed","to":"possible","src":"reset"}
+{"t":87.86,"event":"recognizer","name":"canvas.twoFingerTap","obj":"87b9e","from":"ended","to":"possible","src":"sweep"}
+{"t":87.86,"event":"recognizer","name":"canvas.threeFingerTap","obj":"24d814","from":"failed","to":"possible","src":"sweep"}
+{"t":88.57,"event":"touch","phase":"began","type":"pencil","touch":1394,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":482.5,"wy":397.5,"down":1,"force":0.33,"maxForce":4.17,"altitude":0.74,"azimuth":0.15,"touchView":"StrokeCanvasView","gr":13,"grNames":"stroke.306B345E,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,PKTextInputDrawingGestureRecognizer"}
+{"t":88.57,"event":"recognizer","name":"stroke.306B345E","obj":"57664c","from":"possible","to":"began","src":"inline"}
+{"t":88.6,"event":"model","key":"shape.touches","value":"counter:1/0 base:0 stroke:0 joined:0 following:false"}
+{"t":88.6,"event":"recognizer","name":"canvas.pan","obj":"540c94","from":"possible","to":"failed","src":"sweep"}
+{"t":88.6,"event":"recognizer","name":"canvas.pinch","obj":"344e66","from":"possible","to":"failed","src":"sweep"}
+{"t":88.6,"event":"recognizer","name":"canvas.rotation","obj":"81445d","from":"possible","to":"failed","src":"sweep"}
+{"t":88.6,"event":"recognizer","name":"stroke.306B345E","obj":"57664c","from":"began","to":"changed","src":"inline"}
+{"t":88.73,"event":"touch","phase":"ended","type":"pencil","touch":1394,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":434.5,"wy":547.5,"down":0,"force":0,"maxForce":4.17,"altitude":0.74,"azimuth":6.24}
+{"t":88.74,"event":"model","key":"shape.touches","value":"counter:0/0 base:0 stroke:0 joined:0 following:false"}
+{"t":88.74,"event":"recognizer","name":"stroke.306B345E","obj":"57664c","from":"changed","to":"ended","src":"inline"}
+{"t":88.74,"event":"note","text":"ignore stroke.306B345E <- pencil phase:3 tracking:false"}
+{"t":88.74,"event":"recognizer","name":"stroke.306B345E","obj":"57664c","from":"ended","to":"possible","src":"reset"}
+{"t":88.74,"event":"recognizer","name":"canvas.pan","obj":"540c94","from":"failed","to":"possible","src":"sweep"}
+{"t":88.74,"event":"recognizer","name":"canvas.pinch","obj":"344e66","from":"failed","to":"possible","src":"sweep"}
+{"t":88.74,"event":"recognizer","name":"canvas.rotation","obj":"81445d","from":"failed","to":"possible","src":"sweep"}
+{"t":89.11,"event":"touch","phase":"began","type":"pencil","touch":1395,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":443,"wy":562.5,"down":1,"force":0.33,"maxForce":4.17,"altitude":0.63,"azimuth":6.07,"touchView":"StrokeCanvasView","gr":13,"grNames":"stroke.306B345E,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,PKTextInputDrawingGestureRecognizer"}
+{"t":89.12,"event":"recognizer","name":"stroke.306B345E","obj":"57664c","from":"possible","to":"began","src":"inline"}
+{"t":89.12,"event":"model","key":"shape.touches","value":"counter:1/0 base:0 stroke:0 joined:0 following:false"}
+{"t":89.13,"event":"recognizer","name":"canvas.pan","obj":"540c94","from":"possible","to":"failed","src":"sweep"}
+{"t":89.13,"event":"recognizer","name":"canvas.pinch","obj":"344e66","from":"possible","to":"failed","src":"sweep"}
+{"t":89.13,"event":"recognizer","name":"canvas.rotation","obj":"81445d","from":"possible","to":"failed","src":"sweep"}
+{"t":89.13,"event":"recognizer","name":"stroke.306B345E","obj":"57664c","from":"began","to":"changed","src":"inline"}
+{"t":89.2,"event":"touch","phase":"ended","type":"pencil","touch":1395,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":486.5,"wy":652,"down":0,"force":0,"maxForce":4.17,"altitude":0.73,"azimuth":6.03}
+{"t":89.2,"event":"model","key":"shape.touches","value":"counter:0/0 base:0 stroke:0 joined:0 following:false"}
+{"t":89.2,"event":"recognizer","name":"stroke.306B345E","obj":"57664c","from":"changed","to":"ended","src":"inline"}
+{"t":89.21,"event":"note","text":"ignore stroke.306B345E <- pencil phase:3 tracking:false"}
+{"t":89.21,"event":"recognizer","name":"stroke.306B345E","obj":"57664c","from":"ended","to":"possible","src":"reset"}
+{"t":89.21,"event":"recognizer","name":"canvas.pan","obj":"540c94","from":"failed","to":"possible","src":"sweep"}
+{"t":89.21,"event":"recognizer","name":"canvas.pinch","obj":"344e66","from":"failed","to":"possible","src":"sweep"}
+{"t":89.21,"event":"recognizer","name":"canvas.rotation","obj":"81445d","from":"failed","to":"possible","src":"sweep"}
+{"t":89.7,"event":"touch","phase":"began","type":"direct","touch":1396,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":564.5,"wy":397,"down":2,"touchView":"StrokeCanvasView","gr":12,"grNames":"stroke.306B345E,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":89.7,"event":"touch","phase":"began","type":"direct","touch":1397,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":469.5,"wy":709.5,"down":2,"touchView":"StrokeCanvasView","gr":12,"grNames":"stroke.306B345E,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":89.72,"event":"model","key":"shape.touches","value":"counter:2/2 base:0 stroke:0 joined:2 following:false"}
+{"t":89.72,"event":"recognizer","name":"stroke.306B345E","obj":"57664c","from":"possible","to":"failed","src":"inline"}
+{"t":89.73,"event":"note","text":"ignore stroke.306B345E <- finger phase:0 tracking:false"}
+{"t":89.73,"event":"note","text":"ignore stroke.306B345E <- finger phase:0 tracking:false"}
+{"t":89.72,"event":"touch","phase":"cancelled","type":"direct","touch":1396,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":564.5,"wy":397,"down":1}
+{"t":89.74,"event":"model","key":"shape.touches","value":"counter:1/1 base:0 stroke:0 joined:1 following:false"}
+{"t":89.74,"event":"recognizer","name":"canvas.rotation","obj":"81445d","from":"possible","to":"failed","src":"sweep"}
+{"t":89.73,"event":"touch","phase":"began","type":"direct","touch":1398,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":564.5,"wy":397,"down":2,"touchView":"StrokeCanvasView","gr":9,"grNames":"canvas.pan,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":89.74,"event":"model","key":"shape.touches","value":"counter:2/2 base:0 stroke:0 joined:2 following:false"}
+{"t":89.74,"event":"recognizer","name":"canvas.pan","obj":"540c94","from":"possible","to":"began","src":"sweep"}
+{"t":89.85,"event":"touch","phase":"ended","type":"direct","touch":1397,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":740,"wy":453.5,"down":1}
+{"t":89.87,"event":"model","key":"shape.touches","value":"counter:1/1 base:0 stroke:0 joined:1 following:false"}
+{"t":89.87,"event":"recognizer","name":"canvas.pinch","obj":"344e66","from":"possible","to":"failed","src":"sweep"}
+{"t":89.87,"event":"touch","phase":"ended","type":"direct","touch":1398,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":523.5,"wy":338.5,"down":0}
+{"t":89.89,"event":"model","key":"shape.touches","value":"counter:0/0 base:0 stroke:0 joined:0 following:false"}
+{"t":89.89,"event":"recognizer","name":"canvas.pan","obj":"540c94","from":"began","to":"ended","src":"sweep"}
+{"t":89.99,"event":"note","text":"stranded recognizers replaced: canvas.pan,canvas.pinch,canvas.rotation,stroke.306B345E"}
+{"t":0,"event":"flight","file":"flight-20261010-192305.jsonl","startedAt":"2026-10-10T23:23:05Z","app":"v1.0.43 (1)","build":"2026-10-10T08:14:28Z","device":"iPad12,1","os":"26.6.2","keptFrom":65.49,"keptTo":71.49,"note":"trimmed to the last 6 s before the repair; requireFailure lines and the touches' repeated per-line fields dropped"}
+{"t":65.61,"event":"touch","phase":"began","type":"direct","touch":1993,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":617.5,"wy":235.5,"down":1,"touchView":"StrokeCanvasView","gr":12,"grNames":"stroke.306B345E,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":65.63,"event":"model","key":"shape.touches","value":"counter:1/1 base:0 stroke:0 joined:1 following:false"}
+{"t":65.63,"event":"recognizer","name":"stroke.306B345E","obj":"86366c","from":"possible","to":"failed","src":"inline"}
+{"t":65.63,"event":"note","text":"ignore stroke.306B345E <- finger phase:0 tracking:false"}
+{"t":65.62,"event":"touch","phase":"began","type":"direct","touch":1994,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":640,"wy":461,"down":2,"touchView":"StrokeCanvasView","gr":11,"grNames":"canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":65.64,"event":"model","key":"shape.touches","value":"counter:2/2 base:0 stroke:0 joined:2 following:false"}
+{"t":65.67,"event":"recognizer","name":"canvas.pinch","obj":"f82eee","from":"possible","to":"began","src":"action"}
+{"t":65.69,"event":"recognizer","name":"canvas.pinch","obj":"f82eee","from":"began","to":"changed","src":"action"}
+{"t":65.71,"event":"recognizer","name":"canvas.rotation","obj":"e69910","from":"possible","to":"began","src":"action"}
+{"t":65.72,"event":"recognizer","name":"canvas.rotation","obj":"e69910","from":"began","to":"changed","src":"action"}
+{"t":65.85,"event":"touch","phase":"ended","type":"direct","touch":1994,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":495.5,"wy":564,"down":1}
+{"t":65.86,"event":"model","key":"shape.touches","value":"counter:1/1 base:0 stroke:0 joined:1 following:false"}
+{"t":65.86,"event":"recognizer","name":"canvas.pan","obj":"9c87b5","from":"possible","to":"changed","src":"sweep"}
+{"t":65.86,"event":"touch","phase":"ended","type":"direct","touch":1993,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":521,"wy":275.5,"down":0}
+{"t":65.87,"event":"model","key":"shape.touches","value":"counter:0/0 base:0 stroke:0 joined:0 following:false"}
+{"t":65.87,"event":"recognizer","name":"canvas.pinch","obj":"f82eee","from":"changed","to":"ended","src":"action"}
+{"t":65.87,"event":"recognizer","name":"canvas.rotation","obj":"e69910","from":"changed","to":"ended","src":"action"}
+{"t":65.87,"event":"recognizer","name":"stroke.306B345E","obj":"86366c","from":"failed","to":"possible","src":"reset"}
+{"t":65.87,"event":"recognizer","name":"canvas.pan","obj":"9c87b5","from":"changed","to":"possible","src":"sweep"}
+{"t":65.87,"event":"recognizer","name":"canvas.pinch","obj":"f82eee","from":"ended","to":"possible","src":"sweep"}
+{"t":65.87,"event":"recognizer","name":"canvas.rotation","obj":"e69910","from":"ended","to":"possible","src":"sweep"}
+{"t":65.99,"event":"touch","phase":"began","type":"direct","touch":1995,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":539,"wy":280,"down":2,"touchView":"StrokeCanvasView","gr":12,"grNames":"stroke.306B345E,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":65.99,"event":"touch","phase":"began","type":"direct","touch":1996,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":516.5,"wy":557,"down":2,"touchView":"StrokeCanvasView","gr":12,"grNames":"stroke.306B345E,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":66.01,"event":"model","key":"shape.touches","value":"counter:2/2 base:0 stroke:0 joined:2 following:false"}
+{"t":66.01,"event":"recognizer","name":"stroke.306B345E","obj":"86366c","from":"possible","to":"failed","src":"inline"}
+{"t":66.01,"event":"note","text":"ignore stroke.306B345E <- finger phase:0 tracking:false"}
+{"t":66.01,"event":"note","text":"ignore stroke.306B345E <- finger phase:0 tracking:false"}
+{"t":66.05,"event":"touch","phase":"ended","type":"direct","touch":1996,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":516.5,"wy":557,"down":1}
+{"t":66.05,"event":"model","key":"shape.touches","value":"counter:1/1 base:0 stroke:0 joined:1 following:false"}
+{"t":66.06,"event":"recognizer","name":"canvas.threeFingerTap","obj":"f891a6","from":"possible","to":"failed","src":"sweep"}
+{"t":66.06,"event":"touch","phase":"ended","type":"direct","touch":1995,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":539,"wy":280,"down":0}
+{"t":66.07,"event":"model","key":"shape.touches","value":"counter:0/0 base:0 stroke:0 joined:0 following:false"}
+{"t":66.08,"event":"recognizer","name":"stroke.306B345E","obj":"86366c","from":"failed","to":"possible","src":"reset"}
+{"t":66.08,"event":"recognizer","name":"canvas.threeFingerTap","obj":"f891a6","from":"failed","to":"possible","src":"sweep"}
+{"t":66.7,"event":"touch","phase":"began","type":"pencil","touch":1997,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":302,"wy":455.5,"down":1,"force":0.33,"maxForce":4.17,"altitude":0.75,"azimuth":0.23,"touchView":"StrokeCanvasView","gr":13,"grNames":"stroke.306B345E,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,PKTextInputDrawingGestureRecognizer"}
+{"t":66.76,"event":"model","key":"shape.touches","value":"counter:1/0 base:0 stroke:0 joined:0 following:false"}
+{"t":66.76,"event":"recognizer","name":"stroke.306B345E","obj":"86366c","from":"possible","to":"began","src":"inline"}
+{"t":66.77,"event":"recognizer","name":"canvas.pan","obj":"9c87b5","from":"possible","to":"failed","src":"sweep"}
+{"t":66.77,"event":"recognizer","name":"canvas.pinch","obj":"f82eee","from":"possible","to":"failed","src":"sweep"}
+{"t":66.77,"event":"recognizer","name":"canvas.rotation","obj":"e69910","from":"possible","to":"failed","src":"sweep"}
+{"t":66.77,"event":"recognizer","name":"stroke.306B345E","obj":"86366c","from":"began","to":"changed","src":"inline"}
+{"t":66.92,"event":"touch","phase":"ended","type":"pencil","touch":1997,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":487.5,"wy":254,"down":0,"force":0,"maxForce":4.17,"altitude":0.76,"azimuth":0.4}
+{"t":66.94,"event":"model","key":"shape.touches","value":"counter:0/0 base:0 stroke:0 joined:0 following:false"}
+{"t":66.94,"event":"recognizer","name":"stroke.306B345E","obj":"86366c","from":"changed","to":"ended","src":"inline"}
+{"t":66.95,"event":"note","text":"ignore stroke.306B345E <- pencil phase:3 tracking:false"}
+{"t":66.95,"event":"recognizer","name":"stroke.306B345E","obj":"86366c","from":"ended","to":"possible","src":"reset"}
+{"t":66.95,"event":"recognizer","name":"canvas.pan","obj":"9c87b5","from":"failed","to":"possible","src":"sweep"}
+{"t":66.95,"event":"recognizer","name":"canvas.pinch","obj":"f82eee","from":"failed","to":"possible","src":"sweep"}
+{"t":66.95,"event":"recognizer","name":"canvas.rotation","obj":"e69910","from":"failed","to":"possible","src":"sweep"}
+{"t":68.45,"event":"touch","phase":"began","type":"pencil","touch":1998,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":731,"wy":540.5,"down":1,"force":0.33,"maxForce":4.17,"altitude":0.74,"azimuth":6.27,"touchView":"StrokeCanvasView","gr":13,"grNames":"stroke.306B345E,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,PKTextInputDrawingGestureRecognizer"}
+{"t":68.47,"event":"model","key":"shape.touches","value":"counter:1/0 base:0 stroke:0 joined:0 following:false"}
+{"t":68.47,"event":"recognizer","name":"stroke.306B345E","obj":"86366c","from":"possible","to":"began","src":"inline"}
+{"t":68.47,"event":"recognizer","name":"canvas.pan","obj":"9c87b5","from":"possible","to":"failed","src":"sweep"}
+{"t":68.47,"event":"recognizer","name":"canvas.pinch","obj":"f82eee","from":"possible","to":"failed","src":"sweep"}
+{"t":68.47,"event":"recognizer","name":"canvas.rotation","obj":"e69910","from":"possible","to":"failed","src":"sweep"}
+{"t":68.47,"event":"recognizer","name":"stroke.306B345E","obj":"86366c","from":"began","to":"changed","src":"inline"}
+{"t":68.58,"event":"touch","phase":"ended","type":"pencil","touch":1998,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":712,"wy":531,"down":0,"force":0,"maxForce":4.17,"altitude":0.74,"azimuth":6.27}
+{"t":68.59,"event":"model","key":"shape.touches","value":"counter:0/0 base:0 stroke:0 joined:0 following:false"}
+{"t":68.59,"event":"recognizer","name":"stroke.306B345E","obj":"86366c","from":"changed","to":"ended","src":"inline"}
+{"t":68.59,"event":"note","text":"ignore stroke.306B345E <- pencil phase:3 tracking:false"}
+{"t":68.59,"event":"recognizer","name":"stroke.306B345E","obj":"86366c","from":"ended","to":"possible","src":"reset"}
+{"t":68.59,"event":"recognizer","name":"canvas.pan","obj":"9c87b5","from":"failed","to":"possible","src":"sweep"}
+{"t":68.59,"event":"recognizer","name":"canvas.pinch","obj":"f82eee","from":"failed","to":"possible","src":"sweep"}
+{"t":68.59,"event":"recognizer","name":"canvas.rotation","obj":"e69910","from":"failed","to":"possible","src":"sweep"}
+{"t":68.67,"event":"touch","phase":"began","type":"pencil","touch":1999,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":712,"wy":538,"down":1,"force":0.33,"maxForce":4.17,"altitude":0.66,"azimuth":6.24,"touchView":"StrokeCanvasView","gr":13,"grNames":"stroke.306B345E,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,PKTextInputDrawingGestureRecognizer"}
+{"t":68.69,"event":"model","key":"shape.touches","value":"counter:1/0 base:0 stroke:0 joined:0 following:false"}
+{"t":68.69,"event":"recognizer","name":"stroke.306B345E","obj":"86366c","from":"possible","to":"began","src":"inline"}
+{"t":68.69,"event":"recognizer","name":"canvas.pan","obj":"9c87b5","from":"possible","to":"failed","src":"sweep"}
+{"t":68.69,"event":"recognizer","name":"canvas.pinch","obj":"f82eee","from":"possible","to":"failed","src":"sweep"}
+{"t":68.69,"event":"recognizer","name":"canvas.rotation","obj":"e69910","from":"possible","to":"failed","src":"sweep"}
+{"t":68.69,"event":"recognizer","name":"stroke.306B345E","obj":"86366c","from":"began","to":"changed","src":"inline"}
+{"t":68.85,"event":"touch","phase":"ended","type":"pencil","touch":1999,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":786,"wy":335.5,"down":0,"force":0,"maxForce":4.17,"altitude":0.72,"azimuth":0.19}
+{"t":68.87,"event":"model","key":"shape.touches","value":"counter:0/0 base:0 stroke:0 joined:0 following:false"}
+{"t":68.87,"event":"recognizer","name":"stroke.306B345E","obj":"86366c","from":"changed","to":"ended","src":"inline"}
+{"t":68.87,"event":"note","text":"ignore stroke.306B345E <- pencil phase:3 tracking:false"}
+{"t":68.87,"event":"recognizer","name":"stroke.306B345E","obj":"86366c","from":"ended","to":"possible","src":"reset"}
+{"t":68.87,"event":"recognizer","name":"canvas.pan","obj":"9c87b5","from":"failed","to":"possible","src":"sweep"}
+{"t":68.87,"event":"recognizer","name":"canvas.pinch","obj":"f82eee","from":"failed","to":"possible","src":"sweep"}
+{"t":68.87,"event":"recognizer","name":"canvas.rotation","obj":"e69910","from":"failed","to":"possible","src":"sweep"}
+{"t":69.54,"event":"touch","phase":"began","type":"pencil","touch":2000,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":513.5,"wy":242,"down":1,"force":0.33,"maxForce":4.17,"altitude":0.81,"azimuth":0.11,"touchView":"StrokeCanvasView","gr":13,"grNames":"stroke.306B345E,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,PKTextInputDrawingGestureRecognizer"}
+{"t":69.61,"event":"model","key":"shape.touches","value":"counter:1/0 base:0 stroke:0 joined:0 following:false"}
+{"t":69.62,"event":"recognizer","name":"stroke.306B345E","obj":"86366c","from":"possible","to":"began","src":"inline"}
+{"t":69.62,"event":"recognizer","name":"canvas.pan","obj":"9c87b5","from":"possible","to":"failed","src":"sweep"}
+{"t":69.62,"event":"recognizer","name":"canvas.pinch","obj":"f82eee","from":"possible","to":"failed","src":"sweep"}
+{"t":69.62,"event":"recognizer","name":"canvas.rotation","obj":"e69910","from":"possible","to":"failed","src":"sweep"}
+{"t":69.63,"event":"recognizer","name":"stroke.306B345E","obj":"86366c","from":"began","to":"changed","src":"inline"}
+{"t":69.77,"event":"touch","phase":"ended","type":"pencil","touch":2000,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":797.5,"wy":348.5,"down":0,"force":0,"maxForce":4.17,"altitude":0.95,"azimuth":6.22}
+{"t":69.77,"event":"model","key":"shape.touches","value":"counter:0/0 base:0 stroke:0 joined:0 following:false"}
+{"t":69.77,"event":"recognizer","name":"stroke.306B345E","obj":"86366c","from":"changed","to":"ended","src":"inline"}
+{"t":69.77,"event":"note","text":"ignore stroke.306B345E <- pencil phase:3 tracking:false"}
+{"t":69.77,"event":"recognizer","name":"stroke.306B345E","obj":"86366c","from":"ended","to":"possible","src":"reset"}
+{"t":69.77,"event":"recognizer","name":"canvas.pan","obj":"9c87b5","from":"failed","to":"possible","src":"sweep"}
+{"t":69.77,"event":"recognizer","name":"canvas.pinch","obj":"f82eee","from":"failed","to":"possible","src":"sweep"}
+{"t":69.77,"event":"recognizer","name":"canvas.rotation","obj":"e69910","from":"failed","to":"possible","src":"sweep"}
+{"t":70.36,"event":"touch","phase":"began","type":"direct","touch":2001,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":638.5,"wy":194.5,"down":1,"touchView":"StrokeCanvasView","gr":12,"grNames":"stroke.306B345E,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":70.37,"event":"model","key":"shape.touches","value":"counter:1/1 base:0 stroke:0 joined:1 following:false"}
+{"t":70.37,"event":"recognizer","name":"stroke.306B345E","obj":"86366c","from":"possible","to":"failed","src":"inline"}
+{"t":70.38,"event":"note","text":"ignore stroke.306B345E <- finger phase:0 tracking:false"}
+{"t":70.4,"event":"touch","phase":"began","type":"direct","touch":2002,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":602.5,"wy":523,"down":2,"touchView":"StrokeCanvasView","gr":11,"grNames":"canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":70.41,"event":"model","key":"shape.touches","value":"counter:2/2 base:0 stroke:0 joined:2 following:false"}
+{"t":70.45,"event":"recognizer","name":"canvas.pinch","obj":"f82eee","from":"possible","to":"began","src":"action"}
+{"t":70.45,"event":"recognizer","name":"canvas.rotation","obj":"e69910","from":"possible","to":"began","src":"action"}
+{"t":70.47,"event":"recognizer","name":"canvas.pinch","obj":"f82eee","from":"began","to":"changed","src":"action"}
+{"t":70.47,"event":"recognizer","name":"canvas.rotation","obj":"e69910","from":"began","to":"changed","src":"action"}
+{"t":70.6,"event":"touch","phase":"ended","type":"direct","touch":2001,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":701,"wy":304.5,"down":0}
+{"t":70.6,"event":"touch","phase":"ended","type":"direct","touch":2002,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":593.5,"wy":364.5,"down":0}
+{"t":70.62,"event":"model","key":"shape.touches","value":"counter:0/0 base:0 stroke:0 joined:0 following:false"}
+{"t":70.62,"event":"recognizer","name":"canvas.pinch","obj":"f82eee","from":"changed","to":"ended","src":"action"}
+{"t":70.62,"event":"recognizer","name":"canvas.rotation","obj":"e69910","from":"changed","to":"ended","src":"action"}
+{"t":70.62,"event":"recognizer","name":"stroke.306B345E","obj":"86366c","from":"failed","to":"possible","src":"reset"}
+{"t":70.62,"event":"recognizer","name":"canvas.pinch","obj":"f82eee","from":"ended","to":"possible","src":"sweep"}
+{"t":70.62,"event":"recognizer","name":"canvas.rotation","obj":"e69910","from":"ended","to":"possible","src":"sweep"}
+{"t":71,"event":"touch","phase":"began","type":"direct","touch":2003,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":530.5,"wy":481.5,"down":2,"touchView":"StrokeCanvasView","gr":12,"grNames":"stroke.306B345E,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":71,"event":"touch","phase":"began","type":"direct","touch":2004,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":670,"wy":318,"down":2,"touchView":"StrokeCanvasView","gr":12,"grNames":"stroke.306B345E,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":71,"event":"model","key":"shape.touches","value":"counter:2/2 base:0 stroke:0 joined:2 following:false"}
+{"t":71,"event":"recognizer","name":"stroke.306B345E","obj":"86366c","from":"possible","to":"failed","src":"inline"}
+{"t":71.01,"event":"note","text":"ignore stroke.306B345E <- finger phase:0 tracking:false"}
+{"t":71.01,"event":"note","text":"ignore stroke.306B345E <- finger phase:0 tracking:false"}
+{"t":71,"event":"touch","phase":"cancelled","type":"direct","touch":2004,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":670,"wy":318,"down":1}
+{"t":71.02,"event":"model","key":"shape.touches","value":"counter:1/1 base:0 stroke:0 joined:1 following:false"}
+{"t":71.02,"event":"recognizer","name":"canvas.rotation","obj":"e69910","from":"possible","to":"failed","src":"sweep"}
+{"t":71.03,"event":"touch","phase":"began","type":"direct","touch":2005,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":670,"wy":318,"down":2,"touchView":"StrokeCanvasView","gr":9,"grNames":"canvas.pan,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":71.04,"event":"model","key":"shape.touches","value":"counter:2/2 base:0 stroke:0 joined:2 following:false"}
+{"t":71.35,"event":"touch","phase":"ended","type":"direct","touch":2003,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":812.5,"wy":368,"down":1}
+{"t":71.37,"event":"model","key":"shape.touches","value":"counter:1/1 base:0 stroke:0 joined:1 following:false"}
+{"t":71.37,"event":"recognizer","name":"canvas.pan","obj":"9c87b5","from":"possible","to":"began","src":"sweep"}
+{"t":71.37,"event":"recognizer","name":"canvas.pinch","obj":"f82eee","from":"possible","to":"failed","src":"sweep"}
+{"t":71.38,"event":"touch","phase":"ended","type":"direct","touch":2005,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":736,"wy":236.5,"down":0}
+{"t":71.39,"event":"model","key":"shape.touches","value":"counter:0/0 base:0 stroke:0 joined:0 following:false"}
+{"t":71.39,"event":"recognizer","name":"canvas.pan","obj":"9c87b5","from":"began","to":"ended","src":"sweep"}
+{"t":71.49,"event":"note","text":"stranded recognizers replaced: canvas.pan,canvas.pinch,canvas.rotation,stroke.306B345E"}
+{"t":0,"event":"flight","file":"flight-20261010-193435.jsonl","startedAt":"2026-10-10T23:34:35Z","app":"v1.0.43 (1)","build":"2026-10-10T08:14:28Z","device":"iPad12,1","os":"26.6.2","keptFrom":83.7,"keptTo":89.7,"note":"trimmed to the last 6 s before the repair; requireFailure lines and the touches' repeated per-line fields dropped"}
+{"t":85.06,"event":"touch","phase":"began","type":"direct","touch":2781,"target":"layerPanel.list","via":"view","hitClass":"UITableViewCellContentView","wx":833.5,"wy":128,"down":1,"touchView":"UITableViewCellContentView","gr":15,"grNames":"UILongPressGestureRecognizer,UIScrollViewDelayedTouchesBeganGestureRecognizer,UIScrollViewPanGestureRecognizer,_UISwipeActionPanGestureRecognizer,UILongPressGestureRecognizer,UIPinchGestureRecognizer,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":85.18,"event":"touch","phase":"cancelled","type":"direct","touch":2781,"target":"layerPanel.list","via":"view","hitClass":"UITableViewCellContentView","wx":832,"wy":148,"down":0}
+{"t":86.29,"event":"touch","phase":"began","type":"direct","touch":2782,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":539,"wy":437,"down":1,"touchView":"StrokeCanvasView","gr":16,"grNames":"stroke.306B345E,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":86.3,"event":"recognizer","name":"stroke.306B345E","obj":"81947f","from":"possible","to":"failed","src":"inline"}
+{"t":86.31,"event":"model","key":"shape.touches","value":"counter:1/1 base:0 stroke:0 joined:1 following:false"}
+{"t":86.31,"event":"note","text":"ignore stroke.306B345E <- finger phase:0 tracking:false"}
+{"t":86.31,"event":"touch","phase":"began","type":"direct","touch":2783,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":511,"wy":154.5,"down":2,"touchView":"StrokeCanvasView","gr":15,"grNames":"canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":86.32,"event":"model","key":"shape.touches","value":"counter:2/2 base:0 stroke:0 joined:2 following:false"}
+{"t":86.36,"event":"touch","phase":"ended","type":"direct","touch":2783,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":511,"wy":154.5,"down":0}
+{"t":86.36,"event":"touch","phase":"ended","type":"direct","touch":2782,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":539,"wy":437,"down":0}
+{"t":86.37,"event":"model","key":"shape.touches","value":"counter:0/0 base:0 stroke:0 joined:0 following:false"}
+{"t":86.38,"event":"recognizer","name":"stroke.306B345E","obj":"81947f","from":"failed","to":"possible","src":"reset"}
+{"t":87.58,"event":"touch","phase":"began","type":"direct","touch":2784,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":495.5,"wy":233.5,"down":1,"touchView":"StrokeCanvasView","gr":16,"grNames":"stroke.306B345E,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":87.6,"event":"recognizer","name":"stroke.306B345E","obj":"81947f","from":"possible","to":"failed","src":"inline"}
+{"t":87.6,"event":"model","key":"shape.touches","value":"counter:1/1 base:0 stroke:0 joined:1 following:false"}
+{"t":87.6,"event":"note","text":"ignore stroke.306B345E <- finger phase:0 tracking:false"}
+{"t":87.59,"event":"touch","phase":"began","type":"direct","touch":2785,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":545.5,"wy":563.5,"down":2,"touchView":"StrokeCanvasView","gr":15,"grNames":"canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":87.61,"event":"model","key":"shape.touches","value":"counter:2/2 base:0 stroke:0 joined:2 following:false"}
+{"t":87.65,"event":"touch","phase":"ended","type":"direct","touch":2784,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":495.5,"wy":233.5,"down":1}
+{"t":87.67,"event":"model","key":"shape.touches","value":"counter:1/1 base:0 stroke:0 joined:1 following:false"}
+{"t":87.67,"event":"recognizer","name":"canvas.threeFingerTap","obj":"82e73d","from":"possible","to":"failed","src":"sweep"}
+{"t":87.66,"event":"touch","phase":"ended","type":"direct","touch":2785,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":545.5,"wy":563.5,"down":0}
+{"t":87.67,"event":"model","key":"shape.touches","value":"counter:0/0 base:0 stroke:0 joined:0 following:false"}
+{"t":87.67,"event":"recognizer","name":"stroke.306B345E","obj":"81947f","from":"failed","to":"possible","src":"reset"}
+{"t":87.67,"event":"recognizer","name":"canvas.threeFingerTap","obj":"82e73d","from":"failed","to":"possible","src":"sweep"}
+{"t":88.59,"event":"touch","phase":"began","type":"direct","touch":2786,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":469,"wy":183.5,"down":3,"touchView":"StrokeCanvasView","gr":16,"grNames":"stroke.306B345E,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":88.59,"event":"touch","phase":"began","type":"direct","touch":2787,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":396.5,"wy":274.5,"down":3,"touchView":"StrokeCanvasView","gr":16,"grNames":"stroke.306B345E,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":88.59,"event":"touch","phase":"began","type":"direct","touch":2788,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":489.5,"wy":594,"down":3,"touchView":"StrokeCanvasView","gr":16,"grNames":"stroke.306B345E,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":88.6,"event":"recognizer","name":"stroke.306B345E","obj":"81947f","from":"possible","to":"failed","src":"inline"}
+{"t":88.6,"event":"model","key":"shape.touches","value":"counter:3/3 base:0 stroke:0 joined:3 following:false"}
+{"t":88.6,"event":"note","text":"ignore stroke.306B345E <- finger phase:0 tracking:false"}
+{"t":88.6,"event":"note","text":"ignore stroke.306B345E <- finger phase:0 tracking:false"}
+{"t":88.6,"event":"note","text":"ignore stroke.306B345E <- finger phase:0 tracking:false"}
+{"t":88.67,"event":"touch","phase":"ended","type":"direct","touch":2788,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":489.5,"wy":594,"down":1}
+{"t":88.67,"event":"touch","phase":"ended","type":"direct","touch":2787,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":394.5,"wy":273.5,"down":1}
+{"t":88.68,"event":"model","key":"shape.touches","value":"counter:1/1 base:0 stroke:0 joined:1 following:false"}
+{"t":88.68,"event":"touch","phase":"ended","type":"direct","touch":2786,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":469,"wy":183.5,"down":0}
+{"t":88.68,"event":"model","key":"shape.touches","value":"counter:0/0 base:0 stroke:0 joined:0 following:false"}
+{"t":88.68,"event":"recognizer","name":"stroke.306B345E","obj":"81947f","from":"failed","to":"possible","src":"reset"}
+{"t":88.85,"event":"touch","phase":"began","type":"direct","touch":2789,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":469,"wy":181,"down":3,"touchView":"StrokeCanvasView","gr":16,"grNames":"stroke.306B345E,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":88.85,"event":"touch","phase":"began","type":"direct","touch":2790,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":501.5,"wy":611,"down":3,"touchView":"StrokeCanvasView","gr":16,"grNames":"stroke.306B345E,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":88.85,"event":"touch","phase":"began","type":"direct","touch":2791,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":379,"wy":274.5,"down":3,"touchView":"StrokeCanvasView","gr":16,"grNames":"stroke.306B345E,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":88.87,"event":"recognizer","name":"stroke.306B345E","obj":"81947f","from":"possible","to":"failed","src":"inline"}
+{"t":88.87,"event":"model","key":"shape.touches","value":"counter:3/3 base:0 stroke:0 joined:3 following:false"}
+{"t":88.87,"event":"note","text":"ignore stroke.306B345E <- finger phase:0 tracking:false"}
+{"t":88.87,"event":"note","text":"ignore stroke.306B345E <- finger phase:0 tracking:false"}
+{"t":88.87,"event":"note","text":"ignore stroke.306B345E <- finger phase:0 tracking:false"}
+{"t":88.9,"event":"touch","phase":"ended","type":"direct","touch":2791,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":379,"wy":274.5,"down":2}
+{"t":88.92,"event":"model","key":"shape.touches","value":"counter:2/2 base:0 stroke:0 joined:2 following:false"}
+{"t":88.91,"event":"touch","phase":"ended","type":"direct","touch":2790,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":501.5,"wy":611,"down":1}
+{"t":88.92,"event":"model","key":"shape.touches","value":"counter:1/1 base:0 stroke:0 joined:1 following:false"}
+{"t":88.92,"event":"touch","phase":"ended","type":"direct","touch":2789,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":469,"wy":181,"down":0}
+{"t":88.93,"event":"model","key":"shape.touches","value":"counter:0/0 base:0 stroke:0 joined:0 following:false"}
+{"t":88.94,"event":"recognizer","name":"stroke.306B345E","obj":"81947f","from":"failed","to":"possible","src":"reset"}
+{"t":89.07,"event":"touch","phase":"began","type":"direct","touch":2792,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":470.5,"wy":184,"down":3,"touchView":"StrokeCanvasView","gr":16,"grNames":"stroke.306B345E,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":89.07,"event":"touch","phase":"began","type":"direct","touch":2793,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":380,"wy":293.5,"down":3,"touchView":"StrokeCanvasView","gr":16,"grNames":"stroke.306B345E,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":89.07,"event":"touch","phase":"began","type":"direct","touch":2794,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":507,"wy":634.5,"down":3,"touchView":"StrokeCanvasView","gr":16,"grNames":"stroke.306B345E,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":89.09,"event":"recognizer","name":"stroke.306B345E","obj":"81947f","from":"possible","to":"failed","src":"inline"}
+{"t":89.09,"event":"model","key":"shape.touches","value":"counter:3/3 base:0 stroke:0 joined:3 following:false"}
+{"t":89.09,"event":"note","text":"ignore stroke.306B345E <- finger phase:0 tracking:false"}
+{"t":89.09,"event":"note","text":"ignore stroke.306B345E <- finger phase:0 tracking:false"}
+{"t":89.09,"event":"note","text":"ignore stroke.306B345E <- finger phase:0 tracking:false"}
+{"t":89.13,"event":"touch","phase":"ended","type":"direct","touch":2794,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":507,"wy":634.5,"down":2}
+{"t":89.15,"event":"model","key":"shape.touches","value":"counter:2/2 base:0 stroke:0 joined:2 following:false"}
+{"t":89.14,"event":"touch","phase":"ended","type":"direct","touch":2793,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":380,"wy":293.5,"down":1}
+{"t":89.15,"event":"model","key":"shape.touches","value":"counter:1/1 base:0 stroke:0 joined:1 following:false"}
+{"t":89.16,"event":"touch","phase":"ended","type":"direct","touch":2792,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":470.5,"wy":184,"down":0}
+{"t":89.17,"event":"model","key":"shape.touches","value":"counter:0/0 base:0 stroke:0 joined:0 following:false"}
+{"t":89.17,"event":"recognizer","name":"stroke.306B345E","obj":"81947f","from":"failed","to":"possible","src":"reset"}
+{"t":89.31,"event":"touch","phase":"began","type":"direct","touch":2795,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":415.5,"wy":275.5,"down":3,"touchView":"StrokeCanvasView","gr":16,"grNames":"stroke.306B345E,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":89.31,"event":"touch","phase":"began","type":"direct","touch":2796,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":501,"wy":170,"down":3,"touchView":"StrokeCanvasView","gr":16,"grNames":"stroke.306B345E,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":89.31,"event":"touch","phase":"began","type":"direct","touch":2797,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":558.5,"wy":607,"down":3,"touchView":"StrokeCanvasView","gr":16,"grNames":"stroke.306B345E,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":89.32,"event":"recognizer","name":"stroke.306B345E","obj":"81947f","from":"possible","to":"failed","src":"inline"}
+{"t":89.32,"event":"model","key":"shape.touches","value":"counter:3/3 base:0 stroke:0 joined:3 following:false"}
+{"t":89.32,"event":"note","text":"ignore stroke.306B345E <- finger phase:0 tracking:false"}
+{"t":89.32,"event":"note","text":"ignore stroke.306B345E <- finger phase:0 tracking:false"}
+{"t":89.32,"event":"note","text":"ignore stroke.306B345E <- finger phase:0 tracking:false"}
+{"t":89.33,"event":"touch","phase":"ended","type":"direct","touch":2797,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":558.5,"wy":607,"down":2}
+{"t":89.35,"event":"model","key":"shape.touches","value":"counter:2/2 base:0 stroke:0 joined:2 following:false"}
+{"t":89.35,"event":"touch","phase":"ended","type":"direct","touch":2795,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":415.5,"wy":275.5,"down":1}
+{"t":89.37,"event":"model","key":"shape.touches","value":"counter:1/1 base:0 stroke:0 joined:1 following:false"}
+{"t":89.37,"event":"touch","phase":"ended","type":"direct","touch":2796,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":501,"wy":170,"down":0}
+{"t":89.38,"event":"model","key":"shape.touches","value":"counter:0/0 base:0 stroke:0 joined:0 following:false"}
+{"t":89.38,"event":"recognizer","name":"stroke.306B345E","obj":"81947f","from":"failed","to":"possible","src":"reset"}
+{"t":89.52,"event":"touch","phase":"began","type":"direct","touch":2798,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":493.5,"wy":151.5,"down":2,"touchView":"StrokeCanvasView","gr":16,"grNames":"stroke.306B345E,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":89.52,"event":"touch","phase":"began","type":"direct","touch":2799,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":409,"wy":257,"down":2,"touchView":"StrokeCanvasView","gr":16,"grNames":"stroke.306B345E,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":89.53,"event":"recognizer","name":"stroke.306B345E","obj":"81947f","from":"possible","to":"failed","src":"inline"}
+{"t":89.54,"event":"model","key":"shape.touches","value":"counter:2/2 base:0 stroke:0 joined:2 following:false"}
+{"t":89.54,"event":"note","text":"ignore stroke.306B345E <- finger phase:0 tracking:false"}
+{"t":89.54,"event":"note","text":"ignore stroke.306B345E <- finger phase:0 tracking:false"}
+{"t":89.54,"event":"touch","phase":"began","type":"direct","touch":2800,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":557.5,"wy":575.5,"down":3,"touchView":"StrokeCanvasView","gr":13,"grNames":"canvas.pan,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":89.55,"event":"model","key":"shape.touches","value":"counter:3/3 base:0 stroke:0 joined:3 following:false"}
+{"t":89.55,"event":"recognizer","name":"canvas.pan","obj":"fae24d","from":"possible","to":"failed","src":"sweep"}
+{"t":89.55,"event":"recognizer","name":"canvas.twoFingerTap","obj":"478765","from":"possible","to":"failed","src":"sweep"}
+{"t":89.57,"event":"touch","phase":"ended","type":"direct","touch":2800,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":551,"wy":560,"down":2}
+{"t":89.58,"event":"model","key":"shape.touches","value":"counter:2/2 base:0 stroke:0 joined:2 following:false"}
+{"t":89.58,"event":"touch","phase":"ended","type":"direct","touch":2799,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":409,"wy":257,"down":1}
+{"t":89.6,"event":"model","key":"shape.touches","value":"counter:1/1 base:0 stroke:0 joined:1 following:false"}
+{"t":89.59,"event":"touch","phase":"ended","type":"direct","touch":2798,"target":"canvas.host","via":"view","hitClass":"StrokeCanvasView","wx":493.5,"wy":151.5,"down":0}
+{"t":89.6,"event":"model","key":"shape.touches","value":"counter:0/0 base:0 stroke:0 joined:0 following:false"}
+{"t":89.6,"event":"recognizer","name":"canvas.pinch","obj":"5006b7","from":"possible","to":"failed","src":"sweep"}
+{"t":89.6,"event":"recognizer","name":"canvas.rotation","obj":"14e844","from":"possible","to":"failed","src":"sweep"}
+{"t":89.6,"event":"recognizer","name":"canvas.twoFingerTap","obj":"478765","from":"failed","to":"possible","src":"sweep"}
+{"t":89.7,"event":"note","text":"stranded recognizers replaced: canvas.pan,canvas.pinch,canvas.rotation,stroke.306B345E"}
+{"t":0,"event":"flight","file":"flight-20261010-194056.jsonl","startedAt":"2026-10-10T23:40:56Z","app":"v1.0.43 (1)","build":"2026-10-10T08:14:28Z","device":"iPad12,1","os":"26.6.2","keptFrom":83.73,"keptTo":89.73,"note":"trimmed to the last 6 s before the repair; requireFailure lines and the touches' repeated per-line fields dropped"}
+{"t":84.95,"event":"touch","phase":"began","type":"direct","touch":3268,"target":null,"via":"none","hitClass":"_UIHostingView<ModifiedContent<AnyView, RootModifier>>","wx":276.5,"wy":18.5,"down":1,"touchView":"_UIHostingView<ModifiedContent<AnyView, RootModifier>>","gr":11,"grNames":"UIKitResponderGestureRecognizer,UIKitResponderGestureRecognizer,com.apple.UIKit._UIDoubleTapInteraction.tap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":85.03,"event":"touch","phase":"ended","type":"direct","touch":3268,"target":null,"via":"none","hitClass":"_UIHostingView<ModifiedContent<AnyView, RootModifier>>","wx":276.5,"wy":18.5,"down":0}
+{"t":85.05,"event":"model","key":"vectorFloat","value":"nil"}
+{"t":85.09,"event":"model","key":"activePanel","value":"none"}
+{"t":85.59,"event":"touch","phase":"began","type":"direct","touch":3269,"target":null,"via":"none","hitClass":"_UIHostingView<ModifiedContent<AnyView, RootModifier>>","wx":273.5,"wy":14.5,"down":1,"touchView":"_UIHostingView<ModifiedContent<AnyView, RootModifier>>","gr":8,"grNames":"UIKitResponderGestureRecognizer,UIKitResponderGestureRecognizer,com.apple.UIKit._UIDoubleTapInteraction.tap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":85.66,"event":"touch","phase":"ended","type":"direct","touch":3269,"target":null,"via":"none","hitClass":"_UIHostingView<ModifiedContent<AnyView, RootModifier>>","wx":273.5,"wy":14.5,"down":0}
+{"t":85.92,"event":"model","key":"activePanel","value":"select"}
+{"t":85.98,"event":"touch","phase":"began","type":"pencil","touch":3270,"target":"canvas.host","via":"view","hitClass":"SelectionOverlayView","wx":377.5,"wy":334,"down":1,"force":0.33,"maxForce":4.17,"altitude":0.74,"azimuth":0.44,"touchView":"SelectionOverlayView","gr":13,"grNames":"TouchTypePanGestureRecognizer,TouchTypeTapGestureRecognizer,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,PKTextInputDrawingGestureRecognizer"}
+{"t":86.13,"event":"model","key":"shape.touches","value":"counter:1/0 base:0 stroke:0 joined:0 following:false"}
+{"t":86.39,"event":"touch","phase":"ended","type":"pencil","touch":3270,"target":"canvas.host","via":"view","hitClass":"SelectionOverlayView","wx":343,"wy":379,"down":0,"force":0,"maxForce":4.17,"altitude":0.74,"azimuth":0.39}
+{"t":86.4,"event":"model","key":"shape.touches","value":"counter:0/0 base:0 stroke:0 joined:0 following:false"}
+{"t":86.45,"event":"touch","phase":"began","type":"direct","touch":3271,"target":null,"via":"none","hitClass":"_UIHostingView<ModifiedContent<AnyView, RootModifier>>","wx":279,"wy":11,"down":1,"touchView":"_UIHostingView<ModifiedContent<AnyView, RootModifier>>","gr":9,"grNames":"UIKitResponderGestureRecognizer,UIKitResponderGestureRecognizer,com.apple.UIKit._UIDoubleTapInteraction.tap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":86.52,"event":"touch","phase":"ended","type":"direct","touch":3271,"target":null,"via":"none","hitClass":"_UIHostingView<ModifiedContent<AnyView, RootModifier>>","wx":279,"wy":11,"down":0}
+{"t":86.58,"event":"model","key":"activePanel","value":"none"}
+{"t":87.15,"event":"touch","phase":"began","type":"direct","touch":3272,"target":null,"via":"none","hitClass":"_UIHostingView<ModifiedContent<AnyView, RootModifier>>","wx":277,"wy":9,"down":1,"touchView":"_UIHostingView<ModifiedContent<AnyView, RootModifier>>","gr":8,"grNames":"UIKitResponderGestureRecognizer,UIKitResponderGestureRecognizer,com.apple.UIKit._UIDoubleTapInteraction.tap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":87.2,"event":"touch","phase":"ended","type":"direct","touch":3272,"target":null,"via":"none","hitClass":"_UIHostingView<ModifiedContent<AnyView, RootModifier>>","wx":277,"wy":9,"down":0}
+{"t":87.23,"event":"model","key":"activePanel","value":"select"}
+{"t":87.85,"event":"touch","phase":"began","type":"direct","touch":3273,"target":"canvas.host","via":"view","hitClass":"SelectionOverlayView","wx":493.5,"wy":474,"down":2,"touchView":"SelectionOverlayView","gr":14,"grNames":"TouchTypePanGestureRecognizer,TouchTypeTapGestureRecognizer,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":87.85,"event":"touch","phase":"began","type":"direct","touch":3274,"target":null,"via":"none","hitClass":"none","wx":463.5,"wy":264,"down":2,"touchView":"nil","gr":14,"grNames":"TouchTypePanGestureRecognizer,TouchTypeTapGestureRecognizer,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":87.87,"event":"model","key":"shape.touches","value":"counter:2/2 base:0 stroke:0 joined:2 following:false"}
+{"t":87.93,"event":"touch","phase":"ended","type":"direct","touch":3273,"target":"canvas.host","via":"view","hitClass":"SelectionOverlayView","wx":493.5,"wy":474,"down":0}
+{"t":87.93,"event":"touch","phase":"ended","type":"direct","touch":3274,"target":null,"via":"none","hitClass":"none","wx":463.5,"wy":264,"down":0}
+{"t":87.95,"event":"model","key":"shape.touches","value":"counter:0/0 base:0 stroke:0 joined:0 following:false"}
+{"t":88.54,"event":"touch","phase":"began","type":"direct","touch":3275,"target":"canvas.host","via":"view","hitClass":"SelectionOverlayView","wx":490,"wy":269.5,"down":1,"touchView":"SelectionOverlayView","gr":14,"grNames":"TouchTypePanGestureRecognizer,TouchTypeTapGestureRecognizer,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":88.65,"event":"model","key":"shape.touches","value":"counter:1/1 base:0 stroke:0 joined:1 following:false"}
+{"t":88.58,"event":"touch","phase":"began","type":"direct","touch":3276,"target":null,"via":"none","hitClass":"none","wx":520.5,"wy":493.5,"down":2,"touchView":"nil","gr":14,"grNames":"TouchTypePanGestureRecognizer,TouchTypeTapGestureRecognizer,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":88.7,"event":"model","key":"shape.touches","value":"counter:2/2 base:0 stroke:0 joined:2 following:false"}
+{"t":88.58,"event":"touch","phase":"ended","type":"direct","touch":3276,"target":null,"via":"none","hitClass":"none","wx":520.5,"wy":493.5,"down":1}
+{"t":88.7,"event":"model","key":"shape.touches","value":"counter:1/1 base:0 stroke:0 joined:1 following:false"}
+{"t":88.7,"event":"recognizer","name":"canvas.threeFingerTap","obj":"391475","from":"possible","to":"failed","src":"sweep"}
+{"t":88.58,"event":"touch","phase":"ended","type":"direct","touch":3275,"target":"canvas.host","via":"view","hitClass":"SelectionOverlayView","wx":490,"wy":269.5,"down":0}
+{"t":88.7,"event":"model","key":"shape.touches","value":"counter:0/0 base:0 stroke:0 joined:0 following:false"}
+{"t":88.7,"event":"model","key":"currentLayerIndex","value":"3"}
+{"t":88.71,"event":"recognizer","name":"canvas.threeFingerTap","obj":"391475","from":"failed","to":"possible","src":"sweep"}
+{"t":89.15,"event":"touch","phase":"began","type":"direct","touch":3277,"target":"canvas.host","via":"view","hitClass":"SelectionOverlayView","wx":597,"wy":195.5,"down":1,"touchView":"SelectionOverlayView","gr":14,"grNames":"TouchTypePanGestureRecognizer,TouchTypeTapGestureRecognizer,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":89.23,"event":"model","key":"shape.touches","value":"counter:1/1 base:0 stroke:0 joined:1 following:false"}
+{"t":89.17,"event":"touch","phase":"began","type":"direct","touch":3278,"target":null,"via":"none","hitClass":"none","wx":513.5,"wy":273,"down":3,"touchView":"nil","gr":14,"grNames":"TouchTypePanGestureRecognizer,TouchTypeTapGestureRecognizer,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":89.17,"event":"touch","phase":"began","type":"direct","touch":3279,"target":null,"via":"none","hitClass":"none","wx":556,"wy":513,"down":3,"touchView":"nil","gr":14,"grNames":"TouchTypePanGestureRecognizer,TouchTypeTapGestureRecognizer,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":89.24,"event":"model","key":"shape.touches","value":"counter:3/3 base:0 stroke:0 joined:3 following:false"}
+{"t":89.24,"event":"recognizer","name":"canvas.twoFingerTap","obj":"e4e7db","from":"possible","to":"failed","src":"sweep"}
+{"t":89.18,"event":"touch","phase":"ended","type":"direct","touch":3278,"target":null,"via":"none","hitClass":"none","wx":513.5,"wy":273,"down":1}
+{"t":89.18,"event":"touch","phase":"ended","type":"direct","touch":3279,"target":null,"via":"none","hitClass":"none","wx":556,"wy":513,"down":1}
+{"t":89.24,"event":"model","key":"shape.touches","value":"counter:1/1 base:0 stroke:0 joined:1 following:false"}
+{"t":89.2,"event":"touch","phase":"ended","type":"direct","touch":3277,"target":"canvas.host","via":"view","hitClass":"SelectionOverlayView","wx":588.5,"wy":203.5,"down":0}
+{"t":89.24,"event":"model","key":"shape.touches","value":"counter:0/0 base:0 stroke:0 joined:0 following:false"}
+{"t":89.24,"event":"model","key":"currentLayerIndex","value":"4"}
+{"t":89.25,"event":"recognizer","name":"canvas.twoFingerTap","obj":"e4e7db","from":"failed","to":"possible","src":"sweep"}
+{"t":89.55,"event":"touch","phase":"began","type":"direct","touch":3280,"target":"canvas.host","via":"view","hitClass":"SelectionOverlayView","wx":601,"wy":189,"down":2,"touchView":"SelectionOverlayView","gr":14,"grNames":"TouchTypePanGestureRecognizer,TouchTypeTapGestureRecognizer,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":89.55,"event":"touch","phase":"began","type":"direct","touch":3281,"target":null,"via":"none","hitClass":"none","wx":508,"wy":259,"down":2,"touchView":"nil","gr":14,"grNames":"TouchTypePanGestureRecognizer,TouchTypeTapGestureRecognizer,canvas.pan,canvas.pinch,canvas.rotation,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":89.57,"event":"model","key":"shape.touches","value":"counter:2/2 base:0 stroke:0 joined:2 following:false"}
+{"t":89.57,"event":"touch","phase":"began","type":"direct","touch":3282,"target":null,"via":"none","hitClass":"none","wx":576.5,"wy":495.5,"down":3,"touchView":"nil","gr":12,"grNames":"TouchTypePanGestureRecognizer,TouchTypeTapGestureRecognizer,canvas.pan,canvas.twoFingerTap,canvas.touchCounter,canvas.threeFingerTap,_UISystemGestureGateGestureRecognizer,_UISystemGestureGateGestureRecognizer,PassiveTouchDownObserver,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan,com.apple.UIKit._UIFlexInteraction.Pan"}
+{"t":89.58,"event":"model","key":"shape.touches","value":"counter:3/3 base:0 stroke:0 joined:3 following:false"}
+{"t":89.58,"event":"recognizer","name":"canvas.pan","obj":"35bd88","from":"possible","to":"failed","src":"sweep"}
+{"t":89.58,"event":"recognizer","name":"canvas.twoFingerTap","obj":"e4e7db","from":"possible","to":"failed","src":"sweep"}
+{"t":89.6,"event":"touch","phase":"ended","type":"direct","touch":3281,"target":null,"via":"none","hitClass":"none","wx":508,"wy":259,"down":1}
+{"t":89.6,"event":"touch","phase":"ended","type":"direct","touch":3282,"target":null,"via":"none","hitClass":"none","wx":576.5,"wy":495.5,"down":1}
+{"t":89.61,"event":"model","key":"shape.touches","value":"counter:1/1 base:0 stroke:0 joined:1 following:false"}
+{"t":89.61,"event":"recognizer","name":"canvas.twoFingerTap","obj":"e4e7db","from":"failed","to":"possible","src":"sweep"}
+{"t":89.62,"event":"touch","phase":"ended","type":"direct","touch":3280,"target":"canvas.host","via":"view","hitClass":"SelectionOverlayView","wx":601,"wy":189,"down":0}
+{"t":89.63,"event":"model","key":"shape.touches","value":"counter:0/0 base:0 stroke:0 joined:0 following:false"}
+{"t":89.73,"event":"note","text":"stranded recognizers replaced: canvas.pan"}
