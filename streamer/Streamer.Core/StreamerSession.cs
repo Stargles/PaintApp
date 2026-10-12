@@ -11,17 +11,14 @@ namespace Streamer.Core;
 /// StreamerSession in the same process is legal and independent, which is what makes
 /// hosting this inside the paint app later (rather than a second executable) possible.
 ///
-/// **Every public transition runs one at a time, in the order it was called.** ProtocolServer raises
-/// its events fire-and-forget from whichever thread read the socket, and the iPad states its pause
-/// wish (`resume`) the instant its HELLO completes — so a connect and a control message arrive within
-/// milliseconds of each other, and a second connection replacing the first adds another. Unserialised,
-/// two of those each stopped "the" pipeline (finding none yet), each built one, and the later
-/// assignment to <c>_pipeline</c> lost the earlier one: a pipeline nothing referenced and nothing could
-/// stop, still capturing, still feeding the sinks. Its access units interleaved with the live
-/// pipeline's — two encoders' P-frames decoded against each other's references, which is the datamosh,
-/// and the decode errors that followed each asked for a keyframe, which restarts the live pipeline and
-/// shows "starting" (TODO 172: 1,115 relaunches in one run, 993 in one hour). With the lock there is
-/// never more than one pipeline, so a stop always finds the one that is running.
+/// **Every public transition runs one at a time, in the order it was called** (STREAM.md §3).
+/// ProtocolServer raises its events fire-and-forget from whichever thread read the socket, and the
+/// iPad's `resume` follows its HELLO within milliseconds, so a connect and a control message — or two
+/// connects, when one replaces the other — arrive together. Stopping, building and publishing a
+/// pipeline is not safe against itself: two overlapping would each find no pipeline to stop, each build
+/// one, and the later assignment to <c>_pipeline</c> would lose the earlier — a pipeline nothing
+/// references and nothing can stop, feeding the sinks beside the live one. With the lock there is
+/// never more than one, so a stop always finds the one that is running.
 /// </summary>
 public sealed class StreamerSession : IAsyncDisposable
 {

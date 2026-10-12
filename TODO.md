@@ -63,18 +63,6 @@ overlap — the rule the Move bar already follows (the dock's `zIndex` while a p
 
 ---
 
-## (172) The stream drops to "starting" and datamoshes when the laptop's screen moves
-
-**Status** — reported 2026-10-11 while streaming, after the same day's laptop deploy ((171), `30199e0`, which
-also first deployed `f84776f`'s C# half) and the iPad's (156)/(162) stream changes (iPad on `6bccc68`). The
-owner: *"whenever the stream on the computer is moved, it often briefly goes into not streaming - starting,
-and also seems to datamosh."*
-
-- [ ] Root cause from both ends (the laptop streamer's log and pipeline, the iPad's decoder/state).
-- [ ] Moving content on the laptop never drops the stream to "starting" and never shows corrupted frames.
-
----
-
 ## (27) Stream the computer's screen as a layer
 
 **Status** — briefed 2026-09-13, designed the same day ([STREAM.md](docs/STREAM.md)), and **built through

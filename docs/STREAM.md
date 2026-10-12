@@ -156,6 +156,19 @@ Payloads marked JSON are UTF-8 JSON objects. Unknown types are skipped by length
   said nothing, and the owner's stream sat on "Not streaming — Paused" until something re-sent a wish.
 - The laptop encodes only while a client is connected and not paused; STATUS `streaming:false` means
   the picture is stale on purpose (no source picked, paused, or the capture failed — `reason` field).
+- **There is never more than one capture pipeline, and a request for a keyframe never restarts one that
+  has not started.** `StreamerSession` runs every transition (connect, disconnect, each CONTROL, a source
+  pick, a lock) one at a time, in the order raised, because `ProtocolServer` raises them fire-and-forget
+  and the iPad's `resume` follows its HELLO within milliseconds — and a pipeline still launching has
+  produced nothing, so its first access unit is already the keyframe a connect, `resume` or `keyframe`
+  asks for. TODO (172) is what the unserialised version did: a connect and a `resume` overlapping (the
+  widest window is the three seconds of the convert-shape probe on the first connection after the
+  streamer starts) each built a pipeline, the later assignment lost the earlier one, and that pipeline
+  — referenced by nothing, so nothing could stop it — kept feeding the sinks beside the live one. Two
+  encoders' P-frames decoded against each other's references is the datamosh the owner saw; the decode
+  errors it caused each sent `keyframe`, which restarts the live pipeline and shows "Starting". Evidence
+  in the log: two `GstProcess: launching` lines within 300 ms, then a storm (993 launches in the hour
+  after 2026-10-11 18:00:29), and a `gst-launch-1.0` process outliving every restart.
 - The laptop sends a keyframe on connect, on every source change, on `resume`, on `keyframe`, and at
   least every 60 encoded frames. **The capture is damage-driven** (stage 3 MEASURED it: a still
   desktop produced one frame in 27 s, not a trickle of P-frames as this section first claimed), so a
