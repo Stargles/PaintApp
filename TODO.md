@@ -107,8 +107,18 @@ colours of your choosing (you can recolour your drawings)."*
 colors as the mask. The previous alpha mask feature should also still be present. This probably will
 have a lot of overlapping code with that feature, so follow good architecture protocols."*
 
-- [ ] The owner's design, recorded here.
+**What is already built**: the colour-reassign half shipped as the Recolour effect (`Effect.recolor`,
+TODO (60)), so the colour mask is what is owed.
+
+**Ruled 2026-10-12**: the colour mask looks for the chosen colours **on the ticked layers**, exactly as
+today's alpha mask reads their ink. Proposed and not objected to: one mask, not a second kind —
+`AlphaMask` gains an optional colour list (Recolour's colour key, tolerance and eyedropper picking,
+shared rather than copied); with no colours picked it is today's alpha mask, and picking colours narrows
+it to those colours. The survey is `~/PaintWork/design/s48-survey-masks-stream-liquify.md` §A (four
+colour-distance definitions exist; the mask uses Recolour's; per-pixel Oklab wants memoising per value).
+
 - [ ] Built on the existing mask and recolour modules rather than beside them.
+- [ ] After (179), which touches mask tuning's per-tick path.
 
 ## (177) A stream layer can draw in place in the layer stack
 
@@ -118,6 +128,12 @@ have a lot of overlapping code with that feature, so follow good architecture pr
 followed the layer heigharchy. I'm pretty sure this measure was to prevent re-rendering every time the
 stream moves, but I feel like it is okay as long as we add a switch to the stream options menu where you
 can flip it from rendering on top or in place."*
+
+**What the survey found**: the stream is already in layer order while every layer above it is plain; it
+goes on top only when a layer above blends, masks, grades or is a Guide (`LivePairCut.overHost`). In
+place means re-compositing the layers above the stream every stream tick, in a window — one more consumer
+of (179)'s scheduler, so this follows (179). Decided 2026-10-12 (the orchestrator; the owner may
+overrule): the switch is stored **per stream**, beside Freeze (`StreamRef`), and defaults to **on top**.
 
 - [ ] A switch in the stream bar: on top (today) / in place.
 
@@ -132,8 +148,19 @@ liquify tool's power, so for example if the streaky brush is selected and the li
 a line, it sort of liquifies only parts of the line. One thing, All the liquify tool needs to do is
 adjust the position of stuff. It doesnt need to simulate blending, distortions, and all that."*
 
-- [ ] Design questions answered by the owner (which layer kinds; push only or other modes).
-- [ ] Built on the brush's dab pipeline for its strength field.
+**Ruled 2026-10-12**: it pushes **raster and vector** layers (vector strokes have their points moved
+and stay vectors; text, images, video and streams are left alone); modes **Push, Pinch/Expand and
+Twirl**, chosen in the tool's panel, all of which only move things; it acts on the **active layer only**,
+and an active selection limits it further. This reverses the 2026-08-22 ruling quoted in
+`TransformMode`'s doc ("Warp will not be a feature (like liquify)").
+
+**Shape** (survey §C): each dab of the unchanged brush walk becomes a displacement, so tip, texture,
+flow and hardness are the strength field for free. Before it, the eraser's parallel settings
+(`eraserSize`, `eraserOpacity`, `selectedEraserBrush`, `isEraser`) become one per-tool settings profile,
+which liquify then uses — a refactor that lands with (176).
+
+- [ ] Per-tool settings profile (with (176)).
+- [ ] Liquify on raster and vector, three modes, one undo step per stroke.
 
 ---
 
