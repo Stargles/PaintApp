@@ -63,6 +63,17 @@ Evidence in `~/PaintWork/crash-1012/`.
 
 ---
 
+## (175) Tool option switches are saved
+
+**Status** — ruled 2026-10-12, out of (174): `CanvasManager.fillMendsNeighbourGap` is a plain `@Published`
+var, so switching it off lasts only until the next launch. The owner: *"switch options should be saved."*
+
+- [ ] Every tool option switch (fill, select, shape, brush, eraser, text, … — found by an audit, not by
+      memory) keeps the artist's choice across relaunches, app-wide, through one persistence mechanism.
+- [ ] A list of the tool panels' other settings (sliders, pickers) that are not saved, for the owner.
+
+---
+
 ## (27) Stream the computer's screen as a layer
 
 **Status** — briefed 2026-09-13, designed the same day ([STREAM.md](docs/STREAM.md)), and **built through
