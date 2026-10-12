@@ -28,9 +28,12 @@ final class LiveEditLogicTests: XCTestCase {
         manager.brushColor = Self.red
         manager.beginInteractiveFill(at: CGPoint(x: 30, y: 30))
         manager.endInteractiveFill()
-        let done = expectation(description: "the render's hop to main has run")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { done.fulfill() }
-        wait(for: [done], timeout: 5)
+        // The render is off the main thread and lands by a hop back; wait for the picture itself
+        // rather than for a guessed interval, which a loaded machine outruns.
+        let deadline = Date().addingTimeInterval(10)
+        while manager.liveFill?.preview == nil, Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+        }
         return manager
     }
 
