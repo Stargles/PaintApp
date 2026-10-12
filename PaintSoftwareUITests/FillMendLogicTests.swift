@@ -403,8 +403,10 @@ final class FillMendLogicTests: XCTestCase {
     /// slider's value once it is on.
     func testTheMendReachIsPartOfTheKeyTheFillRendersWith() {
         let manager = CanvasFixture.manager()
-        XCTAssertFalse(manager.fillMendsNeighbourGap, "An option, off until the artist asks")
+        XCTAssertTrue(manager.fillMendsNeighbourGap, "On from a fresh document (owner, 2026-10-12)")
         XCTAssertEqual(manager.fillSettings.mendReach, 12, "Mend Reach defaults to 12 px")
+        XCTAssertEqual(manager.currentFillKey().mendReach, 12, "…and the key a fresh document renders with carries it")
+        manager.setFillMendsNeighbourGap(false)
         XCTAssertEqual(manager.currentFillKey().mendReach, 0)
         manager.setFillMendReach(30)
         XCTAssertEqual(manager.currentFillKey().mendReach, 0, "A slider moved with the option off changes nothing the render reads")

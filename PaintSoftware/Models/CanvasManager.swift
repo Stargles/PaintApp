@@ -1526,11 +1526,12 @@ final class CanvasManager: ObservableObject {
     @Published var fillCanvasEdgeIsBoundary: Bool = true
 
     /// Whether a fill grows into the gap between itself and paint already on its layer — the owner's
-    /// *"have fill B smartly detect its edge is near fill A, and mend the gap"* (TODO (113)). Off by
-    /// default: it is an option, and what it changes is where a fill's edge lands.
+    /// *"have fill B smartly detect its edge is near fill A, and mend the gap"* (TODO (113)). On by
+    /// default (owner, 2026-10-12): a fill that ends short of the one beside it is a defect the artist
+    /// would otherwise have to remember to switch off, and the switch is still in the fill menu.
     ///
     /// How far it reaches is `fillSettings.mendReach`, its own setting. Both fill types honour it.
-    @Published var fillMendsNeighbourGap: Bool = false
+    @Published var fillMendsNeighbourGap: Bool = true
 
 
     @Published var canvasBackgroundColor: Color = .white

@@ -61,15 +61,15 @@ final class FillMendUITests: PaintUITestCase {
     // MARK: - (113) Mend Gap to Neighbouring Fill
 
     /// A box with two dividers, line art on its own layer above the colour. The left cell is filled
-    /// with the option off, the middle one with it still off, and the right one after switching it on
-    /// in the panel — so **the same screenshot carries both the control and the result**: the seam
-    /// between the first two is the owner's *"tiny unfilled region directly under the line"*, and the
-    /// one between the last two is not there. With the line layer hidden, a pixel that is still paper
-    /// is a pixel no fill covers.
+    /// first and the middle one second, both with the option as the document starts it — **on** — and
+    /// the right one after switching it off in the panel, so **the same screenshot carries both the
+    /// control and the result**: the seam between the first two is closed by the default alone, and
+    /// the one between the last two is the owner's *"tiny unfilled region directly under the line"*.
+    /// With the line layer hidden, a pixel that is still paper is a pixel no fill covers.
     ///
     /// Edge Overlap is dragged to the bottom, and each divider is drawn twice, so the seam is several
     /// screen pixels wide rather than the sliver the default tucks under a single thin line.
-    func testTheMendOptionInTheFillMenuClosesTheSeamBetweenTwoFills() throws {
+    func testTheMendOptionIsOnFromAFreshDocumentAndClosesTheSeamBetweenTwoFills() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
         let canvas = app.otherElements["canvas.host"]
@@ -113,28 +113,30 @@ final class FillMendUITests: PaintUITestCase {
         XCTAssertLessThanOrEqual(sliderNumericValue(overlap), 1, "Edge Overlap is down at the bottom, so the seam is most of the line")
         fillButton.tap()   // shut, so the canvas takes the taps
 
+        // Nobody has touched the option: the second fill meets the first under the line on the default.
         canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.333, dy: 0.5)).tap()
         XCTAssertTrue(waitUntilFilled(canvas, dx: 0.333, dy: 0.5), "The first cell fills")
         canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         XCTAssertTrue(waitUntilFilled(canvas, dx: 0.5, dy: 0.5), "The second cell fills")
 
-        // Switch the option on in the fill menu — cold start, so this is the only way it is reached.
+        // Cold start, so the fill menu is the only place the option is reached: it reads on there, and
+        // switching it off is what leaves the seam for the third fill.
         fillButton.tap()
         let mend = app.switches["fillPanel.mendGapToggle"]
         XCTAssertTrue(app.sliders["fillPanel.edgeOverlapSlider"].waitForExistence(timeout: 5), "The fill menu is open")
         scrollFillPanel(app, to: mend)
         XCTAssertTrue(mend.waitForExistence(timeout: 5), "The mend option is in the fill menu")
-        XCTAssertEqual(mend.value as? String, "0", "Off until the artist asks")
-        // Its reach is its own slider, in this menu: there from the start, dim until the option is on,
-        // and 12 px by default — not read off Gap Closing, whose slider is the rail's.
+        XCTAssertEqual(mend.value as? String, "1", "On from a fresh document")
+        // Its reach is its own slider, in this menu: live while the option is on, and 12 px by default —
+        // not read off Gap Closing, whose slider is the rail's.
         let reach = app.sliders["fillPanel.mendReachSlider"]
         scrollFillPanel(app, to: reach)
         XCTAssertTrue(reach.waitForExistence(timeout: 5), "Mend Reach has a slider in the fill menu")
-        XCTAssertFalse(reach.isEnabled, "…which does nothing while the option is off")
+        XCTAssertTrue(reach.isEnabled, "…live, because the option is on")
         XCTAssertTrue(app.staticTexts["Mend Reach: 12 px"].exists, "…and reads 12 px by default")
         mend.tap()
-        XCTAssertEqual(mend.value as? String, "1", "The option is on")
-        XCTAssertTrue(reach.isEnabled, "Mend Reach is live once the option is on")
+        XCTAssertEqual(mend.value as? String, "0", "The option is off")
+        XCTAssertFalse(reach.isEnabled, "…and Mend Reach does nothing while it is")
         fillButton.tap()
 
         canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.667, dy: 0.5)).tap()
@@ -150,11 +152,11 @@ final class FillMendUITests: PaintUITestCase {
         Thread.sleep(forTimeInterval: 1.0)   // the canvas re-composites without the line layer
 
         let picture = try screen(of: canvas)
-        let unmended = picture.lightPixels(row: 0.5, from: dividers[0] - 0.007, to: dividers[0] + 0.0095)
-        let mended = picture.lightPixels(row: 0.5, from: dividers[1] - 0.007, to: dividers[1] + 0.0095)
+        let mended = picture.lightPixels(row: 0.5, from: dividers[0] - 0.007, to: dividers[0] + 0.0095)
+        let unmended = picture.lightPixels(row: 0.5, from: dividers[1] - 0.007, to: dividers[1] + 0.0095)
         attachScreenshot(app, "mend-seams-line-art-hidden")
-        XCTAssertGreaterThan(unmended, 0, "Control: with the option off the first two fills leave paper under the line")
-        XCTAssertEqual(mended, 0, "With it on the third fill meets the second under the line — no paper left across the seam")
+        XCTAssertGreaterThan(unmended, 0, "Control: with the option switched off the third fill leaves paper under the line")
+        XCTAssertEqual(mended, 0, "On the default the second fill meets the first under the line — no paper left across the seam")
     }
 
     // MARK: - (114) The extension buffer
