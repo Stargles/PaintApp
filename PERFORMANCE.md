@@ -5840,11 +5840,9 @@ rate under the finger is unchanged and what is gone is everything the frame cost
 ### 29.5 What is left
 
 - **The other slider-shaped edits write the document per tick too** — the layer panel's Opacity slider,
-  the effect parameter sliders (Lens Blur and the rest), the mask tuning and text panels' sliders. Each is
-  a bake key and a re-minted pair per tick; whether each also hands the render server a canvas-sized
-  picture per tick is INFERRED yes for the compositor-level ones (the sandwich is a canvas-sized composite)
-  and is not measured. They are the next items of this class, and each needs its own held picture (an
-  effect is not a window of ink).
+  the mask tuning and text panels' sliders. Each is a bake key and a re-minted pair per tick. The effect
+  parameter sliders were the first of them held, with a whole-frame held picture of their own (§30, TODO
+  (179)); the rest are that item's later commits.
 - **The device.** The fix is measured by what the app hands Core Animation, not by what `backboardd`
   holds; the iPad should run `-playbackProbe -probeMode recolour` (arguments in `PlaybackProbe`'s header)
   and the owner's own document is the check.
@@ -5853,3 +5851,68 @@ rate under the finger is unchanged and what is gone is everything the frame cost
   the 4096² canvas is the owner's choice. BUGS.md's 2026-10-10 hang reports — the layer panel's reload
   blocked at 83–89% memory pressure — are consistent with that working set on a busy device; this item
   does not touch them.
+
+## 30. An effect slider holds its grade, and the canvas composites the whole frame from it (2026-10-12)
+
+TODO (179), commits 1–4: one scheduler for every live re-update (`LatestWins`: newest request wins, one job
+in flight, the landing before the next mint), one held slot (`CanvasManager.liveEdit`), and the effect
+parameter sliders as its first new user. A tick holds the value (`holdEffectParameter`) and writes nothing;
+the canvas composites the whole frame with the held grade resolved in (`makeFrameRecipe(holding:)`, at
+`.liveComposite`, on `sandwichQueue`) into a canvas-sized `IOSurface` pair over everything it draws; the lift
+routes the value once (`commitHeldGrade`) and the held frame stays up until the bake of the written grade
+lands (`HeldFrameLanding`). Built at full detail — RENDER §2.12's "the knob is the truth" — on the
+orchestrator's answer to the assessment's one owner question, to be measured first and asked again.
+
+### 30.1 Before and after
+
+**MEASURED, Release, iPad (9th generation) simulator (iOS 26.5), `PlaybackProbe -probeMode effect`** (new
+with this item): five vector layers × two frames, a Brightness / Contrast effect layer over them and
+selected, the iPad 9's 192 MiB `CompositorBudget` (`-probeBudgetBytes 201326592`), the onion skin on, the
+Brightness slider driven through the bar's own verbs for 100 ticks 80 ms apart (an 8.5 s drag). *Before* is
+the branch's parent (`4bd4edd`) with the same probe mode driving the verbs that build shipped — a write per
+tick (`applyEffectParameterEdit`) inside the bar's bracket; *after* is `71e9760` — `b428e90` as merged but
+for the bound on the surface's in-use wait, 100 ms then and 500 ms now. A temporary swizzle of
+`UIImageView.image`, not merged (§29's), counted every image of 4 MB or more handed to Core Animation.
+Footprint is `phys_footprint` sampled each tick; "growth" is the drag's peak minus its value at
+touch-down. "Composites" are the pictures the canvas could show during the drag — bakes before (the effect
+layer selected has no live pair, so the canvas stands on the bake), held frames after — counted per span in
+the drag's interval (`PlaybackTrace`'s per-interval counts, also new). Two takes each.
+
+| 100 ticks over 8.5 s | footprint growth over the drag (peak) | canvas-sized images to Core Animation | composites landed (rate) | SwiftUI passes / store decodes | main thread busy |
+|---|---|---|---|---|---|
+| **4096²** — before | +617, +650 MB (1.29, 1.38 GB) | **13, 13 — 872 MB each take** | 9 bakes (1.06/s) | 100 / 114 | 1.11 s |
+| **4096²** — after | +570, +757 MB (1.25, 1.50 GB) | **1, 1 — 67 MB** (the lift's bake) | 10 held frames (1.18/s), ~0.95 s each | 0 / 0 | 0.19, 0.20 s |
+| **2048×1024** — before | +77, +100 MB (324, 339 MB) | **100, 99 — 838, 830 MB** | 54 bakes (6.35/s) | 100 / 290 | 1.49, 1.17 s |
+| **2048×1024** — after | **+19, +19 MB** (249, 249 MB) | **1, 1 — 8 MB** | 100 held frames (11.7/s — every tick), ~12 ms each | 0 / 0 | 0.42, 0.47 s |
+
+How idle the machine was (`top`, at each run's start and end): every 4096² run 71–82% idle. At 2048×1024 the
+first *before* take ran at 72–80% idle; the second *before* take and both *after* takes ran beside another
+session's UI tests at 10–30% idle, so their rates and main-thread figures are a loaded host's — the after
+column still rendered every tick.
+
+### 30.2 What it says
+
+- **At the owner's 2048×1024 the preview is every tick** — 11.7 a second against the drag's 12.5 — where it was
+  the bake's 6.35, each bake a write, an encode and a main-thread decode. The drag hands Core Animation one
+  canvas-sized picture instead of a hundred, and the app grows by 19 MB instead of 77–100. MEASURED.
+- **At 4096² the rate is the composite's, before and after: about one picture a second.** One full-detail
+  composite of the frame under the 192 MiB budget is ~0.95 s on this host, and the bake was the same
+  composite plus a write. What the hold takes away there is the per-picture traffic — 13 canvas-sized pictures
+  (872 MB) to the render server become one, 100 SwiftUI passes and 114 store decodes become none — not the
+  wait. MEASURED.
+- **At 4096² the app's own footprint does not fall; it moves within its spread** (+570 to +757 MB against
+  +617 to +650, a peak up to 1.50 GB against 1.38). The held frame's two surfaces are 128 MB at 4096² (INFERRED,
+  2 × 4096² × 4 B) and its composite has the bake's working set; the bake's images are what the before column
+  paid instead. Assessment risk 1, confirmed. What falls is what reaches the render server, which is what
+  killed `backboardd` in §29 — INFERRED to be the figure that matters on the device, and not measurable here.
+- **Reduced detail while dragging** (the assessment's §8, option 2) is the lever for the 4096² rate: a quarter
+  of the pixels is roughly four times the rate and a quarter of the surfaces. INFERRED from the area, not
+  built; the owner is asked with these numbers.
+
+### 30.3 What it does not show
+
+- **The device.** As §29: the render server's side is out of process in the simulator, and the iPad's
+  composite is slower than this host's. `-playbackProbe -probeMode effect` runs on the iPad as it is.
+- The onion skin off, the Opacity slider (TODO (179)'s commit 6, `-probeMode opacity` then), and a take — a
+  slider recorded while the scene plays shows the held frame at each frame it is minted on.
+

@@ -398,8 +398,8 @@ enum PlaybackProbe {
 
     // MARK: - Effect slider
 
-    /// **An effect slider dragged, tick by tick** — TODO (179). The effect layer is the top one and is
-    /// selected, which is how its bar is on screen; the drag runs what `DrawingView` wires the bar's
+    /// **An effect slider dragged, tick by tick** — TODO (179). The effect layer is selected, which is
+    /// how its bar is on screen; the drag runs what `DrawingView` wires the bar's
     /// Brightness slider to — the bracket at touch-down, a held tick per reported value
     /// (`holdEffectParameter`), the one write at the lift (`commitHeldGrade`) — sweeping the value
     /// up and down its range `intervalMs` apart, and then lets the canvas settle so the footprint
@@ -407,7 +407,9 @@ enum PlaybackProbe {
     @MainActor
     private static func runEffectSlider(_ canvasManager: CanvasManager, ticks: Int, intervalMs: Int,
                                         footprint: @escaping () -> Void) async -> [String] {
-        let layerIndex = canvasManager.layers.count - 1
+        guard let layerIndex = canvasManager.layers.firstIndex(where: { $0.effect != nil }) else {
+            return ["no effect layer"]
+        }
         canvasManager.currentLayerIndex = layerIndex
         let target = KeyframeTarget.layer(id: canvasManager.layers[layerIndex].id)
         guard let parameter = canvasManager.storedEffect(of: target)?.parameters
