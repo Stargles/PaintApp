@@ -107,6 +107,28 @@ own; the backdrop stays opaque, so an empty margin reads the same and ink drawn 
 - [ ] Translucent cover; the toggle's caption in `SettingsMenu.paddingOnTopToggle` rewritten; any UI
       test that probes the margin over ink updated; driven and screenshotted.
 
+## (181) The vector eraser defaults to Cut
+
+**Status** — asked 2026-10-12; small, batched with (180).
+
+*"default eraser should be cut mode"*
+
+New documents start on **Cut** (`VectorEraserMode.cutPoints`) rather than Erase. The default is spelled
+three times today (`CanvasManager.vectorEraserMode`, `ProjectManifest`'s init, `StrokeCanvasView`) — one
+definition. A document's own saved mode is untouched (it is per document, (176) row B4).
+
+- [ ] One default, Cut; a new document's eraser panel shows Cut.
+
+## (182) A Select boolean add is its own undo step
+
+**Status** — asked 2026-10-12; small, batched with (180).
+
+*"the select doing a boolean add should be one undo step (user makes selection 1, then selection 2 which
+gets booleaned, then undos and selection 2 gets undone)"*
+
+- [ ] Undo after an add (and, by the same seam, a subtract) restores the selection as it was before that
+      loop, not no selection; redo re-applies it. Driven: two loops, undo, the first loop's marching ants.
+
 ## (35) Advanced masks — colour masks beside the alpha mask
 
 **Status** — promoted from "Later" 2026-10-12; the owner will describe what it is meant to be once told
