@@ -63,6 +63,15 @@ Evidence in `~/PaintWork/crash-1012/`.
 
 ---
 
+## (174) "Mend gap to neighbouring fill" is on by default
+
+**Status** — asked 2026-10-12. The owner: *"make the mend gap to neighbouring fill on as default."*
+
+- [ ] The fill tool's mend-to-neighbouring-fill option defaults to on (fresh install and reset); tests that
+      assumed off follow.
+
+---
+
 ## (27) Stream the computer's screen as a layer
 
 **Status** — briefed 2026-09-13, designed the same day ([STREAM.md](docs/STREAM.md)), and **built through
