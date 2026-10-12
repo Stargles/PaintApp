@@ -1922,7 +1922,7 @@ struct CanvasView: UIViewRepresentable {
             let layers = canvasManager.layers
             let runs = ids.map { run in run.compactMap { id in layers.firstIndex { $0.id == id } } }
             let maps = canvasManager.liveTransformMaps(edit, runs: runs, atFrame: canvasManager.currentFrame,
-                                                       holding: canvasManager.livePose)
+                                                       holding: canvasManager.liveEdit)
             let size = canvasManager.canvasSize ?? .zero
             var moved = false
             for (index, view) in bandViews.enumerated() {

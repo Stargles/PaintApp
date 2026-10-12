@@ -1113,8 +1113,7 @@ extension CanvasManager {
     var heldHostLayerIndices: [Int] {
         var ids = vectorFloat?.parts.filter(\.isShown).map(\.layerID) ?? []
         if let piece = floatingPiece, piece.kind == .move { ids.append(piece.sourceLayerID) }
-        if let liveFill { ids.append(liveFill.layerID) }
-        if let liveElementEdit { ids.append(liveElementEdit.layerID) }
+        if let id = liveEdit?.hostLayerID { ids.append(id) }
         return ids.compactMap { id in layers.firstIndex { $0.id == id } }
     }
 

@@ -25,7 +25,7 @@ import Foundation
 // canvas-sized picture of the cel for Core Animation to copy to the render server, ten times a second
 // for as long as a finger drags a slider. On the owner's 4096² document on an iPad 9 that killed the
 // render server twice in a minute (TODO (173), PERFORMANCE.md §29). It is the adjustable fill's
-// problem and its answer (`CanvasManager.liveFill`, TODO (157)): the picture lives off the document,
+// problem and its answer (`HeldEdit.fill`, TODO (157)): the picture lives off the document,
 // the cel's host draws it, and the commit writes once. What differs is that a fill adds pixels and an
 // edit *replaces* them, so the host punches the base out under the window (`StrokeCanvasView
 // .showHeldEdit`) the way a vector eraser's stroke does.
@@ -60,7 +60,7 @@ struct ElementEditSession {
     var applied: Bool { held != nil }
 }
 
-/// **The picture of a live element edit, as the canvas shows it** — `CanvasManager.liveElementEdit`:
+/// **The picture of a live element edit, as the canvas shows it** — `HeldEdit.elements`:
 /// the cel it is on, the rectangle it replaces and the list that rectangle is drawn from. The canvas's
 /// own picture of the cel is the base underneath, with a hole punched where this window is.
 struct LiveElementEdit {
@@ -107,9 +107,9 @@ extension CanvasManager {
         guard !window.isEmpty, shownThroughOnePose(celID: celID, in: layerID, elements: elementsBefore) else {
             return session
         }
-        liveElementEdit = LiveElementEdit(layerID: layerID, celID: celID, vectorCanvas: vectorCanvas,
-                                          window: window, rewriting: rewriting, elements: elementsBefore)
-        objectWillChange.send()
+        beginLiveEdit(.elements(LiveElementEdit(layerID: layerID, celID: celID, vectorCanvas: vectorCanvas,
+                                                window: window, rewriting: rewriting,
+                                                elements: elementsBefore)))
         return session
     }
 
@@ -119,14 +119,14 @@ extension CanvasManager {
     func holdElementEdit(_ elements: [VectorElement], in edit: inout ElementEditSession) {
         let first = !edit.applied
         edit.held = elements
-        guard liveElementEdit?.celID == edit.celID else {
+        guard var live = liveElementEdit, live.celID == edit.celID else {
             // No window to put it in (`beginElementEdit`): the artist is told once, on the first tick.
             if first { raise(.editShownOnRelease) }
             return
         }
-        liveElementEdit?.elements = elements
-        liveElementEdit?.tick += 1
-        onHeldPictureMoved?()
+        live.elements = elements
+        live.tick += 1
+        holdLiveEdit(.elements(live))
     }
 
     /// Closes the edit as **one undo step** from the list the artist found to `finalElements`, the list
@@ -158,9 +158,7 @@ extension CanvasManager {
 
     private func endLiveElementEdit() {
         guard liveElementEdit != nil else { return }
-        liveElementEdit = nil
-        onHeldPictureMoved?()
-        objectWillChange.send()
+        endLiveEdit()
     }
 
     /// **Whether the cel's picture on this frame is the one pose's** — the cel at rest, or every

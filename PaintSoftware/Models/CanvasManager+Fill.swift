@@ -96,8 +96,15 @@ extension CanvasManager {
         }
     }
 
-    /// **The adjustable fill as the canvas shows it** — `CanvasManager.liveFill`: the layer and cel it
-    /// will land on, and the latest render's picture, which nothing in the document holds.
+    /// **The adjustable fill as the canvas shows it** — `HeldEdit.fill`, TODO (157): the layer and cel
+    /// it will land on, and the latest render's picture, which nothing in the document holds. Held from
+    /// the press until the fill commits or is cancelled.
+    ///
+    /// **Not in `layers`.** A preview in the cel makes every render a document write — a SwiftUI pass
+    /// over the editor, a new bake key and a re-bake, a re-minted live pair, a thumbnail and a
+    /// main-thread decode of the new bake — per slider tick, for a picture one host draws
+    /// (PERFORMANCE.md §28). The fill's host draws it, the canvas keeps that host drawing while it is
+    /// up (`heldHostLayerIndices`), and the commit writes the document once, as one undo step.
     struct LiveFill {
         let layerID: UUID
         let celID: UUID
@@ -109,25 +116,22 @@ extension CanvasManager {
     /// live picture around the fill's host (`heldHostLayerIndices`); the renders after it publish
     /// nothing (`showLiveFill`).
     private func beginLiveFill(layerID: UUID, celID: UUID) {
-        liveFill = LiveFill(layerID: layerID, celID: celID, preview: nil)
-        objectWillChange.send()
+        beginLiveEdit(.fill(LiveFill(layerID: layerID, celID: celID, preview: nil)))
     }
 
     /// A render's picture, shown by the fill's host and written nowhere — the whole of a slider tick's
     /// cost to the main thread (TODO (157)).
     private func showLiveFill(_ preview: FillPreview?) {
-        guard liveFill != nil else { return }
-        liveFill?.preview = preview
-        onHeldPictureMoved?()
+        guard var fill = liveFill else { return }
+        fill.preview = preview
+        holdLiveEdit(.fill(fill))
     }
 
     /// Lets the gesture's picture go — its pixels are in the document by now, or were thrown away —
     /// and publishes once, so the canvas re-cuts without the fill's host.
     private func endLiveFill() {
         guard liveFill != nil else { return }
-        liveFill = nil
-        onHeldPictureMoved?()
-        objectWillChange.send()
+        endLiveEdit()
     }
 
     /// How far a fill's picture can depend on pixels beyond its window — `FillWindow.halo` at the

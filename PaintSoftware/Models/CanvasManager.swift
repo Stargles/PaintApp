@@ -955,7 +955,13 @@ final class CanvasManager: ObservableObject {
 
     /// A finger landed on the transform being edited. Idempotent, so a second surface reporting the
     /// same gesture — every grip of the box hears its touch-down — changes nothing.
+    ///
+    /// **An adjustable fill or an open gradient panel is settled first** (`beginCanvasEdit`): the
+    /// gesture is about to hold a pose in the one held slot (`liveEdit`), and those two holds outlive a
+    /// finger. The pose's own write settled them at the lift before; settling them at the touch-down
+    /// lands the same steps in the same order.
     func beginLiveTransformEdit(_ edit: LiveTransformEdit) {
+        beginCanvasEdit()
         if liveTransformEdit != edit { liveTransformEdit = edit }
     }
 
@@ -963,7 +969,7 @@ final class CanvasManager: ObservableObject {
     /// commits first (`commitLivePose`, `settleBoxNudge`), so what is dropped here is a gesture that
     /// wrote nothing.
     func endLiveTransformEdit() {
-        livePose = nil
+        takeLivePose()
         if liveTransformEdit != nil { liveTransformEdit = nil }
     }
 
@@ -1006,19 +1012,24 @@ final class CanvasManager: ObservableObject {
         endLiveTransformEdit()
     }
 
-    /// **The pose under the finger, which the document does not hold yet** — TODO (154), (164). Two
-    /// gestures hold one here for their length: a graph-band drag of a pose node (`holdLivePose(_:of:)`,
-    /// whose lift writes its curves once through `commitLivePose`), and a drag of a transformation
-    /// layer's Move box (`boxNudge`, whose lift routes the box's travel once through
-    /// `commitContainerPose`). The canvas re-poses its bands from it, the graph band draws its curves,
-    /// and each lift is one undo step. Nil between gestures.
+    /// **What the finger holds that the document does not hold yet, one gesture at a time** — TODO
+    /// (179), and `HeldEdit` lists what that can be. Written only through the verbs in
+    /// CanvasManager+LiveEdit.swift; nil between gestures.
     ///
-    /// **Not `@Published`, and that is the fix.** Both drags used to write `layers` on every tick, and
-    /// every `ObservedObject` in the editor watches this object, so each tick was a SwiftUI pass over
-    /// the whole editor — six `objectWillChange`s, the canvas's `reconcileLayers`, a full timeline
-    /// rebuild — for a picture only two views draw. MEASURED in PERFORMANCE.md §24.3 and §24.4.
-    /// The vector float's live pose is the same rule (`CanvasView.Coordinator.liveVectorFloatPose`).
-    private(set) var livePose: LivePose?
+    /// Two gestures hold a pose here for their length (TODO (154), (164)): a graph-band drag of a pose
+    /// node (`holdLivePose(_:of:)`, whose lift writes its curves once through `commitLivePose`), and a
+    /// drag of a transformation layer's Move box (`boxNudge`, whose lift routes the box's travel once
+    /// through `commitContainerPose`). The canvas re-poses its bands from it, the graph band draws its
+    /// curves, and each lift is one undo step. The adjustable fill's picture (TODO (157)) and a live
+    /// element edit's window (TODO (173)) are held here too.
+    ///
+    /// **Not `@Published`, and that is the fix.** Every one of these used to write `layers` on every
+    /// tick, and every `ObservedObject` in the editor watches this object, so each tick was a SwiftUI
+    /// pass over the whole editor — six `objectWillChange`s, the canvas's `reconcileLayers`, a full
+    /// timeline rebuild — for a picture only the canvas draws. MEASURED in PERFORMANCE.md §24.3,
+    /// §24.4, §28 and §29. The vector float's live pose is the same rule
+    /// (`CanvasView.Coordinator.liveVectorFloatPose`).
+    var liveEdit: HeldEdit?
 
     /// **The gesture open on a Move box that poses or grades, or nil between gestures** — a drag of a
     /// transformation layer's or a Duplicate Offset's box, or one press of Mirror, Rotate or Reset.
@@ -1034,10 +1045,9 @@ final class CanvasManager: ObservableObject {
     private(set) var moveBoxIsTouched = false
 
     /// **Called synchronously when a picture the canvas shows but the document does not hold yet
-    /// moves** — the pose under the finger (`livePose`) or the adjustable fill's preview (`liveFill`) —
-    /// so the canvas re-shows it on the tick rather than on a SwiftUI pass nothing raises any more. A
-    /// closure for `onTimingStrokeFrameAdvanced`'s reason; installed by `CanvasView.Coordinator`, nil
-    /// headless.
+    /// moves** — whatever `liveEdit` holds — so the canvas re-shows it on the tick rather than on a
+    /// SwiftUI pass nothing raises any more. A closure for `onTimingStrokeFrameAdvanced`'s reason;
+    /// installed by `CanvasView.Coordinator`, nil headless.
     var onHeldPictureMoved: (() -> Void)?
 
     /// **Holds `curves` — whole-curve replacements of `target`'s pose components — as the pose under
@@ -1055,11 +1065,16 @@ final class CanvasManager: ObservableObject {
     }
 
     /// **Holds `held` as the pose under the finger, or nothing, and tells the canvas** — the one write
-    /// of `livePose` a tick makes, from a graph-node drag (above) or a Move-box drag
-    /// (`holdContainerBoxPose`). Raises no SwiftUI pass.
+    /// of the held pose a tick makes, from a graph-node drag (above) or a Move-box drag
+    /// (`holdContainerBoxPose`). Raises no SwiftUI pass. Nothing — the finger back where it began —
+    /// lets a held pose go and leaves a hold of any other kind alone.
     func holdLivePose(_ held: LivePose?) {
-        livePose = held
-        onHeldPictureMoved?()
+        if let held {
+            holdLiveEdit(.pose(held))
+        } else {
+            takeLivePose()
+            onHeldPictureMoved?()
+        }
     }
 
     /// **Writes the pose under the finger into the document — the lift** — through
@@ -1072,8 +1087,7 @@ final class CanvasManager: ObservableObject {
     /// - Returns: whether the document changed; false for a drag that held nothing.
     @discardableResult
     func commitLivePose() -> Bool {
-        guard let held = livePose else { return false }
-        livePose = nil
+        guard let held = takeLivePose() else { return false }
         return setPoseChannelTracks(.layer(id: held.layerID), curves: held.curves.mapValues { $0 })
     }
 
@@ -3779,31 +3793,6 @@ final class CanvasManager: ObservableObject {
     var fillGestureLayerID: UUID?
     var fillGestureCelID: UUID?
     var fillGestureBaseBaked: UIImage?  // layer's baked pixels before this gesture (undo/composite base)
-
-    /// **The adjustable fill's picture, which the document does not hold** — TODO (157). Set when a
-    /// fill gesture begins, its preview replaced by every render while the artist drags a slider, and
-    /// let go when the fill commits or is cancelled; nil between fills.
-    ///
-    /// **Not in `layers`.** A preview in the cel makes every render a document write — a SwiftUI pass
-    /// over the editor, a new bake key and a re-bake, a re-minted live pair, a thumbnail and a
-    /// main-thread decode of the new bake — per slider tick, for a picture one host draws
-    /// (PERFORMANCE.md §28). The fill's host draws it (`onHeldPictureMoved`), the canvas keeps that host
-    /// drawing while it is up (`heldHostLayerIndices`), and the commit writes the document once, as
-    /// one undo step.
-    var liveFill: LiveFill?
-
-    /// **A live element edit's picture, which the document does not hold** — TODO (173): the Select
-    /// panel's Colour, Size and Opacity drag and the gradient panel's, from the moment the session
-    /// opens until it commits or is thrown away; nil between edits.
-    ///
-    /// `liveFill`'s shape for `liveFill`'s reason, applied to the other slider-shaped edit. Each tick
-    /// used to be a document write — a SwiftUI pass, a new bake key and a re-bake, a re-minted live
-    /// pair, a re-built onion skin, and a fresh canvas-sized picture handed to Core Animation — at
-    /// ten ticks a second on a 4096² canvas on an iPad 9, which is the render server's death
-    /// (PERFORMANCE.md §29). Now a tick moves this and tells the canvas (`onHeldPictureMoved`); the
-    /// edited cel's host draws a window of it, the canvas keeps that host drawing while it is up
-    /// (`heldHostLayerIndices`), and the commit writes the document once, as one undo step.
-    var liveElementEdit: LiveElementEdit?
 
     /// Records the artist's own answer for whether a layer bounds the fill (§6.6) — written by the
     /// row's drop button, which is the only control that sets it.

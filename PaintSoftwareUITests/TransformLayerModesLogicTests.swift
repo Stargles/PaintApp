@@ -394,7 +394,7 @@ final class TransformLayerModesLogicTests: XCTestCase {
         // The overlay's tick: `updateFloatingPose` is what every drag of the box ends in, and its
         // tail is the pose held under the finger.
         fx.manager.updateFloatingPose(transform: carried, distortQuad: nil)
-        let poses = fx.manager.renderTreeAndPoses(atFrame: 0, holding: fx.manager.livePose).poses
+        let poses = fx.manager.renderTreeAndPoses(atFrame: 0, holding: fx.manager.liveEdit).poses
         XCTAssertEqual(fx.manager.layerPoses(atFrame: 0)[fx.a]?.affine?.tx ?? 0, 0, accuracy: 1e-9,
                        "the document still rests until the lift")
 

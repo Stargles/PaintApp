@@ -344,7 +344,7 @@ final class LiveTransformEditLogicTests: XCTestCase {
         XCTAssertEqual(told, 3, "and the canvas hears every tick directly")
         XCTAssertEqual(s.manager.layers[index(s.mover, s.manager)].transform, stored,
                        "the document does not hold the pose under the finger")
-        let held = s.manager.liveTransformMaps(edit, runs: runs, atFrame: 0, holding: s.manager.livePose)
+        let held = s.manager.liveTransformMaps(edit, runs: runs, atFrame: 0, holding: s.manager.liveEdit)
         XCTAssertEqual(try tx(from: minted[0], to: held[0]), 8, accuracy: 1e-6,
                        "the bands are re-posed by the drag's whole distance — read inside the folder too")
         let document = s.manager.liveTransformMaps(edit, runs: runs, atFrame: 0)
@@ -364,7 +364,7 @@ final class LiveTransformEditLogicTests: XCTestCase {
         s.manager.beginLiveTransformEdit(edit)
         s.manager.holdLivePose([containerX: xCurve(canvasBox.midX + 3)], of: .layer(id: s.mover))
         s.manager.holdLivePose([containerX: xCurve(canvasBox.midX + 8)], of: .layer(id: s.mover))
-        let shown = s.manager.liveTransformMaps(edit, runs: runs, atFrame: 0, holding: s.manager.livePose)
+        let shown = s.manager.liveTransformMaps(edit, runs: runs, atFrame: 0, holding: s.manager.liveEdit)
 
         XCTAssertTrue(s.manager.commitLivePose(), "the lift changed the document")
         s.manager.endLiveTransformEdit()
@@ -433,7 +433,7 @@ final class LiveTransformEditLogicTests: XCTestCase {
             .curve(.x)?.keys.first?.value)
         s.manager.beginLiveTransformEdit(edit)
         s.manager.holdLivePose([celX: xCurve(restX - 5)], of: .layer(id: s.inner))
-        let held = s.manager.liveTransformMaps(edit, runs: runs, atFrame: 0, holding: s.manager.livePose)
+        let held = s.manager.liveTransformMaps(edit, runs: runs, atFrame: 0, holding: s.manager.liveEdit)
         XCTAssertEqual(try tx(from: minted[0], to: held[0]), -5, accuracy: 1e-6)
         XCTAssertNotEqual(s.manager.layers[inner].cels[0].transformTracks[TransformChannelID.cel.id]?.curve(.x),
                           xCurve(restX - 5), "the cel itself is untouched until the lift")
@@ -483,7 +483,7 @@ final class LiveTransformEditLogicTests: XCTestCase {
         XCTAssertEqual(m.floatingPiece?.transform, box, "nor does the published piece — it learns at the lift")
         XCTAssertEqual(try XCTUnwrap(m.shownFloatingPiece).transform.position.x, box.position.x + 12,
                        accuracy: 1e-9, "while the overlay draws the box under the finger")
-        let held = m.liveTransformMaps(edit, runs: runs, atFrame: 0, holding: m.livePose)
+        let held = m.liveTransformMaps(edit, runs: runs, atFrame: 0, holding: m.liveEdit)
         XCTAssertEqual(try tx(from: minted[0], to: held[0]), 12, accuracy: 1e-6,
                        "the bands are re-posed by the drag's whole distance")
 

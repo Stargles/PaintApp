@@ -979,13 +979,13 @@ extension CanvasManager {
     /// drawings. Asked on the walk rather than by hiding the layer in the model, so nothing is
     /// mutated to find out. Nil — every other caller — is the walk that has always run.
     ///
-    /// **`held` is a pose under the finger the walk shows in place of the stored one** — TODO (154): a
-    /// graph-node drag holds its pose off the document for the length of the gesture
-    /// (`CanvasManager.livePose`), and the canvas's bands are re-posed from this walk. The same
-    /// shape as `excluded`: asked of the walk, nothing mutated. Nil — every other caller — reads the
-    /// document alone.
+    /// **`held` is what the finger holds that the walk shows in place of the document** — TODO (154),
+    /// (179): a pose under a graph-node drag or a Move box (`CanvasManager.liveEdit`), held off the
+    /// document for the length of the gesture, and the canvas's bands are re-posed from this walk.
+    /// The same shape as `excluded`: asked of the walk, nothing mutated. Nil — every other caller,
+    /// and the baker always — reads the document alone.
     func renderTreeAndPoses(atFrame frame: Int, excluding excluded: UUID? = nil,
-                            holding held: LivePose? = nil) -> RenderWalk {
+                            holding held: HeldEdit? = nil) -> RenderWalk {
         var poses: [Int: PoseMap] = [:]
         var frames: [Int: Int] = [:]
         let tree = renderNodes(inContainer: nil, atFrame: frame, documentFrame: frame,
@@ -1125,9 +1125,9 @@ extension CanvasManager {
 
     /// **A transformation layer's pose as the walk shows it** — the finger's where a drag holds one
     /// (`LivePose`), the stored `layerTransform` otherwise. The walk's only read of a container pose.
-    private func shownPose(ofLayerAt index: Int, holding held: LivePose?) -> LayerPose? {
+    private func shownPose(ofLayerAt index: Int, holding held: HeldEdit?) -> LayerPose? {
         guard let stored = layers[index].layerTransform else { return nil }
-        return held?.containerPose(ofLayer: layers[index].id) ?? stored
+        return held?.pose?.containerPose(ofLayer: layers[index].id) ?? stored
     }
 
     /// §4.4's map on its own, for the two callers that want the poses without the nodes —
@@ -1164,7 +1164,7 @@ extension CanvasManager {
     /// read as its own source and be looked up at the playhead.
     private func renderNodes(inContainer container: UUID?, atFrame frame: Int, documentFrame: Int,
                              inheriting inherited: PoseMap?, excluding excluded: UUID?,
-                             holding held: LivePose?,
+                             holding held: HeldEdit?,
                              poses: inout [Int: PoseMap],
                              frames: inout [Int: Int]) -> [RenderNode] {
         // `containerEntries` ranks top-to-bottom for the panel; evaluation runs the other way.

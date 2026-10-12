@@ -54,8 +54,7 @@ enum LiveTransformEdit: Equatable {
     var movesBands: Bool { self != .floatingPiece }
 }
 
-/// **A pose held under the finger and not yet in the document** — `CanvasManager.livePose`, TODO (154),
-/// (164).
+/// **A pose held under the finger and not yet in the document** — `HeldEdit.pose`, TODO (154), (164).
 ///
 /// A graph-band drag of a pose node and a drag of a transformation layer's Move box each used to write
 /// the document on every tick, and each write was a SwiftUI pass over the whole editor. They hold the
@@ -209,11 +208,11 @@ extension CanvasManager {
     /// channel's reads `inkPose`, which composes the cel's own whole-drawing pose under it. Nil maps
     /// are the identity: a leaf at rest.
     ///
-    /// `held` is the pose under the finger (`livePose`), shown in place of the document's — what the
-    /// bands are re-posed to on every update. Nil reads the document alone, which is what a mint
-    /// wants: its maps have to describe the state its recipe froze, and the recipe reads the document.
+    /// `held` is what the finger holds (`liveEdit`), shown in place of the document — what the bands
+    /// are re-posed to on every update. Nil reads the document alone, which is what a mint wants: its
+    /// maps have to describe the state its recipe froze, and the recipe reads the document.
     func liveTransformMaps(_ edit: LiveTransformEdit, runs: [[Int]], atFrame frame: Int,
-                           holding held: LivePose? = nil) -> [PoseMap] {
+                           holding held: HeldEdit? = nil) -> [PoseMap] {
         let walk = renderTreeAndPoses(atFrame: frame, holding: held)
         return runs.map { run in
             guard let leaf = run.first else { return .identity }
@@ -222,7 +221,7 @@ extension CanvasManager {
                 return walk.poses[leaf] ?? .identity
             case .cel:
                 return inkPose(ofLayerAt: leaf, showing: walk.frames[leaf] ?? frame,
-                               inheriting: walk.poses[leaf], holding: held) ?? .identity
+                               inheriting: walk.poses[leaf], holding: held?.pose) ?? .identity
             }
         }
     }
