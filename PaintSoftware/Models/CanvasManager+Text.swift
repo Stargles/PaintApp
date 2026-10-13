@@ -105,7 +105,7 @@ extension CanvasManager {
         // for on the second box. Only the string is cleared.
         textRecipe.string = ""
         let resolution = TextLayout.resolvedFont(for: textRecipe)
-        textFontSubstitution = resolution.substitution
+        textSettings.fontSubstitution = resolution.substitution
         let emptyHeight = resolution.font.lineHeight
         textFrame = TextFrame(origin: canvasPoint,
                               size: CGSize(width: TextLayout.minimumBoxWidth, height: emptyHeight),
@@ -165,7 +165,7 @@ extension CanvasManager {
         textFrame = draft.frame
         textEditingElementID = existing.id
         vectorCanvas.editingElementID = existing.id
-        textFontSubstitution = TextLayout.resolvedFont(for: textRecipe).substitution
+        textSettings.fontSubstitution = TextLayout.resolvedFont(for: textRecipe).substitution
         textGestureActive = true
         textFingerDown = false
         textIsFocused = false
@@ -181,26 +181,30 @@ extension CanvasManager {
     /// until they enlarge it (§5.3, "overflow clips"). **Stage 4 is what turns the second branch
     /// on**: the first drag of a resize handle clears `autoSize`, and from that keystroke onwards the
     /// box the artist set is the box the text wraps into.
+    ///
+    /// A keystroke is the draft's and the box's: the canvas is told (`onHeldPictureMoved`) and nothing
+    /// is published over the editor (TODO (179)).
     func updateTextString(_ string: String) {
         guard textGestureActive, textRecipe.string != string else { return }
         textRecipe.string = string
         regrowTextFrameIfAutoSizing()
-        objectWillChange.send()
+        onHeldPictureMoved?()
     }
 
     /// A settings-panel change landed on `textRecipe` directly (its sliders bind to it). Re-resolves
     /// the font — a family change can substitute — and regrows the box, since a bigger point size on
     /// a pristine box is exactly as much a re-layout as a longer string.
+    ///
+    /// **A tick of a panel control is the panel's and the box's** (TODO (179)): the panel observes
+    /// `textSettings`, the canvas is told (`onHeldPictureMoved`) and re-lays the box, whose glyphs are
+    /// drawn off the main thread — nothing is published over the editor.
     func textRecipeDidChange() {
-        guard textGestureActive else {
-            // No live box: still resolve, so the panel can warn about a missing family before the
-            // artist has placed anything.
-            textFontSubstitution = TextLayout.resolvedFont(for: textRecipe).substitution
-            return
-        }
-        textFontSubstitution = TextLayout.resolvedFont(for: textRecipe).substitution
+        textSettings.fontSubstitution = TextLayout.resolvedFont(for: textRecipe).substitution
+        // No live box: resolved all the same, so the panel can warn about a missing family before the
+        // artist has placed anything.
+        guard textGestureActive else { return }
         regrowTextFrameIfAutoSizing()
-        objectWillChange.send()
+        onHeldPictureMoved?()
     }
 
     /// **No canvas size, and no cap.** Stage 1 measured the room left to the canvas's right edge and
@@ -228,12 +232,13 @@ extension CanvasManager {
         refreshUndoRedoState()
     }
 
-    /// Moves the box's top-left to `origin` in canvas space.
+    /// Moves the box's top-left to `origin` in canvas space — the box's, not the editor's: the canvas
+    /// is told (`onHeldPictureMoved`) and nothing is published (TODO (179)).
     func dragTextFrame(toOrigin origin: CGPoint) {
         guard textGestureActive else { return }
         let current = textFrame[.topLeft]
         textFrame = textFrame.moved(by: CGVector(dx: origin.x - current.x, dy: origin.y - current.y))
-        objectWillChange.send()
+        onHeldPictureMoved?()
     }
 
     /// The finger came off the box. Stays adjustable — this is not a commit, for the same reason
@@ -316,7 +321,7 @@ extension CanvasManager {
         guard textGestureActive, let drag = textHandleDrag else { return }
         guard let next = drag.clampedFrame(draggedTo: canvasPoint, snapsRotation: snapsRotation) else { return }
         textFrame = next
-        objectWillChange.send()
+        onHeldPictureMoved?()
     }
 
     /// The finger came off a grip.

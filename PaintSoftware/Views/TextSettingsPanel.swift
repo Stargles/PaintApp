@@ -11,16 +11,24 @@ import SwiftUI
 /// `CanvasManager.enterTextMode`: from this stage on there is a live text session behind this panel,
 /// and committing on the way in bakes the very text the artist opened the panel to restyle.
 ///
-/// Every control writes `canvasManager.textRecipe` and then calls `textRecipeDidChange()`, which
+/// Every control writes the recipe (`TextSettings`) and then calls `textRecipeDidChange()`, which
 /// re-resolves the font and regrows a pristine box. Routing every one of them through that single
 /// call is what keeps "the box grew because the point size did" from being something each slider has
-/// to remember.
+/// to remember. **A tick redraws this panel and the box, and nothing else** (TODO (179)): the recipe is
+/// observed here, not on the editor-wide `CanvasManager`.
 ///
 /// **No favourites strip.** `ADD_TEXT.md` §5 item 5 leaves *which faces* belong in one open, and the
 /// owner has not answered; the honest version is all families grouped, with the question still open,
 /// rather than an invented shortlist that becomes the answer by default.
 struct TextSettingsPanel: View {
     @ObservedObject var canvasManager: CanvasManager
+    /// The recipe this panel edits, observed here so a tick redraws the panel and not the editor.
+    @ObservedObject var settings: TextSettings
+
+    init(canvasManager: CanvasManager) {
+        self.canvasManager = canvasManager
+        self.settings = canvasManager.textSettings
+    }
 
     /// Prefix for every control's accessibility identifier — `StrokeSettingsSpec.idPrefix`'s job,
     /// stated here because this panel drives one fixed set of properties and so needs no spec.
@@ -38,7 +46,7 @@ struct TextSettingsPanel: View {
     /// Whether the colour picker is up — a presentation too (`CanvasPresentation.textColour`).
     @State private var showingColourPicker = false
 
-    private var typography: Typography { canvasManager.textRecipe.typography }
+    private var typography: Typography { settings.recipe.typography }
 
     var body: some View {
         ScrollView {
@@ -100,8 +108,8 @@ struct TextSettingsPanel: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("\(Self.idPrefix).placementHint")
             }
-            if let substitution = canvasManager.textFontSubstitution {
-                Label(substitution.message(for: canvasManager.textRecipe.font),
+            if let substitution = settings.fontSubstitution {
+                Label(substitution.message(for: settings.recipe.font),
                       systemImage: "exclamationmark.triangle")
                     .font(.caption)
                     .foregroundColor(.orange)
@@ -128,13 +136,13 @@ struct TextSettingsPanel: View {
         Button {
             showingFontPicker.toggle()
         } label: {
-            PullDownLabel(title: "Font", value: canvasManager.textRecipe.font.familyName, verticalPadding: 6)
+            PullDownLabel(title: "Font", value: settings.recipe.font.familyName, verticalPadding: 6)
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("\(Self.idPrefix).fontButton")
-        .accessibilityValue(canvasManager.textRecipe.font.familyName)
+        .accessibilityValue(settings.recipe.font.familyName)
         .canvasPresentation(.textFont, isPresented: $showingFontPicker, canvasManager: canvasManager) {
-            FontFamilyList(current: canvasManager.textRecipe.font.familyName) { family, packID in
+            FontFamilyList(current: settings.recipe.font.familyName) { family, packID in
                 selectFamily(family, packID: packID)
                 showingFontPicker = false
             }
@@ -154,7 +162,7 @@ struct TextSettingsPanel: View {
     /// to exist. Hidden for a family with only one face, which is most display faces.
     @ViewBuilder
     private var faceRow: some View {
-        let font = canvasManager.textRecipe.font
+        let font = settings.recipe.font
         let faces = FontLibrary.shared.faces(inFamily: font.familyName, packID: font.packID)
         if faces.count > 1 {
             let current = currentFace(of: faces)
@@ -163,7 +171,7 @@ struct TextSettingsPanel: View {
                 MenuChoices(values: faces, selected: current,
                             title: \.displayName,
                             identifier: { "textPanel.face.\($0.postScriptName)" }) { face in
-                    canvasManager.textRecipe.font = face.descriptor
+                    settings.recipe.font = face.descriptor
                     canvasManager.textRecipeDidChange()
                 }
             } label: {
@@ -176,7 +184,7 @@ struct TextSettingsPanel: View {
     /// which is what the row has always said it was. Ticked and named from this one answer, so the
     /// menu and its row cannot disagree.
     private func currentFace(of faces: [FontFace]) -> FontFace? {
-        let font = canvasManager.textRecipe.font
+        let font = settings.recipe.font
         return faces.first { $0.postScriptName == font.faceName } ?? faces.first { $0.displayName == "Regular" }
     }
 
@@ -185,12 +193,12 @@ struct TextSettingsPanel: View {
     /// rather than at the moment of drawing. Switching Helvetica Bold to Georgia gives Georgia Bold,
     /// not Georgia Regular.
     private func selectFamily(_ family: String, packID: String?) {
-        let current = canvasManager.textRecipe.font
+        let current = settings.recipe.font
         if let provider = FontLibrary.shared.provider(withID: packID),
            let face = provider.face(inFamily: family, bold: current.isBold, italic: current.isItalic) {
-            canvasManager.textRecipe.font = face.descriptor
+            settings.recipe.font = face.descriptor
         } else {
-            canvasManager.textRecipe.font = FontDescriptor(familyName: family, faceName: nil,
+            settings.recipe.font = FontDescriptor(familyName: family, faceName: nil,
                                                            packID: packID, isBold: current.isBold,
                                                            isItalic: current.isItalic)
         }
@@ -286,9 +294,9 @@ struct TextSettingsPanel: View {
 
     private var alignmentBinding: Binding<Typography.Alignment> {
         Binding(
-            get: { canvasManager.textRecipe.typography.alignment },
+            get: { settings.recipe.typography.alignment },
             set: {
-                canvasManager.textRecipe.typography.alignment = $0
+                settings.recipe.typography.alignment = $0
                 canvasManager.textRecipeDidChange()
             }
         )
@@ -318,9 +326,9 @@ struct TextSettingsPanel: View {
     /// leave the box the size it was, and the artist would watch their text overflow its own outline.
     private func binding(_ path: WritableKeyPath<Typography, CGFloat>) -> Binding<Double> {
         Binding(
-            get: { Double(canvasManager.textRecipe.typography[keyPath: path]) },
+            get: { Double(settings.recipe.typography[keyPath: path]) },
             set: {
-                canvasManager.textRecipe.typography[keyPath: path] = CGFloat($0)
+                settings.recipe.typography[keyPath: path] = CGFloat($0)
                 canvasManager.textRecipeDidChange()
             }
         )

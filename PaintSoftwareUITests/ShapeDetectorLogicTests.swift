@@ -1706,7 +1706,7 @@ final class ShapeDetectorLogicTests: XCTestCase {
         // Before `update`, so the handles are rebuilt at the size this zoom calls for rather than
         // re-centred at the previous one.
         view.canvasScale = canvasScale
-        view.update(shape: shape, previewImage: nil, showHandles: true)
+        view.update(shape: shape, ink: nil, showHandles: true)
         view.isUserInteractionEnabled = true
         return view
     }

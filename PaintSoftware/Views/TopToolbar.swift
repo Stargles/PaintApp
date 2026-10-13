@@ -91,13 +91,7 @@ struct TopToolbar: View {
                     .accessibilityIdentifier("toolbar.layersButton")
 
                 Button(action: { toggle(.color) }) {
-                    Circle()
-                        // The text's colour while a session is live — see `CanvasManager.activeEditColor`.
-                        // A swatch showing the brush colour above a picker editing the text's would be
-                        // the worse half of the two to get wrong.
-                        .fill(canvasManager.activeEditColor)
-                        .frame(width: 34, height: 34)
-                        .overlay(Circle().stroke(Color.white.opacity(0.6), lineWidth: 2))
+                    ActiveColourSwatch(canvasManager: canvasManager, text: canvasManager.textSettings)
                 }
                 .accessibilityIdentifier("toolbar.colorButton")
             }
@@ -275,5 +269,23 @@ struct TopToolbar: View {
         // Exposes the same highlight state UI tests can't read off `.foregroundColor` directly —
         // also lets VoiceOver announce which tool is current.
         .accessibilityAddTraits(isActive ? [.isSelected] : [])
+    }
+}
+
+/// **The toolbar's colour swatch** — the colour the colour panel edits, `CanvasManager.activeEditColor`:
+/// the open text box's while a session is live (a swatch showing the brush colour above a picker editing
+/// the text's would be the worse half of the two to get wrong), the brush's otherwise.
+///
+/// A view of its own so it can observe the text recipe (`TextSettings`, TODO (179)): a tick of the text's
+/// colour picker reaches this swatch without a SwiftUI pass over the editor.
+private struct ActiveColourSwatch: View {
+    @ObservedObject var canvasManager: CanvasManager
+    @ObservedObject var text: TextSettings
+
+    var body: some View {
+        Circle()
+            .fill(canvasManager.activeEditColor)
+            .frame(width: 34, height: 34)
+            .overlay(Circle().stroke(Color.white.opacity(0.6), lineWidth: 2))
     }
 }

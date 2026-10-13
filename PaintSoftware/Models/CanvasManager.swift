@@ -1125,7 +1125,7 @@ final class CanvasManager: ObservableObject {
     /// else, so a slider tick redraws the slider and not the editor (`LiveEditState`, TODO (179)).
     let liveEditState = LiveEditState()
 
-    /// **The gesture open on a Move box that poses or grades, or nil between gestures** — a drag of a
+    /// **The gesture open on a Move box, or nil between gestures** — a drag of a lifted bitmap's, a
     /// transformation layer's or a Duplicate Offset's box, or one press of Mirror, Rotate or Reset.
     /// `BoxNudge` carries what it holds and why it never outlives one gesture.
     ///
@@ -1139,9 +1139,9 @@ final class CanvasManager: ObservableObject {
     private(set) var moveBoxIsTouched = false
 
     /// **Called synchronously when a picture the canvas shows but the document does not hold yet
-    /// moves** — whatever `liveEdit` holds — so the canvas re-shows it on the tick rather than on a
-    /// SwiftUI pass nothing raises any more. A closure for `onTimingStrokeFrameAdvanced`'s reason;
-    /// installed by `CanvasView.Coordinator`, nil headless.
+    /// moves** — whatever `liveEdit` holds, a pending smart shape, a lifted bitmap's box — so the canvas
+    /// re-shows it on the tick rather than on a SwiftUI pass nothing raises any more. A closure for
+    /// `onTimingStrokeFrameAdvanced`'s reason; installed by `CanvasView.Coordinator`, nil headless.
     var onHeldPictureMoved: (() -> Void)?
 
     /// **Holds `curves` — whole-curve replacements of `target`'s pose components — as the pose under
@@ -4457,11 +4457,6 @@ final class CanvasManager: ObservableObject {
     /// confirmed, so every re-render of the live preview lays the same jittered ink and the committed
     /// shape lays it too. Without it a scattering brush's preview reshuffled on every handle drag.
     var shapeGestureSeed: UInt64 = DabRandom.freshSeed()
-    /// Memoized `activeShapePreviewImage`, keyed by the geometry it was rendered for, plus the
-    /// texture it was stamped into. One re-render per geometry change (i.e. per drag event), not one
-    /// per SwiftUI pass — `updateShapeOverlay` runs on every render.
-    var shapePreviewCache: (shape: ShapeGeometry, image: UIImage)?
-    var shapePreviewTexture: RasterLayerTexture?
 
     // MARK: - Text session state (the operations live in CanvasManager+Text.swift)
     //
@@ -4481,12 +4476,18 @@ final class CanvasManager: ObservableObject {
     /// tells `finalizePendingGesturesForHistoryAction` to resign focus before it commits.
     var textIsFocused = false
 
-    /// The draft the panel's sliders and the overlay's keystrokes both write. `@Published` because,
-    /// unlike the shape scalars, a whole settings panel is bound straight to it.
-    @Published var textRecipe = TextRecipe()
+    /// The text tool's recipe and what its font resolved to — observed by the Text panel and the
+    /// colour swatch while a box is open, and by nothing else, so a slider tick or a keystroke is not a
+    /// pass over the editor (TODO (179); see `TextSettings`).
+    let textSettings = TextSettings()
+    /// The draft the panel's controls and the overlay's keystrokes both write — `textSettings.recipe`.
+    var textRecipe: TextRecipe {
+        get { textSettings.recipe }
+        set { textSettings.recipe = newValue }
+    }
     /// Where the draft sits on the canvas. Not `@Published`: it changes on every frame of a box
-    /// drag, and the only view that reads it is the overlay, which the coordinator pushes to
-    /// directly. `objectWillChange.send()` covers the panel's needs.
+    /// drag, and the only view that reads it is the overlay, which the canvas re-lays when told
+    /// (`onHeldPictureMoved`).
     var textFrame = TextFrame(origin: .zero, size: .zero)
     /// Identify the target cel by ID, not index — the session outlives other edits that may shift
     /// array positions before it commits (`shapeGestureLayerID`'s reasoning).
@@ -4535,10 +4536,6 @@ final class CanvasManager: ObservableObject {
     /// any display list to freeze against, and freezing there would hold the active layer's version
     /// stale across whatever else the artist does while the box sits adjustable.
     var isTextEditLive: Bool { textGestureActive && textEditingElementID != nil }
-    /// What the font actually resolved to, and why it is not what was asked for. Recomputed on
-    /// every recipe change by `refreshTextFontResolution()`; the panel shows it. Nil while no
-    /// session is live.
-    var textFontSubstitution: FontSubstitution?
 
     /// Installed by the on-canvas overlay so the model can drop the keyboard without knowing what a
     /// first responder is. Nil whenever no overlay is mounted, which is every headless test.

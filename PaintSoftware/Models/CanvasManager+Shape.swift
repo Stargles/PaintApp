@@ -20,8 +20,8 @@ extension CanvasManager {
     }
 
     /// The shape as it will actually be baked: `activeShape` with the two-finger constraint applied.
-    /// The preview, the handles, and `commitInteractiveShape` all go through this, so what the user
-    /// sees is what lands on the layer.
+    /// The preview (`shapeInk`), the handles, and `commitInteractiveShape` all go through this, so what
+    /// the user sees is what lands on the layer.
     var resolvedShape: ShapeGeometry? {
         guard let shape = activeShape else { return nil }
         return shapeIsConstrained ? shape.constrained : shape
@@ -33,54 +33,15 @@ extension CanvasManager {
         max(shapeGestureStrokeWidth * CGFloat(shapeGestureBrush.dab.spacing), 1)
     }
 
-    /// The stroke `commitInteractiveShape` will lay down: the freehand samples collapsed onto the
-    /// resolved shape's outline.
-    private func collapsedShapeSamples(for shape: ShapeGeometry) -> StrokeSamples {
-        ShapeDetector.collapseSamplesToShape(samples: shapeGestureSamples, shape: shape,
-                                             spacing: shapeStampSpacing)
-    }
-
-    /// The most recently rendered preview. May lag the current geometry by a frame — see
-    /// `isActiveShapePreviewStale` — which is deliberate: showing the previous stroke for one frame
-    /// beats re-stamping a canvas-sized raster for every coalesced Pencil sample.
-    var activeShapePreviewImage: UIImage? {
-        shapeGestureActive ? shapePreviewCache?.image : nil
-    }
-
-    /// True when the geometry has moved on from what `activeShapePreviewImage` was rendered for.
-    var isActiveShapePreviewStale: Bool {
-        guard let shape = resolvedShape else { return false }
-        return shapePreviewCache?.shape != shape
-    }
-
-    /// Renders the transient shape as the collapsed brush stroke that committing it would produce —
-    /// so the adjustable preview shows the user's own stroke, pressure profile and all, rather than a
-    /// uniform generated outline that then visibly changes the moment it bakes.
-    ///
-    /// Memoized per geometry, and stamped into a texture reused across the gesture, so a handle drag
-    /// costs one re-stamp rather than one allocation plus one re-stamp per event.
-    @discardableResult
-    func renderActiveShapePreview() -> UIImage? {
+    /// **The pending shape's ink, as a value a render queue can draw** — the collapsed brush stroke
+    /// committing it would lay down, pressure profile and all, rather than a uniform generated outline
+    /// that visibly changes the moment it bakes. What `ShapeOverlayView` draws off the main thread, one
+    /// picture in flight, into a canvas-sized surface pair (TODO (179)); nil with no shape pending.
+    var shapeInk: ShapeInk? {
         guard let shape = resolvedShape, let canvasSize else { return nil }
-        if let cached = shapePreviewCache, cached.shape == shape { return cached.image }
-
-        let texture: RasterLayerTexture
-        if let existing = shapePreviewTexture, existing.size == canvasSize {
-            texture = existing
-            texture.reset(to: nil, strokeCount: 0)
-        } else {
-            texture = .empty(size: canvasSize)
-            shapePreviewTexture = texture
-        }
-
-        BrushStamper.stampStroke(into: texture, samples: collapsedShapeSamples(for: shape),
-                                 brush: shapeGestureBrush,
-                                 color: shapeGestureColor.uiColor, brushSize: shapeGestureStrokeWidth,
-                                 brushOpacity: shapeGestureOpacity,
-                                 random: DabRandom(seed: shapeGestureSeed))
-        let image = texture.renderToUIImage()
-        shapePreviewCache = (shape, image)
-        return image
+        return ShapeInk(shape: shape, canvasSize: canvasSize, samples: shapeGestureSamples,
+                        spacing: shapeStampSpacing, brush: shapeGestureBrush, color: shapeGestureColor,
+                        size: shapeGestureStrokeWidth, opacity: shapeGestureOpacity, seed: shapeGestureSeed)
     }
 
     /// Begins an interactive shape. Called when the hold timer fires and ShapeDetector confirms a shape.
@@ -97,7 +58,6 @@ extension CanvasManager {
         shapeFingerDown = true
         shapeGeometry = shape
         shapeIsConstrained = false
-        shapePreviewCache = nil
         shapeGestureLayerID = layers[layerIndex].id
         shapeGestureCelID = layers[layerIndex].cels[celIndex].id
         shapeGestureInkPose = inkPose(forLayerID: layers[layerIndex].id)
@@ -116,9 +76,11 @@ extension CanvasManager {
 
     /// Updates the shape's geometry as the user drags a handle or continues the hold stroke.
     /// `startPoint`/`endPoint` are optional so partial updates are possible (e.g. edge-handle
-    /// drags on rectangles resize opposite edges, changing only one corner). Emits
-    /// `objectWillChange` so the SwiftUI-refresh path re-runs `updateShapeOverlay` and keeps
-    /// the overlay's preview and handles glued to the live shape.
+    /// drags on rectangles resize opposite edges, changing only one corner).
+    ///
+    /// **Writes the draft tier, tells the canvas, and publishes nothing** (TODO (179)): the canvas is
+    /// the one thing that draws the shape (`onHeldPictureMoved` re-lays its overlay), so a tick of a
+    /// handle drag is the overlay's — not a SwiftUI pass over the editor.
     func updateInteractiveShape(startPoint: CGPoint? = nil, endPoint: CGPoint? = nil,
                                 rotation: CGFloat? = nil, isConstrained: Bool? = nil) {
         guard shapeGestureActive else { return }
@@ -126,7 +88,7 @@ extension CanvasManager {
         if let endPoint { shapeGeometry.endPoint = endPoint }
         if let rotation { shapeGeometry.rotation = rotation }
         if let isConstrained { shapeIsConstrained = isConstrained }
-        objectWillChange.send()
+        onHeldPictureMoved?()
     }
 
     /// Lifts the pen but leaves the shape adjustable.
@@ -148,11 +110,11 @@ extension CanvasManager {
     /// or stamped into the cel's raster on a raster layer (so the eraser punches through it there).
     /// Either way what lands is a real brush stroke, not a separate shape object.
     func commitInteractiveShape() {
-        guard shapeGestureActive, let shape = resolvedShape else { return }
+        guard shapeGestureActive, let ink = shapeInk else { return }
         shapeGestureActive = false
         shapeFingerDown = false
         let savedBrush = shapeGestureBrush
-        let collapsed = collapsedShapeSamples(for: shape)
+        let collapsed = ink.collapsedSamples
         let layerID = shapeGestureLayerID
         let celID = shapeGestureCelID
         let drawnUnder = shapeGestureInkPose
@@ -161,8 +123,6 @@ extension CanvasManager {
             shapeGestureCelID = nil
             shapeGestureInkPose = nil
             shapeGestureSamples = []
-            shapePreviewCache = nil
-            shapePreviewTexture = nil
             objectWillChange.send()
             refreshUndoRedoState()
         }
@@ -262,9 +222,39 @@ extension CanvasManager {
         shapeGestureCelID = nil
         shapeGestureInkPose = nil
         shapeGestureSamples = []
-        shapePreviewCache = nil
-        shapePreviewTexture = nil
         objectWillChange.send()
         refreshUndoRedoState()
+    }
+}
+
+/// **A pending smart shape's ink, frozen** — everything the stroke its commit lays down is made of, so
+/// a render queue can draw it while the main thread goes on moving the shape (TODO (179),
+/// `CanvasManager.shapeInk`). A value: nothing in it is shared with the draft tier the next tick writes.
+struct ShapeInk {
+    /// The resolved geometry it draws — what tells two pictures of one shape apart.
+    let shape: ShapeGeometry
+    /// The canvas it is drawn over, in points: the window of its picture.
+    let canvasSize: CGSize
+    fileprivate let samples: [VectorSample]
+    fileprivate let spacing: CGFloat
+    fileprivate let brush: Brush
+    fileprivate let color: CodableColor
+    fileprivate let size: CGFloat
+    fileprivate let opacity: Double
+    fileprivate let seed: UInt64
+
+    /// The freehand samples collapsed onto the shape's outline, at the spacing live drawing stamps —
+    /// the stroke `commitInteractiveShape` lays down.
+    var collapsedSamples: StrokeSamples {
+        ShapeDetector.collapseSamplesToShape(samples: samples, shape: shape, spacing: spacing)
+    }
+
+    /// **Stamps the stroke into `context`**, a UIKit context over the canvas in its own points — the
+    /// brush, colour, size, opacity and random field the commit stamps with, so the preview is the ink
+    /// that lands. Safe off the main thread: it reads only this value.
+    func draw(into context: CGContext) {
+        BrushStamper.stampStroke(into: CGContextDabTarget(context), samples: collapsedSamples, brush: brush,
+                                 color: color.uiColor, brushSize: size, brushOpacity: opacity,
+                                 random: DabRandom(seed: seed))
     }
 }

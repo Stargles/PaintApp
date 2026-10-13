@@ -3,13 +3,17 @@ import UIKit
 /// A transparent overlay that displays a transient smart-shape preview with draggable
 /// control-point handles. Placed in the canvas container above all layers when active.
 ///
-/// The preview is the *collapsed brush stroke* the shape will bake into — supplied as an already-
-/// rendered image by `CanvasManager.activeShapePreviewImage` — not a uniform stroked outline. That
-/// way the transient state looks exactly like the result, instead of visibly changing the instant it
-/// commits. A faint outline is drawn over it purely as a geometry guide for the handles. (Over, not
-/// under: `previewView` is a subview and `shapeLayer` is added to this view's own `layer` after it,
-/// so the outline is on top. The header said "under" for a long time, which would have had the next
-/// reader sizing its alpha and line width against the reverse of what happens.)
+/// The preview is the *collapsed brush stroke* the shape will bake into — `CanvasManager.shapeInk`,
+/// drawn here — not a uniform stroked outline. That way the transient state looks exactly like the
+/// result, instead of visibly changing the instant it commits. A faint outline is drawn over it purely
+/// as a geometry guide for the handles. (Over, not under: the preview is inside `previewHost`, a
+/// subview, and `shapeLayer` is added to this view's own `layer` after it, so the outline is on top.)
+///
+/// **The ink is drawn off the main thread, one picture in flight, into a canvas-sized surface pair**
+/// (`WindowSurfaceView`, TODO (179)). It was stamped on the main thread into a canvas-sized texture and
+/// handed to Core Animation as a fresh canvas-sized image once a run-loop turn of a handle drag — 64 MB
+/// a picture at 4096², the shape that killed the render server in PERFORMANCE.md §29. A drag now hands
+/// Core Animation nothing per tick, and the preview runs as fast as one stamp of the stroke.
 ///
 /// Two visual modes:
 ///   1. **Following** (finger still down after hold-detection): preview only, no handles.
@@ -51,7 +55,7 @@ final class ShapeOverlayView: CanvasPlaneView {
             if !isActive {
                 clearHandles()
                 isUserInteractionEnabled = false
-                previewView.image = nil
+                takeDownPreview()
                 shapeLayer.path = nil
                 shape = nil
             }
@@ -171,8 +175,24 @@ final class ShapeOverlayView: CanvasPlaneView {
 
     // MARK: - Layers & gesture
 
-    /// The collapsed-stroke preview, in canvas coordinates (this view is canvas-sized).
-    private let previewView = UIImageView()
+    /// Where the collapsed-stroke preview goes, under the outline and the handles — pinned to this
+    /// canvas-sized view, so it is in canvas coordinates.
+    private let previewHost = UIView()
+    /// The pending shape's picture — made with the shape and dropped with it, so its two canvas-sized
+    /// surfaces are held only while a shape is up.
+    private var preview: WindowSurfaceView?
+    /// The newest ink — what the preview's next draw is minted from.
+    private var ink: ShapeInk?
+    /// The geometry the preview was last asked to draw, so an update that moved nothing asks for nothing.
+    private var requestedShape: ShapeGeometry?
+    /// **How many pictures of a shape have landed**, across shapes — `shapeDraws:` on `canvas.host`,
+    /// so a test that cannot look during its synchronous drag reads how often the preview kept up.
+    private(set) var previewDrawCount = 0
+    /// A picture landed — the canvas republishes its state.
+    var onPreviewDrawn: (() -> Void)?
+    /// The queue every shape's ink is stamped on — its own, so a preview never waits behind a layer's
+    /// committed render.
+    private static let previewQueue = DispatchQueue(label: "ShapeOverlayView.preview", qos: .userInitiated)
     private let shapeLayer = CAShapeLayer()
     private let handleLayer = CALayer()
     private var handles: [HandleInfo] = []
@@ -210,24 +230,17 @@ final class ShapeOverlayView: CanvasPlaneView {
         isHidden = true
         isUserInteractionEnabled = false
 
-        previewView.contentMode = .scaleToFill
-        previewView.isUserInteractionEnabled = false
-        // Same reasoning as the layer hosts: native-resolution raster content should zoom blocky
-        // rather than blurred, so the preview matches the stroke it turns into.
-        previewView.layer.magnificationFilter = .nearest
-        // And the same reasoning in the other direction (`LayerHostView.init` carries the
-        // measurement): this preview is canvas-resolution ink, and matching the stroke it turns
-        // into means matching how that stroke is filtered when the canvas is zoomed out too — a
-        // preview that is invisible at fit zoom and then appears on lift is the worse half of the
-        // mismatch this line closes.
-        previewView.layer.minificationFilter = .trilinear
-        previewView.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(previewView)
+        // The preview's surface filters its canvas-resolution ink the way a layer host does — blocky
+        // zoomed in, mipmapped zoomed out (`WindowSurfaceView.init`) — so it matches the stroke it
+        // turns into at every zoom.
+        previewHost.isUserInteractionEnabled = false
+        previewHost.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(previewHost)
         NSLayoutConstraint.activate([
-            previewView.topAnchor.constraint(equalTo: topAnchor),
-            previewView.bottomAnchor.constraint(equalTo: bottomAnchor),
-            previewView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            previewView.trailingAnchor.constraint(equalTo: trailingAnchor)
+            previewHost.topAnchor.constraint(equalTo: topAnchor),
+            previewHost.bottomAnchor.constraint(equalTo: bottomAnchor),
+            previewHost.leadingAnchor.constraint(equalTo: leadingAnchor),
+            previewHost.trailingAnchor.constraint(equalTo: trailingAnchor)
         ])
 
         // A thin guide outline under the preview, so the handles visibly belong to a shape even
@@ -243,21 +256,22 @@ final class ShapeOverlayView: CanvasPlaneView {
 
     // MARK: - Content updates
 
-    /// Updates everything the overlay draws in one shot. `previewImage` is the collapsed stroke;
-    /// `showHandles` is false while the finger is still following the shape.
+    /// Updates everything the overlay draws in one shot. `ink` is the collapsed stroke, asked for
+    /// when its geometry moved; `showHandles` is false while the finger is still following the shape.
     ///
     /// All CALayer mutations here run with implicit animations disabled. Without that, every geometry
     /// update animates its path/frame over the default 0.25s, and since this is called on every
     /// SwiftUI render pass those animations restart continuously — which is what made the transient
     /// shape appear to flicker and lag behind the finger.
-    func update(shape: ShapeGeometry, previewImage: UIImage?, showHandles: Bool) {
+    func update(shape: ShapeGeometry, ink: ShapeInk?, showHandles: Bool) {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         defer { CATransaction.commit() }
 
         let kindChanged = self.shape?.kind != shape.kind
         self.shape = shape
-        previewView.image = previewImage
+        self.ink = ink
+        if let ink, ink.shape != requestedShape { requestPreview(of: ink) }
         shapeLayer.path = shape.rotatedCGPath
         shapeLayer.lineWidth = outlineWidth
 
@@ -272,10 +286,47 @@ final class ShapeOverlayView: CanvasPlaneView {
         showReadoutIfTurning()
     }
 
-    /// Swaps in a freshly rendered preview without disturbing the handles — used by the coordinator's
-    /// coalesced render, which catches the preview up a frame after the geometry moved.
-    func setPreviewImage(_ image: UIImage?) {
-        previewView.image = image
+    // MARK: - The preview
+
+    /// **Asks for a picture of the shape's ink.** The first of a shape is drawn in this turn
+    /// (`WindowSurfaceView.presentFirst`): it replaces the freehand stroke the hold reverted, so a turn
+    /// with neither would blink. Every later one is minted when the surface is free, from the newest
+    /// ink — so a drag is drawn as fast as one stamp of the stroke, and never queues pictures nobody
+    /// will see.
+    private func requestPreview(of ink: ShapeInk) {
+        requestedShape = ink.shape
+        if let preview {
+            preview.present { [weak self] in
+                guard let self, let ink = self.ink else { return nil }
+                return self.previewFrame(of: ink)
+            }
+            return
+        }
+        let surface = WindowSurfaceView(queue: Self.previewQueue)
+        previewHost.addSubview(surface)
+        preview = surface
+        surface.presentFirst(previewFrame(of: ink))
+    }
+
+    /// One picture of `ink`: the whole canvas, the stroke stamped into it.
+    private func previewFrame(of ink: ShapeInk) -> WindowSurfaceView.Frame {
+        let window = CGRect(origin: .zero, size: ink.canvasSize)
+        return WindowSurfaceView.Frame(window: window, placement: .identity, draw: { context in
+            ink.draw(into: context)
+            return window
+        }, finished: { [weak self] shown in
+            guard shown, let self else { return }
+            self.previewDrawCount += 1
+            self.onPreviewDrawn?()
+        })
+    }
+
+    /// The shape is gone: its picture and its surfaces with it.
+    private func takeDownPreview() {
+        preview?.removeFromSuperview()
+        preview = nil
+        ink = nil
+        requestedShape = nil
     }
 
     /// Re-applies everything sized in screen points after `canvasScale` moves.

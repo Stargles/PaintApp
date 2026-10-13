@@ -58,6 +58,7 @@
 		99D1EA5B5A7EEE8F514A763E /* PaintSoftware/Engine/LassoFillMask.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA1C5749F5AA74C36489D347 /* PaintSoftware/Engine/LassoFillMask.swift */; };
 		74F8B831200D12B5938F4FAB /* PaintSoftware/Engine/FillBasins.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E4E662817C94770E7BBB910 /* PaintSoftware/Engine/FillBasins.swift */; };
 		2F906FD9330411BF08BC4228 /* PaintSoftware/Models/FillSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FD848269C7168728CE2E2AF /* PaintSoftware/Models/FillSettings.swift */; };
+		7DC3EF545B9751AC4F9F6BB9 /* PaintSoftware/Models/TextSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE49E4E10B171E1D4B13798B /* PaintSoftware/Models/TextSettings.swift */; };
 		DE652AFFB5833CF39555FA70 /* PaintSoftware/Engine/FillWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0571EF8FDE440FCB2D862719 /* PaintSoftware/Engine/FillWindow.swift */; };
 		7661664D5824C94FC6BACAF4 /* PaintSoftware/Models/CanvasManager+LassoMove.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C0C3F39377E467E499B8BEE /* PaintSoftware/Models/CanvasManager+LassoMove.swift */; };
 		978E910F2F3396AF51F4DDBA /* PaintSoftware/Models/CanvasManager+MediaPlacement.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BCBA711DB5014F921C0407E /* PaintSoftware/Models/CanvasManager+MediaPlacement.swift */; };
@@ -134,6 +135,8 @@
 		B2C3D4E5F6001122334455C2 /* PaintSoftware/Engine/ShapeGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6001122334455C1 /* PaintSoftware/Engine/ShapeGeometry.swift */; };
 		B2C3D4E5F6001122334455D2 /* PaintSoftware/Engine/ShapeDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6001122334455D1 /* PaintSoftware/Engine/ShapeDetector.swift */; };
 		B2C3D4E5F6001122334455E2 /* ShapeDetectorLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6001122334455E1 /* ShapeDetectorLogicTests.swift */; };
+		DA5949AEBAD46BC8740F7585 /* ShapeInkLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D2E2150B9124973E27F675F /* ShapeInkLogicTests.swift */; };
+		647F212DC9D8B0ED57DDC5F6 /* DraftTickLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E6D8F778FCA84F569D89E74 /* DraftTickLogicTests.swift */; };
 		B2C3D4E5F600112233445602 /* PaintSoftware/Engine/ShapeHoldClock.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F600112233445601 /* PaintSoftware/Engine/ShapeHoldClock.swift */; };
 		E2FD2BA7D05AD14F3CB1094D /* PaintSoftware/Engine/PlaybackClock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AC9AF3B2A180DCF5733729B /* PaintSoftware/Engine/PlaybackClock.swift */; };
 		F87038A716A7B10437327F08 /* PaintSoftware/Models/CanvasManager+Eraser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FD4CF75ACB8BD2252912D26 /* PaintSoftware/Models/CanvasManager+Eraser.swift */; };
@@ -197,6 +200,7 @@
 		0012C24993208CE9232502A7 /* GuideSliderUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D433D126267BB4DBDD8921FD /* GuideSliderUITests.swift */; };
 		9C9543432049909D7A855421 /* EffectSliderLiveUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03B7D00D5BA7CF3BD03253EB /* EffectSliderLiveUITests.swift */; };
 		C642D0F20EB66540E2EA1639 /* OpacitySliderLiveUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FCEA8E4238D113ACE696CD9 /* OpacitySliderLiveUITests.swift */; };
+		773E6F9FB60E77BB75297E16 /* DraftDragLiveUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9D36EE7B7012F2953C3D9BD /* DraftDragLiveUITests.swift */; };
 		2F5D3B0AEAFEB5359E8CE0CF /* GuideUnderLassoMoveUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA035DAC01F130A020B02B65 /* GuideUnderLassoMoveUITests.swift */; };
 		7A54F01C6DC3BFE5A6CB5C58 /* GuideEffectLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97EAC0AFE8551C7BCB0784AF /* GuideEffectLogicTests.swift */; };
 		0DC3FA8A2141BD915C11CAC7 /* LensBlurUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C8D32C3E835AD05BDC423C9 /* LensBlurUITests.swift */; };
@@ -684,6 +688,7 @@
 		EA1C5749F5AA74C36489D347 /* PaintSoftware/Engine/LassoFillMask.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Engine/LassoFillMask.swift"; sourceTree = "<group>"; };
 		4E4E662817C94770E7BBB910 /* PaintSoftware/Engine/FillBasins.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Engine/FillBasins.swift"; sourceTree = "<group>"; };
 		4FD848269C7168728CE2E2AF /* PaintSoftware/Models/FillSettings.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/FillSettings.swift"; sourceTree = "<group>"; };
+		DE49E4E10B171E1D4B13798B /* PaintSoftware/Models/TextSettings.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/TextSettings.swift"; sourceTree = "<group>"; };
 		0571EF8FDE440FCB2D862719 /* PaintSoftware/Engine/FillWindow.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Engine/FillWindow.swift"; sourceTree = "<group>"; };
 		0C0C3F39377E467E499B8BEE /* PaintSoftware/Models/CanvasManager+LassoMove.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/CanvasManager+LassoMove.swift"; sourceTree = "<group>"; };
 		8BCBA711DB5014F921C0407E /* PaintSoftware/Models/CanvasManager+MediaPlacement.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/CanvasManager+MediaPlacement.swift"; sourceTree = "<group>"; };
@@ -763,6 +768,8 @@
 		B2C3D4E5F6001122334455C1 /* PaintSoftware/Engine/ShapeGeometry.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/ShapeGeometry.swift; sourceTree = "<group>"; };
 		B2C3D4E5F6001122334455D1 /* PaintSoftware/Engine/ShapeDetector.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/ShapeDetector.swift; sourceTree = "<group>"; };
 		B2C3D4E5F6001122334455E1 /* ShapeDetectorLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShapeDetectorLogicTests.swift; sourceTree = "<group>"; };
+		2D2E2150B9124973E27F675F /* ShapeInkLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "ShapeInkLogicTests.swift"; sourceTree = "<group>"; };
+		1E6D8F778FCA84F569D89E74 /* DraftTickLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "DraftTickLogicTests.swift"; sourceTree = "<group>"; };
 		B2C3D4E5F600112233445601 /* PaintSoftware/Engine/ShapeHoldClock.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/ShapeHoldClock.swift; sourceTree = "<group>"; };
 		8AC9AF3B2A180DCF5733729B /* PaintSoftware/Engine/PlaybackClock.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/PlaybackClock.swift; sourceTree = "<group>"; };
 		5FD4CF75ACB8BD2252912D26 /* PaintSoftware/Models/CanvasManager+Eraser.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/CanvasManager+Eraser.swift"; sourceTree = "<group>"; };
@@ -826,6 +833,7 @@
 		D433D126267BB4DBDD8921FD /* GuideSliderUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "GuideSliderUITests.swift"; sourceTree = "<group>"; };
 		03B7D00D5BA7CF3BD03253EB /* EffectSliderLiveUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "EffectSliderLiveUITests.swift"; sourceTree = "<group>"; };
 		0FCEA8E4238D113ACE696CD9 /* OpacitySliderLiveUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "OpacitySliderLiveUITests.swift"; sourceTree = "<group>"; };
+		F9D36EE7B7012F2953C3D9BD /* DraftDragLiveUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "DraftDragLiveUITests.swift"; sourceTree = "<group>"; };
 		DA035DAC01F130A020B02B65 /* GuideUnderLassoMoveUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "GuideUnderLassoMoveUITests.swift"; sourceTree = "<group>"; };
 		97EAC0AFE8551C7BCB0784AF /* GuideEffectLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GuideEffectLogicTests.swift; sourceTree = "<group>"; };
 		0C8D32C3E835AD05BDC423C9 /* LensBlurUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LensBlurUITests.swift; sourceTree = "<group>"; };
@@ -1489,6 +1497,8 @@
 				AF505FA009B626AC3B706936 /* VideoFrameMapLogicTests.swift */,
 				201CF79B80FFB5FD424546B0 /* VideoFrameReaderLogicTests.swift */,
 				B2C3D4E5F6001122334455E1 /* ShapeDetectorLogicTests.swift */,
+				2D2E2150B9124973E27F675F /* ShapeInkLogicTests.swift */,
+				1E6D8F778FCA84F569D89E74 /* DraftTickLogicTests.swift */,
 				B2C3D4E5F600112233445501 /* ShapeHoldClockLogicTests.swift */,
 				A11CE0DE0000000000000001 /* AnimationCurveLogicTests.swift */,
 				95F6D4E2F5D8A1C3A1DE2751 /* CelContentProviderLogicTests.swift */,
@@ -1550,6 +1560,7 @@
 				D433D126267BB4DBDD8921FD /* GuideSliderUITests.swift */,
 				03B7D00D5BA7CF3BD03253EB /* EffectSliderLiveUITests.swift */,
 				0FCEA8E4238D113ACE696CD9 /* OpacitySliderLiveUITests.swift */,
+				F9D36EE7B7012F2953C3D9BD /* DraftDragLiveUITests.swift */,
 				DA035DAC01F130A020B02B65 /* GuideUnderLassoMoveUITests.swift */,
 				97EAC0AFE8551C7BCB0784AF /* GuideEffectLogicTests.swift */,
 				0C8D32C3E835AD05BDC423C9 /* LensBlurUITests.swift */,
@@ -1794,6 +1805,7 @@
 				EA1C5749F5AA74C36489D347 /* PaintSoftware/Engine/LassoFillMask.swift */,
 				4E4E662817C94770E7BBB910 /* PaintSoftware/Engine/FillBasins.swift */,
 				4FD848269C7168728CE2E2AF /* PaintSoftware/Models/FillSettings.swift */,
+				DE49E4E10B171E1D4B13798B /* PaintSoftware/Models/TextSettings.swift */,
 				0571EF8FDE440FCB2D862719 /* PaintSoftware/Engine/FillWindow.swift */,
 				DEC0DE00000000000000000F /* PaintSoftware/Engine/RasterLayerTexture.swift */,
 				10E06D42DAEB5E1219F94B87 /* PaintSoftware/Engine/StrokeScratch.swift */,
@@ -2227,6 +2239,8 @@
 				B2C3D4E5F6001122334455C2 /* PaintSoftware/Engine/ShapeGeometry.swift in Sources */,
 				B2C3D4E5F6001122334455D2 /* PaintSoftware/Engine/ShapeDetector.swift in Sources */,
 				B2C3D4E5F6001122334455E2 /* ShapeDetectorLogicTests.swift in Sources */,
+				DA5949AEBAD46BC8740F7585 /* ShapeInkLogicTests.swift in Sources */,
+				647F212DC9D8B0ED57DDC5F6 /* DraftTickLogicTests.swift in Sources */,
 				B2C3D4E5F600112233445602 /* PaintSoftware/Engine/ShapeHoldClock.swift in Sources */,
 				E2FD2BA7D05AD14F3CB1094D /* PaintSoftware/Engine/PlaybackClock.swift in Sources */,
 				F87038A716A7B10437327F08 /* PaintSoftware/Models/CanvasManager+Eraser.swift in Sources */,
@@ -2291,6 +2305,7 @@
 				0012C24993208CE9232502A7 /* GuideSliderUITests.swift in Sources */,
 				9C9543432049909D7A855421 /* EffectSliderLiveUITests.swift in Sources */,
 				C642D0F20EB66540E2EA1639 /* OpacitySliderLiveUITests.swift in Sources */,
+				773E6F9FB60E77BB75297E16 /* DraftDragLiveUITests.swift in Sources */,
 				2F5D3B0AEAFEB5359E8CE0CF /* GuideUnderLassoMoveUITests.swift in Sources */,
 				7A54F01C6DC3BFE5A6CB5C58 /* GuideEffectLogicTests.swift in Sources */,
 				0DC3FA8A2141BD915C11CAC7 /* LensBlurUITests.swift in Sources */,
@@ -2507,6 +2522,7 @@
 				99D1EA5B5A7EEE8F514A763E /* PaintSoftware/Engine/LassoFillMask.swift in Sources */,
 				74F8B831200D12B5938F4FAB /* PaintSoftware/Engine/FillBasins.swift in Sources */,
 				2F906FD9330411BF08BC4228 /* PaintSoftware/Models/FillSettings.swift in Sources */,
+				7DC3EF545B9751AC4F9F6BB9 /* PaintSoftware/Models/TextSettings.swift in Sources */,
 				DE652AFFB5833CF39555FA70 /* PaintSoftware/Engine/FillWindow.swift in Sources */,
 				DEC0DE000000000000000031 /* PaintSoftware/Models/Tool.swift in Sources */,
 				DEC0DE000000000000000033 /* PaintSoftware/Models/LayerFolder.swift in Sources */,

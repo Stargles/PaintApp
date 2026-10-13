@@ -16,8 +16,10 @@ import UIKit
 /// caret a fraction of a point off is invisible; glyphs that jump at commit are not.
 ///
 /// **Nothing in the live path is canvas-sized and nothing in it allocates per frame** (§4 rules 1
-/// and 2). The glyph bitmap is the *box*, re-rendered only when the recipe or the box size changes
-/// and coalesced to one render per run-loop turn; a box drag assigns a frame and rasterizes nothing.
+/// and 2). The glyph bitmap is the *box*, re-rendered only when the recipe or the box size changes,
+/// **off the main thread, one render in flight** (`LatestWins`, TODO (179)) — so a size slider dragged
+/// as fast as the artist likes is laid out as fast as CoreText can and no faster, and the last value
+/// always lands; a box drag assigns a frame and rasterizes nothing.
 final class TextOverlayView: CanvasPlaneView, UITextViewDelegate {
 
     // MARK: - Callbacks
@@ -105,9 +107,18 @@ final class TextOverlayView: CanvasPlaneView, UITextViewDelegate {
     /// The style the text view's attributes were last built for, so a keystroke does not rebuild
     /// them and move the caret. See `TextRecipe.styleOnly`.
     private var appliedStyle: TextRecipe?
-    /// What the glyph bitmap was rendered for. `nil` forces a render.
+    /// What the glyph bitmap on the layer was rendered for. `nil` forces a render.
     private var renderedKey: RenderKey?
-    private var isGlyphRenderScheduled = false
+    /// The glyph renders — one in flight, minted from the newest recipe and box when the last lands.
+    private let glyphRenders = LatestWins(queue: TextOverlayView.glyphQueue)
+    /// Where the glyphs are laid out and drawn — its own queue, so a box never waits behind a layer's
+    /// committed render.
+    private static let glyphQueue = DispatchQueue(label: "TextOverlayView.glyphs", qos: .userInitiated)
+    /// **How many glyph bitmaps have landed** — `glyphs:` on `canvas.host`, so a test that cannot look
+    /// during its synchronous drag reads how often the box kept up with it.
+    private(set) var glyphRenderCount = 0
+    /// A glyph bitmap landed — the canvas republishes its state.
+    var onGlyphsRendered: (() -> Void)?
     private var isTextChangeScheduled = false
     /// The canvas-space point under the finger when the move drag began, and where the box's
     /// top-left was then. Both latched at touch-down so a mid-drag pinch cannot move the reference
@@ -197,6 +208,7 @@ final class TextOverlayView: CanvasPlaneView, UITextViewDelegate {
         isHidden = true
         isUserInteractionEnabled = false
         textView.text = ""
+        glyphRenders.cancel()
         glyphLayer.contents = nil
         ghostLayer.contents = nil
         ghostLayer.isHidden = true
@@ -442,41 +454,43 @@ final class TextOverlayView: CanvasPlaneView, UITextViewDelegate {
 
     private static let maximumGlyphTexels: CGFloat = 4096
 
-    /// Coalesces glyph re-renders to one per run-loop turn. A fast typist delivers several
-    /// keystrokes per frame and each would otherwise cost a CoreText pass and a bitmap — ADD_TEXT.md
-    /// §4 rule 3, which is `scheduleShapePreviewRenderIfNeeded`'s rule with a different subject.
+    /// **Asks for the glyphs of the box as it is when the last render lands** — ADD_TEXT.md §4 rule 3,
+    /// coalescing taken to its end: a fast typist's keystrokes and a slider's ticks each ask, and only
+    /// the request standing when the render in flight lands is laid out, off the main thread, by the
+    /// one rasterizer the bake uses (`TextLayout.renderBox`). A request that would render what the layer
+    /// already shows renders nothing.
     private func scheduleGlyphRender() {
-        guard isActive, !isGlyphRenderScheduled else { return }
-        isGlyphRenderScheduled = true
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.isGlyphRenderScheduled = false
-            self.renderGlyphsIfNeeded()
+        guard isActive else { return }
+        glyphRenders.request { [weak self] in
+            guard let self, self.isActive else { return nil }
+            let key = RenderKey(recipe: self.recipe, boxSize: self.glyphBoxSize, clip: !self.frameModel.autoSize,
+                                scale: self.glyphContentsScale)
+            guard key != self.renderedKey else { return nil }
+            return {
+                let image = TextLayout.renderBox(recipe: key.recipe, boxSize: key.boxSize,
+                                                 clip: key.clip, scale: key.scale)
+                return { [weak self] in self?.showGlyphs(image, for: key) }
+            }
         }
     }
 
-    private func renderGlyphsIfNeeded() {
-        guard isActive else { return }
-        let key = RenderKey(recipe: recipe, boxSize: glyphBoxSize, clip: !frameModel.autoSize,
-                            scale: glyphContentsScale)
-        guard key != renderedKey else { return }
+    /// Puts a landed glyph bitmap on the box — and on the ghost, when the flat editing box is showing
+    /// one — or takes it off for a box with nothing to draw.
+    private func showGlyphs(_ image: UIImage?, for key: RenderKey) {
         renderedKey = key
-        guard let image = TextLayout.renderBox(recipe: key.recipe, boxSize: key.boxSize,
-                                               clip: key.clip, scale: key.scale) else {
-            glyphLayer.contents = nil
-            return
-        }
+        glyphRenderCount += 1
         // No implicit animation: the bitmap is the artwork, and a cross-fade on every keystroke
         // reads as lag.
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         glyphLayer.contentsScale = key.scale
-        glyphLayer.contents = image.cgImage
+        glyphLayer.contents = image?.cgImage
         if !ghostLayer.isHidden {
             ghostLayer.contentsScale = key.scale
-            ghostLayer.contents = image.cgImage
+            ghostLayer.contents = image?.cgImage
         }
         CATransaction.commit()
+        onGlyphsRendered?()
     }
 
     // MARK: - Hit testing

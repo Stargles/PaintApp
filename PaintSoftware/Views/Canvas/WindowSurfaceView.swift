@@ -111,51 +111,70 @@ final class WindowSurfaceView: UIView {
     /// replaced before it was minted is never drawn, and its `finished` never runs.
     func present(_ mint: @escaping () -> Frame?) {
         draws.request { [weak self] in
-            // Minted only while no draw is in flight, so the surfaces may be remade here and the back
-            // one is not being written.
             guard let self, let frame = mint() else { return nil }
-            let window = frame.window, placement = frame.placement
-            let draw = frame.draw, finished = frame.finished
-            self.size(for: window)
-            guard self.surfaces.count == 2 else { return nil }
-            let target = self.surfaces[self.back]
-            let delay = Self.drawDelay
-            return {
-                // **The back surface may still be on screen.** It was the contents until the swap that
-                // put the other one up, and that swap reaches the render server only when the main
-                // thread's transaction commits — while this draw is minted *in* the landing's turn
-                // (`LatestWins` mints as the last draw lands). Cleared now, the server would show one
-                // frame of whatever is under the view. So the draw waits, here off the main thread,
-                // until the server has let the surface go — bounded at half a second, past the
-                // longest busy turn the owner's iPad 9 recorded (182 ms), so a server that never says
-                // so costs one wait rather than the picture.
-                let released = DispatchTime.now() + .milliseconds(500)
-                while target.surface.isInUse, DispatchTime.now() < released { usleep(500) }
-                _ = target.surface.lock(options: [], seed: nil)
-                let cg = target.context
-                cg.clear(CGRect(origin: .zero, size: window.size))
-                if delay > 0 { Thread.sleep(forTimeInterval: delay) }
-                UIGraphicsPushContext(cg)
-                let drawn = draw(cg)
-                UIGraphicsPopContext()
-                _ = target.surface.unlock(options: [], seed: nil)
-                return { [weak self] in
-                    guard let self else { return }
-                    guard drawn == window, self.surfaces.count == 2, self.surfaceWindow == window else {
-                        finished?(false)
-                        return
-                    }
-                    self.layer.contents = target.surface
-                    self.layer.bounds = CGRect(origin: .zero, size: window.size)
-                    self.layer.position = window.origin.applying(placement)
-                    self.layer.setAffineTransform(CGAffineTransform(a: placement.a, b: placement.b,
-                                                                    c: placement.c, d: placement.d,
-                                                                    tx: 0, ty: 0))
-                    self.isHidden = false
-                    self.back = 1 - self.back
-                    self.presentedCount += 1
-                    finished?(true)
+            return self.drawing(frame)
+        }
+    }
+
+    /// **The first picture, drawn and shown in the turn that asks for it** — for a view that appears
+    /// in place of a picture already on screen, where the turns a first draw off the main thread takes
+    /// would show neither: a freehand stroke the moment it becomes a smart shape (`ShapeOverlayView`).
+    /// Only while the view shows nothing and no draw is in flight — past the first picture, a draw on
+    /// the main thread is what `present` exists to keep off it, and it would wait here on the render
+    /// server letting the back surface go. Otherwise it is `present`.
+    func presentFirst(_ frame: Frame) {
+        guard layer.contents == nil, !draws.isBusy, let draw = drawing(frame) else {
+            present { frame }
+            return
+        }
+        draw()()
+    }
+
+    /// **One frame's draw and landing**, minted on the main thread while no draw is in flight — so the
+    /// surfaces may be remade here and the back one is not being written. Nil when there is no surface
+    /// to draw into.
+    private func drawing(_ frame: Frame) -> LatestWins.Work? {
+        let window = frame.window, placement = frame.placement
+        let draw = frame.draw, finished = frame.finished
+        size(for: window)
+        guard surfaces.count == 2 else { return nil }
+        let target = surfaces[back]
+        let delay = Self.drawDelay
+        return {
+            // **The back surface may still be on screen.** It was the contents until the swap that
+            // put the other one up, and that swap reaches the render server only when the main
+            // thread's transaction commits — while this draw is minted *in* the landing's turn
+            // (`LatestWins` mints as the last draw lands). Cleared now, the server would show one
+            // frame of whatever is under the view. So the draw waits, here off the main thread,
+            // until the server has let the surface go — bounded at half a second, past the
+            // longest busy turn the owner's iPad 9 recorded (182 ms), so a server that never says
+            // so costs one wait rather than the picture.
+            let released = DispatchTime.now() + .milliseconds(500)
+            while target.surface.isInUse, DispatchTime.now() < released { usleep(500) }
+            _ = target.surface.lock(options: [], seed: nil)
+            let cg = target.context
+            cg.clear(CGRect(origin: .zero, size: window.size))
+            if delay > 0 { Thread.sleep(forTimeInterval: delay) }
+            UIGraphicsPushContext(cg)
+            let drawn = draw(cg)
+            UIGraphicsPopContext()
+            _ = target.surface.unlock(options: [], seed: nil)
+            return { [weak self] in
+                guard let self else { return }
+                guard drawn == window, self.surfaces.count == 2, self.surfaceWindow == window else {
+                    finished?(false)
+                    return
                 }
+                self.layer.contents = target.surface
+                self.layer.bounds = CGRect(origin: .zero, size: window.size)
+                self.layer.position = window.origin.applying(placement)
+                self.layer.setAffineTransform(CGAffineTransform(a: placement.a, b: placement.b,
+                                                                c: placement.c, d: placement.d,
+                                                                tx: 0, ty: 0))
+                self.isHidden = false
+                self.back = 1 - self.back
+                self.presentedCount += 1
+                finished?(true)
             }
         }
     }

@@ -136,6 +136,9 @@ struct CanvasView: UIViewRepresentable {
         container.addSubview(shapeOverlay)
         context.coordinator.shapeOverlay = shapeOverlay
         shapeOverlay.assist = context.coordinator.handleAssist
+        shapeOverlay.onPreviewDrawn = { [weak coordinator = context.coordinator] in
+            coordinator?.publishCanvasState()
+        }
 
         // The live picture of a primed object being dragged out (TODO (149)). Never interactive, so
         // where it sits in the stack decides nothing about who owns a touch.
@@ -153,6 +156,9 @@ struct CanvasView: UIViewRepresentable {
         textOverlay.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(textOverlay)
         context.coordinator.textOverlay = textOverlay
+        textOverlay.onGlyphsRendered = { [weak coordinator = context.coordinator] in
+            coordinator?.publishCanvasState()
+        }
         textOverlay.onDragBegan = { [weak coordinator = context.coordinator] in
             coordinator?.canvasManager.beginTextFrameDrag()
         }
@@ -418,18 +424,17 @@ struct CanvasView: UIViewRepresentable {
         floatingOverlay.onRequestCommit = { [weak coordinator = context.coordinator] in
             coordinator?.canvasManager.commitFloatingPieceIfNeeded()
         }
+        // Every shape write below tells the canvas itself (`onHeldPictureMoved`), which re-lays this
+        // overlay — so a drag is the overlay's, with no SwiftUI pass behind it (TODO (179)).
         shapeOverlay.onEndpointDragged = { [weak coordinator = context.coordinator] point, endpoint in
             guard let coordinator else { return }
             switch endpoint {
             case .start: coordinator.canvasManager.updateInteractiveShape(startPoint: point)
             case .end: coordinator.canvasManager.updateInteractiveShape(endPoint: point)
             }
-            coordinator.updateShapeOverlay()
         }
         shapeOverlay.onRotationDragged = { [weak coordinator = context.coordinator] rotation in
-            guard let coordinator else { return }
-            coordinator.canvasManager.updateInteractiveShape(rotation: rotation)
-            coordinator.updateShapeOverlay()
+            coordinator?.canvasManager.updateInteractiveShape(rotation: rotation)
         }
         // Both handle drags are pure geometry — see `ShapeGeometry.draggingCorner`/`draggingEdge`.
         // The whole resulting geometry is written back either way. `anchor` is the canvas point the
@@ -634,8 +639,6 @@ struct CanvasView: UIViewRepresentable {
         /// Debounces the snap so a quick two-finger tap-undo doesn't flash a snapped shape.
         private var shapeConstraintTimer: Timer?
         private static let shapeConstraintDelay: TimeInterval = 0.12
-        /// See `scheduleShapePreviewRenderIfNeeded`.
-        private var isShapePreviewRenderScheduled = false
         /// Accumulated canvas-space stroke samples from the current stroke, for shape detection.
         private var shapeDetectionSamples: [VectorSample] = []
         /// Fixed-rate poll that asks `shapeHoldClock` whether the hold is done. The deadline does
@@ -889,9 +892,8 @@ struct CanvasView: UIViewRepresentable {
                         } else if let shape = self.canvasManager.activeShape {
                             let frame = self.shapeFollowFrame ?? shape.followFrame(startingAt: point)
                             self.shapeFollowFrame = frame
-                            self.applyShapeDrag(shape.following(point, from: frame), refreshOverlay: false)
+                            self.applyShapeDrag(shape.following(point, from: frame))
                         }
-                        self.updateShapeOverlay()
                     } else {
                         self.handleStrokeMoved(sample, penTime: penTime, host: host)
                     }
@@ -1227,7 +1229,7 @@ struct CanvasView: UIViewRepresentable {
         /// itself. It distinguishes `following` (pen still down) from `adjustable` (pen lifted,
         /// handles live) rather than collapsing to a bool, because a shape left in `following` with
         /// no pen on the glass is a stranded state, and telling the two apart is the whole diagnosis.
-        private func publishCanvasState() {
+        fileprivate func publishCanvasState() {
             let scale = fitScale * committedScale * liveScale
             // The one place the canvas's screen scale leaves this coordinator. Every transform pass
             // already lands here — including the ones `applyTransform`'s identity guard skips, which
@@ -1277,8 +1279,15 @@ struct CanvasView: UIViewRepresentable {
                 + " pickerPanel:\(ColorPickerPasses.panel)"
                 + " pickerSections:\(ColorPickerPasses.sections)"
                 + " shape:\(shapeState)"
+                // **How many pictures of a pending shape's ink have landed** (TODO (179)), across
+                // shapes — drawn off the main thread into a surface, not through a pass, so a test reads
+                // after its synchronous drag how often the preview kept up with it.
+                + " shapeDraws:\(shapeOverlay?.previewDrawCount ?? 0)"
                 + String(format: " xform:%.4f,%.4f,%.2f,%.2f", scale, rotation, dx, dy)
                 + " text:\(textState)"
+                // **How many glyph bitmaps of the text box have landed** (TODO (179)) — laid out off the
+                // main thread, so a test reads after its synchronous drag how often the box kept up.
+                + " glyphs:\(textOverlay?.glyphRenderCount ?? 0)"
                 + " movebox:\(moveBoxHull())"
                 + " textbox:\(textBoxHull())"
                 // **The angle readout as it is drawn** (TODO (151)): the pill's own text, `none`
@@ -1996,6 +2005,15 @@ struct CanvasView: UIViewRepresentable {
             } else if canvasManager.liveEdit?.channel != nil || canvasManager.liveEdit?.valueFill != nil {
                 showHostAlphasAndFills()
             }
+            // The drafts the canvas draws and the document does not hold either, whose ticks land here
+            // too (TODO (179)): the text box (a keystroke, a panel tick, a drag of the box or a grip), a
+            // pending smart shape, and a lifted bitmap's ants, which ride its box. The text box first,
+            // so the state the shape's re-lay publishes has the box where it is now.
+            updateTextOverlay()
+            updateShapeOverlay()
+            if canvasManager.floatingPiece?.kind == .move {
+                selectionOverlay?.setLiveSelectionTransform(rasterFloatAntsTransform())
+            }
         }
 
         /// Whether what is held is drawn as the whole frame (`HeldEdit.drawsWholeFrame`) on the canvas as
@@ -2641,11 +2659,11 @@ struct CanvasView: UIViewRepresentable {
             }
         }
 
-        /// The raster Move's version of travelling ants. Its piece writes its transform to the model
-        /// on every delta already (`updateFloatingPose`), so unlike the vector float this needs
-        /// no live latch of its own — it is the same one transform on the outline, read off the piece.
+        /// The raster Move's version of travelling ants: the one transform on the outline, read off the
+        /// piece as its box shows it — the drag's travel, which the piece learns at the lift
+        /// (`CanvasManager.boxNudge`), moved on each tick by `heldPictureMoved`.
         private func rasterFloatAntsTransform() -> FloatingAntsMap {
-            guard let piece = canvasManager.floatingPiece, piece.kind == .move else {
+            guard let piece = canvasManager.shownFloatingPiece, piece.kind == .move else {
                 return .affine(.identity)
             }
             // `antsMap`, not the affine composition this used to spell inline: a distorted piece's
@@ -2997,13 +3015,7 @@ struct CanvasView: UIViewRepresentable {
             // Set here as well as in `applyTransform`, so neither ordering of "transform changed" vs
             // "overlay appeared" can leave the handles the wrong size for a frame.
             overlay.canvasScale = canvasContentScale
-            // Render inline the first time so the shape isn't invisible for a frame; the
-            // coalescing below carries subsequent renders.
-            if canvasManager.activeShapePreviewImage == nil { canvasManager.renderActiveShapePreview() }
-            overlay.update(shape: shape,
-                           previewImage: canvasManager.activeShapePreviewImage,
-                           showHandles: isAdjustable)
-            scheduleShapePreviewRenderIfNeeded()
+            overlay.update(shape: shape, ink: canvasManager.shapeInk, showHandles: isAdjustable)
             // Above every layer host so it's visible and hit-testable; interaction is disabled
             // during shape following so touches pass through to the stroke view instead.
             //
@@ -3090,21 +3102,6 @@ struct CanvasView: UIViewRepresentable {
 
         /// The text session's pan, if one has been added — see `followTextBox`.
         private var textFollow = ViewportFollow()
-
-        /// Coalesces preview re-renders to one per run-loop turn — a Pencil delivers several coalesced
-        /// samples per frame, and re-stamping a canvas-sized preview per sample costs far more than
-        /// the frame of lag this trades for. Feeds the overlay directly to avoid re-scheduling itself.
-        private func scheduleShapePreviewRenderIfNeeded() {
-            guard canvasManager.isActiveShapePreviewStale, !isShapePreviewRenderScheduled else { return }
-            isShapePreviewRenderScheduled = true
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                self.isShapePreviewRenderScheduled = false
-                guard self.canvasManager.shapeGestureActive else { return }
-                self.canvasManager.renderActiveShapePreview()
-                self.shapeOverlay?.setPreviewImage(self.canvasManager.activeShapePreviewImage)
-            }
-        }
 
         /// Repaints every layer host whose backing content has drifted from what it last rendered.
         /// The synchronous form of `reconcileLayers`' per-pass version, needed for the moment a
@@ -3813,13 +3810,12 @@ struct CanvasView: UIViewRepresentable {
         /// centre, its size, and its detected rotation. See `ShapeGeometry.FollowFrame`.
         private var shapeFollowFrame: ShapeGeometry.FollowFrame?
 
-        /// Writes a dragged geometry back onto the pending shape and repaints the overlay.
-        /// `refreshOverlay: false` is for callers that update the overlay themselves right after.
-        fileprivate func applyShapeDrag(_ geometry: ShapeGeometry, refreshOverlay: Bool = true) {
+        /// Writes a dragged geometry back onto the pending shape, which repaints the overlay
+        /// (`heldPictureMoved`).
+        fileprivate func applyShapeDrag(_ geometry: ShapeGeometry) {
             canvasManager.updateInteractiveShape(startPoint: geometry.startPoint,
                                                  endPoint: geometry.endPoint,
                                                  rotation: geometry.rotation)
-            if refreshOverlay { updateShapeOverlay() }
         }
 
         private func handleStrokeMoved(_ sample: VectorSample, penTime: TimeInterval, host: LayerHostView?) {
@@ -4801,7 +4797,6 @@ struct CanvasView: UIViewRepresentable {
             isShapeConstraintEngaged = on
             guard canvasManager.shapeGestureActive else { return }
             canvasManager.updateInteractiveShape(isConstrained: on)
-            updateShapeOverlay()
         }
 
         @objc func handleThreeFingerTap() {

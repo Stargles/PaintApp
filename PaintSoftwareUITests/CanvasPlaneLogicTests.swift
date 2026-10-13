@@ -95,7 +95,7 @@ final class CanvasPlaneLogicTests: XCTestCase {
         overlay.isActive = true
         overlay.canvasScale = 1
         overlay.update(shape: ShapeGeometry(kind: .line, startPoint: start, endPoint: end),
-                       previewImage: nil, showHandles: true)
+                       ink: nil, showHandles: true)
         overlay.isUserInteractionEnabled = true
         return overlay
     }

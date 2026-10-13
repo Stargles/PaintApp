@@ -388,6 +388,8 @@ final class DistortLogicTests: XCTestCase {
         manager.updateFloatingPose(transform: FloatingTransform(position: CGPoint(x: 10, y: 12),
                                                                 scaleX: 2, scaleY: 2, rotation: 0),
                                    distortQuad: shape)
+        // The finger lifts — what the piece learns a drag's travel at (`CanvasManager.boxNudge`).
+        manager.moveBoxLifted()
         XCTAssertEqual(manager.floatingPiece?.distortQuad, shape)
 
         // And the composition is real: the canvas quad has moved and scaled with the piece while
@@ -445,8 +447,8 @@ final class DistortLogicTests: XCTestCase {
     ///
     /// The geometry tests above build a `FloatingPiece` by hand so their operands are exact. This one
     /// does not, because what it is about is the wiring: that `beginMove`'s piece can be dragged by
-    /// `FloatingDistortDrag` at all, that `updateFloatingPose` lands the quad on the model, and that
-    /// `commitFloatingPieceIfNeeded` reaches the warp rather than the affine draw.
+    /// `FloatingDistortDrag` at all, that `updateFloatingPose` and the lift land the quad on the model,
+    /// and that `commitFloatingPieceIfNeeded` reaches the warp rather than the affine draw.
     func testAWholeMoveEndToEndBakesTheDistortedShape() throws {
         let manager = CanvasFixture.manager(layerCount: 1)
         CanvasFixture.setBakedContent(manager, layerIndex: 0,
@@ -466,6 +468,7 @@ final class DistortLogicTests: XCTestCase {
             let drag = try XCTUnwrap(FloatingDistortDrag(piece: piece, corner: corner))
             let quad = try XCTUnwrap(drag.quad(draggedTo: target))
             manager.updateFloatingPose(transform: piece.transform, distortQuad: quad)
+            manager.moveBoxLifted()
         }
         XCTAssertNotNil(manager.floatingPiece?.distortQuad, "the drags landed on the model")
         XCTAssertTrue(manager.canResetFloating)

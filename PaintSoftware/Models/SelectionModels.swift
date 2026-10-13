@@ -384,11 +384,15 @@ enum FloatingPieceKind {
     /// Whether a corner drag in Distort mode may pull this piece's corners. False for the effect
     /// box alone — `CanvasManager.distortUnavailableReason` carries the sentence.
     var acceptsDistort: Bool { self != .effectBox }
+
+    /// Whether the piece is lifted pixels — a Move's or a Duplicate's bitmap — rather than a box over a
+    /// pose or a grade.
+    var carriesPixels: Bool { self == .move || self == .duplicate }
 }
 
-/// **One gesture on a Move box that poses or grades** — a drag of a transformation layer's or a
-/// Duplicate Offset's box, or one press of Mirror, Rotate or Reset: the frame it was made on, where the
-/// box was when it began, and where the finger has it now. Held on `CanvasManager.boxNudge`.
+/// **One gesture on a Move box** — a drag of a lifted bitmap's, a transformation layer's or a Duplicate
+/// Offset's box, or one press of Mirror, Rotate or Reset: the frame it was made on, where the box was
+/// when it began, and where the finger has it now. Held on `CanvasManager.boxNudge`.
 ///
 /// **Opened when the gesture begins and settled when it ends** (`CanvasManager.settleBoxNudge`), never
 /// held between gestures: the box stays up across scrubs, Add Keys, graph-editor edits and undo, each
@@ -402,6 +406,11 @@ enum FloatingPieceKind {
 /// original's coverage minus the moved copy's and no transform of a band can draw it. There is nothing
 /// in the document to put back: Undo pressed mid-drag acts on the steps, and a save mid-drag saves the
 /// document as it was.
+///
+/// **A lifted bitmap's gesture is its travel alone** (TODO (179)): the overlay draws the piece where the
+/// finger has it and the canvas moves the ants with it, and the `@Published` piece learns the travel at
+/// the lift — one SwiftUI pass a drag rather than one a tick. Setting the piece down mid-drag lands it
+/// where the box is (`commitFloatingPieceIfNeeded`).
 struct BoxNudge {
     /// The frame the gesture was made on — the frame its commit routes at, wherever the playhead is
     /// when it settles.
@@ -1517,8 +1526,10 @@ extension CanvasManager {
     /// the overlay's drag produces both — `nil` from the arms that do not distort, which is the whole
     /// of what "this gesture left the corners alone" means.
     ///
-    /// **A box that poses or grades carries its gesture** (`boxNudge`) and the piece learns the pose at
-    /// the lift; a lifted bitmap writes the piece, which is what its ants are drawn from.
+    /// **Every box carries its gesture** (`boxNudge`) and the piece learns the pose at the lift — a
+    /// lifted bitmap's too (TODO (179)): the overlay lays itself out on the tick, the canvas moves the
+    /// ants with it (`onHeldPictureMoved`), and the `@Published` piece is written once, so a drag is not
+    /// a SwiftUI pass over the editor per tick.
     func updateFloatingPose(transform: FloatingTransform, distortQuad: Quad?) {
         guard carryBoxNudge(to: transform, distortQuad: distortQuad) else {
             floatingPiece?.transform = transform
@@ -1554,25 +1565,26 @@ extension CanvasManager {
     /// Mirror, Rotate or Reset, before the box moves. `BoxNudge` says why this is per gesture and never
     /// per box.
     ///
-    /// Neither box takes anything from the document: its preview is held and its commit reads the
-    /// document as it stands at the lift — which between gestures is exactly what every other writer
-    /// left it as: a key placed by Add Keys, a node dragged in the graph editor, an undo.
+    /// Neither box that poses or grades takes anything from the document: its preview is held and its
+    /// commit reads the document as it stands at the lift — which between gestures is exactly what every
+    /// other writer left it as: a key placed by Add Keys, a node dragged in the graph editor, an undo. A
+    /// lifted bitmap's gesture is its travel and nothing else: the piece lands only when it is set down.
     private func openBoxNudgeIfNeeded() {
-        guard boxNudge == nil, let piece = floatingPiece, let target = piece.containerTarget else { return }
+        guard boxNudge == nil, let piece = floatingPiece else { return }
         switch piece.kind {
         case .containerPose:
-            guard containerPose(of: target) != nil else { return }
+            guard let target = piece.containerTarget, containerPose(of: target) != nil else { return }
         case .effectBox:
-            guard storedEffect(of: target) != nil else { return }
+            guard let target = piece.containerTarget, storedEffect(of: target) != nil else { return }
         case .move, .duplicate:
-            return
+            break
         }
         boxNudge = BoxNudge(frame: currentFrame, originTransform: piece.transform, originQuad: piece.distortQuad,
                             transform: piece.transform, distortQuad: piece.distortQuad)
     }
 
     /// Carries the box's gesture — opened first if none is — to `transform`. False for a piece with no
-    /// gesture to carry: a lifted bitmap, or a box whose target has stopped posing or grading.
+    /// gesture to carry: a box whose target has stopped posing or grading.
     private func carryBoxNudge(to transform: FloatingTransform, distortQuad: Quad?) -> Bool {
         openBoxNudgeIfNeeded()
         guard boxNudge != nil else { return false }
@@ -1582,10 +1594,12 @@ extension CanvasManager {
     }
 
     /// The box's preview at the gesture's travel — a transformation layer's pose or an effect box's
-    /// grade, held. Each returns at once for the other kind.
+    /// grade, held, each returning at once for another kind; for a lifted bitmap, whose overlay has laid
+    /// itself out already, the canvas is told so it moves the ants with it.
     private func showBoxNudge() {
         holdContainerBoxPose()
         holdEffectBoxLive()
+        if floatingPiece?.kind.carriesPixels == true { onHeldPictureMoved?() }
     }
 
     /// **Ends the gesture on the box that is up: what it did lands as one undo step, routed at the
@@ -1620,7 +1634,11 @@ extension CanvasManager {
         guard let piece = floatingPiece, let nudge = boxNudge, !recordingOwnsMoveBox else { return }
         boxNudge = nil
         placeBox(where: nudge)
-        if piece.kind == .effectBox { revertHeldGrade() } else { holdLivePose(nil) }
+        switch piece.kind {
+        case .effectBox: revertHeldGrade()
+        case .containerPose: holdLivePose(nil)
+        case .move, .duplicate: break
+        }
     }
 
     /// **The piece learns where its box is** — the gesture's travel, written once, when the gesture is
@@ -1634,13 +1652,18 @@ extension CanvasManager {
     }
 
     /// Lands a gesture already taken off the box, as one undo step, and lets its held pose or grade go —
-    /// after the commit, so the canvas re-poses from a document that already holds what was held.
+    /// after the commit, so the canvas re-poses from a document that already holds what was held. A
+    /// lifted bitmap's gesture lands nothing: its travel is the piece's (`placeBox`), and the piece
+    /// lands when it is set down.
     private func commitBoxNudge(_ nudge: BoxNudge, of piece: FloatingPiece) {
-        if piece.kind == .effectBox {
+        switch piece.kind {
+        case .effectBox:
             commitHeldGrade()
-        } else {
+        case .containerPose:
             commitContainerNudge(nudge, of: piece)
             holdLivePose(nil)
+        case .move, .duplicate:
+            break
         }
     }
 
@@ -1974,7 +1997,7 @@ extension CanvasManager {
     /// undoable step. No-op if there's nothing floating.
     @discardableResult
     func commitFloatingPieceIfNeeded() -> Bool {
-        guard let piece = floatingPiece, let canvasSize else { return false }
+        guard var piece = floatingPiece, let canvasSize else { return false }
         floatingPiece = nil
         // **The two boxes bake nothing and return here**, before a single line of the pixel path
         // below. Neither has a `pieceImage` worth rendering, a remainder to composite against or a cel
@@ -1992,6 +2015,13 @@ extension CanvasManager {
         // when the piece bakes, not when it lifts. `.duplicate` cleared its own at lift and is
         // untouched — a copy is not a region the artist is still holding.
         if piece.kind == .move { selection = nil }
+        // A bitmap set down with a finger still on its box — a tool switch or a save mid-drag — lands
+        // where the box is, which the piece has not learnt yet (`boxNudge`).
+        if let nudge = boxNudge {
+            boxNudge = nil
+            piece.transform = nudge.transform
+            piece.distortQuad = nudge.distortQuad
+        }
         guard let targetLayerIndex = layerIndex(ofID: piece.targetLayerID),
               let targetCelIndex = layers[targetLayerIndex].cels.firstIndex(where: { $0.id == piece.targetCelID }) else { return true }
 

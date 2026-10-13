@@ -20,8 +20,9 @@ import UIKit
 /// - It knows which views are artwork only because this file says so. A new artwork view in a file
 ///   nobody listed here is invisible to it — which is why the last test refuses to let a *file*
 ///   grow a `UIImageView` without being classified, since that is the shape the regression takes.
-/// - Only `ShapeOverlayView` is checked at runtime, because it is the one artwork view whose file is
-///   compiled into this target; the rest reach the test as strings.
+/// - Only the shape preview is checked at runtime, because `ShapeOverlayView` and the surface it draws
+///   through are the artwork views whose files are compiled into this target; the rest reach the test
+///   as strings.
 ///
 /// What it does catch is the regression it was written for: somebody adds a canvas image view and
 /// forgets the filter, or a sweep "simplifies" one of these lines away.
@@ -42,7 +43,6 @@ final class CanvasLayerFilterLogicTests: XCTestCase {
         ("PaintSoftware/Views/Canvas/LayerHostView.swift", 2),        // baked + fill tiers
         ("PaintSoftware/Views/Canvas/StrokeCanvasView.swift", 4),     // the layer's picture, the live scratch, the float, one held un-landed stroke
         ("PaintSoftware/Views/CanvasView.swift", 3),                  // the sandwich pair, the onion-skin pair, the timing recorder's trail
-        ("PaintSoftware/Views/ShapeOverlayView.swift", 1),            // the live shape preview
         ("PaintSoftware/Views/FloatingPieceOverlayView.swift", 1)     // the lifted raster piece
     ]
 
@@ -128,14 +128,24 @@ final class CanvasLayerFilterLogicTests: XCTestCase {
     // MARK: - Runtime, for the one file this target compiles
 
     /// The source scan proves a line exists; this proves the property lands on a real layer. Only
-    /// `ShapeOverlayView` can be reached — the layer hosts and `CanvasView` are not compiled into
-    /// this target and pulling them in would drag the whole editor with them.
-    func testTheShapePreviewLayerReallyCarriesTheFilter() {
-        let overlay = ShapeOverlayView(frame: CGRect(x: 0, y: 0, width: 256, height: 256))
-        let previews = overlay.subviews.compactMap { $0 as? UIImageView }
-        XCTAssertEqual(previews.count, 1, "The shape overlay shows its preview through one image view")
-        XCTAssertEqual(previews.first?.layer.minificationFilter, .trilinear)
-        XCTAssertEqual(previews.first?.layer.magnificationFilter, .nearest,
+    /// the shape preview can be reached — the layer hosts and `CanvasView` are not compiled into
+    /// this target and pulling them in would drag the whole editor with them. A pending shape's ink
+    /// is drawn into a `WindowSurfaceView` (TODO (179)), so that is the layer that has to carry it.
+    @MainActor
+    func testTheShapePreviewLayerReallyCarriesTheFilter() throws {
+        let manager = CanvasFixture.manager()
+        let line = ShapeGeometry(kind: .line, startPoint: CGPoint(x: 8, y: 8), endPoint: CGPoint(x: 56, y: 40))
+        manager.beginInteractiveShape(line, samples: (0...8).map {
+            VectorSample(x: 8 + 6 * CGFloat($0), y: 8 + 4 * CGFloat($0), pressure: 1)
+        })
+        let overlay = ShapeOverlayView(frame: CGRect(origin: .zero, size: CanvasFixture.canvasSize))
+        overlay.isActive = true
+        overlay.update(shape: line, ink: manager.shapeInk, showHandles: false)
+        let previews = overlay.subviews.flatMap(\.subviews).compactMap { $0 as? WindowSurfaceView }
+        XCTAssertEqual(previews.count, 1, "The shape overlay shows its preview through one surface view")
+        let preview = try XCTUnwrap(previews.first)
+        XCTAssertEqual(preview.layer.minificationFilter, .trilinear)
+        XCTAssertEqual(preview.layer.magnificationFilter, .nearest,
                        "Untouched — magnified artwork stays crisp, which is a separate contract")
     }
 
