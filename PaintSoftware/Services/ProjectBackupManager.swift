@@ -238,17 +238,13 @@ nonisolated enum ProjectBackupManager {
 
         // App updated or redeployed? Snapshot every valid project BEFORE anything else can touch
         // them, so a bad update can never destroy the only copy of pre-update work.
-        let signature = currentAppSignature
-        if settings.lastAppSignature != signature {
-            snapshotAllProjectsForAppUpdate(signature: signature)
-            settings.lastAppSignature = signature
-        }
+        let snapshot = takeUpdateSnapshotIfNeeded()
 
         repairCorruptedProjects()
 
         // Throwaway: rewrites pose tracks that earlier builds wrote into the current format, across the
         // library, saved versions included. After the snapshot, whose own clone it leaves as it was.
-        LegacyPoseTrackRepair.repairLibrary(leavingUntouched: "preupdate-\(sanitizedSignature(signature))")
+        LegacyPoseTrackRepair.repairLibrary(leavingUntouched: snapshot)
 
         // TODO (57): move each project's JSON sidecars out from under `images/`. **After the repair**
         // so a damaged package is restored before we look at it, and **before the purges** so nothing
@@ -295,6 +291,21 @@ nonisolated enum ProjectBackupManager {
     }
 
     // MARK: - App-update detection & snapshots
+
+    /// **Takes this build's update snapshot if it has not been taken** — every intact project cloned
+    /// into a `preupdate-` slot before anything can touch it — and answers that snapshot's slot-name
+    /// prefix, which a repair leaves exactly as it was. The launch maintenance takes it, and so does a
+    /// repair that has to rewrite packages before the maintenance runs (`LegacyToolSettingsRepair`), so
+    /// whichever comes first takes it once.
+    @discardableResult
+    static func takeUpdateSnapshotIfNeeded() -> String {
+        let signature = currentAppSignature
+        if settings.lastAppSignature != signature {
+            snapshotAllProjectsForAppUpdate(signature: signature)
+            settings.lastAppSignature = signature
+        }
+        return "preupdate-\(sanitizedSignature(signature))"
+    }
 
     /// Version + build + the app binary's modification date. The binary date is what actually
     /// catches dev/AI redeploys, which reinstall the app without bumping the version string.

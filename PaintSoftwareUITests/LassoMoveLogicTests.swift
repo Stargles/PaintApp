@@ -2372,7 +2372,7 @@ final class LassoMoveLogicTests: XCTestCase {
                 // Inside the lasso arm's loop (x ≥ 24), and outside it.
                 vector.addStroke(stroke(from: CGPoint(x: 30, y: 10), to: CGPoint(x: 50, y: 10)))
                 vector.addStroke(stroke(from: CGPoint(x: 4, y: 40), to: CGPoint(x: 16, y: 40)))
-                manager.toolSwitches.preserveMovePrecision = keepPrecision
+                manager.preserveMovePrecision = keepPrecision
 
                 XCTAssertTrue(lift(kind, manager, layerIndex), "\(kind.rawValue): lift")
                 manager.nudgeVectorFloat(to: movedBy(manager, dx: 4, dy: 0))
@@ -2408,7 +2408,7 @@ final class LassoMoveLogicTests: XCTestCase {
     func testUndoingAMoveTakesTheFlagBackWithIt() {
         let (manager, layerIndex, vector) = fixture()
         vector.addStroke(stroke(from: CGPoint(x: 30, y: 10), to: CGPoint(x: 50, y: 10)))
-        manager.toolSwitches.preserveMovePrecision = true
+        manager.preserveMovePrecision = true
 
         XCTAssertTrue(lift(.wholeCel, manager, layerIndex))
         manager.nudgeVectorFloat(to: movedBy(manager, dx: 6, dy: 0))

@@ -96,11 +96,11 @@ final class ToolReturnPathLogicTests: XCTestCase {
         let manager = CanvasFixture.manager()
         manager.selectedTool = .pencil
         manager.selectEyedropper()
-        XCTAssertEqual(manager.editorPreferences.tool, .pencil)
+        XCTAssertEqual(manager.sceneTools.tool, .pencil)
         manager.leaveEyedropper()
 
         manager.primeObject(.rectangle)
         manager.selectEyedropper()
-        XCTAssertEqual(manager.editorPreferences.tool, .pen, "the object is entered for one placement")
+        XCTAssertEqual(manager.sceneTools.tool, .pen, "the object is entered for one placement")
     }
 }

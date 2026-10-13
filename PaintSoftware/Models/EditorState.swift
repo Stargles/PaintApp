@@ -1,20 +1,24 @@
 import SwiftUI
 
-// MARK: - Editor state that survives the gallery round trip (TODO (77))
+// MARK: - The editor as the artist left it in this scene — TODO (77), then TODO (176)
 //
 // Leaving the editor discards the `CanvasManager`; reopening the project builds a new one from the
-// manifest. Everything the manifest did not carry therefore came back at its default — the brush
-// size and opacity, the frame, the zoom, the layer — which is the owner's report. The rule that
-// decides where each piece now lives is one sentence: **how this document is being looked at goes
-// with the document; the tools in the artist's hand go with the app.**
+// manifest. Everything the manifest did not carry therefore came back at its default — the owner's
+// report for (77). The owner's ruling for (176) then put every option on one of three levels, and this
+// file is the scene's: **how this scene is being looked at, and the tools in the artist's hand while they
+// work on it, go with the scene.** A new scene starts at the defaults; reopening one finds it as it was
+// left, whatever another scene did meanwhile.
 //
-// `EditorStateManifest` is the first half, written into `manifest.json` by every save and applied by
-// `ProjectStore.assemble`. `EditorPreferences` is the second, in `UserDefaults` beside
-// `ToolSwitches`, stored by every save and applied to a manager as it enters the editor.
+// The other two levels are elsewhere: what the app keeps for itself (Fingers Can Paint, Render
+// Resolution, the projects folder, the Palettes library…) is `AppSettings`, and what resets each launch
+// is plain model state with no persistence code — the Select and Move switches, the selection mode, the
+// timeline's zoom, every open panel and presentation, interpolate mode, the graph editor, notices, the
+// undo history, and a floating Move or Duplicate piece (committed on the way out).
 //
-// Left to reset on purpose, and named so nobody re-files them: a floating Move or Duplicate piece and
-// a lasso float (committed by `commitAllInteractiveState` on the way out), the selection, every open
-// panel and presentation, interpolate mode, the graph editor, notices, and the undo history.
+// **Decoded strictly.** A package this build cannot read is a package it does not open, never a scene
+// whose tools quietly came back at their defaults: the owner's rule, *"if an update causes existing files
+// to be outdated, then they should be automatically repaired"*. `LegacyToolSettingsRepair` is the one
+// place that knows the earlier shapes.
 
 /// The zoom, rotation and pan the artist left the canvas at — `CanvasView.Coordinator`'s committed
 /// navigation transform, in its own units: `scale` is relative to the fit-to-host scale, `rotation`
@@ -27,13 +31,7 @@ struct CanvasViewTransform: Codable, Equatable {
     var offsetY: Double
 }
 
-/// What the editor was showing of this document when it was saved.
-///
-/// Every field decodes with a default when absent, which is §3.5's field-presence versioning: a
-/// package written before (77) has no `editorState` at all and opens exactly as it did, and a field
-/// added later leaves older records readable. A record this build cannot decode at all is treated
-/// the same way — it is a view of the artwork, never the artwork, so nothing is worth refusing to
-/// open over.
+/// What the editor was showing of this scene, and the tools it was showing them with, when it was saved.
 struct EditorStateManifest: Codable, Equatable {
     var currentFrame: Int = 0
     /// The layer, by id rather than index: a layer added or removed by another build would move an
@@ -46,88 +44,41 @@ struct EditorStateManifest: Codable, Equatable {
     var loopStartFrame: Int? = nil
     var loopEndFrame: Int? = nil
     var view: CanvasViewTransform? = nil
-    /// What the eyedropper reads under the finger — TODO (119). A way of working on *this* drawing
-    /// (the owner: *"one of the things the canvas should remember so if the user exits and enters
-    /// back, it sticks"*), so it travels with the document and not with the app's tools.
-    var eyedropperMode: Eyedropper.Mode = .layer
-
-    init() {}
-
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        currentFrame = try c.decodeIfPresent(Int.self, forKey: .currentFrame) ?? 0
-        selectedLayerID = try c.decodeIfPresent(UUID.self, forKey: .selectedLayerID)
-        selectedFolderID = try c.decodeIfPresent(UUID.self, forKey: .selectedFolderID)
-        isOnionSkinEnabled = try c.decodeIfPresent(Bool.self, forKey: .isOnionSkinEnabled) ?? true
-        onionSkin = (try? c.decodeIfPresent(OnionSkinSettings.self, forKey: .onionSkin)) ?? OnionSkinSettings()
-        isLoopEnabled = try c.decodeIfPresent(Bool.self, forKey: .isLoopEnabled) ?? true
-        loopStartFrame = try c.decodeIfPresent(Int.self, forKey: .loopStartFrame)
-        loopEndFrame = try c.decodeIfPresent(Int.self, forKey: .loopEndFrame)
-        view = try c.decodeIfPresent(CanvasViewTransform.self, forKey: .view)
-        eyedropperMode = (try? c.decodeIfPresent(Eyedropper.Mode.self, forKey: .eyedropperMode)) ?? .layer
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case currentFrame, selectedLayerID, selectedFolderID, isOnionSkinEnabled, onionSkin,
-             isLoopEnabled, loopStartFrame, loopEndFrame, view, eyedropperMode
-    }
+    /// The view preset the Layers panel has active, by id for `selectedLayerID`'s reason; nil is All.
+    var activeViewPresetID: UUID? = nil
+    var tools = SceneTools()
 }
 
-/// The tools in the artist's hand — app-wide, because the toolbar is theirs rather than the
-/// document's: the brush size they nudged follows them into the next document as well as back into
-/// this one. The pen's *preset* stays in the manifest where it has always been (`selectedBrush`,
-/// BRUSH.md §8.1); this carries the size and opacity nudged away from it, the eraser's preset by id,
-/// the tool, and the colour.
-struct EditorPreferences: Codable, Equatable {
-    var tool: Tool
-    var brushSize: Double
-    var brushOpacity: Double
-    var brushColor: CodableColor
-    var eraserBrushID: UUID
-    var eraserSize: Double
-    var eraserOpacity: Double
-
-    /// One key, one JSON value — a seven-field record is one preference, and seven keys would let
-    /// half of it be read against the other half's absence.
-    static let defaultsKey = "paintapp.editorPreferences"
-
-    static func stored(in defaults: UserDefaults = .standard) -> EditorPreferences? {
-        guard let data = defaults.data(forKey: defaultsKey) else { return nil }
-        return try? JSONDecoder().decode(EditorPreferences.self, from: data)
-    }
-
-    func store(in defaults: UserDefaults = .standard) {
-        guard let data = try? JSONEncoder().encode(self) else { return }
-        defaults.set(data, forKey: Self.defaultsKey)
-    }
-
-    /// The launch-argument test hook: `-resetEditorPreferences` forgets the stored tools, and so
-    /// does `-resetGallery`, whose whole purpose is a launch that looks like a fresh install. The
-    /// brush size, opacity, colour and tool outlive a launch now, so a UI test that opens a new
-    /// document and reads the default brush has to ask for the defaults
-    /// (`PaintUITestCase.launchIntoEditor` does) or it inherits whatever the previous test left.
-    /// Synchronous, in `PaintApp.init`, because the next tap can read the record.
-    static func forgetIfRequested(arguments: [String] = ProcessInfo.processInfo.arguments,
-                                  defaults: UserDefaults = .standard) {
-        guard forgetRequested(in: arguments) else { return }
-        defaults.removeObject(forKey: defaultsKey)
-    }
-
-    /// Whether this launch asked for the artist's app-wide preferences to be forgotten — the one
-    /// spelling of the condition, shared by every `forgetIfRequested` that answers to it
-    /// (`ColorPickerType`'s remembered tab, `ToolSwitches`) so a fourth cannot disagree about which
-    /// launch arguments mean it.
-    static func forgetRequested(in arguments: [String]) -> Bool {
-        arguments.contains("-resetEditorPreferences") || arguments.contains("-resetGallery")
-    }
+/// **The tools in the artist's hand in this scene** — TODO (176)'s Document rows. Every default here is
+/// what a new scene starts with; `EditorStateLogicTests` holds them to a new `CanvasManager`'s own.
+struct SceneTools: Codable, Equatable {
+    /// The active tool. Only one the artist can be handed back on opening (`Tool.isRestoredOnOpening`).
+    var tool: Tool = .pen
+    /// Each stroke tool's preset, size and opacity. The preset is carried whole so a package moved to
+    /// another iPad still has it; on opening, the library's own version of it is taken
+    /// (`CanvasManager.adoptLibrarySelections`), because a preset's parameters are app-wide (A8).
+    var profiles = ToolProfiles()
+    /// The colour in hand — Pen, Pencil, Fill, Rectangle, Ellipse and the selection's Fill share it.
+    var color = CodableColor(red: 0, green: 0, blue: 0, alpha: 1)
+    /// What the eyedropper reads under the finger — TODO (119).
+    var eyedropperMode: Eyedropper.Mode = .layer
+    var vectorEraserMode: VectorEraserMode = .default
+    /// Whether the eraser reaches every visible vector layer — TODO (82).
+    var universalEraser = false
+    var fill = FillToolManifest()
+    /// The text tool's draft style — font, face, colour, size, spacing and alignment — with no words.
+    var text = TextRecipe()
+    var interpolationThicknessFade = false
+    var showMotionGroupOverlay = true
+    var colorPanel = ColorPanelManifest()
 }
 
 extension Tool {
-    /// Whether this tool is one the artist can be handed back on their next document. The
-    /// eyedropper, the text tool and a primed object are all entered for one action and leave through
-    /// their own exit paths (`leaveMomentaryTool`, the text session, `leavePlacement`), so restoring
-    /// any of them would open the editor mid-gesture with nothing to finish.
-    var restoresAcrossDocuments: Bool {
+    /// Whether this tool is one the artist can be handed back on opening a scene. The eyedropper, the
+    /// text tool and a primed object are all entered for one action and leave through their own exit
+    /// paths (`leaveMomentaryTool`, the text session, `leavePlacement`), so restoring any of them would
+    /// open the editor mid-gesture with nothing to finish.
+    var isRestoredOnOpening: Bool {
         switch self {
         case .pen, .pencil, .eraser, .fill: return true
         case .eyedropper, .text, .place:    return false
@@ -136,7 +87,7 @@ extension Tool {
 }
 
 extension CanvasManager {
-    /// The document half of the round trip, read for the manifest.
+    /// The scene's half of the editor, read for the manifest.
     var editorState: EditorStateManifest {
         var state = EditorStateManifest()
         state.currentFrame = currentFrame
@@ -148,13 +99,33 @@ extension CanvasManager {
         state.loopStartFrame = loopStartFrame
         state.loopEndFrame = loopEndFrame
         state.view = viewTransform
-        state.eyedropperMode = eyedropperMode
+        state.activeViewPresetID = viewPresets.indices.contains(activeViewPresetIndex)
+            ? viewPresets[activeViewPresetIndex].id : nil
+        state.tools = sceneTools
         return state
     }
 
-    /// Puts a loaded document back where its editor was — `ProjectStore.assemble`'s last step, after
-    /// the layers exist. A layer id the document no longer has falls back to the first layer, which
-    /// is what a fresh open showed before (77).
+    /// The tools, read for the manifest. The eyedropper reports the tool it will hand back to.
+    var sceneTools: SceneTools {
+        let tool = selectedTool == .eyedropper ? toolReturnPath.handsBackTo : selectedTool
+        var tools = SceneTools()
+        tools.tool = tool.isRestoredOnOpening ? tool : .pen
+        tools.profiles = toolProfiles
+        tools.color = brushColor.codable
+        tools.eyedropperMode = eyedropperMode
+        tools.vectorEraserMode = vectorEraserMode
+        tools.universalEraser = universalEraser
+        tools.fill = FillToolManifest(mode: fillMode, settings: fillSettings)
+        tools.text = textRecipe.styleOnly
+        tools.interpolationThicknessFade = interpolationThicknessFade
+        tools.showMotionGroupOverlay = showMotionGroupOverlay
+        tools.colorPanel = colorPanel.manifest
+        return tools
+    }
+
+    /// Puts a loaded scene back where its editor was — `ProjectStore.assemble`'s last step, after the
+    /// layers, folders and view presets exist. A layer id the scene no longer has falls back to the
+    /// first layer, which is what a fresh open shows.
     func restoreEditorState(_ state: EditorStateManifest) {
         currentFrame = max(0, state.currentFrame)
         currentLayerIndex = state.selectedLayerID.flatMap { id in layers.firstIndex { $0.id == id } } ?? 0
@@ -166,31 +137,22 @@ extension CanvasManager {
         loopStartFrame = state.loopStartFrame
         loopEndFrame = state.loopEndFrame
         viewTransform = state.view
-        eyedropperMode = state.eyedropperMode
+        activeViewPresetIndex = state.activeViewPresetID.flatMap { id in viewPresets.firstIndex { $0.id == id } } ?? -1
+        restoreSceneTools(state.tools)
     }
 
-    /// The app half, read for `UserDefaults`. The eyedropper reports the tool it will hand back to.
-    var editorPreferences: EditorPreferences {
-        let tool = selectedTool == .eyedropper ? toolReturnPath.handsBackTo : selectedTool
-        return EditorPreferences(tool: tool.restoresAcrossDocuments ? tool : .pen,
-                                 brushSize: Double(toolProfiles.brush.size), brushOpacity: toolProfiles.brush.opacity,
-                                 brushColor: brushColor.codable,
-                                 eraserBrushID: toolProfiles.eraser.preset.id,
-                                 eraserSize: Double(toolProfiles.eraser.size), eraserOpacity: toolProfiles.eraser.opacity)
-    }
-
-    /// Hands the artist their tools back as a manager enters the editor — new document or reopened
-    /// one. The eraser's preset is resolved through the library, which is the same lookup
-    /// `adoptLibrarySelections` makes; an id the library no longer has keeps the literal default.
-    /// **After** `selectPreset` has run for the document's pen preset, because that call re-baselines
-    /// size and opacity from the preset and this is what the artist nudged them to since.
-    func applyEditorPreferences(_ preferences: EditorPreferences) {
-        selectedTool = preferences.tool
-        toolProfiles.brush.size = CGFloat(preferences.brushSize)
-        toolProfiles.brush.opacity = preferences.brushOpacity
-        brushColor = preferences.brushColor.color
-        if let eraser = brushLibrary.brush(withID: preferences.eraserBrushID) { toolProfiles.eraser.preset = eraser }
-        toolProfiles.eraser.size = CGFloat(preferences.eraserSize)
-        toolProfiles.eraser.opacity = preferences.eraserOpacity
+    func restoreSceneTools(_ tools: SceneTools) {
+        selectedTool = tools.tool
+        toolProfiles = tools.profiles
+        brushColor = tools.color.color
+        eyedropperMode = tools.eyedropperMode
+        vectorEraserMode = tools.vectorEraserMode
+        universalEraser = tools.universalEraser
+        fillMode = tools.fill.mode
+        tools.fill.apply(to: fillSettings)
+        textRecipe = tools.text
+        interpolationThicknessFade = tools.interpolationThicknessFade
+        showMotionGroupOverlay = tools.showMotionGroupOverlay
+        colorPanel.restore(tools.colorPanel)
     }
 }

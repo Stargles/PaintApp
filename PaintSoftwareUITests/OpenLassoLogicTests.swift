@@ -183,7 +183,7 @@ final class OpenLassoLogicTests: XCTestCase {
         XCTAssertTrue(contains(manager, CGPoint(x: 4, y: 4)))
         XCTAssertFalse(contains(manager, inside), "undo takes the lasso's region out again")
 
-        manager.toolSwitches.subtractsSelection = true
+        manager.subtractsSelection = true
         for corner in [CGPoint(x: 0, y: 0), CGPoint(x: 6, y: 0), CGPoint(x: 6, y: 6)] {
             manager.tapLasso(at: corner, nodeReach: reach)
         }

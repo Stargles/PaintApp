@@ -209,17 +209,16 @@ enum UITestSeeds {
 
     /// **A full Recent strip** — `-uiTestSeedColorHistory`, for TODO's colour-panel fit.
     ///
-    /// The strip is "the last colours actually used to paint" (`ColorHistoryStore`), so the only way
-    /// to a full one is `capacity` strokes in `capacity` colours — a few minutes of hex-field typing
-    /// to assert one layout fact. This records twenty distinct colours through the store's own
-    /// `record`, the verb a stroke's end calls, oldest first so the strip reads newest-first as it
-    /// does for an artist.
-    static func seedColorHistoryIfRequested() {
+    /// The strip is "the last colours actually used to paint" in this scene (`ColorPanelState`), so the
+    /// only way to a full one is `recentCapacity` strokes in as many colours — a few minutes of hex-field
+    /// typing to assert one layout fact. This records twenty distinct colours through `recordPainted`,
+    /// the verb a stroke's end calls, oldest first so the strip reads newest-first as it does for an
+    /// artist.
+    static func seedColorHistoryIfRequested(into canvasManager: CanvasManager) {
         guard ProcessInfo.processInfo.arguments.contains("-uiTestSeedColorHistory") else { return }
-        ColorHistoryStore.shared.clear()
-        for step in 0..<ColorHistoryStore.capacity {
-            let hue = Double(step) / Double(ColorHistoryStore.capacity)
-            ColorHistoryStore.shared.record(Color(hue: hue, saturation: 0.8, brightness: 0.9))
+        for step in 0..<ColorPanelState.recentCapacity {
+            let hue = Double(step) / Double(ColorPanelState.recentCapacity)
+            canvasManager.colorPanel.recordPainted(Color(hue: hue, saturation: 0.8, brightness: 0.9))
         }
     }
 

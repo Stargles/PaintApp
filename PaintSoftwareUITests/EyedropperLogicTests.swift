@@ -383,11 +383,11 @@ final class EyedropperLogicTests: XCTestCase {
         return channels(manager)
     }
 
-    /// The owner's default, and the document's: a new manager reads the layer, and so does a manifest
-    /// that never mentioned it.
+    /// The owner's default, and the document's: a new manager reads the layer, and so does a new scene's
+    /// record.
     func testTheDefaultIsTheLayer() {
         XCTAssertEqual(CanvasFixture.manager().eyedropperMode, .layer)
-        XCTAssertEqual(EditorStateManifest().eyedropperMode, .layer)
+        XCTAssertEqual(SceneTools().eyedropperMode, .layer)
     }
 
     /// **The colour that was painted, whatever is composited over it and whichever layer is

@@ -22,21 +22,12 @@ struct ProjectManifest: Codable {
     var modifiedAt: Date
     var backgroundColor: CodableColor
     var isBackgroundVisible: Bool
-    /// The brush active when the project was last saved, and any custom (imported) brushes
-    /// associated with it. The actual custom-brush stamp texture image files are copied into this
-    /// project's own `brushes/` folder alongside the manifest so a saved project stays
-    /// self-contained even if the shared brush-library entry (`BrushStorage`) is later
-    /// renamed/deleted, or the project moves to another device.
-    var selectedBrush: Brush
+    /// Custom (imported) brushes associated with this project. Their stamp texture files are copied
+    /// into the project's own `brushes/` folder alongside the manifest — with those of every tool's
+    /// selected preset (`editorState.tools.profiles`) — so a saved project stays self-contained even if
+    /// the shared brush-library entry (`BrushStorage`) is later renamed or deleted, or the project moves
+    /// to another device.
     var customBrushes: [Brush]
-    /// The vector-eraser behaviour active when the project was last saved. Persisted per project
-    /// rather than app-wide since it's bound up with the artwork: a project drawn with
-    /// `.cutToIntersection` should reopen still cutting to intersections, without leaking into the
-    /// next project. Meaningless for all-raster projects, which just save/reload the default.
-    var vectorEraserMode: VectorEraserMode
-    /// Whether the eraser reaches every visible vector layer — `CanvasManager.universalEraser`,
-    /// persisted beside the mode it aims. Absent means off.
-    var universalEraser: Bool = false
     var folders: [FolderManifest] = []
     var viewPresets: [ViewPresetManifest] = []
     /// The document-level interpolation registries. Live in the manifest rather than beside a cel
@@ -58,19 +49,19 @@ struct ProjectManifest: Codable {
     /// Nil for a document with no vector ink at all, which is the one case where there is nothing to
     /// redeem.
     var brushTableFileName: String? = nil
-    /// Where the editor was — frame, layer, zoom, onion skin, loop — TODO (77). Nil for a package
-    /// written before it existed, which opens at the defaults exactly as it did.
-    var editorState: EditorStateManifest? = nil
+    /// Where the editor was — frame, layer, zoom, onion skin, loop — and the tools in the artist's hand
+    /// in this scene: TODO (77), then TODO (176). Required: a package without it is one an earlier build
+    /// wrote, which `LegacyToolSettingsRepair` rewrote at launch.
+    var editorState: EditorStateManifest
 
     init(id: UUID, name: String, canvasWidth: Double, canvasHeight: Double, canvasPadding: Double = 0, isPaddingOnTop: Bool = true,
          fps: Int, layers: [LayerManifest], modifiedAt: Date,
          backgroundColor: CodableColor = CodableColor(red: 1, green: 1, blue: 1, alpha: 1), isBackgroundVisible: Bool = true,
-         selectedBrush: Brush = BrushLibrary.roundSoft, customBrushes: [Brush] = [],
-         vectorEraserMode: VectorEraserMode = .default, universalEraser: Bool = false,
+         customBrushes: [Brush] = [],
          folders: [FolderManifest] = [], viewPresets: [ViewPresetManifest] = [],
          motionGroups: [MotionGroup] = [], guideStrokes: [GuideStroke] = [],
          animationGroups: [AnimationGroup] = [], brushTableFileName: String? = nil,
-         editorState: EditorStateManifest? = nil) {
+         editorState: EditorStateManifest = EditorStateManifest()) {
         self.id = id
         self.name = name
         self.canvasWidth = canvasWidth
@@ -82,10 +73,7 @@ struct ProjectManifest: Codable {
         self.modifiedAt = modifiedAt
         self.backgroundColor = backgroundColor
         self.isBackgroundVisible = isBackgroundVisible
-        self.selectedBrush = selectedBrush
         self.customBrushes = customBrushes
-        self.vectorEraserMode = vectorEraserMode
-        self.universalEraser = universalEraser
         self.folders = folders
         self.viewPresets = viewPresets
         self.motionGroups = motionGroups
@@ -95,9 +83,8 @@ struct ProjectManifest: Codable {
         self.editorState = editorState
     }
 
-    // Custom decoding so projects saved before backgroundColor/isBackgroundVisible (or, more
-    // recently, selectedBrush/customBrushes and vectorEraserMode) existed — missing those keys
-    // entirely — still load instead of failing to decode.
+    // Custom decoding so projects saved before backgroundColor/isBackgroundVisible or customBrushes
+    // existed — missing those keys entirely — still load instead of failing to decode.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
@@ -112,12 +99,7 @@ struct ProjectManifest: Codable {
         backgroundColor = try container.decodeIfPresent(CodableColor.self, forKey: .backgroundColor)
             ?? CodableColor(red: 1, green: 1, blue: 1, alpha: 1)
         isBackgroundVisible = try container.decodeIfPresent(Bool.self, forKey: .isBackgroundVisible) ?? true
-        selectedBrush = try container.decodeIfPresent(Brush.self, forKey: .selectedBrush) ?? BrushLibrary.roundSoft
         customBrushes = try container.decodeIfPresent([Brush].self, forKey: .customBrushes) ?? []
-        // A package with no mode key was saved when Erase was the only eraser, so it opens on Erase
-        // and not on `VectorEraserMode.default` — that is what a *new* document starts on.
-        vectorEraserMode = try container.decodeIfPresent(VectorEraserMode.self, forKey: .vectorEraserMode) ?? .erase
-        universalEraser = try container.decodeIfPresent(Bool.self, forKey: .universalEraser) ?? false
         folders = try container.decodeIfPresent([FolderManifest].self, forKey: .folders) ?? []
         viewPresets = try container.decodeIfPresent([ViewPresetManifest].self, forKey: .viewPresets) ?? []
         // Absent for pre-interpolation projects and any project that never uses it (an empty
@@ -127,9 +109,7 @@ struct ProjectManifest: Codable {
         animationGroups = try container.decodeIfPresent([AnimationGroup].self,
                                                         forKey: .animationGroups) ?? []
         brushTableFileName = try container.decodeIfPresent(String.self, forKey: .brushTableFileName)
-        // `try?`, unlike every line above: this is where the editor was, not what the artwork is,
-        // and a record this build cannot read is worth the defaults rather than a refused open.
-        editorState = try? container.decodeIfPresent(EditorStateManifest.self, forKey: .editorState)
+        editorState = try container.decode(EditorStateManifest.self, forKey: .editorState)
     }
 
     /// Written explicitly so the two interpolation registries can be *omitted* when empty — a
@@ -147,10 +127,7 @@ struct ProjectManifest: Codable {
         try container.encode(modifiedAt, forKey: .modifiedAt)
         try container.encode(backgroundColor, forKey: .backgroundColor)
         try container.encode(isBackgroundVisible, forKey: .isBackgroundVisible)
-        try container.encode(selectedBrush, forKey: .selectedBrush)
         try container.encode(customBrushes, forKey: .customBrushes)
-        try container.encode(vectorEraserMode, forKey: .vectorEraserMode)
-        if universalEraser { try container.encode(true, forKey: .universalEraser) }
         try container.encode(folders, forKey: .folders)
         try container.encode(viewPresets, forKey: .viewPresets)
         if !motionGroups.isEmpty { try container.encode(motionGroups, forKey: .motionGroups) }
@@ -159,14 +136,13 @@ struct ProjectManifest: Codable {
         // Absent means "this document has no vector ink", the same absence-is-the-meaning idiom every
         // optional key here follows.
         try container.encodeIfPresent(brushTableFileName, forKey: .brushTableFileName)
-        try container.encodeIfPresent(editorState, forKey: .editorState)
+        try container.encode(editorState, forKey: .editorState)
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, name, canvasWidth, canvasHeight, canvasPadding, isPaddingOnTop, fps, layers,
-             modifiedAt, backgroundColor, isBackgroundVisible, selectedBrush, customBrushes,
-             vectorEraserMode, universalEraser, folders, viewPresets, motionGroups, guideStrokes,
-             animationGroups, brushTableFileName, editorState
+             modifiedAt, backgroundColor, isBackgroundVisible, customBrushes, folders, viewPresets,
+             motionGroups, guideStrokes, animationGroups, brushTableFileName, editorState
     }
 }
 

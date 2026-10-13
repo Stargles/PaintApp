@@ -55,86 +55,58 @@ struct Palette: Codable, Identifiable, Equatable {
     }
 }
 
-/// App-wide store of the user's palettes, persisted to `UserDefaults` as JSON. A single shared
-/// instance backs the color picker so the library survives the picker panel being torn down and
-/// rebuilt each time it's reopened (it's created fresh on every `activePanel` switch), and so edits
-/// made in one place are immediately visible everywhere.
-///
-/// Persistence is deliberately kept here rather than in `ProjectStore`/`ProjectManifest`: palettes
-/// belong to the artist, not to any one project file, so they shouldn't ride along in a project's
-/// saved manifest or get overwritten when a different project is opened.
+/// **The artist's palettes library** — app-wide, like the brush library (TODO (176), row J3): a colour
+/// library built up and reused across every drawing, kept in `AppSettings`. Which palette a scene shows
+/// is that scene's (`ColorPanelState.selectedPaletteID`), so this holds the palettes and nothing about
+/// which one is in front. One shared instance backs every picker, so the library survives the panel
+/// being torn down and rebuilt on every `activePanel` switch, and an edit made in one place is visible
+/// everywhere.
 final class PaletteStore: ObservableObject {
     static let shared = PaletteStore()
 
-    @Published var palettes: [Palette] {
-        didSet { persist() }
-    }
-    /// The palette currently shown in the picker. Kept as a stored id (rather than an index) so it
-    /// stays pointing at the same palette across reorders/deletes, and persisted so reopening the
-    /// picker returns to the palette the artist was last using.
-    @Published var selectedPaletteID: UUID? {
-        didSet { defaults.set(selectedPaletteID?.uuidString, forKey: Self.selectedKey) }
-    }
+    @Published private(set) var palettes: [Palette]
 
-    private let defaults: UserDefaults
-    private static let palettesKey = "paletteStore.palettes.v1"
-    private static let selectedKey = "paletteStore.selectedPaletteID.v1"
+    /// Set when a stored library could not be read: nothing is shown, nothing can be changed, and the
+    /// stored library is left exactly as it was. The panel says this sentence instead.
+    let unreadable: String?
 
-    init(defaults: UserDefaults = .standard) {
-        self.defaults = defaults
+    private let settings: AppSettings
 
-        // UI tests pass this flag so each run starts from the seeded presets rather than inheriting
-        // swatches a previous run appended to the persistent store (which would make index-based
-        // assertions flaky). No effect on normal launches.
-        if ProcessInfo.processInfo.arguments.contains("-resetPalettes") {
-            defaults.removeObject(forKey: Self.palettesKey)
-            defaults.removeObject(forKey: Self.selectedKey)
-        }
-
-        let loaded: [Palette]
-        if let data = defaults.data(forKey: Self.palettesKey),
-           let decoded = try? JSONDecoder().decode([Palette].self, from: data),
-           !decoded.isEmpty {
-            loaded = decoded
-        } else {
-            // First launch (or corrupted store): seed the built-in presets.
-            loaded = Self.defaultPresets
-        }
-        self.palettes = loaded
-
-        if let stored = defaults.string(forKey: Self.selectedKey),
-           let uuid = UUID(uuidString: stored),
-           loaded.contains(where: { $0.id == uuid }) {
-            self.selectedPaletteID = uuid
-        } else {
-            self.selectedPaletteID = loaded.first?.id
+    /// A first launch seeds the built-in presets **and stores them at once**, so their ids — which a
+    /// scene's selection names — are the same on every launch after it.
+    init(settings: AppSettings = .standard) {
+        self.settings = settings
+        switch settings.readPalettes() {
+        case .palettes(let stored) where !stored.isEmpty:
+            palettes = stored
+            unreadable = nil
+        case .none, .palettes:
+            palettes = Self.defaultPresets
+            unreadable = nil
+            settings.writePalettes(palettes)
+        case .unreadable(let sentence):
+            palettes = []
+            unreadable = sentence
         }
     }
 
     // MARK: - Selection
 
-    var selectedPalette: Palette? {
-        guard let selectedPaletteID else { return palettes.first }
-        return palettes.first { $0.id == selectedPaletteID } ?? palettes.first
-    }
-
-    var selectedIndex: Int? {
-        guard let id = selectedPalette?.id else { return nil }
-        return palettes.firstIndex { $0.id == id }
-    }
-
-    func select(_ palette: Palette) {
-        selectedPaletteID = palette.id
+    /// The palette a scene's `selectedPaletteID` names, or the library's first when it names none the
+    /// library has — never selected, or deleted in another scene.
+    func palette(selectedBy id: UUID?) -> Palette? {
+        id.flatMap { id in palettes.first { $0.id == id } } ?? palettes.first
     }
 
     // MARK: - Palette CRUD
 
-    /// Creates an empty palette, selects it, and returns it.
+    /// Creates an empty palette and returns it, for the scene that made it to select. Nil while the
+    /// stored library is unreadable.
     @discardableResult
-    func addPalette(name: String = "New Palette") -> Palette {
+    func addPalette(name: String = "New Palette") -> Palette? {
+        guard unreadable == nil else { return nil }
         let palette = Palette(name: uniqueName(from: name), colors: [], isBuiltIn: false)
-        palettes.append(palette)
-        selectedPaletteID = palette.id
+        update { $0.append(palette) }
         return palette
     }
 
@@ -142,19 +114,17 @@ final class PaletteStore: ObservableObject {
         guard let index = palettes.firstIndex(where: { $0.id == palette.id }) else { return }
         let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        palettes[index].name = trimmed
+        update { $0[index].name = trimmed }
     }
 
-    /// Deletes a palette. Refuses to remove the last remaining one (there must always be something
-    /// to show) and re-points the selection at a neighbor when the deleted palette was selected.
-    func deletePalette(_ palette: Palette) {
-        guard palettes.count > 1, let index = palettes.firstIndex(where: { $0.id == palette.id }) else { return }
-        let wasSelected = palette.id == selectedPaletteID
-        palettes.remove(at: index)
-        if wasSelected {
-            let neighbor = palettes[min(index, palettes.count - 1)]
-            selectedPaletteID = neighbor.id
-        }
+    /// Deletes a palette, refusing the last remaining one (there must always be something to show).
+    /// Answers the neighbour that takes its place, for a scene that had it selected to select instead;
+    /// nil when nothing was deleted.
+    @discardableResult
+    func deletePalette(_ palette: Palette) -> Palette? {
+        guard palettes.count > 1, let index = palettes.firstIndex(where: { $0.id == palette.id }) else { return nil }
+        update { $0.remove(at: index) }
+        return palettes[min(index, palettes.count - 1)]
     }
 
     // MARK: - Swatch editing
@@ -163,12 +133,12 @@ final class PaletteStore: ObservableObject {
     /// side by side deliberately).
     func addColor(_ color: Color, to palette: Palette) {
         guard let index = palettes.firstIndex(where: { $0.id == palette.id }) else { return }
-        palettes[index].colors.append(PaletteColor(color: color))
+        update { $0[index].colors.append(PaletteColor(color: color)) }
     }
 
     func removeColor(_ swatch: PaletteColor, from palette: Palette) {
         guard let index = palettes.firstIndex(where: { $0.id == palette.id }) else { return }
-        palettes[index].colors.removeAll { $0.id == swatch.id }
+        update { $0[index].colors.removeAll { $0.id == swatch.id } }
     }
 
     // MARK: - Helpers
@@ -185,9 +155,12 @@ final class PaletteStore: ObservableObject {
         return "\(candidate) \(n)"
     }
 
-    private func persist() {
-        guard let data = try? JSONEncoder().encode(palettes) else { return }
-        defaults.set(data, forKey: Self.palettesKey)
+    /// Every change, saved as it is made. Nothing can change an unreadable library — every path that
+    /// edits one already found nothing to edit — so what is stored stays what it was.
+    private func update(_ change: (inout [Palette]) -> Void) {
+        guard unreadable == nil else { return }
+        change(&palettes)
+        settings.writePalettes(palettes)
     }
 
     // MARK: - Default presets

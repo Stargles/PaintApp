@@ -57,6 +57,9 @@ struct ToolProfiles: Codable, Equatable {
     var brush = ToolProfile(preset: BrushLibrary.roundSoft, size: 5, opacity: 1)
     var eraser = ToolProfile(preset: BrushLibrary.roundHard, size: 20, opacity: 1)
 
+    /// Every tool's preset, in `StrokeTool` order — what a saved package carries tip files for.
+    var presets: [Brush] { StrokeTool.allCases.map { self[$0].preset } }
+
     subscript(tool: StrokeTool) -> ToolProfile {
         get {
             switch tool {

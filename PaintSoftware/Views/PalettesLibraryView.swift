@@ -2,7 +2,7 @@ import SwiftUI
 
 /// The swatch grid every picker tab shows for one palette — the type tabs' "selected palette" section
 /// (item 2) and `PalettesLibraryView`'s per-palette row (item 3) are both this, just with a different
-/// `idPrefix` and always exactly one shared `PaletteStore`/model underneath. Tapping a filled swatch
+/// `idPrefix` and always exactly one shared `PaletteStore` underneath. Tapping a filled swatch
 /// picks it; long-pressing one offers to delete it (`canvasContextMenu`).
 /// Long-pressing an *empty* cell adds the current colour (Procreate's behaviour) — the leading empty
 /// cell also answers a plain tap, since it is the one call sites relied on as a visible "+" button
@@ -90,12 +90,14 @@ struct PaletteSwatchGrid: View {
 /// delete, the same always-visible pencil/trash pattern `LayerPanel`'s saved-views menu uses) plus a
 /// Default indicator or Set Default button, and its full swatch grid; "New Palette" at the top.
 ///
-/// **"Default" is `PaletteStore.selectedPaletteID`** — the palette the type tabs show — not a second
-/// notion of default this view invents. Setting one here is exactly `paletteStore.select(_:)`, the
-/// same call a swatch tap on a type tab never makes (picking a colour there doesn't change which
-/// palette is "active"; only this tab's own button does).
+/// **"Default" is the scene's `ColorPanelState.selectedPaletteID`** — the palette the type tabs show in
+/// this scene — not a second notion of default this view invents. The library is app-wide, so a palette
+/// made here is in every scene; which one a scene shows is that scene's (TODO (176), J3 and J4). Only
+/// this tab's own buttons change it: picking a colour on a type tab doesn't change which palette is
+/// in front.
 struct PalettesLibraryView: View {
     @ObservedObject var paletteStore: PaletteStore
+    @ObservedObject var panelState: ColorPanelState
     let canvasManager: CanvasManager
     let colorToAdd: () -> Color
     var onPick: (Color) -> Void = { _ in }
@@ -111,7 +113,7 @@ struct PalettesLibraryView: View {
                     .foregroundColor(.white)
                 Spacer()
                 Button {
-                    paletteStore.addPalette()
+                    if let made = paletteStore.addPalette() { panelState.selectedPaletteID = made.id }
                 } label: {
                     Label("New Palette", systemImage: "plus")
                         .labelStyle(.iconOnly)
@@ -129,6 +131,12 @@ struct PalettesLibraryView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
+                    if let unreadable = paletteStore.unreadable {
+                        Text(unreadable)
+                            .font(.footnote)
+                            .foregroundColor(.orange)
+                            .accessibilityIdentifier("colorPanel.palettes.unreadable")
+                    }
                     ForEach(Array(paletteStore.palettes.enumerated()), id: \.element.id) { index, palette in
                         paletteRow(index: index, palette: palette)
                     }
@@ -141,7 +149,7 @@ struct PalettesLibraryView: View {
 
     private func paletteRow(index: Int, palette: Palette) -> some View {
         let idPrefix = "colorPanel.palettes.row.\(index)"
-        let isDefault = palette.id == paletteStore.selectedPaletteID
+        let isDefault = palette.id == paletteStore.palette(selectedBy: panelState.selectedPaletteID)?.id
         return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 if renamingPaletteID == palette.id {
@@ -170,7 +178,7 @@ struct PalettesLibraryView: View {
                         .accessibilityIdentifier("\(idPrefix).defaultIndicator")
                 } else {
                     Button {
-                        paletteStore.select(palette)
+                        panelState.selectedPaletteID = palette.id
                     } label: {
                         Text("Set Default")
                             .font(.caption2.weight(.medium))
@@ -196,7 +204,11 @@ struct PalettesLibraryView: View {
                 .accessibilityIdentifier("\(idPrefix).rename")
 
                 Button(role: .destructive) {
-                    paletteStore.deletePalette(palette)
+                    // The scene showing it shows its neighbour instead; another scene that had it
+                    // selected shows the library's first.
+                    if let neighbour = paletteStore.deletePalette(palette), isDefault {
+                        panelState.selectedPaletteID = neighbour.id
+                    }
                 } label: {
                     Image(systemName: "trash")
                         .foregroundColor(.red.opacity(0.85))

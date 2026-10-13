@@ -2893,7 +2893,7 @@ struct CanvasView: UIViewRepresentable {
             // line the piece up against. The outline still shows, and travels with the piece.
             let floating = canvasManager.vectorFloat != nil || canvasManager.floatingPiece?.kind == .move
             overlay.updateSelection(canvasManager.selection,
-                                    allowsOutsideInteraction: canvasManager.toolSwitches.allowsPaintingOutsideSelection || floating)
+                                    allowsOutsideInteraction: canvasManager.allowsPaintingOutsideSelection || floating)
             overlay.updateOpenLasso(canvasManager.openLasso)
             // LASSO_FILL.md §7.2/§7.4, pushed down the same way everything else here is: the overlay
             // decides whether this is new and owns the fade, so a pass that changes nothing costs a
@@ -3128,7 +3128,7 @@ struct CanvasView: UIViewRepresentable {
             // any of that struct's fields. Only applies to a cel the selection acts on.
             let celIdx = canvasManager.displayedCelIndex(inLayer: canvasManager.currentLayerIndex, atFrame: canvasManager.currentFrame)
             let celID = celIdx.map { layer.cels[$0].id }
-            if let selection = canvasManager.selection, !canvasManager.toolSwitches.allowsPaintingOutsideSelection,
+            if let selection = canvasManager.selection, !canvasManager.allowsPaintingOutsideSelection,
                selection.acts(onLayer: layer.id, cel: celID) {
                 host.strokeView.selectionClipPath = selection.path
             } else {
@@ -3318,7 +3318,7 @@ struct CanvasView: UIViewRepresentable {
         /// identity is a different *type* from a derivation's, which is what keeps the two from
         /// colliding on one cel — see `InterpolationPreviewKey`.
         private func updateMotionGroupOverlay(layer: Layer, cel: Cel, host: LayerHostView) {
-            guard canvasManager.isInterpolateMode, canvasManager.toolSwitches.showMotionGroupOverlay,
+            guard canvasManager.isInterpolateMode, canvasManager.showMotionGroupOverlay,
                   let version = cel.vector?.version else {
                 interpolationPreviewKeys.removeValue(forKey: layer.id)
                 host.strokeView.setInterpolationImage(nil)

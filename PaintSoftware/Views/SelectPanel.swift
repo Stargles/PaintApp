@@ -438,7 +438,7 @@ struct SelectPanel: View {
     /// XCUITest), while every other control in this bar is a Button and taps it consistently.
     private var paintOutsideToggle: some View {
         Button {
-            canvasManager.toolSwitches.allowsPaintingOutsideSelection.toggle()
+            canvasManager.allowsPaintingOutsideSelection.toggle()
         } label: {
             HStack(spacing: 8) {
                 // **Wrapped in a fixed column rather than shortened**, because "Paint Outside" alone
@@ -457,12 +457,12 @@ struct SelectPanel: View {
                     // unreadable there (it was before this row gained a third column); giving
                     // rather than overflowing is the difference between cramped and broken.
                     .frame(maxWidth: 96, alignment: .leading)
-                switchIndicator(isOn: canvasManager.toolSwitches.allowsPaintingOutsideSelection)
+                switchIndicator(isOn: canvasManager.allowsPaintingOutsideSelection)
             }
             .contentShape(Rectangle())
         }
         .accessibilityIdentifier("selectPanel.allowOutsideToggle")
-        .accessibilityAddTraits(canvasManager.toolSwitches.allowsPaintingOutsideSelection ? [.isSelected] : [])
+        .accessibilityAddTraits(canvasManager.allowsPaintingOutsideSelection ? [.isSelected] : [])
     }
 
     /// **TODO (95) — Subtract.** Off, a new loop is added to the selection already up; on, it is
@@ -482,9 +482,9 @@ struct SelectPanel: View {
     /// a switch for how the next *loop* meets the last has no loop to act on there, and beside a Subtract
     /// segment it would be a second Subtract that does something else.
     private var subtractToggle: some View {
-        let isOn = canvasManager.toolSwitches.subtractsSelection
+        let isOn = canvasManager.subtractsSelection
         return Button {
-            canvasManager.toolSwitches.subtractsSelection.toggle()
+            canvasManager.subtractsSelection.toggle()
         } label: {
             VStack(spacing: 6) {
                 Text("Subtract")

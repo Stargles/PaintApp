@@ -11,10 +11,6 @@ struct ContentView: View {
     @State private var canvasManager = CanvasManager()
     @Environment(\.scenePhase) private var scenePhase
 
-    /// Keeps the artist's tool switches across launches (TODO (175)): hands them to each document as
-    /// it enters the editor and saves every change to them as it is made.
-    @State private var toolSwitchesKeeper = ToolSwitchesKeeper()
-
     /// Hands the app-wide Fingers Can Paint and Render Resolution (`AppSettings`) to each document as it
     /// enters the editor, and saves every change to them as it is made.
     @State private var settingsKeeper = AppSettingsKeeper()
@@ -183,21 +179,15 @@ struct ContentView: View {
         screen = .editor
     }
 
-    /// The brush in hand as a document enters the editor, in two steps whose order is the point.
-    /// First the live selection catches up with the library — `CanvasManager.adoptLibrarySelections`,
-    /// the preset the artist edited last session becoming the preset the first stroke uses — and
-    /// then TODO (77)'s app half lays the artist's own nudges over it: the size, opacity, colour,
-    /// tool and eraser they last had in hand, stored by `saveIfNeeded` so every save keeps the record
-    /// current. The other order would let a preset edited weeks ago overwrite the size set an hour
-    /// ago. Here, before the editor appears, rather than in an `onAppear`, so the first stroke and
-    /// the first frame both see the finished state. The tool switches (`ToolSwitches`) are the third
-    /// part, and the only one saved as it changes rather than with the next document save.
+    /// The tools in hand as a document enters the editor. The scene's own tools came with it — a new
+    /// one's at the defaults, a reopened one's from its manifest (TODO (176)) — so what is left is the
+    /// app's part: each tool's preset catches up with the library (`CanvasManager.adoptLibrarySelections`,
+    /// the preset the artist edited in another scene becoming the one the next stroke here uses), and
+    /// the app-wide Fingers Can Paint and Render Resolution are handed over (`AppSettingsKeeper`). Here,
+    /// before the editor appears, rather than in an `onAppear`, so the first stroke and the first frame
+    /// both see the finished state.
     private func handToolsToArtist() {
         canvasManager.adoptLibrarySelections()
-        if let preferences = EditorPreferences.stored() {
-            canvasManager.applyEditorPreferences(preferences)
-        }
-        toolSwitchesKeeper.follow(canvasManager)
         settingsKeeper.follow(canvasManager)
     }
 
@@ -253,9 +243,7 @@ struct ContentView: View {
             ?? ProjectStore.createNewProjectURL(name: canvasManager.projectName,
                                                 in: newProjectFolder ?? ProjectStore.projectsDirectory)
         canvasManager.projectURL = url
-        // The artist's tools, beside the document — TODO (77)'s app half; and this save carries
-        // every edit the autosave was waiting on, whatever started it.
-        canvasManager.editorPreferences.store()
+        // This save carries every edit the autosave was waiting on, whatever started it.
         autosave.saveStarted()
         // `onSaveFailed` is the one channel `completion` never was (ARCHITECTURE_REVIEW.md finding
         // 3): `writeAtomically`'s three failure returns used to be silent, so the gallery could

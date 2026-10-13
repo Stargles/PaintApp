@@ -228,7 +228,7 @@ extension CanvasManager {
     /// renders through replaces the cel's display, so tinted strokes alone would make every fill and
     /// placed image vanish. Untagged strokes are grey, to show they ride the first binding.
     func motionGroupOverlayImage(forCel celID: UUID, inLayer layerID: UUID) -> UIImage? {
-        guard isInterpolateMode, toolSwitches.showMotionGroupOverlay,
+        guard isInterpolateMode, showMotionGroupOverlay,
               let at = celIndices(forCel: celID, inLayer: layerID),
               let canvas = layers[at.layer].cels[at.cel].vector else { return nil }
         let elements = canvas.elements
@@ -563,7 +563,7 @@ extension CanvasManager {
 
     var interpolationOptions: InterpolationEvaluator.Options {
         var options = InterpolationEvaluator.Options()
-        options.thicknessFade = toolSwitches.interpolationThicknessFade ? .weighted(exponent: 1) : .none
+        options.thicknessFade = interpolationThicknessFade ? .weighted(exponent: 1) : .none
         // Only inside the mode: a group left muted must not follow the artist out and quietly
         // blank part of every export.
         options.hiddenGroups = isInterpolateMode ? hiddenMotionGroups : []

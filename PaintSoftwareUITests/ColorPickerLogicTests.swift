@@ -2,13 +2,13 @@ import XCTest
 import SwiftUI
 
 /// TODO (73)/(106)'s colour picker overhaul — the model, headless: the ring/triangle point<->colour
-/// maths in `ColorMath` (no UIKit, no simulator gestures needed to check a round trip), then
-/// `ColorHistoryStore` and `PaletteStore` — dedupe/cap/persistence and CRUD/default/persistence —
-/// and one cold-start "migration" test. `ColorPickerUITests` covers reachability (driving each tab
-/// from a fresh document); this file covers whether the arithmetic and the two stores are correct.
+/// maths in `ColorMath` (no UIKit, no simulator gestures needed to check a round trip), then a scene's
+/// Recent colours (`ColorPanelState`) and the app-wide `PaletteStore` — dedupe/cap and
+/// CRUD/persistence/selection. `ColorPickerUITests` covers reachability (driving each tab from a fresh
+/// document); this file covers whether the arithmetic and the two stores are correct.
 final class ColorPickerLogicTests: XCTestCase {
 
-    // MARK: - Isolated UserDefaults (same pattern `EditorStateLogicTests` uses)
+    // MARK: - Isolated UserDefaults (same pattern `AppSettingsLogicTests` uses)
 
     private func isolatedDefaults() throws -> UserDefaults {
         let suite = "color-picker-tests-\(UUID().uuidString)"
@@ -286,65 +286,71 @@ final class ColorPickerLogicTests: XCTestCase {
         XCTAssertEqual(model.opaqueColor.hexString, "FFFFFF", "the opaque colour ignores alpha")
     }
 
-    // MARK: - ColorHistoryStore
+    // MARK: - Recent colours (a scene's own)
 
-    func testHistoryRecordsNewestFirst() throws {
-        let store = ColorHistoryStore(defaults: try isolatedDefaults())
-        store.record(Color(hex: "FF0000")!)
-        store.record(Color(hex: "00FF00")!)
-        store.record(Color(hex: "0000FF")!)
-        XCTAssertEqual(store.colors.map(\.hex), ["0000FF", "00FF00", "FF0000"])
+    func testRecentColoursAreNewestFirst() {
+        let panel = ColorPanelState()
+        panel.recordPainted(Color(hex: "FF0000")!)
+        panel.recordPainted(Color(hex: "00FF00")!)
+        panel.recordPainted(Color(hex: "0000FF")!)
+        XCTAssertEqual(panel.recentColors.map(\.hex), ["0000FF", "00FF00", "FF0000"])
     }
 
-    func testHistoryDedupesByMovingTheExistingEntryToTheFront() throws {
-        let store = ColorHistoryStore(defaults: try isolatedDefaults())
-        store.record(Color(hex: "FF0000")!)
-        store.record(Color(hex: "00FF00")!)
-        store.record(Color(hex: "FF0000")!) // re-used, should move to the front, not duplicate
-        XCTAssertEqual(store.colors.map(\.hex), ["FF0000", "00FF00"], "A re-used colour must not appear twice")
+    func testARecentColourUsedAgainMovesToTheFrontRatherThanAppearingTwice() {
+        let panel = ColorPanelState()
+        panel.recordPainted(Color(hex: "FF0000")!)
+        panel.recordPainted(Color(hex: "00FF00")!)
+        panel.recordPainted(Color(hex: "FF0000")!)
+        XCTAssertEqual(panel.recentColors.map(\.hex), ["FF0000", "00FF00"], "A re-used colour must not appear twice")
     }
 
-    func testHistoryIsCappedAtItsCapacity() throws {
-        let store = ColorHistoryStore(defaults: try isolatedDefaults())
-        for i in 0..<(ColorHistoryStore.capacity + 5) {
-            let hex = String(format: "%06X", i)
-            store.record(Color(hex: hex) ?? .black)
+    func testRecentColoursAreCappedAtTheirCapacity() {
+        let panel = ColorPanelState()
+        for i in 0..<(ColorPanelState.recentCapacity + 5) {
+            panel.recordPainted(Color(hex: String(format: "%06X", i)) ?? .black)
         }
-        XCTAssertEqual(store.colors.count, ColorHistoryStore.capacity, "History must never grow past its capacity")
-        // Newest-first: the most recently recorded capacity+4 colour should still be at the front.
-        XCTAssertEqual(store.colors.first?.hex, String(format: "%06X", ColorHistoryStore.capacity + 4))
+        XCTAssertEqual(panel.recentColors.count, ColorPanelState.recentCapacity, "Never past its capacity")
+        XCTAssertEqual(panel.recentColors.first?.hex, String(format: "%06X", ColorPanelState.recentCapacity + 4))
     }
 
-    func testHistoryPersistsAcrossInstancesAndClearErasesIt() throws {
-        let defaults = try isolatedDefaults()
-        let first = ColorHistoryStore(defaults: defaults)
-        first.record(Color(hex: "ABCDEF")!)
+    /// **Only what was painted with is recent**, and only in the scene it was painted in: a stroke's
+    /// lift records the brush colour, an eraser's lift records nothing.
+    @MainActor
+    func testAStrokesLiftRecordsItsColourInItsOwnSceneAndAnErasersRecordsNothing() {
+        let scene = CanvasFixture.manager(layerCount: 1)
+        let other = CanvasFixture.manager(layerCount: 1)
+        scene.brushColor = Color(hex: "ABCDEF")!
+        scene.strokeEnded(layerIndex: 0, celIndex: 0)
+        XCTAssertEqual(scene.colorPanel.recentColors.map(\.hex), ["ABCDEF"])
+        XCTAssertTrue(other.colorPanel.recentColors.isEmpty, "Another scene's Recent strip is its own")
 
-        let second = ColorHistoryStore(defaults: defaults)
-        XCTAssertEqual(second.colors.map(\.hex), ["ABCDEF"], "History should persist across instances, like PaletteStore's palettes")
+        scene.selectedTool = .eraser
+        scene.brushColor = Color(hex: "123456")!
+        scene.strokeEnded(layerIndex: 0, celIndex: 0)
+        XCTAssertEqual(scene.colorPanel.recentColors.map(\.hex), ["ABCDEF"], "The eraser painted nothing")
 
-        second.clear()
-        XCTAssertTrue(second.colors.isEmpty)
-        let third = ColorHistoryStore(defaults: defaults)
-        XCTAssertTrue(third.colors.isEmpty, "Clear must persist too")
+        scene.colorPanel.clearRecent()
+        XCTAssertTrue(scene.colorPanel.recentColors.isEmpty)
     }
 
-    // MARK: - PaletteStore CRUD + default + persistence
+    // MARK: - The palettes library (app-wide)
 
-    func testAddPaletteSelectsItAndGivesItAUniqueName() throws {
-        let store = PaletteStore(defaults: try isolatedDefaults())
+    private func isolatedSettings() throws -> AppSettings {
+        AppSettings(defaults: try isolatedDefaults())
+    }
+
+    func testAddPaletteGivesItAUniqueName() throws {
+        let store = PaletteStore(settings: try isolatedSettings())
         let before = store.palettes.count
-        let added = store.addPalette()
+        let added = try XCTUnwrap(store.addPalette())
         XCTAssertEqual(store.palettes.count, before + 1)
-        XCTAssertEqual(store.selectedPaletteID, added.id, "Adding a palette should make it the default/selected one")
-
-        let second = store.addPalette(name: added.name)
+        let second = try XCTUnwrap(store.addPalette(name: added.name))
         XCTAssertNotEqual(second.name, added.name, "A duplicate name must be disambiguated")
     }
 
     func testRenamePaletteTrimsAndIgnoresAnEmptyName() throws {
-        let store = PaletteStore(defaults: try isolatedDefaults())
-        let palette = store.addPalette(name: "Mine")
+        let store = PaletteStore(settings: try isolatedSettings())
+        let palette = try XCTUnwrap(store.addPalette(name: "Mine"))
         store.renamePalette(palette, to: "  Renamed  ")
         XCTAssertEqual(store.palettes.first(where: { $0.id == palette.id })?.name, "Renamed")
 
@@ -353,35 +359,29 @@ final class ColorPickerLogicTests: XCTestCase {
                        "An all-whitespace name must not blank out the palette")
     }
 
-    func testDeletePaletteRefusesToRemoveTheLastOneAndRepointsSelection() throws {
-        let store = PaletteStore(defaults: try isolatedDefaults())
-        // `PaletteStore` seeds the built-in presets on a cold start, so start from a known count
-        // (two of our own) rather than assuming the store is empty.
-        let a = store.addPalette(name: "A")
-        let b = store.addPalette(name: "B")
+    /// Deleting answers the neighbour that takes its place — what the scene that had it selected shows
+    /// next — and the last palette cannot be deleted.
+    func testDeletePaletteAnswersItsNeighbourAndRefusesTheLastOne() throws {
+        let store = PaletteStore(settings: try isolatedSettings())
+        let a = try XCTUnwrap(store.addPalette(name: "A"))
+        let b = try XCTUnwrap(store.addPalette(name: "B"))
         let countBeforeDeletes = store.palettes.count
-        store.select(a)
 
-        store.deletePalette(a)
-        XCTAssertEqual(store.palettes.count, countBeforeDeletes - 1, "Deleting the selected palette should remove exactly it")
-        XCTAssertEqual(store.selectedPaletteID, b.id, "Selection should move to a neighbor")
+        XCTAssertEqual(store.deletePalette(a)?.id, b.id, "The neighbour takes its place")
+        XCTAssertEqual(store.palettes.count, countBeforeDeletes - 1, "Deleting removes exactly it")
 
-        // Delete every remaining palette down to one, to reach the refusal case for real rather
-        // than assuming the store started empty.
         while store.palettes.count > 1 {
             store.deletePalette(store.palettes[0])
         }
         let last = store.palettes[0]
-        let countAtOne = store.palettes.count
-        store.deletePalette(last)
-        XCTAssertEqual(store.palettes.count, countAtOne, "The last remaining palette must refuse to be deleted")
-        XCTAssertEqual(store.palettes.first?.id, last.id)
+        XCTAssertNil(store.deletePalette(last), "The last remaining palette must refuse to be deleted")
+        XCTAssertEqual(store.palettes.map(\.id), [last.id])
     }
 
     func testAddAndRemoveColorMutateOnlyTheNamedPalette() throws {
-        let store = PaletteStore(defaults: try isolatedDefaults())
-        let a = store.addPalette(name: "A")
-        let b = store.addPalette(name: "B")
+        let store = PaletteStore(settings: try isolatedSettings())
+        let a = try XCTUnwrap(store.addPalette(name: "A"))
+        let b = try XCTUnwrap(store.addPalette(name: "B"))
         store.addColor(.red, to: a)
         XCTAssertEqual(store.palettes.first(where: { $0.id == a.id })?.colors.count, 1)
         XCTAssertEqual(store.palettes.first(where: { $0.id == b.id })?.colors.count, 0,
@@ -392,36 +392,51 @@ final class ColorPickerLogicTests: XCTestCase {
         XCTAssertEqual(store.palettes.first(where: { $0.id == a.id })?.colors.count, 0)
     }
 
-    func testPalettesAndSelectionPersistAcrossInstances() throws {
-        let defaults = try isolatedDefaults()
-        let first = PaletteStore(defaults: defaults)
-        let mine = first.addPalette(name: "Mine")
+    /// **A palette made in one scene is in every other** — the library is app-wide — and it outlives a
+    /// launch with its swatches.
+    func testPalettesOutliveALaunch() throws {
+        let settings = try isolatedSettings()
+        let first = PaletteStore(settings: settings)
+        let mine = try XCTUnwrap(first.addPalette(name: "Mine"))
         first.addColor(.blue, to: mine)
 
-        let second = PaletteStore(defaults: defaults)
-        XCTAssertEqual(second.selectedPaletteID, mine.id, "The selected/default palette should persist")
+        let second = PaletteStore(settings: settings)
         XCTAssertEqual(second.palettes.first(where: { $0.id == mine.id })?.colors.count, 1,
                        "A palette's swatches should persist")
     }
 
-    // MARK: - Cold start ("the migration")
+    /// A first launch seeds the built-in presets **and stores them**, so the id a scene's selection
+    /// names is the same id on the next launch. They used to be minted afresh every launch until the
+    /// artist first edited one, so a selection of an untouched preset could never survive a relaunch.
+    func testAFirstLaunchSeedsThePresetsWithIdsThatOutliveIt() throws {
+        let settings = try isolatedSettings()
+        let first = PaletteStore(settings: settings)
+        XCTAssertEqual(first.palettes.map(\.name), PaletteStore.defaultPresets.map(\.name))
+        XCTAssertTrue(first.palettes.allSatisfy(\.isBuiltIn))
+        let second = PaletteStore(settings: settings)
+        XCTAssertEqual(second.palettes.map(\.id), first.palettes.map(\.id), "The same ids after a relaunch")
+    }
 
-    /// TODO (73) asked for palette data to be migrated into this model on first read. There turned
-    /// out to be nothing *to* migrate — `PaletteStore` already was the app-wide, `UserDefaults`-JSON
-    /// store this feature needs (grepped: no other palette/history storage exists anywhere in the
-    /// app), so the only real "migration" is this: a device that has never seen (73) — no
-    /// `paletteStore.palettes.v1`/`colorHistoryStore.colors.v1` keys at all — must still boot into a
-    /// valid, usable state rather than an empty or crashing picker.
-    func testAFreshInstallWithNoPriorPickerDataBootstrapsValidDefaults() throws {
+    /// A scene's selection is resolved against the library: an id the library has is that palette, and
+    /// nil — or an id deleted from the library in another scene — is the first.
+    func testASelectionResolvesToItsPaletteOrToTheFirst() throws {
+        let store = PaletteStore(settings: try isolatedSettings())
+        let mine = try XCTUnwrap(store.addPalette(name: "Mine"))
+        XCTAssertEqual(store.palette(selectedBy: mine.id)?.id, mine.id)
+        XCTAssertEqual(store.palette(selectedBy: nil)?.id, store.palettes.first?.id)
+        XCTAssertEqual(store.palette(selectedBy: UUID())?.id, store.palettes.first?.id)
+    }
+
+    /// **The artist's palettes are never read as empty and written over.** A stored library this build
+    /// cannot read shows none, takes no edit, and is still stored exactly as it was.
+    func testAnUnreadableLibraryIsReportedAndLeftAsItWas() throws {
         let defaults = try isolatedDefaults()
-
-        let palettes = PaletteStore(defaults: defaults)
-        XCTAssertEqual(palettes.palettes.count, PaletteStore.defaultPresets.count,
-                       "A cold start should seed the built-in presets")
-        XCTAssertNotNil(palettes.selectedPalette, "A cold start must have something selected/default")
-        XCTAssertTrue(palettes.palettes.allSatisfy(\.isBuiltIn))
-
-        let history = ColorHistoryStore(defaults: defaults)
-        XCTAssertTrue(history.colors.isEmpty, "A cold start's history is empty, not nil/crashing")
+        let garbage = Data("not palettes".utf8)
+        defaults.set(garbage, forKey: AppSettings.Key.palettes)
+        let store = PaletteStore(settings: AppSettings(defaults: defaults))
+        XCTAssertNotNil(store.unreadable, "Said, not hidden")
+        XCTAssertTrue(store.palettes.isEmpty, "Nothing invented in its place")
+        XCTAssertNil(store.addPalette(), "Nothing can be added over it")
+        XCTAssertEqual(defaults.data(forKey: AppSettings.Key.palettes), garbage, "The stored library is untouched")
     }
 }

@@ -328,19 +328,16 @@ final class VectorEraserCommitLogicTests: XCTestCase {
         XCTAssertEqual(manager.history.undoStack.count, steps, "and records nothing")
     }
 
-    /// The switch persists with the mode it aims, and a manifest written before it existed reads
-    /// as off.
-    func testUniversalEraserRoundTripsThroughTheManifestAndDefaultsToOff() throws {
-        let on = ProjectManifest(id: UUID(), name: "t", canvasWidth: 64, canvasHeight: 64, fps: 12,
-                                 layers: [], modifiedAt: Date(), universalEraser: true)
-        let back = try JSONDecoder().decode(ProjectManifest.self, from: JSONEncoder().encode(on))
-        XCTAssertTrue(back.universalEraser)
-        let off = ProjectManifest(id: UUID(), name: "t", canvasWidth: 64, canvasHeight: 64, fps: 12,
-                                  layers: [], modifiedAt: Date())
-        let bytes = try JSONEncoder().encode(off)
-        XCTAssertFalse(String(decoding: bytes, as: UTF8.self).contains("universalEraser"),
-                       "off is the absence of the key, so an older document's bytes are unchanged")
-        XCTAssertFalse(try JSONDecoder().decode(ProjectManifest.self, from: bytes).universalEraser)
+    /// The switch is the scene's, saved beside the mode it aims.
+    func testUniversalEraserRoundTripsThroughTheManifest() throws {
+        for universal in [true, false] {
+            var state = EditorStateManifest()
+            state.tools.universalEraser = universal
+            let manifest = ProjectManifest(id: UUID(), name: "t", canvasWidth: 64, canvasHeight: 64, fps: 12,
+                                           layers: [], modifiedAt: Date(), editorState: state)
+            let back = try JSONDecoder().decode(ProjectManifest.self, from: JSONEncoder().encode(manifest))
+            XCTAssertEqual(back.editorState.tools.universalEraser, universal)
+        }
     }
 
     // MARK: - (80) Whole: every line the eraser touches goes

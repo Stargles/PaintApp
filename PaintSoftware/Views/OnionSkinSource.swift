@@ -527,33 +527,9 @@ struct OnionSkinSettings: Equatable, Codable {
 
     init() {}
 
-    /// **Field by field, with a default for whatever is missing or unreadable**, so a document saved
-    /// before a field existed — or one this build cannot read a single value of — keeps every other
-    /// setting the artist made rather than falling back to a freshly defaulted whole, which is what the
-    /// synthesized decoder would do to the record (`EditorStateManifest` treats any throw as "no
-    /// settings").
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        func decoded<Value: Decodable>(_ key: CodingKeys) -> Value? {
-            (try? c.decodeIfPresent(Value.self, forKey: key)).flatMap { $0 }
-        }
-        let defaults = OnionSkinSettings()
-        neighbourhood = decoded(.neighbourhood) ?? defaults.neighbourhood
-        placement = decoded(.placement) ?? defaults.placement
-        previousCount = decoded(.previousCount) ?? defaults.previousCount
-        nextCount = decoded(.nextCount) ?? defaults.nextCount
-        loops = decoded(.loops) ?? defaults.loops
-        colouring = decoded(.colouring) ?? defaults.colouring
-        resolution = decoded(.resolution) ?? defaults.resolution
-        previousTint = decoded(.previousTint) ?? defaults.previousTint
-        nextTint = decoded(.nextTint) ?? defaults.nextTint
-        isOpacityLinked = decoded(.isOpacityLinked) ?? defaults.isOpacityLinked
-        linkedPrevious = decoded(.linkedPrevious) ?? defaults.linkedPrevious
-        linkedNext = decoded(.linkedNext) ?? defaults.linkedNext
-        freePreviousOpacities = decoded(.freePreviousOpacities) ?? defaults.freePreviousOpacities
-        freeNextOpacities = decoded(.freeNextOpacities) ?? defaults.freeNextOpacities
-    }
-
+    /// Decoded strictly, as the rest of the scene's editor record is: an earlier build's record was
+    /// rewritten in this shape at launch (`LegacyToolSettingsRepair`), so one this build cannot read is
+    /// damage, never a reason to quietly reset the artist's settings.
     private enum CodingKeys: String, CodingKey {
         case neighbourhood, placement, previousCount, nextCount, loops, colouring, resolution,
              previousTint, nextTint, isOpacityLinked, linkedPrevious, linkedNext,

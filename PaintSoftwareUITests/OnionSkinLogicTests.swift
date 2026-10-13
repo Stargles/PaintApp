@@ -358,10 +358,10 @@ final class OnionSkinLogicTests: XCTestCase {
                        "a side showing one skin has no furthest slider to take, so it keeps the one it had")
     }
 
-    /// The settings are part of the document's editor state, so what a save wrote has to read back —
-    /// and a record that is missing fields, or carries keys this build no longer reads, keeps what it
-    /// can and defaults the rest.
-    func testTheSettingsRoundTripAndAnOlderRecordKeepsWhatItCanRead() throws {
+    /// The settings are part of the scene's editor state, so what a save wrote has to read back — and,
+    /// like the rest of that record, a record in an earlier shape is not read at the defaults: it was
+    /// rewritten at launch (`LegacyToolSettingsRepair`, whose tests read the earlier shapes).
+    func testTheSettingsRoundTripAndAnEarlierRecordIsNotReadAtTheDefaults() throws {
         var settings = OnionSkinSettings()
         settings.previousCount = 4
         settings.nextCount = 3
@@ -374,12 +374,7 @@ final class OnionSkinLogicTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(OnionSkinSettings.self, from: data), settings)
 
         let older = Data(#"{"previousCount":3,"placement":"inFront","linkedLevel":0.6,"linkedPreviousLevel":0.5,"isOpacityLinked":true}"#.utf8)
-        let decoded = try JSONDecoder().decode(OnionSkinSettings.self, from: older)
-        XCTAssertEqual(decoded.previousCount, 3, "a record missing most fields keeps the ones it has")
-        XCTAssertEqual(decoded.placement, .inFront)
-        XCTAssertEqual(decoded.nextCount, OnionSkinSettings().nextCount, "…and defaults the rest")
-        XCTAssertEqual(decoded.linkedPrevious, OnionSkinRampEnds.standard,
-                       "the keys of the one-level ramp are not read: its ends are the defaults")
+        XCTAssertThrowsError(try JSONDecoder().decode(OnionSkinSettings.self, from: older))
     }
 
     func testUnlinkedSlidersMoveOneAtATime() {

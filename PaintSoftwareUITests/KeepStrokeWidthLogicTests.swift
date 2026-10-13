@@ -55,7 +55,7 @@ final class KeepStrokeWidthLogicTests: XCTestCase {
         let drawnWidth = try XCTUnwrap(width(vector))
         let drawnSpan = try XCTUnwrap(span(vector))
         XCTAssertEqual(drawnWidth, 4, "PREMISE: the stroke was drawn at 4")
-        XCTAssertFalse(manager.toolSwitches.keepsStrokeWidthOnMove, "PREMISE: off by default — §5.17 is the ruling")
+        XCTAssertFalse(manager.keepsStrokeWidthOnMove, "PREMISE: off by default — §5.17 is the ruling")
 
         scale(manager, by: 2)
         XCTAssertEqual(try XCTUnwrap(width(vector)), 8, accuracy: 1e-9,
@@ -66,7 +66,7 @@ final class KeepStrokeWidthLogicTests: XCTestCase {
         manager.undo()
         XCTAssertEqual(try XCTUnwrap(width(vector)), drawnWidth, "undo puts the drawn width back")
 
-        manager.toolSwitches.keepsStrokeWidthOnMove = true
+        manager.keepsStrokeWidthOnMove = true
         scale(manager, by: 2)
         XCTAssertEqual(try XCTUnwrap(width(vector)), drawnWidth,
                        "on: the same 2× scale leaves the width exactly what the artist drew")
@@ -81,7 +81,7 @@ final class KeepStrokeWidthLogicTests: XCTestCase {
     /// through both, where a relative scheme could drift.
     func testTwoNudgesStillReadTheDrawnWidth() throws {
         let (manager, vector) = fixture()
-        manager.toolSwitches.keepsStrokeWidthOnMove = true
+        manager.keepsStrokeWidthOnMove = true
         XCTAssertTrue(manager.beginVectorWholeCelMove())
         guard let lift = manager.vectorFloat?.frame.transform else { return XCTFail("no float") }
         var grown = lift; grown.scale *= 3
@@ -100,7 +100,7 @@ final class KeepStrokeWidthLogicTests: XCTestCase {
     /// bake did not, so the layer re-renders the truth at gesture end), and a translation does not.
     func testTheLatchDropsAfterAScaledNudgeAndNotAfterATranslationWhileTheToggleIsOn() throws {
         let (manager, vector) = fixture()
-        manager.toolSwitches.keepsStrokeWidthOnMove = true
+        manager.keepsStrokeWidthOnMove = true
         XCTAssertTrue(manager.beginVectorWholeCelMove())
         guard let lift = manager.vectorFloat?.frame.transform else { return XCTFail("no float") }
 
@@ -117,7 +117,7 @@ final class KeepStrokeWidthLogicTests: XCTestCase {
         manager.commitVectorFloatIfNeeded()
 
         // And with the toggle off the same scale keeps the latch, since bitmap and bake agree.
-        manager.toolSwitches.keepsStrokeWidthOnMove = false
+        manager.keepsStrokeWidthOnMove = false
         XCTAssertTrue(manager.beginVectorWholeCelMove())
         guard let lift2 = manager.vectorFloat?.frame.transform else { return XCTFail("no float") }
         var grown2 = lift2; grown2.scale *= 2

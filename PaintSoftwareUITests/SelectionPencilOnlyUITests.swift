@@ -27,7 +27,7 @@ import XCTest
 final class SelectionPencilOnlyUITests: PaintUITestCase {
 
     /// Sets "Fingers Can Paint" to the requested state via the Actions menu, tapping only if it
-    /// isn't already there. `pencilOnlyDrawing` is one of the `ToolSwitches` kept across app launches,
+    /// isn't already there. `pencilOnlyDrawing` is app-wide (`AppSettings`) and kept across launches,
     /// so this reads the toggle's actual current state rather than assuming a fresh-install default.
     ///
     /// Phrased in the UI as the state the artist chooses ("fingers can paint"), inverted from the

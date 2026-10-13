@@ -38,8 +38,9 @@ import SwiftUI
 /// `PickerColor` — `hue`/`saturation`/`brightness`/`alpha` (HSB) — is the *only* stored colour. Square
 /// reads and writes it directly; the Triangle tab converts through `ColorMath.hslToRGB`/`rgbToHSL` using
 /// this same `hue` (`PickerColor.hsl`, `setHSL` — never a second saturation/lightness pair, and never
-/// re-deriving `hue` from the round trip). `previousColor` (this file), `ColorHistoryStore.shared` and
-/// `PaletteStore.shared` are the other three things (73) named as shared rather than per-tab, and every
+/// re-deriving `hue` from the round trip). `previousColor` (this file), the scene's Recent colours
+/// (`ColorPanelState`) and `PaletteStore.shared` are the other three things (73) named as shared rather
+/// than per-tab, and every
 /// type tab still shows all three (`header`, `typeTabBody`) — one previous swatch, one history grid, one
 /// palette grid, never a second copy.
 ///
@@ -53,11 +54,11 @@ import SwiftUI
 /// bound.
 ///
 /// ## Which type it opens on
-/// **The one the artist last chose, in every panel** — `ColorPickerType.remembered`, written when a tab
-/// is tapped and read as the panel is built, so leaving the canvas and coming back, or opening the
-/// picker from a different one of its call sites, finds the picker where it was left (TODO (141)).
-/// Until a tab has been chosen it opens on Classic (`ColorPickerType.initial`), for the reason that
-/// type gives.
+/// **The one the artist last chose in this scene, in every panel** — `ColorPanelState.pickerType`,
+/// written when a tab is tapped and saved with the scene, so leaving the canvas and coming back, or
+/// opening the picker from a different one of its call sites, finds the picker where it was left
+/// (TODO (141), and TODO (176)'s ruling that it is the scene's). A new scene opens on Classic
+/// (`ColorPickerType.initial`), for the reason that type gives.
 struct ColorPickerPanel: View {
     /// The colour this panel edits. Every write goes through here, so the panel has no idea whether
     /// it is driving the brush, the paper, a value layer, an effect or a gradient stop.
@@ -80,11 +81,21 @@ struct ColorPickerPanel: View {
 
     /// The app-wide palette library. Shared so edits persist across the panel being rebuilt each
     /// time it's reopened.
-    @ObservedObject var paletteStore: PaletteStore = .shared
+    @ObservedObject private var paletteStore: PaletteStore = .shared
 
-    /// The app-wide "used to paint" history — see `ColorHistoryStore`'s own doc for why this panel
-    /// only *reads* it (recording happens at the stroke, in `CanvasManager.strokeEnded`).
-    @ObservedObject private var historyStore: ColorHistoryStore = .shared
+    /// The scene's picker type, Recent colours and selected palette — see `ColorPanelState` for why
+    /// this panel only *reads* the Recent colours (recording happens at the stroke, in
+    /// `CanvasManager.strokeEnded`).
+    @ObservedObject private var panelState: ColorPanelState
+
+    init(color: Binding<Color>, eyedropperMode: Binding<Eyedropper.Mode>? = nil, supportsOpacity: Bool = true,
+         canvasManager: CanvasManager) {
+        _color = color
+        self.eyedropperMode = eyedropperMode
+        self.supportsOpacity = supportsOpacity
+        self.canvasManager = canvasManager
+        _panelState = ObservedObject(wrappedValue: canvasManager.colorPanel)
+    }
 
     /// The frame `colorPickerPopover` gives this panel — anchored presentations, which have an arrow
     /// and a keyboard to share the screen with, so the Recent strip and the palette scroll in the room
@@ -116,8 +127,6 @@ struct ColorPickerPanel: View {
     /// than trailing one drag tick behind `color`.
     @State private var previousColor: Color = .black
 
-    @State private var pickerType: ColorPickerType = .remembered()
-
     /// The ring + inner shape's shared bounding box. Fixed rather than `GeometryReader`-sized, so a
     /// drag's normalized offset means the same screen distance in every XCUITest.
     ///
@@ -147,7 +156,7 @@ struct ColorPickerPanel: View {
             header
 
             Group {
-                switch pickerType {
+                switch panelState.pickerType {
                 case .triangle: triangleTab
                 case .square: squareTab
                 case .value: valueTab
@@ -190,8 +199,7 @@ struct ColorPickerPanel: View {
 
     private func tabButton(_ type: ColorPickerType) -> some View {
         Button {
-            pickerType = type
-            type.remember()
+            panelState.pickerType = type
         } label: {
             VStack(spacing: 2) {
                 Image(systemName: type.systemImage)
@@ -199,14 +207,14 @@ struct ColorPickerPanel: View {
                 Text(type.title)
                     .font(.system(size: 9, weight: .medium))
             }
-            .foregroundColor(pickerType == type ? .white : .white.opacity(0.5))
+            .foregroundColor(panelState.pickerType == type ? .white : .white.opacity(0.5))
             .frame(maxWidth: .infinity)
             .padding(.vertical, 4)
-            .background(pickerType == type ? Color.white.opacity(0.16) : Color.clear)
+            .background(panelState.pickerType == type ? Color.white.opacity(0.16) : Color.clear)
             .cornerRadius(7)
         }
         .accessibilityIdentifier("colorPanel.tab.\(type.rawValue)")
-        .accessibilityAddTraits(pickerType == type ? [.isSelected] : [])
+        .accessibilityAddTraits(panelState.pickerType == type ? [.isSelected] : [])
     }
 
     // MARK: - Triangle / Square tabs
@@ -260,10 +268,11 @@ struct ColorPickerPanel: View {
             controls()
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
-                    RecentColours(colors: historyStore.colors, onPick: selectSwatch,
-                                  onClear: { historyStore.clear() })
+                    RecentColours(colors: panelState.recentColors, onPick: selectSwatch,
+                                  onClear: { panelState.clearRecent() })
                         .equatable()
-                    PaletteColours(palette: paletteStore.selectedPalette, paletteStore: paletteStore,
+                    PaletteColours(palette: paletteStore.palette(selectedBy: panelState.selectedPaletteID),
+                                   unreadable: paletteStore.unreadable, paletteStore: paletteStore,
                                    canvasManager: canvasManager, colorToAdd: { model.color },
                                    onPick: selectSwatch)
                         .equatable()
@@ -371,7 +380,7 @@ struct ColorPickerPanel: View {
     // MARK: - Palettes tab (item 3)
 
     private var palettesTab: some View {
-        PalettesLibraryView(paletteStore: paletteStore, canvasManager: canvasManager,
+        PalettesLibraryView(paletteStore: paletteStore, panelState: panelState, canvasManager: canvasManager,
                             colorToAdd: { model.color }, onPick: selectSwatch)
     }
 
@@ -595,17 +604,26 @@ private struct RecentColours: View, Equatable {
 /// is built, so the colour a tick moves is not an input to it.
 private struct PaletteColours: View, Equatable {
     let palette: Palette?
+    /// `PaletteStore.unreadable`: said in place of a palette the library could not read.
+    let unreadable: String?
     let paletteStore: PaletteStore
     let canvasManager: CanvasManager
     let colorToAdd: () -> Color
     let onPick: (Color) -> Void
 
-    static func == (lhs: PaletteColours, rhs: PaletteColours) -> Bool { lhs.palette == rhs.palette }
+    static func == (lhs: PaletteColours, rhs: PaletteColours) -> Bool {
+        lhs.palette == rhs.palette && lhs.unreadable == rhs.unreadable
+    }
 
     var body: some View {
         let _ = ColorPickerPasses.sections += 1
         VStack(alignment: .leading, spacing: 6) {
-            if let palette {
+            if let unreadable {
+                Text(unreadable)
+                    .font(.system(size: 10))
+                    .foregroundColor(.orange)
+                    .accessibilityIdentifier("colorPanel.palettesUnreadable")
+            } else if let palette {
                 Text(palette.name)
                     .font(.subheadline.weight(.semibold))
                     .foregroundColor(.white)

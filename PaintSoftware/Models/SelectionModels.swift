@@ -998,12 +998,12 @@ extension CanvasManager {
         guard let canvasSize else { return }
         let canvasRect = CGRect(origin: .zero, size: canvasSize)
         if let existing = selection, existing.isRegion {
-            let composition = toolSwitches.selectionComposition
+            let composition = selectionComposition
             replaceSelection(with: existing.composed(with: path, by: composition, within: canvasRect),
                              label: composition.historyLabel)
             return
         }
-        if toolSwitches.subtractsSelection {
+        if subtractsSelection {
             raise(.nothingToSubtractFrom)
             return
         }

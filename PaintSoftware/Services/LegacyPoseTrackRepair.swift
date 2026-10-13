@@ -43,7 +43,8 @@ import os
 /// ## Deleting it
 ///
 /// This file, `LegacyPoseTrackRepairLogicTests.swift`, the call in
-/// `ProjectBackupManager.runStartupMaintenance` and the two files' entries in `project.pbxproj`.
+/// `ProjectBackupManager.runStartupMaintenance` and the two files' entries in `project.pbxproj` — and
+/// `LibraryRepair.swift` with it, if it is the last repair left.
 nonisolated enum LegacyPoseTrackRepair {
 
     private static let log = Logger(subsystem: "Starg.PaintSoftware", category: "PoseTrackRepair")
@@ -79,23 +80,16 @@ nonisolated enum LegacyPoseTrackRepair {
     ///   build's own `preupdate-` clones, taken before this ran.
     @discardableResult
     static func repairLibrary(leavingUntouched untouchedPrefix: String) -> Report {
-        let root = ProjectBackupManager.documentsDirectory
-        let rootComponents = root.standardizedFileURL.pathComponents
         var report = Report()
-        for directory in ["Projects", "Backups", "Trash"] {
-            let walked = ProjectBackupManager.allProjectPackages(
-                in: root.appendingPathComponent(directory, isDirectory: true))
-            for package in walked where !package.lastPathComponent.hasPrefix(untouchedPrefix) {
-                let result = repair(packageAt: package)
-                guard result.changed || !result.skippedKeys.isEmpty || !result.failed.isEmpty else { continue }
-                let path = package.standardizedFileURL.pathComponents.dropFirst(rootComponents.count).joined(separator: "/")
-                report.packages[path] = result
-                if !result.skippedKeys.isEmpty || !result.failed.isEmpty {
-                    log.error("""
-                        \(path, privacy: .public): left out \(result.skippedKeys.joined(separator: ", "), privacy: .public); \
-                        could not write \(result.failed.joined(separator: ", "), privacy: .public)
-                        """)
-                }
+        for package in LibraryRepair.packages(leavingUntouched: untouchedPrefix) {
+            let result = repair(packageAt: package.url)
+            guard result.changed || !result.skippedKeys.isEmpty || !result.failed.isEmpty else { continue }
+            report.packages[package.path] = result
+            if !result.skippedKeys.isEmpty || !result.failed.isEmpty {
+                log.error("""
+                    \(package.path, privacy: .public): left out \(result.skippedKeys.joined(separator: ", "), privacy: .public); \
+                    could not write \(result.failed.joined(separator: ", "), privacy: .public)
+                    """)
             }
         }
         if !report.packages.isEmpty {
@@ -109,16 +103,13 @@ nonisolated enum LegacyPoseTrackRepair {
     @discardableResult
     static func repair(packageAt package: URL) -> PackageResult {
         var result = PackageResult()
-        let modified = (try? FileManager.default.attributesOfItem(atPath: package.path))?[.modificationDate] as? Date
-        repairManifest(in: package, result: &result)
-        lazy var canvas = readCanvas(of: package)
-        for sidecar in animationFiles(in: package) {
-            repairSidecar(at: sidecar, canvas: { canvas }, result: &result)
-        }
-        // A saved version without a timestamp in its name is dated by its package folder, which the
-        // rewrite just touched.
-        if result.changed, let modified {
-            try? FileManager.default.setAttributes([.modificationDate: modified], ofItemAtPath: package.path)
+        LibraryRepair.keepingItsDate(package) {
+            repairManifest(in: package, result: &result)
+            lazy var canvas = readCanvas(of: package)
+            for sidecar in animationFiles(in: package) {
+                repairSidecar(at: sidecar, canvas: { canvas }, result: &result)
+            }
+            return result.changed
         }
         return result
     }
@@ -162,7 +153,7 @@ nonisolated enum LegacyPoseTrackRepair {
         }
         guard changed else { return }
         manifest["layers"] = layers
-        if !write(manifest, to: url) { result.failed.append(url.lastPathComponent) }
+        if !LibraryRepair.write(manifest, to: url) { result.failed.append(url.lastPathComponent) }
     }
 
     private static func repairSidecar(at url: URL, canvas: @escaping () -> CGRect?, result: inout PackageResult) {
@@ -184,7 +175,7 @@ nonisolated enum LegacyPoseTrackRepair {
         }
         guard changed else { return }
         sidecar["tracks"] = tracks
-        if !write(sidecar, to: url) { result.failed.append(url.lastPathComponent) }
+        if !LibraryRepair.write(sidecar, to: url) { result.failed.append(url.lastPathComponent) }
     }
 
     private static func record(_ repaired: Repaired, as name: String, in result: inout PackageResult) {
@@ -381,9 +372,4 @@ nonisolated enum LegacyPoseTrackRepair {
         (try? JSONEncoder().encode(track)).flatMap { try? JSONSerialization.jsonObject(with: $0) }
     }
 
-    private static func write(_ object: [String: Any], to url: URL) -> Bool {
-        guard let data = try? JSONSerialization.data(withJSONObject: object,
-                                                     options: [.sortedKeys, .withoutEscapingSlashes]) else { return false }
-        return (try? data.write(to: url, options: .atomic)) != nil
-    }
 }

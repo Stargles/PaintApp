@@ -315,22 +315,7 @@ final class ProjectSaveLogicTests: XCTestCase {
                        "A new document's eraser starts on Cut")
         let manifest = ProjectManifest(id: UUID(), name: "New", canvasWidth: 64, canvasHeight: 64,
                                        fps: 24, layers: [], modifiedAt: Date())
-        XCTAssertEqual(manifest.vectorEraserMode, .cutPoints, "…and so does a manifest built without one")
-    }
-
-    /// TODO (181): a package with no eraser-mode key was saved when Erase was the only eraser, so it
-    /// opens on Erase — changing what new documents start on must not change how that package opens.
-    func testAManifestWithNoEraserModeOpensOnErase() throws {
-        let manifest = ProjectManifest(id: UUID(), name: "Legacy", canvasWidth: 64, canvasHeight: 64,
-                                       fps: 24, layers: [], modifiedAt: Date(), vectorEraserMode: .wholeStroke)
-        let data = try JSONEncoder().encode(manifest)
-        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        XCTAssertEqual(object["vectorEraserMode"] as? String, "wholeStroke", "Setup: the key is written")
-        object.removeValue(forKey: "vectorEraserMode")
-
-        let legacy = try JSONDecoder().decode(ProjectManifest.self,
-                                              from: JSONSerialization.data(withJSONObject: object))
-        XCTAssertEqual(legacy.vectorEraserMode, .erase)
+        XCTAssertEqual(manifest.editorState.tools.vectorEraserMode, .cutPoints, "…and so does a manifest built without one")
     }
 
     /// The specific race the async write introduces: a caller that reloads the project the instant

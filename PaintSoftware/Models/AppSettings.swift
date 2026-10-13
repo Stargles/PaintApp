@@ -18,10 +18,11 @@ import os
 /// unreadable, and an absent key is simply that value's default. Every key is in `Key`; the strings are
 /// the ones each value was already saved under, so nothing an existing install holds has to move.
 ///
-/// **A stored value this build cannot read is never read as the default and never written over.**
-/// Everything here is a plist scalar the app itself wrote, which cannot fail to read, except the render
-/// knob, whose unknown value — one a newer build added — shows as Full and stays stored until the artist
-/// picks another.
+/// **A stored value this build cannot read is never read as the default and never written over.** The
+/// palettes are the artist's own work, so an unreadable library is reported (`PalettesRead.unreadable`)
+/// and left on disk untouched; everything else here is a plist scalar the app itself wrote, which cannot
+/// fail to read, except the render knob, whose unknown value — one a newer build added — shows as Full and
+/// stays stored until the artist picks another.
 ///
 /// **An instance over a `UserDefaults`, not a static that writes through.** CLAUDE.md carries the section
 /// on a `UserDefaults`-backed static that outlived the test that set it; logic tests hand this a suite of
@@ -49,6 +50,7 @@ nonisolated struct AppSettings: @unchecked Sendable {
         static let galleryFolder = "paintapp.galleryFolder"
         static let canvasRepairCount = "paintapp.canvasFreezesCaught"
         static let lastAppSignature = "PaintApp.projectBackup.lastAppSignature"
+        static let palettes = "paletteStore.palettes.v1"
     }
 
     private static let log = Logger(subsystem: "Starg.PaintSoftware", category: "AppSettings")
@@ -144,11 +146,40 @@ nonisolated struct AppSettings: @unchecked Sendable {
         }
     }
 
+    // MARK: - Palettes
+
+    /// What reading the palettes library found.
+    enum PalettesRead: Equatable {
+        /// Nothing stored yet: a first launch.
+        case none
+        case palettes([Palette])
+        /// Stored and unreadable — kept on disk untouched; the sentence is what the artist is told.
+        case unreadable(String)
+    }
+
+    /// **The Palettes library** — app-wide, like the brush library; each scene keeps which one it has
+    /// selected.
+    func readPalettes() -> PalettesRead {
+        guard let data = defaults.data(forKey: Key.palettes) else { return .none }
+        do {
+            return .palettes(try JSONDecoder().decode([Palette].self, from: data))
+        } catch {
+            Self.log.fault("The palettes library could not be read: \(String(describing: error), privacy: .public)")
+            return .unreadable("Your palettes could not be read, so none are shown and nothing has been changed. "
+                               + "They are still stored.")
+        }
+    }
+
+    func writePalettes(_ palettes: [Palette]) {
+        guard let data = try? JSONEncoder().encode(palettes) else { return }
+        defaults.set(data, forKey: Key.palettes)
+    }
+
     // MARK: - Launch-argument test hooks
 
     /// The UI tests' "launch as if this were the first time": `-resetEditorPreferences` (which
     /// `PaintUITestCase.launchIntoEditor` passes on every launch) and `-resetGallery` forget the
-    /// artist's app-wide preferences. The projects folder and the
+    /// artist's app-wide preferences, `-resetPalettes` the palettes library. The projects folder and the
     /// update signature are `-resetGallery`'s alone, forgotten by `ProjectBackupManager` beside the
     /// library it wipes and only in a simulator. Synchronous, in `PaintApp.init`, because the first
     /// document reads these as it opens.
@@ -158,6 +189,9 @@ nonisolated struct AppSettings: @unchecked Sendable {
                         Key.galleryFolder, Key.canvasRepairCount] {
                 defaults.removeObject(forKey: key)
             }
+        }
+        if arguments.contains("-resetPalettes") {
+            defaults.removeObject(forKey: Key.palettes)
         }
     }
 

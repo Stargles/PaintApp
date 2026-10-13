@@ -177,6 +177,9 @@ struct CanvasSizePickerView: View {
         guard let width, let height, isValid else { return }
         canvasManager.canvasSize = CGSize(width: width, height: height)
         canvasManager.addVectorLayer()
+        // Inert unless an XCUITest passed `-uiTestSeedColorHistory`: a full Recent strip, which only
+        // twenty painted strokes in twenty colours would otherwise fill.
+        UITestSeeds.seedColorHistoryIfRequested(into: canvasManager)
         // Inert unless an XCUITest passed `-uiTestSeedMovedTransformLayer` — a Move layer above the
         // drawing layer, first because everything the seeds below place has to land under it.
         UITestSeeds.seedMovedTransformLayerIfRequested(into: canvasManager)

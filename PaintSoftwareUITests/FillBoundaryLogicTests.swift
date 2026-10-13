@@ -578,7 +578,7 @@ final class FillBoundaryLogicTests: XCTestCase {
     /// "read the count, not the banner" warning. This is the one assertion on the Swift-side wire.
     func testCanvasPaddingReachesTheKeyTheFillRendersWith() {
         let manager = CanvasFixture.manager()
-        XCTAssertTrue(manager.toolSwitches.fillCanvasEdgeIsBoundary, "On by default, at the owner's request")
+        XCTAssertTrue(manager.fillSettings.canvasEdgeIsBoundary, "On by default, at the owner's request")
         XCTAssertEqual(manager.currentFillKey().inset, 0, "No padding, so the artwork rect is the buffer")
 
         manager.setCanvasPadding(16)
@@ -640,7 +640,7 @@ final class FillBoundaryLogicTests: XCTestCase {
     private func paddedManager(extension buffer: CGFloat, boundary: Bool = true) -> CanvasManager {
         let manager = CanvasFixture.manager(layerCount: 1)
         manager.canvasPadding = Self.padding
-        manager.toolSwitches.fillCanvasEdgeIsBoundary = boundary
+        manager.fillSettings.canvasEdgeIsBoundary = boundary
         manager.setFillCanvasEdgeExtension(buffer)
         return manager
     }

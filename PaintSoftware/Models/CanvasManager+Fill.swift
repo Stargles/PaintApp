@@ -434,9 +434,9 @@ extension CanvasManager {
         FillKey(gap: Int(fillSettings.gapClosing.rounded()),
                 threshold: Int((fillSettings.threshold * 1000).rounded()),
                 edge: Int(fillEdgeRadius(lasso: fillGestureIsLasso).rounded()),
-                edgeIsWall: toolSwitches.fillCanvasEdgeIsBoundary,
+                edgeIsWall: fillSettings.canvasEdgeIsBoundary,
                 inset: Int(max(0, canvasPadding - fillSettings.canvasEdgeExtension).rounded()),
-                mendReach: toolSwitches.fillMendsNeighbourGap ? Int(fillSettings.mendReach.rounded()) : 0)
+                mendReach: fillSettings.mendsNeighbourGap ? Int(fillSettings.mendReach.rounded()) : 0)
     }
 
     /// Toggles "the canvas edge bounds the fill" and, if a fill is currently adjustable, re-runs it so
@@ -444,8 +444,8 @@ extension CanvasManager {
     /// `setFillSetting` gives the three sliders. Not a `FillAxis`: the sideways drag adjusts a
     /// continuous setting, and there is no useful way to sweep a boolean.
     func setFillCanvasEdgeIsBoundary(_ enabled: Bool) {
-        guard toolSwitches.fillCanvasEdgeIsBoundary != enabled else { return }
-        toolSwitches.fillCanvasEdgeIsBoundary = enabled
+        guard fillSettings.canvasEdgeIsBoundary != enabled else { return }
+        fillSettings.canvasEdgeIsBoundary = enabled
         if fillGestureActive { scheduleFillRender() }
     }
 
@@ -463,8 +463,8 @@ extension CanvasManager {
     /// natural order is to fill, see the seam, and flip this, and the seam should close under the
     /// artist's finger.
     func setFillMendsNeighbourGap(_ enabled: Bool) {
-        guard toolSwitches.fillMendsNeighbourGap != enabled else { return }
-        toolSwitches.fillMendsNeighbourGap = enabled
+        guard fillSettings.mendsNeighbourGap != enabled else { return }
+        fillSettings.mendsNeighbourGap = enabled
         if fillGestureActive { scheduleFillRender() }
     }
 
@@ -1142,7 +1142,7 @@ extension CanvasManager {
     /// the same fill previewed inside.
     private func clippedForSelection(_ preview: FillPreview?, through window: FillWindow,
                                      layerIndex: Int, celIndex: Int) -> FillPreview? {
-        guard let preview, let selection, !toolSwitches.allowsPaintingOutsideSelection,
+        guard let preview, let selection, !allowsPaintingOutsideSelection,
               layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex),
               selection.acts(onLayer: layers[layerIndex].id, cel: layers[layerIndex].cels[celIndex].id)
         else { return preview }

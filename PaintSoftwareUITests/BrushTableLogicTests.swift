@@ -508,6 +508,47 @@ final class BrushTableLogicTests: XCTestCase {
                        "so no pixel of the ink already on the canvas moves")
     }
 
+    /// **TODO (176), the owner's note on row A8**: *"Brushstrokes already in the document should stay as
+    /// they are, the edit menu only applies to new brush strokes"* — across scenes and a save, with the
+    /// preset edited in the app-wide library while this scene was closed. Its vector ink keeps the brush
+    /// it was drawn with, its raster ink keeps its pixels, and the brush this scene's next stroke is laid
+    /// with — the one the canvas hands the stroke view, `toolProfiles[.brush]` — is the edited preset.
+    func testAPresetEditedWhileTheSceneWasClosedReachesOnlyItsNextStrokes() throws {
+        let (manager, layerIndex, vector) = fixture()
+        let library = try XCTUnwrap(manager.brushLibraryOverride)
+        let asDrawn = brush("As Drawn", size: 8, hardness: 0.95, spacing: 0.05)
+        _ = library.add(asDrawn)
+        manager.selectPreset(asDrawn, for: .brush)
+        vector.addStroke(stroke(manager.toolProfiles.brush.preset, from: CGPoint(x: 8, y: 32), to: CGPoint(x: 54, y: 32), size: 12))
+        BrushStamper.stampStroke(into: manager.layers[0].cels[0].raster,
+                                 samples: StrokeSamples((0..<8).map { VectorSample(point: CGPoint(x: 6 + CGFloat($0) * 6, y: 20),
+                                                                                   pressure: 0.9) }, channels: .pressureOnly),
+                                 brush: manager.toolProfiles.brush.preset, color: .black,
+                                 brushSize: 10, brushOpacity: 1, random: DabRandom(seed: 0))
+        let url = projectURL(name: "Drawn Before The Edit")
+        saveAndWait(manager, to: url)
+        let vectorBefore = try XCTUnwrap(pixels(vector.render()))
+        let rasterBefore = try XCTUnwrap(pixels(manager.layers[0].cels[0].raster.renderToUIImage()))
+        assertHasInk(vectorBefore, "the vector stroke drawn before the edit")
+        assertHasInk(rasterBefore, "the raster stroke drawn before the edit")
+
+        // Another scene's brush editor: the same preset, edited, into the library.
+        var edited = asDrawn
+        edited.dab.hardness = 0.05
+        edited.dab.spacing = 0.4
+        library.update(edited)
+
+        let reopened = try XCTUnwrap(ProjectStore.load(from: url))
+        reopened.brushLibraryOverride = library
+        reopened.adoptLibrarySelections()   // what `ContentView` does as the scene enters the editor
+        let reopenedVector = try XCTUnwrap(reopened.layers[layerIndex].cels[0].vector)
+        XCTAssertEqual(reopenedVector.strokes.first?.brush, asDrawn, "The ink already drawn keeps its brush")
+        XCTAssertEqual(try XCTUnwrap(pixels(reopenedVector.render())), vectorBefore, "…and its pixels")
+        XCTAssertEqual(try XCTUnwrap(pixels(reopened.layers[0].cels[0].raster.renderToUIImage())), rasterBefore,
+                       "The raster ink is the pixels it was")
+        XCTAssertEqual(reopened.toolProfiles.brush.preset, edited, "The next stroke is laid with the edited preset")
+    }
+
     /// **§2.10's second half — the explicit verb, and it is one undo step.** Two strokes, both caught,
     /// both re-pointed, and one press of undo puts both back.
     func testApplyingABrushToASelectionIsOneUndoStepThatCoversEveryStrokeItTouched() throws {

@@ -121,7 +121,7 @@ struct FillSettingsPanel: View {
                 // carries on the rest of the way when a fill already sits on the far side of it.
                 VStack(alignment: .leading) {
                     Toggle(isOn: Binding(
-                        get: { canvasManager.toolSwitches.fillMendsNeighbourGap },
+                        get: { settings.mendsNeighbourGap },
                         set: { canvasManager.setFillMendsNeighbourGap($0) }
                     )) {
                         Text("Mend Gap to Neighbouring Fill")
@@ -138,14 +138,14 @@ struct FillSettingsPanel: View {
                     // option is off, like the Extension Buffer below: present, so the artist can see
                     // what the option has, and saying by its colour that it does nothing yet.
                     Text("Mend Reach: \(Int(settings.mendReach)) px")
-                        .foregroundColor(canvasManager.toolSwitches.fillMendsNeighbourGap ? .white : .gray)
+                        .foregroundColor(settings.mendsNeighbourGap ? .white : .gray)
                         .padding(.top, 4)
                     Slider(value: Binding(
                         get: { settings.mendReach },
                         set: { canvasManager.setFillMendReach($0) }
                     ), in: CanvasManager.fillMendReachRange, step: 1)
                         .tint(Self.selectedTint)
-                        .disabled(!canvasManager.toolSwitches.fillMendsNeighbourGap)
+                        .disabled(!settings.mendsNeighbourGap)
                         .accessibilityIdentifier("fillPanel.mendReachSlider")
                     Text("The widest strip of line the mend will close, counted from where Edge Overlap leaves each fill.")
                         .font(.caption)
@@ -162,7 +162,7 @@ struct FillSettingsPanel: View {
                 // could no longer move that slider to 0.
                 VStack(alignment: .leading) {
                     Toggle(isOn: Binding(
-                        get: { canvasManager.toolSwitches.fillCanvasEdgeIsBoundary },
+                        get: { settings.canvasEdgeIsBoundary },
                         set: { canvasManager.setFillCanvasEdgeIsBoundary($0) }
                     )) {
                         Text("Canvas Edge Is a Boundary")
@@ -180,7 +180,7 @@ struct FillSettingsPanel: View {
                     // slider is shown but dead, saying why, rather than vanishing and leaving the
                     // artist to wonder where the option went.
                     let padding = canvasManager.canvasPadding
-                    let canExtend = canvasManager.toolSwitches.fillCanvasEdgeIsBoundary && padding >= 1
+                    let canExtend = settings.canvasEdgeIsBoundary && padding >= 1
                     Text("Extension Buffer: \(Int(min(settings.canvasEdgeExtension, padding))) px")
                         .foregroundColor(canExtend ? .white : .gray)
                         .padding(.top, 4)

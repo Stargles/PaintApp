@@ -74,23 +74,19 @@ final class ColorPickerUITests: PaintUITestCase {
         XCTAssertGreaterThan(Int(pixel.g), Int(pixel.b) + 40, "…with green clearly ahead of blue too, got \(pixel)")
     }
 
-    // MARK: - The chosen type is remembered
+    // MARK: - The chosen type is the scene's
 
     /// TODO (141) — the owner: *"The color wheel type resets to classic (square) every time the canvas
-    /// is exited and re-entered."* Driven the way they hit it: from a fresh document, choose Wheel,
-    /// leave to the gallery and reopen the drawing, and then — since the choice is the artist's rather
-    /// than the drawing's — quit the app and come back to it cold. The panel is read off the screen
-    /// both times: the Wheel's own triangle is up, the Classic square is not, and the tab bar says
-    /// which tab is selected.
-    ///
-    /// **The second half launches without `-resetEditorPreferences`**, which `launchIntoEditor` adds
-    /// to every launch it makes: the hook that makes the other twelve picker tests start on Classic is
-    /// the same one that would erase what this one is proving survives.
-    func testTheTypeTheArtistChoseIsStillChosenAfterLeavingTheCanvasAndAfterAFreshLaunch() throws {
+    /// is exited and re-entered."* — and TODO (176)'s ruling that which tab the picker opens on is the
+    /// scene's. Driven the way they hit it: from a fresh scene, choose Wheel, leave to the gallery and
+    /// reopen the drawing; start a second scene, which opens on Classic; then quit the app, come back
+    /// cold and reopen the first. The panel is read off the screen each time: the Wheel's own triangle
+    /// is up, the Classic square is not, and the tab bar says which tab is selected.
+    func testTheTypeTheArtistChoseIsTheScenesAndOutlivesLeavingAndAFreshLaunch() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
         openColorPanel(app)
-        XCTAssertTrue(app.buttons["colorPanel.tab.square"].isSelected, "PREMISE: a fresh install opens on Classic")
+        XCTAssertTrue(app.buttons["colorPanel.tab.square"].isSelected, "PREMISE: a new scene opens on Classic")
 
         app.buttons["colorPanel.tab.triangle"].tap()
         let triangle = app.otherElements["colorPanel.triangle"]
@@ -101,15 +97,28 @@ final class ColorPickerUITests: PaintUITestCase {
         saveEditorAndReturnToGallery(app).tap()
         assertThePanelOpensOnTheWheel(app, "after leaving the canvas and coming back")
         attachScreenshot(XCUIScreen.main, "Wheel after re-entering the canvas")
+        app.buttons["toolbar.colorButton"].tap()
+
+        // A second scene is its own: it opens on Classic.
+        XCTAssertTrue(app.buttons["toolbar.galleryButton"].waitForExistence(timeout: 5))
+        app.buttons["toolbar.galleryButton"].tap()
+        XCTAssertTrue(openNewCanvas(app), "A second scene")
+        openColorPanel(app)
+        XCTAssertTrue(app.buttons["colorPanel.tab.square"].isSelected, "A new scene opens on Classic, not the Wheel")
+        closeColorPanel(app)
+        saveEditorAndReturnToGallery(app)
 
         // And a launch of its own, which keeps everything but the reset arguments.
         app.terminate()
         app.launchArguments = []
         app.launch()
-        let tile = app.staticTexts.matching(NSPredicate(format: "label == %@", "Untitled")).firstMatch
-        XCTAssertTrue(tile.waitForExistence(timeout: 10), "The saved drawing is in the gallery of the new launch")
-        tile.tap()
-        assertThePanelOpensOnTheWheel(app, "after quitting the app and opening it again")
+        let first = app.staticTexts.matching(NSPredicate(format: "label == %@", "Untitled")).firstMatch
+        XCTAssertTrue(first.waitForExistence(timeout: 10), "The saved drawings are in the gallery of the new launch")
+        let tiles = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Untitled"))
+        XCTAssertEqual(tiles.count, 2, "Both scenes were saved")
+        // Newest first: the second scene is the first tile, the Wheel's scene the second.
+        tiles.element(boundBy: 1).tap()
+        assertThePanelOpensOnTheWheel(app, "after quitting the app and opening the scene again")
     }
 
     /// Opens the colour panel on a document that has just opened, and asserts it came up on the Wheel

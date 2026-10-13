@@ -403,7 +403,7 @@ final class FillMendLogicTests: XCTestCase {
     /// slider's value once it is on.
     func testTheMendReachIsPartOfTheKeyTheFillRendersWith() {
         let manager = CanvasFixture.manager()
-        XCTAssertTrue(manager.toolSwitches.fillMendsNeighbourGap, "On from a fresh document (owner, 2026-10-12)")
+        XCTAssertTrue(manager.fillSettings.mendsNeighbourGap, "On from a fresh document (owner, 2026-10-12)")
         XCTAssertEqual(manager.fillSettings.mendReach, 12, "Mend Reach defaults to 12 px")
         XCTAssertEqual(manager.currentFillKey().mendReach, 12, "…and the key a fresh document renders with carries it")
         manager.setFillMendsNeighbourGap(false)

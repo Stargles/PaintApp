@@ -455,6 +455,24 @@ final class CanvasManager: ObservableObject {
     /// to do nothing until something unrelated forces a re-render.
     @Published var hiddenMotionGroups: Set<UUID> = []
 
+    /// View-level switch for `InterpolationEvaluator.Options.thicknessFade`, so the two behaviours can
+    /// be compared on real drawings. Not per-recipe; saved with the scene. Off matches the evaluator's
+    /// default; the reason it is off is in `InterpolationEvaluator.ThicknessFade`.
+    @Published var interpolationThicknessFade = false {
+        didSet { recordSwitch("interpolationThicknessFade", from: oldValue, to: interpolationThicknessFade) }
+    }
+
+    /// Whether a keyframe's strokes are drawn in their motion groups' tag colours while interpolate
+    /// mode is on. Saved with the scene.
+    ///
+    /// **On by default** — "what did it decide?" is the question this exists to answer, and an
+    /// overlay nobody switches on answers nothing. Shows only where there is a decision to show — a
+    /// drawing that grouped into one part is not tinted at all — and the switch is in the mode's
+    /// options popover for the artist who wants their own colours back for a moment.
+    @Published var showMotionGroupOverlay = true {
+        didSet { recordSwitch("showMotionGroupOverlay", from: oldValue, to: showMotionGroupOverlay) }
+    }
+
     /// Whether the next canvas drag draws a **guide stroke** rather than ink.
     ///
     /// Armed state rather than a `Tool` case, exactly like `armedMotionGroupID` and for the same
@@ -918,7 +936,7 @@ final class CanvasManager: ObservableObject {
     ///
     /// **Not saved across launches, and that is the ruling rather than an omission** — it is
     /// per-drawing intent; storing it would make *last used* the default, which is not what the owner
-    /// asked for. (A picker, not one of the `toolSwitches` the owner asked to keep.)
+    /// asked for.
     ///
     /// Written through `setSelectionMembership(_:)`, never assigned directly from a view: a float
     /// lifted under the old rule has to be re-lifted under the new one, and the order that re-lift
@@ -929,6 +947,66 @@ final class CanvasManager: ObservableObject {
     /// `selectObject(at:)`. Not saved across launches, for `selectionMembership`'s reason one line up.
     @Published var tapComposition: TapComposition = .single
     @Published var magicWandTolerance: Double = 0.15
+
+    // The Select panel's and the Move bar's switches. **Not saved: each resets with every launch** — the
+    // owner's ruling for TODO (176). Each change is handed to the action recorder (`recordSwitch`).
+
+    /// **Paint Outside Selection** — whether painting, erasing and filling may touch pixels outside the
+    /// active selection. Off by default (deny), matching Procreate-style selections; only meaningful
+    /// while `selection` is non-nil.
+    @Published var allowsPaintingOutsideSelection = false {
+        didSet { recordSwitch("allowsPaintingOutsideSelection", from: oldValue, to: allowsPaintingOutsideSelection) }
+    }
+
+    /// **TODO (95) — "Add / Subtract", in the Select panel's rule row.** Off, a new loop is added to the
+    /// selection already up; on, it is taken from it. Read through `selectionComposition` in one place,
+    /// `finishSelection`, so a freehand loop, a rectangle and the wand all compose the same way.
+    ///
+    /// A subtract drawn with nothing selected raises `CanvasNotice.nothingToSubtractFrom` rather than
+    /// selecting, so a switch that was left on shows itself the first time it is used.
+    @Published var subtractsSelection = false {
+        didSet { recordSwitch("subtractsSelection", from: oldValue, to: subtractsSelection) }
+    }
+
+    /// How the next selection loop meets the one already up — `subtractsSelection` as the operation
+    /// `Selection.composed(with:by:)` takes.
+    var selectionComposition: SelectionComposition {
+        subtractsSelection ? .subtract : .add
+    }
+
+    /// **TODO item (14) — "Keep full precision" on the Move bar.** While this is on, every stroke a
+    /// committed vector Move writes is marked `VectorStroke.precise`, so its samples are *stored* as
+    /// float32 instead of on the quarter-pixel grid.
+    ///
+    /// Off by default, and that is the ruling rather than caution: the packed form is the compaction
+    /// feature item (8) shipped, and the precise one costs ~1.7x the bytes a sample. It buys exactly
+    /// one thing — a stroke the artist shrinks, saves, reopens and grows again comes back where it
+    /// was — and only a Move can shrink one, so only a Move turns it on.
+    @Published var preserveMovePrecision = false {
+        didSet { recordSwitch("preserveMovePrecision", from: oldValue, to: preserveMovePrecision) }
+    }
+
+    /// **TODO (75) — "Keep Stroke Width" on the Move bar.** The owner: *"there should be a toggle
+    /// where there is the option that the brushstroke size is constant. Right now I believe it scales
+    /// with the move."* It does, by ruling — LASSO_MOVE.md §5.17's `sqrt(|det|)` — and that stays the
+    /// default. While this is on, a scaled Move leaves every stroke's `VectorStroke.size` exactly what
+    /// it was at the lift; `applyToVectorFloat` is the one place a Move writes geometry and the one
+    /// place this is read.
+    ///
+    /// **A keystoned stroke is outside it, and that is the shape of the thing rather than a gap.** Under
+    /// Distort a stroke's width is not one number: each dab takes its radius from the map's local scale
+    /// where it lands (`StrokeDistort`, KEYFRAMES.md §8), so "unchanged" has no single width to name.
+    /// The switch governs the two affine arms, which is every Move, scale, turn, Freeform and Mirror.
+    @Published var keepsStrokeWidthOnMove = false {
+        didSet { recordSwitch("keepsStrokeWidthOnMove", from: oldValue, to: keepsStrokeWidthOnMove) }
+    }
+
+    /// Hands a switch's change to the action recorder by name — a recording that shows a tool behaving
+    /// unexpectedly is often explained entirely by one of these being flipped above it.
+    func recordSwitch(_ name: String, from old: Bool, to new: Bool) {
+        guard old != new else { return }
+        ActionRecorder.ifRecording { $0.model(name, new ? "true" : "false") }
+    }
     @Published var selection: Selection? {
         didSet {
             // **A selection cleared or replaced mid-drag cancels the drag** (TODO (42)): the session
@@ -1191,25 +1269,6 @@ final class CanvasManager: ObservableObject {
     /// with the document (`EditorStateManifest`) and switched from the colour panel's top right
     /// (`ColorPickerPanel.eyedropperMode`). `@Published` because that switch renders it.
     @Published var eyedropperMode: Eyedropper.Mode = .layer
-    /// **The artist's on/off choices for their tools** — fill's mend and canvas-edge switches, the
-    /// Select panel's, the Move bar's and interpolation's (`ToolSwitches` names each and carries its
-    /// default). One value so the tools in the artist's hand are kept across launches by one
-    /// mechanism, `ToolSwitchesKeeper`, rather than by a `UserDefaults` call per switch; the model
-    /// itself touches no defaults.
-    ///
-    /// Every change is handed to the action recorder by name, because a recording that shows a tool
-    /// behaving unexpectedly is often explained entirely by one of these being flipped above it.
-    @Published var toolSwitches = ToolSwitches() {
-        didSet {
-            guard oldValue != toolSwitches else { return }
-            ActionRecorder.ifRecording { recorder in
-                for (name, field) in ToolSwitches.saved where oldValue[keyPath: field] != toolSwitches[keyPath: field] {
-                    recorder.model(name, toolSwitches[keyPath: field] ? "true" : "false")
-                }
-            }
-        }
-    }
-
     /// **Whether only the Apple Pencil draws** — the inverse of Settings → Fingers Can Paint. About the
     /// artist's hardware, not any one drawing, so it is app-wide (`AppSettings`) and handed to each
     /// document by `AppSettingsKeeper`; off on a manager nothing has handed it to.
@@ -1218,10 +1277,7 @@ final class CanvasManager: ObservableObject {
     /// draws at all — a recording showing finger touches that produce no stroke is explained entirely
     /// by this being `true` somewhere above them.
     @Published var pencilOnlyDrawing = false {
-        didSet {
-            guard oldValue != pencilOnlyDrawing else { return }
-            ActionRecorder.ifRecording { $0.model("pencilOnlyDrawing", pencilOnlyDrawing ? "true" : "false") }
-        }
+        didSet { recordSwitch("pencilOnlyDrawing", from: oldValue, to: pencilOnlyDrawing) }
     }
 
     /// How large the live canvas's composites are rendered — see `RenderResolution`, which carries
@@ -1291,23 +1347,22 @@ final class CanvasManager: ObservableObject {
     /// *"edits currently apply to a live copy and are lost when the preset changes"*, at the one
     /// place that half of it could not reach.
     ///
-    /// The profiles are initialised from the **literals** `BrushLibrary.roundSoft` / `.roundHard`,
-    /// which is right on a device with no library and wrong the moment one has been edited: MEASURED
-    /// as a red UI test where an edit survived closing the editor and did not survive a relaunch, with
-    /// the library file holding the edit the whole time and the menu row beside the editor drawing it.
-    /// The ids are written down (they have to be, for the picker's highlight to survive a reload), so
-    /// the library can be asked.
+    /// A scene carries each tool's preset whole (`SceneTools.profiles`), and a new scene starts from
+    /// the **literals** `BrushLibrary.roundSoft` / `.roundHard` — right on a device with no library,
+    /// and wrong the moment the preset has been edited, here or in another scene: MEASURED as a red UI
+    /// test where an edit survived closing the editor and did not survive a relaunch, with the library
+    /// file holding the edit the whole time and the menu row beside the editor drawing it. A preset's
+    /// parameters are app-wide (the owner's ruling for TODO (176), row A8), so the library's version is
+    /// the one the next stroke uses; the ids are written down, so the library can be asked.
     ///
-    /// **Size and opacity are re-baselined only when the value actually moved**, which is what keeps
-    /// this from quietly changing the eraser's default width: on a fresh library the stored brush
-    /// *is* the literal, the guard fails, and nothing is touched. After an edit, re-baselining is
-    /// `selectPreset`'s own behaviour and is what the artist means by having set a size in the editor.
-    /// The tool is deliberately not retargeted — this is not a selection, it is the same selection
-    /// catching up.
+    /// **Only the preset moves.** The size and opacity are the scene's own (rows A3 and A4) and are
+    /// what the artist left them at; the tool is not retargeted — this is not a selection, it is the
+    /// same selection catching up. The ink already in the scene keeps the brushes it was drawn with
+    /// (its brush table), so an edit reaches only new strokes, as the owner asked.
     func adoptLibrarySelections() {
         for tool in StrokeTool.allCases {
             if let stored = brushLibrary.brush(withID: toolProfiles[tool].preset.id), stored != toolProfiles[tool].preset {
-                toolProfiles[tool] = ToolProfile(preset: stored)
+                toolProfiles[tool].preset = stored
             }
         }
     }
@@ -1422,9 +1477,13 @@ final class CanvasManager: ObservableObject {
     /// is `fillSettings.selectedAxis`.
     enum FillAxis { case gapClosing, threshold, edgeOverlap }
 
-    /// The fill tool's slider values — observed by the views that show them and by nothing else, so a
+    /// The fill tool's settings — observed by the views that show them and by nothing else, so a
     /// slider tick is not a pass over the editor (TODO (157); see `FillSettings`).
     let fillSettings = FillSettings()
+
+    /// The colour panel's picker type, Recent colours and selected palette in this scene — observed by
+    /// the panel and nothing else, for `fillSettings`' reason (see `ColorPanelState`).
+    let colorPanel = ColorPanelState()
 
     /// Which kind of fill the fill tool performs — a type option under the one tool, not a second
     /// tool. `.lasso` takes its gesture from `SelectionOverlayView` instead of the fill press
@@ -3474,7 +3533,7 @@ final class CanvasManager: ObservableObject {
         // paints nothing with `brushColor` (`.destinationOut`/a punch, not ink), so it is excluded
         // here rather than left to flood the list with whatever colour happened to be selected.
         if selectedTool != .eraser {
-            ColorHistoryStore.shared.record(brushColor)
+            colorPanel.recordPainted(brushColor)
         }
     }
 

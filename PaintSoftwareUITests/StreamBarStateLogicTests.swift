@@ -294,7 +294,7 @@ final class StreamBarStateLogicTests: XCTestCase {
     /// This is the rule `b07984d` (stage 2) did not need and stage 4 adds — read that commit's
     /// message and this file's old test (now split in two) before changing it again. The document's
     /// *ambient* connection (`documentEndpointOverride`, standing in for `sync()`'s real
-    /// `StreamEndpoint.lastUsed()` read) can sit connected with no stream element for the rest of a
+    /// `AppSettings.lastStreamEndpoint` read) can sit connected with no stream element for the rest of a
     /// session, and it must read as paused so the laptop is not encoding for a canvas nobody is
     /// showing — pausing costs nothing else, since FILE_* still flows on a paused connection.
     func testAConnectionNoElementNamesIsNowPaused() throws {

@@ -122,8 +122,9 @@ class PaintUITestCase: XCTestCase {
     /// comes back, `waitForExistence` below times out and the test fails.
     @discardableResult
     func launchIntoEditor(_ app: XCUIApplication) -> Bool {
-        // The artist's tools outlive a launch since TODO (77); a test that opens a new document
-        // and reads the default brush wants the defaults, not the last test's slider position.
+        // The app-wide preferences outlive a launch — Fingers Can Paint, Render Resolution, the gallery
+        // folder (`AppSettings`) — and a test that opens a new document wants the defaults, not
+        // whatever the last test left. A scene's own tools start at the defaults in every new one.
         if !app.launchArguments.contains("-resetEditorPreferences") {
             app.launchArguments.append("-resetEditorPreferences")
         }

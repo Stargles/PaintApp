@@ -229,8 +229,8 @@ enum ProjectStore {
     ///     because the palette was then a superset of what any stroke could reference; BRUSH.md §2.10
     ///     ends that on purpose by minting a table entry per edit, so a document routinely holds
     ///     brushes no picker lists.
-    ///   * **The palette** — `selectedBrush` and `customBrushes`, which `manifest.json` persists in
-    ///     their own right (§8.1: the library and the table are different collections). A custom brush
+    ///   * **The palette** — every tool's selected preset and `customBrushes`, which `manifest.json`
+    ///     persists in their own right (§8.1: the library and the table are different collections). A custom brush
     ///     the artist has imported but not yet drawn with is in no stroke's table and still has to
     ///     travel, or the picker comes back on another device pointing at a file that is not there.
     ///
@@ -385,10 +385,7 @@ enum ProjectStore {
         let fps: Int
         let backgroundColor: CodableColor
         let isBackgroundVisible: Bool
-        let selectedBrush: Brush
         let customBrushes: [Brush]
-        let vectorEraserMode: VectorEraserMode
-        let universalEraser: Bool
         let folders: [FolderManifest]
         let viewPresets: [ViewPresetManifest]
         let motionGroups: [MotionGroup]
@@ -424,10 +421,7 @@ enum ProjectStore {
             fps = canvasManager.fps
             backgroundColor = canvasManager.canvasBackgroundColor.codable
             isBackgroundVisible = canvasManager.isCanvasBackgroundVisible
-            selectedBrush = canvasManager.toolProfiles.brush.preset
             customBrushes = canvasManager.customBrushes
-            vectorEraserMode = canvasManager.vectorEraserMode
-            universalEraser = canvasManager.universalEraser
             folders = canvasManager.folders.map { folder in
                 FolderManifest(id: folder.id, name: folder.name, hasCustomName: folder.hasCustomName,
                                isExpanded: folder.isExpanded,
@@ -1272,7 +1266,7 @@ enum ProjectStore {
         // both the drawing and the palette need into the project package for self-containment.
         copyCustomBrushTexturesIntoProject(
             importedTextureFileNames(table: brushTable,
-                                     palette: [snapshot.selectedBrush] + snapshot.customBrushes),
+                                     palette: snapshot.editorState.tools.profiles.presets + snapshot.customBrushes),
             projectURL: url)
 
         let manifest = ProjectManifest(
@@ -1287,10 +1281,7 @@ enum ProjectStore {
             modifiedAt: Date(),
             backgroundColor: snapshot.backgroundColor,
             isBackgroundVisible: snapshot.isBackgroundVisible,
-            selectedBrush: snapshot.selectedBrush,
             customBrushes: snapshot.customBrushes,
-            vectorEraserMode: snapshot.vectorEraserMode,
-            universalEraser: snapshot.universalEraser,
             folders: snapshot.folders,
             viewPresets: snapshot.viewPresets,
             motionGroups: snapshot.motionGroups,
@@ -2170,18 +2161,13 @@ enum ProjectStore {
         // was deleted) — see copyCustomBrushTexturesIntoProject's doc comment for the save side.
         restoreCustomBrushTexturesFromProject(
             importedTextureFileNames(table: decoded.brushTable,
-                                     palette: [manifest.selectedBrush] + manifest.customBrushes),
+                                     palette: manifest.editorState.tools.profiles.presets + manifest.customBrushes),
             projectURL: url)
         manager.customBrushes = manifest.customBrushes
         // BRUSH.md §8.1: the library is app-level and the manifest's list is this *document's*.
         // A project made on another device carries brushes this library has never seen, and the two
         // lines above make them drawable; this is what makes them pickable.
         manager.adoptRestoredBrushesIntoLibrary()
-        manager.selectPreset(manifest.selectedBrush, for: .brush)
-        // Assigned directly rather than through a `select…` helper: unlike a brush, the vector-eraser
-        // mode carries no size/opacity to re-baseline, so there is nothing for such a helper to do.
-        manager.vectorEraserMode = manifest.vectorEraserMode
-        manager.universalEraser = manifest.universalEraser
         // Document-level interpolation state. Both default to empty for every project that predates
         // the feature or simply never used it.
         manager.motionGroups = manifest.motionGroups
@@ -2258,9 +2244,9 @@ enum ProjectStore {
 
         manager.layers = layers
         migrateGroupVisibility(manager, folders: manifest.folders)
-        // Last, after the layers and folders it names exist — TODO (77). A package from before it
-        // carries none and opens at the defaults, as it always did.
-        manager.restoreEditorState(manifest.editorState ?? EditorStateManifest())
+        // Last, after the layers, folders and view presets it names exist — TODO (77) — and with them
+        // the tools the artist had in hand in this scene, TODO (176).
+        manager.restoreEditorState(manifest.editorState)
         // What this open could not read, carried on the document rather than logged and forgotten.
         // `SaveDamageGate` is the only thing that reads it; `CanvasManager` merely holds it, which is
         // the smallest seam that gets a value produced in the vector decode to the save path.
