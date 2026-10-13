@@ -242,7 +242,8 @@ enum PlaybackProbe {
                 "atEnd": footprint.last,
                 "growth": footprint.growth,
                 "samples": footprint.samples
-            ]
+            ],
+            "surfaceBytesPeak": footprint.surfacePeak
         ]
 
         let intervals = report.ticks.map(\.intervalMs).filter { $0 > 0 }.sorted()
@@ -614,7 +615,13 @@ enum PlaybackProbe {
     /// transient peaks the artist never pays for twice.
     struct FootprintTrack {
         private(set) var samples: [UInt64] = []
-        mutating func sample() { samples.append(PlaybackProbe.footprintBytes()) }
+        /// The most the live pictures' surfaces held at any sample (`WindowSurfaceView.residentBytes`)
+        /// — a held frame's pair is the whole of it during an effect drag (TODO (179)).
+        private(set) var surfacePeak = 0
+        mutating func sample() {
+            samples.append(PlaybackProbe.footprintBytes())
+            surfacePeak = max(surfacePeak, WindowSurfaceView.residentBytes)
+        }
         var peak: UInt64 { samples.max() ?? 0 }
         var first: UInt64 { samples.first ?? 0 }
         var last: UInt64 { samples.last ?? 0 }

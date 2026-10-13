@@ -47,6 +47,15 @@ final class WindowSurfaceView: UIView {
     /// at the mint, with the rest of the frame's values.
     static var drawDelay: TimeInterval = 0
 
+    /// **The bytes every view's surfaces hold, process-wide** — what a live picture costs in memory
+    /// while it is up (two canvas-sized surfaces for a held frame, PERFORMANCE.md §30). Main thread:
+    /// surfaces are made at a mint and dropped there or with the view. `PlaybackProbe` reports its peak.
+    private(set) static var residentBytes = 0
+    /// This view's share of `residentBytes`.
+    private var surfaceBytes = 0 {
+        didSet { Self.residentBytes += surfaceBytes - oldValue }
+    }
+
     /// How many frames have been presented — for tests, which spin the run loop until it moves.
     private(set) var presentedCount = 0
     /// The window the surfaces are sized to, in canvas points; `.null` before the first present.
@@ -72,6 +81,8 @@ final class WindowSurfaceView: UIView {
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    deinit { Self.residentBytes -= surfaceBytes }
 
     /// **One frame, as the main thread mints it**: where it goes and how it is drawn.
     ///
@@ -166,6 +177,7 @@ final class WindowSurfaceView: UIView {
             return
         }
         surfaces = []
+        surfaceBytes = 0
         isHidden = true
         layer.contents = nil
         surfaceWindow = window
@@ -188,5 +200,6 @@ final class WindowSurfaceView: UIView {
             context.scaleBy(x: 1, y: -1)
             surfaces.append(Surface(surface: surface, context: context))
         }
+        surfaceBytes = surfaces.reduce(0) { $0 + $1.surface.allocationSize }
     }
 }
