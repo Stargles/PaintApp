@@ -5869,8 +5869,8 @@ rate under the finger is unchanged and what is gone is everything the frame cost
 
 - **The picker the edit is driven from cost more per tick than the edit did** — §31.
 - **The other slider-shaped edits wrote the document per tick too.** The effect bar and the layer panel's
-  Opacity and transform-mode sliders hold now (§30, §30.5, TODO (179)); the text panel's sliders are that
-  item's later commits, and mask tuning is (35)'s.
+  Opacity and transform-mode sliders hold now (§30, §30.5, TODO (179)), and so do the text panel, the text
+  box's drags, a lifted bitmap's Move box and a smart shape's handles (§32); mask tuning is (35)'s.
 - **The device.** The fix is measured by what the app hands Core Animation, not by what `backboardd`
   holds; the iPad should run `-playbackProbe -probeMode recolour` (arguments in `PlaybackProbe`'s header)
   and the owner's own document is the check.
@@ -6119,3 +6119,35 @@ Wheel (410)** — INFERRED to be the Wheel. Both are fixed.
 - The panel's per-swatch `canvasContextMenu` (thirty presentations a palette) is still the most expensive
   thing to *build* here; it is built once now. One menu per grid, keyed by the pressed swatch, is the cheaper
   shape if the picker ever opens slowly.
+
+## 32. A smart shape's handle drag stamped a canvas-sized picture on the main thread twice a tick (2026-10-13)
+
+TODO (179) commit 8, the assessment's own finding (§1 of `s48-179-throttle-assessment.md`, never reported by
+the owner): `updateInteractiveShape` sent `objectWillChange` per tick, and every pass ended in the shape
+overlay's preview — the collapsed stroke stamped into a canvas-sized texture **on the main thread** and handed
+to Core Animation as a fresh canvas-sized `UIImage`, twice a tick (the pass's `update` and the coalesced
+re-render's `setPreviewImage`). Now a tick writes the draft tier and tells the canvas, and `ShapeOverlayView`
+stamps `CanvasManager.shapeInk` off the main thread into a canvas-sized `WindowSurfaceView` pair, one picture
+in flight; the first picture of a shape is drawn in the turn it appears (`presentFirst`).
+
+**MEASURED, Release, iPad (9th generation) simulator (iOS 26.5), `PlaybackProbe -probeMode shape`** (new): a
+4096² document of five vector layers × two frames, the iPad 9's 192 MiB budget, onion on, a pending rectangle
+(the brush a sixty-fourth of the canvas wide) whose far corner is driven through `updateInteractiveShape` for
+100 ticks 80 ms apart, then committed. *Before* is `bdf686c` with the same probe mode, not merged; *after* is
+this change. §29's temporary `UIImageView.image` swizzle (not merged) counted every image of 4 MB or more.
+Two takes each, 45–79% idle at the start (another session's build), 75–92% at the end.
+
+| 100 ticks over 8.5 s, 4096² | canvas-sized images to Core Animation | pictures of the shape landed | main thread busy | SwiftUI passes | footprint growth over the drag |
+|---|---|---|---|---|---|
+| before (two takes) | **200, 200 — 13.4 GB each take** | 200 (every tick, twice) | **8.63, 8.52 s** | 100 | +53, +53 MB |
+| after (two takes) | **0** | 100 surface presents (every tick) | **0.16, 0.18 s** | 0 | **+0, +0 MB** |
+
+- **The drag no longer saturates the main thread**: before, a tick's stamp-and-image cost the main thread all
+  of the 80 ms between ticks (8.6 s busy of 8.9 s); after, a tick is 1.7 ms of main thread, and the stamp runs
+  off it at every tick's rate. MEASURED.
+- **Nothing canvas-sized reaches the render server per tick**: 13.4 GB of images in 8.5 s, §29's death by the
+  same door, became none. INFERRED to be the figure that matters on the device (`backboardd` is out of
+  process here).
+- **The surfaces are 128 MiB while a shape is pending at 4096²** (16 MiB at 2048×1024) — what the old texture
+  and its cached image held between them in the app, and they are mapped once by the render server where the
+  old images were copied. Held only while a shape is up. Not measured: the device.
