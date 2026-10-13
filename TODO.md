@@ -130,19 +130,24 @@ that 2 s window (max 182 ms, all `sourcePhase`).
 Merged with (179)'s first half: a window draw was minted in the turn the last one landed, into the
 surface that swap had just retired and the render server still showed until the turn committed; the
 draw now waits until `IOSurface.isInUse` says the server has let it go (`WindowSurfaceView.present`).
-`SelectionFillRecolourUITests` stages the iPad's draw time and busy turns (two simulator-only seams) and
-passes — but it **did not reproduce the flicker on the shipped build either**: the simulator's render
-server did not show the swapped-out surface. The held frame's canvas-sized surface did (3 of 3 runs red
-without the wait, `EffectSliderLiveUITests`). The owner's iPad is the confirmation still owed. The
+**The simulator's render server does not show the swapped-out surface of a recolour's window** — not at a
+sixth of the canvas or nine-tenths, not with draws of 0.3–2.5 s, not with the main thread held busy after
+every swap (that seam staged only this and is deleted) — so no screen read here can see the flicker.
+`WindowSurfaceViewLogicTests` pins the wait where it is deterministic (a surface with a use count is not
+drawn into; a server that never lets go costs one bounded wait), and `SelectionFillRecolourUITests` covers
+the arrangement around it with one seam, the draw's length: the base stays on screen until a picture has
+landed, no tick takes its picture off, and an older colour never comes back. (`EffectSliderLiveUITests`
+sees the missing wait on the simulator only by chance: 2 of 3 runs red here, whatever the drag's timing
+gives.) The owner's iPad is the confirmation still owed. The
 1,468 ms of main-thread busy is not the held edit's tick (`-probeMode recolour` at 2668×1644 on an iPad 9
 simulator: 79 ms over 34 ticks): it was the colour picker's own re-evaluation — every tick rebuilt the whole
 panel, and the Wheel redrew 14,400 rectangles — fixed and measured in PERFORMANCE.md §31 (Select's Colour
 9–25 ms → 5.5 ms a tick).
 
-- [x] Cold-start XCUITest that samples the region mid-drag and fails on a flicker; root cause fixed in the seam.
+- [x] Cold-start XCUITest that reads the filled region through the held edit and fails on the paper showing through; root cause fixed in the seam.
 - [ ] The owner confirms on the iPad.
-- [ ] `SelectionFillRecolourUITests` is wall-clock-shaped (it needs ≥ 10 screen reads mid-drag and reads
-      3–4 under load, on clean `69029de` too): make it count what it asserts, not how fast the host is.
+- [x] `SelectionFillRecolourUITests` counts what it asserts: it was wall-clock-shaped (≥ 10 screen reads
+      inside a synchronous drag, 3–4 under load); it now taps swatches and waits for each picture to land.
 - [x] The colour picker's own redraw during a drag measured and, if it is the ~1.4 s, fixed (a separate
       worker — not the held edit's code). It was: PERFORMANCE.md §31.
 

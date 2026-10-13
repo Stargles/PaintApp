@@ -166,7 +166,8 @@ final class SelectionFillRecolourUITests: PaintUITestCase {
         func pixels(_ sample: MidGestureSampler.Sample) -> String {
             clear.map { sample.pixels[$0].map { "\($0.r),\($0.g),\($0.b)" } ?? "-" }.joined(separator: " ")
         }
-        let note = XCTAttachment(string: "(seconds from the picker opening) ticks at " + taps.map { String(format: "%.2f", $0 - t0) }.joined(separator: ", ")
+        let note = XCTAttachment(string: "window \(app.windows.firstMatch.frame), host \(host); "
+                                 + "(seconds from the picker opening) ticks at " + taps.map { String(format: "%.2f", $0 - t0) }.joined(separator: ", ")
                                  + "\n" + timeline.map { sample in
             String(format: "%.2f ", sample.finished - t0)
                 + (uniformLevel(sample).map { "level \($0)" } ?? "NOT ONE COLOUR: " + pixels(sample))
