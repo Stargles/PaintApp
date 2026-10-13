@@ -190,10 +190,11 @@ struct InterpolateBar: View {
 
     /// The `t` slider — the timing bar.
     ///
-    /// `onEditingChanged` is the whole drag/release boundary: touch-down opens one undo step and
-    /// selects `.preview` render quality, release closes the step and re-renders at `.full`. Both
-    /// halves matter — a step per tick makes undo useless, and `.full` per tick makes the slider
-    /// unusable on real art.
+    /// `onEditingChanged` is the whole drag/release boundary: touch-down holds the in-between's recipe
+    /// and selects `.preview` render quality, release writes the held `t` as one undo step and
+    /// re-renders at `.full`. Both halves matter — a step per tick makes undo useless, and `.full` per
+    /// tick makes the slider unusable on real art. **A tick is held, not written** (TODO (179)): the
+    /// in-between's host draws it off the main thread, and nothing else in the editor re-renders.
     private var timing: some View {
         HStack(spacing: 10) {
             Text("Timing")
@@ -201,7 +202,7 @@ struct InterpolateBar: View {
                 .foregroundColor(.white.opacity(0.7))
             Slider(
                 value: Binding(
-                    get: { Double(activeRecipe?.t ?? 0) },
+                    get: { Double(shownT ?? 0) },
                     set: { value in
                         guard let at = canvasManager.interpolationTarget else { return }
                         let cel = canvasManager.layers[at.layer].cels[at.cel]
@@ -214,11 +215,14 @@ struct InterpolateBar: View {
                     else { canvasManager.commitInterpolationDrag() }
                 })
             .accessibilityIdentifier("interpolate.tSlider")
-            Text(String(format: "%.2f", activeRecipe?.t ?? 0))
-                .font(.caption.monospacedDigit())
-                .foregroundColor(.white.opacity(0.85))
-                .frame(width: 34, alignment: .trailing)
+            TimingReadout(state: canvasManager.liveEditState, stored: activeRecipe?.t)
         }
+    }
+
+    /// The in-between's `t` as the canvas shows it — the slider's held value while a drag holds it.
+    private var shownT: CGFloat? {
+        if let held = canvasManager.liveEdit?.interpolation, held.drag == .timing, let t = held.recipe?.t { return t }
+        return activeRecipe?.t
     }
 
     // MARK: - Derived state
@@ -251,5 +255,19 @@ struct InterpolateBar: View {
         let cels = canvasManager.interpolationReferences.count
         let spread = cels > keyframes.count ? " (\(cels) cels across layers)" : ""
         return "\(keyframes.count) reference\(keyframes.count == 1 ? "" : "s")\(spread)."
+    }
+}
+
+/// **The Timing slider's number** — a view of its own so it can observe the held `t` (`LiveEditState`,
+/// TODO (179)) and follow the finger without the bar, or the editor, re-rendering per tick.
+private struct TimingReadout: View {
+    @ObservedObject var state: LiveEditState
+    let stored: CGFloat?
+
+    var body: some View {
+        Text(String(format: "%.2f", state.interpolationT ?? stored ?? 0))
+            .font(.caption.monospacedDigit())
+            .foregroundColor(.white.opacity(0.85))
+            .frame(width: 34, alignment: .trailing)
     }
 }

@@ -1044,9 +1044,10 @@ extension CanvasManager {
     /// (`GuideOverlayView`'s own note says why it refused this seam).
     ///
     /// **`isScrubbingInterpolation` replaces it, and it is a gesture clause rather than a frame one.**
-    /// The slider writes `recipe.t` on every tick, so with the derivation in the key every tick is a
-    /// new key: one full-quality ARAP evaluation and three canvas-sized composites per tick, against a
-    /// drag the artist expects to track their finger. MEASURED at the owner's 2048x1024 canvas
+    /// A drag of the in-between — the Timing slider, a guide's handle, a spacing dot — moves its
+    /// derivation on every tick (held since TODO (179), `HeldInterpolation`), so with the compositor on
+    /// every tick would be a new key: one full-quality ARAP evaluation and three canvas-sized composites
+    /// per tick, against a drag the artist expects to track their finger. MEASURED at the owner's 2048x1024 canvas
     /// (`PerfBaselineTests.testWhatEngagingTheCompositorOnAnInBetweenCosts`, PERFORMANCE.md §7): ~100 ms
     /// a rebuild in a Debug simulator, so a slider held down runs many ticks behind the finger. **The
     /// exact multiple is not known and the clause does not need it** — §7 records why that figure
@@ -1383,7 +1384,7 @@ extension CanvasManager {
         // registry, the mode flags) and `resolve()` runs on a background queue and on
         // `PixelOps.parallelMap`'s workers. What crosses the seam is a `DerivedCelContent` whose
         // closure captures only values — its own doc comment states that contract.
-        let provider = celContentProvider(atFrame: frame)
+        let provider = celContentProvider(atFrame: frame, holding: held?.interpolation)
         for index in layers.indices {
             let layer = layers[index]
             let leafFrame = frames[index] ?? frame

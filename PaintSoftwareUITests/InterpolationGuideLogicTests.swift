@@ -786,6 +786,92 @@ final class InterpolationGuideLogicTests: XCTestCase {
         XCTAssertTrue(manager.guideStrokes.isEmpty, "a cancelled drag leaves nothing to undo")
     }
 
+    // MARK: - Held under the finger (TODO (179))
+
+    /// The in-between at the playhead, drawn as the canvas draws it: `livePreview`'s derivation, which
+    /// reads what an interpolation drag holds.
+    private func shownInBetween(_ manager: CanvasManager) throws -> [UInt8] {
+        let cel = manager.layers[1].cels[1]
+        guard case .derived(let derived) = manager.livePreview(forCel: cel, atFrame: manager.currentFrame) else {
+            XCTFail("the in-between has a derivation"); return []
+        }
+        let image = try XCTUnwrap(derived.render(.full)?.cgImage, "the in-between renders")
+        let width = image.width, height = image.height
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        bytes.withUnsafeMutableBytes { buffer in
+            let context = CGContext(data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8,
+                                    bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        }
+        return bytes
+    }
+
+    /// **A guide's handle drag holds the guide: the in-between is drawn from it, and the document hears of
+    /// it once.** Ticks publish nothing over the editor and leave the registry as it was, while the
+    /// canvas is told each time and the in-between it draws is already bent by the held guide — the very
+    /// picture the lift's write then derives (two producers: the hold read through `livePreview`, and the
+    /// document after the commit). One step; a cancel writes nothing.
+    func testAHandleDragHoldsTheGuideAndTheInBetweenIsDrawnFromIt() throws {
+        let manager = guidedFrame()
+        let before = try soleGuide(manager)
+        let index = GuideHandles.indices(in: before.samples)[2]
+        let resting = try shownInBetween(manager)
+        var published = 0, told = 0
+        let watch = manager.objectWillChange.sink { published += 1 }
+        manager.onHeldPictureMoved = { told += 1 }
+        manager.beginGuideHandleDrag(guideID: before.id)
+        let opened = published
+        for y in stride(from: CGFloat(10), through: 60, by: 10) {
+            manager.dragGuideHandle(sampleIndex: index, to: CGPoint(x: 50, y: y))
+        }
+        XCTAssertEqual(published, opened, "six ticks of the handle raised \(published - opened) passes over the editor")
+        XCTAssertEqual(told, 6, "the canvas was told on every tick")
+        XCTAssertEqual(try soleGuide(manager).samples, before.samples, "the registry waits for the lift")
+        XCTAssertNotEqual(manager.visibleGuideStrokes.first?.samples, before.samples, "the overlay draws the held guide")
+        XCTAssertTrue(manager.isScrubbingInterpolation, "the compositor stands down while the drag is held")
+        let held = try shownInBetween(manager)
+        XCTAssertNotEqual(held, resting, "the in-between under the drag follows the held guide")
+
+        manager.commitGuideHandleDrag()
+        watch.cancel()
+        XCTAssertNil(manager.liveEdit, "the lift lets the hold go")
+        XCTAssertEqual(try shownInBetween(manager), held, "the written guide derives the picture the drag showed")
+        manager.undo()
+        XCTAssertEqual(try soleGuide(manager).samples, before.samples, "and it was one step")
+
+        manager.beginGuideHandleDrag(guideID: before.id)
+        manager.dragGuideHandle(sampleIndex: index, to: CGPoint(x: 50, y: 60))
+        manager.cancelGuideHandleDrag()
+        XCTAssertNil(manager.liveEdit)
+        XCTAssertEqual(try shownInBetween(manager), resting, "a cancelled drag leaves the in-between as it was")
+    }
+
+    /// **A spacing dot's drag holds the recipe** the same way: nothing written per tick, the chart and the
+    /// in-between drawn from the held recipe, one step at the lift.
+    func testASpacingDragHoldsTheRecipeAndTheChartIsDrawnFromIt() throws {
+        let manager = guidedFrame()
+        let guide0 = try soleGuide(manager)
+        let stored = try XCTUnwrap(manager.layers[1].cels[1].interpolation)
+        var published = 0
+        let watch = manager.objectWillChange.sink { published += 1 }
+        manager.beginGuideSpacingDrag(guideID: guide0.id)
+        let opened = published
+        for v: CGFloat in [0.4, 0.45, 0.5, 0.55, 0.6] { manager.dragGuideSpacingStop(index: 4, to: v) }
+        XCTAssertEqual(published, opened, "five ticks of a dot raised \(published - opened) passes over the editor")
+        let unchanged = try XCTUnwrap(manager.layers[1].cels[1].interpolation)
+        XCTAssertEqual(unchanged.spacing, stored.spacing, "the recipe waits for the lift")
+        XCTAssertEqual(unchanged.groups.map(\.spacing), stored.groups.map(\.spacing))
+        XCTAssertEqual(manager.spacingChart(forGuide: guide0.id)?.stops[4] ?? 0, 0.6, accuracy: 1e-6,
+                       "the chart draws the held dot")
+        let held = try shownInBetween(manager)
+        manager.commitGuideSpacingDrag()
+        watch.cancel()
+        let written = try XCTUnwrap(manager.layers[1].cels[1].interpolation)
+        XCTAssertEqual((written.groups.first?.spacing ?? written.spacing)?.eased(0.5) ?? 0, 0.6, accuracy: 1e-6)
+        XCTAssertEqual(try shownInBetween(manager), held, "the written recipe derives the picture the drag showed")
+    }
+
     /// A move that arrives with no drag in flight does nothing. The overlay can only send one after
     /// `touchesBegan` claimed a handle, but the guide can vanish under it — an undo, or a scrub off
     /// the in-between — and reshaping a guide the artist can no longer see would be unexplainable.

@@ -287,8 +287,9 @@ final class StrokeCanvasView: CanvasPlaneView {
                 // canvas's element's rectangle; the next tick presents the new cel's own.
                 removeStreamSurfaces()
                 // A live edit's window shows the canvas it was drawn from; the next pass presents
-                // the new cel's own, if it has one.
+                // the new cel's own, if it has one — and a held in-between, the cel it was derived for.
                 takeDownHeldEdit(landing: false)
+                showHeldDerivation(nil)
             }
             refreshDisplay()
         }
@@ -352,6 +353,7 @@ final class StrokeCanvasView: CanvasPlaneView {
             // repaints the base with the element's newest frame in it.
             removeStreamSurfaces()
             takeDownHeldEdit(landing: false)
+            showHeldDerivation(nil)
         } else {
             refreshDisplayIfStale()
         }
@@ -847,6 +849,54 @@ final class StrokeCanvasView: CanvasPlaneView {
         return true
     }
 
+    // MARK: - A held in-between
+
+    /// **Where an in-between under an interpolation drag reaches the screen** — `HeldInterpolation`, TODO
+    /// (179). One canvas-sized `WindowSurfaceView` over the base, in `poseSpace` where a held edit's goes,
+    /// drawn off the main thread from the derivation as the finger holds it — one evaluation in flight,
+    /// the newest tick's minted when it lands — and the base hidden under it once it has a picture. A tick
+    /// used to evaluate the in-between on the main thread and hand Core Animation a fresh canvas-sized
+    /// image; now it hands it nothing.
+    private var heldDerivationSurface: WindowSurfaceView?
+    /// The canvas, once the surface has put a picture over it — the hole the base is punched out by.
+    private var heldDerivationHole: CGRect?
+    /// **How many held in-between pictures have landed**, across drags — `heldInbetweens:` on
+    /// `canvas.host`.
+    private(set) static var heldDerivationCount = 0
+
+    /// **Shows `derived` — the in-between as an interpolation drag holds it — in place of the base, or
+    /// takes the held picture down** for nil. Drawn at `.preview` quality, the drag's; the lift's
+    /// full-quality render goes into the base (`setInterpolationImage`) on the pass that takes this down.
+    func showHeldDerivation(_ derived: DerivedCelContent?) {
+        guard let derived, !hostIsBlanked, let size = vectorCanvas?.size else {
+            guard heldDerivationSurface != nil else { return }
+            heldDerivationSurface?.removeFromSuperview()
+            heldDerivationSurface = nil
+            heldDerivationHole = nil
+            showOverlays(scratch)
+            return
+        }
+        let surface: WindowSurfaceView
+        if let existing = heldDerivationSurface {
+            surface = existing
+        } else {
+            surface = WindowSurfaceView(queue: Self.renderQueue)
+            poseSpace.insertSubview(surface, at: 0)
+            heldDerivationSurface = surface
+        }
+        let window = CGRect(origin: .zero, size: size)
+        surface.present(window: window, placement: .identity, draw: { _ in
+            derived.render(.preview)?.draw(in: window)
+            return window
+        }, finished: { [weak self] shown in
+            guard shown, let self, self.heldDerivationSurface === surface else { return }
+            Self.heldDerivationCount += 1
+            guard self.heldDerivationHole != window else { return }
+            self.heldDerivationHole = window
+            self.showOverlays(self.scratch)
+        })
+    }
+
     /// A derived frame to show in place of this cel's own content — an in-between, or the cel's
     /// ink posed. Not stored in `vectorCanvas`: it is derived, never persisted.
     /// `CanvasView.Coordinator` recomputes and pushes it.
@@ -1238,7 +1288,7 @@ final class StrokeCanvasView: CanvasPlaneView {
             // A timing stroke is never an eraser (`beginTimingTakeIfArmed` refuses one), so the live
             // window never replaces the base — but held ink from an earlier eraser stroke can still
             // be up, and it owns the hole. The same call the ordinary path makes with `liveHole` nil.
-            setBaseHole(heldEditHole ?? unlandedInk.baseHole)
+            setBaseHole(heldEditHole ?? heldDerivationHole ?? unlandedInk.baseHole)
             return
         }
         let image = scratch?.image
@@ -1247,7 +1297,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         // eraser's touch-down renders the canvas synchronously and so retires everything held (see
         // `UnlandedInk.hold`), and `UnlandedInk` holds at most one removal in any case.
         let liveHole = scratch.flatMap { $0.replacesBase ? $0.windowRect : nil }
-        setBaseHole(liveHole ?? heldEditHole ?? unlandedInk.baseHole)
+        setBaseHole(liveHole ?? heldEditHole ?? heldDerivationHole ?? unlandedInk.baseHole)
         // **BRUSH.md §2.11's cap, on the display side.** An `.additive` window holds the stroke's
         // ink at full flow and is shown at the stroke's own opacity, which is exactly what
         // `StrokeScratch.commit` will do to it at lift — so what the artist watches build up under

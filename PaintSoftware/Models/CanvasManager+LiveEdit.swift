@@ -42,6 +42,10 @@ enum HeldEdit {
     /// A value layer's flat colour under the picker (TODO (179)) — a host's background colour on a
     /// canvas Core Animation draws, the whole frame otherwise.
     case valueFill(HeldValueFill)
+    /// An in-between under the finger — the Timing slider's `t`, a guide's handle, a spacing-chart dot
+    /// (TODO (179)). The compositor stands down while it is held (`isScrubbingInterpolation`), and the
+    /// in-between's host draws it off the main thread from the derivation as held.
+    case interpolation(HeldInterpolation)
 
     var pose: LivePose? {
         if case .pose(let pose) = self { return pose }
@@ -73,6 +77,11 @@ enum HeldEdit {
         return nil
     }
 
+    var interpolation: HeldInterpolation? {
+        if case .interpolation(let held) = self { return held }
+        return nil
+    }
+
     /// **The layer whose host must keep drawing while this is held** — the one it draws on. A pose, a
     /// grade, a channel and a flat colour name none: none is a picture a host draws — a box moves the
     /// composite under it, and the rest change the composite itself, or a host's alpha or colour on a
@@ -82,6 +91,7 @@ enum HeldEdit {
         case .pose, .grade, .channel, .valueFill: return nil
         case .elements(let edit): return edit.layerID
         case .fill(let fill): return fill.layerID
+        case .interpolation(let held): return held.layerID
         }
     }
 
@@ -96,7 +106,7 @@ enum HeldEdit {
         case .grade: return true
         case .channel(let held): return canvasEngaged || held.channel != .opacity
         case .valueFill: return canvasEngaged
-        case .pose, .elements, .fill: return false
+        case .pose, .elements, .fill, .interpolation: return false
         }
     }
 }
@@ -190,6 +200,35 @@ struct HeldValueFill: Equatable {
     var fill: ValueFill
 }
 
+/// **An interpolation drag held under the finger** — TODO (179): the Timing slider's `t`, a guide's handle,
+/// a dot of a guide's spacing chart. Each wrote the document on every tick — `layers` or the guide
+/// registry, so a SwiftUI pass over the editor, a new bake key, and the in-between re-rendered on the main
+/// thread — and each now holds what it would write: the recipe of the in-between it is over, or the guide
+/// it is shaping, read by the derivation in place of the document's (`CanvasManager.derivedCelContent`),
+/// and written once, at the lift, as one undo step.
+struct HeldInterpolation {
+    /// Which of the three drags holds it — what each one's lift and tick ask before touching it.
+    enum Drag { case timing, guideHandle, spacing }
+    let drag: Drag
+    /// The in-between the drag is over — the interpolation target when it began.
+    let layerID: UUID
+    let celID: UUID
+    /// The in-between's recipe as the finger holds it — `t` from the slider, a spacing from the chart —
+    /// or nil for a guide's handle, which leaves every recipe as it is.
+    var recipe: InterpolationRecipe?
+    /// A guide as its handle drag holds it, in place of the registry's — every in-between it drives
+    /// derives from it. Nil for the slider and the chart.
+    var guide: GuideStroke?
+
+    /// Whether this changes what `cel` derives: the in-between whose recipe is held, or one the held guide
+    /// drives.
+    func affects(_ cel: Cel) -> Bool {
+        if recipe != nil, cel.id == celID { return true }
+        guard let guide, let own = cel.interpolation else { return false }
+        return own.guideIDs.contains(guide.id) || own.groups.contains { $0.guideIDs.contains(guide.id) }
+    }
+}
+
 /// **That a grade or a channel is held, for the controls that show it** — TODO (179). A slider whose
 /// value reads the document would snap back while the finger holds a value the document does not have
 /// yet, and one that observed the canvas manager would re-render the whole editor per tick — the cost
@@ -200,6 +239,8 @@ final class LiveEditState: ObservableObject {
     @Published fileprivate(set) var grade: HeldGrade?
     /// The held target channel, for the layer options' channel rows (`CanvasManager.channelAsShown`).
     @Published fileprivate(set) var channel: HeldChannel?
+    /// The in-between's `t` while the Timing slider holds it, for the bar's readout.
+    @Published fileprivate(set) var interpolationT: CGFloat?
 }
 
 extension CanvasManager {
@@ -255,6 +296,8 @@ extension CanvasManager {
         if liveEditState.grade != grade { liveEditState.grade = grade }
         let channel = liveEdit?.channel
         if liveEditState.channel != channel { liveEditState.channel = channel }
+        let t = liveEdit?.interpolation?.recipe?.t
+        if liveEditState.interpolationT != t { liveEditState.interpolationT = t }
     }
 
     // MARK: A grade under the finger — the effect bar, the Duplicate Offset's box, a graph-band drag

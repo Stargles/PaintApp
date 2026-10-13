@@ -1022,8 +1022,8 @@ final class InterpolationWorkflowLogicTests: XCTestCase {
                      "One undo returns to the pre-interpolation state — Phase 4's definition of done")
     }
 
-    /// A whole drag is one step, not one per tick. `t`
-    /// lives in the `Cel` struct, so the plain structure bracket is enough here.
+    /// A whole drag is one step, not one per tick — the ticks are held (`HeldInterpolation`, TODO (179))
+    /// and the lift writes `t` once.
     func testAWholeSliderDragIsOneUndoStep() throws {
         let manager = manager()
         let cels = threeCels(manager, layerIndex: 1)
@@ -1032,6 +1032,9 @@ final class InterpolationWorkflowLogicTests: XCTestCase {
         manager.interpolate(mode: .generate, layerIndex: 1, celIndex: 1)
         let layerID = manager.layers[1].id
         let originalT = try XCTUnwrap(manager.layers[1].cels[1].interpolation?.t)
+        // The bar's slider is the in-between's under the playhead.
+        manager.currentLayerIndex = 1
+        manager.currentFrame = cels[1].startFrame
 
         manager.beginInterpolationDrag()
         XCTAssertTrue(manager.isScrubbingInterpolation, "The drag selects .preview render quality")
@@ -1047,6 +1050,47 @@ final class InterpolationWorkflowLogicTests: XCTestCase {
                        "Nine ticks undo as one step, straight back to where the drag started")
         XCTAssertNotNil(manager.layers[1].cels[1].interpolation,
                         "Undoing the drag must not also undo the interpolation itself")
+    }
+
+    /// **A Timing drag holds the recipe: the in-between under it is drawn at the held `t`, and the
+    /// document hears of it once.** Ticks publish nothing over the editor and leave the cel's `t` as it
+    /// was; the canvas is told each tick, and the picture it draws (`livePreview`, which reads the hold)
+    /// is the one the lift's write then derives.
+    func testATimingDragIsHeldAndTheInBetweenIsDrawnAtTheHeldT() throws {
+        let manager = manager()
+        let cels = threeCels(manager, layerIndex: 1)
+        manager.enterInterpolateMode()
+        setReferences(manager, layerIndex: 1, cels: [cels[0], cels[2]])
+        manager.interpolate(mode: .generate, layerIndex: 1, celIndex: 1)
+        manager.currentLayerIndex = 1
+        manager.currentFrame = cels[1].startFrame
+        let layerID = manager.layers[1].id
+        let stored = try XCTUnwrap(manager.layers[1].cels[1].interpolation?.t)
+        func shown() -> AnyHashable? {
+            guard case .derived(let derived) = manager.livePreview(forCel: manager.layers[1].cels[1],
+                                                                   atFrame: manager.currentFrame) else { return nil }
+            return derived.identity
+        }
+        var published = 0, told = 0
+        let watch = manager.objectWillChange.sink { published += 1 }
+        manager.onHeldPictureMoved = { told += 1 }
+        manager.beginInterpolationDrag()
+        let opened = published
+        for step in stride(from: 0.1, through: 0.9, by: 0.1) {
+            manager.setInterpolationT(CGFloat(step), forCel: cels[1].id, inLayer: layerID)
+        }
+        XCTAssertEqual(published, opened, "nine ticks raised \(published - opened) passes over the editor")
+        XCTAssertEqual(told, 9, "the canvas was told on every tick")
+        XCTAssertEqual(manager.layers[1].cels[1].interpolation?.t ?? -1, stored, accuracy: 1e-9,
+                       "the cel's t waits for the lift")
+        XCTAssertEqual(manager.liveEditState.interpolationT ?? -1, 0.9, accuracy: 1e-9, "the bar's readout follows")
+        let held = shown()
+        manager.commitInterpolationDrag()
+        watch.cancel()
+        XCTAssertEqual(manager.layers[1].cels[1].interpolation?.t ?? -1, 0.9, accuracy: 1e-9)
+        XCTAssertNotNil(held)
+        XCTAssertEqual(shown(), held, "the written t derives the in-between the drag showed")
+        XCTAssertNil(manager.liveEditState.interpolationT)
     }
 
     func testSettingTClampsToTheSliderRange() throws {

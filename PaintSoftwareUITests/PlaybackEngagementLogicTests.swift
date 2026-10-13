@@ -162,11 +162,13 @@ final class PlaybackEngagementLogicTests: XCTestCase {
         let tree = manager.renderTree(atFrame: 0)
         XCTAssertTrue(manager.sandwichEngagesOnCanvas(tree: tree), "Baseline: playing engages")
 
-        manager.isScrubbingInterpolation = true
+        // An in-between under the Timing slider (`HeldInterpolation`) is what `isScrubbingInterpolation` reads.
+        manager.liveEdit = .interpolation(HeldInterpolation(drag: .timing, layerID: UUID(), celID: UUID(),
+                                                            recipe: nil, guide: nil))
         XCTAssertFalse(manager.sandwichEngagesOnCanvas(tree: tree),
                        "The clauses below the first one still bind — a new first clause may widen "
                        + "engagement, never override a refusal")
-        manager.isScrubbingInterpolation = false
+        manager.liveEdit = nil
         XCTAssertTrue(manager.sandwichEngagesOnCanvas(tree: tree), "…and it is not a latch")
         manager.stopPlayback()
     }

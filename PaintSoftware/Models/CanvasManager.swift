@@ -429,10 +429,6 @@ final class CanvasManager: ObservableObject {
     /// which path a resize takes and carries the reasoning.
     @Published var isResizing: Bool = false
 
-    /// True between `beginInterpolationDrag` and `commitInterpolationDrag` — the `t` slider is being
-    /// dragged. Selects `.preview` render quality for the duration; see `RenderQuality`.
-    @Published var isScrubbingInterpolation: Bool = false
-
     /// The motion group a canvas tap assigns to, or nil when tapping does nothing — the retagging
     /// gesture, armed from its chip on `InterpolateBar`.
     ///
@@ -4669,6 +4665,7 @@ final class CanvasManager: ObservableObject {
         // its held value was never written (TODO (179)).
         revertHeldGrade()
         revertHeldChannel()
+        revertInterpolationHold()
         // The gradient panel is the opposite case: it has no finger to be under, so what is open is
         // an adjustable edit, and it commits so the undo that follows has a real step to revert. A value
         // layer's colour picker is the gradient's case.

@@ -1259,6 +1259,9 @@ struct CanvasView: UIViewRepresentable {
                 // or a flat colour's preview, which reaches the screen through a surface rather than a
                 // pass, so a test that cannot look during its synchronous drag reads this after it.
                 + " held:\(heldFrameCount)"
+                // **How many pictures of an in-between under an interpolation drag have landed** (TODO
+                // (179)), drawn off the main thread into its host's surface, across drags.
+                + " heldInbetweens:\(StrokeCanvasView.heldDerivationCount)"
                 // **What draws the whole frame, and at how many pixels** — the held frame while it is up
                 // (half its size a side on a big scene, `DragPreviewDetail`), the bake at rest. A test
                 // reads it straight after a lift to see the detail the finger was shown, and after the
@@ -2004,6 +2007,12 @@ struct CanvasView: UIViewRepresentable {
                 requestHeldFrame()
             } else if canvasManager.liveEdit?.channel != nil || canvasManager.liveEdit?.valueFill != nil {
                 showHostAlphasAndFills()
+            }
+            // An in-between under an interpolation drag, and the guide it shapes: drawn by its host and
+            // the guide overlay from the hold (`HeldInterpolation`).
+            if canvasManager.liveEdit?.interpolation != nil {
+                updateInterpolationPreviews()
+                updateGuideOverlay()
             }
             // The drafts the canvas draws and the document does not hold either, whose ticks land here
             // too (TODO (179)): the text box (a keystroke, a panel tick, a drag of the box or a grip), a
@@ -3287,9 +3296,16 @@ struct CanvasView: UIViewRepresentable {
                                                        inheriting: poses[layerIndex])
                 guard let shown = shownCel(ofLayerAt: layerIndex, in: walk) else {
                     interpolationPreviewKeys.removeValue(forKey: layer.id)
+                    host.strokeView.showHeldDerivation(nil)
                     host.strokeView.setInterpolationImage(nil)
                     continue
                 }
+                // **An in-between under an interpolation drag is drawn off the main thread** (TODO
+                // (179), `HeldInterpolation`): only the one the drag changes, at `.preview` quality, into
+                // the host's surface — and every other host keeps the picture it has, at the quality it
+                // has it, so the drag's touch-down and lift re-render nothing they do not change.
+                let held = canvasManager.liveEdit?.interpolation.flatMap { $0.affects(shown.cel) ? $0 : nil }
+                if held == nil { host.strokeView.showHeldDerivation(nil) }
                 // **The whole per-layer decision is `LiveCelPreview`, and none of it is left here** —
                 // read that type for why. What this loop used to do instead was ask
                 // `cel.interpolation != nil` first, which is a test for *one* of the two derivation
@@ -3335,16 +3351,19 @@ struct CanvasView: UIViewRepresentable {
                     // `PosedCelIdentity` carries the resolved maps, so scrubbing to a frame the
                     // pose resolves differently at is a different key and a repaint, and holding on
                     // one it resolves equal at is the same key and free.
-                    let key = InterpolationPreviewKey(identity: derived.identity,
-                                                      preview: canvasManager.isScrubbingInterpolation)
+                    let key = InterpolationPreviewKey(identity: derived.identity, preview: held != nil)
                     guard interpolationPreviewKeys[layer.id] != key else { continue }
                     interpolationPreviewKeys[layer.id] = key
+                    if held != nil {
+                        host.strokeView.showHeldDerivation(derived)
+                        continue
+                    }
                     derivedRenderCount += 1
                     // The derivation already in hand, rather than `interpolatedImage(forCel:inLayer:)`,
                     // which would resolve a second one from the ids. Same pixels — that function is a
                     // thin call through `derivedCelContent` — and one resolve instead of two on the
                     // path that runs every SwiftUI pass.
-                    host.strokeView.setInterpolationImage(derived.render(key.preview ? .preview : .full),
+                    host.strokeView.setInterpolationImage(derived.render(.full),
                                                           covering: Self.inkCoverage(of: shown.cel))
                 case .motionGroupTint:
                     updateMotionGroupOverlay(layer: layer, cel: shown.cel, host: host)

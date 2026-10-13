@@ -411,25 +411,56 @@ extension CanvasManager {
         }
     }
 
-    /// The slider's touch-down. Pairs with `commitInterpolationDrag` to make a whole drag one undo
-    /// step. `t` lives in `Cel`, so the plain structure bracket suffices — the display list is
-    /// derived from the recipe, not rewritten, so no vector canvas changes while the slider moves.
+    /// **The Timing slider's touch-down: the in-between's recipe is held** (TODO (179)) — its ticks move
+    /// the held `t` and write nothing, and `commitInterpolationDrag` writes it once, as one undo step.
     func beginInterpolationDrag() {
-        isScrubbingInterpolation = true
-        beginStructureGesture()
+        guard let at = interpolationTarget, let recipe = layers[at.layer].cels[at.cel].interpolation else { return }
+        beginInterpolationHold(HeldInterpolation(drag: .timing, layerID: layers[at.layer].id,
+                                                 celID: layers[at.layer].cels[at.cel].id, recipe: recipe, guide: nil))
     }
 
-    /// Sets `t` mid-drag. Records nothing — the bracket owns the step.
+    /// **One tick of the Timing slider: the in-between is at `t`** (clamped to the slider's range) — held,
+    /// drawn by its host off the main thread, written nowhere. A value set with no drag open (VoiceOver's
+    /// adjust, a scripted value) is a drag of one tick: held and written at once, one step.
     func setInterpolationT(_ t: CGFloat, forCel celID: UUID, inLayer layerID: UUID) {
-        guard let at = celIndices(forCel: celID, inLayer: layerID),
-              layers[at.layer].cels[at.cel].interpolation != nil else { return }
-        layers[at.layer].cels[at.cel].interpolation?.t = min(max(t, 0), 1)
+        let t = min(max(t, 0), 1)
+        guard var held = liveEdit?.interpolation, held.drag == .timing, held.celID == celID else {
+            guard let at = celIndices(forCel: celID, inLayer: layerID),
+                  let recipe = layers[at.layer].cels[at.cel].interpolation else { return }
+            beginInterpolationHold(HeldInterpolation(drag: .timing, layerID: layerID, celID: celID,
+                                                     recipe: recipe, guide: nil))
+            setInterpolationT(t, forCel: celID, inLayer: layerID)
+            commitInterpolationDrag()
+            return
+        }
+        held.recipe?.t = t
+        holdLiveEdit(.interpolation(held))
     }
 
+    /// **The Timing slider's lift: the held `t` is written once**, as one step — none when it is where it
+    /// began — and the hold is let go.
     func commitInterpolationDrag() {
-        isScrubbingInterpolation = false
-        commitStructureGesture(label: .adjustTiming)
+        guard let held = liveEdit?.interpolation, held.drag == .timing, let t = held.recipe?.t else { return }
+        if let at = celIndices(forCel: held.celID, inLayer: held.layerID),
+           let stored = layers[at.layer].cels[at.cel].interpolation?.t, abs(stored - t) > 1e-9 {
+            withInterpolationUndo(label: .adjustTiming) { layers[at.layer].cels[at.cel].interpolation?.t = t }
+        }
+        endInterpolationHold(.timing)
     }
+
+    /// **Opens an interpolation drag's hold** — settling what else is in flight first, as any edit that
+    /// lands on the canvas does (`beginCanvasEdit`), and publishing once, which is what stands the
+    /// compositor down for the drag (`isScrubbingInterpolation`).
+    private func beginInterpolationHold(_ held: HeldInterpolation) {
+        beginCanvasEdit()
+        beginLiveEdit(.interpolation(held))
+    }
+
+    /// **The in-between drag under the finger, if one is** — what selects `.preview` render quality for
+    /// the in-between it changes and stands the compositor down while it is held
+    /// (`sandwichEngagesOnCanvas`): the drag is the one moment the artist is looking at the in-between
+    /// rather than at the picture around it, and a full-quality evaluation per tick cannot track a finger.
+    var isScrubbingInterpolation: Bool { liveEdit?.interpolation != nil }
 
     // MARK: - Editing at an in-between
 
@@ -1257,9 +1288,9 @@ extension CanvasManager {
 
     /// This document's derivations, bound to `frame` — what a caller hands `PixelOps.rasterize` so
     /// that a derived cel stops flattening blank. See `CelContentProvider`.
-    func celContentProvider(atFrame frame: Int) -> CelContentProvider {
+    func celContentProvider(atFrame frame: Int, holding held: HeldInterpolation? = nil) -> CelContentProvider {
         CelContentProvider(frame: frame) { [weak self] cel, frame, inherited in
-            self?.derivedCelContent(for: cel, atFrame: frame, inheriting: inherited)
+            self?.derivedCelContent(for: cel, atFrame: frame, inheriting: inherited, holding: held)
         }
     }
 
@@ -1313,7 +1344,8 @@ extension CanvasManager {
     /// in-between that does not.
     func derivedCelContent(for cel: Cel, atFrame frame: Int,
                            inheriting inherited: PoseMap? = nil,
-                           overridingT overrideT: CGFloat? = nil) -> DerivedCelContent? {
+                           overridingT overrideT: CGFloat? = nil,
+                           holding held: HeldInterpolation? = nil) -> DerivedCelContent? {
         // **Two derivation sources, and they are alternatives rather than a composition** —
         // KEYFRAMES.md §2.18. *"A derived in-between carries no object channels"*: its display list is
         // computed, so it has no stable elements to key, and Move is already refused outright on one
@@ -1324,7 +1356,7 @@ extension CanvasManager {
         // The pose arm is tried second and answers nil on one `isEmpty` for every cel of every
         // rasterize in a document that has never been keyframed, which is the contract this whole
         // function is written to.
-        guard let recipe = cel.interpolation, let canvasSize else {
+        guard let recipe = recipe(of: cel, holding: held), let canvasSize else {
             guard cel.interpolation == nil else { return nil }
             // **VIDEO.md §5's third branch**, and it is asked before the pose arm rather than beside
             // it because it is a *superset* of that arm: a video cel can be posed like any other, so
@@ -1340,7 +1372,7 @@ extension CanvasManager {
 
         let t = overrideT ?? recipe.t
         let options = interpolationOptions
-        let guideStrokes = guides(driving: recipe)
+        let guideStrokes = guides(driving: recipe, holding: held?.guide)
         // A reprojection's content is the cel's own display list, which no evaluator-side
         // `ContentProvider` can reach — the recipe holds no reference to the cel it lives on, by
         // design (see `InterpolationEvaluator.evaluate`'s `subject`).
@@ -1503,7 +1535,8 @@ extension CanvasManager {
     /// ink at every frame of a move the composite and the export are both animating.
     func livePreview(forCel cel: Cel, atFrame frame: Int,
                      inheriting inherited: PoseMap? = nil) -> LiveCelPreview {
-        if let derived = derivedCelContent(for: cel, atFrame: frame, inheriting: inherited) {
+        if let derived = derivedCelContent(for: cel, atFrame: frame, inheriting: inherited,
+                                           holding: liveEdit?.interpolation) {
             return .derived(derived)
         }
         return cel.interpolation == nil ? .motionGroupTint : .cleared
@@ -1517,15 +1550,25 @@ extension CanvasManager {
     /// here, not on any `VectorCanvas`, and `updateGuideStroke` replaces one **keeping its id**, so
     /// no cache key can see a guide edit by version alone — having the key and the evaluator read
     /// the same list is what keeps them in sync.
-    func guides(driving recipe: InterpolationRecipe) -> [GuideStroke] {
+    ///
+    /// `held` is a guide a handle drag holds (`HeldInterpolation.guide`), read in place of the registry's.
+    func guides(driving recipe: InterpolationRecipe, holding held: GuideStroke? = nil) -> [GuideStroke] {
         var wanted = recipe.guideIDs
         for binding in recipe.groups { wanted.append(contentsOf: binding.guideIDs) }
         guard !wanted.isEmpty else { return [] }
         var seen: Set<UUID> = []
         return wanted.compactMap { id in
             guard seen.insert(id).inserted else { return nil }
+            if let held, held.id == id { return held }
             return guideStrokes.first { $0.id == id }
         }
+    }
+
+    /// **`cel`'s recipe as the canvas shows it** — the one an interpolation drag holds for it, the
+    /// stored one otherwise.
+    func recipe(of cel: Cel, holding held: HeldInterpolation?) -> InterpolationRecipe? {
+        guard let held, held.celID == cel.id, let recipe = held.recipe else { return cel.interpolation }
+        return recipe
     }
 
     /// Records a guide the artist just drew and binds it to the frame under the playhead.
@@ -1569,10 +1612,14 @@ extension CanvasManager {
     /// The guides to *draw* right now: those bound to the frame under the playhead. Deliberately the
     /// recipe's own list, not every guide in the document — showing all of them would bury the arc
     /// the artist is working on under every arc they have ever drawn.
+    ///
+    /// **As the finger holds them**: a guide whose handle is under it is drawn as held, and a recipe the
+    /// spacing chart holds is the one read.
     var visibleGuideStrokes: [GuideStroke] {
         guard isInterpolateMode, let at = interpolationTarget,
-              let recipe = layers[at.layer].cels[at.cel].interpolation else { return [] }
-        return guides(driving: recipe)
+              let recipe = recipe(of: layers[at.layer].cels[at.cel], holding: liveEdit?.interpolation)
+        else { return [] }
+        return guides(driving: recipe, holding: liveEdit?.interpolation?.guide)
     }
 
     @discardableResult
@@ -1602,46 +1649,61 @@ extension CanvasManager {
         GuideHandles.indices(in: guide.samples).map { ($0, guide.samples[$0].point) }
     }
 
-    /// A handle drag's touch-down. Uses `beginStructureGesture`, the same bracket the `t` slider
-    /// uses — sufficient here, unlike the retag case, because `StructureSnapshot` carries
-    /// `guideStrokes` outright: a guide is a document-level value, not stroke content behind a class
-    /// reference. `updateGuideStroke`'s own bracket defers to this gesture rather than recording per
-    /// move.
+    /// A handle drag's touch-down: **the guide is held** (TODO (179)) — its ticks reshape the held guide
+    /// and write nothing, every in-between it drives is drawn from it by its host, and the lift writes it
+    /// once (`updateGuideStroke`), one step.
     func beginGuideHandleDrag(guideID: UUID) {
-        guard let guide = guideStrokes.first(where: { $0.id == guideID }) else { return }
+        guard let guide = guideStrokes.first(where: { $0.id == guideID }), let at = interpolationTarget else { return }
         guideHandleDrag = (guideID, guide.samples)
-        beginStructureGesture()
+        beginInterpolationHold(HeldInterpolation(drag: .guideHandle, layerID: layers[at.layer].id,
+                                                 celID: layers[at.layer].cels[at.cel].id, recipe: nil, guide: guide))
     }
 
-    /// Moves the handle mid-drag. Records nothing — the bracket owns the step.
+    /// Moves the handle mid-drag — the held guide's, and nothing in the document.
     ///
     /// Re-derived from the touch-down geometry every time, which is what makes the result depend on
     /// where the finger *is* rather than on how it got there.
     func dragGuideHandle(sampleIndex: Int, to destination: CGPoint) {
-        guard let drag = guideHandleDrag,
-              var guide = guideStrokes.first(where: { $0.id == drag.guideID }) else { return }
+        guard let drag = guideHandleDrag, var held = liveEdit?.interpolation, held.drag == .guideHandle,
+              var guide = held.guide, guide.id == drag.guideID else { return }
         guide.samples = GuideHandles.dragged(drag.samples, index: sampleIndex, to: destination)
-        updateGuideStroke(guide)
+        held.guide = guide
+        holdLiveEdit(.interpolation(held))
     }
 
-    /// The lift. Records the step, or drops it when the handle came back to where it started — a tap
-    /// is not an edit, and identical-geometry undo steps just make undo tedious.
+    /// The lift. Writes the held guide as one step, or nothing when the handle came back to where it
+    /// started — a tap is not an edit, and identical-geometry undo steps just make undo tedious.
     func commitGuideHandleDrag() {
         guard let drag = guideHandleDrag else { return }
         guideHandleDrag = nil
-        let moved = guideStrokes.first { $0.id == drag.guideID }?.samples != drag.samples
-        if moved { commitStructureGesture(label: .editGuide) } else { cancelStructureGesture() }
+        if let held = liveEdit?.interpolation, held.drag == .guideHandle, let guide = held.guide,
+           guide.id == drag.guideID, guide.samples != drag.samples {
+            updateGuideStroke(guide)
+        }
+        endInterpolationHold(.guideHandle)
     }
 
-    /// A second finger landing mid-drag. Puts the guide back exactly as it was and records nothing —
-    /// a snapshot left in place would be handed to whichever gesture committed next.
+    /// A second finger landing mid-drag. Lets the held guide go and records nothing — the registry
+    /// never moved.
     func cancelGuideHandleDrag() {
-        guard let drag = guideHandleDrag else { return }
+        guard guideHandleDrag != nil else { return }
         guideHandleDrag = nil
-        if let index = guideStrokes.firstIndex(where: { $0.id == drag.guideID }) {
-            guideStrokes[index].samples = drag.samples
-        }
-        cancelStructureGesture()
+        endInterpolationHold(.guideHandle)
+    }
+
+    /// **Lets whichever interpolation drag is under the finger go, and writes nothing** — Undo or Redo
+    /// pressed mid-drag, the selection-edit and effect-slider rule: a drag is not a step until it lifts.
+    func revertInterpolationHold() {
+        guideHandleDrag = nil
+        guideSpacingDrag = nil
+        guard liveEdit?.interpolation != nil else { return }
+        endLiveEdit()
+    }
+
+    /// Lets `drag`'s hold go — after its lift has written it, or with nothing written.
+    private func endInterpolationHold(_ drag: HeldInterpolation.Drag) {
+        guard liveEdit?.interpolation?.drag == drag else { return }
+        endLiveEdit()
     }
 
     // MARK: - The guide list, link and duplicate
@@ -1770,68 +1832,74 @@ extension CanvasManager {
     }
 
     /// The chart to draw on `guideID`, or nil when there is nothing to space.
+    ///
+    /// **As the finger holds it**: the recipe a chart drag holds, and the guide a handle drag holds.
     func spacingChart(forGuide guideID: UUID) -> SpacingChart? {
+        let held = liveEdit?.interpolation
         guard let at = interpolationTarget,
-              let recipe = layers[at.layer].cels[at.cel].interpolation,
-              let guide = guideStrokes.first(where: { $0.id == guideID }),
+              let recipe = recipe(of: layers[at.layer].cels[at.cel], holding: held),
+              let guide = held?.guide.flatMap({ $0.id == guideID ? $0 : nil })
+                ?? guideStrokes.first(where: { $0.id == guideID }),
               let frames = interpolationFrameSpan(of: recipe), frames >= 3 else { return nil }
         return SpacingChart(curve: spacingInForce(for: guide, in: recipe), frames: frames)
     }
 
-    /// Writes a chart back as the easing for every group `guide` drives.
+    /// **`recipe` with `curve` as the easing for every group `guide` drives** — what a chart drag holds
+    /// and writes.
     ///
     /// `binding.spacing` outranks the guide's derived stylus timing, so a dot the artist has placed
     /// by hand is not overwritten by the velocity they happened to draw the arc at. A recipe with no
     /// bindings takes it on `recipe.spacing` instead, the same rule one level up.
-    func setSpacing(_ curve: SpacingCurve, forGuide guideID: UUID) {
-        guard let at = interpolationTarget,
-              var recipe = layers[at.layer].cels[at.cel].interpolation,
-              let guide = guideStrokes.first(where: { $0.id == guideID }) else { return }
+    func respaced(_ recipe: InterpolationRecipe, to curve: SpacingCurve, forGuide guide: GuideStroke) -> InterpolationRecipe {
+        var recipe = recipe
         var wroteABinding = false
         for index in recipe.groups.indices where binding(recipe.groups[index], isDrivenBy: guide, in: recipe) {
             recipe.groups[index].spacing = curve
             wroteABinding = true
         }
         if !wroteABinding { recipe.spacing = curve }
-        withInterpolationUndo(label: .adjustSpacing) {
-            layers[at.layer].cels[at.cel].interpolation = recipe
-        }
+        return recipe
     }
 
-    /// A chart dot's touch-down. Same bracket and the same touch-down snapshot as a handle drag, for
-    /// the same two reasons: one undo step per gesture, and a drag that is a pure function of where
-    /// the finger *is* rather than of the curve it has been writing as it went.
+    /// A chart dot's touch-down: **the in-between's recipe is held** (TODO (179)), with the chart and the
+    /// recipe as they stood latched — a handle drag's two reasons: one undo step per gesture, and a drag
+    /// that is a pure function of where the finger *is* rather than of the curve it has been holding as it
+    /// went.
     func beginGuideSpacingDrag(guideID: UUID) {
         guard let chart = spacingChart(forGuide: guideID),
               let at = interpolationTarget,
               let recipe = layers[at.layer].cels[at.cel].interpolation else { return }
         guideSpacingDrag = (guideID, chart, recipe)
-        beginStructureGesture()
+        beginInterpolationHold(HeldInterpolation(drag: .spacing, layerID: layers[at.layer].id,
+                                                 celID: layers[at.layer].cels[at.cel].id, recipe: recipe, guide: nil))
     }
 
-    /// Moves one frame's dot to `fraction` along the guide. Records nothing — the bracket owns it.
+    /// Moves one frame's dot to `fraction` along the guide — in the held recipe, and nothing in the
+    /// document.
     func dragGuideSpacingStop(index: Int, to fraction: CGFloat) {
-        guard let drag = guideSpacingDrag else { return }
-        setSpacing(drag.chart.moving(index, to: fraction).curve, forGuide: drag.guideID)
+        guard let drag = guideSpacingDrag, var held = liveEdit?.interpolation, held.drag == .spacing,
+              let guide = guideStrokes.first(where: { $0.id == drag.guideID }) else { return }
+        held.recipe = respaced(drag.recipe, to: drag.chart.moving(index, to: fraction).curve, forGuide: guide)
+        holdLiveEdit(.interpolation(held))
     }
 
+    /// The lift. Writes the held recipe as one step, or nothing when no dot moved.
     func commitGuideSpacingDrag() {
-        guard let drag = guideSpacingDrag, let at = interpolationTarget else { return }
-        guideSpacingDrag = nil
-        let moved = layers[at.layer].cels[at.cel].interpolation.map { current in
-            current.spacing != drag.recipe.spacing
-                || current.groups.map(\.spacing) != drag.recipe.groups.map(\.spacing)
-        } ?? false
-        if moved { commitStructureGesture(label: .adjustSpacing) } else { cancelStructureGesture() }
-    }
-
-    func cancelGuideSpacingDrag() {
         guard let drag = guideSpacingDrag else { return }
         guideSpacingDrag = nil
-        if let at = interpolationTarget {
-            layers[at.layer].cels[at.cel].interpolation = drag.recipe
+        if let held = liveEdit?.interpolation, held.drag == .spacing, let recipe = held.recipe,
+           let at = celIndices(forCel: held.celID, inLayer: held.layerID),
+           recipe.spacing != drag.recipe.spacing || recipe.groups.map(\.spacing) != drag.recipe.groups.map(\.spacing) {
+            withInterpolationUndo(label: .adjustSpacing) { layers[at.layer].cels[at.cel].interpolation = recipe }
         }
-        cancelStructureGesture()
+        endInterpolationHold(.spacing)
+    }
+
+    /// A second finger landing mid-drag. Lets the held recipe go and records nothing.
+    func cancelGuideSpacingDrag() {
+        guard guideSpacingDrag != nil else { return }
+        guideSpacingDrag = nil
+        endInterpolationHold(.spacing)
     }
 
     func removeGuideStroke(id: UUID) {
