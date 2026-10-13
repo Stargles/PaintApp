@@ -106,6 +106,17 @@ why: pictures handed to Core Animation faster than the render server frees them)
       (§32), the brush colour (§33.1) and the fill slider (§34.1). **Owed: the iPad itself** — the probe's
       `effect`, `opacity`, `shape` and `fill` modes on the owner's device.
 
+## (189) The onion skin's opacity slider ticks the canvas, not the editor
+
+**Status** — found by (179)'s last commit (PERFORMANCE §34.2), 2026-10-13; decided by the orchestrator,
+behaviour-neutral, the same shape as the brush colour's `BrushColorState` (§33.1).
+
+Each tick of the onion skin's opacity slider re-evaluates the whole editor (~13 ms a tick on the iPad 9
+simulator) because the value is published on `CanvasManager`. Give it a small publisher of its own so the
+ghost follows per tick and the editor does not.
+
+- [ ] Its own publisher; ms/tick and editor passes per tick measured before/after with §31's method.
+
 ## (183) Recolouring a filled selection flickers
 
 **Status** — reported 2026-10-12 with a recording; given to the (179) worker, whose seam owns the held

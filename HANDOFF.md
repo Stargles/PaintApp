@@ -10,17 +10,15 @@ file, then [CLAUDE.md](CLAUDE.md) (build, test, merge, deploy), then the specifi
 pick up. [TODO.md](TODO.md) is the owner's asks **in queue order — the top is next**; [BUGS.md](BUGS.md)
 is what we find.
 
-## State (session 48, 2026-10-13)
+## State (session 48 closed, 2026-10-13)
 
 **Check `git worktree list` and every `tmp/*` branch first** (`git log --oneline origin/main..<branch>`)
 — `origin/main` is a shared ref and a cut-off session's work sits on its branch.
 
-**In flight when this was written:** TODO (179) part 3 on `tmp/throttle179c` (worktree
-`~/PaintWork/PaintApp-throttle179c`): the assessment's commits 8–10 (smart-shape preview off the main
-thread, text panel and text/float drags held, interpolation previews, the fill fold onto `LatestWins`),
-the brush colour's own publisher, and graph drags of Opacity / transform / animation-group curves held.
-If that branch is ahead of `main` and its worktree is idle, finish it from there; the brief is
-`~/PaintWork/design/s48-179-throttle-assessment.md` §5 plus (179)'s open boxes.
+**Nothing is in flight.** Session 48 closed with `main` at the commit that carries this file; no
+`tmp/*` branch holds unmerged work. The next session may be run by Codex or another agent — everything it
+needs is in the repo (AGENTS.md, CLAUDE.md, this file, TODO.md, BUGS.md, the specs) plus the design notes
+in `~/PaintWork/design/` on this Mac.
 
 **Build from `~/PaintWork`, not `~/Desktop`** (CLAUDE.md "Build and test", first paragraph).
 `~/PaintWork/deploy` is a detached worktree kept for device builds.
@@ -28,15 +26,20 @@ If that branch is ahead of `main` and its worktree is idle, finish it from there
 **The owner's iPad has `7cf3245`** (Release, installed 2026-10-13 after an iPad-9-simulator regression
 pass of 210 UI tests — every red was the known 13"-geometry debt or environmental). Its profile expires
 **2026-10-15T04:52Z**; the re-signer (`~/PaintApp/deploy/resign.sh`, syncs to `origin/main`) is armed for
-2026-10-14 23:52 local. **The next install runs `LegacyToolSettingsRepair` on the owner's scenes** (TODO
-(176)'s one-shot repair, below) — say so to the owner when it lands.
+2026-10-14 23:52 local — **and it installs whatever `origin/main` is then**, so the full UI suite below
+should run before that, or the re-sign ships an unproven build. **The next install runs
+`LegacyToolSettingsRepair` on the owner's scenes** (TODO (176)'s one-shot repair, below) — tell the owner
+when it lands and ask them to open a few scenes.
 
-**Fast tier at `786efac`**: 5049 passed / 4 skipped, Debug and Release reconciled. The full UI suite has not
-been run since `38a3dd6` (session 47); every item since ran its own UI classes.
+**Fast tier at `48418d9`**: 5086 tests, Release green; Debug green after one source-scan count was updated
+for the deleted fill image view (re-run passed). The full UI suite has not been run since `38a3dd6`
+(session 47) — every item since ran its own UI classes; **run it (CLAUDE.md "Full run", erased device)
+before the next device install**, since ~70 merges landed without one.
 
 ## What is next
 
-1. **Finish TODO (179)** (above), then the owner's iPad `PlaybackProbe` run it still owes.
+1. **TODO (179) is built** — only the owner's iPad `PlaybackProbe` run is owed (its last box). **TODO (189)**,
+   small: the onion skin's opacity slider on its own publisher, the brush colour's shape.
 2. **TODO (177)** — a stream layer drawn in place: one more consumer of (179)'s seam (a windowed
    recomposite of the layers above the stream per stream tick). Survey:
    `~/PaintWork/design/s48-survey-masks-stream-liquify.md` §B.
@@ -47,15 +50,18 @@ been run since `38a3dd6` (session 47); every item since ran its own UI classes.
 
 ## What shipped this session (48)
 
-`f368504..2fd79ac`; causes are in the commit messages. The decisions most likely to be tripped over:
+`f368504..` (~70 merges); causes are in the commit messages. The decisions most likely to be tripped over:
 
 - **(179) One seam for every live re-update** — `LatestWins` (newest request wins, one job in flight, the
   landing on main before the next mint; proven by an interleaving rig in `LatestWinsLogicTests`), one held
   slot `CanvasManager.liveEdit`, and lane F: a whole-frame composite from the held value via
   `makeFrameRecipe(holding:)` into `WindowSurfaceView`'s surface pair, held until the bake lands. Effect
   parameters, the whole-effect editors, the Adjust Box, effect-channel graph drags, layer/folder Opacity,
-  value colour and Rotate/Shake/Parallax all write once at the lift. **Above ~4 MP a drag preview is half
-  detail** (`DragPreviewDetail`; the owner's drag-only exception beside RENDER.md §2.12). PERFORMANCE §30.
+  value colour, Rotate/Shake/Parallax, the smart-shape and text previews, the interpolation Timing/guide
+  drags, graph-band channel drags and the fill's renders all write once at the lift; the brush colour
+  has its own publisher (`BrushColorState`). **Above ~4 MP a drag preview is half detail**
+  (`DragPreviewDetail`; the owner's drag-only exception beside RENDER.md §2.12). PERFORMANCE §30–§34:
+  a 4096² fill-slider drag handed Core Animation 102 canvas-sized images before and 2 after.
 - **(183) A window surface is not drawn while the render server still shows it**
   (`WindowSurfaceView.present` waits on `IOSurface.isInUse`); the colour picker no longer rebuilds per
   tick (`PickerColor`, PERFORMANCE §31). The owner's on-device confirmation of the flicker is owed.

@@ -3,6 +3,13 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## A scrub at 4096² with the onion skin on spends ~1.3 s of main thread building the ghost (2026-10-13)
+
+Found by TODO (179)'s `PlaybackProbe -probeMode scrub`/`onion` (PERFORMANCE.md §34.2), iPad 9 simulator,
+Release: across a 60-step scrub of a 4096² scene with the onion skin on, building the onion ghost costs
+~1.3 s of main thread against ~0.1 s of frame decode (8 of 60 steps decoded on main; none at 2048×1024).
+Not measured on the device. The owner's scenes are usually 2048×1024; not yet a reported symptom, so not
+in TODO.md — move it there if a scrub with the onion skin feels heavy on the iPad.
 
 ## The layer panel's reload stalls the main thread for 1.2–1.7 s on the iPad 9, mostly blocked rather than computing (2026-10-10)
 
