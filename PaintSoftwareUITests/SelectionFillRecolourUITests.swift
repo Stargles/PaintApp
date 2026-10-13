@@ -110,9 +110,7 @@ final class SelectionFillRecolourUITests: PaintUITestCase {
                                     + "first read \(String(describing: before?.pixels)))")
 
         // 3. The picker opens, which begins the edit's session — and the window is drawn then too, over
-        //    the list as it stands, so the base has to stay on screen through that draw as well. Once it
-        //    has landed (the draw's 2.5 s and a second's grace) the points still red are the ones the
-        //    picker does not cover.
+        //    the list as it stands, so the base has to stay on screen through that draw as well.
         let opened = CFAbsoluteTimeGetCurrent()
         swatch.tap()
         XCTAssertTrue(app.descendants(matching: .any)["canvasPresentation.selectionColour"].firstMatch
@@ -124,28 +122,21 @@ final class SelectionFillRecolourUITests: PaintUITestCase {
             XCTAssertEqual(element.value as? String, pick.hex, "PREMISE: swatch \(pick.index) is \(pick.hex)")
             swatches.append(element)
         }
-        Thread.sleep(forTimeInterval: max(0, opened + Self.drawSeconds + 1 - CFAbsoluteTimeGetCurrent()))
-        let settled = sampler.latest
-        let clear = onTheFill.filter { level(of: settled?.pixels[$0]) == 0 }
-        XCTAssertGreaterThanOrEqual(clear.count, 6,
-                                    "PREMISE: the fill reads red where it is read, clear of the picker (\(clear.count) of "
-                                    + "\(onTheFill.count) points; settled read \(String(describing: settled?.pixels)))")
         attachScreenshot(XCUIScreen.main, "1-picker-open-over-the-filled-selection")
 
-        /// The one level every clear point reads in a sample, or nil when they disagree or any is not a colour.
-        func uniformLevel(_ sample: MidGestureSampler.Sample) -> Int? {
-            let levels = Set(clear.map { level(of: sample.pixels[$0]) })
-            return levels.count == 1 ? levels.first ?? nil : nil
+        // 4. The picks, in the artist's order. The first is asked for while the session's own first draw
+        //    is still in flight and waits behind it; its picture takes 2.5 s to draw, and the base must
+        //    be on screen until it lands. Then the second, third and fourth in quick succession: the
+        //    second is drawn at once, the third is asked for during that draw and the fourth replaces
+        //    it, so the picture drawn after the second lands — into the surface the first one just left —
+        //    is the newest, and the third is never drawn at all. **Every wait is for a picture:** that
+        //    at least six of the points on the fill read the colour asked for.
+        func points(reading target: Int, in sample: MidGestureSampler.Sample) -> [Int] {
+            onTheFill.filter { level(of: sample.pixels[$0]) == target }
         }
-        func waitForLevel(atLeast target: Int) -> Bool {
-            waitForSample(sampler, timeout: 40) { (uniformLevel($0) ?? -1) >= target } != nil
+        func waitForPicture(_ target: Int) -> MidGestureSampler.Sample? {
+            waitForSample(sampler, timeout: 40) { points(reading: target, in: $0).count >= 6 }
         }
-
-        // 4. Tick one alone: its picture takes 2.5 s to draw, and the base must be on screen meanwhile.
-        //    Then ticks two, three and four in quick succession: the second is drawn at once, the third
-        //    is asked for during that draw and the fourth replaces it, so the picture drawn after the
-        //    second lands — into the surface the first one just left — is the newest, and the third
-        //    is never drawn at all.
         let t0 = opened
         var taps: [CFAbsoluteTime] = []
         func tick(_ index: Int) {
@@ -153,15 +144,24 @@ final class SelectionFillRecolourUITests: PaintUITestCase {
             taps.append(CFAbsoluteTimeGetCurrent())
         }
         tick(0)
-        XCTAssertTrue(waitForLevel(atLeast: 1), "the first tick's picture never reached the screen")
+        XCTAssertNotNil(waitForPicture(1), "the first tick's picture never reached the screen")
         tick(1)
         tick(2)
         tick(3)
-        XCTAssertTrue(waitForLevel(atLeast: Self.picks.count), "the newest tick's picture never reached the screen")
+        let landed = waitForPicture(Self.picks.count)
+        XCTAssertNotNil(landed, "the newest tick's picture never reached the screen")
         let reads = sampler.stop()
-        attachScreenshot(XCUIScreen.main, "1-the-last-tick-held")
+        attachScreenshot(XCUIScreen.main, "2-the-last-tick-held")
 
-        // 5. What every read said, from the picker opening on.
+        // 5. What every read said, from the picker opening on, at the points that show the last picture:
+        //    the ones on the fill that the picker does not stand over.
+        let clear = landed.map { points(reading: Self.picks.count, in: $0) } ?? []
+        /// The one level every clear point reads in a sample, or nil when they disagree or any is not a colour.
+        func uniformLevel(_ sample: MidGestureSampler.Sample) -> Int? {
+            let levels = Set(clear.map { level(of: sample.pixels[$0]) })
+            return levels.count == 1 ? levels.first ?? nil : nil
+        }
+
         let timeline = reads.filter { $0.finished >= opened }
         func pixels(_ sample: MidGestureSampler.Sample) -> String {
             clear.map { sample.pixels[$0].map { "\($0.r),\($0.g),\($0.b)" } ?? "-" }.joined(separator: " ")
