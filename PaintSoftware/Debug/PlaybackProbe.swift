@@ -58,6 +58,12 @@ import UIKit
 ///                                    the second layer's (Multiply with `-probeGraded`, so the
 ///                                    compositor draws the canvas), through the rail's shipped verbs
 ///                                    for `-probeTicks` ticks `-probeTickMs` apart
+///     -probeMode shape               drag a pending smart shape's corner instead of playing (TODO
+///                                    (179)): a rectangle put down on the first layer the way the
+///                                    hold and the lift put one, the brush a sixty-fourth of the
+///                                    canvas wide, its far corner driven through the overlay's
+///                                    shipped verb for `-probeTicks` ticks `-probeTickMs` apart,
+///                                    then committed
 ///     -probeTicks <n>                picker or slider ticks in one drag (default 100)
 ///     -probeTickMs <n>               milliseconds between ticks (default 80, the owner's iPad 9)
 ///     -probeOnion <0|1>              the onion skin, on by default as it is for the artist
@@ -91,7 +97,7 @@ enum PlaybackProbe {
     /// redoes them, one operation per interval. Two modes rather than two probes because the
     /// document, the bake wait and the report are identical and only the middle differs — and
     /// because the whole question of this pass is whether the three symptoms are one cost.
-    enum Mode: String { case playback, edit, recolour, effect, opacity }
+    enum Mode: String { case playback, edit, recolour, effect, opacity, shape }
 
     // MARK: - The run
 
@@ -192,6 +198,11 @@ enum PlaybackProbe {
                                                 ticks: max(1, intArgument("-probeTicks", default: 100)),
                                                 intervalMs: max(1, intArgument("-probeTickMs", default: 80)),
                                                 footprint: { footprint.sample() })
+        case .shape:
+            operations = await runShapeDrag(canvasManager, size: size,
+                                            ticks: max(1, intArgument("-probeTicks", default: 100)),
+                                            intervalMs: max(1, intArgument("-probeTickMs", default: 80)),
+                                            footprint: { footprint.sample() })
         case .edit:
             operations = await runEdits(canvasManager, size: size,
                                         count: max(1, intArgument("-probeEdits", default: 4)),
@@ -473,6 +484,53 @@ enum PlaybackProbe {
         try? await Task.sleep(nanoseconds: 6_000_000_000)
         footprint()
         return ["opacity"]
+    }
+
+    // MARK: - Smart shape
+
+    /// **A pending smart shape's corner dragged, tick by tick** — TODO (179). A rectangle is put down on
+    /// the first layer the way the hold and the lift put one (`beginInteractiveShape`,
+    /// `endInteractiveShape`), its outline the drawn samples and the brush a sixty-fourth of the canvas
+    /// wide; the drag runs what the overlay wires a corner to — `updateInteractiveShape` per reported
+    /// point, sweeping the far corner out and back `intervalMs` apart — then commits the shape and lets
+    /// the canvas settle, so the footprint samples cover what the session leaves behind.
+    @MainActor
+    private static func runShapeDrag(_ canvasManager: CanvasManager, size: CGSize, ticks: Int, intervalMs: Int,
+                                     footprint: @escaping () -> Void) async -> [String] {
+        canvasManager.currentLayerIndex = 0
+        canvasManager.toolProfiles.brush.size = size.width / 64
+        let rect = CGRect(x: size.width * 0.3, y: size.height * 0.4, width: size.width * 0.3,
+                          height: size.height * 0.2)
+        let corners = [CGPoint(x: rect.minX, y: rect.minY), CGPoint(x: rect.maxX, y: rect.minY),
+                       CGPoint(x: rect.maxX, y: rect.maxY), CGPoint(x: rect.minX, y: rect.maxY),
+                       CGPoint(x: rect.minX, y: rect.minY)]
+        let samples = zip(corners, corners.dropFirst()).flatMap { from, to in
+            (0..<24).map { step -> VectorSample in
+                let t = CGFloat(step) / 24
+                return VectorSample(x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t, pressure: 1)
+            }
+        }
+        canvasManager.beginInteractiveShape(ShapeGeometry(kind: .rectangle, startPoint: rect.origin,
+                                                          endPoint: CGPoint(x: rect.maxX, y: rect.maxY)),
+                                            samples: samples)
+        canvasManager.endInteractiveShape()
+        guard canvasManager.shapeGestureActive else { return ["no shape"] }
+        try? await Task.sleep(nanoseconds: 1_500_000_000)
+        footprint()
+        PlaybackTrace.mark(.tick, value: 0)
+        for tick in 0..<ticks {
+            let phase = Double(tick % 40) / 20
+            let share = CGFloat(phase <= 1 ? phase : 2 - phase)
+            canvasManager.updateInteractiveShape(endPoint: CGPoint(x: rect.maxX + size.width * 0.25 * share,
+                                                                   y: rect.maxY + size.height * 0.25 * share))
+            try? await Task.sleep(nanoseconds: UInt64(intervalMs) * 1_000_000)
+            footprint()
+        }
+        PlaybackTrace.mark(.tick, value: 1)
+        canvasManager.commitInteractiveShape()
+        try? await Task.sleep(nanoseconds: 6_000_000_000)
+        footprint()
+        return ["shape"]
     }
 
     // MARK: - Recolour
