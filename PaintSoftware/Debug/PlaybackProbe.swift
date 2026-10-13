@@ -64,6 +64,19 @@ import UIKit
 ///                                    canvas wide, its far corner driven through the overlay's
 ///                                    shipped verb for `-probeTicks` ticks `-probeTickMs` apart,
 ///                                    then committed
+///     -probeMode fill                drag the Fill panel's Gap Closing slider over an adjustable fill
+///                                    instead of playing (TODO (179)): a bucket fill tapped on the first
+///                                    layer at the middle of the canvas, the slider swept through its
+///                                    shipped verb for `-probeTicks` ticks `-probeTickMs` apart, then
+///                                    committed
+///     -probeMode scrub               scrub the playhead across the baked frames instead of playing
+///                                    (TODO (179)): `goToFrame`, the timeline's verb, forward and back
+///                                    over `-probeFrames` for `-probeTicks` steps `-probeTickMs` apart,
+///                                    playback stopped
+///     -probeMode onion               drag the onion skin's first Behind opacity slider instead of
+///                                    playing (TODO (179)): the playhead on the second frame so the
+///                                    ghost is drawn, the slot swept through the panel's verb for
+///                                    `-probeTicks` ticks `-probeTickMs` apart
 ///     -probeTicks <n>                picker or slider ticks in one drag (default 100)
 ///     -probeTickMs <n>               milliseconds between ticks (default 80, the owner's iPad 9)
 ///     -probeOnion <0|1>              the onion skin, on by default as it is for the artist
@@ -97,7 +110,7 @@ enum PlaybackProbe {
     /// redoes them, one operation per interval. Two modes rather than two probes because the
     /// document, the bake wait and the report are identical and only the middle differs — and
     /// because the whole question of this pass is whether the three symptoms are one cost.
-    enum Mode: String { case playback, edit, recolour, effect, opacity, shape }
+    enum Mode: String { case playback, edit, recolour, effect, opacity, shape, fill, scrub, onion }
 
     // MARK: - The run
 
@@ -203,6 +216,21 @@ enum PlaybackProbe {
                                             ticks: max(1, intArgument("-probeTicks", default: 100)),
                                             intervalMs: max(1, intArgument("-probeTickMs", default: 80)),
                                             footprint: { footprint.sample() })
+        case .fill:
+            operations = await runFillSlider(canvasManager, size: size,
+                                             ticks: max(1, intArgument("-probeTicks", default: 100)),
+                                             intervalMs: max(1, intArgument("-probeTickMs", default: 80)),
+                                             footprint: { footprint.sample() })
+        case .scrub:
+            operations = await runScrub(canvasManager, frames: frameCount,
+                                        ticks: max(1, intArgument("-probeTicks", default: 100)),
+                                        intervalMs: max(1, intArgument("-probeTickMs", default: 80)),
+                                        footprint: { footprint.sample() })
+        case .onion:
+            operations = await runOnionSlider(canvasManager,
+                                              ticks: max(1, intArgument("-probeTicks", default: 100)),
+                                              intervalMs: max(1, intArgument("-probeTickMs", default: 80)),
+                                              footprint: { footprint.sample() })
         case .edit:
             operations = await runEdits(canvasManager, size: size,
                                         count: max(1, intArgument("-probeEdits", default: 4)),
@@ -531,6 +559,86 @@ enum PlaybackProbe {
         try? await Task.sleep(nanoseconds: 6_000_000_000)
         footprint()
         return ["shape"]
+    }
+
+    // MARK: - Fill, scrub, onion
+
+    /// The share of a sweep out and back, 0 → 1 → 0 over forty ticks — what every slider runner drives.
+    private static func sweep(_ tick: Int) -> Double {
+        let phase = Double(tick % 40) / 20
+        return phase <= 1 ? phase : 2 - phase
+    }
+
+    /// **An adjustable fill's Gap Closing slider dragged, tick by tick** — TODO (179) commit 10. A bucket
+    /// fill is tapped on the first layer at the middle of the canvas, where the seeded strokes leave the
+    /// paper open, so the flood reaches the canvas's edges and its window grows to the canvas; the Fill
+    /// panel's slider then runs its shipped verb (`setFillGapClosing`) per tick, sweeping the whole range
+    /// out and back `intervalMs` apart; then the commit, and the canvas settles.
+    @MainActor
+    private static func runFillSlider(_ canvasManager: CanvasManager, size: CGSize, ticks: Int, intervalMs: Int,
+                                      footprint: @escaping () -> Void) async -> [String] {
+        canvasManager.currentLayerIndex = 0
+        canvasManager.setFillGapClosing(0)
+        canvasManager.beginInteractiveFill(at: CGPoint(x: size.width / 2, y: size.height / 2))
+        canvasManager.endInteractiveFill()
+        try? await Task.sleep(nanoseconds: 3_000_000_000)
+        guard canvasManager.fillGestureActive else { return ["no fill"] }
+        footprint()
+        PlaybackTrace.mark(.tick, value: 0)
+        for tick in 0..<ticks {
+            canvasManager.setFillGapClosing(CanvasManager.fillGapRange.upperBound * CGFloat(sweep(tick)))
+            try? await Task.sleep(nanoseconds: UInt64(intervalMs) * 1_000_000)
+            footprint()
+        }
+        PlaybackTrace.mark(.tick, value: 1)
+        canvasManager.commitInteractiveFill()
+        try? await Task.sleep(nanoseconds: 6_000_000_000)
+        footprint()
+        return ["fill"]
+    }
+
+    /// **The playhead scrubbed across the baked frames, step by step** — what the timeline's drag runs
+    /// per frame it crosses (`goToFrame`), playback stopped, forward over every frame and back
+    /// `intervalMs` apart. What it reads is how often a step decoded its frame on the main thread
+    /// (`storeDecode`'s `onMainCount`, `bakeRead`'s misses) and what that cost.
+    @MainActor
+    private static func runScrub(_ canvasManager: CanvasManager, frames: Int, ticks: Int, intervalMs: Int,
+                                 footprint: @escaping () -> Void) async -> [String] {
+        try? await Task.sleep(nanoseconds: 1_500_000_000)
+        footprint()
+        let span = max(frames - 1, 1)
+        PlaybackTrace.mark(.tick, value: 0)
+        for tick in 1...ticks {
+            let step = tick % (2 * span)
+            canvasManager.goToFrame(step <= span ? step : 2 * span - step)
+            try? await Task.sleep(nanoseconds: UInt64(intervalMs) * 1_000_000)
+            footprint()
+        }
+        PlaybackTrace.mark(.tick, value: 1)
+        try? await Task.sleep(nanoseconds: 2_000_000_000)
+        footprint()
+        return ["scrub"]
+    }
+
+    /// **The onion skin's first Behind opacity slot dragged, tick by tick** — the panel's slider writes
+    /// `onionSkin.setOpacity` per tick. The playhead goes to the second frame first, so there is a
+    /// frame behind it and the ghost is drawn.
+    @MainActor
+    private static func runOnionSlider(_ canvasManager: CanvasManager, ticks: Int, intervalMs: Int,
+                                       footprint: @escaping () -> Void) async -> [String] {
+        canvasManager.goToFrame(1)
+        try? await Task.sleep(nanoseconds: 3_000_000_000)
+        footprint()
+        PlaybackTrace.mark(.tick, value: 0)
+        for tick in 0..<ticks {
+            canvasManager.onionSkin.setOpacity(0.1 + 0.8 * sweep(tick), slot: 0, on: .previous)
+            try? await Task.sleep(nanoseconds: UInt64(intervalMs) * 1_000_000)
+            footprint()
+        }
+        PlaybackTrace.mark(.tick, value: 1)
+        try? await Task.sleep(nanoseconds: 3_000_000_000)
+        footprint()
+        return ["onion"]
     }
 
     // MARK: - Recolour

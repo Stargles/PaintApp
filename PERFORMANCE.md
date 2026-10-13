@@ -5735,9 +5735,8 @@ re-renders) costs 685–711 ms a window in this harness — touch delivery, the 
 Animation — so the fill's share of a tick is ~1.5–2 ms, down from ~6–7.5 (INFERRED from the two
 differences at ~114 ticks a window). `FillSliderLiveUITests` pins it as counts: the picture follows the
 drag (`moves:`) with at most 2 passes across it, where each tick used to be one. **Not measured**: the
-device; the preview is still a window-sized image handed to Core Animation per tick, the first lever if
-the device says otherwise. (§29 builds that lever for the Select panel's edit — a persistent surface
-pair — and the fill's preview is still the image.)
+device. The preview was still a window-sized image handed to Core Animation per tick; §34.1 draws it into
+a surface pair instead.
 
 ---
 
@@ -6197,3 +6196,55 @@ Opacity where Core Animation draws, the whole frame where the compositor does, t
 pose. `GraphCurveHoldUITests` pins it from a new document: the ink fades under the finger while it holds, at
 most 3 passes across the drag, one Undo takes it back. Not measured in milliseconds. **A marquee across kinds
 of channel** (say Opacity and a grade together) still writes per tick — it is the one band drag left that does.
+
+## 34. An adjustable fill handed Core Animation a picture per render; the scrub and the onion skin measured (2026-10-13)
+
+TODO (179) commit 10.
+
+### 34.1 The fill fold
+
+The fill's private coalescer (`drainFillWork`'s loop over a pending and a rendered key under `fillLock`) is
+one `LatestWins` per gesture on `fillQueue` now (`CanvasManager.fillRenders`), and the layer's host draws a
+render's bytes into a `WindowSurfaceView` pair off the main thread (`LayerHostView.showFill`) instead of
+being handed a new window-sized `UIImage` per render — §28's "first lever", and the selection clip moves off
+the main thread with it.
+
+**MEASURED, Release, iPad (9th generation) simulator (iOS 26.5), `PlaybackProbe -probeMode fill`** (new): a
+4096² document of three vector layers × two frames, the iPad 9's 192 MiB budget, onion on; a bucket fill
+tapped mid-canvas on the first layer, where the seeded strokes leave the paper open, so the flood reaches
+the canvas's edges and its window grows to the canvas (worked at the budget's scale); Gap Closing swept
+0 → 40 → 0 through `setFillGapClosing` for 100 ticks 80 ms apart, then committed. *Before* is `048f4da`
+with the same probe mode, not merged; *after* is this change. §29's temporary `UIImageView.image` swizzle
+(not merged) counted every image of 4 MB or more. Two takes each, 48–64% idle at the start (this session's
+UI tests on another simulator), 72–86% at the end.
+
+| 100 ticks over 8.5 s, 4096² | images of 4 MB or more to Core Animation | fill pictures shown | main thread busy | footprint growth | surfaces |
+|---|---|---|---|---|---|
+| before (two takes) | **102, 102 — 2,096 MB each take** | 100 images | 1.26, 1.18 s | +119, +130 MB | — |
+| after (two takes) | **2, 2 — 84 MB** (the commit's) | 100 surface presents | **0.45, 0.47 s** | +41, +89 MB | 38.9 MiB |
+
+Every tick still renders and is shown (100 of 100), and the main thread's share of a tick falls from
+~12 ms to ~4.5 ms: what it lost is Core Animation preparing a 20 MB image per render. The surfaces are two
+of the fill's window at its working size, held while the fill is adjustable. Not measured: the device.
+
+### 34.2 The scrub's decode and the onion skin's surface — measured, and not built
+
+The assessment planned both for this commit only if a measurement asked for them. Neither did.
+
+- **The scrub** (`-probeMode scrub`, new: `goToFrame` over eight distinct frames, 60 steps 80 ms apart
+  forward and back, playback stopped). A plain document's scrub reads no bake at all — the hosts draw it —
+  so it was taken with `-probeGraded` (one Multiply layer), where the canvas rests on the baked frame. At
+  4096² the ring holds two frames and **8 of the 60 steps decoded on the main thread (11 with the onion
+  on), ~15–17 ms each here** — 122 ms of the scrub's 1.44 s of main-thread busy with the onion off. At
+  2048×1024, where the ring holds every frame, none did. So decoding off the main thread would buy ~8% of a
+  4096² scrub. **The larger cost is the onion skin's**: with it on, the same scrub is 2.99 s of main
+  thread, 1.33 s of it the ghost's frames built inside `updateUIView` (`onionFrames`, ~22 ms a step) — not
+  this item's, and not built here.
+- **The onion skin's opacity slider** (`-probeMode onion`, new: the first Behind slot swept for 100 ticks
+  at 4096²) handed Core Animation **4** images of 4 MB or more in all and ran one `onionComposite`: an
+  opacity tick does not rebuild the ghost, so its present does not churn the render server and a surface
+  would buy nothing. What a tick does cost is a SwiftUI pass over the editor — `onionSkin` is `@Published`
+  on `CanvasManager` — 100 `updateUIView`s and 1.31 s of main thread over the 8.4 s drag (~13 ms a tick):
+  the brush colour's shape (§33.1), not fixed here.
+
+The brush editor's scratch pad (optional in the assessment) was left as it is.

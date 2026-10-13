@@ -66,8 +66,10 @@ canvas instead of the editor (PERFORMANCE §32); commit 9 — an in-between's Ti
 and a spacing dot held, with the in-between drawn by its host off the main thread (§33.2); the brush colour on
 an object of its own (`BrushColorState`, §33.1: 11.6 → 7.1 ms a tick, no editor pass); and a graph-band drag
 of a target's channels or an animation group's pose held (§33.3 — a marquee across kinds of channel still
-writes per tick). Commit 7 (mask tuning live) moved to (35). Commit 10 of
-`~/PaintWork/design/s48-179-throttle-assessment.md` §5 (the fill fold) is next.
+writes per tick); and commit 10 — the fill's renders through a `LatestWins` and its picture drawn into a
+surface off the main thread (§34.1). Commit 7 (mask tuning live) moved to (35). The scrub's decode and the
+onion skin's surface were measured and not needed (§34.2). **Every box below but the device measurement
+is done**: the iPad run of `PlaybackProbe` is owed.
 
 **Ruled 2026-10-12, on §30**: *lower detail only on big scenes* — above about 4 million pixels (twice the
 owner's usual 2048×1024) a drag preview is drawn at half detail while the finger is down and full detail
@@ -93,15 +95,16 @@ why: pictures handed to Core Animation faster than the render server frees them)
       and its size. Built if it is one clean seam; brought to the owner if it means a renderer rewrite.
 - [x] Inventory every control that writes the document per tick (incl. HANDOFF's "ruled to wait" grade
       sliders, grade graph nodes and the Duplicate Offset box, which this ruling supersedes).
-- [ ] One held-value + latest-wins preview seam they all use; no per-control copies — commits 1–6, 8 and 9
-      merged (`1a715ec`..`0f09447`, `bd5ffec`, `f6586c9`, commit 6, commit 8, commit 9), and the graph-band
-      channel drags; 10 (the fill fold) to go; 7 is (35)'s.
+- [x] One held-value + latest-wins preview seam they all use; no per-control copies — commits 1–6 and 8–10
+      merged (`1a715ec`..`0f09447`, `bd5ffec`, `f6586c9`, commits 6, 8, 9 and 10), and the graph-band
+      channel drags; 7 is (35)'s.
 - [x] Half-detail drag preview above the size threshold (PERFORMANCE.md §30.4).
 - [x] The brush colour panel's tick: its own small publisher (`BrushColorState`) — the toolbar swatches and
       the canvas follow per tick, the editor does not re-evaluate (PERFORMANCE §33.1).
-- [ ] Measured with `PlaybackProbe` before/after, as §29 was — the effect slider (PERFORMANCE.md §30), half
-      detail (§30.4), the Opacity slider (§30.5), a smart shape's handle drag (§32) and the brush colour
-      (§33.1) are; the rest with their commits, and the iPad itself.
+- [ ] Measured with `PlaybackProbe` before/after, as §29 was — on the iPad 9 simulator: the effect slider
+      (PERFORMANCE.md §30), half detail (§30.4), the Opacity slider (§30.5), a smart shape's handle drag
+      (§32), the brush colour (§33.1) and the fill slider (§34.1). **Owed: the iPad itself** — the probe's
+      `effect`, `opacity`, `shape` and `fill` modes on the owner's device.
 
 ## (183) Recolouring a filled selection flickers
 
