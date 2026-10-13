@@ -6106,10 +6106,8 @@ Wheel (410)** — INFERRED to be the Wheel. Both are fixed.
   rail: every view that observes `CanvasManager` re-evaluates, 54% of the samples are SwiftUI update, of
   which `CanvasView.updateUIView` is 10%, `InlineNameFieldView.sizeThatFits` 2%). That is `brushColor` being
   a `@Published` of the whole editor, not the picker, and it is the same shape as §24 and §29's per-tick
-  writes. **Not fixed here — it needs a ruling:** (a) leave it; (b) give the brush's colour a small publisher
-  of its own so only the toolbar swatches re-evaluate per tick, the canvas being told directly; (c) hold the
-  colour while the finger is down and write it at the lift, so the toolbar's swatch follows at the lift and
-  not live (the panel's own swatch still follows).
+  writes. **(b) was chosen and is §33.1**: the brush's colour has a small publisher of its own, so only the
+  views that show it re-evaluate per tick and the canvas is told directly.
 - **Select's remaining 5–6 ms a tick is spread thin**: layout and Core Animation commit of the shapes and the
   hex field (a `UITextField` re-measured a tick, ~10% of what is left), the held window's `IOSurface` present
   (a synchronous XPC inside the commit, ~12%, §29's seam and the render server's side), the recorder's
@@ -6151,3 +6149,51 @@ Two takes each, 45–79% idle at the start (another session's build), 75–92% a
 - **The surfaces are 128 MiB while a shape is pending at 4096²** (16 MiB at 2048×1024) — what the old texture
   and its cached image held between them in the app, and they are mapped once by the render server where the
   old images were copied. Held only while a shape is up. Not measured: the device.
+
+## 33. The brush colour, an in-between's drags and a graph-band curve were still written per tick (2026-10-13)
+
+TODO (179): the per-tick writes left after commit 8. Each is held off the document while the finger is down
+and written once at the lift, as one undo step.
+
+### 33.1 The brush's colour panel
+
+§31.4's lever (b), decided by the orchestrator: `brushColor` was `@Published` on `CanvasManager`, so each tick
+of a drag on the brush's colour picker was a SwiftUI pass over every view that observes the editor. The colour
+lives on an object of its own now (`BrushColorState`); the views that show it observe that — the panel's host,
+the toolbar's swatch, the side toolbar's eyedropper button — and the canvas is told directly
+(`CanvasView.Coordinator.observeBrushColor`). `CanvasManager.brushColor` reads and writes it, so no caller moved.
+
+**MEASURED, Release, iPad (9th generation) simulator (iOS 26.5)**, §31's method: a new document, landscape, the
+Action Recorder on, the brush's colour panel on Classic, one continuous ten-second finger drag round the square
+(a temporary test, not merged). The main-thread figure is the recorder's `mainBusy` over the eight two-second
+windows wholly inside the drag, per tick delivered. *Before* is `733f875`, *after* this change; two takes each,
+82–95% idle. This harness's finger is handed ~1,030 ticks in ten seconds where §31.3's was handed ~573, so its
+per-tick figures compare with each other and not with §31.3's.
+
+| ten-second drag, Brush → Classic, the square | main-thread ms per tick | ms per second | ticks | panel bodies a tick | editor passes a tick |
+|---|---|---|---|---|---|
+| before (two takes) | 11.60, 11.67 | 682, 683 | 1,039, 1,033 | 1.00 | 1.00 |
+| after (two takes) | **7.16, 7.11** | 416, 418 | 1,026, 1,039 | 1.00 | **0** |
+
+The editor's pass was ~4.5 ms of a tick's 11.6 (39%). What is left is the panel's own body a tick — it draws
+the colour it edits — the swatches that follow it, and Core Animation. Not measured: the device.
+
+### 33.2 An in-between's Timing slider, a guide's handle and a spacing dot
+
+Each tick wrote the recipe or the guide into the document — a pass, a new bake key, and the in-between
+re-evaluated on the main thread and handed to Core Animation as a fresh canvas-sized image. Now the drag holds
+it (`HeldInterpolation`), every in-between it changes is drawn by its host off the main thread at preview
+quality, and the lift writes it once and redraws at full quality. `InterpolationDragLiveUITests` pins it from a
+seeded document, read off the screen while the finger holds: at most 3 SwiftUI passes across a drag and its
+lift (one a tick before), and more than one in-between picture landed under the finger. Not measured in
+milliseconds. The onion skin of the neighbouring frames follows at the lift, not during the drag.
+
+### 33.3 A graph-band drag of a target's channels or an animation group's pose
+
+The band's drags of a pose and a grade already held their curves (§24, §30); a target channel's — Opacity,
+Rotate's speed, Shake, a Parallax share — and an animation group's still wrote the document every tick. They
+hold now (`HeldChannelCurves`, `HeldEdit.groupPose`), and the canvas reads the held curve: a host's alpha for
+Opacity where Core Animation draws, the whole frame where the compositor does, the cel's host for a group's
+pose. `GraphCurveHoldUITests` pins it from a new document: the ink fades under the finger while it holds, at
+most 3 passes across the drag, one Undo takes it back. Not measured in milliseconds. **A marquee across kinds
+of channel** (say Opacity and a grade together) still writes per tick — it is the one band drag left that does.
