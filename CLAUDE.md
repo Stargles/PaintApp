@@ -1,3 +1,7 @@
+**Every agent starts at [AGENTS.md](AGENTS.md)** — the read order, the owner's working agreements, the
+standing engineering rules and the bar for done, tool-neutral. This file is the build, test, merge and
+deploy detail; it binds every agent, not only Claude Code.
+
 # Multi-Session Protocol
 
 Multiple sessions may work this repo concurrently, each in its own worktree. Never edit `main`
