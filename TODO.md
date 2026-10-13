@@ -111,6 +111,10 @@ why: pictures handed to Core Animation faster than the render server frees them)
       (`1a715ec`..`0f09447`); 5–10 (whole-effect editors, opacity, mask tuning, shape/text, interpolation,
       fill fold) to go.
 - [ ] Half-detail drag preview above the size threshold.
+- [ ] The brush colour panel's tick: `brushColor` is `@Published` on `CanvasManager`, so every tick of a
+      brush colour drag is a whole-editor SwiftUI pass (8–14 ms on the iPad 9 simulator, PERFORMANCE §31).
+      Decided (orchestrator, behaviour-neutral): the brush colour gets its own small publisher — the
+      toolbar swatches and the canvas follow per tick, the editor does not re-evaluate.
 - [ ] Measured with `PlaybackProbe` before/after, as §29 was.
 
 ## (183) Recolouring a filled selection flickers
@@ -137,6 +141,8 @@ panel, and the Wheel redrew 14,400 rectangles — fixed and measured in PERFORMA
 
 - [x] Cold-start XCUITest that samples the region mid-drag and fails on a flicker; root cause fixed in the seam.
 - [ ] The owner confirms on the iPad.
+- [ ] `SelectionFillRecolourUITests` is wall-clock-shaped (it needs ≥ 10 screen reads mid-drag and reads
+      3–4 under load, on clean `69029de` too): make it count what it asserts, not how fast the host is.
 - [x] The colour picker's own redraw during a drag measured and, if it is the ~1.4 s, fixed (a separate
       worker — not the held edit's code). It was: PERFORMANCE.md §31.
 

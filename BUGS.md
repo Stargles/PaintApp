@@ -60,6 +60,17 @@ found *"ended touches:0"*. So the stranded pan is usually **failed while still c
 after every touch is up — its touches were never delivered an end or cancel — and once it was `ended`
 with none. Not yet analysed against the touch sequence before each.
 
+**Analysed 2026-10-13** (`~/PaintWork/design/s48-stranded-analysis.md`): `canvas.pan` is in all 8
+strands; the trigger is a third distinct touch joining a pair that landed together — a late third finger
+(~20 ms) or a system cancel-and-reissue (1–4 ms) — **8 of the 9** such sequences stranded; the one that
+did not had the pair end in one event. Ruled out by the data: pencil, hierarchy changes, the hold shield
+(the 10-10 build predates it), a touch that never ended. Best hypothesis (INFERRED): UIKit's
+`UIPanGestureRecognizer` (min = max = 2) bookkeeping is not reset after a third touch. **The owner ruled
+the next build carries diagnostics only** (per-touch move counts, each recogniser's `numberOfTouches` in
+the sweep by dispatching phase, a `UITouch` identity per touch line, and a persistent repair counter);
+the candidate fixes (a pan subclass that ignores touches beyond two; `delaysTouchesEnded = false`) wait
+for one or two more strands.
+
 **Cause: not found.** The recognizers are left out of `.possible` after every touch is up:
 `StrokeGestureRecognizer.reset()` (which writes a line when it runs) never ran, and
 `canvas.touchCounter` read 0. **Not reproduced**: about 1,400 synthesised shapes
