@@ -11,6 +11,15 @@ struct TouchSample {
     /// Small integer identifying one finger/pen for the length of its sequence, so a reader can
     /// follow "the second finger" without matching pointers.
     let touchID: Int
+    /// The `UITouch` object itself, by identity. **Not `touchID`**, which numbers sequences — a new
+    /// number is minted at every `.began` — and so cannot say whether UIKit handed the same object back
+    /// for a touch it had just cancelled and begun again (BUGS.md, the stranded recognizers). Written as
+    /// a recognizer's `obj` is.
+    let object: ObjectIdentifier
+    /// How many `.moved` deliveries the touch received between its `began` and this line. `ended` and
+    /// `cancelled` lines only: with the pan's `numberOfTouches` it says whether a touch drifted before
+    /// the recognizer around it gave up.
+    let moves: Int?
     /// The accessibility identifier an XCUITest would address. Nil means this touch is not
     /// replayable as-is and the converter has to say so.
     let target: String?
@@ -217,18 +226,15 @@ struct TouchSample {
 
     private func willSend(_ event: UIEvent, window: UIWindow?) {
         guard event.type == .touches, let window, let touches = event.allTouches else { return }
-        // The flight recorder's whole saving: a move is skipped here, before anything is looked up.
+        // A move costs one increment, so the touch's end line can say how many it had; nothing is
+        // looked up or written for it unless a recording is running.
+        for touch in touches where touch.phase == .moved { tracks[ObjectIdentifier(touch)]?.moves += 1 }
         guard recordsInFull || touches.contains(where: { Self.isSequenceEdge($0.phase) }) else { return }
         let recorder = ActionRecorder.shared
         // Counted from the whole event, not from the touches we end up writing: "how many fingers
         // are down" is the thing that separates a two-finger pan from a one-finger draw, and it has
         // to be right even on an event where only one of them moved.
-        let concurrent = touches.reduce(into: 0) { count, touch in
-            switch touch.phase {
-            case .began, .moved, .stationary: count += 1
-            default: break
-            }
-        }
+        let concurrent = Self.touchesDown(in: touches)
         // Whether this event starts a touch sequence: every touch in it has only just begun. For
         // `CanvasWedgeDetector`, which counts sequences — so only the first began touch of such an
         // event is reported as starting one.
@@ -247,6 +253,16 @@ struct TouchSample {
 
     private static func isSequenceEdge(_ phase: UITouch.Phase) -> Bool {
         phase == .began || phase == .ended || phase == .cancelled
+    }
+
+    /// The touches an event carries that are on the glass: all but the ones ending or cancelled.
+    private static func touchesDown(in touches: Set<UITouch>) -> Int {
+        touches.reduce(into: 0) { count, touch in
+            switch touch.phase {
+            case .began, .moved, .stationary: count += 1
+            default: break
+            }
+        }
     }
 
     /// Rescans when a touch is bound to a named recognizer the registry is not watching yet — a new
@@ -271,11 +287,21 @@ struct TouchSample {
     /// registry as an action message anyway, and the two a move can produce without one — `.failed`
     /// and the reset to `.possible` — are caught by the next sequence edge, which in a stroke or a
     /// pan is never more than the lift away.
+    ///
+    /// **The one move that is swept anyway is one with three fingers or more down**: the shape that
+    /// strands the canvas is a third touch joining a pair (BUGS.md), and a sweep after a move inside it
+    /// is what says a recognizer failed between the edges rather than at one. Rare and cheap — an undo
+    /// or redo tap, a few moves long.
     private func didSend(_ event: UIEvent) {
-        guard event.type == .touches else { return }
-        guard recordsInFull || (event.allTouches?.contains(where: { Self.isSequenceEdge($0.phase) }) ?? false) else { return }
-        sweepRecognizerStates()
+        guard event.type == .touches, let touches = event.allTouches else { return }
+        var phases: EventPhases = []
+        for touch in touches { phases.formUnion(EventPhases(touch.phase)) }
+        guard recordsInFull || !phases.isDisjoint(with: .sequenceEdges)
+                || (phases.contains(.moved) && Self.touchesDown(in: touches) >= Self.fingersThatSweepMoves) else { return }
+        sweepRecognizerStates(after: phases)
     }
+
+    private static let fingersThatSweepMoves = 3
 
     // MARK: - Touch sampling and coalescing
 
@@ -286,6 +312,9 @@ struct TouchSample {
         var lastEmittedTime: Double
         var lastEmittedPoint: CGPoint
         var skippedSinceEmit: Int
+        /// `.moved` deliveries so far, counted in `willSend` for every touch the tap has seen begin,
+        /// whichever sink is on.
+        var moves = 0
         /// Resolved once, at `.began`, and reused for the whole sequence — see `targetFrame`.
         var target: ResolvedTarget
         var targetFrame: CGRect
@@ -333,7 +362,7 @@ struct TouchSample {
             tracks[key] = track
             nextTouchID += 1
             return makeSample(touch, track: track, phase: "began", point: point, time: time,
-                              concurrent: concurrent, skipped: nil, windowSize: window.bounds.size)
+                              concurrent: concurrent, skipped: nil, moves: nil, windowSize: window.bounds.size)
         }
 
         // A touch we never saw begin (recording started mid-gesture). Adopt it rather than drop it —
@@ -348,7 +377,7 @@ struct TouchSample {
             tracks[key] = adopted
             nextTouchID += 1
             return makeSample(touch, track: adopted, phase: name(for: phase), point: point, time: time,
-                              concurrent: concurrent, skipped: nil, windowSize: window.bounds.size)
+                              concurrent: concurrent, skipped: nil, moves: nil, windowSize: window.bounds.size)
         }
 
         switch phase {
@@ -374,14 +403,14 @@ struct TouchSample {
             track.lastPhase = .moved
             tracks[key] = track
             return makeSample(touch, track: track, phase: "moved", point: point, time: time,
-                              concurrent: concurrent, skipped: skipped, windowSize: window.bounds.size)
+                              concurrent: concurrent, skipped: skipped, moves: nil, windowSize: window.bounds.size)
         case .ended, .cancelled:
             // Guard against UIKit repeating a terminal phase in a later event for the same touch.
             guard track.lastPhase != phase else { return nil }
             let skipped = track.skippedSinceEmit
             tracks.removeValue(forKey: key)
             return makeSample(touch, track: track, phase: name(for: phase), point: point, time: time,
-                              concurrent: concurrent, skipped: skipped, windowSize: window.bounds.size)
+                              concurrent: concurrent, skipped: skipped, moves: track.moves, windowSize: window.bounds.size)
         default:
             return nil
         }
@@ -395,7 +424,7 @@ struct TouchSample {
     }
 
     private func makeSample(_ touch: UITouch, track: Track, phase: String, point: CGPoint,
-                            time: Double, concurrent: Int, skipped: Int?, windowSize: CGSize) -> TouchSample {
+                            time: Double, concurrent: Int, skipped: Int?, moves: Int?, windowSize: CGSize) -> TouchSample {
         let frame = track.targetFrame
         // Normalised inside the target's frame **as it stood when the touch began**. Deliberately not
         // re-measured per sample: the canvas container is transformed live during a two-finger pan,
@@ -409,6 +438,8 @@ struct TouchSample {
             phase: phase,
             type: typeName(touch.type),
             touchID: track.touchID,
+            object: ObjectIdentifier(touch),
+            moves: moves,
             target: track.target.identifier,
             targetClass: track.target.identifierClass,
             hitClass: track.target.hitClass,
@@ -685,13 +716,29 @@ struct TouchSample {
         let name: String
         let objectID: ObjectIdentifier
         var lastState: UIGestureRecognizer.State
+        /// Whether the file follows this recognizer's `numberOfTouches` as well as its state
+        /// (`followsTouchCount`). Fixed by the name; `lastTouches` is 0 and unused when it is not.
+        let followsTouches: Bool
+        var lastTouches: Int
 
         init(recognizer: UIGestureRecognizer, name: String) {
             self.recognizer = recognizer
             self.name = name
             self.objectID = ObjectIdentifier(recognizer)
             self.lastState = recognizer.state
+            self.followsTouches = WindowEventTap.followsTouchCount(named: name)
+            self.lastTouches = followsTouches ? recognizer.numberOfTouches : 0
         }
+    }
+
+    /// **The recognizers whose touch count the file follows**: the three transform recognizers and the
+    /// layers' stroke recognizers (`CanvasView.Coordinator.configure` names them `stroke.<id>`) —
+    /// exactly the ones a stranded canvas leaves out of `.possible`. A stranded pan reads *failed with
+    /// two touches* after every finger is up in some flights and *ended with none* in another
+    /// (BUGS.md), and a state alone cannot say which; the count, written whenever it changes, says when
+    /// it dropped and which event it dropped in.
+    static func followsTouchCount(named name: String) -> Bool {
+        CanvasWedgeDetector.transformRecognizers.contains(name) || name.hasPrefix("stroke.")
     }
 
     private var registry: [Entry] = []
@@ -719,9 +766,12 @@ struct TouchSample {
 
         // Preserve `lastState` for recognizers we were already watching, so a rescan mid-gesture
         // doesn't resynthesise a transition that already went into the file.
-        let previous = Dictionary(uniqueKeysWithValues: registry.map { ($0.objectID, $0.lastState) })
+        let previous = Dictionary(uniqueKeysWithValues: registry.map { ($0.objectID, (state: $0.lastState, touches: $0.lastTouches)) })
         for entry in found {
-            if let state = previous[entry.objectID] { entry.lastState = state }
+            if let last = previous[entry.objectID] {
+                entry.lastState = last.state
+                entry.lastTouches = last.touches
+            }
             if !targeted.contains(entry.objectID), let recognizer = entry.recognizer {
                 // Adding a target is additive: it makes UIKit deliver action messages we then log,
                 // and changes nothing about recognition, precedence or failure requirements. It is
@@ -772,14 +822,22 @@ struct TouchSample {
     ///
     /// The two routes compose rather than duplicate: both update `lastState`, so whichever notices a
     /// transition first is the one that writes it, and `src` on the line says which that was.
-    func sweepRecognizerStates() {
+    ///
+    /// **A sweep says which event it followed**: `src` is `sweep:` and the letters of the touch phases
+    /// that event dispatched (`EventPhases.tag`) — `sweep:b` is a recognizer that failed in the event
+    /// that began a touch, `sweep:e` one that failed at a lift. A recognizer in `followsTouchCount` is
+    /// also written when only its touch count moved, `from` and `to` the same state, with `touches`.
+    func sweepRecognizerStates(after dispatched: EventPhases) {
         for entry in registry {
             guard let recognizer = entry.recognizer else { continue }
             let state = recognizer.state
-            guard state != entry.lastState else { continue }
-            ActionRecorder.shared.recognizer(entry.name, object: entry.objectID,
-                                             from: entry.lastState, to: state, source: "sweep")
+            let touches = entry.followsTouches ? recognizer.numberOfTouches : 0
+            guard state != entry.lastState || touches != entry.lastTouches else { continue }
+            ActionRecorder.shared.recognizer(entry.name, object: entry.objectID, from: entry.lastState, to: state,
+                                             source: "sweep:" + dispatched.tag,
+                                             touches: entry.followsTouches ? touches : nil)
             entry.lastState = state
+            entry.lastTouches = touches
         }
     }
 
@@ -789,15 +847,18 @@ struct TouchSample {
         guard let entry = registryByID[ObjectIdentifier(recognizer)] else {
             // Not discovered yet (created since the last rescan). Still worth writing — a nameless
             // line is better than a missing transition — and the name falls back to the class.
-            ActionRecorder.shared.recognizer(recognizer.name ?? String(describing: type(of: recognizer)),
-                                             object: ObjectIdentifier(recognizer),
-                                             from: recognizer.state, to: newState, source: source)
+            let name = recognizer.name ?? String(describing: type(of: recognizer))
+            ActionRecorder.shared.recognizer(name, object: ObjectIdentifier(recognizer),
+                                             from: recognizer.state, to: newState, source: source,
+                                             touches: Self.followsTouchCount(named: name) ? recognizer.numberOfTouches : nil)
             return
         }
         guard entry.lastState != newState else { return }
-        ActionRecorder.shared.recognizer(entry.name, object: entry.objectID,
-                                         from: entry.lastState, to: newState, source: source)
+        let touches = entry.followsTouches ? recognizer.numberOfTouches : 0
+        ActionRecorder.shared.recognizer(entry.name, object: entry.objectID, from: entry.lastState, to: newState,
+                                         source: source, touches: entry.followsTouches ? touches : nil)
         entry.lastState = newState
+        entry.lastTouches = touches
     }
 
     private func note(_ recognizer: UIGestureRecognizer, source: String) {
@@ -810,6 +871,41 @@ struct TouchSample {
 
     static func name(of recognizer: UIGestureRecognizer) -> String {
         recognizer.name ?? String(describing: type(of: recognizer))
+    }
+
+    /// The touch phases one event carried, for the letters a sweep is tagged with.
+    struct EventPhases: OptionSet {
+        let rawValue: UInt8
+        static let began = EventPhases(rawValue: 1)
+        static let moved = EventPhases(rawValue: 2)
+        static let ended = EventPhases(rawValue: 4)
+        static let cancelled = EventPhases(rawValue: 8)
+        /// The phases that begin or finish a touch sequence.
+        static let sequenceEdges: EventPhases = [.began, .ended, .cancelled]
+
+        init(rawValue: UInt8) { self.rawValue = rawValue }
+
+        /// A touch's phase as the one-bit set; `.stationary` and the hover phases carry nothing a sweep
+        /// is tagged with.
+        init(_ phase: UITouch.Phase) {
+            switch phase {
+            case .began: self = .began
+            case .moved: self = .moved
+            case .ended: self = .ended
+            case .cancelled: self = .cancelled
+            default: self = []
+            }
+        }
+
+        /// `b`, `m`, `e`, `c`, in that order: `be` is an event that began one touch and ended another.
+        var tag: String {
+            var letters = ""
+            if contains(.began) { letters += "b" }
+            if contains(.moved) { letters += "m" }
+            if contains(.ended) { letters += "e" }
+            if contains(.cancelled) { letters += "c" }
+            return letters
+        }
     }
 
     /// **Every recognizer under `root`, UIKit's and the system's included, that is not at rest** — out

@@ -160,7 +160,7 @@ final class ActionRecorder: ObservableObject {
         }
         let base = entries.first?.time ?? now
         let header = Self.headerLine(canvasSize: flightContext.canvasSize, projectName: flightContext.projectName,
-                                     tap: tapReport, url: url,
+                                     tap: tapReport, url: url, freezesCaught: CanvasRepairCount.current(),
                                      flight: [("trigger", .str(trigger)), ("events", .int(entries.count)),
                                               ("seconds", .num(now - base))])
         let notice: String
@@ -243,7 +243,8 @@ final class ActionRecorder: ObservableObject {
         ensureTap()
         tap?.recordsInFull = true
 
-        writer.append(Self.headerLine(canvasSize: canvasSize, projectName: projectName, tap: tapReport, url: url))
+        writer.append(Self.headerLine(canvasSize: canvasSize, projectName: projectName, tap: tapReport, url: url,
+                                      freezesCaught: CanvasRepairCount.current()))
         writtenEvents = 1
 
         // **The recording explains itself now, and that is a defect this closed rather than a
@@ -383,14 +384,26 @@ final class ActionRecorder: ObservableObject {
     /// no `.ended`/`.failed`/`.cancelled` after it. `source` says how we noticed (see
     /// `WindowEventTap.sweepRecognizerStates`), because the three routes have different blind spots
     /// and knowing which one caught a transition tells you whether the ordering is exact.
-    func recognizer(_ name: String, object: ObjectIdentifier, from: UIGestureRecognizer.State, to: UIGestureRecognizer.State, source: String) {
-        emit("recognizer", [
+    ///
+    /// `touches` is what UIKit says the recognizer is still tracking, for the ones
+    /// `WindowEventTap.followsTouchCount` follows; a line whose `from` and `to` are the same state is
+    /// the count moving on its own.
+    func recognizer(_ name: String, object: ObjectIdentifier, from: UIGestureRecognizer.State, to: UIGestureRecognizer.State,
+                    source: String, touches: Int? = nil) {
+        emit("recognizer", Self.recognizerFields(name: name, object: object, from: from, to: to, source: source, touches: touches))
+    }
+
+    static func recognizerFields(name: String, object: ObjectIdentifier, from: UIGestureRecognizer.State,
+                                 to: UIGestureRecognizer.State, source: String, touches: Int?) -> [(String, JSONValue)] {
+        var fields: [(String, JSONValue)] = [
             ("name", .str(name)),
-            ("obj", .str(Self.shortObject(object))),
-            ("from", .str(Self.stateName(from))),
-            ("to", .str(Self.stateName(to))),
+            ("obj", .str(shortObject(object))),
+            ("from", .str(stateName(from))),
+            ("to", .str(stateName(to))),
             ("src", .str(source))
-        ])
+        ]
+        if let touches { fields.append(("touches", .int(touches))) }
+        return fields
     }
 
     /// The answer `CanvasView.Coordinator.gestureRecognizer(_:shouldRequireFailureOf:)` gave, and
@@ -424,10 +437,18 @@ final class ActionRecorder: ObservableObject {
     /// scans for. The ring takes began/ended/cancelled only; a `.moved` sample exists at all only
     /// while a recording is running (`WindowEventTap.recordsInFull`).
     func touch(_ s: TouchSample) {
+        emit("touch", Self.touchFields(s), at: s.time, inRing: s.phase != "moved")
+    }
+
+    /// A touch line's fields, in file order. `touch` numbers the sequence and `uid` is the `UITouch`
+    /// object (`TouchSample.object`), so a touch UIKit hands back for a replacement reads as a new
+    /// `touch` with the same `uid`.
+    static func touchFields(_ s: TouchSample) -> [(String, JSONValue)] {
         var fields: [(String, JSONValue)] = [
             ("phase", .str(s.phase)),
             ("type", .str(s.type)),
             ("touch", .int(s.touchID)),
+            ("uid", .str(shortObject(s.object))),
             ("target", s.target.map { JSONValue.str($0) } ?? .null),
             ("role", .str(s.role)),
             ("nx", .num(s.normalized.x)), ("ny", .num(s.normalized.y)),
@@ -453,6 +474,7 @@ final class ActionRecorder: ObservableObject {
         if let dropped = s.coalescedAway, dropped > 0 {
             fields.append(("skipped", .int(dropped)))
         }
+        if let moves = s.moves { fields.append(("moves", .int(moves))) }
         // `.began` only, and the two that settle "was this touch ever offered to a recognizer".
         // Written as a count plus a joined list rather than a JSON array so a reader can `grep gr:0`
         // for the interesting case without a parser. See `TouchSample.boundRecognizers`.
@@ -461,7 +483,7 @@ final class ActionRecorder: ObservableObject {
             fields.append(("gr", .int(bound.count)))
             fields.append(("grNames", .str(bound.joined(separator: ","))))
         }
-        emit("touch", fields, at: s.time, inRing: s.phase != "moved")
+        return fields
     }
 
     /// Reports a transition for a recognizer whose source we own — today only
@@ -512,7 +534,7 @@ final class ActionRecorder: ObservableObject {
         case null
     }
 
-    private static func line(_ event: String, _ fields: [(String, JSONValue)], at t: Double) -> String {
+    static func line(_ event: String, _ fields: [(String, JSONValue)], at t: Double) -> String {
         var out = "{\"t\":"
         out += Self.number(CGFloat(t))
         out += ",\"event\":\""
@@ -590,8 +612,10 @@ final class ActionRecorder: ObservableObject {
 
     /// The first line of a file. `flight` is present only on a flight dump — its trigger, how many
     /// events and how many seconds the ring held — and its absence is what says a file is a recording.
-    private static func headerLine(canvasSize: CGSize?, projectName: String, tap: WindowEventTap.InstallReport?,
-                                   url: URL, flight: [(String, JSONValue)] = []) -> String {
+    /// `freezesCaught` is `CanvasRepairCount` at the moment the file is made — for the flight a repair
+    /// saves, with that repair in it — so two flights from two builds can be set side by side.
+    static func headerLine(canvasSize: CGSize?, projectName: String, tap: WindowEventTap.InstallReport?,
+                           url: URL, freezesCaught: Int, flight: [(String, JSONValue)] = []) -> String {
         var fields: [(String, JSONValue)] = [
             ("schema", .int(1)),
             ("app", .str(AppVersion.versionString)),
@@ -609,6 +633,7 @@ final class ActionRecorder: ObservableObject {
             ("startedAt", .str(ISO8601DateFormatter().string(from: Date()))),
             ("mode", .str(flight.isEmpty ? "recording" : "flight"))
         ] + flight
+        fields.append(("canvasFreezesCaught", .int(freezesCaught)))
         if let canvasSize {
             fields.append(("canvasW", .num(canvasSize.width)))
             fields.append(("canvasH", .num(canvasSize.height)))

@@ -14,6 +14,8 @@ struct ActionRecorderSection: View {
     @ObservedObject var canvasManager: CanvasManager
     @ObservedObject private var recorder = ActionRecorder.shared
     @State private var showRecordings = false
+    /// `CanvasRepairCount`'s own key, so the row follows the count while the menu is open.
+    @AppStorage(CanvasRepairCount.defaultsKey) private var freezesCaught = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -24,6 +26,8 @@ struct ActionRecorderSection: View {
             }
 
             saveFlightButton
+
+            freezesCaughtRow
 
             if let problem = recorder.problem {
                 Text(problem)
@@ -103,6 +107,22 @@ struct ActionRecorderSection: View {
             .contentShape(Rectangle())
         }
         .accessibilityIdentifier("recorder.saveFlight")
+    }
+
+    /// **How many canvas freezes the app has caught and fixed for itself**, across every launch — the
+    /// number to read off before installing a build and again after using it, to compare the build's
+    /// repair rate with the last one's (BUGS.md, the stranded recognizers). Plain text: nothing in it
+    /// is for tapping.
+    private var freezesCaughtRow: some View {
+        HStack {
+            Image(systemName: "ladybug").frame(width: 24)
+            Text(CanvasRepairCount.title(freezesCaught)).accessibilityIdentifier("recorder.freezesCaught")
+            Spacer()
+        }
+        .font(.caption)
+        .foregroundColor(.gray)
+        .padding(.horizontal)
+        .padding(.bottom, 6)
     }
 
     private var liveReadout: some View {

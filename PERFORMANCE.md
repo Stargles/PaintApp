@@ -5385,6 +5385,34 @@ lookup to a dictionary before this was merged. Not included, because no headless
 it: UIKit's own delivery and the `sendEvent` interception's per-move `contains(where:)`. Memory: the
 ring holds at most 5,000 events, INFERRED at ~1 MB when full.
 
+**Added 2026-10-13: the stranded-canvas diagnostics** (BUGS.md, "The canvas's recognizers strand…").
+The flight file now counts each touch's moves (`moves`, on its end line), names the `UITouch` object
+(`uid`), writes `numberOfTouches` for `canvas.pan`/`pinch`/`rotation` and the `stroke.*` recognizers
+(a line of their own when only the count moves), tags a sweep with the phases of the event it followed
+(`sweep:b`), and sweeps a move with three or more fingers down. What that adds to a stroke: one
+dictionary increment per move event (`willSend`), four `numberOfTouches` reads per sweep, and one more
+field on a recognizer line. **MEASURED 2026-10-13**, the same test, base (`70a6fc4`) and this change
+built in two worktrees and run alternately on the same simulator, 66% idle at the start, three runs of
+each (four of the base in Debug) — medians:
+
+| | Debug before | Debug after | Release before | Release after |
+|---|---|---|---|---|
+| an event into the ring (`recognizer`; 5 fields, now 6) | 580 ns | 700 ns | 134 ns | 198 ns |
+| per stroke sample (`.changed` action → registry lookup) | 185 ns | 182 ns | 17 ns | 17 ns |
+| per touch-began/-ended event (sweep of 12 recognizers) | 4.63 µs | 5.18 µs | 2.63 µs | 2.87 µs |
+| per move event: the count (a **stand-in**, below) | — | 400 ns | — | 83 ns |
+| 500-sample stroke delta, flight on against off | +0.03 ms | +0.24 ms | −0.01 ms | −0.02 ms |
+
+The stroke is 16.4 ms in Debug and 9.4–10.4 ms in Release. The Debug delta moved by what the new work
+adds up to — 500 × 0.4 µs + 2 × 0.55 µs ≈ 0.2 ms, 1.4% of the stroke — and the Release delta is inside
+the run-to-run scatter of the stroke itself (−0.04, +0.39, −0.02 ms; the base's −0.10, +0.14, −0.01,
+−0.01): 500 × 83 ns ≈ 0.04 ms, 0.4%. The count is timed on a stand-in because `willSend` cannot be
+driven headless (`UITouch` cannot be built outside UIKit): a dictionary of a struct keyed by
+`ObjectIdentifier`, incremented through an optional chain, which is the whole of what it does for a
+move. Still not included: the loops over an event's touches in `willSend` and `didSend` — at most two
+touches an event, so INFERRED at tens of nanoseconds beside the dictionary increment. The cost is inside
+this section's bound: nothing measurable on a stroke.
+
 
 ## 24. A transform under the finger, and the three ways it lagged (2026-10-02)
 

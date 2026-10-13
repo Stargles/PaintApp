@@ -5695,18 +5695,22 @@ final class PerfBaselineTests: XCTestCase {
     /// **What the always-on flight recorder costs a stroke** — its per-event cost, and a whole
     /// 500-sample stroke with and without it.
     ///
-    /// The flight recorder adds three things to the drawing path, and this times the real code for
-    /// each: every event the ring keeps is an `emit` (here `model`, a two-field event, and
-    /// `recognizer`, a five-field one); every stroke sample delivers the tap one `.changed` action
+    /// The flight recorder adds four things to the drawing path, and this times the real code for
+    /// each but the last: every event the ring keeps is an `emit` (here `model`, a two-field event, and
+    /// `recognizer`, a six-field one); every stroke sample delivers the tap one `.changed` action
     /// message, which finds the recognizer in the registry and writes nothing because the state did
-    /// not change (`noteTransition`); and the touch-began and -ended events each end in one
-    /// `sweepRecognizerStates` over the registry. The registry is populated the way the app's is,
-    /// from a view carrying the canvas's own named recognizers, on the test process's real window
-    /// with the real tap installed.
+    /// not change (`noteTransition`); the touch-began and -ended events each end in one
+    /// `sweepRecognizerStates` over the registry, which reads `numberOfTouches` of the four
+    /// recognizers the file follows (`followsTouchCount`); and every move is counted against its
+    /// touch (`WindowEventTap.willSend`). The registry is populated the way the app's is, from a view
+    /// carrying the canvas's own named recognizers, on the test process's real window with the real
+    /// tap installed.
     ///
     /// **What it does not include** is UIKit's touch delivery and the `sendEvent` interception's own
-    /// phase check on a move, which no headless harness can drive — a `contains(where:)` over the
-    /// event's touches and an early return (`WindowEventTap.willSend`/`didSend`).
+    /// per-event work on a move, which no headless harness can drive — a loop over the event's touches
+    /// in `willSend` and in `didSend` (`UITouch` cannot be built outside UIKit). The per-move count is
+    /// timed on a **stand-in**: a dictionary of a struct keyed by `ObjectIdentifier`, incremented
+    /// through an optional chain, which is the whole of what `willSend` does for a move.
     ///
     /// The ceilings are generous, per this file's note: the numbers are the output.
     func testFlightRecorderCostOnAStroke() throws {
@@ -5749,11 +5753,15 @@ final class PerfBaselineTests: XCTestCase {
         let emitModel = perCall(iterations) { ActionRecorder.ifRecording { $0.model("selectedTool", "brush") } }
         let emitRecognizer = perCall(iterations) {
             ActionRecorder.ifRecording {
-                $0.recognizer("canvas.pan", object: ObjectIdentifier(stroke), from: .possible, to: .began, source: "sweep")
+                $0.recognizer("canvas.pan", object: ObjectIdentifier(stroke), from: .possible, to: .began,
+                              source: "sweep:b", touches: 2)
             }
         }
         let sampleHook = perCall(iterations) { tap.noteTransition(stroke, to: .changed, source: "action") }
-        let sweep = perCall(iterations) { tap.sweepRecognizerStates() }
+        let sweep = perCall(iterations) { tap.sweepRecognizerStates(after: .ended) }
+        struct CountedTouch { var skipped = 0; var moves = 0; var target = "canvas.host"; var hitClass = "StrokeCanvasView" }
+        var counted = [ObjectIdentifier(stroke): CountedTouch()]
+        let moveCount = perCall(iterations) { counted[ObjectIdentifier(stroke)]?.moves += 1 }
         ActionRecorder.isFlying = false
         let gateOff = perCall(iterations) { ActionRecorder.ifRecording { $0.model("selectedTool", "brush") } }
 
@@ -5769,9 +5777,12 @@ final class PerfBaselineTests: XCTestCase {
             off.append(measuringPeakMemory { stamp(samples, into: manager) }.seconds)
             on.append(measuringPeakMemory {
                 stamp(samples, into: manager)
-                tap.sweepRecognizerStates()
-                for _ in 0..<Self.sampleCount { tap.noteTransition(stroke, to: .changed, source: "action") }
-                tap.sweepRecognizerStates()
+                tap.sweepRecognizerStates(after: .began)
+                for _ in 0..<Self.sampleCount {
+                    tap.noteTransition(stroke, to: .changed, source: "action")
+                    counted[ObjectIdentifier(stroke)]?.moves += 1
+                }
+                tap.sweepRecognizerStates(after: .ended)
             }.seconds)
         }
         let median = { (values: [Double]) in values.sorted()[values.count / 2] }
@@ -5780,6 +5791,7 @@ final class PerfBaselineTests: XCTestCase {
             ("emitModel", nanoseconds(emitModel)),
             ("emitRecognizer", nanoseconds(emitRecognizer)),
             ("strokeSampleHook", nanoseconds(sampleHook)),
+            ("moveCountStandIn", nanoseconds(moveCount)),
             ("sweep\(names.count + 1)", nanoseconds(sweep)),
             ("gateOff", nanoseconds(gateOff)),
             ("strokeOff", preciseMilliseconds(median(off))),

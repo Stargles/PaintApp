@@ -126,6 +126,190 @@ final class FlightRecorderLogicTests: XCTestCase {
         XCTAssertEqual(WindowEventTap.unquietRecognizers(under: view), ["canvas.pinch possible touches:2 on UIView"])
     }
 
+    // MARK: - What a stranded canvas's flight carries (BUGS.md, "The canvas's recognizers strand…")
+
+    private func touchSample(phase: String, touchID: Int, object: AnyObject, moves: Int?) -> TouchSample {
+        TouchSample(time: 1, phase: phase, type: "direct", touchID: touchID, object: ObjectIdentifier(object), moves: moves,
+                    target: nil, targetClass: "none", hitClass: "StrokeCanvasView", role: "other", label: nil,
+                    depth: 0, resolution: "none", normalized: .zero, window: .zero, windowNormalized: .zero,
+                    concurrent: 1, isPencil: false, force: 0, maxForce: 0, altitude: 0, azimuth: 0,
+                    coalescedAway: nil, touchViewClass: nil, boundRecognizers: nil)
+    }
+
+    /// A line as the recorder encodes it and a reader parses it — the encoder under test, not a
+    /// restatement of its field list.
+    private func parsed(_ event: String, _ fields: [(String, ActionRecorder.JSONValue)]) throws -> [String: Any] {
+        let line = ActionRecorder.line(event, fields, at: 1.5)
+        return try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any], line)
+    }
+
+    /// **`moves` is on the line a touch ends or is cancelled on, and only there** — it is a total, and
+    /// a total on a `began` or a `moved` would be a count of nothing yet.
+    func testOnlyAnEndedOrCancelledTouchLineCarriesItsMoves() throws {
+        let touch = NSObject()
+        for phase in ["began", "moved"] {
+            let line = try parsed("touch", ActionRecorder.touchFields(touchSample(phase: phase, touchID: 4, object: touch, moves: nil)))
+            XCTAssertNil(line["moves"], "a \(phase) line has no move count")
+        }
+        for phase in ["ended", "cancelled"] {
+            let line = try parsed("touch", ActionRecorder.touchFields(touchSample(phase: phase, touchID: 4, object: touch, moves: 7)))
+            XCTAssertEqual(line["moves"] as? Int, 7, "a \(phase) line carries the touch's total")
+        }
+        let still = try parsed("touch", ActionRecorder.touchFields(touchSample(phase: "ended", touchID: 5, object: touch, moves: 0)))
+        XCTAssertEqual(still["moves"] as? Int, 0, "a touch that never moved says so — 0 is an answer, absence is not")
+    }
+
+    /// **`touch` numbers sequences and `uid` is the `UITouch` object**, so the pair says what neither
+    /// does alone: one object under two sequence numbers is UIKit handing a touch back (the cancel and
+    /// reissue shape, H7); two objects under one reader's eye are two fingers.
+    func testTheTouchObjectsIdentityIsOnEveryLineAndSeparatesObjectFromSequence() throws {
+        let one = NSObject(), another = NSObject()
+        let first = try parsed("touch", ActionRecorder.touchFields(touchSample(phase: "cancelled", touchID: 370, object: one, moves: 0)))
+        let reissued = try parsed("touch", ActionRecorder.touchFields(touchSample(phase: "began", touchID: 372, object: one, moves: nil)))
+        let other = try parsed("touch", ActionRecorder.touchFields(touchSample(phase: "began", touchID: 371, object: another, moves: nil)))
+
+        XCTAssertEqual(first["uid"] as? String, ActionRecorder.shortObject(ObjectIdentifier(one)))
+        XCTAssertEqual(first["uid"] as? String, reissued["uid"] as? String, "one object, two sequences, one uid")
+        XCTAssertNotEqual(first["touch"] as? Int, reissued["touch"] as? Int, "…and two sequence numbers")
+        XCTAssertNotEqual(first["uid"] as? String, other["uid"] as? String, "another object is another uid")
+    }
+
+    /// The count is on the line only for a recognizer the file follows the touches of; the line of a
+    /// touch count moving on its own is the same state on both sides.
+    func testARecognizerLineCarriesTheTouchesItWasAskedFor() throws {
+        let recognizer = NSObject()
+        let counted = try parsed("recognizer", ActionRecorder.recognizerFields(
+            name: "canvas.pan", object: ObjectIdentifier(recognizer), from: .failed, to: .failed, source: "sweep:e", touches: 0))
+        XCTAssertEqual(counted["touches"] as? Int, 0, "0 is the finding that matters: failed, and nothing left to wait for")
+        XCTAssertEqual(counted["from"] as? String, "failed")
+        XCTAssertEqual(counted["to"] as? String, "failed")
+        XCTAssertEqual(counted["src"] as? String, "sweep:e")
+
+        let uncounted = try parsed("recognizer", ActionRecorder.recognizerFields(
+            name: "canvas.twoFingerTap", object: ObjectIdentifier(recognizer), from: .possible, to: .failed, source: "sweep:b", touches: nil))
+        XCTAssertNil(uncounted["touches"], "a recognizer the file does not follow has no count on its line")
+    }
+
+    /// **Every flight header names the repair count**, so two flights from two builds set side by side
+    /// say how often each build had caught a freeze by then — and a recording's header too, since the
+    /// count is a fact about the build and not about the trigger.
+    func testEveryHeaderCarriesTheRepairCount() throws {
+        let url = URL(fileURLWithPath: "/tmp/flight-test.jsonl")
+        let flight = try headerFields(
+            ActionRecorder.headerLine(canvasSize: nil, projectName: "T", tap: nil, url: url, freezesCaught: 12,
+                                      flight: [("trigger", .str("stranded"))]))
+        XCTAssertEqual(flight["canvasFreezesCaught"] as? Int, 12)
+        XCTAssertEqual(flight["mode"] as? String, "flight")
+
+        let recording = try headerFields(ActionRecorder.headerLine(canvasSize: nil, projectName: "T", tap: nil, url: url, freezesCaught: 0))
+        XCTAssertEqual(recording["canvasFreezesCaught"] as? Int, 0, "a build that has caught none says 0, not nothing")
+    }
+
+    private func headerFields(_ line: String) throws -> [String: Any] {
+        try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any], line)
+    }
+
+    // MARK: - The sweep says which event it followed, and follows touches
+
+    func testASweepIsTaggedWithTheLettersOfTheTouchPhasesTheEventCarried() {
+        typealias Phases = WindowEventTap.EventPhases
+        XCTAssertEqual(Phases.began.tag, "b")
+        XCTAssertEqual(Phases.ended.tag, "e")
+        XCTAssertEqual(Phases([.began, .ended]).tag, "be", "an event that began one touch and ended another")
+        XCTAssertEqual(Phases([.cancelled, .moved, .began]).tag, "bmc", "always in the order b, m, e, c")
+        XCTAssertEqual(Phases(UITouch.Phase.stationary), [], "a resting finger is no phase to tag by")
+        XCTAssertEqual(Phases(UITouch.Phase.moved), .moved)
+    }
+
+    func testTheFileFollowsTheTouchesOfTheTransformRecognizersAndTheStrokeRecognizersOnly() {
+        for name in ["canvas.pan", "canvas.pinch", "canvas.rotation", "stroke.66A8F2C1"] {
+            XCTAssertTrue(WindowEventTap.followsTouchCount(named: name), name)
+        }
+        for name in ["canvas.twoFingerTap", "canvas.threeFingerTap", "canvas.touchCounter", "canvas.fillPress", "timeline.rulerScrub"] {
+            XCTAssertFalse(WindowEventTap.followsTouchCount(named: name), name)
+        }
+    }
+
+    /// **What a sweep writes about a followed recognizer, through the real tap, the ring and a saved
+    /// file**: its state change with the touches UIKit says it holds, and — the finding a stranded
+    /// pan's flight needs, *failed holding two touches* against *ended holding none* — the count moving
+    /// on its own, in the sweep of the event it dropped in. A recognizer the file does not follow gets
+    /// its state change without a count, and nothing for its touches. A sweep that finds nothing new
+    /// writes nothing.
+    ///
+    /// The two are named for this test rather than `canvas.pan` and `canvas.twoFingerTap`: the ring is
+    /// the recorder's own and holds whatever an earlier test left in it, so a line is this test's by
+    /// its name. `followsTouchCount`'s table is the test above. (`Driven` is settled in `.began` and
+    /// `.ended`: UIKit puts a recognizer set to `.failed` with no real touch behind it straight back
+    /// to `.possible`.)
+    func testASweepWritesAFollowedRecognizersStateWithItsTouchesAndTheCountMovingOnItsOwn() throws {
+        guard let window = WindowEventTap.activeWindow() else { throw XCTSkip("no window in the test process to install the tap on") }
+        let canvas = UIView(frame: window.bounds)
+        let followed = Driven(target: nil, action: nil)
+        followed.name = "stroke.sweeptest"
+        let unfollowed = Driven(target: nil, action: nil)
+        unfollowed.name = "canvas.sweeptest.tap"
+        canvas.addGestureRecognizer(followed)
+        canvas.addGestureRecognizer(unfollowed)
+        window.addSubview(canvas)
+
+        let tap = WindowEventTap()
+        let wasFlying = ActionRecorder.isFlying
+        defer {
+            tap.uninstall()
+            canvas.removeFromSuperview()
+            ActionRecorder.isFlying = wasFlying
+        }
+        guard tap.install().interceptedClass != nil else { throw XCTSkip("the tap could not intercept this window") }
+        ActionRecorder.isFlying = true
+
+        followed.held = 2
+        followed.settle(in: .began)
+        unfollowed.settle(in: .began)
+        tap.sweepRecognizerStates(after: .began)      // both begin; the followed one holds two touches
+        followed.held = 1
+        tap.sweepRecognizerStates(after: .ended)      // one finger lifts: the count moves, the state does not
+        followed.held = 0
+        followed.settle(in: .ended)
+        unfollowed.held = 3
+        tap.sweepRecognizerStates(after: [.ended, .cancelled])   // the last lift: the state moves with the count
+        tap.sweepRecognizerStates(after: .ended)      // nothing changed: nothing written
+
+        let lines = try savedFlightLines().filter { $0["event"] as? String == "recognizer" }
+        let followedLines = lines.filter { $0["name"] as? String == "stroke.sweeptest" }
+        let unfollowedLines = lines.filter { $0["name"] as? String == "canvas.sweeptest.tap" }
+
+        func summary(_ line: [String: Any]) -> String {
+            "\(line["from"] ?? "?")>\(line["to"] ?? "?") \(line["src"] ?? "?") touches:\(line["touches"] ?? "-")"
+        }
+        XCTAssertEqual(followedLines.map(summary), [
+            "possible>began sweep:b touches:2",
+            "began>began sweep:e touches:1",
+            "began>ended sweep:ec touches:0",
+        ], "state and touches while the state moves, the touches alone when only they move, and no fourth line for the quiet sweep")
+
+        XCTAssertEqual(unfollowedLines.map(summary), ["possible>began sweep:b touches:-"],
+                       "a recognizer the file does not follow: its state change, no count, and nothing when only its touches moved")
+    }
+
+    /// Saves the flight ring the way the Settings row does and reads the file back — its header is
+    /// checked on the way, because the header is the other half of what a stranded flight carries.
+    private func savedFlightLines() throws -> [[String: Any]] {
+        let saved = try XCTUnwrap(ActionRecorder.shared.saveFlight(trigger: "test"))
+        addTeardownBlock { try? FileManager.default.removeItem(at: saved) }
+        let written = expectation(for: NSPredicate { _, _ in FileManager.default.fileExists(atPath: saved.path) },
+                                  evaluatedWith: saved)
+        wait(for: [written], timeout: 5)
+        let text = try String(contentsOf: saved, encoding: .utf8)
+        let lines = try text.split(separator: "\n").map {
+            try XCTUnwrap(try JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any], String($0))
+        }
+        XCTAssertEqual(lines.first?["canvasFreezesCaught"] as? Int, CanvasRepairCount.current(),
+                       "the saved flight's header names the repair count of the moment")
+        XCTAssertEqual(lines.first?["trigger"] as? String, "test")
+        return lines
+    }
+
     // MARK: - The ring
 
     func testTheRingKeepsOnlyTheWindowAndNeverMoreThanItsCapacity() {

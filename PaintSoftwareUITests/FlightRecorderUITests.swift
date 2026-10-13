@@ -46,4 +46,38 @@ final class FlightRecorderUITests: PaintUITestCase {
             as a `flight-…jsonl`. Found \(flightFiles.count) flight files, \(before) before the save.
             """)
     }
+
+    /// **How many freezes the app has caught and fixed for itself is on the screen** the owner already
+    /// opens to save a flight, as plain text beside it: the number to read off before installing a
+    /// build and after using it. From a brand-new document, with nothing set up first. The count is
+    /// whatever this simulator's earlier runs left, so the row is read for its shape, not its value —
+    /// `CanvasRepairCountLogicTests` pins the counting.
+    func testTheSettingsMenuShowsHowManyCanvasFreezesTheAppHasCaught() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        app.buttons["toolbar.settingsButton"].tap()
+
+        let save = app.buttons["recorder.saveFlight"]
+        XCTAssertTrue(save.waitForExistence(timeout: 5), "PREMISE: Save Last 90 Seconds is in the Settings menu")
+        let caught = app.staticTexts["recorder.freezesCaught"]
+        XCTAssertTrue(caught.waitForExistence(timeout: 5), "the repair count is in the Settings menu, beside Save Last 90 Seconds")
+        XCTAssertNotNil(caught.label.range(of: #"^Canvas freezes caught: \d+$"#, options: .regularExpression),
+                        "…and says what it counts, as a number: \(caught.label)")
+        XCTAssertGreaterThan(caught.frame.minY, save.frame.minY, "it sits under Save Last 90 Seconds")
+
+        // The menu scrolls and its recorder section is the last in it: the row has to be one the
+        // artist reaches, not only one the tree holds. The swipe starts in the menu's left gutter,
+        // where nothing is a control (`scrollFillPanel`'s reason).
+        let menu = app.scrollViews.containing(.staticText, identifier: "Settings").firstMatch
+        var drags = 0
+        while !caught.isHittable && drags < 8, menu.exists {
+            let frame = menu.frame
+            let origin = app.coordinate(withNormalizedOffset: .zero)
+            origin.withOffset(CGVector(dx: frame.minX + 6, dy: frame.midY + frame.height * 0.35))
+                .press(forDuration: 0.1, thenDragTo: origin.withOffset(CGVector(dx: frame.minX + 6, dy: frame.midY - frame.height * 0.35)))
+            drags += 1
+        }
+        XCTAssertTrue(caught.isHittable, "scrolling the Settings menu brings the repair count on screen")
+        attachScreenshot(app, "canvas-freezes-caught-row")
+    }
 }

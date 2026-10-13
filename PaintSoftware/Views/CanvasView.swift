@@ -4027,7 +4027,8 @@ struct CanvasView: UIViewRepresentable {
         /// recognizers strand when a touch joins two others"). The repair is what stops both, and any
         /// cause not yet met, becoming a frozen canvas.
         ///
-        /// Tells the action recorder, which saves its last ninety seconds: a repair is the moment the
+        /// Counts itself (`CanvasRepairCount`, kept across launches and shown in the Settings menu), then
+        /// tells the action recorder, which saves its last ninety seconds: a repair is the moment the
         /// freeze *would* have happened, and the ring holds how it came about. It also says what else
         /// under the window was out of `.possible` or still holding a touch
         /// (`WindowEventTap.unquietRecognizers`), which no earlier file could.
@@ -4062,6 +4063,7 @@ struct CanvasView: UIViewRepresentable {
                 stranded.append(old ?? "stroke")
             }
             guard !stranded.isEmpty else { return }
+            CanvasRepairCount.record()
             ActionRecorder.ifRecording { $0.canvasRecognizersReplaced(stranded, notAtRest: notAtRest) }
         }
 

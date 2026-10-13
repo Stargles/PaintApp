@@ -109,6 +109,24 @@ next install, make the shape on purpose — three fingers, two down together and
 way a fast redo tap lands — until the "Caught a canvas freeze and fixed it" badge shows, and send the
 newest `flight-…` from the recordings list. Once the cause is known, the file-per-repair can stop.
 
+**What that flight carries now (diagnostics only; `replaceStrandedRecognizers` is untouched).**
+Every touch line has `uid`, the `UITouch` object's identity — `touch` numbers *sequences* and cannot say
+whether UIKit handed an object back; the simulator reuses one object across sequences that do not
+overlap, so a shared `uid` is only a finding when the two touches were alive together or the
+replacement begins in the cancel's own event — and an `ended`/`cancelled` line has `moves:N`. The
+recognizer lines for `canvas.pan`, `canvas.pinch`, `canvas.rotation` and the layers' `stroke.*` carry
+`touches:N`, and a line of their own when only the count moves (`from` = `to`). A sweep's `src` is
+`sweep:` and the letters of the phases the event it followed carried (`b` `m` `e` `c`): `sweep:b` is a
+recognizer that failed in the event that began a touch, `sweep:e` at a lift, and a move with three or
+more fingers down is swept too (`sweep:m`), so *pan failed in the third touch's begin or after a move*
+and *when its count dropped* are read off the file. The Settings menu shows **Canvas freezes caught: N**
+beside Save Last 90 Seconds — the app's lifetime total, kept across launches and over-installs, and in every
+flight and recording header as `canvasFreezesCaught` — so the number read before installing a build and
+after using it is that build's repair rate, and a build that is right stops counting. The candidate fixes
+(a pan that ignores touches beyond two; `delaysTouchesEnded = false`) wait for one or two more strands
+read with these fields. Not covered by any test: that a repair itself counts — it has no simulator
+trigger — which is one line, `CanvasRepairCount.record()`, in `replaceStrandedRecognizers`.
+
 ## An effect layer between two live hosts is left out of the live picture (2026-10-11)
 
 `CanvasManager.liveHostRun` is one span of the leaf order, from the lowest to the highest of the
