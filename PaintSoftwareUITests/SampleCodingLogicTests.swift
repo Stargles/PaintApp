@@ -285,7 +285,7 @@ final class SampleCodingLogicTests: XCTestCase {
         let far: StrokeSamples = [VectorSample(x: 11_900.25, y: 64, pressure: 1),
                    VectorSample(x: 60.5, y: 500.75, pressure: 0.5)]
         manager.layers[1].cels[0].vector?.addStroke(
-            VectorStroke(brush: manager.selectedBrush,
+            VectorStroke(brush: manager.toolProfiles.brush.preset,
                          color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                          size: 8, opacity: 1, samples: far))
 
@@ -310,7 +310,7 @@ final class SampleCodingLogicTests: XCTestCase {
         manager.canvasSize = CGSize(width: 12000, height: 600)
         manager.addVectorLayer()
         manager.layers[1].cels[0].vector?.addStroke(
-            VectorStroke(brush: manager.selectedBrush,
+            VectorStroke(brush: manager.toolProfiles.brush.preset,
                          color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                          size: 8, opacity: 1,
                          samples: [VectorSample(x: 100, y: 100, pressure: 1)]))
@@ -453,13 +453,13 @@ final class SampleCodingLogicTests: XCTestCase {
         let manager = CanvasFixture.manager(layerCount: 1)
         manager.addVectorLayer()
         let walk = Self.realisticRun(count: 24)
-        var piece = VectorStroke(brush: manager.selectedBrush,
+        var piece = VectorStroke(brush: manager.toolProfiles.brush.preset,
                                  color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                                  size: 8, opacity: 1, samples: walk.replacingSamples(walk.prefix(8)))
         piece.lattice = DabLattice(samples: walk, parameters: [0, 1])
         manager.layers[1].cels[0].vector?.addStroke(piece.markedPrecise())
         manager.layers[1].cels[0].vector?.addStroke(
-            VectorStroke(brush: manager.selectedBrush,
+            VectorStroke(brush: manager.toolProfiles.brush.preset,
                          color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                          size: 8, opacity: 1, samples: walk.replacingSamples(walk.suffix(8))))
 

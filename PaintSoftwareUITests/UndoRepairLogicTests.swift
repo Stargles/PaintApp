@@ -1615,7 +1615,7 @@ final class UndoRepairLogicTests: XCTestCase {
         var wider = Self.brush()
         wider.name = "Twice"
         wider.dab.size = 2
-        manager.selectedBrush = wider
+        manager.toolProfiles.brush.preset = wider
 
         let repairsBefore = canvas.regionRepairs
         let widenedBefore = canvas.regionRepairsWidened

@@ -818,7 +818,7 @@ final class CelCRUDCharacterizationTests: XCTestCase {
         guard let vector = cel.vector else { return XCTFail("A vector layer's cel carries a VectorCanvas") }
         let before = PixelOps.rasterize(cel: cel, canvasSize: size())
 
-        vector.addStroke(VectorStroke(brush: manager.selectedBrush,
+        vector.addStroke(VectorStroke(brush: manager.toolProfiles.brush.preset,
                                       color: CodableColor(red: 0, green: 0, blue: 1, alpha: 1),
                                       size: 8, opacity: 1,
                                       samples: [VectorSample(x: 8, y: 8, pressure: 1),

@@ -3779,7 +3779,7 @@ final class LassoMoveLogicTests: XCTestCase {
         select(manager, layerIndex, loop(CGRect(x: 8, y: 8, width: 48, height: 44)))
         // Neither of these two may reach the artwork.
         let colour = picked(0.2, 0.4, 0.8, 0.9)
-        manager.brushOpacity = 0.2
+        manager.toolProfiles.brush.opacity = 0.2
         manager.recolorSelection(to: colour)
 
         let stroke = vector.elements.compactMap(\.stroke).first

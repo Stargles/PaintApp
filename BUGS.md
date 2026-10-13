@@ -2118,7 +2118,7 @@ free run, or shift later cels rightward — are timeline feature design and a se
 
 ## Switching brush presets resets live size/opacity (2026-07-22)
 
-`selectBrush` re-baselines `brushSize`/`brushOpacity` from the preset, so re-tapping the current
+`selectPreset` re-baselines the profile's size and opacity from the preset, so re-tapping the current
 brush throws away a size the user just dialled in. Partly intentional per its doc comment — needs a
 product call, not just a fix.
 

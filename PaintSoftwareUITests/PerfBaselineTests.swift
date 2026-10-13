@@ -143,10 +143,10 @@ final class PerfBaselineTests: XCTestCase {
         autoreleasepool {
             BrushStamper.stampStroke(into: manager.layers[0].cels[0].raster,
                                      samples: samples,
-                                     brush: manager.selectedBrush,
+                                     brush: manager.toolProfiles.brush.preset,
                                      color: .black,
                                      brushSize: brushSize,
-                                     brushOpacity: manager.brushOpacity, random: DabRandom(seed: 0))
+                                     brushOpacity: manager.toolProfiles.brush.opacity, random: DabRandom(seed: 0))
             manager.strokeEnded(layerIndex: 0, celIndex: 0)
         }
     }
@@ -408,9 +408,9 @@ final class PerfBaselineTests: XCTestCase {
                                VectorSample(point: CGPoint(x: x + 60, y: y), pressure: 0.8)]
                 let before = strokeSnapshot(raster)
                 raster.beginStroke()
-                BrushStamper.stampStroke(into: raster, samples: samples, brush: manager.selectedBrush,
+                BrushStamper.stampStroke(into: raster, samples: samples, brush: manager.toolProfiles.brush.preset,
                                          color: .black, brushSize: brushSize,
-                                         brushOpacity: manager.brushOpacity, random: DabRandom(seed: 0))
+                                         brushOpacity: manager.toolProfiles.brush.opacity, random: DabRandom(seed: 0))
                 raster.endStroke()
                 let after = strokeSnapshot(raster)
                 recordCroppedStrokeUndo(manager: manager, raster: raster, from: before, to: after)
@@ -449,9 +449,9 @@ final class PerfBaselineTests: XCTestCase {
         let sweepBefore = strokeSnapshot(raster)
         raster.beginStroke()
         BrushStamper.stampStroke(into: raster, samples: syntheticStroke(sampleCount: Self.sampleCount),
-                                 brush: manager.selectedBrush, color: .black,
+                                 brush: manager.toolProfiles.brush.preset, color: .black,
                                  brushSize: brushSize,
-                                 brushOpacity: manager.brushOpacity, random: DabRandom(seed: 0))
+                                 brushOpacity: manager.toolProfiles.brush.opacity, random: DabRandom(seed: 0))
         raster.endStroke()
         let sweepAfter = strokeSnapshot(raster)
         recordCroppedStrokeUndo(manager: manager, raster: raster, from: sweepBefore, to: sweepAfter)
@@ -492,7 +492,7 @@ final class PerfBaselineTests: XCTestCase {
         BrushStamper.stampStroke(into: raster,
                                  samples: [VectorSample(point: CGPoint(x: 200, y: 200), pressure: 1),
                                            VectorSample(point: CGPoint(x: 400, y: 260), pressure: 1)],
-                                 brush: manager.selectedBrush, color: .black,
+                                 brush: manager.toolProfiles.brush.preset, color: .black,
                                  brushSize: 30, brushOpacity: 1, random: DabRandom(seed: 0))
         raster.endStroke()
         let reference = alphaFingerprint(raster)
@@ -503,7 +503,7 @@ final class PerfBaselineTests: XCTestCase {
         BrushStamper.stampStroke(into: raster,
                                  samples: [VectorSample(point: CGPoint(x: 900, y: 700), pressure: 1),
                                            VectorSample(point: CGPoint(x: 1300, y: 1100), pressure: 1)],
-                                 brush: manager.selectedBrush, color: .black,
+                                 brush: manager.toolProfiles.brush.preset, color: .black,
                                  brushSize: 30, brushOpacity: 1, random: DabRandom(seed: 0))
         raster.endStroke()
         let after = strokeSnapshot(raster)
@@ -535,7 +535,7 @@ final class PerfBaselineTests: XCTestCase {
         BrushStamper.stampStroke(into: raster,
                                  samples: [VectorSample(point: CGPoint(x: -20, y: -20), pressure: 1),
                                            VectorSample(point: CGPoint(x: 120, y: 120), pressure: 1)],
-                                 brush: manager.selectedBrush, color: .black,
+                                 brush: manager.toolProfiles.brush.preset, color: .black,
                                  brushSize: 40, brushOpacity: 1, random: DabRandom(seed: 0))
         raster.endStroke()
         let after = strokeSnapshot(raster)
@@ -1452,7 +1452,7 @@ final class PerfBaselineTests: XCTestCase {
     /// being keyed exactly rather than by octave.
     func testDabImageCacheHitRate() {
         let manager = perfManager()
-        manager.selectedBrush = TestBrushes.square
+        manager.toolProfiles.brush.preset = TestBrushes.square
         let texture = manager.layers[0].cels[0].raster
         let samples = syntheticStroke(sampleCount: Self.sampleCount)
 
@@ -1475,7 +1475,7 @@ final class PerfBaselineTests: XCTestCase {
         // The round dab the same walk lays, for scale: an image dab is intrinsically dearer than a
         // disc and the point of the cache is to keep that ratio small rather than to erase it.
         let round = perfManager()
-        round.selectedBrush = TestBrushes.hardRound
+        round.toolProfiles.brush.preset = TestBrushes.hardRound
         let roundStart = Date()
         stamp(samples, into: round)
         let roundSeconds = -roundStart.timeIntervalSinceNow
@@ -3244,7 +3244,7 @@ final class PerfBaselineTests: XCTestCase {
             for celIndex in 0..<celsPerLayer {
                 autoreleasepool {
                     inkOneCel(manager.layers[layerIndex].cels[celIndex].raster, canvas: canvas,
-                              brush: manager.selectedBrush, seed: layerIndex * celsPerLayer + celIndex)
+                              brush: manager.toolProfiles.brush.preset, seed: layerIndex * celsPerLayer + celIndex)
                 }
             }
         }
@@ -3732,7 +3732,7 @@ final class PerfBaselineTests: XCTestCase {
                 for celIndex in 0..<celsPerLayer {
                     autoreleasepool {
                         inkOneCel(manager.layers[layerIndex].cels[celIndex].raster, canvas: canvas,
-                                  brush: manager.selectedBrush,
+                                  brush: manager.toolProfiles.brush.preset,
                                   seed: layerIndex * celsPerLayer + celIndex)
                     }
                 }
@@ -4300,7 +4300,7 @@ final class PerfBaselineTests: XCTestCase {
         for pass in 0..<3 {
             autoreleasepool {
                 inkOneCel(authored.layers[pass % layerCount].cels[pass].raster, canvas: Self.ownersCanvasSize,
-                          brush: authored.selectedBrush, seed: 1000 + pass)
+                          brush: authored.toolProfiles.brush.preset, seed: 1000 + pass)
             }
             profile = await save()
             guard let profile else { return XCTFail("Every save publishes a profile — see ProjectStore.SaveProfile") }
@@ -4470,7 +4470,7 @@ final class PerfBaselineTests: XCTestCase {
         let manager = CanvasManager()
         manager.canvasSize = canvas
         manager.addLayer(name: "Residency")
-        let brush = manager.selectedBrush
+        let brush = manager.toolProfiles.brush.preset
 
         // One warm-up cel outside the measurement: the first canvas-sized bitmap in a process faults
         // in pages every later one reuses, and item 9 measured that first-touch gap at ~1.4x.

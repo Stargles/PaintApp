@@ -17,32 +17,19 @@ struct SizePreviewWindow: View {
     let sliderFrame: CGRect
     let bounds: CGRect
 
-    private var isEraser: Bool { request.tool == .eraser }
+    /// The profile the request names — preset, size and opacity — so the brush and the eraser
+    /// cannot be read from each other's state.
+    private var profile: ToolProfile { canvasManager.toolProfiles[request.tool] }
 
-    private var brush: Brush {
-        isEraser ? canvasManager.selectedEraserBrush : canvasManager.selectedBrush
-    }
-
-    /// Size and opacity are picked by the request itself (`SizePreviewRequest.toolSize`), not by a
-    /// ternary here — the brush and the eraser keep entirely separate state and getting that pick
-    /// wrong is exactly the sort of thing a `View` file makes untestable.
     private var geometry: SizePreviewGeometry {
-        SizePreviewGeometry(toolSize: request.toolSize(brushSize: canvasManager.brushSize,
-                                                       eraserSize: canvasManager.eraserSize),
-                            canvasScale: canvasScale.scale)
-    }
-
-    private var opacity: Double {
-        request.opacity(brushOpacity: canvasManager.brushOpacity,
-                        eraserOpacity: canvasManager.eraserOpacity)
+        SizePreviewGeometry(toolSize: profile.size, canvasScale: canvasScale.scale)
     }
 
     /// **TODO (79)(b): the permanent % badge over the rail's size icon is gone; this is where its
     /// number lives now** — beside the pop-up, and only while the pop-up itself is up, since
     /// `SizePreviewWindow` only exists on screen while a size slider is held.
     private var sizePercentText: String {
-        SizePreviewPercentFormat.string(for: request.sizePercent(brushSizePercent: canvasManager.brushSizePercent,
-                                                                  eraserSizePercent: canvasManager.eraserSizePercent))
+        SizePreviewPercentFormat.string(for: canvasManager.sizePercent(of: request.tool))
     }
 
     var body: some View {
@@ -60,18 +47,17 @@ struct SizePreviewWindow: View {
             ZStack {
                 // What the mark lands on. Paper for the brush; transparency, drawn as a
                 // checkerboard, for the eraser — whose stamp is a hole in the ink above it.
-                if isEraser {
-                    CheckerboardPattern()
-                } else {
-                    Color.white
+                switch request.tool {
+                case .brush: Color.white
+                case .eraser: CheckerboardPattern()
                 }
 
                 Image(uiImage: SizePreviewStampRenderer.stampImage(
                     geometry: geometry,
-                    brush: brush,
+                    brush: profile.preset,
                     tool: request.tool,
                     color: canvasManager.brushColor.resolvedUIColor(opacity: 1),
-                    opacity: opacity
+                    opacity: profile.opacity
                 ))
             }
             .frame(width: side, height: side)

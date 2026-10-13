@@ -25,7 +25,9 @@ struct SideToolbar: View {
     /// while dragging a fill). Any other tool shows size / opacity sliders (the eraser's own separate
     /// state while erasing, otherwise the paint brush's).
     private var isFillMode: Bool { canvasManager.selectedTool == .fill }
-    private var isEraserMode: Bool { canvasManager.selectedTool == .eraser }
+    /// Whose size and opacity the rail shows outside fill and placement: the eraser's while erasing,
+    /// otherwise the paint brush's.
+    private var railTool: StrokeTool { canvasManager.selectedTool.strokeTool ?? .brush }
     /// An Add-menu object is primed (TODO (149)); the rail offers the dials that object has.
     private var isPlacing: Bool { canvasManager.selectedTool == .place }
 
@@ -78,74 +80,9 @@ struct SideToolbar: View {
                     )
                 } else if isPlacing {
                     placementSliders
-                } else if isEraserMode {
-                    // TODO (79)(a): the same `BrushSizeCurve` the brush's slider uses, via
-                    // `eraserSizeSliderPosition` — see `CanvasManager+BrushSize.swift`. The eraser's
-                    // slider used to bind `eraserSize` directly (a linear 1...50), which is why it
-                    // never felt like the brush's.
-                    labeledSlider(
-                        title: "Size",
-                        value: Binding(get: { canvasManager.eraserSizeSliderPosition },
-                                       set: { canvasManager.eraserSizeSliderPosition = $0 }),
-                        range: 0...1,
-                        identifier: "sideToolbar.eraserSizeSlider",
-                        // `.above`, not beside: a hand on a vertical slider covers the track and
-                        // everything below-and-right of the contact point, and that point travels
-                        // the whole track, so there is no clear spot level with it.
-                        preview: SizePreviewRequest(sliderID: "sideToolbar.eraserSizeSlider",
-                                                    tool: .eraser, side: .above)
-                    )
-                    Button(action: resetSettings) {
-                        Image(systemName: "arrow.counterclockwise")
-                            .font(.footnote)
-                            .foregroundColor(.white)
-                            .frame(width: 30, height: 30)
-                            .background(Color.white.opacity(0.15))
-                            .cornerRadius(6)
-                    }
-                    labeledSlider(
-                        title: "Opacity",
-                        value: $canvasManager.eraserOpacity,
-                        range: 0...1,
-                        identifier: "sideToolbar.eraserOpacitySlider",
-                        showsPercentWhileAdjusting: true
-                    )
                 } else {
-                    // TODO (79): the slider drags `brushSizeSliderPosition` (0...1, logarithmic —
-                    // see `BrushSizeCurve`), not `brushSize` itself. `CanvasManager+BrushSize.swift`
-                    // is the whole of the conversion; this file only ever sees a slider position in
-                    // and a percentage to print, same as it always saw a Double in either range.
-                    labeledSlider(
-                        title: "Size",
-                        value: Binding(get: { canvasManager.brushSizeSliderPosition },
-                                       set: { canvasManager.brushSizeSliderPosition = $0 }),
-                        range: 0...1,
-                        identifier: "sideToolbar.brushSizeSlider",
-                        // See the eraser's twin above for why the window goes above the rail rather
-                        // than level with it.
-                        preview: SizePreviewRequest(sliderID: "sideToolbar.brushSizeSlider",
-                                                    tool: .brush, side: .above)
-                    )
-                    Button(action: resetSettings) {
-                        Image(systemName: "arrow.counterclockwise")
-                            .font(.footnote)
-                            .foregroundColor(.white)
-                            .frame(width: 30, height: 30)
-                            .background(Color.white.opacity(0.15))
-                            .cornerRadius(6)
-                    }
-                    labeledSlider(
-                        title: "Opacity",
-                        value: $canvasManager.brushOpacity,
-                        range: 0...1,
-                        identifier: "sideToolbar.brushOpacitySlider",
-                        showsPercentWhileAdjusting: true
-                    )
+                    strokeToolSliders(railTool)
                 }
-                // The Apple Pencil / finger-drawing gate used to live here. It moved to the Actions
-                // menu: it's a set-once preference about the user's hardware, not a per-stroke dial
-                // like the sliders it was sitting among.
-
                 // The eyedropper, below the opacity slider — the owner's placement, 2026-08-17.
                 //
                 // Outside the three `if` branches above deliberately: those swap the rail's *sliders*
@@ -179,6 +116,42 @@ struct SideToolbar: View {
         .background(Color.black.opacity(0.85))
     }
 
+    /// A stroke tool's Size and Opacity, read from and written to its own profile — so adjusting the
+    /// eraser never disturbs the paint brush. Size drags the slider position (`0...1`, logarithmic —
+    /// see `BrushSizeCurve`), not the size itself; `CanvasManager+BrushSize.swift` is the whole of
+    /// the conversion, TODO (79). The identifiers keep each tool's name (`sideToolbar.brushSizeSlider`,
+    /// `sideToolbar.eraserOpacitySlider`).
+    @ViewBuilder private func strokeToolSliders(_ tool: StrokeTool) -> some View {
+        let sizeID = "sideToolbar.\(tool.rawValue)SizeSlider"
+        labeledSlider(
+            title: "Size",
+            value: Binding(get: { canvasManager.sizeSliderPosition(of: tool) },
+                           set: { canvasManager.setSizeSliderPosition($0, of: tool) }),
+            range: 0...1,
+            identifier: sizeID,
+            // `.above`, not beside: a hand on a vertical slider covers the track and everything
+            // below-and-right of the contact point, and that point travels the whole track, so there
+            // is no clear spot level with it.
+            preview: SizePreviewRequest(sliderID: sizeID, tool: tool, side: .above)
+        )
+        Button(action: resetSettings) {
+            Image(systemName: "arrow.counterclockwise")
+                .font(.footnote)
+                .foregroundColor(.white)
+                .frame(width: 30, height: 30)
+                .background(Color.white.opacity(0.15))
+                .cornerRadius(6)
+        }
+        labeledSlider(
+            title: "Opacity",
+            value: Binding(get: { canvasManager.toolProfiles[tool].opacity },
+                           set: { canvasManager.toolProfiles[tool].opacity = $0 }),
+            range: 0...1,
+            identifier: "sideToolbar.\(tool.rawValue)OpacitySlider",
+            showsPercentWhileAdjusting: true
+        )
+    }
+
     /// **The dials a primed object has, and only those** (TODO (149)) — the brush's Size is not one of
     /// them, since the pen sizes the object as it drags. A gradient has its Width, a share of the
     /// artwork's longer side, so the slider's own percentage readout is the "% of canvas size" the
@@ -197,7 +170,7 @@ struct SideToolbar: View {
         case .rectangle, .ellipse:
             labeledSlider(
                 title: "Opacity",
-                value: $canvasManager.brushOpacity,
+                value: $canvasManager.toolProfiles.brush.opacity,
                 range: 0...1,
                 identifier: "sideToolbar.brushOpacitySlider",
                 showsPercentWhileAdjusting: true
@@ -322,12 +295,10 @@ struct SideToolbar: View {
             // left the other one where the artist dragged it is a reset the artist cannot see.
             fillSettings.bucketEdgeOverlap = FillSettings.defaultBucketEdgeOverlap
             fillSettings.lassoEdgeOverlap = CanvasManager.fillExpandRange.upperBound
-        } else if isEraserMode {
-            canvasManager.eraserSize = 20
-            canvasManager.eraserOpacity = 1.0
         } else {
-            canvasManager.brushSize = 5
-            canvasManager.brushOpacity = 1.0
+            let defaults = ToolProfiles()[railTool]
+            canvasManager.toolProfiles[railTool].size = defaults.size
+            canvasManager.toolProfiles[railTool].opacity = defaults.opacity
         }
     }
 }

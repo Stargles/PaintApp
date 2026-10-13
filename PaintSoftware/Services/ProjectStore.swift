@@ -424,7 +424,7 @@ enum ProjectStore {
             fps = canvasManager.fps
             backgroundColor = canvasManager.canvasBackgroundColor.codable
             isBackgroundVisible = canvasManager.isCanvasBackgroundVisible
-            selectedBrush = canvasManager.selectedBrush
+            selectedBrush = canvasManager.toolProfiles.brush.preset
             customBrushes = canvasManager.customBrushes
             vectorEraserMode = canvasManager.vectorEraserMode
             universalEraser = canvasManager.universalEraser
@@ -2177,7 +2177,7 @@ enum ProjectStore {
         // A project made on another device carries brushes this library has never seen, and the two
         // lines above make them drawable; this is what makes them pickable.
         manager.adoptRestoredBrushesIntoLibrary()
-        manager.selectBrush(manifest.selectedBrush)
+        manager.selectPreset(manifest.selectedBrush, for: .brush)
         // Assigned directly rather than through a `select…` helper: unlike a brush, the vector-eraser
         // mode carries no size/opacity to re-baseline, so there is nothing for such a helper to do.
         manager.vectorEraserMode = manifest.vectorEraserMode

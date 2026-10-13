@@ -371,7 +371,7 @@ enum PlaybackProbe {
                                                           atFrame: canvasManager.currentFrame),
               canvasManager.layers[layerIndex].cels.indices.contains(celIndex),
               let vector = canvasManager.layers[layerIndex].cels[celIndex].vector else { return }
-        var brush = canvasManager.selectedBrush
+        var brush = canvasManager.toolProfiles.brush.preset
         brush.size = size.height / 24
         // Diagonal, so no two strokes of a run overlap and each is genuinely new ink.
         let t = CGFloat(index % 8) / 8
@@ -481,7 +481,7 @@ enum PlaybackProbe {
     @MainActor
     private static func seed(into canvasManager: CanvasManager, layers: Int, frames: Int,
                              strokesPerCel: Int, size: CGSize) {
-        var brush = canvasManager.selectedBrush
+        var brush = canvasManager.toolProfiles.brush.preset
         brush.size = size.height / 24
         for _ in 1..<max(layers, 1) { canvasManager.addVectorLayer() }
         for layerIndex in 0..<layers {

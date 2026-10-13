@@ -99,7 +99,7 @@ final class AutosaveLogicTests: XCTestCase {
         }
         manager.addVectorLayer()
         manager.layers[2].cels[0].vector?.addStroke(
-            VectorStroke(brush: manager.selectedBrush,
+            VectorStroke(brush: manager.toolProfiles.brush.preset,
                          color: CodableColor(red: 0, green: 0, blue: 1, alpha: 1),
                          size: 8, opacity: 1,
                          samples: [VectorSample(x: 10, y: 10, pressure: 1),

@@ -24,7 +24,7 @@ enum HistoryActionLabel: CaseIterable, Equatable {
     // MARK: Pixel/vector content edits
 
     /// A brush stroke, on a raster or vector layer. Named apart from `.erase` even though both are
-    /// the same drag-a-brush gesture (`StrokeCanvasView`'s `isEraser` is the only difference) — an
+    /// the same drag-a-brush gesture (`StrokeCanvasView`'s `strokeTool` is the only difference) — an
     /// artist who erased something undone as "brush stroke" would read the banner as wrong.
     case brushStroke
     case erase

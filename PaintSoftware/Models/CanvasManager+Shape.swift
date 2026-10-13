@@ -104,13 +104,13 @@ extension CanvasManager {
         shapeGestureSamples = samples
         // Shape detection only ever runs for the pen/pencil (see `startShapeDetection`), so the
         // paint brush's settings are always the right ones to snapshot here.
-        shapeGestureBrush = selectedBrush
+        shapeGestureBrush = toolProfiles.brush.preset
         shapeGestureSeed = DabRandom.freshSeed()
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 1
-        brushColor.resolvedUIColor(opacity: brushOpacity).getRed(&r, green: &g, blue: &b, alpha: &a)
+        brushColor.resolvedUIColor(opacity: toolProfiles.brush.opacity).getRed(&r, green: &g, blue: &b, alpha: &a)
         shapeGestureColor = CodableColor(red: Double(r), green: Double(g), blue: Double(b), alpha: Double(a))
-        shapeGestureStrokeWidth = brushSize
-        shapeGestureOpacity = brushOpacity
+        shapeGestureStrokeWidth = toolProfiles.brush.size
+        shapeGestureOpacity = toolProfiles.brush.opacity
         refreshUndoRedoState()
     }
 

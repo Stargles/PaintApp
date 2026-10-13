@@ -52,8 +52,8 @@ final class SaveDamageGateLogicTests: XCTestCase {
 
         let canvas = manager.layers[1].cels[0].vector
         XCTAssertNotNil(canvas, "Setup: a vector layer's cel should carry a VectorCanvas")
-        canvas?.addStroke(stroke(from: CGPoint(x: 4, y: 4), to: CGPoint(x: 30, y: 30), brush: manager.selectedBrush))
-        canvas?.addStroke(stroke(from: CGPoint(x: 8, y: 40), to: CGPoint(x: 40, y: 8), brush: manager.selectedBrush))
+        canvas?.addStroke(stroke(from: CGPoint(x: 4, y: 4), to: CGPoint(x: 30, y: 30), brush: manager.toolProfiles.brush.preset))
+        canvas?.addStroke(stroke(from: CGPoint(x: 8, y: 40), to: CGPoint(x: 40, y: 8), brush: manager.toolProfiles.brush.preset))
         return manager
     }
 

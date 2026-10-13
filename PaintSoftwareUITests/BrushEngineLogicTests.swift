@@ -925,9 +925,12 @@ final class BrushEngineLogicTests: XCTestCase {
     /// The load-bearing one: the stamp is `size x zoom`, at every zoom the canvas offers.
     func testSizePreviewStampIsBrushSizeTimesCanvasScaleAcrossTheZoomRange() {
         let request = SizePreviewRequest(sliderID: "brushPanel.sizeSlider", tool: .brush, side: .leading)
+        var profiles = ToolProfiles()
+        profiles.eraser.size = 999
         for zoom in [CGFloat(0.125), 0.3, 0.5, 1, 2, 3, 4] {
             for brushSize in [CGFloat(1), 5, 40, 200] {
-                let size = request.toolSize(brushSize: brushSize, eraserSize: 999)
+                profiles.brush.size = brushSize
+                let size = profiles[request.tool].size
                 let geometry = SizePreviewGeometry(toolSize: size, canvasScale: zoom)
                 XCTAssertEqual(geometry.stampDiameter, brushSize * zoom, accuracy: 0.0001,
                                "A \(brushSize)-point brush at \(zoom)x must preview as \(brushSize * zoom) screen points, not \(brushSize)")
@@ -935,33 +938,38 @@ final class BrushEngineLogicTests: XCTestCase {
         }
     }
 
-    /// The eraser has its own size, and the preview must read that one.
-    func testSizePreviewStampReadsTheEraserSizeNotTheBrushSize() {
+    /// The eraser has its own profile, and the preview must read that one — its size and its opacity.
+    func testSizePreviewStampReadsTheEraserProfileNotTheBrushs() {
         let eraser = SizePreviewRequest(sliderID: "eraserPanel.sizeSlider", tool: .eraser, side: .leading)
         let brush = SizePreviewRequest(sliderID: "brushPanel.sizeSlider", tool: .brush, side: .leading)
+        var profiles = ToolProfiles()
+        profiles.brush.size = 5
+        profiles.brush.opacity = 1
+        profiles.eraser.size = 20
+        profiles.eraser.opacity = 0.4
         for zoom in [CGFloat(0.125), 0.5, 1, 2, 4] {
-            let eraserGeometry = SizePreviewGeometry(toolSize: eraser.toolSize(brushSize: 5, eraserSize: 20),
-                                                     canvasScale: zoom)
+            let eraserGeometry = SizePreviewGeometry(toolSize: profiles[eraser.tool].size, canvasScale: zoom)
             XCTAssertEqual(eraserGeometry.stampDiameter, 20 * zoom, accuracy: 0.0001,
-                           "The eraser preview must scale `eraserSize`, not `brushSize`")
-            let brushGeometry = SizePreviewGeometry(toolSize: brush.toolSize(brushSize: 5, eraserSize: 20),
-                                                    canvasScale: zoom)
+                           "The eraser preview must scale the eraser's size, not the brush's")
+            let brushGeometry = SizePreviewGeometry(toolSize: profiles[brush.tool].size, canvasScale: zoom)
             XCTAssertEqual(brushGeometry.stampDiameter, 5 * zoom, accuracy: 0.0001,
                            "…and the brush preview the other way round")
         }
-        XCTAssertEqual(eraser.opacity(brushOpacity: 1, eraserOpacity: 0.4), 0.4, accuracy: 0.0001)
-        XCTAssertEqual(brush.opacity(brushOpacity: 1, eraserOpacity: 0.4), 1, accuracy: 0.0001)
+        XCTAssertEqual(profiles[eraser.tool].opacity, 0.4, accuracy: 0.0001)
+        XCTAssertEqual(profiles[brush.tool].opacity, 1, accuracy: 0.0001)
     }
 
-    /// **TODO (79)(b)'s pop-up percentage** reads the same tool split `toolSize`/`opacity` already
-    /// do — the eraser's own percent, never the brush's, and the other way round.
+    /// **TODO (79)(b)'s pop-up percentage** reads the request's own tool — the eraser's own percent,
+    /// never the brush's, and the other way round.
     func testSizePreviewSizePercentReadsTheRequestsOwnToolNotTheOther() {
         let eraser = SizePreviewRequest(sliderID: "eraserPanel.sizeSlider", tool: .eraser, side: .leading)
         let brush = SizePreviewRequest(sliderID: "brushPanel.sizeSlider", tool: .brush, side: .leading)
-        XCTAssertEqual(eraser.sizePercent(brushSizePercent: 0.2, eraserSizePercent: 0.05), 0.05,
-                       accuracy: 0.0001)
-        XCTAssertEqual(brush.sizePercent(brushSizePercent: 0.2, eraserSizePercent: 0.05), 0.2,
-                       accuracy: 0.0001)
+        let manager = CanvasFixture.manager()
+        manager.canvasSize = CGSize(width: 100, height: 100)
+        manager.toolProfiles.brush.size = 20
+        manager.toolProfiles.eraser.size = 5
+        XCTAssertEqual(manager.sizePercent(of: eraser.tool), 0.05, accuracy: 0.0001)
+        XCTAssertEqual(manager.sizePercent(of: brush.tool), 0.2, accuracy: 0.0001)
     }
 
     /// **`SizePreviewPercentFormat` is the one place either the rail's Opacity caption or the Size
@@ -1038,8 +1046,7 @@ final class BrushEngineLogicTests: XCTestCase {
         for newSize in [CGFloat(9), 24, 61, 200] {
             visibility.editingChanged(true, for: request)
             XCTAssertTrue(visibility.isVisible, "Still held at size \(newSize)")
-            XCTAssertEqual(SizePreviewGeometry(toolSize: request.toolSize(brushSize: newSize, eraserSize: 20),
-                                               canvasScale: 0.5).stampDiameter,
+            XCTAssertEqual(SizePreviewGeometry(toolSize: newSize, canvasScale: 0.5).stampDiameter,
                            newSize * 0.5, accuracy: 0.0001,
                            "…and following the new value")
         }

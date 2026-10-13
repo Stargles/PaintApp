@@ -62,7 +62,7 @@ final class ProjectPackageRenameLogicTests: XCTestCase {
         let canvas = manager.layers[vectorLayer].cels[0].vector
         XCTAssertNotNil(canvas, "Setup: a vector layer's first cel should carry a VectorCanvas")
         canvas?.addStroke(VectorStroke(
-            brush: manager.selectedBrush,
+            brush: manager.toolProfiles.brush.preset,
             color: CodableColor(red: 0, green: 0, blue: 1, alpha: 1),
             size: 8, opacity: 1,
             samples: [VectorSample(x: Self.inkStart.x, y: Self.inkStart.y, pressure: 1),

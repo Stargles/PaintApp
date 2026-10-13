@@ -308,7 +308,7 @@ enum UITestSeeds {
                                                           atFrame: 0),
               let vector = canvasManager.layers[canvasManager.layers.count - 1].cels[celIndex].vector
         else { return }
-        var brush = canvasManager.selectedBrush
+        var brush = canvasManager.toolProfiles.brush.preset
         brush.size = size.height / 8
         vector.addStroke(VectorStroke(
             id: UUID(), brush: brush,
@@ -355,7 +355,7 @@ enum UITestSeeds {
                                                           atFrame: 0),
               let vector = canvasManager.layers[canvasManager.layers.count - 1].cels[celIndex].vector
         else { return }
-        var brush = canvasManager.selectedBrush
+        var brush = canvasManager.toolProfiles.brush.preset
         brush.size = size.height / 8
         vector.addStroke(VectorStroke(
             id: UUID(), brush: brush,
@@ -397,7 +397,7 @@ enum UITestSeeds {
         guard ProcessInfo.processInfo.arguments.contains("-uiTestSeedPlainAnimation"),
               let size = canvasManager.canvasSize else { return }
         let layerCount = 3, frameCount = 2
-        var brush = canvasManager.selectedBrush
+        var brush = canvasManager.toolProfiles.brush.preset
         brush.size = size.height / 24
         // `createCanvas` has already added the first one.
         for _ in 1..<layerCount { canvasManager.addVectorLayer() }
@@ -477,7 +477,7 @@ enum UITestSeeds {
     /// brush a sixty-fourth of the canvas wide, so a pixel probe at fit zoom finds the ink.
     private static func seedPendingShape(_ shape: ShapeGeometry, samples: [VectorSample],
                                          into canvasManager: CanvasManager, size: CGSize) {
-        canvasManager.brushSize = size.width / 64
+        canvasManager.toolProfiles.brush.size = size.width / 64
         canvasManager.beginInteractiveShape(shape, samples: samples)
         canvasManager.endInteractiveShape()
     }
@@ -502,7 +502,7 @@ enum UITestSeeds {
                 vector: .empty(size: size))
         }
         canvasManager.layers[layer].cels = cels
-        var brush = canvasManager.selectedBrush
+        var brush = canvasManager.toolProfiles.brush.preset
         brush.size = size.height / 32
         // An L at each keyframe, moved right from one to the next — its two arms in two colours, which
         // is what Tag by Colour needs to make a group of each.

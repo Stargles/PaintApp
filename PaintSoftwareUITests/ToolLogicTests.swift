@@ -180,9 +180,9 @@ final class ToolLogicTests: XCTestCase {
         XCTAssertTrue(manager.textGestureActive,
                       "fixture precondition: there has to be a live text session for this to measure anything")
 
-        manager.selectBrush(TestBrushes.pencil)
+        manager.selectPreset(TestBrushes.pencil, for: .brush)
 
-        XCTAssertEqual(manager.selectedBrush.name, TestBrushes.pencil.name,
+        XCTAssertEqual(manager.toolProfiles.brush.preset.name, TestBrushes.pencil.name,
                        "The preset itself still becomes the active brush — that half was never in question")
         XCTAssertEqual(manager.selectedTool, .text, """
             Picking a brush preset took the tool off `.text` without committing the text session. \
@@ -207,13 +207,13 @@ final class ToolLogicTests: XCTestCase {
         // `BrushLibrary.isPencilPreset` asks whether a brush is in §8.6's Sketching group, so it has
         // to be handed a brush the app actually ships — a fixture that merely *looks* like a pencil
         // is not in any group and correctly answers no.
-        manager.selectBrush(BrushLibrary.pencilHard)
+        manager.selectPreset(BrushLibrary.pencilHard, for: .brush)
         XCTAssertEqual(manager.selectedTool, .pencil, "A brush in Sketching selects the pencil")
 
-        manager.selectBrush(BrushLibrary.roundSoft)
+        manager.selectPreset(BrushLibrary.roundSoft, for: .brush)
         XCTAssertEqual(manager.selectedTool, .pen, "…and a round preset comes back to the pen")
 
-        manager.selectBrush(BrushLibrary.pencilTextured)
+        manager.selectPreset(BrushLibrary.pencilTextured, for: .brush)
         XCTAssertEqual(manager.selectedTool, .pencil,
                        "…and it is the whole group, not one hand-checked id — which is what the "
                        + "five-id version could not say")
@@ -225,12 +225,12 @@ final class ToolLogicTests: XCTestCase {
         let manager = CanvasFixture.manager()
 
         manager.selectedTool = .eraser
-        manager.selectBrush(TestBrushes.pencil)
+        manager.selectPreset(TestBrushes.pencil, for: .brush)
         XCTAssertEqual(manager.selectedTool, .eraser,
                        "Picking a paint brush while erasing must not silently switch back to painting")
 
         manager.selectedTool = .fill
-        manager.selectBrush(TestBrushes.pencil)
+        manager.selectPreset(TestBrushes.pencil, for: .brush)
         XCTAssertEqual(manager.selectedTool, .fill)
     }
 

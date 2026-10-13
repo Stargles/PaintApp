@@ -182,7 +182,7 @@ final class CanvasResizeLogicTests: XCTestCase {
         let manager = CanvasFixture.manager(layerCount: 1)
         manager.addVectorLayer()
         let canvas = try XCTUnwrap(manager.layers[1].cels[0].vector)
-        canvas.addStroke(VectorStroke(brush: manager.selectedBrush,
+        canvas.addStroke(VectorStroke(brush: manager.toolProfiles.brush.preset,
                                       color: CodableColor(red: 0, green: 0, blue: 1, alpha: 1),
                                       size: 8, opacity: 1,
                                       samples: [VectorSample(x: 10, y: 12, pressure: 1),
@@ -212,7 +212,7 @@ final class CanvasResizeLogicTests: XCTestCase {
         let groupID = UUID()
         let lattice = Lattice(cols: 2, rows: 2, restOrigin: CGPoint(x: 10, y: 14),
                               restCellSize: 8, activeCells: [0, 3])
-        let edit = LocalEdit(stroke: VectorStroke(brush: manager.selectedBrush,
+        let edit = LocalEdit(stroke: VectorStroke(brush: manager.toolProfiles.brush.preset,
                                                  color: CodableColor(red: 1, green: 0, blue: 0, alpha: 1),
                                                  size: 5, opacity: 1,
                                                  samples: [VectorSample(x: 16, y: 20, pressure: 1)]),
@@ -350,7 +350,7 @@ final class CanvasResizeLogicTests: XCTestCase {
         let manager = CanvasFixture.manager(layerCount: 1)
         manager.addVectorLayer()
         let canvas = try! XCTUnwrap(manager.layers[1].cels[0].vector)
-        canvas.addStroke(Self.stroke(at: [CGPoint(x: 10, y: 12)], size: 8, brush: manager.selectedBrush))
+        canvas.addStroke(Self.stroke(at: [CGPoint(x: 10, y: 12)], size: 8, brush: manager.toolProfiles.brush.preset))
 
         XCTAssertTrue(manager.resizeCanvas(to: CGSize(width: 128, height: 128)))
         let moved = try! XCTUnwrap(manager.layers[1].cels[0].vector?.strokes.first)
@@ -597,7 +597,7 @@ final class CanvasResizeLogicTests: XCTestCase {
             let manager = CanvasFixture.manager(layerCount: 1)
             manager.addVectorLayer()
             let canvas = try XCTUnwrap(manager.layers[1].cels[0].vector)
-            canvas.addStroke(Self.stroke(at: samples, size: 8, brush: manager.selectedBrush))
+            canvas.addStroke(Self.stroke(at: samples, size: 8, brush: manager.toolProfiles.brush.preset))
             let label = "\(out) \(outMode) then \(back) \(backMode)"
 
             XCTAssertTrue(manager.resizeCanvas(to: out, mode: outMode), label)
@@ -716,7 +716,7 @@ final class CanvasResizeLogicTests: XCTestCase {
         let canvas = try XCTUnwrap(manager.layers[1].cels[0].vector)
         // The artwork rect's two corners, in buffer coordinates: padding is 4, artwork is 64.
         canvas.addStroke(Self.stroke(at: [CGPoint(x: 4, y: 4), CGPoint(x: 68, y: 68)],
-                                     size: 8, brush: manager.selectedBrush))
+                                     size: 8, brush: manager.toolProfiles.brush.preset))
 
         XCTAssertTrue(manager.resizeCanvas(to: CGSize(width: 128, height: 128), mode: .scaleToFit))
 
@@ -788,7 +788,7 @@ final class CanvasResizeLogicTests: XCTestCase {
         // Vertical, because y is the axis that overflows below and a horizontal stroke would stay
         // comfortably inside — the premise assertions are what say so.
         canvas.addStroke(Self.stroke(at: [CGPoint(x: 32, y: 2), CGPoint(x: 32, y: 62)],
-                                     size: 8, brush: manager.selectedBrush))
+                                     size: 8, brush: manager.toolProfiles.brush.preset))
 
         // 64² → 100×40 under Fill: k = max(100/64, 40/64) = 1.5625, so x fits exactly and y overflows
         // by 60 points, 30 off each edge.
@@ -821,7 +821,7 @@ final class CanvasResizeLogicTests: XCTestCase {
         let lattice = Lattice(cols: 2, rows: 2, restOrigin: CGPoint(x: 10, y: 14),
                               restCellSize: 8, activeCells: [0, 3])
         let edit = LocalEdit(stroke: Self.stroke(at: [CGPoint(x: 16, y: 20)], size: 5,
-                                                 brush: manager.selectedBrush),
+                                                 brush: manager.toolProfiles.brush.preset),
                              groupID: groupID)
         manager.layers[0].cels[0].interpolation = InterpolationRecipe(
             t: 0.5, groups: [MotionGroupBinding(groupID: groupID, lattices: [lattice])], localEdits: [edit])
@@ -949,7 +949,7 @@ final class CanvasResizeLogicTests: XCTestCase {
         manager.addVectorLayer()
         let points = [CGPoint(x: 8, y: 12), CGPoint(x: 50, y: 44)]
         let canvas = try XCTUnwrap(manager.layers[1].cels[0].vector)
-        canvas.addStroke(Self.stroke(at: points, size: 9, brush: manager.selectedBrush))
+        canvas.addStroke(Self.stroke(at: points, size: 9, brush: manager.toolProfiles.brush.preset))
 
         XCTAssertTrue(manager.resizeCanvas(to: new, mode: .scaleToFit))
         let scaled = try XCTUnwrap(manager.layers[1].cels[0].vector?.strokes.first)
@@ -1021,7 +1021,7 @@ final class CanvasResizeLogicTests: XCTestCase {
             for index in 0..<strokesPerCel {
                 canvas.addStroke(Self.stroke(at: [CGPoint(x: CGFloat(index % 60) + 1, y: 5),
                                                   CGPoint(x: CGFloat(index % 60) + 2, y: 40)],
-                                             size: 4, brush: manager.selectedBrush))
+                                             size: 4, brush: manager.toolProfiles.brush.preset))
             }
             XCTAssertTrue(manager.resizeCanvas(to: CGSize(width: 96, height: 96)))
             return manager.history.currentCost
@@ -1132,7 +1132,7 @@ final class CanvasResizeLogicTests: XCTestCase {
             manager.addVectorLayer()
             try XCTUnwrap(manager.layers[1].cels[0].vector)
                 .addStroke(Self.stroke(at: [CGPoint(x: 4, y: 4), CGPoint(x: 40, y: 40)], size: 6,
-                                       brush: manager.selectedBrush))
+                                       brush: manager.toolProfiles.brush.preset))
             if inked {
                 CanvasFixture.setBakedContent(manager, layerIndex: 0,
                                               CanvasFixture.solidImage(.red, rect: CGRect(x: 8, y: 8, width: 16, height: 16)))
@@ -1220,7 +1220,7 @@ final class CanvasResizeLogicTests: XCTestCase {
         let manager = CanvasFixture.manager(layerCount: 1)
         manager.addVectorLayer()
         try XCTUnwrap(manager.layers[1].cels[0].vector)
-            .addStroke(Self.stroke(at: [CGPoint(x: 4, y: 4)], size: 4, brush: manager.selectedBrush))
+            .addStroke(Self.stroke(at: [CGPoint(x: 4, y: 4)], size: 4, brush: manager.toolProfiles.brush.preset))
         let plan = try XCTUnwrap(manager.planResize(to: CGSize(width: 96, height: 96)))
         XCTAssertEqual(plan.audit.blankCels, 2, "a vector cel with no pixels in it is blank")
         XCTAssertEqual(plan.audit.inkedCels, 0)
@@ -1407,7 +1407,7 @@ final class CanvasResizeLogicTests: XCTestCase {
 
         manager.addVectorLayer()
         manager.layers[2].cels[0].vector?.addStroke(
-            VectorStroke(brush: manager.selectedBrush,
+            VectorStroke(brush: manager.toolProfiles.brush.preset,
                          color: CodableColor(red: 0, green: 0, blue: 1, alpha: 1),
                          size: 8, opacity: 1,
                          samples: [VectorSample(x: 10, y: 10, pressure: 1),

@@ -392,7 +392,7 @@ final class InkPoseLogicTests: XCTestCase {
 
         let filled = pixelsUnderMove()
         filled.brushColor = Color(.sRGB, red: 1, green: 0, blue: 0, opacity: 1)
-        filled.brushOpacity = 1
+        filled.toolProfiles.brush.opacity = 1
         selectShownSquare(filled)
         filled.fillSelection()
         XCTAssertTrue(storedInk(filled, 40, 95), "Fill painted nowhere the loop is shown")
@@ -453,7 +453,7 @@ final class InkPoseLogicTests: XCTestCase {
         manager.layers[1].transform = LayerPose(pose: PoseQuad(box: Self.box, mappedBy: slide80), mode: .move)
         manager.currentLayerIndex = 0
         manager.brushColor = Color(.sRGB, red: 0, green: 0, blue: 0, opacity: 1)
-        manager.brushOpacity = 1
+        manager.toolProfiles.brush.opacity = 1
 
         XCTAssertTrue(manager.dragOut(.ellipse, from: CGPoint(x: 128, y: 128), to: CGPoint(x: 188, y: 128)))
 

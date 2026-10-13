@@ -273,8 +273,8 @@ extension CanvasManager {
         fillGestureIsLasso = false
         fillLastRender = nil
         fillGestureSeed = (seedX, seedY)
-        fillGestureColor = Self.premultipliedComponents(brushColor.resolvedUIColor(opacity: brushOpacity))
-        fillGestureFillColor = CodableColor(brushColor.resolvedUIColor(opacity: brushOpacity))
+        fillGestureColor = Self.premultipliedComponents(brushColor.resolvedUIColor(opacity: toolProfiles.brush.opacity))
+        fillGestureFillColor = CodableColor(brushColor.resolvedUIColor(opacity: toolProfiles.brush.opacity))
         let layerID = layers[layerIndex].id
         let celID = layers[layerIndex].cels[celIndex].id
         fillGestureLayerID = layerID
@@ -896,8 +896,8 @@ extension CanvasManager {
         fillGestureIsLasso = true
         fillLastRender = nil
         fillGestureSeed = (0, 0)   // unused: a lasso session seeds from its mask
-        fillGestureColor = Self.premultipliedComponents(brushColor.resolvedUIColor(opacity: brushOpacity))
-        fillGestureFillColor = CodableColor(brushColor.resolvedUIColor(opacity: brushOpacity))
+        fillGestureColor = Self.premultipliedComponents(brushColor.resolvedUIColor(opacity: toolProfiles.brush.opacity))
+        fillGestureFillColor = CodableColor(brushColor.resolvedUIColor(opacity: toolProfiles.brush.opacity))
         let layerID = layers[layerIndex].id
         let celID = layers[layerIndex].cels[celIndex].id
         fillGestureLayerID = layerID

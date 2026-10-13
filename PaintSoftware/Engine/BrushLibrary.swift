@@ -537,7 +537,7 @@ enum BrushLibrary {
 
     /// **Whether picking this brush should put the artist on the pencil rather than the pen.**
     ///
-    /// `CanvasManager.selectBrush` asked `brush.shape == .pencil`, and that question no longer
+    /// `CanvasManager.selectPreset` asked `brush.shape == .pencil`, and that question no longer
     /// exists: a pencil and a pen both stamp a tip and differ in their grain, spacing and dynamics.
     /// So the affinity is to the *library*, which is a fact the library owns and the brush value
     /// does not — a field would be the pair `BrushTip` removed, wearing a tool's name.

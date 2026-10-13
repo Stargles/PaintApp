@@ -753,7 +753,7 @@ final class MemoryBudgetLogicTests: XCTestCase {
         let manager = CanvasFixture.manager(layerCount: 1)   // registers the notice's responder
         let refusedSize = CGSize(width: 2_147_483_648, height: 1)
         let canvas = VectorCanvas(size: refusedSize,
-                                  strokes: [VectorStroke(brush: manager.selectedBrush,
+                                  strokes: [VectorStroke(brush: manager.toolProfiles.brush.preset,
                                                          color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                                                          size: 4, opacity: 1,
                                                          samples: [VectorSample(x: 2, y: 0, pressure: 1),

@@ -168,12 +168,12 @@ final class EditorStateLogicTests: XCTestCase {
         let before = manager.editorPreferences
 
         manager.selectedTool = .eraser
-        manager.brushSize = 37
-        manager.brushOpacity = 0.4
+        manager.toolProfiles.brush.size = 37
+        manager.toolProfiles.brush.opacity = 0.4
         manager.brushColor = Color(red: 0.2, green: 0.5, blue: 0.9)
-        manager.selectEraserBrush(eraser)
-        manager.eraserSize = 45
-        manager.eraserOpacity = 0.7
+        manager.selectPreset(eraser, for: .eraser)
+        manager.toolProfiles.eraser.size = 45
+        manager.toolProfiles.eraser.opacity = 0.7
         let stored = manager.editorPreferences
         XCTAssertNotEqual(stored, before, "Setup: every field is away from its default")
         stored.store(in: defaults)
@@ -184,13 +184,13 @@ final class EditorStateLogicTests: XCTestCase {
         next.brushLibraryOverride = library
         next.applyEditorPreferences(try XCTUnwrap(EditorPreferences.stored(in: defaults)))
         XCTAssertEqual(next.selectedTool, .eraser)
-        XCTAssertEqual(next.brushSize, 37)
-        XCTAssertEqual(next.brushOpacity, 0.4)
+        XCTAssertEqual(next.toolProfiles.brush.size, 37)
+        XCTAssertEqual(next.toolProfiles.brush.opacity, 0.4)
         XCTAssertEqual(next.brushColor.codable, manager.brushColor.codable)
-        XCTAssertEqual(next.selectedEraserBrush.id, eraser.id)
-        XCTAssertEqual(next.selectedEraserBrush.name, "Wide eraser", "Resolved through the library")
-        XCTAssertEqual(next.eraserSize, 45, "…and the nudged size wins over the preset's 60")
-        XCTAssertEqual(next.eraserOpacity, 0.7)
+        XCTAssertEqual(next.toolProfiles.eraser.preset.id, eraser.id)
+        XCTAssertEqual(next.toolProfiles.eraser.preset.name, "Wide eraser", "Resolved through the library")
+        XCTAssertEqual(next.toolProfiles.eraser.size, 45, "…and the nudged size wins over the preset's 60")
+        XCTAssertEqual(next.toolProfiles.eraser.opacity, 0.7)
     }
 
     func testAOneShotToolIsRecordedAsTheToolItHandsBackTo() {
@@ -210,8 +210,8 @@ final class EditorStateLogicTests: XCTestCase {
         preferences.eraserBrushID = UUID()
         preferences.eraserSize = 33
         manager.applyEditorPreferences(preferences)
-        XCTAssertEqual(manager.selectedEraserBrush, BrushLibrary.roundHard, "An unknown id changes no preset")
-        XCTAssertEqual(manager.eraserSize, 33, "…while the size the artist had still applies")
+        XCTAssertEqual(manager.toolProfiles.eraser.preset, BrushLibrary.roundHard, "An unknown id changes no preset")
+        XCTAssertEqual(manager.toolProfiles.eraser.size, 33, "…while the size the artist had still applies")
     }
 
     // MARK: - The colour picker's type (TODO (141))

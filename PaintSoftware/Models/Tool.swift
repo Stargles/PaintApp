@@ -102,7 +102,7 @@ extension Tool {
     /// Whether picking a *paint-brush preset* should also make that brush's tool the active tool.
     ///
     /// **The third hand-maintained exclusion list in this file's history, and it is here for the
-    /// same reason the other two are.** `CanvasManager.selectBrush` spelled it
+    /// same reason the other two are.** `CanvasManager.selectPreset` spelled it
     /// `selectedTool != .eraser && selectedTool != .fill`, written when those were the only two
     /// tools it had to stand clear of. `.eyedropper` and `.text` were both added to the enum
     /// afterwards and neither was added to the list, so a preset tap in either mode silently
@@ -113,7 +113,7 @@ extension Tool {
     ///
     /// **`.text` is the answer that matters, and it is about stranded state rather than tidiness.**
     /// Leaving text mode has to run `commitAllInteractiveState()` — that is the whole of
-    /// `CanvasManager.enterTextMode`'s doc comment, from the other side — and `selectBrush` runs
+    /// `CanvasManager.enterTextMode`'s doc comment, from the other side — and `selectPreset` runs
     /// none. A `true` here would take `selectedTool` off `.text` while `textGestureActive` stayed
     /// true, which leaves `TextOverlayView` on screen claiming touches in its `hitTest` while
     /// `activeHostIsInteractive` has just gone true underneath it. That pair is
@@ -132,7 +132,7 @@ extension Tool {
             // brush panel switch to the pencil, which is the feature.
             return true
         case .eraser:
-            // The eraser keeps its own preset (`selectedEraserBrush`) entirely separate, so a tap in
+            // The eraser keeps its own profile (`toolProfiles.eraser`) entirely separate, so a tap in
             // the paint-brush panel while erasing must not silently put the artist back to painting.
             // The original rule, unchanged.
             return false
@@ -235,7 +235,7 @@ enum FillMode: String, Codable, CaseIterable, Identifiable {
 /// `.destinationOut` brush.
 ///
 /// Lives here rather than in `Engine/` because it is a *tool* setting owned by `CanvasManager`,
-/// persisted in `ProjectManifest`, and pushed into `StrokeCanvasView` alongside `isEraser`.
+/// persisted in `ProjectManifest`, and pushed into `StrokeCanvasView` alongside its `strokeTool`.
 enum VectorEraserMode: String, Codable, CaseIterable, Identifiable {
     /// Mode 1 — *erase touched parts*. Indistinguishable from raster erasing: partial-width shaves,
     /// soft edges and `< 1` opacity all reproduce. Retains the eraser's gesture whole as an

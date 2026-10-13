@@ -75,7 +75,7 @@ final class TimingRecorderLogicTests: XCTestCase {
     }
 
     private func stroke(_ manager: CanvasManager, _ samples: StrokeSamples) -> VectorStroke {
-        VectorStroke(brush: manager.selectedBrush,
+        VectorStroke(brush: manager.toolProfiles.brush.preset,
                      color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                      size: 8, opacity: 1, samples: samples)
     }

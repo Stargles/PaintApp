@@ -75,7 +75,7 @@ struct BrushEditorScreen: View {
 
     /// **The draft, never the selection.** The one place the two could be confused, so it is the one
     /// place either is named: everything else on this screen reads this.
-    private var brush: Brush { draft ?? canvasManager[keyPath: spec.selectedBrush] }
+    private var brush: Brush { draft ?? canvasManager.toolProfiles[spec.tool].preset }
     private var idPrefix: String { spec.idPrefix }
 
     var body: some View {
@@ -118,9 +118,9 @@ struct BrushEditorScreen: View {
             // Taken once. A second `onAppear` (the layer is rebuilt when the panel behind it
             // changes) must not throw away edits made since the first.
             if draft == nil {
-                draft = canvasManager[keyPath: spec.selectedBrush]
-                openedSize = canvasManager[keyPath: spec.size]
-                openedOpacity = canvasManager[keyPath: spec.opacity]
+                draft = canvasManager.toolProfiles[spec.tool].preset
+                openedSize = canvasManager.toolProfiles[spec.tool].size
+                openedOpacity = canvasManager.toolProfiles[spec.tool].opacity
             }
         }
         // Raised from a menu row, so it cannot be a `PhotosPicker` button itself — the row goes away
@@ -883,20 +883,20 @@ struct BrushEditorScreen: View {
             // lands on top of the side toolbar. Here it opens into the middle column with room to
             // spare.
             sliderRow(title: "Size",
-                      valueText: "\(Int(canvasManager[keyPath: spec.size]))",
+                      valueText: "\(Int(canvasManager.toolProfiles[spec.tool].size))",
                       value: sizeBinding, range: 1...200,
                       identifier: "\(idPrefix).sizeSlider",
                       preview: SizePreviewRequest(sliderID: "\(idPrefix).sizeSlider",
-                                                  tool: spec.previewTool, side: .leading))
+                                                  tool: spec.tool, side: .leading))
             sliderRow(title: "Opacity",
-                      valueText: "\(Int(canvasManager[keyPath: spec.opacity] * 100))%",
+                      valueText: "\(Int(canvasManager.toolProfiles[spec.tool].opacity * 100))%",
                       value: opacityBinding, range: 0...1,
                       identifier: "\(idPrefix).opacitySlider")
 
             BrushScratchPadView(brush: brush,
                                 color: padColor,
-                                strokeSize: canvasManager[keyPath: spec.size],
-                                strokeOpacity: canvasManager[keyPath: spec.opacity],
+                                strokeSize: canvasManager.toolProfiles[spec.tool].size,
+                                strokeOpacity: canvasManager.toolProfiles[spec.tool].opacity,
                                 identifier: "\(idPrefix).pad",
                                 clearToken: padClearToken,
                                 zoom: padZoom)
@@ -914,7 +914,10 @@ struct BrushEditorScreen: View {
     /// so the eraser's pad paints in grey and reads as *the shape this eraser removes*, which is what
     /// `EraserSettingsPanel`'s own preview says about itself.
     private var padColor: UIColor {
-        spec.previewTool == .eraser ? UIColor(white: 0.35, alpha: 1) : UIColor(canvasManager.brushColor)
+        switch spec.tool {
+        case .brush: return UIColor(canvasManager.brushColor)
+        case .eraser: return UIColor(white: 0.35, alpha: 1)
+        }
     }
 
     // MARK: - Controls
@@ -973,7 +976,7 @@ struct BrushEditorScreen: View {
     // MARK: - Writing
 
     /// **Every edit goes through here, and it reaches the draft and nothing else** — §2.31. Neither
-    /// the library nor `CanvasManager.selectedBrush` moves until Done, so an artist who Cancels
+    /// the library nor the tool's profile moves until Done, so an artist who Cancels
     /// leaves both exactly as they found them.
     private func edit(_ body: (inout Brush) -> Void) {
         var updated = brush
@@ -991,7 +994,7 @@ struct BrushEditorScreen: View {
     /// (§2.31) lives entirely on this side of the button.
     private func done() {
         let committed = brush
-        canvasManager[keyPath: spec.selectedBrush] = committed
+        canvasManager.toolProfiles[spec.tool].preset = committed
         library.update(committed)
         onClose()
     }
@@ -1005,8 +1008,8 @@ struct BrushEditorScreen: View {
     /// rather than to whichever brush happens to be open"* — so the file stays and only this brush's
     /// pointer at it is discarded with the draft.
     private func cancel() {
-        if let openedSize { canvasManager[keyPath: spec.size] = openedSize }
-        if let openedOpacity { canvasManager[keyPath: spec.opacity] = openedOpacity }
+        if let openedSize { canvasManager.toolProfiles[spec.tool].size = openedSize }
+        if let openedOpacity { canvasManager.toolProfiles[spec.tool].opacity = openedOpacity }
         draft = nil
         onClose()
     }
@@ -1089,17 +1092,17 @@ struct BrushEditorScreen: View {
     /// live half is deliberate: they are `CanvasManager`'s, the side toolbar shows them, and a size
     /// that only appeared on Done would read as a slider that did nothing. Cancel puts them back.
     private var sizeBinding: Binding<Double> {
-        Binding(get: { Double(canvasManager[keyPath: spec.size]) },
+        Binding(get: { Double(canvasManager.toolProfiles[spec.tool].size) },
                 set: { newValue in
-                    canvasManager[keyPath: spec.size] = CGFloat(newValue)
+                    canvasManager.toolProfiles[spec.tool].size = CGFloat(newValue)
                     edit { $0.size = CGFloat(newValue) }
                 })
     }
 
     private var opacityBinding: Binding<Double> {
-        Binding(get: { canvasManager[keyPath: spec.opacity] },
+        Binding(get: { canvasManager.toolProfiles[spec.tool].opacity },
                 set: { newValue in
-                    canvasManager[keyPath: spec.opacity] = newValue
+                    canvasManager.toolProfiles[spec.tool].opacity = newValue
                     edit { $0.opacity = newValue }
                 })
     }

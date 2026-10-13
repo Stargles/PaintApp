@@ -1,13 +1,13 @@
 import SwiftUI
 
-/// Eraser settings — the shared brushes menu (`StrokeSettingsPanel`) driven by `CanvasManager`'s
-/// separate `selectedEraserBrush`/`eraserSize`/`eraserOpacity` state instead of the paint brush's, so
+/// Eraser settings — the shared brushes menu (`StrokeSettingsPanel`) driven by the eraser's own profile
+/// (`CanvasManager.toolProfiles.eraser`) instead of the paint brush's, so
 /// adjusting the eraser never disturbs whatever brush you paint with (see `BrushStamper.stampDab`:
 /// an eraser dab is the same stamp, just composited with `.destinationOut` instead of painting
 /// color).
 ///
 /// **It lists the same library the brush does, and that is BRUSH.md §11 rather than a convenience.**
-/// The eraser used to be offered `availableEraserBrushes` — the five built-ins with imports excluded,
+/// The eraser used to be offered the five built-ins with imports excluded,
 /// on the grounds that a custom texture was *"a paint-brush-only feature"*. §11 rules the opposite:
 /// *the eraser is a stroke*, so an imported brush erases with no eraser work at all. One library, two
 /// selections. The `+` still offers no importer here — importing is one verb in one place, on the
@@ -20,11 +20,7 @@ struct EraserSettingsPanel: View {
     static let spec = StrokeSettingsSpec(
         title: "Eraser",
         idPrefix: "eraserPanel",
-        selectedBrush: \.selectedEraserBrush,
-        size: \.eraserSize,
-        opacity: \.eraserOpacity,
-        selectPreset: { manager, preset in manager.selectEraserBrush(preset) },
-        previewTool: .eraser
+        tool: .eraser
     )
 
     var body: some View {

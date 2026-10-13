@@ -2138,7 +2138,7 @@ extension CanvasManager {
         // whichever door it arrives from: a vector layer gets an element on top of everything
         // (LASSO_FILL.md §2a's *"cover everything"*), a raster layer gets pixels.
         layDownSolidFill(layerSpacePath(selection.path, forLayerID: layers[currentLayerIndex].id),
-                         color: brushColor.resolvedUIColor(opacity: brushOpacity),
+                         color: brushColor.resolvedUIColor(opacity: toolProfiles.brush.opacity),
                          layerIndex: currentLayerIndex, celIndex: celIndex, label: .fill)
     }
 
@@ -2372,7 +2372,7 @@ extension CanvasManager {
 
         // Interned once rather than per stroke: `BrushPool.intern` is a lock and a hash, and every
         // stroke here is being pointed at the same brush.
-        let ref = BrushPool.intern(selectedBrush)
+        let ref = BrushPool.intern(toolProfiles.brush.preset)
         var newElements = working
         var changed = 0
         for (index, element) in working.enumerated() {

@@ -1,26 +1,20 @@
 import SwiftUI
 
-/// Which `CanvasManager` state a `StrokeSettingsPanel` drives, plus its labelling. The paint brush
-/// and the eraser expose the same knobs over two parallel sets of properties (`selectedBrush`/
-/// `brushSize`/`brushOpacity` vs `selectedEraserBrush`/`eraserSize`/`eraserOpacity`), so the panel
-/// itself is shared and only this differs — see `BrushSettingsPanel`/`EraserSettingsPanel`.
+/// Which tool's profile a `StrokeSettingsPanel` drives, plus its labelling. The paint brush and the
+/// eraser expose the same knobs over their own `ToolProfile`s (`CanvasManager.toolProfiles`), so the
+/// panel itself is shared and only this differs — see `BrushSettingsPanel`/`EraserSettingsPanel`.
 ///
 /// **There is no `presets` keypath any more.** It used to name two different arrays —
-/// `availableBrushes` for the brush, `availableEraserBrushes` (the five built-ins, no imports) for
-/// the eraser — and BRUSH.md §11 rules that distinction away: *the eraser is a brush*, so an
-/// imported tip erases with no eraser work. One library, two selections.
+/// `availableBrushes` for the brush, the five built-ins with no imports for the eraser — and BRUSH.md
+/// §11 rules that distinction away: *the eraser is a brush*, so an imported tip erases with no eraser
+/// work. One library, one selection per tool.
 struct StrokeSettingsSpec {
     let title: String
     /// Prefix for every control's accessibility identifier, e.g. "brushPanel" → "brushPanel.sizeSlider".
     let idPrefix: String
-    let selectedBrush: ReferenceWritableKeyPath<CanvasManager, Brush>
-    let size: ReferenceWritableKeyPath<CanvasManager, CGFloat>
-    let opacity: ReferenceWritableKeyPath<CanvasManager, Double>
-    let selectPreset: (CanvasManager, Brush) -> Void
-    /// Which tool's stamp the Size slider's real-size preview should draw. Carried here rather than
-    /// inferred from `idPrefix` so adding a third stroke tool is a compile error, not a string match
-    /// that quietly falls through to the brush.
-    let previewTool: SizePreviewTool
+    /// The profile the panel reads and writes, and so which tool's stamp the Size slider's real-size
+    /// preview draws.
+    let tool: StrokeTool
 }
 
 /// **The brushes menu** — BRUSH.md §7.1, reached by §2.20's second tap on the tool icon.
@@ -69,7 +63,7 @@ struct StrokeSettingsPanel<Accessory: View, AddItems: View>: View {
     /// The group whose title in the header is a name field, or nil.
     @State private var renamingGroupID: UUID?
 
-    private var brush: Brush { canvasManager[keyPath: spec.selectedBrush] }
+    private var brush: Brush { canvasManager.toolProfiles[spec.tool].preset }
 
     private var openGroup: BrushGroup? {
         if let openGroupID, let found = library.groups.first(where: { $0.id == openGroupID }) { return found }
@@ -141,7 +135,7 @@ struct StrokeSettingsPanel<Accessory: View, AddItems: View>: View {
                 //
                 // Three verbs that already existed: the store mints and files it
                 // (`BrushLibraryStore.createBrush`, which is where the rule is and where a logic test
-                // can reach it), `spec.selectPreset` selects it exactly as tapping its row would — so
+                // can reach it), `selectPreset` selects it exactly as tapping its row would — so
                 // the eraser's own selection moves when the eraser's `+` is used — and `onEditBrush`
                 // is §2.20's second tap. The editor edits *the selection*, so selecting it is what
                 // makes "straight to the edit menu of a default brush" true rather than sending the
@@ -149,7 +143,7 @@ struct StrokeSettingsPanel<Accessory: View, AddItems: View>: View {
                 MenuItem("Create Manually", systemImage: "paintbrush.pointed", identifier: "\(spec.idPrefix).createManually") {
                     let made = library.createBrush(inGroup: openGroup?.id)
                     openGroupID = library.group(containingBrush: made.id)?.id ?? openGroupID
-                    spec.selectPreset(canvasManager, made)
+                    canvasManager.selectPreset(made, for: spec.tool)
                     onEditBrush()
                 }
                 addMenuItems()
@@ -290,7 +284,7 @@ struct StrokeSettingsPanel<Accessory: View, AddItems: View>: View {
             if isSelected {
                 onEditBrush()
             } else {
-                spec.selectPreset(canvasManager, candidate)
+                canvasManager.selectPreset(candidate, for: spec.tool)
             }
         }
         .accessibilityElement(children: .combine)

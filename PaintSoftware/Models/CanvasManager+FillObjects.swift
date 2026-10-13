@@ -44,7 +44,7 @@ extension CanvasManager {
         case .oval: label = .addEllipse
         case .line: return false
         }
-        let color = brushColor.resolvedUIColor(opacity: brushOpacity)
+        let color = brushColor.resolvedUIColor(opacity: toolProfiles.brush.opacity)
         guard let surface = drawingSurfaceForNewObject(vectorOnly: false),
               let stored = layerSpaceFill(shape.rotatedCGPath, paint: .solid(CodableColor(color)),
                                           onLayerAt: surface.layerIndex) else { return false }

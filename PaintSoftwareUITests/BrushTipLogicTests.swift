@@ -479,7 +479,7 @@ final class BrushTipLogicTests: XCTestCase {
     /// So: a fresh manager, one call — the one `BrushSettingsPanel` makes with the picked image and
     /// nothing else — and then the three questions that follow. Is the brush in the picker's list?
     /// Is it selected, so the next stroke uses it with no second step? And does drawing with
-    /// `manager.selectedBrush` put *that tip's* ink down? The last is the one that fails if the
+    /// `manager.toolProfiles.brush.preset` put *that tip's* ink down? The last is the one that fails if the
     /// import writes a file nothing reads.
     func testImportingAPngFromAColdStartSelectsItAndTheNextStrokeIsDrawnWithIt() throws {
         let manager = CanvasFixture.manager()
@@ -497,7 +497,7 @@ final class BrushTipLogicTests: XCTestCase {
         XCTAssertNotNil(imported.tip.importedTextureFileName, "the import names a file of its own")
         XCTAssertTrue(manager.availableBrushes.contains { $0.id == imported.id },
                       "…it is in the picker's list, which is the only way to select it again later")
-        XCTAssertEqual(manager.selectedBrush.id, imported.id,
+        XCTAssertEqual(manager.toolProfiles.brush.preset.id, imported.id,
                        "…and it is the active brush, so the next stroke is drawn with what was imported")
         XCTAssertTrue(manager.selectedTool.paintsOnCanvas,
                       "…with a tool whose touches reach the layer, or there is no next stroke")
@@ -506,7 +506,7 @@ final class BrushTipLogicTests: XCTestCase {
         BrushStamper.stampStroke(into: texture,
                                  samples: StrokeSamples([VectorSample(point: CGPoint(x: 100, y: 100), pressure: 1)],
                                                         channels: .pressureOnly),
-                                 brush: manager.selectedBrush, color: .black, brushSize: 120,
+                                 brush: manager.toolProfiles.brush.preset, color: .black, brushSize: 120,
                                  brushOpacity: 1, random: DabRandom(seed: 5))
         let pixels = try XCTUnwrap(Self.rgba(of: texture))
         XCTAssertGreaterThan(Self.alpha(pixels, 100, 100), 200, "the imported brush draws at all")

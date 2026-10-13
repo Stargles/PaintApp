@@ -98,8 +98,8 @@ final class BrushSizePercentLogicTests: XCTestCase {
     func testBrushSizePercentIsBrushSizeOverTheReferenceExtent() {
         let manager = CanvasFixture.manager()
         manager.canvasSize = CGSize(width: 200, height: 200)
-        manager.brushSize = 40
-        XCTAssertEqual(manager.brushSizePercent, 0.2, accuracy: 1e-9)
+        manager.toolProfiles.brush.size = 40
+        XCTAssertEqual(manager.sizePercent(of: .brush), 0.2, accuracy: 1e-9)
     }
 
     /// **The persistence decision, pinned as behaviour.** `brushSize` stays in canvas points — the
@@ -110,17 +110,17 @@ final class BrushSizePercentLogicTests: XCTestCase {
     func testTheSameStoredBrushSizeReadsAsDifferentPercentagesOnDifferentCanvases() {
         let small = CanvasFixture.manager()
         small.canvasSize = CGSize(width: 100, height: 100)
-        small.brushSize = 20
+        small.toolProfiles.brush.size = 20
 
         let large = CanvasFixture.manager()
         large.canvasSize = CGSize(width: 2000, height: 2000)
-        large.brushSize = 20
+        large.toolProfiles.brush.size = 20
 
-        XCTAssertEqual(small.brushSize, large.brushSize, "the absolute stroke width is unchanged…")
-        XCTAssertNotEqual(small.brushSizePercent, large.brushSizePercent,
+        XCTAssertEqual(small.toolProfiles.brush.size, large.toolProfiles.brush.size, "the absolute stroke width is unchanged…")
+        XCTAssertNotEqual(small.sizePercent(of: .brush), large.sizePercent(of: .brush),
                           "…which is exactly why the same points value is a different percentage")
-        XCTAssertEqual(small.brushSizePercent, 0.2, accuracy: 1e-9)
-        XCTAssertEqual(large.brushSizePercent, 0.01, accuracy: 1e-9)
+        XCTAssertEqual(small.sizePercent(of: .brush), 0.2, accuracy: 1e-9)
+        XCTAssertEqual(large.sizePercent(of: .brush), 0.01, accuracy: 1e-9)
     }
 
     // MARK: - The slider position round-trips through brushSize
@@ -128,27 +128,27 @@ final class BrushSizePercentLogicTests: XCTestCase {
     func testDraggingTheSliderToTheTopSetsBrushSizeToTheFullReferenceExtent() {
         let manager = CanvasFixture.manager()
         manager.canvasSize = CGSize(width: 400, height: 400)
-        manager.brushSizeSliderPosition = 1.0
-        XCTAssertEqual(manager.brushSize, 400, accuracy: 1e-6)
+        manager.setSizeSliderPosition(1.0, of: .brush)
+        XCTAssertEqual(manager.toolProfiles.brush.size, 400, accuracy: 1e-6)
     }
 
     func testDraggingTheSliderToTheBottomSetsBrushSizeToPointOneOfAPercent() {
         let manager = CanvasFixture.manager()
         manager.canvasSize = CGSize(width: 1000, height: 1000)
-        manager.brushSizeSliderPosition = 0.0
-        XCTAssertEqual(manager.brushSize, 1.0, accuracy: 1e-6, "0.1% of a 1000pt canvas is 1pt")
+        manager.setSizeSliderPosition(0.0, of: .brush)
+        XCTAssertEqual(manager.toolProfiles.brush.size, 1.0, accuracy: 1e-6, "0.1% of a 1000pt canvas is 1pt")
     }
 
     func testReadingTheSliderPositionBackAfterSettingBrushSizeDirectlyRoundTrips() {
         let manager = CanvasFixture.manager()
         manager.canvasSize = CGSize(width: 512, height: 512)
-        manager.brushSize = 51.2   // 10%
+        manager.toolProfiles.brush.size = 51.2   // 10%
 
-        let t = manager.brushSizeSliderPosition
-        manager.brushSize = 0     // disturb it
-        manager.brushSizeSliderPosition = t
+        let t = manager.sizeSliderPosition(of: .brush)
+        manager.toolProfiles.brush.size = 0     // disturb it
+        manager.setSizeSliderPosition(t, of: .brush)
 
-        XCTAssertEqual(manager.brushSize, 51.2, accuracy: 1e-6)
+        XCTAssertEqual(manager.toolProfiles.brush.size, 51.2, accuracy: 1e-6)
     }
 
     // MARK: - TODO (79)(a): the eraser goes through the same curve
@@ -156,34 +156,34 @@ final class BrushSizePercentLogicTests: XCTestCase {
     func testEraserSizePercentIsEraserSizeOverTheReferenceExtent() {
         let manager = CanvasFixture.manager()
         manager.canvasSize = CGSize(width: 200, height: 200)
-        manager.eraserSize = 40
-        XCTAssertEqual(manager.eraserSizePercent, 0.2, accuracy: 1e-9)
+        manager.toolProfiles.eraser.size = 40
+        XCTAssertEqual(manager.sizePercent(of: .eraser), 0.2, accuracy: 1e-9)
     }
 
     func testDraggingTheEraserSliderToTheTopSetsEraserSizeToTheFullReferenceExtent() {
         let manager = CanvasFixture.manager()
         manager.canvasSize = CGSize(width: 400, height: 400)
-        manager.eraserSizeSliderPosition = 1.0
-        XCTAssertEqual(manager.eraserSize, 400, accuracy: 1e-6)
+        manager.setSizeSliderPosition(1.0, of: .eraser)
+        XCTAssertEqual(manager.toolProfiles.eraser.size, 400, accuracy: 1e-6)
     }
 
     func testDraggingTheEraserSliderToTheBottomSetsEraserSizeToPointOneOfAPercent() {
         let manager = CanvasFixture.manager()
         manager.canvasSize = CGSize(width: 1000, height: 1000)
-        manager.eraserSizeSliderPosition = 0.0
-        XCTAssertEqual(manager.eraserSize, 1.0, accuracy: 1e-6, "0.1% of a 1000pt canvas is 1pt")
+        manager.setSizeSliderPosition(0.0, of: .eraser)
+        XCTAssertEqual(manager.toolProfiles.eraser.size, 1.0, accuracy: 1e-6, "0.1% of a 1000pt canvas is 1pt")
     }
 
     func testReadingTheEraserSliderPositionBackAfterSettingEraserSizeDirectlyRoundTrips() {
         let manager = CanvasFixture.manager()
         manager.canvasSize = CGSize(width: 512, height: 512)
-        manager.eraserSize = 51.2   // 10%
+        manager.toolProfiles.eraser.size = 51.2   // 10%
 
-        let t = manager.eraserSizeSliderPosition
-        manager.eraserSize = 0     // disturb it
-        manager.eraserSizeSliderPosition = t
+        let t = manager.sizeSliderPosition(of: .eraser)
+        manager.toolProfiles.eraser.size = 0     // disturb it
+        manager.setSizeSliderPosition(t, of: .eraser)
 
-        XCTAssertEqual(manager.eraserSize, 51.2, accuracy: 1e-6)
+        XCTAssertEqual(manager.toolProfiles.eraser.size, 51.2, accuracy: 1e-6)
     }
 
     /// **The eraser and the brush read the same curve independently** — dragging one slider's position
@@ -193,8 +193,8 @@ final class BrushSizePercentLogicTests: XCTestCase {
     func testTheEraserAndTheBrushAgreeOnPercentAtTheSameSliderPosition() {
         let manager = CanvasFixture.manager()
         manager.canvasSize = CGSize(width: 300, height: 300)
-        manager.brushSizeSliderPosition = 0.37
-        manager.eraserSizeSliderPosition = 0.37
-        XCTAssertEqual(manager.brushSizePercent, manager.eraserSizePercent, accuracy: 1e-9)
+        manager.setSizeSliderPosition(0.37, of: .brush)
+        manager.setSizeSliderPosition(0.37, of: .eraser)
+        XCTAssertEqual(manager.sizePercent(of: .brush), manager.sizePercent(of: .eraser), accuracy: 1e-9)
     }
 }

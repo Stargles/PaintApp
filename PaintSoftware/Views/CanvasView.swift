@@ -688,9 +688,7 @@ struct CanvasView: UIViewRepresentable {
         private struct AppliedTool: Equatable {
             let tool: Tool
             let color: Color
-            let size: CGFloat
-            let opacity: Double
-            let brush: Brush
+            let profile: ToolProfile
             /// Must be in the cache key: without it, changing eraser mode leaves every other field
             /// equal and the guard silently does nothing.
             let vectorEraserMode: VectorEraserMode
@@ -3137,22 +3135,19 @@ struct CanvasView: UIViewRepresentable {
                 host.strokeView.selectionClipPath = nil
             }
 
-            // Eraser gets its own brush/size/opacity, separate from the paint brush's.
-            let isEraser = canvasManager.selectedTool == .eraser
-            let activeSize = isEraser ? canvasManager.eraserSize : canvasManager.brushSize
-            let activeOpacity = isEraser ? canvasManager.eraserOpacity : canvasManager.brushOpacity
-            let activeBrush = isEraser ? canvasManager.selectedEraserBrush : canvasManager.selectedBrush
+            // Each stroke tool draws with its own profile; a tool that lays no stroke leaves the
+            // brush's in place for the next one that does.
+            let strokeTool = canvasManager.selectedTool.strokeTool ?? .brush
+            let profile = canvasManager.toolProfiles[strokeTool]
 
             // Only push new tool settings when something tool-relevant actually changed.
-            let desired = AppliedTool(tool: canvasManager.selectedTool, color: canvasManager.brushColor, size: activeSize, opacity: activeOpacity, brush: activeBrush, vectorEraserMode: canvasManager.vectorEraserMode, universalEraser: canvasManager.universalEraser)
+            let desired = AppliedTool(tool: canvasManager.selectedTool, color: canvasManager.brushColor, profile: profile, vectorEraserMode: canvasManager.vectorEraserMode, universalEraser: canvasManager.universalEraser)
             guard lastAppliedTool[layer.id] != desired else { return }
             lastAppliedTool[layer.id] = desired
 
             host.strokeView.brushColor = canvasManager.brushColor.resolvedUIColor(opacity: 1)
-            host.strokeView.brushSize = activeSize
-            host.strokeView.brushOpacity = activeOpacity
-            host.strokeView.brush = activeBrush
-            host.strokeView.isEraser = isEraser
+            host.strokeView.strokeTool = strokeTool
+            host.strokeView.profile = profile
             host.strokeView.vectorEraserMode = canvasManager.vectorEraserMode
             host.strokeView.universalEraser = canvasManager.universalEraser
             // .fill is handled by fillTapRecognizer, not the stroke view.
@@ -4968,7 +4963,7 @@ struct CanvasView: UIViewRepresentable {
             guard let plan = canvasManager.placementPlan, let container = containerView,
                   let preview = placementPreview else { return }
             container.bringSubviewToFront(preview)
-            preview.show(plan, color: canvasManager.brushColor.resolvedUIColor(opacity: canvasManager.brushOpacity))
+            preview.show(plan, color: canvasManager.brushColor.resolvedUIColor(opacity: canvasManager.toolProfiles.brush.opacity))
         }
 
         /// The eyedropper's tap: take the colour under it as the brush colour, then go back to the

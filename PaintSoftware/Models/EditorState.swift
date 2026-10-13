@@ -174,24 +174,24 @@ extension CanvasManager {
     var editorPreferences: EditorPreferences {
         let tool = selectedTool == .eyedropper ? toolReturnPath.handsBackTo : selectedTool
         return EditorPreferences(tool: tool.restoresAcrossDocuments ? tool : .pen,
-                                 brushSize: Double(brushSize), brushOpacity: brushOpacity,
+                                 brushSize: Double(toolProfiles.brush.size), brushOpacity: toolProfiles.brush.opacity,
                                  brushColor: brushColor.codable,
-                                 eraserBrushID: selectedEraserBrush.id,
-                                 eraserSize: Double(eraserSize), eraserOpacity: eraserOpacity)
+                                 eraserBrushID: toolProfiles.eraser.preset.id,
+                                 eraserSize: Double(toolProfiles.eraser.size), eraserOpacity: toolProfiles.eraser.opacity)
     }
 
     /// Hands the artist their tools back as a manager enters the editor — new document or reopened
     /// one. The eraser's preset is resolved through the library, which is the same lookup
     /// `adoptLibrarySelections` makes; an id the library no longer has keeps the literal default.
-    /// **After** `selectBrush` has run for the document's pen preset, because that call re-baselines
+    /// **After** `selectPreset` has run for the document's pen preset, because that call re-baselines
     /// size and opacity from the preset and this is what the artist nudged them to since.
     func applyEditorPreferences(_ preferences: EditorPreferences) {
         selectedTool = preferences.tool
-        brushSize = CGFloat(preferences.brushSize)
-        brushOpacity = preferences.brushOpacity
+        toolProfiles.brush.size = CGFloat(preferences.brushSize)
+        toolProfiles.brush.opacity = preferences.brushOpacity
         brushColor = preferences.brushColor.color
-        if let eraser = brushLibrary.brush(withID: preferences.eraserBrushID) { selectedEraserBrush = eraser }
-        eraserSize = CGFloat(preferences.eraserSize)
-        eraserOpacity = preferences.eraserOpacity
+        if let eraser = brushLibrary.brush(withID: preferences.eraserBrushID) { toolProfiles.eraser.preset = eraser }
+        toolProfiles.eraser.size = CGFloat(preferences.eraserSize)
+        toolProfiles.eraser.opacity = preferences.eraserOpacity
     }
 }

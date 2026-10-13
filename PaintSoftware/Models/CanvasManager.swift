@@ -1111,21 +1111,12 @@ final class CanvasManager: ObservableObject {
     /// its position), set by `copyCel` and consumed non-destructively by `pasteCel`.
     @Published var copiedCel: CopiedCel?
 
-    /// The active brush's stroke diameter, **in canvas points** — same unit as `Brush.size`, which
-    /// this is copied from on every preset pick (see the two writers below). Persisted and shared
-    /// across documents in that unit, unchanged by TODO (79): a brush preset draws the same absolute
-    /// line whichever canvas it is used on, which is the point of a preset library.
-    ///
-    /// **TODO (79) — the side toolbar's slider reads and writes this as a percentage of the current
-    /// document's canvas, where 100% is defined as the canvas's shorter side** (`artworkSize`, not
-    /// the padded buffer — see `CanvasManager+BrushSize.swift`'s `brushSizeReferenceExtent`). That
-    /// mapping is presentation only, computed fresh on every read; nothing about this property's own
-    /// storage or unit changed, so a document opened at a different canvas size still draws the same
-    /// point size it always did and simply reads as a different percentage on the toolbar.
-    @Published var brushSize: CGFloat = 5.0
-    /// The active brush's stroke opacity, `0...1` — **linear**, unlike `brushSize`'s slider. The side
-    /// toolbar's badge shows this ×100 as a plain percentage; there is no curve to document here.
-    @Published var brushOpacity: Double = 1.0
+    /// **What each stroke tool draws with** — the brush's and the eraser's preset, size and opacity,
+    /// one `ToolProfile` per `StrokeTool`. Sizes are in canvas points (`Brush.size`'s unit); the side
+    /// toolbar's sliders read and write them as a percentage of the canvas's shorter side — TODO (79),
+    /// `CanvasManager+BrushSize.swift` — which is presentation only, so a document opened at a
+    /// different canvas size draws the same point size and reads as a different percentage.
+    @Published var toolProfiles = ToolProfiles()
     @Published var brushColor: Color = .black
     /// **This property's `didSet` used to be the fifth closer of an engaged whole-layer vector Move**
     /// — a real tool switch cleared `isVectorTransforming`, which the six writers of this property
@@ -1246,12 +1237,6 @@ final class CanvasManager: ObservableObject {
         }
     }
 
-    /// The full brush preset currently active (shape, hardness, spacing, stabilization, dynamics,
-    /// scatter/rotation jitter, blend mode). `brushSize`/`brushOpacity` above stay separate
-    /// published properties rather than folded into this because `SideToolbar`'s sliders bind
-    /// directly to them and can move independently of whichever preset is selected — nudging a
-    /// brush's size doesn't become a new saved preset.
-    @Published var selectedBrush: Brush = BrushLibrary.roundSoft
     /// User-imported custom brushes **this document must carry tip files for** — BRUSH.md §8.1's
     /// second half, read by `ProjectStore.importedTextureFileNames` so a saved package is
     /// self-contained. Persisted per project via `ProjectManifest`.
@@ -1278,55 +1263,53 @@ final class CanvasManager: ObservableObject {
     /// Every brush offered in the menu — the whole library, in group order.
     var availableBrushes: [Brush] { brushLibrary.allBrushes }
 
-    /// Selects a brush preset as the active brush. Also re-baselines the live
-    /// `brushSize`/`brushOpacity` from the brush's own defaults, and — only when the active tool is
-    /// one that *has* a paint-brush preset — retargets `selectedTool` at it (`.pencil` for the
-    /// Pencil preset, `.pen` otherwise).
+    /// **Makes `preset` the one `tool` draws with**, at the preset's own size and opacity — picking a
+    /// preset from a menu re-baselines both. The brush's pick also retargets `selectedTool` at the
+    /// preset's tool (`.pencil` for the Pencil preset, `.pen` otherwise), but only while the active tool
+    /// is one that *has* a paint-brush preset; the eraser's pick never touches the tool, because
+    /// picking an eraser shape only makes sense while already erasing.
     ///
     /// **The condition is `Tool.followsBrushPresetSelection`, not a list written here.** It was
     /// `selectedTool != .eraser && selectedTool != .fill`, and `.eyedropper` and `.text` were both
     /// added to `Tool` after that line without being added to it. See that property for what the
     /// `.text` case in particular was capable of stranding.
-    func selectBrush(_ brush: Brush) {
-        selectedBrush = brush
-        brushSize = brush.size
-        brushOpacity = brush.opacity
-        if selectedTool.followsBrushPresetSelection {
+    func selectPreset(_ preset: Brush, for tool: StrokeTool) {
+        toolProfiles[tool] = ToolProfile(preset: preset)
+        switch tool {
+        case .brush:
+            guard selectedTool.followsBrushPresetSelection else { return }
             // `brush.shape == .pencil` until BRUSH.md §12 stage 5, which is a question `BrushTip`
             // deliberately cannot answer: a pencil and a pen are both a `.round` tip and differ only
             // in hardness, spacing and dynamics. Which *preset* this is belongs to the library —
             // see `BrushLibrary.isPencilPreset` for why it is not a field on `Brush`.
-            selectedTool = BrushLibrary.isPencilPreset(brush) ? .pencil : .pen
+            selectedTool = BrushLibrary.isPencilPreset(preset) ? .pencil : .pen
+        case .eraser:
+            break
         }
     }
 
-    /// **Takes the library's current value for whichever brushes are selected** — BRUSH.md §7's
+    /// **Takes the library's current value for every tool's selected preset** — BRUSH.md §7's
     /// *"edits currently apply to a live copy and are lost when the preset changes"*, at the one
     /// place that half of it could not reach.
     ///
-    /// `selectedBrush` and `selectedEraserBrush` are initialised from the **literals**
-    /// `BrushLibrary.roundSoft` / `.roundHard`, which is right on a device with no library and wrong
-    /// the moment one has been edited: MEASURED as a red UI test where an edit survived closing the
-    /// editor and did not survive a relaunch, with the library file holding the edit the whole time
-    /// and the menu row beside the editor drawing it. The ids are written down (they have to be, for
-    /// the picker's highlight to survive a reload), so the library can be asked.
+    /// The profiles are initialised from the **literals** `BrushLibrary.roundSoft` / `.roundHard`,
+    /// which is right on a device with no library and wrong the moment one has been edited: MEASURED
+    /// as a red UI test where an edit survived closing the editor and did not survive a relaunch, with
+    /// the library file holding the edit the whole time and the menu row beside the editor drawing it.
+    /// The ids are written down (they have to be, for the picker's highlight to survive a reload), so
+    /// the library can be asked.
     ///
     /// **Size and opacity are re-baselined only when the value actually moved**, which is what keeps
     /// this from quietly changing the eraser's default width: on a fresh library the stored brush
     /// *is* the literal, the guard fails, and nothing is touched. After an edit, re-baselining is
-    /// `selectBrush`'s own behaviour and is what the artist means by having set a size in the editor.
+    /// `selectPreset`'s own behaviour and is what the artist means by having set a size in the editor.
     /// The tool is deliberately not retargeted — this is not a selection, it is the same selection
     /// catching up.
     func adoptLibrarySelections() {
-        if let stored = brushLibrary.brush(withID: selectedBrush.id), stored != selectedBrush {
-            selectedBrush = stored
-            brushSize = stored.size
-            brushOpacity = stored.opacity
-        }
-        if let stored = brushLibrary.brush(withID: selectedEraserBrush.id), stored != selectedEraserBrush {
-            selectedEraserBrush = stored
-            eraserSize = stored.size
-            eraserOpacity = stored.opacity
+        for tool in StrokeTool.allCases {
+            if let stored = brushLibrary.brush(withID: toolProfiles[tool].preset.id), stored != toolProfiles[tool].preset {
+                toolProfiles[tool] = ToolProfile(preset: stored)
+            }
         }
     }
 
@@ -1339,7 +1322,7 @@ final class CanvasManager: ObservableObject {
     func addCustomBrush(_ brush: Brush, toGroup groupID: UUID? = nil) {
         customBrushes.append(brush)
         brushLibrary.add(brush, toGroup: groupID)
-        selectBrush(brush)
+        selectPreset(brush, for: .brush)
     }
 
     /// The name of the group a restored project's own brushes are taken into — see
@@ -1378,23 +1361,14 @@ final class CanvasManager: ObservableObject {
 
     // MARK: - Eraser (functions like the brush tool — same shape/dynamics/spacing — but
     // `BrushStamper` composites its stamps with `.destinationOut` instead of painting `brushColor`.
-    // Kept as entirely separate published state from the paint brush's, so adjusting the eraser
-    // never disturbs the paint brush, and switching tools never clobbers either one's settings.)
-
-    /// The eraser's own brush preset. Defaults to Hard Round, the crisp/predictable shape most paint
-    /// apps default their eraser to.
-    @Published var selectedEraserBrush: Brush = BrushLibrary.roundHard
-    /// Live-adjustable eraser diameter, separate from `brushSize`. Defaults larger than the paint
-    /// brush's default — erasers are typically used broader than the pen/pencil.
-    @Published var eraserSize: CGFloat = 20
-    @Published var eraserOpacity: Double = 1.0
+    // Its preset, size and opacity are `toolProfiles.eraser`.)
 
     /// Which of the vector-eraser behaviours (see `VectorEraserMode` in Tool.swift) the eraser
     /// uses. Only consulted while the active layer is `.vector`: on a raster layer the eraser is a
     /// plain `.destinationOut` brush, so `EraserSettingsPanel` hides its picker there entirely.
     ///
-    /// Lives alongside the shape/size/opacity state rather than inside `selectedEraserBrush` because
-    /// it is not a property of the *stamp* — the same eraser preset cuts or shaves depending on
+    /// Lives beside the eraser's profile rather than inside its preset because it is not a property
+    /// of the *stamp* — the same eraser preset cuts or shaves depending on
     /// this, and switching presets (which re-baselines size/opacity) must not silently change which
     /// mode you're erasing in. Also what `VectorEraserMode.isStabilized` reads, so
     /// `StrokeCanvasView` can decide per-mode whether to smooth the input path.
@@ -1444,23 +1418,6 @@ final class CanvasManager: ObservableObject {
     /// `CanvasDisplayScale`, which explains why republishing this manager on every pinch frame is not
     /// an option.
     let canvasDisplayScale = CanvasDisplayScale()
-
-    /// Every brush offered in the eraser's menu — **the same library the brush picks from**.
-    ///
-    /// It was `BrushLibrary.defaults` alone, on the grounds that an imported texture was a
-    /// paint-brush-only feature. BRUSH.md §11 rules otherwise: *the eraser is a stroke*, so an
-    /// imported brush erases with no eraser work. Kept as its own accessor rather than deleted
-    /// because the two tools still hold two separate *selections* over the one library.
-    var availableEraserBrushes: [Brush] { brushLibrary.allBrushes }
-
-    /// Eraser analogue of `selectBrush`: re-baselines `eraserSize`/`eraserOpacity` from the chosen
-    /// preset. Never touches `selectedTool` — unlike `selectBrush`, picking an eraser shape only
-    /// makes sense while already erasing.
-    func selectEraserBrush(_ brush: Brush) {
-        selectedEraserBrush = brush
-        eraserSize = brush.size
-        eraserOpacity = brush.opacity
-    }
 
     /// The three fill settings the fill tool's sideways (horizontal) drag can adjust — which one it does
     /// is `fillSettings.selectedAxis`.

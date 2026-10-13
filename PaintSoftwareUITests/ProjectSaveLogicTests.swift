@@ -69,7 +69,7 @@ final class ProjectSaveLogicTests: XCTestCase {
         manager.addVectorLayer()
         let vectorCanvas = manager.layers[2].cels[0].vector
         XCTAssertNotNil(vectorCanvas, "Setup: a vector layer's cel should carry a VectorCanvas")
-        vectorCanvas?.addStroke(VectorStroke(brush: manager.selectedBrush,
+        vectorCanvas?.addStroke(VectorStroke(brush: manager.toolProfiles.brush.preset,
                                             color: CodableColor(red: 0, green: 0, blue: 1, alpha: 1),
                                             size: 8, opacity: 1,
                                             samples: [VectorSample(x: 10, y: 10, pressure: 1),
@@ -1470,7 +1470,7 @@ final class ProjectSaveLogicTests: XCTestCase {
                       "Setup: layer 0 should take a second, undrawn cel at frame 12")
         manager.addVectorLayer()
         manager.layers[1].cels[0].vector?.addStroke(
-            VectorStroke(brush: manager.selectedBrush,
+            VectorStroke(brush: manager.toolProfiles.brush.preset,
                          color: CodableColor(red: 0, green: 0, blue: 1, alpha: 1),
                          size: 8, opacity: 1,
                          samples: [VectorSample(x: 10, y: 10, pressure: 1),
@@ -1773,7 +1773,7 @@ final class ProjectSaveLogicTests: XCTestCase {
                       + "on another device with a brush that draws nothing")
 
         let builtInOnly = CanvasFixture.manager()
-        builtInOnly.selectBrush(TestBrushes.square)
+        builtInOnly.selectPreset(TestBrushes.square, for: .brush)
         let squareURL = projectURL(name: "Built In Tip")
         saveAndWait(builtInOnly, to: squareURL)
         let bundled = try? FileManager.default.contentsOfDirectory(

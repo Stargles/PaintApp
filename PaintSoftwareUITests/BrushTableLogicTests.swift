@@ -329,7 +329,7 @@ final class BrushTableLogicTests: XCTestCase {
         saveAndWait(manager, to: url)
         XCTAssertEqual(Set(try tableOnDisk(at: url).brushes), [old], "before: the table names Old")
 
-        manager.selectBrush(new)
+        manager.selectPreset(new, for: .brush)
         // Stated rather than inherited: the default is Cut, and a Cut that catches everything is a
         // split of nothing — true today and not what this test is about.
         manager.selectionMembership = .touching
@@ -420,8 +420,8 @@ final class BrushTableLogicTests: XCTestCase {
         // The palette forgets it — a rename, a future removal, or simply the artist editing on to the
         // next brush. The ink has not forgotten it.
         manager.customBrushes = []
-        manager.selectBrush(TestBrushes.hardRound)
-        XCTAssertFalse(([manager.selectedBrush] + manager.customBrushes)
+        manager.selectPreset(TestBrushes.hardRound, for: .brush)
+        XCTAssertFalse(([manager.toolProfiles.brush.preset] + manager.customBrushes)
                         .contains { $0.tip.importedTextureFileName == fileName },
                        "fixture precondition: no palette entry names this file any more")
 
@@ -488,7 +488,7 @@ final class BrushTableLogicTests: XCTestCase {
     func testEditingABrushDoesNotChangeAStrokeAlreadyDrawnWithIt() throws {
         let (manager, _, vector) = fixture()
         let asDrawn = brush("As Drawn", size: 8, hardness: 0.95, spacing: 0.05)
-        manager.selectBrush(asDrawn)
+        manager.selectPreset(asDrawn, for: .brush)
         vector.addStroke(stroke(asDrawn, from: CGPoint(x: 8, y: 32), to: CGPoint(x: 54, y: 32), size: 12))
         let before = try XCTUnwrap(pixels(vector.render()))
         assertHasInk(before, "the stroke drawn before the edit")
@@ -498,7 +498,7 @@ final class BrushTableLogicTests: XCTestCase {
         var edited = asDrawn
         edited.dab.hardness = 0.05
         edited.dab.spacing = 0.4
-        manager.selectBrush(edited)
+        manager.selectPreset(edited, for: .brush)
 
         XCTAssertEqual(try XCTUnwrap(vector.strokes.first).brushRef, drawnRef,
                        "the stroke keeps the entry it was drawn with")
@@ -518,7 +518,7 @@ final class BrushTableLogicTests: XCTestCase {
         vector.addStroke(stroke(drawn, from: CGPoint(x: 8, y: 44), to: CGPoint(x: 54, y: 44), size: 11))
         let before = try XCTUnwrap(pixels(vector.render()))
 
-        manager.selectBrush(picked)
+        manager.selectPreset(picked, for: .brush)
         manager.selectionMembership = .touching
         select(manager, layerIndex, loop(CGRect(x: 2, y: 2, width: 60, height: 60)))
         let baseline = manager.history.undoStack.count
@@ -546,7 +546,7 @@ final class BrushTableLogicTests: XCTestCase {
         vector.addStroke(stroke(drawn, from: CGPoint(x: 4, y: 10), to: CGPoint(x: 26, y: 10)))
         vector.addStroke(stroke(drawn, from: CGPoint(x: 4, y: 56), to: CGPoint(x: 26, y: 56)))
 
-        manager.selectBrush(picked)
+        manager.selectPreset(picked, for: .brush)
         manager.selectionMembership = .enclosed
         select(manager, layerIndex, loop(CGRect(x: 0, y: 0, width: 40, height: 24)))
         manager.applyBrushToSelection()
@@ -562,7 +562,7 @@ final class BrushTableLogicTests: XCTestCase {
         let (manager, layerIndex, vector) = fixture()
         let only = brush("Only", size: 8)
         vector.addStroke(stroke(only, from: CGPoint(x: 8, y: 30), to: CGPoint(x: 54, y: 30)))
-        manager.selectBrush(only)
+        manager.selectPreset(only, for: .brush)
         manager.selectionMembership = .touching
         select(manager, layerIndex, loop(CGRect(x: 2, y: 2, width: 60, height: 60)))
 
@@ -583,10 +583,10 @@ final class BrushTableLogicTests: XCTestCase {
         let layerIndex = manager.currentLayerIndex
         let vector = try XCTUnwrap(manager.layers[layerIndex].cels[0].vector)
 
-        manager.selectBrush(TestBrushes.hardRound)
-        vector.addStroke(stroke(manager.selectedBrush,
+        manager.selectPreset(TestBrushes.hardRound, for: .brush)
+        vector.addStroke(stroke(manager.toolProfiles.brush.preset,
                                 from: CGPoint(x: 8, y: 30), to: CGPoint(x: 54, y: 30), size: 10))
-        manager.selectBrush(TestBrushes.softRound)
+        manager.selectPreset(TestBrushes.softRound, for: .brush)
         manager.selectionMembership = .touching
         select(manager, layerIndex, loop(CGRect(x: 2, y: 2, width: 60, height: 60)))
 

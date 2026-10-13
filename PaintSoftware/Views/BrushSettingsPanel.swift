@@ -2,8 +2,7 @@ import SwiftUI
 import PhotosUI
 import UIKit
 
-/// The brushes menu driven by the paint brush's `CanvasManager` state (`selectedBrush`/`brushSize`/
-/// `brushOpacity`), plus the two pieces unique to the paint brush — importing a custom texture, and a
+/// The brushes menu driven by the paint brush's profile (`CanvasManager.toolProfiles.brush`), plus the two pieces unique to the paint brush — importing a custom texture, and a
 /// solid-color preview swatch.
 ///
 /// **The importer moved to the `+`.** It was the panel's `accessory`, a row under six sliders, which
@@ -23,11 +22,7 @@ struct BrushSettingsPanel: View {
     static let spec = StrokeSettingsSpec(
         title: "Brush",
         idPrefix: "brushPanel",
-        selectedBrush: \.selectedBrush,
-        size: \.brushSize,
-        opacity: \.brushOpacity,
-        selectPreset: { manager, preset in manager.selectBrush(preset) },
-        previewTool: .brush
+        tool: .brush
     )
 
     var body: some View {

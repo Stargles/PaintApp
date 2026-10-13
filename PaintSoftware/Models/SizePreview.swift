@@ -19,14 +19,6 @@ import UIKit
 
 // MARK: - What is being previewed
 
-/// Which of the two tools' size the preview is showing. The paint brush and the eraser keep entirely
-/// separate size/opacity/preset state on `CanvasManager` (`brushSize`/`selectedBrush` vs
-/// `eraserSize`/`selectedEraserBrush`), so the preview has to be told which set to read.
-enum SizePreviewTool: String, Equatable {
-    case brush
-    case eraser
-}
-
 /// Which side of the slider the window sits on — chosen per surface so the artist's own hand is not
 /// on top of the thing they asked to see.
 ///
@@ -44,39 +36,20 @@ enum SizePreviewSide: Equatable {
 /// Which size slider raised the preview, and what it is showing.
 ///
 /// `sliderID` is the slider's own accessibility identifier. It is what makes a lift *specific*: the
-/// brush panel's Size slider and the rail's Size slider drive the same `brushSize` and would
+/// brush panel's Size slider and the rail's Size slider drive the same profile's size and would
 /// otherwise be indistinguishable, so a stale "editing ended" from one could dismiss a preview the
 /// other had just raised.
 struct SizePreviewRequest: Equatable {
     let sliderID: String
-    let tool: SizePreviewTool
+    /// The profile the preview reads — its preset, size and opacity (`CanvasManager.toolProfiles`) —
+    /// and so which way the stamp composites.
+    let tool: StrokeTool
     let side: SizePreviewSide
 
-    init(sliderID: String, tool: SizePreviewTool, side: SizePreviewSide) {
+    init(sliderID: String, tool: StrokeTool, side: SizePreviewSide) {
         self.sliderID = sliderID
         self.tool = tool
         self.side = side
-    }
-
-    /// The tool's live diameter in canvas points, picked from the two parallel sets of state
-    /// `CanvasManager` keeps. The same pick `CanvasView` makes when it pushes settings at the stroke
-    /// view — written here rather than in the window's `body` so a test can prove the eraser reads
-    /// `eraserSize` and not `brushSize`, which a `View` file could never be asked.
-    func toolSize(brushSize: CGFloat, eraserSize: CGFloat) -> CGFloat {
-        tool == .eraser ? eraserSize : brushSize
-    }
-
-    /// Its twin for opacity — `eraserOpacity` is separate from `brushOpacity` for the same reason.
-    func opacity(brushOpacity: Double, eraserOpacity: Double) -> Double {
-        tool == .eraser ? eraserOpacity : brushOpacity
-    }
-
-    /// Its twin for the percentage the pop-up prints beside the stamp — TODO (79)(b). Both tools'
-    /// percentages are already computed off the one shared reference extent
-    /// (`CanvasManager.brushSizeReferenceExtent`); this only picks which of the two the request is
-    /// about, the same way `toolSize`/`opacity` do.
-    func sizePercent(brushSizePercent: Double, eraserSizePercent: Double) -> Double {
-        tool == .eraser ? eraserSizePercent : brushSizePercent
     }
 }
 
@@ -125,7 +98,7 @@ struct SizePreviewVisibility: Equatable {
     init() {}
 
     var isVisible: Bool { active != nil }
-    var tool: SizePreviewTool? { active?.tool }
+    var tool: StrokeTool? { active?.tool }
 
     /// `isEditing` is "a finger is on this slider": true from the drag gesture's first touch or from
     /// `Slider.onEditingChanged(true)`, false from either one's end. Both reporters are idempotent
@@ -307,7 +280,7 @@ enum SizePreviewStampRenderer {
     ///
     /// A stamp larger than the window is not scaled: Core Graphics clips it to the context, which is
     /// exactly the real-size crop that was asked for.
-    static func stampImage(geometry: SizePreviewGeometry, brush: Brush, tool: SizePreviewTool,
+    static func stampImage(geometry: SizePreviewGeometry, brush: Brush, tool: StrokeTool,
                            color: UIColor, opacity: Double) -> UIImage {
         let side = max(geometry.windowSide, 1)
         let format = UIGraphicsImageRendererFormat.preferred()
@@ -315,10 +288,14 @@ enum SizePreviewStampRenderer {
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: format)
         return renderer.image { context in
             let cg = context.cgContext
-            let isEraser = tool == .eraser
-            if isEraser {
+            let blendMode: CGBlendMode
+            switch tool {
+            case .brush:
+                blendMode = brush.stroke.blendMode.cgBlendMode
+            case .eraser:
                 eraserInk.setFill()
                 cg.fill(CGRect(x: 0, y: 0, width: side, height: side))
+                blendMode = .destinationOut
             }
             let target = CGContextDabTarget(cg)
             // **One dab is still a stroke, and BRUSH.md §2.11 means it has to be bracketed like one.**
@@ -332,9 +309,7 @@ enum SizePreviewStampRenderer {
             // canvas, so there is no canvas point for it to be anchored to. `CGContextDabTarget`
             // takes the phase as a parameter for exactly this reason — a target that assumed one
             // could not have expressed the difference.
-            target.beginStrokeGroup(opacity: CGFloat(opacity),
-                                    blendMode: isEraser ? .destinationOut
-                                                        : brush.stroke.blendMode.cgBlendMode,
+            target.beginStrokeGroup(opacity: CGFloat(opacity), blendMode: blendMode,
                                     texture: brush.texture)
             BrushStamper.stampDab(into: target,
                                   at: CGPoint(x: side / 2, y: side / 2),
