@@ -203,6 +203,7 @@
 		C642D0F20EB66540E2EA1639 /* OpacitySliderLiveUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FCEA8E4238D113ACE696CD9 /* OpacitySliderLiveUITests.swift */; };
 		773E6F9FB60E77BB75297E16 /* DraftDragLiveUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9D36EE7B7012F2953C3D9BD /* DraftDragLiveUITests.swift */; };
 		8CAD360CB3166BC295839B6C /* InterpolationDragLiveUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 944364121B64F82B30EAEC40 /* InterpolationDragLiveUITests.swift */; };
+		8048C1A1E03363AE4D50F54F /* GraphCurveHoldUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA249AFFB6BE3F6D5DED18FA /* GraphCurveHoldUITests.swift */; };
 		2F5D3B0AEAFEB5359E8CE0CF /* GuideUnderLassoMoveUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA035DAC01F130A020B02B65 /* GuideUnderLassoMoveUITests.swift */; };
 		7A54F01C6DC3BFE5A6CB5C58 /* GuideEffectLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97EAC0AFE8551C7BCB0784AF /* GuideEffectLogicTests.swift */; };
 		0DC3FA8A2141BD915C11CAC7 /* LensBlurUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C8D32C3E835AD05BDC423C9 /* LensBlurUITests.swift */; };
@@ -838,6 +839,7 @@
 		0FCEA8E4238D113ACE696CD9 /* OpacitySliderLiveUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "OpacitySliderLiveUITests.swift"; sourceTree = "<group>"; };
 		F9D36EE7B7012F2953C3D9BD /* DraftDragLiveUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "DraftDragLiveUITests.swift"; sourceTree = "<group>"; };
 		944364121B64F82B30EAEC40 /* InterpolationDragLiveUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "InterpolationDragLiveUITests.swift"; sourceTree = "<group>"; };
+		DA249AFFB6BE3F6D5DED18FA /* GraphCurveHoldUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "GraphCurveHoldUITests.swift"; sourceTree = "<group>"; };
 		DA035DAC01F130A020B02B65 /* GuideUnderLassoMoveUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "GuideUnderLassoMoveUITests.swift"; sourceTree = "<group>"; };
 		97EAC0AFE8551C7BCB0784AF /* GuideEffectLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GuideEffectLogicTests.swift; sourceTree = "<group>"; };
 		0C8D32C3E835AD05BDC423C9 /* LensBlurUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LensBlurUITests.swift; sourceTree = "<group>"; };
@@ -1566,6 +1568,7 @@
 				0FCEA8E4238D113ACE696CD9 /* OpacitySliderLiveUITests.swift */,
 				F9D36EE7B7012F2953C3D9BD /* DraftDragLiveUITests.swift */,
 				944364121B64F82B30EAEC40 /* InterpolationDragLiveUITests.swift */,
+				DA249AFFB6BE3F6D5DED18FA /* GraphCurveHoldUITests.swift */,
 				DA035DAC01F130A020B02B65 /* GuideUnderLassoMoveUITests.swift */,
 				97EAC0AFE8551C7BCB0784AF /* GuideEffectLogicTests.swift */,
 				0C8D32C3E835AD05BDC423C9 /* LensBlurUITests.swift */,
@@ -2313,6 +2316,7 @@
 				C642D0F20EB66540E2EA1639 /* OpacitySliderLiveUITests.swift in Sources */,
 				773E6F9FB60E77BB75297E16 /* DraftDragLiveUITests.swift in Sources */,
 				8CAD360CB3166BC295839B6C /* InterpolationDragLiveUITests.swift in Sources */,
+				8048C1A1E03363AE4D50F54F /* GraphCurveHoldUITests.swift in Sources */,
 				2F5D3B0AEAFEB5359E8CE0CF /* GuideUnderLassoMoveUITests.swift in Sources */,
 				7A54F01C6DC3BFE5A6CB5C58 /* GuideEffectLogicTests.swift in Sources */,
 				0DC3FA8A2141BD915C11CAC7 /* LensBlurUITests.swift in Sources */,

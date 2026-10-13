@@ -525,12 +525,17 @@ extension CanvasManager {
     /// tiers through the CTM. Two currencies, which is exactly the ruling: *"a raster layer softens
     /// under a push-in while the vector layer beside it stays sharp"*. **So a cel with no vector tier
     /// answers nil here and is still posed** — by the other half.
+    ///
+    /// `tracks` are the cel's pose tracks as a hold has them (an animation group's graph drag, TODO (179)),
+    /// in place of its own.
     func posedCelContent(for cel: Cel, atFrame frame: Int,
-                         inheriting inherited: PoseMap? = nil) -> DerivedCelContent? {
+                         inheriting inherited: PoseMap? = nil,
+                         tracks held: [String: TransformTrack]? = nil) -> DerivedCelContent? {
         let container = inherited.flatMap { $0.isIdentity ? nil : $0 }
-        guard !cel.transformTracks.isEmpty || container != nil,
+        let tracks = held ?? cel.transformTracks
+        guard !tracks.isEmpty || container != nil,
               let vector = cel.vector, let canvasSize else { return nil }
-        let mappings = Self.poseMappings(cel.transformTracks, atCelLocalFrame: frame - cel.startFrame)
+        let mappings = Self.poseMappings(tracks, atCelLocalFrame: frame - cel.startFrame)
         guard !mappings.isEmpty || container != nil else { return nil }
 
         // Resolved **now**, on the main actor, into values the closure captures — `DerivedCelContent`'s

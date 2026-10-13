@@ -361,7 +361,8 @@ final class LiveEditLogicTests: XCTestCase {
     }
 
     /// **A graph-band drag holds a grade only when every channel it carries is a grade's** — a pose is a
-    /// live transform edit's, and a target scalar (Opacity) is still written as the drag goes.
+    /// live transform edit's, a target scalar (Opacity) is held as a channel's curve, and a marquee that
+    /// carries both kinds is written as the drag goes.
     @MainActor
     func testAGraphBandDragHoldsAGradeOnlyForTheGradesOwnChannels() throws {
         let (manager, target, _) = graded()
@@ -372,6 +373,111 @@ final class LiveEditLogicTests: XCTestCase {
         XCTAssertFalse(manager.graphBandHoldsGrade(target: target, parameterIDs: []))
         XCTAssertFalse(manager.graphBandHoldsGrade(target: .layer(id: manager.layers[0].id), parameterIDs: [brightnessID]),
                        "a layer with no grade holds none")
+    }
+
+    // MARK: - Graph-band drags of target channels and an animation group (TODO (179))
+
+    /// **A graph-band drag of the Opacity curve is held, and the lift writes it once.** Ticks publish
+    /// nothing, leave the track as it was, and move what the canvas reads — the host's alpha
+    /// (`effectiveOpacity`) and the walk's opacity — and the held frame is the bake of what the lift writes
+    /// (the live walk with the hold against the baker's own recipe after it). One step, named for keys.
+    @MainActor
+    func testAGraphBandDragOfTheOpacityCurveIsHeldAndTheLiftWritesItOnce() throws {
+        let (manager, target) = faded()
+        _ = arrangeChannel(.key, manager, target)   // an Opacity curve keyed at 0 and 10
+        manager.history.removeAll()
+        XCTAssertTrue(manager.graphBandHoldsChannels(parameterIDs: [TargetChannel.opacity.id]))
+        XCTAssertFalse(manager.graphBandHoldsChannels(parameterIDs: [TargetChannel.opacity.id, brightnessID]),
+                       "a marquee that also carries a grade's channel writes as it goes")
+        let stored = try XCTUnwrap(manager.keyframeState(of: target).channelTracks[TargetChannel.opacity.id])
+        func frame(holding held: HeldEdit?) throws -> [UInt8] {
+            let recipe = try XCTUnwrap(manager.makeFrameRecipe(atFrame: manager.currentFrame, includeBackground: true,
+                                                               sizing: .liveComposite, holding: held))
+            return try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(recipe.composite(budgetBytes: manager.frameBaker.budgetBytes))))
+        }
+        let rest = try frame(holding: nil)
+        var published = 0
+        let watch = manager.objectWillChange.sink { published += 1 }
+        var curve = stored
+        for value in [0.8, 0.5, 0.3] {
+            curve.setKey(AnimationCurve.Key(frame: 0, value: value, interpolation: .linear))
+            manager.holdChannelCurves(target, [TargetChannel.opacity.id: curve])
+        }
+        watch.cancel()
+        XCTAssertEqual(published, 0, "three ticks of the curve raised \(published) passes over the editor")
+        XCTAssertEqual(manager.keyframeState(of: target).channelTracks[TargetChannel.opacity.id], stored,
+                       "the track waits for the lift")
+        XCTAssertEqual(manager.effectiveOpacity(ofLayer: 0), 0.3, accuracy: 1e-9, "the host's alpha follows the held curve")
+        XCTAssertEqual(manager.channelAsShown(of: target, channel: .opacity, atFrame: 0) ?? -1, 0.3, accuracy: 1e-9)
+        let held = try frame(holding: manager.liveEdit)
+        XCTAssertNotEqual(held, rest, "the held curve changes the frame")
+
+        XCTAssertTrue(manager.commitHeldCurves())
+        XCTAssertNil(manager.liveEdit)
+        XCTAssertEqual(manager.keyframeState(of: target).channelTracks[TargetChannel.opacity.id], curve, "the lift writes the curve")
+        XCTAssertEqual(manager.history.undoStack.count, 1, "…as one step")
+        XCTAssertEqual(manager.history.undoStack.last?.label, .effectKeys)
+        XCTAssertEqual(try frame(holding: nil), held, "the bake of the written curve is the frame the finger held")
+    }
+
+    /// **A graph-band drag of an animation group's channel is held, and the cel derives from it.** The
+    /// group's slide is folded into the cel's tracks the lift will leave; the derivation the canvas draws
+    /// (`livePreview`, which reads the hold) moves while the document does not, and after the lift the
+    /// written tracks derive that same picture. A drag of a group's channel is a group pose's to hold, and
+    /// no other kind of channel's.
+    @MainActor
+    func testAGraphBandDragOfAnAnimationGroupIsHeldAndTheCelDerivesFromIt() throws {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.addVectorLayer()
+        let group = UUID()
+        let box = CGRect(x: 0, y: 0, width: 64, height: 64)
+        var stroke = VectorStroke(id: UUID(), brush: TestBrushes.hardRound,
+                                  color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1), size: 6, opacity: 1,
+                                  samples: StrokeSamples([VectorSample(x: 8, y: 20, pressure: 1),
+                                                          VectorSample(x: 24, y: 20, pressure: 1)],
+                                                         channels: .pressureOnly))
+        stroke.animationGroupID = group
+        let cel = Cel(id: UUID(), startFrame: 0, frameCount: 16, raster: .empty(size: CanvasFixture.canvasSize),
+                      vector: .empty(size: CanvasFixture.canvasSize))
+        cel.vector?.addStroke(stroke)
+        manager.layers[1].cels = [cel]
+        manager.currentLayerIndex = 1
+        manager.currentFrame = 8
+        let layerID = manager.layers[1].id
+        let channel = TransformChannelID.group(group)
+        CanvasFixture.setPoseTrack(manager, layerID: layerID, celID: cel.id, channel: channel,
+                                   CanvasFixture.poseTrack(box: box, [(0, PoseQuad(restingIn: box)),
+                                                                      (8, PoseQuad(box: box, mappedBy: CGAffineTransform(translationX: 10, y: 0)))]))
+        manager.history.removeAll()
+        let xID = PoseChannelID.cel(.group(group)).parameterID(.x)
+        let target = KeyframeTarget.layer(id: layerID)
+        XCTAssertTrue(manager.graphBandHoldsGroupPose(target: target, parameterIDs: [xID]))
+        XCTAssertFalse(manager.graphBandHoldsGroupPose(target: target, parameterIDs: [xID, TargetChannel.opacity.id]))
+        XCTAssertNil(manager.graphBandEdit(target: target, parameterIDs: [xID]), "no band carries a group")
+        func shown() -> AnyHashable? {
+            guard case .derived(let derived) = manager.livePreview(forCel: manager.layers[1].cels[0],
+                                                                   atFrame: manager.currentFrame) else { return nil }
+            return derived.identity
+        }
+        let rest = shown()
+        let storedTracks = manager.layers[1].cels[0].transformTracks
+        var curve = try XCTUnwrap(manager.layers[1].cels[0].transformTracks[channel.id]?.curves[.x])
+        let atEight = try XCTUnwrap(curve.keys.last)
+        curve.setKey(AnimationCurve.Key(frame: atEight.frame, value: atEight.value + 20, interpolation: .linear))
+        var published = 0
+        let watch = manager.objectWillChange.sink { published += 1 }
+        manager.holdGroupPose([xID: curve], of: target)
+        watch.cancel()
+        XCTAssertEqual(published, 0, "a tick raised \(published) passes over the editor")
+        XCTAssertEqual(manager.layers[1].cels[0].transformTracks, storedTracks, "the cel's tracks wait for the lift")
+        XCTAssertTrue(manager.liveEdit?.changesDerivation(of: manager.layers[1].cels[0]) == true)
+        let held = shown()
+        XCTAssertNotEqual(held, rest, "the cel's derivation follows the held group pose")
+        XCTAssertTrue(manager.commitHeldCurves())
+        XCTAssertNil(manager.liveEdit)
+        XCTAssertNotEqual(manager.layers[1].cels[0].transformTracks, storedTracks, "the lift writes the tracks")
+        XCTAssertEqual(manager.history.undoStack.count, 1, "…as one step")
+        XCTAssertEqual(shown(), held, "the written tracks derive the picture the drag showed")
     }
 
     /// **Opening a grade settles the adjustable fill first** — one slot: the fill lands as its own step

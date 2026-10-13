@@ -1103,22 +1103,20 @@ extension CanvasManager {
 
     /// **A poser's own scalar rows** — the two closures every mode arm needs of a `TargetChannel`:
     /// whether it carries a curve (rotate's closed form against its sum) and its resolved value at a
-    /// frame. `held` is a channel of this layer's under the finger (`HeldChannel`, TODO (179)), read in
-    /// place of the document's: its value at the edit's frame, and the curve the lift will leave where
-    /// that is read across the bar.
+    /// frame. `held` is what the finger holds (TODO (179)) — a channel slider or a graph-band drag of this
+    /// layer's channels — read in place of the document's: a slider's value at the edit's frame and the
+    /// curve the lift will leave where that is read across the bar, a drag's curves at every frame.
     fileprivate struct PoserChannels {
         let hasCurve: (TargetChannel) -> Bool
         let value: (TargetChannel, Int) -> Double
 
-        init(layer: Layer, holding held: HeldChannel?) {
-            let held = held?.target == .layer(id: layer.id) ? held : nil
+        init(layer: Layer, holding held: HeldEdit?) {
+            let target = KeyframeTarget.layer(id: layer.id)
             hasCurve = { channel in
-                if let held = held?.holding(channel, of: .layer(id: layer.id)) { return held.routedCurve != nil }
-                return layer.channelTracks[channel.id]?.isEmpty == false
+                held?.channelHasCurve(channel, of: target) ?? (layer.channelTracks[channel.id]?.isEmpty == false)
             }
             value = { channel, frame in
-                if let held = held?.holding(channel, of: .layer(id: layer.id)) { return held.value(atFrame: frame) }
-                return layer.resolvedValue(channel, atFrame: frame)
+                held?.channelValue(channel, of: target, atFrame: frame) ?? layer.resolvedValue(channel, atFrame: frame)
             }
         }
     }
@@ -1143,25 +1141,24 @@ extension CanvasManager {
     /// An entry's parallax share at `frame` — `Layer.parallaxShare(atFrame:positionalDefault:)` or
     /// the folder's, whichever home the entry is, or the finger's where its slider holds it.
     private func parallaxShare(of entry: ContainerEntry, atFrame frame: Int,
-                               positionalDefault: Double, holding held: HeldChannel?) -> Double {
+                               positionalDefault: Double, holding held: HeldEdit?) -> Double {
         switch entry {
         case .layer(let index):
-            if let held = held?.holding(.parallaxShare, of: .layer(id: layers[index].id)) {
-                return held.value(atFrame: frame)
+            if let held = held?.channelValue(.parallaxShare, of: .layer(id: layers[index].id), atFrame: frame) {
+                return held
             }
             return layers[index].parallaxShare(atFrame: frame, positionalDefault: positionalDefault)
         case .folder(let folder):
-            if let held = held?.holding(.parallaxShare, of: .folder(id: folder.id)) { return held.value(atFrame: frame) }
+            if let held = held?.channelValue(.parallaxShare, of: .folder(id: folder.id), atFrame: frame) { return held }
             return folder.parallaxShare(atFrame: frame, positionalDefault: positionalDefault)
         }
     }
 
     /// **An opacity as the walk shows it at `frame`** — `resolved`, or the finger's where `target`'s
-    /// Opacity slider holds it (`HeldChannel`, TODO (179)).
+    /// Opacity slider or a graph-band drag of its curve holds it (TODO (179)).
     private func shownOpacity(_ resolved: @autoclosure () -> Double, of target: KeyframeTarget, atFrame frame: Int,
                               holding held: HeldEdit?) -> Double {
-        guard let held = held?.channel?.holding(.opacity, of: target) else { return resolved() }
-        return held.value(atFrame: frame)
+        held?.channelValue(.opacity, of: target, atFrame: frame) ?? resolved()
     }
 
     /// **A transformation layer's pose as the walk shows it** — the finger's where a drag holds one
@@ -1334,10 +1331,10 @@ extension CanvasManager {
             // every block, so a layer with several blocks is several starts.
             guard let poser = containerPoser(
                 pose: pose, atFrame: entryFrame, blockStart: layer.cels[celIndex].startFrame,
-                channels: PoserChannels(layer: layer, holding: held?.channel),
+                channels: PoserChannels(layer: layer, holding: held),
                 shareOf: { q, positional in
                     self.parallaxShare(of: stack[q], atFrame: carriedFrame[q], positionalDefault: positional,
-                                       holding: held?.channel)
+                                       holding: held)
                 },
                 stack: stack, position: position) else { continue }
             posers.append(poser)

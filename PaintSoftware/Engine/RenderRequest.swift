@@ -1384,7 +1384,7 @@ extension CanvasManager {
         // registry, the mode flags) and `resolve()` runs on a background queue and on
         // `PixelOps.parallelMap`'s workers. What crosses the seam is a `DerivedCelContent` whose
         // closure captures only values — its own doc comment states that contract.
-        let provider = celContentProvider(atFrame: frame, holding: held?.interpolation)
+        let provider = celContentProvider(atFrame: frame, holding: held)
         for index in layers.indices {
             let layer = layers[index]
             let leafFrame = frames[index] ?? frame

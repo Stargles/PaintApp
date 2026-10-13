@@ -1299,29 +1299,6 @@ private extension PaintUITestCase {
         let end: Double
     }
 
-    /// **A mark on a frame, put there the only way an artist can: tap the frame's column of the block,
-    /// then Add Keys on the menu it raises.** A frame's column is a fraction of the block, which reaches
-    /// past its right edge for a frame the block does not cover — the only handle a test has on an empty
-    /// slot (`testAnEmptySlotCanStillBeGivenAKeyframe`'s technique).
-    ///
-    /// **One tap or two, decided by what happened rather than assumed.** `handleTapOnCel` and
-    /// `handleTapOnGap` are a two-stage contract: a tap on a frame that is *not* already selected only
-    /// selects it, and the menu comes up on the next one. So a frame the playhead is already sitting on —
-    /// frame 0 on a fresh document — needs a single tap, and tapping twice there opens the menu and
-    /// dismisses it again, which is indistinguishable from the menu never having opened.
-    func addKeysMark(_ app: XCUIApplication, on block: XCUIElement, ofLength length: Int, atFrame frame: Int) {
-        let slot = block.coordinate(withNormalizedOffset:
-            CGVector(dx: (Double(frame) + 0.5) / Double(length), dy: 0.5))
-        let add = app.buttons["timeline.menu.Add Keys"]
-        slot.tap()
-        if !add.waitForExistence(timeout: 2) {
-            slot.tap()
-            XCTAssertTrue(add.waitForExistence(timeout: 5),
-                          "No Add Keys on frame \(frame)'s menu — the artist's only way in")
-        }
-        add.tap()
-    }
-
     /// **A layer with one genuinely animated effect channel, authored the only way the app can author
     /// one: two keyframe marks and one slider drag.**
     ///

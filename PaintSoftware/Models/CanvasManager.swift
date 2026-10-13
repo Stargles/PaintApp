@@ -4672,6 +4672,7 @@ final class CanvasManager: ObservableObject {
         // its held value was never written (TODO (179)).
         revertHeldGrade()
         revertHeldChannel()
+        revertHeldCurves()
         revertInterpolationHold()
         // The gradient panel is the opposite case: it has no finger to be under, so what is open is
         // an adjustable edit, and it commits so the undo that follows has a real step to revert. A value

@@ -2022,12 +2022,14 @@ struct CanvasView: UIViewRepresentable {
             heldFrameLanding.update(held: heldDrawsWholeFrame)
             if heldFrameLanding.phase == .held {
                 requestHeldFrame()
-            } else if canvasManager.liveEdit?.channel != nil || canvasManager.liveEdit?.valueFill != nil {
+            } else if canvasManager.liveEdit?.channel != nil || canvasManager.liveEdit?.channelCurves != nil
+                        || canvasManager.liveEdit?.valueFill != nil {
                 showHostAlphasAndFills()
             }
-            // An in-between under an interpolation drag, and the guide it shapes: drawn by its host and
-            // the guide overlay from the hold (`HeldInterpolation`).
-            if canvasManager.liveEdit?.interpolation != nil {
+            // A derivation the hold changes — an in-between under an interpolation drag, and the guide it
+            // shapes, or a cel an animation group's graph drag poses: drawn by its host (and the guide
+            // overlay) from the hold.
+            if canvasManager.liveEdit?.interpolation != nil || canvasManager.liveEdit?.groupPose != nil {
                 updateInterpolationPreviews()
                 updateGuideOverlay()
             }
@@ -3317,11 +3319,12 @@ struct CanvasView: UIViewRepresentable {
                     host.strokeView.setInterpolationImage(nil)
                     continue
                 }
-                // **An in-between under an interpolation drag is drawn off the main thread** (TODO
-                // (179), `HeldInterpolation`): only the one the drag changes, at `.preview` quality, into
-                // the host's surface — and every other host keeps the picture it has, at the quality it
-                // has it, so the drag's touch-down and lift re-render nothing they do not change.
-                let held = canvasManager.liveEdit?.interpolation.flatMap { $0.affects(shown.cel) ? $0 : nil }
+                // **A derivation a hold changes is drawn off the main thread** (TODO (179)) — an in-between
+                // under an interpolation drag, a cel an animation group's graph drag poses: only the ones
+                // the drag changes, at `.preview` quality, into the host's surface — and every other host
+                // keeps the picture it has, at the quality it has it, so the drag's touch-down and lift
+                // re-render nothing they do not change.
+                let held = canvasManager.liveEdit.flatMap { $0.changesDerivation(of: shown.cel) ? $0 : nil }
                 if held == nil { host.strokeView.showHeldDerivation(nil) }
                 // **The whole per-layer decision is `LiveCelPreview`, and none of it is left here** —
                 // read that type for why. What this loop used to do instead was ask

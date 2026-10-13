@@ -1288,7 +1288,7 @@ extension CanvasManager {
 
     /// This document's derivations, bound to `frame` — what a caller hands `PixelOps.rasterize` so
     /// that a derived cel stops flattening blank. See `CelContentProvider`.
-    func celContentProvider(atFrame frame: Int, holding held: HeldInterpolation? = nil) -> CelContentProvider {
+    func celContentProvider(atFrame frame: Int, holding held: HeldEdit? = nil) -> CelContentProvider {
         CelContentProvider(frame: frame) { [weak self] cel, frame, inherited in
             self?.derivedCelContent(for: cel, atFrame: frame, inheriting: inherited, holding: held)
         }
@@ -1345,7 +1345,7 @@ extension CanvasManager {
     func derivedCelContent(for cel: Cel, atFrame frame: Int,
                            inheriting inherited: PoseMap? = nil,
                            overridingT overrideT: CGFloat? = nil,
-                           holding held: HeldInterpolation? = nil) -> DerivedCelContent? {
+                           holding held: HeldEdit? = nil) -> DerivedCelContent? {
         // **Two derivation sources, and they are alternatives rather than a composition** —
         // KEYFRAMES.md §2.18. *"A derived in-between carries no object channels"*: its display list is
         // computed, so it has no stable elements to key, and Move is already refused outright on one
@@ -1356,7 +1356,7 @@ extension CanvasManager {
         // The pose arm is tried second and answers nil on one `isEmpty` for every cel of every
         // rasterize in a document that has never been keyframed, which is the contract this whole
         // function is written to.
-        guard let recipe = recipe(of: cel, holding: held), let canvasSize else {
+        guard let recipe = recipe(of: cel, holding: held?.interpolation), let canvasSize else {
             guard cel.interpolation == nil else { return nil }
             // **VIDEO.md §5's third branch**, and it is asked before the pose arm rather than beside
             // it because it is a *superset* of that arm: a video cel can be posed like any other, so
@@ -1366,13 +1366,16 @@ extension CanvasManager {
             //
             // It answers nil on one memoized `Bool` for a cel holding no video, which is every cel
             // of every document that has never imported one — this function's stated contract.
-            return videoCelContent(for: cel, atFrame: frame, inheriting: inherited)
-                ?? posedCelContent(for: cel, atFrame: frame, inheriting: inherited)
+            //
+            // **An animation group's graph drag holds the cel's tracks** (TODO (179)); both arms read them.
+            let tracks = held?.groupPose?.transformTracks(ofCel: cel.id)
+            return videoCelContent(for: cel, atFrame: frame, inheriting: inherited, tracks: tracks)
+                ?? posedCelContent(for: cel, atFrame: frame, inheriting: inherited, tracks: tracks)
         }
 
         let t = overrideT ?? recipe.t
         let options = interpolationOptions
-        let guideStrokes = guides(driving: recipe, holding: held?.guide)
+        let guideStrokes = guides(driving: recipe, holding: held?.interpolation?.guide)
         // A reprojection's content is the cel's own display list, which no evaluator-side
         // `ContentProvider` can reach — the recipe holds no reference to the cel it lives on, by
         // design (see `InterpolationEvaluator.evaluate`'s `subject`).
@@ -1453,10 +1456,11 @@ extension CanvasManager {
     /// standing rather than a gap: `InterpolationEvaluator` passes a video through unwarped and
     /// answers with an image, so there is no element left for a frame map to resolve.
     func videoCelContent(for cel: Cel, atFrame frame: Int,
-                         inheriting inherited: PoseMap? = nil) -> DerivedCelContent? {
+                         inheriting inherited: PoseMap? = nil,
+                         tracks held: [String: TransformTrack]? = nil) -> DerivedCelContent? {
         guard let vector = cel.vector, vector.holdsVideo, let canvasSize else { return nil }
         let container = inherited.flatMap { $0.isIdentity ? nil : $0 }
-        let mappings = Self.poseMappings(cel.transformTracks, atCelLocalFrame: frame - cel.startFrame)
+        let mappings = Self.poseMappings(held ?? cel.transformTracks, atCelLocalFrame: frame - cel.startFrame)
 
         let suppressed = vector.suppressedElementIDs
         let elements = suppressed.isEmpty ? vector.elements
@@ -1536,7 +1540,7 @@ extension CanvasManager {
     func livePreview(forCel cel: Cel, atFrame frame: Int,
                      inheriting inherited: PoseMap? = nil) -> LiveCelPreview {
         if let derived = derivedCelContent(for: cel, atFrame: frame, inheriting: inherited,
-                                           holding: liveEdit?.interpolation) {
+                                           holding: liveEdit) {
             return .derived(derived)
         }
         return cel.interpolation == nil ? .motionGroupTint : .cleared

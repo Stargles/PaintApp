@@ -916,8 +916,8 @@ private struct ChannelScalarControl: View {
 
     /// What the control shows: the held value while its slider is under the finger, `resolved` else.
     private var shown: Double {
-        guard let held = liveEdit.channel?.holding(channel, of: target) else { return resolved }
-        return held.value(atFrame: held.frame)
+        if let held = liveEdit.channel?.holding(channel, of: target) { return held.value(atFrame: held.frame) }
+        return liveEdit.channelValue(channel, of: target, atFrame: canvasManager.currentFrame) ?? resolved
     }
 
     private func hold(_ value: Double) {
@@ -1139,7 +1139,8 @@ private struct ParallaxItemsSection: View {
 
     /// An item's share as shown: the held one while its slider is under the finger.
     private func share(of item: ParallaxItem) -> Double {
-        liveEdit.channel?.holding(.parallaxShare, of: item.target).map { $0.value } ?? item.share
+        liveEdit.channel?.holding(.parallaxShare, of: item.target).map { $0.value }
+            ?? liveEdit.channelValue(.parallaxShare, of: item.target, atFrame: canvasManager.currentFrame) ?? item.share
     }
 
     var body: some View {

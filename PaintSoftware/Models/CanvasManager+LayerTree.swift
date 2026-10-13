@@ -265,17 +265,17 @@ extension CanvasManager {
     /// (`renderNodes(inContainer:atFrame:)`) takes its frame as an argument and this cannot, which
     /// is the same split `layerEffect` and `layerEffect(atFrame:)` already carry.
     ///
-    /// **And as the finger holds it**: an Opacity slider under the finger on this layer or a folder
-    /// round it is read in place of the document's (`HeldChannel`, TODO (179)), which is how a drag on
-    /// a canvas Core Animation draws moves the host's alpha on the tick with no pass at all.
+    /// **And as the finger holds it**: an Opacity slider, or a graph-band drag of the Opacity curve, under
+    /// the finger on this layer or a folder round it is read in place of the document's (TODO (179)), which
+    /// is how a drag on a canvas Core Animation draws moves the host's alpha on the tick with no pass at all.
     func effectiveOpacity(ofLayer index: Int) -> Double {
         guard layers.indices.contains(index) else { return 1 }
         let frame = currentFrame
-        let held = liveEdit?.channel
-        let own = held?.holding(.opacity, of: .layer(id: layers[index].id))?.value(atFrame: frame)
+        let held = liveEdit
+        let own = held?.channelValue(.opacity, of: .layer(id: layers[index].id), atFrame: frame)
             ?? layers[index].opacity(atFrame: frame)
         return ancestorFolders(ofLayer: index).reduce(own) { opacity, folder in
-            opacity * (held?.holding(.opacity, of: .folder(id: folder.id))?.value(atFrame: frame)
+            opacity * (held?.channelValue(.opacity, of: .folder(id: folder.id), atFrame: frame)
                        ?? folder.opacity(atFrame: frame))
         }
     }
