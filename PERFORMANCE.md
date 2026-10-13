@@ -5935,8 +5935,8 @@ column still rendered every tick.
   paid instead. Assessment risk 1, confirmed. What falls is what reaches the render server, which is what
   killed `backboardd` in §29 — INFERRED to be the figure that matters on the device, and not measurable here.
 - **Reduced detail while dragging** (the assessment's §8, option 2) is the lever for the 4096² rate: a quarter
-  of the pixels is roughly four times the rate and a quarter of the surfaces. INFERRED from the area, not
-  built; the owner is asked with these numbers.
+  of the pixels is roughly four times the rate and a quarter of the surfaces, INFERRED from the area. The
+  owner ruled it for big scenes; §30.4 is the measurement, and the rate was 22 times, not four.
 
 ### 30.3 What it does not show
 
@@ -5944,6 +5944,32 @@ column still rendered every tick.
   composite is slower than this host's. `-playbackProbe -probeMode effect` runs on the iPad as it is.
 - The onion skin off, the Opacity slider (TODO (179)'s commit 6, `-probeMode opacity` then), and a take — a
   slider recorded while the scene plays shows the held frame at each frame it is minted on.
+
+### 30.4 Half detail on a big scene — the owner's ruling, measured (2026-10-13)
+
+Read on §30.2, the owner ruled *lower detail only on big scenes* (RENDER.md §2.12's one exception): above
+twice 2048×1024 the held frame is drawn at half a side while the finger is down (`DragPreviewDetail`,
+`RenderSizing.dragPreview`), its effects' pixel lengths halved with it, and the lift lands the bake at full
+detail. **MEASURED** as §30.1 — Release, iPad (9th generation) simulator, `-probeMode effect -probeLayers 5`,
+192 MiB budget, onion on, 100 ticks 80 ms apart — with `surfaceBytesPeak` new in the probe
+(`WindowSurfaceView.residentBytes`, the held frame's pair being the only surfaces up). *Before* is `ddfd6ec`
+(full detail, the probe's surface count added); *after* is this change. Two takes each, alternated, every run
+80–84% idle at its start and 95% at its end.
+
+| 4096², 100 ticks over 8.5 s | held frames landed (rate) | one composite | surfaces held | footprint growth over the drag (peak) | main thread busy |
+|---|---|---|---|---|---|
+| full detail — before | 9, 9 (1.05/s) | 999, 945 ms | **128 MiB** | +767, +807 MB (1.48, 1.45 GB) | 190, 196 ms |
+| half detail — after | **100, 100 (11.7/s — every tick)** | **45, 43 ms** | **32 MiB** | **+0, +0 MB** (0.71, 0.64 GB) | 284, 290 ms |
+
+- **At 4096² the preview now keeps up with the finger**, as 2048×1024 did — 22 times the composite rate, not
+  the four times a quarter of the pixels predicted (§30.2, INFERRED), because a 2048² frame fits the 192 MiB
+  budget whole where a 4096² one is composited in strips (RENDER §3.8). MEASURED.
+- **The drag no longer grows the app**: the full-detail composite's working set was the +0.8 GB; a half-detail
+  one fits inside what the touch-down already held. The surfaces are a quarter (32 against 128 MiB). MEASURED.
+- **Main-thread busy rises with the rate** — 100 landings and mints instead of 9 — to ~34 ms a second.
+- **The lift** is unchanged: the two frames' bakes land 1.3 s apart after it in both columns (2,525–2,935 ms
+  of `bakeComposite`), and the half-detail frame stays up until the first does (`HeldFrameLanding`).
+- At or below the threshold nothing changed — 2048×1024 and the picker's default 2048² draw at full detail.
 
 ## 31. A colour picker's tick rebuilt the whole picker, and the Wheel's shading was 14,400 rectangles (2026-10-13)
 

@@ -56,14 +56,14 @@ their files are repaired. Build `2974b33` broke this rule and lost the owner's k
 `ElementEditSession`, `WindowSurfaceView`) to every control that still writes the document per tick.
 The assessment's commits 1–4 are merged: `LatestWins`; the live pair, onion skin and eyedropper on it;
 one held slot, `CanvasManager.liveEdit`; and the effect parameter sliders, held, with the whole frame
-composited from the held grade (measured in PERFORMANCE.md §30). §30 read 2026-10-12: 2048×1024 keeps up
-with every tick; 4096² previews ~1/s at full detail. Commits 5–10 of
+composited from the held grade (measured in PERFORMANCE.md §30). The owner's half-detail ruling is
+built (below; RENDER.md §2.12, PERFORMANCE.md §30.4: 4096² now previews every tick). Commits 5–10 of
 `~/PaintWork/design/s48-179-throttle-assessment.md` §5 are next.
 
 **Ruled 2026-10-12, on §30**: *lower detail only on big scenes* — above about 4 million pixels (twice the
 owner's usual 2048×1024) a drag preview is drawn at half detail while the finger is down and full detail
 at the lift; at or below it, full detail. This is a drag-only exception to RENDER.md §2.12 ("the knob is
-the truth"), made by the owner; the threshold is one named constant.
+the truth"), made by the owner; the threshold is one named constant (`DragPreviewDetail`).
 
 The owner, asked whether the remaining per-tick sliders (layer Opacity, effect parameters, mask tuning,
 the text panel) should get (173)'s fix: *"for all of them, cant there be a system where it just slows
@@ -87,7 +87,7 @@ why: pictures handed to Core Animation faster than the render server frees them)
 - [ ] One held-value + latest-wins preview seam they all use; no per-control copies — commits 1–4 merged
       (`1a715ec`..`0f09447`); 5–10 (whole-effect editors, opacity, mask tuning, shape/text, interpolation,
       fill fold) to go.
-- [ ] Half-detail drag preview above the size threshold.
+- [x] Half-detail drag preview above the size threshold (PERFORMANCE.md §30.4).
 - [ ] The brush colour panel's tick: `brushColor` is `@Published` on `CanvasManager`, so every tick of a
       brush colour drag is a whole-editor SwiftUI pass (8–14 ms on the iPad 9 simulator, PERFORMANCE §31).
       Decided (orchestrator, behaviour-neutral): the brush colour gets its own small publisher — the

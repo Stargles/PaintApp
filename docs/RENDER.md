@@ -88,6 +88,16 @@ the build order.
     project's folder.
 12. **The knob is the truth.** *"If the user slides the slider to full, then the canvas should be set to
     full."* Nothing may silently render below the knob's resolution.
+    **One exception, the owner's, 2026-10-12 — a drag on a big scene.** Asked how a whole-picture drag preview
+    should look on a 4096² scene once it measured about one picture a second at full detail (PERFORMANCE.md §30),
+    the owner chose *lower detail only on big scenes*: above about 4 million pixels — twice their usual
+    2048×1024 — a preview redrawn under the finger is drawn at **half detail** while the finger is down, and the
+    picture at the lift is full detail; at or below it, full detail throughout. One named constant
+    (`DragPreviewDetail.halfDetailAbovePixels`), measured on what the knob asks for; only the held frame asks for
+    it (`RenderSizing.dragPreview`), so the bake, the store and export stay at the knob. At half detail the
+    effects' lengths in pixels (a blur's radius, an outline's width) are halved with the picture, so it is the
+    lift's picture, softer — not the knob's 50%, which draws those lengths in its own pixels because what it
+    draws is what it exports.
 13. **A canvas that shows the previous composite for a split second after pen-up is acceptable**, provided
     the main thread never freezes: the artist must be able to move the canvas and lay the next stroke in
     that interval.
@@ -439,11 +449,12 @@ bake mints at `.liveComposite` and the three share their flattens across two que
 **A grade under an effect slider is drawn whole — TODO (179), 2026-10-12.** A slider's value is held off the
 document while the finger is down (`CanvasManager.liveEdit`), so a tick dirties nothing and the baker idles; the
 canvas composites the frame itself with the held grade resolved in (`makeFrameRecipe(holding:)`), at
-`.liveComposite`, on `sandwichQueue`, one composite in flight and the newest value minted when it lands, and
-presents it through a canvas-sized `IOSurface` pair (`WindowSurfaceView`). That held frame is a *live picture*,
-the pair's product rather than a second producer of `full`: transient, never stored, byte-identical to the bake of
-what the lift writes (`LiveEditLogicTests`), and up after the lift only until that bake lands
-(`HeldFrameLanding`). The bake stays the one writer of the store.
+`.dragPreview` — the live size, or half of it a side on a big scene (§2.12's exception) — on `sandwichQueue`, one
+composite in flight and the newest value minted when it lands, and presents it through an `IOSurface` pair
+(`WindowSurfaceView`) stretched over the canvas. That held frame is a *live picture*, the pair's product rather
+than a second producer of `full`: transient, never stored, byte-identical to the bake of what the lift writes at
+full detail (`LiveEditLogicTests`), and up after the lift only until that bake lands (`HeldFrameLanding`). The
+bake stays the one writer of the store.
 
 **A transform being dragged holds the baker and is drawn by bands — TODO (125), 2026-10-02.** While a pose is
 under the finger (a transformation layer's Move box, a take recorded through it, a pose node in the graph editor:
