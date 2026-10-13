@@ -113,32 +113,6 @@ why: pictures handed to Core Animation faster than the render server frees them)
 - [ ] Half-detail drag preview above the size threshold.
 - [ ] Measured with `PlaybackProbe` before/after, as §29 was.
 
-## (180) Padding On Top is translucent
-
-**Status** — asked 2026-10-12; small, queued behind (179)'s measurement (no test runs beside a perf take).
-
-*"right now if I have the padding on top, the padding opacity is set to opaque so I cant see what I am
-drawing in the padding. What I want is it to be translucent but on top."*
-
-`PaddingCoverView` fills the margin with `PaddingCoverView.tint`, the same opaque grey as the backdrop
-under the paper (`CanvasView.makeUIView`'s `paddingBackdrop`). The cover gets a translucent grey of its
-own; the backdrop stays opaque, so an empty margin reads the same and ink drawn into it shows through.
-
-- [ ] Translucent cover; the toggle's caption in `SettingsMenu.paddingOnTopToggle` rewritten; any UI
-      test that probes the margin over ink updated; driven and screenshotted.
-
-## (181) The vector eraser defaults to Cut
-
-**Status** — asked 2026-10-12; small, batched with (180).
-
-*"default eraser should be cut mode"*
-
-New documents start on **Cut** (`VectorEraserMode.cutPoints`) rather than Erase. The default is spelled
-three times today (`CanvasManager.vectorEraserMode`, `ProjectManifest`'s init, `StrokeCanvasView`) — one
-definition. A document's own saved mode is untouched (it is per document, (176) row B4).
-
-- [ ] One default, Cut; a new document's eraser panel shows Cut.
-
 ## (182) A Select boolean add is its own undo step
 
 **Status** — asked 2026-10-12; small, batched with (180).

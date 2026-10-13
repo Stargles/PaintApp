@@ -1359,9 +1359,9 @@ final class EraserAndPersistenceUITests: PaintUITestCase {
 
         XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, at: middle)), "Sanity: the fill should be visible before erasing it")
 
-        let eraserButton = app.buttons["toolbar.eraserButton"]
-        XCTAssertTrue(eraserButton.waitForExistence(timeout: 5))
-        eraserButton.tap() // select
+        // The new document's layer is a vector layer, where the fill is an element of its own and only
+        // Erase reaches it — a new document's eraser is on Cut, which cuts strokes and leaves fills.
+        selectVectorEraserMode(app, "Erase")
         setBrushSize(app, tool: "eraser", normalized: 1.0) // menu, second tap, Size slider
 
         drawLine(on: canvas, from: CGVector(dx: loopTop.dx, dy: middle.dy), to: CGVector(dx: loopBottom.dx, dy: middle.dy))
