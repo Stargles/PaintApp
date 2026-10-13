@@ -872,8 +872,9 @@ reproduce it at all. `PaintSoftware/Debug/ActionRecorder.swift` turns those four
 greppable JSONL file. **Reach for it before spending runs trying to reproduce something the owner
 saw and you can't** — the fill-tool gesture bug in [BUGS.md](BUGS.md) is exactly that shape.
 
-**Turning it on**: Actions menu → **"Record My Actions"**, in its own section just below the
-pencil-only toggle. Reproduce the bug, then **"Stop Recording"**.
+**Turning it on**: Settings menu → **"Record My Actions"**, in the recorder section beside
+"Canvas freezes caught: N" (the lifetime repair count, also in every flight header). Reproduce the
+bug, then **"Stop Recording"**.
 
 **The flight recorder is always on and writes nothing until asked.** From the editor's first
 appearance `ActionRecorder` keeps the last 90 s of the cheap events (touch-began/-ended with the
@@ -881,12 +882,12 @@ recognizers each bound, recognizer transitions, `requireFailure`, model changes,
 memory, and saves them as `flight-*.jsonl` beside the recordings when the canvas replaces stranded
 recognizers (a `stranded` flight ends in two notes: which it replaced, and every recognizer under the
 window then out of `.possible` or still counting a touch), when `CanvasWedgeDetector` sees the canvas
-still wedged, or on Actions → **"Save Last 90 Seconds"** — so after a device-only glitch the owner does
+still wedged, or on Settings → **"Save Last 90 Seconds"** — so after a device-only glitch the owner does
 nothing, or taps that one row. Its cost on a
 stroke is PERFORMANCE.md §23 (below the stroke's own run-to-run noise).
 
 **Where recordings land**: `Documents/Recordings/recording-yyyyMMdd-HHmmss.jsonl` (and
-`flight-…jsonl`), inside the app container. The Actions menu lists them with Share and Delete, so the owner can AirDrop one straight
+`flight-…jsonl`), inside the app container. The Settings menu lists them with Share and Delete, so the owner can AirDrop one straight
 out. To pull one over the cable instead:
 
 ```bash
