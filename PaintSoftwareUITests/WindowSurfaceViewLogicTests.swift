@@ -243,4 +243,109 @@ final class WindowSurfaceViewLogicTests: XCTestCase {
         XCTAssertEqual(view.presentedCount, 0)
         XCTAssertTrue(view.isHidden)
     }
+
+    // MARK: - A picture asked for is never stranded
+
+    /// Spins the main queue until `done`, failing by name if it is not reached.
+    private func spin(until done: () -> Bool, _ what: String, file: StaticString = #filePath, line: UInt = #line) {
+        let deadline = Date().addingTimeInterval(3)
+        while !done(), Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.005))
+        }
+        XCTAssertTrue(done(), what, file: file, line: line)
+    }
+
+    /// **A frame dropped at its landing still lets the one behind it draw** — a draw that answers
+    /// another rectangle (the element moved between the two reads) is not shown, and its landing must
+    /// hand the worker on like any other: the newest frame, asked for while it drew, is the picture
+    /// left up.
+    func testAFrameDroppedAtItsLandingStillStartsTheNewestOneWaitingBehindIt() throws {
+        let view = WindowSurfaceView(queue: queue)
+        let window = CGRect(x: 0, y: 0, width: 8, height: 4)
+        let gate = DispatchSemaphore(value: 0)
+        var outcomes: [String] = []
+        view.present(window: window, placement: .identity, draw: { _ in
+            gate.wait()
+            return CGRect(x: 1, y: 0, width: 8, height: 4)
+        }, finished: { outcomes.append("dropped: \($0 ? "shown" : "not shown")") })
+        view.present(window: window, placement: .identity, draw: { cg in
+            UIColor.red.setFill()
+            cg.fill(CGRect(origin: .zero, size: window.size))
+            return window
+        }, finished: { outcomes.append("newest: \($0 ? "shown" : "not shown")") })
+        gate.signal()
+        spin(until: { outcomes.count == 2 }, "both frames reported how they ended")
+        XCTAssertEqual(outcomes, ["dropped: not shown", "newest: shown"])
+        XCTAssertEqual(view.presentedCount, 1)
+        let surface = try XCTUnwrap(view.layer.contents as? IOSurface)
+        _ = surface.lock(options: [.readOnly], seed: nil)
+        defer { _ = surface.unlock(options: [.readOnly], seed: nil) }
+        let bytes = surface.baseAddress.assumingMemoryBound(to: UInt8.self)
+        XCTAssertGreaterThan(Int(bytes[2]), Int(bytes[1]) + 100, "the newest frame (red) is what is on the layer")
+    }
+
+    /// **A frame that cannot be minted does not wedge the view** — a window with no area has no surface
+    /// to draw into, the mint answers nothing, and the next frame asked for is drawn as usual.
+    func testAFrameWithNoSurfaceToDrawIntoLeavesTheViewAbleToDrawTheNext() {
+        let view = WindowSurfaceView(queue: queue)
+        var outcomes: [Bool] = []
+        view.present(window: .zero, placement: .identity, draw: { _ in .zero }, finished: { outcomes.append($0) })
+        XCTAssertEqual(view.presentedCount, 0)
+        present(view, window: CGRect(x: 0, y: 0, width: 8, height: 4), count: 1)
+        XCTAssertEqual(view.presentedCount, 1, "the frame after the unmintable one was drawn and shown")
+        XCTAssertEqual(outcomes, [], "a frame never minted never reports")
+    }
+
+    /// **A frame asked for from inside `finished` is drawn after the landing returns, not inside it** —
+    /// the held edit's `finished` re-shows overlays, and a caller may ask for a picture there.
+    func testAFrameAskedForInsideFinishedIsDrawnAfterTheLandingReturns() {
+        let view = WindowSurfaceView(queue: queue)
+        let window = CGRect(x: 0, y: 0, width: 8, height: 4)
+        let lock = NSLock()
+        var events: [String] = []
+        func record(_ event: String) { lock.lock(); events.append(event); lock.unlock() }
+        view.present(window: window, placement: .identity, draw: { _ in record("draw first"); return window },
+                     finished: { _ in
+            record("first finished")
+            view.present(window: window, placement: .identity, draw: { _ in record("draw second"); return window },
+                         finished: { _ in record("second finished") })
+            record("first finished returns")
+        })
+        spin(until: { view.presentedCount == 2 }, "the frame asked for inside finished was shown")
+        lock.lock(); let order = events; lock.unlock()
+        XCTAssertEqual(order, ["draw first", "first finished", "first finished returns", "draw second", "second finished"],
+                       "the second frame was drawn after the first's landing returned")
+    }
+
+    /// **Frames asked for while a draw waits for the render server replace each other, and the newest
+    /// is drawn** — the wait for `IOSurface.isInUse` is part of the draw in flight, so it is a state the
+    /// scheduler's single waiting slot has to cover: the draw that waits is not abandoned, the ones
+    /// asked for during the wait are not queued behind it one each, and none of them is lost.
+    func testFramesAskedForWhileADrawWaitsForTheServerCollapseToTheNewest() throws {
+        let view = WindowSurfaceView(queue: queue)
+        let window = CGRect(x: 0, y: 0, width: 8, height: 4)
+        present(view, window: window, count: 1)
+        let held = try XCTUnwrap(view.layer.contents as? IOSurface, "frame one's surface is on the layer")
+        held.incrementUseCount()
+        var released = false
+        defer { if !released { held.decrementUseCount() } }
+        present(view, window: window, count: 1)
+
+        let lock = NSLock()
+        var drawn: [String] = []
+        func draw(_ name: String) -> (CGContext) -> CGRect? {
+            { _ in
+                lock.lock(); drawn.append(name); lock.unlock()
+                return window
+            }
+        }
+        view.present(window: window, placement: .identity, draw: draw("first asked"))
+        view.present(window: window, placement: .identity, draw: draw("replaced"))
+        view.present(window: window, placement: .identity, draw: draw("newest"))
+        held.decrementUseCount()
+        released = true
+        spin(until: { view.presentedCount == 4 }, "the draw that waited and the newest frame asked for during its wait were both shown")
+        lock.lock(); let order = drawn; lock.unlock()
+        XCTAssertEqual(order, ["first asked", "newest"], "the replaced frame was never drawn")
+    }
 }
