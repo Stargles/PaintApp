@@ -31,18 +31,14 @@ final class LiveHalvesStripMetalLogicTests: XCTestCase {
     private let green = UIColor(red: 0, green: 1, blue: 0, alpha: 1)
     private let blue = UIColor(red: 0, green: 0, blue: 1, alpha: 1)
 
-    /// `renderResolution` persists through `UserDefaults` into the next run on the same simulator,
-    /// and every recipe here is sized by it. See `LiveHalvesStripLogicTests.setUp`.
     override func setUp() {
         super.setUp()
-        UserDefaults.standard.removeObject(forKey: CanvasManager.renderResolutionDefaultsKey)
         Compositor.backend = .metal
         MaskResolver.clearCache()
         PixelOps.clearRasterizeCache()
     }
 
     override func tearDown() {
-        UserDefaults.standard.removeObject(forKey: CanvasManager.renderResolutionDefaultsKey)
         Compositor.backend = Compositor.defaultBackend
         // **Restored here and not merely at the end of the test that arms it.** The override stands
         // in for the device, it is read from whatever queue is compositing, and a suite that leaked

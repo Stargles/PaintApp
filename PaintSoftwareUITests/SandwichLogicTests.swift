@@ -59,19 +59,7 @@ final class SandwichLogicTests: XCTestCase {
         Compositor.backend = .coreGraphics
     }
 
-    /// **`renderResolution` writes through to `UserDefaults`, and a test that sets it poisons every
-    /// test that runs after it — in this process and in the next run on the same simulator.**
-    ///
-    /// Learned the hard way rather than anticipated: the three render-resolution cases below set it to
-    /// `.half` and `.threeQuarter`, and every `CanvasManager()` reads the stored value in its property
-    /// initialiser, so eight unrelated cases in this file started compositing at 32² and failing with
-    /// "Widths differ: 32 is not 64". Nothing in the failure named the setting.
-    ///
-    /// Removing the key rather than writing `.full` back, because those are different states: the key
-    /// being absent is what a fresh install has, and it is the only one of the two that leaves the
-    /// simulator's defaults exactly as this file found them.
     override func tearDown() {
-        UserDefaults.standard.removeObject(forKey: CanvasManager.renderResolutionDefaultsKey)
         Compositor.backend = Compositor.defaultBackend
         super.tearDown()
     }

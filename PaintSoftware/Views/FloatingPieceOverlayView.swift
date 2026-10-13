@@ -51,7 +51,7 @@ final class FloatingPieceOverlayView: TransformOverlayView, UIGestureRecognizerD
     /// two-finger pan would otherwise begin in the same breath as the pan that is meant to win.
     var isDragging: Bool { drag != nil }
 
-    /// Mirrors `CanvasManager.toolSwitches.pencilOnlyDrawing`, pushed down every `updateFloatingOverlay()` call —
+    /// Mirrors `CanvasManager.pencilOnlyDrawing`, pushed down every `updateFloatingOverlay()` call —
     /// the same pattern `SelectionOverlayView.pencilOnlyDrawing`'s doc comment describes. TODO (47):
     /// the tap-outside commit below used to run unconditionally, on the theory that settling a float
     /// writes nothing so pencil-only mode had no stake in it. The owner's report is the eyedropper's

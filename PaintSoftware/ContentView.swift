@@ -15,6 +15,10 @@ struct ContentView: View {
     /// it enters the editor and saves every change to them as it is made.
     @State private var toolSwitchesKeeper = ToolSwitchesKeeper()
 
+    /// Hands the app-wide Fingers Can Paint and Render Resolution (`AppSettings`) to each document as it
+    /// enters the editor, and saves every change to them as it is made.
+    @State private var settingsKeeper = AppSettingsKeeper()
+
     /// The autosave — TODO (76). `AutosaveClock` decides *when*; this view supplies the edits, the
     /// hold and the save, because it is the one object that can see all three: the manager's edit
     /// signal, the screen, and `saveIfNeeded`. See `AutosaveDriver`.
@@ -76,6 +80,9 @@ struct ContentView: View {
                 return
             }
             guard PlaybackProbe.isArmed else { return }
+            // The probe's document enters the editor like any other, at the device's own Render
+            // Resolution — which is what a measurement on the owner's iPad is of.
+            settingsKeeper.follow(canvasManager)
             await PlaybackProbe.run(canvasManager: canvasManager) { screen = .editor }
         }
         // **The app is a dark app, and this is where it says so** — BUGS.md, "The channel-list
@@ -143,7 +150,8 @@ struct ContentView: View {
     /// sync, and `returnToGallery` always sets `screen` after its save has landed a URL, so the
     /// document just closed is still the one this reads. **A New Canvas that was cancelled has no URL
     /// and answers with the folder it was started in** (TODO (152)): the artist chose that folder by
-    /// standing in it, and Cancel puts them back there.
+    /// standing in it, and Cancel puts them back there. **At launch, with no document yet, it is the
+    /// folder the gallery was last in** (`AppSettings.galleryFolder`, TODO (176)).
     ///
     /// `GalleryView`'s `path` is already root-first folder *names*, not URLs, precisely so a storage
     /// relocation re-roots instead of pointing at a stale absolute path — `folderComponents(of:under:)`
@@ -153,7 +161,9 @@ struct ContentView: View {
     /// `Projects/` altogether. If the folder was since deleted or moved, `GalleryView.refresh()`'s own
     /// walk back to the nearest surviving ancestor handles it — no second mechanism needed here.
     private var galleryReturnPath: [String] {
-        guard let folder = canvasManager.projectURL?.deletingLastPathComponent() ?? newProjectFolder else { return [] }
+        guard let folder = canvasManager.projectURL?.deletingLastPathComponent() ?? newProjectFolder else {
+            return AppSettings.standard.galleryFolder
+        }
         return ProjectBackupManager.folderComponents(of: folder, under: ProjectStore.projectsDirectory) ?? []
     }
 
@@ -188,6 +198,7 @@ struct ContentView: View {
             canvasManager.applyEditorPreferences(preferences)
         }
         toolSwitchesKeeper.follow(canvasManager)
+        settingsKeeper.follow(canvasManager)
     }
 
     // MARK: - Autosave (TODO (76))

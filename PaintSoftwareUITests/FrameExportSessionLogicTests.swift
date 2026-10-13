@@ -39,15 +39,12 @@ import UIKit
 ///
 /// Fixtures are on a temp `cachesDirectoryOverride` and a temp `outputDirectoryOverride`, force
 /// `.coreGraphics` in `setUp` and restore `Compositor.defaultBackend` — not the literal — in
-/// `tearDown`, for the reason `ChunkedCompositeLogicTests` writes out. `renderResolution` is pinned
-/// and restored for `BakeWiringLogicTests`' reason: it writes through to `UserDefaults`, so it is
-/// process-wide state that outlives the run that set it.
+/// `tearDown`, for the reason `ChunkedCompositeLogicTests` writes out.
 @MainActor
 final class FrameExportSessionLogicTests: XCTestCase {
 
     private var caches: URL!
     private var outputs: URL!
-    private var storedResolution: String?
     private var cancellables: Set<AnyCancellable> = []
 
     override func setUp() {
@@ -61,18 +58,10 @@ final class FrameExportSessionLogicTests: XCTestCase {
                                                    isDirectory: true)
         FrameBakeStore.cachesDirectoryOverride = caches
         FrameExportSession.outputDirectoryOverride = outputs
-        storedResolution = UserDefaults.standard.string(forKey: CanvasManager.renderResolutionDefaultsKey)
-        UserDefaults.standard.set(RenderResolution.full.rawValue,
-                                  forKey: CanvasManager.renderResolutionDefaultsKey)
     }
 
     override func tearDown() {
         cancellables.removeAll()
-        if let storedResolution {
-            UserDefaults.standard.set(storedResolution, forKey: CanvasManager.renderResolutionDefaultsKey)
-        } else {
-            UserDefaults.standard.removeObject(forKey: CanvasManager.renderResolutionDefaultsKey)
-        }
         FrameBakeStore.cachesDirectoryOverride = nil
         FrameExportSession.outputDirectoryOverride = nil
         try? FileManager.default.removeItem(at: caches)

@@ -9,6 +9,8 @@ import XCTest
 /// possible.
 final class BackupManagerLogicTests: XCTestCase {
 
+    private var settingsSuite = ""
+
     private var root: URL!
     private let pngHeader: [UInt8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]
 
@@ -18,12 +20,16 @@ final class BackupManagerLogicTests: XCTestCase {
         ProjectBackupManager.rootDirectoryOverride = root
         ProjectBackupManager.trashRetentionInterval = 7 * 24 * 60 * 60
         ProjectBackupManager.maxTotalBackupBytes = ProjectBackupManager.defaultMaxTotalBackupBytes
-        UserDefaults.standard.removeObject(forKey: ProjectBackupManager.signatureDefaultsKey)
+        // The update signature is kept in a suite of this test's own, so a run neither reads nor leaves
+        // the real one.
+        settingsSuite = "backup-settings-\(UUID().uuidString)"
+        ProjectBackupManager.settings = AppSettings(defaults: try XCTUnwrap(UserDefaults(suiteName: settingsSuite)))
     }
 
     override func tearDownWithError() throws {
         ProjectBackupManager.rootDirectoryOverride = nil
-        UserDefaults.standard.removeObject(forKey: ProjectBackupManager.signatureDefaultsKey)
+        ProjectBackupManager.settings = .standard
+        UserDefaults.standard.removePersistentDomain(forName: settingsSuite)
         try? FileManager.default.removeItem(at: root)
         root = nil
     }

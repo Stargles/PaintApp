@@ -29,7 +29,6 @@ import SwiftUI
 final class PlaybackTickBench: XCTestCase {
 
     private var root: URL!
-    private var storedResolution: String?
 
     /// **Set only once `setUpWithError` is past its skip guard, because `tearDown` runs even when
     /// `setUpWithError` throws `XCTSkip`** — and every line of it is about state setUp had not
@@ -45,26 +44,11 @@ final class PlaybackTickBench: XCTestCase {
     /// `MemoryAuditBench`, `UndoRepairBench`) never tripped it because their tearDown touches
     /// nothing their setUp allocates. This one is also the only bench class marked `@MainActor`,
     /// which is what made it look like an isolation problem rather than an ordering one.
-    ///
-    /// It also disambiguates `storedResolution`: nil means "there was no stored value" only if setUp
-    /// actually ran, and without this flag the skip path took the `else` branch and **removed a
-    /// `UserDefaults` key it had never set** — CLAUDE.md's write-through-`renderResolution` hazard,
-    /// reached from the one path that had not pinned anything.
     private var didPin = false
 
     override func setUpWithError() throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["PAINTAPP_BENCH"] != nil,
                           "PlaybackTickBench is opt-in; set PAINTAPP_BENCH=1 to re-measure.")
-        // **Pinned, because every figure this file publishes is per *pixel*.** `renderResolution`
-        // writes through to `UserDefaults`, so it is process-wide state that survives into the next
-        // run in the simulator container — CLAUDE.md's own section on that, and `BakeWiringLogicTests`
-        // pins it for the same reason. The read, the bake and the two sandwich halves are all sized
-        // by `liveCompositeSize`, so a container an earlier suite left on Half would quarter the area
-        // under three of the four rows in PERFORMANCE.md §14.2 and publish them as full-size numbers.
-        // Restored to what was there, not to a literal.
-        storedResolution = UserDefaults.standard.string(forKey: CanvasManager.renderResolutionDefaultsKey)
-        UserDefaults.standard.set(RenderResolution.full.rawValue,
-                                  forKey: CanvasManager.renderResolutionDefaultsKey)
         root = FileManager.default.temporaryDirectory
             .appendingPathComponent("PlaybackTickBench-" + UUID().uuidString, isDirectory: true)
         didPin = true
@@ -73,11 +57,6 @@ final class PlaybackTickBench: XCTestCase {
     override func tearDown() {
         // Nothing below is safe on the skip path — see `didPin`.
         if didPin {
-            if let storedResolution {
-                UserDefaults.standard.set(storedResolution, forKey: CanvasManager.renderResolutionDefaultsKey)
-            } else {
-                UserDefaults.standard.removeObject(forKey: CanvasManager.renderResolutionDefaultsKey)
-            }
             try? FileManager.default.removeItem(at: root)
             FrameBakeStore.cachesDirectoryOverride = nil
             Compositor.backend = Compositor.defaultBackend

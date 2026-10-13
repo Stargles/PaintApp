@@ -1192,10 +1192,10 @@ final class CanvasManager: ObservableObject {
     /// (`ColorPickerPanel.eyedropperMode`). `@Published` because that switch renders it.
     @Published var eyedropperMode: Eyedropper.Mode = .layer
     /// **The artist's on/off choices for their tools** — fill's mend and canvas-edge switches, the
-    /// Select panel's, the Move bar's, interpolation's and the finger/Pencil gate (`ToolSwitches`
-    /// names each and carries its default). One value so the tools in the artist's hand are kept
-    /// across launches by one mechanism, `ToolSwitchesKeeper`, rather than by a `UserDefaults` call
-    /// per switch; the model itself touches no defaults.
+    /// Select panel's, the Move bar's and interpolation's (`ToolSwitches` names each and carries its
+    /// default). One value so the tools in the artist's hand are kept across launches by one
+    /// mechanism, `ToolSwitchesKeeper`, rather than by a `UserDefaults` call per switch; the model
+    /// itself touches no defaults.
     ///
     /// Every change is handed to the action recorder by name, because a recording that shows a tool
     /// behaving unexpectedly is often explained entirely by one of these being flipped above it.
@@ -1210,27 +1210,26 @@ final class CanvasManager: ObservableObject {
         }
     }
 
-    /// Defaults key for `renderResolution`. About the *machine* and the artist's tolerance for a soft
-    /// preview, not about any one drawing — the same argument `ToolSwitches.pencilOnlyDrawing` makes, and
-    /// the reason neither of these is in a project's manifest. A document carried to a faster iPad should
-    /// not bring a downgraded canvas with it.
-    static let renderResolutionDefaultsKey = "paintapp.renderResolution"
+    /// **Whether only the Apple Pencil draws** — the inverse of Settings → Fingers Can Paint. About the
+    /// artist's hardware, not any one drawing, so it is app-wide (`AppSettings`) and handed to each
+    /// document by `AppSettingsKeeper`; off on a manager nothing has handed it to.
+    ///
+    /// Recorded by the action recorder, because it is the gate that decides whether a `.direct` touch
+    /// draws at all — a recording showing finger touches that produce no stroke is explained entirely
+    /// by this being `true` somewhere above them.
+    @Published var pencilOnlyDrawing = false {
+        didSet {
+            guard oldValue != pencilOnlyDrawing else { return }
+            ActionRecorder.ifRecording { $0.model("pencilOnlyDrawing", pencilOnlyDrawing ? "true" : "false") }
+        }
+    }
 
     /// How large the live canvas's composites are rendered — see `RenderResolution`, which carries
-    /// what it does and does not reach.
-    ///
-    /// Absent a stored preference this is `.full`, and that direction is not arbitrary: the failure
-    /// mode of defaulting to a reduced setting is an artist who never opens this menu concluding the
-    /// app renders softly, with nothing on screen to suggest a control exists. The failure mode of
-    /// defaulting to full is that they find the app slow on a heavy document — which is the state
-    /// they were in before this setting existed, and which sends them looking.
-    @Published var renderResolution: RenderResolution =
-        UserDefaults.standard.string(forKey: CanvasManager.renderResolutionDefaultsKey)
-            .flatMap(RenderResolution.init(rawValue:)) ?? .full
-    {
+    /// what it does and does not reach. App-wide (`AppSettings`), handed to each document by
+    /// `AppSettingsKeeper`; `.full` on a manager nothing has handed it to.
+    @Published var renderResolution: RenderResolution = .full {
         didSet {
             guard oldValue != renderResolution else { return }
-            UserDefaults.standard.set(renderResolution.rawValue, forKey: Self.renderResolutionDefaultsKey)
             // Recorded for the reason `pencilOnlyDrawing` is: a recording whose canvas looks soft, or
             // whose composites are unexpectedly cheap, is explained entirely by this line.
             ActionRecorder.ifRecording { $0.model("renderResolution", renderResolution.rawValue) }

@@ -1,7 +1,7 @@
 import XCTest
 
 /// End-to-end coverage for the pencil-only-mode fix to the Select tool's lasso/rectangle/automatic
-/// gestures — the third hole in `CanvasManager.toolSwitches.pencilOnlyDrawing` gating, after `fillPress` and
+/// gestures — the third hole in `CanvasManager.pencilOnlyDrawing` gating, after `fillPress` and
 /// `catchAll` (see `CanvasView`'s "Which of these reject a finger" doc comment). `SelectionOverlayView`
 /// used plain `UIPanGestureRecognizer`/`UITapGestureRecognizer`, whose `@objc` action never receives a
 /// `UITouch`, so nothing there could ask whether the touch was a finger — the same shape of hole the
@@ -207,7 +207,7 @@ final class SelectionPencilOnlyUITests: PaintUITestCase {
 
     /// **TODO (59)'s sixth hole: the graph editor's box select.** The owner, 2026-09-10: *"right now
     /// in the graph menu, the finger can be used for the box select on nodes. Should only be the pen
-    /// (in pen mode)"* — i.e. it obeys `CanvasManager.toolSwitches.pencilOnlyDrawing` rather than inventing a
+    /// (in pen mode)"* — i.e. it obeys `CanvasManager.pencilOnlyDrawing` rather than inventing a
     /// second preference, which is what `pencilOnlyDrawingAllows` makes literal.
     ///
     /// **XCUITest cannot synthesise a pencil**, so the pen half of the ask is unprovable here and is

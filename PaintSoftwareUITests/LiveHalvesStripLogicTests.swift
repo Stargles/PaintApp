@@ -39,22 +39,14 @@ final class LiveHalvesStripLogicTests: XCTestCase {
     private let blue = UIColor(red: 0, green: 0, blue: 1, alpha: 1)
     private let white = UIColor(white: 1, alpha: 1)
 
-    /// **`renderResolution` is read by every `CanvasManager()` out of `UserDefaults`, and it
-    /// persists in the simulator container between runs.** A suite that left it on `.half` produced
-    /// fifteen reds in a later fast tier, in files that had never heard of it. Every recipe here is
-    /// sized by `liveCompositeSize`, which is that setting, so this file removes the key at both ends
-    /// — in `setUp` so a poisoned container cannot reach these fixtures, and in `tearDown` so the
-    /// container is left exactly as it was found. Absent the key the value is `.full`.
     override func setUp() {
         super.setUp()
-        UserDefaults.standard.removeObject(forKey: CanvasManager.renderResolutionDefaultsKey)
         Compositor.backend = .coreGraphics
         MaskResolver.clearCache()
         PixelOps.clearRasterizeCache()
     }
 
     override func tearDown() {
-        UserDefaults.standard.removeObject(forKey: CanvasManager.renderResolutionDefaultsKey)
         // The default rather than the literal, for `Compositor.defaultBackend`'s reason.
         Compositor.backend = Compositor.defaultBackend
         CompositorBudget.budgetOverrideBytes = nil

@@ -44,7 +44,6 @@ final class SandwichKeyLogicTests: XCTestCase {
     }
 
     override func tearDown() {
-        UserDefaults.standard.removeObject(forKey: CanvasManager.renderResolutionDefaultsKey)
         Compositor.backend = Compositor.defaultBackend
         MaskResolver.clearCache()
         super.tearDown()

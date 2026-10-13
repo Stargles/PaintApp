@@ -12,26 +12,8 @@ import Foundation
 /// using it. It is the measure of a fix (BUGS.md, the stranded recognizers): a build that is right
 /// stops counting, and it does not depend on the recorder to say so.
 ///
-/// An instance of the defaults rather than a static that writes through — CLAUDE.md carries the section
-/// on a `UserDefaults`-backed static that outlived the test that set it — so the logic tests hand it a
-/// suite of their own.
+/// Kept app-wide in `AppSettings` (`canvasRepairCount`, `recordCanvasRepair`); this names its row.
 enum CanvasRepairCount {
-    /// Also the `@AppStorage` key the Settings menu reads, which is what keeps its row current while the
-    /// menu is open.
-    static let defaultsKey = "paintapp.canvasFreezesCaught"
-
-    static func current(in defaults: UserDefaults = .standard) -> Int {
-        defaults.integer(forKey: defaultsKey)
-    }
-
-    /// One more repair, counted. Answers the new total.
-    @discardableResult
-    static func record(in defaults: UserDefaults = .standard) -> Int {
-        let total = current(in: defaults) + 1
-        defaults.set(total, forKey: defaultsKey)
-        return total
-    }
-
     /// The Settings row's text.
     static func title(_ count: Int) -> String { "Canvas freezes caught: \(count)" }
 }

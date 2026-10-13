@@ -831,13 +831,8 @@ final class MaskParityLogicTests: XCTestCase {
     /// took the cap out — the knob is the truth, and a frame too big for the budget is stripped
     /// rather than shrunk — so the knob is now the only thing that separates the two sizes, and it is
     /// what this turns.
-    ///
-    /// `renderResolution` writes through to `UserDefaults` and is process-wide, so it is restored on
-    /// the way out: a suite that leaves it on `.half` reds fifteen tests in a *later* run.
     func testTheLiveMaskResolvesAtTheSizeTheSandwichComposites() {
         let manager = clippedManager()
-        let originalResolution = manager.renderResolution
-        defer { manager.renderResolution = originalResolution }
         manager.renderResolution = .half
 
         guard let sandwich = manager.makeSandwichRecipe(atFrame: 0, activeLayerIndex: 1)?.resolve(),

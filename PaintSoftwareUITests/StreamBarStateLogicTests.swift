@@ -15,7 +15,6 @@ final class StreamBarStateLogicTests: XCTestCase {
     private static let endpoint = StreamEndpoint(host: "laptop", port: 47301)
 
     private var caches: URL!
-    private var storedResolution: String?
 
     override func setUp() {
         super.setUp()
@@ -23,18 +22,9 @@ final class StreamBarStateLogicTests: XCTestCase {
         caches = FileManager.default.temporaryDirectory
             .appendingPathComponent("StreamBarStateLogicTests-" + UUID().uuidString, isDirectory: true)
         FrameBakeStore.cachesDirectoryOverride = caches
-        // Pinned and restored, `BakeWiringLogicTests`' reason: the knob writes through to
-        // `UserDefaults`, and the baked frame below is sized by it.
-        storedResolution = UserDefaults.standard.string(forKey: CanvasManager.renderResolutionDefaultsKey)
-        UserDefaults.standard.set(RenderResolution.full.rawValue, forKey: CanvasManager.renderResolutionDefaultsKey)
     }
 
     override func tearDown() {
-        if let storedResolution {
-            UserDefaults.standard.set(storedResolution, forKey: CanvasManager.renderResolutionDefaultsKey)
-        } else {
-            UserDefaults.standard.removeObject(forKey: CanvasManager.renderResolutionDefaultsKey)
-        }
         FrameBakeStore.cachesDirectoryOverride = nil
         try? FileManager.default.removeItem(at: caches)
         Compositor.backend = Compositor.defaultBackend

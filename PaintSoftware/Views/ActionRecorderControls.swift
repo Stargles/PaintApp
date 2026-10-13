@@ -14,8 +14,8 @@ struct ActionRecorderSection: View {
     @ObservedObject var canvasManager: CanvasManager
     @ObservedObject private var recorder = ActionRecorder.shared
     @State private var showRecordings = false
-    /// `CanvasRepairCount`'s own key, so the row follows the count while the menu is open.
-    @AppStorage(CanvasRepairCount.defaultsKey) private var freezesCaught = 0
+    /// `AppSettings`' own key for the count, observed so the row follows it while the menu is open.
+    @AppStorage(AppSettings.Key.canvasRepairCount) private var freezesCaught = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {

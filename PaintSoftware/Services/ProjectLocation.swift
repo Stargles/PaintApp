@@ -44,10 +44,10 @@ extension Notification.Name {
 ///
 /// ## Test seams
 ///
-/// `defaults` and `appFolderOverride` exist because a bookmark is process-and-device state: a logic
-/// test that wrote `UserDefaults.standard` would leak into the next run in the simulator container,
-/// which CLAUDE.md records costing 15 reds when `CanvasManager.renderResolution` did it. Both are
-/// restored in `tearDown` by the suites that set them.
+/// `settings` and `appFolderOverride` exist because a bookmark is process-and-device state: a logic
+/// test that wrote the app's own settings would leak into the next run in the simulator container,
+/// which CLAUDE.md records costing 15 reds when a render setting did it. Both are restored in
+/// `tearDown` by the suites that set them.
 ///
 /// Pure Foundation, no UIKit: this file is compiled into the UI-test bundle the same way
 /// `ProjectBackupManager` is.
@@ -55,25 +55,13 @@ nonisolated enum ProjectLocation {
 
     // MARK: - Test seams
 
-    /// Which defaults the bookmark is persisted in. Logic tests point this at a per-test suite.
-    nonisolated(unsafe) static var defaults: UserDefaults = .standard
+    /// The store the bookmark is kept in (`AppSettings.projectsFolderBookmark` and its name). Logic tests
+    /// point this at a per-test suite.
+    nonisolated(unsafe) static var settings: AppSettings = .standard
 
     /// What "the app's own folder" means. Logic tests point this at a temp directory so they never
     /// touch the real container.
     nonisolated(unsafe) static var appFolderOverride: URL?
-
-    // MARK: - Persisted keys
-
-    /// The security-scoped bookmark for the chosen folder. Internal so tests can clear it.
-    static let bookmarkDefaultsKey = "PaintApp.projectLocation.bookmark"
-    /// The gallery's "your work is inside the app" warning has been answered. Lives here rather than
-    /// on `GalleryView` so `-resetGallery` can clear it: that flag is compiled into the test bundle,
-    /// which has no app views in it.
-    static let invitationDismissedDefaultsKey = "PaintApp.gallery.storageInvitationDismissed"
-    /// The folder's display name, kept **beside** the bookmark rather than derived from it, because
-    /// the failure this has to describe is exactly the one where the URL cannot be produced. Without
-    /// it the banner would have to say "a folder" instead of naming the one the artist chose.
-    static let displayNameDefaultsKey = "PaintApp.projectLocation.displayName"
 
     // MARK: - Status
 
@@ -139,7 +127,7 @@ nonisolated enum ProjectLocation {
     /// artist never picked one" from "the one they picked is off the network right now", which the
     /// settings screen has to say differently.
     static var hasChosenFolder: Bool {
-        defaults.data(forKey: bookmarkDefaultsKey) != nil
+        settings.projectsFolderBookmark != nil
     }
 
     // MARK: - Launch
@@ -156,10 +144,10 @@ nonisolated enum ProjectLocation {
     }
 
     /// The resolve, with no side effects on `_status` — factored out so `adopt` can re-use it and so
-    /// a test can ask what a given defaults state resolves to.
+    /// a test can ask what a given settings state resolves to.
     private static func resolveStoredBookmark() -> Status {
-        guard let data = defaults.data(forKey: bookmarkDefaultsKey) else { return .appFolder }
-        let name = defaults.string(forKey: displayNameDefaultsKey) ?? "your projects folder"
+        guard let data = settings.projectsFolderBookmark else { return .appFolder }
+        let name = settings.projectsFolderName ?? "your projects folder"
 
         var isStale = false
         let url: URL
@@ -251,8 +239,8 @@ nonisolated enum ProjectLocation {
             report = ProjectLibraryMigration.migrate(from: source, to: folder)
         }
 
-        defaults.set(bookmark, forKey: bookmarkDefaultsKey)
-        defaults.set(folder.lastPathComponent, forKey: displayNameDefaultsKey)
+        settings.projectsFolderBookmark = bookmark
+        settings.projectsFolderName = folder.lastPathComponent
         // Re-resolve rather than trusting the URL in hand: this is the same code path the next launch
         // will take, so a bookmark that cannot round-trip is discovered now, while the artist is
         // looking at the picker, instead of silently at the launch after next.
@@ -270,8 +258,8 @@ nonisolated enum ProjectLocation {
         let report = source.standardizedFileURL == destination.standardizedFileURL
             ? .empty
             : ProjectLibraryMigration.migrate(from: source, to: destination)
-        defaults.removeObject(forKey: bookmarkDefaultsKey)
-        defaults.removeObject(forKey: displayNameDefaultsKey)
+        settings.projectsFolderBookmark = nil
+        settings.projectsFolderName = nil
         setStatus(.appFolder)
         return report
     }
@@ -281,8 +269,8 @@ nonisolated enum ProjectLocation {
     private static func persistBookmark(for url: URL, name: String) {
         if let data = try? url.bookmarkData(options: [], includingResourceValuesForKeys: nil,
                                             relativeTo: nil) {
-            defaults.set(data, forKey: bookmarkDefaultsKey)
-            defaults.set(name, forKey: displayNameDefaultsKey)
+            settings.projectsFolderBookmark = data
+            settings.projectsFolderName = name
         }
     }
 

@@ -29,6 +29,9 @@ struct GalleryView: View {
     /// own navigation state and nothing else touches it once the view exists; if the seeded folder has
     /// since been deleted or moved, `refresh()`'s own walk back to the nearest surviving ancestor
     /// (below) runs on the first `.onAppear` exactly as it would for any other vanished folder.
+    ///
+    /// **Kept app-wide** (`AppSettings.galleryFolder`, TODO (176)): every `refresh()` records where the
+    /// gallery stands, so the next launch opens in the folder the artist was in.
     @State private var path: [String]
     @State private var projectPendingDeletion: ProjectSummary?
     @State private var folderPendingDeletion: ProjectStore.ProjectFolder?
@@ -44,11 +47,10 @@ struct GalleryView: View {
     /// Which project is opening, if any — see `GalleryOpenState` for the two rules it carries.
     @State private var openState = GalleryOpenState()
 
-    /// The artist has seen the "inside the app" warning and answered it. Persisted (the key lives on
-    /// `ProjectLocation`, where `-resetGallery` can reach it), because a warning that comes back
-    /// every launch is one that stops being read.
-    @State private var invitationDismissed =
-        ProjectLocation.defaults.bool(forKey: ProjectLocation.invitationDismissedDefaultsKey)
+    /// The artist has seen the "inside the app" warning and answered it. Kept app-wide
+    /// (`AppSettings.storageInvitationDismissed`, which `-resetGallery` forgets), because a warning that
+    /// comes back every launch is one that stops being read.
+    @State private var invitationDismissed = AppSettings.standard.storageInvitationDismissed
 
     /// Shown only at the top of the tree, only when no folder has been chosen, and only once the
     /// artist has something to lose.
@@ -107,8 +109,7 @@ struct GalleryView: View {
                                 .font(.footnote.bold())
                                 .accessibilityIdentifier("gallery.storageInvitationChoose")
                             Button {
-                                ProjectLocation.defaults.set(
-                                    true, forKey: ProjectLocation.invitationDismissedDefaultsKey)
+                                AppSettings.standard.storageInvitationDismissed = true
                                 invitationDismissed = true
                             } label: {
                                 Image(systemName: "xmark")
@@ -317,6 +318,7 @@ struct GalleryView: View {
         while !path.isEmpty && !ProjectBackupManager.isDirectory(currentDirectory) {
             path.removeLast()
         }
+        AppSettings.standard.galleryFolder = path
         locationProblem = ProjectLocation.status.problem
         folders = ProjectStore.listFolders(in: currentDirectory)
         projects = ProjectStore.listProjects(in: currentDirectory)

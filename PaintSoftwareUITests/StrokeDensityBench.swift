@@ -308,9 +308,6 @@ final class StrokeDensityBench: XCTestCase {
 
     /// The two operations that are **not** invalidations, which matters as much as the list above:
     /// a zoom and a render-resolution change must leave the cel's memo standing.
-    ///
-    /// `renderResolution` writes through to `UserDefaults` and survives into the next run in the
-    /// simulator container (CLAUDE.md), so it is pinned and restored here.
     @MainActor
     func testZoomAndRenderResolutionDoNotInvalidateAVectorCel() {
         let canvas = VectorCanvas(size: Self.canvasSize, strokes: Self.scene(20))
@@ -323,10 +320,8 @@ final class StrokeDensityBench: XCTestCase {
         XCTAssertEqual(canvas.render().size, Self.canvasSize)
 
         let manager = CanvasManager()
-        let previousResolution = manager.renderResolution
-        defer { manager.renderResolution = previousResolution }
         manager.canvasSize = Self.canvasSize
-        manager.renderResolution = previousResolution == .half ? .full : .half
+        manager.renderResolution = .half
 
         XCTAssertEqual(canvas.version, version, "a render-resolution change is not an edit")
         XCTAssertEqual(canvas.rasterizations, rasterizations, "and must not re-stamp a dab")

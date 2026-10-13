@@ -10,8 +10,7 @@ import SwiftUI
 //
 // `EditorStateManifest` is the first half, written into `manifest.json` by every save and applied by
 // `ProjectStore.assemble`. `EditorPreferences` is the second, in `UserDefaults` beside
-// `ToolSwitches` and `renderResolution`, stored by every save and applied to a manager as it
-// enters the editor.
+// `ToolSwitches`, stored by every save and applied to a manager as it enters the editor.
 //
 // Left to reset on purpose, and named so nobody re-files them: a floating Move or Duplicate piece and
 // a lasso float (committed by `commitAllInteractiveState` on the way out), the selection, every open
@@ -116,8 +115,8 @@ struct EditorPreferences: Codable, Equatable {
 
     /// Whether this launch asked for the artist's app-wide preferences to be forgotten — the one
     /// spelling of the condition, shared by every `forgetIfRequested` that answers to it
-    /// (`StreamEndpoint`'s last-used laptop, `ColorPickerType`'s remembered tab, `ToolSwitches`) so a
-    /// fifth cannot disagree about which launch arguments mean it.
+    /// (`ColorPickerType`'s remembered tab, `ToolSwitches`) so a fourth cannot disagree about which
+    /// launch arguments mean it.
     static func forgetRequested(in arguments: [String]) -> Bool {
         arguments.contains("-resetEditorPreferences") || arguments.contains("-resetGallery")
     }

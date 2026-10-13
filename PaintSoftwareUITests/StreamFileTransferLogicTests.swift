@@ -9,7 +9,7 @@ import UIKit
 /// started or not), and the assertions read the document the way the picker's own tests do.
 ///
 /// Every test connects through STREAM.md §6's document-level connection
-/// (`documentEndpointOverride` standing in for `StreamEndpoint.lastUsed()`) rather than through a
+/// (`documentEndpointOverride` standing in for `AppSettings.lastStreamEndpoint`) rather than through a
 /// stream element, because a file transfer needs a connection and nothing else — the whole point
 /// of §6's new bullet is that the drop box works before any Stream Screen.
 @MainActor

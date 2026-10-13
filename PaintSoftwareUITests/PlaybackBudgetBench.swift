@@ -32,7 +32,6 @@ import UIKit
 final class PlaybackBudgetBench: XCTestCase {
 
     private var root: URL!
-    private var storedResolution: String?
     private var storedBudget: Int?
     /// Set past `setUpWithError`'s skip guard — `tearDown` runs even when `setUpWithError` throws
     /// `XCTSkip`, and every line of it is about state setUp had not reached. `PlaybackTickBench`
@@ -42,11 +41,6 @@ final class PlaybackBudgetBench: XCTestCase {
     override func setUpWithError() throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["PAINTAPP_BENCH"] != nil,
                           "PlaybackBudgetBench is opt-in; set PAINTAPP_BENCH=1 to re-measure.")
-        // `renderResolution` writes through to `UserDefaults` and survives into the next run in the
-        // simulator container — CLAUDE.md's own section on that. Every figure here is per pixel.
-        storedResolution = UserDefaults.standard.string(forKey: CanvasManager.renderResolutionDefaultsKey)
-        UserDefaults.standard.set(RenderResolution.full.rawValue,
-                                  forKey: CanvasManager.renderResolutionDefaultsKey)
         storedBudget = CompositorBudget.budgetOverrideBytes
         CompositorBudget.budgetOverrideBytes = Self.iPad9Budget
         root = FileManager.default.temporaryDirectory
@@ -59,11 +53,6 @@ final class PlaybackBudgetBench: XCTestCase {
 
     override func tearDown() {
         if didPin {
-            if let storedResolution {
-                UserDefaults.standard.set(storedResolution, forKey: CanvasManager.renderResolutionDefaultsKey)
-            } else {
-                UserDefaults.standard.removeObject(forKey: CanvasManager.renderResolutionDefaultsKey)
-            }
             CompositorBudget.budgetOverrideBytes = storedBudget
             VectorRenderCache.removeAll()
             try? FileManager.default.removeItem(at: root)

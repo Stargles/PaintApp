@@ -8,9 +8,9 @@ import UIKit
 /// lifted into the Move box — and dismisses. If the connection fails the sheet says so in one
 /// sentence and stays open, with the fields as the artist typed them.
 ///
-/// The last address used is prefilled from `UserDefaults` (`lastHostKey` / `lastPortKey`), because
-/// the laptop's MagicDNS name does not change between sessions and typing `100.104.85.111` on
-/// glass is the kind of thing that makes a feature go unused.
+/// The last address used is prefilled (`AppSettings.lastStreamEndpoint`), because the laptop's
+/// MagicDNS name does not change between sessions and typing `100.104.85.111` on glass is the kind of
+/// thing that makes a feature go unused.
 struct StreamConnectSheet: View {
     @ObservedObject var canvasManager: CanvasManager
     @Environment(\.dismiss) private var dismiss
@@ -18,12 +18,6 @@ struct StreamConnectSheet: View {
     /// Non-nil when the bar's address row opened this sheet: the connect re-points that element
     /// (`CanvasManager.retargetStream`) instead of inserting a new layer.
     var retargeting: StreamRetarget? = nil
-
-    /// `UserDefaults` keys for the prefill — `StreamEndpoint.lastHostDefaultsKey`/
-    /// `lastPortDefaultsKey`, so this sheet and `ScreenStreamCoordinator`'s document-level
-    /// connection (STREAM.md §6) cannot drift onto two spellings of "the last laptop."
-    static let lastHostKey = StreamEndpoint.lastHostDefaultsKey
-    static let lastPortKey = StreamEndpoint.lastPortDefaultsKey
 
     @State private var host: String
     @State private var portText: String
@@ -58,10 +52,9 @@ struct StreamConnectSheet: View {
     init(canvasManager: CanvasManager, retargeting: StreamRetarget? = nil) {
         self.canvasManager = canvasManager
         self.retargeting = retargeting
-        let defaults = UserDefaults.standard
-        _host = State(initialValue: defaults.string(forKey: Self.lastHostKey) ?? "")
-        let storedPort = defaults.integer(forKey: Self.lastPortKey)
-        _portText = State(initialValue: String(storedPort > 0 ? storedPort : Int(StreamEndpoint.defaultPort)))
+        let last = AppSettings.standard.lastStreamEndpoint
+        _host = State(initialValue: last?.host ?? "")
+        _portText = State(initialValue: String(last?.port ?? StreamEndpoint.defaultPort))
     }
 
     /// The port as typed, or nil when it is not a port.
@@ -183,9 +176,7 @@ struct StreamConnectSheet: View {
         let host = trimmedHost
         failure = nil
         isConnecting = true
-        let defaults = UserDefaults.standard
-        defaults.set(host, forKey: Self.lastHostKey)
-        defaults.set(Int(port), forKey: Self.lastPortKey)
+        AppSettings.standard.lastStreamEndpoint = StreamEndpoint(host: host, port: port)
         Task { @MainActor in
             do {
                 let status = try await canvasManager.streamCoordinator.connect(

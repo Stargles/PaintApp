@@ -25,7 +25,6 @@ import SwiftUI
 final class BakeWiringLogicTests: XCTestCase {
 
     private var caches: URL!
-    private var storedResolution: String?
 
     override func setUp() {
         super.setUp()
@@ -34,28 +33,9 @@ final class BakeWiringLogicTests: XCTestCase {
         caches = FileManager.default.temporaryDirectory
             .appendingPathComponent("BakeWiringLogicTests-" + UUID().uuidString, isDirectory: true)
         FrameBakeStore.cachesDirectoryOverride = caches
-        // **`CanvasManager.renderResolution` writes through to `UserDefaults` on every set**, so it
-        // is process-wide state and not a property of the manager under test. This suite is the only
-        // one in the repo that moves it, and the first run of it moved the *next* suite's fixtures
-        // to half resolution — `FrameBakerLogicTests` composited at 32² and reported it as a
-        // failure of the code under test. Exactly the trap `Compositor.backend` is restored for two
-        // lines above, reached through a different door: restore what was there, not a literal.
-        storedResolution = UserDefaults.standard.string(forKey: CanvasManager.renderResolutionDefaultsKey)
-        // …and *pinned*, not merely restored. Every fixture below sizes a ring or a buffer in
-        // frames, and the number of bytes in a frame is `liveCompositeSize` — which is the knob. A
-        // suite that inherited whatever the last run of it happened to leave in this simulator's
-        // container would size its ring against one resolution and its document against another; the
-        // first draft of this file did exactly that and reported a 2-frame ring holding 8.
-        UserDefaults.standard.set(RenderResolution.full.rawValue,
-                                  forKey: CanvasManager.renderResolutionDefaultsKey)
     }
 
     override func tearDown() {
-        if let storedResolution {
-            UserDefaults.standard.set(storedResolution, forKey: CanvasManager.renderResolutionDefaultsKey)
-        } else {
-            UserDefaults.standard.removeObject(forKey: CanvasManager.renderResolutionDefaultsKey)
-        }
         FrameBakeStore.cachesDirectoryOverride = nil
         try? FileManager.default.removeItem(at: caches)
         Compositor.backend = Compositor.defaultBackend

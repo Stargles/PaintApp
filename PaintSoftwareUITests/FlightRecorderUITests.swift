@@ -51,7 +51,7 @@ final class FlightRecorderUITests: PaintUITestCase {
     /// opens to save a flight, as plain text beside it: the number to read off before installing a
     /// build and after using it. From a brand-new document, with nothing set up first. The count is
     /// whatever this simulator's earlier runs left, so the row is read for its shape, not its value —
-    /// `CanvasRepairCountLogicTests` pins the counting.
+    /// `AppSettingsLogicTests` pins the counting.
     func testTheSettingsMenuShowsHowManyCanvasFreezesTheAppHasCaught() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))

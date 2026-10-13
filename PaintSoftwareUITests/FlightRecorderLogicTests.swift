@@ -304,7 +304,7 @@ final class FlightRecorderLogicTests: XCTestCase {
         let lines = try text.split(separator: "\n").map {
             try XCTUnwrap(try JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any], String($0))
         }
-        XCTAssertEqual(lines.first?["canvasFreezesCaught"] as? Int, CanvasRepairCount.current(),
+        XCTAssertEqual(lines.first?["canvasFreezesCaught"] as? Int, AppSettings.standard.canvasRepairCount,
                        "the saved flight's header names the repair count of the moment")
         XCTAssertEqual(lines.first?["trigger"] as? String, "test")
         return lines

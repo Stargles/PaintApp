@@ -35,7 +35,7 @@ final class ProjectLocationLogicTests: XCTestCase {
         try FileManager.default.createDirectory(at: external, withIntermediateDirectories: true)
 
         suiteName = "project-location-tests-\(UUID().uuidString)"
-        ProjectLocation.defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        ProjectLocation.settings = AppSettings(defaults: try XCTUnwrap(UserDefaults(suiteName: suiteName)))
         ProjectLocation.appFolderOverride = container
         savedOverride = ProjectBackupManager.rootDirectoryOverride
         ProjectBackupManager.rootDirectoryOverride = nil
@@ -45,7 +45,7 @@ final class ProjectLocationLogicTests: XCTestCase {
     override func tearDownWithError() throws {
         ProjectLocation.resetForTesting()
         UserDefaults.standard.removePersistentDomain(forName: suiteName)
-        ProjectLocation.defaults = .standard
+        ProjectLocation.settings = .standard
         ProjectLocation.appFolderOverride = nil
         ProjectBackupManager.rootDirectoryOverride = savedOverride
         try? FileManager.default.removeItem(at: scratch)
@@ -425,7 +425,7 @@ final class ProjectLocationLogicTests: XCTestCase {
         try? FileManager.default.removeItem(at: container)
         try? FileManager.default.createDirectory(at: container, withIntermediateDirectories: true)
         UserDefaults.standard.removePersistentDomain(forName: suiteName)
-        ProjectLocation.defaults = UserDefaults(suiteName: suiteName)!
+        ProjectLocation.settings = AppSettings(defaults: UserDefaults(suiteName: suiteName)!)
         ProjectLocation.resolveOnLaunch()
     }
 }

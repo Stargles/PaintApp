@@ -160,7 +160,7 @@ final class ActionRecorder: ObservableObject {
         }
         let base = entries.first?.time ?? now
         let header = Self.headerLine(canvasSize: flightContext.canvasSize, projectName: flightContext.projectName,
-                                     tap: tapReport, url: url, freezesCaught: CanvasRepairCount.current(),
+                                     tap: tapReport, url: url, freezesCaught: AppSettings.standard.canvasRepairCount,
                                      flight: [("trigger", .str(trigger)), ("events", .int(entries.count)),
                                               ("seconds", .num(now - base))])
         let notice: String
@@ -244,7 +244,7 @@ final class ActionRecorder: ObservableObject {
         tap?.recordsInFull = true
 
         writer.append(Self.headerLine(canvasSize: canvasSize, projectName: projectName, tap: tapReport, url: url,
-                                      freezesCaught: CanvasRepairCount.current()))
+                                      freezesCaught: AppSettings.standard.canvasRepairCount))
         writtenEvents = 1
 
         // **The recording explains itself now, and that is a defect this closed rather than a

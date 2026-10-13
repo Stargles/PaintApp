@@ -24,7 +24,7 @@ import Foundation
 ///
 /// **A key per switch, not one JSON record**, so a switch added by a later build never invalidates the
 /// ones already saved — an absent key is simply that switch's default — and so a UI test can seed one
-/// with a launch argument (`-paintapp.pencilOnlyDrawing YES`), which a JSON blob would not allow.
+/// with a launch argument (`-paintapp.subtractsSelection YES`), which a JSON blob would not allow.
 ///
 /// Adding a switch is its field below and its row in `saved`;
 /// `ToolSwitchesLogicTests.testEverySwitchHasARowInTheSavedTable` fails when the second is forgotten.
@@ -119,18 +119,6 @@ struct ToolSwitches: Equatable {
     /// drawing that grouped into one part is not tinted at all — and the switch is in the mode's
     /// options popover for the artist who wants their own colours back for a moment.
     var showMotionGroupOverlay = true
-
-    // MARK: - Touch input
-
-    /// Whether only the Apple Pencil draws. About the user's *hardware*, not any one drawing.
-    ///
-    /// Absent a saved choice this is false: an ON-by-default gate would silently swallow every finger
-    /// touch on a device with no Apple Pencil, reading as "drawing is broken". Users with a Pencil who
-    /// want to rest a palm switch it on, and it stays on from then on. Recorded by the action recorder
-    /// like every switch, because it is the gate that decides whether a `.direct` touch draws at all —
-    /// a recording showing finger touches that produce no stroke is explained entirely by this being
-    /// `true` somewhere above them.
-    var pencilOnlyDrawing = false
 }
 
 extension ToolSwitches {
@@ -147,8 +135,7 @@ extension ToolSwitches {
 extension ToolSwitches {
 
     /// Every switch, by the name it is recorded under and the field it is. **The one list a new switch
-    /// is added to besides its declaration**; the `UserDefaults` key is `paintapp.` and the name, which
-    /// is what `pencilOnlyDrawing` has always been kept under.
+    /// is added to besides its declaration**; the `UserDefaults` key is `paintapp.` and the name.
     static let saved: [(name: String, field: WritableKeyPath<ToolSwitches, Bool>)] = [
         ("fillCanvasEdgeIsBoundary", \.fillCanvasEdgeIsBoundary),
         ("fillMendsNeighbourGap", \.fillMendsNeighbourGap),
@@ -158,7 +145,6 @@ extension ToolSwitches {
         ("keepsStrokeWidthOnMove", \.keepsStrokeWidthOnMove),
         ("interpolationThicknessFade", \.interpolationThicknessFade),
         ("showMotionGroupOverlay", \.showMotionGroupOverlay),
-        ("pencilOnlyDrawing", \.pencilOnlyDrawing),
     ]
 
     static func defaultsKey(_ name: String) -> String { "paintapp.\(name)" }

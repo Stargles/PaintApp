@@ -10,37 +10,6 @@ nonisolated struct StreamEndpoint: Hashable, Codable {
 
     /// STREAM.md §3's port.
     static let defaultPort: UInt16 = 47301
-
-    /// `UserDefaults` keys for "the last laptop connected to" — `StreamConnectSheet` writes these on
-    /// every connect attempt, success or not (its own prefill), and STREAM.md §6's document-level
-    /// connection reads them back on document open. One shared pair rather than two copies, so the
-    /// sheet and the coordinator cannot drift on the key string.
-    static let lastHostDefaultsKey = "streamScreen.lastHost"
-    static let lastPortDefaultsKey = "streamScreen.lastPort"
-
-    /// The last endpoint recorded, or nil when nothing has been recorded or what is there is not a
-    /// usable port.
-    static func lastUsed(in defaults: UserDefaults = .standard) -> StreamEndpoint? {
-        guard let host = defaults.string(forKey: lastHostDefaultsKey), !host.isEmpty else { return nil }
-        let port = defaults.integer(forKey: lastPortDefaultsKey)
-        guard port > 0, port <= 65535 else { return nil }
-        return StreamEndpoint(host: host, port: UInt16(port))
-    }
-
-    /// The launch-argument test hook, `EditorPreferences.forgetIfRequested`'s own shape: an XCUITest
-    /// that actually completes a connect attempt (`StreamScreenUITests
-    /// .testStreamScreenConnectSheetShowsTheRefusedMessageWhenNothingListens`, the one test in the
-    /// suite that does) leaves this pair written on the simulator's disk, where it outlives that
-    /// launch and prefills the *next* test's address/port fields with whatever it typed rather than
-    /// the defaults a cold-start assertion expects. `-resetEditorPreferences` already means "launch
-    /// as if this were the first time" for the brush/tool state; this is the same promise applied to
-    /// the other persistent default in the app.
-    static func forgetLastUsedIfRequested(arguments: [String] = ProcessInfo.processInfo.arguments,
-                                          defaults: UserDefaults = .standard) {
-        guard EditorPreferences.forgetRequested(in: arguments) else { return }
-        defaults.removeObject(forKey: lastHostDefaultsKey)
-        defaults.removeObject(forKey: lastPortDefaultsKey)
-    }
 }
 
 /// Where an inbound transfer's bytes land while they arrive, and where an outbound one is read

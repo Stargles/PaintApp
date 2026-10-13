@@ -44,9 +44,9 @@ nonisolated enum ProjectBackupManager {
     static let defaultMaxTotalBackupBytes: UInt64 = 4_000_000_000
     nonisolated(unsafe) static var maxTotalBackupBytes: UInt64 = defaultMaxTotalBackupBytes
 
-    /// UserDefaults key holding the app signature (version + build + binary mtime) seen at the
-    /// previous launch. Internal (not private) so logic tests can clear it between runs.
-    static let signatureDefaultsKey = "PaintApp.projectBackup.lastAppSignature"
+    /// Where the app signature (version + build + binary mtime) seen at the previous launch is kept.
+    /// Logic tests point this at a suite of their own.
+    nonisolated(unsafe) static var settings: AppSettings = .standard
 
     // MARK: - Directories
 
@@ -196,9 +196,9 @@ nonisolated enum ProjectBackupManager {
         let args = ProcessInfo.processInfo.arguments
 
         // Launch-arg test hooks (never present in normal runs):
-        //   -resetGallery               wipe Projects/Backups/Trash and the update signature (and,
-        //                               synchronously in `PaintApp.init`, the artist's tool
-        //                               preferences — see `EditorPreferences.forgetIfRequested`)
+        //   -resetGallery               wipe Projects/Backups/Trash, the projects-folder choice and the
+        //                               update signature (and, synchronously in `PaintApp.init`, the
+        //                               artist's app-wide preferences — see `AppSettings.forgetIfRequested`)
         //   -simulateProjectCorruption  overwrite the newest project's manifest.json with garbage,
         //                               simulating an update/crash-damaged package, so the repair
         //                               pass below can be observed fixing it end-to-end.
@@ -221,16 +221,14 @@ nonisolated enum ProjectBackupManager {
             // artist's real library. Forgetting the bookmark first makes the wipe container-only by
             // construction, which is the same reasoning the simulator guard above is built on: this
             // flag must not be able to touch anything a reinstall could not.
-            ProjectLocation.defaults.removeObject(forKey: ProjectLocation.bookmarkDefaultsKey)
-            ProjectLocation.defaults.removeObject(forKey: ProjectLocation.displayNameDefaultsKey)
-            ProjectLocation.defaults.removeObject(forKey: ProjectLocation.invitationDismissedDefaultsKey)
+            ProjectLocation.settings.forgetLibraryLocation()
             ProjectLocation.resetForTesting()
             let fm = FileManager.default
             for dir in [projectsDirectory, backupsRootDirectory, trashDirectory] {
                 try? fm.removeItem(at: dir)
                 try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
             }
-            UserDefaults.standard.removeObject(forKey: signatureDefaultsKey)
+            settings.lastAppSignature = nil
         }
         if args.contains("-simulateProjectCorruption") {
             simulateNewestProjectCorruption()
@@ -241,9 +239,9 @@ nonisolated enum ProjectBackupManager {
         // App updated or redeployed? Snapshot every valid project BEFORE anything else can touch
         // them, so a bad update can never destroy the only copy of pre-update work.
         let signature = currentAppSignature
-        if UserDefaults.standard.string(forKey: signatureDefaultsKey) != signature {
+        if settings.lastAppSignature != signature {
             snapshotAllProjectsForAppUpdate(signature: signature)
-            UserDefaults.standard.set(signature, forKey: signatureDefaultsKey)
+            settings.lastAppSignature = signature
         }
 
         repairCorruptedProjects()

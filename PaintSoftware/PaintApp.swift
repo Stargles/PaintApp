@@ -34,7 +34,7 @@ struct PaintApp: App {
         EditorPreferences.forgetIfRequested()
         ToolSwitches.forgetIfRequested()
         ColorPickerType.forgetIfRequested()
-        StreamEndpoint.forgetLastUsedIfRequested()
+        AppSettings.standard.forgetIfRequested()
         // Launch-time safety pass (off the main thread): snapshot every project if the app binary
         // changed (update/dev redeploy), auto-repair any damaged project package from its backups,
         // purge expired trash. The gallery re-lists when it finishes.

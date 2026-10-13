@@ -55,7 +55,6 @@ final class ToolSwitchesLogicTests: XCTestCase {
         XCTAssertFalse(switches.keepsStrokeWidthOnMove)
         XCTAssertFalse(switches.interpolationThicknessFade)
         XCTAssertTrue(switches.showMotionGroupOverlay, "The motion-group tint is on")
-        XCTAssertFalse(switches.pencilOnlyDrawing, "Fingers can paint until the artist says otherwise")
         XCTAssertEqual(CanvasManager().toolSwitches, switches, "A new manager starts from them")
     }
 
@@ -90,23 +89,15 @@ final class ToolSwitchesLogicTests: XCTestCase {
         XCTAssertTrue(ToolSwitches.stored(in: defaults).fillCanvasEdgeIsBoundary, "The untouched one is at its default")
     }
 
-    /// **The pencil-only choice already on an artist's iPad is read, not reset** — its key is the one
-    /// it has always been kept under.
-    func testThePencilOnlyKeyIsTheOneItHasAlwaysBeenKeptUnder() throws {
-        let defaults = try isolatedDefaults()
-        defaults.set(true, forKey: "paintapp.pencilOnlyDrawing")
-        XCTAssertTrue(ToolSwitches.stored(in: defaults).pencilOnlyDrawing)
-    }
-
-    /// A switch saved as the string a launch argument gives (`-paintapp.pencilOnlyDrawing YES`) reads as
-    /// the choice it spells — the way a UI test seeds one switch for one process.
+    /// A switch saved as the string a launch argument gives (`-paintapp.subtractsSelection YES`) reads
+    /// as the choice it spells — the way a UI test seeds one switch for one process.
     func testALaunchArgumentSeedsASwitch() throws {
         let defaults = try isolatedDefaults()
-        defaults.set("YES", forKey: ToolSwitches.defaultsKey("showMotionGroupOverlay"))
-        defaults.set("NO", forKey: ToolSwitches.defaultsKey("pencilOnlyDrawing"))
+        defaults.set("YES", forKey: ToolSwitches.defaultsKey("subtractsSelection"))
+        defaults.set("NO", forKey: ToolSwitches.defaultsKey("showMotionGroupOverlay"))
         let switches = ToolSwitches.stored(in: defaults)
-        XCTAssertTrue(switches.showMotionGroupOverlay)
-        XCTAssertFalse(switches.pencilOnlyDrawing)
+        XCTAssertTrue(switches.subtractsSelection)
+        XCTAssertFalse(switches.showMotionGroupOverlay)
     }
 
     // MARK: - The keeper

@@ -1903,11 +1903,6 @@ final class PerfBaselineTests: XCTestCase {
         let full = rebuild(at: .full)
         let threeQuarter = rebuild(at: .threeQuarter)
         let half = rebuild(at: .half)
-        // Removing the key rather than writing `.full` back — see `SandwichLogicTests.tearDown`, which
-        // carries what this leak looked like when it was not cleaned up. `defer` would be tidier and
-        // is wrong here: `rebuild` is what writes it, so the restore has to outlive all three calls
-        // and there is no scope that ends between them.
-        UserDefaults.standard.removeObject(forKey: CanvasManager.renderResolutionDefaultsKey)
         Compositor.backend = Compositor.defaultBackend
 
         report("render resolution, 6 layers at 2048x2048 (3 composites)", [

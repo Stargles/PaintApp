@@ -152,21 +152,21 @@ final class ScreenStreamCoordinator: ObservableObject {
     /// A test seam: a decoder image source per endpoint that stands in for a socket. Nil in the app.
     var frameSourceOverride: ((StreamEndpoint) -> (index: Int, image: CGImage)?)?
 
-    /// A test seam for STREAM.md §6's document-level connection: overrides what `UserDefaults`
-    /// would answer for "the last laptop connected to," so a logic test drives the ambient-connection
-    /// rule with no real defaults touched. Outer nil (the default) means "ask `UserDefaults.standard`
-    /// through `StreamEndpoint.lastUsed`"; `.some(nil)` means "nothing is recorded."
+    /// A test seam for STREAM.md §6's document-level connection: overrides what `AppSettings` would
+    /// answer for "the last laptop connected to," so a logic test drives the ambient-connection rule
+    /// with no real settings touched. Outer nil (the default) means "ask
+    /// `AppSettings.standard.lastStreamEndpoint`"; `.some(nil)` means "nothing is recorded."
     var documentEndpointOverride: StreamEndpoint??
 
     /// **STREAM.md §6's new bullet**: the document keeps a connection to the last laptop connected
     /// to, even with no stream element naming it — so the drop box and Send to Computer work as soon
     /// as a document is open, not only after Stream Screen. Read fresh on every `sync()` pass rather
-    /// than cached once at document open: `StreamConnectSheet.connect()` writes the defaults on
+    /// than cached once at document open: `StreamConnectSheet.connect()` records the endpoint on
     /// every attempt, so connecting to a new laptop becomes "last used" on the very next
     /// reconciliation pass rather than only after the document is reopened.
     private var documentEndpoint: StreamEndpoint? {
         if let documentEndpointOverride { return documentEndpointOverride }
-        return StreamEndpoint.lastUsed()
+        return AppSettings.standard.lastStreamEndpoint
     }
 
     /// Whether `sync()` and `connect(to:)` open sockets. **False in every `CanvasFixture` manager**,

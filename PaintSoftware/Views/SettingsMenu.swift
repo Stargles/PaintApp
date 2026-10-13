@@ -194,8 +194,8 @@ struct SettingsMenu: View {
     /// state the user is actually choosing between — rather than as the `pencilOnlyDrawing` flag it
     /// sets, which is inverted and reads backwards on a toggle. Persists across launches.
     private var pencilOnlyToggle: some View {
-        Toggle(isOn: Binding(get: { !canvasManager.toolSwitches.pencilOnlyDrawing },
-                             set: { canvasManager.toolSwitches.pencilOnlyDrawing = !$0 })) {
+        Toggle(isOn: Binding(get: { !canvasManager.pencilOnlyDrawing },
+                             set: { canvasManager.pencilOnlyDrawing = !$0 })) {
             HStack {
                 Image(systemName: "hand.draw").frame(width: 24)
                 Text("Fingers Can Paint")

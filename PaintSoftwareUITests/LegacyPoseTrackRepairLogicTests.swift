@@ -14,6 +14,8 @@ import CoreGraphics
 @MainActor
 final class LegacyPoseTrackRepairLogicTests: XCTestCase {
 
+    private var settingsSuite = ""
+
     private var root: URL!
     private var canvasBox: CGRect { CGRect(origin: .zero, size: CanvasFixture.canvasSize) }
     private var canvasCentre: CGPoint { CGPoint(x: canvasBox.midX, y: canvasBox.midY) }
@@ -24,7 +26,10 @@ final class LegacyPoseTrackRepairLogicTests: XCTestCase {
             .appendingPathComponent("legacy-pose-repair-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         ProjectBackupManager.rootDirectoryOverride = root
-        UserDefaults.standard.removeObject(forKey: ProjectBackupManager.signatureDefaultsKey)
+        // The update signature is kept in a suite of this test's own, so a run neither reads nor leaves
+        // the real one.
+        settingsSuite = "backup-settings-\(UUID().uuidString)"
+        ProjectBackupManager.settings = AppSettings(defaults: try XCTUnwrap(UserDefaults(suiteName: settingsSuite)))
         Compositor.backend = .coreGraphics
         MaskResolver.clearCache()
         PixelOps.clearRasterizeCache()
@@ -35,7 +40,8 @@ final class LegacyPoseTrackRepairLogicTests: XCTestCase {
         MaskResolver.clearCache()
         PixelOps.clearRasterizeCache()
         ProjectBackupManager.rootDirectoryOverride = nil
-        UserDefaults.standard.removeObject(forKey: ProjectBackupManager.signatureDefaultsKey)
+        ProjectBackupManager.settings = .standard
+        UserDefaults.standard.removePersistentDomain(forName: settingsSuite)
         try? FileManager.default.removeItem(at: root)
     }
 
