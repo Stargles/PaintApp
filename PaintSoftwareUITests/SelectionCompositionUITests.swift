@@ -70,4 +70,80 @@ final class SelectionCompositionUITests: PaintUITestCase {
                       "…and left the line the Subtract loop took out of it")
         attachScreenshot(app, "subtract-cleared-left-only")
     }
+
+    /// **Undo after a second loop gives back the first loop's selection** — TODO (182), the owner:
+    /// *"user makes selection 1, then selection 2 which gets booleaned, then undos and selection 2 gets
+    /// undone."* From a new document, read off the canvas: with both loops up the exterior hatch is
+    /// drawn only between and around them; one press of Undo and it covers the second loop's region
+    /// again, with the first loop's still clean; Redo gives the union back; and a Clear after the
+    /// undo takes only the first loop's line.
+    ///
+    /// The hatch is the assertion that fails if the ants stop following the model, and Clear is the one
+    /// that fails if they follow it and the model does not: the two readings of one selection.
+    func testUndoAfterASecondLoopGivesBackTheFirstLoopsSelection() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app), "setup: a brand-new document")
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let paper = paperRect(in: canvas)
+        func at(_ dx: Double, _ dy: Double) -> CGVector { onHost(paper, dx, dy) }
+
+        setBrushColor(app, hex: "FF0000")
+        setBrushSize(app, normalized: 0.12)
+        let leftMid = at(0.25, 0.22), rightMid = at(0.73, 0.22)
+        drawLine(on: canvas, from: at(0.12, 0.22), to: at(0.38, 0.22))
+        drawLine(on: canvas, from: at(0.60, 0.22), to: at(0.86, 0.22))
+        XCTAssertTrue(waitUntil(canvas, leftMid, isRed), "PREMISE: the left red line is on screen")
+        XCTAssertTrue(waitUntil(canvas, rightMid, isRed), "PREMISE: the right red line is on screen")
+
+        app.buttons["toolbar.selectButton"].tap()
+        let rectangle = app.buttons["selectPanel.mode.rectangle"]
+        XCTAssertTrue(rectangle.waitForExistence(timeout: 5), "the Select panel offers Rectangle")
+        rectangle.tap()
+        dragOnCanvas(app, from: at(0.06, 0.12), to: at(0.44, 0.32))
+        dragOnCanvas(app, from: at(0.54, 0.12), to: at(0.92, 0.32))
+
+        /// The hatch over a strip just under the loops' top edge — inside the left loop, in the gap between
+        /// the loops, inside the right loop — clear of both lines and well inside the outlines. Polled,
+        /// because the overlay redraws on the pass that follows the model.
+        func hatch(_ x: ClosedRange<Double>, until holds: (Double) -> Bool) throws -> Double {
+            var fraction = 0.0
+            let deadline = Date().addingTimeInterval(5)
+            repeat {
+                fraction = hatchedFraction(try pixelProbe(canvas), canvas: canvas, paper: paper, x: x, y: 0.135...0.155)
+                if holds(fraction) { break }
+                Thread.sleep(forTimeInterval: 0.25)
+            } while Date() < deadline
+            return fraction
+        }
+        let insideLeft = 0.10...0.40, gap = 0.46...0.52, insideRight = 0.60...0.88
+        let clean: (Double) -> Bool = { $0 < 0.02 }, hatched: (Double) -> Bool = { $0 > 0.05 }
+
+        XCTAssertTrue(clean(try hatch(insideLeft, until: clean)), "the first loop's region is clear of the hatch")
+        XCTAssertTrue(clean(try hatch(insideRight, until: clean)), "…and so is the second's: the union is up")
+        XCTAssertTrue(hatched(try hatch(gap, until: hatched)), "PREMISE: and the paper between them is hatched")
+        attachScreenshot(app, "two-loops-union")
+
+        // One press of Undo.
+        app.buttons["sideToolbar.undoButton"].tap()
+        XCTAssertTrue(hatched(try hatch(insideRight, until: hatched)),
+                      "undo: the second loop's region is hatched again — it is no longer selected")
+        XCTAssertTrue(clean(try hatch(insideLeft, until: clean)), "…and the first loop's is still the selection")
+        attachScreenshot(app, "undo-first-loop-only")
+
+        // And Redo gives the union back.
+        app.buttons["sideToolbar.redoButton"].tap()
+        XCTAssertTrue(clean(try hatch(insideRight, until: clean)), "redo: the second loop is selected again")
+        app.buttons["sideToolbar.undoButton"].tap()
+        XCTAssertTrue(hatched(try hatch(insideRight, until: hatched)), "…and undone once more")
+
+        // The model agrees with the picture: Clear takes the first loop's line and not the second's.
+        let clear = app.buttons["selectPanel.clearButton"]
+        XCTAssertTrue(clear.isEnabled, "a selection is up")
+        clear.tap()
+        XCTAssertTrue(waitUntil(canvas, leftMid, isWhitish), "Clear took the line under the first loop")
+        XCTAssertTrue(waitUntil(canvas, rightMid, isRed),
+                      "…and left the line under the second, which the undo took out of the selection")
+        attachScreenshot(app, "undo-then-clear-left-only")
+    }
 }

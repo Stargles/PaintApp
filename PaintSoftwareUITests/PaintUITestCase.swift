@@ -1768,6 +1768,31 @@ class PaintUITestCase: XCTestCase {
         try SynthesizedTouch.synthesize([path], named: "one-finger stroke")
     }
 
+    /// **How much of a patch of bare paper the Select tool's exterior hatch covers**, as a fraction of
+    /// the pixels read: about a seventh where the diagonal stripes are drawn and none where they are
+    /// not. `x` and `y` are paper fractions. Keep the patch off ink, and a dozen points inside any
+    /// outline, where the ants and their blue shadow are drawn.
+    func hatchedFraction(_ probe: (Double, Double) -> RGBA, canvas: XCUIElement, paper: CGRect,
+                         x: ClosedRange<Double>, y: ClosedRange<Double>) -> Double {
+        let frame = canvas.frame
+        let stepX = 0.7 / Double(frame.width), stepY = 0.7 / Double(frame.height)
+        let left = paper.minX + paper.width * x.lowerBound, right = paper.minX + paper.width * x.upperBound
+        let top = paper.minY + paper.height * y.lowerBound, bottom = paper.minY + paper.height * y.upperBound
+        var read = 0, hatched = 0
+        var py = top
+        while py <= bottom {
+            var px = left
+            while px <= right {
+                let pixel = probe(px, py)
+                if min(pixel.r, pixel.g, pixel.b) < 235 { hatched += 1 }
+                read += 1
+                px += stepX
+            }
+            py += stepY
+        }
+        return read == 0 ? 0 : Double(hatched) / Double(read)
+    }
+
     /// **A freehand loop round the rectangle between two offsets of `canvas.host`, in one stroke that
     /// ends where it began** — what Freehand selection closes on lift (TODO (184)). A straight drag,
     /// which is all `dragOnCanvas` can draw, lifts away from where it landed and leaves the lasso open.

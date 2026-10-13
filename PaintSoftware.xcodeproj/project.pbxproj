@@ -10,6 +10,8 @@
 		2B2D45E7E45CEAC0997FF6B3 /* PlacementLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AD7FFF9C7072CCD856D01D7 /* PlacementLogicTests.swift */; };
 		D2B8319C29D1B75C86FFC1C2 /* PaintSoftware/Models/CanvasManager+Placement.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7706DFF2E57D65DDEC94400 /* PaintSoftware/Models/CanvasManager+Placement.swift */; };
 		71F151DE4A87F102F1E4E356 /* TapSelectUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DBCE9405A10F642474B7885 /* TapSelectUITests.swift */; };
+		962EB95C4BA4A1995C3496F9 /* SelectionSurvivesLayerSwitchUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9022D2E71C9DC2EC2FD5023B /* SelectionSurvivesLayerSwitchUITests.swift */; };
+		CD5FCFCD0885F8CE3E54029B /* OpenLassoUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D0CB2D303944087956106F3 /* OpenLassoUITests.swift */; };
 		9EA574C053D114AA75EF6A74 /* TapSelectLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D0665AB7A782FB2FBA39984 /* TapSelectLogicTests.swift */; };
 		51DB1605D69F0F7615BA8122 /* OpenLassoLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70F2197CA62EC511115D17F0 /* OpenLassoLogicTests.swift */; };
 		BD3C86C595ECD393F35718B9 /* PaintSoftware/Models/CanvasManager+TapSelect.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2107396FB2B6DF85F6B33948 /* PaintSoftware/Models/CanvasManager+TapSelect.swift */; };
@@ -625,6 +627,8 @@
 		2AD7FFF9C7072CCD856D01D7 /* PlacementLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PlacementLogicTests.swift; sourceTree = "<group>"; };
 		E7706DFF2E57D65DDEC94400 /* PaintSoftware/Models/CanvasManager+Placement.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/CanvasManager+Placement.swift"; sourceTree = "<group>"; };
 		7DBCE9405A10F642474B7885 /* TapSelectUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TapSelectUITests.swift; sourceTree = "<group>"; };
+		9022D2E71C9DC2EC2FD5023B /* SelectionSurvivesLayerSwitchUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SelectionSurvivesLayerSwitchUITests.swift; sourceTree = "<group>"; };
+		9D0CB2D303944087956106F3 /* OpenLassoUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = OpenLassoUITests.swift; sourceTree = "<group>"; };
 		3D0665AB7A782FB2FBA39984 /* TapSelectLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TapSelectLogicTests.swift; sourceTree = "<group>"; };
 		70F2197CA62EC511115D17F0 /* OpenLassoLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = OpenLassoLogicTests.swift; sourceTree = "<group>"; };
 		2107396FB2B6DF85F6B33948 /* PaintSoftware/Models/CanvasManager+TapSelect.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/CanvasManager+TapSelect.swift"; sourceTree = "<group>"; };
@@ -1367,6 +1371,8 @@
 				7186549102F48EFD65C89E17 /* EditSelectedObjectUITests.swift */,
 				A0EAD819554BAC2098782140 /* TextSessionUITests.swift */,
 				7DBCE9405A10F642474B7885 /* TapSelectUITests.swift */,
+				9022D2E71C9DC2EC2FD5023B /* SelectionSurvivesLayerSwitchUITests.swift */,
+				9D0CB2D303944087956106F3 /* OpenLassoUITests.swift */,
 				5AC93EFC402EAACF4E81539C /* FillObjectUITests.swift */,
 				B52B97CA02A09585F3CBCA3B /* EditSelectedObjectLogicTests.swift */,
 				3D0665AB7A782FB2FBA39984 /* TapSelectLogicTests.swift */,
@@ -2119,6 +2125,8 @@
 				C6F38EC0B2C0C9F7A58FC026 /* EditSelectedObjectUITests.swift in Sources */,
 				4BCFB562E6B13D3B293FCE9F /* TextSessionUITests.swift in Sources */,
 				71F151DE4A87F102F1E4E356 /* TapSelectUITests.swift in Sources */,
+				962EB95C4BA4A1995C3496F9 /* SelectionSurvivesLayerSwitchUITests.swift in Sources */,
+				CD5FCFCD0885F8CE3E54029B /* OpenLassoUITests.swift in Sources */,
 				3FF2D452FA87432F5626E7EA /* FillObjectUITests.swift in Sources */,
 				6F2AC6D7ABA2EDE406623C58 /* EditSelectedObjectLogicTests.swift in Sources */,
 				9EA574C053D114AA75EF6A74 /* TapSelectLogicTests.swift in Sources */,

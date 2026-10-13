@@ -225,6 +225,7 @@ final class OpenLassoLogicTests: XCTestCase {
     /// only sign that the press will do something.
     func testUndoIsLitWhileALassoIsOpenAndRedoIsNot() {
         let manager = CanvasFixture.manager()
+        manager.history.removeAll()
         manager.recordUndo(label: .brushStroke, undo: {}, redo: {})
         manager.undo()
         XCTAssertFalse(manager.canUndo, "PREMISE: the history has nothing left to undo")
