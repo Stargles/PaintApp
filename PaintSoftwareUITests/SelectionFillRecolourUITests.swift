@@ -10,9 +10,10 @@ import UIKit
 /// punched out under a window, and the window's picture is drawn off the main thread into one of two
 /// surfaces the render server shows (`StrokeCanvasView.showHeldEdit`, `WindowSurfaceView`). So at every
 /// moment between the first tick and the lift the artist must be looking at *the fill in some colour*:
-/// the base while the first picture is still being drawn, then the newest picture that has landed —
-/// never the paper, which is what the punched hole shows when a picture is not on top of it, and never
-/// an older colour once a newer one has been seen.
+/// the base while the first picture is still being drawn (the window is drawn when the picker opens,
+/// over the list as it stands, before any tick), then the newest picture that has landed — never the
+/// paper, which is what the punched hole shows when a picture is not on top of it, and never an older
+/// colour once a newer one has been seen.
 ///
 /// **How it is made deterministic.** Not by sampling a synthesised drag, whose synchronous call leaves
 /// the number of screen reads to the host's speed (the test it replaces needed ten and read three on a
@@ -85,21 +86,10 @@ final class SelectionFillRecolourUITests: PaintUITestCase {
         openSelectionEditBand(app)
         let swatch = app.buttons["selectPanel.colourSwatch"]
         XCTAssertTrue(swatch.waitForExistence(timeout: 5), "the loop raised the colour swatch")
-        swatch.tap()
-        XCTAssertTrue(app.descendants(matching: .any)["canvasPresentation.selectionColour"].firstMatch
-            .waitForExistence(timeout: 5), "the swatch opens the picker")
 
-        // 2. The picks, each swatch's own value read first.
-        var swatches: [XCUIElement] = []
-        for pick in Self.picks {
-            let element = app.otherElements["colorPanel.swatch.\(pick.index)"]
-            XCTAssertTrue(element.exists, "PREMISE: the picker lists palette swatch \(pick.index)")
-            XCTAssertEqual(element.value as? String, pick.hex, "PREMISE: swatch \(pick.index) is \(pick.hex)")
-            swatches.append(element)
-        }
-
-        // 3. A grid of points over the loop; those that read red now are on the fill and under nothing —
-        //    not under the picker, the Select panel or the timeline — and are the ones read from here on.
+        // 2. A grid of points over the loop, read from another thread from here on — before the picker
+        //    opens, when the fill is on screen under nothing but the Select panel and the timeline, which
+        //    the loop stays above. The points that read red are on the fill.
         let host = canvas.frame
         func screen(_ v: CGVector) -> CGPoint {
             CGPoint(x: host.minX + host.width * v.dx, y: host.minY + host.height * v.dy)
@@ -113,11 +103,34 @@ final class SelectionFillRecolourUITests: PaintUITestCase {
         }
         let sampler = MidGestureSampler(points: grid, interval: 0)
         sampler.start()
-        let premiseRead = waitForSample(sampler, timeout: 30) { _ in true }
-        let clear = grid.indices.filter { level(of: premiseRead?.pixels[$0]) == 0 }
+        let before = waitForSample(sampler, timeout: 30) { _ in true }
+        let onTheFill = grid.indices.filter { level(of: before?.pixels[$0]) == 0 }
+        XCTAssertGreaterThanOrEqual(onTheFill.count, 12,
+                                    "PREMISE: the fill reads red where it is read (\(onTheFill.count) of \(grid.count) points; "
+                                    + "first read \(String(describing: before?.pixels)))")
+
+        // 3. The picker opens, which begins the edit's session — and the window is drawn then too, over
+        //    the list as it stands, so the base has to stay on screen through that draw as well. Once it
+        //    has landed (the draw's 2.5 s and a second's grace) the points still red are the ones the
+        //    picker does not cover.
+        let opened = CFAbsoluteTimeGetCurrent()
+        swatch.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["canvasPresentation.selectionColour"].firstMatch
+            .waitForExistence(timeout: 5), "the swatch opens the picker")
+        var swatches: [XCUIElement] = []
+        for pick in Self.picks {
+            let element = app.otherElements["colorPanel.swatch.\(pick.index)"]
+            XCTAssertTrue(element.exists, "PREMISE: the picker lists palette swatch \(pick.index)")
+            XCTAssertEqual(element.value as? String, pick.hex, "PREMISE: swatch \(pick.index) is \(pick.hex)")
+            swatches.append(element)
+        }
+        Thread.sleep(forTimeInterval: max(0, opened + Self.drawSeconds + 1 - CFAbsoluteTimeGetCurrent()))
+        let settled = sampler.latest
+        let clear = onTheFill.filter { level(of: settled?.pixels[$0]) == 0 }
         XCTAssertGreaterThanOrEqual(clear.count, 6,
                                     "PREMISE: the fill reads red where it is read, clear of the picker (\(clear.count) of "
-                                    + "\(grid.count) points; first read \(String(describing: premiseRead?.pixels)))")
+                                    + "\(onTheFill.count) points; settled read \(String(describing: settled?.pixels)))")
+        attachScreenshot(XCUIScreen.main, "1-picker-open-over-the-filled-selection")
 
         /// The one level every clear point reads in a sample, or nil when they disagree or any is not a colour.
         func uniformLevel(_ sample: MidGestureSampler.Sample) -> Int? {
@@ -133,7 +146,7 @@ final class SelectionFillRecolourUITests: PaintUITestCase {
         //    is asked for during that draw and the fourth replaces it, so the picture drawn after the
         //    second lands — into the surface the first one just left — is the newest, and the third
         //    is never drawn at all.
-        let t0 = CFAbsoluteTimeGetCurrent()
+        let t0 = opened
         var taps: [CFAbsoluteTime] = []
         func tick(_ index: Int) {
             swatches[index].tap()
@@ -148,17 +161,17 @@ final class SelectionFillRecolourUITests: PaintUITestCase {
         let reads = sampler.stop()
         attachScreenshot(XCUIScreen.main, "1-the-last-tick-held")
 
-        // 5. What every read said, from the first tick on.
-        let timeline = reads.filter { $0.finished >= taps[0] }
+        // 5. What every read said, from the picker opening on.
+        let timeline = reads.filter { $0.finished >= opened }
         func pixels(_ sample: MidGestureSampler.Sample) -> String {
             clear.map { sample.pixels[$0].map { "\($0.r),\($0.g),\($0.b)" } ?? "-" }.joined(separator: " ")
         }
-        let note = XCTAttachment(string: "ticks at " + taps.map { String(format: "%.2f", $0 - t0) }.joined(separator: ", ")
+        let note = XCTAttachment(string: "(seconds from the picker opening) ticks at " + taps.map { String(format: "%.2f", $0 - t0) }.joined(separator: ", ")
                                  + "\n" + timeline.map { sample in
             String(format: "%.2f ", sample.finished - t0)
                 + (uniformLevel(sample).map { "level \($0)" } ?? "NOT ONE COLOUR: " + pixels(sample))
         }.joined(separator: "\n"))
-        note.name = "what the fill read, from the first tick on"
+        note.name = "what the fill read, from the picker opening on"
         note.lifetime = .keepAlways
         add(note)
 
