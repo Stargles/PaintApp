@@ -43,9 +43,7 @@ final class VectorDuplicateLogicTests: XCTestCase {
 
     private func select(_ manager: CanvasManager, _ layerIndex: Int, _ rect: CGRect) {
         let path = CGPath(rect: rect, transform: nil)
-        manager.selection = Selection(path: path, bounds: rect,
-                                      layerID: manager.layers[layerIndex].id,
-                                      celID: manager.layers[layerIndex].cels[0].id)
+        manager.selection = Selection(path: path, bounds: rect)
     }
 
     /// The layer directly above `layerIndex`, or a failure — the place both Duplicate arms put their

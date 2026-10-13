@@ -62,9 +62,7 @@ final class SandwichLiveHostsLogicTests: XCTestCase {
         s.manager.setLayerBlendMode(layerIndex: s.above, to: .multiply)
         XCTAssertTrue(s.manager.sandwichEngagesOnCanvas(tree: s.tree), "PREMISE: a Multiply guide engages it")
         s.manager.selection = Selection(path: CGPath(rect: CGRect(x: 4, y: 24, width: 56, height: 16), transform: nil),
-                                        bounds: CGRect(x: 4, y: 24, width: 56, height: 16),
-                                        layerID: s.manager.layers[s.drawing].id,
-                                        celID: s.manager.layers[s.drawing].cels[0].id)
+                                        bounds: CGRect(x: 4, y: 24, width: 56, height: 16))
         XCTAssertTrue(s.manager.beginVectorLassoMove(), "PREMISE: the loop catches the drawing's line")
         XCTAssertNotNil(s.manager.vectorFloat)
 
@@ -111,8 +109,7 @@ final class SandwichLiveHostsLogicTests: XCTestCase {
         manager.setLayerBlendMode(layerIndex: 2, to: .multiply)
         manager.currentLayerIndex = 1
         manager.selection = Selection(path: CGPath(rect: CGRect(x: 4, y: 20, width: 56, height: 16), transform: nil),
-                                      bounds: CGRect(x: 4, y: 20, width: 56, height: 16),
-                                      layerID: manager.layers[1].id, celID: manager.layers[1].cels[0].id)
+                                      bounds: CGRect(x: 4, y: 20, width: 56, height: 16))
         manager.beginMove()
         XCTAssertEqual(manager.floatingPiece?.kind, .move, "PREMISE: a raster lift")
         let tree = manager.renderTree(atFrame: 0)

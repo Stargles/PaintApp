@@ -35,6 +35,11 @@ enum HistoryActionLabel: CaseIterable, Equatable {
     /// loop back reads "undo fill" as the wrong thing having gone.
     case lassoFill
     case clearSelection
+    /// A second loop joining the selection already up, or the Subtract switch taking one away from it —
+    /// TODO (182). Two cases, as `.erase` is apart from `.brushStroke`: the banner says which of the two
+    /// is coming back, and an artist who added a loop and reads "undid subtract" has the wrong picture.
+    case addToSelection
+    case subtractFromSelection
     /// Change Colour on a selection — every stroke, fill and text object the loop caught takes the
     /// picked colour, whole. Named apart from `.fill` for the reason `.lassoFill` is: an artist who
     /// wants their old colours back reads "undo fill" as the wrong thing having gone.
@@ -278,6 +283,8 @@ enum HistoryActionLabel: CaseIterable, Equatable {
         case .fill: return "fill"
         case .lassoFill: return "lasso fill"
         case .clearSelection: return "clear selection"
+        case .addToSelection: return "add to selection"
+        case .subtractFromSelection: return "subtract from selection"
         case .recolorSelection: return "recolour selection"
         case .applyBrushToSelection: return "apply brush to selection"
         case .resizeSelectionStrokes: return "resize strokes in selection"

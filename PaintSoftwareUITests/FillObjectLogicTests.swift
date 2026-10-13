@@ -191,9 +191,7 @@ final class FillObjectLogicTests: XCTestCase {
         let (manager, layerIndex, vector) = vectorFixture()
         manager.brushColor = red
         let loop = CGPath(rect: CGRect(x: 10, y: 10, width: 20, height: 20), transform: nil)
-        manager.selection = Selection(path: loop, bounds: loop.boundingBoxOfPath,
-                                      layerID: manager.layers[layerIndex].id,
-                                      celID: manager.layers[layerIndex].cels[0].id)
+        manager.selection = Selection(path: loop, bounds: loop.boundingBoxOfPath)
         let baseline = steps(manager)
         manager.fillSelection()
         XCTAssertEqual(vector.elements.compactMap(\.fill).count, 1)
@@ -519,9 +517,7 @@ final class FillObjectLogicTests: XCTestCase {
                        paint: .linearGradient(.spanning(rect, angle: 0)))
         let before = try XCTUnwrap(vector.elements.first?.fill?.paint)
         let loop = CGPath(rect: CGRect(x: 2, y: 2, width: 60, height: 60), transform: nil)
-        manager.selection = Selection(path: loop, bounds: loop.boundingBoxOfPath,
-                                      layerID: manager.layers[layerIndex].id,
-                                      celID: manager.layers[layerIndex].cels[0].id)
+        manager.selection = Selection(path: loop, bounds: loop.boundingBoxOfPath)
 
         XCTAssertFalse(manager.applySelectionEdit(.color(CodableColor(red: 1, green: 0, blue: 0, alpha: 1))),
                        "a hue written over both ends would flatten it, so Colour does not reach it")

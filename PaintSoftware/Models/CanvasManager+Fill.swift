@@ -1132,8 +1132,8 @@ extension CanvasManager {
                             artworkRect: paper, mendReach: Float(key.mendReach) * scale, fillColor: context.color)
     }
 
-    /// Clips a fill preview to the active selection's path when the fill lands on the exact layer/cel
-    /// the selection belongs to and outside interaction is denied — the flood-fill tool analogue of
+    /// Clips a fill preview to the active selection's path when the fill lands on a cel the selection
+    /// acts on and outside interaction is denied — the flood-fill tool analogue of
     /// `StrokeCanvasView.selectionClipPath`, so a bucket fill can't paint outside the marching ants
     /// any more than a brush stroke can. Runs on the main thread — from the `fillQueue` render's
     /// `DispatchQueue.main.async` hop, and from `commitInteractiveFill` on the path where that hop
@@ -1144,7 +1144,8 @@ extension CanvasManager {
                                      layerIndex: Int, celIndex: Int) -> FillPreview? {
         guard let preview, let selection, !toolSwitches.allowsPaintingOutsideSelection,
               layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex),
-              layers[layerIndex].id == selection.layerID, layers[layerIndex].cels[celIndex].id == selection.celID else { return preview }
+              selection.acts(onLayer: layers[layerIndex].id, cel: layers[layerIndex].cels[celIndex].id)
+        else { return preview }
         // The selection is in canvas coordinates and the preview's pixels are its window's, so the
         // path is taken into the window before it clips.
         var toWindow = window.transform

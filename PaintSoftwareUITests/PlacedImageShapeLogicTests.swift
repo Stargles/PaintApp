@@ -282,9 +282,7 @@ final class PlacedImageShapeLogicTests: XCTestCase {
         let element = image(at: CGPoint(x: 32, y: 32), scale: 1, rotation: 0, aspect: 9)
         vector.addImage(element)
         let loop = CGRect(x: 4, y: 4, width: 56, height: 56)
-        manager.selection = Selection(path: CGPath(rect: loop, transform: nil), bounds: loop,
-                                      layerID: manager.layers[layerIndex].id,
-                                      celID: manager.layers[layerIndex].cels[0].id)
+        manager.selection = Selection(path: CGPath(rect: loop, transform: nil), bounds: loop)
         XCTAssertTrue(manager.beginVectorLassoMove())
 
         let measured = try XCTUnwrap(manager.vectorFloat?.ink.bounds(), "the lift measured the photo")
@@ -391,9 +389,7 @@ final class PlacedImageShapeLogicTests: XCTestCase {
         vector.addImage(image(at: CGPoint(x: 32, y: 32), scale: 1, rotation: 0))
         manager.selection = Selection(path: CGPath(rect: CGRect(x: 18, y: 18, width: 28, height: 28),
                                                    transform: nil),
-                                      bounds: CGRect(x: 18, y: 18, width: 28, height: 28),
-                                      layerID: manager.layers[layerIndex].id,
-                                      celID: manager.layers[layerIndex].cels[0].id)
+                                      bounds: CGRect(x: 18, y: 18, width: 28, height: 28))
         XCTAssertTrue(manager.beginVectorLassoMove(), "the lift catches the photo")
         manager.setTransformMode(.freeform)
         XCTAssertTrue(manager.vectorFloatIsFreeform,
@@ -423,9 +419,7 @@ final class PlacedImageShapeLogicTests: XCTestCase {
         vector.addImage(image(at: CGPoint(x: 32, y: 32), scale: 1, rotation: 0))
         manager.selection = Selection(path: CGPath(rect: CGRect(x: 18, y: 18, width: 28, height: 28),
                                                    transform: nil),
-                                      bounds: CGRect(x: 18, y: 18, width: 28, height: 28),
-                                      layerID: manager.layers[layerIndex].id,
-                                      celID: manager.layers[layerIndex].cels[0].id)
+                                      bounds: CGRect(x: 18, y: 18, width: 28, height: 28))
         XCTAssertTrue(manager.beginVectorLassoMove())
 
         manager.mirrorFloating(horizontal: true)

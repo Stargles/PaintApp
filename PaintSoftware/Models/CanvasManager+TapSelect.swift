@@ -71,7 +71,7 @@ extension CanvasManager {
             if let hit = topmostObject(at: point) { selectTapped(.add, hit) }
             return nil
         case .subtract:
-            guard let held = selection?.elements, let cel = tappedSelectionCel else {
+            guard let held = selection?.objects?.elements, let cel = tappedSelectionCel else {
                 raise(.nothingTappedToSubtractFrom)
                 return nil
             }
@@ -90,8 +90,9 @@ extension CanvasManager {
                               _ tapped: (layerIndex: Int, celIndex: Int, shown: VectorElement)) -> Bool {
         let layer = layers[tapped.layerIndex]
         let held: Set<UUID>
-        if let selection, selection.layerID == layer.id, selection.celID == layer.cels[tapped.celIndex].id {
-            held = selection.elements ?? []
+        if let objects = selection?.objects, objects.layerID == layer.id,
+           objects.celID == layer.cels[tapped.celIndex].id {
+            held = objects.elements
         } else {
             held = []
         }
@@ -122,15 +123,16 @@ extension CanvasManager {
         let bounds = union.boundingBoxOfPath.intersection(CGRect(origin: .zero, size: canvasSize))
         guard !bounds.isNull else { return nil }
         let layer = layers[layerIndex]
-        return Selection(path: union, bounds: bounds, layerID: layer.id, celID: layer.cels[celIndex].id,
-                         elements: Set(outlined.map(\.0)))
+        return Selection(path: union, bounds: bounds,
+                         objects: SelectedObjects(layerID: layer.id, celID: layer.cels[celIndex].id,
+                                                  elements: Set(outlined.map(\.0))))
     }
 
     /// Where the tapped selection's cel is now, or nil when the selection is not one or its cel is gone.
     private var tappedSelectionCel: (layerIndex: Int, celIndex: Int)? {
-        guard let selection, selection.elements != nil,
-              let layerIndex = layers.firstIndex(where: { $0.id == selection.layerID }),
-              let celIndex = layers[layerIndex].cels.firstIndex(where: { $0.id == selection.celID })
+        guard let objects = selection?.objects,
+              let layerIndex = layers.firstIndex(where: { $0.id == objects.layerID }),
+              let celIndex = layers[layerIndex].cels.firstIndex(where: { $0.id == objects.celID })
         else { return nil }
         return (layerIndex, celIndex)
     }

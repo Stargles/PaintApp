@@ -1526,9 +1526,7 @@ final class UndoRepairLogicTests: XCTestCase {
     private func manager(around canvas: VectorCanvas, selecting loop: CGRect,
                          membership: LassoMembership) -> CanvasManager {
         let manager = manager(around: canvas)
-        manager.selection = Selection(path: CGPath(rect: loop, transform: nil), bounds: loop,
-                                      layerID: manager.layers[0].id,
-                                      celID: manager.layers[0].cels[0].id)
+        manager.selection = Selection(path: CGPath(rect: loop, transform: nil), bounds: loop)
         manager.setSelectionMembership(membership)
         return manager
     }

@@ -58,6 +58,29 @@ final class TapSelectLogicTests: XCTestCase {
         vector.elements.first { $0.id == id }
     }
 
+    // MARK: - A tapped set belongs to its cel
+
+    /// **A layer change puts a tapped set down and leaves a drawn region up** (TODO (185)): the artist
+    /// named *those* objects, which live on one cel, where a region is a place on the paper that any
+    /// layer can be asked about. The control for the region is in the same run, so the difference is
+    /// the kind of selection and nothing else.
+    func testAChangeOfLayerPutsATappedSetDownWhereARegionStays() {
+        let (manager, layerIndex, vector) = vectorFixture()
+        let line = stroke(from: CGPoint(x: 10, y: 30), to: CGPoint(x: 50, y: 30))
+        vector.addStroke(line)
+        manager.selectObject(at: CGPoint(x: 30, y: 30))
+        XCTAssertEqual(manager.selection?.objects?.elements, [line.id], "PREMISE: the stroke is selected")
+
+        manager.currentLayerIndex = 0
+        XCTAssertNil(manager.selection, "the tapped set belongs to layer \(layerIndex)'s cel and is put down")
+
+        manager.finishSelection(path: rect(CGRect(x: 0, y: 0, width: 40, height: 30)))
+        XCTAssertNotNil(manager.selection, "PREMISE: a region is up")
+        manager.currentLayerIndex = layerIndex
+        XCTAssertNotNil(manager.selection, "…and a region is carried to the next layer")
+        XCTAssertNil(manager.selection?.objects, "…as a region")
+    }
+
     // MARK: - Which object — the drawn shape of each kind
 
     /// **A stroke is its ink**: a point within the stamp radius of the centre line is on it, and one
@@ -156,7 +179,7 @@ final class TapSelectLogicTests: XCTestCase {
         vector.addStroke(line)
 
         XCTAssertNil(manager.selectObject(at: CGPoint(x: 30, y: 30)), "a stroke has no editor of its own")
-        XCTAssertEqual(manager.selection?.elements, [line.id], "the tap named the stroke")
+        XCTAssertEqual(manager.selection?.objects?.elements, [line.id], "the tap named the stroke")
         XCTAssertEqual(manager.selectionStyle.size, 4, "the readout is the stroke's, not the fill's")
 
         let blue = Color(red: 0, green: 0, blue: 1)
@@ -196,7 +219,7 @@ final class TapSelectLogicTests: XCTestCase {
         XCTAssertEqual(manager.textEditingElementID, words.id, "Edit Text is open on that box")
         XCTAssertTrue(manager.textGestureActive)
         XCTAssertEqual(manager.selectedTool, .text)
-        XCTAssertEqual(manager.selection?.elements, [words.id], "the selection outlives the editor it opened")
+        XCTAssertEqual(manager.selection?.objects?.elements, [words.id], "the selection outlives the editor it opened")
         XCTAssertNil(manager.gradientEdit, "and no gradient session opened")
     }
 
@@ -207,7 +230,7 @@ final class TapSelectLogicTests: XCTestCase {
 
         XCTAssertEqual(manager.selectObject(at: CGPoint(x: 30, y: 30)), .gradient)
         XCTAssertNotNil(manager.gradientEdit, "the gradient's card is open")
-        XCTAssertEqual(manager.selection?.elements, [id])
+        XCTAssertEqual(manager.selection?.objects?.elements, [id])
         XCTAssertFalse(manager.textGestureActive)
     }
 
@@ -218,7 +241,7 @@ final class TapSelectLogicTests: XCTestCase {
         let id = flatFill(vector, CGRect(x: 10, y: 10, width: 30, height: 30))
 
         XCTAssertNil(manager.selectObject(at: CGPoint(x: 20, y: 20)))
-        XCTAssertEqual(manager.selection?.elements, [id])
+        XCTAssertEqual(manager.selection?.objects?.elements, [id])
         XCTAssertNil(manager.gradientEdit)
         XCTAssertFalse(manager.textGestureActive)
         XCTAssertNotEqual(manager.selectedTool, .text)
@@ -251,7 +274,7 @@ final class TapSelectLogicTests: XCTestCase {
         manager.selectObject(at: CGPoint(x: 30, y: 30))
         XCTAssertEqual(manager.currentLayerIndex, lower, "the tap switched to the object's layer")
         XCTAssertEqual(manager.selection?.layerID, manager.layers[lower].id)
-        XCTAssertEqual(manager.selection?.elements, [line.id])
+        XCTAssertEqual(manager.selection?.objects?.elements, [line.id])
     }
 
     /// **The topmost layer wins where two layers have an object under the finger**, and a hidden layer is
@@ -266,12 +289,12 @@ final class TapSelectLogicTests: XCTestCase {
         upperVector.addStroke(top)
 
         manager.selectObject(at: CGPoint(x: 30, y: 30))
-        XCTAssertEqual(manager.selection?.elements, [top.id], "the layer on top answers first")
+        XCTAssertEqual(manager.selection?.objects?.elements, [top.id], "the layer on top answers first")
 
         manager.layers[upper].isVisible = false
         manager.selectObject(at: CGPoint(x: 30, y: 30))
         XCTAssertEqual(manager.currentLayerIndex, lower, "with it hidden the tap goes through to the layer below")
-        XCTAssertNotEqual(manager.selection?.elements, [top.id])
+        XCTAssertNotEqual(manager.selection?.objects?.elements, [top.id])
     }
 
     /// **The object is where it is shown, not where it is stored.** A cel channel slides the drawing 20
@@ -290,7 +313,7 @@ final class TapSelectLogicTests: XCTestCase {
         manager.currentFrame = 12
 
         manager.selectObject(at: CGPoint(x: 45, y: 30))
-        XCTAssertEqual(manager.selection?.elements, [line.id], "the stroke is selected where it is drawn (x 30…50)")
+        XCTAssertEqual(manager.selection?.objects?.elements, [line.id], "the stroke is selected where it is drawn (x 30…50)")
         manager.selectObject(at: CGPoint(x: 12, y: 30))
         XCTAssertNil(manager.selection, "…and a tap where it is stored selects nothing")
     }
@@ -300,11 +323,11 @@ final class TapSelectLogicTests: XCTestCase {
         let (manager, _, vector) = vectorFixture()
         let id = flatFill(vector, CGRect(x: 10, y: 10, width: 20, height: 20))
         manager.selectObject(at: CGPoint(x: 20, y: 20))
-        XCTAssertEqual(manager.selection?.elements, [id])
+        XCTAssertEqual(manager.selection?.objects?.elements, [id])
 
         manager.finishSelection(path: rect(CGRect(x: 40, y: 40, width: 20, height: 20)))
         XCTAssertNotNil(manager.selection)
-        XCTAssertNil(manager.selection?.elements, "the loop is a region, and replaced the tapped object")
+        XCTAssertNil(manager.selection?.objects?.elements, "the loop is a region, and replaced the tapped object")
         XCTAssertEqual(manager.selection?.bounds, CGRect(x: 40, y: 40, width: 20, height: 20))
     }
     // MARK: - Single, Add, Subtract
@@ -346,7 +369,7 @@ final class TapSelectLogicTests: XCTestCase {
         manager.tapComposition = .add
         XCTAssertNil(manager.selectObject(at: onRight), "a stroke has no editor of its own")
 
-        XCTAssertEqual(manager.selection?.elements, [left.id, right.id], "the second tap joined the first")
+        XCTAssertEqual(manager.selection?.objects?.elements, [left.id, right.id], "the second tap joined the first")
         let held = try XCTUnwrap(manager.selection)
         XCTAssertTrue(held.path.contains(onLeft) && held.path.contains(onRight), "the outline holds both strokes")
         XCTAssertFalse(held.path.contains(CGPoint(x: 50, y: 32)), "…and not the fill between and around them")
@@ -381,7 +404,7 @@ final class TapSelectLogicTests: XCTestCase {
         manager.tapComposition = .subtract
 
         XCTAssertNil(manager.selectObject(at: onLeft))
-        XCTAssertEqual(manager.selection?.elements, [right.id], "the left stroke left the selection")
+        XCTAssertEqual(manager.selection?.objects?.elements, [right.id], "the left stroke left the selection")
         let held = try XCTUnwrap(manager.selection)
         XCTAssertTrue(held.path.contains(onRight))
         XCTAssertFalse(held.path.contains(onLeft), "the outline no longer holds it")
@@ -410,7 +433,7 @@ final class TapSelectLogicTests: XCTestCase {
         let vector = try XCTUnwrap(manager.layers[manager.currentLayerIndex].cels[0].vector)
         vector.addStroke(over)
         XCTAssertEqual(VectorHitTest.topmost(in: vector.elements, at: onLeft)?.id, over.id, "PREMISE: the new stroke is on top")
-        XCTAssertEqual(manager.selection?.elements, [left.id])
+        XCTAssertEqual(manager.selection?.objects?.elements, [left.id])
 
         manager.tapComposition = .subtract
         manager.selectObject(at: onLeft)
@@ -427,12 +450,12 @@ final class TapSelectLogicTests: XCTestCase {
         let bare = CGPoint(x: 90, y: 90)
 
         manager.selectObject(at: bare)
-        XCTAssertEqual(manager.selection?.elements, [left.id, right.id], "an Add that found nothing kept the set")
+        XCTAssertEqual(manager.selection?.objects?.elements, [left.id, right.id], "an Add that found nothing kept the set")
         manager.tapComposition = .subtract
         manager.selectObject(at: bare)
-        XCTAssertEqual(manager.selection?.elements, [left.id, right.id], "…and so did a Subtract")
+        XCTAssertEqual(manager.selection?.objects?.elements, [left.id, right.id], "…and so did a Subtract")
         manager.selectObject(at: CGPoint(x: 50, y: 32))
-        XCTAssertEqual(manager.selection?.elements, [left.id, right.id], "…a fill is not a selected object to take out")
+        XCTAssertEqual(manager.selection?.objects?.elements, [left.id, right.id], "…a fill is not a selected object to take out")
         manager.tapComposition = .single
         manager.selectObject(at: bare)
         XCTAssertNil(manager.selection, "a Single that found nothing put the selection down")
@@ -489,7 +512,7 @@ final class TapSelectLogicTests: XCTestCase {
         XCTAssertEqual(manager.currentLayerIndex, lower)
         manager.selectObject(at: CGPoint(x: 30, y: 50))
         XCTAssertEqual(manager.currentLayerIndex, upper, "the tap's layer is the active one")
-        XCTAssertEqual(manager.selection?.elements, [above.id], "the set is the object tapped, on its own layer")
+        XCTAssertEqual(manager.selection?.objects?.elements, [above.id], "the set is the object tapped, on its own layer")
         XCTAssertEqual(manager.selection?.layerID, manager.layers[upper].id)
     }
 
@@ -498,11 +521,11 @@ final class TapSelectLogicTests: XCTestCase {
     func testATapAddedOverADrawnRegionStartsASet() {
         let (manager, _, _, right, _) = twoStrokesOverAFill()
         manager.finishSelection(path: rect(CGRect(x: 0, y: 0, width: 40, height: 30)))
-        XCTAssertNil(manager.selection?.elements, "PREMISE: a drawn region")
+        XCTAssertNil(manager.selection?.objects?.elements, "PREMISE: a drawn region")
 
         manager.tapComposition = .add
         manager.selectObject(at: onRight)
-        XCTAssertEqual(manager.selection?.elements, [right.id], "the Add made a set of the tapped object alone")
+        XCTAssertEqual(manager.selection?.objects?.elements, [right.id], "the Add made a set of the tapped object alone")
     }
 
     /// **Clear deletes the whole set and the selection goes with it**, as it did for one object.

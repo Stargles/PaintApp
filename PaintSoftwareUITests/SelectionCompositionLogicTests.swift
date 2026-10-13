@@ -160,12 +160,15 @@ final class SelectionCompositionLogicTests: XCTestCase {
     /// **The default is Add, and a first loop under it is the plain selection it always was** — the
     /// operand that keeps every other test in the suite meaning what it meant.
     func testTheFirstLoopUnderAddIsAPlainSelection() {
-        let (manager, layerIndex, _, _, _, _) = fixture()
+        let (manager, _, _, _, _, _) = fixture()
         XCTAssertEqual(manager.toolSwitches.selectionComposition, .add, "the default is Add")
+        let baseline = manager.history.undoStack.count
         draw(aroundA, on: manager)
         XCTAssertEqual(manager.selection?.bounds, aroundA)
-        XCTAssertEqual(manager.selection?.layerID, manager.layers[layerIndex].id)
+        XCTAssertEqual(manager.selection?.isRegion, true, "a drawn loop is a region, whatever layer is active")
         XCTAssertNil(manager.notice, "nothing to say about a plain loop")
+        XCTAssertEqual(manager.history.undoStack.count, baseline,
+                       "the first loop is where the selection begins, and is not an undo step")
     }
 
     /// **Deselect, then a loop, is a fresh selection under either switch** — TODO (94)'s door: the
@@ -178,5 +181,104 @@ final class SelectionCompositionLogicTests: XCTestCase {
         draw(aroundB, on: manager)
         XCTAssertFalse(contains(manager.selection, centreOfA), "the deselected loop did not come back")
         XCTAssertTrue(contains(manager.selection, centreOfB))
+    }
+
+    // MARK: - Undo (TODO (182))
+
+    /// **An added loop is one undo step, and undo gives back the selection as it was before that
+    /// loop** — the owner: *"user makes selection 1, then selection 2 which gets booleaned, then
+    /// undos and selection 2 gets undone."* The operands are the path (a held, b not) and what Clear
+    /// does with it, so a restored `bounds` with a stale path could not pass; redo is the other half.
+    func testAnAddedLoopIsOneUndoStepAndUndoRestoresTheSelectionBeforeIt() {
+        let (manager, _, vector, a, b, _) = fixture()
+        draw(aroundA, on: manager)
+        let baseline = manager.history.undoStack.count
+        draw(aroundB, on: manager)
+        XCTAssertEqual(manager.history.undoStack.count, baseline + 1, "the second loop is one step")
+        XCTAssertTrue(contains(manager.selection, centreOfB), "PREMISE: the union holds b")
+
+        manager.undo()
+        XCTAssertTrue(contains(manager.selection, centreOfA), "undo: the first loop is still selected")
+        XCTAssertFalse(contains(manager.selection, centreOfB), "…and the second is not")
+        XCTAssertEqual(manager.selection?.bounds, aroundA, "…with the bounds of the first loop alone")
+        XCTAssertEqual(manager.history.undoStack.count, baseline, "…and the step is spent")
+
+        manager.redo()
+        XCTAssertTrue(contains(manager.selection, centreOfA), "redo: the union is back")
+        XCTAssertTrue(contains(manager.selection, centreOfB), "…holding b again")
+
+        manager.undo()
+        manager.clearSelectionPixels()
+        let remaining = Set(vector.elements.map(\.id))
+        XCTAssertFalse(remaining.contains(a), "Clear after the undo took the first loop's ink")
+        XCTAssertTrue(remaining.contains(b), "…and left the second loop's: it is no longer selected")
+    }
+
+    /// **A subtract is the same seam**: undo gives back what the Subtract loop took out, redo takes it
+    /// out again — and the banner names which of the two just came back.
+    func testASubtractedLoopIsOneUndoStepToo() {
+        let (manager, _, _, _, _, _) = fixture()
+        draw(aroundAandB, on: manager)
+        manager.toolSwitches.subtractsSelection = true
+        let baseline = manager.history.undoStack.count
+        draw(aroundB, on: manager)
+        XCTAssertEqual(manager.history.undoStack.count, baseline + 1)
+        XCTAssertFalse(contains(manager.selection, centreOfB), "PREMISE: b was taken out")
+
+        manager.undo()
+        XCTAssertTrue(contains(manager.selection, centreOfB), "undo: b is selected again")
+        XCTAssertTrue(contains(manager.selection, centreOfA))
+        XCTAssertEqual(manager.notice?.code, "historyUndo", "the artist is told something was undone")
+
+        manager.redo()
+        XCTAssertFalse(contains(manager.selection, centreOfB), "redo: b is taken out again")
+        XCTAssertTrue(contains(manager.selection, centreOfA))
+    }
+
+    /// **A subtract that swallows the selection is a deselect, and it is still one step** — undo gives
+    /// the whole selection back rather than finding nothing to undo.
+    func testUndoingASubtractThatDeselectedPutsTheSelectionBack() {
+        let (manager, _, _, _, _, _) = fixture()
+        draw(aroundA, on: manager)
+        manager.toolSwitches.subtractsSelection = true
+        draw(aroundA, on: manager)
+        XCTAssertNil(manager.selection, "PREMISE: nothing is left")
+
+        manager.undo()
+        XCTAssertEqual(manager.selection?.bounds, aroundA, "undo: the selection that was swallowed is back")
+        manager.redo()
+        XCTAssertNil(manager.selection, "redo: swallowed again")
+    }
+
+    /// **The first loop is not a step, so the press after it belongs to whatever came before** — and
+    /// the selection it made is left alone. The control for the tests above: a step recorded for
+    /// every loop would make this undo deselect.
+    func testTheFirstLoopIsNotAStepAndUndoLeavesItUp() {
+        let (manager, _, vector, a, _, _) = fixture()
+        draw(aroundA, on: manager)
+        manager.clearSelectionPixels()
+        XCTAssertFalse(vector.elements.map(\.id).contains(a), "PREMISE: Clear took a")
+
+        manager.undo()
+        XCTAssertTrue(vector.elements.map(\.id).contains(a), "the press undid the Clear, the last step")
+        XCTAssertTrue(contains(manager.selection, centreOfA), "…and the first loop is still selected")
+    }
+
+    /// **Steps keep their order against other edits**: loop, add, Clear — the first undo takes the
+    /// Clear back (the union still selected), the second takes the added loop out.
+    func testUndoWalksBackThroughAClearBeforeItReachesTheAddedLoop() {
+        let (manager, _, vector, a, b, _) = fixture()
+        draw(aroundA, on: manager)
+        draw(aroundB, on: manager)
+        manager.clearSelectionPixels()
+        XCTAssertTrue(vector.elements.filter { [a, b].contains($0.id) }.isEmpty, "PREMISE: both cleared")
+
+        manager.undo()
+        XCTAssertEqual(Set(vector.elements.map(\.id)).intersection([a, b]), [a, b], "the first press: the Clear")
+        XCTAssertTrue(contains(manager.selection, centreOfB), "…with the union still selected")
+
+        manager.undo()
+        XCTAssertFalse(contains(manager.selection, centreOfB), "the second press: the added loop")
+        XCTAssertTrue(contains(manager.selection, centreOfA))
     }
 }

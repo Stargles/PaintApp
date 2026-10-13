@@ -3106,11 +3106,11 @@ struct CanvasView: UIViewRepresentable {
             guard let host = layerHosts[layer.id] else { return }
 
             // Also outside the AppliedTool guard: toggling "paint outside selection" doesn't touch
-            // any of that struct's fields. Only applies to the layer/cel the selection belongs to.
+            // any of that struct's fields. Only applies to a cel the selection acts on.
             let celIdx = canvasManager.displayedCelIndex(inLayer: canvasManager.currentLayerIndex, atFrame: canvasManager.currentFrame)
             let celID = celIdx.map { layer.cels[$0].id }
             if let selection = canvasManager.selection, !canvasManager.toolSwitches.allowsPaintingOutsideSelection,
-               selection.layerID == layer.id, selection.celID == celID {
+               selection.acts(onLayer: layer.id, cel: celID) {
                 host.strokeView.selectionClipPath = selection.path
             } else {
                 host.strokeView.selectionClipPath = nil

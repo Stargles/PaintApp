@@ -542,9 +542,7 @@ final class VectorMergeLogicTests: XCTestCase {
             let canvas = manager.layers[lifted].cels[0].vector!
             let idsBefore = Set(canvas.elements.map(\.id))
             manager.selection = Selection(path: CGPath(rect: CGRect(x: 0, y: 0, width: 64, height: 64), transform: nil),
-                                          bounds: CGRect(x: 0, y: 0, width: 64, height: 64),
-                                          layerID: manager.layers[lifted].id,
-                                          celID: manager.layers[lifted].cels[0].id)
+                                          bounds: CGRect(x: 0, y: 0, width: 64, height: 64))
             XCTAssertTrue(manager.beginVectorLassoMove(), "Setup: the lift should catch layer \(lifted)'s ink")
             XCTAssertFalse(canvas.suppressedElementIDs.isEmpty, "Setup: the float suppresses what it lifted")
 

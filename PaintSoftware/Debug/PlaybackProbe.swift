@@ -447,12 +447,9 @@ enum PlaybackProbe {
     private static func runRecolour(_ canvasManager: CanvasManager, size: CGSize, ticks: Int,
                                     intervalMs: Int,
                                     footprint: @escaping () -> Void) async -> [String] {
-        let layerIndex = canvasManager.currentLayerIndex
-        guard let celIndex = canvasManager.activeCelIndex(inLayer: layerIndex, atFrame: canvasManager.currentFrame) else { return ["no cel"] }
+        guard canvasManager.activeCelIndex(inLayer: canvasManager.currentLayerIndex, atFrame: canvasManager.currentFrame) != nil else { return ["no cel"] }
         let whole = CGPath(rect: CGRect(origin: .zero, size: size), transform: nil)
-        canvasManager.selection = Selection(path: whole, bounds: whole.boundingBoxOfPath,
-                                            layerID: canvasManager.layers[layerIndex].id,
-                                            celID: canvasManager.layers[layerIndex].cels[celIndex].id)
+        canvasManager.selection = Selection(path: whole, bounds: whole.boundingBoxOfPath)
         footprint()
         PlaybackTrace.mark(.tick, value: 0)
         guard canvasManager.beginSelectionEdit(.color) else { return ["session refused"] }

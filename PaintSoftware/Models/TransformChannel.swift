@@ -432,7 +432,7 @@ extension CanvasManager {
     static func lassoLoops(of selection: Selection, in vector: VectorCanvas,
                            posedBy poses: [UUID: PoseMap]) -> LassoLoops {
         let drawn = vector.localPath(fromCanvas: selection.path).normalized(using: VectorCanvas.lassoFillRule)
-        return lassoLoops(drawn, posedBy: poses, only: selection.elements)
+        return lassoLoops(drawn, posedBy: poses, only: selection.objects?.elements)
     }
 
     /// **The affine the channels applied *after* `channel` carry its members through at `frame`.**

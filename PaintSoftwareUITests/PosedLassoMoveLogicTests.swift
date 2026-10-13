@@ -59,9 +59,7 @@ final class PosedLassoMoveLogicTests: XCTestCase {
     private func loop(_ rect: CGRect) -> CGPath { CGPath(rect: rect, transform: nil) }
 
     private func select(_ manager: CanvasManager, _ layerIndex: Int, _ path: CGPath) {
-        manager.selection = Selection(path: path, bounds: path.boundingBoxOfPath,
-                                      layerID: manager.layers[layerIndex].id,
-                                      celID: manager.layers[layerIndex].cels[0].id)
+        manager.selection = Selection(path: path, bounds: path.boundingBoxOfPath)
     }
 
     private func movedBy(_ manager: CanvasManager, dx: CGFloat, dy: CGFloat) -> LayerTransform {

@@ -56,9 +56,7 @@ final class LiveElementEditLogicTests: XCTestCase {
 
     private func select(_ manager: CanvasManager, _ layerIndex: Int, _ rect: CGRect) {
         let path = CGPath(rect: rect, transform: nil)
-        manager.selection = Selection(path: path, bounds: rect,
-                                      layerID: manager.layers[layerIndex].id,
-                                      celID: manager.layers[layerIndex].cels[0].id)
+        manager.selection = Selection(path: path, bounds: rect)
     }
 
     /// **A scene with z-order in it**: a fill, a stroke across the fill, both inside the loop; a black

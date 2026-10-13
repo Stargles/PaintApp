@@ -171,12 +171,11 @@ extension CanvasManager {
     var selectionAnimationGroup: SelectionAnimationGroup {
         guard animationGroupEditUnavailableReason == nil,
               let selection,
-              layers.indices.contains(currentLayerIndex),
-              layers[currentLayerIndex].id == selection.layerID,
-              let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame),
-              layers[currentLayerIndex].cels[celIndex].id == selection.celID,
+              let celIndex = activeCelIndex(actedOnBy: selection),
               let vector = layers[currentLayerIndex].cels[celIndex].vector
         else { return .unavailable }
+        let layerID = layers[currentLayerIndex].id
+        let celID = layers[currentLayerIndex].cels[celIndex].id
 
         let registered = Set(animationGroups.map(\.id))
         guard !registered.isEmpty else { return .untagged }
@@ -186,15 +185,14 @@ extension CanvasManager {
 
         let key = SelectionAnimationGroupMemo(
             pathObject: ObjectIdentifier(selection.path), bounds: selection.bounds,
-            layerID: selection.layerID, celID: selection.celID, frame: currentFrame,
+            layerID: layerID, celID: celID, frame: currentFrame,
             vectorVersion: vector.version, membership: selectionMembership,
             registered: registered.count, answer: .unavailable)
         if let memo = selectionAnimationGroupMemo, memo.matches(key) { return memo.answer }
 
         let loops = CanvasManager.lassoLoops(
             of: selection, in: vector,
-            posedBy: celPoseMaps(elements, layerID: selection.layerID, celID: selection.celID,
-                                 atFrame: currentFrame))
+            posedBy: celPoseMaps(elements, layerID: layerID, celID: celID, atFrame: currentFrame))
         let caught = vector.elementIDs(insideLoops: loops, membership: selectionMembership)
         var tags: Set<UUID> = []
         var untagged = false
@@ -240,10 +238,7 @@ extension CanvasManager {
         commitAllInteractiveState()
         guard animationGroupEditUnavailableReason == nil,
               let selection = requested,
-              layers.indices.contains(currentLayerIndex),
-              layers[currentLayerIndex].id == selection.layerID,
-              let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame),
-              layers[currentLayerIndex].cels[celIndex].id == selection.celID,
+              let celIndex = activeCelIndex(actedOnBy: selection),
               let vector = layers[currentLayerIndex].cels[celIndex].vector else { return false }
         let layerID = layers[currentLayerIndex].id
         let celID = layers[currentLayerIndex].cels[celIndex].id

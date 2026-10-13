@@ -120,9 +120,7 @@ final class AnimationGroupMembershipLogicTests: XCTestCase {
     /// same reason.
     private func select(_ f: Fixture, _ rect: CGRect) {
         let path = CGPath(rect: rect, transform: nil)
-        f.manager.selection = Selection(path: path, bounds: rect,
-                                        layerID: f.manager.layers[f.layerIndex].id,
-                                        celID: f.manager.layers[f.layerIndex].cels[0].id)
+        f.manager.selection = Selection(path: path, bounds: rect)
     }
 
     /// **The loop that catches S1 where it *looks* at the playhead** — x 13…27 at y 16…24.

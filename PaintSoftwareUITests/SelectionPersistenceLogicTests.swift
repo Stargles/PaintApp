@@ -28,6 +28,36 @@ final class SelectionPersistenceLogicTests: XCTestCase {
         CGPath(rect: CGRect(x: 10, y: 10, width: 20, height: 20), transform: nil)
     }
 
+    private func black() -> CodableColor { CodableColor(red: 0, green: 0, blue: 0, alpha: 1) }
+
+    private func stroke(from a: CGPoint, to b: CGPoint) -> VectorStroke {
+        VectorStroke(id: UUID(), brush: TestBrushes.hardRound, color: black(), size: 4, opacity: 1,
+                     samples: [VectorSample(x: a.x, y: a.y, pressure: 1),
+                               VectorSample(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, pressure: 1),
+                               VectorSample(x: b.x, y: b.y, pressure: 1)])
+    }
+
+    /// Two vector layers over the fixture's raster layer. The loop (`rectSelectionPath`, 10…30 square)
+    /// is round one stroke on each, and each layer also holds a stroke far from it.
+    private func twoInkedVectorLayers() -> (manager: CanvasManager, lower: Int, upper: Int,
+                                            lowerVector: VectorCanvas, upperVector: VectorCanvas,
+                                            lowerInside: UUID, upperInside: UUID, upperOutside: UUID) {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.addVectorLayer()
+        let lower = manager.currentLayerIndex
+        manager.addVectorLayer()
+        let upper = manager.currentLayerIndex
+        guard let lowerVector = manager.layers[lower].cels[0].vector,
+              let upperVector = manager.layers[upper].cels[0].vector else {
+            fatalError("fixture precondition: a vector layer's cel has a canvas")
+        }
+        lowerVector.addStroke(stroke(from: CGPoint(x: 14, y: 20), to: CGPoint(x: 26, y: 20)))
+        upperVector.addStroke(stroke(from: CGPoint(x: 14, y: 22), to: CGPoint(x: 26, y: 22)))
+        upperVector.addStroke(stroke(from: CGPoint(x: 40, y: 50), to: CGPoint(x: 56, y: 50)))
+        return (manager, lower, upper, lowerVector, upperVector,
+                lowerVector.elements[0].id, upperVector.elements[0].id, upperVector.elements[1].id)
+    }
+
     // MARK: - The toolbar's active-lasso state
 
     /// The owner's report, verbatim: make a selection, then pick brush, eraser, and fill in turn —
@@ -92,18 +122,137 @@ final class SelectionPersistenceLogicTests: XCTestCase {
         XCTAssertNotNil(manager.selection, "picking a paint tool must never be one of the things that clears a selection")
     }
 
-    /// Decision: leaving the layer a selection was made on clears it —
-    /// `handleActiveContextChanged` (SelectionModels.swift, "leaving the layer/frame ends any
-    /// in-progress..." doc comment), deliberate and unchanged by this branch.
-    func testChangingToADifferentLayerClearsSelection() {
+    /// **Decision, revised 2026-10-12 (TODO (185)): a drawn region follows the artist to another
+    /// layer.** The owner: *"make the select stay when switching layers. Right now it disappears if
+    /// you switch."* It used to be stamped with the cel it was drawn on and put down the moment the
+    /// active layer changed; a region carries no cel now, so there is nothing for the switch to
+    /// invalidate. Both directions, and the same path object — kept, not redrawn.
+    func testChangingToADifferentLayerKeepsARegionSelection() {
         let manager = CanvasFixture.manager(layerCount: 2)
         manager.currentLayerIndex = 0
         manager.finishSelection(path: rectSelectionPath())
-        XCTAssertNotNil(manager.selection, "fixture precondition")
+        let drawn = manager.selection
+        XCTAssertNotNil(drawn, "fixture precondition")
 
         manager.currentLayerIndex = 1
+        XCTAssertNotNil(manager.selection, "a region drawn on layer 0 is still up on layer 1")
+        XCTAssertTrue(manager.selection?.path === drawn?.path, "…the very selection the artist drew")
+        XCTAssertTrue(CanvasManager.selectIconIsActive(selectPanelOpen: false, selection: manager.selection),
+                      "…and the toolbar still reads a live selection")
 
-        XCTAssertNil(manager.selection, "a selection stamped to layer 0's cel must not silently apply to layer 1")
+        manager.currentLayerIndex = 0
+        XCTAssertTrue(manager.selection?.path === drawn?.path, "…and back again")
+    }
+
+    /// **The region is the canvas's, so what a verb does with it is the new layer's business**: the
+    /// ink on layer 2 inside the loop is cleared and the ink on layer 1, which the loop was drawn
+    /// round, is left alone. Both operands — *and* the stroke on layer 2 outside the loop, which is
+    /// the one a Clear of the whole layer would also take.
+    func testClearActsOnTheLayerTheRegionWasCarriedToAndOnNoOther() {
+        let f = twoInkedVectorLayers()
+        f.manager.currentLayerIndex = f.lower
+        f.manager.finishSelection(path: rectSelectionPath())
+
+        f.manager.currentLayerIndex = f.upper
+        f.manager.clearSelectionPixels()
+
+        XCTAssertEqual(Set(f.upperVector.elements.map(\.id)), [f.upperOutside],
+                       "layer 2 lost the stroke inside the region and kept the one outside it")
+        XCTAssertEqual(Set(f.lowerVector.elements.map(\.id)), [f.lowerInside],
+                       "layer 1, where the loop was drawn, is untouched: the verb acts on the active layer")
+        XCTAssertNotNil(f.manager.selection, "a region outlives what it cleared")
+    }
+
+    /// **Move lifts the new layer's ink inside the region.** `beginVectorLassoMove` used to refuse
+    /// with `selection.layerID == target.layerID`; the float it raises is on layer 2 and holds the
+    /// stroke inside the loop and not the one outside it.
+    func testMoveLiftsTheInkOfTheLayerTheRegionWasCarriedTo() {
+        let f = twoInkedVectorLayers()
+        f.manager.currentLayerIndex = f.lower
+        f.manager.finishSelection(path: rectSelectionPath())
+        f.manager.currentLayerIndex = f.upper
+
+        XCTAssertTrue(f.manager.beginVectorLassoMove(), "a region carried to a vector layer lifts what it holds there")
+        XCTAssertEqual(f.manager.vectorFloat?.parts[0].layerID, f.manager.layers[f.upper].id,
+                       "the float is layer 2's")
+        XCTAssertEqual(f.manager.vectorFloat?.parts[0].insideIDs, [f.upperInside],
+                       "…and holds the stroke inside the loop only")
+        f.manager.cancelVectorFloat()
+    }
+
+    /// **A region on a layer with no drawing at the playhead acts on nothing and stays up** — the
+    /// artist walks on to a layer that has something, and finds the loop where they left it. Move says
+    /// nothing and lifts nothing rather than falling back to the whole layer (LASSO_MOVE.md §5.9).
+    func testARegionOnALayerWithNothingAtThePlayheadStaysUpAndActsOnNothing() {
+        let f = twoInkedVectorLayers()
+        CanvasFixture.setCelLayout(f.manager, layerIndex: f.upper, [(start: 6, length: 6)])
+        f.manager.currentFrame = 0
+        f.manager.currentLayerIndex = f.lower
+        f.manager.finishSelection(path: rectSelectionPath())
+
+        f.manager.currentLayerIndex = f.upper
+        XCTAssertNotNil(f.manager.selection, "the region is still up over a layer that is empty here")
+        XCTAssertFalse(f.manager.beginVectorLassoMove(), "…and Move has nothing to lift")
+        XCTAssertNil(f.manager.vectorFloat)
+        f.manager.clearSelectionPixels()
+        XCTAssertEqual(f.upperVector.elements.count, 2, "…and Clear cleared nothing")
+    }
+
+    /// **The playhead's rule is unchanged for a region that has been carried**: stepping onto another
+    /// drawing of the layer the artist is now on puts it down, exactly as it did before regions could
+    /// follow a layer switch — the owner was told frames keep today's behaviour.
+    func testAFrameStepOntoAnotherCelPutsDownARegionThatWasCarriedToThisLayer() {
+        let manager = CanvasFixture.manager(layerCount: 2)
+        for layer in 0...1 {
+            CanvasFixture.setCelLayout(manager, layerIndex: layer, [(start: 0, length: 6), (start: 6, length: 6)])
+        }
+        manager.currentFrame = 0
+        manager.currentLayerIndex = 0
+        manager.finishSelection(path: rectSelectionPath())
+        manager.currentLayerIndex = 1
+        XCTAssertNotNil(manager.selection, "PREMISE: carried to layer 1")
+
+        manager.currentFrame = 3
+        XCTAssertNotNil(manager.selection, "a tick within layer 1's first cel leaves it alone")
+        manager.currentFrame = 6
+        XCTAssertNil(manager.selection, "layer 1's second cel is another drawing: the region is put down")
+    }
+
+    /// **A drag on the selection ends with the cel it was opened on**, as it did when the layer switch
+    /// itself cleared the selection: a region that outlives the switch must not leave a colour or size
+    /// session writing to the layer the artist walked away from.
+    func testALayerChangeEndsASelectionEditOpenOnTheOldLayer() {
+        let f = twoInkedVectorLayers()
+        f.manager.currentLayerIndex = f.lower
+        f.manager.finishSelection(path: rectSelectionPath())
+        let sizeBefore = f.lowerVector.elements.compactMap { $0.stroke?.size }
+        XCTAssertTrue(f.manager.beginSelectionEdit(.size), "PREMISE: a session is open on layer 1")
+        f.manager.previewSelectionEdit(.size(30))
+
+        f.manager.currentLayerIndex = f.upper
+
+        XCTAssertNil(f.manager.selectionEdit, "the session ended with the cel it was opened on")
+        XCTAssertEqual(f.lowerVector.elements.compactMap { $0.stroke?.size }, sizeBefore,
+                       "…and layer 1's ink is what it was before the drag")
+        XCTAssertNotNil(f.manager.selection, "…while the region itself came along")
+    }
+
+    /// `Selection.acts(onLayer:cel:)` is the one answer every consumer asks: a region everywhere —
+    /// an empty frame included, where a stroke makes the cel and must still be clipped — and a tapped
+    /// set on its own cel only.
+    func testARegionActsEverywhereAndATappedSetOnItsOwnCelOnly() {
+        let path = rectSelectionPath()
+        let layer = UUID(), cel = UUID()
+        let region = Selection(path: path, bounds: path.boundingBoxOfPath)
+        XCTAssertTrue(region.acts(onLayer: layer, cel: cel))
+        XCTAssertTrue(region.acts(onLayer: layer, cel: nil), "a layer with no drawing here is still clipped")
+
+        let tapped = Selection(path: path, bounds: path.boundingBoxOfPath,
+                               objects: SelectedObjects(layerID: layer, celID: cel, elements: [UUID()]))
+        XCTAssertTrue(tapped.acts(onLayer: layer, cel: cel))
+        XCTAssertFalse(tapped.acts(onLayer: layer, cel: UUID()), "another cel of the same layer")
+        XCTAssertFalse(tapped.acts(onLayer: UUID(), cel: cel), "the same cel id under another layer")
+        XCTAssertFalse(tapped.acts(onLayer: layer, cel: nil), "a gap")
     }
 
     /// Decision: moving the playhead onto a *different cel* clears it — same mechanism as the layer

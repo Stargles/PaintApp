@@ -468,7 +468,7 @@ extension CanvasManager {
     func beginVectorLassoMove() -> Bool {
         commitAllInteractiveState()
         guard let selection, let target = activeVectorMoveTarget(),
-              selection.layerID == target.layerID, selection.celID == target.celID else { return false }
+              selection.acts(onLayer: target.layerID, cel: target.celID) else { return false }
         let vector = target.vector
 
         // The loop in the space the ink is stored in, pulled back into each element's own space for a
@@ -594,7 +594,7 @@ extension CanvasManager {
     func beginVectorLassoDuplicate() -> Bool {
         commitAllInteractiveState()
         guard let selection, let target = activeVectorMoveTarget(),
-              selection.layerID == target.layerID, selection.celID == target.celID else { return false }
+              selection.acts(onLayer: target.layerID, cel: target.celID) else { return false }
         let source = target.vector
         let loops = Self.lassoLoops(of: selection, in: source, posedBy: target.poses)
         guard let split = source.splitForLassoMove(insideLoops: loops, membership: selectionMembership) else {
@@ -667,7 +667,7 @@ extension CanvasManager {
     func moveVectorSelectionToNewLayer() -> Bool {
         commitAllInteractiveState()
         guard let selection, let target = activeVectorMoveTarget(),
-              selection.layerID == target.layerID, selection.celID == target.celID else { return false }
+              selection.acts(onLayer: target.layerID, cel: target.celID) else { return false }
         let source = target.vector
         let loops = Self.lassoLoops(of: selection, in: source, posedBy: target.poses)
         guard let split = source.splitForLassoMove(insideLoops: loops, membership: selectionMembership) else {

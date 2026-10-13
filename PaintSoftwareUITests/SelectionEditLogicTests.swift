@@ -47,9 +47,7 @@ final class SelectionEditLogicTests: XCTestCase {
     private func loop(_ rect: CGRect) -> CGPath { CGPath(rect: rect, transform: nil) }
 
     private func select(_ manager: CanvasManager, _ layerIndex: Int, _ path: CGPath) {
-        manager.selection = Selection(path: path, bounds: path.boundingBoxOfPath,
-                                      layerID: manager.layers[layerIndex].id,
-                                      celID: manager.layers[layerIndex].cels[0].id)
+        manager.selection = Selection(path: path, bounds: path.boundingBoxOfPath)
     }
 
     /// Undo steps recorded since the fixture was built — `LassoMoveLogicTests.stepsSince`'s reason:
@@ -462,8 +460,7 @@ final class SelectionEditLogicTests: XCTestCase {
         let manager = CanvasFixture.manager(layerCount: 1)
         XCTAssertEqual(manager.layers[manager.currentLayerIndex].kind, .raster, "fixture: a pixel layer")
         manager.selection = Selection(path: loop(CGRect(x: 2, y: 2, width: 20, height: 20)),
-                                      bounds: CGRect(x: 2, y: 2, width: 20, height: 20),
-                                      layerID: manager.layers[0].id, celID: manager.layers[0].cels[0].id)
+                                      bounds: CGRect(x: 2, y: 2, width: 20, height: 20))
         let reason = manager.selectionEditUnavailableReason
         XCTAssertNotNil(reason, "a pixel cel must say why")
         XCTAssertTrue(reason?.contains("vector layers only") == true, "…in the artist's terms: \(reason ?? "")")

@@ -118,15 +118,11 @@ struct ActionsMenu: View {
     /// Renders the current selection's bounding box out of the active cel's flattened pixels and sets
     /// it on the system pasteboard. False when there is no selection, no active cel to read, or the
     /// crop is degenerate — the three guards `fillSelection`/`clearSelectionPixels` already state for
-    /// "the same cel this selection was drawn on".
+    /// "a cel this selection acts on".
     @discardableResult
     private func copySelectionToPasteboard() -> Bool {
         guard let selection = canvasManager.selection, let canvasSize = canvasManager.canvasSize,
-              canvasManager.layers.indices.contains(canvasManager.currentLayerIndex),
-              canvasManager.layers[canvasManager.currentLayerIndex].id == selection.layerID,
-              let celIndex = canvasManager.activeCelIndex(inLayer: canvasManager.currentLayerIndex,
-                                                          atFrame: canvasManager.currentFrame),
-              canvasManager.layers[canvasManager.currentLayerIndex].cels[celIndex].id == selection.celID
+              let celIndex = canvasManager.activeCelIndex(actedOnBy: selection)
         else { return false }
         let cel = canvasManager.layers[canvasManager.currentLayerIndex].cels[celIndex]
         let flattened = PixelOps.rasterize(cel: cel, canvasSize: canvasSize)

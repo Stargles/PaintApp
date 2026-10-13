@@ -498,7 +498,7 @@ final class CanvasManager: ObservableObject {
                 // through exactly that restore, so an unconditional clear here would move the band
                 // off the folder on the first press of Undo.
                 if selectedFolderID != nil { selectedFolderID = nil }
-                handleActiveContextChanged()
+                handleActiveContextChanged(.layer)
                 // The action recorder (see `ActionRecorder.ifRecording`). The *value*, not
                 // just the fact of a change — "which layer was active" is what decides where a stroke
                 // landed and which stroke recognizer the transform gestures were waiting on.
@@ -924,9 +924,8 @@ final class CanvasManager: ObservableObject {
             // `deselect()`, by `handleActiveContextChanged` when the artist walks to another cel, and
             // by a new loop drawn while a slider is still held. Cheap when no session is open, which
             // is every assignment but that one.
-            guard let session = selectionEdit else { return }
-            if let selection, selection.layerID == session.edit.layerID, selection.celID == session.edit.celID,
-               let old = oldValue, old.path === selection.path { return }
+            guard selectionEdit != nil else { return }
+            if let selection, let old = oldValue, old.path === selection.path { return }
             cancelSelectionEdit()
         }
     }
@@ -1625,7 +1624,7 @@ final class CanvasManager: ObservableObject {
     @Published var currentFrame: Int = 0 {
         didSet {
             if oldValue != currentFrame {
-                handleActiveContextChanged()
+                handleActiveContextChanged(.frame(from: oldValue))
                 // **After `handleActiveContextChanged`, which is what settles anything the outgoing
                 // frame was still holding** — and before the SwiftUI pass, which is the whole point:
                 // see `onTimingStrokeFrameAdvanced`. Guarded on the flag rather than on `isRecording`
@@ -2880,7 +2879,7 @@ final class CanvasManager: ObservableObject {
             } else if currentLayerIndex >= layers.count {
                 currentLayerIndex = layers.count - 1
             } else if deletingActiveLayerInPlace {
-                handleActiveContextChanged()
+                handleActiveContextChanged(.layer)
             }
         }
         recordLayerStackChange("deleted layer at \(index)")

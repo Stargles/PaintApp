@@ -170,6 +170,14 @@ enum SelectionComposition {
     case add
     /// The new loop is taken away from what is selected.
     case subtract
+
+    /// What the step this loop leaves on the undo stack is called.
+    var historyLabel: HistoryActionLabel {
+        switch self {
+        case .add: return .addToSelection
+        case .subtract: return .subtractFromSelection
+        }
+    }
 }
 
 /// **How a tap in Select → Tap meets the objects already selected** — the owner, 2026-10-02: *"a slider
@@ -178,7 +186,7 @@ enum SelectionComposition {
 /// (`SelectPanel.tapCompositionPicker`) while Tap is the mode; `CanvasManager.selectObject(at:)` is the
 /// one place it is read.
 ///
-/// A tapped selection is a **set of objects on one cel** (`Selection.elements`), and the three rules are
+/// A tapped selection is a **set of objects on one cel** (`Selection.objects`), and the three rules are
 /// the three things a tap can do to that set. They do not combine with a drawn loop: a loop is a region
 /// and a set is not, so whichever was made last replaces the other (`CanvasManager.finishSelection`,
 /// `selectObject(at:)`).
@@ -220,12 +228,19 @@ enum TapComposition: String, CaseIterable, Identifiable {
     }
 }
 
-/// A finalized selection: a closed path in canvas point space, stamped with the (layer, cel) it
-/// belongs to so a layer/frame switch can tell whether it's still valid (see
-/// `CanvasManager.handleActiveContextChanged`). Keyed by stable UUID rather than array index —
-/// indices shift (or get silently reused) whenever `layers` is mutated, e.g. deleting the very
-/// layer a selection lives on can leave `currentLayerIndex` numerically unchanged while it now
-/// points at a different layer, which an index-based selection would wrongly treat as still valid.
+/// A finalized selection: a closed path in canvas point space.
+///
+/// **A drawn region belongs to the canvas, not to a layer** — TODO (185), the owner: *"make the select
+/// stay when switching layers."* The loops, the rectangle and the wand's flood make a region, and a
+/// region is a place on the paper: it follows the artist to whichever layer is active, and Move,
+/// Recolour, Clear and the paint clip act on that layer's content inside it. **It carries no cel**, so
+/// there is nothing for a layer switch to invalidate, and each consumer pulls it back through the pose
+/// of the layer it is acting on (`layerSpacePath`, `lassoLoops`) — which is what makes the same region
+/// mean the same place on the screen on a layer a transformation layer carries somewhere else.
+///
+/// **A tapped set is the opposite** (`objects`): the artist named *those* objects, so it belongs to the
+/// cel they live on and is put down when the active cel is anywhere else
+/// (`CanvasManager.handleActiveContextChanged`).
 ///
 /// **One path, however many loops made it** — TODO (95). A second loop is composed onto the first
 /// with Core Graphics' own booleans (`composed(with:by:)`), and the result is a *normalized* path:
@@ -235,19 +250,28 @@ enum TapComposition: String, CaseIterable, Identifiable {
 /// asks under `lassoFillRule` (LASSO_MOVE.md §5.23–§5.26) — with no set of loops to walk and no
 /// second rule to keep in step with the first.
 ///
-/// **A Tap selection is the same value with one more field** (`elements`): its path is the union of the
+/// **A Tap selection is the same value with one more field** (`objects`): its path is the union of the
 /// outlines of the objects the artist tapped (`VectorHitTest.outline(of:)`), and its loops answer for
 /// those elements only (`LassoLoops`), so Move, Recolour, Clear, Edit and every other reader of a
 /// selection act on the objects and on nothing lying under or inside their outlines.
 struct Selection {
     var path: CGPath
     var bounds: CGRect
-    var layerID: UUID
-    var celID: UUID
-    /// The objects taps named, all on this cel, or nil for a selection drawn as a region — the loop
-    /// modes' and the wand's. A set of tapped objects is not a region the next loop can be added to or
-    /// taken from, and a region is not a set a tap can add to: each replaces the other.
-    var elements: Set<UUID>? = nil
+    /// The objects taps named, or nil for a selection drawn as a region — the loop modes' and the
+    /// wand's. A set of tapped objects is not a region the next loop can be added to or taken from, and
+    /// a region is not a set a tap can add to: each replaces the other.
+    var objects: SelectedObjects? = nil
+
+    /// Whether this is a drawn region rather than a tapped set.
+    var isRegion: Bool { objects == nil }
+
+    /// Whether the selection acts at `cel` of `layer` — nil for a layer with no drawing at the
+    /// playhead. A region acts everywhere, an empty frame included (a stroke drawn there makes the cel
+    /// and must still be clipped); a tapped set acts on the cel its objects live on and nowhere else.
+    func acts(onLayer layerID: UUID, cel celID: UUID?) -> Bool {
+        guard let objects else { return true }
+        return objects.layerID == layerID && objects.celID == celID
+    }
 
     /// This selection with `loop` added to it or taken from it — the composed path, normalized, and
     /// its bounds re-measured against the canvas exactly as a fresh loop's are. Nil when nothing is
@@ -274,6 +298,17 @@ struct Selection {
         result.bounds = bounds
         return result
     }
+}
+
+/// **What a tapped selection holds, and where** (`Selection.objects`): the cel and the ids of the
+/// objects on it. Keyed by stable UUID rather than array index — indices shift (or get silently
+/// reused) whenever `layers` is mutated, e.g. deleting the very layer a set lives on can leave
+/// `currentLayerIndex` numerically unchanged while it now points at a different layer, which an
+/// index-based stamp would wrongly treat as still valid.
+struct SelectedObjects {
+    var layerID: UUID
+    var celID: UUID
+    var elements: Set<UUID>
 }
 
 // MARK: - Floating piece
@@ -797,17 +832,18 @@ extension CanvasManager {
     /// CanvasManager.swift), and explicitly by `deleteLayer` since it can leave
     /// `currentLayerIndex`'s numeric value unchanged while the layer it now points at is a
     /// different one (no `didSet` fires in that case). A pending floating piece is committed —
-    /// never silently discarded — if the active cel actually changed; an active selection tied to
-    /// a now-inactive cel is cleared. Same-cel frame ticks (scrubbing within one cel's frame
-    /// range) intentionally leave both alone.
-    func handleActiveContextChanged() {
+    /// never silently discarded — if the active cel actually changed. A selection is put down by the
+    /// rule on `Selection`: **a drawn region follows the artist to another layer** (TODO (185)) and is
+    /// put down only when the playhead walks the layer they are on onto another of its drawings; a
+    /// tapped set is put down by any move off the cel its objects live on. Same-cel frame ticks
+    /// (scrubbing within one cel's frame range) intentionally leave all of it alone.
+    func handleActiveContextChanged(_ change: ActiveContextChange) {
         // A still-adjustable fill or shape can't follow the user to another cel — bake both here so
         // they land as committed steps on the global history, against the cel they were drawn on,
         // before the active context moves off it.
         beginCanvasEdit()
         let activeLayerID = layers.indices.contains(currentLayerIndex) ? layers[currentLayerIndex].id : nil
-        let activeCel = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame)
-        let activeCelID = activeCel.map { layers[currentLayerIndex].cels[$0].id }
+        let activeCelID = self.activeCelID(inLayer: currentLayerIndex, atFrame: currentFrame)
         if let piece = floatingPiece {
             let stillTargeted = piece.targetLayerID == activeLayerID && piece.targetCelID == activeCelID
             if !stillTargeted, !recordingOwnsMoveBox {
@@ -822,8 +858,15 @@ extension CanvasManager {
            !(float.parts[0].layerID == activeLayerID && float.parts[0].celID == activeCelID) {
             commitVectorFloatIfNeeded()
         }
-        if let sel = selection, !(sel.layerID == activeLayerID && sel.celID == activeCelID) {
-            selection = nil
+        if let selection, selectionIsPutDown(selection, by: change, layerID: activeLayerID, celID: activeCelID) {
+            self.selection = nil
+        }
+        // A drag on the selection is about one cel's drawing, and a region outlives the layer it was
+        // made on: the session ends with the cel it was opened on, as it did when the move put the
+        // selection down.
+        if let session = selectionEdit,
+           !(session.edit.layerID == activeLayerID && session.edit.celID == activeCelID) {
+            cancelSelectionEdit()
         }
         // **Render-cache eviction used to happen here and deliberately does not any more.**
         // `currentFrame.didSet` calls this, so `evictDistantVectorRenderCaches` ran on every playback
@@ -831,6 +874,49 @@ extension CanvasManager {
         // each canvas's lock, MEASURED at 0.154 ms a tick on 300 cels (RENDER.md §5 stage 7). It is
         // `VectorRenderCache` now, driven by a canvas memoizing a render rather than by the playhead
         // moving, so a tick that changes nothing costs nothing.
+    }
+
+    /// What moved the active cel, which is what decides whether a selection outlives it.
+    enum ActiveContextChange {
+        /// The active layer changed — the artist picked another, or the one they were on was deleted.
+        case layer
+        /// The playhead moved off `frame`.
+        case frame(from: Int)
+    }
+
+    /// Whether `selection` is put down by arriving at (`layerID`, `celID`) by `change`.
+    ///
+    /// **A tapped set** is on the cel it names and nowhere else. **A region** belongs to the canvas,
+    /// so a layer change never puts it down; a frame change does when it carries the layer the artist
+    /// is on to another of its cels — *"the selection belonged to the first drawing"* — which is the
+    /// rule a selection has always had for the playhead (a tick that stays within one cel's frames
+    /// leaves it alone), asked of the cel the playhead left rather than of a stamp the region no
+    /// longer carries.
+    private func selectionIsPutDown(_ selection: Selection, by change: ActiveContextChange,
+                                    layerID: UUID?, celID: UUID?) -> Bool {
+        if let objects = selection.objects {
+            return !(objects.layerID == layerID && objects.celID == celID)
+        }
+        guard case .frame(let from) = change else { return false }
+        return activeCelID(inLayer: currentLayerIndex, atFrame: from) != celID
+    }
+
+    /// The id of the cel `layerIndex` shows at `frame`, or nil for a gap or a layer that is not there.
+    func activeCelID(inLayer layerIndex: Int, atFrame frame: Int) -> UUID? {
+        activeCelIndex(inLayer: layerIndex, atFrame: frame).map { layers[layerIndex].cels[$0].id }
+    }
+
+    /// The index of the active cel when `selection` can be acted on there — a region on any cel, a
+    /// tapped set only on its own — or nil. **The one door every consumer of a selection asks**, so
+    /// "can this selection act here" has one answer and the consumers go on reading `currentLayerIndex`
+    /// and the returned index for the layer and cel they act on.
+    func activeCelIndex(actedOnBy selection: Selection) -> Int? {
+        guard layers.indices.contains(currentLayerIndex),
+              let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame),
+              selection.acts(onLayer: layers[currentLayerIndex].id,
+                             cel: layers[currentLayerIndex].cels[celIndex].id)
+        else { return nil }
+        return celIndex
     }
 
     /// **Whether a live take is recording the Move box that is up** — KEYFRAMES.md §5's second surface,
@@ -901,29 +987,32 @@ extension CanvasManager {
 
     /// Lands a loop — freehand, rectangle or the wand's flood, all three arrive here.
     ///
-    /// **With a selection already up on this cel, the loop is composed onto it rather than replacing
-    /// it** — TODO (95): the union under `selectionComposition == .add`, the difference under
-    /// `.subtract`. Starting over is the Deselect tab or a tap on the Select icon itself (TODO (94)).
-    /// A subtract that takes everything away is a deselect; one drawn with nothing up says so
+    /// **With a region already up, the loop is composed onto it rather than replacing it** — TODO
+    /// (95): the union under `selectionComposition == .add`, the difference under `.subtract`.
+    /// Starting over is the Deselect tab or a tap on the Select icon itself (TODO (94)). A subtract
+    /// that takes everything away is a deselect; one drawn with nothing up says so
     /// (`CanvasNotice.nothingToSubtractFrom`) rather than becoming a selection under a switch that
     /// promised the opposite. **Tapped objects are not a region a loop can be added to**
-    /// (`Selection.elements`), so a loop drawn over them replaces them.
+    /// (`Selection.objects`), so a loop drawn over them replaces them.
+    ///
+    /// **A composition is its own undo step** — TODO (182): the loop that was added or taken away is
+    /// taken back by one press and brought back by one redo. The first loop is not a step: it is
+    /// where the selection begins, and the press that follows it belongs to whatever was drawn before.
     func finishSelection(path: CGPath) {
         // Drawing a selection is a canvas edit under the "does the canvas look different" rule, and
-        // more concretely: the selection is stamped with the cel it belongs to and immediately
-        // clips subsequent painting, so a shape/fill still hanging over that cel has to be part of
-        // its content by now rather than arriving on top of the selection afterwards.
+        // more concretely: the selection immediately clips subsequent painting, so a shape/fill
+        // still hanging over the cel has to be part of its content by now rather than arriving on
+        // top of the selection afterwards.
         beginCanvasEdit()
-        guard let canvasSize, layers.indices.contains(currentLayerIndex),
-              let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame) else { return }
-        let layerID = layers[currentLayerIndex].id
-        let celID = layers[currentLayerIndex].cels[celIndex].id
+        guard let canvasSize else { return }
         let canvasRect = CGRect(origin: .zero, size: canvasSize)
-        // `handleActiveContextChanged` clears a selection the moment the active cel changes, so one
-        // that is up is on this cel; the check is what keeps that a fact rather than an assumption.
-        if let existing = selection, existing.layerID == layerID, existing.celID == celID,
-           existing.elements == nil {
-            selection = existing.composed(with: path, by: toolSwitches.selectionComposition, within: canvasRect)
+        if let existing = selection, existing.isRegion {
+            let composition = toolSwitches.selectionComposition
+            let composed = existing.composed(with: path, by: composition, within: canvasRect)
+            selection = composed
+            recordUndo(label: composition.historyLabel,
+                       undo: { [weak self] in self?.selection = existing },
+                       redo: { [weak self] in self?.selection = composed })
             return
         }
         if toolSwitches.subtractsSelection {
@@ -932,7 +1021,7 @@ extension CanvasManager {
         }
         let bounds = path.boundingBoxOfPath.intersection(canvasRect)
         guard bounds.width > 1, bounds.height > 1 else { return }
-        selection = Selection(path: path, bounds: bounds, layerID: layerID, celID: celID)
+        selection = Selection(path: path, bounds: bounds)
     }
 
     func finishAutomaticSelection(at point: CGPoint) {
@@ -1418,10 +1507,7 @@ extension CanvasManager {
         // hole in.
         commitAllInteractiveState()
         guard let selection = requested, let canvasSize,
-              layers.indices.contains(currentLayerIndex),
-              layers[currentLayerIndex].id == selection.layerID,
-              let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame),
-              layers[currentLayerIndex].cels[celIndex].id == selection.celID else { return }
+              let celIndex = activeCelIndex(actedOnBy: selection) else { return }
         let sourceIndex = currentLayerIndex
         let cel = layers[sourceIndex].cels[celIndex]
         let sourceLayerID = layers[sourceIndex].id
@@ -2032,15 +2118,11 @@ extension CanvasManager {
         // (see `beginMove`), so without settling the piece first this would paint into the cel that
         // is currently showing a hole, and the piece would then bake over the top of it.
         commitAllInteractiveState()
-        guard let selection = requested,
-              layers.indices.contains(currentLayerIndex),
-              layers[currentLayerIndex].id == selection.layerID,
-              let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame),
-              layers[currentLayerIndex].cels[celIndex].id == selection.celID else { return }
+        guard let selection = requested, let celIndex = activeCelIndex(actedOnBy: selection) else { return }
         // The same add path the fill tool and Add → Rectangle take, so "Fill" means one thing
         // whichever door it arrives from: a vector layer gets an element on top of everything
         // (LASSO_FILL.md §2a's *"cover everything"*), a raster layer gets pixels.
-        layDownSolidFill(layerSpacePath(selection.path, forLayerID: selection.layerID),
+        layDownSolidFill(layerSpacePath(selection.path, forLayerID: layers[currentLayerIndex].id),
                          color: brushColor.resolvedUIColor(opacity: brushOpacity),
                          layerIndex: currentLayerIndex, celIndex: celIndex, label: .fill)
     }
@@ -2119,10 +2201,7 @@ extension CanvasManager {
         // is currently showing a hole, and the piece would then bake over the top of it.
         commitAllInteractiveState()
         guard let selection = requested, let canvasSize,
-              layers.indices.contains(currentLayerIndex),
-              layers[currentLayerIndex].id == selection.layerID,
-              let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame),
-              layers[currentLayerIndex].cels[celIndex].id == selection.celID else { return }
+              let celIndex = activeCelIndex(actedOnBy: selection) else { return }
         let cel = layers[currentLayerIndex].cels[celIndex]
         let isVector = layers[currentLayerIndex].kind == .vector
         if isVector, let vectorCanvas = cel.vector {
@@ -2174,9 +2253,9 @@ extension CanvasManager {
             // the initial apply, so it is asked for explicitly, as the recolour and
             // `bakePreciseStrokes` both do.
             celContentChangedOutsideStroke(layerID: layers[currentLayerIndex].id, celID: cel.id)
-            // Tapped objects are their own selection (`Selection.elements`), and Clear has just
+            // Tapped objects are their own selection (`Selection.objects`), and Clear has just
             // deleted them; a loop is a region and outlives what it cleared.
-            if selection.elements != nil { self.selection = nil }
+            if !selection.isRegion { self.selection = nil }
         } else {
             let base = PixelOps.rasterize(cel: cel, canvasSize: canvasSize)
             let newImage = PixelOps.clear(base: base,
@@ -2248,10 +2327,7 @@ extension CanvasManager {
         commitAllInteractiveState()
         guard applyBrushUnavailableReason == nil,
               let selection = requested,
-              layers.indices.contains(currentLayerIndex),
-              layers[currentLayerIndex].id == selection.layerID,
-              let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame),
-              layers[currentLayerIndex].cels[celIndex].id == selection.celID,
+              let celIndex = activeCelIndex(actedOnBy: selection),
               let vectorCanvas = layers[currentLayerIndex].cels[celIndex].vector else { return }
 
         let loops = CanvasManager.lassoLoops(

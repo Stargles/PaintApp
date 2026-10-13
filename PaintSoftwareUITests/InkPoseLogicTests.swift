@@ -309,8 +309,7 @@ final class InkPoseLogicTests: XCTestCase {
     /// A loop round the square **as the artist sees it**, on the layer's current cel.
     private func selectShownSquare(_ manager: CanvasManager) {
         let loop = CGRect(x: 90, y: 90, width: 60, height: 60)
-        manager.selection = Selection(path: CGPath(rect: loop, transform: nil), bounds: loop,
-                                      layerID: manager.layers[0].id, celID: manager.layers[0].cels[0].id)
+        manager.selection = Selection(path: CGPath(rect: loop, transform: nil), bounds: loop)
     }
 
     /// Whether a pixel of a layer's *stored* picture is inked.
@@ -405,9 +404,7 @@ final class InkPoseLogicTests: XCTestCase {
     func testFillOnAVectorSelectionUnderAMoveLayerIsShownInsideTheLoop() throws {
         let fx = layerUnderMove(CGAffineTransform(translationX: 80, y: 0))
         let loop = CGRect(x: 110, y: 30, width: 40, height: 20)
-        fx.manager.selection = Selection(path: CGPath(rect: loop, transform: nil), bounds: loop,
-                                         layerID: fx.manager.layers[fx.ink].id,
-                                         celID: fx.manager.layers[fx.ink].cels[0].id)
+        fx.manager.selection = Selection(path: CGPath(rect: loop, transform: nil), bounds: loop)
         fx.manager.fillSelection()
         let element = try XCTUnwrap(fx.manager.layers[fx.ink].cels[0].vector?.elements.last, "Fill laid nothing down")
         let onScreen = try XCTUnwrap(shown(element, in: fx.manager, layer: fx.ink).fill?.cgPath)

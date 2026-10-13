@@ -401,24 +401,22 @@ extension CanvasManager {
         }
         guard selectionEditUnavailableReason == nil,
               let selection,
-              layers.indices.contains(currentLayerIndex),
-              layers[currentLayerIndex].id == selection.layerID,
-              let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame),
-              layers[currentLayerIndex].cels[celIndex].id == selection.celID,
+              let celIndex = activeCelIndex(actedOnBy: selection),
               let vector = layers[currentLayerIndex].cels[celIndex].vector
         else { return .unavailable }
+        let layerID = layers[currentLayerIndex].id
+        let celID = layers[currentLayerIndex].cels[celIndex].id
 
         let key = SelectionStyleMemo(
             pathObject: ObjectIdentifier(selection.path), bounds: selection.bounds,
-            layerID: selection.layerID, celID: selection.celID, frame: currentFrame,
+            layerID: layerID, celID: celID, frame: currentFrame,
             vectorVersion: vector.version, membership: selectionMembership, answer: .unavailable)
         if let memo = selectionStyleMemo, memo.matches(key) { return memo.answer }
 
         let elements = vector.elements
         let loops = CanvasManager.lassoLoops(
             of: selection, in: vector,
-            posedBy: celPoseMaps(elements, layerID: selection.layerID, celID: selection.celID,
-                                 atFrame: currentFrame))
+            posedBy: celPoseMaps(elements, layerID: layerID, celID: celID, atFrame: currentFrame))
         let caught = vector.elementIDs(insideLoops: loops, membership: selectionMembership)
         let answer = SelectionStyle.of(elements, caught: caught)
         var stored = key
@@ -457,10 +455,7 @@ extension CanvasManager {
         commitAllInteractiveState()
         guard selectionEditUnavailableReason == nil,
               let selection = requested,
-              layers.indices.contains(currentLayerIndex),
-              layers[currentLayerIndex].id == selection.layerID,
-              let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame),
-              layers[currentLayerIndex].cels[celIndex].id == selection.celID,
+              let celIndex = activeCelIndex(actedOnBy: selection),
               let vectorCanvas = layers[currentLayerIndex].cels[celIndex].vector else { return false }
         let layerID = layers[currentLayerIndex].id
         let celID = layers[currentLayerIndex].cels[celIndex].id

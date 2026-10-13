@@ -131,9 +131,7 @@ final class SelectionEditBench: XCTestCase {
                 let manager = benchManager(canvas)
                 let loop = Self.loopReachingFifty(on: canvas)
                 let reached = canvas.elementIDs(insideLocalPath: loop, membership: .touching).count
-                manager.selection = Selection(path: loop, bounds: loop.boundingBoxOfPath,
-                                              layerID: manager.layers[0].id,
-                                              celID: manager.layers[0].cels[0].id)
+                manager.selection = Selection(path: loop, bounds: loop.boundingBoxOfPath)
 
                 XCTAssertTrue(manager.beginSelectionEdit(.size), "n=\(n): the loop caught something")
                 let caught = manager.selectionEdit?.caught.count ?? 0

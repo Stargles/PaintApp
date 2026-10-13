@@ -454,8 +454,7 @@ final class DistortLogicTests: XCTestCase {
                                                                rect: CGRect(x: 16, y: 24, width: 32, height: 16)))
         manager.selection = Selection(path: CGPath(rect: CGRect(x: 16, y: 24, width: 32, height: 16),
                                                    transform: nil),
-                                      bounds: CGRect(x: 16, y: 24, width: 32, height: 16),
-                                      layerID: manager.layers[0].id, celID: manager.layers[0].cels[0].id)
+                                      bounds: CGRect(x: 16, y: 24, width: 32, height: 16))
         manager.setTransformMode(.distort)
         manager.beginMove()
         let lifted = try XCTUnwrap(manager.floatingPiece)

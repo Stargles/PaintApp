@@ -48,9 +48,7 @@ final class LassoMoveLogicTests: XCTestCase {
     private func loop(_ rect: CGRect) -> CGPath { CGPath(rect: rect, transform: nil) }
 
     private func select(_ manager: CanvasManager, _ layerIndex: Int, _ path: CGPath) {
-        manager.selection = Selection(path: path, bounds: path.boundingBoxOfPath,
-                                      layerID: manager.layers[layerIndex].id,
-                                      celID: manager.layers[layerIndex].cels[0].id)
+        manager.selection = Selection(path: path, bounds: path.boundingBoxOfPath)
     }
 
     private func cgImage(_ vector: VectorCanvas) -> CGImage? { vector.render().cgImage }
@@ -673,8 +671,7 @@ final class LassoMoveLogicTests: XCTestCase {
         CanvasFixture.setBakedContent(manager, layerIndex: 0,
                                       CanvasFixture.solidImage(.black, rect: CGRect(x: 10, y: 10, width: 20, height: 20)))
         manager.selection = Selection(path: CGPath(rect: CGRect(x: 8, y: 8, width: 24, height: 24), transform: nil),
-                                      bounds: CGRect(x: 8, y: 8, width: 24, height: 24),
-                                      layerID: manager.layers[0].id, celID: manager.layers[0].cels[0].id)
+                                      bounds: CGRect(x: 8, y: 8, width: 24, height: 24))
 
         manager.beginMove()
         XCTAssertNotNil(manager.floatingPiece, "fixture precondition: something lifted")
@@ -4791,8 +4788,7 @@ final class LassoMoveLogicTests: XCTestCase {
                        "and never shown holding a setting nothing on this layer obeys")
 
         manager.selection = Selection(path: CGPath(rect: CGRect(x: 8, y: 8, width: 24, height: 24), transform: nil),
-                                      bounds: CGRect(x: 8, y: 8, width: 24, height: 24),
-                                      layerID: manager.layers[0].id, celID: manager.layers[0].cels[0].id)
+                                      bounds: CGRect(x: 8, y: 8, width: 24, height: 24))
         manager.beginMove()
         XCTAssertNotNil(manager.floatingPiece, "fixture precondition: something lifted")
 
