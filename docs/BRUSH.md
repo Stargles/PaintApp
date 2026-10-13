@@ -1586,7 +1586,7 @@ model is correct"* are both about exactly that.
 **The bases are grouped, `size` and `opacity` are not, and that pair is not an exception.** `Brush.size`
 and `Brush.opacity` are the *stroke's* diameter and opacity: `BrushStamper` takes both as arguments
 because the toolbar drives them and a lasso resize scales the first, and what the preset holds is the
-value copied into `CanvasManager.brushSize` when it is picked. `BrushDabSettings.size` and `.opacity`
+value copied into the brush's profile (`CanvasManager.toolProfiles`) when it is picked. `BrushDabSettings.size` and `.opacity`
 are the matrix's own outputs — the fractions those are multiplied by — and live with the rest.
 
 `density` is the level a dab's **gate** is decided by — §2.32. `BrushStamper.stampDab` stamps when it

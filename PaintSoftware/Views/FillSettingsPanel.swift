@@ -11,15 +11,7 @@ struct FillSettingsPanel: View {
         self.settings = canvasManager.fillSettings
     }
 
-    /// The vivid blue for the setting the fill tool's sideways drag currently adjusts, and the lighter
-    /// blue for the others — so it's obvious at a glance which slider the drag is wired to. Changing any
-    /// slider re-points the selection at it (see `CanvasManager.setFillSetting`).
-    private static let selectedTint = Color(red: 0.20, green: 0.55, blue: 1.0)
-    private static let unselectedTint = Color(red: 0.60, green: 0.78, blue: 1.0)
-
-    private func tint(_ axis: CanvasManager.FillAxis) -> Color {
-        settings.selectedAxis == axis ? Self.selectedTint : Self.unselectedTint
-    }
+    private static let tint = Color(red: 0.20, green: 0.55, blue: 1.0)
 
     var body: some View {
         ScrollView {
@@ -56,7 +48,7 @@ struct FillSettingsPanel: View {
 
                 Text(canvasManager.fillMode == .lasso
                      ? "Draw a loop. It works like a fence, and your lines are walls: anything inside the fence that the fence can walk to — the paper around your drawing, and anywhere it can slip through a gap — is left alone. Everything else inside is filled solid, lines and all. Nothing lands on the fence itself."
-                     : "The highlighted slider is the one the fill tool's sideways drag adjusts. Move any slider to switch the drag to it.")
+                     : "After a fill, drag sideways on the canvas to change Gap Closing: left raises it, right lowers it.")
                     .font(.caption)
                     .foregroundColor(.gray)
                     .padding(.horizontal)
@@ -66,9 +58,9 @@ struct FillSettingsPanel: View {
                         .foregroundColor(.white)
                     Slider(value: Binding(
                         get: { settings.gapClosing },
-                        set: { canvasManager.setFillSetting(.gapClosing, $0) }
+                        set: { canvasManager.setFillGapClosing($0) }
                     ), in: CanvasManager.fillGapRange)
-                        .tint(tint(.gapClosing))
+                        .tint(Self.tint)
                         .accessibilityIdentifier("fillPanel.gapClosingSlider")
                     Text("Bridges small breaks in a boundary so the fill doesn't leak out.")
                         .font(.caption)
@@ -81,9 +73,9 @@ struct FillSettingsPanel: View {
                         .foregroundColor(.white)
                     Slider(value: Binding(
                         get: { settings.threshold },
-                        set: { canvasManager.setFillSetting(.threshold, $0) }
+                        set: { canvasManager.setFillThreshold($0) }
                     ), in: CanvasManager.fillThresholdRange)
-                        .tint(tint(.threshold))
+                        .tint(Self.tint)
                         .accessibilityIdentifier("fillPanel.thresholdSlider")
                     Text("How different two colours must be to count as a wall — higher spreads across softer borders.")
                         .font(.caption)
@@ -104,9 +96,9 @@ struct FillSettingsPanel: View {
                         .foregroundColor(.white)
                     Slider(value: Binding(
                         get: { canvasManager.fillEdgeOverlap },
-                        set: { canvasManager.setFillSetting(.edgeOverlap, $0) }
+                        set: { canvasManager.setFillEdgeOverlap($0) }
                     ), in: CanvasManager.fillExpandRange)
-                        .tint(tint(.edgeOverlap))
+                        .tint(Self.tint)
                         .accessibilityIdentifier("fillPanel.edgeOverlapSlider")
                     Text(canvasManager.fillMode == .lasso
                          ? "At the top the colour reaches the outer edge of your line; lower it and the colour tucks further underneath."
@@ -127,7 +119,7 @@ struct FillSettingsPanel: View {
                         Text("Mend Gap to Neighbouring Fill")
                             .foregroundColor(.white)
                     }
-                    .tint(Self.selectedTint)
+                    .tint(Self.tint)
                     .accessibilityIdentifier("fillPanel.mendGapToggle")
                     Text("Where a fill on this layer sits across a line from this one, the colour grows under the line to meet it, so no seam is left between them. It only crosses line, and never covers the other fill or open paper.")
                         .font(.caption)
@@ -144,7 +136,7 @@ struct FillSettingsPanel: View {
                         get: { settings.mendReach },
                         set: { canvasManager.setFillMendReach($0) }
                     ), in: CanvasManager.fillMendReachRange, step: 1)
-                        .tint(Self.selectedTint)
+                        .tint(Self.tint)
                         .disabled(!settings.mendsNeighbourGap)
                         .accessibilityIdentifier("fillPanel.mendReachSlider")
                     Text("The widest strip of line the mend will close, counted from where Edge Overlap leaves each fill.")
@@ -168,7 +160,7 @@ struct FillSettingsPanel: View {
                         Text("Canvas Edge Is a Boundary")
                             .foregroundColor(.white)
                     }
-                    .tint(Self.selectedTint)
+                    .tint(Self.tint)
                     .accessibilityIdentifier("fillPanel.canvasEdgeBoundaryToggle")
                     Text("Fills stop at the canvas edge instead of spreading out into the padding, and Gap Closing may bridge to it so a line stopping just short still seals.")
                         .font(.caption)
@@ -188,7 +180,7 @@ struct FillSettingsPanel: View {
                         get: { min(settings.canvasEdgeExtension, padding) },
                         set: { canvasManager.setFillCanvasEdgeExtension($0) }
                     ), in: 0...max(padding, 1), step: 1)
-                        .tint(Self.selectedTint)
+                        .tint(Self.tint)
                         .disabled(!canExtend)
                         .accessibilityIdentifier("fillPanel.canvasEdgeExtensionSlider")
                     Text(padding >= 1

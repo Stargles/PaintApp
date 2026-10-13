@@ -9,15 +9,11 @@ import CoreGraphics
 /// sync, every toolbar body — for a number two sliders draw. MEASURED in PERFORMANCE.md §28. Here only
 /// the views that show these values observe them (`FillSettingsPanel`, the left rail's fill sliders),
 /// so a tick redraws its slider and nothing else. `CanvasManager.fillSettings` holds the one instance;
-/// `CanvasManager.setFillSetting` and its siblings are the writers that also re-run an adjustable fill.
+/// `CanvasManager.setFillGapClosing` and its siblings are the writers that also re-run an adjustable fill.
 ///
 /// **Saved with the scene** (TODO (176)): `FillToolManifest` is their record in the manifest, with the Fill
 /// Type beside them.
 final class FillSettings: ObservableObject {
-
-    /// Which setting the fill tool's sideways drag adjusts, and which slider the Fill panel highlights.
-    /// Changing any of the three re-points it at that one (`CanvasManager.setFillSetting`).
-    @Published var selectedAxis: CanvasManager.FillAxis = .gapClosing
 
     static let defaultGapClosing: CGFloat = 8
     static let defaultBucketEdgeOverlap: CGFloat = 2

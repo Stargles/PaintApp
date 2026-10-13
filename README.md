@@ -94,9 +94,15 @@ toolset, and a frame-by-frame animation timeline.
 - **Saving**: automatic — a few seconds after you stop editing, and every half minute while you
   do not stop — as well as when you leave to the gallery or the app goes to the background. Each
   save is atomic (staged, validated, then swapped in), writes only the cels that changed, and keeps
-  the artist's thread out of it. Coming back from the gallery lands where you left: same frame,
-  layer, zoom, onion skin and loop range are the document's; brush size, opacity, colour, tool and
-  eraser follow you between documents
+  the artist's thread out of it. **Where each option is kept** (TODO (176)'s ruling): a scene keeps
+  how it is looked at — frame, layer, zoom, onion skin, loop range, active view — and the tools in
+  hand — the tool, each stroke tool's preset, size and opacity, the colour, the eraser's and fill's
+  settings, the text tool's style, the interpolate switches, the colour panel's tab, Recent colours
+  and selected palette — so a new scene starts on the defaults and a reopened one is as it was left
+  (`EditorStateManifest`). The app keeps the brush library and preset edits, the Palettes library,
+  Fingers Can Paint, Render Resolution, the projects folder and the gallery folder you were in
+  (`AppSettings`, and the brush library's own file). The Select and Move switches, the selection mode
+  and the panels reset each launch
 - **Gestures**: two-finger zoom, rotate, and pan
 
 ## Project Structure
@@ -121,7 +127,10 @@ PaintSoftware/
 │   ├── CanvasManager.swift      # Core state/operations (layers, cels, tools, undo)
 │   ├── InterpolationRecipe.swift / MotionGroup.swift / GuideStroke.swift
 │   ├── SelectionModels.swift    # Select & Move tool operations
-│   ├── Palette.swift / ColorHistory.swift  # Custom color palettes; last colours used to paint
+│   ├── EditorState.swift        # What a scene keeps of its editor and its tools (the manifest's record)
+│   ├── AppSettings.swift        # What the app keeps for itself — the one `UserDefaults` store
+│   ├── ToolProfile.swift        # Each stroke tool's preset, size and opacity
+│   ├── Palette.swift / ColorPanelState.swift  # The app's palettes; a scene's picker tab, Recent colours, palette
 │   ├── PickerColor.swift        # The colour picker's one colour (hue/saturation/brightness/alpha), observed per property
 │   └── ProjectManifest.swift    # On-disk project schema
 ├── Services/
@@ -213,8 +222,9 @@ xcodebuild -project PaintSoftware.xcodeproj -scheme PaintSoftware \
 ### Fill
 1. Select the Fill tool and tap inside a region bounded by content on the current layer's fill
    references.
-2. Drag to adjust threshold/gap-closing/edge-overlap live before it commits; it also stays adjustable
-   after lifting your finger until you draw elsewhere or start a new fill.
+2. Drag sideways to adjust Gap Closing live before it commits — left raises it, right lowers it; the
+   fill also stays adjustable after lifting your finger, through the Fill menu's sliders, until you
+   draw elsewhere or start a new fill.
 3. Toggle which layers count as fill boundaries with each row's drop button, shown while a layer's
    options menu is open. Shown layers are boundaries and hidden ones are not, until you say otherwise
    — after which your choice sticks through the eye icon.

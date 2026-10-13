@@ -50,29 +50,6 @@ their files are repaired. Build `2974b33` broke this rule and lost the owner's k
 
 ---
 
-## (176) Where each option is saved — per document, global, or not at all
-
-**Status** — asked 2026-10-12; the inventory is being taken, then the owner rules row by row.
-
-*"For the options saving, there currently is 2 levels of saving if i recall correctly: per document and
-global. In my opinion, I think it is best if everything previously global is saved per document. However
-I dont yet know all the things that are saved per document, global, or not saved at all, so show me all
-of them first, and I will tell you which ones save with which method."*
-
-Rulings on (175)'s questions, 2026-10-12: the **Subtract switch is not saved** (it resets each launch);
-**tool sliders and pickers are saved** — at whichever level the inventory ruling gives them.
-
-**Ruled row by row 2026-10-12** — `~/PaintWork/design/s48-176-ruling.md` is the ruling and the brief
-(row ids from `s48-settings-inventory.md`). In short: the tool options become **per scene** (tool, brush
-size/opacity/colour, eraser, fill, text, interpolate switches, colour picker tab, recent colours, selected
-palette, active view); the **brush library, preset edits, imported tips and the Palettes library stay
-app-wide**, as do Fingers Can Paint, Render Resolution and the gallery's folders; Select's and Move's
-switches (Subtract, Paint Outside Selection, Keep Stroke Width, Keep Full Precision) **reset each launch**
-— the owner confirmed that over (175)'s saving them. Mask tuning goes per mask, in (35).
-
-- [ ] One store per level; the per-tool settings profile; a one-shot repair carrying today's global
-      values into every existing scene.
-
 ## (179) Everything live previews at the rate the device can draw, and writes the scene once
 
 **Status** — asked 2026-10-12; extends (173)'s held-edit mechanism (`CanvasManager.liveElementEdit`,
@@ -151,15 +128,6 @@ panel, and the Wheel redrew 14,400 rectangles — fixed and measured in PERFORMA
 - [x] The colour picker's own redraw during a drag measured and, if it is the ~1.4 s, fixed (a separate
       worker — not the held edit's code). It was: PERFORMANCE.md §31.
 
-## (186) The fill's sideways drag adjusts Gap Closing only, and right decreases it
-
-**Status** — asked 2026-10-12 (a note on the option-saving page, row C6).
-
-*"just fix it to gap closing (no other sliders). Also invert the direction, so that drag right decreases
-gap fill."* — `FillSettings.selectedAxis` and its highlight go; the drag always moves Gap Closing.
-
-- [ ] One axis, inverted; the highlight removed whole; driven.
-
 ## (35) Advanced masks — colour masks beside the alpha mask
 
 **Status** — promoted from "Later" 2026-10-12; the owner will describe what it is meant to be once told
@@ -224,11 +192,9 @@ and an active selection limits it further. This reverses the 2026-08-22 ruling q
 `TransformMode`'s doc ("Warp will not be a feature (like liquify)").
 
 **Shape** (survey §C): each dab of the unchanged brush walk becomes a displacement, so tip, texture,
-flow and hardness are the strength field for free. Before it, the eraser's parallel settings
-(`eraserSize`, `eraserOpacity`, `selectedEraserBrush`, `isEraser`) become one per-tool settings profile,
-which liquify then uses — a refactor that lands with (176).
+flow and hardness are the strength field for free. Its brush type, size and power are a third
+`ToolProfile` — a `StrokeTool` case and a `ToolProfiles` field, which (176) built for it.
 
-- [ ] Per-tool settings profile (with (176)).
 - [ ] Liquify on raster and vector, three modes, one undo step per stroke.
 
 ---

@@ -201,7 +201,7 @@ final class FillGestureRestartLogicTests: XCTestCase {
         let gate = DispatchSemaphore(value: 0)
         manager.fillQueue.async { gate.wait() }
         // A gesture-1 worker, queued behind the gate: this is the one that must not speak later.
-        manager.setFillSetting(.gapClosing, 5)
+        manager.setFillGapClosing(5)
 
         manager.brushColor = Self.blue
         manager.beginInteractiveFill(at: Self.onThePaper)   // the second tap
@@ -368,7 +368,7 @@ final class FillGestureRestartLogicTests: XCTestCase {
 
         let gate = DispatchSemaphore(value: 0)
         manager.fillQueue.async { gate.wait() }
-        manager.setFillSetting(.gapClosing, 5)   // a gesture-1 worker, queued behind the gate
+        manager.setFillGapClosing(5)   // a gesture-1 worker, queued behind the gate
 
         manager.brushColor = Self.blue
         DispatchQueue.global().asyncAfter(deadline: .now() + 0.15) { gate.signal() }

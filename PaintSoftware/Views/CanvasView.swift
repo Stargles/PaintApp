@@ -647,16 +647,10 @@ struct CanvasView: UIViewRepresentable {
         private var shapeDetectionActive = false
         /// The stroke view that started the current detection stroke, to revert on shape found.
         private weak var shapeDetectionHost: LayerHostView?
-        // Interactive-fill drag state, captured at press-down. The drag is horizontal-only — its
-        // rightward travel raises whichever setting is currently selected, relative to these baselines.
+        // Interactive-fill drag state, captured at press-down. The drag is sideways and adjusts Gap
+        // Closing alone, relative to this baseline (`CanvasManager.fillDragGapClosing`).
         private var fillDragStartHost: CGPoint?
         private var fillDragStartGap: CGFloat = 0
-        private var fillDragStartThreshold: CGFloat = 0
-        private var fillDragStartEdge: CGFloat = 0
-
-        /// Finger travel that sweeps a fill setting across its whole slider range. Generous so fine
-        /// adjustments are easy; clamped in CanvasManager.
-        private static let fillDragSweepPoints: CGFloat = 320
 
         private var fitScale: CGFloat = 1
         private var baseCenter: CGPoint?
@@ -4875,8 +4869,6 @@ struct CanvasView: UIViewRepresentable {
                 // The drag delta is measured in fixed screen (host) space so feel is zoom-independent.
                 fillDragStartHost = recognizer.location(in: host)
                 fillDragStartGap = canvasManager.fillSettings.gapClosing
-                fillDragStartThreshold = canvasManager.fillSettings.threshold
-                fillDragStartEdge = canvasManager.fillEdgeOverlap
                 // Pressing back inside the current adjustable fill resumes drag-adjusting it. A
                 // press elsewhere bakes it first via `beginInteractiveFill`'s `beginCanvasEdit`.
                 if canvasManager.isFillInAdjustableState, canvasManager.isPointInPendingFill(at: canvasPoint) {
@@ -4887,21 +4879,8 @@ struct CanvasView: UIViewRepresentable {
             case .changed:
                 guard let start = fillDragStartHost else { return }
                 let dx = recognizer.location(in: host).x - start.x
-                // Horizontal-only: rightward travel raises the selected setting; the others hold.
-                func perPoint(_ range: ClosedRange<CGFloat>) -> CGFloat {
-                    (range.upperBound - range.lowerBound) / Self.fillDragSweepPoints
-                }
-                switch canvasManager.fillSettings.selectedAxis {
-                case .gapClosing:
-                    let gap = fillDragStartGap + dx * perPoint(CanvasManager.fillGapRange)
-                    canvasManager.updateInteractiveFill(gapClosing: gap, threshold: fillDragStartThreshold, edgeOverlap: fillDragStartEdge)
-                case .threshold:
-                    let threshold = fillDragStartThreshold + dx * perPoint(CanvasManager.fillThresholdRange)
-                    canvasManager.updateInteractiveFill(gapClosing: fillDragStartGap, threshold: threshold, edgeOverlap: fillDragStartEdge)
-                case .edgeOverlap:
-                    let edge = fillDragStartEdge + dx * perPoint(CanvasManager.fillExpandRange)
-                    canvasManager.updateInteractiveFill(gapClosing: fillDragStartGap, threshold: fillDragStartThreshold, edgeOverlap: edge)
-                }
+                canvasManager.updateInteractiveFill(
+                    gapClosing: CanvasManager.fillDragGapClosing(from: fillDragStartGap, travelled: dx))
             case .ended:
                 // See the doc comment: `fillDragStartHost` is "this sequence was accepted", and a
                 // declined press must not reach `endInteractiveFill` — which would commit whatever

@@ -509,7 +509,7 @@ final class FillContourLogicTests: XCTestCase {
         // 64 px fixture canvas bridges two 10 px squares into one blob and takes the corner-touch
         // with it. The guard below caught exactly that on the first run of this test. 0 is a setting
         // the Fill panel offers, and it is the one under which the fill traces the artist's ink.
-        manager.setFillSetting(.gapClosing, 0)
+        manager.setFillGapClosing(0)
 
         // --- the artist's first lasso, around both squares ---
         manager.beginInteractiveLassoFill(path: rectangleLoop(CGRect(x: 4, y: 4, width: 34, height: 34)))

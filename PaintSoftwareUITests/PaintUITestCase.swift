@@ -174,7 +174,7 @@ class PaintUITestCase: XCTestCase {
 
     /// Brings a control of the open fill panel into view. The panel is a scroll view of its own that
     /// holds more than its height, and **a swipe has to start on it** — one aimed at "the first scroll
-    /// view" lands on the canvas, where a vertical drag is the fill tool's own Gap Closing gesture.
+    /// view" lands on the canvas, where a drag is the fill tool's own Gap Closing gesture.
     ///
     /// **Anchored on the scroll view's own frame, and in its left gutter.** The frame stays put while
     /// the rows move, where a row's frame (the title's, which an earlier version offset from) scrolls
@@ -674,20 +674,15 @@ class PaintUITestCase: XCTestCase {
         XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: outside.dx, dy: outside.dy)), "Fill of an off-center square must stay contained — leaking here means the reference was rasterized mirrored")
     }
 
-    /// Shared body: selects the fill tool (a single tap, which also switches the left rail's sliders to
-    /// gap-closing / threshold / edge-overlap); optionally opens the panel and nudges
-    /// `selectAxisPanelSliderID` so that setting becomes the drag axis, then closes the panel again;
-    /// reads `sliderID`'s value (left-rail sliders are reliable to *read*), then press-drags horizontally
-    /// on the canvas from `from` to `to` and checks the slider moved in the expected direction — proving
-    /// the drag adjusts the selected setting live.
-    func runInteractiveFillDragTest(
-        sliderID: String,
-        selectAxisPanelSliderID: String? = nil,
-        from: CGVector,
-        to: CGVector,
-        expectRaised: Bool,
-        what: String
-    ) throws {
+    /// Shared body for the fill tool's sideways drag — TODO (186): **it adjusts Gap Closing and nothing
+    /// else, and rightward lowers it.** Selects the fill tool (a single tap, which also switches the left
+    /// rail's sliders to gap-closing / threshold / edge-overlap); optionally opens the panel and nudges
+    /// `panelSliderID` — moving another slider used to make its setting the drag's — then closes it;
+    /// reads the rail's Gap Closing and Threshold (left-rail sliders are reliable to *read*), press-drags
+    /// horizontally on the canvas from `from` to `to`, and checks Gap Closing moved the way
+    /// `expectRaised` says while Threshold stood still.
+    func runInteractiveFillDragTest(nudgingPanelSlider panelSliderID: String? = nil,
+                                    from: CGVector, to: CGVector, expectRaised: Bool, what: String) throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
 
@@ -698,20 +693,21 @@ class PaintUITestCase: XCTestCase {
         XCTAssertTrue(fillButton.waitForExistence(timeout: 5))
         fillButton.tap() // Selects the fill tool; the left rail's sliders become gap-closing / threshold / edge-overlap.
 
-        if let selectAxisPanelSliderID {
-            // Moving a slider selects its setting as the drag axis. Do it on the panel's horizontal slider
-            // (reliable) and nudge it low so the following drag has headroom, then close the panel so the
-            // canvas drag isn't intercepted by it.
+        if let panelSliderID {
+            // The panel's horizontal sliders are reliable to `adjust`, unlike the rotated left-rail ones;
+            // closed again so the canvas drag isn't intercepted by the panel.
             fillButton.tap() // Open the Fill panel.
-            let axisSlider = app.sliders[selectAxisPanelSliderID]
-            XCTAssertTrue(axisSlider.waitForExistence(timeout: 5))
-            axisSlider.adjust(toNormalizedSliderPosition: 0.1)
+            let panelSlider = app.sliders[panelSliderID]
+            XCTAssertTrue(panelSlider.waitForExistence(timeout: 5))
+            panelSlider.adjust(toNormalizedSliderPosition: 0.1)
             fillButton.tap() // Close the Fill panel.
         }
 
-        let slider = app.sliders[sliderID]
-        XCTAssertTrue(slider.waitForExistence(timeout: 5))
-        let before = sliderNumericValue(slider)
+        let gap = app.sliders["sideToolbar.gapClosingSlider"]
+        let threshold = app.sliders["sideToolbar.thresholdSlider"]
+        XCTAssertTrue(gap.waitForExistence(timeout: 5))
+        let gapBefore = sliderNumericValue(gap)
+        let thresholdBefore = sliderNumericValue(threshold)
 
         // Press on the canvas and drag horizontally. Both endpoints sit on the left/center of the canvas,
         // clear of the 300pt trailing settings panel, so the drag lands on the fill gesture not the panel.
@@ -719,12 +715,15 @@ class PaintUITestCase: XCTestCase {
         let end = canvas.coordinate(withNormalizedOffset: to)
         start.press(forDuration: 0.3, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.3)
 
-        let after = sliderNumericValue(slider)
+        let gapAfter = sliderNumericValue(gap)
         if expectRaised {
-            XCTAssertGreaterThan(after, before, "\(what) (slider \(before) -> \(after))")
+            XCTAssertGreaterThan(gapAfter, gapBefore, "\(what) (Gap Closing \(gapBefore) -> \(gapAfter))")
         } else {
-            XCTAssertLessThan(after, before, "\(what) (slider \(before) -> \(after))")
+            XCTAssertLessThan(gapAfter, gapBefore, "\(what) (Gap Closing \(gapBefore) -> \(gapAfter))")
         }
+        XCTAssertEqual(sliderNumericValue(threshold), thresholdBefore,
+                       "The drag moves Gap Closing and no other slider (Threshold \(thresholdBefore))")
+        attachScreenshot(app, "fill-drag-\(expectRaised ? "left" : "right")")
     }
 
     /// These sliders surface their raw value to accessibility (e.g. "8", "40", "2", "6") rather than a

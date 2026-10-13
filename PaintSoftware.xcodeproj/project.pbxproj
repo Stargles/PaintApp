@@ -248,6 +248,7 @@
 		D04E01B3D6B35C3F87C1C94E /* BrushSizeSliderUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3E10656FA7B4CEF7B6D3252 /* BrushSizeSliderUITests.swift */; };
 		31739EE1A7A376DD95CA00AB /* AutosaveUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EB9F24F761120A39F5848E4 /* AutosaveUITests.swift */; };
 		DCC20B0EA3AFE8B4DA09D2E6 /* EditorStateRoundTripUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED5620FF6AB5003532CD9AFB /* EditorStateRoundTripUITests.swift */; };
+		8CD2BDEEAC05C1A9C4B5AA83 /* SceneToolsUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A660EB9CEAA62CF74F5EBE50 /* SceneToolsUITests.swift */; };
 		3775EADEBE5F8CF8F5FE2402 /* AddMenuUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3775EADEBE5F8CF8F5FE2401 /* AddMenuUITests.swift */; };
 		EA871DBAB3A71DC25F495302 /* TopBarMenusUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA871DBAB3A71DC25F495301 /* TopBarMenusUITests.swift */; };
 		DEC0DE00000000000000000A /* PaintSoftware/Engine/BrushLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000009 /* PaintSoftware/Engine/BrushLibrary.swift */; };
@@ -875,6 +876,7 @@
 		C3E10656FA7B4CEF7B6D3252 /* BrushSizeSliderUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BrushSizeSliderUITests.swift; sourceTree = "<group>"; };
 		7EB9F24F761120A39F5848E4 /* AutosaveUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AutosaveUITests.swift; sourceTree = "<group>"; };
 		ED5620FF6AB5003532CD9AFB /* EditorStateRoundTripUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EditorStateRoundTripUITests.swift; sourceTree = "<group>"; };
+		A660EB9CEAA62CF74F5EBE50 /* SceneToolsUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "SceneToolsUITests.swift"; sourceTree = "<group>"; };
 		3775EADEBE5F8CF8F5FE2401 /* AddMenuUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AddMenuUITests.swift; sourceTree = "<group>"; };
 		EA871DBAB3A71DC25F495301 /* TopBarMenusUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TopBarMenusUITests.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000009 /* PaintSoftware/Engine/BrushLibrary.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/BrushLibrary.swift; sourceTree = "<group>"; };
@@ -1655,6 +1657,7 @@
 				C3E10656FA7B4CEF7B6D3252 /* BrushSizeSliderUITests.swift */,
 				7EB9F24F761120A39F5848E4 /* AutosaveUITests.swift */,
 				ED5620FF6AB5003532CD9AFB /* EditorStateRoundTripUITests.swift */,
+				A660EB9CEAA62CF74F5EBE50 /* SceneToolsUITests.swift */,
 				3435ABC01BE88B30E0B59E00 /* CanvasTransformLeavesStandingUITests.swift */,
 				DA27E91CF5075DCBD5D4E941 /* CanvasTouchSettleLogicTests.swift */,
 				8020BFB6082F592C6BE757F9 /* HandleDragLogicTests.swift */,
@@ -2415,6 +2418,7 @@
 				D04E01B3D6B35C3F87C1C94E /* BrushSizeSliderUITests.swift in Sources */,
 				31739EE1A7A376DD95CA00AB /* AutosaveUITests.swift in Sources */,
 				DCC20B0EA3AFE8B4DA09D2E6 /* EditorStateRoundTripUITests.swift in Sources */,
+				8CD2BDEEAC05C1A9C4B5AA83 /* SceneToolsUITests.swift in Sources */,
 				DEC0DE0000000000000000F2 /* PerfBaselineTests.swift in Sources */,
 				65998A23D7249459B07A3055 /* StrokeDensityBench.swift in Sources */,
 				4EA7076DF68F8DFA9FCB6BF5 /* PlaybackTickBench.swift in Sources */,

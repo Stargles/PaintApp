@@ -84,6 +84,7 @@ final class ColorPickerUITests: PaintUITestCase {
     /// is up, the Classic square is not, and the tab bar says which tab is selected.
     func testTheTypeTheArtistChoseIsTheScenesAndOutlivesLeavingAndAFreshLaunch() throws {
         let app = XCUIApplication()
+        app.launchArguments = ["-resetGallery"]
         XCTAssertTrue(launchIntoEditor(app))
         openColorPanel(app)
         XCTAssertTrue(app.buttons["colorPanel.tab.square"].isSelected, "PREMISE: a new scene opens on Classic")

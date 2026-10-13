@@ -1473,10 +1473,6 @@ final class CanvasManager: ObservableObject {
     /// an option.
     let canvasDisplayScale = CanvasDisplayScale()
 
-    /// The three fill settings the fill tool's sideways (horizontal) drag can adjust — which one it does
-    /// is `fillSettings.selectedAxis`.
-    enum FillAxis { case gapClosing, threshold, edgeOverlap }
-
     /// The fill tool's settings — observed by the views that show them and by nothing else, so a
     /// slider tick is not a pass over the editor (TODO (157); see `FillSettings`).
     let fillSettings = FillSettings()

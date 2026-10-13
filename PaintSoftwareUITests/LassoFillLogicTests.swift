@@ -159,7 +159,7 @@ final class LassoFillLogicTests: XCTestCase {
                                      loop: CGPath) throws -> (region: [UInt8], session: MetalFillSession) {
         let manager = CanvasFixture.manager(layerCount: 1)
         manager.fillMode = .lasso
-        manager.setFillSetting(.edgeOverlap, slider)
+        manager.setFillEdgeOverlap(slider)
         let session = try lassoSession(reference, loop: loop)
         let region = try XCTUnwrap(session.fill(seedX: 0, seedY: 0, seedColor: .zero, threshold: 0.15,
                                                 gapWidth: 8,
@@ -1481,17 +1481,17 @@ final class LassoFillLogicTests: XCTestCase {
         manager.fillMode = .lasso
         XCTAssertEqual(manager.fillEdgeOverlap, 6)
         for v in stride(from: CGFloat(0), through: 6, by: 1) {
-            manager.setFillSetting(.edgeOverlap, v)
+            manager.setFillEdgeOverlap(v)
             XCTAssertEqual(manager.fillEdgeRadius(lasso: true), 6 - v,
                            "Slider \(v) grows the collar by \(6 - v) px")
         }
 
-        manager.setFillSetting(.edgeOverlap, 3)
+        manager.setFillEdgeOverlap(3)
         XCTAssertEqual(manager.fillSettings.lassoEdgeOverlap, 3)
         XCTAssertEqual(manager.fillSettings.bucketEdgeOverlap, 2, "Adjusting one mode must not move the other")
         manager.fillMode = .flood
         XCTAssertEqual(manager.fillEdgeOverlap, 2, "Switching back shows the bucket its own value")
-        manager.setFillSetting(.edgeOverlap, 5)
+        manager.setFillEdgeOverlap(5)
         XCTAssertEqual(manager.fillSettings.bucketEdgeOverlap, 5)
         XCTAssertEqual(manager.fillSettings.lassoEdgeOverlap, 3)
     }

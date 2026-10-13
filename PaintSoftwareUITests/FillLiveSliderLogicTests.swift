@@ -31,7 +31,7 @@ final class FillLiveSliderLogicTests: XCTestCase {
         CanvasFixture.setBakedContent(manager, layerIndex: 0, ink)
         manager.addLayer()
         manager.brushColor = Self.red
-        manager.setFillSetting(.gapClosing, 0)
+        manager.setFillGapClosing(0)
         manager.beginInteractiveFill(at: CGPoint(x: 30, y: 30))
         manager.endInteractiveFill()
         settle()
@@ -69,7 +69,7 @@ final class FillLiveSliderLogicTests: XCTestCase {
         let versions = manager.layers.map { $0.cels.map { $0.raster.version } }
 
         for gap in stride(from: CGFloat(5), through: 40, by: 5) {
-            manager.setFillSetting(.gapClosing, gap)
+            manager.setFillGapClosing(gap)
             manager.fillQueue.sync {}
             settle(0.15)
         }
@@ -90,7 +90,7 @@ final class FillLiveSliderLogicTests: XCTestCase {
         let manager = adjustableFill()
         let before = manager.history.undoStack.count
         for gap in stride(from: CGFloat(5), through: 40, by: 5) {
-            manager.setFillSetting(.gapClosing, gap)
+            manager.setFillGapClosing(gap)
             manager.fillQueue.sync {}
             settle(0.15)
         }
@@ -122,5 +122,22 @@ final class FillLiveSliderLogicTests: XCTestCase {
         cancelled.cancelInteractiveFill()
         XCTAssertNil(cancelled.liveFill)
         XCTAssertEqual(cancelled.heldHostLayerIndices, [], "cancelled: nothing to draw")
+    }
+
+    // MARK: - The sideways drag (TODO (186))
+
+    /// **Gap Closing and nothing else, and rightward lowers it** — the owner's *"invert the direction, so
+    /// that drag right decreases gap fill."* The whole range is one sweep, and the ends clamp.
+    func testTheSidewaysDragLowersGapClosingToTheRightAndRaisesItToTheLeft() {
+        let range = CanvasManager.fillGapRange
+        let sweep = CanvasManager.fillDragSweepPoints
+        let start: CGFloat = 8
+        XCTAssertLessThan(CanvasManager.fillDragGapClosing(from: start, travelled: 20), start, "Right lowers it")
+        XCTAssertGreaterThan(CanvasManager.fillDragGapClosing(from: start, travelled: -20), start, "Left raises it")
+        XCTAssertEqual(CanvasManager.fillDragGapClosing(from: start, travelled: 0), start)
+        XCTAssertEqual(CanvasManager.fillDragGapClosing(from: range.upperBound, travelled: sweep), range.lowerBound,
+                       accuracy: 1e-9, "One sweep to the right crosses the whole range")
+        XCTAssertEqual(CanvasManager.fillDragGapClosing(from: start, travelled: 10 * sweep), range.lowerBound, "…and clamps")
+        XCTAssertEqual(CanvasManager.fillDragGapClosing(from: start, travelled: -10 * sweep), range.upperBound)
     }
 }

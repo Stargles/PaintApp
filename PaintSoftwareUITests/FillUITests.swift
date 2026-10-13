@@ -252,29 +252,26 @@ final class FillContainmentUITests: PaintUITestCase {
 
 final class FillLiveAdjustUITests: PaintUITestCase {
 
-    /// The fill tool's drag is horizontal-only and adjusts whichever setting is *selected* (default
-    /// gap-closing). Pressing on the canvas and dragging **right** raises that setting in real time, and
-    /// the left rail's gap-closing slider (which replaces brush Size in fill mode) mirrors it. The slider
-    /// value is an observable proxy for the live setting — both are bound to the same `@Published`
-    /// property, so a change to one is a change to the other.
-    func testInteractiveFillDragRightRaisesSelectedGapClosingByDefault() throws {
-        try runInteractiveFillDragTest(sliderID: "sideToolbar.gapClosingSlider",
-                                       from: CGVector(dx: 0.15, dy: 0.5),
+    /// TODO (186), the owner: *"just fix it to gap closing (no other sliders). Also invert the direction,
+    /// so that drag right decreases gap fill."* Pressing on the canvas and dragging **right** lowers Gap
+    /// Closing in real time, and the left rail's Gap Closing slider (which replaces brush Size in fill
+    /// mode) mirrors it. The slider value is an observable proxy for the live setting — both are bound
+    /// to the same `@Published` property, so a change to one is a change to the other.
+    func testInteractiveFillDragRightLowersGapClosing() throws {
+        try runInteractiveFillDragTest(from: CGVector(dx: 0.15, dy: 0.5),
                                        to: CGVector(dx: 0.5, dy: 0.5),
-                                       expectRaised: true,
-                                       what: "Dragging right during a fill should raise the selected setting (gap-closing by default)")
+                                       expectRaised: false,
+                                       what: "Dragging right during a fill lowers Gap Closing")
     }
 
-    /// Companion: once the Threshold slider is the selected axis (moving it selects it), the same
-    /// rightward drag raises Threshold instead of gap-closing. The axis is selected via the Fill panel's
-    /// horizontal Threshold slider (reliable to `adjust`, unlike the rotated left-rail sliders).
-    func testInteractiveFillDragRightRaisesThresholdWhenSelected() throws {
-        try runInteractiveFillDragTest(sliderID: "sideToolbar.thresholdSlider",
-                                       selectAxisPanelSliderID: "fillPanel.thresholdSlider",
-                                       from: CGVector(dx: 0.15, dy: 0.5),
-                                       to: CGVector(dx: 0.5, dy: 0.5),
+    /// Dragging **left** raises it — and moving the Threshold slider first, which once made Threshold the
+    /// drag's setting, changes nothing about what the drag adjusts.
+    func testInteractiveFillDragLeftRaisesGapClosingWhateverSliderWasMovedLast() throws {
+        try runInteractiveFillDragTest(nudgingPanelSlider: "fillPanel.thresholdSlider",
+                                       from: CGVector(dx: 0.5, dy: 0.5),
+                                       to: CGVector(dx: 0.15, dy: 0.5),
                                        expectRaised: true,
-                                       what: "With Threshold selected, dragging right during a fill should raise the wall threshold")
+                                       what: "Dragging left during a fill raises Gap Closing, after Threshold was moved")
     }
 
     /// The core of the post-fill config state: after a fill is applied and the finger lifts, the fill is

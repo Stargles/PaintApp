@@ -444,13 +444,18 @@ use the result. Put these four in the brief, not in the reviewer's head.
 
 ### A static that writes through to `UserDefaults` outlives the test that set it
 
-`CanvasManager.renderResolution` persists on every set, so it is process-wide **and survives into the
-next run in the simulator container**. A suite that left it on `.half` produced **15 reds in a later fast
-tier**, across `EffectLayerLogicTests` and `PerfBaselineTests`, every one a half-resolution artifact of a
-*previous* run — reported, reasonably, as failures of the code under test. Pin it in `setUp` and restore
-what was there in `tearDown`, exactly as suites already do for `Compositor.backend`. It is that same
-restore rule reached through a door nobody had checked, and the persistence is what makes it worse: the
-damage shows up in a *different* suite, on a *later* run, with nothing pointing back.
+`CanvasManager.renderResolution` once persisted on every set, so it was process-wide **and survived into
+the next run in the simulator container**. A suite that left it on `.half` produced **15 reds in a later
+fast tier**, across `EffectLayerLogicTests` and `PerfBaselineTests`, every one a half-resolution artifact
+of a *previous* run — reported, reasonably, as failures of the code under test. The persistence is what
+made it worse than a forgotten `Compositor.backend` restore: the damage shows up in a *different* suite,
+on a *later* run, with nothing pointing back.
+
+**The fix is structural since TODO (176): the model writes no store.** `AppSettings` is the app's one
+`UserDefaults` store, an instance over the defaults it is handed — logic tests hand it a suite of their
+own — and only `AppSettingsKeeper`, held by `ContentView`, carries a value between it and a
+`CanvasManager`. A new app-wide value goes there, never into a model `didSet`; `-resetEditorPreferences`
+forgets it for every UI test.
 
 ### The simulator subsystem degrades over a long session, and it looks like your code
 

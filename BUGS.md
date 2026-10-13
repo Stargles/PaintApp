@@ -792,7 +792,7 @@ fixed; (b) is what is still open here.**
 stroke is thinner than one screen pixel — FIXED, the nine artwork layers ask for `.trilinear`.**
 `magnificationFilter` was set on every view that shows artwork and `minificationFilter` on none of them,
 so they all ran Core Animation's default `.linear` minification, which has no mipmap chain.
-`CanvasManager.brushSize` defaults to **5 canvas points** (`CanvasManager.swift:497`) and the canvas opens
+The brush's size defaults to **5 canvas points** (`ToolProfiles.brush`) and the canvas opens
 at `fitScale` (`CanvasView.swift:2607`). MEASURED — a 5-point line drawn into a canvas-sized image and
 minified to a 400-point viewport, point-sampled (what an un-mipmapped `.linear` degenerates to at these
 ratios) against box-filtered:
@@ -1612,29 +1612,6 @@ The real gap is narrower than "the raster can vanish": it is that **this path is
 The vector payload beside it now reports a missing or unparseable file through
 `ProjectStore`'s `ProjectLoad` logger; the raster, whose loss is larger and more visible to the
 artist, says nothing at all. A log line here costs nothing and is the whole of the sensible fix.
-
-
-## One bad swatch loses the artist's entire palette library (2026-08-17)
-
-`Palette.swift:95-101` reads the persisted palettes as
-`try? JSONDecoder().decode([Palette].self, from: data)` and falls back to `Self.defaultPresets` when
-that returns nil. The array is decoded whole, so **one unreadable palette — or one unreadable swatch
-inside one palette — discards every custom palette the artist has built**, silently, replaced by the
-seeded presets as though this were a first launch. `save()` then writes the defaults back over the
-store at `:204`, and the loss is final.
-
-**This is the same bug that was just fixed for vector cels, in a different file**: an all-or-nothing
-decode of an array whose elements are independent, a silent fallback to empty-equivalent, and a
-write-back that makes it permanent. Lower stakes than artwork — palettes are cheap to rebuild and this
-is not a drawing — but it is still the user's own data, it is still silent, and unlike the project
-package there is **no backup layer here at all**: this lives in `UserDefaults` under
-`paletteStore.palettes.v1`, which `ProjectBackupManager` does not cover.
-
-The fix is the same one element at a time pattern, and it is smaller here because there is no legacy
-shape and no discriminator: decode `[Palette]` through a wrapper whose `init(from:)` cannot throw,
-keep the palettes that read, and seed the presets only when *nothing* did. The distinction worth
-keeping is between "the store is absent" (a genuine first launch — seed) and "the store is present but
-would not decode" (damage — keep what survives and say so).
 
 
 ## The palm baseline that shipped with the snap fix has never run (2026-08-17)

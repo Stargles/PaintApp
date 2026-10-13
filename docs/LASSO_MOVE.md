@@ -270,7 +270,7 @@ and Duplicate is the pixel cut.
 | which rule a **Clear** follows | `CanvasManager.clearSelectionPixels` — the same `splitForLassoMove` call with `insideIDs` **deleted** rather than lifted, so all three rules arrive through one line. §5.25 is what Cut means there; §5.26 is what puts it on the picker |
 | changing the rule mid-float | `CanvasManager.setSelectionMembership(_:)` — `cancelVectorFloat()` **then** `beginVectorLassoMove()`, in that order, because the latter's first statement bakes the float. No control reaches this any more (the Select panel is suppressed while anything floats, §5.13); it is the setter's invariant, not a picker's behaviour |
 | Enclosed catching nothing | `CanvasNotice.Kind.nothingWhollyInside`, raised only when a laxer rule *would* have caught something — §5.24, and the one deliberate exception to §5.9. One call, `CanvasManager.noteALassoThatCaughtNothing`, reached from all three consumers |
-| the setting | `CanvasManager.selectionMembership`, **not saved across launches** — per-drawing intent; storing it would make *last used* the default. (A picker: the on/off switches beside it are kept, `ToolSwitches`.) |
+| the setting | `CanvasManager.selectionMembership`, **not saved across launches** — per-drawing intent; storing it would make *last used* the default. (The Select panel's switches beside it reset each launch too — TODO (176).) |
 
 **The two new rules are cheaper and safer than the one that ships**, which inverts the usual
 expectation: neither cuts, so there is no bisection, no boundary dab, no fresh ids, no lattice

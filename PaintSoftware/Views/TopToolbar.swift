@@ -10,7 +10,7 @@ extension Binding where Value == ActivePanel {
     /// edit.
     ///
     /// For the fill tool it must not bake, because those sliders exist precisely to re-run a
-    /// still-adjustable fill (see `CanvasManager.setFillSetting`) — committing on the way in freezes
+    /// still-adjustable fill (see `CanvasManager.setFillGapClosing`) — committing on the way in freezes
     /// the fill and turns every slider in the panel into a no-op. Text has the same shape and a
     /// larger stake (`CanvasManager.enterTextMode`), which is what made this worth having one
     /// spelling of: it is now reached from two views, and a second hand-written copy of a rule is

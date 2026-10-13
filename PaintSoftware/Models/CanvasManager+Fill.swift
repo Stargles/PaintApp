@@ -378,9 +378,8 @@ extension CanvasManager {
     /// the artist has in front of them. Two stored settings, one control — see `FillSettings.lassoEdgeOverlap` for
     /// why they cannot share a number.
     ///
-    /// Every UI path goes through here (`FillSettingsPanel`, `SideToolbar`, the fill tool's sideways
-    /// drag in `CanvasView`, and `setFillSetting`/`updateInteractiveFill` below), so "which mode owns
-    /// this value" is decided in exactly one place.
+    /// Every UI path goes through here (`FillSettingsPanel` and `SideToolbar`, through
+    /// `setFillEdgeOverlap` below), so "which mode owns this value" is decided in exactly one place.
     var fillEdgeOverlap: CGFloat {
         get { fillMode == .lasso ? fillSettings.lassoEdgeOverlap : fillSettings.bucketEdgeOverlap }
         set {
@@ -440,9 +439,8 @@ extension CanvasManager {
     }
 
     /// Toggles "the canvas edge bounds the fill" and, if a fill is currently adjustable, re-runs it so
-    /// the artist sees the difference without re-tapping — the same live-update contract
-    /// `setFillSetting` gives the three sliders. Not a `FillAxis`: the sideways drag adjusts a
-    /// continuous setting, and there is no useful way to sweep a boolean.
+    /// the artist sees the difference without re-tapping — the same live-update contract the sliders'
+    /// setters give.
     func setFillCanvasEdgeIsBoundary(_ enabled: Bool) {
         guard fillSettings.canvasEdgeIsBoundary != enabled else { return }
         fillSettings.canvasEdgeIsBoundary = enabled
@@ -469,9 +467,7 @@ extension CanvasManager {
     }
 
     /// Sets how far the mend reaches and re-runs an adjustable fill so the seam is seen closing as the
-    /// slider moves. Whole pixels, within `fillMendReachRange`. **Not a `FillAxis`**: the left rail's
-    /// sideways drag adjusts Gap Closing, Threshold and Edge Overlap, and the mend's reach is set from
-    /// the fill dropdown alone.
+    /// slider moves. Whole pixels, within `fillMendReachRange`; set from the fill dropdown alone.
     func setFillMendReach(_ pixels: CGFloat) {
         let v = min(max(pixels.rounded(), Self.fillMendReachRange.lowerBound), Self.fillMendReachRange.upperBound)
         guard fillSettings.mendReach != v else { return }
@@ -509,37 +505,48 @@ extension CanvasManager {
         }
     }
 
-    /// Updates the in-progress fill's gap-closing (vertical drag), wall threshold (horizontal drag) and
-    /// edge-overlap settings — clamped to the slider ranges — and re-fills from the cached GPU session.
-    /// Also writes them back to the published settings so the fill sliders mirror the drag live. Cheap to
-    /// call on every touch-move: identical quantized values schedule no work, and a burst coalesces.
-    func updateInteractiveFill(gapClosing: CGFloat, threshold: CGFloat, edgeOverlap: CGFloat) {
+    /// **The fill tool's sideways drag adjusts Gap Closing and nothing else, and rightward lowers it** —
+    /// TODO (186), the owner: *"just fix it to gap closing (no other sliders). Also invert the direction,
+    /// so that drag right decreases gap fill."* Finger travel that sweeps the whole range: generous, so
+    /// fine adjustments are easy.
+    static let fillDragSweepPoints: CGFloat = 320
+
+    /// Gap Closing for a sideways fill drag `travelled` host points to the right of where it started at
+    /// `start` — negative is leftward — clamped to the slider's range.
+    static func fillDragGapClosing(from start: CGFloat, travelled: CGFloat) -> CGFloat {
+        let perPoint = (fillGapRange.upperBound - fillGapRange.lowerBound) / fillDragSweepPoints
+        return min(max(start - travelled * perPoint, fillGapRange.lowerBound), fillGapRange.upperBound)
+    }
+
+    /// Sets the in-progress fill's Gap Closing — the sideways drag's one setting — and re-fills from the
+    /// cached GPU session; the Gap Closing sliders mirror the drag live. Cheap to call on every
+    /// touch-move: identical quantized values schedule no work, and a burst coalesces.
+    func updateInteractiveFill(gapClosing: CGFloat) {
         guard fillGestureActive else { return }
-        let clampedGap = min(max(gapClosing, Self.fillGapRange.lowerBound), Self.fillGapRange.upperBound)
-        let clampedThreshold = min(max(threshold, Self.fillThresholdRange.lowerBound), Self.fillThresholdRange.upperBound)
-        if fillSettings.gapClosing != clampedGap { fillSettings.gapClosing = clampedGap }
-        if fillSettings.threshold != clampedThreshold { fillSettings.threshold = clampedThreshold }
-        // Clamped by the setter, and written to whichever mode's stored value the slider is showing.
-        fillEdgeOverlap = edgeOverlap
+        let clamped = min(max(gapClosing, Self.fillGapRange.lowerBound), Self.fillGapRange.upperBound)
+        if fillSettings.gapClosing != clamped { fillSettings.gapClosing = clamped }
         scheduleFillRender()
     }
 
-    /// Sets one fill setting from the Fill panel: updates the value, makes that setting the axis the
-    /// fill tool's sideways drag will adjust next time, and — if a fill is currently adjustable — re-runs
-    /// it live so the user sees the change without re-tapping. Called from the panel's slider bindings;
-    /// the interactive drag writes the `@Published` values directly instead, so it never re-selects here.
-    func setFillSetting(_ axis: FillAxis, _ value: CGFloat) {
-        if fillSettings.selectedAxis != axis { fillSettings.selectedAxis = axis }
-        switch axis {
-        case .gapClosing:
-            let v = min(max(value, Self.fillGapRange.lowerBound), Self.fillGapRange.upperBound)
-            if fillSettings.gapClosing != v { fillSettings.gapClosing = v }
-        case .threshold:
-            let v = min(max(value, Self.fillThresholdRange.lowerBound), Self.fillThresholdRange.upperBound)
-            if fillSettings.threshold != v { fillSettings.threshold = v }
-        case .edgeOverlap:
-            fillEdgeOverlap = value
-        }
+    // The Fill panel's and the left rail's sliders: each sets its value and — if a fill is still
+    // adjustable — re-runs it live, so the artist sees the change without re-tapping.
+
+    func setFillGapClosing(_ value: CGFloat) {
+        let v = min(max(value, Self.fillGapRange.lowerBound), Self.fillGapRange.upperBound)
+        if fillSettings.gapClosing != v { fillSettings.gapClosing = v }
+        if fillGestureActive { scheduleFillRender() }
+    }
+
+    func setFillThreshold(_ value: CGFloat) {
+        let v = min(max(value, Self.fillThresholdRange.lowerBound), Self.fillThresholdRange.upperBound)
+        if fillSettings.threshold != v { fillSettings.threshold = v }
+        if fillGestureActive { scheduleFillRender() }
+    }
+
+    /// Clamped by `fillEdgeOverlap`'s setter, and written to whichever fill type's value the slider
+    /// is showing.
+    func setFillEdgeOverlap(_ value: CGFloat) {
+        fillEdgeOverlap = value
         if fillGestureActive { scheduleFillRender() }
     }
 
