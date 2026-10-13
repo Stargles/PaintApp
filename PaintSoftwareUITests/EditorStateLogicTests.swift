@@ -151,6 +151,23 @@ final class EditorStateLogicTests: XCTestCase {
         XCTAssertEqual(reopenedB.fillSettings.gapClosing, FillSettings.defaultGapClosing)
     }
 
+    /// **The Select panel's and the Move bar's switches are not saved** — the owner's ruling for (176),
+    /// confirmed over (175)'s saving them. A scene saved with all four on reopens with all four off.
+    func testTheSelectAndMoveSwitchesAreNotSavedWithTheScene() throws {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.subtractsSelection = true
+        manager.allowsPaintingOutsideSelection = true
+        manager.keepsStrokeWidthOnMove = true
+        manager.preserveMovePrecision = true
+        let url = ProjectStore.createNewProjectURL(name: "Switches")
+        saveAndWait(manager, to: url)
+        let reopened = try XCTUnwrap(ProjectStore.load(from: url))
+        XCTAssertFalse(reopened.subtractsSelection)
+        XCTAssertFalse(reopened.allowsPaintingOutsideSelection)
+        XCTAssertFalse(reopened.keepsStrokeWidthOnMove)
+        XCTAssertFalse(reopened.preserveMovePrecision)
+    }
+
     /// `SceneTools()` is what a new scene starts with, and it has to be what a new `CanvasManager` holds,
     /// or a scene saved untouched would come back changed.
     func testTheRecordsDefaultsAreANewScenesOwn() {
