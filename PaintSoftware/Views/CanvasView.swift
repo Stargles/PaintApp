@@ -1318,6 +1318,12 @@ struct CanvasView: UIViewRepresentable {
                 // because a flip is over before anything could enumerate the cels; monotonic, so a
                 // test reads it either side of the thing it is timing. One atomic-ish load per pass.
                 + " rasterizes:\(VectorCanvas.totalRasterizations)"
+                // **What the colour picker has evaluated** (TODO (183)) — ticks of a drag, panel bodies
+                // and the Recent / palette sections, process-wide and monotonic like `rasterizes:`. The
+                // sections moving at all across a drag is the picker rebuilding what a tick must not.
+                + " pickerTicks:\(ColorPickerPasses.ticks)"
+                + " pickerPanel:\(ColorPickerPasses.panel)"
+                + " pickerSections:\(ColorPickerPasses.sections)"
                 + " shape:\(shapeState)"
                 + String(format: " xform:%.4f,%.4f,%.2f,%.2f", scale, rotation, dx, dy)
                 + " text:\(textState)"

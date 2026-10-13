@@ -5839,6 +5839,7 @@ rate under the finger is unchanged and what is gone is everything the frame cost
 
 ### 29.5 What is left
 
+- **The picker the edit is driven from cost more per tick than the edit did** — §31.
 - **The other slider-shaped edits write the document per tick too** — the layer panel's Opacity slider,
   the mask tuning and text panels' sliders. Each is a bake key and a re-minted pair per tick. The effect
   parameter sliders were the first of them held, with a whole-frame held picture of their own (§30, TODO
@@ -5916,3 +5917,128 @@ column still rendered every tick.
 - The onion skin off, the Opacity slider (TODO (179)'s commit 6, `-probeMode opacity` then), and a take — a
   slider recorded while the scene plays shows the held frame at each frame it is minted on.
 
+## 31. A colour picker's tick rebuilt the whole picker, and the Wheel's shading was 14,400 rectangles (2026-10-13)
+
+TODO (183), `recording-20261012-173827.jsonl` (the owner's iPad 9, build `95e5507`, canvas 2668×1644):
+Select → Fill → Edit → Colour, a drag on the picker's inner shape from 4.35 to 6.52 s. Its `mainThread` line
+for 4.01–6.02 s reads `mainBusy` **1,467.81 ms** (max 182 ms) over `n=220` turns, and names nothing but
+`sourcePhase`, `observerPhase` and `caCommit`: **no `bodyDrawing`, no `updateUIView`** — the editor was not
+asked for a pass. §29's `-probeMode recolour` had put the held edit's own tick at 79 ms over 34 ticks, so
+the 1.4 s was INFERRED to be the picker redrawing itself, which nothing timed. It was; and it was three
+things, not one.
+
+### 31.1 Where the main thread went — MEASURED
+
+**Method.** iPad (9th generation) simulator (iOS 26.5), landscape, **Release**, a new 2048×2048 document
+with the Select flow of the recording (red brush → Rectangle → loop → Fill → Edit → Colour swatch → picker).
+The drag is **one continuous synthesised touch** (`fingerStroke`, ten seconds, ~53 ticks a second — the
+rate the recording's drag delivered) circling inside the shape, so a count is of a real gesture and not of
+taps; the action recorder is on, as in the owner's recording. `/usr/bin/sample` at 1 ms on the app's
+main thread names the cost (**`xctrace record --attach` to a simulator process hung on this host, with
+and without `--device`**; `sample` is a sampler of the same kind). It inflates wall time, so every
+**ms/tick below is from an unsampled run** and the samples are for shares only. An XCUITest runner is
+attached, which makes SwiftUI build accessibility identities and costs ~8% of the samples (`ccessibility`
+frames) that the owner's iPad does not pay; it is in every column, before and after.
+
+| main thread, 4,886 samples, Select → Classic square, before | share |
+|---|---|
+| idle (`mach_msg2_trap`) | 44% |
+| SwiftUI view-graph update | **38%** — of it `CanvasContextMenu.body` 7% (`swift_getTypeByMangledName`, resolving type metadata, 9%), `onLongPressGesture` 4%, `ForEachChild` 4%, `PaletteSwatchGrid` 3% |
+| Core Animation commit | 16% |
+| the hex `UITextField` | 4% |
+| the held edit's own tick (`previewSelectionEdit`, `holdElementEdit`, `heldPictureMoved`) | **0.8%** |
+
+| main thread, 4,736 samples, Select → Wheel (the triangle), before | share |
+|---|---|
+| idle | 3% |
+| Core Animation commit | **69%** — of it RenderBox rendering the display list (`RB::RenderFrame` 33%, one `Fill::Color` primitive for each of the 14,400 rectangles) |
+| the `Canvas` closure (`HSLTriangle.body`, inside `CanvasDisplayList.updateValue`) | 15% |
+| SwiftUI view-graph update | 26% |
+
+1. **A tick rebuilt the whole panel.** `hue`/`saturation`/`brightness`/`alpha`/`hexText` were five `@State`s
+   on `ColorPickerPanel`, and a write to any `@State` re-evaluates the body of the view that owns it. The
+   body's own cost is nothing (`bodyColorPicker`, 0.1 ms) — what it *constructs* is the cost: the Recent
+   grid and the selected palette, thirty-odd swatches each carrying a `canvasContextMenu` (its own
+   `canvasPresentation`, anchor preference and long-press), then the hex field and the layout of all of it,
+   at 1.3–1.4 panel bodies a tick.
+2. **The Wheel's shading was re-issued whenever the triangle's body ran.** `HSLTriangle` drew a
+   120 × 120 grid of `context.fill` calls from a `Canvas` closure — every tick of a drag *on the triangle*,
+   though only the hue changes the shading. It is also the one that makes single turns long — 316 ms on this
+   host against 12 ms for the square — and the owner's longest turn was 182 ms (§31.3).
+3. **The brush's colour panel is rebuilt by its host on every tick** (`brushColor` is `@Published` on
+   `CanvasManager`), so (1) applied there too and, with it, a whole-editor pass a tick (§31.4).
+
+### 31.2 The fix
+
+`PickerColor` (`Models/PickerColor.swift`) is an `@Observable` class holding the one colour, and the panel
+holds it and **reads nothing from it**: the shapes, the swatch pair, the hex field and the opacity row each
+read what they draw in their own bodies, so a tick re-evaluates those and the rest of the picker stands
+still. Each shape is split into the part that draws the colour (marker, hue-tinted fill) and the part that
+does not (the ring's band, the gesture, the frame). The Recent grid and the palette are `Equatable`
+sections, so a host that rebuilds the panel every tick still does not rebuild thirty swatches. The Wheel's
+shading is a 128 × 128 bitmap (`ColorMath.triangleShadingPixels`: HSL's own corner blend, three
+multiply-adds a pixel) clipped by the true vector triangle and turned by the GPU — made once per tick of a
+drag on the ring and **never** for one on the triangle. Nothing is throttled: the seam the Select picker
+writes through is §29's held edit, unchanged, and it was never the cost.
+
+`ColorPickerPasses` counts what the picker evaluated, process-wide, and `canvas.host`'s label publishes it
+(`pickerTicks:`, `pickerPanel:`, `pickerSections:`, beside `rasterizes:`). `ColorPickerLiveUITests` bounds
+it from a new document: across ~270 ticks of a drag on Select's Colour the panel's body ran ≤ 3 times,
+the grids 0, the editor was raised ≤ 3 passes, and the fill ended as the colour the picker's swatch shows;
+on the Wheel and the brush's panel the grids are rebuilt 0 times. Mutation-tested: the panel reading the
+colour turns the Select test red (393 bodies across 268 ticks); the sections' `==` returning false turns the
+brush and Wheel tests red (534 and 704 grid rebuilds); a tick that never reaches the host turns all three red.
+
+### 31.3 Before and after — MEASURED
+
+**MEASURED, Release, iPad (9th generation) simulator, M1 Pro host.** Each cell is a range over the takes of
+that build (two to three: the first at 57–77% machine idle, the other two beside other sessions' UI runs at
+14–57% idle — the ratios are the same in all of them). *Before* is `939f9e0` (this item's first commit — the
+instrumentation, the parent's picker); *after* is this item. Each take is one ten-second continuous drag, of
+which the app can be handed at most ~573 ticks; the main-thread figure is the recorder's `mainBusy` over the
+two-second windows wholly inside the drag, per tick delivered. An idle picker open costs 10–20 ms a second.
+
+| the drag | main-thread ms per tick | ticks delivered of ~573 | panel bodies a tick | Recent + palette rebuilds a tick | editor passes a tick |
+|---|---|---|---|---|---|
+| **Select** → Classic, the square | **8.8–11.8 → 5.2–5.6** | 470–573 → 555–573 | 1.44 → 0 | 1.44 → 0 | 0 → 0 |
+| Select → Classic, the hue ring | 8.6–10.2 → 5.6–5.8 | 512–573 → 512–573 | 1.29 → 0 | 1.29 → 0 | 0 → 0 |
+| **Select** → Wheel, the triangle | **23.1–24.7 → 5.5–5.8** | 417–445 → 471–558 | 1.39 → 0 | 1.39 → 0 | 0 → 0 |
+| Select → Wheel, the hue ring | 23.5 → 5.6–5.7 | 432–440 → 557–573 | 1.27 → 0 | 1.27 → 0 | 0 → 0 |
+| **Brush** → Classic, the square | 12.8–15.5 → 11.9–12.9 | 561–573 → 564–573 | 1 → 1 | 1 → 0 | 1 → 1 |
+| Brush → Classic, the hue ring | 11.9–13.9 → 7.9–8.4 | 558–573 → 562–573 | 1 → 1 | 1 → 0 | 1 → 1 |
+| Brush → Wheel, the triangle | 27.6–31.1 → 12.1–13.7 | 347–379 → 538–558 | 1 → 1 | 1 → 0 | 1 → 1 |
+| Brush → Wheel, the hue ring | 29.4–30.4 → 12.3–13.1 | 346–367 → 570–571 | 1 → 1 | 1 → 0 | 1 → 1 |
+
+"After" Select's panel count is **one for the whole drag** (the first tick's `objectWillChange`, §29's
+`beginLiveEdit`), not one a tick. "Rebuilds" are of the Recent grid *and* the palette together. A Wheel drag
+used to be handed 60–78% of the ticks a finger makes, because the main thread could not take them; it is
+handed 82–100% now.
+
+**What it says.** Select's Colour costs ~5.5 ms a tick on every tab — **about a half of Classic's cost and a
+quarter of the Wheel's** — and no longer depends on which shape is under the finger. Which tab the owner was
+on is not in the recording. Their 1,468 ms in two seconds is ~730 ms a second: this host's *before* ×1.3 (§1) is
+610–690 ms a second for Classic at ~53 ticks a second and 1,240+ for the Wheel (30 ms a tick, which at the
+~25 ticks a second a main thread that busy is handed is ~750) — both fit. **The one number that tells them
+apart is the longest turn: 182 ms there, against 12 ms for Classic here (16 on the device) and 316 for the
+Wheel (410)** — INFERRED to be the Wheel. Both are fixed.
+
+### 31.4 What is left, and what this does not show
+
+- **The brush's colour panel is 8–14 ms a tick and the picker is no longer most of it.** What remains is the
+  editor's own pass — `passes:` moves once a tick (`DrawingView.body`, the toolbars, the timeline, the layer
+  rail: every view that observes `CanvasManager` re-evaluates, 54% of the samples are SwiftUI update, of
+  which `CanvasView.updateUIView` is 10%, `InlineNameFieldView.sizeThatFits` 2%). That is `brushColor` being
+  a `@Published` of the whole editor, not the picker, and it is the same shape as §24 and §29's per-tick
+  writes. **Not fixed here — it needs a ruling:** (a) leave it; (b) give the brush's colour a small publisher
+  of its own so only the toolbar swatches re-evaluate per tick, the canvas being told directly; (c) hold the
+  colour while the finger is down and write it at the lift, so the toolbar's swatch follows at the lift and
+  not live (the panel's own swatch still follows).
+- **Select's remaining 5–6 ms a tick is spread thin**: layout and Core Animation commit of the shapes and the
+  hex field (a `UITextField` re-measured a tick, ~10% of what is left), the held window's `IOSurface` present
+  (a synchronous XPC inside the commit, ~12%, §29's seam and the render server's side), the recorder's
+  `WindowEventTap` (2%), and the XCUITest accessibility the iPad does not have. No one item is over a fifth.
+- **The device.** Every figure here is the simulator's, on an M1 Pro: the iPad 9's A13 is ~1.3× it on main-thread
+  work (§1) and the owner's own drag is the check.
+- The panel's per-swatch `canvasContextMenu` (thirty presentations a palette) is still the most expensive
+  thing to *build* here; it is built once now. One menu per grid, keyed by the pressed swatch, is the cheaper
+  shape if the picker ever opens slowly.

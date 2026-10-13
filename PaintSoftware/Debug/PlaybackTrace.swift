@@ -159,6 +159,13 @@ final class PlaybackTrace: @unchecked Sendable {
         case bodyTimeline
         /// `LayerPanel.body`.
         case bodyLayerPanel
+        /// `ColorPickerPanel.body` — the picker's own SwiftUI passes. A tick of a drag does not run it
+        /// where the picker is held by a view that stands still (Select's Colour); the brush's panel is
+        /// rebuilt by the editor on every tick, and runs it once each.
+        case bodyColorPicker
+        /// The Wheel tab's shading bitmap, made: `ColorMath.triangleShadingPixels` and the image around
+        /// it, once per tick of a drag on the ring and never for one on the triangle.
+        case pickerShading
         /// `TopToolbar.body` and `SideToolbar.body`, together: they are one chrome and neither is
         /// separately actionable.
         case bodyToolbars

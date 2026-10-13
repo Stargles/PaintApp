@@ -122,6 +122,7 @@ PaintSoftware/
 │   ├── InterpolationRecipe.swift / MotionGroup.swift / GuideStroke.swift
 │   ├── SelectionModels.swift    # Select & Move tool operations
 │   ├── Palette.swift / ColorHistory.swift  # Custom color palettes; last colours used to paint
+│   ├── PickerColor.swift        # The colour picker's one colour (hue/saturation/brightness/alpha), observed per property
 │   └── ProjectManifest.swift    # On-disk project schema
 ├── Services/
 │   ├── ProjectStore.swift       # Save/load a project package

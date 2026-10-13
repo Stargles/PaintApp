@@ -131,12 +131,14 @@ passes — but it **did not reproduce the flicker on the shipped build either**:
 server did not show the swapped-out surface. The held frame's canvas-sized surface did (3 of 3 runs red
 without the wait, `EffectSliderLiveUITests`). The owner's iPad is the confirmation still owed. The
 1,468 ms of main-thread busy is not the held edit's tick (`-probeMode recolour` at 2668×1644 on an iPad 9
-simulator: 79 ms over 34 ticks) — INFERRED to be the colour picker's own redraw, which nothing times.
+simulator: 79 ms over 34 ticks): it was the colour picker's own re-evaluation — every tick rebuilt the whole
+panel, and the Wheel redrew 14,400 rectangles — fixed and measured in PERFORMANCE.md §31 (Select's Colour
+9–25 ms → 5.5 ms a tick).
 
 - [x] Cold-start XCUITest that samples the region mid-drag and fails on a flicker; root cause fixed in the seam.
 - [ ] The owner confirms on the iPad.
-- [ ] The colour picker's own redraw during a drag measured and, if it is the ~1.4 s, fixed (a separate
-      worker — not the held edit's code).
+- [x] The colour picker's own redraw during a drag measured and, if it is the ~1.4 s, fixed (a separate
+      worker — not the held edit's code). It was: PERFORMANCE.md §31.
 
 ## (186) The fill's sideways drag adjusts Gap Closing only, and right decreases it
 

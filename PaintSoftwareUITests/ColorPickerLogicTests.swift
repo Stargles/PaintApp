@@ -106,14 +106,6 @@ final class ColorPickerLogicTests: XCTestCase {
         XCTAssertEqual(whiteCorner.y, ColorMath.triangleWhiteVertex.y, accuracy: 0.0001)
     }
 
-    func testTriangleContainsItsOwnCentreAndVerticesButNotFarOutsidePoints() {
-        XCTAssertTrue(ColorMath.triangleContains(x: 0, y: 0), "The centroid area must read as inside")
-        XCTAssertTrue(ColorMath.triangleContains(x: ColorMath.trianglePureHueVertex.x,
-                                                  y: ColorMath.trianglePureHueVertex.y))
-        XCTAssertFalse(ColorMath.triangleContains(x: 0, y: -5), "Far outside the triangle must read as outside")
-        XCTAssertFalse(ColorMath.triangleContains(x: 5, y: 5))
-    }
-
     /// A drag that leaves the triangle entirely must still answer *some* valid, in-range
     /// saturation/lightness (the clamp-and-renormalize this function documents) rather than a
     /// negative or out-of-range value that would paint a marker nobody asked for.
@@ -183,6 +175,115 @@ final class ColorPickerLogicTests: XCTestCase {
             XCTAssertEqual(hsl.h, 0, "Grey \(grey) must not report a garbage hue")
             XCTAssertEqual(hsl.s, 0, "Grey \(grey) must not report spurious saturation")
         }
+    }
+
+    // MARK: - The triangle's shading, as pixels
+
+    /// The shading is a corner blend (`ColorMath.triangleShadingPixels`), and it must be *the same
+    /// colour* `hslToRGB` gives at the `(s, l)` the gesture reads at that point — inside the triangle
+    /// where the weights are all positive, and outside it where both take the clamp. Compared at the
+    /// pixel centres, where the maths is exact, for every pixel of a small image at several hues: a
+    /// blend with one channel swapped, a pure colour taken at the wrong lightness, or a clamp the
+    /// gesture does not share, goes red here.
+    func testTheTriangleShadingIsHSLsColourAtEveryPixelInsideAndOutside() {
+        let side = 24
+        for hue in [0.0, 0.1, 1.0 / 3.0, 0.5, 0.75, 0.95] {
+            let pixels = ColorMath.triangleShadingPixels(hue: hue, side: side)
+            XCTAssertEqual(pixels.count, side * side * 4, "an RGBA8 image of side \(side)")
+            for row in 0..<side {
+                for column in 0..<side {
+                    let x = (Double(column) + 0.5) / Double(side) * 2 - 1
+                    let y = (Double(row) + 0.5) / Double(side) * 2 - 1
+                    let sl = ColorMath.triangleSaturationLightness(x: x, y: y)
+                    let want = ColorMath.hslToRGB(h: hue, s: sl.s, l: sl.l)
+                    let offset = (row * side + column) * 4
+                    for (channel, expected) in [want.r, want.g, want.b].enumerated() {
+                        XCTAssertEqual(Double(pixels[offset + channel]) / 255, expected, accuracy: 1.5 / 255,
+                                       "hue \(hue), pixel (\(column), \(row)), channel \(channel)")
+                    }
+                    XCTAssertEqual(pixels[offset + 3], 255, "the shading is opaque; the vector clip is the edge")
+                }
+            }
+        }
+    }
+
+    /// The three corners of the triangle are the three colours it is named for — read off the image
+    /// itself, near each vertex, not off the maths that drew it.
+    func testTheTriangleShadingsCornersAreTheHueBlackAndWhite() {
+        let side = 200, hue = 0.58
+        let pixels = ColorMath.triangleShadingPixels(hue: hue, side: side)
+        func colour(at vertex: (x: Double, y: Double)) -> (r: Double, g: Double, b: Double) {
+            // Pulled 4% toward the centroid so the sample is inside the triangle, not on its edge.
+            let x = vertex.x * 0.96, y = vertex.y * 0.96
+            let column = Int((x + 1) / 2 * Double(side)), row = Int((y + 1) / 2 * Double(side))
+            let offset = (row * side + column) * 4
+            return (Double(pixels[offset]) / 255, Double(pixels[offset + 1]) / 255, Double(pixels[offset + 2]) / 255)
+        }
+        let pure = ColorMath.hslToRGB(h: hue, s: 1, l: 0.5)
+        let top = colour(at: ColorMath.trianglePureHueVertex)
+        XCTAssertEqual(top.r, pure.r, accuracy: 0.1); XCTAssertEqual(top.g, pure.g, accuracy: 0.1)
+        XCTAssertEqual(top.b, pure.b, accuracy: 0.1)
+        let white = colour(at: ColorMath.triangleWhiteVertex)
+        XCTAssertGreaterThan(min(white.r, white.g, white.b), 0.9, "the white corner is white")
+        let black = colour(at: ColorMath.triangleBlackVertex)
+        XCTAssertLessThan(max(black.r, black.g, black.b), 0.1, "the black corner is black")
+    }
+
+    // MARK: - PickerColor
+
+    /// A grey carries no hue (`rgbToHSB` says 0), and taking that at its word would throw the ring's
+    /// marker to red whenever the artist picked a grey or typed `808080`.
+    @MainActor
+    func testLoadingAnAchromaticColourKeepsTheHueTheRingAlreadyHad() {
+        let model = PickerColor()
+        model.load(Color(hex: "3366FF")!, supportsOpacity: true)
+        let blueHue = model.hue
+        XCTAssertGreaterThan(blueHue, 0.5, "PREMISE: the colour is a blue")
+        model.load(Color(hex: "808080")!, supportsOpacity: true)
+        XCTAssertEqual(model.hue, blueHue, accuracy: 1e-9, "a grey did not move the hue")
+        XCTAssertEqual(model.saturation, 0, accuracy: 1e-6)
+        XCTAssertEqual(model.hexString, "808080")
+    }
+
+    /// A host with no opacity row (a canvas background, a gradient stop) never receives an alpha: an
+    /// inbound swatch saved with one arrives opaque.
+    @MainActor
+    func testAHostWithoutOpacityLoadsEveryColourOpaque() {
+        let model = PickerColor()
+        model.load(Color(hex: "FF000080")!, supportsOpacity: false)
+        XCTAssertEqual(model.alpha, 1, "no opacity row: alpha is forced to 1")
+        XCTAssertEqual(model.hexString, "FF0000")
+        model.load(Color(hex: "FF000080")!, supportsOpacity: true)
+        XCTAssertEqual(model.alpha, 128.0 / 255, accuracy: 0.01, "with one, it is kept")
+    }
+
+    /// The Triangle tab writes saturation and lightness at the stored hue and takes only the resulting
+    /// saturation and brightness: the hue is untouched, and the pair reads back as it was written —
+    /// including at an achromatic point, where re-deriving the hue from the round trip would lose it.
+    @MainActor
+    func testTheTrianglesWriteLeavesTheHueAndReadsBackAsWritten() {
+        let model = PickerColor()
+        model.hue = 0.31
+        model.setHSL(saturation: 0.8, lightness: 0.4)
+        XCTAssertEqual(model.hue, 0.31, accuracy: 1e-12, "the triangle never moves the hue")
+        XCTAssertEqual(model.hsl.s, 0.8, accuracy: 1e-9)
+        XCTAssertEqual(model.hsl.l, 0.4, accuracy: 1e-9)
+        model.setHSL(saturation: 0, lightness: 0.5)
+        XCTAssertEqual(model.hue, 0.31, accuracy: 1e-12, "a grey point keeps the hue the ring shows")
+    }
+
+    /// The model's colour is the colour the host receives: loaded from a hex and read back as the same
+    /// hex, with the marker's position (saturation, brightness) where the hex says.
+    @MainActor
+    func testTheModelsColourIsTheColourItWasLoadedWith() {
+        let model = PickerColor()
+        for hex in ["FF0000", "00FF00", "0000FF", "FFFF00", "123456", "FEDCBA", "000000", "FFFFFF"] {
+            model.load(Color(hex: hex)!, supportsOpacity: true)
+            XCTAssertEqual(model.color.hexString, hex)
+            XCTAssertEqual(model.opaqueColor.hexString, hex, "an opaque colour is its own opaque colour")
+        }
+        model.alpha = 0.5
+        XCTAssertEqual(model.opaqueColor.hexString, "FFFFFF", "the opaque colour ignores alpha")
     }
 
     // MARK: - ColorHistoryStore

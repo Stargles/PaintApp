@@ -15,7 +15,9 @@ struct PaletteSwatchGrid: View {
     @ObservedObject var paletteStore: PaletteStore
     let canvasManager: CanvasManager
     let palette: Palette
-    let currentColor: Color
+    /// The colour an empty cell takes, asked for when the cell is pressed — not held, so a grid does not
+    /// change with every tick of a picker drag.
+    let colorToAdd: () -> Color
     let idPrefix: String
     var onPick: (Color) -> Void = { _ in }
 
@@ -56,7 +58,7 @@ struct PaletteSwatchGrid: View {
             // interaction SwiftUI doesn't resolve reliably, and there is already one fully
             // discoverable way to add without hunting for the exact cell to long-press.
             Button {
-                paletteStore.addColor(currentColor, to: palette)
+                paletteStore.addColor(colorToAdd(), to: palette)
             } label: {
                 emptyCellLabel
             }
@@ -66,7 +68,7 @@ struct PaletteSwatchGrid: View {
             ForEach(1..<emptyCount, id: \.self) { offset in
                 emptyCellLabel
                     .contentShape(Rectangle())
-                    .onLongPressGesture { paletteStore.addColor(currentColor, to: palette) }
+                    .onLongPressGesture { paletteStore.addColor(colorToAdd(), to: palette) }
                     .accessibilityIdentifier("\(idPrefix).emptySwatch.\(offset)")
             }
         }
@@ -95,7 +97,7 @@ struct PaletteSwatchGrid: View {
 struct PalettesLibraryView: View {
     @ObservedObject var paletteStore: PaletteStore
     let canvasManager: CanvasManager
-    let currentColor: Color
+    let colorToAdd: () -> Color
     var onPick: (Color) -> Void = { _ in }
 
     /// The palette whose name is a field, or nil.
@@ -207,7 +209,7 @@ struct PalettesLibraryView: View {
             }
 
             PaletteSwatchGrid(paletteStore: paletteStore, canvasManager: canvasManager, palette: palette,
-                              currentColor: currentColor, idPrefix: idPrefix, onPick: onPick)
+                              colorToAdd: colorToAdd, idPrefix: idPrefix, onPick: onPick)
         }
     }
 }

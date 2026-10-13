@@ -202,6 +202,7 @@
 		53BF15DB3E42C6DF9733FC6D /* PaintSoftware/Models/CanvasTouchOwner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A02A59C9FBBA808D9B9A5A9 /* PaintSoftware/Models/CanvasTouchOwner.swift */; };
 		1AF01A67236BA1C7ECC0BBAE /* PaintSoftware/Models/ActivePanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C06C5B61B4249FBB9276708 /* PaintSoftware/Models/ActivePanel.swift */; };
 		679A5CC0088D72E9FB510E1B /* PaintSoftware/Models/ColorPickerType.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCF56F760E4B8EA143BF65ED /* PaintSoftware/Models/ColorPickerType.swift */; };
+		3926B072CCDE140A2255AA73 /* PaintSoftware/Models/PickerColor.swift in Sources */ = {isa = PBXBuildFile; fileRef = C98FB0C26D180177971FA2A7 /* PaintSoftware/Models/PickerColor.swift */; };
 		F9E5BC5EB116BE33DAFE44A1 /* CanvasTouchOwnerLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0E0398AFE293479E4E56FFC /* CanvasTouchOwnerLogicTests.swift */; };
 		9E0C9B47A45D91C37016E4EC /* SelectionPersistenceLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3910EAE6C2F876E57DF8D40 /* SelectionPersistenceLogicTests.swift */; };
 		1CE28FAC5767D1E837AE0778 /* CanvasGeometryLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE8F5545244553CBE8D16114 /* CanvasGeometryLogicTests.swift */; };
@@ -468,6 +469,7 @@
 		4B194DBDD54073D1922384F7 /* SelectionEditUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BD1D218FA46EBEDC7AAFB3E /* SelectionEditUITests.swift */; };
 		C7FF4D4739368900EB718A95 /* SelectionEditLiveUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A766B60D58A3C74B4B60AE58 /* SelectionEditLiveUITests.swift */; };
 		D51C5FA65101BBC0D45861B1 /* SelectionFillRecolourUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6E043673EE0A55F14BD4E3D /* SelectionFillRecolourUITests.swift */; };
+		B2024B6A7F1A113708262026 /* ColorPickerLiveUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF5B007B4426CCEFB61EDFF7 /* ColorPickerLiveUITests.swift */; };
 		ABCAB1B09A3153447FFCFC0F /* SelectionEditBench.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90327EB6EEDE41A32D00FC18 /* SelectionEditBench.swift */; };
 		1A5B798603866CFE1387C236 /* SelectionEditLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88D870A59CE91053BFB646A3 /* SelectionEditLogicTests.swift */; };
 		61DC990EBAE696695C70DCD9 /* LiveElementEditLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34A98B16DB1D00C1065937CF /* LiveElementEditLogicTests.swift */; };
@@ -823,6 +825,7 @@
 		1A02A59C9FBBA808D9B9A5A9 /* PaintSoftware/Models/CanvasTouchOwner.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/CanvasTouchOwner.swift; sourceTree = "<group>"; };
 		9C06C5B61B4249FBB9276708 /* PaintSoftware/Models/ActivePanel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/ActivePanel.swift; sourceTree = "<group>"; };
 		CCF56F760E4B8EA143BF65ED /* PaintSoftware/Models/ColorPickerType.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/ColorPickerType.swift; sourceTree = "<group>"; };
+		C98FB0C26D180177971FA2A7 /* PaintSoftware/Models/PickerColor.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/PickerColor.swift; sourceTree = "<group>"; };
 		A0E0398AFE293479E4E56FFC /* CanvasTouchOwnerLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CanvasTouchOwnerLogicTests.swift; sourceTree = "<group>"; };
 		E3910EAE6C2F876E57DF8D40 /* SelectionPersistenceLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SelectionPersistenceLogicTests.swift; sourceTree = "<group>"; };
 		EE8F5545244553CBE8D16114 /* CanvasGeometryLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CanvasGeometryLogicTests.swift; sourceTree = "<group>"; };
@@ -1089,6 +1092,7 @@
 		3BD1D218FA46EBEDC7AAFB3E /* SelectionEditUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SelectionEditUITests.swift; sourceTree = "<group>"; };
 		A766B60D58A3C74B4B60AE58 /* SelectionEditLiveUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "SelectionEditLiveUITests.swift"; sourceTree = "<group>"; };
 		E6E043673EE0A55F14BD4E3D /* SelectionFillRecolourUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "SelectionFillRecolourUITests.swift"; sourceTree = "<group>"; };
+		AF5B007B4426CCEFB61EDFF7 /* ColorPickerLiveUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "ColorPickerLiveUITests.swift"; sourceTree = "<group>"; };
 		90327EB6EEDE41A32D00FC18 /* SelectionEditBench.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SelectionEditBench.swift; sourceTree = "<group>"; };
 		88D870A59CE91053BFB646A3 /* SelectionEditLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SelectionEditLogicTests.swift; sourceTree = "<group>"; };
 		34A98B16DB1D00C1065937CF /* LiveElementEditLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "LiveElementEditLogicTests.swift"; sourceTree = "<group>"; };
@@ -1328,6 +1332,7 @@
 				3BD1D218FA46EBEDC7AAFB3E /* SelectionEditUITests.swift */,
 				A766B60D58A3C74B4B60AE58 /* SelectionEditLiveUITests.swift */,
 				E6E043673EE0A55F14BD4E3D /* SelectionFillRecolourUITests.swift */,
+				AF5B007B4426CCEFB61EDFF7 /* ColorPickerLiveUITests.swift */,
 				90327EB6EEDE41A32D00FC18 /* SelectionEditBench.swift */,
 				88D870A59CE91053BFB646A3 /* SelectionEditLogicTests.swift */,
 				34A98B16DB1D00C1065937CF /* LiveElementEditLogicTests.swift */,
@@ -1816,6 +1821,7 @@
 				1A02A59C9FBBA808D9B9A5A9 /* PaintSoftware/Models/CanvasTouchOwner.swift */,
 				9C06C5B61B4249FBB9276708 /* PaintSoftware/Models/ActivePanel.swift */,
 				CCF56F760E4B8EA143BF65ED /* PaintSoftware/Models/ColorPickerType.swift */,
+				C98FB0C26D180177971FA2A7 /* PaintSoftware/Models/PickerColor.swift */,
 				DEC0DE000000000000000032 /* PaintSoftware/Models/LayerFolder.swift */,
 				DEC0DE000000000000000034 /* PaintSoftware/Models/ViewPreset.swift */,
 				DEC0DE000000000000000036 /* PaintSoftware/Models/LayerStackRow.swift */,
@@ -2101,6 +2107,7 @@
 				4B194DBDD54073D1922384F7 /* SelectionEditUITests.swift in Sources */,
 				C7FF4D4739368900EB718A95 /* SelectionEditLiveUITests.swift in Sources */,
 				D51C5FA65101BBC0D45861B1 /* SelectionFillRecolourUITests.swift in Sources */,
+				B2024B6A7F1A113708262026 /* ColorPickerLiveUITests.swift in Sources */,
 				ABCAB1B09A3153447FFCFC0F /* SelectionEditBench.swift in Sources */,
 				1A5B798603866CFE1387C236 /* SelectionEditLogicTests.swift in Sources */,
 				61DC990EBAE696695C70DCD9 /* LiveElementEditLogicTests.swift in Sources */,
@@ -2273,6 +2280,7 @@
 				53BF15DB3E42C6DF9733FC6D /* PaintSoftware/Models/CanvasTouchOwner.swift in Sources */,
 				1AF01A67236BA1C7ECC0BBAE /* PaintSoftware/Models/ActivePanel.swift in Sources */,
 				679A5CC0088D72E9FB510E1B /* PaintSoftware/Models/ColorPickerType.swift in Sources */,
+				3926B072CCDE140A2255AA73 /* PaintSoftware/Models/PickerColor.swift in Sources */,
 				F9E5BC5EB116BE33DAFE44A1 /* CanvasTouchOwnerLogicTests.swift in Sources */,
 				9E0C9B47A45D91C37016E4EC /* SelectionPersistenceLogicTests.swift in Sources */,
 				1CE28FAC5767D1E837AE0778 /* CanvasGeometryLogicTests.swift in Sources */,

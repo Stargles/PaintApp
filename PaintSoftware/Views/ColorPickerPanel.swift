@@ -20,8 +20,8 @@ import SwiftUI
 ///   is just under the panel's own width, `ringThickness` is close to the reference's ~10-12% of the
 ///   radius rather than the old quarter of it.
 /// - **The triangle's shading is clipped by its own vector edge, not by a coarse grid's whole cells**
-///   — see `HSLTriangle.trianglePath(in:)` for why that, not the grid's resolution alone, is what was
-///   reading as "very pixelated".
+///   — see `TriangleShading` for why that, not the shading's resolution, is what read as "very
+///   pixelated".
 /// - **The triangle is rotated a further 90° clockwise** — `ColorMath.triangleRotation` — so its
 ///   full-hue vertex points at the ring's own red at hue 0, matching the reference, rather than
 ///   sitting at the top of its bounding box.
@@ -35,14 +35,22 @@ import SwiftUI
 ///   everything compact."*
 ///
 /// ## One shared colour model, not four
-/// `hue`/`saturation`/`brightness`/`alpha` (HSB) is the *only* stored colour. Square reads and writes
-/// it directly; the Triangle tab converts through `ColorMath.hslToRGB`/`rgbToHSL` using this same
-/// `hue` (never storing a second saturation/lightness pair, and never re-deriving `hue` from the
-/// round trip — see `applyTriangleSL`, the same achromatic-hue guard `applyHSBA` already needed).
-/// `previousColor` (this file), `ColorHistoryStore.shared` and `PaletteStore.shared` are the other
-/// three things (73) named as shared rather than per-tab, and every type tab still shows all three
-/// (`header`, `typeTabBody`) — one previous swatch, one history grid, one palette grid, never a
-/// second copy.
+/// `PickerColor` — `hue`/`saturation`/`brightness`/`alpha` (HSB) — is the *only* stored colour. Square
+/// reads and writes it directly; the Triangle tab converts through `ColorMath.hslToRGB`/`rgbToHSL` using
+/// this same `hue` (`PickerColor.hsl`, `setHSL` — never a second saturation/lightness pair, and never
+/// re-deriving `hue` from the round trip). `previousColor` (this file), `ColorHistoryStore.shared` and
+/// `PaletteStore.shared` are the other three things (73) named as shared rather than per-tab, and every
+/// type tab still shows all three (`header`, `typeTabBody`) — one previous swatch, one history grid, one
+/// palette grid, never a second copy.
+///
+/// ## A tick of a drag re-evaluates the shape under the finger and nothing else
+/// The panel holds `model` and **reads nothing from it**; the shapes, the swatch pair, the hex field and
+/// the opacity row each read what they draw (`PickerColor`'s header). The Recent grid and the palette
+/// are `Equatable` sections (`RecentColours`, `PaletteColours`), so a host that rebuilds the panel on
+/// every tick — the brush's colour is `@Published` on `CanvasManager` — still does not rebuild their
+/// thirty swatches, each with its own context-menu presentation and long-press. What a tick costs is
+/// PERFORMANCE.md §31's; `ColorPickerPasses` counts what was evaluated, for `ColorPickerLiveUITests` to
+/// bound.
 ///
 /// ## Which type it opens on
 /// **The one the artist last chose, in every panel** — `ColorPickerType.remembered`, written when a tab
@@ -63,7 +71,7 @@ struct ColorPickerPanel: View {
     var eyedropperMode: Binding<Eyedropper.Mode>? = nil
 
     /// Whether the alpha channel is the artist's to set — false hides the opacity row *and* forces
-    /// every inbound colour opaque. See `applyHSBA`.
+    /// every inbound colour opaque. See `PickerColor.load`.
     var supportsOpacity: Bool = true
 
     /// For the swatch grids' Delete menu, which registers as a presentation like any other
@@ -99,12 +107,9 @@ struct ColorPickerPanel: View {
     /// less than this and the sections scroll, as they always did.
     static let dropdownHeight: CGFloat = 700
 
-    @State private var hue: Double = 0
-    @State private var saturation: Double = 0
-    @State private var brightness: Double = 0
-    @State private var alpha: Double = 1
-    @State private var hexText: String = "000000"
-    @FocusState private var hexFieldFocused: Bool
+    /// The one colour, held by reference so that **this view reads nothing from it** — a drag writes
+    /// the model and re-evaluates the views that draw it (`PickerColor`'s header), not this body.
+    @State private var model = PickerColor()
 
     /// The colour this panel opened with, for the current/previous swap (item 2). Set once, in
     /// `onAppear` — not continuously — so it stays a stable A/B point for the whole session rather
@@ -129,23 +134,15 @@ struct ColorPickerPanel: View {
     /// The opacity bar's fixed width — the panel's content width once `opacityRow`'s own
     /// horizontal padding (16pt a side, `.padding(.horizontal)`'s default) is taken out.
     private static var opacityBarWidth: CGFloat { popoverSize.width - 32 }
-    /// What the header leaves the hex field: a `#` and six digits, between the swatches and the eyedropper's
-    /// mode switch.
-    private static let hexRowWidth: CGFloat = 96
 
-    private var currentColor: Color {
-        Color.fromHSBA(h: hue, s: saturation, b: brightness, a: alpha)
-    }
-
-    /// The Triangle tab's saturation/lightness, derived from the same `hue`/`saturation`/
-    /// `brightness` every other tab shares — never stored on its own. See the type's doc comment.
-    private var hslComponents: (s: Double, l: Double) {
-        let rgb = ColorMath.hsbToRGB(h: hue, s: saturation, v: brightness)
-        let hsl = ColorMath.rgbToHSL(r: rgb.r, g: rgb.g, b: rgb.b)
-        return (hsl.s, hsl.l)
-    }
-
+    /// Timed, so that "what a SwiftUI pass over the picker costs" is a row of a `PlaybackTrace` report
+    /// rather than part of its unattributed remainder — see `PlaybackTrace.Phase.bodyColorPicker`.
     var body: some View {
+        ColorPickerPasses.panel += 1
+        return PlaybackTrace.span(.bodyColorPicker) { bodyContent }
+    }
+
+    @ViewBuilder private var bodyContent: some View {
         VStack(spacing: 0) {
             header
 
@@ -164,18 +161,16 @@ struct ColorPickerPanel: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color.black.opacity(0.9))
         .onAppear {
-            applyHSBA(color.hsbaComponents)
-            hexText = currentColor.hexString
+            model.load(color, supportsOpacity: supportsOpacity)
             previousColor = color
         }
         // Follows the binding when something *else* moves it — the eyedropper picking off the
-        // canvas while this panel is open is the case this exists for. The guard is against
-        // `currentColor`, not a flag, and exact rather than approximate: `commitColor` assigns
-        // `currentColor` itself, so a write this panel caused compares equal and returns here.
+        // canvas while this panel is open is the case this exists for. The guard is against the
+        // model's colour, not a flag, and exact rather than approximate: `commitColor` assigns the
+        // model's colour itself, so a write this panel caused compares equal and returns here.
         .onChange(of: color) { _, newValue in
-            guard newValue != currentColor else { return }
-            applyHSBA(newValue.hsbaComponents)
-            if !hexFieldFocused { hexText = currentColor.hexString }
+            guard newValue != model.color else { return }
+            model.load(newValue, supportsOpacity: supportsOpacity)
         }
     }
 
@@ -219,9 +214,8 @@ struct ColorPickerPanel: View {
     private var triangleTab: some View {
         typeTabBody {
             shapeArea {
-                HueRing(hue: $hue, diameter: Self.ringDiameter, thickness: Self.ringThickness, onChanged: commitColor)
-                HSLTriangle(saturation: hslComponents.s, lightness: hslComponents.l, hue: hue,
-                           diameter: Self.innerDiameter, onChanged: applyTriangleSL)
+                HueRing(model: model, diameter: Self.ringDiameter, thickness: Self.ringThickness, onChanged: commitColor)
+                HSLTriangle(model: model, diameter: Self.innerDiameter, onChanged: commitColor)
             }
             opacityRow
         }
@@ -230,9 +224,8 @@ struct ColorPickerPanel: View {
     private var squareTab: some View {
         typeTabBody {
             shapeArea {
-                HueRing(hue: $hue, diameter: Self.ringDiameter, thickness: Self.ringThickness, onChanged: commitColor)
-                SaturationBrightnessSquare(saturation: $saturation, brightness: $brightness, hue: hue,
-                                           size: Self.squareSide, onChanged: commitColor)
+                HueRing(model: model, diameter: Self.ringDiameter, thickness: Self.ringThickness, onChanged: commitColor)
+                SaturationBrightnessSquare(model: model, size: Self.squareSide, onChanged: commitColor)
             }
             opacityRow
         }
@@ -267,8 +260,13 @@ struct ColorPickerPanel: View {
             controls()
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
-                    historySection
-                    paletteSection
+                    RecentColours(colors: historyStore.colors, onPick: selectSwatch,
+                                  onClear: { historyStore.clear() })
+                        .equatable()
+                    PaletteColours(palette: paletteStore.selectedPalette, paletteStore: paletteStore,
+                                   canvasManager: canvasManager, colorToAdd: { model.color },
+                                   onPick: selectSwatch)
+                        .equatable()
                 }
                 .padding(.horizontal)
                 .padding(.bottom, 8)
@@ -282,24 +280,9 @@ struct ColorPickerPanel: View {
 
     private var valueTab: some View {
         typeTabBody {
-            VStack(alignment: .leading, spacing: 8) {
-                labeledSlider("Hue", value: $hue, id: "colorPanel.value.hueSlider")
-                labeledSlider("Saturation", value: $saturation, id: "colorPanel.value.saturationSlider")
-                labeledSlider("Brightness", value: $brightness, id: "colorPanel.value.brightnessSlider")
-            }
-            .padding(.horizontal)
+            ValueSliders(model: model, onChanged: commitColor)
+                .padding(.horizontal)
             opacityRow
-        }
-    }
-
-    private func labeledSlider(_ title: String, value: Binding<Double>, id: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title)
-                .font(.caption)
-                .foregroundColor(.white.opacity(0.7))
-            Slider(value: value, in: 0...1)
-                .accessibilityIdentifier(id)
-                .onChange(of: value.wrappedValue) { _, _ in commitColor() }
         }
     }
 
@@ -315,32 +298,11 @@ struct ColorPickerPanel: View {
     private var opacityRow: some View {
         if supportsOpacity {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Opacity: \(Int(alpha * 100))%")
-                    .font(.caption)
-                    .foregroundColor(.white)
-                OpacityBar(alpha: $alpha, color: Color.fromHSBA(h: hue, s: saturation, b: brightness, a: 1),
-                          width: Self.opacityBarWidth, onChanged: commitColor)
+                OpacityReadout(model: model)
+                OpacityBar(model: model, width: Self.opacityBarWidth, onChanged: commitColor)
             }
             .padding(.horizontal)
         }
-    }
-
-    private var hexRow: some View {
-        HStack(spacing: 2) {
-            Text("#")
-                .foregroundColor(.gray)
-            TextField("Hex", text: $hexText)
-                .foregroundColor(.white)
-                .autocorrectionDisabled(true)
-                .textInputAutocapitalization(.characters)
-                .focused($hexFieldFocused)
-                .accessibilityIdentifier("colorPanel.hexField")
-                .onSubmit { applyHexText() }
-                .onChange(of: hexFieldFocused) { _, focused in
-                    if !focused { applyHexText() }
-                }
-        }
-        .frame(width: Self.hexRowWidth)
     }
 
     // MARK: - Header: current/previous (TODO (106) — the panel's own top-left corner)
@@ -358,39 +320,14 @@ struct ColorPickerPanel: View {
     /// generation in landscape the keyboard's top is at 457 pt of 810).
     private var header: some View {
         HStack(spacing: 8) {
-            swatchPair
-            hexRow
+            SwatchPair(model: model, previous: previousColor, onSwap: swapWithPrevious)
+            HexField(model: model, onApply: applyHexText)
             Spacer(minLength: 0)
         }
         .padding(.leading, 10)
         .padding(.top, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .overlay(alignment: .topTrailing) { eyedropperModeSwitch }
-    }
-
-    private var swatchPair: some View {
-        ZStack(alignment: .topLeading) {
-            Button {
-                swapWithPrevious()
-            } label: {
-                Circle()
-                    .fill(previousColor)
-                    .overlay(Circle().stroke(Color.white.opacity(0.4), lineWidth: 1))
-            }
-            .buttonStyle(.plain)
-            .frame(width: 26, height: 26)
-            .offset(x: 12, y: 12)
-            .accessibilityIdentifier("colorPanel.previousSwatch")
-            .accessibilityValue(previousColor.hexString)
-
-            Circle()
-                .fill(currentColor)
-                .overlay(Circle().stroke(Color.white.opacity(0.6), lineWidth: 1.5))
-                .frame(width: 26, height: 26)
-                .accessibilityIdentifier("colorPanel.currentSwatch")
-                .accessibilityValue(currentColor.hexString)
-        }
-        .frame(width: 40, height: 40, alignment: .topLeading)
     }
 
     // MARK: - Header: the eyedropper's mode (TODO (119) — the panel's own top-right corner)
@@ -431,131 +368,250 @@ struct ColorPickerPanel: View {
         }
     }
 
-    // MARK: - Recent + selected palette (every type tab)
+    // MARK: - Palettes tab (item 3)
 
-    private var historySection: some View {
+    private var palettesTab: some View {
+        PalettesLibraryView(paletteStore: paletteStore, canvasManager: canvasManager,
+                            colorToAdd: { model.color }, onPick: selectSwatch)
+    }
+
+    // MARK: - Writes
+
+    /// Loads a colour from history or a palette swatch. Goes through `PickerColor.load` rather than
+    /// assigning it straight through, for `applyHexText`'s reason: a swatch saved with alpha must
+    /// arrive opaque in a panel with no opacity row.
+    private func selectSwatch(_ swatch: Color) {
+        model.load(swatch, supportsOpacity: supportsOpacity)
+        color = model.color
+    }
+
+    /// Applies the hex field's text when it parses; on text that does not, nothing moves and the field
+    /// puts the model's own spelling back (`HexField.apply`) instead of leaving it showing something
+    /// that was never applied.
+    private func applyHexText(_ text: String) {
+        guard let parsed = Color(hex: text) else { return }
+        model.load(parsed, supportsOpacity: supportsOpacity)
+        color = model.color
+    }
+
+    /// Swaps `color` and `previousColor` — the "tap previous to swap back" gesture item 2 asks for,
+    /// implemented as a real swap (not a one-shot revert) so tapping it again swaps right back.
+    private func swapWithPrevious() {
+        let old = model.color
+        model.load(previousColor, supportsOpacity: supportsOpacity)
+        color = model.color
+        previousColor = old
+    }
+
+    /// One tick of a drag: pushes the model's colour to the bound one. The hex field follows the model
+    /// by itself (`HexField`).
+    private func commitColor() {
+        ColorPickerPasses.ticks += 1
+        color = model.color
+    }
+}
+
+// MARK: - What reads the colour
+
+/// The two swatches at the header's corner: the colour the panel opened with (tap to swap back) and
+/// the live one over it.
+private struct SwatchPair: View {
+    let model: PickerColor
+    let previous: Color
+    let onSwap: () -> Void
+
+    var body: some View {
+        let current = model.color
+        ZStack(alignment: .topLeading) {
+            Button {
+                onSwap()
+            } label: {
+                Circle()
+                    .fill(previous)
+                    .overlay(Circle().stroke(Color.white.opacity(0.4), lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .frame(width: 26, height: 26)
+            .offset(x: 12, y: 12)
+            .accessibilityIdentifier("colorPanel.previousSwatch")
+            .accessibilityValue(previous.hexString)
+
+            Circle()
+                .fill(current)
+                .overlay(Circle().stroke(Color.white.opacity(0.6), lineWidth: 1.5))
+                .frame(width: 26, height: 26)
+                .accessibilityIdentifier("colorPanel.currentSwatch")
+                .accessibilityValue(current.hexString)
+        }
+        .frame(width: 40, height: 40, alignment: .topLeading)
+    }
+}
+
+/// The hex field: `#` and six digits, between the swatches and the eyedropper's mode switch. It follows
+/// the model unless the artist is typing in it, and hands what they typed to `onApply` when they finish.
+private struct HexField: View {
+    let model: PickerColor
+    let onApply: (String) -> Void
+
+    @State private var text = ""
+    @FocusState private var focused: Bool
+
+    /// What the header leaves the hex field.
+    private static let width: CGFloat = 96
+
+    var body: some View {
+        HStack(spacing: 2) {
+            Text("#")
+                .foregroundColor(.gray)
+            TextField("Hex", text: $text)
+                .foregroundColor(.white)
+                .autocorrectionDisabled(true)
+                .textInputAutocapitalization(.characters)
+                .focused($focused)
+                .accessibilityIdentifier("colorPanel.hexField")
+                .onSubmit { apply() }
+                .onChange(of: focused) { _, isFocused in
+                    if !isFocused { apply() }
+                }
+        }
+        .frame(width: Self.width)
+        .onAppear { text = model.hexString }
+        .onChange(of: model.hexString) { _, hex in
+            if !focused { text = hex }
+        }
+    }
+
+    private func apply() {
+        onApply(text)
+        text = model.hexString
+    }
+}
+
+/// `Opacity: 63%`, over the bar.
+private struct OpacityReadout: View {
+    let model: PickerColor
+
+    var body: some View {
+        Text("Opacity: \(Int(model.alpha * 100))%")
+            .font(.caption)
+            .foregroundColor(.white)
+    }
+}
+
+/// The Value tab's three sliders. `commitColor` runs on every change, the way each shape's drag does.
+private struct ValueSliders: View {
+    @Bindable var model: PickerColor
+    let onChanged: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            labeledSlider("Hue", value: $model.hue, id: "colorPanel.value.hueSlider")
+            labeledSlider("Saturation", value: $model.saturation, id: "colorPanel.value.saturationSlider")
+            labeledSlider("Brightness", value: $model.brightness, id: "colorPanel.value.brightnessSlider")
+        }
+    }
+
+    private func labeledSlider(_ title: String, value: Binding<Double>, id: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.caption)
+                .foregroundColor(.white.opacity(0.7))
+            Slider(value: value, in: 0...1)
+                .accessibilityIdentifier(id)
+                .onChange(of: value.wrappedValue) { _, _ in onChanged() }
+        }
+    }
+}
+
+// MARK: - What a tick must not rebuild
+
+/// What the picker has evaluated, process-wide and monotonic — read by `CanvasView.publishCanvasState`
+/// onto `canvas.host`'s label (`pickerTicks:`, `pickerPanel:`, `pickerSections:`) so a test reads it
+/// either side of a drag, as it reads `rasterizes:`. A tick that rebuilds the Recent grid and the
+/// palette is a tick that moves `sections` by two.
+enum ColorPickerPasses {
+    /// Ticks of a drag (`ColorPickerPanel.commitColor`).
+    static var ticks = 0
+    /// `ColorPickerPanel.body` evaluations.
+    static var panel = 0
+    /// `RecentColours` and `PaletteColours` body evaluations — the sections a tick must not rebuild.
+    static var sections = 0
+}
+
+/// The Recent grid: a grid on the palette's own columns, not a strip that scrolls sideways — the twenty
+/// colours the history holds are two rows of ten, all in view, and each swatch is the size of the
+/// palette's below it.
+///
+/// **`Equatable` by what it shows.** `onPick` and `onClear` are not compared: they write through
+/// storage that does not move (the colour binding's location, the panel's `@State` boxes), so a copy
+/// captured earlier writes exactly where a fresh one would. What decides whether a host that rebuilds
+/// the panel on every tick of a drag (the brush's) rebuilds thirty swatches with it is therefore this
+/// `==` — a contract — and not how SwiftUI happens to diff a struct that holds closures.
+private struct RecentColours: View, Equatable {
+    let colors: [PaletteColor]
+    let onPick: (Color) -> Void
+    let onClear: () -> Void
+
+    static func == (lhs: RecentColours, rhs: RecentColours) -> Bool { lhs.colors == rhs.colors }
+
+    var body: some View {
+        let _ = ColorPickerPasses.sections += 1
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text("Recent")
                     .font(.subheadline.weight(.semibold))
                     .foregroundColor(.white)
                 Spacer()
-                if !historyStore.colors.isEmpty {
-                    Button("Clear") { historyStore.clear() }
+                if !colors.isEmpty {
+                    Button("Clear") { onClear() }
                         .font(.caption)
                         .foregroundColor(.white.opacity(0.7))
                         .accessibilityIdentifier("colorPanel.history.clearButton")
                 }
             }
-            if historyStore.colors.isEmpty {
+            if colors.isEmpty {
                 Text("Colours you paint with appear here.")
                     .font(.system(size: 10))
                     .foregroundColor(.white.opacity(0.4))
             } else {
-                // **A grid on the palette's own columns, not a strip that scrolls sideways** — the
-                // twenty colours the history holds are two rows of ten, all in view, and each swatch is
-                // the size of the palette's below it.
                 LazyVGrid(columns: PaletteSwatchGrid.columns, spacing: PaletteSwatchGrid.spacing) {
-                    ForEach(Array(historyStore.colors.enumerated()), id: \.element.id) { index, swatch in
+                    ForEach(Array(colors.enumerated()), id: \.element.id) { index, swatch in
                         RoundedRectangle(cornerRadius: 5)
                             .fill(swatch.color)
                             .aspectRatio(1, contentMode: .fit)
                             .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.white.opacity(0.25), lineWidth: 1))
                             .accessibilityIdentifier("colorPanel.history.swatch.\(index)")
                             .accessibilityValue(swatch.hex)
-                            .onTapGesture { selectSwatch(swatch.color) }
+                            .onTapGesture { onPick(swatch.color) }
                     }
                 }
             }
         }
     }
+}
 
-    private var paletteSection: some View {
+/// The selected palette: its name and its swatch grid. `Equatable` by the palette, for
+/// `RecentColours`' reason; `colorToAdd` is asked when an empty cell is pressed, not read as the grid
+/// is built, so the colour a tick moves is not an input to it.
+private struct PaletteColours: View, Equatable {
+    let palette: Palette?
+    let paletteStore: PaletteStore
+    let canvasManager: CanvasManager
+    let colorToAdd: () -> Color
+    let onPick: (Color) -> Void
+
+    static func == (lhs: PaletteColours, rhs: PaletteColours) -> Bool { lhs.palette == rhs.palette }
+
+    var body: some View {
+        let _ = ColorPickerPasses.sections += 1
         VStack(alignment: .leading, spacing: 6) {
-            if let palette = paletteStore.selectedPalette {
+            if let palette {
                 Text(palette.name)
                     .font(.subheadline.weight(.semibold))
                     .foregroundColor(.white)
                 PaletteSwatchGrid(paletteStore: paletteStore, canvasManager: canvasManager, palette: palette,
-                                  currentColor: currentColor, idPrefix: "colorPanel", onPick: selectSwatch)
+                                  colorToAdd: colorToAdd, idPrefix: "colorPanel", onPick: onPick)
             }
-        }
-    }
-
-    // MARK: - Palettes tab (item 3)
-
-    private var palettesTab: some View {
-        PalettesLibraryView(paletteStore: paletteStore, canvasManager: canvasManager, currentColor: currentColor,
-                            onPick: selectSwatch)
-    }
-
-    // MARK: - Colour state
-
-    /// Updates `hue`/`saturation`/`brightness`/`alpha` from HSBA components, preserving the
-    /// *previous* hue when the incoming color is achromatic (saturation ~ 0) instead of snapping it
-    /// to 0/red — `ColorMath.rgbToHSB` returns hue 0 for any r==g==b color since hue is genuinely
-    /// undefined there. Alpha is forced to 1 when `supportsOpacity` is false. This is the single
-    /// funnel every inbound colour passes through (`onAppear`, `onChange`, a hex string, a swatch).
-    private func applyHSBA(_ hsba: (h: Double, s: Double, b: Double, a: Double)) {
-        if hsba.s > 0.0001 {
-            hue = hsba.h
-        }
-        saturation = hsba.s
-        brightness = hsba.b
-        alpha = supportsOpacity ? hsba.a : 1
-    }
-
-    /// The Triangle tab's write path: HSL saturation/lightness at the panel's own `hue` -> RGB ->
-    /// HSB, taking only the resulting saturation/brightness and leaving `hue` untouched. Re-deriving
-    /// hue from the round trip instead (as `applyHSBA` must, for an *external* colour of unknown
-    /// history) would risk exactly the achromatic hue loss that guards against — except here it is
-    /// avoidable for free, because this tab already knows the hue it started from.
-    private func applyTriangleSL(_ s: Double, _ l: Double) {
-        let rgb = ColorMath.hslToRGB(h: hue, s: s, l: l)
-        let hsb = ColorMath.rgbToHSB(r: rgb.r, g: rgb.g, b: rgb.b)
-        saturation = hsb.s
-        brightness = hsb.v
-        commitColor()
-    }
-
-    /// Parses `hexText` and, if valid, updates the HSBA state from it. On invalid input, reverts the
-    /// displayed text to the last known-good color instead of leaving the field showing something
-    /// that was never actually applied.
-    private func applyHexText() {
-        guard let parsed = Color(hex: hexText) else {
-            hexText = currentColor.hexString
-            return
-        }
-        applyHSBA(parsed.hsbaComponents)
-        hexText = currentColor.hexString
-        color = currentColor
-    }
-
-    /// Loads a colour from history or a palette swatch. Goes through `applyHSBA`/`currentColor`
-    /// rather than assigning it straight through, for `applyHexText`'s reason: a swatch saved with
-    /// alpha must arrive opaque in a panel with no opacity row.
-    private func selectSwatch(_ swatch: Color) {
-        applyHSBA(swatch.hsbaComponents)
-        hexText = currentColor.hexString
-        color = currentColor
-    }
-
-    /// Swaps `color` and `previousColor` — the "tap previous to swap back" gesture item 2 asks for,
-    /// implemented as a real swap (not a one-shot revert) so tapping it again swaps right back.
-    private func swapWithPrevious() {
-        let old = currentColor
-        applyHSBA(previousColor.hsbaComponents)
-        hexText = currentColor.hexString
-        color = currentColor
-        previousColor = old
-    }
-
-    /// Pushes the current HSBA state to the bound colour and, unless the hex field is mid-edit,
-    /// refreshes its displayed text to match.
-    private func commitColor() {
-        color = currentColor
-        if !hexFieldFocused {
-            hexText = currentColor.hexString
         }
     }
 }

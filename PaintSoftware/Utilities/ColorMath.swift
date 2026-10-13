@@ -361,9 +361,7 @@ enum ColorMath {
     }
 
     /// The raw (unclamped) barycentric weights of `(x, y)` against the triangle `(k, w, p)` —
-    /// negative outside it. Split out from `triangleSaturationLightness` so rendering can ask "is
-    /// this cell actually inside the triangle" (`triangleContains`) with the same arithmetic the
-    /// gesture uses, rather than the clamped, always-in-range version below.
+    /// negative outside it.
     private static func triangleBarycentricWeights(x: Double, y: Double) -> (wK: Double, wW: Double, wP: Double) {
         let p = trianglePureHueVertex, w = triangleWhiteVertex, k = triangleBlackVertex
         // Standard barycentric solve for a point against a triangle (k, w, p).
@@ -373,32 +371,58 @@ enum ColorMath {
         return (wK, wW, 1 - wK - wW)
     }
 
-    /// Whether `(x, y)` (in the triangle's local frame) falls inside it — for rendering only, so a
-    /// fill loop can leave the area outside the triangle blank instead of painting it with an edge
-    /// colour it never actually is.
-    static func triangleContains(x: Double, y: Double) -> Bool {
-        let weights = triangleBarycentricWeights(x: x, y: y)
-        let epsilon = -0.001
-        return weights.wK >= epsilon && weights.wW >= epsilon && weights.wP >= epsilon
-    }
-
     /// Inverse of `trianglePosition`: a point in the triangle's local frame -> saturation/lightness.
     /// A point outside the triangle (an in-progress drag can easily overshoot it) is **clamped by its
     /// barycentric weights** — any negative weight is raised to 0 and the three renormalized to sum
     /// to 1 — rather than rejected, so a drag that leaves the triangle still tracks its nearest edge
     /// instead of freezing the marker.
     static func triangleSaturationLightness(x: Double, y: Double) -> (s: Double, l: Double) {
-        var (wK, wW, wP) = triangleBarycentricWeights(x: x, y: y)
+        let (_, wW, wP) = clampedTriangleWeights(x: x, y: y)
+        let l = wW + wP / 2
+        let denomS = 1 - abs(2 * l - 1)
+        let s = denomS > 0.0001 ? min(max(wP / denomS, 0), 1) : 0
+        return (s, min(max(l, 0), 1))
+    }
 
+    /// `triangleBarycentricWeights`, with any negative weight raised to 0 and the three renormalized to
+    /// sum to 1 — the clamp both the gesture's answer and the shading's colour take outside the triangle.
+    private static func clampedTriangleWeights(x: Double, y: Double) -> (wK: Double, wW: Double, wP: Double) {
+        var (wK, wW, wP) = triangleBarycentricWeights(x: x, y: y)
         if wK < 0 || wW < 0 || wP < 0 {
             wK = max(wK, 0); wW = max(wW, 0); wP = max(wP, 0)
             let sum = wK + wW + wP
             if sum > 0 { wK /= sum; wW /= sum; wP /= sum }
         }
+        return (wK, wW, wP)
+    }
 
-        let l = wW + wP / 2
-        let denomS = 1 - abs(2 * l - 1)
-        let s = denomS > 0.0001 ? min(max(wP / denomS, 0), 1) : 0
-        return (s, min(max(l, 0), 1))
+    /// **The triangle's shading at one hue, as pixels** — row-major RGBA8, opaque, `side` × `side`,
+    /// covering the triangle's local frame (`-1...1` on both axes) in its unrotated pose.
+    ///
+    /// The colour at `(x, y)` is `hslToRGB(h, s, l)` for the `(s, l)` that `triangleSaturationLightness`
+    /// reads there, and that is *exactly* the corner blend `trianglePosition` is derived from — `wK·black +
+    /// wW·white + wP·pureHue` — so it is computed as that blend: three multiply-adds a pixel, no trig, no
+    /// branch on the hue's sextant. Outside the triangle the colour carries on from the nearest edge (the
+    /// same clamp the gesture takes), which is what lets the view clip it with a vector path and get an
+    /// antialiased edge from a small bitmap.
+    ///
+    /// A bitmap rather than the 14,400 filled rectangles the shading used to be: those were re-issued, and
+    /// re-rasterised, on every tick of a drag, and a tick is the one thing that must not cost the grid.
+    static func triangleShadingPixels(hue: Double, side: Int) -> [UInt8] {
+        let pure = hslToRGB(h: hue, s: 1, l: 0.5)
+        var pixels = [UInt8](repeating: 255, count: side * side * 4)
+        func byte(_ value: Double) -> UInt8 { UInt8(min(max(value, 0), 1) * 255 + 0.5) }
+        for row in 0..<side {
+            let y = (Double(row) + 0.5) / Double(side) * 2 - 1
+            for column in 0..<side {
+                let x = (Double(column) + 0.5) / Double(side) * 2 - 1
+                let (_, wW, wP) = clampedTriangleWeights(x: x, y: y)
+                let offset = (row * side + column) * 4
+                pixels[offset] = byte(wW + wP * pure.r)
+                pixels[offset + 1] = byte(wW + wP * pure.g)
+                pixels[offset + 2] = byte(wW + wP * pure.b)
+            }
+        }
+        return pixels
     }
 }
