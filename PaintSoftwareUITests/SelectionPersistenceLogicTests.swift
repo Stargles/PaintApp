@@ -163,9 +163,8 @@ final class SelectionPersistenceLogicTests: XCTestCase {
         XCTAssertNotNil(f.manager.selection, "a region outlives what it cleared")
     }
 
-    /// **Move lifts the new layer's ink inside the region.** `beginVectorLassoMove` used to refuse
-    /// with `selection.layerID == target.layerID`; the float it raises is on layer 2 and holds the
-    /// stroke inside the loop and not the one outside it.
+    /// **Move lifts the new layer's ink inside the region**: the float `beginVectorLassoMove` raises is
+    /// layer 2's and holds the stroke inside the loop and not the one outside it.
     func testMoveLiftsTheInkOfTheLayerTheRegionWasCarriedTo() {
         let f = twoInkedVectorLayers()
         f.manager.currentLayerIndex = f.lower

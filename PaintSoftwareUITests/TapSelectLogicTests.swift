@@ -273,7 +273,7 @@ final class TapSelectLogicTests: XCTestCase {
 
         manager.selectObject(at: CGPoint(x: 30, y: 30))
         XCTAssertEqual(manager.currentLayerIndex, lower, "the tap switched to the object's layer")
-        XCTAssertEqual(manager.selection?.layerID, manager.layers[lower].id)
+        XCTAssertEqual(manager.selection?.objects?.layerID, manager.layers[lower].id)
         XCTAssertEqual(manager.selection?.objects?.elements, [line.id])
     }
 
@@ -513,7 +513,7 @@ final class TapSelectLogicTests: XCTestCase {
         manager.selectObject(at: CGPoint(x: 30, y: 50))
         XCTAssertEqual(manager.currentLayerIndex, upper, "the tap's layer is the active one")
         XCTAssertEqual(manager.selection?.objects?.elements, [above.id], "the set is the object tapped, on its own layer")
-        XCTAssertEqual(manager.selection?.layerID, manager.layers[upper].id)
+        XCTAssertEqual(manager.selection?.objects?.layerID, manager.layers[upper].id)
     }
 
     /// **A set and a region replace each other**: a loop over a tapped set (the existing rule), and an Add
