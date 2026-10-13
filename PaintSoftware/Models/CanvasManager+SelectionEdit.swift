@@ -619,20 +619,28 @@ extension CanvasManager {
     /// what "open it for editing" settles first (`beginEditingText` and `beginGradientEdit` both
     /// begin by settling whatever was pending).
     ///
+    /// **An editor that opens takes the dock from the Select panel, and an open lasso goes with it** —
+    /// TODO (188), the way a tool switch puts one down (LASSO_MOVE.md §5.29). Neither opener goes
+    /// through `commitAllInteractiveState`, so the abandon is this door's own: left open, the corners
+    /// would stay drawn under the editor and the next Undo would take one back instead of the editor's
+    /// last edit.
+    ///
     /// - Returns: whether the editor opened. False when the loop caught no object of that kind — the
     ///   entry is not offered then, so this is the model refusing in case a view asks anyway.
     @discardableResult
     func editSelectedObject(_ kind: EditableKind) -> Bool {
         guard let id = selectionStyle.editableObjects[kind] else { return false }
+        let opened: Bool
         switch kind {
         case .text:
             // Text mode only once the session is open: it is what makes the overlay's box and the
             // panel mean anything, and an object that would not open has no use for either.
-            guard beginEditingText(elementID: id) else { return false }
-            enterTextMode()
-            return true
+            opened = beginEditingText(elementID: id)
+            if opened { enterTextMode() }
         case .gradient:
-            return beginGradientEdit(elementID: id)
+            opened = beginGradientEdit(elementID: id)
         }
+        if opened { abandonOpenLasso() }
+        return opened
     }
 }

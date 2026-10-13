@@ -52,6 +52,11 @@ extension CanvasManager {
     /// **Tapped objects and a drawn loop do not combine**, since a set is not a region: a loop drawn over
     /// a tapped set replaces it (`finishSelection`) and an Add over a loop's region starts a set.
     ///
+    /// **Every tap that changes the selection is an undo step** — TODO (188), as a loop is and Deselect
+    /// is: a tap that makes, adds to or takes from the selection, and a tap on nothing. Undo gives back
+    /// the selection as it stood before the tap (the object's editor, if one opened, is not a step of
+    /// its own), and Redo makes it again.
+    ///
     /// - Returns: the kind of editor that opened, for the caller to raise the panel it belongs in
     ///   (`EditableKind.panel`); nil when nothing opened.
     @discardableResult
@@ -84,7 +89,9 @@ extension CanvasManager {
     }
 
     /// Puts `tapped` through `rule` against the objects already selected on its cel and writes the
-    /// selection that is left — nothing selected when the set is empty. False when it is.
+    /// selection that is left — nothing selected when the set is empty, which is False. **One undo step,
+    /// through the door a loop's selection goes through** (`replaceSelection`): Undo gives back the
+    /// selection as it stood before the tap.
     @discardableResult
     private func selectTapped(_ rule: TapComposition,
                               _ tapped: (layerIndex: Int, celIndex: Int, shown: VectorElement)) -> Bool {
@@ -99,13 +106,10 @@ extension CanvasManager {
         // Before the selection is written: the active cel changing clears a selection
         // (`handleActiveContextChanged`), so the other order would lose the one just made.
         selectLayer(tapped.layerIndex)
-        guard let made = tappedSelection(rule.result(of: tapped.shown.id, onto: held),
-                                         layerIndex: tapped.layerIndex, celIndex: tapped.celIndex) else {
-            deselect()
-            return false
-        }
-        selection = made
-        return true
+        let made = tappedSelection(rule.result(of: tapped.shown.id, onto: held),
+                                   layerIndex: tapped.layerIndex, celIndex: tapped.celIndex)
+        replaceSelection(with: made, label: rule.historyLabel(composedOnto: held))
+        return made != nil
     }
 
     /// **The selection that holds exactly `ids` on one cel**, drawn as the union of their outlines —

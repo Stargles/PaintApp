@@ -138,17 +138,6 @@ simulator: 79 ms over 34 ticks) — INFERRED to be the colour picker's own redra
 - [ ] The colour picker's own redraw during a drag measured and, if it is the ~1.4 s, fixed (a separate
       worker — not the held edit's code).
 
-## (188) Tap selections are undo steps; Add Text puts an open lasso down
-
-**Status** — 2026-10-12, the two loose ends (187)'s merge (`0bfdb56`) reported; decided by the
-orchestrator from the owner's (187) ruling that making a selection and Deselect are undo steps.
-
-- [ ] A tap in Tap mode that makes, adds to or takes from the selection is an undo step, through the same
-      `replaceSelection(with:label:)` door as a loop.
-- [ ] Add Text (which closes the Select panel without `commitAllInteractiveState`) abandons an open lasso
-      the way a tool switch does — driven: corners placed, Add Text, the lasso is gone and Undo does not
-      take back corners.
-
 ## (186) The fill's sideways drag adjusts Gap Closing only, and right decreases it
 
 **Status** — asked 2026-10-12 (a note on the option-saving page, row C6).

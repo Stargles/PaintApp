@@ -251,6 +251,155 @@ final class OpenLassoUITests: PaintUITestCase {
         XCTAssertTrue(waitUntil(canvas, outside, isRed), "…and left the mark outside it")
     }
 
+    // MARK: - Opening an editor puts an open lasso down (TODO (188))
+
+    /// Select, Freehand, and the pen tapped onto each of `corners`: the lasso is open with that many
+    /// points, and its node is drawn where the first tap landed.
+    private func openALasso(_ app: XCUIApplication, _ canvas: XCUIElement, corners: [CGVector]) throws {
+        let freehand = app.buttons["selectPanel.mode.lasso"]
+        XCTAssertTrue(freehand.waitForExistence(timeout: 5), "the Select panel offers Freehand")
+        freehand.tap()
+        assertBelowTheToolbar(app, canvas, dy: corners[0].dy, "The lasso's corners")
+        for (index, corner) in corners.enumerated() {
+            canvas.coordinate(withNormalizedOffset: corner).tap()
+            XCTAssertTrue(settledField(app, "lasso:", equals: "\(index + 1)"), "corner \(index + 1) joined the open lasso")
+        }
+        XCTAssertTrue(try nodeIsDrawn(canvas, at: hostPoint(canvas, corners[0])), "PREMISE: the start node is drawn")
+    }
+
+    /// **Add Text puts an open lasso down** — TODO (188). Two corners placed in Freehand, then the Add
+    /// menu and its Add Text row: the lasso is gone and its node with it, and the Undo that follows has
+    /// no corner to take back. (The Add icon is what takes the Select panel's place, and it puts the
+    /// lasso down on the way in like every toolbar icon; this pins that the text tool never meets one.)
+    ///
+    /// What the artist does next, at every step: tap two corners; tap Add, then Add Text — the text
+    /// panel is up and the Select tool's lasso is not on the canvas.
+    func testAddTextPutsAnOpenLassoDownAndUndoTakesNoCornerBack() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app), "setup: a brand-new document")
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let paper = paperRect(in: canvas)
+        func at(_ dx: Double, _ dy: Double) -> CGVector { onHost(paper, dx, dy) }
+
+        app.buttons["toolbar.selectButton"].tap()
+        let corners = [at(0.15, 0.12), at(0.45, 0.12)]
+        try openALasso(app, canvas, corners: corners)
+        attachScreenshot(app, "open-lasso-before-add-text")
+
+        app.buttons["toolbar.addButton"].tap()
+        let addText = app.buttons["add.addTextRow"]
+        XCTAssertTrue(addText.waitForExistence(timeout: 5), "PREMISE: the Add menu lists Add Text")
+        XCTAssertTrue(settledField(app, "lasso:", equals: "none"), "opening the Add menu put the lasso down")
+        addText.tap()
+        XCTAssertTrue(app.buttons["textPanel.fontButton"].waitForExistence(timeout: 5), "PREMISE: the text panel is up")
+        XCTAssertEqual(readField(app, "lasso:"), "none", "Add Text met no open lasso")
+        XCTAssertFalse(try nodeIsDrawn(canvas, at: hostPoint(canvas, corners[0])), "…and its node is not on the canvas")
+        attachScreenshot(app, "add-text-no-lasso")
+
+        app.buttons["sideToolbar.undoButton"].tap()
+        XCTAssertTrue(settledField(app, "lasso:", equals: "none"), "Undo has no corner to take back")
+        XCTAssertFalse(try nodeIsDrawn(canvas, at: hostPoint(canvas, corners[0])), "…and draws none")
+    }
+
+    /// Select → Tap with Add chosen, and a tap on `point` (screen points): the object under it joins the
+    /// selection and opens no editor, so the Select panel's Edit entry is what opens it.
+    private func addToTheSelectionByTap(_ app: XCUIApplication, at point: CGPoint) {
+        app.buttons["toolbar.selectButton"].tap()
+        let tap = app.buttons["selectPanel.mode.tap"]
+        XCTAssertTrue(tap.waitForExistence(timeout: 5), "the Select panel's mode picker has a Tap mode")
+        tap.tap()
+        let picker = app.segmentedControls["selectPanel.tapCompositionPicker"]
+        XCTAssertTrue(picker.waitForExistence(timeout: 5))
+        picker.buttons["Add"].tap()
+        app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: point.x, dy: point.y)).tap()
+    }
+
+    /// **Edit Text, opened from the Select panel with a lasso half drawn, puts the lasso down** — the
+    /// real way for an editor to meet one: the words are selected (by a tap in Tap), the mode is switched
+    /// to Freehand and two corners are placed over the selection that is still up, and the panel's Edit
+    /// Text entry takes the dock. The corners must not stay drawn under the text editor, and the Undo
+    /// pressed in it must not take one back.
+    ///
+    /// What the artist does next, at every step: tap the words; switch to Freehand and tap two corners;
+    /// tap Edit Text — the text panel and the words' box are up and the lasso is gone.
+    func testEditTextFromTheSelectPanelPutsAnOpenLassoDown() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app), "setup: a brand-new document")
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let host = canvas.frame
+        let paper = paperRect(in: canvas)
+        func at(_ dx: Double, _ dy: Double) -> CGVector { onHost(paper, dx, dy) }
+
+        let boxTopLeft = writeWords("Hello", app, canvas)
+        app.buttons["toolbar.brushButton"].tap()
+        XCTAssertTrue(waitForTextState(app, "none"), "PREMISE: the brush puts the words down (text:\(readTextState(app)))")
+        waitForTheKeyboardToLeave(app)
+
+        addToTheSelectionByTap(app, at: CGPoint(x: boxTopLeft.x + 0.05 * host.width, y: boxTopLeft.y + 0.02 * host.height))
+        let edit = app.buttons["selectPanel.editTextButton"]
+        XCTAssertTrue(edit.waitForExistence(timeout: 5), "PREMISE: the tap selected the words, so Edit Text is offered")
+        XCTAssertFalse(app.buttons["textPanel.fontButton"].exists, "PREMISE: Add opened no editor")
+
+        let corners = [at(0.10, 0.12), at(0.30, 0.12)]
+        try openALasso(app, canvas, corners: corners)
+        XCTAssertTrue(edit.exists, "the selection is still up under the corners, so Edit Text still is offered")
+        attachScreenshot(app, "open-lasso-over-a-selection")
+
+        edit.tap()
+        XCTAssertTrue(app.buttons["textPanel.fontButton"].waitForExistence(timeout: 5), "Edit Text brought up the text panel")
+        XCTAssertTrue(waitForTextState(app, "box", "editing"), "…with the words' box on the canvas (text:\(readTextState(app)))")
+        XCTAssertTrue(settledField(app, "lasso:", equals: "none"), "the open lasso was put down (it holds \(readField(app, "lasso:")))")
+        XCTAssertFalse(try nodeIsDrawn(canvas, at: hostPoint(canvas, corners[0])), "…and its node is not on the canvas")
+        attachScreenshot(app, "edit-text-no-lasso")
+
+        app.buttons["sideToolbar.undoButton"].tap()
+        XCTAssertTrue(settledField(app, "lasso:", equals: "none"), "Undo has no corner to take back")
+    }
+
+    /// **And Edit Gradient**, whose card the model raises with no panel for the Select one to give way
+    /// to: the gradient is tapped into the selection, two corners are placed, Edit Gradient opens the card
+    /// — and the lasso is gone. (The node's blue ring cannot be told from a gradient's own colours, so
+    /// the host's `lasso:` field is the reading.)
+    func testEditGradientFromTheSelectPanelPutsAnOpenLassoDown() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app), "setup: a brand-new document")
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let paper = paperRect(in: canvas)
+        func at(_ dx: Double, _ dy: Double) -> CGVector { onHost(paper, dx, dy) }
+
+        placeFromTheAddMenu(app, row: "add.linearGradientRow", primedName: "gradient",
+                            from: at(0.1, 0.5), to: at(0.9, 0.5))
+        let done = app.buttons["gradientPanel.doneButton"]
+        XCTAssertTrue(done.waitForExistence(timeout: 5), "PREMISE: the gradient's card is up")
+        done.tap()
+        XCTAssertTrue(done.waitForNonExistence(timeout: 5), "PREMISE: …and closed")
+
+        let middle = canvas.coordinate(withNormalizedOffset: at(0.5, 0.5))
+        let centre = middle.screenPoint
+        addToTheSelectionByTap(app, at: centre)
+        let edit = app.buttons["selectPanel.editGradientButton"]
+        XCTAssertTrue(edit.waitForExistence(timeout: 5), "PREMISE: the tap selected the gradient, so Edit Gradient is offered")
+
+        let freehand = app.buttons["selectPanel.mode.lasso"]
+        freehand.tap()
+        assertBelowTheToolbar(app, canvas, dy: at(0.15, 0.12).dy, "The lasso's corners")
+        for (index, corner) in [at(0.15, 0.12), at(0.45, 0.12)].enumerated() {
+            canvas.coordinate(withNormalizedOffset: corner).tap()
+            XCTAssertTrue(settledField(app, "lasso:", equals: "\(index + 1)"), "corner \(index + 1) joined the open lasso")
+        }
+
+        edit.tap()
+        XCTAssertTrue(app.sliders["gradientPanel.angleSlider"].waitForExistence(timeout: 5), "Edit Gradient opened the card")
+        XCTAssertTrue(settledField(app, "lasso:", equals: "none"), "the open lasso was put down (it holds \(readField(app, "lasso:")))")
+        attachScreenshot(app, "edit-gradient-no-lasso")
+
+        app.buttons["sideToolbar.undoButton"].tap()
+        XCTAssertTrue(settledField(app, "lasso:", equals: "none"), "Undo has no corner to take back")
+    }
+
     /// `readField` until it says `wanted` (or, with `differsFrom`, anything else) — the label is
     /// written on the pass that follows the model.
     private func settledField(_ app: XCUIApplication, _ prefix: String, equals wanted: String? = nil,

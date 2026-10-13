@@ -574,4 +574,174 @@ final class TapSelectLogicTests: XCTestCase {
         XCTAssertNil(manager.selection)
     }
 
+    // MARK: - Tap selections are undo steps (TODO (188))
+
+    /// The labels of the undo stack, oldest first, past `baseline` steps.
+    private func labels(_ manager: CanvasManager, since baseline: Int) -> [HistoryActionLabel] {
+        manager.history.undoStack.dropFirst(baseline).map(\.label)
+    }
+
+    /// **A tap that makes the selection is one undo step, and Undo takes the selection away** — as the
+    /// first loop is. The operand is what a verb does with it: after the Undo, Recolour has no selection
+    /// to act on and changes nothing, and after the Redo it changes the stroke that was tapped.
+    func testATapThatMakesTheSelectionIsOneUndoStep() throws {
+        let (manager, vector, left, _, _) = twoStrokesOverAFill()
+        let baseline = manager.history.undoStack.count
+
+        manager.selectObject(at: onLeft)
+        XCTAssertEqual(labels(manager, since: baseline), [.makeSelection], "one step, called what it did")
+
+        manager.undo()
+        XCTAssertNil(manager.selection, "undo: the tap's selection is gone")
+        XCTAssertEqual(manager.history.undoStack.count, baseline, "…and the step is spent")
+        XCTAssertEqual(manager.notice?.code, "historyUndo", "the artist is told something was undone")
+        XCTAssertFalse(manager.recolorSelection(to: Color(red: 0, green: 0, blue: 1)), "a verb has nothing to act on")
+        XCTAssertEqual(element(left.id, in: vector)?.stroke?.color.blue, 0)
+
+        manager.redo()
+        XCTAssertEqual(manager.selection?.objects?.elements, [left.id], "redo: the stroke is selected again")
+        XCTAssertTrue(manager.recolorSelection(to: Color(red: 0, green: 0, blue: 1)))
+        XCTAssertEqual(element(left.id, in: vector)?.stroke?.color.blue, 1, "…and the verb reaches it")
+    }
+
+    /// **A Single tap over a set is a step whose Undo gives the first set back**, and the press after it
+    /// takes that one away.
+    func testASingleTapOverAnotherSetIsAStepAndUndoGivesTheFirstBack() {
+        let (manager, _, left, right, _) = twoStrokesOverAFill()
+        manager.selectObject(at: onLeft)
+        let baseline = manager.history.undoStack.count - 1
+
+        manager.selectObject(at: onRight)
+        XCTAssertEqual(manager.selection?.objects?.elements, [right.id], "PREMISE: the second tap replaced the first")
+        XCTAssertEqual(labels(manager, since: baseline), [.makeSelection, .makeSelection])
+
+        manager.undo()
+        XCTAssertEqual(manager.selection?.objects?.elements, [left.id], "undo: the first stroke is the selection again")
+        manager.undo()
+        XCTAssertNil(manager.selection, "…and the press after it takes that away")
+        manager.redo()
+        manager.redo()
+        XCTAssertEqual(manager.selection?.objects?.elements, [right.id], "redo walks forward through both")
+    }
+
+    /// **An Add is an add-to-selection step: Undo leaves the first object selected and Redo joins the
+    /// second again** — the owner's *"selection 2 gets undone"* for taps. Asserted through Recolour, which
+    /// reaches exactly the objects selected.
+    func testAnAddIsAnAddToSelectionStepAndUndoLeavesTheFirstObjectSelected() throws {
+        let (manager, vector, left, right, _) = twoStrokesOverAFill()
+        manager.selectObject(at: onLeft)
+        let baseline = manager.history.undoStack.count - 1
+        manager.tapComposition = .add
+
+        manager.selectObject(at: onRight)
+        XCTAssertEqual(manager.selection?.objects?.elements, [left.id, right.id], "PREMISE: both are selected")
+        XCTAssertEqual(labels(manager, since: baseline), [.makeSelection, .addToSelection])
+
+        manager.undo()
+        XCTAssertEqual(manager.selection?.objects?.elements, [left.id], "undo: only the first object is selected")
+        let held = try XCTUnwrap(manager.selection)
+        XCTAssertTrue(held.path.contains(onLeft) && !held.path.contains(onRight), "…and its outline no longer holds the second")
+
+        manager.redo()
+        XCTAssertEqual(manager.selection?.objects?.elements, [left.id, right.id], "redo: the second joins again")
+        manager.undo()
+        XCTAssertTrue(manager.recolorSelection(to: Color(red: 0, green: 0, blue: 1)))
+        XCTAssertEqual(element(left.id, in: vector)?.stroke?.color.blue, 1, "the verb reached the first")
+        XCTAssertEqual(element(right.id, in: vector)?.stroke?.color.blue, 0, "…and not the one the undo took out")
+    }
+
+    /// **An Add with nothing tapped to add to makes the selection**, as a first loop does whichever switch
+    /// is on, and one over a drawn region replaces it — and Undo gives the region back.
+    func testAnAddWithNothingToAddToIsAMakeSelectionStepAndUndoGivesBackARegion() {
+        let (manager, _, _, right, _) = twoStrokesOverAFill()
+        manager.tapComposition = .add
+        let baseline = manager.history.undoStack.count
+        manager.selectObject(at: onRight)
+        XCTAssertEqual(labels(manager, since: baseline), [.makeSelection], "nothing was selected, so this made one")
+
+        manager.undo()
+        manager.finishSelection(path: rect(CGRect(x: 0, y: 0, width: 40, height: 30)))
+        let region = manager.selection
+        XCTAssertNotNil(region, "PREMISE: a drawn region")
+        manager.selectObject(at: onRight)
+        XCTAssertEqual(manager.selection?.objects?.elements, [right.id], "PREMISE: the Add started a set")
+        XCTAssertEqual(manager.history.undoStack.last?.label, .makeSelection, "…a make, not an add: it joined nothing")
+
+        manager.undo()
+        XCTAssertTrue(manager.selection?.path === region?.path, "undo: the drawn region is back")
+    }
+
+    /// **A Subtract is a subtract-from-selection step, and so is the one that takes the last object**:
+    /// Undo gives the object back either way.
+    func testASubtractIsASubtractFromSelectionStepAndUndoGivesTheObjectBack() {
+        let (manager, _, left, right, _) = twoStrokesOverAFill()
+        manager.tapComposition = .add
+        manager.selectObject(at: onLeft)
+        manager.selectObject(at: onRight)
+        manager.tapComposition = .subtract
+        let baseline = manager.history.undoStack.count
+
+        manager.selectObject(at: onLeft)
+        XCTAssertEqual(manager.selection?.objects?.elements, [right.id], "PREMISE: the left stroke left")
+        XCTAssertEqual(labels(manager, since: baseline), [.subtractFromSelection])
+        manager.undo()
+        XCTAssertEqual(manager.selection?.objects?.elements, [left.id, right.id], "undo: it is back in the set")
+
+        manager.redo()
+        manager.selectObject(at: onRight)
+        XCTAssertNil(manager.selection, "PREMISE: the last object left, so nothing is selected")
+        XCTAssertEqual(manager.history.undoStack.last?.label, .subtractFromSelection)
+        manager.undo()
+        XCTAssertEqual(manager.selection?.objects?.elements, [right.id], "undo: the last object is selected again")
+    }
+
+    /// **A tap on nothing is a Deselect step under Single, and a miss under Add or Subtract is no step at
+    /// all** — it changed nothing, so there is nothing for Undo to give back.
+    func testATapOnNothingIsADeselectStepUnderSingleAndNoStepUnderAddOrSubtract() {
+        let (manager, _, left, _, _) = twoStrokesOverAFill()
+        manager.selectObject(at: onLeft)
+        let bare = CGPoint(x: 90, y: 90)
+        var baseline = manager.history.undoStack.count
+
+        manager.tapComposition = .add
+        manager.selectObject(at: bare)
+        manager.tapComposition = .subtract
+        manager.selectObject(at: bare)
+        XCTAssertEqual(manager.history.undoStack.count, baseline, "a miss under Add or Subtract records nothing")
+
+        manager.tapComposition = .single
+        manager.selectObject(at: bare)
+        XCTAssertNil(manager.selection, "PREMISE: a Single that found nothing put the selection down")
+        XCTAssertEqual(labels(manager, since: baseline), [.deselect])
+        manager.undo()
+        XCTAssertEqual(manager.selection?.objects?.elements, [left.id], "undo: the stroke is selected again")
+
+        manager.deselect()
+        baseline = manager.history.undoStack.count
+        manager.selectObject(at: bare)
+        XCTAssertEqual(manager.history.undoStack.count, baseline, "a miss with nothing selected records nothing")
+    }
+
+    /// **A tap on another layer is a step, and Undo does not bring a set back over a drawing it cannot
+    /// act on** — the rule a frame step puts one down by. The layer change put the first set down before
+    /// the second was made, so the step gives back nothing, and the artist stays on the layer tapped.
+    func testUndoOfATapOnAnotherLayerDoesNotBringTheFirstLayersSetBack() throws {
+        let (manager, lower, lowerVector) = vectorFixture()
+        lowerVector.addStroke(stroke(from: CGPoint(x: 10, y: 10), to: CGPoint(x: 50, y: 10)))
+        manager.addVectorLayer()
+        let upper = manager.currentLayerIndex
+        let above = stroke(from: CGPoint(x: 10, y: 50), to: CGPoint(x: 50, y: 50))
+        try XCTUnwrap(manager.layers[upper].cels[0].vector).addStroke(above)
+
+        manager.selectObject(at: CGPoint(x: 30, y: 10))
+        XCTAssertEqual(manager.currentLayerIndex, lower, "PREMISE: the first tap selected on the lower layer")
+        manager.selectObject(at: CGPoint(x: 30, y: 50))
+        XCTAssertEqual(manager.selection?.objects?.elements, [above.id], "PREMISE: the second on the upper")
+
+        manager.undo()
+        XCTAssertNil(manager.selection, "undo: the lower layer's set is not resurrected on the upper layer")
+        XCTAssertEqual(manager.currentLayerIndex, upper, "…and the layer is not an undo step")
+        manager.redo()
+        XCTAssertEqual(manager.selection?.objects?.elements, [above.id], "redo: the tap's set, on the layer that shows it")
+    }
 }

@@ -208,4 +208,61 @@ final class TapSelectUITests: PaintUITestCase {
         attachScreenshot(app, "tap-picker-after-clear")
     }
 
+    // MARK: - Undo (TODO (188))
+
+    /// **A tap is an undo step: after an Add, Undo leaves only the first stroke selected, and Redo joins
+    /// the second again** — the owner's *"selection 2 gets undone"* for taps, which had been loops only.
+    /// Two strokes are drawn; the first is tapped (Single), the second is added.
+    ///
+    /// Clear is the reading of what is selected, because it takes exactly what the selection holds and
+    /// the pixels say so: Redo then Clear takes both strokes, one Undo gives both back (the Clear), a
+    /// second takes the Add out of the selection, and Clear then takes the first stroke alone and leaves
+    /// the second — which is the only way the second can still be ink. The first Undo alone is the
+    /// press that would have taken the second *stroke* away before taps were steps.
+    ///
+    /// What the artist does next, at every step: tap a stroke, switch to Add, tap another — both are
+    /// selected; Undo — the second is out and the first is still selected; Redo — the second is in.
+    func testUndoAfterAnAddedTapLeavesTheFirstStrokeSelectedAndRedoJoinsTheSecondAgain() throws {
+        let (app, canvas, paper) = launch()
+        let lowest = rowAboveTheDock(canvas)
+        let rows = [lowest - 0.07, lowest]
+        func at(_ x: Double, _ row: Double) -> CGVector { CGVector(dx: onHost(paper, x, 0).dx, dy: row) }
+        for row in rows { drawLine(on: canvas, from: at(0.25, row), to: at(0.75, row)) }
+        for row in rows {
+            XCTAssertTrue(waitUntil(canvas, at(0.5, row), isInk), "PREMISE: the stroke at \(row) is on the paper")
+        }
+
+        chooseTapMode(app)
+        assertAboveTheDock(app, canvas, dy: lowest, "The two strokes")
+        let picker = app.segmentedControls["selectPanel.tapCompositionPicker"]
+        XCTAssertTrue(picker.waitForExistence(timeout: 5))
+        let clear = app.buttons["selectPanel.clearButton"]
+        let undo = app.buttons["sideToolbar.undoButton"], redo = app.buttons["sideToolbar.redoButton"]
+        canvas.coordinate(withNormalizedOffset: at(0.5, rows[0])).tap()
+        XCTAssertTrue(clear.isEnabled, "PREMISE: the first stroke is selected")
+        picker.buttons["Add"].tap()
+        canvas.coordinate(withNormalizedOffset: at(0.5, rows[1])).tap()
+        attachScreenshot(app, "tap-undo-both-selected")
+
+        // Undo and Redo: the selection moves, and the drawing does not.
+        undo.tap()
+        XCTAssertTrue(waitUntil(canvas, at(0.5, rows[1]), isInk), "undo took the Add out of the selection, not the stroke out of the picture")
+        XCTAssertTrue(clear.isEnabled, "…and the first stroke is still selected")
+        attachScreenshot(app, "tap-undo-first-only")
+        redo.tap()
+        clear.tap()
+        XCTAssertTrue(waitUntil(canvas, at(0.5, rows[0]), isWhitish), "redo: the Clear took the first stroke")
+        XCTAssertTrue(waitUntil(canvas, at(0.5, rows[1]), isWhitish), "…and the second, which the redo had joined to the selection")
+
+        // Back through the Clear, then the Add: the first stroke alone is selected.
+        undo.tap()
+        XCTAssertTrue(waitUntil(canvas, at(0.5, rows[0]), isInk), "undo: the Clear is taken back, first stroke")
+        XCTAssertTrue(waitUntil(canvas, at(0.5, rows[1]), isInk), "…and the second")
+        undo.tap()
+        clear.tap()
+        XCTAssertTrue(waitUntil(canvas, at(0.5, rows[0]), isWhitish), "the next Clear took the first stroke")
+        XCTAssertTrue(waitUntil(canvas, at(0.5, rows[1]), isInk),
+                      "…and left the second: the Undo before it took the Add out of the selection")
+        attachScreenshot(app, "tap-undo-then-clear-first-only")
+    }
 }

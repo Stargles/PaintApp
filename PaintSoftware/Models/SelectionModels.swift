@@ -226,6 +226,17 @@ enum TapComposition: String, CaseIterable, Identifiable {
         case .subtract: return current.subtracting([tapped])
         }
     }
+
+    /// What the undo step this tap leaves is called — a loop's rule (`SelectionComposition.historyLabel`):
+    /// the tap that begins a selection makes one, whichever rule is picked, and an Add or a Subtract
+    /// onto a set already up says which way the selection moved.
+    func historyLabel(composedOnto current: Set<UUID>) -> HistoryActionLabel {
+        switch self {
+        case .single: return .makeSelection
+        case .add: return current.isEmpty ? .makeSelection : .addToSelection
+        case .subtract: return .subtractFromSelection
+        }
+    }
 }
 
 /// A finalized selection: a closed path in canvas point space.
@@ -1001,12 +1012,13 @@ extension CanvasManager {
         replaceSelection(with: Selection(path: path, bounds: bounds), label: .makeSelection)
     }
 
-    /// **The one door a drawn selection changes through**: writes `replacement` and records the step
-    /// that gives back what stood before it. The history hands a selection back through
-    /// `selectionStillActing`, so a tapped set whose cel is no longer shown is not resurrected over a
-    /// drawing it cannot act on.
-    private func replaceSelection(with replacement: Selection?, label: HistoryActionLabel) {
+    /// **The one door the artist changes the selection through** — a loop, a tap in Tap and Deselect:
+    /// writes `replacement` and records the step that gives back what stood before it. The history hands
+    /// a selection back through `selectionStillActing`, so a tapped set whose cel is no longer shown is
+    /// not resurrected over a drawing it cannot act on. Nothing to nothing records nothing.
+    func replaceSelection(with replacement: Selection?, label: HistoryActionLabel) {
         let before = selection
+        guard before != nil || replacement != nil else { return }
         selection = replacement
         recordUndo(label: label,
                    undo: { [weak self] in guard let self else { return }; selection = selectionStillActing(before) },
@@ -1060,7 +1072,6 @@ extension CanvasManager {
     /// lasso, if there is one, is put down all the same.
     func deselect() {
         abandonOpenLasso()
-        guard selection != nil else { return }
         replaceSelection(with: nil, label: .deselect)
     }
 

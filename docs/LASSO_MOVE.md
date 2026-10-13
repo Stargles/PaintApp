@@ -1746,7 +1746,8 @@ Six more came on **2026-10-12**, all about how the Select tool is *used* rather 
     and the closed loop goes through `finishSelection`, so it adds or subtracts like every other
     loop. "On the node" is 22 screen points, whatever the zoom. Defaults the owner has not overruled:
     **Undo while a lasso is open takes back its last corner or stroke** (the history is untouched);
-    **switching tool, panel or selection mode, Deselect and the Select icon put an open lasso down**;
+    **switching tool, panel or selection mode, Deselect and the Select icon put an open lasso down** (an
+    Edit Text or Edit Gradient entry that opens its editor from the Select panel is a panel switch);
     a save, a layer change and the eyedropper (§5.33) do not. Freehand only — the rectangle, the wand
     and Tap are unchanged, and so is the fill tool's lasso, which still closes on lift.
 
@@ -1765,8 +1766,11 @@ Six more came on **2026-10-12**, all about how the Select tool is *used* rather 
     `deselect`. Deselect with nothing selected records nothing, and putting an open lasso down is not a
     step: nothing an open lasso did is in the history (§5.29). The history gives a selection back by the
     rule a frame step puts one down by (§5.32), so a tapped set whose cel is no longer shown is not
-    brought back over a drawing it cannot act on. A tap in Tap that makes, adds to or subtracts from a
-    tapped set is still not a step; that was not asked.
+    brought back over a drawing it cannot act on. **A tap in Tap is a step too** (TODO (188)): one that
+    makes a set, adds to it or takes from it goes through the same door as `makeSelection`,
+    `addToSelection` or `subtractFromSelection` — an Add with nothing to add to is a make, as a first loop is
+    whichever switch is on — and Undo gives back the selection as it stood before the tap (the editor a
+    Single tap opens on text or a gradient is not a step of its own).
 
 32. **A drawn region survives every frame step**, as it does a layer switch (§5.30): it stays up on
     whatever drawing is on the frame the playhead is on and acts on that drawing — on a frame where the

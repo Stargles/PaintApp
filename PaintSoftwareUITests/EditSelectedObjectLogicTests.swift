@@ -268,4 +268,60 @@ final class EditSelectedObjectLogicTests: XCTestCase {
         XCTAssertNil(manager.gradientEdit, "the panel's session is closed by the undo")
         XCTAssertEqual(try XCTUnwrap(vector.elements.compactMap(\.fill).first?.gradient).angle, 0, accuracy: 1e-6)
     }
+
+    // MARK: - An editor that opens puts an open lasso down (TODO (188))
+
+    /// Two corners of a Freehand lasso placed over a standing selection: the corners the artist was in
+    /// the middle of, with the selection (and so the Edit entries) still up under them.
+    private func openALasso(on manager: CanvasManager) {
+        manager.tapLasso(at: CGPoint(x: 10, y: 50), nodeReach: 2)
+        manager.tapLasso(at: CGPoint(x: 40, y: 50), nodeReach: 2)
+        XCTAssertEqual(manager.openLasso?.points.count, 2, "PREMISE: a lasso is open")
+    }
+
+    /// **Edit Text takes the dock from the Select panel, and the open lasso goes with it** — the way a
+    /// tool switch puts one down. The text session is the one live thing behind the panel now; corners
+    /// left drawn over it would be what the next Undo took back.
+    func testEditTextPutsAnOpenLassoDownAndLeavesTheSelection() throws {
+        let (manager, layerIndex, vector) = vectorFixture()
+        vector.upsertText(textElement("Hello"))
+        select(manager, layerIndex, everything)
+        openALasso(on: manager)
+
+        XCTAssertTrue(manager.editSelectedObject(.text))
+
+        XCTAssertNil(manager.openLasso, "the corners are put down")
+        XCTAssertNotNil(manager.selection, "…and the selection is not: it outlives the tool that made it")
+        XCTAssertTrue(manager.textGestureActive, "…and the editor opened")
+        XCTAssertTrue(manager.history.undoStack.map(\.label).allSatisfy { $0 != .makeSelection },
+                      "putting the corners down is not an undo step")
+    }
+
+    /// **And so does Edit Gradient**, whose card the model raises with no panel to close the Select one.
+    func testEditGradientPutsAnOpenLassoDownAndLeavesTheSelection() throws {
+        let (manager, layerIndex, vector) = vectorFixture()
+        gradientFill(vector)
+        select(manager, layerIndex, everything)
+        openALasso(on: manager)
+
+        XCTAssertTrue(manager.editSelectedObject(.gradient))
+
+        XCTAssertNil(manager.openLasso, "the corners are put down")
+        XCTAssertNotNil(manager.selection)
+        XCTAssertNotNil(manager.gradientEdit, "…and the editor opened")
+    }
+
+    /// **A refusal leaves the lasso alone**: an entry the model declined opened nothing, so nothing
+    /// replaced the tool.
+    func testARefusedEditLeavesTheOpenLassoWhereItWas() {
+        let (manager, layerIndex, vector) = vectorFixture()
+        vector.addStroke(stroke(y: 10))
+        select(manager, layerIndex, everything)
+        openALasso(on: manager)
+
+        for kind in EditableKind.allCases {
+            XCTAssertFalse(manager.editSelectedObject(kind))
+        }
+        XCTAssertEqual(manager.openLasso?.points.count, 2, "no editor opened, so the corners stay")
+    }
 }
