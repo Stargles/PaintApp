@@ -37,14 +37,6 @@ struct DrawingView: View {
     /// practice, but nothing about either flag's type enforces that, and one flag doing both jobs
     /// would let one bar's open state silently answer for the other's.
     @State private var showingTransformSettings = false
-    /// Whether the slider drag currently in flight wrote a **keyframe** rather than a value, so the
-    /// undo step it closes can be named for what it did — KEYFRAMES stage 3a.
-    ///
-    /// A flag on the view rather than on the manager because it is a property of *this* gesture, and
-    /// the gesture's two ends are both here: `onEditBegan` clears it, the per-parameter write sets it,
-    /// `onEditEnded` reads it. Putting it on `CanvasManager` would make it a piece of global state
-    /// whose lifetime nothing enforces.
-    @State private var effectEditWroteKeyframe = false
     /// Which stroke tool's brush is open in the **full-screen** editor, or nil — BRUSH.md §2.24.
     ///
     /// **On this view rather than inside `StrokeSettingsPanel`, because the screen it raises is this
@@ -515,24 +507,9 @@ struct DrawingView: View {
                         canvasManager.holdEffectParameter(editing.target, parameter: parameter, value: newValue)
                     },
                     animatedChannelIDs: editing.animatedChannelIDs,
-                    onEditBegan: {
-                        effectEditWroteKeyframe = false
-                        canvasManager.beginStructureGesture()
-                    },
-                    // **The label follows what the drag actually wrote**, which is the fix for an undo
-                    // step that would otherwise lie: a slider drag opens a structure gesture, so a
-                    // track written inside it records no step of its own and folds into this one. An
-                    // artist who animated a bloom and pressed undo would read "Adjust Layer Effect"
-                    // and conclude the grade itself had gone. `.effectKeys` exists for exactly
-                    // this distinction — see `HistoryActionLabel`.
-                    onEditEnded: {
-                        // The lift: the held grade's one write, inside the bracket, so the drag is one
-                        // step under the label what it wrote earns.
-                        let wrote = canvasManager.commitHeldGrade()
-                        if wrote == .key || wrote == .seedAndKey { effectEditWroteKeyframe = true }
-                        canvasManager.commitStructureGesture(
-                            label: effectEditWroteKeyframe ? .effectKeys : .valueLayerEffect)
-                    },
+                    // The lift: what the gesture held is written once, as one step named for what it
+                    // wrote (`commitHeldGrade`) — nothing before it wrote anything to bracket.
+                    onEditEnded: { canvasManager.commitHeldGrade() },
                     // **The slider is §5's first recordable surface, and this line is all of what it
                     // implements** — KEYFRAMES.md §5 and the owner's 2026-09-09 ruling. The pencil
                     // landing is the trigger; whether that becomes a take is entirely the model's
@@ -724,10 +701,10 @@ struct DrawingView: View {
             // apart on `AnimationCurve.isAnimated`.
             animatedChannelIDs: Set(canvasManager.curvedEffectChannelIDs(of: target)),
             raisedFromRail: target.isFolder,
-            // Which of the two grade homes a whole-`Effect` write goes to is `setStoredEffect`'s
-            // question now, resolved at write time — so a restack while the bar is open cannot send the
-            // write to a neighbour, and the view holds no copy of that switch.
-            onChange: { canvasManager.setStoredEffect(of: target, to: $0) })
+            // Held like a slider's tick, and stored at the lift by `setStoredEffect`, which resolves
+            // which of the two grade homes it goes to at write time — so a restack while the bar is
+            // open cannot send the write to a neighbour, and the view holds no copy of that switch.
+            onChange: { canvasManager.holdStoredEffect(target, $0) })
     }
 
     /// **The grade whose knobs are docked, at the playhead.**

@@ -452,8 +452,9 @@ final class DuplicateOffsetEffectLogicTests: XCTestCase {
     /// **The box comes up at the copy's current pose, the drag previews live, Done writes the five
     /// scalars as one step, and one undo restores all five** — §8 row 6's "the box commit writes the
     /// five scalars". The lift is read straight off the stored effect; the drag is
-    /// `updateFloatingPose`, the overlay's own entry; the preview is checked on the *resolved* grade
-    /// before Done, because that is what the render draws while the finger is down.
+    /// `updateFloatingPose`, the overlay's own entry; the preview is checked on the grade as the render
+    /// walk shows it before Done (`effectAsShown`), because that is what is drawn while the finger is
+    /// down — and the document is checked untouched, because the preview is held (TODO (179)).
     func testTheBoxCommitWritesTheFiveScalarsAndOneUndoRestoresThem() {
         let (manager, target, index) = gradedManager(dup {
             $0.offsetX = 10; $0.offsetY = 20; $0.scaleX = 2; $0.scaleY = 0.5; $0.rotationDegrees = 45; $0.color = red
@@ -473,9 +474,10 @@ final class DuplicateOffsetEffectLogicTests: XCTestCase {
         dragged.position = CGPoint(x: 32 - 6, y: 32 + 3)
         dragged.scaleX = 1.5; dragged.scaleY = 1.25; dragged.rotation = -0.3
         manager.updateFloatingPose(transform: dragged, distortQuad: nil)
-        guard case .duplicateOffset(let live)? = manager.resolvedEffect(of: target, atFrame: manager.currentFrame)
+        guard case .duplicateOffset(let live)? = manager.effectAsShown(of: target, atFrame: manager.currentFrame)
         else { return XCTFail("The grade is gone") }
-        XCTAssertEqual(live.offsetX, -6, accuracy: 1e-9, "The preview writes where the render reads")
+        XCTAssertEqual(live.offsetX, -6, accuracy: 1e-9, "The preview is held where the render reads")
+        XCTAssertEqual(stored(manager, index)?.offsetX, 10, "…and the document is not written mid-drag")
         XCTAssertEqual(live.offsetY, 3, accuracy: 1e-9)
         XCTAssertEqual(live.scaleX, 1.5, accuracy: 1e-9); XCTAssertEqual(live.scaleY, 1.25, accuracy: 1e-9)
         XCTAssertEqual(live.rotationDegrees, -0.3 * 180 / .pi, accuracy: 1e-9)
@@ -584,9 +586,11 @@ final class DuplicateOffsetEffectLogicTests: XCTestCase {
         var dragged = manager.floatingPiece!.transform
         dragged.position.x += 10
         manager.updateFloatingPose(transform: dragged, distortQuad: nil)
-        guard case .duplicateOffset(let live)? = manager.resolvedEffect(of: target, atFrame: 5) else { return XCTFail() }
-        XCTAssertEqual(live.offsetX, 30, accuracy: 1e-9, "The preview keys the playhead, so the render follows")
+        guard case .duplicateOffset(let live)? = manager.effectAsShown(of: target, atFrame: 5) else { return XCTFail() }
+        XCTAssertEqual(live.offsetX, 30, accuracy: 1e-9, "The preview resolves the playhead to the drag")
         XCTAssertEqual(stored(manager, index)?.offsetX, 0, "…without touching the base a curve overrides")
+        XCTAssertNil(manager.layers[index].effectTracks["duplicateOffset.offsetX"]?.key(atFrame: 5),
+                     "…or writing the key before the lift")
 
         manager.commitAnyFloatingPiece()
         XCTAssertEqual(manager.layers[index].effectTracks["duplicateOffset.offsetX"]?.key(atFrame: 5)?.value, 30,

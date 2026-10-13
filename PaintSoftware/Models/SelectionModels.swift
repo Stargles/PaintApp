@@ -386,14 +386,6 @@ enum FloatingPieceKind {
     var acceptsDistort: Bool { self != .effectBox }
 }
 
-/// **What an `.effectBox` gesture found when it began** — the stored grade and its curves, put back
-/// before the commit so the routed write's undo baseline is the value the drag started from rather
-/// than the value the preview left. `BoxNudge.foundGrade` says why only this box keeps one.
-struct EffectBoxRest: Equatable {
-    var effect: Effect
-    var tracks: [String: AnimationCurve]
-}
-
 /// **One gesture on a Move box that poses or grades** — a drag of a transformation layer's or a
 /// Duplicate Offset's box, or one press of Mirror, Rotate or Reset: the frame it was made on, where the
 /// box was when it began, and where the finger has it now. Held on `CanvasManager.boxNudge`.
@@ -403,10 +395,13 @@ struct EffectBoxRest: Equatable {
 /// of which writes the very layer it is over, so its commit routes the gesture's own travel onto the
 /// document as it stands at the lift and nothing older (TODO (153)).
 ///
-/// **A transformation layer's box writes nothing until then** (TODO (164)). Its pose under the finger
-/// is held off the document (`CanvasManager.livePose`) — the graph-node drag's mechanism — so the
-/// canvas re-poses its bands from it with no SwiftUI pass, and there is nothing in the document to put
-/// back: Undo pressed mid-drag acts on the steps, and a save mid-drag saves the document as it was.
+/// **Neither box writes anything until then.** A transformation layer's pose under the finger is held
+/// off the document (`CanvasManager.livePose`, TODO (164)) — the graph-node drag's mechanism — so the
+/// canvas re-poses its bands from it with no SwiftUI pass; a Duplicate Offset's grade is held the same
+/// way (`HeldGrade`, TODO (179)) and the canvas composites the whole frame from it, since a rim is the
+/// original's coverage minus the moved copy's and no transform of a band can draw it. There is nothing
+/// in the document to put back: Undo pressed mid-drag acts on the steps, and a save mid-drag saves the
+/// document as it was.
 struct BoxNudge {
     /// The frame the gesture was made on — the frame its commit routes at, wherever the playhead is
     /// when it settles.
@@ -420,13 +415,6 @@ struct BoxNudge {
     /// when the gesture settles.
     var transform: FloatingTransform
     var distortQuad: Quad?
-    /// **The grade an effect box's gesture found, and nil on a transformation layer's.** A grade is the
-    /// one thing the canvas can show only by compositing the document — a Duplicate Offset's rim is the
-    /// original's coverage minus the moved copy's, which no Core Animation transform of a band can
-    /// draw — so this box's preview is written (`showEffectBoxLive`), as a grade's graph-node drag and
-    /// every grade slider are, and what the gesture found is put back before its commit routes, or one
-    /// press of Undo would leave the copy where the drag had just put it.
-    let foundGrade: EffectBoxRest?
 }
 
 /// A piece of pixel content lifted out for interactive move/resize/rotate, not yet committed back
@@ -945,16 +933,14 @@ extension CanvasManager {
     }
 
     /// **Whether the document is still missing something the floating piece holds** — what a save
-    /// waits for and settles. A lifted bitmap always: it lands only when the piece is set down. An
-    /// effect box in the middle of a gesture: its grade preview is in the document
-    /// (`BoxNudge.foundGrade`). **Never a transformation layer's box**: between gestures it has landed
-    /// everything it did, and during one it holds its pose off the document (`livePose`), so a save
-    /// writes the document as it was before the drag and neither waits for the box nor takes it down.
+    /// waits for and settles. A lifted bitmap always: it lands only when the piece is set down. **Never
+    /// a box that poses or grades**: between gestures it has landed everything it did, and during one it
+    /// holds its pose or its grade off the document (`liveEdit`), so a save writes the document as it
+    /// was before the drag and neither waits for the box nor takes it down.
     var floatingPieceHoldsUnsettledEdit: Bool {
         switch floatingPiece?.kind {
-        case nil, .containerPose: return false
+        case nil, .containerPose, .effectBox: return false
         case .move, .duplicate: return true
-        case .effectBox: return boxNudge != nil
         }
     }
 
@@ -1311,77 +1297,26 @@ extension CanvasManager {
         ]
     }
 
-    /// **The effect box's preview: write the five where the render reads them, and let the canvas
-    /// draw the copy there** — written, because a grade is shown only by compositing the document
-    /// (`BoxNudge.foundGrade`). The stored base on an unkeyed channel, a key at the gesture's frame on
-    /// a keyed one — composed onto the state the gesture found rather than the live one, so a hundred
-    /// ticks leave one key rather than a hundred baselines of drift. Records no undo step;
-    /// `commitEffectBoxNudge` puts the found state back before it routes.
-    private func showEffectBoxLive() {
+    /// **The effect box's preview: the five held where the render reads them, and the canvas draws the
+    /// copy there** — `HeldGrade`, an effect slider's hold, at the gesture's frame (TODO (179)): the
+    /// canvas composites the whole frame from it, and nothing is written. Only the scalars that moved
+    /// from where the gesture found them are the lift's to route (`commitHeldGrade`, at the gesture's
+    /// frame, through the settings bar's own writer), so a box that ended where it began writes nothing
+    /// at all — `commitContainerNudge`'s rule, one payload over.
+    private func holdEffectBoxLive() {
         guard let piece = floatingPiece, piece.kind == .effectBox,
-              let target = piece.containerTarget, let nudge = boxNudge, let rest = nudge.foundGrade,
-              let canvasSize, storedEffect(of: target) != nil
+              let target = piece.containerTarget, let nudge = boxNudge, let canvasSize,
+              let found = resolvedEffect(of: target, atFrame: nudge.frame)
         else { return }
-        var effect = rest.effect
-        var tracks = rest.tracks
         let scalars = Self.effectBoxScalars(of: nudge.transform, canvasSize: canvasSize)
-        for parameter in effect.parameters where parameter.isScalarAnimatable {
-            guard let value = scalars[parameter.id] else { continue }
-            if var curve = tracks[parameter.id], !curve.isEmpty {
-                curve.setKey(AnimationCurve.Key(frame: nudge.frame, value: value))
-                tracks[parameter.id] = curve
-            } else {
-                effect = parameter.write(effect, value)
-            }
+        var values: [String: Double] = [:]
+        var moved: Set<String> = []
+        for parameter in found.parameters where parameter.isScalarAnimatable {
+            guard let value = scalars[parameter.id], let was = parameter.read(found) else { continue }
+            values[parameter.id] = value
+            if abs(value - was) > 1e-9 { moved.insert(parameter.id) }
         }
-        writeEffectStateOffHistory(target, effect: effect, tracks: tracks)
-    }
-
-    /// **A direct write of a grade and its curves onto either home, recording nothing** — the
-    /// preview's and the restore's write, and no one else's: an edit goes through
-    /// `applyEffectParameterEdit`. The only reason this is not `setStoredEffect` is that that one
-    /// records a step, and a preview that recorded a step per tick is the failure every slider row's
-    /// undo bracket exists to avoid.
-    private func writeEffectStateOffHistory(_ target: KeyframeTarget, effect: Effect,
-                                            tracks: [String: AnimationCurve]) {
-        switch target {
-        case .layer(let id):
-            guard let index = layers.firstIndex(where: { $0.id == id }) else { return }
-            if layers[index].effect != effect { layers[index].effect = effect }
-            if layers[index].effectTracks != tracks { layers[index].effectTracks = tracks }
-        case .folder(let id):
-            guard let index = folders.firstIndex(where: { $0.id == id }) else { return }
-            if folders[index].effect != effect { folders[index].effect = effect }
-            if folders[index].effectTracks != tracks { folders[index].effectTracks = tracks }
-        }
-    }
-
-    /// **One effect-box gesture's commit, the grade already back where the gesture found it** — route
-    /// each of the five through the settings bar's own writer at the frame the gesture was made on,
-    /// inside one gesture bracket, so the gesture is one undo step whether it wrote values or keys.
-    /// `commitContainerNudge`'s shape, one payload over, and with the same rule: a box that ended
-    /// where it began writes nothing at all.
-    private func commitEffectBoxNudge(_ rest: EffectBoxRest, of nudge: BoxNudge, on piece: FloatingPiece) {
-        let frame = nudge.frame
-        guard let target = piece.containerTarget, let canvasSize,
-              storedEffect(of: target) != nil else { return }
-        guard let resolved = resolvedEffect(of: target, atFrame: frame) else { return }
-        let scalars = Self.effectBoxScalars(of: nudge.transform, canvasSize: canvasSize)
-        let moved = rest.effect.parameters.filter { parameter in
-            guard parameter.isScalarAnimatable, let value = scalars[parameter.id],
-                  let was = parameter.read(resolved) else { return false }
-            return abs(value - was) > 1e-9
-        }
-        guard !moved.isEmpty else { return }
-        beginStructureGesture()
-        var wroteKey = false
-        for parameter in moved {
-            let route = applyEffectParameterEdit(target, parameter: parameter,
-                                                 newValue: scalars[parameter.id] ?? 0,
-                                                 atFrame: frame)
-            if route == .key || route == .seedAndKey { wroteKey = true }
-        }
-        commitStructureGesture(label: wroteKey ? .effectKeys : .valueLayerEffect)
+        holdEffectBox(target, atFrame: nudge.frame, values: values, moved: moved)
     }
 
     /// **The pose a container box is showing right now** — the pose in force where its gesture
@@ -1619,26 +1554,21 @@ extension CanvasManager {
     /// Mirror, Rotate or Reset, before the box moves. `BoxNudge` says why this is per gesture and never
     /// per box.
     ///
-    /// A transformation layer's box takes nothing from the document: its preview is held and its
-    /// commit reads the document as it stands at the lift. An effect box takes the grade it is about to
-    /// write its preview over (`BoxNudge.foundGrade`) — read as the document stands, which between
-    /// gestures is exactly what every other writer left it as: a key placed by Add Keys, a node dragged
-    /// in the graph editor, an undo.
+    /// Neither box takes anything from the document: its preview is held and its commit reads the
+    /// document as it stands at the lift — which between gestures is exactly what every other writer
+    /// left it as: a key placed by Add Keys, a node dragged in the graph editor, an undo.
     private func openBoxNudgeIfNeeded() {
         guard boxNudge == nil, let piece = floatingPiece, let target = piece.containerTarget else { return }
-        let foundGrade: EffectBoxRest?
         switch piece.kind {
         case .containerPose:
             guard containerPose(of: target) != nil else { return }
-            foundGrade = nil
         case .effectBox:
-            guard let effect = storedEffect(of: target) else { return }
-            foundGrade = EffectBoxRest(effect: effect, tracks: keyframeState(of: target).tracks)
+            guard storedEffect(of: target) != nil else { return }
         case .move, .duplicate:
             return
         }
         boxNudge = BoxNudge(frame: currentFrame, originTransform: piece.transform, originQuad: piece.distortQuad,
-                            transform: piece.transform, distortQuad: piece.distortQuad, foundGrade: foundGrade)
+                            transform: piece.transform, distortQuad: piece.distortQuad)
     }
 
     /// Carries the box's gesture — opened first if none is — to `transform`. False for a piece with no
@@ -1651,11 +1581,11 @@ extension CanvasManager {
         return true
     }
 
-    /// The box's preview at the gesture's travel — a transformation layer's held, an effect box's
-    /// written. Each returns at once for the other kind.
+    /// The box's preview at the gesture's travel — a transformation layer's pose or an effect box's
+    /// grade, held. Each returns at once for the other kind.
     private func showBoxNudge() {
         holdContainerBoxPose()
-        showEffectBoxLive()
+        holdEffectBoxLive()
     }
 
     /// **Ends the gesture on the box that is up: what it did lands as one undo step, routed at the
@@ -1684,14 +1614,13 @@ extension CanvasManager {
     /// way. The box stays up under the finger; the drag carries on from where the box is, and the
     /// lift writes only what it moved since.
     ///
-    /// A transformation layer's gesture wrote nothing, so dropping it is letting its held pose go; an
-    /// effect box's grade preview is put back. Not while a live take owns the box, for
-    /// `settleBoxNudge`'s reason.
+    /// Neither gesture wrote anything, so dropping it is letting its held pose or grade go. Not while a
+    /// live take owns the box, for `settleBoxNudge`'s reason.
     func cancelBoxNudge() {
         guard let piece = floatingPiece, let nudge = boxNudge, !recordingOwnsMoveBox else { return }
         boxNudge = nil
         placeBox(where: nudge)
-        if let found = nudge.foundGrade { putBackGrade(found, of: piece) } else { holdLivePose(nil) }
+        if piece.kind == .effectBox { revertHeldGrade() } else { holdLivePose(nil) }
     }
 
     /// **The piece learns where its box is** — the gesture's travel, written once, when the gesture is
@@ -1704,27 +1633,15 @@ extension CanvasManager {
         floatingPiece = piece
     }
 
-    /// Lands a gesture already taken off the box, as one undo step, and lets its held pose go —
+    /// Lands a gesture already taken off the box, as one undo step, and lets its held pose or grade go —
     /// after the commit, so the canvas re-poses from a document that already holds what was held.
     private func commitBoxNudge(_ nudge: BoxNudge, of piece: FloatingPiece) {
-        if let found = nudge.foundGrade {
-            putBackGrade(found, of: piece)
-            commitEffectBoxNudge(found, of: nudge, on: piece)
+        if piece.kind == .effectBox {
+            commitHeldGrade()
         } else {
             commitContainerNudge(nudge, of: piece)
             holdLivePose(nil)
         }
-    }
-
-    /// **Puts back the grade an effect box's gesture found, off the history** — its preview has been
-    /// writing the document on every tick, so what the gesture's commit measures its change from, and
-    /// what a dropped gesture leaves, is the grade before it. Writing the fields directly rather than
-    /// through `applyEffectParameterEdit` is what keeps the restore off the history: it is undoing a
-    /// preview, not an edit. **Safe only because `found` is this gesture's** — a copy older than the
-    /// gesture would put back over whatever else was written since.
-    private func putBackGrade(_ found: EffectBoxRest, of piece: FloatingPiece) {
-        guard let target = piece.containerTarget, storedEffect(of: target) != nil else { return }
-        writeEffectStateOffHistory(target, effect: found.effect, tracks: found.tracks)
     }
 
     /// **The frame a container box's preview is made at** — the gesture's own, so a scrub made while

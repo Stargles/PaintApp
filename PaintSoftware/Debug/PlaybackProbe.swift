@@ -401,8 +401,8 @@ enum PlaybackProbe {
 
     /// **An effect slider dragged, tick by tick** — TODO (179). The effect layer is selected, which is
     /// how its bar is on screen; the drag runs what `DrawingView` wires the bar's
-    /// Brightness slider to — the bracket at touch-down, a held tick per reported value
-    /// (`holdEffectParameter`), the one write at the lift (`commitHeldGrade`) — sweeping the value
+    /// Brightness slider to — a held tick per reported value (`holdEffectParameter`), the one write
+    /// and its undo step at the lift (`commitHeldGrade`) — sweeping the value
     /// up and down its range `intervalMs` apart, and then lets the canvas settle so the footprint
     /// samples cover what the session leaves behind.
     @MainActor
@@ -420,7 +420,6 @@ enum PlaybackProbe {
         try? await Task.sleep(nanoseconds: 1_500_000_000)
         footprint()
         PlaybackTrace.mark(.tick, value: 0)
-        canvasManager.beginStructureGesture()
         for tick in 0..<ticks {
             let phase = Double(tick % 40) / 20
             let share = phase <= 1 ? phase : 2 - phase
@@ -431,7 +430,6 @@ enum PlaybackProbe {
         }
         PlaybackTrace.mark(.tick, value: 1)
         canvasManager.commitHeldGrade()
-        canvasManager.commitStructureGesture(label: .valueLayerEffect)
         try? await Task.sleep(nanoseconds: 6_000_000_000)
         footprint()
         return ["effect"]

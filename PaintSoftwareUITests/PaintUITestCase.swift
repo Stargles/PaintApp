@@ -1010,12 +1010,13 @@ class PaintUITestCase: XCTestCase {
     /// the layer and start again rather than flip the picker already sitting in its options.
     ///
     /// So the route is: add the value layer, open its options, and pick a grade from the Mode row.
-    /// **Brightness / Contrast** because it is what the retired menu item created — the identity
-    /// instance, so a document built by this helper is the same document the old one built.
+    /// **Brightness / Contrast** by default because it is what the retired menu item created — the
+    /// identity instance, so a document built by this helper is the same document the old one built;
+    /// `slug` is another grade's `effectMenuSlug`.
     ///
     /// Leaves the layer's options panel **open**, exactly as the picker leaves it. Callers that want
     /// the canvas clear should close the panel, which is what the row-based helpers above also expect.
-    func addEffectLayerFromAddMenu(_ app: XCUIApplication) {
+    func addEffectLayerFromAddMenu(_ app: XCUIApplication, slug: String = "brightnesscontrast") {
         addValueLayerFromAddMenu(app)
 
         // The new layer is active the moment it lands, so one tap on its row opens options rather
@@ -1035,7 +1036,7 @@ class PaintUITestCase: XCTestCase {
         // `effectMenuSlug(.brightnessContrast(…))` — "Brightness / Contrast" lower-cased with the
         // punctuation stripped. Quoting the slug rather than the label for the reason the slug exists:
         // it survives a rewording of the visible name.
-        let item = app.buttons["layerOptions.blendMode.brightnesscontrast"]
+        let item = app.buttons["layerOptions.blendMode.\(slug)"]
         XCTAssertTrue(item.waitForExistence(timeout: 5), "The Blend Mode menu should list the effect catalogue")
         item.tap()
     }

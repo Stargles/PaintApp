@@ -29,9 +29,10 @@ enum HeldEdit {
     case elements(LiveElementEdit)
     /// The adjustable fill's picture (TODO (157)), drawn by the cel's host over its own.
     case fill(CanvasManager.LiveFill)
-    /// A grade under the finger — an effect parameter's slider (TODO (179)). It changes the whole
-    /// picture, so the canvas redraws the whole frame from it (`CanvasView.Coordinator`'s held
-    /// frame), and the render walk reads it in place of the document's grade.
+    /// A grade under the finger — the effect bar's controls, the Duplicate Offset's box, a graph-band
+    /// drag of an effect channel (TODO (179)). It changes the whole picture, so the canvas redraws the
+    /// whole frame from it (`CanvasView.Coordinator`'s held frame), and the render walk reads it in
+    /// place of the document's grade.
     case grade(HeldGrade)
 
     var pose: LivePose? {
@@ -66,51 +67,62 @@ enum HeldEdit {
     }
 }
 
-/// **A grade held under the finger** — what one or more of a target's effect parameters resolve to
-/// while an effect slider is dragged (TODO (179)).
+/// **A grade held under the finger** — what a target's grade is while one of the effect bar's controls,
+/// the Duplicate Offset's box or a graph-band drag of an effect channel is under the finger (TODO (179)).
+/// Three shapes of edit, one value, because the three are one question to the render walk — what does
+/// the grade resolve to here — and one write at the lift:
 ///
-/// **Exact by construction.** Every arm of `KeyframeControl.write` resolves the edited channel to the
-/// new value at the frame of the edit — `.key` and `.seedAndKey` put a key there, `.storedValue` and
-/// `.storedValueHoldingBaseline` write the base of a channel no curve drives — so "the grade at this
-/// frame with this parameter at this value" is the picture the lift's one write will make. Nothing
-/// re-implements the routing: the walk substitutes the value, and the lift routes it once.
+/// - **`values`, a slider or the box**: a parameter resolves to the value at the frame of the edit.
+///   **Exact by construction**: every arm of `KeyframeControl.write` resolves the edited channel to the
+///   new value at that frame — `.key` and `.seedAndKey` put a key there, `.storedValue` and
+///   `.storedValueHoldingBaseline` write the base of a channel no curve drives — so substituting the
+///   value is the picture the lift's one routed write makes, with nothing re-implemented.
+/// - **`stored`, a whole-effect editor** (a Curves graph, Gradient Map's stops, Recolour's entries, a
+///   colour swatch, a toggle or picker): the grade as the lift stores it (`setStoredEffect`). The
+///   editors build it from the grade the bar shows at the playhead, so at that frame it resolves to
+///   itself.
+/// - **`curves`, a graph-band drag**: the curves the finger has the channels on, in place of the
+///   target's, as the lift writes them (`writeGraphNodeCurve`).
 struct HeldGrade: Equatable {
     /// The layer or folder whose grade is held.
     let target: KeyframeTarget
-    /// The frame the gesture began on — where the lift routes its write.
+    /// The frame the gesture began on — where the lift routes its values.
     let frame: Int
-    /// Every parameter the gesture has moved, by id, at the value the finger holds it at.
+    /// The whole stored grade a whole-effect editor holds, or nil for the document's.
+    var stored: Effect?
+    /// Effect channels' curves as a graph-band drag holds them, by parameter id, in place of the target's.
+    var curves: [String: AnimationCurve] = [:]
+    /// Every parameter a slider or the box has moved, by id, at the value the finger holds it at.
     var values: [String: Double] = [:]
-    /// **The ids whose newest value is the artist's edit** — what the lift writes. A value a live take
-    /// caught is the take's (`recordParameterSample`): shown while the finger holds it and written by
-    /// the take as a curve, never by the lift.
+    /// **The ids of `values` whose newest value is the artist's edit** — what the lift writes. A value a
+    /// live take caught is the take's (`recordParameterSample`): shown while the finger holds it and
+    /// written by the take as a curve, never by the lift.
     var edited: Set<String> = []
 
-    /// `effect` — the grade resolved at the frame shown — with every held parameter at its held value.
-    func applied(to effect: Effect) -> Effect {
-        var result = effect
-        for parameter in effect.parameters {
+    /// **The grade at `frame` as the finger holds it** — `stored` (or the document's, `documentStored`)
+    /// resolved through `tracks` with `curves` in their place, and every held value set. The render walk's
+    /// read and the bar's, so the canvas and the controls cannot show two different grades.
+    func shown(stored documentStored: Effect, tracks: [String: AnimationCurve], atFrame frame: Int) -> Effect {
+        let through = curves.isEmpty ? tracks : tracks.merging(curves) { $1 }
+        var result = (stored ?? documentStored).resolved(atFrame: frame, through: through)
+        for parameter in result.parameters {
             guard let value = values[parameter.id] else { continue }
             result = parameter.write(result, value)
         }
         return result
     }
+
+    /// Whether the lift has anything to write.
+    var writesAnything: Bool { stored != nil || !curves.isEmpty || !edited.isEmpty }
 }
 
-/// **The held grade as the docked controls show it** — TODO (179). A slider whose value reads the
+/// **That a grade is held, for the docked controls** — TODO (179). A slider whose value reads the
 /// document would snap back while the finger holds a value the document does not have yet, and one that
-/// read the canvas manager would re-render the whole editor per tick — the cost the hold removes. So
-/// the held grade is mirrored here, on an object only the controls observe: `FillSettings`' shape
-/// (TODO (157)).
+/// observed the canvas manager would re-render the whole editor per tick — the cost the hold removes. So
+/// the held grade is mirrored here, on an object only the controls observe (`FillSettings`' shape, TODO
+/// (157)), and they read it back as `CanvasManager.effectAsShown`.
 final class LiveEditState: ObservableObject {
     @Published fileprivate(set) var grade: HeldGrade?
-
-    /// `effect`, the grade of `target` resolved at the playhead, as the finger holds it — itself when
-    /// nothing of `target`'s is held.
-    func shown(_ effect: Effect, on target: KeyframeTarget?) -> Effect {
-        guard let grade, grade.target == target else { return effect }
-        return grade.applied(to: effect)
-    }
 }
 
 extension CanvasManager {
@@ -166,37 +178,110 @@ extension CanvasManager {
         if liveEditState.grade != grade { liveEditState.grade = grade }
     }
 
-    // MARK: A grade under the finger — the effect sliders
+    // MARK: A grade under the finger — the effect bar, the Duplicate Offset's box, a graph-band drag
+
+    /// **`target`'s grade at `frame`, as the canvas shows it** — the held grade's when one of its controls
+    /// is under the finger (`HeldGrade.shown`), the document's otherwise. What the effect bar's rows read.
+    func effectAsShown(of target: KeyframeTarget, atFrame frame: Int) -> Effect? {
+        guard let stored = storedEffect(of: target) else { return nil }
+        let tracks = keyframeState(of: target).tracks
+        guard let grade = liveEdit?.grade, grade.target == target else {
+            return stored.resolved(atFrame: frame, through: tracks)
+        }
+        return grade.shown(stored: stored, tracks: tracks, atFrame: frame)
+    }
+
+    /// **One tick of any grade edit: `change` applied to what `target` holds**, opened at `frame` when
+    /// nothing of `target`'s is held. Held, shown by the canvas (the whole frame, redrawn as fast as the
+    /// device can) and by the bar, written nowhere — no SwiftUI pass over the editor, no bake key, no undo
+    /// step.
+    ///
+    /// **Opening one settles what else is held**, which is what keeps the slot single: an adjustable fill
+    /// or an open gradient panel outlives the finger that made it, and is landed here as its own step
+    /// (`beginCanvasEdit`) before the grade takes the slot — what the bar's touch-down undo bracket did
+    /// while a tick still wrote the document.
+    private func holdGrade(of target: KeyframeTarget, openingAt frame: Int, _ change: (inout HeldGrade) -> Void) {
+        var grade: HeldGrade
+        if let held = liveEdit?.grade, held.target == target {
+            grade = held
+        } else {
+            beginCanvasEdit()
+            grade = HeldGrade(target: target, frame: frame)
+        }
+        change(&grade)
+        holdLiveEdit(.grade(grade))
+    }
 
     /// **One tick of an effect slider: `parameter` on `target` resolves to `value` under the finger.**
-    /// Held, shown by the canvas (the whole frame, redrawn as fast as the device can) and by the
-    /// slider, written nowhere — no SwiftUI pass over the editor, no bake key, no undo step.
     ///
     /// **A live take still catches the value** (KEYFRAMES.md §5): `recordParameterSample` takes it
     /// with its wall time, the canvas shows it, and the take — not the lift — writes it, as a curve.
     func holdEffectParameter(_ target: KeyframeTarget, parameter: EffectParameter, value: Double) {
         let recorded = parameter.isScalarAnimatable
             && recordParameterSample(target, parameterID: parameter.id, value: value)
-        var grade = liveEdit?.grade.flatMap { $0.target == target ? $0 : nil }
-            ?? HeldGrade(target: target, frame: currentFrame)
-        grade.values[parameter.id] = value
-        if recorded {
-            grade.edited.remove(parameter.id)
-        } else {
-            grade.edited.insert(parameter.id)
+        holdGrade(of: target, openingAt: currentFrame) { grade in
+            grade.values[parameter.id] = value
+            if recorded {
+                grade.edited.remove(parameter.id)
+            } else {
+                grade.edited.insert(parameter.id)
+            }
         }
-        holdLiveEdit(.grade(grade))
     }
 
-    /// **The lift: every parameter the finger edited is written once**, through the routing a tick used
-    /// to take (`applyEffectParameterEdit`) at the frame the gesture began on, and the hold is let go.
-    /// Inside the caller's undo bracket, so the gesture is one step.
+    /// **One tick of a whole-effect editor: `target`'s grade is `effect`** — a Curves point dragged, a
+    /// gradient stop or a recolour entry moved, a colour picked, a toggle or a picker flipped. The lift
+    /// stores it.
+    func holdStoredEffect(_ target: KeyframeTarget, _ effect: Effect) {
+        holdGrade(of: target, openingAt: currentFrame) { $0.stored = effect }
+    }
+
+    /// **One tick of the Duplicate Offset's box: its five scalars resolve to `values` at `frame`**, the
+    /// frame the box's gesture was made on. `moved` are the ones that differ from where the gesture found
+    /// them — what the lift routes, so a box that ended where it began writes nothing.
+    func holdEffectBox(_ target: KeyframeTarget, atFrame frame: Int, values: [String: Double], moved: Set<String>) {
+        holdGrade(of: target, openingAt: frame) { grade in
+            grade.values = values
+            grade.edited = moved
+        }
+    }
+
+    /// **One tick of a graph-band drag of `target`'s effect channels: they are on `curves`.**
+    func holdEffectCurves(_ target: KeyframeTarget, _ curves: [String: AnimationCurve]) {
+        holdGrade(of: target, openingAt: currentFrame) { $0.curves.merge(curves) { $1 } }
+    }
+
+    /// **The lift: what the finger held is written once, as one undo step** — the stored grade through
+    /// `setStoredEffect`, the curves through `writeGraphNodeCurve`, every edited value through the routing
+    /// a tick used to take (`applyEffectParameterEdit`) at the frame the gesture began on — and the hold is
+    /// let go. One bracket, here, around the one write: nothing writes before it any more. The step is
+    /// named for what it wrote — keys (`.effectKeys`) when any write keyed or a curve moved, the grade
+    /// (`.valueLayerEffect`) otherwise — so an Undo of an animated drag does not read as the grade going.
     ///
-    /// - Returns: the strongest route taken — `.key` or `.seedAndKey` when any write keyed, so the
-    ///   caller can name its step — or nil when nothing was written.
+    /// **A lift that changed nothing records nothing** — a curve dragged back to where it was, a colour
+    /// picked back to the one there, a popover opened and closed: a step that undoes nothing is the
+    /// failure every bracket in this app is built to avoid.
+    ///
+    /// - Returns: the strongest route a value took — `.key` or `.seedAndKey` when any keyed — or nil
+    ///   when no value was routed.
     @discardableResult
     func commitHeldGrade() -> KeyframeControl.Write? {
         guard let grade = liveEdit?.grade else { return nil }
+        guard grade.writesAnything else {
+            endLiveEdit()
+            return nil
+        }
+        beginStructureGesture()
+        var changed = false
+        if let stored = grade.stored, stored != storedEffect(of: grade.target) {
+            setStoredEffect(of: grade.target, to: stored)
+            changed = true
+        }
+        var curvesChanged = false
+        for (id, curve) in grade.curves.sorted(by: { $0.key < $1.key })
+        where writeGraphNodeCurve(target: grade.target, parameterID: id, to: curve) {
+            curvesChanged = true
+        }
         var route: KeyframeControl.Write?
         for id in grade.edited.sorted() {
             guard let value = grade.values[id],
@@ -205,6 +290,13 @@ extension CanvasManager {
             let wrote = applyEffectParameterEdit(grade.target, parameter: parameter, newValue: value,
                                                  atFrame: grade.frame)
             if route != .key, route != .seedAndKey { route = wrote }
+            changed = true
+        }
+        if changed || curvesChanged {
+            let keyed = curvesChanged || route == .key || route == .seedAndKey
+            commitStructureGesture(label: keyed ? .effectKeys : .valueLayerEffect)
+        } else {
+            cancelStructureGesture()
         }
         endLiveEdit()
         return route
@@ -222,10 +314,19 @@ extension CanvasManager {
     func releaseTakePreview(of target: KeyframeTarget) {
         guard var grade = liveEdit?.grade, grade.target == target else { return }
         grade.values = grade.values.filter { grade.edited.contains($0.key) }
-        if grade.values.isEmpty {
-            endLiveEdit()
-        } else {
+        if grade.writesAnything {
             holdLiveEdit(.grade(grade))
+        } else {
+            endLiveEdit()
         }
+    }
+
+    /// **Whether a graph-band drag of `parameterIDs` on `target` holds a grade** — every one of them a
+    /// scalar channel of `target`'s own grade, none a pose or a target channel (`graphBandEdit` takes a
+    /// pose; a target scalar is still written as the drag goes). The band's drag asks it at touch-down.
+    func graphBandHoldsGrade(target: KeyframeTarget, parameterIDs: Set<String>) -> Bool {
+        guard !parameterIDs.isEmpty, let effect = storedEffect(of: target) else { return false }
+        let channels = Set(effect.parameters.filter(\.isScalarAnimatable).map(\.id))
+        return parameterIDs.isSubset(of: channels)
     }
 }

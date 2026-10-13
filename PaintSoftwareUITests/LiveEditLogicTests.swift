@@ -152,7 +152,6 @@ final class LiveEditLogicTests: XCTestCase {
             }
             old.manager.commitStructureGesture(label: .valueLayerEffect)
 
-            new.manager.beginStructureGesture()
             let effectBefore = new.manager.storedEffect(of: new.target)
             let stateBefore = new.manager.keyframeState(of: new.target)
             var published = 0
@@ -165,7 +164,6 @@ final class LiveEditLogicTests: XCTestCase {
             XCTAssertEqual(new.manager.storedEffect(of: new.target), effectBefore, "\(arm): a tick writes no grade")
             XCTAssertEqual(new.manager.keyframeState(of: new.target), stateBefore, "\(arm): …and no key")
             let route = new.manager.commitHeldGrade()
-            new.manager.commitStructureGesture(label: .valueLayerEffect)
 
             XCTAssertEqual(route, arm, "the lift routed through the arm a tick would have")
             XCTAssertNil(new.manager.liveEdit, "the hold is let go")
@@ -173,7 +171,10 @@ final class LiveEditLogicTests: XCTestCase {
                            "\(arm): the stored grade the lift wrote is the per-tick path's")
             XCTAssertEqual(new.manager.keyframeState(of: new.target), old.manager.keyframeState(of: old.target),
                            "\(arm): the keys, marks and baselines are the per-tick path's")
-            XCTAssertEqual(new.manager.history.undoStack.count, 1, "\(arm): one step")
+            XCTAssertEqual(new.manager.history.undoStack.count, 1, "\(arm): one step, its own bracket")
+            XCTAssertEqual(new.manager.history.undoStack.last?.label,
+                           arm == .key || arm == .seedAndKey ? .effectKeys : .valueLayerEffect,
+                           "\(arm): named for what it wrote, as the bar named the per-tick path's step")
             XCTAssertEqual(old.manager.history.undoStack.count, 1)
         }
     }
@@ -209,12 +210,10 @@ final class LiveEditLogicTests: XCTestCase {
             return try XCTUnwrap(CanvasFixture.rgbaBytes(image))
         }
         let before = try frame(holding: nil)
-        manager.beginStructureGesture()
         manager.holdEffectParameter(target, parameter: parameter, value: 1.6)
         let held = try frame(holding: manager.liveEdit)
         XCTAssertNotEqual(held, before, "the held value changes the frame")
         manager.commitHeldGrade()
-        manager.commitStructureGesture(label: .valueLayerEffect)
         XCTAssertEqual(try frame(holding: nil), held, "the bake of the written grade is the frame the finger held")
     }
 
@@ -253,6 +252,163 @@ final class LiveEditLogicTests: XCTestCase {
         XCTAssertNil(manager.commitHeldGrade(), "the lift writes nothing the take caught")
         XCTAssertEqual(manager.keyframeState(of: target), afterTake)
         XCTAssertEqual(manager.storedEffect(of: target), base)
+    }
+
+    // MARK: - The whole-effect editors, the Duplicate Offset's box and a graph-band drag (TODO (179) commit 5)
+
+    /// A grey floor under a Curves effect layer at identity — a whole-effect editor's document.
+    private func curved() -> (manager: CanvasManager, target: KeyframeTarget) {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        let floor = UIGraphicsImageRenderer(size: CanvasFixture.canvasSize, format: PixelOps.transparentFormat()).image { ctx in
+            UIColor(white: 0.4, alpha: 1).setFill()
+            ctx.fill(CGRect(x: 8, y: 8, width: 48, height: 48))
+        }
+        CanvasFixture.setBakedContent(manager, layerIndex: 0, floor)
+        manager.addValueLayer(effect: .curves(Effect.Curves()))
+        manager.currentLayerIndex = 1
+        manager.history.removeAll()
+        manager.refreshUndoRedoState()
+        return (manager, .layer(id: manager.layers[1].id))
+    }
+
+    /// One Curves point dragged up over `ticks` steps — what `CurveEditor` hands `onChange` per tick.
+    private func curveTicks(_ ticks: Int) -> [Effect] {
+        (1...ticks).map { step in
+            .curves(Effect.Curves(points: [CurvePoint(x: 0, y: 0),
+                                           CurvePoint(x: 0.5, y: 0.5 + 0.1 * Double(step)),
+                                           CurvePoint(x: 1, y: 1)]))
+        }
+    }
+
+    /// **A whole-effect editor's ticks held and one write at the lift land what a write per tick
+    /// landed** — two documents built the same way; one takes the old path (a `setStoredEffect` per
+    /// tick inside the bar's touch-down bracket), the other the new (a hold per tick, one write at the
+    /// lift). The grade, the keyframe state and the step are compared as values; a tick publishes
+    /// nothing and writes nothing.
+    @MainActor
+    func testAWholeEffectEditorsHeldTicksAndOneWriteLandWhatAWritePerTickLanded() throws {
+        let old = curved(), new = curved()
+        let ticks = curveTicks(4)
+
+        old.manager.beginStructureGesture()
+        for effect in ticks { old.manager.setStoredEffect(of: old.target, to: effect) }
+        old.manager.commitStructureGesture(label: .valueLayerEffect)
+
+        let before = new.manager.storedEffect(of: new.target)
+        var published = 0
+        let sink = new.manager.objectWillChange.sink { published += 1 }
+        for effect in ticks { new.manager.holdStoredEffect(new.target, effect) }
+        sink.cancel()
+        XCTAssertEqual(published, 0, "a tick raises no pass over the editor")
+        XCTAssertEqual(new.manager.storedEffect(of: new.target), before, "a tick writes no grade")
+        XCTAssertEqual(new.manager.effectAsShown(of: new.target, atFrame: 0), ticks.last,
+                       "…while the render walk and the bar are shown the newest")
+        new.manager.commitHeldGrade()
+
+        XCTAssertNil(new.manager.liveEdit, "the hold is let go")
+        XCTAssertEqual(new.manager.storedEffect(of: new.target), old.manager.storedEffect(of: old.target))
+        XCTAssertEqual(new.manager.keyframeState(of: new.target), old.manager.keyframeState(of: old.target))
+        XCTAssertEqual(new.manager.history.undoStack.count, 1, "one step")
+        XCTAssertEqual(new.manager.history.undoStack.last?.label, .valueLayerEffect)
+        new.manager.undo()
+        XCTAssertEqual(new.manager.storedEffect(of: new.target), before, "and one Undo takes the whole drag back")
+    }
+
+    /// **A lift that changed nothing records nothing** — a popover opened and closed on the colour it
+    /// had, a curve point put back where it was.
+    @MainActor
+    func testALiftThatChangedNothingRecordsNoStep() throws {
+        let (manager, target) = curved()
+        let stored = try XCTUnwrap(manager.storedEffect(of: target))
+        manager.holdStoredEffect(target, curveTicks(1)[0])
+        manager.holdStoredEffect(target, stored)
+        manager.commitHeldGrade()
+        XCTAssertNil(manager.liveEdit)
+        XCTAssertEqual(manager.history.undoStack.count, 0, "nothing changed, nothing recorded")
+    }
+
+    /// **The held frame is the bake of what the lift writes, for each shape of hold** — the whole-effect
+    /// editor's stored grade and a graph-band drag's curves, as `testTheHeldFrameIsTheBakeOfWhatTheLiftWrites`
+    /// is for a slider's values: the live walk before the lift against the baker's own recipe after it.
+    @MainActor
+    func testTheHeldFrameOfAStoredGradeAndOfHeldCurvesIsTheBakeOfTheLift() throws {
+        func frame(_ manager: CanvasManager, holding held: HeldEdit?) throws -> [UInt8] {
+            let recipe = try XCTUnwrap(manager.makeFrameRecipe(atFrame: manager.currentFrame, includeBackground: true,
+                                                               sizing: .liveComposite, holding: held))
+            return try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(recipe.composite(budgetBytes: manager.frameBaker.budgetBytes))))
+        }
+        let (curvesDoc, curvesTarget) = curved()
+        let rest = try frame(curvesDoc, holding: nil)
+        curvesDoc.holdStoredEffect(curvesTarget, curveTicks(3)[2])
+        let heldGrade = try frame(curvesDoc, holding: curvesDoc.liveEdit)
+        XCTAssertNotEqual(heldGrade, rest, "the held curve changes the frame")
+        curvesDoc.commitHeldGrade()
+        XCTAssertEqual(try frame(curvesDoc, holding: nil), heldGrade, "a stored grade: the bake is what was held")
+
+        let (keyed, target, _) = graded()
+        var curve = AnimationCurve()
+        curve.setKey(AnimationCurve.Key(frame: 0, value: 1.7, interpolation: .linear))
+        curve.setKey(AnimationCurve.Key(frame: 10, value: 0.3, interpolation: .linear))
+        let flat = try frame(keyed, holding: nil)
+        keyed.holdEffectCurves(target, [brightnessID: curve])
+        let heldCurves = try frame(keyed, holding: keyed.liveEdit)
+        XCTAssertNotEqual(heldCurves, flat, "the held curve changes the frame")
+        XCTAssertNil(keyed.keyframeState(of: target).tracks[brightnessID], "…and is not written while held")
+        keyed.commitHeldGrade()
+        XCTAssertEqual(keyed.keyframeState(of: target).tracks[brightnessID], curve, "the lift writes the curve")
+        XCTAssertEqual(keyed.history.undoStack.last?.label, .effectKeys, "…as keys")
+        XCTAssertEqual(try frame(keyed, holding: nil), heldCurves, "held curves: the bake is what was held")
+    }
+
+    /// **A graph-band drag holds a grade only when every channel it carries is a grade's** — a pose is a
+    /// live transform edit's, and a target scalar (Opacity) is still written as the drag goes.
+    @MainActor
+    func testAGraphBandDragHoldsAGradeOnlyForTheGradesOwnChannels() throws {
+        let (manager, target, _) = graded()
+        XCTAssertTrue(manager.graphBandHoldsGrade(target: target, parameterIDs: [brightnessID]))
+        XCTAssertTrue(manager.graphBandHoldsGrade(target: target, parameterIDs: [brightnessID, "brightnessContrast.contrast"]))
+        XCTAssertFalse(manager.graphBandHoldsGrade(target: target, parameterIDs: [brightnessID, TargetChannel.opacity.id]),
+                       "a marquee that also carries Opacity writes as it goes")
+        XCTAssertFalse(manager.graphBandHoldsGrade(target: target, parameterIDs: []))
+        XCTAssertFalse(manager.graphBandHoldsGrade(target: .layer(id: manager.layers[0].id), parameterIDs: [brightnessID]),
+                       "a layer with no grade holds none")
+    }
+
+    /// **Opening a grade settles the adjustable fill first** — one slot: the fill lands as its own step
+    /// before the grade takes it, which the bar's touch-down bracket used to do while a tick still
+    /// wrote the document.
+    @MainActor
+    func testAGradeOpenedWhileAFillIsAdjustableLandsTheFillFirst() throws {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        let ink = UIGraphicsImageRenderer(size: CanvasFixture.canvasSize, format: PixelOps.transparentFormat()).image { ctx in
+            UIColor.black.setFill()
+            for rect in [CGRect(x: 10, y: 10, width: 44, height: 3), CGRect(x: 10, y: 51, width: 44, height: 3),
+                         CGRect(x: 10, y: 10, width: 3, height: 44), CGRect(x: 51, y: 10, width: 3, height: 44)] {
+                ctx.fill(rect)
+            }
+        }
+        CanvasFixture.setBakedContent(manager, layerIndex: 0, ink)
+        manager.addLayer()
+        manager.addValueLayer(effect: .brightnessContrast(Effect.BrightnessContrast(brightness: 1, contrast: 1)))
+        let target = KeyframeTarget.layer(id: try XCTUnwrap(manager.layers.last).id)
+        manager.currentLayerIndex = 1
+        manager.brushColor = Self.red
+        manager.beginInteractiveFill(at: CGPoint(x: 30, y: 30))
+        manager.endInteractiveFill()
+        let deadline = Date().addingTimeInterval(10)
+        while manager.liveFill?.preview == nil, Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+        }
+        XCTAssertNotNil(manager.liveFill?.preview, "Fixture check: the fill is held")
+        let steps = manager.history.undoStack.count
+
+        let parameter = try XCTUnwrap(manager.storedEffect(of: target)?.parameters.first { $0.id == brightnessID })
+        manager.holdEffectParameter(target, parameter: parameter, value: 1.4)
+        XCTAssertNil(manager.liveFill, "the fill's hold is over")
+        XCTAssertNotNil(manager.liveEdit?.grade, "…and the grade holds the slot")
+        XCTAssertEqual(manager.history.undoStack.count, steps + 1, "the fill landed as its own step")
+        manager.commitHeldGrade()
+        XCTAssertEqual(manager.history.undoStack.count, steps + 2, "…and the drag is the next")
     }
 
     // MARK: - Half detail on a big scene (the owner's ruling of 2026-10-12)

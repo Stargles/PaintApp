@@ -75,10 +75,9 @@ final class RecordingLogicTests: XCTestCase {
     }
 
     /// The finger lifting off the slider, as `DrawingView` wires the bar's `onEditEnded`: the held
-    /// grade's one write, then the bracket.
-    private func lift(_ manager: CanvasManager, label: HistoryActionLabel = .valueLayerEffect) {
+    /// grade's one write, in its own bracket.
+    private func lift(_ manager: CanvasManager) {
         manager.commitHeldGrade()
-        manager.commitStructureGesture(label: label)
     }
 
     // MARK: - Arming is not starting — the owner's ruling of 2026-09-09
@@ -583,10 +582,9 @@ final class RecordingLogicTests: XCTestCase {
                       "The scratch-pad base is restored — the motion lives on the curve, not the base")
     }
 
-    /// **Two channels, and simulated slider gestures of their own nested inside the take** —
-    /// `onEditBegan`/`onEditEnded`'s real brackets, not just the recorder's outer one. Still one
-    /// undo step, and it is the take's own label that survives — `commitStructureGesture`'s own
-    /// rule, *"an inner label is discarded rather than winning."*
+    /// **Two channels, and simulated slider gestures of their own inside the take** — each lifted as
+    /// the bar lifts it. Still one undo step, and it is the take's own label — the lifts write nothing
+    /// the take caught.
     func testMultipleChannelsInOneTakeStillCostOneUndoStepEvenWithNestedSliderGestures() {
         let (manager, clock) = self.manager()
         let tgt = target(manager)
@@ -595,15 +593,13 @@ final class RecordingLogicTests: XCTestCase {
         manager.startRecording()
         let epoch = clock.now
 
-        manager.beginStructureGesture()
         drag(manager, clock, tgt, brightnessID, to: 0.1, at: epoch)
         drag(manager, clock, tgt, brightnessID, to: 1.9, at: epoch + 1.0)
-        lift(manager, label: .effectKeys)
+        lift(manager)
 
-        manager.beginStructureGesture()
         drag(manager, clock, tgt, contrastID, to: 0.3, at: epoch + 1.0)
         drag(manager, clock, tgt, contrastID, to: 1.6, at: epoch + 2.0)
-        lift(manager, label: .effectKeys)
+        lift(manager)
 
         let refusal = manager.stopRecording()
 
@@ -636,30 +632,19 @@ final class RecordingLogicTests: XCTestCase {
 
     // MARK: - The step's name when the take ends inside the gesture that started it
 
-    /// **The case arming-on-touch-down made the common one, and it is where the undo step would
-    /// start lying.**
-    ///
-    /// A take now begins on the slider's touch-down, so the recorder's bracket is the outer one and
-    /// the slider's is open inside it. The scene then runs out while the finger is still down —
-    /// which is what usually happens, since the artist drags for the whole take — so
-    /// `stopRecording`'s `commitStructureGesture(label: .recordAnimation)` closes at depth 2 and
-    /// merely decrements. The step is recorded when the artist lets go, under **the slider's**
-    /// label. `.recordAnimation` exists precisely so an artist who recorded a bloom does not read
-    /// "Adjust Layer Effect" and conclude the grade itself has gone.
-    ///
-    /// **The two operands are the label the recorder claimed and the label the slider offered**, and
-    /// they differ — which is what makes the assertion able to go red, and what makes a red one mean
-    /// the code is wrong rather than the definition.
-    func testATakeThatEndsWhileTheSliderIsStillHeldKeepsItsOwnUndoLabel() {
+    /// **A take that runs out while the slider is still held is its own step, at once, and the lift
+    /// adds nothing.** A take begins on the slider's touch-down and the scene usually runs out while the
+    /// finger is still down, since the artist drags for the whole take. The slider opens no bracket of
+    /// its own (it holds its ticks, TODO (179)), so the take's step is recorded when the take ends —
+    /// as `.recordAnimation`, so an artist who recorded a bloom does not read "Adjust Layer Effect" and
+    /// conclude the grade itself has gone — and the lift writes nothing the take caught.
+    func testATakeThatEndsWhileTheSliderIsStillHeldIsOneStepAndTheLiftAddsNone() {
         let (manager, clock) = self.manager(frames: 48)
         let tgt = target(manager)
         let before = manager.history.undoStack.count
         manager.armRecording()
 
-        // The slider's touch-down, in the order `EffectSettingsBar` reports it: the trigger first,
-        // so the take's bracket is the outer one, then the slider's own.
         manager.beginArmedTake(on: tgt)
-        manager.beginStructureGesture()
         let epoch = clock.now
         drag(manager, clock, tgt, brightnessID, to: 0.2, at: epoch)
         drag(manager, clock, tgt, brightnessID, to: 1.8, at: epoch + 1.0)
@@ -668,28 +653,23 @@ final class RecordingLogicTests: XCTestCase {
         clock.now = epoch + 47.5 / Double(manager.fps)
         manager.tickPlayback()
         XCTAssertFalse(manager.isRecording, "Setup: the take ended at the end of the scene")
-        XCTAssertEqual(manager.history.undoStack.count, before,
-                       "Setup: and it could not record its step, because the artist is still holding on")
+        XCTAssertEqual(manager.history.undoStack.count, before + 1, "The take is its step as it ends")
+        XCTAssertEqual(manager.history.undoStack.last?.label, .recordAnimation)
 
-        // The artist lets go. `DrawingView` offers the label a plain drag would earn.
+        // The artist lets go.
         lift(manager)
-
-        XCTAssertEqual(manager.history.undoStack.count, before + 1, "One step for the whole take")
-        XCTAssertEqual(manager.history.undoStack.last?.label, .recordAnimation,
-                       "The step belongs to the take that spanned the drag, not to the drag")
-        XCTAssertNotNil(manager.keyframeState(of: tgt).tracks[brightnessID],
-                        "…and it is a step over a curve, which is what makes the wrong name a lie")
+        XCTAssertEqual(manager.history.undoStack.count, before + 1, "…and the lift adds none")
+        XCTAssertNotNil(manager.keyframeState(of: tgt).tracks[brightnessID], "The take's curve is written")
+        XCTAssertNil(manager.liveEdit, "Nothing is held")
     }
 
-    /// The other operand of the claim: an ordinary slider drag with no take anywhere near it still
-    /// commits under the label its caller passed. Without this, a claim that simply never cleared
-    /// — or one hard-wired to `.recordAnimation` — would pass the test above.
+    /// The other operand: an ordinary slider drag after a take still earns its own label, so a label
+    /// hard-wired to `.recordAnimation` would not pass the test above and this one.
     func testAnOrdinarySliderDragAfterATakeStillEarnsItsOwnUndoLabel() {
         let (manager, clock) = self.manager(frames: 48)
         let tgt = target(manager)
         manager.armRecording()
         manager.beginArmedTake(on: tgt)
-        manager.beginStructureGesture()
         let epoch = clock.now
         drag(manager, clock, tgt, brightnessID, to: 0.2, at: epoch)
         drag(manager, clock, tgt, brightnessID, to: 1.8, at: epoch + 1.0)
@@ -699,12 +679,11 @@ final class RecordingLogicTests: XCTestCase {
         XCTAssertEqual(manager.history.undoStack.last?.label, .recordAnimation, "Setup")
 
         // A second drag, this time with nothing armed and nothing recording.
-        manager.beginStructureGesture()
         drag(manager, clock, tgt, contrastID, to: 1.4, at: clock.now + 0.1)
         lift(manager)
 
         XCTAssertEqual(manager.history.undoStack.last?.label, .valueLayerEffect,
-                       "The claim was spent on the take's own step and does not colour the next drag")
+                       "The take's label does not colour the next drag")
     }
 
     // MARK: - Refusals

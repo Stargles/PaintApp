@@ -42,7 +42,6 @@ struct ColorWheelsEditor: View {
     let parameters: [EffectParameter]
     var animatedChannelIDs: Set<String> = []
     var onParameterChange: (EffectParameter, Double) -> Void
-    var onEditBegan: () -> Void
     var onEditEnded: () -> Void
     var onSliderTouchDown: (EffectParameter) -> Void = { _ in }
 
@@ -79,7 +78,7 @@ struct ColorWheelsEditor: View {
     private static let doubleTapInterval: TimeInterval = 0.4
 
     /// Which wheel the live drag is on and whether it has moved past the slop — cleared on `.onEnded`,
-    /// the only place `onEditEnded` is called, so a drag that never moved closes no bracket.
+    /// the only place `onEditEnded` is called, so a drag that never moved lifts with nothing held.
     @State private var dragging: WheelID?
     @State private var didMove = false
     /// When the last inert tap landed, per wheel, for the double-tap.
@@ -221,10 +220,9 @@ struct ColorWheelsEditor: View {
                 let hueParameter = parameter(id, "hue"), satParameter = parameter(id, "saturation")
                 if !didMove {
                     didMove = true
-                    // The landing before the bracket, `sliderRow`'s own order: the take's undo step
-                    // has to be the outer one.
+                    // The landing first, `sliderRow`'s own order: the take's undo step has to be the
+                    // outer one.
                     if let hueParameter { onSliderTouchDown(hueParameter) }
-                    onEditBegan()
                 }
                 let polar = Self.polar(of: value.location, diameter: Self.discDiameter)
                 let current = id.wheel(of: wheels)
@@ -259,7 +257,6 @@ struct ColorWheelsEditor: View {
         let identity = Effect.ColorWheels.Wheel()
         let writes: [(String, Double)] = [("hue", identity.hue), ("saturation", identity.saturation),
                                           ("luminance", identity.luminance), ("strength", identity.strength)]
-        onEditBegan()
         for (field, value) in writes {
             if let parameter = parameter(id, field) { onParameterChange(parameter, value) }
         }
@@ -288,7 +285,7 @@ struct ColorWheelsEditor: View {
                 .frame(width: 46, alignment: .leading)
                 Slider(value: Binding(get: { value }, set: { onParameterChange(parameter, $0) }),
                        in: range) { editing in
-                    if editing { onSliderTouchDown(parameter); onEditBegan() } else { onEditEnded() }
+                    if editing { onSliderTouchDown(parameter) } else { onEditEnded() }
                 }
                 .controlSize(.mini)
                 .accessibilityIdentifier("effectSettings.\(parameter.controlIdentifier ?? parameter.id)")

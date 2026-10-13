@@ -241,16 +241,19 @@ struct EffectSettingsBar: View {
     /// bar's acceptance test; `testEffectSettingsBarIsShorterForFewerSliders` is a regression net.
 
     let effect: Effect
-    /// Carried purely so the two colour popovers below can be declared through
-    /// `View.canvasPresentation` — this panel reads nothing else off the manager. Threaded rather
+    /// Carried so the two colour popovers below can be declared through `View.canvasPresentation`,
+    /// and read for the grade a control under the finger holds (`shown`). Threaded rather
     /// than reached through the environment because every other view in this app takes it as a
     /// parameter, and one view that does not is one view whose dependencies do not show in its
     /// signature.
     @ObservedObject var canvasManager: CanvasManager
-    /// **What an effect slider holds while the finger is down** (TODO (179)) — the document does not
-    /// move until the lift, so every row shows `shown`, the grade with the held values in it. Observed
-    /// here so a tick redraws this bar and nothing else.
+    /// **That one of this bar's controls holds the grade** (TODO (179)) — the document does not move
+    /// until the lift, so every row shows `shown`, the grade as held. Observed here so a tick redraws
+    /// this bar and nothing else.
     @ObservedObject var liveEdit: LiveEditState
+    /// **Where a whole-effect edit goes** — one tick of the colour, toggle, picker, Curves, gradient
+    /// stop and recolour rows, the whole grade as the lift will store it. Held, like a slider's
+    /// (`CanvasManager.holdStoredEffect`), and written at `onEditEnded`.
     var onChange: (Effect) -> Void
     /// **Where a *slider* edit goes, named by the parameter that moved** — KEYFRAMES.md stage 3a.
     ///
@@ -268,23 +271,24 @@ struct EffectSettingsBar: View {
     /// Ids of the parameters this target already animates, so a row can say so. Empty for every
     /// document nobody has keyed, which is nearly all of them.
     var animatedChannelIDs: Set<String> = []
-    /// Brackets a whole slider drag into one undo step, the way the value layer's colour picker
-    /// brackets a whole picking session — see `LayerOptionsPanel.valueColorRow`.
-    var onEditBegan: () -> Void
+    /// **The lift** — a slider let go, a colour popover closed, a curve point released, a toggle or a
+    /// picker chosen. Every control above it only holds what it shows (`onChange`, `onParameterChange`:
+    /// TODO (179)), so this is where the gesture is written, once, as one undo step
+    /// (`CanvasManager.commitHeldGrade`). A control that never moved calls it with nothing held, which
+    /// writes nothing.
     var onEditEnded: () -> Void
     /// **The pencil landing on a slider** — KEYFRAMES.md §5 and the owner's 2026-09-09 ruling, which
     /// made *this* the moment a live take begins rather than the record button.
     ///
-    /// Reported at touch-down, before `onEditBegan`, and **for every slider including the ones no
+    /// Reported at touch-down, and **for every slider including the ones no
     /// curve can drive**: the parameter rides along so the model can tell the two apart and answer a
     /// landing on a stepped field out loud (`RecordingRefusal.notRecordable`) rather than by doing
     /// nothing. A stepped field looks exactly like a recordable one, which is the whole reason the
     /// filtering is not done here.
     ///
     /// **Sliders only, and that is a line rather than an omission.** A toggle, a picker and the
-    /// colour swatch call `onEditBegan` too, but none of them is a *landing*: each is one discrete
-    /// act that opens and closes its bracket in the same breath, and there is no motion for a take
-    /// to capture. Starting playback on a toggle flip would be a mode the artist did not ask for.
+    /// colour swatch are gestures too, but none of them is a *landing*: each is one discrete act that
+    /// is held and lifted in the same breath, and there is no motion for a take to capture. Starting playback on a toggle flip would be a mode the artist did not ask for.
     var onSliderTouchDown: (EffectParameter) -> Void = { _ in }
     /// **Which grade home this bar is editing** — the value the recolour's eyedropper buttons arm
     /// the tool with, so a pick lands on this node's pair and not on the brush (TODO (60)). Nil is
@@ -341,9 +345,15 @@ struct EffectSettingsBar: View {
         // the header is what a test should look for to say this is on screen.
     }
 
-    /// The grade every row shows: the document's, resolved at the playhead, with whatever an effect
-    /// slider holds in it (`liveEdit`).
-    private var shown: Effect { liveEdit.shown(effect, on: pickTarget) }
+    /// The grade every row shows: the document's, resolved at the playhead, or — while one of this
+    /// bar's controls is under the finger — what it holds (`CanvasManager.effectAsShown`, the render
+    /// walk's own read). `liveEdit` is what tells the bar a tick moved it.
+    private var shown: Effect {
+        guard liveEdit.grade != nil, let pickTarget,
+              let held = canvasManager.effectAsShown(of: pickTarget, atFrame: canvasManager.currentFrame)
+        else { return effect }
+        return held
+    }
 
     @ViewBuilder
     private var rows: some View {
@@ -363,7 +373,6 @@ struct EffectSettingsBar: View {
         case .curves(let params):
             CurveEditor(points: params.points,
                         onChange: { onChange(.curves(Effect.Curves(points: $0))) },
-                        onEditBegan: onEditBegan,
                         onEditEnded: onEditEnded)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
@@ -372,7 +381,6 @@ struct EffectSettingsBar: View {
             // pinned to x = 0 and x = 1 so the table always spans the full input range — so "start
             // over" is a button rather than a gesture nobody would find.
             actionRow("Reset Curve", systemImage: "arrow.counterclockwise", identifier: "curveReset") {
-                onEditBegan()
                 onChange(.curves(Effect.Curves()))
                 onEditEnded()
             }
@@ -397,7 +405,6 @@ struct EffectSettingsBar: View {
             GradientStopsEditor(stops: params.stops,
                                 canvasManager: canvasManager,
                                 onChange: { onChange(.gradientMap(Effect.GradientMap(stops: $0, mix: params.mix))) },
-                                onEditBegan: onEditBegan,
                                 onEditEnded: onEditEnded)
             slider("gradientMap.mix")
             note("The pixel's brightness picks a colour from the gradient.")
@@ -429,7 +436,6 @@ struct EffectSettingsBar: View {
             // so a slider would be a lie about what the control does. A button that rerolls it is what
             // the parameter actually offers. `Effect.parameters` says the same thing as `.stepped`.
             actionRow("Reroll Grain", systemImage: "die.face.5", identifier: "reseed") {
-                onEditBegan()
                 params.seed = params.seed &+ 1
                 onChange(.noise(params))
                 onEditEnded()
@@ -507,7 +513,6 @@ struct EffectSettingsBar: View {
                                  canvasManager: canvasManager,
                                  pickTarget: pickTarget,
                                  onChange: { params.entries = $0; onChange(.recolor(params)) },
-                                 onEditBegan: onEditBegan,
                                  onEditEnded: onEditEnded)
             toggleRow("Preserve Shading", isOn: params.preserveShading, identifier: "preserveShading") {
                 params.preserveShading = $0; onChange(.recolor(params))
@@ -521,12 +526,11 @@ struct EffectSettingsBar: View {
             // it: `CRTScreen.preset` reads which name the fields currently are, and a field one tick
             // off every preset reads "Custom" — so the row never claims a look the sliders have
             // left, which a stored name would the moment one moved (`Effect.CRTScreen`'s doc).
-            // One undo step per pick, bracketed like Reroll Grain: a pick is one act, not a drag.
+            // One undo step per pick, held and lifted at once like Reroll Grain: a pick is one act.
             pickerRow("Preset", current: params.preset?.rawValue ?? "Custom", identifier: "crtPreset") {
                 MenuChoices(values: Array(Effect.CRTScreen.Preset.allCases), selected: params.preset,
                             title: { $0.rawValue },
                             identifier: { "effectSettings.crtPreset.\($0.rawValue.lowercased())" }) { preset in
-                    onEditBegan()
                     onChange(.crtScreen(Effect.CRTScreen.preset(preset)))
                     onEditEnded()
                 }
@@ -553,7 +557,6 @@ struct EffectSettingsBar: View {
                 MenuChoices(values: Array(Effect.DuplicateOffset.Region.allCases), selected: params.region,
                             title: \.displayName,
                             identifier: { "effectSettings.region.\($0.rawValue)" }) { region in
-                    onEditBegan()
                     params.region = region; onChange(.duplicateOffset(params))
                     onEditEnded()
                 }
@@ -563,7 +566,6 @@ struct EffectSettingsBar: View {
             pickerRow("Blend Mode", current: params.blendMode.displayName, identifier: "blendMode") {
                 blendMenuSections(BlendMode.blendingMenuSections, selected: params.blendMode,
                                   identifierPrefix: "effectSettings.blendMode") { mode in
-                    onEditBegan()
                     params.blendMode = mode; onChange(.duplicateOffset(params))
                     onEditEnded()
                 }
@@ -587,7 +589,7 @@ struct EffectSettingsBar: View {
                 MenuChoices(values: Array(Effect.Glare.GlareType.allCases), selected: params.type,
                             title: \.displayName,
                             identifier: { "effectSettings.glareType.\($0.rawValue)" }) { type in
-                    onEditBegan(); params.type = type; onChange(.glare(params)); onEditEnded()
+                    params.type = type; onChange(.glare(params)); onEditEnded()
                 }
             }
             slider("glare.threshold")
@@ -618,7 +620,7 @@ struct EffectSettingsBar: View {
                 MenuChoices(values: Array(Effect.Guide.Mode.allCases), selected: params.mode,
                             title: \.displayName,
                             identifier: { "effectSettings.guideMode.\($0.rawValue)" }) { mode in
-                    onEditBegan(); params.mode = mode; onChange(.guide(params)); onEditEnded()
+                    params.mode = mode; onChange(.guide(params)); onEditEnded()
                 }
             }
             switch params.mode {
@@ -664,7 +666,6 @@ struct EffectSettingsBar: View {
                               parameters: shown.parameters,
                               animatedChannelIDs: animatedChannelIDs,
                               onParameterChange: onParameterChange,
-                              onEditBegan: onEditBegan,
                               onEditEnded: onEditEnded,
                               onSliderTouchDown: onSliderTouchDown)
             note("Drag a dot toward a colour to tint that range; double-tap it (or the arrow) to reset. Shadows, Midtones and Highlights overlap smoothly by lightness; Global reaches everything.")
@@ -708,8 +709,8 @@ struct EffectSettingsBar: View {
         return parameter
     }
 
-    /// One tunable number, on **one line** — label, slider, readout — with the undo bracket the mask
-    /// harness never needed, since that one wrote statics rather than the model.
+    /// One tunable number, on **one line** — label, slider, readout — held while the finger is down
+    /// and written at the lift.
     ///
     /// **It was two lines until TODO item (49), and the fold cost the slider nothing.** The bar is
     /// `BottomDock.preferredWidth` now rather than 560, and the extra width pays for exactly the
@@ -744,12 +745,12 @@ struct EffectSettingsBar: View {
             }
             .frame(width: BottomDock.sliderLabelWidth, alignment: .leading)
 
-            // **`onTouchDown` before `onEditBegan`, and the order is load-bearing.** The take's undo
-            // bracket has to be the outer one of the pair — `commitStructureGesture`'s rule is that
-            // the step belongs to the action that spans the others, and a take spans this drag and
-            // any others the artist makes before the scene runs out.
+            // **The take's bracket opens at touch-down and the drag's only at its lift**, inside it —
+            // `commitStructureGesture`'s rule is that the step belongs to the action that spans the
+            // others, and a take spans this drag and any others the artist makes before the scene runs
+            // out.
             Slider(value: Binding(get: { value }, set: change), in: range) { editing in
-                if editing { onTouchDown(); onEditBegan() } else { onEditEnded() }
+                if editing { onTouchDown() } else { onEditEnded() }
             }
             .accessibilityIdentifier("effectSettings.\(identifier)")
             // The number, not the label — a test asserting a drag landed reads this rather than
@@ -770,7 +771,7 @@ struct EffectSettingsBar: View {
     private func toggleRow(_ label: String, isOn: Bool, identifier: String,
                            onChange change: @escaping (Bool) -> Void) -> some View {
         Toggle(isOn: Binding(get: { isOn }, set: { newValue in
-            onEditBegan(); change(newValue); onEditEnded()
+            change(newValue); onEditEnded()
         })) {
             Text(label).font(.system(size: 12)).foregroundColor(.white.opacity(0.85))
         }
@@ -822,15 +823,11 @@ struct EffectSettingsBar: View {
     /// rather than a second colour UI. `CodableColor` is what `Outline` stores and what the manifest
     /// already speaks, so nothing here needs a new representation.
     ///
-    /// **The bracket is the popover's lifetime, not the write's**, which is `EffectSettingsBar`'s
-    /// whole undo rule applied to the one control that has no `onEditingChanged`. A picker on a
-    /// `Binding` writes on every tick of its own sliders, so wrapping each write in
-    /// `onEditBegan`/`onEditEnded` would record an undo step per tick — the exact failure the
-    /// `Slider` rows above avoid. `LayerOptionsPanel.valueColorRow` solved this first, the same way:
-    /// a swatch that opens the picker, and `showingColorPicker`'s transitions standing in for the
-    /// drag's beginning and end. That reasoning is unchanged by the picker behind the swatch becoming
-    /// `ColorPickerPanel` — it writes through its binding on every drag tick exactly as the stock
-    /// control did.
+    /// **The gesture is the popover's lifetime, not one pick**, which is `EffectSettingsBar`'s whole
+    /// undo rule applied to the one control that has no `onEditingChanged`. A picker on a `Binding`
+    /// reports every tick of its own sliders, each held (`onChange`, TODO (179)), and its dismissal is
+    /// the lift that writes the last of them as one step — `showingColorPicker`'s close standing in for
+    /// a drag's end, as `LayerOptionsPanel.valueColorRow` first did.
     ///
     /// **`presentation` is a parameter rather than a hard-coded `.effectOutlineColour` since TODO
     /// (60)**, when Bloom became this row's second caller. The two can never be on screen at once —
@@ -856,16 +853,15 @@ struct EffectSettingsBar: View {
             // The hex rather than the resolved `Color`, for `blendModeRow`'s reason: it survives the
             // panel closing and reopening, so a test can confirm the pick reached the model.
             .accessibilityValue(color.color.hexString)
-            // The bracket is `onPresent`/`onDismiss` rather than `.onChange(of: showingColorPicker)`
-            // for `LayerOptionsPanel.valueColorRow`'s reason: `.onChange` is silent when the *host*
-            // is deleted with the picker still up, which is what a canvas touch does to this whole
-            // rail. The modifier runs `onDismiss` however the presentation ends, so this panel
-            // needs no `.onDisappear` — and must not have one, since two of them would close the
-            // bracket twice.
+            // The lift is `onDismiss` rather than `.onChange(of: showingColorPicker)` for
+            // `LayerOptionsPanel.valueColorRow`'s reason: `.onChange` is silent when the *host* is
+            // deleted with the picker still up, which is what a canvas touch does to this whole rail.
+            // The modifier runs `onDismiss` however the presentation ends, so this panel needs no
+            // `.onDisappear` — and must not have one, since two of them would write the gesture twice.
             .colorPickerPopover(presentation, isPresented: $showingColorPicker,
                                 canvasManager: canvasManager,
                                 color: Binding(get: { color.color }, set: { change($0.effectColor) }),
-                                onPresent: onEditBegan, onDismiss: onEditEnded)
+                                onDismiss: onEditEnded)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
@@ -1007,7 +1003,6 @@ func optionsSubMenuHeader(title: String,
 struct CurveEditor: View {
     let points: [CurvePoint]
     var onChange: ([CurvePoint]) -> Void
-    var onEditBegan: () -> Void
     var onEditEnded: () -> Void
 
     /// A fixed square rather than a `GeometryReader`. The panel is a fixed 240pt rail and this sits
@@ -1023,7 +1018,7 @@ struct CurveEditor: View {
 
     /// Which handle the live gesture grabbed, and whether it has moved far enough to be a drag. Both
     /// are cleared on `.onEnded`, which is also the only place `onEditEnded` is called — so a drag
-    /// that never moved closes no bracket, because it never opened one.
+    /// that never moved lifts with nothing held, and writes nothing.
     @State private var dragIndex: Int?
     @State private var didMove = false
 
@@ -1151,7 +1146,6 @@ struct CurveEditor: View {
                 guard let index = dragIndex, points.indices.contains(index) else { return }
                 if !didMove {
                     didMove = true
-                    onEditBegan()
                 }
                 onChange(moving(index, to: modelPoint(value.location)))
             }
@@ -1167,7 +1161,6 @@ struct CurveEditor: View {
                 // A tap. On a handle it removes it, on empty graph it adds one — the two halves of
                 // one gesture, because a curve editor with separate add and remove buttons makes the
                 // artist name a point before they can delete it.
-                onEditBegan()
                 if let index = dragIndex {
                     onChange(removing(index))
                 } else {
@@ -1244,10 +1237,9 @@ struct GradientStopsEditor: View {
     /// popover can be declared through `View.canvasPresentation`.
     @ObservedObject var canvasManager: CanvasManager
     var onChange: ([GradientStop]) -> Void
-    var onEditBegan: () -> Void
     var onEditEnded: () -> Void
 
-    /// Which stop's colour popover is open, if any — the swatch-opens-a-picker bracket
+    /// Which stop's colour popover is open, if any — the swatch-opens-a-picker gesture
     /// `EffectSettingsBar.colorRow` explains, one row at a time.
     @State private var colorPickerIndex: Int?
 
@@ -1261,9 +1253,9 @@ struct GradientStopsEditor: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
-        // No `.onDisappear` closing the bracket here any more: `View.canvasPresentation` on the row
-        // below runs `onDismiss` when the host is deleted as well as when the flag goes false, and a
-        // second closer would decrement the bracket twice.
+        // No `.onDisappear` lifting here: `View.canvasPresentation` on the row below runs `onDismiss`
+        // when the host is deleted as well as when the flag goes false, and a second lift would be
+        // one too many.
     }
 
     private var preview: some View {
@@ -1304,7 +1296,7 @@ struct GradientStopsEditor: View {
             .buttonStyle(.plain)
             .accessibilityIdentifier("effectSettings.gradientStop.\(index).color")
             .accessibilityValue(stops[index].color.color.hexString)
-            // The bracket is the popover's lifetime, `colorRow`'s rule — stated per row rather than
+            // The gesture is the popover's lifetime, `colorRow`'s rule — stated per row rather than
             // once for the editor because `colorPickerIndex` changing from one row to another is a
             // close *and* an open, and a single observer would see one transition where there are
             // two. Every row carries the same `CanvasPresentation` case: only one can be open at a
@@ -1324,7 +1316,7 @@ struct GradientStopsEditor: View {
                                         onChange(updated)
                                     }),
                                 supportsOpacity: false,
-                                onPresent: onEditBegan, onDismiss: onEditEnded)
+                                onDismiss: onEditEnded)
 
             Slider(value: Binding(
                 get: { stops.indices.contains(index) ? stops[index].position : 0 },
@@ -1335,13 +1327,12 @@ struct GradientStopsEditor: View {
                     onChange(updated)
                 }
             ), in: 0...1) { editing in
-                if editing { onEditBegan() } else { onEditEnded() }
+                if !editing { onEditEnded() }
             }
             .accessibilityIdentifier("effectSettings.gradientStop.\(index).position")
             .accessibilityValue(String(format: "%.4f", stops.indices.contains(index) ? stops[index].position : 0))
 
             Button {
-                onEditBegan()
                 var updated = stops
                 updated.remove(at: index)
                 onChange(updated)
@@ -1361,7 +1352,6 @@ struct GradientStopsEditor: View {
 
     private var addButton: some View {
         Button {
-            onEditBegan()
             onChange(stops + [GradientStop(position: 0.5, color: CodableColor(red: 0.5, green: 0.5, blue: 0.5, alpha: 1))])
             onEditEnded()
         } label: {
@@ -1404,7 +1394,6 @@ struct RecolorEntriesEditor: View {
     @ObservedObject var canvasManager: CanvasManager
     let pickTarget: KeyframeTarget?
     var onChange: ([RecolorEntry]) -> Void
-    var onEditBegan: () -> Void
     var onEditEnded: () -> Void
 
     /// Which swatch's colour popover is open — `(index, end)`, one at a time, the
@@ -1435,7 +1424,6 @@ struct RecolorEntriesEditor: View {
                 eyedropperButton(index, .to)
                 Spacer()
                 Button {
-                    onEditBegan()
                     var updated = entries
                     updated.remove(at: index)
                     onChange(updated)
@@ -1488,7 +1476,7 @@ struct RecolorEntriesEditor: View {
                                 get: { color(index, end).color },
                                 set: { picked in write(index, end, picked.effectColor) }),
                             supportsOpacity: false,
-                            onPresent: onEditBegan, onDismiss: onEditEnded)
+                            onDismiss: onEditEnded)
     }
 
     /// Arms the eyedropper for this swatch. **Selected while armed for exactly this swatch**, so the
@@ -1538,7 +1526,7 @@ struct RecolorEntriesEditor: View {
                     onChange(updated)
                 }
             ), in: range) { editing in
-                if editing { onEditBegan() } else { onEditEnded() }
+                if !editing { onEditEnded() }
             }
             .accessibilityIdentifier("effectSettings.recolorEntry.\(index).\(identifier)")
             .accessibilityValue(String(format: "%.4f", value))
@@ -1553,7 +1541,6 @@ struct RecolorEntriesEditor: View {
     private var addButton: some View {
         let atCap = entries.count >= Effect.maxRecolorEntries
         return Button {
-            onEditBegan()
             onChange(entries + [RecolorEntry.blank])
             onEditEnded()
         } label: {

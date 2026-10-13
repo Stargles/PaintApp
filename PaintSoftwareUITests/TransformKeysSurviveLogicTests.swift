@@ -414,10 +414,10 @@ final class TransformKeysSurviveLogicTests: XCTestCase {
         XCTAssertNil(manager.floatingPiece, "A tool switch does")
     }
 
-    /// **An effect box in the middle of a drag does hold the autosave** — its grade preview is written
-    /// (`BoxNudge.foundGrade`), and is not yet an edit — and lets it go at the lift, which lands the
-    /// drag as one step and leaves the box up.
-    func testAnEffectBoxMidDragHoldsTheAutosaveUntilItsLift() throws {
+    /// **An effect box in the middle of a drag holds nothing a save needs** — its grade preview is held
+    /// off the document (`HeldGrade`, TODO (179)), as a transformation layer's pose is — and its lift
+    /// lands the drag as one step and leaves the box up.
+    func testAnEffectBoxMidDragHoldsNoSaveAndItsLiftIsOneStep() throws {
         let manager = CanvasFixture.manager(layerCount: 1)
         manager.addValueLayer(effect: .duplicateOffset(Effect.DuplicateOffset(offsetX: 6)))
         let index = manager.layers.count - 1
@@ -425,13 +425,15 @@ final class TransformKeysSurviveLogicTests: XCTestCase {
         XCTAssertTrue(manager.beginEffectBoxMove(for: .layer(id: manager.layers[index].id)))
         XCTAssertFalse(manager.hasInteractiveStatePending, "A box nobody has dragged holds nothing")
         let steps = manager.history.undoStack.count
+        let before = manager.layers[index].effect
 
         var box = try XCTUnwrap(manager.floatingPiece).transform
         box.position.x += 10
         manager.updateFloatingPose(transform: box, distortQuad: nil)
-        XCTAssertTrue(manager.hasInteractiveStatePending, "Mid-drag, the save waits for the written preview")
+        XCTAssertFalse(manager.hasInteractiveStatePending, "Mid-drag, the save has nothing to wait for")
+        XCTAssertEqual(manager.layers[index].effect, before, "…because the drag is written nowhere yet")
         manager.settleBoxNudge()
-        XCTAssertFalse(manager.hasInteractiveStatePending, "Let go, it does not")
+        XCTAssertNotEqual(manager.layers[index].effect, before, "It lands at the lift")
         XCTAssertEqual(manager.history.undoStack.count, steps + 1, "…and the drag is one step")
         XCTAssertNotNil(manager.floatingPiece, "…with the box still up")
     }

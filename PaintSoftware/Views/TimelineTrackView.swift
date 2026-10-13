@@ -845,8 +845,13 @@ struct TimelineTrackView: UIViewRepresentable {
             var didMove = false
             /// Whether any write actually changed the document, so a drag that resolved to the frame
             /// and value it started on cancels its bracket instead of recording an empty undo step.
-            /// Only a drag that writes as it goes sets it — a pose drag holds its curves instead.
+            /// Only a drag that writes as it goes sets it — a pose or a grade drag holds its curves.
             var didWrite = false
+            /// **Whether this drag holds a grade's curves** (`CanvasManager.graphBandHoldsGrade`) — a
+            /// drag of effect channels only, which holds them off the document until the lift
+            /// (`CanvasManager.holdEffectCurves`, TODO (179)) while the canvas composites the whole
+            /// frame from them, and whose lift writes them as one step.
+            var holdsGrade = false
             /// **Whether this drag began a live transform edit** (`CanvasManager.graphBandEdit`) — a
             /// pose drag, which holds its curves off the document until the lift
             /// (`CanvasManager.holdLivePose`, TODO (154)) rather than writing them on every tick, and
@@ -994,6 +999,9 @@ struct TimelineTrackView: UIViewRepresentable {
             if let edit = canvasManager.graphBandEdit(target: content.target, parameterIDs: grabbedIDs) {
                 canvasManager.beginLiveTransformEdit(edit)
                 graphBandDrag?.beganLiveEdit = true
+            } else {
+                graphBandDrag?.holdsGrade = canvasManager.graphBandHoldsGrade(target: content.target,
+                                                                             parameterIDs: grabbedIDs)
             }
         }
 
@@ -1012,11 +1020,11 @@ struct TimelineTrackView: UIViewRepresentable {
             if !drag.didMove {
                 drag.didMove = true
                 // One bracket for the whole drag, opened here rather than at touch-down: this is the
-                // moment the gesture stops being a candidate tap. `setEffectParameterTrack` records
+                // moment the gesture stops being a candidate tap. `writeGraphNodeCurve`'s stores record
                 // nothing while a gesture snapshot is open, so the N writes below — one per channel
-                // per tick — collapse into the single step `commitStructureGesture` records. A pose
-                // drag needs none: it writes once, at the lift, as one step of its own.
-                if !drag.beganLiveEdit, !drag.carried.isEmpty || drag.handle != nil {
+                // per tick — collapse into the single step `commitStructureGesture` records. A pose or
+                // a grade drag needs none: it writes once, at the lift, as one step of its own.
+                if !drag.beganLiveEdit, !drag.holdsGrade, !drag.carried.isEmpty || drag.handle != nil {
                     canvasManager.beginStructureGesture()
                 }
             }
@@ -1091,12 +1099,14 @@ struct TimelineTrackView: UIViewRepresentable {
 
         /// **Hands one tick's curves on.** A pose drag holds them off the document
         /// (`CanvasManager.holdLivePose`, TODO (154)): the canvas re-poses its bands from them on the
-        /// spot and nothing else in the editor runs. Any other drag — a grade, a target scalar — writes
-        /// them, because the canvas can show those only by compositing the document; that write is a
-        /// SwiftUI pass over the editor, and it is the price of seeing the grade change live.
+        /// spot and nothing else in the editor runs. A grade drag holds them too
+        /// (`CanvasManager.holdEffectCurves`, TODO (179)), and the canvas composites the whole frame
+        /// from them. A drag of a target scalar still writes them, a SwiftUI pass over the editor a tick.
         private func carry(_ curves: [String: AnimationCurve], of drag: GraphBandDrag) {
             if drag.beganLiveEdit {
                 canvasManager.holdLivePose(curves, of: drag.target)
+            } else if drag.holdsGrade {
+                canvasManager.holdEffectCurves(drag.target, curves)
             } else if writeGraphBandCurves(curves, target: drag.target) {
                 graphBandDrag?.didWrite = true
             }
@@ -1104,10 +1114,10 @@ struct TimelineTrackView: UIViewRepresentable {
 
         /// **Redraws the band for the tick just carried** — last, after the rings, the readout and the
         /// focus have followed the keys, so `layoutGraphBand`'s prune never sees a focus a frame
-        /// behind its node. A held pose redraws the band alone; a written one takes the layout pass
-        /// the document moved.
+        /// behind its node. A held pose or grade redraws the band alone; a written one takes the layout
+        /// pass the document moved.
         private func redrawGraphBand(after drag: GraphBandDrag) {
-            if drag.beganLiveEdit {
+            if drag.beganLiveEdit || drag.holdsGrade {
                 redrawHeldGraphBand()
             } else {
                 relayout()
@@ -1121,15 +1131,19 @@ struct TimelineTrackView: UIViewRepresentable {
                                  visibleX: visibleBandX)
         }
 
-        /// **What the band shows of `content`**: the held pose's curves in place of the document's
-        /// while a drag holds one (`CanvasManager.livePose`, TODO (154)), and `content` otherwise. Asked
-        /// by every path that hands the band its content, so a layout pass that lands mid-drag —
-        /// something else in the editor publishing — draws the finger's curves and not the document's.
+        /// **What the band shows of `content`**: the held pose's or grade's curves in place of the
+        /// document's while a drag holds them (`CanvasManager.livePose`, TODO (154); `HeldGrade.curves`,
+        /// TODO (179)), and `content` otherwise. Asked by every path that hands the band its content, so
+        /// a layout pass that lands mid-drag — something else in the editor publishing — draws the
+        /// finger's curves and not the document's.
         private func shownGraphBand(_ content: TimelineGraphBand.Content) -> TimelineGraphBand.Content {
-            guard let held = canvasManager.livePose, content.target == .layer(id: held.layerID) else {
-                return content
+            if let held = canvasManager.livePose, content.target == .layer(id: held.layerID) {
+                return content.holding(held.curves, contentEndFrame: canvasManager.contentEndFrame)
             }
-            return content.holding(held.curves, contentEndFrame: canvasManager.contentEndFrame)
+            if let grade = canvasManager.liveEdit?.grade, content.target == grade.target, !grade.curves.isEmpty {
+                return content.holding(grade.curves, contentEndFrame: canvasManager.contentEndFrame)
+            }
+            return content
         }
 
         private func finishGraphBandTouch(at point: CGPoint) {
@@ -1246,12 +1260,21 @@ struct TimelineTrackView: UIViewRepresentable {
                 canvasManager.endLiveTransformEdit()
                 if cancelled { redrawHeldGraphBand() }
             }
+            // A grade drag's the same way: the lift writes what it held as one step, a cancel lets it go.
+            if drag.holdsGrade {
+                if cancelled {
+                    canvasManager.revertHeldGrade()
+                    redrawHeldGraphBand()
+                } else {
+                    canvasManager.commitHeldGrade()
+                }
+            }
             guard drag.didMove else { return }
             if cancelled {
                 graphBandSelection = drag.startSelection
                 graphBandView.setSelection(graphBandSelection)
             }
-            guard !drag.beganLiveEdit, !drag.carried.isEmpty || drag.handle != nil else { return }
+            guard !drag.beganLiveEdit, !drag.holdsGrade, !drag.carried.isEmpty || drag.handle != nil else { return }
             if cancelled {
                 var restored: [String: AnimationCurve] = [:]
                 for channel in drag.channels where drag.carried.contains(where: {

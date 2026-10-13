@@ -1150,12 +1150,16 @@ extension CanvasManager {
         return held?.pose?.containerPose(ofLayer: layers[index].id) ?? stored
     }
 
-    /// **A grade as the walk shows it** — the finger's where an effect slider holds one of `target`'s
-    /// parameters (`HeldGrade`), the document's resolved at this frame otherwise. The walk's only read
-    /// of a held grade, for a layer and a folder alike.
-    private func shownEffect(_ effect: Effect?, of target: KeyframeTarget, holding held: HeldEdit?) -> Effect? {
-        guard let effect, let grade = held?.grade, grade.target == target else { return effect }
-        return grade.applied(to: effect)
+    /// **A grade as the walk shows it at `frame`** — `stored` resolved through `tracks`, or, where one
+    /// of `target`'s controls is under the finger, the grade as the finger holds it (`HeldGrade.shown`).
+    /// The walk's only read of a grade, for a layer and a folder alike.
+    private func shownEffect(stored: Effect?, tracks: [String: AnimationCurve], atFrame frame: Int,
+                             of target: KeyframeTarget, holding held: HeldEdit?) -> Effect? {
+        guard let stored else { return nil }
+        guard let grade = held?.grade, grade.target == target else {
+            return stored.resolved(atFrame: frame, through: tracks)
+        }
+        return grade.shown(stored: stored, tracks: tracks, atFrame: frame)
     }
 
     /// §4.4's map on its own, for the two callers that want the poses without the nodes —
@@ -1349,7 +1353,8 @@ extension CanvasManager {
                 // `.normal` pin for the frames outside the bar, which is what a leaf that contributes
                 // nothing should look like to the tree.
                 let effect = activeCelIndex(inLayer: index, atFrame: entryFrame) != nil
-                    ? shownEffect(layer.layerEffect(atFrame: entryFrame), of: .layer(id: layer.id), holding: held)
+                    ? shownEffect(stored: layer.layerEffect, tracks: layer.effectTracks, atFrame: entryFrame,
+                                  of: .layer(id: layer.id), holding: held)
                     : nil
                 // **The one place a leaf's pose is recorded.** Absent rather than present-and-identity
                 // for `TransformTrack.mapping(atCelLocalFrame:)`'s reason reached from the tree side:
@@ -1364,8 +1369,8 @@ extension CanvasManager {
                 if entryFrame != documentFrame { frames[index] = entryFrame }
                 result.append(RenderNode(id: layer.id, content: .leaf(layerIndex: index),
                                   // **Resolved at this frame** — TODO (21)'s keyframable opacity,
-                                  // and the seam is the one `layerEffect(atFrame:)` already cut two
-                                  // lines up. The compositor receives a number, so it never learns
+                                  // and the seam is the one `shownEffect` already cut for the grade
+                                  // above. The compositor receives a number, so it never learns
                                   // that opacity can be animated, and `FrameBakeKey` digests
                                   // `node.opacity` and therefore varies per frame for free. A layer
                                   // with no curve returns the stored value byte for byte, which is
@@ -1503,14 +1508,14 @@ extension CanvasManager {
                                   // form cannot have. An effect node is an ordinary `.stack` folder
                                   // carrying a grade, so neither clause above fires on it.
                                   //
-                                  // **`resolvedEffect(atFrame:)`, never the `effect` field** — the
-                                  // same rule the leaf above follows with `layerEffect(atFrame:)`,
-                                  // and for the same reason: the accessor is where a keyframe track
-                                  // lands, and a raw field read is a grade frozen at whatever the
-                                  // artist last typed. Today the two answer identically, which is
-                                  // exactly what makes the mistake invisible until it is expensive.
-                                  effect: shownEffect(folder.resolvedEffect(atFrame: entryFrame),
-                                                      of: .folder(id: folder.id), holding: held)))
+                                  // **Resolved through its tracks, never the `effect` field as it
+                                  // stands** — `shownEffect` does what `resolvedEffect(atFrame:)`
+                                  // does, as the leaf above, and for the same reason: the tracks are
+                                  // where a keyframe lands, and a raw field read is a grade frozen at
+                                  // whatever the artist last typed.
+                                  effect: shownEffect(stored: folder.effect, tracks: folder.effectTracks,
+                                                      atFrame: entryFrame, of: .folder(id: folder.id),
+                                                      holding: held)))
             }
         }
         return result

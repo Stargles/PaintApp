@@ -35,10 +35,10 @@ final class EffectSliderLiveUITests: PaintUITestCase {
     }
 
     /// A new document of `size` (the picker's default when nil) with the bake slowed, a line on Layer 1,
-    /// then `+` → Value Layer → Brightness / Contrast, which leaves the new effect layer selected;
-    /// closing the rail puts its settings bar on screen. Returns the canvas, its paper and the slider.
-    private func openBrightnessEffect(_ app: XCUIApplication, size: CGSize? = nil) throws
-        -> (canvas: XCUIElement, paper: CGRect, brightness: XCUIElement) {
+    /// then `+` → Value Layer → the grade `slug` names, which leaves the new effect layer selected;
+    /// closing the rail puts its settings bar on screen. Returns the canvas and its paper.
+    private func openEffect(_ app: XCUIApplication, slug: String, size: CGSize? = nil) throws
+        -> (canvas: XCUIElement, paper: CGRect) {
         app.launchArguments += ["-uiTestSlowBakeMillis", "\(Int(Self.bakeDelay * 1000))"]
         XCTAssertTrue(launchIntoEditor(app, size: size), "setup: a brand-new document")
         let canvas = app.otherElements["canvas.host"]
@@ -47,10 +47,17 @@ final class EffectSliderLiveUITests: PaintUITestCase {
         setBrushSize(app, normalized: 0.3)
         drawLine(on: canvas, from: onHost(paper, 0.15, 0.3), to: onHost(paper, 0.45, 0.3))
         openLayerPanel(app)
-        addEffectLayerFromAddMenu(app)
+        addEffectLayerFromAddMenu(app, slug: slug)
         closeLayerRail(app)
         XCTAssertTrue(waitForSandwichState(app, "rest", timeout: 30,
                                            "PREMISE: the effect engages the compositor and its bake lands"))
+        return (canvas, paper)
+    }
+
+    /// `openEffect` for Brightness / Contrast, with its Brightness slider.
+    private func openBrightnessEffect(_ app: XCUIApplication, size: CGSize? = nil) throws
+        -> (canvas: XCUIElement, paper: CGRect, brightness: XCUIElement) {
+        let (canvas, paper) = try openEffect(app, slug: "brightnesscontrast", size: size)
         let brightness = app.sliders["effectSettings.brightness"]
         XCTAssertTrue(brightness.waitForExistence(timeout: 5), "the effect's bar is up with its Brightness slider")
         return (canvas, paper, brightness)
@@ -156,5 +163,63 @@ final class EffectSliderLiveUITests: PaintUITestCase {
         wait(for: [XCTNSPredicateExpectation(predicate: landed, object: nil)], timeout: Self.bakeDelay + 20)
         XCTAssertEqual(readField(app, "picture:"), "bake@2400x2400", "the lift landed at full detail")
         attachScreenshot(app, "big-scene-after-the-bake")
+    }
+
+    /// **A Curves point dragged redraws the whole frame live and writes the document once, at the
+    /// lift** — the whole-effect editors' hold (TODO (179)), from a new document, the artist's way:
+    /// `+` → Value Layer → Curves, then the curve's white end dragged halfway down the graph and held.
+    /// The paper darkens while the finger is still on the point (read from another thread), the canvas
+    /// is raised no SwiftUI pass a tick, the held frame is still up straight after the lift though the
+    /// bake is slowed, the bake lands the same picture, and one Undo takes the drag back.
+    func testDraggingACurvesPointRedrawsTheFrameLiveAndTheLiftIsOneStep() throws {
+        let app = XCUIApplication()
+        let (canvas, paper) = try openEffect(app, slug: "curves")
+        let graph = app.descendants(matching: .any)["effectSettings.curveGraph"]
+        XCTAssertTrue(graph.waitForExistence(timeout: 5), "the Curves bar is up with its graph")
+        let curveBefore = try XCTUnwrap(graph.value as? String)
+        let probe = paperPatch(canvas, paper, x: 0.55...0.85, y: 0.12...0.24)
+        assertAboveTheDock(app, canvas, dy: onHost(paper, 0, 0.24).dy, "the paper probe's lowest row")
+        let paperBefore = try XCTUnwrap(meanLuma(readScreenNow(probe)), "PREMISE: the paper can be read")
+        XCTAssertGreaterThan(paperBefore, 200, "PREMISE: the paper is white before the drag (\(paperBefore))")
+        let heldBefore = try XCTUnwrap(Int(readField(app, "held:")))
+        let passesBefore = try XCTUnwrap(Int(readField(app, "passes:")))
+
+        // The white end sits at the graph's top-right corner (`CurveEditor.position`); a touch beside it
+        // grabs it, the editor's hit radius being far wider than the dot.
+        let start = graph.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 0)).withOffset(CGVector(dx: -3, dy: 3))
+        let held = samplesDuring(probe, "curve point drag") {
+            start.press(forDuration: 0.3, thenDragTo: start.withOffset(CGVector(dx: 0, dy: graph.frame.height * 0.5)),
+                        withVelocity: XCUIGestureVelocity(60), thenHoldForDuration: 4.0)
+        }
+        let afterLift = try XCTUnwrap(meanLuma(readScreenNow(probe)))
+        attachScreenshot(app, "curves-straight-after-the-lift")
+        let midDrag = held.compactMap { meanLuma($0.pixels) }
+        let note = XCTAttachment(string: "paper luma before \(paperBefore); while held: "
+                                 + midDrag.map { String(format: "%.0f", $0) }.joined(separator: " ")
+                                 + String(format: "; straight after the lift %.0f", afterLift))
+        note.lifetime = .keepAlways
+        add(note)
+        XCTAssertTrue(midDrag.contains { $0 < paperBefore - 40 },
+                      "while the finger was on the point the paper never darkened (\(midDrag.count) samples)")
+        let frames = try XCTUnwrap(Int(readField(app, "held:"))) - heldBefore
+        XCTAssertGreaterThan(frames, 1, "the whole frame was redrawn \(frames) times across the drag")
+        let passes = try XCTUnwrap(Int(readField(app, "passes:"))) - passesBefore
+        XCTAssertLessThanOrEqual(passes, 3, "\(passes) SwiftUI passes reached the canvas across the drag and its lift — "
+                                 + "a tick that writes the document is one pass each")
+        XCTAssertLessThan(afterLift, paperBefore - 40,
+                          "straight after the lift the canvas showed the old picture while the bake ran (\(afterLift))")
+
+        XCTAssertNotEqual(graph.value as? String, curveBefore, "PREMISE: the drag moved the curve's white end")
+        XCTAssertTrue(waitForSandwichState(app, "rest", timeout: 30, "the written curve's bake lands"))
+        Thread.sleep(forTimeInterval: Self.bakeDelay + 1)
+        let landed = try XCTUnwrap(meanLuma(readScreenNow(probe)))
+        XCTAssertEqual(landed, afterLift, accuracy: 12, "the bake of the written curve is the picture the finger held")
+
+        app.buttons["sideToolbar.undoButton"].tap()
+        Thread.sleep(forTimeInterval: Self.bakeDelay + 1)
+        XCTAssertTrue(waitForSandwichState(app, "rest", timeout: 30, "the undone curve's bake lands"))
+        let undone = try XCTUnwrap(meanLuma(readScreenNow(probe)))
+        XCTAssertGreaterThan(undone, paperBefore - 15, "one Undo takes the whole drag back (\(undone))")
+        XCTAssertEqual(graph.value as? String, curveBefore, "…and the curve with it")
     }
 }
