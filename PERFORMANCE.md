@@ -5868,10 +5868,9 @@ rate under the finger is unchanged and what is gone is everything the frame cost
 ### 29.5 What is left
 
 - **The picker the edit is driven from cost more per tick than the edit did** — §31.
-- **The other slider-shaped edits write the document per tick too** — the layer panel's Opacity slider,
-  the mask tuning and text panels' sliders. Each is a bake key and a re-minted pair per tick. The effect
-  parameter sliders were the first of them held, with a whole-frame held picture of their own (§30, TODO
-  (179)); the rest are that item's later commits.
+- **The other slider-shaped edits wrote the document per tick too.** The effect bar and the layer panel's
+  Opacity and transform-mode sliders hold now (§30, §30.5, TODO (179)); the text panel's sliders are that
+  item's later commits, and mask tuning is (35)'s.
 - **The device.** The fix is measured by what the app hands Core Animation, not by what `backboardd`
   holds; the iPad should run `-playbackProbe -probeMode recolour` (arguments in `PlaybackProbe`'s header)
   and the owner's own document is the check.
@@ -5942,8 +5941,8 @@ column still rendered every tick.
 
 - **The device.** As §29: the render server's side is out of process in the simulator, and the iPad's
   composite is slower than this host's. `-playbackProbe -probeMode effect` runs on the iPad as it is.
-- The onion skin off, the Opacity slider (TODO (179)'s commit 6, `-probeMode opacity` then), and a take — a
-  slider recorded while the scene plays shows the held frame at each frame it is minted on.
+- The onion skin off, and a take — a slider recorded while the scene plays shows the held frame at each frame
+  it is minted on. The Opacity slider is §30.5.
 
 ### 30.4 Half detail on a big scene — the owner's ruling, measured (2026-10-13)
 
@@ -5970,6 +5969,30 @@ detail. **MEASURED** as §30.1 — Release, iPad (9th generation) simulator, `-p
 - **The lift** is unchanged: the two frames' bakes land 1.3 s apart after it in both columns (2,525–2,935 ms
   of `bakeComposite`), and the half-detail frame stays up until the first does (`HeldFrameLanding`).
 - At or below the threshold nothing changed — 2048×1024 and the picker's default 2048² draw at full detail.
+
+### 30.5 The Opacity slider holds too (TODO (179) commit 6, 2026-10-13)
+
+A layer's Opacity slider wrote the document on every tick (`applyTargetChannelEdit` inside the rail's
+touch-down bracket). It holds now (`holdTargetChannel`) and writes once at the lift; where the compositor
+draws the canvas the held frame is composited from it (lane F, at half detail above the threshold), and where
+Core Animation does it is the host's alpha. **MEASURED** with `-probeMode opacity` (new): Release, iPad
+(9th generation) simulator, five vector layers × two frames, the second layer Multiply (`-probeGraded`, so the
+compositor draws the canvas) and dragged, 192 MiB budget, onion on, 100 ticks 80 ms apart. *Before* is
+`f6586c9` (commit 5) with the same probe mode driving the rail's old verbs, not merged; *after* is commit 6.
+Every run 68–74% idle at its start.
+
+| 100 ticks over 8.5 s | pictures of the drag (rate) | per-tick work besides | footprint growth (peak) | main thread busy |
+|---|---|---|---|---|
+| **4096²** — before (two takes) | 10 bakes (1.2/s), 20 live pairs | 100 SwiftUI passes, 100 onion composites, 129 store decodes | +768, +845 MB (1.65, 1.73 GB) | 1.29, 1.28 s |
+| **4096²** — after (two takes) | **100 held frames (11.7/s — every tick)**, 55 ms each at half detail | none | **+11, +19 MB** (0.89, 0.90 GB) | **0.10, 0.10 s** |
+| 2048×1024 — before | 100 live pairs (every tick), 56 bakes | 100 passes, 100 onion composites, 318 store decodes | +93 MB (0.33 GB) | 1.59 s |
+| 2048×1024 — after | 100 held frames (every tick), 15 ms each | none | +15 MB (0.25 GB) | 0.32 s |
+
+- **At 4096² the fade now follows the finger** instead of the bake's one picture a second, and the drag no
+  longer grows the app by ~0.8 GB; the held frame's surfaces are 32 MiB (half detail), 16 MiB at 2048×1024.
+- **At 2048×1024 the canvas already followed every tick** — by re-minting the live pair, re-baking, decoding
+  and rebuilding the onion skin each time; all of that is gone, and the main thread does a fifth of the work.
+- Not measured: the canvas-sized pictures handed to Core Animation (§30.1's swizzle was not re-run).
 
 ## 31. A colour picker's tick rebuilt the whole picker, and the Wheel's shading was 14,400 rectangles (2026-10-13)
 
