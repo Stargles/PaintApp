@@ -1,18 +1,30 @@
 import UIKit
 
 /// One slot in the layer stack: baked raster content at the bottom, a drawable stroke canvas over it,
-/// and the live fill preview pinned edge-to-edge **on top** — a fill covers everything already on the
-/// layer, including that layer's own ink (LASSO_FILL.md §2a). (Inserted photos are vector-layer
-/// content — see `VectorCanvas` — and render as part of `strokeView`'s vector display, not a
-/// dedicated image view here.)
+/// and the live fill preview **on top** — a fill covers everything already on the layer, including that
+/// layer's own ink (LASSO_FILL.md §2a). (Inserted photos are vector-layer content — see `VectorCanvas` —
+/// and render as part of `strokeView`'s vector display, not a dedicated image view here.)
 final class LayerHostView: CanvasPlaneView {
-    let fillImageView = UIImageView()
     /// Raster content "baked" into this layer's active cel by a select/move/fill/clear operation
     /// (see `Cel.bakedImage`), or the transient "hole" preview while that cel's content is lifted
     /// into a floating piece. The **bottom** of the three, below `strokeView`'s live strokes and
-    /// below `fillImageView`'s preview.
+    /// below the fill's preview.
     let bakedImageView = UIImageView()
     let strokeView = StrokeCanvasView()
+
+    /// **The live fill's plane: the layer's own space, posed** (`shownPose`). Its bounds are the host's
+    /// with the anchor at the origin, so the pose is its transform about the canvas origin; the fill's
+    /// surface inside it is placed in the layer's own space, where a fill is worked out.
+    private let fillPlane = UIView()
+    /// The adjustable fill's picture (`showFill`) — made with the fill's first render, and let go with
+    /// the fill.
+    private var fillSurface: WindowSurfaceView?
+    /// The render and clip `fillSurface` was last asked to show, so the passes that change nothing are
+    /// two identity checks.
+    private var shownFill: (render: CanvasManager.FillRenderResult, clip: CGPath?)?
+    /// Where every host's fill pictures are drawn — one fill is live at a time.
+    private static let fillDrawQueue = DispatchQueue(label: "com.paintapp.LayerHostView.fill",
+                                                     qos: .userInteractive)
 
     init() {
         super.init(frame: .zero)
@@ -22,15 +34,11 @@ final class LayerHostView: CanvasPlaneView {
         // interaction-disabled and the touch lands here instead.
         isMultipleTouchEnabled = true
 
-        // The preview covers the window the fill worked in (`FillWindow`), so this view is framed to
-        // that rect by `showFillPreview` rather than pinned to the host. At scale 1 the image is the
-        // window's own pixels and the stretch is 1:1; below it the stretch is the resample the fill
-        // already accepted.
-        fillImageView.contentMode = .scaleToFill
-        fillImageView.isHidden = true
-        // Placed by hand (`placeFillPreview`) with its anchor at the origin, so a pose is the
-        // preview's transform and not the pose conjugated about its centre.
-        fillImageView.layer.anchorPoint = .zero
+        // Sized with the host in `layoutSubviews`; anchored at the origin, so a pose is the plane's
+        // transform and not the pose conjugated about its centre.
+        fillPlane.isUserInteractionEnabled = false
+        fillPlane.layer.anchorPoint = .zero
+        fillPlane.layer.position = .zero
 
         bakedImageView.isUserInteractionEnabled = false
         bakedImageView.isHidden = true
@@ -44,8 +52,8 @@ final class LayerHostView: CanvasPlaneView {
         // Coordinator.applyTransform), not by re-rasterizing at a higher resolution — Core Animation's
         // default magnificationFilter (.linear) would bilinearly blur these raster layers' textures as
         // the user zooms in. Nearest-neighbor keeps pixels crisp/blocky at high zoom instead. strokeView
-        // sets this on its own internal image view (see StrokeCanvasView.init).
-        fillImageView.layer.magnificationFilter = .nearest
+        // sets this on its own internal image view (see StrokeCanvasView.init), and the fill's surface
+        // on its own layer (`WindowSurfaceView.init`).
         bakedImageView.layer.magnificationFilter = .nearest
 
         // **Minification is the opposite problem and takes the opposite answer.** Zoomed *out* — and
@@ -59,22 +67,21 @@ final class LayerHostView: CanvasPlaneView {
         // screen as a faint line instead of as nothing. It costs Core Animation a mipmap chain,
         // about a third more texture per displayed layer, which `CompositorBudget` does not account
         // for — see PERFORMANCE.md §9 item 5, which is that gap in general.
-        fillImageView.layer.minificationFilter = .trilinear
         bakedImageView.layer.minificationFilter = .trilinear
 
-        // `fillImageView` shows the *live* fill-tool preview (a committed fill is flattened into the
+        // `fillPlane` shows the *live* fill-tool preview (a committed fill is flattened into the
         // cel's `raster` tier), and it is **the topmost of the three**: LASSO_FILL.md §2a — a fill
         // covers everything already on the layer, earlier fills and this layer's own ink alike. The
         // preview has to stack the way `commitInteractiveFill` will, or the picture rearranges itself
         // when the artist lifts the pencil. `PixelOps.rasterizeUncached` draws the same three tiers in
         // this same order, which is what keeps the live canvas and every flatten of it agreeing.
         //
-        // Being above `strokeView` costs nothing in touch handling: `UIImageView` is
-        // `isUserInteractionEnabled == false` by default, so it is invisible to hit-testing and the
-        // stroke canvas underneath still receives the first touch of every stroke.
+        // Being above `strokeView` costs nothing in touch handling: the plane takes no touches, so it
+        // is invisible to hit-testing and the stroke canvas underneath still receives the first touch
+        // of every stroke.
         addSubview(bakedImageView)
         addSubview(strokeView)
-        addSubview(fillImageView)
+        addSubview(fillPlane)
         NSLayoutConstraint.activate([
             bakedImageView.topAnchor.constraint(equalTo: topAnchor),
             bakedImageView.bottomAnchor.constraint(equalTo: bottomAnchor),
@@ -89,40 +96,59 @@ final class LayerHostView: CanvasPlaneView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    /// Shows the live fill preview over its own window of the canvas, or nothing. The host's points
-    /// are canvas pixels — the stack is magnified by a transform on the container — so the preview's
-    /// rect is placed in them directly, through the layer's pose (`shownPose`).
-    func showFillPreview(_ preview: FillPreview?) {
-        fillImageView.image = preview?.image
-        fillPreviewRect = preview?.rect ?? .zero
-        placeFillPreview()
-        fillImageView.isHidden = preview == nil
-        alignContentMasks()
+    /// **Shows the adjustable fill's render over this layer's own pixels, or nothing**, and answers
+    /// whether that changed anything — TODO (179). The bytes are drawn into a surface off the main
+    /// thread (`WindowSurfaceView`) through the same `FillRenderResult.preview(clippedTo:)` the commit
+    /// flattens, so a render reaches the screen with no image built on the main thread and none handed
+    /// to Core Animation, and the picture does not change when the pencil lifts.
+    ///
+    /// The surface is the render's window at the window's working size, stretched over the window's
+    /// rect — 1:1 at scale 1, and below it the resample the fill already accepted. The host's points
+    /// are canvas pixels (the stack is magnified by a transform on the container), so the rect is
+    /// placed in them directly, through the layer's pose (`fillPlane`).
+    ///
+    /// **A window of another size gets a surface of its own**, and the one on screen stays up until
+    /// the new one's first picture lands — a bucket's window grows when a slider lets the paint
+    /// further, and a surface remade in place would show the layer without its fill for a draw.
+    @discardableResult
+    func showFill(_ render: CanvasManager.FillRenderResult?, clip: CGPath?) -> Bool {
+        guard shownFill?.render !== render || shownFill?.clip !== clip else { return false }
+        guard let render else {
+            shownFill = nil
+            fillSurface = nil
+            for surface in fillPlane.subviews { surface.removeFromSuperview() }
+            return true
+        }
+        shownFill = (render, clip)
+        let window = CGRect(x: 0, y: 0, width: render.window.workingWidth, height: render.window.workingHeight)
+        var replaced: WindowSurfaceView?
+        if fillSurface.map({ !$0.surfaceWindow.isNull && $0.surfaceWindow.size != window.size }) ?? true {
+            replaced = fillSurface
+            let surface = WindowSurfaceView(queue: Self.fillDrawQueue)
+            fillPlane.addSubview(surface)
+            fillSurface = surface
+        }
+        fillSurface?.present(window: window, placement: render.window.transform.inverted(), draw: { _ in
+            guard let preview = render.preview(clippedTo: clip) else { return nil }
+            preview.image.draw(in: window)
+            return window
+        }, finished: { _ in replaced?.removeFromSuperview() })
+        return true
     }
 
     /// **The pose the canvas shows this layer through** (`CanvasManager.inkPose`), pushed by
     /// `CanvasView.Coordinator` on every pass — TODO (124). The stroke view takes it for the live
-    /// stroke and a raster layer's pixels; the fill preview here takes it because a fill is worked
-    /// out in the layer's own space and has to be shown where it will land.
+    /// stroke and a raster layer's pixels; the fill's plane takes it because a fill is worked out in
+    /// the layer's own space and has to be shown where it will land.
     var shownPose: PoseMap? {
         get { strokeView.shownPose }
         set {
             guard newValue != strokeView.shownPose else { return }
             strokeView.shownPose = newValue
-            placeFillPreview()
+            let pose = newValue.flatMap { $0.inverse == nil ? nil : $0 }
+            fillPlane.layer.transform = pose?.layerTransform ?? CATransform3DIdentity
+            alignContentMasks()
         }
-    }
-
-    /// The window the preview covers, in the layer's own space.
-    private var fillPreviewRect: CGRect = .zero
-
-    private func placeFillPreview() {
-        let rect = fillPreviewRect
-        fillImageView.bounds = CGRect(origin: .zero, size: rect.size)
-        fillImageView.layer.position = .zero
-        let window = CATransform3DMakeTranslation(rect.minX, rect.minY, 0)
-        let pose = shownPose.flatMap { $0.inverse == nil ? nil : $0 }
-        fillImageView.layer.transform = pose.map { CATransform3DConcat(window, $0.layerTransform) } ?? window
     }
 
     // MARK: - Blanking, for §5.2's sandwich
@@ -197,7 +223,7 @@ final class LayerHostView: CanvasPlaneView {
     /// The three views that hold this layer's own pixels, and therefore the three that a mask has to
     /// clip. Ordered as they are stacked, which is only for reading — `contentMasks` pairs with this
     /// by index and nothing else depends on the order.
-    private var maskedContentViews: [UIView] { [bakedImageView, strokeView, fillImageView] }
+    private var maskedContentViews: [UIView] { [bakedImageView, strokeView, fillPlane] }
 
     /// One mask layer per content view. **Three, not one shared**: `CALayer.mask` takes ownership the
     /// way a superlayer does, so assigning a single layer to three masks would move it to the third
@@ -251,8 +277,8 @@ final class LayerHostView: CanvasPlaneView {
     }
 
     /// Where a canvas-sized mask sits in `view`'s own coordinates: the host's bounds, shifted back by
-    /// the view's origin — which is zero for the two pinned views and the preview's window for
-    /// `fillImageView`.
+    /// the view's origin — which is zero for the two pinned views and the pose's offset for
+    /// `fillPlane`.
     private func maskFrame(for view: UIView) -> CGRect {
         bounds.offsetBy(dx: -view.frame.minX, dy: -view.frame.minY)
     }
@@ -270,6 +296,7 @@ final class LayerHostView: CanvasPlaneView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        fillPlane.bounds = bounds
         // The mask layers are not in the view hierarchy, so autolayout does not reach them. Canvas
         // size is fixed for a document's life and a stroke cannot outlive it, so this is belt and
         // braces rather than a live resize path — but a mask frozen at the zero frame it was created

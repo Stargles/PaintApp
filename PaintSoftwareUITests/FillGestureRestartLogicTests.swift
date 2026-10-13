@@ -8,8 +8,8 @@ import CoreGraphics
 /// do something with it being in the transient state, then another thing is filled, and it doesnt
 /// bake the first one properly before going to the second."* Their reading is exactly right, and
 /// the window they are describing is real: `beginInteractiveFill` composites the reference, uploads
-/// a GPU session and runs the flood on `fillQueue`, then publishes the preview back with a
-/// `DispatchQueue.main.async`. A tap that lands before that hop runs used to break three ways at
+/// a GPU session and runs the flood on `fillQueue`, then lands the preview back on the main thread
+/// (`CanvasManager.fillRenders`). A tap that lands before that hop runs used to break three ways at
 /// once, and each of the three has a test below.
 ///
 /// **There are two windows, not one, and 2026-08-21 is when the second one surfaced.** The owner
@@ -29,9 +29,9 @@ import CoreGraphics
 ///    bodies run on the main thread and nothing has pumped the run loop. That is the window in which
 ///    the artist's first fill exists as pixels but not as document state.
 ///  - **A semaphore block on `fillQueue`** holds the serial queue, so work enqueued behind it can be
-///    ordered deliberately. That is how a *superseded* worker is made to run after the gesture that
+///    ordered deliberately. That is how a *superseded* render is made to run after the gesture that
 ///    replaced it, which is what happens on device whenever the second tap lands while the first
-///    flood is still on the GPU.
+///    gesture's next render is still waiting for the GPU.
 ///
 /// Everything drives the real `CanvasManager` and the real `MetalFillSession`; nothing is mocked.
 /// See `FillBoundaryLogicTests` for why the fill's Metal pipeline runs headlessly at all.
@@ -143,8 +143,8 @@ final class FillGestureRestartLogicTests: XCTestCase {
         XCTAssertEqual(pixel.a, 255)
     }
 
-    /// `beginInteractiveLassoFill` has the same shape and had the same exposure — it publishes
-    /// through the same `drainFillWork`, so a second loop drawn before the first one's hop landed
+    /// `beginInteractiveLassoFill` has the same shape and had the same exposure — it renders
+    /// through the same `renderFill`, so a second loop drawn before the first one's landing ran
     /// dropped it identically. One undo step per loop, not one per pair.
     func testASecondLassoBakesTheFirstOne() throws {
         let manager = sceneManager()
@@ -178,29 +178,52 @@ final class FillGestureRestartLogicTests: XCTestCase {
         XCTAssertEqual(manager.history.undoStack.count, before, "Nothing was recorded for the empty loop")
     }
 
+    /// **Three taps inside one turn of the main thread bake the first two.** The third tap's commit
+    /// waits on `fillQueue` for the second tap's render, so that render has to be *on* the queue the
+    /// moment the second tap begins — though the first tap's render has not landed, and still holds
+    /// the one job a gesture's renders may have in flight. Each gesture gets renders of its own
+    /// (`CanvasManager.fillRenders`) for exactly this: a request left waiting behind the first tap's
+    /// landing would be on no queue, and the third tap would find the second fill nowhere.
+    func testThreeTapsInOneTurnBakeTheFirstTwo() throws {
+        let manager = sceneManager()
+        let before = manager.history.undoStack.count
+
+        tapAndRenderWithoutPublishing(manager, at: Self.onTheSquare)   // rendered, its landing not run
+        manager.brushColor = Self.blue
+        manager.beginInteractiveFill(at: Self.onThePaper)              // bakes the first
+        manager.endInteractiveFill()
+        manager.beginInteractiveFill(at: Self.onTheSquare)             // bakes the second
+
+        XCTAssertEqual(manager.history.undoStack.count, before + 2, "The first two taps baked, one step each")
+        XCTAssertGreaterThan(try bakedPixel(manager, Self.onTheSquare).r, 200, "The first is red on the square")
+        let onPaper = try bakedPixel(manager, Self.onThePaper)
+        XCTAssertGreaterThan(onPaper.b, 200, "…and the second blue on the paper, rather than dropped")
+        XCTAssertEqual(onPaper.a, 255)
+    }
+
     // MARK: - (b)/(c) A superseded worker must not speak for the gesture that replaced it
 
     /// **The second fill has to be rendered by the second fill's own session.**
     ///
-    /// The forced interleaving is the one the device produces when the second tap lands mid-flood: a
-    /// worker belonging to gesture 1 runs *after* gesture 2 has started. It used to read `fillPending`
-    /// — now gesture 2's request — book `fillRendered` against it, and render it against gesture 1's
-    /// session, gesture 1's reference composite and gesture 1's sampled colour. Two failures fall out
-    /// of that one step: gesture 2's own worker then finds `key == fillRendered` and returns having
-    /// drawn nothing at all, and what the artist is left looking at is a flood from the new point
-    /// judged against the old picture.
+    /// The forced interleaving is the one the device produces when the second tap lands while the
+    /// first gesture's next render is queued: a render belonging to gesture 1 runs *after* gesture 2
+    /// has started. Rendering there pairs gesture 2's seed — or gesture 1's, against gesture 2's
+    /// session — with the wrong reference composite and the wrong sampled colour, and what the artist
+    /// is left looking at is a flood from the new point judged against the old picture.
     ///
-    /// Both are settled by one assertion, because of how the scene is built: the tap is on paper and
-    /// gesture 1 sampled green, so the stale pairing plants no seed and paints an empty region. A
-    /// preview that covers the paper can only have come from gesture 2's own session.
+    /// Settled by one assertion, because of how the scene is built: the tap is on paper and gesture 1
+    /// sampled green, so the stale pairing plants no seed and paints an empty region. A preview that
+    /// covers the paper can only have come from gesture 2's own session.
     func testTheSecondFillRendersAgainstItsOwnSessionAndSeed() throws {
         let manager = sceneManager()
-        tapAndRenderWithoutPublishing(manager, at: Self.onTheSquare)
+        manager.beginInteractiveFill(at: Self.onTheSquare)
+        manager.endInteractiveFill()
+        settle()   // the first render lands, so the gesture's next one is minted the moment it is asked for
 
-        // Hold the serial queue so the next two workers can be ordered deliberately.
+        // Hold the serial queue so the next two renders can be ordered deliberately.
         let gate = DispatchSemaphore(value: 0)
         manager.fillQueue.async { gate.wait() }
-        // A gesture-1 worker, queued behind the gate: this is the one that must not speak later.
+        // A gesture-1 render, queued behind the gate: this is the one that must not speak later.
         manager.setFillGapClosing(5)
 
         manager.brushColor = Self.blue
@@ -364,11 +387,11 @@ final class FillGestureRestartLogicTests: XCTestCase {
 
         manager.beginInteractiveLassoFill(path: rectangleLoop(Self.loopA))
         manager.endInteractiveFill()
-        manager.fillQueue.sync {}   // rendered, not yet published
+        settle()   // landed, so the gesture's next render is minted the moment it is asked for
 
         let gate = DispatchSemaphore(value: 0)
         manager.fillQueue.async { gate.wait() }
-        manager.setFillGapClosing(5)   // a gesture-1 worker, queued behind the gate
+        manager.setFillGapClosing(5)   // a gesture-1 render, queued behind the gate
 
         manager.brushColor = Self.blue
         DispatchQueue.global().asyncAfter(deadline: .now() + 0.15) { gate.signal() }

@@ -124,6 +124,80 @@ final class FillLiveSliderLogicTests: XCTestCase {
         XCTAssertEqual(cancelled.heldHostLayerIndices, [], "cancelled: nothing to draw")
     }
 
+    // MARK: - One render in flight, the newest next (TODO (179))
+
+    /// Spins the main run loop until `done` holds, up to ten seconds — a landing is a hop back to main,
+    /// and a loaded machine outruns any guessed interval.
+    private func spin(until done: () -> Bool) {
+        let deadline = Date().addingTimeInterval(10)
+        while !done(), Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.02)) }
+    }
+
+    /// **A burst of ticks while a render is in flight is one more render: the newest.** Forty ticks of
+    /// the slider with `fillQueue` held — the first is minted at once and waits on the queue, and every
+    /// tick after it replaces the one waiting behind it — so when the queue frees, two renders land:
+    /// the first tick's and the last's. None of the thirty-eight between is ever rendered, and the
+    /// picture left on screen is the last value's: sealed.
+    @MainActor
+    func testABurstOfTicksWhileARenderIsInFlightIsOneRenderOfTheNewest() throws {
+        let manager = adjustableFill()
+        let renders = try XCTUnwrap(manager.fillRenders, "Fixture check: the adjustable fill has its renders")
+        let landed = renders.landedCount
+        let gate = DispatchSemaphore(value: 0)
+        manager.fillQueue.async { gate.wait() }
+        for gap in stride(from: CGFloat(1), through: 40, by: 1) { manager.setFillGapClosing(gap) }
+        gate.signal()
+        spin { renders.landedCount >= landed + 2 }
+        settle(0.3)   // and nothing after them
+
+        XCTAssertEqual(renders.landedCount - landed, 2, "the first tick's render and the newest, nothing between")
+        XCTAssertEqual(alpha(manager.liveFill?.preview, at: CGPoint(x: 60, y: 32)), 0,
+                       "the newest is the one shown: the sealed fill stays inside the box")
+    }
+
+    /// **A touch-move that moves no value renders nothing** — the sideways drag calls
+    /// `updateInteractiveFill` on every touch-move, and most of them land on the same quantized Gap
+    /// Closing as the last.
+    @MainActor
+    func testATouchMoveThatMovesNoValueRendersNothing() throws {
+        let manager = adjustableFill()
+        let renders = try XCTUnwrap(manager.fillRenders)
+        let landed = renders.landedCount
+        for _ in 0..<10 { manager.updateInteractiveFill(gapClosing: manager.fillSettings.gapClosing) }
+        settle(0.3)
+        XCTAssertEqual(renders.landedCount, landed, "ten touch-moves at the same value rendered nothing")
+        XCTAssertFalse(renders.isBusy)
+    }
+
+    /// **A fill obeys the marching ants on screen and in the document alike.** A region selected on blank
+    /// paper and a bucket fill tapped inside it: the render the host is handed comes with the region to
+    /// clip it to (`LiveFill.clip`), and the commit lands the same clipped picture — one function builds
+    /// both (`FillRenderResult.preview(clippedTo:)`), so the fill does not spill when the pencil lifts.
+    func testAFillInsideASelectionIsClippedOnScreenAndInTheCommit() throws {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        let region = CGRect(x: 16, y: 16, width: 24, height: 20)
+        manager.selection = Selection(path: CGPath(rect: region, transform: nil), bounds: region)
+        manager.brushColor = Self.red
+        let inside = CGPoint(x: 28, y: 26), outside = CGPoint(x: 5, y: 5)
+        manager.beginInteractiveFill(at: inside)
+        manager.endInteractiveFill()
+        settle()
+
+        let live = try XCTUnwrap(manager.liveFill)
+        XCTAssertNotNil(live.clip, "the fill's render comes with the selection to clip it to")
+        let shown = try XCTUnwrap(live.preview, "Fixture check: the fill rendered")
+        XCTAssertGreaterThan(alpha(shown, at: inside), 0, "inside the region the fill is shown")
+        XCTAssertEqual(alpha(shown, at: outside), 0, "…and outside it nothing, though the paper there is open")
+
+        manager.commitInteractiveFill()
+        let cel = try XCTUnwrap(manager.activeCelIndex(inLayer: 0, atFrame: manager.currentFrame))
+        let landed = try XCTUnwrap(manager.layers[0].cels[cel].raster.renderToUIImage().cgImage)
+        let bytes = try XCTUnwrap(CanvasFixture.rgbaBytes(landed))
+        func landedAlpha(_ point: CGPoint) -> UInt8 { bytes[(Int(point.y) * landed.width + Int(point.x)) * 4 + 3] }
+        XCTAssertGreaterThan(landedAlpha(inside), 200, "the commit lands the fill inside the region")
+        XCTAssertEqual(landedAlpha(outside), 0, "…and nothing outside it")
+    }
+
     // MARK: - The sideways drag (TODO (186))
 
     /// **Gap Closing and nothing else, and rightward lowers it** — the owner's *"invert the direction, so

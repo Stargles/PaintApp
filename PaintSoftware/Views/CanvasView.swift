@@ -1519,8 +1519,8 @@ struct CanvasView: UIViewRepresentable {
         static func makeSandwichView() -> UIImageView {
             let view = UIImageView()
             // The composite is exactly `canvasSize` and the container's bounds are too, so this is a
-            // 1:1 blit and `.scaleToFill` cannot resample — the same reasoning `LayerHostView` gives
-            // for `fillImageView`. Nearest-neighbor for the same reason it does as well: the whole
+            // 1:1 blit and `.scaleToFill` cannot resample. Nearest-neighbor for the reason
+            // `LayerHostView` gives for its image views: the whole
             // stack is magnified by a transform on the container, and bilinear would blur the very
             // pixels the host views keep crisp.
             view.contentMode = .scaleToFill
@@ -2212,11 +2212,8 @@ struct CanvasView: UIViewRepresentable {
         /// nothing otherwise (`CanvasManager.liveFill`). Returns whether the host's picture changed.
         @discardableResult
         private func showLiveFill(on host: LayerHostView, layerID: UUID, celID: UUID?) -> Bool {
-            let live = canvasManager.liveFill
-            let preview = live.flatMap { $0.layerID == layerID && $0.celID == celID ? $0.preview : nil }
-            guard host.fillImageView.image !== preview?.image else { return false }
-            host.showFillPreview(preview)
-            return true
+            let live = canvasManager.liveFill.flatMap { $0.layerID == layerID && $0.celID == celID ? $0 : nil }
+            return host.showFill(live?.render, clip: live?.clip)
         }
 
         /// Shows on `host` the live element edit's window when it is on `celID` of `layerID`, and

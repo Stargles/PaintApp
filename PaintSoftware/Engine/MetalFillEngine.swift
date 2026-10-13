@@ -293,7 +293,7 @@ final class MetalFillSession {
     private let params2Buf: MTLBuffer?
     private let paramsBuf: MTLBuffer
 
-    /// Whether this session runs the lasso algorithm. Immutable, so `drainFillWork` can ask a session
+    /// Whether this session runs the lasso algorithm. Immutable, so `renderFill` can ask a session
     /// what it is from the fill queue without touching main-thread gesture state.
     let isLasso: Bool
 

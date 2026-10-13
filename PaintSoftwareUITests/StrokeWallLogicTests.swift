@@ -11,7 +11,7 @@ import simd
 /// Two halves are tested here and they fail differently. `StrokeWallMask` decides **which** elements
 /// are walls and puts their centre lines on the canvas; the GPU pipeline decides what a wall *does*,
 /// and that half is exercised through the production `MetalFillSession` — the same object
-/// `CanvasManager.drainFillWork` drives, with the same defaults an artist gets.
+/// `CanvasManager.renderFill` drives, with the same defaults an artist gets.
 ///
 /// **The headline fixture is drawn by the shipped Rough Ink brush at a low pressure, not by hand-placed
 /// dots**, because a hand-placed fixture would prove that the code closes gaps somebody put there on

@@ -14,7 +14,7 @@ import simd
 /// shape cannot see it.
 ///
 /// The session tests drive `MetalFillSession` — the production kernels and `FillBasins` exactly as
-/// `CanvasManager.drainFillWork` drives them — over hand-built ink. The last test is the owner's own
+/// `CanvasManager.renderFill` drives them — over hand-built ink. The last test is the owner's own
 /// scene through the app's fill path: a hand-wobbled square drawn with a brush on a vector layer at
 /// their 2048×1024 canvas.
 final class FillGapClosingLogicTests: XCTestCase {

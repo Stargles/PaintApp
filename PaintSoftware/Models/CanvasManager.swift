@@ -3744,26 +3744,43 @@ final class CanvasManager: ObservableObject {
     static let fillMendReachRange: ClosedRange<CGFloat> = 1...40
 
     /// Serial queue that owns every fill computation for the active gesture. Keeping it serial means
-    /// the GPU session and render bookkeeping below are only ever touched from one thread, letting
-    /// `drainFillWork` coalesce a burst of drag updates into a single render of the latest params.
+    /// the GPU session and the window below are only ever touched from one thread.
     let fillQueue = DispatchQueue(label: "com.paintsoftware.interactiveFill", qos: .userInteractive)
     let fillLock = NSLock()
-    var fillPending = FillKey(gap: 0, threshold: 0, edge: 0, edgeIsWall: true, inset: 0, mendReach: 0)
-    var fillRendered = FillKey(gap: .min, threshold: .min, edge: .min, edgeIsWall: false, inset: .min, mendReach: 0)
-    var fillWorkerScheduled = false
+
+    /// **The live gesture's renders, on `fillQueue`** — TODO (179): one job in flight, the newest
+    /// request minted when it lands, and each result shown before the next is minted, so a drag across
+    /// a fill slider renders as fast as the GPU can and no faster, and the main thread holds at most one
+    /// landing. Made by `beginFillGeneration` and let go by `endFillGeneration`.
+    ///
+    /// **One per gesture, not one for the manager, because of the commit.** A gesture's first render
+    /// has to be on `fillQueue` the moment the gesture begins — `commitInteractiveFill` waits on the
+    /// queue for the render a second tap would otherwise drop (`awaitFillRenderIfNothingProduced`), and
+    /// a request standing behind the last gesture's job, not yet minted, is not on it. A new instance
+    /// is idle, so its first request is minted and enqueued at once, behind whatever the last gesture
+    /// left on the queue (`LatestWins`' clause 3).
+    ///
+    /// Reached through `MainActor.assumeIsolated`: `LatestWins` is main-actor, and `CanvasManager` is
+    /// main-thread by convention rather than isolated — the test target compiles it without the app's
+    /// default isolation — so the calls state the thread they are on rather than hop to it.
+    var fillRenders: LatestWins?
+    /// The settings the live gesture's last render was minted for. A request at the same settings
+    /// mints nothing, so a touch-move that moves no quantized value costs no render. Main thread only.
+    var fillMintedKey: FillKey?
 
     /// **Which gesture `fillQueue` is working for.** Bumped by every `begin*Fill`, and again by
     /// `commitInteractiveFill`/`cancelInteractiveFill` when the gesture retires. Written on the main
     /// thread under `fillLock`, read on `fillQueue` under it, read freely on main (the only writer).
     ///
     /// It exists because a *second* fill is the case the old invariant did not cover — the owner's
-    /// *"using the fill tool more than once breaks it sometimes"*. A worker whose gesture has been
-    /// replaced must not claim the new gesture's key as rendered, must not render, and must not
-    /// publish; `drainFillWork` checks this at each of those three points. See
-    /// `CanvasManager+Fill.swift`'s `beginFillGeneration` / `FillGestureContext`.
+    /// *"using the fill tool more than once breaks it sometimes"*. A render whose gesture has been
+    /// replaced must not run and must not store its result for the commit; `renderFill` checks this
+    /// at both points, on the queue. On the main thread the same retirement is the gesture's
+    /// `fillRenders` being cancelled, which drops its landing. See `CanvasManager+Fill.swift`'s
+    /// `beginFillGeneration` / `FillGestureContext`.
     var fillGeneration: UInt64 = 0
 
-    /// The live gesture's latest render, stored by `drainFillWork` on `fillQueue` under `fillLock`
+    /// The live gesture's latest render, stored by `renderFill` on `fillQueue` under `fillLock`
     /// *before* the hop to main that installs it — so `commitInteractiveFill` can bake a fill whose
     /// pixels exist but have not reached the main thread yet. See `FillRenderResult`.
     var fillRenderedRegion: FillRenderResult?
@@ -3776,7 +3793,7 @@ final class CanvasManager: ObservableObject {
     /// starts while the first is still on the GPU.
     var fillSession: MetalFillSession?
     /// The window `fillSession` was built for — TODO (86). A bucket's grows on `fillQueue` as the
-    /// paint reaches its rim (`drainFillWork`), and the session is rebuilt with it; the two are
+    /// paint reaches its rim (`renderFill`), and the session is rebuilt with it; the two are
     /// written together and only there.
     var fillWindow: FillWindow?
     /// The reference layers the live gesture floods against, held for the gesture so a grown window
@@ -3823,10 +3840,6 @@ final class CanvasManager: ObservableObject {
     /// True when a fill exists and the finger is NOT pressing (adjustable state). The coordinator checks
     /// this in the fill-press handler so that a two-finger pan's first touch doesn't commit the fill.
     var isFillInAdjustableState: Bool { fillGestureActive && !fillFingerDown }
-    /// The last render the main thread installed — its painted pixels and the window they cover —
-    /// kept so a re-tap can be hit-tested against the pixels the current fill already covers
-    /// (`isPointInPendingFill`) and so the commit can bake them. Main-thread only.
-    var fillLastRender: FillRenderResult?
     var fillGestureSeed: (x: Int, y: Int) = (0, 0)
     var fillGestureColor: SIMD4<Float> = .zero   // premultiplied 0..1
     var fillGestureFillColor: CodableColor = .init(red: 0, green: 0, blue: 0, alpha: 1)

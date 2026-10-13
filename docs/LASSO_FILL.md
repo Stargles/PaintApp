@@ -91,8 +91,8 @@ lift:
   lossy step. And **the trace is now a function of the mask alone**: loops used to start at
   `remaining.keys.first`, whose order comes from Swift's per-process random hash seed, so the same
   drawing corrupted somewhere different on every launch. `FillContourLogicTests` pins both.
-- **The live preview.** The `fillImage` tier draws *last* in `PixelOps.rasterize` and in
-  `ThumbnailRenderer`, and `fillImageView` sits above `strokeView` in `LayerHostView`. The preview and
+- **The live preview.** The layer's host draws it above `strokeView` (`LayerHostView.showFill`), from
+  the same `FillRenderResult.preview(clippedTo:)` the commit flattens on top of the cel. The preview and
   the commit must show the same stacking or the artist watches the picture change when they lift the
   pencil.
 

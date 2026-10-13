@@ -7,8 +7,8 @@ import XCTest
 /// A square with a gap, a fill tapped inside it with Gap Closing at 0 — so it pours out through the gap
 /// — and then the Fill panel's slider dragged across its whole track. Read off `canvas.host`: the
 /// canvas's picture changed under the finger (`moves:`) while almost no SwiftUI pass reached it
-/// (`passes:`) — every tick used to be one — and read off the screen: at the top of the slider the
-/// fill is back inside the square, into its corners.
+/// (`passes:`) — every tick used to be one — and read off the screen, while the finger is still on the
+/// slider and after: at the top of the slider the fill is back inside the square, into its corners.
 ///
 /// On a document the compositor draws (a blending layer), because that is where each tick also
 /// re-baked the frame and decoded it back on the main thread.
@@ -49,19 +49,29 @@ final class FillSliderLiveUITests: PaintUITestCase {
         XCTAssertNotNil(waitForPixel(canvas, at: outside, matches: { self.isRed($0) }),
                         "Fixture check: at 0 the fill pours out through the gap")
 
+        // Just outside the gap: red while the fill pours out, paper once the slider seals it.
+        let probe = paperPatch(canvas, visible, x: 0.685...0.695, y: 0.47...0.48)
+        XCTAssertFalse(readScreenNow(probe).contains { isWhitish($0) }, "Fixture check: the probe reads the poured fill")
+
         fillButton.tap()
         XCTAssertTrue(slider.waitForExistence(timeout: 5))
         Thread.sleep(forTimeInterval: 1)
         let passesBefore = try XCTUnwrap(Int(readField(app, "passes:")), "the canvas publishes `passes:`")
         let movesBefore = try XCTUnwrap(Int(readField(app, "moves:")), "the canvas publishes `moves:`")
-        slider.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.5))
-            .press(forDuration: 0.3, thenDragTo: slider.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)),
-                   withVelocity: 80, thenHoldForDuration: 0.3)
+        let held = samplesDuring(probe, "gap closing drag") {
+            slider.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.5))
+                .press(forDuration: 0.3, thenDragTo: slider.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)),
+                       withVelocity: 80, thenHoldForDuration: 3.0)
+        }
         let passes = try XCTUnwrap(Int(readField(app, "passes:"))) - passesBefore
         let moves = try XCTUnwrap(Int(readField(app, "moves:"))) - movesBefore
         XCTAssertGreaterThanOrEqual(moves, 3, "the fill's picture followed the slider, \(moves) times")
         XCTAssertLessThanOrEqual(passes, 2, "\(passes) SwiftUI passes reached the canvas across the drag — "
                                  + "a tick that publishes is one pass each")
+        // What the artist saw under the finger, read from another thread while it held at the top.
+        XCTAssertTrue(held.contains { $0.pixels.allSatisfy { self.isWhitish($0) } },
+                      "while the finger held the slider at the top the sealed fill never reached the screen — "
+                      + "\(held.map { $0.pixels.filter { self.isWhitish($0) }.count }) of \(probe.count) points were paper")
         fillButton.tap()
 
         XCTAssertNotNil(waitForPixel(canvas, at: outside, matches: { self.isWhitish($0) }),

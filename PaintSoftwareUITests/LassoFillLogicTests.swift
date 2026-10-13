@@ -1214,7 +1214,7 @@ final class LassoFillLogicTests: XCTestCase {
     }
 
     /// **The half a test of the engine alone would miss.** The preview is shown by the layer's host over
-    /// its picture (`CanvasManager.liveFill`, `LayerHostView.fillImageView`) and the commit flattens
+    /// its picture (`CanvasManager.liveFill`, `LayerHostView.showFill`) and the commit flattens
     /// into `Cel.raster`; if those two disagree about stacking, the artist watches the picture
     /// rearrange itself the instant they lift the pencil. The preview is read here as the host shows
     /// it — over `PixelOps.rasterize` of the cel — and the commit through that same flatten.

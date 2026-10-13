@@ -17,7 +17,7 @@ import simd
 ///
 /// So the assertions here are on **the real production kernels**, against reference bytes built by
 /// hand instead of by a synthetic pencil. Nothing is mirrored or re-implemented: `MetalFillSession`
-/// is exactly the object `CanvasManager.drainFillWork` drives.
+/// is exactly the object `CanvasManager.renderFill` drives.
 ///
 /// Deliberately **not** guarded with `XCTSkipIf(MetalFillEngine.shared == nil)`. A skip here would
 /// quietly restore the state this file exists to end — green, and testing nothing.
