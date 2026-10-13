@@ -42,8 +42,7 @@ struct InterpolatePanel: View {
     /// Thickness cross-fade, exposed as a toggle rather than shipped on or off.
     ///
     /// The mechanism works, the default is `.none`, and which is better is a judgement to make on
-    /// real drawings. Deliberately view-level and not persisted per recipe — where it eventually
-    /// lives (global preference, per recipe, per group) is a decision to take *after* looking at it.
+    /// real drawings. One switch for the scene, not per recipe, and saved with the scene (TODO (176)).
     private var options: some View {
         Toggle(isOn: $canvasManager.interpolationThicknessFade) {
             VStack(alignment: .leading, spacing: 2) {
