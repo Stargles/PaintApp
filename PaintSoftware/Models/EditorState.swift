@@ -142,7 +142,7 @@ extension CanvasManager {
     }
 
     func restoreSceneTools(_ tools: SceneTools) {
-        selectedTool = tools.tool
+        selectedTool = tools.tool.isRestoredOnOpening ? tools.tool : .pen
         toolProfiles = tools.profiles
         brushColor = tools.color.color
         eyedropperMode = tools.eyedropperMode

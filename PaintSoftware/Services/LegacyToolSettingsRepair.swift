@@ -80,7 +80,9 @@ enum LegacyToolSettingsRepair {
         if !candidates.isEmpty {
             let snapshot = ProjectBackupManager.takeUpdateSnapshotIfNeeded()
             let earlier = EarlierAppWideTools(defaults: defaults, library: library)
-            for package in candidates where !package.url.lastPathComponent.hasPrefix(snapshot) {
+            // A saved version the snapshot's thinning retired is no longer there to repair.
+            for package in candidates where !package.url.lastPathComponent.hasPrefix(snapshot)
+                && FileManager.default.fileExists(atPath: package.url.path) {
                 switch repair(packageAt: package.url, from: earlier) {
                 case .alreadyCurrent: break
                 case .repaired: report.repaired.append(package.path)

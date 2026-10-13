@@ -408,13 +408,18 @@ final class ColorPickerLogicTests: XCTestCase {
     /// A first launch seeds the built-in presets **and stores them**, so the id a scene's selection
     /// names is the same id on the next launch. They used to be minted afresh every launch until the
     /// artist first edited one, so a selection of an untouched preset could never survive a relaunch.
+    ///
+    /// The store is the operand, not a second `PaletteStore`: within one process the presets are one
+    /// `static let`, so a second store agrees with the first whether or not anything was stored.
     func testAFirstLaunchSeedsThePresetsWithIdsThatOutliveIt() throws {
         let settings = try isolatedSettings()
         let first = PaletteStore(settings: settings)
         XCTAssertEqual(first.palettes.map(\.name), PaletteStore.defaultPresets.map(\.name))
         XCTAssertTrue(first.palettes.allSatisfy(\.isBuiltIn))
-        let second = PaletteStore(settings: settings)
-        XCTAssertEqual(second.palettes.map(\.id), first.palettes.map(\.id), "The same ids after a relaunch")
+        guard case .palettes(let stored) = settings.readPalettes() else {
+            return XCTFail("The seeded presets are stored on the first launch, so the next one reads their ids")
+        }
+        XCTAssertEqual(stored.map(\.id), first.palettes.map(\.id), "The ids the next launch reads")
     }
 
     /// A scene's selection is resolved against the library: an id the library has is that palette, and
