@@ -47,11 +47,6 @@ final class WindowSurfaceView: UIView {
     /// at the mint, with the rest of the frame's values.
     static var drawDelay: TimeInterval = 0
 
-    /// **How long the main thread stays busy after a swap, before the turn commits** — zero on every
-    /// ordinary launch, and set only by `UITestSeeds.applyBusyLandingTurnIfRequested`
-    /// (`-uiTestBusyLandingTurnMillis`, simulator only), so a test can stage the iPad's busy turns.
-    static var landingTurnDelay: TimeInterval = 0
-
     /// How many frames have been presented — for tests, which spin the run loop until it moves.
     private(set) var presentedCount = 0
     /// The window the surfaces are sized to, in canvas points; `.null` before the first present.
@@ -149,14 +144,6 @@ final class WindowSurfaceView: UIView {
                     self.back = 1 - self.back
                     self.presentedCount += 1
                     finished?(true)
-                    // After everything the landing's block does — `LatestWins` mints the next draw
-                    // once this returns — and before the turn's commit: see `landingTurnDelay`.
-                    if Self.landingTurnDelay > 0 {
-                        let busy = Self.landingTurnDelay
-                        CFRunLoopPerformBlock(CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue) {
-                            Thread.sleep(forTimeInterval: busy)
-                        }
-                    }
                 }
             }
         }

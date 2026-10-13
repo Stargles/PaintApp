@@ -1,167 +1,199 @@
 import XCTest
 import UIKit
 
-/// **A filled selection recoloured from the Select panel never shows the base through the edit while
-/// the finger is on the picker** — the owner's report of 2026-10-12, on the iPad 9 in landscape:
-/// *"Made a selection, clicked on fill, then clicked on edit and tried to change the color inside the
-/// selection. Lots of flickering."*
+/// **A filled selection recoloured from the Select panel never shows the paper through the edit while
+/// the picker is open** — the owner's report of 2026-10-12, on the iPad 9: *"Made a selection, clicked
+/// on fill, then clicked on edit and tried to change the color inside the selection. Lots of
+/// flickering."*
 ///
-/// The edit is held off the document (TODO (173)): the cel's base is punched out under a window, and
-/// the window is drawn into one of two surfaces the render server shows. Each draw is minted in the
-/// main-thread turn the last one landed in — before that turn's transaction has taken the swap to the
-/// server — so the surface being cleared and redrawn could still be the one on screen, and for as long
-/// as the main thread kept that turn from committing the paper showed through the punched hole, where
-/// the fill had been. On the iPad 9 a window over a large fill takes hundreds of milliseconds to draw
-/// and the colour picker keeps the main thread busy for up to 182 ms a turn (the owner's recording), so
-/// the picture alternated with the hole on every tick. Here both are a few milliseconds, and the two
-/// seams give the simulator the device's: `-uiTestSlowWindowDrawMillis` (the draw) and
-/// `-uiTestBusyLandingTurnMillis` (the turn the swap lands in).
+/// The edit is held off the document (TODO (173)) for as long as the picker is open: the cel's base is
+/// punched out under a window, and the window's picture is drawn off the main thread into one of two
+/// surfaces the render server shows (`StrokeCanvasView.showHeldEdit`, `WindowSurfaceView`). So at every
+/// moment between the first tick and the lift the artist must be looking at *the fill in some colour*:
+/// the base while the first picture is still being drawn, then the newest picture that has landed —
+/// never the paper, which is what the punched hole shows when a picture is not on top of it, and never
+/// an older colour once a newer one has been seen.
 ///
-/// Cold start, the artist's way, on an iPad (9th generation) simulator turned to landscape: a red brush,
-/// Select → Rectangle, a loop on the right half of the paper, Fill; Edit → the colour swatch → the
-/// picker's hue ring dragged for eight seconds while another thread reads the filled region. Every
-/// reading taken with the finger down must be the fill in *some* colour — never the paper.
+/// **How it is made deterministic.** Not by sampling a synthesised drag, whose synchronous call leaves
+/// the number of screen reads to the host's speed (the test it replaces needed ten and read three on a
+/// loaded machine). The ticks are palette swatch taps, one tick each, and **every wait is for a colour
+/// to land, not for time**: the screen is read continuously from another thread, and the test moves on
+/// when the picture it asked for is the one on screen. What is asserted is a property of *every* read
+/// taken meanwhile. The only thing time does is the one seam, `-uiTestSlowWindowDrawMillis`, which
+/// makes each draw take 2.5 s, so that the stretch between a tick being asked for and its picture
+/// landing — a few milliseconds on this host, hundreds on the iPad — is long enough to be read for
+/// certain, whatever the speed of the read: the test asserts it read in it, and fails by saying so
+/// when it did not rather than passing on nothing.
+///
+/// **What it cannot show, and the simulator is why.** The owner's flicker is the surface being redrawn
+/// while the render server still shows it (`WindowSurfaceView.present`'s wait). On this simulator the
+/// render server did not show the retired surface in any arrangement tried — a window from a sixth of
+/// the canvas to nine-tenths of it, draws of 0.3 to 1 s, a main thread held busy after every swap — so
+/// no screen read can see that hazard here, and **`WindowSurfaceViewLogicTests` pins the wait instead**,
+/// at the level where it is deterministic (a surface with a use count is not drawn into). The owner's
+/// iPad is the confirmation still owed. What this test does catch is the rest of the arrangement going
+/// wrong around it: the hole punched before the first picture has landed, a picture taken off the
+/// surface between ticks, an older picture shown after a newer one.
+///
+/// Cold start, the artist's way, in the suite's orientation: a red brush, Select → Rectangle, a loop on
+/// the paper, Fill; Edit → the colour swatch → the picker's palette. Nothing here depends on how the
+/// iPad's window sits on the screen (the simulator's windowed apps place it differently from launch to
+/// launch): every point is derived from a frame read in this run.
 final class SelectionFillRecolourUITests: PaintUITestCase {
 
-    /// The screen read at fixed points, repeatedly, on another thread — `MidGestureSampler`'s job, with
-    /// the screenshot drawn through its own orientation first so a landscape read lands where the
-    /// points say (the shared sampler reads the portrait pixel buffer as it comes).
-    private final class LandscapeSampler {
-        private let points: [CGPoint]
-        private var stopped = false
-        private var samples: [(finished: CFAbsoluteTime, pixels: [RGBA?])] = []
-        private let lock = NSLock()
-        private let group = DispatchGroup()
+    /// How long each window draw takes (`-uiTestSlowWindowDrawMillis`).
+    private static let drawSeconds = 2.5
 
-        init(points: [CGPoint]) { self.points = points }
+    /// Spectrum's blue, green, purple and orange — four picks the screen tells apart from red, from
+    /// paper and from each other. The test reads each swatch's own value before using it.
+    private static let picks: [(index: Int, hex: String)] = [(8, "2196F3"), (6, "4CAF50"), (10, "9C27B0"), (4, "FF9800")]
 
-        func start() {
-            group.enter()
-            DispatchQueue.global(qos: .userInitiated).async { [self] in
-                defer { group.leave() }
-                while true {
-                    lock.lock(); let done = stopped; lock.unlock()
-                    if done { return }
-                    let read = Self.pixels(in: XCUIScreen.main.screenshot().image, at: points)
-                    let finished = CFAbsoluteTimeGetCurrent()
-                    lock.lock(); samples.append((finished, read)); lock.unlock()
-                    Thread.sleep(forTimeInterval: 0.02)
-                }
-            }
+    /// The colour of a read: 0 is the fill as it was painted (red), `n` is the n-th pick, nil is
+    /// anything else — the paper, the hatching, a half-drawn picture.
+    private func level(of pixel: RGBA?) -> Int? {
+        guard let pixel else { return nil }
+        func near(_ rgb: (Int, Int, Int)) -> Bool {
+            abs(Int(pixel.r) - rgb.0) < 14 && abs(Int(pixel.g) - rgb.1) < 14 && abs(Int(pixel.b) - rgb.2) < 14
         }
-
-        func stop() -> [(finished: CFAbsoluteTime, pixels: [RGBA?])] {
-            lock.lock(); stopped = true; lock.unlock()
-            group.wait()
-            return samples
+        if near((255, 0, 0)) { return 0 }
+        for (offset, pick) in Self.picks.enumerated() {
+            let value = Int(pick.hex, radix: 16) ?? 0
+            if near(((value >> 16) & 255, (value >> 8) & 255, value & 255)) { return offset + 1 }
         }
-
-        private static func pixels(in image: UIImage, at points: [CGPoint]) -> [RGBA?] {
-            let format = UIGraphicsImageRendererFormat()
-            format.scale = 1
-            let upright = UIGraphicsImageRenderer(size: image.size, format: format).image { _ in
-                image.draw(in: CGRect(origin: .zero, size: image.size))
-            }
-            guard let cg = upright.cgImage else { return points.map { _ in nil } }
-            let width = cg.width, height = cg.height
-            var buffer = [UInt8](repeating: 0, count: width * height * 4)
-            guard let context = CGContext(data: &buffer, width: width, height: height, bitsPerComponent: 8,
-                                          bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
-                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
-            else { return points.map { _ in nil } }
-            context.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
-            let sx = CGFloat(width) / image.size.width, sy = CGFloat(height) / image.size.height
-            return points.map { point in
-                let x = Int(point.x * sx), y = Int(point.y * sy)
-                guard x >= 0, y >= 0, x < width, y < height else { return nil }
-                let offset = (y * width + x) * 4
-                return (buffer[offset], buffer[offset + 1], buffer[offset + 2], buffer[offset + 3])
-            }
-        }
+        return nil
     }
 
     func testRecolouringAFilledSelectionNeverShowsThePaperThroughTheEdit() throws {
-        XCUIDevice.shared.orientation = .landscapeLeft
         let app = XCUIApplication()
-        app.launchArguments += ["-uiTestSlowWindowDrawMillis", "300", "-uiTestBusyLandingTurnMillis", "150"]
+        app.launchArguments += ["-uiTestSlowWindowDrawMillis", "\(Int(Self.drawSeconds * 1000))"]
         XCTAssertTrue(launchIntoEditor(app), "setup: a brand-new document")
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
-        XCTAssertGreaterThan(app.windows.firstMatch.frame.width, app.windows.firstMatch.frame.height,
-                             "PREMISE: the iPad is in landscape, as the owner holds it")
 
-        // 1. Red, Select → Rectangle, a loop on the right half of the paper, Fill.
+        // 1. Red, Select → Rectangle, a loop across the upper paper, Fill; Edit → the swatch → the picker.
         setBrushColor(app, hex: "FF0000")
         app.buttons["toolbar.selectButton"].tap()
         let rectangle = app.buttons["selectPanel.mode.rectangle"]
         XCTAssertTrue(rectangle.waitForExistence(timeout: 5))
         rectangle.tap()
         let visible = visiblePaperRect(app, in: canvas)
-        dragOnCanvas(app, from: onHost(visible, 0.52, 0.12), to: onHost(visible, 0.94, 0.9))
+        let loop = (x0: 0.1, y0: 0.1, x1: 0.9, y1: 0.5)
+        dragOnCanvas(app, from: onHost(visible, loop.x0, loop.y0), to: onHost(visible, loop.x1, loop.y1))
         let fill = app.buttons["selectPanel.fillButton"]
         XCTAssertTrue(fill.waitForExistence(timeout: 5), "the loop raised the Select panel's Fill")
         fill.tap()
-
-        let host = canvas.frame
-        func screen(_ v: CGVector) -> CGPoint {
-            CGPoint(x: host.minX + host.width * v.dx, y: host.minY + host.height * v.dy)
-        }
-        let probes = [(0.62, 0.3), (0.72, 0.45), (0.82, 0.3), (0.66, 0.65), (0.84, 0.7), (0.75, 0.55)]
-            .map { screen(onHost(visible, $0.0, $0.1)) }
-        let premise = LandscapeSampler(points: probes)
-        premise.start()
-        Thread.sleep(forTimeInterval: 1.5)
-        let filled = premise.stop().last?.pixels ?? []
-        XCTAssertTrue(filled.count == probes.count && filled.allSatisfy(isRed),
-                      "PREMISE: the selection is filled red where it is read (\(filled))")
-
-        // 2. Edit → the colour swatch → the picker, which must leave the probes in view.
         openSelectionEditBand(app)
         let swatch = app.buttons["selectPanel.colourSwatch"]
         XCTAssertTrue(swatch.waitForExistence(timeout: 5), "the loop raised the colour swatch")
         swatch.tap()
-        let picker = app.descendants(matching: .any)["canvasPresentation.selectionColour"].firstMatch
-        XCTAssertTrue(picker.waitForExistence(timeout: 5), "the swatch opens the picker")
-        let ring = app.otherElements["colorPanel.hueSlider"]
-        XCTAssertTrue(ring.waitForExistence(timeout: 5), "the picker's hue ring")
-        let clear = probes.filter { !picker.frame.insetBy(dx: -8, dy: -8).contains($0) }
-        XCTAssertGreaterThanOrEqual(clear.count, 3,
-                                    "PREMISE: the fill is read clear of the picker (picker \(picker.frame))")
-        attachScreenshot(app, "1-picker-open-over-the-filled-selection")
+        XCTAssertTrue(app.descendants(matching: .any)["canvasPresentation.selectionColour"].firstMatch
+            .waitForExistence(timeout: 5), "the swatch opens the picker")
 
-        // 3. The ring dragged for eight seconds, slowly, while the filled region is read.
-        let f = ring.frame
-        let centre = CGPoint(x: f.midX, y: f.midY)
-        let radius = min(f.width, f.height) * 0.42
-        func point(_ angle: Double) -> XCUICoordinate {
-            ring.coordinate(withNormalizedOffset: .zero).withOffset(
-                CGVector(dx: centre.x - f.minX + radius * cos(angle), dy: centre.y - f.minY + radius * sin(angle)))
+        // 2. The picks, each swatch's own value read first.
+        var swatches: [XCUIElement] = []
+        for pick in Self.picks {
+            let element = app.otherElements["colorPanel.swatch.\(pick.index)"]
+            XCTAssertTrue(element.exists, "PREMISE: the picker lists palette swatch \(pick.index)")
+            XCTAssertEqual(element.value as? String, pick.hex, "PREMISE: swatch \(pick.index) is \(pick.hex)")
+            swatches.append(element)
         }
-        let sampler = LandscapeSampler(points: clear)
+
+        // 3. A grid of points over the loop; those that read red now are on the fill and under nothing —
+        //    not under the picker, the Select panel or the timeline — and are the ones read from here on.
+        let host = canvas.frame
+        func screen(_ v: CGVector) -> CGPoint {
+            CGPoint(x: host.minX + host.width * v.dx, y: host.minY + host.height * v.dy)
+        }
+        var grid: [CGPoint] = []
+        for fx in stride(from: 0.06, through: 0.94, by: 0.11) {
+            for fy in stride(from: 0.12, through: 0.88, by: 0.19) {
+                grid.append(screen(onHost(visible, loop.x0 + (loop.x1 - loop.x0) * fx,
+                                          loop.y0 + (loop.y1 - loop.y0) * fy)))
+            }
+        }
+        let sampler = MidGestureSampler(points: grid, interval: 0)
         sampler.start()
-        let start = Date()
-        var angle = 0.6
-        while Date().timeIntervalSince(start) < 8 {
-            point(angle).press(forDuration: 0.05, thenDragTo: point(angle + 0.9), withVelocity: .slow,
-                               thenHoldForDuration: 0.05)
-            angle += 0.9
-        }
-        let returned = CFAbsoluteTimeGetCurrent()
-        let taken = sampler.stop().filter { $0.finished < returned - 0.3 }
-        attachScreenshot(app, "2-after-the-drag")
+        let premiseRead = waitForSample(sampler, timeout: 30) { _ in true }
+        let clear = grid.indices.filter { level(of: premiseRead?.pixels[$0]) == 0 }
+        XCTAssertGreaterThanOrEqual(clear.count, 6,
+                                    "PREMISE: the fill reads red where it is read, clear of the picker (\(clear.count) of "
+                                    + "\(grid.count) points; first read \(String(describing: premiseRead?.pixels)))")
 
-        let note = XCTAttachment(string: taken.map { sample in
-            sample.pixels.map { $0.map { "\($0.r),\($0.g),\($0.b)" } ?? "-" }.joined(separator: " ")
+        /// The one level every clear point reads in a sample, or nil when they disagree or any is not a colour.
+        func uniformLevel(_ sample: MidGestureSampler.Sample) -> Int? {
+            let levels = Set(clear.map { level(of: sample.pixels[$0]) })
+            return levels.count == 1 ? levels.first ?? nil : nil
+        }
+        func waitForLevel(atLeast target: Int) -> Bool {
+            waitForSample(sampler, timeout: 40) { (uniformLevel($0) ?? -1) >= target } != nil
+        }
+
+        // 4. Tick one alone: its picture takes 2.5 s to draw, and the base must be on screen meanwhile.
+        //    Then ticks two, three and four in quick succession: the second is drawn at once, the third
+        //    is asked for during that draw and the fourth replaces it, so the picture drawn after the
+        //    second lands — into the surface the first one just left — is the newest, and the third
+        //    is never drawn at all.
+        let t0 = CFAbsoluteTimeGetCurrent()
+        var taps: [CFAbsoluteTime] = []
+        func tick(_ index: Int) {
+            swatches[index].tap()
+            taps.append(CFAbsoluteTimeGetCurrent())
+        }
+        tick(0)
+        XCTAssertTrue(waitForLevel(atLeast: 1), "the first tick's picture never reached the screen")
+        tick(1)
+        tick(2)
+        tick(3)
+        XCTAssertTrue(waitForLevel(atLeast: Self.picks.count), "the newest tick's picture never reached the screen")
+        let reads = sampler.stop()
+        attachScreenshot(XCUIScreen.main, "1-the-last-tick-held")
+
+        // 5. What every read said, from the first tick on.
+        let timeline = reads.filter { $0.finished >= taps[0] }
+        func pixels(_ sample: MidGestureSampler.Sample) -> String {
+            clear.map { sample.pixels[$0].map { "\($0.r),\($0.g),\($0.b)" } ?? "-" }.joined(separator: " ")
+        }
+        let note = XCTAttachment(string: "ticks at " + taps.map { String(format: "%.2f", $0 - t0) }.joined(separator: ", ")
+                                 + "\n" + timeline.map { sample in
+            String(format: "%.2f ", sample.finished - t0)
+                + (uniformLevel(sample).map { "level \($0)" } ?? "NOT ONE COLOUR: " + pixels(sample))
         }.joined(separator: "\n"))
-        note.name = "the filled region, read while the finger was on the ring"
+        note.name = "what the fill read, from the first tick on"
         note.lifetime = .keepAlways
         add(note)
-        XCTAssertGreaterThanOrEqual(taken.count, 10, "the screen was read \(taken.count) times while the finger was down")
-        XCTAssertTrue(taken.contains { $0.pixels.contains { !isRed($0) && !isWhitish($0) } },
-                      "PREMISE: the recolour reached the screen while the finger was down")
-        let flashes = taken.filter { $0.pixels.contains(where: isWhitish) }
-        XCTAssertTrue(flashes.isEmpty,
-                      "the paper showed through the fill \(flashes.count) times in \(taken.count) reads while the "
-                      + "colour was being dragged — the edit's window was redrawn in a surface still on screen")
+
+        if let bad = timeline.first(where: { uniformLevel($0) == nil }) {
+            XCTFail("the fill read as something other than one of its colours \(String(format: "%.2f", bad.finished - t0)) s "
+                    + "in, with the edit held — the paper through the hole, or half a picture (\(pixels(bad)))")
+            return
+        }
+        let levels = timeline.compactMap(uniformLevel)
+        XCTAssertEqual(levels, levels.sorted(),
+                       "an older colour came back after a newer one had been on screen (levels read, in order: \(levels))")
+        XCTAssertEqual(levels.last, Self.picks.count, "the screen ends on the newest tick's picture")
+
+        // 6. **Reads that fell while a picture was on screen and the next was still being drawn** — the
+        //    base while the first draws, the first picture while the second does, the second while the
+        //    last does — each more than once, or the loop above has asserted nothing about the stretch
+        //    this test exists for.
+        for shown in [0, 1, 2] {
+            let dwelling = levels.filter { $0 == shown }.count
+            XCTAssertGreaterThanOrEqual(
+                dwelling, 2,
+                "PREMISE: the screen was read \(dwelling) times with level \(shown) on it while the next picture was being "
+                + "drawn — the host is too slow to read inside a \(Self.drawSeconds) s draw (levels read: \(levels))")
+        }
+    }
+
+    /// Polls `sampler` until its newest sample satisfies `accepted`, and returns that sample; nil when
+    /// the deadline passes — never the last reading, as `waitForPixel`.
+    private func waitForSample(_ sampler: MidGestureSampler, timeout: TimeInterval,
+                               _ accepted: (MidGestureSampler.Sample) -> Bool) -> MidGestureSampler.Sample? {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if let latest = sampler.latest, accepted(latest) { return latest }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        return nil
     }
 }

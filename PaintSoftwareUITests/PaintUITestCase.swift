@@ -1974,6 +1974,13 @@ class PaintUITestCase: XCTestCase {
             return samples
         }
 
+        /// The newest sample taken so far — for a caller that waits on what the screen shows while the
+        /// sampler keeps running, rather than for a count of reads.
+        var latest: Sample? {
+            lock.lock(); defer { lock.unlock() }
+            return samples.last
+        }
+
         private static func pixels(in image: UIImage, at points: [CGPoint]) -> [RGBA?] {
             guard let cg = image.cgImage else { return points.map { _ in nil } }
             let width = cg.width, height = cg.height

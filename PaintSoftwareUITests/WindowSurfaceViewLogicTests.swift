@@ -129,6 +129,84 @@ final class WindowSurfaceViewLogicTests: XCTestCase {
         XCTAssertGreaterThan(Int(bytes[2]), Int(bytes[1]) + 100, "the newest frame (red) is what is on the layer")
     }
 
+    /// **A surface the render server still holds is not drawn into** — `WindowSurfaceView.present`'s
+    /// wait, the cure for the owner's flicker of 2026-10-12 (*"Lots of flickering"* recolouring a
+    /// filled selection). The draw for a frame is minted in the turn the last one landed, and the swap
+    /// that put the last one up reaches the render server only when that turn's transaction commits —
+    /// so the surface the new draw clears and fills is still the one on screen, and one frame of
+    /// whatever lies under the view shows through it. `IOSurface.isInUse` is what says the server has
+    /// let go. **This is the level at which the hazard is deterministic**: the simulator's render
+    /// server does not show a retired surface of a window's size, so no screen read can see it there
+    /// (`SelectionFillRecolourUITests` says what it can and cannot).
+    ///
+    /// Operands: the surface a frame will be drawn into — the one that was on the layer two frames
+    /// ago, which the test takes a use count on, as the server's mapping does — read for its own
+    /// pixels while the frame waits, and for whether the frame's draw has run. Frame three is drawn
+    /// into frame one's surface (the view alternates two).
+    func testASurfaceTheRenderServerStillHoldsIsNotDrawnIntoUntilItLetsGo() throws {
+        let view = WindowSurfaceView(queue: queue)
+        let window = CGRect(x: 0, y: 0, width: 8, height: 4)
+        present(view, window: window, count: 1)
+        let held = try XCTUnwrap(view.layer.contents as? IOSurface, "frame one's surface is on the layer")
+        held.incrementUseCount()
+        var released = false
+        defer { if !released { held.decrementUseCount() } }
+        present(view, window: window, count: 1)
+
+        let lock = NSLock()
+        var drawStarted = false
+        view.present(window: window, placement: .identity) { cg in
+            lock.lock(); drawStarted = true; lock.unlock()
+            UIColor.red.setFill()
+            cg.fill(CGRect(origin: .zero, size: window.size))
+            return window
+        }
+        RunLoop.main.run(until: Date().addingTimeInterval(0.25))
+        lock.lock(); let startedWhileHeld = drawStarted; lock.unlock()
+        XCTAssertFalse(startedWhileHeld, "frame three's draw ran into a surface the render server still held")
+        XCTAssertEqual(view.presentedCount, 2, "and it did not land")
+        XCTAssertEqual(alpha(of: held), 255, "the held surface still has frame one's picture: it was not cleared")
+
+        held.decrementUseCount()
+        released = true
+        let deadline = Date().addingTimeInterval(2)
+        while view.presentedCount < 3, Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.005))
+        }
+        XCTAssertEqual(view.presentedCount, 3, "once the server let go, the frame was drawn and landed")
+        lock.lock(); let started = drawStarted; lock.unlock()
+        XCTAssertTrue(started)
+        XCTAssertTrue(view.layer.contents as AnyObject? === (held as AnyObject), "into the surface that was held")
+    }
+
+    /// **A server that never lets go costs one wait, not the picture** — the wait is bounded (half a
+    /// second, past the longest busy turn the owner's iPad 9 recorded), so a surface that stays in use
+    /// forever is drawn into after it rather than never.
+    func testASurfaceTheServerNeverLetsGoOfIsDrawnIntoAfterTheBound() throws {
+        let view = WindowSurfaceView(queue: queue)
+        let window = CGRect(x: 0, y: 0, width: 8, height: 4)
+        present(view, window: window, count: 1)
+        let held = try XCTUnwrap(view.layer.contents as? IOSurface)
+        held.incrementUseCount()
+        defer { held.decrementUseCount() }
+        present(view, window: window, count: 1)
+        view.present(window: window, placement: .identity) { _ in window }
+        let deadline = Date().addingTimeInterval(4)
+        while view.presentedCount < 3, Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.005))
+        }
+        XCTAssertEqual(view.presentedCount, 3, "the frame landed although the surface was never let go")
+    }
+
+    /// One pixel's alpha of a surface the test drew a full-window green fill into — 255 while it holds
+    /// that picture, 0 once it has been cleared for another.
+    private func alpha(of surface: IOSurface) -> UInt8 {
+        _ = surface.lock(options: [.readOnly], seed: nil)
+        defer { _ = surface.unlock(options: [.readOnly], seed: nil) }
+        let bytes = surface.baseAddress.assumingMemoryBound(to: UInt8.self)
+        return bytes[2 * surface.bytesPerRow + 3 * 4 + 3]
+    }
+
     /// **`finished` says how every draw ended, in the turn it ended** — a caller waiting to punch a
     /// hole under the picture waits for `true`.
     func testFinishedReportsWhetherTheDrawBecameTheContents() {
