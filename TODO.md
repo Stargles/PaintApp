@@ -133,6 +133,23 @@ panel, and the Wheel redrew 14,400 rectangles — fixed and measured in PERFORMA
 - [x] The colour picker's own redraw during a drag measured and, if it is the ~1.4 s, fixed (a separate
       worker — not the held edit's code). It was: PERFORMANCE.md §31.
 
+## (177) A stream layer can draw in place in the layer stack
+
+**Status** — asked 2026-10-12.
+
+*"currently the stream layer renders on top of everything. It would be nice if the stream layer still
+followed the layer heigharchy. I'm pretty sure this measure was to prevent re-rendering every time the
+stream moves, but I feel like it is okay as long as we add a switch to the stream options menu where you
+can flip it from rendering on top or in place."*
+
+**What the survey found**: the stream is already in layer order while every layer above it is plain; it
+goes on top only when a layer above blends, masks, grades or is a Guide (`LivePairCut.overHost`). In
+place means re-compositing the layers above the stream every stream tick, in a window — one more consumer
+of (179)'s scheduler, so this follows (179). Decided 2026-10-12 (the orchestrator; the owner may
+overrule): the switch is stored **per stream**, beside Freeze (`StreamRef`), and defaults to **on top**.
+
+- [ ] A switch in the stream bar: on top (today) / in place.
+
 ## (35) Advanced masks — colour masks beside the alpha mask
 
 **Status** — promoted from "Later" 2026-10-12; the owner will describe what it is meant to be once told
@@ -162,23 +179,6 @@ colour-distance definitions exist; the mask uses Recolour's; per-pixel Oklab wan
       lane F (the assessment's commit 7, moved here so the per-mask value is what is held).
 - [ ] Built on the existing mask and recolour modules rather than beside them.
 - [ ] After (179), which touches mask tuning's per-tick path.
-
-## (177) A stream layer can draw in place in the layer stack
-
-**Status** — asked 2026-10-12.
-
-*"currently the stream layer renders on top of everything. It would be nice if the stream layer still
-followed the layer heigharchy. I'm pretty sure this measure was to prevent re-rendering every time the
-stream moves, but I feel like it is okay as long as we add a switch to the stream options menu where you
-can flip it from rendering on top or in place."*
-
-**What the survey found**: the stream is already in layer order while every layer above it is plain; it
-goes on top only when a layer above blends, masks, grades or is a Guide (`LivePairCut.overHost`). In
-place means re-compositing the layers above the stream every stream tick, in a window — one more consumer
-of (179)'s scheduler, so this follows (179). Decided 2026-10-12 (the orchestrator; the owner may
-overrule): the switch is stored **per stream**, beside Freeze (`StreamRef`), and defaults to **on top**.
-
-- [ ] A switch in the stream bar: on top (today) / in place.
 
 ## (178) Liquify tool
 
