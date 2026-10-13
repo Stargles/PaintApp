@@ -113,16 +113,6 @@ why: pictures handed to Core Animation faster than the render server frees them)
 - [ ] Half-detail drag preview above the size threshold.
 - [ ] Measured with `PlaybackProbe` before/after, as §29 was.
 
-## (182) A Select boolean add is its own undo step
-
-**Status** — asked 2026-10-12; small, batched with (180).
-
-*"the select doing a boolean add should be one undo step (user makes selection 1, then selection 2 which
-gets booleaned, then undos and selection 2 gets undone)"*
-
-- [ ] Undo after an add (and, by the same seam, a subtract) restores the selection as it was before that
-      loop, not no selection; redo re-applies it. Driven: two loops, undo, the first loop's marching ants.
-
 ## (183) Recolouring a filled selection flickers
 
 **Status** — reported 2026-10-12 with a recording; given to the (179) worker, whose seam owns the held
@@ -147,40 +137,6 @@ simulator: 79 ms over 34 ticks) — INFERRED to be the colour picker's own redra
 - [ ] The owner confirms on the iPad.
 - [ ] The colour picker's own redraw during a drag measured and, if it is the ~1.4 s, fixed (a separate
       worker — not the held edit's code).
-
-## (184) The lasso takes taps as corners and closes on its start node
-
-**Status** — asked and ruled 2026-10-12; batched with (182), the other Select change.
-
-*"The user lasso selects, and a node spawns in the place where they first put down their pen. When the
-node is clicked again it completes the selection, and the user can move on to the next selection which
-gets booleaned. Thus, if the user taps instead of draws, the select will automatically jump to the new
-location, forming a polygon like shape. For example if the user taps on the 4 edges of a square, the
-select forms a square. The previous drawing behaviour should also work"*
-
-**Ruled**: a drawn stroke that ends back on the start node **closes on lift**, as today; lifted anywhere
-else the lasso **stays open** — a tap adds a straight-edged corner, a new stroke joins from the open end
-with a straight edge to where the pen lands, and a tap on the start node closes it. The closed loop then
-composes onto the selection exactly as a loop does today (`finishSelection`, add/subtract). Orchestrator
-defaults, the owner may overrule: undo while open removes the last corner or drawn run; switching tool,
-mode or tapping the Select icon abandons an open lasso; it applies to the Freehand mode only.
-
-- [ ] Open-lasso state with its start node drawn; taps as corners; strokes joined; node tap closes.
-- [ ] Driven: four taps and a node tap make a square selection; a one-stroke loop still closes on lift.
-
-## (185) The selection stays when switching layers
-
-**Status** — asked 2026-10-12; batched with (182) and (184), the other Select changes.
-
-*"make the select stay when switching layers. Right now it disappears if you switch"*
-
-A selection is stamped with the cel it was made on (`finishSelection`) and is dropped when the active
-layer changes. Orchestrator defaults, the owner may overrule: a **drawn region** (freehand, rectangle,
-wand) stays up and applies to whichever layer is active — Move, Recolour, Clear and the paint clip act on
-the new layer's content inside it; **tapped objects** belong to their layer, so a tap selection still
-clears; switching *frames* keeps today's behaviour (the worker reports what that is).
-
-- [ ] Region selection survives a layer switch and acts on the new layer; driven on the device geometry.
 
 ## (186) The fill's sideways drag adjusts Gap Closing only, and right decreases it
 

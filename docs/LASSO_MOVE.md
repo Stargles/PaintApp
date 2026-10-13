@@ -1725,6 +1725,43 @@ the loop is asked in rather than about which rule it is asked under.
     refusal had made unreachable at every frame where a pose was doing anything.
 
 
+Three more came on **2026-10-12**, all about how the Select tool is *used* rather than what it catches.
+
+28. **A boolean add is its own undo step.** The owner: *"the select doing a boolean add should be one
+    undo step (user makes selection 1, then selection 2 which gets booleaned, then undos and selection
+    2 gets undone)."* A loop composed onto a region already up — under Add or under Subtract — records
+    one step on the ordinary history (`finishSelection`, `HistoryActionLabel.addToSelection` /
+    `.subtractFromSelection`): undo gives back the selection as it stood before that loop, redo takes
+    it again, and a subtract that swallowed everything is still a step whose undo gives the selection
+    back. **The first loop is not a step** — it is where the selection begins, and the press after it
+    belongs to whatever was drawn before.
+
+29. **The Freehand lasso takes taps as corners and closes on its start node.** The owner: *"a node
+    spawns in the place where they first put down their pen. When the node is clicked again it
+    completes the selection … if the user taps instead of draws, the select will automatically jump to
+    the new location, forming a polygon like shape … The previous drawing behaviour should also work."*
+    The lasso is one polyline (`OpenLasso`, on `CanvasManager.openLasso`): a drawn stroke adds its
+    samples, a tap adds a corner, and the straight edge from the open end to where the pen next lands
+    is the polyline's own next segment. A stroke that **lifts on the start node closes**, as it always
+    did; lifted anywhere else it **stays open**; a tap on the node of a lasso with a shape closes it,
+    and the closed loop goes through `finishSelection`, so it adds or subtracts like every other
+    loop. "On the node" is 22 screen points, whatever the zoom. Defaults the owner has not overruled:
+    **Undo while a lasso is open takes back its last corner or stroke** (the history is untouched);
+    **switching tool, panel or selection mode, Deselect and the Select icon put an open lasso down**;
+    a save and a layer change do not. Freehand only — the rectangle, the wand and Tap are unchanged,
+    and so is the fill tool's lasso, which still closes on lift.
+
+30. **A drawn region follows the artist to another layer.** The owner: *"make the select stay when
+    switching layers. Right now it disappears if you switch."* A loop, a rectangle and the wand's
+    flood make a **region** (`Selection`), which carries no cel: Move, Recolour, Clear, the other
+    verbs and the paint clip act on the layer that is active, each pulling it back through that
+    layer's own pose. A **tapped set** (`Selection.objects`) belongs to the cel its objects live on and
+    is put down by any move off it. **The playhead's rule is unchanged**: stepping onto another cel of
+    the layer the artist is on puts a region down, and a tick within one cel leaves it alone
+    (`CanvasManager.handleActiveContextChanged`). Whether a region should also survive that step is
+    the owner's to say.
+
+
 ## 6. Open risks
 
 **Needs the owner's eye on the device, not a test:**
