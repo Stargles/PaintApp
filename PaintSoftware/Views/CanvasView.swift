@@ -1302,6 +1302,11 @@ struct CanvasView: UIViewRepresentable {
                 // slider's preview, which reaches the screen through a surface rather than a pass, so a
                 // test that cannot look during its synchronous drag reads this after it.
                 + " held:\(heldFrameCount)"
+                // **What draws the whole frame, and at how many pixels** — the held frame while it is up
+                // (half its size a side on a big scene, `DragPreviewDetail`), the bake at rest. A test
+                // reads it straight after a lift to see the detail the finger was shown, and after the
+                // bake to see the detail the lift landed (TODO (179)).
+                + " picture:\(wholeFramePicture())"
                 // **The third cost of a frame, and the one playback was actually spending.**
                 // `derived:` counts posed and interpolated pictures and `rebuilds:` counts sandwich
                 // composites; neither sees the cel's *own* committed render, which is what a layer
@@ -1335,6 +1340,18 @@ struct CanvasView: UIViewRepresentable {
             guard let hostView, state != lastPublishedCanvasState else { return }
             lastPublishedCanvasState = state
             hostView.accessibilityLabel = state
+        }
+
+        /// `picture:` on `canvas.host` — `held@<w>x<h>` while the held frame is on screen, `bake@<w>x<h>`
+        /// at rest, otherwise what the canvas is drawn by (`hosts`, or `live` for the pair or bands).
+        private func wholeFramePicture() -> String {
+            func pixels(_ size: CGSize) -> String { "\(Int(size.width))x\(Int(size.height))" }
+            if let surface = heldFrameSurface, !surface.isHidden { return "held@" + pixels(surface.surfaceWindow.size) }
+            switch sandwichPresentation {
+            case .disengaged: return "hosts"
+            case .rest: return sandwichFull.map { "bake@" + pixels($0.size) } ?? "none"
+            case .live, .midStroke, .moving: return "live"
+            }
         }
 
         /// The last string `publishCanvasState` wrote, so an unchanged pass costs a comparison.
@@ -2055,6 +2072,11 @@ struct CanvasView: UIViewRepresentable {
         /// One held frame, minted when the surface is free: the recipe of the frame the playhead is on
         /// now, with whatever is held now. Nil before there is a canvas.
         ///
+        /// **At half detail on a big scene** (`RenderSizing.dragPreview`, the owner's 2026-10-12 ruling):
+        /// a quarter of the pixels to composite and a quarter of the surface, stretched over the canvas
+        /// with a linear filter so it reads as soft rather than blocky — the reduced composite's rule in
+        /// `updateSandwich`. The lift's picture is the bake, at full detail.
+        ///
         /// **The picture replaces the canvas rather than covering it.** The composite carries the paper
         /// but not what is behind the paper — the margin's grey, which is also what shows through a
         /// document whose paper is off — so the surface is filled with that first. Drawn over the old
@@ -2063,13 +2085,14 @@ struct CanvasView: UIViewRepresentable {
             let frame = canvasManager.currentFrame
             guard let canvasSize = canvasManager.canvasSize,
                   let recipe = canvasManager.makeFrameRecipe(atFrame: frame, includeBackground: true,
-                                                             sizing: .liveComposite,
+                                                             sizing: .dragPreview,
                                                              holding: canvasManager.liveEdit)
             else { return nil }
             heldFrameMintedAt = frame
             let window = CGRect(origin: .zero, size: recipe.canvasSize)
             let placement = CGAffineTransform(scaleX: canvasSize.width / window.width,
                                               y: canvasSize.height / window.height)
+            heldFrameSurface?.layer.magnificationFilter = window.size == canvasSize ? .nearest : .linear
             let budget = canvasManager.frameBaker.budgetBytes
             let backdrop = PaddingCoverView.marginGrey
             return WindowSurfaceView.Frame(window: window, placement: placement, draw: { cg in
@@ -2095,9 +2118,11 @@ struct CanvasView: UIViewRepresentable {
             heldFrameLanding.update(held: canvasManager.liveEdit?.grade != nil)
             heldFrameLanding.pass(key: key, pictureIsCurrent: pictureIsCurrent)
             guard heldFrameLanding.isUp else {
-                heldFrameSurface?.removeFromSuperview()
+                guard let surface = heldFrameSurface else { return }
+                surface.removeFromSuperview()
                 heldFrameSurface = nil
                 heldFrameMintedAt = nil
+                publishCanvasState()
                 return
             }
             // `reconcileLayers` may have fronted the hosts and the halves this pass; the onion skin,

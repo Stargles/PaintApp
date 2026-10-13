@@ -106,15 +106,6 @@ final class StreamScreenUITests: PaintUITestCase {
         app.buttons["streamConnect.cancelButton"].tap()
     }
 
-    /// The address and port fields raise a keyboard with no built-in "select all" — cleared one
-    /// `delete` at a time, `LargeCanvasFillUITests`' own way of doing this to a text field.
-    private func setField(_ field: XCUIElement, to value: String) {
-        field.tap()
-        let currentLength = (field.value as? String)?.count ?? 0
-        let clear = String(repeating: XCUIKeyboardKey.delete.rawValue, count: currentLength)
-        field.typeText(clear + value)
-    }
-
     /// TODO (98): the "Nearby" section — this pins that the section itself is drawn above the
     /// address field: CLAUDE.md's rule that a feature whose model is correct but whose surface was
     /// never looked at can still ship unusable.

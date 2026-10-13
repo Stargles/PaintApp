@@ -901,6 +901,24 @@ extension Array where Element == RenderNode {
         }
     }
 
+    /// **The tree as a buffer `detail` of the size a side must draw it** — every effect's lengths in the
+    /// buffer's own pixels (a blur's radius, an outline's width, an offset: `Effect.drawingPixelLengths`)
+    /// scaled by `detail`, so a composite at a fraction of the size is the same picture, softer. The
+    /// drag preview's (`RenderSizing.dragPreview`); the Render Resolution knob deliberately does not do
+    /// this, because what it draws is what it exports (`Effect.CRTScreen.scanlinePeriod`'s doc).
+    func drawingPixelLengths(at detail: Double) -> [RenderNode] {
+        map { node in
+            let content: RenderNode.Content
+            switch node.content {
+            case .leaf: content = node.content
+            case .node(let op, let inputs): content = .node(op: op, inputs: inputs.map { $0.drawingPixelLengths(at: detail) })
+            }
+            return RenderNode(id: node.id, content: content, opacity: node.opacity, isVisible: node.isVisible,
+                              blendMode: node.blendMode, isIsolated: node.isIsolated, masks: node.masks,
+                              effect: node.effect?.drawingPixelLengths(at: detail))
+        }
+    }
+
     /// The tree pruned to everything strictly below, and strictly above, one leaf in evaluation
     /// order — `cut(around:)` with one run of one leaf, the stroke's sandwich. Nil when `layerIndex`
     /// is not a leaf anywhere in this tree.

@@ -56,13 +56,4 @@ final class LargeCanvasFillUITests: PaintUITestCase {
 
         attachScreenshot(app, "large-canvas-fill")
     }
-
-    /// `CanvasSizePickerUITests`' own way in: the field raises a number pad with no selection
-    /// affordances, so it is cleared one `delete` at a time.
-    private func setField(_ field: XCUIElement, to value: String) {
-        field.tap()
-        let currentLength = (field.value as? String)?.count ?? 0
-        let clear = String(repeating: XCUIKeyboardKey.delete.rawValue, count: currentLength)
-        field.typeText(clear + value)
-    }
 }

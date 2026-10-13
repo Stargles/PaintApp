@@ -3638,6 +3638,27 @@ extension EffectParameter {
     ///   between two colours, plus alpha — which is a smaller change than "four curves", and a
     ///   different one.
     var isScalarAnimatable: Bool { animation == .continuous && value == .double }
+
+    /// **Whether this is a length in the buffer's own pixels** — the unit its readout prints (`"%.1f
+    /// px"`), which is what every pixel-unit knob in `Effect` means (`CRTScreen.scanlinePeriod`'s doc):
+    /// a blur's radius, an outline's width, an offset, a guide's spacing. One place says what the unit
+    /// is, so a new knob in pixels is one with no second list to join.
+    var isPixelLength: Bool { format?.hasSuffix(" px") ?? false }
+}
+
+extension Effect {
+
+    /// **This effect as a buffer `detail` of the size a side must draw it** — every pixel length
+    /// (`EffectParameter.isPixelLength`) scaled by `detail` and written the way its control writes it,
+    /// so the composite is the same picture at fewer pixels rather than one whose blur is wider. The
+    /// drag preview's (`[RenderNode].drawingPixelLengths(at:)`). What reads the buffer per pixel and
+    /// has no length — a noise's grain, a posterize screen, an edge filter's 3×3 — is simply softer.
+    func drawingPixelLengths(at detail: Double) -> Effect {
+        parameters.reduce(self) { effect, parameter in
+            guard parameter.isPixelLength, let length = parameter.read(effect) else { return effect }
+            return parameter.write(effect, length * detail)
+        }
+    }
 }
 
 extension Effect {

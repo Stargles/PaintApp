@@ -34,16 +34,16 @@ final class EffectSliderLiveUITests: PaintUITestCase {
         return read.map { (Double($0.r) + Double($0.g) + Double($0.b)) / 3 }.reduce(0, +) / Double(read.count)
     }
 
-    func testDraggingAnEffectSliderRedrawsTheFrameLiveAndTheLiftIsOneStep() throws {
-        let app = XCUIApplication()
+    /// A new document of `size` (the picker's default when nil) with the bake slowed, a line on Layer 1,
+    /// then `+` → Value Layer → Brightness / Contrast, which leaves the new effect layer selected;
+    /// closing the rail puts its settings bar on screen. Returns the canvas, its paper and the slider.
+    private func openBrightnessEffect(_ app: XCUIApplication, size: CGSize? = nil) throws
+        -> (canvas: XCUIElement, paper: CGRect, brightness: XCUIElement) {
         app.launchArguments += ["-uiTestSlowBakeMillis", "\(Int(Self.bakeDelay * 1000))"]
-        XCTAssertTrue(launchIntoEditor(app), "setup: a brand-new document")
+        XCTAssertTrue(launchIntoEditor(app, size: size), "setup: a brand-new document")
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
         let paper = paperRect(in: canvas)
-
-        // 1. A line on Layer 1, then `+` → Value Layer → Brightness / Contrast, which leaves the new
-        //    effect layer selected; closing the rail puts its settings bar on screen.
         setBrushSize(app, normalized: 0.3)
         drawLine(on: canvas, from: onHost(paper, 0.15, 0.3), to: onHost(paper, 0.45, 0.3))
         openLayerPanel(app)
@@ -53,6 +53,12 @@ final class EffectSliderLiveUITests: PaintUITestCase {
                                            "PREMISE: the effect engages the compositor and its bake lands"))
         let brightness = app.sliders["effectSettings.brightness"]
         XCTAssertTrue(brightness.waitForExistence(timeout: 5), "the effect's bar is up with its Brightness slider")
+        return (canvas, paper, brightness)
+    }
+
+    func testDraggingAnEffectSliderRedrawsTheFrameLiveAndTheLiftIsOneStep() throws {
+        let app = XCUIApplication()
+        let (canvas, paper, brightness) = try openBrightnessEffect(app)
         attachScreenshot(app, "1-effect-layer-selected")
 
         let probe = paperPatch(canvas, paper, x: 0.55...0.85, y: 0.12...0.24)
@@ -97,6 +103,9 @@ final class EffectSliderLiveUITests: PaintUITestCase {
                                  + "a tick that writes the document is one pass each")
         XCTAssertLessThan(afterLift, paperBefore - 40,
                           "straight after the lift the canvas showed the old picture while the bake ran (\(afterLift))")
+        // The picker's default canvas is 2048², at the threshold, so the finger was shown full detail.
+        XCTAssertEqual(readField(app, "picture:"), "held@2048x2048",
+                       "a 2048² scene previews a drag at full detail (`DragPreviewDetail`)")
 
         // 3. The bake lands and the picture stays what the finger left.
         XCTAssertTrue(waitForSandwichState(app, "rest", timeout: 30, "the written grade's bake lands"))
@@ -114,5 +123,39 @@ final class EffectSliderLiveUITests: PaintUITestCase {
         Thread.sleep(forTimeInterval: Self.bakeDelay + 1)
         let undone = try XCTUnwrap(meanLuma(readScreenNow(probe)))
         XCTAssertGreaterThan(undone, paperBefore - 15, "…and the paper is white again (\(undone))")
+    }
+
+    /// **On a scene above twice 2048×1024 the finger is shown half detail, and the lift lands full** —
+    /// the owner's ruling of 2026-10-12 (`DragPreviewDetail`), from a new 2400² document. The drag is
+    /// synchronous, so what it showed is read straight after the lift, while the slowed bake keeps the
+    /// held frame up: half the scene's pixels a side, and darker than the paper was, so it drew the
+    /// held grade. Once the bake lands the canvas draws the written grade at the scene's own size.
+    func testOnABigSceneTheDragIsPreviewedAtHalfDetailAndTheLiftLandsFullDetail() throws {
+        let app = XCUIApplication()
+        let (canvas, paper, brightness) = try openBrightnessEffect(app, size: CGSize(width: 2400, height: 2400))
+        XCTAssertEqual(readField(app, "picture:"), "bake@2400x2400", "PREMISE: at rest the bake is at full detail")
+        let probe = paperPatch(canvas, paper, x: 0.55...0.85, y: 0.12...0.24)
+        assertAboveTheDock(app, canvas, dy: onHost(paper, 0, 0.24).dy, "the paper probe's lowest row")
+        let paperBefore = try XCTUnwrap(meanLuma(readScreenNow(probe)), "PREMISE: the paper can be read")
+        let heldBefore = try XCTUnwrap(Int(readField(app, "held:")))
+
+        let from = Double(brightness.normalizedSliderPosition)
+        thumb(of: brightness, at: from).press(forDuration: 0.3, thenDragTo: thumb(of: brightness, at: max(0.05, from - 0.4)),
+                                              withVelocity: XCUIGestureVelocity(60), thenHoldForDuration: 3.0)
+        let shown = readField(app, "picture:")
+        let afterLift = try XCTUnwrap(meanLuma(readScreenNow(probe)))
+        attachScreenshot(app, "big-scene-straight-after-the-lift")
+        XCTAssertEqual(shown, "held@1200x1200", "the finger was shown half detail a side on a 2400² scene")
+        XCTAssertGreaterThan(try XCTUnwrap(Int(readField(app, "held:"))) - heldBefore, 1,
+                             "the whole frame was redrawn under the finger more than once")
+        XCTAssertLessThan(afterLift, paperBefore - 40, "the half-detail frame drew the held grade (\(afterLift))")
+
+        XCTAssertTrue(waitForSandwichState(app, "rest", timeout: 30, "the written grade's bake lands"))
+        let landed = NSPredicate { _, _ in self.readField(app, "picture:") == "bake@2400x2400" }
+        wait(for: [XCTNSPredicateExpectation(predicate: landed, object: nil)], timeout: Self.bakeDelay + 20)
+        XCTAssertEqual(readField(app, "picture:"), "bake@2400x2400", "the lift landed at full detail")
+        let after = try XCTUnwrap(meanLuma(readScreenNow(probe)))
+        XCTAssertEqual(after, afterLift, accuracy: 12, "…and it is the picture the finger was shown")
+        attachScreenshot(app, "big-scene-after-the-bake")
     }
 }

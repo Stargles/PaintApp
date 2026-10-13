@@ -258,11 +258,4 @@ final class OutsideTheCanvasUITests: PaintUITestCase {
         XCTAssertNotEqual(before, after,
                           "a rotate whose fingers landed on the surround moved nothing (xform \(before) -> \(after))")
     }
-
-    private func setField(_ field: XCUIElement, to value: String) {
-        field.tap()
-        let currentLength = (field.value as? String)?.count ?? 0
-        let clear = String(repeating: XCUIKeyboardKey.delete.rawValue, count: currentLength)
-        field.typeText(clear + value)
-    }
 }

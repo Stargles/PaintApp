@@ -117,11 +117,11 @@ class PaintUITestCase: XCTestCase {
         return nil
     }
 
-    /// Gallery -> New Canvas -> Create Canvas (default 2048x2048), landing in the editor.
+    /// Gallery -> New Canvas -> Create Canvas (default 2048x2048, or `size`), landing in the editor.
     /// Also serves as the regression test for the launch-time freeze: if that bug ever
     /// comes back, `waitForExistence` below times out and the test fails.
     @discardableResult
-    func launchIntoEditor(_ app: XCUIApplication) -> Bool {
+    func launchIntoEditor(_ app: XCUIApplication, size: CGSize? = nil) -> Bool {
         // The app-wide preferences outlive a launch — Fingers Can Paint, Render Resolution, the gallery
         // folder (`AppSettings`) — and a test that opens a new document wants the defaults, not
         // whatever the last test left. A scene's own tools start at the defaults in every new one.
@@ -139,23 +139,37 @@ class PaintUITestCase: XCTestCase {
         }
         hasLaunchedIntoEditor = true
         app.launch()
-        return openNewCanvas(app)
+        return openNewCanvas(app, size: size)
     }
 
     /// Gallery -> New Canvas -> Create Canvas, landing in the editor: the half of `launchIntoEditor`
-    /// after the launch, for a test that relaunches under launch arguments of its own.
+    /// after the launch, for a test that relaunches under launch arguments of its own. `size` is typed
+    /// into the picker's fields; nil keeps its default.
     @discardableResult
-    func openNewCanvas(_ app: XCUIApplication) -> Bool {
+    func openNewCanvas(_ app: XCUIApplication, size: CGSize? = nil) -> Bool {
         let newCanvas = app.buttons["gallery.newCanvasButton"]
         guard newCanvas.waitForExistence(timeout: 10) else { return false }
         newCanvas.tap()
 
         let createButton = app.buttons["sizePicker.createButton"]
         guard createButton.waitForExistence(timeout: 10) else { return false }
+        if let size {
+            setField(app.textFields["sizePicker.widthField"], to: String(Int(size.width)))
+            setField(app.textFields["sizePicker.heightField"], to: String(Int(size.height)))
+        }
         createButton.tap()
 
         let frameLabel = app.staticTexts["timeline.frameLabel"]
         return frameLabel.waitForExistence(timeout: 10)
+    }
+
+    /// Types `value` into `field` in place of what it holds. Cleared one `delete` at a time: the size
+    /// picker's and the resize sheet's fields raise a number pad, and the stream's address field a
+    /// keyboard, and neither has a select-all.
+    func setField(_ field: XCUIElement, to value: String) {
+        field.tap()
+        let currentLength = (field.value as? String)?.count ?? 0
+        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: currentLength) + value)
     }
 
     /// Opens the Fill panel and answers whether it came up. The tool's button selects the tool on a first

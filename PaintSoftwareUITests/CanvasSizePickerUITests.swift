@@ -135,14 +135,4 @@ final class CanvasSizePickerUITests: PaintUITestCase {
         XCTAssertTrue(row.label.contains("1920 × 1080"),
                       "the document is the size the preset named — the Resize Canvas row reads \"\(row.label)\"")
     }
-
-    /// Cleared with `delete` presses rather than a select-all, matching `CanvasResizeSheet`'s own
-    /// UI test (`ToolsAndSelectionUITests.testResizeCanvasIsInTheActionsMenuAndAppliesTheTypedSize`):
-    /// the field raises a number pad, which has no selection affordances at all.
-    private func setField(_ field: XCUIElement, to value: String) {
-        field.tap()
-        let currentLength = (field.value as? String)?.count ?? 0
-        let clear = String(repeating: XCUIKeyboardKey.delete.rawValue, count: currentLength)
-        field.typeText(clear + value)
-    }
 }

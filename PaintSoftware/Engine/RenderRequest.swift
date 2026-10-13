@@ -603,8 +603,8 @@ struct SandwichRequests {
 
 // MARK: - Building one
 
-/// **How a request picks the buffer it composites into.** Three answers, named, because one of them
-/// is not expressible as a bounding box and the difference between them is a cache key.
+/// **How a request picks the buffer it composites into.** Four answers, named, because two of them
+/// are not expressible as a bounding box and the difference between them is a cache key.
 enum RenderSizing {
 
     /// The canvas itself, in whole pixels — no `RenderResolution`, no `CompositorBudget` cap.
@@ -624,6 +624,14 @@ enum RenderSizing {
     /// least afford it.
     case liveComposite
 
+    /// **What a drag preview is drawn at: `liveComposite`, at half detail on a big scene** — the
+    /// owner's one exception to RENDER.md §2.12, ruled 2026-10-12 (`DragPreviewDetail`). At half
+    /// detail every length the tree's effects measure in the buffer's own pixels is halved with it
+    /// (`[RenderNode].drawingPixelLengths(at:)`), so the preview is the picture the lift will land,
+    /// softer, rather than one whose blur is twice as wide. Only the held frame asks for it; the bake
+    /// and everything else the canvas shows stay at `liveComposite`.
+    case dragPreview
+
     /// Fitted inside a bounding box.
     ///
     /// **Why this exists.** The project thumbnail composited the entire canvas to make a 320×320
@@ -637,6 +645,37 @@ enum RenderSizing {
     /// the same thing every other consumer now is — `StripedCompositor` cuts the frame into strips
     /// rather than the picture into fewer pixels (RENDER.md §2.12, §3.8).
     case fitting(CGSize)
+}
+
+/// **How much detail a drag preview is drawn at** — the owner's ruling of 2026-10-12 on PERFORMANCE.md
+/// §30, and the one exception to RENDER.md §2.12 ("the knob is the truth"): *lower detail only on big
+/// scenes.* A preview that redraws the whole frame under the finger (the held frame, `RenderSizing
+/// .dragPreview`) is drawn at **half detail a side** — the Render Resolution knob's 50% — while the
+/// finger is down when the picture the knob asks for is larger than `halfDetailAbovePixels`, and at
+/// full detail at or below it. The lift is always full detail: what lands is the bake, at the knob.
+///
+/// **Measured on what the knob asks for, not on the canvas**, because the cost is the pixels
+/// composited: a 4096² scene with the knob at 50% already composites 2048², at the threshold, and is
+/// drawn at that, not at a quarter of it.
+enum DragPreviewDetail {
+
+    /// **Twice the owner's usual 2048×1024**, about 4 million pixels: above it a drag preview is drawn
+    /// at half detail. At 2048×1024 the whole frame redraws on every tick at full detail; at 4096² it
+    /// managed about one a second (PERFORMANCE.md §30).
+    static let halfDetailAbovePixels: CGFloat = 2 * 2048 * 1024
+
+    /// The fraction of `liveSize` a side the preview is drawn at: one half above the threshold, one at
+    /// or below it.
+    static func detail(forLiveSize liveSize: CGSize) -> CGFloat {
+        liveSize.width * liveSize.height > halfDetailAbovePixels ? 0.5 : 1
+    }
+
+    /// The preview's buffer, in whole pixels: `liveSize` itself at full detail.
+    static func size(ofLiveSize liveSize: CGSize) -> CGSize {
+        let detail = detail(forLiveSize: liveSize)
+        guard detail < 1 else { return liveSize }
+        return RenderRequest.wholePixels(CGSize(width: liveSize.width * detail, height: liveSize.height * detail))
+    }
 }
 
 extension CanvasManager {
@@ -708,13 +747,20 @@ extension CanvasManager {
                          holding held: HeldEdit? = nil) -> FrameRecipe? {
         guard let canvasSize, canvasSize.width > 0, canvasSize.height > 0 else { return nil }
 
-        let (tree, poses, frames) = renderTreeAndPoses(atFrame: frame, holding: held)
+        let walk = renderTreeAndPoses(atFrame: frame, holding: held)
+        let (poses, frames) = (walk.poses, walk.frames)
+        var tree = walk.tree
         let renderSize: CGSize
         switch sizing {
         case .native:
             renderSize = RenderRequest.wholePixels(canvasSize)
         case .liveComposite:
             renderSize = liveCompositeSize(of: tree, canvasSize: canvasSize)
+        case .dragPreview:
+            let live = liveCompositeSize(of: tree, canvasSize: canvasSize)
+            let detail = DragPreviewDetail.detail(forLiveSize: live)
+            renderSize = DragPreviewDetail.size(ofLiveSize: live)
+            if detail < 1 { tree = tree.drawingPixelLengths(at: Double(detail)) }
         case .fitting(let bound):
             // The box, and no cap. `renderSize(fitting:within:)` never goes above native and the
             // only caller asks for a 320x320 gallery tile, so the cap this used to take was inert at

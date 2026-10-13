@@ -58,13 +58,6 @@ class StreamUITestCase: PaintUITestCase {
                       "committing the box leaves the stream bar up", file: file, line: line)
     }
 
-    /// The field is cleared one `delete` at a time — `StreamScreenUITests.setField`'s way.
-    private func setField(_ field: XCUIElement, to value: String) {
-        field.tap()
-        let currentLength = (field.value as? String)?.count ?? 0
-        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: currentLength) + value)
-    }
-
     // MARK: - Reading
 
     enum Colour: String {

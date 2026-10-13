@@ -254,5 +254,95 @@ final class LiveEditLogicTests: XCTestCase {
         XCTAssertEqual(manager.keyframeState(of: target), afterTake)
         XCTAssertEqual(manager.storedEffect(of: target), base)
     }
-}
 
+    // MARK: - Half detail on a big scene (the owner's ruling of 2026-10-12)
+
+    /// **Above twice 2048×1024 a drag preview is drawn at half a side; at or below it, at the knob's
+    /// size** — measured on what the knob asks for, so a 4096² scene at 50% is already at the threshold.
+    func testADragPreviewIsHalfDetailOnlyAboveTwiceTheOwnersUsualCanvas() {
+        XCTAssertEqual(DragPreviewDetail.halfDetailAbovePixels, 2 * 2048 * 1024)
+        let cases: [(live: CGSize, preview: CGSize)] = [
+            (CGSize(width: 4096, height: 4096), CGSize(width: 2048, height: 2048)),
+            (CGSize(width: 2049, height: 2048), CGSize(width: 1025, height: 1024)),
+            (CGSize(width: 2048, height: 2048), CGSize(width: 2048, height: 2048)),   // at it: full
+            (CGSize(width: 2048, height: 1024), CGSize(width: 2048, height: 1024)),   // the owner's usual
+            (RenderResolution.half.renderSize(for: CGSize(width: 4096, height: 4096)),
+             CGSize(width: 2048, height: 2048)),                                      // the knob at 50%
+        ]
+        for (live, preview) in cases {
+            XCTAssertEqual(DragPreviewDetail.size(ofLiveSize: live), preview, "a \(live) frame previews at \(preview)")
+        }
+    }
+
+    /// A grey box under a Blur effect layer — the blur's radius is a length in the buffer's own pixels.
+    private func blurred(radius: Double) -> (manager: CanvasManager, blurLayerID: UUID) {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        let box = UIGraphicsImageRenderer(size: CanvasFixture.canvasSize, format: PixelOps.transparentFormat()).image { ctx in
+            UIColor(white: 0.2, alpha: 1).setFill()
+            ctx.fill(CGRect(x: 16, y: 16, width: 32, height: 32))
+        }
+        CanvasFixture.setBakedContent(manager, layerIndex: 0, box)
+        manager.addValueLayer(effect: .blur(Effect.Blur(radius: radius)))
+        return (manager, manager.layers[1].id)
+    }
+
+    /// **The held frame asks for half detail on a big scene, and only the held frame does** — its
+    /// recipe is half the knob's size a side with the blur's radius halved with it, while the bake's
+    /// (`liveComposite`, what the lift lands) keeps both; at the threshold the preview is the bake's size.
+    @MainActor
+    func testOnlyTheDragPreviewIsDrawnAtHalfDetailAndItsPixelLengthsAreHalvedWithIt() throws {
+        let (manager, blurLayerID) = blurred(radius: 6)
+        func blurRadius(_ recipe: FrameRecipe) -> Double? {
+            guard case .blur(let blur)? = RenderNode.find(blurLayerID, in: recipe.tree)?.effect else { return nil }
+            return blur.radius
+        }
+        manager.canvasSize = CGSize(width: 2049, height: 2048)
+        let preview = try XCTUnwrap(manager.makeFrameRecipe(atFrame: 0, includeBackground: true, sizing: .dragPreview))
+        XCTAssertEqual(preview.canvasSize, CGSize(width: 1025, height: 1024), "above the threshold: half a side")
+        XCTAssertEqual(blurRadius(preview), 3, "…and the blur half as many of its pixels")
+        let bake = try XCTUnwrap(manager.makeFrameRecipe(atFrame: 0, includeBackground: true, sizing: .liveComposite))
+        XCTAssertEqual(bake.canvasSize, CGSize(width: 2049, height: 2048), "the bake is at the knob")
+        XCTAssertEqual(blurRadius(bake), 6)
+
+        manager.canvasSize = CGSize(width: 2048, height: 2048)
+        let atThreshold = try XCTUnwrap(manager.makeFrameRecipe(atFrame: 0, includeBackground: true, sizing: .dragPreview))
+        XCTAssertEqual(atThreshold.canvasSize, CGSize(width: 2048, height: 2048), "at the threshold: full detail")
+        XCTAssertEqual(blurRadius(atThreshold), 6)
+    }
+
+    /// **Half detail is the lift's picture, softer — not a different one.** A 32² composite of the tree
+    /// with its pixel lengths halved against the 64² composite averaged two by two: close everywhere,
+    /// where the same 32² composite with the blur left at the full-size radius is twice as wide and far
+    /// off along the box's edge. Without the halving, a drag on a blur's radius would show the artist a
+    /// blur the lift does not land.
+    @MainActor
+    func testAHalfDetailCompositeIsTheFullPictureAtHalfItsPixels() throws {
+        let (manager, _) = blurred(radius: 6)
+        let budget = manager.frameBaker.budgetBytes
+        let full = try XCTUnwrap(manager.makeFrameRecipe(atFrame: 0, includeBackground: true, sizing: .native))
+        let fullBytes = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(full.composite(budgetBytes: budget))))
+        let half = CGSize(width: 32, height: 32)
+        let small = try XCTUnwrap(manager.makeFrameRecipe(atFrame: 0, includeBackground: true, sizing: .fitting(half)))
+        func composite(_ tree: [RenderNode]) throws -> [UInt8] {
+            let recipe = FrameRecipe(tree: tree, leaves: small.leaves, maskStacks: small.maskStacks, frame: 0,
+                                     canvasSize: half, background: small.background, quality: small.quality)
+            return try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(recipe.composite(budgetBytes: budget))))
+        }
+        /// The worst channel difference against the full picture averaged over each 2×2 block.
+        func worstDifference(_ bytes: [UInt8]) -> Int {
+            var worst = 0
+            for y in 0..<32 { for x in 0..<32 { for c in 0..<3 {
+                let sum = [(0, 0), (1, 0), (0, 1), (1, 1)].reduce(0) {
+                    $0 + Int(fullBytes[((2 * y + $1.1) * 64 + 2 * x + $1.0) * 4 + c])
+                }
+                worst = max(worst, abs(sum / 4 - Int(bytes[(y * 32 + x) * 4 + c])))
+            } } }
+            return worst
+        }
+        let halved = worstDifference(try composite(small.tree.drawingPixelLengths(at: 0.5)))
+        let unscaled = worstDifference(try composite(small.tree))
+        XCTAssertLessThan(halved, 16, "half detail draws the full picture at half its pixels (worst \(halved))")
+        XCTAssertGreaterThan(unscaled, 2 * halved + 16,
+                             "PREMISE: a radius left at the full size's draws a wider blur (worst \(unscaled))")
+    }
+}
