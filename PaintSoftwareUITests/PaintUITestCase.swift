@@ -1768,6 +1768,28 @@ class PaintUITestCase: XCTestCase {
         try SynthesizedTouch.synthesize([path], named: "one-finger stroke")
     }
 
+    /// **A freehand loop round the rectangle between two offsets of `canvas.host`, in one stroke that
+    /// ends where it began** — what Freehand selection closes on lift (TODO (184)). A straight drag,
+    /// which is all `dragOnCanvas` can draw, lifts away from where it landed and leaves the lasso open.
+    func drawFreehandLoop(_ app: XCUIApplication, from: CGVector, to: CGVector) throws {
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5), "the canvas is there to draw on")
+        let frame = canvas.frame
+        func at(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(x: frame.minX + frame.width * x, y: frame.minY + frame.height * y)
+        }
+        let corners = [at(from.dx, from.dy), at(to.dx, from.dy), at(to.dx, to.dy), at(from.dx, to.dy), at(from.dx, from.dy)]
+        var points: [CGPoint] = []
+        for (a, b) in zip(corners, corners.dropFirst()) {
+            for step in 0..<10 {
+                let t = CGFloat(step) / 10
+                points.append(CGPoint(x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t))
+            }
+        }
+        points.append(corners[0])
+        try fingerStroke(through: points)
+    }
+
     /// **Closes whatever presentation is open with a touch that does nothing else** — the middle of the
     /// widest empty stretch of the top toolbar, measured from the bar as it is laid out.
     ///

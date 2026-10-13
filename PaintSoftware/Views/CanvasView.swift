@@ -382,6 +382,17 @@ struct CanvasView: UIViewRepresentable {
                 coordinator.canvasManager.finishSelection(path: path)
             }
         }
+        // Freehand selection (TODO (184)): the model decides whether a stroke or tap closes the lasso
+        // or leaves it open, and the overlay is told the answer in the same turn of the run loop, so
+        // the preview never shows a lifted stroke between the lift and the pass that follows it.
+        selectionOverlay.onLassoStroke = { [weak coordinator = context.coordinator] run, reach in
+            coordinator?.canvasManager.liftLassoStroke(run, nodeReach: reach)
+            coordinator?.updateSelectionOverlay()
+        }
+        selectionOverlay.onLassoTap = { [weak coordinator = context.coordinator] point, reach in
+            coordinator?.canvasManager.tapLasso(at: point, nodeReach: reach)
+            coordinator?.updateSelectionOverlay()
+        }
         selectionOverlay.onAutomaticTap = { [weak coordinator = context.coordinator] point in
             coordinator?.canvasManager.finishAutomaticSelection(at: point)
         }
@@ -1316,6 +1327,9 @@ struct CanvasView: UIViewRepresentable {
                 // while it is hidden — the host hides the pill from XCUITest like every descendant.
                 + " readout:\(handleAssist.readout?.text ?? "none")"
                 + " readoutbox:\(rotationReadoutBox())"
+                // **The open lasso's size** (TODO (184)): how many points the Freehand lasso holds, or
+                // `none` — the host hides the overlay's layers from XCUITest like every descendant.
+                + " lasso:\(canvasManager.openLasso.map { String($0.points.count) } ?? "none")"
             // **Compared before it is written, because this now runs on every pass.** Building the
             // string is a handful of interpolations against a `renderTree` derivation and a
             // whole-tree `==` on the same line, so it is free; assigning an accessibility label is
@@ -2858,7 +2872,7 @@ struct CanvasView: UIViewRepresentable {
             guard let overlay = selectionOverlay, let container = containerView else { return }
             let touch = canvasTouchInputs()
             let lassoFilling = touch.isLassoFilling
-            overlay.mode = lassoFilling ? .lasso : canvasManager.selectionMode
+            overlay.gesture = lassoFilling ? .closedLasso : SelectionOverlayView.Gesture(canvasManager.selectionMode)
             // Mirrored down every pass, same as `reconcileLayers` mirrors it to
             // `StrokeCanvasView.pencilOnlyDrawing` — see `SelectionOverlayView.pencilOnlyDrawing`'s
             // doc comment for why a selection drag needs this too. A lasso fill is a drawing edit by
@@ -2876,6 +2890,7 @@ struct CanvasView: UIViewRepresentable {
             let floating = canvasManager.vectorFloat != nil || canvasManager.floatingPiece?.kind == .move
             overlay.updateSelection(canvasManager.selection,
                                     allowsOutsideInteraction: canvasManager.toolSwitches.allowsPaintingOutsideSelection || floating)
+            overlay.updateOpenLasso(canvasManager.openLasso)
             // LASSO_FILL.md §7.2/§7.4, pushed down the same way everything else here is: the overlay
             // decides whether this is new and owns the fade, so a pass that changes nothing costs a
             // UUID comparison. It is drawn here rather than over the layer stack because the tint has
@@ -3914,6 +3929,8 @@ struct CanvasView: UIViewRepresentable {
             // And the Move tool's box, which carried the same defect until 2026-08-21 and is the
             // overlay ADD_TEXT.md §1 was pointing *at* when it said not to copy the fixed 24×24.
             transformOverlay?.canvasScale = canvasContentScale
+            // And the Freehand lasso's start node, whose size and reach are screen points too.
+            selectionOverlay?.canvasScale = canvasContentScale
             guard let container = containerView, let baseCenter else { return }
             let scale = fitScale * committedScale * liveScale
             let rotation = effectiveRotation()

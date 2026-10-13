@@ -1058,6 +1058,7 @@ extension CanvasManager {
 
     func deselect() {
         selection = nil
+        abandonOpenLasso()
     }
 
     // MARK: Toolbar highlight

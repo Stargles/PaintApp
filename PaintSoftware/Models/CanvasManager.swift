@@ -882,7 +882,20 @@ final class CanvasManager: ObservableObject {
     }
 
     // MARK: - Select & Move tool state (see SelectionModels.swift for the operations)
-    @Published var selectionMode: SelectionMode = .lasso
+    @Published var selectionMode: SelectionMode = .lasso {
+        // An open lasso is Freehand's own state: another mode has nothing to close it with.
+        didSet { if oldValue != selectionMode { abandonOpenLasso() } }
+    }
+    /// **The Freehand lasso the artist has begun and not closed** — TODO (184). Nil when none is
+    /// open, which is every moment but the stretch between a stroke or tap that left it open and the
+    /// one that closes it. See `OpenLasso`.
+    @Published var openLasso: OpenLasso? {
+        didSet {
+            ActionRecorder.ifRecording { $0.model("openLasso", openLasso.map { String($0.points.count) } ?? "nil") }
+            // Undo takes back its last corner while it is open, so the affordance follows it.
+            if (oldValue == nil) != (openLasso == nil) { refreshUndoRedoState() }
+        }
+    }
     @Published var transformMode: TransformMode = .uniform
     /// **TODO (135) — which cels a folder's Move carries**, the picker on the Move bar while a folder's
     /// box is up. `.thisCel` is the shipped behaviour and the default.
@@ -1942,6 +1955,9 @@ final class CanvasManager: ObservableObject {
     func commitAllInteractiveState() {
         settleInteractiveState()
         commitFloatingPieceIfNeeded()
+        // The tool is being replaced, and an open lasso is the Select tool's own unfinished work —
+        // unlike a save (`settleInteractiveState`), which must not take it from under the artist's pen.
+        abandonOpenLasso()
     }
 
     /// Enters the text tool — the Actions menu's "Add Text" row, and the only way in.
@@ -4543,6 +4559,12 @@ final class CanvasManager: ObservableObject {
         // chose that). Returning here is the whole of it — the drawing history is untouched, so the
         // next undo after tapping away still finds the text object waiting on it.
         if textEditUndoHandler?(false) == true { return }
+        // An open lasso is the newest thing the artist did, and nothing it did is in the history:
+        // the press takes back its last corner or stroke and is spent.
+        if openLasso != nil {
+            retractOpenLasso()
+            return
+        }
         // **A lift nobody dragged is undone by putting it back, and that press is spent.** The split
         // is the only thing that has happened since, and it carries no step of its own — so falling
         // through to `history.undo()` here would leave the artist's own drawing intact but revert
@@ -4571,6 +4593,8 @@ final class CanvasManager: ObservableObject {
     private func redoNow() {
         // `undo()`'s twin — see the comment there.
         if textEditUndoHandler?(true) == true { return }
+        // And an open lasso has nothing to redo, which is why the button is dim while one is up.
+        if openLasso != nil { return }
         finalizePendingGesturesForHistoryAction()
         if let label = history.redo() {
             raise(.historyRedo(label))
@@ -4642,10 +4666,13 @@ final class CanvasManager: ObservableObject {
         // affordance must be lit even on an empty committed stack. It absorbed the whole-layer
         // transform's own clause when that path was deleted (TODO item (12) stage 2): Move with no
         // selection is a float now, so `vectorFloat != nil` is the whole answer for both.
+        //
+        // An open lasso is the last: Undo takes back its newest corner or stroke (`retractOpenLasso`),
+        // and Redo has nothing of its own to bring back, so it is dim for as long as one is up.
         let newCanUndo = fillGestureActive || shapeGestureActive || textGestureActive
-            || gradientEdit?.edit.applied == true || vectorFloat != nil || history.canUndo
+            || gradientEdit?.edit.applied == true || vectorFloat != nil || openLasso != nil || history.canUndo
         let newCanRedo = !fillGestureActive && !shapeGestureActive && !textGestureActive
-            && gradientEdit?.edit.applied != true && history.canRedo
+            && gradientEdit?.edit.applied != true && openLasso == nil && history.canRedo
         if canUndo != newCanUndo { canUndo = newCanUndo }
         if canRedo != newCanRedo { canRedo = newCanRedo }
     }

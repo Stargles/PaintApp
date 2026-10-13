@@ -68,12 +68,29 @@ final class TouchTypePanGestureRecognizer: UIPanGestureRecognizer {
     /// The touch type of the most recent touch to land on this recognizer. `.direct` (finger) is the
     /// conservative initial value, same reasoning as `TouchTypePressRecognizer.lastTouchType`.
     private(set) var lastTouchType: UITouch.TouchType = .direct
+    /// Where the touch that began the current sequence first landed, in window coordinates.
+    private var firstLandingInWindow: CGPoint?
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
         if let type = resolvedLastTouchType(from: touches.map(\.type)) {
             lastTouchType = type
         }
+        if firstLandingInWindow == nil, let touch = touches.first {
+            firstLandingInWindow = touch.location(in: nil)
+        }
         super.touchesBegan(touches, with: event)
+    }
+
+    override func reset() {
+        super.reset()
+        firstLandingInWindow = nil
+    }
+
+    /// **Where the pen first came down**, in `view`'s coordinates. A pan is recognized once the touch
+    /// has travelled its slop, so `location(in:)` at `.began` is already that far along the stroke;
+    /// a lasso whose node belongs where the pen landed asks for this instead.
+    func touchDownLocation(in view: UIView) -> CGPoint? {
+        firstLandingInWindow.map { view.convert($0, from: nil) }
     }
 }
 

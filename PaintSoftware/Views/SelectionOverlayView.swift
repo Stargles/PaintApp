@@ -5,11 +5,73 @@ import UIKit
 /// matches canvas points exactly (same placement pattern as the object-layer work's
 /// `ObjectTransformOverlayView`).
 final class SelectionOverlayView: CanvasPlaneView {
+    /// A loop the gesture itself closed: a rectangle, and a lasso fill's freehand stroke.
     var onFinishPath: ((CGPath) -> Void)?
+    /// Freehand selection (`Gesture.openLasso`): a stroke lifted, and a tap — each with how close to
+    /// the start node counts as on it, in canvas points. The model decides what they mean
+    /// (`CanvasManager.liftLassoStroke`, `tapLasso`).
+    var onLassoStroke: (([CGPoint], _ nodeReach: CGFloat) -> Void)?
+    var onLassoTap: ((CGPoint, _ nodeReach: CGFloat) -> Void)?
     var onAutomaticTap: ((CGPoint) -> Void)?
     var onObjectTap: ((CGPoint) -> Void)?
 
-    var mode: SelectionMode = .lasso
+    /// What a drag or a tap on this view does.
+    enum Gesture {
+        /// A freehand stroke closed on lift — the fill tool's lasso, which borrows this view's lasso
+        /// whole (see `CanvasView.updateSelectionOverlay`).
+        case closedLasso
+        /// Freehand selection: strokes and taps build a lasso that closes on its start node
+        /// (TODO (184)).
+        case openLasso
+        case rectangle
+        case wand
+        case tap
+
+        init(_ mode: SelectionMode) {
+            switch mode {
+            case .lasso: self = .openLasso
+            case .rectangle: self = .rectangle
+            case .automatic: self = .wand
+            case .tap: self = .tap
+            }
+        }
+    }
+
+    var gesture: Gesture = .openLasso {
+        didSet {
+            guard oldValue != gesture, oldValue == .openLasso else { return }
+            // Leaving Freehand takes its half-drawn lasso and its node with it.
+            lassoPoints = []
+            openLasso = nil
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            liveShadowLayer.path = nil
+            liveLayer.path = nil
+            nodeShadowLayer.isHidden = true
+            nodeLayer.isHidden = true
+            CATransaction.commit()
+        }
+    }
+
+    /// What one canvas point measures on screen — pushed by `CanvasView.Coordinator.applyTransform`,
+    /// like the other overlays whose chrome is a fixed size in screen points however far the artist has
+    /// zoomed. The start node and its reach are that kind of chrome.
+    var canvasScale: CGFloat = 1 {
+        didSet {
+            guard canvasScale != oldValue, canvasScale > 0 else { return }
+            refreshLassoPreview()
+        }
+    }
+
+    /// The start node's drawn radius and how near it a pen counts as on it, in screen points. The reach
+    /// is the 44 pt minimum touch target's radius: a fingertip or a pencil's tip finds the node it
+    /// is aiming at without hunting, and a loop drawn by hand closes when it comes back round to it.
+    static let nodeScreenRadius: CGFloat = 9
+    static let nodeScreenReach: CGFloat = 22
+
+    /// How near the node counts as on it, in canvas points — what the model is handed with each stroke
+    /// and tap.
+    var nodeReach: CGFloat { Self.nodeScreenReach / max(canvasScale, 0.01) }
 
     /// Whether this view should currently intercept touches to create a selection — true only while
     /// the Select tool is active and nothing is floating (a pending move/duplicate takes priority).
@@ -56,7 +118,14 @@ final class SelectionOverlayView: CanvasPlaneView {
     /// in, so a resize mid-fade can put the frame back where it belongs.
     private var shownCollarRect: CGRect = .zero
 
+    /// The Freehand stroke under the pen, from where it landed.
     private var lassoPoints: [CGPoint] = []
+    /// The open lasso as the model has it, drawn behind the stroke under the pen.
+    private var openLasso: OpenLasso?
+    /// Its start node: a white disc ringed in the ants' blue, filled blue while the pen is where a lift
+    /// would close the lasso.
+    private let nodeShadowLayer = CAShapeLayer()
+    private let nodeLayer = CAShapeLayer()
     private var rectStart: CGPoint?
     private var currentSelectionPath: CGPath?
     private var hatchIsEnabled: Bool = false
@@ -115,6 +184,13 @@ final class SelectionOverlayView: CanvasPlaneView {
         liveLayer.lineWidth = 1.5
         liveLayer.lineDashPattern = [6, 4]
         layer.addSublayer(liveLayer)
+
+        nodeShadowLayer.fillColor = UIColor.systemBlue.cgColor
+        nodeShadowLayer.isHidden = true
+        layer.addSublayer(nodeShadowLayer)
+        nodeLayer.fillColor = UIColor.white.cgColor
+        nodeLayer.isHidden = true
+        layer.addSublayer(nodeLayer)
 
         // Styled exactly as the live preview, because it *is* the live preview brought back: §7.4
         // asks the artist to compare the fence they drew with the fence they thought they drew, and a
@@ -354,46 +430,115 @@ final class SelectionOverlayView: CanvasPlaneView {
     @objc private func handlePan(_ recognizer: TouchTypePanGestureRecognizer) {
         guard isCapturingGestures else { return }
         guard !pencilOnlyDrawing || recognizer.lastTouchType == .pencil else { return }
-        switch mode {
-        case .lasso: handleLassoPan(recognizer)
+        switch gesture {
+        case .closedLasso, .openLasso: handleLassoPan(recognizer)
         case .rectangle: handleRectanglePan(recognizer)
-        case .automatic, .tap: break // the wand and Tap select by a tap, not a drag
+        case .wand, .tap: break // the wand and Tap select by a tap, not a drag
         }
     }
 
-    private func handleLassoPan(_ recognizer: UIPanGestureRecognizer) {
+    private func handleLassoPan(_ recognizer: TouchTypePanGestureRecognizer) {
         let location = recognizer.location(in: self)
         switch recognizer.state {
         case .began:
-            lassoPoints = [location]
+            // **From where the pen landed, not from where the recognizer woke up** — a pan begins once
+            // the touch has travelled its slop, and the node belongs where the artist put the pen down.
+            lassoPoints = [recognizer.touchDownLocation(in: self) ?? location, location]
+            refreshLassoPreview()
         case .changed:
             lassoPoints.append(location)
-            let path = CGMutablePath()
-            path.addLines(between: lassoPoints)
-            // Actions disabled, same reason and same fix as `ShapeOverlayView.update`
-            // (ShapeOverlayView.swift:218-222) and `GuideOverlayView.redraw`
-            // (GuideOverlayView.swift:155-158): this runs on every touch-moved event of an active
-            // drag, and without disabling implicit animations each `path` assignment picks up
-            // CALayer's default ~0.25s animation, so the preview visibly lags behind the stylus
-            // instead of tracking it.
-            CATransaction.begin()
-            CATransaction.setDisableActions(true)
-            liveShadowLayer.path = path
-            liveLayer.path = path
-            CATransaction.commit()
+            refreshLassoPreview()
         case .ended:
             lassoPoints.append(location)
-            defer { lassoPoints = []; liveShadowLayer.path = nil; liveLayer.path = nil }
-            guard lassoPoints.count > 2 else { return }
-            let path = CGMutablePath()
-            path.addLines(between: lassoPoints)
-            path.closeSubpath()
-            onFinishPath?(path)
+            let stroke = lassoPoints
+            lassoPoints = []
+            if gesture == .openLasso {
+                // The model answers by closing the lasso or leaving it open, and the coordinator
+                // pushes that answer back to `updateOpenLasso` before this turn of the run loop ends.
+                onLassoStroke?(stroke, nodeReach)
+                refreshLassoPreview()
+            } else {
+                refreshLassoPreview()
+                guard stroke.count > 2 else { return }
+                let path = CGMutablePath()
+                path.addLines(between: stroke)
+                path.closeSubpath()
+                onFinishPath?(path)
+            }
         default:
             lassoPoints = []
+            refreshLassoPreview()
+        }
+    }
+
+    // MARK: - The open lasso (TODO (184))
+
+    /// Shows the lasso the model holds — its polyline from the start node to the open end, and the node
+    /// — or takes it down. Ignored outside Freehand selection.
+    func updateOpenLasso(_ lasso: OpenLasso?) {
+        let shown = gesture == .openLasso ? lasso : nil
+        guard shown != openLasso else { return }
+        openLasso = shown
+        refreshLassoPreview()
+    }
+
+    /// Redraws the lasso preview: the open lasso and the stroke under the pen as one polyline, filled
+    /// as the region they would close to, and the start node — blue while the pen is where a lift
+    /// would close the lasso.
+    ///
+    /// **Actions disabled**, same reason and same fix as `ShapeOverlayView.update` and
+    /// `GuideOverlayView.redraw`: this runs on every touch-moved event of an active drag, and without
+    /// it each `path` assignment picks up CALayer's default ~0.25 s animation, so the preview lags the
+    /// stylus instead of tracking it.
+    private func refreshLassoPreview() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
+        guard gesture == .openLasso || gesture == .closedLasso else { return }
+
+        // The lasso as it would stand if the stroke under the pen were lifted now. The first stroke of
+        // a lasso shows its node while it is drawn: the node is where the pen landed.
+        let standing: OpenLasso?
+        if lassoPoints.isEmpty {
+            standing = openLasso
+        } else if var lasso = openLasso {
+            lasso.append(lassoPoints)
+            standing = lasso
+        } else {
+            standing = OpenLasso(startingWith: lassoPoints)
+        }
+        let drawn = standing?.points ?? lassoPoints
+        if drawn.count > 1 {
+            let path = CGMutablePath()
+            path.addLines(between: drawn)
+            liveShadowLayer.path = path
+            liveLayer.path = path
+        } else {
             liveShadowLayer.path = nil
             liveLayer.path = nil
         }
+
+        guard gesture == .openLasso, let standing else {
+            nodeShadowLayer.isHidden = true
+            nodeLayer.isHidden = true
+            return
+        }
+        placeNode(at: standing.start,
+                  closing: !lassoPoints.isEmpty && standing.closes(at: standing.end, within: nodeReach))
+    }
+
+    private func placeNode(at point: CGPoint, closing: Bool) {
+        let scale = max(canvasScale, 0.01)
+        let radius = Self.nodeScreenRadius / scale
+        let ring = 2.5 / scale
+        nodeShadowLayer.path = CGPath(ellipseIn: CGRect(x: point.x - radius - ring, y: point.y - radius - ring,
+                                                        width: 2 * (radius + ring), height: 2 * (radius + ring)),
+                                      transform: nil)
+        nodeLayer.path = CGPath(ellipseIn: CGRect(x: point.x - radius, y: point.y - radius,
+                                                  width: 2 * radius, height: 2 * radius), transform: nil)
+        nodeLayer.fillColor = (closing ? UIColor.systemBlue : UIColor.white).cgColor
+        nodeShadowLayer.isHidden = false
+        nodeLayer.isHidden = false
     }
 
     private func handleRectanglePan(_ recognizer: UIPanGestureRecognizer) {
@@ -426,10 +571,11 @@ final class SelectionOverlayView: CanvasPlaneView {
     @objc private func handleTap(_ recognizer: TouchTypeTapGestureRecognizer) {
         guard isCapturingGestures, !pencilOnlyDrawing || recognizer.lastTouchType == .pencil else { return }
         let point = recognizer.location(in: self)
-        switch mode {
-        case .automatic: onAutomaticTap?(point)
+        switch gesture {
+        case .wand: onAutomaticTap?(point)
         case .tap: onObjectTap?(point)
-        case .lasso, .rectangle: break
+        case .openLasso: onLassoTap?(point, nodeReach)
+        case .closedLasso, .rectangle: break
         }
     }
 }

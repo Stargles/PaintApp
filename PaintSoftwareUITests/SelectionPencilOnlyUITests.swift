@@ -66,10 +66,10 @@ final class SelectionPencilOnlyUITests: PaintUITestCase {
         XCTAssertTrue(fillButton.waitForExistence(timeout: 5))
         XCTAssertFalse(fillButton.isEnabled, "no selection should exist yet")
 
-        // A one-finger lasso drag — XCUITest's synthetic touches are `.direct` (finger); a real pencil
+        // A one-finger lasso loop — XCUITest's synthetic touches are `.direct` (finger); a real pencil
         // touch cannot be synthesized, but the bug is specifically about finger input being wrongly
         // accepted, so this is exactly the case that needs covering.
-        dragOnCanvas(app, from: CGVector(dx: 0.3, dy: 0.25), to: CGVector(dx: 0.55, dy: 0.42))
+        try drawFreehandLoop(app, from: CGVector(dx: 0.3, dy: 0.25), to: CGVector(dx: 0.55, dy: 0.42))
 
         XCTAssertFalse(fillButton.isEnabled,
                        "a finger drag must not create a selection while pencil-only mode is on — this is the reported bug")
@@ -81,7 +81,7 @@ final class SelectionPencilOnlyUITests: PaintUITestCase {
         app.buttons["toolbar.selectButton"].tap()
         XCTAssertTrue(lassoMode.waitForExistence(timeout: 5))
         lassoMode.tap()
-        dragOnCanvas(app, from: CGVector(dx: 0.3, dy: 0.25), to: CGVector(dx: 0.55, dy: 0.42))
+        try drawFreehandLoop(app, from: CGVector(dx: 0.3, dy: 0.25), to: CGVector(dx: 0.55, dy: 0.42))
         XCTAssertTrue(fillButton.waitForExistence(timeout: 5))
         XCTAssertTrue(fillButton.isEnabled, "with pencil-only mode off, the same finger drag should create a selection")
     }

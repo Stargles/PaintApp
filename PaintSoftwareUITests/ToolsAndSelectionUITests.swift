@@ -869,8 +869,8 @@ final class SelectionAndMoveUITests: PaintUITestCase {
         XCTAssertTrue(fillButton.waitForExistence(timeout: 5))
         XCTAssertFalse(fillButton.isEnabled, "Sanity: the pick itself must not have created a selection")
 
-        // …and the overlay is capturing again, so a drag lassoes.
-        dragOnCanvas(app, from: CGVector(dx: 0.30, dy: row - 0.10), to: CGVector(dx: 0.60, dy: row + 0.12))
+        // …and the overlay is capturing again, so a loop lassoes.
+        try drawFreehandLoop(app, from: CGVector(dx: 0.30, dy: row - 0.10), to: CGVector(dx: 0.60, dy: row + 0.12))
         XCTAssertTrue(fillButton.isEnabled, """
             The selection overlay never resumed capturing after the pick. It yields *while the \
             eyedropper is armed* and the revert is what hands it back, so if this fails while the \
@@ -905,9 +905,9 @@ final class SelectionAndMoveUITests: PaintUITestCase {
         XCTAssertTrue(fillButton.waitForExistence(timeout: 5))
         XCTAssertFalse(fillButton.isEnabled, "Sanity: no selection yet")
 
-        // A drag straight over the red line: the overlay must take it as a lasso, and nothing must
+        // A loop drawn over the red line: the overlay must take it as a lasso, and nothing must
         // sample a colour off it.
-        dragOnCanvas(app, from: CGVector(dx: 0.30, dy: row - 0.10), to: CGVector(dx: 0.60, dy: row + 0.12))
+        try drawFreehandLoop(app, from: CGVector(dx: 0.30, dy: row - 0.10), to: CGVector(dx: 0.60, dy: row + 0.12))
 
         XCTAssertTrue(fillButton.isEnabled,
                       "With the eyedropper unarmed, a canvas drag must still make a selection")
