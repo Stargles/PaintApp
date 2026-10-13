@@ -323,6 +323,7 @@ struct CanvasView: UIViewRepresentable {
 
         context.coordinator.hostView = host
         context.coordinator.observeKeyboard()
+        context.coordinator.observeBrushColor()
         context.coordinator.containerView = container
         context.coordinator.onionSkinView = onionSkin
         context.coordinator.paperView = paper
@@ -1343,6 +1344,22 @@ struct CanvasView: UIViewRepresentable {
                 self.keyboardOverlap = host.keyboardOverlap(frame)
                 self.followTextBox()
             }
+        }
+
+        private var brushColorSubscription: AnyCancellable?
+
+        /// **The brush's colour reaches the canvas without a pass over the editor** — it is published on
+        /// its own object (`BrushColorState`, TODO (179)), so a tick of its picker re-renders only the
+        /// swatches that show it; this applies it to the active layer's stroke view, so the next stroke is
+        /// drawn in it, and republishes the canvas's state, whose picker counters a test reads. After the
+        /// write rather than at the publisher's `willSet`, whose value the manager does not hold yet.
+        func observeBrushColor() {
+            brushColorSubscription = canvasManager.brushColorState.$color
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] _ in
+                    self?.updateActiveLayerAndTool()
+                    self?.publishCanvasState()
+                }
         }
 
         /// The pill's text changed: the host's label follows it now, not on the next SwiftUI pass.

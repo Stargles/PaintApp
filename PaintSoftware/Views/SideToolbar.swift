@@ -217,7 +217,7 @@ struct SideToolbar: View {
         .accessibilityIdentifier("sideToolbar.eyedropperButton")
         // The hex of the colour the tool writes, so a test can read a completed pick off the rail
         // without opening the colour panel — `blendModeRow`'s convention.
-        .accessibilityValue(canvasManager.brushColor.hexString)
+        .modifier(BrushColorValue(brush: canvasManager.brushColorState))
         .accessibilityAddTraits(canvasManager.selectedTool == .eyedropper ? [.isSelected] : [])
     }
 
@@ -319,5 +319,15 @@ private struct VerticalSlider: View {
                 .frame(width: geo.size.width, height: geo.size.height)
                 .accessibilityIdentifier(accessibilityIdentifier ?? "")
         }
+    }
+}
+
+/// **The brush's colour as an accessibility value**, observed on its own object (`BrushColorState`, TODO
+/// (179)), so a pick or a picker tick reaches the eyedropper button without a pass over the editor.
+private struct BrushColorValue: ViewModifier {
+    @ObservedObject var brush: BrushColorState
+
+    func body(content: Content) -> some View {
+        content.accessibilityValue(brush.color.hexString)
     }
 }

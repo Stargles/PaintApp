@@ -59,6 +59,7 @@
 		74F8B831200D12B5938F4FAB /* PaintSoftware/Engine/FillBasins.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E4E662817C94770E7BBB910 /* PaintSoftware/Engine/FillBasins.swift */; };
 		2F906FD9330411BF08BC4228 /* PaintSoftware/Models/FillSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FD848269C7168728CE2E2AF /* PaintSoftware/Models/FillSettings.swift */; };
 		7DC3EF545B9751AC4F9F6BB9 /* PaintSoftware/Models/TextSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE49E4E10B171E1D4B13798B /* PaintSoftware/Models/TextSettings.swift */; };
+		D43CEE1D835E0F6D3240B73F /* PaintSoftware/Models/BrushColorState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 344AB6EF738BCF9D5FD1580E /* PaintSoftware/Models/BrushColorState.swift */; };
 		DE652AFFB5833CF39555FA70 /* PaintSoftware/Engine/FillWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0571EF8FDE440FCB2D862719 /* PaintSoftware/Engine/FillWindow.swift */; };
 		7661664D5824C94FC6BACAF4 /* PaintSoftware/Models/CanvasManager+LassoMove.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C0C3F39377E467E499B8BEE /* PaintSoftware/Models/CanvasManager+LassoMove.swift */; };
 		978E910F2F3396AF51F4DDBA /* PaintSoftware/Models/CanvasManager+MediaPlacement.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BCBA711DB5014F921C0407E /* PaintSoftware/Models/CanvasManager+MediaPlacement.swift */; };
@@ -690,6 +691,7 @@
 		4E4E662817C94770E7BBB910 /* PaintSoftware/Engine/FillBasins.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Engine/FillBasins.swift"; sourceTree = "<group>"; };
 		4FD848269C7168728CE2E2AF /* PaintSoftware/Models/FillSettings.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/FillSettings.swift"; sourceTree = "<group>"; };
 		DE49E4E10B171E1D4B13798B /* PaintSoftware/Models/TextSettings.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/TextSettings.swift"; sourceTree = "<group>"; };
+		344AB6EF738BCF9D5FD1580E /* PaintSoftware/Models/BrushColorState.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/BrushColorState.swift"; sourceTree = "<group>"; };
 		0571EF8FDE440FCB2D862719 /* PaintSoftware/Engine/FillWindow.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Engine/FillWindow.swift"; sourceTree = "<group>"; };
 		0C0C3F39377E467E499B8BEE /* PaintSoftware/Models/CanvasManager+LassoMove.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/CanvasManager+LassoMove.swift"; sourceTree = "<group>"; };
 		8BCBA711DB5014F921C0407E /* PaintSoftware/Models/CanvasManager+MediaPlacement.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/CanvasManager+MediaPlacement.swift"; sourceTree = "<group>"; };
@@ -1809,6 +1811,7 @@
 				4E4E662817C94770E7BBB910 /* PaintSoftware/Engine/FillBasins.swift */,
 				4FD848269C7168728CE2E2AF /* PaintSoftware/Models/FillSettings.swift */,
 				DE49E4E10B171E1D4B13798B /* PaintSoftware/Models/TextSettings.swift */,
+				344AB6EF738BCF9D5FD1580E /* PaintSoftware/Models/BrushColorState.swift */,
 				0571EF8FDE440FCB2D862719 /* PaintSoftware/Engine/FillWindow.swift */,
 				DEC0DE00000000000000000F /* PaintSoftware/Engine/RasterLayerTexture.swift */,
 				10E06D42DAEB5E1219F94B87 /* PaintSoftware/Engine/StrokeScratch.swift */,
@@ -2527,6 +2530,7 @@
 				74F8B831200D12B5938F4FAB /* PaintSoftware/Engine/FillBasins.swift in Sources */,
 				2F906FD9330411BF08BC4228 /* PaintSoftware/Models/FillSettings.swift in Sources */,
 				7DC3EF545B9751AC4F9F6BB9 /* PaintSoftware/Models/TextSettings.swift in Sources */,
+				D43CEE1D835E0F6D3240B73F /* PaintSoftware/Models/BrushColorState.swift in Sources */,
 				DE652AFFB5833CF39555FA70 /* PaintSoftware/Engine/FillWindow.swift in Sources */,
 				DEC0DE000000000000000031 /* PaintSoftware/Models/Tool.swift in Sources */,
 				DEC0DE000000000000000033 /* PaintSoftware/Models/LayerFolder.swift in Sources */,

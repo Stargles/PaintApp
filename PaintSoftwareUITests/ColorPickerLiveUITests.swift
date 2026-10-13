@@ -177,9 +177,11 @@ final class ColorPickerLiveUITests: PaintUITestCase {
 
     // MARK: - The brush's colour panel
 
-    /// The brush's colour is published by the editor, so the editor rebuilds the panel on every tick of
-    /// the drag — which is why the grids are `Equatable` sections: the panel's body runs, the swatches
-    /// do not. (Panel bodies are not bounded here: this host re-evaluates the panel by design.)
+    /// The brush's colour is published on its own object (`BrushColorState`, TODO (179)), so a tick
+    /// re-evaluates the panel's host and the swatches that show the colour — not the editor: the canvas
+    /// is raised no pass across the drag, and the toolbar's swatch follows the panel. The grids are
+    /// `Equatable` sections, so the panel's body runs and its swatches do not. (Panel bodies are not
+    /// bounded here: this host re-evaluates the panel by design, so it follows an eyedropper pick.)
     func testDraggingTheBrushColourPanelDoesNotRebuildTheSwatchGrids() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app), "setup: a brand-new document")
@@ -201,8 +203,13 @@ final class ColorPickerLiveUITests: PaintUITestCase {
                        + "\(ticks) ticks of the brush's colour panel")
         XCTAssertNotEqual(app.otherElements["colorPanel.currentSwatch"].value as? String, startHex,
                           "PREMISE: the drag moved the colour")
-        // And the colour reached the brush: close the panel, draw, read the stroke.
+        XCTAssertLessThanOrEqual(after.passes - before.passes, 2,
+                                 "\(after.passes - before.passes) SwiftUI passes reached the canvas across \(ticks) ticks "
+                                 + "of the brush's colour — the editor re-evaluated for a colour two swatches show")
+        // And the colour reached the brush: the toolbar's swatch, then a stroke.
         let shown = try XCTUnwrap(app.otherElements["colorPanel.currentSwatch"].value as? String)
+        XCTAssertEqual(app.buttons["toolbar.colorButton"].value as? String, shown,
+                       "the toolbar's swatch is the colour the panel last showed")
         closeColorPanel(app)
         let canvas = app.otherElements["canvas.host"]
         drawLine(on: canvas, from: CGVector(dx: 0.3, dy: 0.5), to: CGVector(dx: 0.7, dy: 0.5))

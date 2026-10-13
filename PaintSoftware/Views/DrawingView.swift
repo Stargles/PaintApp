@@ -996,12 +996,8 @@ struct DrawingView: View {
             EraserSettingsPanel(canvasManager: canvasManager,
                                 onEditBrush: { brushEditing = EraserSettingsPanel.spec })
         case .color:
-            // `activeEditColor`, not `brushColor`: while a text session is live this panel is that
-            // session's colour picker, which is what makes `TopToolbar.toggle`'s no-bake conditional
-            // mean anything. See `CanvasManager.activeEditColor`.
-            ColorPickerPanel(color: $canvasManager.activeEditColor,
-                             eyedropperMode: $canvasManager.eyedropperMode,
-                             canvasManager: canvasManager)
+            ActiveColourPicker(canvasManager: canvasManager, brush: canvasManager.brushColorState,
+                               text: canvasManager.textSettings)
         case .fill:
             FillSettingsPanel(canvasManager: canvasManager)
         case .text:
@@ -1009,5 +1005,24 @@ struct DrawingView: View {
         // Interpolate has no case here: its options are a popover on the timeline's own interpolate
         // button (`AnimationTimeline.interpolateButton`), not a top-toolbar dropdown.
         }
+    }
+}
+
+/// **The top toolbar's colour panel** — the picker over `CanvasManager.activeEditColor`: `activeEditColor`,
+/// not `brushColor`, because while a text session is live this panel is that session's colour picker, which
+/// is what makes `TopToolbar.toggle`'s no-bake conditional mean anything.
+///
+/// A host of its own so it can observe the two colours (`BrushColorState`, `TextSettings`, TODO (179)): the
+/// panel follows the colour when something else moves it — the eyedropper picking off the canvas while it is
+/// open (`ColorPickerPanel`'s `onChange`) — and a tick of the picker re-evaluates this panel, not the editor.
+private struct ActiveColourPicker: View {
+    @ObservedObject var canvasManager: CanvasManager
+    @ObservedObject var brush: BrushColorState
+    @ObservedObject var text: TextSettings
+
+    var body: some View {
+        ColorPickerPanel(color: $canvasManager.activeEditColor,
+                         eyedropperMode: $canvasManager.eyedropperMode,
+                         canvasManager: canvasManager)
     }
 }

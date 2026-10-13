@@ -90,10 +90,9 @@ struct TopToolbar: View {
                 iconButton(system: "square.stack.3d.up", isActive: activePanel == .layers) { toggle(.layers) }
                     .accessibilityIdentifier("toolbar.layersButton")
 
-                Button(action: { toggle(.color) }) {
-                    ActiveColourSwatch(canvasManager: canvasManager, text: canvasManager.textSettings)
-                }
-                .accessibilityIdentifier("toolbar.colorButton")
+                ActiveColourButton(canvasManager: canvasManager, brush: canvasManager.brushColorState,
+                                   text: canvasManager.textSettings) { toggle(.color) }
+                    .accessibilityIdentifier("toolbar.colorButton")
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
         }
@@ -272,20 +271,27 @@ struct TopToolbar: View {
     }
 }
 
-/// **The toolbar's colour swatch** — the colour the colour panel edits, `CanvasManager.activeEditColor`:
-/// the open text box's while a session is live (a swatch showing the brush colour above a picker editing
-/// the text's would be the worse half of the two to get wrong), the brush's otherwise.
+/// **The toolbar's colour button** — a swatch of the colour the colour panel edits,
+/// `CanvasManager.activeEditColor`: the open text box's while a session is live (a swatch showing the brush
+/// colour above a picker editing the text's would be the worse half of the two to get wrong), the brush's
+/// otherwise.
 ///
-/// A view of its own so it can observe the text recipe (`TextSettings`, TODO (179)): a tick of the text's
-/// colour picker reaches this swatch without a SwiftUI pass over the editor.
-private struct ActiveColourSwatch: View {
+/// A view of its own so it can observe the two colours it may show (`BrushColorState`, `TextSettings`,
+/// TODO (179)): a tick of either colour's picker reaches this swatch without a SwiftUI pass over the editor.
+private struct ActiveColourButton: View {
     @ObservedObject var canvasManager: CanvasManager
+    @ObservedObject var brush: BrushColorState
     @ObservedObject var text: TextSettings
+    let action: () -> Void
 
     var body: some View {
-        Circle()
-            .fill(canvasManager.activeEditColor)
-            .frame(width: 34, height: 34)
-            .overlay(Circle().stroke(Color.white.opacity(0.6), lineWidth: 2))
+        Button(action: action) {
+            Circle()
+                .fill(canvasManager.activeEditColor)
+                .frame(width: 34, height: 34)
+                .overlay(Circle().stroke(Color.white.opacity(0.6), lineWidth: 2))
+        }
+        // The hex of what it shows, so a test can read that a tick reached the toolbar.
+        .accessibilityValue(canvasManager.activeEditColor.hexString)
     }
 }

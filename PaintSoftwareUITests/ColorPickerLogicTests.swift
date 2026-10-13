@@ -313,6 +313,28 @@ final class ColorPickerLogicTests: XCTestCase {
         XCTAssertEqual(panel.recentColors.first?.hex, String(format: "%06X", ColorPanelState.recentCapacity + 4))
     }
 
+    /// **A tick of the brush's colour is the swatches' and not the editor's** — TODO (179). The colour is
+    /// published on its own object (`BrushColorState`), so sixty ticks of the picker — written the way the
+    /// panel writes them, through `activeEditColor` — send nothing on `CanvasManager`, which every view in the
+    /// editor observes, and one each on the brush colour's object, which the swatches observe. The stroke
+    /// the brush draws next is in the colour the last tick left.
+    @MainActor
+    func testABrushColourTickIsTheSwatchesAndNotTheEditors() {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        var editor = 0, swatches = 0
+        let watchEditor = manager.objectWillChange.sink { editor += 1 }
+        let watchSwatches = manager.brushColorState.objectWillChange.sink { swatches += 1 }
+        for tick in 0..<60 {
+            manager.activeEditColor = Color(hue: Double(tick) / 60, saturation: 0.8, brightness: 0.9)
+        }
+        watchEditor.cancel()
+        watchSwatches.cancel()
+        XCTAssertEqual(editor, 0, "60 ticks of the brush's colour raised \(editor) passes over the editor")
+        XCTAssertEqual(swatches, 60, "and the swatches heard every one")
+        XCTAssertEqual(manager.brushColor.hexString, Color(hue: 59.0 / 60, saturation: 0.8, brightness: 0.9).hexString,
+                       "the brush paints in the last tick's colour")
+    }
+
     /// **Only what was painted with is recent**, and only in the scene it was painted in: a stroke's
     /// lift records the brush colour, an eraser's lift records nothing.
     @MainActor

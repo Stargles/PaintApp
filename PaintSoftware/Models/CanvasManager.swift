@@ -1191,7 +1191,14 @@ final class CanvasManager: ObservableObject {
     /// `CanvasManager+BrushSize.swift` — which is presentation only, so a document opened at a
     /// different canvas size draws the same point size and reads as a different percentage.
     @Published var toolProfiles = ToolProfiles()
-    @Published var brushColor: Color = .black
+    /// The brush's colour — observed by the swatches that show it and by the canvas, and by nothing else,
+    /// so a tick of its picker is not a pass over the editor (TODO (179); see `BrushColorState`).
+    let brushColorState = BrushColorState()
+    /// The colour the brush paints with — `brushColorState.color`.
+    var brushColor: Color {
+        get { brushColorState.color }
+        set { brushColorState.color = newValue }
+    }
     /// **This property's `didSet` used to be the fifth closer of an engaged whole-layer vector Move**
     /// — a real tool switch cleared `isVectorTransforming`, which the six writers of this property
     /// (`TopToolbar`'s brush/eraser/fill buttons, `selectEyedropper`, `leaveEyedropper`,
