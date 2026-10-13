@@ -153,7 +153,8 @@ it to those colours. The survey is `~/PaintWork/design/s48-survey-masks-stream-l
 colour-distance definitions exist; the mask uses Recolour's; per-pixel Oklab wants memoising per value).
 
 - [ ] Mask tuning (threshold, antialias) becomes **per mask** — the owner on 2026-10-12 — replacing
-      `MaskResolver`'s process-wide statics.
+      `MaskResolver`'s process-wide statics — and its sliders preview live through (179)'s held slot and
+      lane F (the assessment's commit 7, moved here so the per-mask value is what is held).
 - [ ] Built on the existing mask and recolour modules rather than beside them.
 - [ ] After (179), which touches mask tuning's per-tick path.
 
