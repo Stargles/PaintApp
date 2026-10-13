@@ -608,14 +608,14 @@ final class OpacityChannelLogicTests: XCTestCase {
 
     // MARK: - Recording — §5.1's shared trigger
 
-    /// **A take on the opacity slider writes an opacity curve** — §5.1's *"a scalar surface is one
-    /// line plus a routing hook"*, exercised through the same two calls the slider makes.
+    /// **A take on the opacity slider writes an opacity curve, and leaves the stored base as it found
+    /// it** — §5.1's *"a scalar surface is one line plus a routing hook"*, exercised through the calls
+    /// the slider makes: a held tick per reported value (`holdTargetChannel`, TODO (179)) and the lift.
     ///
-    /// Operands: the curve the take committed, and the stored base afterwards. The second is the
-    /// one that is easy to get wrong: the base is a **scratch pad** during a take — the artist has
-    /// to watch the layer fade under their finger — so it must be put back at the commit or the
-    /// fade applies twice, once from the base and once from the curve.
-    func testATakeOnTheOpacitySliderWritesACurveAndRestoresTheBase() {
+    /// Operands: the curve the take committed, and the stored base during and after. The base is never
+    /// a scratch pad any more — the artist watches the layer fade through the held value — so nothing
+    /// has to be put back, and the fade cannot apply twice.
+    func testATakeOnTheOpacitySliderWritesACurveAndLeavesTheBase() {
         let manager = drawingManager(frames: 240)
         let clock = FakeClock()
         manager.playbackNow = { clock.now }
@@ -628,26 +628,29 @@ final class OpacityChannelLogicTests: XCTestCase {
 
         for (index, value) in [0.9, 0.6, 0.3, 0.1].enumerated() {
             clock.now = 1_000 + Double(index) * 0.25
-            manager.applyTargetChannelEdit(tgt, channel: channel, newValue: value,
-                                           atFrame: manager.currentFrame)
+            manager.holdTargetChannel(tgt, channel: channel, value: value)
+            XCTAssertEqual(manager.layers[0].opacity, 1, "A tick of a take writes no base")
         }
+        XCTAssertEqual(manager.channelAsShown(of: tgt, channel: channel, atFrame: manager.currentFrame) ?? .nan,
+                       0.1, accuracy: 0.0001, "…while the canvas is shown the newest")
         clock.now = 1_001
         XCTAssertNil(manager.stopRecording(), "The take produced something")
+        XCTAssertNil(manager.liveEdit, "The take's preview goes when its curve is written")
+        XCTAssertNil(manager.commitHeldChannel(), "…and the lift has nothing of its own to write")
 
         let recorded = manager.layers[0].channelTracks[opacityID]
         XCTAssertNotNil(recorded, "The take wrote an opacity curve")
         XCTAssertTrue(recorded?.isAnimated ?? false,
                       "…and it is an animation by the owner's definition, not a flat line")
-        XCTAssertEqual(manager.layers[0].opacity, 1, accuracy: 0.0001,
-                       "The stored base is put back — it was a scratch pad for the length of the take")
+        XCTAssertEqual(manager.layers[0].opacity, 1, accuracy: 0.0001, "The stored base is the one the take found")
     }
 
-    /// **A take routes the value away from the keyframe rule while it runs.**
+    /// **A take keeps the value away from the keyframe rule while it runs.**
     ///
-    /// Operands: the routing arm each reported value takes, and the key count. Keying per reported
-    /// value is the aliased sample §5 forbids in its first paragraph — a three-second take would
-    /// leave 72 keys a channel — so every tick must answer `.storedValue` even on a channel that
-    /// already carries a curve, which is otherwise the `.key` arm.
+    /// Operands: what the tick wrote, and the key count. Keying per reported value is the aliased sample
+    /// §5 forbids in its first paragraph — a three-second take would leave 72 keys a channel — so a tick
+    /// a take catches is the take's: no key, even on a channel that already carries a curve, which is
+    /// otherwise the `.key` arm, and nothing for the lift to write.
     func testWhileATakeRunsEachReportedValueBypassesTheKeyframeRule() {
         let manager = drawingManager(frames: 240)
         let clock = FakeClock()
@@ -660,12 +663,13 @@ final class OpacityChannelLogicTests: XCTestCase {
         XCTAssertTrue(manager.beginArmedTake(on: tgt, isRecordable: true))
 
         clock.now = 1_000.1
-        XCTAssertEqual(manager.applyTargetChannelEdit(tgt, channel: channel,
-                                                      newValue: 0.8, atFrame: manager.currentFrame),
-                       .storedValue,
-                       "A live take takes the routing decision away, even from a channel with a curve")
+        manager.holdTargetChannel(tgt, channel: channel, value: 0.8)
+        XCTAssertEqual(manager.liveEdit?.channel?.edited, false,
+                       "A live take takes the value, even from a channel with a curve")
         XCTAssertEqual(manager.layers[0].channelTracks[opacityID]?.keys.count, keysBefore,
                        "…so the tick wrote no key")
+        XCTAssertNil(manager.commitHeldChannel(), "…and the lift writes nothing the take caught")
+        XCTAssertEqual(manager.layers[0].channelTracks[opacityID]?.keys.count, keysBefore)
         manager.stopRecording()
     }
 

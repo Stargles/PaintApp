@@ -34,6 +34,14 @@ enum HeldEdit {
     /// whole frame from it (`CanvasView.Coordinator`'s held frame), and the render walk reads it in
     /// place of the document's grade.
     case grade(HeldGrade)
+    /// A target channel under the finger — a layer's or folder's Opacity, a transformation layer's
+    /// Rotate speed or Shake amplitudes, an item's Parallax share (TODO (179)). Opacity on a canvas Core
+    /// Animation draws is a host's alpha; everything else is drawn whole, as a grade is
+    /// (`drawsWholeFrame`).
+    case channel(HeldChannel)
+    /// A value layer's flat colour under the picker (TODO (179)) — a host's background colour on a
+    /// canvas Core Animation draws, the whole frame otherwise.
+    case valueFill(HeldValueFill)
 
     var pose: LivePose? {
         if case .pose(let pose) = self { return pose }
@@ -55,14 +63,40 @@ enum HeldEdit {
         return nil
     }
 
-    /// **The layer whose host must keep drawing while this is held** — the one it draws on. A pose and
-    /// a grade name none: neither is a picture a host draws — a box moves the composite under it, and
-    /// a grade changes the composite itself (`heldHostLayerIndices`).
+    var channel: HeldChannel? {
+        if case .channel(let channel) = self { return channel }
+        return nil
+    }
+
+    var valueFill: HeldValueFill? {
+        if case .valueFill(let fill) = self { return fill }
+        return nil
+    }
+
+    /// **The layer whose host must keep drawing while this is held** — the one it draws on. A pose, a
+    /// grade, a channel and a flat colour name none: none is a picture a host draws — a box moves the
+    /// composite under it, and the rest change the composite itself, or a host's alpha or colour on a
+    /// canvas with no composite (`heldHostLayerIndices`).
     var hostLayerID: UUID? {
         switch self {
-        case .pose, .grade: return nil
+        case .pose, .grade, .channel, .valueFill: return nil
         case .elements(let edit): return edit.layerID
         case .fill(let fill): return fill.layerID
+        }
+    }
+
+    /// **Whether the canvas shows this hold by compositing the whole frame from it** — the held frame
+    /// (`CanvasView.Coordinator.requestHeldFrame`, lane F). A grade always: no view of the canvas can
+    /// draw one. Opacity and a flat colour only where the compositor draws the canvas at all
+    /// (`canvasEngaged`): where Core Animation draws it, they are a host's alpha and background colour,
+    /// set on the spot with no picture at all (lane A). Every other channel moves a pose, and a posed
+    /// leaf is drawn by the composite or re-derived by its host, so it is drawn whole.
+    func drawsWholeFrame(canvasEngaged: Bool) -> Bool {
+        switch self {
+        case .grade: return true
+        case .channel(let held): return canvasEngaged || held.channel != .opacity
+        case .valueFill: return canvasEngaged
+        case .pose, .elements, .fill: return false
         }
     }
 }
@@ -116,13 +150,56 @@ struct HeldGrade: Equatable {
     var writesAnything: Bool { stored != nil || !curves.isEmpty || !edited.isEmpty }
 }
 
-/// **That a grade is held, for the docked controls** — TODO (179). A slider whose value reads the
-/// document would snap back while the finger holds a value the document does not have yet, and one that
-/// observed the canvas manager would re-render the whole editor per tick — the cost the hold removes. So
-/// the held grade is mirrored here, on an object only the controls observe (`FillSettings`' shape, TODO
-/// (157)), and they read it back as `CanvasManager.effectAsShown`.
+/// **A target channel held under the finger** — a slider of `TargetChannel`'s (TODO (179)): Opacity on
+/// a layer's row or a folder's, a transformation layer's Rotate speed and Shake amplitudes, an item's
+/// Parallax share. The channel resolves to `value` at `frame`, the frame of the edit, which is exact for
+/// the reason a grade's held value is: every arm of `KeyframeControl.write` resolves the edited channel
+/// to the new value there.
+///
+/// **Read at any other frame it is the curve the lift will leave the channel on** (`routedCurve`), and
+/// that matters for one channel: Rotate's speed is summed over the bar, so the angle at the playhead is
+/// a sum over every frame before it. A keyed speed edited to `value` at `frame` is a different sum from
+/// `value` held everywhere — so the curve the lift's keyed arms would write is worked out at the tick
+/// (`CanvasManager.routedChannelCurve`) and read in its place.
+struct HeldChannel: Equatable {
+    let target: KeyframeTarget
+    let channel: TargetChannel
+    /// The frame the gesture began on — where the lift routes it.
+    let frame: Int
+    /// The poser whose list the item is in, for a Parallax share: the lift writes the item's positional
+    /// default through first (`setParallaxShare`). Nil for every other channel.
+    let parallaxPoser: KeyframeTarget?
+    /// What the finger holds the channel at.
+    var value: Double
+    /// **Whether the newest value is the artist's edit** — what the lift writes. A value a live take
+    /// caught is the take's, shown while held and written by the take as a curve, never by the lift.
+    var edited: Bool
+    /// The curve the lift's keyed arms leave the channel on, or nil where it writes the stored value.
+    var routedCurve: AnimationCurve?
+
+    /// The channel at `frame` as the finger holds it.
+    func value(atFrame frame: Int) -> Double {
+        routedCurve.map { channel.clamped($0.evaluate(at: Double(frame))) } ?? value
+    }
+}
+
+/// **A value layer's flat colour held under the picker** (TODO (179)): the popover's ticks, written once
+/// when it closes.
+struct HeldValueFill: Equatable {
+    let layerID: UUID
+    var fill: ValueFill
+}
+
+/// **That a grade or a channel is held, for the controls that show it** — TODO (179). A slider whose
+/// value reads the document would snap back while the finger holds a value the document does not have
+/// yet, and one that observed the canvas manager would re-render the whole editor per tick — the cost
+/// the hold removes. So the hold is mirrored here, on an object only those controls observe
+/// (`FillSettings`' shape, TODO (157)), and they read it back as `CanvasManager.effectAsShown` and
+/// `channelAsShown`.
 final class LiveEditState: ObservableObject {
     @Published fileprivate(set) var grade: HeldGrade?
+    /// The held target channel, for the layer options' channel rows (`CanvasManager.channelAsShown`).
+    @Published fileprivate(set) var channel: HeldChannel?
 }
 
 extension CanvasManager {
@@ -172,10 +249,12 @@ extension CanvasManager {
         return held
     }
 
-    /// Puts the held grade where the controls read it, only when it moved.
+    /// Puts the held grade and channel where the controls read them, only when they moved.
     private func mirrorLiveEdit() {
         let grade = liveEdit?.grade
         if liveEditState.grade != grade { liveEditState.grade = grade }
+        let channel = liveEdit?.channel
+        if liveEditState.channel != channel { liveEditState.channel = channel }
     }
 
     // MARK: A grade under the finger — the effect bar, the Duplicate Offset's box, a graph-band drag
@@ -309,9 +388,13 @@ extension CanvasManager {
         endLiveEdit()
     }
 
-    /// **A take ended under a held grade**: the values it caught are on its curve now, so they stop
-    /// being shown; what the finger edited outside the take stays held for the lift.
+    /// **A take ended under a held grade or channel**: the values it caught are on its curve now, so
+    /// they stop being shown; what the finger edited outside the take stays held for the lift.
     func releaseTakePreview(of target: KeyframeTarget) {
+        if let held = liveEdit?.channel, held.target == target, !held.edited {
+            endLiveEdit()
+            return
+        }
         guard var grade = liveEdit?.grade, grade.target == target else { return }
         grade.values = grade.values.filter { grade.edited.contains($0.key) }
         if grade.writesAnything {
@@ -328,5 +411,138 @@ extension CanvasManager {
         guard !parameterIDs.isEmpty, let effect = storedEffect(of: target) else { return false }
         let channels = Set(effect.parameters.filter(\.isScalarAnimatable).map(\.id))
         return parameterIDs.isSubset(of: channels)
+    }
+
+    // MARK: A target channel under the finger — Opacity, Rotate, Shake, Parallax
+
+    /// **`channel` on `target` at `frame`, as the canvas shows it** — the held value where its slider is
+    /// under the finger (`HeldChannel.value(atFrame:)`), the document's otherwise. What the render walk,
+    /// the hosts' alpha and the channel rows read.
+    func channelAsShown(of target: KeyframeTarget, channel: TargetChannel, atFrame frame: Int) -> Double? {
+        if let held = liveEdit?.channel?.holding(channel, of: target) { return held.value(atFrame: frame) }
+        return resolvedValue(of: target, channel: channel, atFrame: frame)
+    }
+
+    /// **One tick of a channel's slider: `channel` on `target` is at `value` under the finger.** Held,
+    /// shown by the canvas — a host's alpha or the whole frame (`HeldEdit.drawsWholeFrame`) — and by the
+    /// row, written nowhere: no SwiftUI pass over the editor, no bake key, no undo step. `parallaxPoser`
+    /// is the poser whose list a Parallax share's item is in.
+    ///
+    /// **Opening one settles what else is held** (`beginCanvasEdit`), the grade's rule (`holdGrade`).
+    /// **A live take still catches the value** (KEYFRAMES.md §5): the take, not the lift, writes it.
+    func holdTargetChannel(_ target: KeyframeTarget, channel: TargetChannel, value: Double,
+                           parallaxPoser: KeyframeTarget? = nil) {
+        let value = channel.clamped(value)
+        let recorded = recordParameterSample(target, parameterID: channel.id, value: value)
+        let open = liveEdit?.channel?.holding(channel, of: target)
+        if open == nil { beginCanvasEdit() }
+        let frame = open?.frame ?? currentFrame
+        // Only Rotate's speed is read at frames other than the edit's — summed over the bar — so only it
+        // needs the curve the lift will leave; every other channel is read at the frame shown.
+        let curve = !recorded && channel == .rotateSpeed
+            ? routedChannelCurve(target, channel: channel, to: value, atFrame: frame) : nil
+        holdLiveEdit(.channel(HeldChannel(target: target, channel: channel, frame: frame,
+                                          parallaxPoser: parallaxPoser, value: value, edited: !recorded,
+                                          routedCurve: curve)))
+    }
+
+    /// **The curve `applyTargetChannelEdit` would leave `channel` on for `value` at `frame`** — its two
+    /// keyed arms' curves, from the inputs those arms read (`AnimationCurve.keyed` for `.key`, as
+    /// `setTargetChannelKeys` writes it; `AnimationCurve.seeded` for `.seedAndKey`, as
+    /// `seedAndKeyTargetChannel` does), worked out and not written — or nil for the arms that write the
+    /// stored value, under which the channel is `value` at every frame. `LiveEditLogicTests` holds it to
+    /// the curve the lift writes, arm by arm.
+    func routedChannelCurve(_ target: KeyframeTarget, channel: TargetChannel, to value: Double,
+                            atFrame frame: Int) -> AnimationCurve? {
+        let state = keyframeState(of: target)
+        switch keyframeWrite(target, channel: channel, atFrame: frame) {
+        case .key:
+            return (state.channelTracks[channel.id] ?? AnimationCurve())
+                .keyed(channel.clamped(value), atFrame: frame, holding: placedKeys(of: target, in: state).primed)
+        case .seedAndKey:
+            guard let stored = storedValue(of: target, channel: channel) else { return nil }
+            return AnimationCurve.seeded(state.channelTracks[channel.id], keyframes: keyframeFrames(of: target, in: state),
+                                         frame: frame, oldValue: channel.clamped(stored),
+                                         newValue: channel.clamped(value))
+        case .storedValue, .storedValueHoldingBaseline:
+            return nil
+        }
+    }
+
+    /// **The lift: the channel the finger held is written once, as one undo step** — through the routing
+    /// a tick used to take (`applyTargetChannelEdit`, or `setParallaxShare` for an item's share, which
+    /// writes its positional default through first) at the frame the gesture began on, in its own
+    /// bracket, named for what it wrote: the channel's keys when it keyed, its edit otherwise.
+    ///
+    /// **A lift that changes nothing records nothing** — the value the channel already resolves to at
+    /// the edit's frame: a slider settling on its own value after a lift, a drag back to where it began.
+    /// (An untyped Parallax share resolves to its positional default, which is not a stored number, so
+    /// any value written there is a change.)
+    ///
+    /// - Returns: the route taken, or nil when nothing was written — no hold, a value the take caught,
+    ///   or the value the channel already had.
+    @discardableResult
+    func commitHeldChannel() -> KeyframeControl.Write? {
+        guard let held = liveEdit?.channel else { return nil }
+        let untypedShare = held.channel == .parallaxShare && storedParallaxShare(of: held.target) == nil
+        let current = untypedShare ? nil : resolvedValue(of: held.target, channel: held.channel, atFrame: held.frame)
+        guard held.edited, current.map({ abs($0 - held.value) > 1e-9 }) ?? true else {
+            endLiveEdit()
+            return nil
+        }
+        beginStructureGesture()
+        let route: KeyframeControl.Write
+        if held.channel == .parallaxShare, let poser = held.parallaxPoser {
+            route = setParallaxShare(of: held.target, beneath: poser, to: held.value, atFrame: held.frame)
+        } else {
+            route = applyTargetChannelEdit(held.target, channel: held.channel, newValue: held.value,
+                                           atFrame: held.frame)
+        }
+        commitStructureGesture(label: route == .storedValue ? held.channel.editLabel : held.channel.keyframeLabel)
+        endLiveEdit()
+        return route
+    }
+
+    /// Lets a held channel go and **writes nothing** — the document never moved.
+    func revertHeldChannel() {
+        guard liveEdit?.channel != nil else { return }
+        endLiveEdit()
+    }
+
+    // MARK: A value layer's colour under the picker
+
+    /// **The flat colour of the layer at `index`, as the canvas shows it** — the picker's while it holds
+    /// one (`HeldValueFill`), the document's otherwise. Nil for a layer that is not a flat colour.
+    func valueFillAsShown(ofLayer index: Int) -> ValueFill? {
+        guard layers.indices.contains(index), let stored = layers[index].valueFill else { return nil }
+        guard let held = liveEdit?.valueFill, held.layerID == layers[index].id else { return stored }
+        return held.fill
+    }
+
+    /// **One tick of a value layer's colour picker: the layer at `index` is `fill`.** Held and shown — the
+    /// host's background, or the whole frame — and written when the picker closes. Opening one settles
+    /// what else is held, the grade's rule.
+    func holdValueFill(ofLayer index: Int, _ fill: ValueFill) {
+        guard layers.indices.contains(index), layers[index].valueFill != nil else { return }
+        let id = layers[index].id
+        if liveEdit?.valueFill?.layerID != id { beginCanvasEdit() }
+        holdLiveEdit(.valueFill(HeldValueFill(layerID: id, fill: fill)))
+    }
+
+    /// **The picker closed: the colour it held is written once** (`setLayerFill`, one step, or none for
+    /// the colour the layer already had), and the hold is let go.
+    func commitHeldValueFill() {
+        guard let held = liveEdit?.valueFill else { return }
+        if let index = layers.firstIndex(where: { $0.id == held.layerID }) {
+            setLayerFill(layerIndex: index, to: held.fill)
+        }
+        endLiveEdit()
+    }
+}
+
+extension HeldChannel {
+    /// Itself when it holds `channel` on `target`, nil otherwise.
+    func holding(_ channel: TargetChannel, of target: KeyframeTarget) -> HeldChannel? {
+        self.channel == channel && self.target == target ? self : nil
     }
 }

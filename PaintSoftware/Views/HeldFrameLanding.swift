@@ -1,12 +1,13 @@
 import Foundation
 
-/// **Whether the whole-frame picture of a held grade stays over the canvas** — TODO (179).
+/// **Whether the whole-frame picture of a hold stays over the canvas** — TODO (179).
 ///
-/// While an effect slider is held the canvas shows a whole-frame composite of the held grade, drawn
-/// as fast as the device can (`CanvasView.Coordinator`'s held frame). At the lift the grade is written
-/// once and the document's key moves — and the canvas's own picture of the new key, the bake, takes a
+/// While a grade, a channel or a flat colour is held where the canvas draws it whole
+/// (`HeldEdit.drawsWholeFrame`), the canvas shows a whole-frame composite of it, drawn as fast as the
+/// device can (`CanvasView.Coordinator`'s held frame). At the lift the value is written once and the
+/// document's key moves — and the canvas's own picture of the new key, the bake, takes a
 /// bake's length to arrive (~350 ms on the owner's iPad, longer at 4096²). Taking the held frame down
-/// at the lift would flash the old grade for that long; leaving it up past a later edit would hide
+/// at the lift would flash the old picture for that long; leaving it up past a later edit would hide
 /// that edit. So it **stays up until the canvas's own picture is current for the key the canvas is
 /// on**, and comes down the moment the key moves on past the one it landed on — `.moving`'s rule after
 /// a transform edit's lift, and `UnlandedInk`'s for a stroke, asked of the whole frame.
@@ -22,7 +23,7 @@ struct HeldFrameLanding: Equatable {
     enum Phase: Equatable {
         /// Nothing held, nothing landing — no held frame on screen.
         case idle
-        /// A grade is under the finger.
+        /// A whole-frame hold is under the finger.
         case held
         /// The finger let go; waiting for the canvas's own picture. The key is the one the first pass
         /// after the lift found the canvas on — nil until that pass has run.
@@ -34,7 +35,7 @@ struct HeldFrameLanding: Equatable {
     /// Whether the held frame should be on screen.
     var isUp: Bool { phase != .idle }
 
-    /// Whether a grade is held right now — reported on every tick and every pass.
+    /// Whether a whole-frame hold is under the finger right now — reported on every tick and every pass.
     mutating func update(held: Bool) {
         if held {
             phase = .held

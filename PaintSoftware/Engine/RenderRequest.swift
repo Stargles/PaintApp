@@ -737,7 +737,8 @@ extension CanvasManager {
     /// three. `.native` is the default and what every parity test and the eyedropper take.
     ///
     /// `held` is what the finger holds (`liveEdit`), resolved in place of the document — the canvas's
-    /// held frame, a grade under an effect slider (TODO (179)). **Only that live picture passes it**:
+    /// held frame, a grade, a channel or a flat colour under the finger (TODO (179)). **Only that live
+    /// picture passes it**:
     /// the baker never does, so a bake is always the document's.
     @MainActor
     func makeFrameRecipe(atFrame frame: Int,
@@ -774,7 +775,7 @@ extension CanvasManager {
         return FrameRecipe(
             tree: tree,
             leaves: leafSnapshots(atFrame: frame, quality: quality, poses: poses, frames: frames,
-                                  alsoIncluding: maskedLayerIndices(in: maskStacks)),
+                                  alsoIncluding: maskedLayerIndices(in: maskStacks), holding: held),
             maskStacks: maskStacks,
             frame: frame,
             canvasSize: renderSize,
@@ -1362,7 +1363,8 @@ extension CanvasManager {
     ///
     /// **A value layer's colour is resolved here** — `resolvedColor(atFrame:)` and then
     /// `LayerRenderSource.SolidColor`, which is where that type's own note argues why the resolve
-    /// stays on the main actor and the canvas-sized fill does not.
+    /// stays on the main actor and the canvas-sized fill does not. `held` is a colour its picker holds
+    /// (`HeldValueFill`, TODO (179)), read in place of the document's: the held frame's one read of it.
     ///
     /// **`frames` is TRANSFORM_LAYER.md §5.5's per-leaf source frame**, and every "at this frame"
     /// read below — the cel, the derivation, the version, the grade test, the flat colour — asks
@@ -1373,7 +1375,8 @@ extension CanvasManager {
     private func leafSnapshots(atFrame frame: Int, quality: RenderQuality,
                                poses: [Int: PoseMap] = [:],
                                frames: [Int: Int] = [:],
-                               alsoIncluding maskSourceLayers: Set<Int> = []) -> [LeafSnapshot?] {
+                               alsoIncluding maskSourceLayers: Set<Int> = [],
+                               holding held: HeldEdit? = nil) -> [LeafSnapshot?] {
         var leaves = [LeafSnapshot?](repeating: nil, count: layers.count)
         // **`derived` is resolved here rather than in `resolve()`, and that placement is
         // load-bearing.** Resolving a `CelContentProvider` reads the document (`layers`, the guide
@@ -1479,7 +1482,8 @@ extension CanvasManager {
             // decides whether this layer contributes at this frame at all, so deleting a value
             // layer's block at frame *n* removes its colour at *n*, which is what every other layer
             // does and what the timeline shows.
-            if let fill = layer.valueFill {
+            if let stored = layer.valueFill {
+                let fill = held?.valueFill.flatMap { $0.layerID == layer.id ? $0.fill : nil } ?? stored
                 let colour = LayerRenderSource.SolidColor(fill.resolvedColor(atFrame: leafFrame))
                 leaves[index] = LeafSnapshot(version: version, content: .solid(colour))
                 continue

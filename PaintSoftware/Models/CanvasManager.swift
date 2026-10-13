@@ -4668,12 +4668,15 @@ final class CanvasManager: ObservableObject {
         // is no lifted-but-adjustable state for it to have: the slider's lift *is* the commit, so a
         // session that is still open when undo lands is one the artist is still dragging.
         cancelSelectionEdit()
-        // An effect slider under the finger is the same case, and is let go the same way: its held
-        // grade was never written (TODO (179)).
+        // An effect or channel slider under the finger is the same case, and is let go the same way:
+        // its held value was never written (TODO (179)).
         revertHeldGrade()
+        revertHeldChannel()
         // The gradient panel is the opposite case: it has no finger to be under, so what is open is
-        // an adjustable edit, and it commits so the undo that follows has a real step to revert.
+        // an adjustable edit, and it commits so the undo that follows has a real step to revert. A value
+        // layer's colour picker is the gradient's case.
         commitGradientEdit()
+        commitHeldValueFill()
     }
 
     func refreshUndoRedoState() {

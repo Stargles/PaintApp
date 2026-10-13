@@ -79,16 +79,6 @@ struct LayerStackListView: UIViewRepresentable {
         private var dataSource: UITableViewDiffableDataSource<Int, UUID>?
         private(set) var rows: [LayerRowModel] = []
 
-        /// **Whether the opacity drag in progress has written a keyframe** — TODO (21), and the
-        /// input to which label its undo step carries.
-        ///
-        /// A property on the coordinator rather than a value returned to `commitStructureGesture`,
-        /// because a drag reports many values and only the *first* one's routing arm is knowable at
-        /// the commit: `applyTargetChannelEdit` seeds or holds on tick one and then keys on every
-        /// tick after, so the honest question is "did this gesture write any keys at all". Reset on
-        /// touch-down so an abandoned drag cannot label the next one.
-        private var opacityWroteKeys = false
-
         /// The two rows a live pinch started on.
         private var pinchPair: (UUID, UUID)?
         /// Each pinch touch's y position in the table's coordinate space, captured the instant it
@@ -244,43 +234,27 @@ struct LayerStackListView: UIViewRepresentable {
                                                             isReference: !model.isFillReference)
                     }
                     // **The opacity slider is a keyframable channel's surface** — TODO (21), the
-                    // owner's ask of 2026-09-09 — so the write is routed by
-                    // `applyTargetChannelEdit` rather than assigned. That call is the same five-arm
-                    // rule an effect slider takes: on a document with no keyframes it assigns the
-                    // value and nothing about this feature is visible; on one with keyframes it
-                    // keys, seeds or holds a baseline.
-                    //
-                    // **The arm it returns names the undo step**, which is why the label is a
-                    // `@State`-free box read at the commit: an artist who animated a fade must not
-                    // read "undo change opacity" and conclude the fade itself has gone.
+                    // owner's ask of 2026-09-09 — so its one write is routed by
+                    // `applyTargetChannelEdit` rather than assigned, the same five-arm rule an effect
+                    // slider takes. **A tick is held, not written** (TODO (179)): the host's alpha
+                    // follows it on a canvas Core Animation draws, the whole frame is redrawn from it
+                    // where the compositor does, and the lift writes it once, named for what it wrote
+                    // — an artist who animated a fade must not read "undo change opacity" and conclude
+                    // the fade itself has gone (`CanvasManager.commitHeldChannel`).
                     cell.onOpacityChange = { [weak self] value in
-                        guard let self else { return }
-                        guard let target = self.opacityTarget(model) else { return }
-                        let route = self.canvasManager.applyTargetChannelEdit(
-                            target, channel: .opacity, newValue: value,
-                            atFrame: self.canvasManager.currentFrame)
-                        if route != .storedValue { self.opacityWroteKeys = true }
+                        guard let self, let target = self.opacityTarget(model) else { return }
+                        self.canvasManager.holdTargetChannel(target, channel: .opacity, value: value)
                     }
                     cell.onOpacityChangeBegan = { [weak self] in
-                        guard let self else { return }
-                        self.opacityWroteKeys = false
-                        // **§5.1 step 1: the arm is answered on touch-down, before this surface
-                        // opens its own undo bracket**, so the take's bracket is the outer one and
-                        // `stopRecording`'s commit merely decrements while the artist is still
-                        // holding the slider. The answer is deliberately unread — `false` with
-                        // nothing raised is "the recorder was not armed", and this surface then
-                        // behaves exactly as it did before recording existed.
-                        if let target = self.opacityTarget(model) {
-                            _ = self.canvasManager.beginArmedTake(on: target, isRecordable: true)
-                        }
-                        self.canvasManager.beginStructureGesture()
+                        // **§5.1 step 1: the arm is answered on touch-down.** The answer is
+                        // deliberately unread — `false` with nothing raised is "the recorder was not
+                        // armed", and this surface then behaves exactly as it did before recording
+                        // existed.
+                        guard let self, let target = self.opacityTarget(model) else { return }
+                        _ = self.canvasManager.beginArmedTake(on: target, isRecordable: true)
                     }
                     cell.onOpacityChangeEnded = { [weak self] in
-                        guard let self else { return }
-                        self.canvasManager.commitStructureGesture(
-                            label: self.opacityWroteKeys ? TargetChannel.opacity.keyframeLabel
-                                                         : TargetChannel.opacity.editLabel)
-                        self.opacityWroteKeys = false
+                        self?.canvasManager.commitHeldChannel()
                     }
                 }
                 return cell

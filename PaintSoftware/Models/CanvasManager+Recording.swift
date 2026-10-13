@@ -26,20 +26,10 @@ extension CanvasManager {
 
         /// The stored grade as it was at arm time — what the take's channels are resolved against when
         /// they are written. A slider never writes it during a take: the value under the finger is
-        /// held (`HeldGrade`, TODO (179)), shown on the canvas and caught here, so the motion reaches
-        /// the document only as the curve.
+        /// held (`HeldGrade`, `HeldChannel`, TODO (179)), shown on the canvas and caught here, so the
+        /// motion reaches the document only as the curve — and so does a channel's (Opacity, Rotate,
+        /// Shake, Parallax), whose stored value a take therefore never has to put back.
         let baseEffect: Effect?
-
-        /// **The stored value of every `TargetChannel` at arm time** — TODO (21)'s second channel
-        /// kind, restored at commit: opacity is a scratch pad during a take, because an artist who
-        /// cannot see the layer fade under their finger is recording blind, and the motion belongs on
-        /// the curve.
-        ///
-        /// **Captured for every channel rather than for the ones touched**, which costs one `Double`
-        /// per channel per take and removes a hazard: a channel first touched mid-take would
-        /// otherwise have no base to restore, and the value the artist let go on would silently
-        /// become the stored one *and* the curve's — the fade would then apply twice.
-        let baseChannelValues: [String: Double]
 
         /// **The container's own pose as it stood at arm time** — `baseEffect`'s counterpart for
         /// KEYFRAMES.md §5's second surface, the Move box: the pose the take's curves are written onto
@@ -62,9 +52,9 @@ extension CanvasManager {
         var poses: [PoseComponents.Component: ValueRecording] = [:]
 
         /// **How many gesture brackets were open when the take began**, so that `stopRecording` can
-        /// tell "a control the artist is still holding opened one *inside* mine" from "brackets that
-        /// were already open outside mine". The first is the case `pendingGestureLabel` exists for
-        /// and is now the ordinary one; the second is somebody else's step and must not be renamed.
+        /// tell "a gesture the artist is still in opened one *inside* mine" from "brackets that were
+        /// already open outside mine". The first is the case `pendingGestureLabel` exists for; the
+        /// second is somebody else's step and must not be renamed.
         let gestureDepthAtStart: Int
 
         /// Per parameter id, everything that channel reported.
@@ -422,26 +412,17 @@ extension CanvasManager {
             return .noScene
         }
 
-        // One bracket over the whole take. Every base write inside it — including the slider's own
-        // `beginStructureGesture`/`commitStructureGesture` pair, which is depth-counted and nests —
-        // folds into this one step, so a take is one undo press however many sliders it touched.
-        // `commitStructureGesture`'s own rule: "an inner label is discarded rather than winning: the
-        // step belongs to the action that spans the others."
-        //
-        // **This bracket is now usually the *outer* one of a pair the artist is still holding**,
-        // since a take begins on a slider's touch-down. `CanvasManager.pendingGestureLabel` is what
-        // keeps the step's name right when the take ends before the finger lifts.
+        // One bracket over the whole take. Every write inside it — a lift's, which brackets itself,
+        // depth-counted and nesting — folds into this one step, so a take is one undo press however
+        // many sliders it touched. `commitStructureGesture`'s own rule: "an inner label is discarded
+        // rather than winning: the step belongs to the action that spans the others." A gesture of
+        // another kind still open when the take ends is `CanvasManager.pendingGestureLabel`'s case.
         beginStructureGesture()
 
         if !isPlaying { play() }
-        var baseChannelValues: [String: Double] = [:]
-        for channel in TargetChannel.all {
-            baseChannelValues[channel.id] = storedValue(of: target, channel: channel)
-        }
         recordingTake = RecordingTake(target: target,
                                       startFrame: currentFrame,
                                       baseEffect: storedEffect(of: target),
-                                      baseChannelValues: baseChannelValues,
                                       // Nil on every target but a transformation layer, and
                                       // captured unconditionally — `RecordingTake.basePose`
                                       // carries the hazard that makes it unconditional.
@@ -573,8 +554,8 @@ extension CanvasManager {
     /// **Returns whether the recorder consumed the routing decision.** When it did, the caller must
     /// *not* run `KeyframeControl.write`'s five arms: keying per tick is precisely the aliased 24 Hz
     /// sample §5 forbids, and it would leave 72 keys a channel on a three-second take. The value is
-    /// still shown by the caller — held for an effect slider (`holdEffectParameter`), written to the
-    /// stored base as a scratch pad for an opacity slider — which is what the artist sees move.
+    /// still shown by the caller — held (`holdEffectParameter`, `holdTargetChannel`, TODO (179)) —
+    /// which is what the artist sees move.
     ///
     /// The timestamp is `playbackNow()` — the same injectable wall clock playback derives the
     /// playhead from, so a test can hand the recorder numbers instead of sleeping through a take.
@@ -631,11 +612,12 @@ extension CanvasManager {
             cancelStructureGesture()
         } else if outcome == nil {
             commitStructureGesture(label: .recordAnimation)
-            // **The common case since arming moved to the pencil**: the scene ran out while the
-            // artist was still holding the slider that began the take, so their bracket is open
-            // inside ours and the commit above only decremented. The step will be recorded when they
-            // let go, under their label — "Adjust Layer Effect" over a take that wrote a curve, which
-            // is the lie `.recordAnimation` exists to prevent. Claim it instead.
+            // **A gesture of its own opened inside the take is still open** — the scene ran out
+            // while the artist was still in the middle of one, so its bracket is open inside ours and
+            // the commit above only decremented. The step will be recorded when it ends, under its
+            // label — over a take that wrote a curve, which is the lie `.recordAnimation` exists to
+            // prevent. Claim it instead. (The sliders that begin a take open no bracket of their own:
+            // their ticks are held, TODO (179).)
             if structureGestureDepth > take.gestureDepthAtStart {
                 pendingGestureLabel = .recordAnimation
             }
@@ -658,31 +640,13 @@ extension CanvasManager {
     ///   `stopRecording` whether its own bracket has anything in it — see there.
     private func commitRecordingTake(_ take: RecordingTake)
         -> (refusal: RecordingRefusal?, curvesWritten: Int) {
-        // The target's own scalars first, whatever happens next: they were a scratch pad, and the
-        // artist never asked for the value they let go on to become the stored one. Not conditional
-        // on the take having touched them: `setStoredValue` early-returns when the value is already
-        // there. A grade needs no such restore — its sliders hold rather than write (TODO (179)).
-        for channel in TargetChannel.all {
-            guard let base = take.baseChannelValues[channel.id] else { continue }
-            setStoredValue(of: take.target, channel: channel, to: base)
-        }
-        // **There is deliberately no second restore here for the container's own pose**, and the reason
-        // is an asymmetry worth stating rather than a gap — a line doing it was written, could not be
-        // killed by any mutation, and was removed on that evidence.
-        //
-        // The restore above is load-bearing because `setTargetChannelCurves` writes only a channel's
-        // *track*: nothing in a successful take would otherwise put the stored opacity back, so the
-        // drag would apply twice.
-        // **`writeContainerPose` writes the whole `LayerPose`, `pose` field included**, and
-        // `commitRecordedPoseTrack` builds what it writes from `take.basePose` rather than from the live
-        // model — so a successful pose take restores the base *as part of* its own write. Every other
-        // pose take writes nothing, and `stopRecording` then calls `cancelStructureGesture`, whose
-        // snapshot was taken at `startRecording` and carries `layers` and `folders` by value.
-        //
-        // So both paths already land on the pose the artist found, and a restore here would be a line
-        // no test could make matter. The claim itself is pinned where it belongs — on the outcome, by
-        // `MoveBoxRecordingLogicTests.testTheStoredBaseIsPutBackAndTheMotionIsOnTheCurveAlone`, whose
-        // operand is `take.basePose`'s provenance one function down.
+        // **Nothing is put back before the curves are written**: no slider writes its target during a
+        // take — a grade's and a channel's ticks are held (TODO (179)) and a container's pose is held
+        // too (`livePose`) — so every base is still the one the take found. A successful pose take's
+        // `writeContainerPose` writes the whole `LayerPose` from `take.basePose`, and every other pose
+        // take writes nothing and `stopRecording` cancels its bracket, whose snapshot carries `layers`
+        // and `folders` by value. `MoveBoxRecordingLogicTests.testTheStoredBaseIsPutBackAndTheMotionIsOnTheCurveAlone`
+        // pins the pose's half on the outcome.
 
         // **The Move box's half, before the gate below**, because a pose take catches no *channel*: its
         // whole product is one `TransformTrack` on a third store that is neither a grade's

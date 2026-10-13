@@ -446,9 +446,11 @@ memo is bought by the *size*:** `PixelOps.rasterize` and `MaskResolver.CacheKey`
 bake mints at `.liveComposite` and the three share their flattens across two queues. That also lets the halves keep
 `.userInitiated` while the bake keeps `.utility`, which is what §2 asks for. 
 
-**A grade under an effect slider is drawn whole — TODO (179), 2026-10-12.** A slider's value is held off the
+**A grade under the finger is drawn whole — TODO (179), 2026-10-12** — and so is an Opacity, a transform mode's
+channel or a flat colour wherever the compositor draws the canvas (an Opacity or a colour on a canvas Core
+Animation draws is a host's alpha or background, set on the tick). A control's value is held off the
 document while the finger is down (`CanvasManager.liveEdit`), so a tick dirties nothing and the baker idles; the
-canvas composites the frame itself with the held grade resolved in (`makeFrameRecipe(holding:)`), at
+canvas composites the frame itself with the hold resolved in (`makeFrameRecipe(holding:)`), at
 `.dragPreview` — the live size, or half of it a side on a big scene (§2.12's exception) — on `sandwichQueue`, one
 composite in flight and the newest value minted when it lands, and presents it through an `IOSurface` pair
 (`WindowSurfaceView`) stretched over the canvas. That held frame is a *live picture*, the pair's product rather

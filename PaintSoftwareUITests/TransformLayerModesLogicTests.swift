@@ -504,6 +504,38 @@ final class TransformLayerModesLogicTests: XCTestCase {
         XCTAssertGreaterThan(try angle(at: 12), 0, "which is not where it started")
     }
 
+    /// **A held Rotate speed poses the frame as the lift will, on a stored speed and on a keyed one** —
+    /// TODO (179). The speed is summed over the bar, so the angle at frame 10 depends on the speed at
+    /// every frame before it: the held value at the edit's frame alone would be the wrong sum on a
+    /// keyed channel. Held at frame 4 and read at 10 through the walk (`renderTreeAndPoses(holding:)`),
+    /// then written and read off the document — the same angle both times, and a different one from
+    /// before the hold, on both.
+    @MainActor
+    func testAHeldRotateSpeedPosesTheFrameAsTheLiftWill() throws {
+        let right = CGPoint(x: centre.x + 10, y: centre.y)
+        for keyed in [false, true] {
+            let fx = rotatedRasterLayer(speed: 15)
+            if keyed {
+                fx.manager.layers[fx.mover].channelTracks[TargetChannel.rotateSpeed.id] = curve([(0, 15), (8, 0)])
+            }
+            let target = KeyframeTarget.layer(id: fx.manager.layers[fx.mover].id)
+            fx.manager.currentFrame = 4
+            func point(holding held: HeldEdit?) throws -> CGPoint {
+                let poses = fx.manager.renderTreeAndPoses(atFrame: 10, holding: held).poses
+                return try XCTUnwrap(poses[fx.drawn]?.applied(to: right), "the wheel poses the ink at 10")
+            }
+            let before = try point(holding: nil)
+            fx.manager.holdTargetChannel(target, channel: .rotateSpeed, value: 30)
+            XCTAssertEqual(fx.manager.layers[fx.mover].rotateSpeed, 15, "keyed \(keyed): a tick writes no speed")
+            let held = try point(holding: fx.manager.liveEdit)
+            XCTAssertGreaterThan(hypot(held.x - before.x, held.y - before.y), 0.5, "keyed \(keyed): the hold turns the wheel")
+            fx.manager.commitHeldChannel()
+            let landed = try point(holding: nil)
+            XCTAssertEqual(held.x, landed.x, accuracy: 1e-6, "keyed \(keyed): the lift lands the angle the hold showed")
+            XCTAssertEqual(held.y, landed.y, accuracy: 1e-6)
+        }
+    }
+
     /// **A keyframe holds the box, never the angle** (ruling 7, §6). With the wheel at 15°/frame,
     /// placing a keyframe at 4 writes a key for the *authored* pose — the resting box — and the
     /// spin at frame 6 is still 90°. A writer that keyed the resolved map would freeze a 60° pose

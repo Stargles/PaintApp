@@ -1059,10 +1059,10 @@ extension CanvasManager {
     /// stored value is `parallaxShareValue`'s fallback rather than the 75% the artist was looking at
     /// — so a first drag on a keyed layer would seed A with the wrong number. Materialising first
     /// makes the funnel's read true. It is not an undo step of its own: the number it writes is the
-    /// one already on screen, and the bracket the panel opens around the drag records the edit.
+    /// one already on screen, and the bracket the lift opens around it records the edit (`commitHeldChannel`).
     ///
-    /// - Returns: the arm taken, so the caller can label its undo bracket, exactly as the opacity
-    ///   slider does.
+    /// - Returns: the arm taken, so the lift can label its undo step, exactly as the opacity slider's
+    ///   does.
     @discardableResult
     func setParallaxShare(of item: KeyframeTarget, beneath poser: KeyframeTarget,
                           to value: Double, atFrame frame: Int) -> KeyframeControl.Write {

@@ -196,6 +196,7 @@
 		8BB7D438C425855DCF10ED6D /* GuideOverStrokeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29EF3F368D1AA6C8325A64F8 /* GuideOverStrokeUITests.swift */; };
 		0012C24993208CE9232502A7 /* GuideSliderUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D433D126267BB4DBDD8921FD /* GuideSliderUITests.swift */; };
 		9C9543432049909D7A855421 /* EffectSliderLiveUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03B7D00D5BA7CF3BD03253EB /* EffectSliderLiveUITests.swift */; };
+		C642D0F20EB66540E2EA1639 /* OpacitySliderLiveUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FCEA8E4238D113ACE696CD9 /* OpacitySliderLiveUITests.swift */; };
 		2F5D3B0AEAFEB5359E8CE0CF /* GuideUnderLassoMoveUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA035DAC01F130A020B02B65 /* GuideUnderLassoMoveUITests.swift */; };
 		7A54F01C6DC3BFE5A6CB5C58 /* GuideEffectLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97EAC0AFE8551C7BCB0784AF /* GuideEffectLogicTests.swift */; };
 		0DC3FA8A2141BD915C11CAC7 /* LensBlurUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C8D32C3E835AD05BDC423C9 /* LensBlurUITests.swift */; };
@@ -824,6 +825,7 @@
 		29EF3F368D1AA6C8325A64F8 /* GuideOverStrokeUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "GuideOverStrokeUITests.swift"; sourceTree = "<group>"; };
 		D433D126267BB4DBDD8921FD /* GuideSliderUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "GuideSliderUITests.swift"; sourceTree = "<group>"; };
 		03B7D00D5BA7CF3BD03253EB /* EffectSliderLiveUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "EffectSliderLiveUITests.swift"; sourceTree = "<group>"; };
+		0FCEA8E4238D113ACE696CD9 /* OpacitySliderLiveUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "OpacitySliderLiveUITests.swift"; sourceTree = "<group>"; };
 		DA035DAC01F130A020B02B65 /* GuideUnderLassoMoveUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "GuideUnderLassoMoveUITests.swift"; sourceTree = "<group>"; };
 		97EAC0AFE8551C7BCB0784AF /* GuideEffectLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GuideEffectLogicTests.swift; sourceTree = "<group>"; };
 		0C8D32C3E835AD05BDC423C9 /* LensBlurUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LensBlurUITests.swift; sourceTree = "<group>"; };
@@ -1547,6 +1549,7 @@
 				29EF3F368D1AA6C8325A64F8 /* GuideOverStrokeUITests.swift */,
 				D433D126267BB4DBDD8921FD /* GuideSliderUITests.swift */,
 				03B7D00D5BA7CF3BD03253EB /* EffectSliderLiveUITests.swift */,
+				0FCEA8E4238D113ACE696CD9 /* OpacitySliderLiveUITests.swift */,
 				DA035DAC01F130A020B02B65 /* GuideUnderLassoMoveUITests.swift */,
 				97EAC0AFE8551C7BCB0784AF /* GuideEffectLogicTests.swift */,
 				0C8D32C3E835AD05BDC423C9 /* LensBlurUITests.swift */,
@@ -2287,6 +2290,7 @@
 				8BB7D438C425855DCF10ED6D /* GuideOverStrokeUITests.swift in Sources */,
 				0012C24993208CE9232502A7 /* GuideSliderUITests.swift in Sources */,
 				9C9543432049909D7A855421 /* EffectSliderLiveUITests.swift in Sources */,
+				C642D0F20EB66540E2EA1639 /* OpacitySliderLiveUITests.swift in Sources */,
 				2F5D3B0AEAFEB5359E8CE0CF /* GuideUnderLassoMoveUITests.swift in Sources */,
 				7A54F01C6DC3BFE5A6CB5C58 /* GuideEffectLogicTests.swift in Sources */,
 				0DC3FA8A2141BD915C11CAC7 /* LensBlurUITests.swift in Sources */,

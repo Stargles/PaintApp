@@ -1040,59 +1040,14 @@ struct CanvasView: UIViewRepresentable {
                 // comments — the latter is a documented approximation, not exact group opacity.
                 let effectivelyVisible = canvasManager.isLayerEffectivelyVisible(index)
                 if host.isHidden != !effectivelyVisible { host.isHidden = !effectivelyVisible }
+                let celIdx = canvasManager.activeCelIndex(inLayer: index,
+                                                          atFrame: shownFrames[index] ?? canvasManager.currentFrame)
                 // §6.5: while a mask-edit session is open, everything that isn't a legal source for
                 // it dims — folded in here rather than as a separate overlay, since this is already
                 // where every other per-layer canvas approximation (group opacity, visibility) gets
-                // combined into the one number Core Animation takes.
-                let targetAlpha = CGFloat(canvasManager.effectiveOpacity(ofLayer: index))
-                    * canvasManager.maskEditCanvasDim(forLayerAt: index)
-                if host.alpha != targetAlpha { host.alpha = targetAlpha }
-
-                let celIdx = canvasManager.activeCelIndex(inLayer: index,
-                                                          atFrame: shownFrames[index] ?? canvasManager.currentFrame)
-
-                // §4.5's value layer on the live canvas: **a host with a background colour**, and
-                // nothing else. Its three content views stay empty — the colour is not in a cel — so
-                // the host's own background is what Core Animation draws, full-bleed, in stack order,
-                // under `host.alpha` (which already folds in group opacity) and behind
-                // `setBlanked`'s mask when the compositor takes over.
-                //
-                // **`needsCompositorOnCanvas` deliberately gains no clause for this**, and that is the
-                // check rather than an omission: a value layer at Normal with no mask is an ordinary
-                // opaque leaf, and a flat rect in a flat row of siblings is the one thing Core
-                // Animation is good at — so it draws exactly what the compositor would. Give it a
-                // blend mode or a mask and the *existing* clauses fire on it like any other leaf, and
-                // the sandwich takes over with the resolved solid source. A clause here would have
-                // pushed every document containing a flat colour onto the compositor for nothing.
-                //
-                // **This whole path is the *flat-colour* mode's, and `valueFill` is what confines it
-                // there** — not a `kind` test, which is what it would have been if the accessor had
-                // not been narrowed. A value layer in effect mode has no colour to paint: it grades
-                // the backdrop beneath it, which is a thing one sibling view cannot do to another, so
-                // it must be compositor-driven. `Layer.valueFill` answers nil the moment `effect` is
-                // set (that is the mode discriminant), the `.map` below therefore yields nil, and the
-                // line after it *assigns* that nil — which is the half worth stating, because the
-                // failure this would otherwise be is silent: an `if let` here, or a "only write when
-                // there is a colour" shortcut, would leave the flat colour the artist picked before
-                // the flip painted over the grade for the rest of the session, and it would look like
-                // the effect simply not working. The write is unconditional-when-different, so the
-                // flip clears it on the same pass the mode changes.
-                //
-                // Nothing else is needed to make the grade appear: `needsCompositorOnCanvas`'s
-                // *effect* clause (phase 9a) fires on the leaf, the sandwich engages, and `full` is
-                // the graded composite. That clause reads `RenderNode.effect`, which the derivation
-                // sets from the same `layerEffect` accessor, so the two answers cannot disagree —
-                // "this host paints no colour" and "the compositor is on" are one condition read
-                // twice, and `EffectLayerLogicTests` pins both halves.
-                //
-                // Resolved at `currentFrame` for `leafSnapshots`' reason: the frame is the argument a
-                // later keyframe phase needs, and reading it here too keeps the live canvas and the
-                // composite asking the same question. Gated on `celIdx` for the same reason the
-                // snapshot is — a layer with no block at this frame contributes nothing at it.
-                let fillColour = (celIdx == nil ? nil : layer.valueFill).map {
-                    PixelOps.uiColor(from: $0.resolvedColor(atFrame: canvasManager.currentFrame).color)
-                }
-                if host.backgroundColor != fillColour { host.backgroundColor = fillColour }
+                // combined into the one number Core Animation takes. And the value layer's colour —
+                // both in `showAlphaAndFill`, which an Opacity or colour tick runs alone.
+                showAlphaAndFill(on: host, ofLayerAt: index, celIndex: celIdx)
 
                 let displayedBaked = bakedImageToDisplay(layerIndex: index, celIndex: celIdx)
                 if host.bakedImageView.image !== displayedBaked { host.bakedImageView.image = displayedBaked }
@@ -1298,9 +1253,9 @@ struct CanvasView: UIViewRepresentable {
                 + " rebuilds:\(sandwichRebuildCount)"
                 + " moves:\(liveMoveCount)"
                 + " passes:\(passCount)"
-                // **How many whole frames of a held grade have landed** (TODO (179)) — an effect
-                // slider's preview, which reaches the screen through a surface rather than a pass, so a
-                // test that cannot look during its synchronous drag reads this after it.
+                // **How many whole frames of a hold have landed** (TODO (179)) — a grade's, a channel's
+                // or a flat colour's preview, which reaches the screen through a surface rather than a
+                // pass, so a test that cannot look during its synchronous drag reads this after it.
                 + " held:\(heldFrameCount)"
                 // **What draws the whole frame, and at how many pixels** — the held frame while it is up
                 // (half its size a side on a big scene, `DragPreviewDetail`), the bake at rest. A test
@@ -1515,7 +1470,7 @@ struct CanvasView: UIViewRepresentable {
         /// The rebuilds of the live picture, one in flight at a time — see `requestSandwichRebuild`.
         private let sandwichRebuilds = LatestWins(queue: Coordinator.sandwichQueue)
 
-        /// **The whole frame of a grade held under an effect slider** (TODO (179)), over everything the
+        /// **The whole frame as the finger holds it** (TODO (179)), over everything the
         /// canvas draws and under the onion skin and the chrome — see `requestHeldFrame`. Made at the
         /// first tick and dropped when it lands, so its two canvas-sized surfaces exist only while a
         /// finger is down and a bake's length after.
@@ -2010,9 +1965,11 @@ struct CanvasView: UIViewRepresentable {
 
         /// **A picture the document does not hold yet moved** — `CanvasManager.onHeldPictureMoved`: a
         /// graph-node drag's tick (TODO (154)), an adjustable fill's render (TODO (157)), a live
-        /// element edit's tick (TODO (173)) or an effect slider's (TODO (179)). Each is re-shown now,
-        /// and that is the whole of its cost to the canvas: it is held off the document, so no SwiftUI
-        /// pass comes. A grade changes the whole picture, so it is drawn whole (`requestHeldFrame`).
+        /// element edit's tick (TODO (173)), or a grade's, a target channel's or a flat colour's (TODO
+        /// (179)). Each is re-shown now, and that is the whole of its cost to the canvas: it is held off
+        /// the document, so no SwiftUI pass comes. A grade changes the whole picture, so it is drawn whole
+        /// (`requestHeldFrame`), and so is a channel or a colour wherever the compositor draws the canvas;
+        /// where Core Animation does, an Opacity or a colour is a host's alpha or background, set here.
         ///
         /// The pose re-poses the bands on screen; before they land there is nothing to re-pose, and the
         /// pass that lands them reads the held pose. The fill is drawn by its own host, which the canvas
@@ -2033,15 +1990,87 @@ struct CanvasView: UIViewRepresentable {
                 liveMoveCount += 1
                 publishCanvasState()
             }
-            // A grade changes the whole picture, so it is drawn whole rather than by a host.
-            heldFrameLanding.update(held: canvasManager.liveEdit?.grade != nil)
-            if heldFrameLanding.phase == .held { requestHeldFrame() }
+            heldFrameLanding.update(held: heldDrawsWholeFrame)
+            if heldFrameLanding.phase == .held {
+                requestHeldFrame()
+            } else if canvasManager.liveEdit?.channel != nil || canvasManager.liveEdit?.valueFill != nil {
+                showHostAlphasAndFills()
+            }
         }
 
-        // MARK: The held frame — a grade under an effect slider (TODO (179))
+        /// Whether what is held is drawn as the whole frame (`HeldEdit.drawsWholeFrame`) on the canvas as
+        /// it is now — composited, or drawn by Core Animation.
+        private var heldDrawsWholeFrame: Bool {
+            canvasManager.liveEdit?.drawsWholeFrame(canvasEngaged: sandwichPresentation != .disengaged) ?? false
+        }
 
-        /// **Asks for the whole frame as the finger holds it** — the document's own walk with the held
-        /// grade resolved in (`makeFrameRecipe(holding:)`), composited at the live size off the main
+        /// **Every host's alpha and flat colour, as the model shows them now** — `reconcileLayerRows`'
+        /// own two lines, run on a tick of an Opacity slider or a colour picker (lane A): an approximation
+        /// of group opacity Core Animation can draw, and a value layer's background.
+        private func showHostAlphasAndFills() {
+            let shownFrames = canvasManager.displayedFrames(atFrame: canvasManager.currentFrame)
+            for (index, layer) in canvasManager.layers.enumerated() {
+                guard let host = layerHosts[layer.id] else { continue }
+                showAlphaAndFill(on: host, ofLayerAt: index,
+                                 celIndex: canvasManager.activeCelIndex(
+                                    inLayer: index, atFrame: shownFrames[index] ?? canvasManager.currentFrame))
+            }
+        }
+
+        /// One host's alpha and flat colour — `effectiveOpacity` (with group opacity folded in, and the
+        /// mask-edit dim) and `valueFillAsShown`, both as the finger holds them where it holds them.
+        private func showAlphaAndFill(on host: LayerHostView, ofLayerAt index: Int, celIndex: Int?) {
+            let targetAlpha = CGFloat(canvasManager.effectiveOpacity(ofLayer: index))
+                * canvasManager.maskEditCanvasDim(forLayerAt: index)
+            if host.alpha != targetAlpha { host.alpha = targetAlpha }
+            // §4.5's value layer on the live canvas: **a host with a background colour**, and
+            // nothing else. Its three content views stay empty — the colour is not in a cel — so
+            // the host's own background is what Core Animation draws, full-bleed, in stack order,
+            // under `host.alpha` (which already folds in group opacity) and behind
+            // `setBlanked`'s mask when the compositor takes over.
+            //
+            // **`needsCompositorOnCanvas` deliberately gains no clause for this**, and that is the
+            // check rather than an omission: a value layer at Normal with no mask is an ordinary
+            // opaque leaf, and a flat rect in a flat row of siblings is the one thing Core
+            // Animation is good at — so it draws exactly what the compositor would. Give it a
+            // blend mode or a mask and the *existing* clauses fire on it like any other leaf, and
+            // the sandwich takes over with the resolved solid source. A clause here would have
+            // pushed every document containing a flat colour onto the compositor for nothing.
+            //
+            // **This whole path is the *flat-colour* mode's, and `valueFill` is what confines it
+            // there** — not a `kind` test, which is what it would have been if the accessor had
+            // not been narrowed. A value layer in effect mode has no colour to paint: it grades
+            // the backdrop beneath it, which is a thing one sibling view cannot do to another, so
+            // it must be compositor-driven. `Layer.valueFill` answers nil the moment `effect` is
+            // set (that is the mode discriminant), the `.map` below therefore yields nil, and the
+            // line after it *assigns* that nil — which is the half worth stating, because the
+            // failure this would otherwise be is silent: an `if let` here, or a "only write when
+            // there is a colour" shortcut, would leave the flat colour the artist picked before
+            // the flip painted over the grade for the rest of the session, and it would look like
+            // the effect simply not working. The write is unconditional-when-different, so the
+            // flip clears it on the same pass the mode changes.
+            //
+            // Nothing else is needed to make the grade appear: `needsCompositorOnCanvas`'s
+            // *effect* clause (phase 9a) fires on the leaf, the sandwich engages, and `full` is
+            // the graded composite. That clause reads `RenderNode.effect`, which the derivation
+            // sets from the same `layerEffect` accessor, so the two answers cannot disagree —
+            // "this host paints no colour" and "the compositor is on" are one condition read
+            // twice, and `EffectLayerLogicTests` pins both halves.
+            //
+            // Resolved at `currentFrame` for `leafSnapshots`' reason: the frame is the argument a
+            // later keyframe phase needs, and reading it here too keeps the live canvas and the
+            // composite asking the same question. Gated on `celIdx` for the same reason the
+            // snapshot is — a layer with no block at this frame contributes nothing at it.
+            let fillColour = (celIndex == nil ? nil : canvasManager.valueFillAsShown(ofLayer: index)).map {
+                PixelOps.uiColor(from: $0.resolvedColor(atFrame: canvasManager.currentFrame).color)
+            }
+            if host.backgroundColor != fillColour { host.backgroundColor = fillColour }
+        }
+
+        // MARK: The held frame — a grade, a channel or a flat colour under the finger (TODO (179))
+
+        /// **Asks for the whole frame as the finger holds it** — the document's own walk with the hold
+        /// resolved in (`makeFrameRecipe(holding:)`), composited at the live size off the main
         /// thread and drawn into a canvas-sized surface pair (`WindowSurfaceView`). The surface's
         /// `LatestWins` keeps one composite in flight and mints the next against the newest value when
         /// it lands, so the preview runs exactly as fast as the device can composite the frame — and
@@ -2115,7 +2144,7 @@ struct CanvasView: UIViewRepresentable {
         /// is of that key. Takes the frame down once it has landed, keeps it over everything else while
         /// it is up, and asks for the frame the playhead is on when a take has moved it.
         private func landHeldFrame(key: SandwichKey?, pictureIsCurrent: Bool) {
-            heldFrameLanding.update(held: canvasManager.liveEdit?.grade != nil)
+            heldFrameLanding.update(held: heldDrawsWholeFrame)
             heldFrameLanding.pass(key: key, pictureIsCurrent: pictureIsCurrent)
             guard heldFrameLanding.isUp else {
                 guard let surface = heldFrameSurface else { return }

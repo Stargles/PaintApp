@@ -24,8 +24,8 @@ final class LayerStackCell: UITableViewCell {
     var onToggleVisibility: (() -> Void)?
     var onToggleExpanded: (() -> Void)?
     var onOpacityChange: ((Double) -> Void)?
-    /// Bracket the whole opacity drag so it lands as one undo step rather than one per tick —
-    /// see `CanvasManager.beginStructureGesture`'s doc comment.
+    /// The opacity drag's touch-down and lift: every tick between them is held, and the lift writes the
+    /// drag as one undo step (`CanvasManager.commitHeldChannel`).
     var onOpacityChangeBegan: (() -> Void)?
     var onOpacityChangeEnded: (() -> Void)?
     /// A folder row's tap already means expand/collapse, so its options menu (§4.2's pass-through
@@ -165,9 +165,14 @@ final class LayerStackCell: UITableViewCell {
         opacitySlider.minimumValue = 0
         opacitySlider.maximumValue = 1
         opacitySlider.addTarget(self, action: #selector(opacityChanged), for: .valueChanged)
+        // **The drag's two ends are `.touchDown` and the touch-up, and `.touchCancel` is neither**
+        // (TODO (179): the drag is held, so its ends decide when it is written). MEASURED on iOS 26.5:
+        // the slider sends `.touchCancel` the moment its own pan takes a drag over, mid-gesture; its
+        // value goes on following the finger after the finger lifts, springing to where it was let go;
+        // and `.touchUpInside` / `.touchUpOutside` arrive only once it has settled — then one
+        // `.valueChanged` more, of the settled value. So the touch-up is the lift.
         opacitySlider.addTarget(self, action: #selector(opacityDragBegan), for: .touchDown)
-        opacitySlider.addTarget(self, action: #selector(opacityDragEnded),
-                                for: [.touchUpInside, .touchUpOutside, .touchCancel])
+        opacitySlider.addTarget(self, action: #selector(opacityDragEnded), for: [.touchUpInside, .touchUpOutside])
 
         opacityReadoutLabel.font = .monospacedDigitSystemFont(ofSize: 13, weight: .semibold)
         opacityReadoutLabel.textColor = .white
@@ -816,6 +821,7 @@ final class LayerStackCell: UITableViewCell {
         opacityReadoutHide?.cancel()
         opacityReadoutHide = nil
         isShowingOpacityReadout = false
+        opacityDragIsOpen = false
         refreshOpacityReadout()
         // A reorder drag leaves preview translations on the cells it shifted; a cell recycled while
         // one is still applied would otherwise render its new row at the old row's offset.
@@ -834,14 +840,24 @@ final class LayerStackCell: UITableViewCell {
     @objc private func opacityChanged() {
         refreshOpacityReadout()
         onOpacityChange?(Double(opacitySlider.value))
+        // **A change with no drag open is a whole gesture** — VoiceOver's increment, or the slider's
+        // echo of its settled value after the touch-up: nothing will lift it later, so it is lifted
+        // here, or it would be held off the document for good. An echo lifts the value already
+        // written, which writes nothing (`CanvasManager.commitHeldChannel`).
+        if !opacityDragIsOpen { onOpacityChangeEnded?() }
     }
 
+    /// From the opacity slider's `.touchDown` to its touch-up — see the targets in `init`.
+    private var opacityDragIsOpen = false
+
     @objc private func opacityDragBegan() {
+        opacityDragIsOpen = true
         showOpacityReadout()
         onOpacityChangeBegan?()
     }
 
     @objc private func opacityDragEnded() {
+        opacityDragIsOpen = false
         scheduleOpacityReadoutHide()
         onOpacityChangeEnded?()
     }

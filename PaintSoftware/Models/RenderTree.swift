@@ -1000,8 +1000,8 @@ extension CanvasManager {
     /// **`held` is what the finger holds that the walk shows in place of the document** — TODO (154),
     /// (179): a pose under a graph-node drag or a Move box (`CanvasManager.liveEdit`), held off the
     /// document for the length of the gesture, and the canvas's bands are re-posed from this walk; or
-    /// a grade under an effect slider, which the walk resolves into its target's node and the canvas
-    /// composites the whole frame from. The same shape as `excluded`: asked of the walk, nothing
+    /// a grade, an Opacity or a transform mode's channel under the finger, which the walk resolves into
+    /// its target's node or poser and the canvas composites the whole frame from. The same shape as `excluded`: asked of the walk, nothing
     /// mutated. Nil — every other caller, and the baker always — reads the document alone, which is
     /// what keeps the bake the document's truth.
     func renderTreeAndPoses(atFrame frame: Int, excluding excluded: UUID? = nil,
@@ -1103,14 +1103,23 @@ extension CanvasManager {
 
     /// **A poser's own scalar rows** — the two closures every mode arm needs of a `TargetChannel`:
     /// whether it carries a curve (rotate's closed form against its sum) and its resolved value at a
-    /// frame.
+    /// frame. `held` is a channel of this layer's under the finger (`HeldChannel`, TODO (179)), read in
+    /// place of the document's: its value at the edit's frame, and the curve the lift will leave where
+    /// that is read across the bar.
     fileprivate struct PoserChannels {
         let hasCurve: (TargetChannel) -> Bool
         let value: (TargetChannel, Int) -> Double
 
-        init(layer: Layer) {
-            hasCurve = { layer.channelTracks[$0.id]?.isEmpty == false }
-            value = { layer.resolvedValue($0, atFrame: $1) }
+        init(layer: Layer, holding held: HeldChannel?) {
+            let held = held?.target == .layer(id: layer.id) ? held : nil
+            hasCurve = { channel in
+                if let held = held?.holding(channel, of: .layer(id: layer.id)) { return held.routedCurve != nil }
+                return layer.channelTracks[channel.id]?.isEmpty == false
+            }
+            value = { channel, frame in
+                if let held = held?.holding(channel, of: .layer(id: layer.id)) { return held.value(atFrame: frame) }
+                return layer.resolvedValue(channel, atFrame: frame)
+            }
         }
     }
 
@@ -1132,15 +1141,27 @@ extension CanvasManager {
     }
 
     /// An entry's parallax share at `frame` — `Layer.parallaxShare(atFrame:positionalDefault:)` or
-    /// the folder's, whichever home the entry is.
+    /// the folder's, whichever home the entry is, or the finger's where its slider holds it.
     private func parallaxShare(of entry: ContainerEntry, atFrame frame: Int,
-                               positionalDefault: Double) -> Double {
+                               positionalDefault: Double, holding held: HeldChannel?) -> Double {
         switch entry {
         case .layer(let index):
+            if let held = held?.holding(.parallaxShare, of: .layer(id: layers[index].id)) {
+                return held.value(atFrame: frame)
+            }
             return layers[index].parallaxShare(atFrame: frame, positionalDefault: positionalDefault)
         case .folder(let folder):
+            if let held = held?.holding(.parallaxShare, of: .folder(id: folder.id)) { return held.value(atFrame: frame) }
             return folder.parallaxShare(atFrame: frame, positionalDefault: positionalDefault)
         }
+    }
+
+    /// **An opacity as the walk shows it at `frame`** — `resolved`, or the finger's where `target`'s
+    /// Opacity slider holds it (`HeldChannel`, TODO (179)).
+    private func shownOpacity(_ resolved: @autoclosure () -> Double, of target: KeyframeTarget, atFrame frame: Int,
+                              holding held: HeldEdit?) -> Double {
+        guard let held = held?.channel?.holding(.opacity, of: target) else { return resolved() }
+        return held.value(atFrame: frame)
     }
 
     /// **A transformation layer's pose as the walk shows it** — the finger's where a drag holds one
@@ -1313,9 +1334,10 @@ extension CanvasManager {
             // every block, so a layer with several blocks is several starts.
             guard let poser = containerPoser(
                 pose: pose, atFrame: entryFrame, blockStart: layer.cels[celIndex].startFrame,
-                channels: PoserChannels(layer: layer),
+                channels: PoserChannels(layer: layer, holding: held?.channel),
                 shareOf: { q, positional in
-                    self.parallaxShare(of: stack[q], atFrame: carriedFrame[q], positionalDefault: positional)
+                    self.parallaxShare(of: stack[q], atFrame: carriedFrame[q], positionalDefault: positional,
+                                       holding: held?.channel)
                 },
                 stack: stack, position: position) else { continue }
             posers.append(poser)
@@ -1375,7 +1397,9 @@ extension CanvasManager {
                                   // `node.opacity` and therefore varies per frame for free. A layer
                                   // with no curve returns the stored value byte for byte, which is
                                   // what keeps every document nobody has animated identical.
-                                  opacity: layer.opacity(atFrame: entryFrame), isVisible: layer.isVisible,
+                                  opacity: shownOpacity(layer.opacity(atFrame: entryFrame), of: .layer(id: layer.id),
+                                                        atFrame: entryFrame, holding: held),
+                                  isVisible: layer.isVisible,
                                   // **`.clipToBelow` never reaches the compositor as a mode.** It is
                                   // not a blend (§7 says so while listing it among them); it is this
                                   // machinery with an implicit source, so it is resolved here into a
@@ -1466,7 +1490,9 @@ extension CanvasManager {
                                   // Resolved at this frame, the leaf's rule on the other home —
                                   // §2.21 for grades, reached by the channel kind that arrived
                                   // after it.
-                                  opacity: folder.opacity(atFrame: entryFrame), isVisible: folder.isVisible,
+                                  opacity: shownOpacity(folder.opacity(atFrame: entryFrame), of: .folder(id: folder.id),
+                                                        atFrame: entryFrame, holding: held),
+                                  isVisible: folder.isVisible,
                                   // **Two forcings, and they are different rules that happen to write
                                   // the same value.**
                                   //

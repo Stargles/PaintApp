@@ -1194,8 +1194,9 @@ extension CanvasManager {
             playheadIsOnKeyframe: placed.contains(frame))
     }
 
-    /// **One opacity-slider edit, routed and performed** — `applyEffectParameterEdit`'s twin, arm
-    /// for arm.
+    /// **One channel-slider edit, routed and performed** — `applyEffectParameterEdit`'s twin, arm
+    /// for arm. A channel's slider calls it once, at its lift (`commitHeldChannel`); its ticks are
+    /// held and write nothing (TODO (179)), and a live take catches them there (`holdTargetChannel`).
     ///
     /// - Returns: the arm taken, so the caller can label its undo bracket. A drag that wrote keys is
     ///   the channel's `keyframeLabel` and a drag that wrote a value is its `editLabel`; an artist
@@ -1203,16 +1204,6 @@ extension CanvasManager {
     @discardableResult
     func applyTargetChannelEdit(_ target: KeyframeTarget, channel: TargetChannel,
                                 newValue: Double, atFrame frame: Int) -> KeyframeControl.Write {
-        // **A live take takes the routing decision away** — §5's intercept: `recordParameterSample`
-        // is keyed by an id string and knows nothing about which store the channel lives in, so a
-        // scalar surface plugs into the recorder by calling it (the effect sliders do, from
-        // `holdEffectParameter`). Keying per reported value is the aliased sample §5 forbids in its
-        // first paragraph. The stored value is a scratch pad here for the length of the take, which
-        // `stopRecording` puts back.
-        if recordParameterSample(target, parameterID: channel.id, value: newValue) {
-            setStoredValue(of: target, channel: channel, to: newValue)
-            return .storedValue
-        }
 
         let route = keyframeWrite(target, channel: channel, atFrame: frame)
         // **The stored value, never the resolved one** — `applyEffectParameterEdit`'s rule: writing

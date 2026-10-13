@@ -54,6 +54,10 @@ import UIKit
 ///                                    Brightness / Contrast effect layer over the vector layers,
 ///                                    selected, its Brightness driven through the effect bar's
 ///                                    shipped verbs for `-probeTicks` ticks `-probeTickMs` apart
+///     -probeMode opacity             drag a layer's Opacity slider instead of playing (TODO (179)):
+///                                    the second layer's (Multiply with `-probeGraded`, so the
+///                                    compositor draws the canvas), through the rail's shipped verbs
+///                                    for `-probeTicks` ticks `-probeTickMs` apart
 ///     -probeTicks <n>                picker or slider ticks in one drag (default 100)
 ///     -probeTickMs <n>               milliseconds between ticks (default 80, the owner's iPad 9)
 ///     -probeOnion <0|1>              the onion skin, on by default as it is for the artist
@@ -87,7 +91,7 @@ enum PlaybackProbe {
     /// redoes them, one operation per interval. Two modes rather than two probes because the
     /// document, the bake wait and the report are identical and only the middle differs — and
     /// because the whole question of this pass is whether the three symptoms are one cost.
-    enum Mode: String { case playback, edit, recolour, effect }
+    enum Mode: String { case playback, edit, recolour, effect, opacity }
 
     // MARK: - The run
 
@@ -183,6 +187,11 @@ enum PlaybackProbe {
                                                ticks: max(1, intArgument("-probeTicks", default: 100)),
                                                intervalMs: max(1, intArgument("-probeTickMs", default: 80)),
                                                footprint: { footprint.sample() })
+        case .opacity:
+            operations = await runOpacitySlider(canvasManager,
+                                                ticks: max(1, intArgument("-probeTicks", default: 100)),
+                                                intervalMs: max(1, intArgument("-probeTickMs", default: 80)),
+                                                footprint: { footprint.sample() })
         case .edit:
             operations = await runEdits(canvasManager, size: size,
                                         count: max(1, intArgument("-probeEdits", default: 4)),
@@ -433,6 +442,37 @@ enum PlaybackProbe {
         try? await Task.sleep(nanoseconds: 6_000_000_000)
         footprint()
         return ["effect"]
+    }
+
+    // MARK: - Opacity slider
+
+    /// **A layer's Opacity slider dragged, tick by tick** — TODO (179). The second layer (the graded
+    /// one, Multiply with `-probeGraded`) is selected; the drag runs what `LayerStackListView` wires the
+    /// rail's slider to — a held tick per reported value (`holdTargetChannel`), the one write and its
+    /// undo step at the lift (`commitHeldChannel`) — sweeping the value up and down, then lets the
+    /// canvas settle so the footprint samples cover what the session leaves behind.
+    @MainActor
+    private static func runOpacitySlider(_ canvasManager: CanvasManager, ticks: Int, intervalMs: Int,
+                                         footprint: @escaping () -> Void) async -> [String] {
+        guard canvasManager.layers.count > 1 else { return ["no second layer"] }
+        let layerIndex = 1
+        canvasManager.currentLayerIndex = layerIndex
+        let target = KeyframeTarget.layer(id: canvasManager.layers[layerIndex].id)
+        try? await Task.sleep(nanoseconds: 1_500_000_000)
+        footprint()
+        PlaybackTrace.mark(.tick, value: 0)
+        for tick in 0..<ticks {
+            let phase = Double(tick % 40) / 20
+            let share = phase <= 1 ? phase : 2 - phase
+            canvasManager.holdTargetChannel(target, channel: .opacity, value: 0.2 + 0.6 * share)
+            try? await Task.sleep(nanoseconds: UInt64(intervalMs) * 1_000_000)
+            footprint()
+        }
+        PlaybackTrace.mark(.tick, value: 1)
+        canvasManager.commitHeldChannel()
+        try? await Task.sleep(nanoseconds: 6_000_000_000)
+        footprint()
+        return ["opacity"]
     }
 
     // MARK: - Recolour

@@ -267,9 +267,6 @@ struct LayerOptionsPanel: View {
     /// complaint that moved the effect knobs does not reach it.
     @State private var showingMaskMenu = false
     @State private var showingValueColorPicker = false
-    /// The fill as it stood when the picker opened, so the whole picking session lands as one undo
-    /// step and a picker opened and dismissed unchanged records none.
-    @State private var fillWhenPickerOpened: ValueFill?
 
     private var layerIndex: Int? { canvasManager.layers.firstIndex { $0.id == layerID } }
 
@@ -309,13 +306,9 @@ struct LayerOptionsPanel: View {
         .onChange(of: layerID) { _, _ in
             showingMaskMenu = false
         }
-        // **The hand-written `.onDisappear` that used to sit here is gone, and its job is done for
-        // it.** A panel torn down with the colour picker still open would leave `valueColorRow`'s
-        // undo bracket open, and the next unrelated edit would record itself inside it; the guard
-        // against that is now `View.canvasPresentation`'s own `onDisappear`, which runs that row's
-        // `onDismiss` however the presentation ends. Two of them would have been worse than none —
-        // each closes the bracket, and closing it twice decrements `structureGestureDepth` past
-        // zero, which is the leak wearing the other sign.
+        // **No `.onDisappear` here.** A panel torn down with the colour picker still open would leave
+        // `valueColorRow`'s held colour unwritten; `View.canvasPresentation`'s own `onDisappear` runs
+        // that row's `onDismiss` however the presentation ends, and a second one would write twice.
     }
 
     /// The menu proper: what the panel shows until the Mask row swaps it for the mask menu.
@@ -539,42 +532,26 @@ struct LayerOptionsPanel: View {
             // it back after the panel closes and reopens and know the pick reached the model.
             .accessibilityValue(canvasManager.layers[index].valueFill?.color.hex ?? "")
             // One undo step for the whole picking session, not one per tick of the picker's own
-            // sliders — the bracket the opacity drag uses (`CanvasManager.beginStructureGesture`),
-            // with the popover's lifetime standing in for the drag's. A picker opened and dismissed
-            // without a change cancels instead of committing, since `commitStructureGesture` records
-            // a step whether or not the snapshots differ.
+            // sliders: each tick is held (`holdValueFill`, TODO (179)) — the host's colour follows
+            // it, or the whole frame where the compositor draws the canvas — and the popover's close is
+            // the lift that writes the last of them, or nothing for a colour the layer already had.
             //
-            // **`onPresent`/`onDismiss` rather than `.onChange(of: showingValueColorPicker)`, and
-            // that is the point of the modifier.** `.onChange` does not fire when the *host* is
-            // deleted with the picker still up — which is what a canvas touch does to this whole
-            // rail — while `onDismiss` runs however the presentation ends, so the bracket needs no
-            // `.onDisappear` of its own.
+            // **`onDismiss` rather than `.onChange(of: showingValueColorPicker)`, and that is the
+            // point of the modifier.** `.onChange` does not fire when the *host* is deleted with the
+            // picker still up — which is what a canvas touch does to this whole rail — while
+            // `onDismiss` runs however the presentation ends.
             .colorPickerPopover(.valueLayerColour, isPresented: $showingValueColorPicker,
                                 canvasManager: canvasManager,
                                 color: valueColorBinding(index: index),
-                                onPresent: {
-                                    guard let index = layerIndex,
-                                          canvasManager.layers.indices.contains(index) else { return }
-                                    fillWhenPickerOpened = canvasManager.layers[index].fill
-                                    canvasManager.beginStructureGesture()
-                                },
-                                onDismiss: {
-                                    guard let index = layerIndex,
-                                          canvasManager.layers.indices.contains(index) else { return }
-                                    if canvasManager.layers[index].fill == fillWhenPickerOpened {
-                                        canvasManager.cancelStructureGesture()
-                                    } else {
-                                        canvasManager.commitStructureGesture(label: .valueLayerColor)
-                                    }
-                                    fillWhenPickerOpened = nil
-                                })
+                                onDismiss: { canvasManager.commitHeldValueFill() })
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
     }
 
+    /// The colour as the canvas shows it — the picker's while it holds one.
     private func fillColor(index: Int) -> Color {
-        canvasManager.layers[index].valueFill?.color.color ?? ValueFill.defaultColor.color
+        canvasManager.valueFillAsShown(ofLayer: index)?.color.color ?? ValueFill.defaultColor.color
     }
 
     private func valueColorBinding(index: Int) -> Binding<Color> {
@@ -587,7 +564,7 @@ struct LayerOptionsPanel: View {
                 // `setLayerFill`'s "nothing happened" guard could never fire.
                 let existing = canvasManager.layers[index].fill ?? ValueFill()
                 let updated = ValueFill(color: PaletteColor(id: existing.color.id, hex: picked.hexString))
-                canvasManager.setLayerFill(layerIndex: index, to: updated)
+                canvasManager.holdValueFill(ofLayer: index, updated)
             }
         )
     }
@@ -830,11 +807,11 @@ struct TransformSettingsBar: View {
         case .move:
             EmptyView()
         case .rotate:
-            RotateSpeedRow(canvasManager: canvasManager, target: target)
+            RotateSpeedRow(canvasManager: canvasManager, liveEdit: canvasManager.liveEditState, target: target)
         case .parallax:
-            ParallaxItemsSection(canvasManager: canvasManager, poser: target)
+            ParallaxItemsSection(canvasManager: canvasManager, liveEdit: canvasManager.liveEditState, poser: target)
         case .shake:
-            ShakeRows(canvasManager: canvasManager, target: target)
+            ShakeRows(canvasManager: canvasManager, liveEdit: canvasManager.liveEditState, target: target)
         case .repeat:
             RepeatRows(canvasManager: canvasManager, target: target)
         }
@@ -901,72 +878,76 @@ private struct RepeatRows: View {
     }
 }
 
-/// **A keyable scalar's slider and typed field, bracketed as one undo step and routed through
-/// `applyTargetChannelEdit`** — the opacity slider's funnel (`LayerStackListView.onOpacityChange`)
-/// on a SwiftUI control, and written once so the Rotate speed and every Parallax share are the same
+/// **A keyable scalar's slider and typed field, held while the finger is down and written once at the
+/// lift** — the opacity slider's funnel (`LayerStackListView.onOpacityChange`) on a SwiftUI control,
+/// and written once so the Rotate speed, the Shake amplitudes and every Parallax share are the same
 /// surface. The slider covers the channel's `uiRange`; the field accepts anything in its
 /// `modelDomain`, which is how a share is typed past 100% or negative (§2 ruling: *"can input
 /// negative values or higher"*).
 ///
 /// **Shows the resolved value at the playhead, never the base** — §2.23: a keyed channel whose
-/// control showed the base would read as stuck.
+/// control showed the base would read as stuck — **and the held value while the finger is down**
+/// (`CanvasManager.channelAsShown`, through `liveEdit`, which a tick moves and nothing else does).
 ///
-/// `write` is the routed edit — `applyTargetChannelEdit` for a plain channel, `setParallaxShare` for
-/// a share, which materialises the positional default first — and returns the arm taken so the
-/// commit can name its step. `display` turns a stored value into the field's text and `parse` turns
-/// typed text back, so a share reads and types in percent while it is stored as a fraction.
+/// A tick is held (`holdTargetChannel`, TODO (179)): the canvas redraws the whole frame from it and the
+/// document is written at the lift, once, routed through `applyTargetChannelEdit` — or `setParallaxShare`
+/// for a share, which materialises the positional default first, and which `parallaxPoser` names.
+/// `display` turns a stored value into the field's text and `parse` turns typed text back, so a share
+/// reads and types in percent while it is stored as a fraction.
 private struct ChannelScalarControl: View {
     @ObservedObject var canvasManager: CanvasManager
+    @ObservedObject var liveEdit: LiveEditState
     let target: KeyframeTarget
     let channel: TargetChannel
     let identifier: String
-    /// **The value the control shows, supplied by the row rather than read off the channel here**,
-    /// because for a parallax share the number the artist is looking at is the *positional default*
-    /// when nothing has been typed — and the channel's own read of a nil share is the key path's
-    /// fallback (1), which is not what the row's label says. The first draft read the channel and
+    /// **The value the control shows at rest, supplied by the row rather than read off the channel
+    /// here**, because for a parallax share the number the artist is looking at is the *positional
+    /// default* when nothing has been typed — and the channel's own read of a nil share is the key
+    /// path's fallback (1), which is not what the row's label says. The first draft read the channel and
     /// drew every untyped item's slider at 100% under a caption reading "25% (default)": a correct
     /// value in the wrong place, CLAUDE.md's case 1.
     let resolved: Double
     let display: (Double) -> String
     let parse: (String) -> Double?
-    let write: (Double) -> KeyframeControl.Write
+    /// The poser an item's share is listed under, for a Parallax share; nil for every other channel.
+    var parallaxPoser: KeyframeTarget? = nil
 
-    @State private var dragValue: Double?
-    @State private var wroteKeys = false
     @State private var fieldText = ""
+
+    /// What the control shows: the held value while its slider is under the finger, `resolved` else.
+    private var shown: Double {
+        guard let held = liveEdit.channel?.holding(channel, of: target) else { return resolved }
+        return held.value(atFrame: held.frame)
+    }
+
+    private func hold(_ value: Double) {
+        canvasManager.holdTargetChannel(target, channel: channel, value: value, parallaxPoser: parallaxPoser)
+    }
 
     var body: some View {
         HStack(spacing: 8) {
             Slider(value: Binding(
-                get: { dragValue ?? min(max(resolved, channel.uiRange.lowerBound), channel.uiRange.upperBound) },
-                set: { value in
-                    dragValue = value
-                    if write(value) != .storedValue { wroteKeys = true }
-                }),
+                get: { min(max(shown, channel.uiRange.lowerBound), channel.uiRange.upperBound) },
+                set: { hold($0) }),
                    in: channel.uiRange,
                    onEditingChanged: { editing in
                        if editing {
-                           wroteKeys = false
-                           // §5.1 step 1: the recorder's arm is answered on touch-down, before this
-                           // surface opens its own undo bracket — the opacity slider's order.
+                           // §5.1 step 1: the recorder's arm is answered on touch-down — the opacity
+                           // slider's order.
                            _ = canvasManager.beginArmedTake(on: target, isRecordable: true)
-                           canvasManager.beginStructureGesture()
                        } else {
-                           canvasManager.commitStructureGesture(
-                               label: wroteKeys ? channel.keyframeLabel : channel.editLabel)
-                           dragValue = nil
-                           wroteKeys = false
+                           canvasManager.commitHeldChannel()
                        }
                    })
             .tint(.blue)
             .accessibilityIdentifier("\(identifier).slider")
-            .accessibilityValue(display(dragValue ?? resolved))
+            .accessibilityValue(display(shown))
             // **Empty until typed into, with the current number as its placeholder.** A field
             // pre-filled with "0.0" puts the cursor wherever the tap lands and a typed "15" becomes
             // "150.0" — so the number is shown as the prompt and the artist types a whole new one,
             // which is also what a typed value means. Return commits and clears; anything that is
             // not a number is dropped.
-            TextField(display(dragValue ?? resolved), text: $fieldText)
+            TextField(display(shown), text: $fieldText)
                 .keyboardType(.numbersAndPunctuation)
                 .multilineTextAlignment(.trailing)
                 .font(.caption.monospacedDigit())
@@ -977,16 +958,14 @@ private struct ChannelScalarControl: View {
                 .background(Color.white.opacity(0.08))
                 .cornerRadius(4)
                 .accessibilityIdentifier("\(identifier).field")
-                .accessibilityValue(display(dragValue ?? resolved))
+                .accessibilityValue(display(shown))
                 .onSubmit {
                     defer { fieldText = "" }
                     guard let typed = parse(fieldText) else { return }
-                    // One bracket for the typed edit, the slider's own shape with no drag inside it.
+                    // A typed edit is a drag with one tick: held and lifted at once, one step.
                     _ = canvasManager.beginArmedTake(on: target, isRecordable: true)
-                    canvasManager.beginStructureGesture()
-                    let route = write(channel.clamped(typed))
-                    canvasManager.commitStructureGesture(
-                        label: route != .storedValue ? channel.keyframeLabel : channel.editLabel)
+                    hold(channel.clamped(typed))
+                    canvasManager.commitHeldChannel()
                 }
         }
     }
@@ -997,10 +976,12 @@ private struct ChannelScalarControl: View {
 /// keyframe does *not* do to it (§6: placing a keyframe does not pause the wheel; key the speed to 0).
 private struct RotateSpeedRow: View {
     @ObservedObject var canvasManager: CanvasManager
+    /// What moves the readouts while the slider is held — the document does not until the lift.
+    @ObservedObject var liveEdit: LiveEditState
     let target: KeyframeTarget
 
     private var speed: Double {
-        canvasManager.resolvedValue(of: target, channel: .rotateSpeed, atFrame: canvasManager.currentFrame) ?? 0
+        canvasManager.channelAsShown(of: target, channel: .rotateSpeed, atFrame: canvasManager.currentFrame) ?? 0
     }
 
     var body: some View {
@@ -1014,14 +995,10 @@ private struct RotateSpeedRow: View {
                     .accessibilityIdentifier("layerOptions.rotateSpeedReadout")
             }
             ChannelScalarControl(
-                canvasManager: canvasManager, target: target, channel: .rotateSpeed,
+                canvasManager: canvasManager, liveEdit: liveEdit, target: target, channel: .rotateSpeed,
                 identifier: "layerOptions.rotateSpeed", resolved: speed,
                 display: { String(format: "%.1f", $0) },
-                parse: { Double($0.trimmingCharacters(in: .whitespaces)) },
-                write: { value in
-                    canvasManager.applyTargetChannelEdit(target, channel: .rotateSpeed, newValue: value,
-                                                         atFrame: canvasManager.currentFrame)
-                })
+                parse: { Double($0.trimmingCharacters(in: .whitespaces)) })
             Text(framesPerTurnText)
                 .font(.caption2)
                 .foregroundColor(.gray)
@@ -1053,10 +1030,12 @@ private struct RotateSpeedRow: View {
 /// to hold still) and that the shake is the same on every play until re-rolled.
 private struct ShakeRows: View {
     @ObservedObject var canvasManager: CanvasManager
+    /// What moves the readouts while a slider is held — the document does not until the lift.
+    @ObservedObject var liveEdit: LiveEditState
     let target: KeyframeTarget
 
     private func resolved(_ channel: TargetChannel) -> Double {
-        canvasManager.resolvedValue(of: target, channel: channel, atFrame: canvasManager.currentFrame) ?? 0
+        canvasManager.channelAsShown(of: target, channel: channel, atFrame: canvasManager.currentFrame) ?? 0
     }
 
     private var period: Int { canvasManager.containerPose(of: target)?.shakePeriod ?? 1 }
@@ -1073,14 +1052,10 @@ private struct ShakeRows: View {
                         .accessibilityIdentifier("layerOptions.\(channel.id)Readout")
                 }
                 ChannelScalarControl(
-                    canvasManager: canvasManager, target: target, channel: channel,
+                    canvasManager: canvasManager, liveEdit: liveEdit, target: target, channel: channel,
                     identifier: "layerOptions.\(channel.id)", resolved: resolved(channel),
                     display: { String(format: channel.format, $0) },
-                    parse: { Double($0.trimmingCharacters(in: .whitespaces)) },
-                    write: { value in
-                        canvasManager.applyTargetChannelEdit(target, channel: channel, newValue: value,
-                                                             atFrame: canvasManager.currentFrame)
-                    })
+                    parse: { Double($0.trimmingCharacters(in: .whitespaces)) })
             }
             ShakePeriodControl(canvasManager: canvasManager, target: target, period: period)
             HStack {
@@ -1158,7 +1133,14 @@ private struct ShakePeriodControl: View {
 /// theirs and which are the position's.
 private struct ParallaxItemsSection: View {
     @ObservedObject var canvasManager: CanvasManager
+    /// What moves a share's readout while its slider is held — the document does not until the lift.
+    @ObservedObject var liveEdit: LiveEditState
     let poser: KeyframeTarget
+
+    /// An item's share as shown: the held one while its slider is under the finger.
+    private func share(of item: ParallaxItem) -> Double {
+        liveEdit.channel?.holding(.parallaxShare, of: item.target).map { $0.value } ?? item.share
+    }
 
     var body: some View {
         let items = canvasManager.parallaxItems(beneath: poser)
@@ -1192,24 +1174,22 @@ private struct ParallaxItemsSection: View {
                             .lineLimit(1)
                             .accessibilityIdentifier("layerOptions.parallaxItem.\(rank).name")
                         Spacer()
-                        Text(TargetChannel.parallaxShare.percentText(item.share)
+                        Text(TargetChannel.parallaxShare.percentText(share(of: item))
                                 + (item.isExplicit ? "" : " (default)"))
                             .font(.caption2)
                             .foregroundColor(.gray)
                             .accessibilityIdentifier("layerOptions.parallaxItem.\(rank).share")
                     }
                     ChannelScalarControl(
-                        canvasManager: canvasManager, target: item.target, channel: .parallaxShare,
+                        canvasManager: canvasManager, liveEdit: liveEdit, target: item.target,
+                        channel: .parallaxShare,
                         identifier: "layerOptions.parallaxItem.\(rank)", resolved: item.share,
                         display: { String(Int(($0 * 100).rounded())) },
                         parse: { text in
                             Double(text.trimmingCharacters(in: .whitespaces)
                                        .replacingOccurrences(of: "%", with: "")).map { $0 / 100 }
                         },
-                        write: { value in
-                            canvasManager.setParallaxShare(of: item.target, beneath: poser, to: value,
-                                                           atFrame: canvasManager.currentFrame)
-                        })
+                        parallaxPoser: poser)
                     .opacity(item.isExplicit ? 1 : 0.6)
                 }
             }

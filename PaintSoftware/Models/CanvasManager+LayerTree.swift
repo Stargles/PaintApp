@@ -264,11 +264,20 @@ extension CanvasManager {
     /// The frame is `currentFrame` because that is what a live canvas *is* — the tree derivation
     /// (`renderNodes(inContainer:atFrame:)`) takes its frame as an argument and this cannot, which
     /// is the same split `layerEffect` and `layerEffect(atFrame:)` already carry.
+    ///
+    /// **And as the finger holds it**: an Opacity slider under the finger on this layer or a folder
+    /// round it is read in place of the document's (`HeldChannel`, TODO (179)), which is how a drag on
+    /// a canvas Core Animation draws moves the host's alpha on the tick with no pass at all.
     func effectiveOpacity(ofLayer index: Int) -> Double {
         guard layers.indices.contains(index) else { return 1 }
         let frame = currentFrame
-        return ancestorFolders(ofLayer: index)
-            .reduce(layers[index].opacity(atFrame: frame)) { $0 * $1.opacity(atFrame: frame) }
+        let held = liveEdit?.channel
+        let own = held?.holding(.opacity, of: .layer(id: layers[index].id))?.value(atFrame: frame)
+            ?? layers[index].opacity(atFrame: frame)
+        return ancestorFolders(ofLayer: index).reduce(own) { opacity, folder in
+            opacity * (held?.holding(.opacity, of: .folder(id: folder.id))?.value(atFrame: frame)
+                       ?? folder.opacity(atFrame: frame))
+        }
     }
 
     // MARK: - Reorder

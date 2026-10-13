@@ -411,6 +411,198 @@ final class LiveEditLogicTests: XCTestCase {
         XCTAssertEqual(manager.history.undoStack.count, steps + 2, "…and the drag is the next")
     }
 
+    // MARK: - A target channel and a flat colour under the finger (TODO (179) commit 6)
+
+    /// A grey floor on a raster layer, its Opacity at 1, no history.
+    private func faded() -> (manager: CanvasManager, target: KeyframeTarget) {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        let floor = UIGraphicsImageRenderer(size: CanvasFixture.canvasSize, format: PixelOps.transparentFormat()).image { ctx in
+            UIColor(white: 0.2, alpha: 1).setFill()
+            ctx.fill(CGRect(x: 8, y: 8, width: 48, height: 48))
+        }
+        CanvasFixture.setBakedContent(manager, layerIndex: 0, floor)
+        manager.layers[0].blendMode = .multiply
+        manager.history.removeAll()
+        manager.refreshUndoRedoState()
+        return (manager, .layer(id: manager.layers[0].id))
+    }
+
+    /// `KeyframeControl.write`'s inputs put in front of each arm for the Opacity channel, the same way
+    /// on any document `faded()` made; returns the frame the edit is made at.
+    private func arrangeChannel(_ arm: KeyframeControl.Write, _ manager: CanvasManager, _ target: KeyframeTarget) -> Int {
+        switch arm {
+        case .storedValue:
+            return 2
+        case .storedValueHoldingBaseline:
+            manager.addKeys(target, atFrame: 0)
+            return 6
+        case .seedAndKey:
+            manager.addKeys(target, atFrame: 0)
+            manager.addKeys(target, atFrame: 10)
+            return 10
+        case .key:
+            manager.addKeys(target, atFrame: 0)
+            manager.addKeys(target, atFrame: 10)
+            manager.applyTargetChannelEdit(target, channel: .opacity, newValue: 0.4, atFrame: 10)
+            return 4
+        }
+    }
+
+    /// **N held Opacity ticks and the lift write exactly what N per-tick writes wrote, on every arm** —
+    /// the channel's half of the equivalence the hold rests on, two documents built the same way: the
+    /// old path (an `applyTargetChannelEdit` per tick inside the rail's touch-down bracket) and the new
+    /// (a hold per tick, one write at the lift). A tick publishes nothing and writes nothing; the step
+    /// is named for what it wrote.
+    @MainActor
+    func testHeldChannelTicksAndOneWriteAtTheLiftLandWhatAWritePerTickLanded() throws {
+        let ticks: [Double] = [0.8, 0.35, 0.6, 0.45]
+        for arm in [KeyframeControl.Write.storedValue, .storedValueHoldingBaseline, .seedAndKey, .key] {
+            let old = faded(), new = faded()
+            let frame = arrangeChannel(arm, old.manager, old.target)
+            _ = arrangeChannel(arm, new.manager, new.target)
+            for m in [old.manager, new.manager] { m.currentFrame = frame; m.history.removeAll() }
+            XCTAssertEqual(old.manager.keyframeWrite(old.target, channel: .opacity, atFrame: frame), arm,
+                           "Fixture check: the edit takes the \(arm) arm")
+
+            old.manager.beginStructureGesture()
+            var wroteKeys = false
+            for value in ticks {
+                let route = old.manager.applyTargetChannelEdit(old.target, channel: .opacity, newValue: value, atFrame: frame)
+                if route != .storedValue { wroteKeys = true }
+            }
+            old.manager.commitStructureGesture(label: wroteKeys ? TargetChannel.opacity.keyframeLabel
+                                                                : TargetChannel.opacity.editLabel)
+
+            let layerBefore = new.manager.layers[0]
+            var published = 0
+            let sink = new.manager.objectWillChange.sink { published += 1 }
+            for value in ticks { new.manager.holdTargetChannel(new.target, channel: .opacity, value: value) }
+            sink.cancel()
+            XCTAssertEqual(published, 0, "\(arm): a tick raises no pass over the editor")
+            XCTAssertEqual(new.manager.layers[0].opacity, layerBefore.opacity, "\(arm): a tick writes no opacity")
+            XCTAssertEqual(new.manager.layers[0].channelTracks, layerBefore.channelTracks, "\(arm): …and no key")
+            XCTAssertEqual(new.manager.channelAsShown(of: new.target, channel: .opacity, atFrame: frame), ticks.last,
+                           "\(arm): the canvas and the row are shown the newest")
+            XCTAssertEqual(new.manager.effectiveOpacity(ofLayer: 0), ticks.last ?? 0, accuracy: 1e-9,
+                           "\(arm): …and so is the host's alpha")
+            new.manager.commitHeldChannel()
+
+            XCTAssertNil(new.manager.liveEdit, "the hold is let go")
+            XCTAssertEqual(new.manager.layers[0].opacity, old.manager.layers[0].opacity, "\(arm): the stored opacity")
+            XCTAssertEqual(new.manager.layers[0].channelTracks, old.manager.layers[0].channelTracks, "\(arm): the curve")
+            XCTAssertEqual(new.manager.keyframeState(of: new.target), old.manager.keyframeState(of: old.target),
+                           "\(arm): the marks and baselines")
+            XCTAssertEqual(new.manager.history.undoStack.count, 1, "\(arm): one step")
+            XCTAssertEqual(new.manager.history.undoStack.last?.label, old.manager.history.undoStack.last?.label,
+                           "\(arm): named as the per-tick path named it")
+        }
+    }
+
+    /// **A channel's lift that changes nothing records nothing** — a slider settling on the value it had,
+    /// or dragged back to where it began; an untyped Parallax share is the exception, since its shown
+    /// value is a positional default and not a stored number.
+    @MainActor
+    func testAChannelLiftThatChangesNothingRecordsNoStep() throws {
+        let (manager, target) = faded()
+        manager.holdTargetChannel(target, channel: .opacity, value: 0.4)
+        manager.holdTargetChannel(target, channel: .opacity, value: 1)
+        XCTAssertNil(manager.commitHeldChannel(), "back where it began: nothing is written")
+        XCTAssertNil(manager.liveEdit)
+        XCTAssertEqual(manager.history.undoStack.count, 0, "…and no step")
+        manager.holdTargetChannel(target, channel: .opacity, value: 0.4)
+        XCTAssertEqual(manager.commitHeldChannel(), .storedValue)
+        XCTAssertEqual(manager.history.undoStack.count, 1, "a change is a step")
+    }
+
+    /// **The curve a held channel is read through off its own frame is the curve the lift writes** — on
+    /// both keyed arms. Rotate's speed is summed over the bar, so a held speed is read through this
+    /// curve (`HeldChannel.routedCurve`); here it is held to the curve `applyTargetChannelEdit` actually
+    /// leaves, on the channel every arm is cheapest to arrange on.
+    @MainActor
+    func testTheRoutedCurveIsTheCurveTheLiftWritesOnBothKeyedArms() throws {
+        for arm in [KeyframeControl.Write.seedAndKey, .key] {
+            let (manager, target) = faded()
+            let frame = arrangeChannel(arm, manager, target)
+            let predicted = try XCTUnwrap(manager.routedChannelCurve(target, channel: .opacity, to: 0.25, atFrame: frame),
+                                          "\(arm) leaves a curve")
+            manager.applyTargetChannelEdit(target, channel: .opacity, newValue: 0.25, atFrame: frame)
+            XCTAssertEqual(manager.layers[0].channelTracks[TargetChannel.opacity.id], predicted,
+                           "\(arm): the routed curve is the written one")
+        }
+        let (plain, plainTarget) = faded()
+        XCTAssertNil(plain.routedChannelCurve(plainTarget, channel: .opacity, to: 0.25, atFrame: 2),
+                     "the stored-value arm leaves none")
+    }
+
+    /// **A held Opacity is the whole frame where the compositor draws the canvas, and the bake of what
+    /// the lift writes** — the live walk with the hold before the lift against the baker's own recipe
+    /// after it.
+    @MainActor
+    func testTheHeldFrameOfAHeldOpacityIsTheBakeOfTheLift() throws {
+        let (manager, target) = faded()
+        func frame(holding held: HeldEdit?) throws -> [UInt8] {
+            let recipe = try XCTUnwrap(manager.makeFrameRecipe(atFrame: manager.currentFrame, includeBackground: true,
+                                                               sizing: .liveComposite, holding: held))
+            return try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(recipe.composite(budgetBytes: manager.frameBaker.budgetBytes))))
+        }
+        let rest = try frame(holding: nil)
+        manager.holdTargetChannel(target, channel: .opacity, value: 0.3)
+        let held = try frame(holding: manager.liveEdit)
+        XCTAssertNotEqual(held, rest, "the held opacity changes the frame")
+        manager.commitHeldChannel()
+        XCTAssertEqual(try frame(holding: nil), held, "the bake of the written opacity is the frame the finger held")
+    }
+
+    /// **Which lane a hold is drawn through** — a grade always as the whole frame; Opacity and a flat
+    /// colour as a host's alpha and background where Core Animation draws the canvas, the whole frame
+    /// where the compositor does; every other channel moves a pose, so always the whole frame.
+    func testOpacityAndAColourAreAHostsPropertyOnAPlainCanvasAndEverythingElseIsTheWholeFrame() {
+        let id = UUID()
+        func channel(_ c: TargetChannel) -> HeldEdit {
+            .channel(HeldChannel(target: .layer(id: id), channel: c, frame: 0, parallaxPoser: nil, value: 0.5,
+                                 edited: true, routedCurve: nil))
+        }
+        let colour = HeldEdit.valueFill(HeldValueFill(layerID: id, fill: ValueFill()))
+        XCTAssertFalse(channel(.opacity).drawsWholeFrame(canvasEngaged: false))
+        XCTAssertTrue(channel(.opacity).drawsWholeFrame(canvasEngaged: true))
+        XCTAssertFalse(colour.drawsWholeFrame(canvasEngaged: false))
+        XCTAssertTrue(colour.drawsWholeFrame(canvasEngaged: true))
+        for posing in [TargetChannel.rotateSpeed, .shakeX, .parallaxShare] {
+            XCTAssertTrue(channel(posing).drawsWholeFrame(canvasEngaged: false), "\(posing.id) moves a pose")
+        }
+        XCTAssertTrue(HeldEdit.grade(HeldGrade(target: .layer(id: id), frame: 0)).drawsWholeFrame(canvasEngaged: false))
+    }
+
+    /// **A value layer's colour picker holds its colour and writes it once, when it closes** — the host's
+    /// colour and the composite read the hold; one step; a picker closed on the colour it opened on
+    /// records none.
+    @MainActor
+    func testAValueLayersColourIsHeldAndWrittenOnceWhenThePickerCloses() throws {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.addValueLayer()
+        let index = manager.layers.count - 1
+        manager.history.removeAll()
+        let original = try XCTUnwrap(manager.layers[index].valueFill, "Fixture check: a flat colour")
+        let picked = ValueFill(color: PaletteColor(id: original.color.id, hex: "FF0000"))
+        let pickedAgain = ValueFill(color: PaletteColor(id: original.color.id, hex: "00FF00"))
+
+        manager.holdValueFill(ofLayer: index, picked)
+        manager.holdValueFill(ofLayer: index, pickedAgain)
+        XCTAssertEqual(manager.layers[index].valueFill, original, "a tick writes nothing")
+        XCTAssertEqual(manager.valueFillAsShown(ofLayer: index), pickedAgain, "…and the canvas is shown the newest")
+        let recipe = try XCTUnwrap(manager.makeFrameRecipe(atFrame: 0, includeBackground: true, holding: manager.liveEdit))
+        guard case .solid(let colour)? = recipe.leaves[index]?.content else { return XCTFail("the leaf is a flat colour") }
+        XCTAssertEqual(colour, LayerRenderSource.SolidColor(pickedAgain.color), "…and so is the held frame")
+        manager.commitHeldValueFill()
+        XCTAssertEqual(manager.layers[index].valueFill, pickedAgain, "the close writes it")
+        XCTAssertEqual(manager.history.undoStack.count, 1, "…as one step")
+        XCTAssertNil(manager.liveEdit)
+
+        manager.holdValueFill(ofLayer: index, pickedAgain)
+        manager.commitHeldValueFill()
+        XCTAssertEqual(manager.history.undoStack.count, 1, "a picker closed on its own colour records none")
+    }
+
     // MARK: - Half detail on a big scene (the owner's ruling of 2026-10-12)
 
     /// **Above twice 2048×1024 a drag preview is drawn at half a side; at or below it, at the knob's
