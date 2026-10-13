@@ -104,20 +104,12 @@ final class SelectionCompositionUITests: PaintUITestCase {
         dragOnCanvas(app, from: at(0.54, 0.12), to: at(0.92, 0.32))
 
         /// The hatch over a strip just under the loops' top edge — inside the left loop, in the gap between
-        /// the loops, inside the right loop — clear of both lines and well inside the outlines. Polled,
-        /// because the overlay redraws on the pass that follows the model.
+        /// the loops, inside the right loop — clear of both lines and well inside the outlines.
         func hatch(_ x: ClosedRange<Double>, until holds: (Double) -> Bool) throws -> Double {
-            var fraction = 0.0
-            let deadline = Date().addingTimeInterval(5)
-            repeat {
-                fraction = hatchedFraction(try pixelProbe(canvas), canvas: canvas, paper: paper, x: x, y: 0.135...0.155)
-                if holds(fraction) { break }
-                Thread.sleep(forTimeInterval: 0.25)
-            } while Date() < deadline
-            return fraction
+            try settledHatch(canvas, paper: paper, x: x, until: holds)
         }
         let insideLeft = 0.10...0.40, gap = 0.46...0.52, insideRight = 0.60...0.88
-        let clean: (Double) -> Bool = { $0 < 0.02 }, hatched: (Double) -> Bool = { $0 > 0.05 }
+        let clean = isHatchClean, hatched = isHatched
 
         XCTAssertTrue(clean(try hatch(insideLeft, until: clean)), "the first loop's region is clear of the hatch")
         XCTAssertTrue(clean(try hatch(insideRight, until: clean)), "…and so is the second's: the union is up")
@@ -145,5 +137,82 @@ final class SelectionCompositionUITests: PaintUITestCase {
         XCTAssertTrue(waitUntil(canvas, rightMid, isRed),
                       "…and left the line under the second, which the undo took out of the selection")
         attachScreenshot(app, "undo-then-clear-left-only")
+    }
+
+    /// **The first loop and Deselect are undo steps too** — TODO (187), the owner, 2026-10-12. From a new
+    /// document, read off the canvas: one loop round a red line; one press of Undo takes the selection
+    /// away (the hatch goes) and leaves the line; Redo draws it again; Deselect puts it down; one press
+    /// of Undo brings it back, and Clear then takes the line — the model agrees with the picture.
+    ///
+    /// The line is the assertion that fails if the press goes back to doing what it did before the
+    /// loop was a step of its own, which is to take the line away and leave the loop up.
+    ///
+    /// What the artist does next, at every step: draw a loop; Undo — the loop is gone, the drawing is
+    /// not; tap Deselect; Undo — the loop is back.
+    func testUndoAfterTheFirstLoopTakesTheSelectionAwayAndUndoAfterDeselectBringsItBack() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app), "setup: a brand-new document")
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let paper = paperRect(in: canvas)
+        func at(_ dx: Double, _ dy: Double) -> CGVector { onHost(paper, dx, dy) }
+
+        setBrushColor(app, hex: "FF0000")
+        setBrushSize(app, normalized: 0.12)
+        let line = at(0.25, 0.22)
+        drawLine(on: canvas, from: at(0.12, 0.22), to: at(0.38, 0.22))
+        XCTAssertTrue(waitUntil(canvas, line, isRed), "PREMISE: the red line is on screen")
+
+        app.buttons["toolbar.selectButton"].tap()
+        let rectangle = app.buttons["selectPanel.mode.rectangle"]
+        XCTAssertTrue(rectangle.waitForExistence(timeout: 5), "the Select panel offers Rectangle")
+        rectangle.tap()
+        let deselect = app.buttons["selectPanel.deselectButton"]
+        let undo = app.buttons["sideToolbar.undoButton"], redo = app.buttons["sideToolbar.redoButton"]
+        dragOnCanvas(app, from: at(0.06, 0.12), to: at(0.44, 0.32))
+
+        /// The hatch over the paper right of the loop: drawn while a selection is up, absent when none is.
+        let outside = 0.50...0.58
+        func hatchOutside(_ holds: (Double) -> Bool) throws -> Bool { holds(try settledHatch(canvas, paper: paper, x: outside, until: holds)) }
+        /// The Deselect tab is lit exactly while a selection is up, and lights on the pass after the model.
+        func deselectIsEnabled(_ enabled: Bool) -> Bool {
+            let wanted = expectation(for: NSPredicate(format: "isEnabled == %@", NSNumber(value: enabled)),
+                                     evaluatedWith: deselect)
+            return XCTWaiter().wait(for: [wanted], timeout: 5) == .completed
+        }
+        XCTAssertTrue(deselectIsEnabled(true), "PREMISE: the loop is a selection")
+        XCTAssertTrue(try hatchOutside(isHatched), "PREMISE: the paper outside the loop is hatched")
+        attachScreenshot(app, "first-loop")
+
+        // Undo takes the selection away and leaves the drawing.
+        undo.tap()
+        XCTAssertTrue(deselectIsEnabled(false), "undo: nothing is selected")
+        XCTAssertTrue(try hatchOutside(isHatchClean), "…and the hatch is gone")
+        XCTAssertTrue(isRed(rgbaPixel(of: canvas, at: line)), "…while the line, which came before the loop, stays")
+        attachScreenshot(app, "undo-first-loop")
+
+        // Redo draws it again.
+        redo.tap()
+        XCTAssertTrue(try hatchOutside(isHatched), "redo: the loop is selected again")
+        XCTAssertTrue(deselectIsEnabled(true))
+
+        // Deselect puts it down, and Undo brings it back.
+        deselect.tap()
+        XCTAssertTrue(deselectIsEnabled(false), "Deselect: nothing is selected")
+        XCTAssertTrue(try hatchOutside(isHatchClean), "…and the hatch is gone")
+        undo.tap()
+        XCTAssertTrue(try hatchOutside(isHatched), "undo: the selection Deselect put down is back")
+        XCTAssertTrue(deselectIsEnabled(true))
+        attachScreenshot(app, "undo-deselect")
+
+        redo.tap()
+        XCTAssertTrue(try hatchOutside(isHatchClean), "redo: put down again")
+        undo.tap()
+        XCTAssertTrue(try hatchOutside(isHatched), "…and back")
+
+        // The model agrees with the picture: the restored selection is one Clear acts on.
+        app.buttons["selectPanel.clearButton"].tap()
+        XCTAssertTrue(waitUntil(canvas, line, isWhitish), "Clear took the line under the restored selection")
+        attachScreenshot(app, "restored-selection-cleared")
     }
 }

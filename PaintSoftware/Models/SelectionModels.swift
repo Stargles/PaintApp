@@ -230,17 +230,21 @@ enum TapComposition: String, CaseIterable, Identifiable {
 
 /// A finalized selection: a closed path in canvas point space.
 ///
-/// **A drawn region belongs to the canvas, not to a layer** — TODO (185), the owner: *"make the select
-/// stay when switching layers."* The loops, the rectangle and the wand's flood make a region, and a
-/// region is a place on the paper: it follows the artist to whichever layer is active, and Move,
-/// Recolour, Clear and the paint clip act on that layer's content inside it. **It carries no cel**, so
-/// there is nothing for a layer switch to invalidate, and each consumer pulls it back through the pose
-/// of the layer it is acting on (`layerSpacePath`, `lassoLoops`) — which is what makes the same region
-/// mean the same place on the screen on a layer a transformation layer carries somewhere else.
+/// **A drawn region belongs to the canvas, not to a layer or a frame** — TODO (185) and (187), the
+/// owner: *"make the select stay when switching layers"*, and *"a drawn region survives every frame
+/// step."* The loops, the rectangle and the wand's flood make a region, and a region is a place on the
+/// paper: it follows the artist to whichever layer is active and to whichever frame the playhead is
+/// on, and Move, Recolour, Clear and the paint clip act on the drawing that is there inside it. **It
+/// carries no cel**, so there is nothing for a layer switch or a frame step to invalidate, and each
+/// consumer pulls it back through the pose of the layer it is acting on (`layerSpacePath`,
+/// `lassoLoops`) — which is what makes the same region mean the same place on the screen on a layer a
+/// transformation layer carries somewhere else.
 ///
 /// **A tapped set is the opposite** (`objects`): the artist named *those* objects, so it belongs to the
 /// cel they live on and is put down when the active cel is anywhere else
-/// (`CanvasManager.handleActiveContextChanged`).
+/// (`CanvasManager.handleActiveContextChanged`) — a different layer, a step onto another drawing of the
+/// layer, or onto a frame where the layer has none. A set cannot be carried to another drawing, because
+/// its ids name nothing there.
 ///
 /// **One path, however many loops made it** — TODO (95). A second loop is composed onto the first
 /// with Core Graphics' own booleans (`composed(with:by:)`), and the result is a *normalized* path:
@@ -266,9 +270,10 @@ struct Selection {
     var isRegion: Bool { objects == nil }
 
     /// Whether the selection acts at `cel` of `layer` — nil for a layer with no drawing at the
-    /// playhead. A region acts everywhere, an empty frame included (a stroke drawn there makes the cel
-    /// and must still be clipped); a tapped set acts on the cel its objects live on and nowhere else.
-    func acts(onLayer layerID: UUID, cel celID: UUID?) -> Bool {
+    /// playhead, or no layer at all. A region acts everywhere, an empty frame included (a stroke drawn
+    /// there makes the cel and must still be clipped); a tapped set acts on the cel its objects live on
+    /// and nowhere else.
+    func acts(onLayer layerID: UUID?, cel celID: UUID?) -> Bool {
         guard let objects else { return true }
         return objects.layerID == layerID && objects.celID == celID
     }
@@ -833,11 +838,11 @@ extension CanvasManager {
     /// `currentLayerIndex`'s numeric value unchanged while the layer it now points at is a
     /// different one (no `didSet` fires in that case). A pending floating piece is committed —
     /// never silently discarded — if the active cel actually changed. A selection is put down by the
-    /// rule on `Selection`: **a drawn region follows the artist to another layer** (TODO (185)) and is
-    /// put down only when the playhead walks the layer they are on onto another of its drawings; a
-    /// tapped set is put down by any move off the cel its objects live on. Same-cel frame ticks
-    /// (scrubbing within one cel's frame range) intentionally leave all of it alone.
-    func handleActiveContextChanged(_ change: ActiveContextChange) {
+    /// rule on `Selection`: **a drawn region follows the artist to another layer and to another frame**
+    /// (TODO (185), (187)) and is never put down here; a tapped set is put down by any move off the cel
+    /// its objects live on. Same-cel frame ticks (scrubbing within one cel's frame range)
+    /// intentionally leave all of it alone.
+    func handleActiveContextChanged() {
         // A still-adjustable fill or shape can't follow the user to another cel — bake both here so
         // they land as committed steps on the global history, against the cel they were drawn on,
         // before the active context moves off it.
@@ -858,12 +863,12 @@ extension CanvasManager {
            !(float.parts[0].layerID == activeLayerID && float.parts[0].celID == activeCelID) {
             commitVectorFloatIfNeeded()
         }
-        if let selection, selectionIsPutDown(selection, by: change, layerID: activeLayerID, celID: activeCelID) {
+        if let selection, !selection.acts(onLayer: activeLayerID, cel: activeCelID) {
             self.selection = nil
         }
-        // A drag on the selection is about one cel's drawing, and a region outlives the layer it was
-        // made on: the session ends with the cel it was opened on, as it did when the move put the
-        // selection down.
+        // A drag on the selection is about one cel's drawing, and a region outlives the layer and the
+        // frame it was made on: the session ends with the cel it was opened on, as it did when the move
+        // put the selection down.
         if let session = selectionEdit,
            !(session.edit.layerID == activeLayerID && session.edit.celID == activeCelID) {
             cancelSelectionEdit()
@@ -874,31 +879,6 @@ extension CanvasManager {
         // each canvas's lock, MEASURED at 0.154 ms a tick on 300 cels (RENDER.md §5 stage 7). It is
         // `VectorRenderCache` now, driven by a canvas memoizing a render rather than by the playhead
         // moving, so a tick that changes nothing costs nothing.
-    }
-
-    /// What moved the active cel, which is what decides whether a selection outlives it.
-    enum ActiveContextChange {
-        /// The active layer changed — the artist picked another, or the one they were on was deleted.
-        case layer
-        /// The playhead moved off `frame`.
-        case frame(from: Int)
-    }
-
-    /// Whether `selection` is put down by arriving at (`layerID`, `celID`) by `change`.
-    ///
-    /// **A tapped set** is on the cel it names and nowhere else. **A region** belongs to the canvas,
-    /// so a layer change never puts it down; a frame change does when it carries the layer the artist
-    /// is on to another of its cels — *"the selection belonged to the first drawing"* — which is the
-    /// rule a selection has always had for the playhead (a tick that stays within one cel's frames
-    /// leaves it alone), asked of the cel the playhead left rather than of a stamp the region no
-    /// longer carries.
-    private func selectionIsPutDown(_ selection: Selection, by change: ActiveContextChange,
-                                    layerID: UUID?, celID: UUID?) -> Bool {
-        if let objects = selection.objects {
-            return !(objects.layerID == layerID && objects.celID == celID)
-        }
-        guard case .frame(let from) = change else { return false }
-        return activeCelID(inLayer: currentLayerIndex, atFrame: from) != celID
     }
 
     /// The id of the cel `layerIndex` shows at `frame`, or nil for a gap or a layer that is not there.
@@ -995,9 +975,9 @@ extension CanvasManager {
     /// promised the opposite. **Tapped objects are not a region a loop can be added to**
     /// (`Selection.objects`), so a loop drawn over them replaces them.
     ///
-    /// **A composition is its own undo step** — TODO (182): the loop that was added or taken away is
-    /// taken back by one press and brought back by one redo. The first loop is not a step: it is
-    /// where the selection begins, and the press that follows it belongs to whatever was drawn before.
+    /// **Every loop is its own undo step** — TODO (182), (187): the first loop, one added to a region
+    /// and one taken from it. One press takes the selection back to what stood before the loop (nothing,
+    /// for the first), and one redo makes it again.
     func finishSelection(path: CGPath) {
         // Drawing a selection is a canvas edit under the "does the canvas look different" rule, and
         // more concretely: the selection immediately clips subsequent painting, so a shape/fill
@@ -1008,11 +988,8 @@ extension CanvasManager {
         let canvasRect = CGRect(origin: .zero, size: canvasSize)
         if let existing = selection, existing.isRegion {
             let composition = toolSwitches.selectionComposition
-            let composed = existing.composed(with: path, by: composition, within: canvasRect)
-            selection = composed
-            recordUndo(label: composition.historyLabel,
-                       undo: { [weak self] in self?.selection = existing },
-                       redo: { [weak self] in self?.selection = composed })
+            replaceSelection(with: existing.composed(with: path, by: composition, within: canvasRect),
+                             label: composition.historyLabel)
             return
         }
         if toolSwitches.subtractsSelection {
@@ -1021,7 +998,29 @@ extension CanvasManager {
         }
         let bounds = path.boundingBoxOfPath.intersection(canvasRect)
         guard bounds.width > 1, bounds.height > 1 else { return }
-        selection = Selection(path: path, bounds: bounds)
+        replaceSelection(with: Selection(path: path, bounds: bounds), label: .makeSelection)
+    }
+
+    /// **The one door a drawn selection changes through**: writes `replacement` and records the step
+    /// that gives back what stood before it. The history hands a selection back through
+    /// `selectionStillActing`, so a tapped set whose cel is no longer shown is not resurrected over a
+    /// drawing it cannot act on.
+    private func replaceSelection(with replacement: Selection?, label: HistoryActionLabel) {
+        let before = selection
+        selection = replacement
+        recordUndo(label: label,
+                   undo: { [weak self] in guard let self else { return }; selection = selectionStillActing(before) },
+                   redo: { [weak self] in guard let self else { return }; selection = selectionStillActing(replacement) })
+    }
+
+    /// `candidate`, or nil when it is a tapped set belonging to a cel that is not the one shown — the
+    /// rule `handleActiveContextChanged` puts a selection down by, asked of one the history is about to
+    /// give back. A region is always returned: it acts on whatever drawing is there.
+    private func selectionStillActing(_ candidate: Selection?) -> Selection? {
+        guard let candidate else { return nil }
+        let layerID = layers.indices.contains(currentLayerIndex) ? layers[currentLayerIndex].id : nil
+        let celID = activeCelID(inLayer: currentLayerIndex, atFrame: currentFrame)
+        return candidate.acts(onLayer: layerID, cel: celID) ? candidate : nil
     }
 
     func finishAutomaticSelection(at point: CGPoint) {
@@ -1056,9 +1055,13 @@ extension CanvasManager {
         finishSelection(path: path)
     }
 
+    /// **Puts the selection down, as one undo step** — TODO (187): the press after it gives the
+    /// selection back, and redo puts it down again. Nothing selected is nothing to record: the open
+    /// lasso, if there is one, is put down all the same.
     func deselect() {
-        selection = nil
         abandonOpenLasso()
+        guard selection != nil else { return }
+        replaceSelection(with: nil, label: .deselect)
     }
 
     // MARK: Toolbar highlight

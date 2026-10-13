@@ -53,17 +53,10 @@ final class SelectionSurvivesLayerSwitchUITests: PaintUITestCase {
 
         /// The hatch over a strip just under the loop's top edge, clear of every line: inside it, and outside it.
         func hatch(_ x: ClosedRange<Double>, until holds: (Double) -> Bool) throws -> Double {
-            var fraction = 0.0
-            let deadline = Date().addingTimeInterval(5)
-            repeat {
-                fraction = hatchedFraction(try pixelProbe(canvas), canvas: canvas, paper: paper, x: x, y: 0.135...0.155)
-                if holds(fraction) { break }
-                Thread.sleep(forTimeInterval: 0.25)
-            } while Date() < deadline
-            return fraction
+            try settledHatch(canvas, paper: paper, x: x, until: holds)
         }
         let insideLoop = 0.10...0.40, outsideLoop = 0.50...0.58
-        let clean: (Double) -> Bool = { $0 < 0.02 }, hatched: (Double) -> Bool = { $0 > 0.05 }
+        let clean = isHatchClean, hatched = isHatched
         XCTAssertTrue(clean(try hatch(insideLoop, until: clean)), "PREMISE: the loop's region is clear")
         XCTAssertTrue(hatched(try hatch(outsideLoop, until: hatched)),
                       "PREMISE: the paper outside the loop is hatched")

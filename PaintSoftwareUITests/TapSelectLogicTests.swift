@@ -81,6 +81,38 @@ final class TapSelectLogicTests: XCTestCase {
         XCTAssertNil(manager.selection?.objects, "…as a region")
     }
 
+    /// **A frame step puts a tapped set down when it leaves the cel and not before** (TODO (187)): the
+    /// set's ids name objects of one drawing, so a step onto another drawing of the layer — or onto a
+    /// frame where the layer has none — cannot carry it, where a drawn region goes along to both
+    /// (`SelectionPersistenceLogicTests`). A tick within the cel's own frames leaves it alone.
+    func testAFrameStepPutsATappedSetDownOnlyWhenItLeavesTheCel() {
+        let (manager, layerIndex, vector) = vectorFixture()
+        let size = manager.canvasSize ?? CanvasFixture.canvasSize
+        let second = VectorCanvas.empty(size: size)
+        manager.layers[layerIndex].cels = [
+            Cel(id: UUID(), startFrame: 0, frameCount: 6, raster: .empty(size: size), vector: vector),
+            Cel(id: UUID(), startFrame: 8, frameCount: 4, raster: .empty(size: size), vector: second),
+        ]
+        manager.currentFrame = 0
+        let line = stroke(from: CGPoint(x: 10, y: 30), to: CGPoint(x: 50, y: 30))
+        vector.addStroke(line)
+
+        func tapTheStroke() {
+            manager.selectObject(at: CGPoint(x: 30, y: 30))
+            XCTAssertEqual(manager.selection?.objects?.elements, [line.id], "PREMISE: the stroke is selected")
+        }
+        tapTheStroke()
+        manager.currentFrame = 3
+        XCTAssertEqual(manager.selection?.objects?.elements, [line.id], "a tick within the cel leaves the set alone")
+        manager.currentFrame = 6
+        XCTAssertNil(manager.selection, "a frame where the layer has no drawing puts the set down")
+
+        manager.currentFrame = 0
+        tapTheStroke()
+        manager.currentFrame = 8
+        XCTAssertNil(manager.selection, "…and so does a step onto the layer's other drawing")
+    }
+
     // MARK: - Which object — the drawn shape of each kind
 
     /// **A stroke is its ink**: a point within the stamp radius of the centre line is on it, and one

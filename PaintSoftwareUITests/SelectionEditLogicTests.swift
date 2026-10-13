@@ -322,7 +322,7 @@ final class SelectionEditLogicTests: XCTestCase {
         manager.previewSelectionEdit(.size(31))
         manager.deselect()
         XCTAssertEqual(shownSizes(manager, vector), before, "deselect mid-drag: the sizes the artist started with")
-        XCTAssertEqual(stepsSince(baseline, manager), 0)
+        XCTAssertEqual(stepsSince(baseline, manager), 1, "the Deselect is the one step, and the cancelled drag added none")
         XCTAssertNil(manager.selectionEdit, "the session is closed, not merely detached from its loop")
         manager.previewSelectionEdit(.size(32))
         XCTAssertEqual(sizes(vector), before, "a tick with no selection has nothing to be about")

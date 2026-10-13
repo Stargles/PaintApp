@@ -162,13 +162,10 @@ final class SelectionCompositionLogicTests: XCTestCase {
     func testTheFirstLoopUnderAddIsAPlainSelection() {
         let (manager, _, _, _, _, _) = fixture()
         XCTAssertEqual(manager.toolSwitches.selectionComposition, .add, "the default is Add")
-        let baseline = manager.history.undoStack.count
         draw(aroundA, on: manager)
         XCTAssertEqual(manager.selection?.bounds, aroundA)
         XCTAssertEqual(manager.selection?.isRegion, true, "a drawn loop is a region, whatever layer is active")
         XCTAssertNil(manager.notice, "nothing to say about a plain loop")
-        XCTAssertEqual(manager.history.undoStack.count, baseline,
-                       "the first loop is where the selection begins, and is not an undo step")
     }
 
     /// **Deselect, then a loop, is a fresh selection under either switch** — TODO (94)'s door: the
@@ -250,18 +247,149 @@ final class SelectionCompositionLogicTests: XCTestCase {
         XCTAssertNil(manager.selection, "redo: swallowed again")
     }
 
-    /// **The first loop is not a step, so the press after it belongs to whatever came before** — and
-    /// the selection it made is left alone. The control for the tests above: a step recorded for
-    /// every loop would make this undo deselect.
-    func testTheFirstLoopIsNotAStepAndUndoLeavesItUp() {
+    // MARK: - The first loop and Deselect (TODO (187))
+
+    /// **The first loop is one undo step, and Undo takes the selection away** — the owner, 2026-10-12.
+    /// It had been where the selection begins and no step of its own, so the press after it undid
+    /// whatever was drawn before; now it is the loop's own. The operands are the path and what a verb
+    /// does with it: after the undo Clear has no selection to act on and takes nothing, and after the
+    /// redo it takes the ink under the loop.
+    func testTheFirstLoopIsOneUndoStepAndUndoTakesTheSelectionAway() {
+        let (manager, _, vector, a, _, _) = fixture()
+        let baseline = manager.history.undoStack.count
+        draw(aroundA, on: manager)
+        XCTAssertEqual(manager.history.undoStack.count, baseline + 1, "the first loop is one step")
+        XCTAssertEqual(manager.history.undoStack.last?.label, .makeSelection)
+
+        manager.undo()
+        XCTAssertNil(manager.selection, "undo: the selection is gone")
+        XCTAssertEqual(manager.history.undoStack.count, baseline, "…and the step is spent")
+        XCTAssertEqual(manager.notice?.code, "historyUndo", "the artist is told something was undone")
+        manager.clearSelectionPixels()
+        XCTAssertTrue(vector.elements.map(\.id).contains(a), "Clear has nothing to act on: the ink is still there")
+
+        manager.redo()
+        XCTAssertEqual(manager.selection?.bounds, aroundA, "redo: the loop is selected again")
+        manager.clearSelectionPixels()
+        XCTAssertFalse(vector.elements.map(\.id).contains(a), "…and Clear takes the ink under it")
+    }
+
+    /// **The press after a first loop is the loop's, and the one after that is whatever came before** —
+    /// the control: an undo that skipped the loop would take the Clear instead of the selection.
+    func testUndoAfterAFirstLoopAndAClearWalksBackThroughBothInOrder() {
         let (manager, _, vector, a, _, _) = fixture()
         draw(aroundA, on: manager)
         manager.clearSelectionPixels()
         XCTAssertFalse(vector.elements.map(\.id).contains(a), "PREMISE: Clear took a")
 
         manager.undo()
-        XCTAssertTrue(vector.elements.map(\.id).contains(a), "the press undid the Clear, the last step")
+        XCTAssertTrue(vector.elements.map(\.id).contains(a), "the first press undid the Clear, the last step")
         XCTAssertTrue(contains(manager.selection, centreOfA), "…and the first loop is still selected")
+
+        manager.undo()
+        XCTAssertNil(manager.selection, "the second press took the first loop's selection away")
+    }
+
+    /// **A loop that replaces a tapped set is a step too, and its undo gives the set back** — while the
+    /// set's cel is still the one shown.
+    func testUndoOfALoopDrawnOverATappedSetGivesTheSetBackWhileItsCelIsShown() {
+        let (manager, _, vector, a, _, _) = fixture()
+        manager.tapComposition = .add
+        manager.selectObject(at: centreOfA)
+        XCTAssertEqual(manager.selection?.objects?.elements, [a], "PREMISE: a is tapped")
+
+        draw(aroundB, on: manager)
+        XCTAssertNil(manager.selection?.objects, "PREMISE: the loop replaced the set with a region")
+
+        manager.undo()
+        XCTAssertEqual(manager.selection?.objects?.elements, [a], "undo: the tapped set is back")
+        XCTAssertNotNil(vector.elements.first { $0.id == a })
+    }
+
+    /// **The history does not hand back a tapped set over a drawing it cannot act on.** A set belongs
+    /// to one cel, `handleActiveContextChanged` puts it down when the playhead leaves, and Undo of the
+    /// loop that replaced it is not a way round that: with the cel no longer shown the press takes the
+    /// loop's region away and finds no set to give back.
+    func testUndoDoesNotResurrectATappedSetWhoseCelIsNoLongerShown() {
+        let (manager, layerIndex, vector, a, _, _) = fixture()
+        let size = manager.canvasSize ?? CanvasFixture.canvasSize
+        manager.layers[layerIndex].cels = [
+            Cel(id: UUID(), startFrame: 0, frameCount: 6, raster: .empty(size: size), vector: vector),
+            Cel(id: UUID(), startFrame: 6, frameCount: 6, raster: .empty(size: size), vector: .empty(size: size)),
+        ]
+        manager.currentFrame = 0
+        manager.tapComposition = .add
+        manager.selectObject(at: centreOfA)
+        XCTAssertEqual(manager.selection?.objects?.elements, [a], "PREMISE: a is tapped on the first drawing")
+        draw(aroundB, on: manager)
+        XCTAssertNil(manager.selection?.objects, "PREMISE: the loop replaced the set with a region")
+
+        manager.currentFrame = 6
+        XCTAssertNotNil(manager.selection, "PREMISE: the region went along to the second drawing")
+        manager.undo()
+        XCTAssertNil(manager.selection, "undo: the region is gone and the tapped set, on a cel not shown, is not back")
+    }
+
+    /// **Deselect is one undo step, and Undo brings the selection back** — the owner, 2026-10-12. The
+    /// bounds and the path both come back, so it is the same selection and not one redrawn from its
+    /// outline; redo puts it down again.
+    func testDeselectIsOneUndoStepAndUndoBringsTheSelectionBack() {
+        let (manager, _, vector, a, _, _) = fixture()
+        draw(aroundA, on: manager)
+        let drawn = manager.selection
+        let baseline = manager.history.undoStack.count
+
+        manager.deselect()
+        XCTAssertNil(manager.selection, "PREMISE: Deselect put it down")
+        XCTAssertEqual(manager.history.undoStack.count, baseline + 1, "…as one step")
+        XCTAssertEqual(manager.history.undoStack.last?.label, .deselect)
+
+        manager.undo()
+        XCTAssertTrue(manager.selection?.path === drawn?.path, "undo: the very selection that was put down is back")
+        XCTAssertEqual(manager.selection?.bounds, aroundA)
+
+        manager.redo()
+        XCTAssertNil(manager.selection, "redo: put down again")
+
+        manager.undo()
+        manager.clearSelectionPixels()
+        XCTAssertFalse(vector.elements.map(\.id).contains(a), "the selection that came back is one a verb acts on")
+    }
+
+    /// **Deselect with nothing selected is not a step**, and neither is putting an open lasso down: a
+    /// step for each would fill the history with presses that undo nothing, and the Select icon's
+    /// tap-off calls the same door.
+    func testDeselectWithNothingSelectedRecordsNothing() {
+        let (manager, _, _, _, _, _) = fixture()
+        let baseline = manager.history.undoStack.count
+        manager.deselect()
+        XCTAssertEqual(manager.history.undoStack.count, baseline, "nothing was selected")
+
+        manager.tapLasso(at: CGPoint(x: 10, y: 10), nodeReach: 4)
+        manager.tapLasso(at: CGPoint(x: 40, y: 10), nodeReach: 4)
+        XCTAssertNotNil(manager.openLasso, "PREMISE: a lasso is open")
+        manager.deselect()
+        XCTAssertNil(manager.openLasso, "the open lasso is put down")
+        XCTAssertEqual(manager.history.undoStack.count, baseline, "…and that is not a step either")
+    }
+
+    /// **Loop, Deselect, loop: Undo walks back through all three** in order — the second loop (a fresh
+    /// selection, since Deselect started over), then the Deselect (the first selection comes back), then
+    /// the first loop.
+    func testUndoWalksBackThroughALoopADeselectAndALoop() {
+        let (manager, _, _, _, _, _) = fixture()
+        draw(aroundA, on: manager)
+        manager.deselect()
+        draw(aroundB, on: manager)
+        XCTAssertFalse(contains(manager.selection, centreOfA), "PREMISE: the second loop started fresh")
+
+        manager.undo()
+        XCTAssertNil(manager.selection, "the first press: the second loop")
+        manager.undo()
+        XCTAssertTrue(contains(manager.selection, centreOfA), "the second press: the Deselect, so a is selected")
+        XCTAssertFalse(contains(manager.selection, centreOfB))
+        manager.undo()
+        XCTAssertNil(manager.selection, "the third press: the first loop")
     }
 
     /// **Steps keep their order against other edits**: loop, add, Clear — the first undo takes the

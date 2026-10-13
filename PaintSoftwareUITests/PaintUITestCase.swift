@@ -290,6 +290,27 @@ class PaintUITestCase: XCTestCase {
         return value.hasSuffix(",ref")
     }
 
+    /// **Cuts a drawing in two at `frame` (0-based) through the cel block's menu**: one tap on the frame
+    /// selects it and moves the playhead, a second on the same spot opens the menu, Split Drawing cuts.
+    /// The second half starts as a copy of the first and the playhead is left on its first frame.
+    func splitDrawing(_ app: XCUIApplication, layerIndex: Int = 0, celIndex: Int = 0, atFrame frame: Int) {
+        func block() -> (element: XCUIElement, offset: CGVector)? {
+            let element = app.otherElements["timeline.cel.\(layerIndex).\(celIndex)"]
+            guard element.waitForExistence(timeout: 5), let value = element.value as? String else { return nil }
+            let parts = value.split(separator: ",")
+            guard parts.count >= 2, let start = Int(parts[0]), let length = Int(parts[1]), length > 0 else { return nil }
+            return (element, CGVector(dx: (Double(frame - start) + 0.5) / Double(length), dy: 0.5))
+        }
+        guard let first = block() else { return XCTFail("no block at timeline.cel.\(layerIndex).\(celIndex)") }
+        first.element.coordinate(withNormalizedOffset: first.offset).tap()
+        XCTAssertEqual(readFrameLabel(app)?.current, frame + 1, "the tap moved the playhead to frame \(frame + 1)")
+        guard let second = block() else { return XCTFail("the block vanished after the first tap") }
+        second.element.coordinate(withNormalizedOffset: second.offset).tap()
+        let split = app.buttons["timeline.menu.Split Drawing"]
+        XCTAssertTrue(split.waitForExistence(timeout: 5), "the second tap opens the block's menu")
+        split.tap()
+    }
+
     /// Reads a layer panel row's accessibilityValue, which is the stroke count of that
     /// layer's cel at the current frame (see LayerRow.strokeCount).
     func readLayerStrokeCount(_ app: XCUIApplication, layerIndex: Int) -> Int? {
@@ -1792,6 +1813,28 @@ class PaintUITestCase: XCTestCase {
         }
         return read == 0 ? 0 : Double(hatched) / Double(read)
     }
+
+    /// **`hatchedFraction` once the overlay has caught up** — read every quarter second, for up to five,
+    /// until `holds` accepts it, and the last reading returned either way. The overlay redraws on the
+    /// pass that follows the model, so a single read taken straight after a tap is a read of the
+    /// picture before it. The strip is the default just under a loop's top edge, clear of the lines
+    /// the Select tests draw.
+    func settledHatch(_ canvas: XCUIElement, paper: CGRect, x: ClosedRange<Double>,
+                      y: ClosedRange<Double> = 0.135...0.155, until holds: (Double) -> Bool) throws -> Double {
+        var fraction = 0.0
+        let deadline = Date().addingTimeInterval(5)
+        repeat {
+            fraction = hatchedFraction(try pixelProbe(canvas), canvas: canvas, paper: paper, x: x, y: y)
+            if holds(fraction) { break }
+            Thread.sleep(forTimeInterval: 0.25)
+        } while Date() < deadline
+        return fraction
+    }
+
+    /// What `settledHatch` reads for a strip the hatch is not over, and for one it is: about a seventh of
+    /// the pixels where the diagonal stripes are drawn, none where they are not.
+    func isHatchClean(_ fraction: Double) -> Bool { fraction < 0.02 }
+    func isHatched(_ fraction: Double) -> Bool { fraction > 0.05 }
 
     /// **A freehand loop round the rectangle between two offsets of `canvas.host`, in one stroke that
     /// ends where it began** — what Freehand selection closes on lift (TODO (184)). A straight drag,

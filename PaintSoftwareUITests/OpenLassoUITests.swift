@@ -162,6 +162,95 @@ final class OpenLassoUITests: PaintUITestCase {
         XCTAssertFalse(try nodeIsDrawn(canvas, at: hostPoint(canvas, at(0.20, 0.15))), "…and its node with it")
     }
 
+    /// **A colour picked in the middle of a lasso leaves the corners where they are** — TODO (187), the
+    /// owner, 2026-10-12. From a new document: two taps in Freehand, the sidebar's eyedropper armed, a
+    /// red mark tapped to take its colour, two more taps and a tap on the node — and the selection is
+    /// the quadrilateral all four corners make.
+    ///
+    /// Two readings of every step: the host's `lasso:` field (the open lasso's point count) and the
+    /// start node's blue ring, drawn; and at the end the ink Clear takes, which is the selection's own
+    /// shape — a mark in the fourth corner's region goes only if the corner placed after the pick is
+    /// part of the loop.
+    ///
+    /// What the artist does next, at every step: tap two corners; tap Pick, then a colour on the canvas
+    /// — the swatch turns that colour and the Select tool is still where it was, with its node and its
+    /// outline; tap the rest of the corners and the node.
+    func testAColourPickedMidLassoLeavesTheCornersAndTheLassoClosesIntoTheQuadrilateral() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app), "setup: a brand-new document")
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let paper = paperRect(in: canvas)
+        func at(_ dx: Double, _ dy: Double) -> CGVector { onHost(paper, dx, dy) }
+
+        // 1. Red marks as in the square test, then a blue brush so that a pick has something to change.
+        setBrushColor(app, hex: "FF0000")
+        setBrushSize(app, normalized: 0.12)
+        let centre = at(0.35, 0.24), bottomLeft = at(0.22, 0.33), outside = at(0.75, 0.24)
+        drawLine(on: canvas, from: at(0.30, 0.24), to: at(0.40, 0.24))
+        drawLine(on: canvas, from: at(0.19, 0.33), to: at(0.25, 0.33))
+        drawLine(on: canvas, from: at(0.68, 0.24), to: at(0.82, 0.24))
+        for (name, mark) in [("middle", centre), ("bottom-left", bottomLeft), ("outside", outside)] {
+            XCTAssertTrue(waitUntil(canvas, mark, isRed), "PREMISE: the \(name) mark is on screen")
+        }
+        setBrushColor(app, hex: "0000FF")
+        let pick = app.buttons["sideToolbar.eyedropperButton"]
+        XCTAssertTrue(pick.waitForExistence(timeout: 5))
+        XCTAssertEqual(pick.value as? String, "0000FF", "PREMISE: the brush is blue")
+
+        // 2. Freehand, and two corners of the square.
+        app.buttons["toolbar.selectButton"].tap()
+        let freehand = app.buttons["selectPanel.mode.lasso"]
+        XCTAssertTrue(freehand.waitForExistence(timeout: 5), "the Select panel offers Freehand")
+        freehand.tap()
+        let deselect = app.buttons["selectPanel.deselectButton"]
+        XCTAssertTrue(deselect.waitForExistence(timeout: 5))
+        let corners = [at(0.15, 0.12), at(0.55, 0.12), at(0.55, 0.38), at(0.15, 0.38)]
+        assertAboveTheDock(app, canvas, dy: corners[2].dy, "The square's bottom corners")
+        assertBelowTheToolbar(app, canvas, dy: corners[0].dy, "The square's top corners")
+        let node = hostPoint(canvas, corners[0])
+        for index in 0..<2 {
+            canvas.coordinate(withNormalizedOffset: corners[index]).tap()
+            XCTAssertTrue(settledField(app, "lasso:", equals: "\(index + 1)"), "corner \(index + 1) joined the open lasso")
+        }
+        XCTAssertTrue(try nodeIsDrawn(canvas, at: node), "PREMISE: the start node is drawn")
+
+        // 3. Arm the eyedropper: the lasso is still open, and the node still drawn.
+        pick.tap()
+        XCTAssertTrue(pick.isSelected, "the eyedropper is armed")
+        XCTAssertEqual(readField(app, "lasso:"), "2", "arming it did not put the lasso down")
+        XCTAssertTrue(try nodeIsDrawn(canvas, at: node), "…its node is still drawn")
+
+        // 4. Pick the red mark: the swatch turns red, the tool is handed back, the lasso is still open.
+        canvas.coordinate(withNormalizedOffset: outside).tap()
+        let picked = expectation(for: NSPredicate(format: "value == %@", "FF0000"), evaluatedWith: pick)
+        XCTAssertEqual(XCTWaiter().wait(for: [picked], timeout: 10), .completed, "the pick took the red")
+        let handedBack = expectation(for: NSPredicate(format: "isSelected == false"), evaluatedWith: pick)
+        XCTAssertEqual(XCTWaiter().wait(for: [handedBack], timeout: 10), .completed, "…and handed the canvas back")
+        XCTAssertEqual(readField(app, "lasso:"), "2", "the pick did not put the lasso down")
+        XCTAssertTrue(try nodeIsDrawn(canvas, at: node), "…and its node is still drawn")
+        XCTAssertFalse(deselect.isEnabled, "an open lasso selects nothing yet")
+        attachScreenshot(app, "open-lasso-after-the-pick")
+
+        // 5. The other two corners, and the node: the lasso closes into the square.
+        for index in 2..<4 {
+            canvas.coordinate(withNormalizedOffset: corners[index]).tap()
+            XCTAssertTrue(settledField(app, "lasso:", equals: "\(index + 1)"),
+                          "corner \(index + 1) joined the lasso the pick had left open (it holds \(readField(app, "lasso:")))")
+        }
+        canvas.coordinate(withNormalizedOffset: corners[0]).tap()
+        XCTAssertTrue(settledField(app, "lasso:", equals: "none"), "the tap on the node closed the lasso")
+        XCTAssertTrue(deselect.waitForExistence(timeout: 5))
+        XCTAssertTrue(deselect.isEnabled, "…into a selection")
+        attachScreenshot(app, "quadrilateral-selected")
+
+        app.buttons["selectPanel.clearButton"].tap()
+        XCTAssertTrue(waitUntil(canvas, centre, isWhitish), "Clear took the mark in the middle of the square")
+        XCTAssertTrue(waitUntil(canvas, bottomLeft, isWhitish),
+                      "…and the one in its fourth corner: the corners placed before and after the pick made one shape")
+        XCTAssertTrue(waitUntil(canvas, outside, isRed), "…and left the mark outside it")
+    }
+
     /// `readField` until it says `wanted` (or, with `differsFrom`, anything else) — the label is
     /// written on the pass that follows the model.
     private func settledField(_ app: XCUIApplication, _ prefix: String, equals wanted: String? = nil,

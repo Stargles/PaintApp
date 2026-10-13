@@ -221,11 +221,6 @@ struct SideToolbar: View {
             if canvasManager.selectedTool == .eyedropper {
                 canvasManager.leaveEyedropper()
             } else {
-                // Any in-progress move/shape/fill bakes first, exactly as switching tools from the
-                // top toolbar does — the eyedropper reads the canvas, and a still-adjustable
-                // fill sitting in its own transient tier is content the artist can see and would
-                // reasonably expect to be able to pick from.
-                canvasManager.commitAllInteractiveState()
                 canvasManager.selectEyedropper()
             }
         } label: {

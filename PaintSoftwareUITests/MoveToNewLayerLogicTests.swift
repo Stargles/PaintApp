@@ -38,8 +38,12 @@ final class MoveToNewLayerLogicTests: XCTestCase {
                                VectorSample(x: b.x, y: b.y, pressure: 1)])
     }
 
-    private func select(_ manager: CanvasManager, _ rect: CGRect) {
+    /// Draws the loop and returns how deep the history is with it drawn — the loop is a step of its own
+    /// (TODO (187)), so what a verb added is counted from here.
+    @discardableResult
+    private func select(_ manager: CanvasManager, _ rect: CGRect) -> Int {
         manager.finishSelection(path: CGPath(rect: rect, transform: nil))
+        return manager.history.undoStack.count
     }
 
     private let aroundLeft = CGRect(x: 2, y: 24, width: 28, height: 16)
@@ -50,7 +54,7 @@ final class MoveToNewLayerLogicTests: XCTestCase {
     /// press of Undo puts it all back.**
     func testTheLoopsInkMovesToANewLayerAboveAndOneUndoPutsItBack() throws {
         let (manager, source, vector, left, right) = vectorFixture()
-        select(manager, aroundLeft)
+        let baseline = select(manager, aroundLeft)
         let layersBefore = manager.layers.count
 
         manager.moveSelectionToNewLayer()
@@ -70,7 +74,7 @@ final class MoveToNewLayerLogicTests: XCTestCase {
         // it down without a nudge records nothing, so the verb is one step.
         XCTAssertEqual(manager.vectorFloat?.parts[0].layerID, added.id, "the box holds the moved ink")
         manager.commitVectorFloatIfNeeded()
-        XCTAssertEqual(manager.history.undoStack.count, 1, "one undo step for the whole verb")
+        XCTAssertEqual(manager.history.undoStack.count - baseline, 1, "one undo step for the whole verb")
 
         manager.undo()
         XCTAssertEqual(manager.layers.count, layersBefore, "undo removes the layer")
@@ -112,10 +116,10 @@ final class MoveToNewLayerLogicTests: XCTestCase {
     func testALoopThatCatchesNothingAddsNoLayerAndNoStep() {
         let (manager, _, vector, left, right) = vectorFixture()
         let layersBefore = manager.layers.count
-        select(manager, CGRect(x: 30, y: 2, width: 6, height: 6))
+        let baseline = select(manager, CGRect(x: 30, y: 2, width: 6, height: 6))
         manager.moveSelectionToNewLayer()
         XCTAssertEqual(manager.layers.count, layersBefore, "nothing to move, no layer")
-        XCTAssertEqual(manager.history.undoStack.count, 0, "…and no step")
+        XCTAssertEqual(manager.history.undoStack.count - baseline, 0, "…and no step")
         XCTAssertEqual(vector.elements.map(\.id), [left, right], "…and the source untouched")
         XCTAssertNil(manager.vectorFloat)
     }
@@ -132,7 +136,7 @@ final class MoveToNewLayerLogicTests: XCTestCase {
             size: size, image: CanvasFixture.solidImage(.red, rect: painted), strokeCount: 1)
         manager.history.removeAll()
         manager.refreshUndoRedoState()
-        select(manager, aroundLeft)
+        let baseline = select(manager, aroundLeft)
 
         manager.moveSelectionToNewLayer()
 
@@ -140,7 +144,7 @@ final class MoveToNewLayerLogicTests: XCTestCase {
         XCTAssertEqual(manager.currentLayerIndex, 1, "…above the source, and current")
         XCTAssertEqual(manager.layers[1].kind, .raster)
         XCTAssertNil(manager.floatingPiece, "nothing floats: both halves were on hand at once")
-        XCTAssertEqual(manager.history.undoStack.count, 1, "one undo step for the whole verb")
+        XCTAssertEqual(manager.history.undoStack.count - baseline, 1, "one undo step for the whole verb")
 
         func alpha(_ layer: Int, at point: CGPoint) throws -> UInt8 {
             let image = try XCTUnwrap(PixelOps.rasterize(cel: manager.layers[layer].cels[0],

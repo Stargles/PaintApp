@@ -35,6 +35,11 @@ enum HistoryActionLabel: CaseIterable, Equatable {
     /// loop back reads "undo fill" as the wrong thing having gone.
     case lassoFill
     case clearSelection
+    /// A loop that makes the selection where none was up (TODO (187)), and the Deselect that puts it down.
+    /// Apart from the two below because the banner says which way the selection just moved: an artist
+    /// who pressed Undo after a Deselect and reads "undid add to selection" has the wrong picture.
+    case makeSelection
+    case deselect
     /// A second loop joining the selection already up, or the Subtract switch taking one away from it —
     /// TODO (182). Two cases, as `.erase` is apart from `.brushStroke`: the banner says which of the two
     /// is coming back, and an artist who added a loop and reads "undid subtract" has the wrong picture.
@@ -283,6 +288,8 @@ enum HistoryActionLabel: CaseIterable, Equatable {
         case .fill: return "fill"
         case .lassoFill: return "lasso fill"
         case .clearSelection: return "clear selection"
+        case .makeSelection: return "make selection"
+        case .deselect: return "deselect"
         case .addToSelection: return "add to selection"
         case .subtractFromSelection: return "subtract from selection"
         case .recolorSelection: return "recolour selection"

@@ -1725,7 +1725,7 @@ the loop is asked in rather than about which rule it is asked under.
     refusal had made unreachable at every frame where a pose was doing anything.
 
 
-Three more came on **2026-10-12**, all about how the Select tool is *used* rather than what it catches.
+Six more came on **2026-10-12**, all about how the Select tool is *used* rather than what it catches.
 
 28. **A boolean add is its own undo step.** The owner: *"the select doing a boolean add should be one
     undo step (user makes selection 1, then selection 2 which gets booleaned, then undos and selection
@@ -1733,8 +1733,7 @@ Three more came on **2026-10-12**, all about how the Select tool is *used* rathe
     one step on the ordinary history (`finishSelection`, `HistoryActionLabel.addToSelection` /
     `.subtractFromSelection`): undo gives back the selection as it stood before that loop, redo takes
     it again, and a subtract that swallowed everything is still a step whose undo gives the selection
-    back. **The first loop is not a step** — it is where the selection begins, and the press after it
-    belongs to whatever was drawn before.
+    back. (The first loop and Deselect are steps too — §5.31.)
 
 29. **The Freehand lasso takes taps as corners and closes on its start node.** The owner: *"a node
     spawns in the place where they first put down their pen. When the node is clicked again it
@@ -1748,18 +1747,41 @@ Three more came on **2026-10-12**, all about how the Select tool is *used* rathe
     loop. "On the node" is 22 screen points, whatever the zoom. Defaults the owner has not overruled:
     **Undo while a lasso is open takes back its last corner or stroke** (the history is untouched);
     **switching tool, panel or selection mode, Deselect and the Select icon put an open lasso down**;
-    a save and a layer change do not. Freehand only — the rectangle, the wand and Tap are unchanged,
-    and so is the fill tool's lasso, which still closes on lift.
+    a save, a layer change and the eyedropper (§5.33) do not. Freehand only — the rectangle, the wand
+    and Tap are unchanged, and so is the fill tool's lasso, which still closes on lift.
 
 30. **A drawn region follows the artist to another layer.** The owner: *"make the select stay when
     switching layers. Right now it disappears if you switch."* A loop, a rectangle and the wand's
     flood make a **region** (`Selection`), which carries no cel: Move, Recolour, Clear, the other
     verbs and the paint clip act on the layer that is active, each pulling it back through that
     layer's own pose. A **tapped set** (`Selection.objects`) belongs to the cel its objects live on and
-    is put down by any move off it. **The playhead's rule is unchanged**: stepping onto another cel of
-    the layer the artist is on puts a region down, and a tick within one cel leaves it alone
-    (`CanvasManager.handleActiveContextChanged`). Whether a region should also survive that step is
-    the owner's to say.
+    is put down by any move off it. A region survives a frame step too (§5.32).
+
+31. **The first loop and Deselect are undo steps too.** Ruled with the follow-ups to §5.28: Undo after a
+    first loop removes the selection, Undo after Deselect brings it back, and Redo makes each again. The
+    first loop, a loop added to a region, a loop taken from one and Deselect — the panel's tab, the Select
+    icon's tap-off, and a tap on nothing in Tap — all change the selection through one door
+    (`CanvasManager.replaceSelection`), as `makeSelection`, `addToSelection`, `subtractFromSelection` and
+    `deselect`. Deselect with nothing selected records nothing, and putting an open lasso down is not a
+    step: nothing an open lasso did is in the history (§5.29). The history gives a selection back by the
+    rule a frame step puts one down by (§5.32), so a tapped set whose cel is no longer shown is not
+    brought back over a drawing it cannot act on. A tap in Tap that makes, adds to or subtracts from a
+    tapped set is still not a step; that was not asked.
+
+32. **A drawn region survives every frame step**, as it does a layer switch (§5.30): it stays up on
+    whatever drawing is on the frame the playhead is on and acts on that drawing — on a frame where the
+    layer has none it stays up and acts on nothing, and acts again when the playhead is back on one. A
+    **tapped set** is the one thing that still goes: its ids name the objects of one cel, so a step onto
+    another drawing of the layer, or onto a frame where the layer has none, puts it down, and a tick
+    within the cel's own frames leaves it alone. `handleActiveContextChanged` asks only
+    `Selection.acts(onLayer:cel:)`; it no longer takes what moved the active cel.
+
+33. **The eyedropper keeps an open lasso.** Arming the sidebar's eyedropper and picking with it do not put
+    the Freehand lasso down. The eyedropper is a momentary tool — it interrupts the tool beneath it and
+    hands the canvas back — so arming it lands what is in flight, because it reads the canvas, and
+    replaces nothing (`CanvasManager.commitEditsInFlight`; `commitAllInteractiveState`, which a tool
+    replacement calls, is that and the abandon). Switching tool, panel or selection mode, Deselect and
+    the Select icon still put an open lasso down (§5.29).
 
 
 ## 6. Open risks

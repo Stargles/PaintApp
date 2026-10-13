@@ -498,7 +498,7 @@ final class CanvasManager: ObservableObject {
                 // through exactly that restore, so an unconditional clear here would move the band
                 // off the folder on the first press of Undo.
                 if selectedFolderID != nil { selectedFolderID = nil }
-                handleActiveContextChanged(.layer)
+                handleActiveContextChanged()
                 // The action recorder (see `ActionRecorder.ifRecording`). The *value*, not
                 // just the fact of a change — "which layer was active" is what decides where a stroke
                 // landed and which stroke recognizer the transform gestures were waiting on.
@@ -934,8 +934,8 @@ final class CanvasManager: ObservableObject {
             // **A selection cleared or replaced mid-drag cancels the drag** (TODO (42)): the session
             // rewrites what *this* loop caught, and with the loop gone there is nothing for the drag
             // to be about, so the pre-drag list goes back and no step is recorded. Reached by
-            // `deselect()`, by `handleActiveContextChanged` when the artist walks to another cel, and
-            // by a new loop drawn while a slider is still held. Cheap when no session is open, which
+            // `deselect()`, by `handleActiveContextChanged` when a tapped set's cel is no longer shown,
+            // and by a new loop drawn while a slider is still held. Cheap when no session is open, which
             // is every assignment but that one.
             guard selectionEdit != nil else { return }
             if let selection, let old = oldValue, old.path === selection.path { return }
@@ -1637,7 +1637,7 @@ final class CanvasManager: ObservableObject {
     @Published var currentFrame: Int = 0 {
         didSet {
             if oldValue != currentFrame {
-                handleActiveContextChanged(.frame(from: oldValue))
+                handleActiveContextChanged()
                 // **After `handleActiveContextChanged`, which is what settles anything the outgoing
                 // frame was still holding** — and before the SwiftUI pass, which is the whole point:
                 // see `onTimingStrokeFrameAdvanced`. Guarded on the flag rather than on `isRecording`
@@ -1953,11 +1953,21 @@ final class CanvasManager: ObservableObject {
     /// is being replaced (tool switch, layer/frame change, an edit that needs the canvas to itself),
     /// at which a piece left floating would otherwise be stranded or silently discarded.
     func commitAllInteractiveState() {
-        settleInteractiveState()
-        commitFloatingPieceIfNeeded()
+        commitEditsInFlight()
         // The tool is being replaced, and an open lasso is the Select tool's own unfinished work —
         // unlike a save (`settleInteractiveState`), which must not take it from under the artist's pen.
         abandonOpenLasso()
+    }
+
+    /// **Lands every edit in flight and takes a Move box down, and replaces nothing** — the half of
+    /// `commitAllInteractiveState` that a *momentary* tool needs. The eyedropper reads the canvas and
+    /// hands it straight back (`enterMomentaryTool`), so it needs a still-adjustable fill or a floating
+    /// piece to be content the pick can see, but it is an interruption of the tool beneath it and not a
+    /// replacement of it: the Select tool's open lasso is still there when the pick is done
+    /// (TODO (187)).
+    func commitEditsInFlight() {
+        settleInteractiveState()
+        commitFloatingPieceIfNeeded()
     }
 
     /// Enters the text tool — the Actions menu's "Add Text" row, and the only way in.
@@ -2895,7 +2905,7 @@ final class CanvasManager: ObservableObject {
             } else if currentLayerIndex >= layers.count {
                 currentLayerIndex = layers.count - 1
             } else if deletingActiveLayerInPlace {
-                handleActiveContextChanged(.layer)
+                handleActiveContextChanged()
             }
         }
         recordLayerStackChange("deleted layer at \(index)")

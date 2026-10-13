@@ -138,17 +138,6 @@ simulator: 79 ms over 34 ticks) — INFERRED to be the colour picker's own redra
 - [ ] The colour picker's own redraw during a drag measured and, if it is the ~1.4 s, fixed (a separate
       worker — not the held edit's code).
 
-## (187) Select follow-ups: frames, undo, the eyedropper
-
-**Status** — ruled 2026-10-12 on the questions (182)/(184)/(185)'s merge (`55b06a3`) left.
-
-- [ ] **A drawn region survives every frame step**, as it does a layer switch, acting on whatever drawing
-      is on the current frame (today it clears on a step to a frame with a different drawing).
-- [ ] **The first loop and Deselect are undo steps too** (built: only add and subtract are), so Undo
-      after a first loop removes the selection and Undo after Deselect brings it back.
-- [ ] **The eyedropper keeps an open lasso** — picking a colour mid-lasso no longer abandons the corners
-      (today everything through `commitAllInteractiveState` abandons it).
-
 ## (186) The fill's sideways drag adjusts Gap Closing only, and right decreases it
 
 **Status** — asked 2026-10-12 (a note on the option-saving page, row C6).

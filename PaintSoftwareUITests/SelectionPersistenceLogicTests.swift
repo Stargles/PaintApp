@@ -197,24 +197,88 @@ final class SelectionPersistenceLogicTests: XCTestCase {
         XCTAssertEqual(f.upperVector.elements.count, 2, "…and Clear cleared nothing")
     }
 
-    /// **The playhead's rule is unchanged for a region that has been carried**: stepping onto another
-    /// drawing of the layer the artist is now on puts it down, exactly as it did before regions could
-    /// follow a layer switch — the owner was told frames keep today's behaviour.
-    func testAFrameStepOntoAnotherCelPutsDownARegionThatWasCarriedToThisLayer() {
-        let manager = CanvasFixture.manager(layerCount: 2)
-        for layer in 0...1 {
-            CanvasFixture.setCelLayout(manager, layerIndex: layer, [(start: 0, length: 6), (start: 6, length: 6)])
+    /// **A vector layer with two drawings, each holding one stroke inside `rectSelectionPath` and one
+    /// outside it** — the fixture for a region carried across a frame step: frames 0–5 are the first
+    /// drawing, 6–11 the second.
+    private func twoDrawings() -> (manager: CanvasManager, layer: Int, first: VectorCanvas, second: VectorCanvas,
+                                   firstInside: UUID, firstOutside: UUID, secondInside: UUID, secondOutside: UUID) {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.addVectorLayer()
+        let layer = manager.currentLayerIndex
+        let size = manager.canvasSize ?? CanvasFixture.canvasSize
+        let first = VectorCanvas.empty(size: size), second = VectorCanvas.empty(size: size)
+        manager.layers[layer].cels = [
+            Cel(id: UUID(), startFrame: 0, frameCount: 6, raster: .empty(size: size), vector: first),
+            Cel(id: UUID(), startFrame: 6, frameCount: 6, raster: .empty(size: size), vector: second),
+        ]
+        for canvas in [first, second] {
+            canvas.addStroke(stroke(from: CGPoint(x: 14, y: 20), to: CGPoint(x: 26, y: 20)))
+            canvas.addStroke(stroke(from: CGPoint(x: 40, y: 50), to: CGPoint(x: 56, y: 50)))
         }
         manager.currentFrame = 0
-        manager.currentLayerIndex = 0
-        manager.finishSelection(path: rectSelectionPath())
-        manager.currentLayerIndex = 1
-        XCTAssertNotNil(manager.selection, "PREMISE: carried to layer 1")
+        return (manager, layer, first, second, first.elements[0].id, first.elements[1].id,
+                second.elements[0].id, second.elements[1].id)
+    }
 
-        manager.currentFrame = 3
-        XCTAssertNotNil(manager.selection, "a tick within layer 1's first cel leaves it alone")
-        manager.currentFrame = 6
-        XCTAssertNil(manager.selection, "layer 1's second cel is another drawing: the region is put down")
+    /// **Decision, 2026-10-12 (TODO (187)): a drawn region survives every frame step**, as it does a
+    /// layer switch, and acts on whatever drawing is on the frame the playhead is on. The owner had been
+    /// told frames kept the old rule (a step onto another drawing of the layer put the region down) and
+    /// ruled the other way. The operands are what the verbs do with it: Clear takes the *second*
+    /// drawing's stroke inside the loop and leaves its other stroke and every stroke of the first.
+    func testARegionSurvivesAFrameStepOntoAnotherDrawingAndClearActsOnThatDrawing() {
+        let f = twoDrawings()
+        f.manager.finishSelection(path: rectSelectionPath())
+        let drawn = f.manager.selection
+
+        f.manager.currentFrame = 3
+        XCTAssertTrue(f.manager.selection?.path === drawn?.path, "a tick within the first drawing leaves it alone")
+        f.manager.currentFrame = 6
+        XCTAssertTrue(f.manager.selection?.path === drawn?.path,
+                      "the second drawing is another cel and the region is still the very one the artist drew")
+
+        f.manager.clearSelectionPixels()
+        XCTAssertEqual(Set(f.second.elements.map(\.id)), [f.secondOutside],
+                       "Clear took the second drawing's stroke inside the loop and kept the one outside it")
+        XCTAssertEqual(Set(f.first.elements.map(\.id)), [f.firstInside, f.firstOutside],
+                       "…and the first drawing, which the loop was drawn over, is untouched")
+
+        f.manager.currentFrame = 0
+        XCTAssertTrue(f.manager.selection?.path === drawn?.path, "…and back again")
+        f.manager.clearSelectionPixels()
+        XCTAssertEqual(Set(f.first.elements.map(\.id)), [f.firstOutside], "the first drawing is the one it acts on now")
+    }
+
+    /// **Move lifts the inside of the drawing the playhead is on**, not the one the loop was drawn over.
+    func testMoveLiftsTheInkOfTheDrawingTheRegionWasCarriedTo() {
+        let f = twoDrawings()
+        f.manager.finishSelection(path: rectSelectionPath())
+        f.manager.currentFrame = 6
+
+        XCTAssertTrue(f.manager.beginVectorLassoMove(), "a region carried to another drawing lifts what it holds there")
+        XCTAssertEqual(f.manager.vectorFloat?.parts[0].celID, f.manager.layers[f.layer].cels[1].id,
+                       "the float is the second drawing's")
+        XCTAssertEqual(f.manager.vectorFloat?.parts[0].insideIDs, [f.secondInside])
+        f.manager.cancelVectorFloat()
+    }
+
+    /// **A frame where the layer has no drawing is a frame the region stays up over**: it acts on
+    /// nothing there and on the drawing again when the playhead is back on one.
+    func testARegionStaysUpOverAGapInTheLayerAndActsAgainAfterIt() {
+        let f = twoDrawings()
+        let size = f.manager.canvasSize ?? CanvasFixture.canvasSize
+        f.manager.layers[f.layer].cels[1] = Cel(id: UUID(), startFrame: 8, frameCount: 4,
+                                                raster: .empty(size: size), vector: f.second)
+        f.manager.finishSelection(path: rectSelectionPath())
+
+        f.manager.currentFrame = 6 // the gap
+        XCTAssertNotNil(f.manager.selection, "the region is still up over a frame with no drawing")
+        XCTAssertFalse(f.manager.beginVectorLassoMove(), "…and Move has nothing to lift there")
+        f.manager.clearSelectionPixels()
+        XCTAssertEqual(f.first.elements.count + f.second.elements.count, 4, "…and Clear cleared nothing")
+
+        f.manager.currentFrame = 9
+        f.manager.clearSelectionPixels()
+        XCTAssertEqual(Set(f.second.elements.map(\.id)), [f.secondOutside], "back on a drawing it acts on it")
     }
 
     /// **A drag on the selection ends with the cel it was opened on**, as it did when the layer switch
@@ -252,36 +316,6 @@ final class SelectionPersistenceLogicTests: XCTestCase {
         XCTAssertFalse(tapped.acts(onLayer: layer, cel: UUID()), "another cel of the same layer")
         XCTAssertFalse(tapped.acts(onLayer: UUID(), cel: cel), "the same cel id under another layer")
         XCTAssertFalse(tapped.acts(onLayer: layer, cel: nil), "a gap")
-    }
-
-    /// Decision: moving the playhead onto a *different cel* clears it — same mechanism as the layer
-    /// case, keyed on `celID` rather than `layerID`.
-    func testChangingFrameToADifferentCelClearsSelection() {
-        let manager = CanvasFixture.manager()
-        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 6), (start: 6, length: 6)])
-        manager.currentFrame = 0
-        manager.finishSelection(path: rectSelectionPath())
-        XCTAssertNotNil(manager.selection, "fixture precondition")
-
-        manager.currentFrame = 6 // the second cel
-
-        XCTAssertNil(manager.selection, "the selection belonged to the first cel and must not carry over to the second")
-    }
-
-    /// Decision: scrubbing *within* the cel a selection belongs to must NOT clear it — called out
-    /// explicitly at `handleActiveContextChanged`'s doc comment ("Same-cel frame ticks... intentionally
-    /// leave both alone"). The near-miss twin of the test above, so the ruling on each side of the
-    /// boundary is pinned rather than left implied by checking only one of them.
-    func testScrubbingWithinTheSameCelDoesNotClearSelection() {
-        let manager = CanvasFixture.manager()
-        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 6), (start: 6, length: 6)])
-        manager.currentFrame = 0
-        manager.finishSelection(path: rectSelectionPath())
-        XCTAssertNotNil(manager.selection, "fixture precondition")
-
-        manager.currentFrame = 3 // still the first cel, frames [0, 6)
-
-        XCTAssertNotNil(manager.selection, "a frame tick that stays on the same cel must leave a live selection alone")
     }
 
     /// Decision: explicit Deselect clears it — the whole point of the Select panel's button.

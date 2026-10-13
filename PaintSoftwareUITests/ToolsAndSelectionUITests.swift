@@ -919,10 +919,9 @@ final class SelectionAndMoveUITests: PaintUITestCase {
     }
 
     /// What the `floatingPiece == nil` half of the two guards is worth, pinned as behaviour: the rail
-    /// button calls `commitAllInteractiveState()` **before** `selectEyedropper()`
-    /// (`SideToolbar.eyedropperButton`), and that calls `commitFloatingPieceIfNeeded()` — so arming
-    /// the eyedropper bakes a floating piece on the way in and the two states never coexist through
-    /// this door. The guard clause is therefore already unreachable rather than load-bearing, and
+    /// button's `selectEyedropper()` calls `commitEditsInFlight()` **before** it arms the tool, and that
+    /// calls `commitFloatingPieceIfNeeded()` — so arming the eyedropper bakes a floating piece on the
+    /// way in and the two states never coexist through this door. The guard clause is therefore already unreachable rather than load-bearing, and
     /// this test is what would notice if the bake were ever removed from that button.
     func testArmingTheEyedropperBakesAFloatingPieceRatherThanRacingIt() throws {
         let app = XCUIApplication()
@@ -944,7 +943,7 @@ final class SelectionAndMoveUITests: PaintUITestCase {
 
         XCTAssertTrue(doneButton.waitForNonExistence(timeout: 5), """
             Arming the eyedropper must settle a floating piece, not sit alongside one. \
-            `SideToolbar.eyedropperButton` calls `commitAllInteractiveState()` first for exactly \
+            `selectEyedropper()` calls `commitEditsInFlight()` first for exactly \
             this reason — the tool samples the composite, and a piece still in the air is content \
             the artist can see and would expect to pick from.
             """)

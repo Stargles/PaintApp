@@ -275,6 +275,51 @@ final class OpenLassoLogicTests: XCTestCase {
         XCTAssertNil(manager.selection, "…and none of it selected anything")
     }
 
+    /// **The eyedropper keeps an open lasso** — TODO (187), the owner, 2026-10-12: picking a colour in
+    /// the middle of a lasso must not put the corners down. The eyedropper is a momentary tool: it
+    /// interrupts the tool beneath it and hands the canvas back, so arming it lands what is in flight
+    /// (it reads the canvas) and replaces nothing. Read off what the closed lasso selects: the corner
+    /// placed after the pick is part of the shape, so the fourth corner's region is selected — the
+    /// triangle of the first three would not hold it.
+    @MainActor
+    func testTheEyedropperKeepsAnOpenLassoThroughArmingAndThePick() {
+        let manager = CanvasFixture.manager()
+        manager.eyedropperMode = .composite
+        manager.tapLasso(at: square[0], nodeReach: reach)
+        manager.tapLasso(at: square[1], nodeReach: reach)
+
+        manager.selectEyedropper()
+        XCTAssertEqual(manager.selectedTool, .eyedropper, "PREMISE: the eyedropper is armed")
+        XCTAssertEqual(manager.openLasso?.points.count, 2, "arming it does not put the lasso down")
+
+        manager.pickColor(atCanvasPoint: inside)
+        XCTAssertEqual(manager.selectedTool, .pen, "PREMISE: the pick handed the tool back")
+        XCTAssertEqual(manager.openLasso?.points, [square[0], square[1]], "…and neither did the pick")
+
+        manager.tapLasso(at: square[2], nodeReach: reach)
+        manager.tapLasso(at: square[3], nodeReach: reach)
+        manager.tapLasso(at: square[0], nodeReach: reach)
+        XCTAssertNil(manager.openLasso, "the tap on the node closed it")
+        XCTAssertTrue(contains(manager, CGPoint(x: 14, y: 36)),
+                      "the selection is the quadrilateral: its fourth corner's region is held")
+        XCTAssertTrue(contains(manager, inside))
+        XCTAssertFalse(contains(manager, outside))
+    }
+
+    /// **Arming the eyedropper still lands what is in flight**, which is what it needed
+    /// `commitAllInteractiveState` for in the first place: a Move box up when the pick is armed is
+    /// taken down, so the colour is read off a canvas that holds what the artist sees. The control for
+    /// the test above — a `selectEyedropper` that stopped committing would keep the lasso too.
+    func testArmingTheEyedropperStillTakesAMoveBoxDown() {
+        let manager = CanvasFixture.manager()
+        manager.beginMove()
+        XCTAssertNotNil(manager.floatingPiece, "PREMISE: Move lifted the layer")
+
+        manager.selectEyedropper()
+        XCTAssertNil(manager.floatingPiece, "arming the eyedropper settled the piece")
+        XCTAssertEqual(manager.selectedTool, .eyedropper)
+    }
+
     /// **A save does not**: the autosave settles the document without taking a lasso from under the
     /// artist's pen, and neither does moving to another layer — the region it will make belongs to the
     /// canvas.

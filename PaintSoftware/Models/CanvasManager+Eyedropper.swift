@@ -57,10 +57,18 @@ extension CanvasManager {
 
     /// Selects the eyedropper for the brush swatch, remembering what to come back to.
     ///
+    /// **Any in-progress move, shape or fill bakes first**, as switching tools from the top toolbar does
+    /// — the eyedropper reads the canvas, and a still-adjustable fill sitting in its own transient tier
+    /// is content the artist can see and would reasonably expect to pick from. **And only that**:
+    /// `commitEditsInFlight`, not `commitAllInteractiveState`, because arming the eyedropper
+    /// interrupts the tool beneath it rather than replacing it, and a Freehand lasso the artist has
+    /// begun is still open when the pick hands the canvas back (TODO (187)).
+    ///
     /// **Not `.eyedropper` itself**, if that is somehow already current: the memory has to survive a
     /// second tap on the sidebar button, or a double-tap would strand the artist in the tool with
     /// "previous" pointing at the tool they are already in.
     func selectEyedropper() {
+        commitEditsInFlight()
         selectEyedropper(for: .brushColor)
     }
 
