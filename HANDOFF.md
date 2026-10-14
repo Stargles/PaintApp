@@ -18,9 +18,12 @@ is what we find.
 **Session 49 is in flight.** The verified starting point is `5d73184`; no prior `tmp/*` branch held
 unmerged work. Current task branches are `tmp/s49-onion` (189), `tmp/s49-stream` (177),
 `tmp/s49-masks` (35), and `tmp/s49-session` (coordination). Their worktrees are under `~/PaintWork/`.
-Do not harvest a worker's uncommitted files: the worker may be mutation-testing. Liquify (178) follows.
+Do not harvest a worker's uncommitted files: the worker may be mutation-testing. Liquify (178) follows,
+including linked in-between frames (owner ruled 2026-10-14). New (190) is a brief first-fill flash when
+starting a second fill; test the owner's transient-to-bake handoff theory first.
 The owner permits any useful agent count but prioritises usage conservation and output quality over
 speed. Keep delegation focused, use cheaper models for routine work, and report the queue occasionally.
+The owner is asleep until 10 a.m. Toronto time; defer further questions until then.
 The full UI suite is owed on the integrated tree before the next install. Earlier session design notes
 remain in `~/PaintWork/design/`.
 
@@ -91,14 +94,14 @@ before the next device install**, since ~70 merges landed without one.
 
 ## Waiting on the owner
 
-**Questions to ask (plain language, with options):**
-- Session 49 has asked whether (178) initially includes linked generated in-betweens; answer pending.
-  See TODO (178), `VECTOR_INTERPOLATION.md` §3.8. Editable-drawing work is independent.
-1. (176) Subtract, Paint Outside Selection, Keep Stroke Width and Keep Full Precision reset whenever a
-   scene is **opened**, not only on relaunch — keep that, or keep them across scenes until the app quits?
-2. (179) On big scenes the half-detail preview leaves **Fog Glow** up to twice as wide mid-drag (its Size
+**Owner confirmations, 2026-10-14:** (176)'s Subtract, Paint Outside Selection, Keep Stroke Width and
+Keep Full Precision continue resetting whenever a scene opens. (183)'s selection recolour no longer
+flickers on the iPad; the different two-fill flash is now (190). (178) includes linked in-between frames.
+
+**Questions to ask after 10 a.m. Toronto time (plain language, with options):**
+1. (179) On big scenes the half-detail preview leaves **Fog Glow** up to twice as wide mid-drag (its Size
    cannot go below 2) — leave it, scale it anyway, or never use half detail when a scene has Fog Glow?
-3. Once the next build has repaired his scenes and they look right: delete `LegacyToolSettingsRepair`
+2. Once the next build has repaired his scenes and they look right: delete `LegacyToolSettingsRepair`
    (and `LegacyPoseTrackRepair`, if the keyed scene from session 47 was restored and animates — still
    unconfirmed: Gallery → scene "1" → Versions… → Oct 9 "Before app update" → Restore).
 

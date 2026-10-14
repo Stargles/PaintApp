@@ -5,7 +5,8 @@ The owner's asks. [BUGS.md](BUGS.md) is for what *we* find.
 **Session 49 (2026-10-14):** the owner asked to continue through every actionable item, stopping only
 for genuinely required input or context degradation. Agent count is unrestricted for now; usage
 conservation and output quality take priority over speed. Use focused delegation and cheaper models
-for routine work, with occasional queue reports.
+for routine work, with occasional queue reports. The owner is asleep until 10 a.m. Toronto time;
+continue independently and defer further questions until then.
 
 ## How to read and keep this file
 
@@ -122,39 +123,19 @@ ghost follows per tick and the editor does not.
 
 - [ ] Its own publisher; ms/tick and editor passes per tick measured before/after with §31's method.
 
-## (183) Recolouring a filled selection flickers
+## (190) Starting a second fill briefly flashes the first fill
 
-**Status** — reported 2026-10-12 with a recording; given to the (179) worker, whose seam owns the held
-element edit and `WindowSurfaceView`.
+**Status** — reported 2026-10-14 after the owner confirmed (183)'s recolour flicker is gone.
 
-*"Made a selection, clicked on fill, then clicked on edit and tried to change the color inside the
-selection. Lots of flickering."* — `~/PaintWork/recordings-1012/recording-20261012-173827.jsonl`
-(2668×1644, build `95e5507`): the colour drag runs 4.35–6.52 s and the main thread is busy 1,468 ms of
-that 2 s window (max 182 ms, all `sourcePhase`).
+*"when I fill one place, then fill another place, the first place briefly flickers once. I believe this
+is because it is getting baked from the transient state. It is minor though and should be a simple fix
+(i think)."*
 
-Merged with (179)'s first half: a window draw was minted in the turn the last one landed, into the
-surface that swap had just retired and the render server still showed until the turn committed; the
-draw now waits until `IOSurface.isInUse` says the server has let it go (`WindowSurfaceView.present`).
-**The simulator's render server does not show the swapped-out surface of a recolour's window** — not at a
-sixth of the canvas or nine-tenths, not with draws of 0.3–2.5 s, not with the main thread held busy after
-every swap (that seam staged only this and is deleted) — so no screen read here can see the flicker.
-`WindowSurfaceViewLogicTests` pins the wait where it is deterministic (a surface with a use count is not
-drawn into; a server that never lets go costs one bounded wait), and `SelectionFillRecolourUITests` covers
-the arrangement around it with one seam, the draw's length: the base stays on screen until a picture has
-landed, no tick takes its picture off, and an older colour never comes back. (`EffectSliderLiveUITests`
-sees the missing wait on the simulator only by chance: 2 of 3 runs red here, whatever the drag's timing
-gives.) The owner's iPad is the confirmation still owed. The
-1,468 ms of main-thread busy is not the held edit's tick (`-probeMode recolour` at 2668×1644 on an iPad 9
-simulator: 79 ms over 34 ticks): it was the colour picker's own re-evaluation — every tick rebuilt the whole
-panel, and the Wheel redrew 14,400 rectangles — fixed and measured in PERFORMANCE.md §31 (Select's Colour
-9–25 ms → 5.5 ms a tick).
+Test the owner's transient-to-bake handoff theory first. Preserve the first fill's displayed picture
+until its committed replacement has landed; use the existing fill/surface presentation lifecycle,
+without a second holding path or timing delay.
 
-- [x] Cold-start XCUITest that reads the filled region through the held edit and fails on the paper showing through; root cause fixed in the seam.
-- [ ] The owner confirms on the iPad.
-- [x] `SelectionFillRecolourUITests` counts what it asserts: it was wall-clock-shaped (≥ 10 screen reads
-      inside a synchronous drag, 3–4 under load); it now taps swatches and waits for each picture to land.
-- [x] The colour picker's own redraw during a drag measured and, if it is the ~1.4 s, fixed (a separate
-      worker — not the held edit's code). It was: PERFORMANCE.md §31.
+- [ ] Reproduce with two successive fills; fix the cause and pin the visible handoff with a cold-start UI test.
 
 ## (177) A stream layer can draw in place in the layer stack
 
@@ -224,13 +205,13 @@ and an active selection limits it further. This reverses the 2026-08-22 ruling q
 flow and hardness are the strength field for free. Its brush type, size and power are a third
 `ToolProfile` — a `StrokeTool` case and a `ToolProfiles` field, which (176) built for it.
 
-**Session 49 scope question pending:** whether Liquify initially applies only to editable drawings or
-also to linked generated in-betweens. `VECTOR_INTERPOLATION.md` §3.8 specifies that a linked in-between
-needs a recipe-owned displacement field, not per-vertex offsets or `localEdits`; that field does not
-exist. The session-48 survey proposed refusing derived frames, which needs the owner's ruling before
-that limitation is treated as accepted.
+**Ruled 2026-10-14:** *"Include linked in-between frames now."* Liquify must reshape generated frames
+while preserving their links to the source drawings. `VECTOR_INTERPOLATION.md` §3.8 specifies a
+recipe-owned rest-space displacement field, never per-vertex offsets or `localEdits`; build that field
+alongside the editable-drawing tool. The session-48 survey's proposed refusal of derived frames is
+superseded by this ruling.
 
-- [ ] Liquify on raster and vector, three modes, one undo step per stroke.
+- [ ] Liquify on raster and vector, including linked generated in-betweens, three modes, one undo step per stroke.
 
 ---
 
