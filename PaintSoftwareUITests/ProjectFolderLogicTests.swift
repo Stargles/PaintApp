@@ -246,6 +246,43 @@ final class ProjectFolderLogicTests: XCTestCase {
         XCTAssertEqual(Set(ProjectStore.listProjects(in: folder).map(\.name)), ["Rough", "Rough 2"])
     }
 
+    func testCollisionNameWriteFailureLeavesBothProjectsAtTheirOriginalAddresses() throws {
+        let folder = try ProjectStore.createFolder(named: "Shots", in: ProjectStore.projectsDirectory)
+        let occupied = writeProject(named: "Rough", in: folder)
+        let incoming = writeProject(named: "Rough", in: ProjectStore.projectsDirectory)
+        let original = try Data(contentsOf: incoming.appendingPathComponent("manifest.json"))
+        let other = try Data(contentsOf: occupied.appendingPathComponent("manifest.json"))
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: incoming.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: incoming.path) }
+        XCTAssertNil(ProjectStore.moveProject(at: incoming, into: folder))
+        XCTAssertEqual(try Data(contentsOf: incoming.appendingPathComponent("manifest.json")), original)
+        XCTAssertEqual(try Data(contentsOf: occupied.appendingPathComponent("manifest.json")), other)
+    }
+
+    func testRefusedMoveRestoresTheOriginalTitleWithoutOverwritingItsOccupant() throws {
+        let folder = try ProjectStore.createFolder(named: "Shots", in: ProjectStore.projectsDirectory)
+        let occupied = writeProject(named: "Rough", in: folder)
+        let incoming = writeProject(named: "Rough", in: ProjectStore.projectsDirectory)
+        let original = try Data(contentsOf: incoming.appendingPathComponent("manifest.json"))
+        let other = try Data(contentsOf: occupied.appendingPathComponent("manifest.json"))
+        XCTAssertNil(ProjectPackageName.move(incoming, to: occupied, retitling: "Rough 2"))
+        XCTAssertEqual(try Data(contentsOf: incoming.appendingPathComponent("manifest.json")), original)
+        XCTAssertEqual(try Data(contentsOf: occupied.appendingPathComponent("manifest.json")), other)
+    }
+
+    func testCollisionRetitleKeepsTheBackupRecoveryNameAndProjectIdentity() throws {
+        let folder = try ProjectStore.createFolder(named: "Shots", in: ProjectStore.projectsDirectory)
+        writeProject(named: "Rough", in: folder)
+        let incoming = writeProject(named: "Rough", in: ProjectStore.projectsDirectory)
+        let id = try XCTUnwrap(ProjectBackupManager.manifestID(at: incoming))
+        ProjectBackupManager.refreshLatestSnapshot(projectURL: incoming, projectID: id)
+        let moved = try XCTUnwrap(ProjectStore.moveProject(at: incoming, into: folder))
+        XCTAssertEqual(ProjectBackupManager.manifestID(at: moved), id)
+        try Data("wrecked".utf8).write(to: moved.appendingPathComponent("manifest.json"))
+        XCTAssertTrue(ProjectBackupManager.restoreNewestValidBackup(forProjectAt: moved))
+        XCTAssertEqual(Set(ProjectStore.listProjects(in: folder).map(\.name)), ["Rough", "Rough 2"])
+    }
+
     /// Trash lookup for a project that lives in a folder: the "is there still a live project of this
     /// name" check that guards a backup history is tree-wide, so an expiring trash item cannot take
     /// a filed project's restore points with it.

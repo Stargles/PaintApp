@@ -655,11 +655,10 @@ nonisolated enum ProjectBackupManager {
     /// re-invented, because a folder appearing that the artist deleted is a side effect they did not
     /// ask for and cannot see coming.
     ///
-    /// Returns nil only when the move itself failed, in which case the entry is still in Trash,
-    /// still complete, and still listed.
+    /// Returns nil when the move or its collision-name write failed. The entry remains complete
+    /// in Trash and remains listed.
     @discardableResult
     static func restoreFromTrash(_ trashURL: URL) -> TrashRestore? {
-        let fm = FileManager.default
         let base = parseTrashName(trashURL.deletingPathExtension().lastPathComponent)?.base ?? "Recovered"
         let origin = folderComponents(of: trashURL.deletingLastPathComponent(), under: trashDirectory) ?? []
         let wanted = origin.reduce(projectsDirectory) { $0.appendingPathComponent($1, isDirectory: true) }
@@ -669,9 +668,10 @@ nonisolated enum ProjectBackupManager {
         let originIsThere = origin.isEmpty || isDirectory(wanted)
 
         let destination = uniqueProjectURL(baseName: base, in: originIsThere ? wanted : projectsDirectory)
-        guard (try? fm.moveItem(at: trashURL, to: destination)) != nil else { return nil }
-        pruneEmptyTrashFolders()
         let landedStem = destination.deletingPathExtension().lastPathComponent
+        guard ProjectPackageName.move(trashURL, to: destination,
+            retitling: landedStem == base ? nil : landedStem) != nil else { return nil }
+        pruneEmptyTrashFolders()
         return TrashRestore(url: destination,
                             origin: origin,
                             missingOriginFolder: originIsThere ? nil : origin.joined(separator: " / "),

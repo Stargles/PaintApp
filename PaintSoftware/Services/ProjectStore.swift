@@ -205,7 +205,8 @@ enum ProjectStore {
             destination = directory.appendingPathComponent("\(base) \(suffix).paintproj")
             suffix += 1
         }
-        return (try? fm.moveItem(at: url, to: destination)).map { destination }
+        let title = destination.deletingPathExtension().lastPathComponent
+        return ProjectPackageName.move(url, to: destination, retitling: title == base ? nil : title)
     }
 
     /// "Delete" never destroys data: the package moves to Trash (auto-purged only after

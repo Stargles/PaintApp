@@ -631,6 +631,58 @@ nonisolated enum ProjectPackageLayout {
 /// line at the call site.
 nonisolated enum ProjectPackageName {
 
+    /// A filing move or Trash restore, optionally taking the collision name the destination chose.
+    /// Edit only metadata, never load cels. A refused metadata write leaves the package at its old
+    /// address; a refused move restores the old metadata. Both use atomic writes and a move that
+    /// cannot overwrite an occupied destination. The existing rename gate follows the same project
+    /// identity and its backup-origin marker follows the successful landing.
+    static func move(_ source: URL, to destination: URL, retitling title: String? = nil) -> URL? {
+        let fm = FileManager.default
+        let projectID = ProjectBackupManager.manifestID(at: source)
+        let move = { () -> URL? in
+            let manifestURL = source.appendingPathComponent("manifest.json")
+            var original: Data?
+            if let title {
+                do {
+                    let bytes = try Data(contentsOf: manifestURL)
+                    guard var fields = try JSONSerialization.jsonObject(with: bytes) as? [String: Any],
+                          fields["name"] is String else { return nil }
+                    fields["name"] = title
+                    let renamed = try JSONSerialization.data(withJSONObject: fields,
+                        options: [.sortedKeys, .withoutEscapingSlashes])
+                    try renamed.write(to: manifestURL, options: .atomic)
+                    original = bytes
+                } catch { return nil }
+            }
+            do {
+                try fm.moveItem(at: source, to: destination)
+                if let projectID {
+                    ProjectBackupManager.noteProjectRenamed(projectID: projectID,
+                        to: destination.lastPathComponent)
+                    if title != nil {
+                        ProjectBackupManager.refreshLatestSnapshot(projectURL: destination, projectID: projectID)
+                    }
+                }
+                return destination
+            } catch {
+                if let original {
+                    do { try original.write(to: manifestURL, options: .atomic) }
+                    catch {
+                        // The package remains complete at its original location even if its title
+                        // could not be put back. Never delete it to hide a refused filing operation.
+                        Logger(subsystem: "Starg.PaintSoftware", category: "ProjectRename")
+                            .error("Project title rollback failed: \(String(describing: error), privacy: .public)")
+                    }
+                }
+                return nil
+            }
+        }
+        if let projectID {
+            return PackageRenameGate.renamingIdlePackage(at: source, projectID: projectID, move)
+        }
+        return move()
+    }
+
     /// Character cap: what reads as a folder name rather than a paragraph.
     static let maximumStemCharacters = 60
     /// Byte cap, which is the one the filesystem enforces. A component must stay under 255 **bytes**,
