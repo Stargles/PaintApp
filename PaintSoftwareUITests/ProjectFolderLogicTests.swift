@@ -260,14 +260,26 @@ final class ProjectFolderLogicTests: XCTestCase {
     }
 
     func testRefusedMoveRestoresTheOriginalTitleWithoutOverwritingItsOccupant() throws {
-        let folder = try ProjectStore.createFolder(named: "Shots", in: ProjectStore.projectsDirectory)
-        let occupied = writeProject(named: "Rough", in: folder)
-        let incoming = writeProject(named: "Rough", in: ProjectStore.projectsDirectory)
-        let original = try Data(contentsOf: incoming.appendingPathComponent("manifest.json"))
-        let other = try Data(contentsOf: occupied.appendingPathComponent("manifest.json"))
-        XCTAssertNil(ProjectPackageName.move(incoming, to: occupied, retitling: "Rough 2"))
-        XCTAssertEqual(try Data(contentsOf: occupied.appendingPathComponent("manifest.json")), other)
-        XCTAssertEqual(try Data(contentsOf: incoming.appendingPathComponent("manifest.json")), original)
+        for existingMarker in [true, false] {
+            let folder = try ProjectStore.createFolder(named: "Shots \(existingMarker)", in: ProjectStore.projectsDirectory)
+            let occupied = writeProject(named: "Rough", in: folder)
+            let live = writeProject(named: "Rough", in: ProjectStore.projectsDirectory)
+            let id = try XCTUnwrap(ProjectBackupManager.manifestID(at: live))
+            ProjectBackupManager.refreshLatestSnapshot(projectURL: live, projectID: id)
+            let marker = ProjectBackupManager.backupsRootDirectory.appendingPathComponent(id.uuidString)
+                .appendingPathComponent("origin.name")
+            let markerBytes: Data? = existingMarker ? Data([0xff, 0x00, 0x0a]) : nil
+            if let markerBytes { try markerBytes.write(to: marker) }
+            else { try FileManager.default.removeItem(at: marker) }
+            let incoming = try XCTUnwrap(ProjectBackupManager.moveToTrash(live, tag: "deleted"))
+            let original = try Data(contentsOf: incoming.appendingPathComponent("manifest.json"))
+            let other = try Data(contentsOf: occupied.appendingPathComponent("manifest.json"))
+            XCTAssertNil(ProjectPackageName.move(incoming, to: occupied, retitling: "Rough 2"))
+            let restoredMarker = FileManager.default.fileExists(atPath: marker.path) ? try Data(contentsOf: marker) : nil
+            XCTAssertEqual(restoredMarker, markerBytes, "a refused Trash move preserves marker bytes or absence")
+            XCTAssertEqual(try Data(contentsOf: occupied.appendingPathComponent("manifest.json")), other)
+            XCTAssertEqual(try Data(contentsOf: incoming.appendingPathComponent("manifest.json")), original)
+        }
     }
 
     func testCollisionRetitleKeepsTheBackupRecoveryNameAndProjectIdentity() throws {

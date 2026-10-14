@@ -657,10 +657,6 @@ nonisolated enum ProjectPackageName {
                         original = bytes
                     } catch { return nil }
                 }
-                if let projectID {
-                    ProjectBackupManager.noteProjectRenamed(projectID: projectID,
-                        to: destination.lastPathComponent)
-                }
                 do {
                     try fm.moveItem(at: source, to: destination)
                     if let projectID {
@@ -670,10 +666,6 @@ nonisolated enum ProjectPackageName {
                     }
                     return destination
                 } catch {
-                    if let projectID {
-                        ProjectBackupManager.noteProjectRenamed(projectID: projectID,
-                            to: source.lastPathComponent)
-                    }
                     if let original {
                         do { try original.write(to: manifestURL, options: .atomic) }
                         catch {
@@ -687,7 +679,10 @@ nonisolated enum ProjectPackageName {
                 }
             }
             if let projectID {
-                return PackageRenameGate.renamingOpenPackage(from: source, projectID: projectID, move)
+                return PackageRenameGate.renamingOpenPackage(from: source, projectID: projectID) {
+                    ProjectBackupManager.withProjectRenameOrigin(projectID: projectID,
+                        to: destination.lastPathComponent, move)
+                }
             }
             return move()
         }

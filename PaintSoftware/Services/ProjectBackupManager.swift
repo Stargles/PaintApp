@@ -984,8 +984,38 @@ nonisolated enum ProjectBackupManager {
         return candidate
     }
 
-    private static func writeOriginMarker(directory: URL, projectFileName: String) {
-        try? projectFileName.write(to: directory.appendingPathComponent("origin.name"), atomically: true, encoding: .utf8)
+    @discardableResult
+    private static func writeOriginMarker(directory: URL, projectFileName: String) -> Bool {
+        do {
+            try projectFileName.write(to: directory.appendingPathComponent("origin.name"),
+                                      atomically: true, encoding: .utf8)
+            return true
+        } catch { return false }
+    }
+
+    /// Explicit moves preserve the exact old marker on refusal, including absence. A Trash package's
+    /// timestamped filename cannot stand in for the marker its live scene previously wrote.
+    static func withProjectRenameOrigin(projectID: UUID, to filename: String,
+                                        _ move: () -> URL?) -> URL? {
+        let fm = FileManager.default
+        let directory = backupsRootDirectory.appendingPathComponent(projectID.uuidString, isDirectory: true)
+        guard fm.fileExists(atPath: directory.path) else { return move() }
+        let marker = directory.appendingPathComponent("origin.name")
+        let original: Data?
+        do { original = fm.fileExists(atPath: marker.path) ? try Data(contentsOf: marker) : nil }
+        catch { return nil }
+        guard writeOriginMarker(directory: directory, projectFileName: filename) else { return nil }
+        let landed = move()
+        if landed == nil {
+            do {
+                if let original { try original.write(to: marker, options: .atomic) }
+                else { try fm.removeItem(at: marker) }
+            } catch {
+                Logger(subsystem: "Starg.PaintSoftware", category: "ProjectRename")
+                    .error("Backup origin rollback failed: \(String(describing: error), privacy: .public)")
+            }
+        }
+        return landed
     }
 
     /// **Points a project's backup folder at the name its package is about to have** — TODO (57)
