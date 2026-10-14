@@ -43,6 +43,10 @@ final class LegacyMaskRepairLogicTests: XCTestCase {
         XCTAssertEqual(rewritten.map(\.threshold), [0.1, 0.1])
         XCTAssertEqual(rewritten.map(\.antialiasHalfWidth), [0.01, 0.01])
         XCTAssertEqual(rewritten.map(\.invert), [false, false])
+        XCTAssertEqual(rewritten.map(\.isEnabled), [true, true])
+        XCTAssertEqual(rewritten.first?.sources.map { $0.id.uuidString },
+                       ["7D7F35BB-D277-42D0-BFF5-7C7C237A3645", "E331C25C-0F5D-421B-BACA-C2A90C0FFB4C",
+                        "62A497C2-04F1-466F-89AE-0C72A1917C68"])
         let once = try Data(contentsOf: package.appendingPathComponent("manifest.json"))
         XCTAssertEqual(LegacyMaskRepair.repair(packageAt: package), .alreadyCurrent)
         XCTAssertEqual(try Data(contentsOf: package.appendingPathComponent("manifest.json")), once)
