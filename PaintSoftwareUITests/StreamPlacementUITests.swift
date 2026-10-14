@@ -2,11 +2,6 @@ import XCTest
 
 /// Cold-start reachability and actual pixels, including the artist's rotoscoping gesture.
 final class StreamPlacementUITests: StreamUITestCase {
-    override func setUpWithError() throws {
-        try super.setUpWithError()
-        XCUIDevice.shared.orientation = .landscapeLeft
-    }
-
     private func selectLayer(_ app: XCUIApplication, _ index: Int) {
         openLayerPanel(app)
         let row = app.staticTexts["layerPanel.row.\(index)"]
@@ -42,7 +37,7 @@ final class StreamPlacementUITests: StreamUITestCase {
         laptop.show(.blue)
         waitForPicture(.black, on: canvas)
         XCTAssertFalse(app.staticTexts["streamBar.pictureNote"].exists)
-        attachScreenshot(XCUIScreen.main, "In Place under Multiply on iPad 9 landscape")
+        attachScreenshot(XCUIScreen.main, "In Place under Multiply")
         placement.tap()
         waitForPicture(.green, on: canvas, "On Top still shows the frozen computer frame")
         app.buttons["streamBar.freezeButton"].tap()
@@ -88,6 +83,9 @@ final class StreamPlacementUITests: StreamUITestCase {
         XCTAssertTrue(readScreenNow([inkPoint]).first.flatMap { $0 }.map { Colour.black.matches($0) } == true,
             "the landed composite retains the ink beside the Guide")
         attachScreenshot(XCUIScreen.main, "Guide remains above stream-layer ink")
+        // The shared sampler reads portrait pixels; the owner's layout is captured natively below.
+        XCUIDevice.shared.orientation = .landscapeLeft
+        Thread.sleep(forTimeInterval: 1)
         print("S49 STREAM LANDSCAPE READY")
         Thread.sleep(forTimeInterval: 3)
     }
