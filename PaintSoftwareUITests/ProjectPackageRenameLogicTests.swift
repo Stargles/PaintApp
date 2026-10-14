@@ -46,6 +46,23 @@ final class ProjectPackageRenameLogicTests: XCTestCase {
         root = nil
     }
 
+    func testFilingAnOpenedProjectWaitsForItsPendingRenameAndLaterSaveFollowsIt() throws {
+        let (manager, original) = savedProject(titled: "Rough")
+        _ = try XCTUnwrap(ProjectStore.load(from: original))
+        let folder = try ProjectStore.createFolder(named: "Shots", in: ProjectStore.projectsDirectory)
+        manager.projectName = "Final"
+        let finished = expectation(description: "pending rename completed")
+        ProjectStore.save(manager, to: original) { finished.fulfill() }
+        let moved = try XCTUnwrap(ProjectStore.moveProject(at: original, into: folder))
+        wait(for: [finished], timeout: 30)
+        XCTAssertEqual(moved.lastPathComponent, "Final.paintproj")
+        // A completion queued before the move can still hand the document the former address.
+        save(manager, to: original)
+        XCTAssertEqual(ProjectBackupManager.allProjectPackages().map(\.standardizedFileURL),
+                       [moved.standardizedFileURL])
+        assertInkSurvived(at: moved, "a queued save after filing")
+    }
+
     // MARK: - Fixtures
 
     /// The two sample coordinates the fixture stroke is drawn through. Named, so that "the ink

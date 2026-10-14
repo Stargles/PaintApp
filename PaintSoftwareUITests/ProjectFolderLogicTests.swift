@@ -255,8 +255,8 @@ final class ProjectFolderLogicTests: XCTestCase {
         try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: incoming.path)
         defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: incoming.path) }
         XCTAssertNil(ProjectStore.moveProject(at: incoming, into: folder))
-        XCTAssertEqual(try Data(contentsOf: incoming.appendingPathComponent("manifest.json")), original)
         XCTAssertEqual(try Data(contentsOf: occupied.appendingPathComponent("manifest.json")), other)
+        XCTAssertEqual(try Data(contentsOf: incoming.appendingPathComponent("manifest.json")), original)
     }
 
     func testRefusedMoveRestoresTheOriginalTitleWithoutOverwritingItsOccupant() throws {
@@ -266,8 +266,8 @@ final class ProjectFolderLogicTests: XCTestCase {
         let original = try Data(contentsOf: incoming.appendingPathComponent("manifest.json"))
         let other = try Data(contentsOf: occupied.appendingPathComponent("manifest.json"))
         XCTAssertNil(ProjectPackageName.move(incoming, to: occupied, retitling: "Rough 2"))
-        XCTAssertEqual(try Data(contentsOf: incoming.appendingPathComponent("manifest.json")), original)
         XCTAssertEqual(try Data(contentsOf: occupied.appendingPathComponent("manifest.json")), other)
+        XCTAssertEqual(try Data(contentsOf: incoming.appendingPathComponent("manifest.json")), original)
     }
 
     func testCollisionRetitleKeepsTheBackupRecoveryNameAndProjectIdentity() throws {

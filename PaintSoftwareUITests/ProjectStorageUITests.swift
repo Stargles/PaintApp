@@ -418,6 +418,42 @@ final class ProjectStorageUITests: PaintUITestCase {
                        "which is the top of the tree, not some folder we are still standing in")
     }
 
+    func testAJustDrawnProjectMovesOntoATakenNameAndBothTilesRemainReachable() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-resetGallery"]
+        app.launch()
+        XCTAssertTrue(app.buttons["gallery.newCanvasButton"].waitForExistence(timeout: 15))
+        makeFolder(app, named: "Shots")
+        app.buttons["gallery.folderTile.Shots"].tap()
+        for index in 0..<2 {
+            app.buttons["gallery.newCanvasButton"].tap()
+            app.buttons["sizePicker.createButton"].tap()
+            XCTAssertTrue(app.staticTexts["timeline.frameLabel"].waitForExistence(timeout: 25))
+            let canvas = app.otherElements["canvas.host"]
+            drawLine(on: canvas, from: CGVector(dx: 0.35, dy: 0.45), to: CGVector(dx: 0.6, dy: 0.6))
+            let field = app.textFields["timeline.projectNameField"]
+            field.tap()
+            field.typeText("Rough\n")
+            returnToGallery(app)
+            XCTAssertTrue(app.buttons["gallery.tileMenu.Rough"].waitForExistence(timeout: 15))
+            if index == 0 { app.buttons["gallery.breadcrumbBack"].tap() }
+        }
+        app.buttons["gallery.tileMenu.Rough"].tap()
+        app.buttons["Move to…"].tap()
+        let destination = app.buttons["gallery.moveTarget.Shots"]
+        XCTAssertTrue(destination.waitForExistence(timeout: 10))
+        destination.tap()
+        app.buttons["gallery.folderTile.Shots"].tap()
+        XCTAssertTrue(app.buttons["gallery.tileMenu.Rough"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["gallery.tileMenu.Rough 2"].waitForExistence(timeout: 15))
+        attachScreenshot(app, "drawn-project-filed-with-both-titles")
+        app.staticTexts["Rough 2"].tap()
+        XCTAssertTrue(app.staticTexts["timeline.frameLabel"].waitForExistence(timeout: 25))
+        XCTAssertEqual(app.textFields["timeline.projectNameField"].value as? String, "Rough 2")
+        let marker = try XCTUnwrap(readVectorMarker(app))
+        XCTAssertEqual(marker.strokes, 1)
+    }
+
     // MARK: - Helpers
 
     /// Deletes a project through its tile menu, confirming the alert. Both call sites are in the same

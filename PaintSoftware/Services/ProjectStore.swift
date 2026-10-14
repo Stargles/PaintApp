@@ -195,6 +195,10 @@ enum ProjectStore {
     /// Returns the new URL, or nil if the move failed — a package left exactly where it was.
     @discardableResult
     static func moveProject(at url: URL, into directory: URL) -> URL? {
+        return serializingPackageMutation {
+        let url = ProjectBackupManager.manifestID(at: url).map {
+            PackageRenameGate.currentLocation(of: url, projectID: $0)
+        } ?? url
         let fm = FileManager.default
         guard url.deletingLastPathComponent().standardizedFileURL != directory.standardizedFileURL else { return url }
         try? fm.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -207,6 +211,7 @@ enum ProjectStore {
         }
         let title = destination.deletingPathExtension().lastPathComponent
         return ProjectPackageName.move(url, to: destination, retitling: title == base ? nil : title)
+        }
     }
 
     /// "Delete" never destroys data: the package moves to Trash (auto-purged only after
@@ -644,7 +649,19 @@ enum ProjectStore {
     /// that. Two overlapping saves — an autosave from `scenePhase` racing the user leaving the editor
     /// — must not interleave their stage/validate/stash/rename steps, or one could rename its package
     /// into place while the other is stashing what it believes is the live one.
-    private static let saveQueue = DispatchQueue(label: "com.paintapp.ProjectStore.save", qos: .userInitiated)
+    private static let saveQueueKey = DispatchSpecificKey<Bool>()
+    private static let saveQueue: DispatchQueue = {
+        let queue = DispatchQueue(label: "com.paintapp.ProjectStore.save", qos: .userInitiated)
+        queue.setSpecific(key: saveQueueKey, value: true)
+        return queue
+    }()
+
+    /// Explicit gallery moves wait behind pending saves. Nested naming helpers stay on this queue;
+    /// they never wait for a main-actor save completion, which would deadlock the gallery action.
+    static func serializingPackageMutation<T>(_ body: () -> T) -> T {
+        if DispatchQueue.getSpecific(key: saveQueueKey) == true { return body() }
+        return saveQueue.sync(execute: body)
+    }
 
     /// STREAM.md §6: a stream's last picture is saved as JPEG at this quality.
     static let streamLastFrameJPEGQuality: CGFloat = 0.9

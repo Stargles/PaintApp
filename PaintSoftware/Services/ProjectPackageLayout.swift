@@ -635,10 +635,13 @@ nonisolated enum ProjectPackageName {
     /// Edit only metadata, never load cels. A refused metadata write leaves the package at its old
     /// address; a refused move restores the old metadata. Both use atomic writes and a move that
     /// cannot overwrite an occupied destination. The existing rename gate follows the same project
-    /// identity and its backup-origin marker follows the successful landing.
+    /// identity. User moves serialize with saves; the backup-origin marker is written before the
+    /// directory move and rolled back when it fails.
     static func move(_ source: URL, to destination: URL, retitling title: String? = nil) -> URL? {
-        let fm = FileManager.default
         let projectID = ProjectBackupManager.manifestID(at: source)
+        return ProjectStore.serializingPackageMutation {
+        let source = projectID.map { PackageRenameGate.currentLocation(of: source, projectID: $0) } ?? source
+        let fm = FileManager.default
         let move = { () -> URL? in
             let manifestURL = source.appendingPathComponent("manifest.json")
             var original: Data?
@@ -654,17 +657,23 @@ nonisolated enum ProjectPackageName {
                     original = bytes
                 } catch { return nil }
             }
+            if let projectID {
+                ProjectBackupManager.noteProjectRenamed(projectID: projectID,
+                    to: destination.lastPathComponent)
+            }
             do {
                 try fm.moveItem(at: source, to: destination)
                 if let projectID {
-                    ProjectBackupManager.noteProjectRenamed(projectID: projectID,
-                        to: destination.lastPathComponent)
                     if title != nil {
                         ProjectBackupManager.refreshLatestSnapshot(projectURL: destination, projectID: projectID)
                     }
                 }
                 return destination
             } catch {
+                if let projectID {
+                    ProjectBackupManager.noteProjectRenamed(projectID: projectID,
+                        to: source.lastPathComponent)
+                }
                 if let original {
                     do { try original.write(to: manifestURL, options: .atomic) }
                     catch {
@@ -678,9 +687,10 @@ nonisolated enum ProjectPackageName {
             }
         }
         if let projectID {
-            return PackageRenameGate.renamingIdlePackage(at: source, projectID: projectID, move)
+            return PackageRenameGate.renamingOpenPackage(from: source, projectID: projectID, move)
         }
         return move()
+        }
     }
 
     /// Character cap: what reads as a folder name rather than a paragraph.
