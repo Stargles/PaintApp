@@ -1312,8 +1312,6 @@ struct ColourKey: Codable, Equatable, Hashable {
     static let defaultTolerance = 0.1
     static let defaultSoftness = 0.5
 
-    static var blank: ColourKey { RecolorEntry.blank.key }
-
     func hash(into hasher: inout Hasher) {
         hasher.combine(from.red); hasher.combine(from.green); hasher.combine(from.blue)
         hasher.combine(from.alpha); hasher.combine(tolerance); hasher.combine(softness)

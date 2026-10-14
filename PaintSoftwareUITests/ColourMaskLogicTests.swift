@@ -197,6 +197,33 @@ final class ColourMaskLogicTests: XCTestCase {
         withExtendedLifetime(observation) {}
     }
 
+    func testFolderTuningHoldDoesNotChangeAnotherMaskAndCommitsAsOneUndoStep() throws {
+        let manager = CanvasFixture.manager(layerCount: 3)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0,
+            CanvasFixture.solidImage(UIColor(red: 1, green: 0, blue: 0, alpha: 0.5),
+                                     rect: CGRect(x: 0, y: 0, width: 64, height: 64)))
+        CanvasFixture.setBakedContent(manager, layerIndex: 2,
+            CanvasFixture.solidImage(.blue, rect: CGRect(x: 0, y: 0, width: 64, height: 64)))
+        manager.layers[0].isVisible = false
+        manager.layers[1].isVisible = false
+        let other = AlphaMask(sources: [.layer(manager.layers[0].id)])
+        manager.layers[1].alphaMask = other
+        let folder = manager.addFolder(name: "Masked group")
+        manager.layers[2].parentFolderID = folder
+        manager.folders[0].alphaMask = other
+        var held = other
+        held.setTuning(threshold: 0.9, antialiasHalfWidth: 0.01)
+        let before = try bytes(manager)
+        manager.holdMask(held, for: .folder(folder))
+        XCTAssertEqual(try bytes(manager, holding: manager.liveEdit).filter { $0 != 0 }.count, 0)
+        XCTAssertEqual(manager.folders[0].alphaMask, other)
+        manager.commitHeldMask()
+        XCTAssertEqual(manager.folders[0].alphaMask, held)
+        XCTAssertEqual(manager.layers[1].alphaMask, other)
+        manager.undo()
+        XCTAssertEqual(try bytes(manager), before)
+    }
+
     func testMaskEyedropperReadsTickedHiddenSourcesAndKeepsPanelOpen() throws {
         let manager = fixture()
         let target = MaskSource.layer(manager.layers[1].id)
