@@ -130,13 +130,13 @@ canvas to remove the old surface. Otherwise that mint sees the committed fill an
 together, darkening translucent fills. Pin the combined boundary before merging the integration.
 
 - [ ] Reproduce with two successive fills; fix the cause and pin the visible handoff with a cold-start UI test.
-  Initial baseline sampling forced landscape, but `MidGestureSampler` uses portrait raw screenshot
-  coordinates. That baseline result is invalid and is not evidence of the gap; rerun the seeded and fixed
-  transition test in portrait before accepting its pixels. The existing simulator-only
-  `-uiTestSlowVectorRenderMillis 300` seed delays the background vector-render queue, not the main
-  thread. Code tracing identifies the hypothesis to test: the transient fill surface may be removed
-  synchronously before the vector element or raster pixels are written, while the next committed base
-  is pending.
+  The seeded pre-fix path fails the transition UI assertion in portrait at `55a1795`: the first filled
+  region is visible before the second tap, then at least one 50 ms sample loses it while the 300 ms
+  background vector-render delay is active. The earlier landscape sample was invalid because
+  `MidGestureSampler` reads portrait screenshot coordinates. The seed delays the background render queue,
+  not the main thread. A logic test now exercises the real `commitInteractiveFill` boundary: the vector
+  version or raster texture must already be replaced while `liveFill` remains present for handoff; a
+  cancelled fill and empty commit must not announce a landing.
 
 ## (177) A stream layer can draw in place in the layer stack
 

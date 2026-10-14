@@ -155,6 +155,66 @@ final class FillWindowLogicTests: XCTestCase {
 
     // MARK: - The gesture
 
+    /// The view must receive the already-committed picture while the editable fill is still held:
+    /// a vector's version has advanced, and a raster's replaced texture is installed. Cancelling a
+    /// live fill drops the surface without pretending that anything landed.
+    func testFillLandingCallbackRunsAfterWriteBeforePreviewRelease() throws {
+        try XCTSkipIf(MetalFillEngine.shared == nil, "no Metal device")
+
+        let vectorManager = CanvasFixture.manager()
+        vectorManager.brushColor = Self.red
+        vectorManager.layers[0].kind = .vector
+        let vectorCanvas = VectorCanvas(size: CanvasFixture.canvasSize)
+        vectorManager.layers[0].cels[0].vector = vectorCanvas
+        let initialVectorVersion = vectorCanvas.version
+        var vectorLandingObserved = false
+        vectorManager.onLiveFillWillLand = { preview in
+            vectorLandingObserved = vectorManager.liveFill != nil
+                && vectorCanvas.version > initialVectorVersion
+                && preview.rect == vectorManager.fillLastRender?.window.rect
+        }
+        vectorManager.beginInteractiveFill(at: CGPoint(x: 32, y: 32))
+        vectorManager.endInteractiveFill()
+        vectorManager.fillQueue.sync {}
+        settle()
+        XCTAssertNotNil(vectorManager.liveFill?.preview, "the vector fill has a visible surface before commit")
+        vectorManager.commitInteractiveFill()
+        XCTAssertTrue(vectorLandingObserved,
+                      "the vector replacement is written before the exact preview is handed off")
+        XCTAssertNil(vectorManager.liveFill, "the fill surface is released after its replacement is held")
+
+        let rasterManager = CanvasFixture.manager()
+        rasterManager.brushColor = Self.red
+        let oldRaster = rasterManager.layers[0].cels[0].raster
+        var rasterLandingObserved = false
+        rasterManager.onLiveFillWillLand = { _ in
+            rasterLandingObserved = rasterManager.liveFill != nil
+                && rasterManager.layers[0].cels[0].raster !== oldRaster
+        }
+        rasterManager.beginInteractiveFill(at: CGPoint(x: 32, y: 32))
+        rasterManager.endInteractiveFill()
+        rasterManager.fillQueue.sync {}
+        settle()
+        rasterManager.commitInteractiveFill()
+        XCTAssertTrue(rasterLandingObserved,
+                      "the replaced raster is installed before the fill surface is released")
+        XCTAssertNil(rasterManager.liveFill)
+
+        let cancelledManager = CanvasFixture.manager()
+        cancelledManager.brushColor = Self.red
+        var cancelledLandingObserved = false
+        cancelledManager.onLiveFillWillLand = { _ in cancelledLandingObserved = true }
+        cancelledManager.beginInteractiveFill(at: CGPoint(x: 32, y: 32))
+        cancelledManager.endInteractiveFill()
+        cancelledManager.fillQueue.sync {}
+        settle()
+        XCTAssertNotNil(cancelledManager.liveFill?.preview, "the cancellation starts from a visible fill")
+        cancelledManager.cancelInteractiveFill()
+        cancelledManager.commitInteractiveFill()
+        XCTAssertFalse(cancelledLandingObserved, "cancel and an empty commit do not announce a landing")
+        XCTAssertNil(cancelledManager.liveFill)
+    }
+
     /// Larger than a bucket's first window on both axes, and small enough that a session over the
     /// whole of it is a few dozen megabytes on the simulator.
     private static let largeCanvas = CGSize(width: 1400, height: 1400)
