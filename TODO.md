@@ -178,8 +178,10 @@ changes the map; tighter integration loses the saving. Keep the current verified
 places 6,354 of 11,900 main-thread samples in the brush mask sampler. Exact lookup/SIMD experiments
 did not show a reliable improvement and are not adopted. A safeguarded acceleration of the same
 Euler inverse cuts the horizontal Push fixture to 179,020,536 evaluations (38.43% fewer), with all
-339,824 rendered bytes unchanged and no failed source solves. Native validation must cover arbitrary
-Push directions, grain and selections before adoption; other modes retain their existing solver.
+339,824 rendered bytes unchanged and no failed source solves. Native Release validation now covers 18 signed/diagonal, grain, selection and other-mode fixtures:
+all pixels match, no source solves fail, and non-Push coordinates/counts remain exact. The temporary
+oracle is removed; restored Release 7/7 passed. Integrate `ac8a177`, then `2acece9`; final combined
+gates remain. Other modes retain ordinary iteration.
 Evidence: `~/PaintWork/s49-liquify-profile/`, `~/PaintWork/evidence/s49-liquify-sampler/` and
 `~/PaintWork/evidence/s49-liquify-inverse-acceleration/`. Raster interaction cost is still open.
 The pending-lift finalizer now reuses finished procedural geometry and transfers the shown surface

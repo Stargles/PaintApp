@@ -64,8 +64,8 @@ Never harvest dirty worker files: mutations may be intentional.
   - **Storage:** actual `5d73184`-written package retained with provenance. Retarget, resize and strict
     selection decoding (`ae58c7e`, `1fd073e`, `42ff0b1`) are integrated: 47/47 Debug, fourteen distinct
     faults caught in fifteen runs, restored 3/3; earlier storage pass sixteen faults red, restored 12/12.
-    Expanded fixtures `f9ecedb`: all 25 distinct faults caught across 31 selected executions, restored
-    11/11 green. The fixture-only commit is ready to integrate; format worker simulator deleted. That worker now
+    Expanded fixtures `f9ecedb` (feature `6c457c9`): all 25 distinct faults caught across 31 selected
+    executions, restored 11/11 green. Format worker simulator deleted. That worker now
     owns the isolated raster task.
   - **Lift and held pictures:** shared source `25791ab`/feature `c07406f` transfers the shown IOSurface
     and composes overlapping pending replacement windows. Independent expected-image oracle
@@ -93,11 +93,13 @@ Never harvest dirty worker files: mutations may be intentional.
     Raster interaction cost remains open. CPU sampling identifies native alpha sampling as the largest
     cost; exact lookup/SIMD trials had no reliable gain. Continuous-flow integration changes the map
     or loses its saving at higher accuracy. Neither experiment is adopted. Same-Euler inverse
-    acceleration cuts the horizontal fixture's evaluations by 38.43% with identical RGBA; the isolated
+    acceleration cuts the horizontal fixture's evaluations by 38.43% with identical RGBA. Focused
     native Release validation passed 7/7: 18 signed/diagonal/pattern/grain/selection fixtures have
     identical RGBA and zero source failures. Hard-window evaluations fall to 48,236,266; patterned
-    to 179,020,536. Temporary oracle removal and restored checks remain before adoption. Timings were
-    not paired, so claim evaluation savings, not a speed ratio.
+    to 179,020,536. Ready commits `ac8a177`, then `2acece9`: temporary oracle removed, restored
+    Release 7/7, seven solver mutations and five retained-assertion input faults red. Inverse worker
+    simulator deleted. Root reviewed code and image pairs. Timings were not paired, so claim
+    evaluation savings, not a speed ratio. `~/PaintWork/evidence/s49-liquify-inverse-native/README.md`.
     Evidence: `~/PaintWork/s49-liquify-profile/`, `~/PaintWork/evidence/s49-liquify-sampler/`,
     `s49-liquify-flow-prototype/`, and `s49-liquify-inverse-acceleration/`.
   - **Raster:** ordinary raster hold/commit was absent. The owner ruled all pixels move, including
