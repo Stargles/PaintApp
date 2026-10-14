@@ -345,6 +345,9 @@ struct CanvasView: UIViewRepresentable {
         context.coordinator.canvasManager.onHeldPictureMoved = { [weak coordinator = context.coordinator] in
             coordinator?.heldPictureMoved()
         }
+        context.coordinator.canvasManager.onLiveFillWillLand = { [weak coordinator = context.coordinator] preview in
+            coordinator?.prepareLiveFillLanding(preview)
+        }
 
         // One undo step per whole move/scale/rotate drag, not per intermediate value — see
         // `CanvasManager.beginStructureGesture`'s doc comment. (Covers object-layer transforms;
@@ -2053,6 +2056,26 @@ struct CanvasView: UIViewRepresentable {
             updateShapeOverlay()
             if canvasManager.floatingPiece?.kind == .move {
                 selectionOverlay?.setLiveSelectionTransform(rasterFloatAntsTransform())
+            }
+        }
+
+        /// **Transfers a committed fill's picture before `endLiveEdit` takes its surface down.** A
+        /// vector base is rasterized asynchronously, so its exact visible preview joins the same
+        /// `UnlandedInk` set as a finished stroke until that version lands. A raster base can be
+        /// installed synchronously, so refresh it first and then let the fill surface go.
+        func prepareLiveFillLanding(_ preview: FillPreview) {
+            guard let fill = canvasManager.liveFill,
+                  let layerIndex = canvasManager.layers.firstIndex(where: { $0.id == fill.layerID }),
+                  let celIndex = canvasManager.layers[layerIndex].cels.firstIndex(where: { $0.id == fill.celID }),
+                  let host = layerHosts[fill.layerID] else { return }
+
+            let cel = canvasManager.layers[layerIndex].cels[celIndex]
+            if let vectorCanvas = cel.vector {
+                host.strokeView.vectorCanvas = vectorCanvas
+                host.strokeView.holdUnlandedWindow(preview.image, rect: preview.rect,
+                                                   at: vectorCanvas.version)
+            } else {
+                host.strokeView.raster = cel.raster
             }
         }
 

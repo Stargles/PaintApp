@@ -162,8 +162,9 @@ extension CanvasManager {
 
     /// Lets the gesture's picture go — its pixels are in the document by now, or were thrown away —
     /// and publishes once, so the canvas re-cuts without the fill's host.
-    private func endLiveFill() {
+    private func endLiveFill(landing preview: FillPreview? = nil) {
         guard liveFill != nil else { return }
+        if let preview { onLiveFillWillLand?(preview) }
         endLiveEdit()
     }
 
@@ -694,10 +695,10 @@ extension CanvasManager {
         // An empty lasso result stores no bytes at all, so §7.1's "no undo entry for a loop that
         // enclosed nothing" still falls out of that same guard.
         let shown = render?.preview(clippedTo: fillSelectionClip(layerIndex: layerIndex, celIndex: celIndex))
-        // Let go of the gesture's picture before the document takes its pixels, so the pass the write
-        // raises finds no fill to show over them.
-        endLiveFill()
-        guard let preview = shown else { return }  // nothing was previewed
+        guard let preview = shown else {
+            endLiveFill()
+            return
+        }  // nothing was previewed
 
         if layers[layerIndex].kind == .vector {
             // --- Vector layer: the fill becomes a VectorFillElement, never raster pixels ---
@@ -721,11 +722,18 @@ extension CanvasManager {
             guard let render,
                   let traced = PixelOps.pathFromAlphaMask(bytes: render.bytes, width: render.window.workingWidth,
                                                           height: render.window.workingHeight,
-                                                          minimumAlpha: coverageCut) else { return }
+                                                          minimumAlpha: coverageCut) else {
+                endLiveFill()
+                return
+            }
             var toCanvas = render.window.transform.inverted()
-            guard let path = traced.copy(using: &toCanvas) else { return }
-            placeVectorFill(path, paint: .solid(fillColor), layerIndex: layerIndex, celIndex: celIndex,
-                            label: label)
+            guard let path = traced.copy(using: &toCanvas),
+                  placeVectorFill(path, paint: .solid(fillColor), layerIndex: layerIndex, celIndex: celIndex,
+                                  label: label) != nil else {
+                endLiveFill()
+                return
+            }
+            endLiveFill(landing: preview)
         } else {
             let cel = layers[layerIndex].cels[celIndex]
             // --- Raster path: flatten into `raster` directly, with the fill on top ---
@@ -761,6 +769,7 @@ extension CanvasManager {
                                       oldRaster: cel.raster, oldBaked: fillGestureBaseBaked,
                                       newRaster: bakedRasterTexture(image: finalImage, likeExisting: cel.raster),
                                       newBaked: nil, label: label)
+            endLiveFill(landing: preview)
         }
     }
 

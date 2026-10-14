@@ -840,10 +840,8 @@ final class StrokeCanvasView: CanvasPlaneView {
             let image = UIGraphicsImageRenderer(size: window.size, format: format).image { ctx in
                 canvas.drawEditWindow(of: canvas.elements, in: window, into: ctx.cgContext, rewriting: [])
             }
-            unlandedInk.hold(UnlandedInk.Picture(id: nextUnlandedInkID, version: canvas.version,
-                                                 windowRect: window, alpha: 1, replacesBase: true,
-                                                 image: image))
-            nextUnlandedInkID += 1
+            holdUnlandedPicture(image, rect: window, alpha: 1, replacesBase: true,
+                                at: canvas.version)
         }
         showOverlays(scratch)
         return true
@@ -1330,9 +1328,24 @@ final class StrokeCanvasView: CanvasPlaneView {
         // Exactly the three fields `showOverlays` reads off a live scratch, so the picture does
         // not change when it changes hands.
         let alpha = scratch.replacesBase ? 1 : scratch.opacity
+        holdUnlandedPicture(image, rect: scratch.windowRect, alpha: alpha,
+                            replacesBase: scratch.replacesBase, at: version)
+    }
+
+    /// Holds a committed fill's already-visible window in the same set as finished stroke and edit
+    /// pictures. The vector base lands asynchronously; `refreshDisplay` retires this when its version
+    /// arrives, exactly as it does for every other unlanded picture.
+    func holdUnlandedWindow(_ image: UIImage, rect: CGRect, at version: Int) {
+        guard vectorCanvas != nil, !rect.isNull else { return }
+        holdUnlandedPicture(image, rect: rect, alpha: 1, replacesBase: false, at: version)
+        showOverlays(scratch)
+    }
+
+    private func holdUnlandedPicture(_ image: UIImage, rect: CGRect, alpha: CGFloat,
+                                    replacesBase: Bool, at version: Int) {
         unlandedInk.hold(UnlandedInk.Picture(id: nextUnlandedInkID, version: version,
-                                             windowRect: scratch.windowRect, alpha: alpha,
-                                             replacesBase: scratch.replacesBase, image: image))
+                                             windowRect: rect, alpha: alpha,
+                                             replacesBase: replacesBase, image: image))
         nextUnlandedInkID += 1
     }
 

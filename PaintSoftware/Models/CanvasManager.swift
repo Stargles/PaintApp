@@ -1140,6 +1140,11 @@ final class CanvasManager: ObservableObject {
     /// `onTimingStrokeFrameAdvanced`'s reason; installed by `CanvasView.Coordinator`, nil headless.
     var onHeldPictureMoved: (() -> Void)?
 
+    /// Called synchronously after a live fill has been written, but before its preview is released.
+    /// The canvas transfers vector previews to `UnlandedInk` or installs a new raster base here so
+    /// the old base is never exposed between the preview and its committed replacement.
+    var onLiveFillWillLand: ((FillPreview) -> Void)?
+
     /// **Holds `curves` — whole-curve replacements of `target`'s pose components — as the pose under
     /// the finger**: shown by the canvas and the band, written nowhere. Each call replaces the last,
     /// since a drag hands over everything it has moved since touch-down. Curves that change nothing —

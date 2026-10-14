@@ -918,6 +918,12 @@ it is the dependency order.
    committed render on its own queue and holds the finished stroke's scratch until it lands (§2.13);
    `DeferredVectorRender` is the ordering, headless.
 
+   **The same handoff covers a committed fill.** Before `LayerHostView` removes the adjustable fill's
+   surface, the exact shown window joins `UnlandedInk` at the vector canvas version that now includes
+   it; the surface and held window change together, and the held window retires with that base. A raster
+   fill instead installs its replaced raster into `StrokeCanvasView` synchronously before the surface
+   comes down. Cancelling or committing no pixels simply removes the transient surface.
+
    **Two things worth carrying forward.** (a) `VectorCanvas.Frozen` keeps a live reference beside its
    frozen values and renders through `render(quality:ifStillAtVersion:)`, so the composite shares the
    display's memo instead of re-stamping the cel — MEASURED on the owner's iPad 9 in Release,

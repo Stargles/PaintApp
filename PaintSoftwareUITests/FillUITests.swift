@@ -11,6 +11,87 @@ import XCTest
 
 final class FillContainmentUITests: PaintUITestCase {
 
+    /// The owner reports that a completed first fill flashes off the canvas as a second fill starts.
+    /// Keep reading the first region while the second tap commits the first gesture and starts its own;
+    /// every sample after the first fill lands must still show the first fill, not the stale base.
+    func testStartingASecondFillKeepsTheFirstFillVisible() throws {
+        let app = XCUIApplication()
+        XCUIDevice.shared.orientation = .landscapeLeft
+        app.launchArguments += ["-uiTestSlowVectorRenderMillis", "300"]
+        XCTAssertTrue(launchIntoEditor(app))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let visible = visiblePaperRect(app, in: canvas)
+        func at(_ x: Double, _ y: Double) -> CGVector { onHost(visible, x, y) }
+
+        for (left, right) in [(0.2, 0.45), (0.55, 0.8)] {
+            drawLine(on: canvas, from: at(left, 0.25), to: at(right, 0.25))
+            drawLine(on: canvas, from: at(right, 0.25), to: at(right, 0.75))
+            drawLine(on: canvas, from: at(right, 0.75), to: at(left, 0.75))
+            drawLine(on: canvas, from: at(left, 0.75), to: at(left, 0.25))
+        }
+
+        setBrushColor(app, hex: "FF0000")
+        let fill = app.buttons["toolbar.fillButton"]
+        XCTAssertTrue(fill.waitForExistence(timeout: 5))
+        fill.tap()
+        let firstProbe = at(0.325, 0.5)
+        let secondProbe = at(0.675, 0.5)
+        canvas.coordinate(withNormalizedOffset: firstProbe).tap()
+        XCTAssertNotNil(waitForPixel(canvas, at: firstProbe, matches: { isRed($0) }),
+                        "the first region is filled before starting the second")
+
+        let firstPoint = CGPoint(x: canvas.frame.minX + canvas.frame.width * firstProbe.dx,
+                                 y: canvas.frame.minY + canvas.frame.height * firstProbe.dy)
+        let sampler = MidGestureSampler(points: [firstPoint], interval: 0.05)
+        sampler.start()
+        canvas.coordinate(withNormalizedOffset: secondProbe).tap()
+        Thread.sleep(forTimeInterval: 2.5)
+        let samples = sampler.stop()
+
+        XCTAssertFalse(samples.isEmpty, "the first fill was sampled while the second fill started")
+        XCTAssertTrue(samples.allSatisfy { sample in sample.pixels.first.map { isRed($0) } == true },
+                      "the first fill must stay visible through the second fill's commit")
+        XCTAssertNotNil(waitForPixel(canvas, at: secondProbe, matches: { isRed($0) }),
+                        "the second fill lands too")
+        attachScreenshot(app, "two successive fills remain visible")
+    }
+
+    /// **The raster arm replaces its base before the adjustable surface goes away.** Run the same
+    /// artist sequence on a raster layer, whose committed texture is installed synchronously.
+    func testStartingASecondRasterFillKeepsTheFirstVisible() throws {
+        let app = XCUIApplication()
+        XCUIDevice.shared.orientation = .landscapeLeft
+        XCTAssertTrue(launchIntoEditor(app))
+        addRasterLayer(app)
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let visible = visiblePaperRect(app, in: canvas)
+        func at(_ x: Double, _ y: Double) -> CGVector { onHost(visible, x, y) }
+
+        for (left, right) in [(0.2, 0.45), (0.55, 0.8)] {
+            drawLine(on: canvas, from: at(left, 0.25), to: at(right, 0.25))
+            drawLine(on: canvas, from: at(right, 0.25), to: at(right, 0.75))
+            drawLine(on: canvas, from: at(right, 0.75), to: at(left, 0.75))
+            drawLine(on: canvas, from: at(left, 0.75), to: at(left, 0.25))
+        }
+
+        setBrushColor(app, hex: "FF0000")
+        let fill = app.buttons["toolbar.fillButton"]
+        XCTAssertTrue(fill.waitForExistence(timeout: 5))
+        fill.tap()
+        let first = at(0.325, 0.5), second = at(0.675, 0.5)
+        canvas.coordinate(withNormalizedOffset: first).tap()
+        XCTAssertNotNil(waitForPixel(canvas, at: first, matches: { isRed($0) }),
+                        "the first raster region is filled")
+        canvas.coordinate(withNormalizedOffset: second).tap()
+        XCTAssertNotNil(waitForPixel(canvas, at: first, matches: { isRed($0) }),
+                        "replacing the raster base does not drop the first fill")
+        XCTAssertNotNil(waitForPixel(canvas, at: second, matches: { isRed($0) }),
+                        "the second raster fill lands too")
+        attachScreenshot(app, "two successive raster fills remain visible")
+    }
+
     /// Draws a fully closed square in lineart, then taps the fill tool inside it and expects the
     /// interior (previously white paper) to end up colored.
     func testFillToolFillsClosedLineartRegion() throws {
