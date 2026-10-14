@@ -24,6 +24,8 @@ free filename `Rough 2.paintproj`, but its manifest still names it `Rough`, so b
 `Rough`. Collision restores from Trash use the same directory-only move and can announce a new name
 that the tile does not show. Keep one metadata-and-package rename path, preserve the project and its
 backup history, and refuse a metadata-write failure before moving either package.
+A refused Trash move must also restore the exact prior backup marker bytes or absence; its
+timestamped source filename is not the original live-project marker.
 
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
