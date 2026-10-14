@@ -110,7 +110,7 @@ final class LegacyMaskRepairLogicTests: XCTestCase {
             var editor = try XCTUnwrap(json["editorState"] as? [String: Any])
             editor.removeValue(forKey: "tools")
             json["editorState"] = editor
-            json["selectedBrush"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(manager.selectedBrush))
+            json["selectedBrush"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(BrushLibrary.roundSoft))
         }
         let original = try files(backup), displaced = try files(live)
         XCTAssertTrue(ProjectBackupManager.restoreBackup(at: backup, toProjectAt: live))
