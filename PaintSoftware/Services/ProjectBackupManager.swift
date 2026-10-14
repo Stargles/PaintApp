@@ -26,10 +26,9 @@ extension Notification.Name {
 /// (at most 44 a project, spread over a month), the trash retention window, and a global
 /// `maxTotalBackupBytes` cap — which never deletes a project's last remaining restore point.
 ///
-/// This type is deliberately pure Foundation (no UIKit/SwiftUI, no app-model dependencies — the
-/// manifest is probed via a private skeleton struct) so it can be compiled directly into the
-/// UI-test bundle for logic tests, the same pattern as `Engine/Brush.swift` (see
-/// `BrushEngineLogicTests.swift`'s header comment for why `@testable import` doesn't work there).
+/// File discovery and damage checks use a Foundation-only manifest skeleton. An explicit restore
+/// also asks `LibraryRepair` to prepare and strictly validate a staged copy before replacement; the
+/// scene’s current decoder owns that validation, without loading its cels.
 nonisolated enum ProjectBackupManager {
 
     // MARK: - Configuration (overridable by logic tests)
@@ -258,7 +257,7 @@ nonisolated enum ProjectBackupManager {
         pruneToSizeCap()
     }
 
-    /// ProjectStore.save stages new packages at `.saving-*` before swapping; a crash between
+    /// Saving and restoring stage new packages at `.saving-*` before swapping; a crash between
     /// staging and swapping leaves one behind. It's not user data (the live package was never
     /// touched), so it's just clutter to remove.
     static func cleanupStaleSaveDirectories() {
@@ -482,18 +481,30 @@ nonisolated enum ProjectBackupManager {
             }
     }
 
-    /// Restores a backup over the live package. The live package (damaged or just newer) is moved
-    /// to Trash rather than deleted, so even a mistaken restore is itself recoverable. The backup
-    /// is *cloned*, not moved, so the restore point survives. Refuses to restore a backup that
-    /// itself fails validation.
+    /// Repairs a staged clone and validates the current format before replacing the live scene.
+    /// The original restore point is never rewritten; the displaced live scene remains recoverable
+    /// in Trash. Staging uses the save prefix so the existing crash-cleanup sweep also removes an
+    /// interrupted restore’s temporary package.
     @discardableResult
     static func restoreBackup(at backupURL: URL, toProjectAt projectURL: URL, trashTag: String = "replaced") -> Bool {
         let fm = FileManager.default
         guard validateProject(at: backupURL) else { return false }
+        let staged = projectURL.deletingLastPathComponent()
+            .appendingPathComponent(".saving-restore-\(UUID().uuidString).paintproj")
+        defer { try? fm.removeItem(at: staged) }
+        guard cloneItem(at: backupURL, to: staged), LibraryRepair.prepareForCurrentRead(staged) else { return false }
+        var displaced: URL?
         if fm.fileExists(atPath: projectURL.path) {
-            guard moveToTrash(projectURL, tag: trashTag) != nil else { return false }
+            guard let trash = moveToTrash(projectURL, tag: trashTag) else { return false }
+            displaced = trash
         }
-        return cloneItem(at: backupURL, to: projectURL)
+        do {
+            try fm.moveItem(at: staged, to: projectURL)
+            return true
+        } catch {
+            if let displaced { try? fm.moveItem(at: displaced, to: projectURL) }
+            return false
+        }
     }
 
     /// The automatic-repair path: restores from the newest backup that itself passes validation.

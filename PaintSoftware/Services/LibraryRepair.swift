@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// **What every one-shot repair of the artist's library shares** — the walk over every package they
 /// have, and the rewrite of one JSON file that leaves the package dated as it was.
@@ -8,6 +9,38 @@ import Foundation
 /// repairs use this — pose tracks, tools and masks — and it goes with the last
 /// of them.
 nonisolated enum LibraryRepair {
+    private static let log = Logger(subsystem: "Starg.PaintSoftware", category: "LibraryRepair")
+
+    /// The same one-shot repairs on an explicit restore’s staged copy. Update snapshots stay in the
+    /// earlier format on purpose; repairing them in place would destroy the untouched recovery copy.
+    /// No cel is rendered or eagerly loaded here: the current manifest is decoded as metadata, then
+    /// the existing package validator checks every referenced file.
+    static func prepareForCurrentRead(_ package: URL) -> Bool {
+        let pose = LegacyPoseTrackRepair.repair(packageAt: package)
+        guard pose.failed.isEmpty, pose.skippedKeys.isEmpty else { return false }
+        // A fresh reader of the persisted library avoids reading the UI’s mutable brush store from
+        // the startup maintenance queue. This is used only while the tool-settings repair exists.
+        let earlier = LegacyToolSettingsRepair.EarlierAppWideTools(defaults: .standard,
+                                                                  library: BrushLibraryStore(arguments: []))
+        switch LegacyToolSettingsRepair.repair(packageAt: package, from: earlier) {
+        case .alreadyCurrent, .repaired: break
+        case .unreadable, .notWritten: return false
+        }
+        switch LegacyMaskRepair.repair(packageAt: package) {
+        case .alreadyCurrent, .repaired: break
+        case .unreadable, .notWritten: return false
+        }
+        // Stream-placement repair joins this sequence at integration, before current validation.
+        do {
+            let data = try Data(contentsOf: package.appendingPathComponent("manifest.json"))
+            _ = try JSONDecoder().decode(ProjectManifest.self, from: data)
+        } catch {
+            log.error("Restored scene cannot be read: \(String(describing: error), privacy: .public)")
+            return false
+        }
+        return ProjectBackupManager.validateProject(at: package)
+    }
+
 
     /// One package of the library, and its path below the library root for a report.
     struct Package {

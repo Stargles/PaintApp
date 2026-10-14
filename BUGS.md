@@ -1,3 +1,11 @@
+## Restoring an untouched update snapshot copies an old format into the live scene (2026-10-14)
+
+`restoreBackup` checks file presence through `ManifestSkeleton`, which intentionally ignores tools,
+poses and mask fields. A snapshot taken before the one-shot repairs passes that check, is copied over
+the live scene, and then fails the current strict decoder. The live scene has already moved to Trash.
+Restore must repair a staged copy through the existing one-shot repairs and strictly decode its
+manifest before moving the live scene. The original snapshot stays byte-for-byte untouched.
+
 # Known Issues
 
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
