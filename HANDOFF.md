@@ -15,22 +15,34 @@ is what we find.
 **Check `git worktree list` and every `tmp/*` branch first** (`git log --oneline origin/main..<branch>`)
 — `origin/main` is a shared ref and a cut-off session's work sits on its branch.
 
-**Session 49 is in flight.** The verified starting point is `5d73184`; no prior `tmp/*` branch held
-unmerged work. (189) is merged at `8616532`. Current task branches are `tmp/s49-fill-handoff` (190),
-`tmp/s49-stream` (177), `tmp/s49-masks` (35), and `tmp/s49-session` (coordination). Their worktrees are under `~/PaintWork/`.
-Do not harvest a worker's uncommitted files: the worker may be mutation-testing. Liquify (178) follows,
-including linked in-between frames (owner ruled 2026-10-14). New (190) is a brief first-fill flash when
-starting a second fill; test the owner's transient-to-bake handoff theory first.
+**Session 49 is in flight.** The verified starting point was `5d73184`; no prior `tmp/*` branch held
+unmerged work. (189) is merged at `8616532`. Task branches are `tmp/s49-fill-handoff` (190),
+`tmp/s49-stream` (177), `tmp/s49-masks` (35), and `tmp/s49-session` (coordination), under `~/PaintWork/`.
+Do not harvest uncommitted worker files: they may be deliberate test mutations. None is merge-ready yet.
+
+- **(190):** the first-fill flash is reproduced in portrait with a 300 ms background-render delay.
+  The restored fix and real commit-boundary logic test pass; missing handoff, early callback and false
+  cancellation landing mutations go red. Full UI/fast-tier checks remain. The earlier landscape pixel
+  evidence was invalid because `MidGestureSampler` assumes portrait; keep that limitation explicit.
+  The raster sequence also passes in portrait. An existing reference-layer test fails its iPad9 probe
+  but passes on a fresh 13-inch simulator (known geometry debt).
+- **(177):** Debug fast tier 5101, four skips, zero failures before rebasing onto `0ad03d2`; new UI class
+  four tests green. Logic and UI mutations exercised the stream sources, ordering and persistence.
+  Final Release and cleanup remain. Native landscape capture `/tmp/s49-stream-landscape.png` reviewed.
+- **(35):** 13 mutation batches and five feature/recovery UI tests complete; native landscape capture
+  `~/PaintWork/s49-mask-logs/mask-ipad9-controls-landscape.png` reviewed. Final Debug at 5103 exposed an
+  old partial-manifest fixture, now made current; that exposed a real move-to-colliding-folder title
+  inconsistency, being fixed through the existing rename writer. A timing red passed warm. Final
+  Debug/Release remain. At integration, add stream repair to `LibraryRepair.prepareForCurrentRead`.
+
+Liquify (178) follows, **including linked in-between frames** (owner ruled 2026-10-14). The current reuse,
+format and validation constraints are in `~/PaintWork/design/s49-liquify-constraints.md`; earlier surveys
+are alongside it. Keep the old `5d73184` Release app at `/tmp/s49-onion-before-derived` until a genuine
+previous-build interpolation package has been captured for its format repair.
 The owner permits any useful agent count but prioritises usage conservation and output quality over
 speed. Keep delegation focused, use cheaper models for routine work, and report the queue occasionally.
 The owner is asleep until 10 a.m. Toronto time; defer further questions until then.
-An interruption at 03:40 was recovered from the existing worktrees: the mask worker restored its
-deliberate backup-repair mutation before resuming. No worker is ready to merge yet.
-The full UI suite is owed on the integrated tree before the next install. Earlier session design notes
-remain in `~/PaintWork/design/`; `s49-liquify-constraints.md` records the current reuse seams and
-superseded premises for (178). The mask branch has rebased onto `4dde4ca`: its 13 mutation batches and
-five feature/recovery UI tests are complete; final Debug/Release tiers remain. Stream validation and
-the two-fill reproduction are still running. No worker is ready to merge yet.
+The full UI suite is owed on the integrated tree before the next install.
 
 **Build from `~/PaintWork`, not `~/Desktop`** (CLAUDE.md "Build and test", first paragraph).
 `~/PaintWork/deploy` is a detached worktree kept for device builds.
