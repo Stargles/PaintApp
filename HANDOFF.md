@@ -90,7 +90,11 @@ Never harvest dirty worker files: mutations may be intentional.
     ordered compact spatial operations and bounded inverse-coordinate tiles sampled from regenerated
     original material once. Reuse native stamping, stroke-group opacity/eraser order and `ImageWarp`.
     Runtime element copies must retain shared immutable operation definitions; deduplicate them at the
-    strict sidecar codec boundary, never through a global prepared-field pool. Stationary-boundary
+    strict scoped material-bundle codec boundary (including independently encoded `LocalEdit.stroke`),
+    never through a global prepared-field pool. Inverse source tiles need a bilinear halo and bounded
+    cache, not an allocation spanning every inverse sample. Reuse inverse-coordinate tiles across
+    strokes with the same operations; validate work counts for one versus many strokes.
+    Stationary-boundary
     gradient fills, scattered paint, size edits, cuts and transformed/linked frames are required cases.
     Comparison: `~/PaintWork/evidence/s49-liquify-selection-options-native-spacing/comparison.png`.
     Fixture checkpoint `99ef7c8`; current vector/linked/profile UI passed 3/3 on `57d8247`.
@@ -133,6 +137,9 @@ Never harvest dirty worker files: mutations may be intentional.
   - **Still owed:** target material-phase fix, raster completion, feature mutations,
     pending edit/undo/save and rapid overlapping previews,
     native iPad9 UI, final Debug/Release fast tiers, final audit and integrated full UI run.
+    Precision/curve batch: baseline 5/5, five intended production faults caught, three cases and the
+    restored baseline still owed after the full-run resource hold. Four source files restored exactly
+    to `57d8247`, clean tree, own simulator shut down and retained.
 
 The owner permits any useful agent count but prioritises usage conservation and quality over speed.
 Keep delegation focused and report the queue occasionally. It is now after the owner’s 10 a.m. return.
