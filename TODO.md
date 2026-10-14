@@ -153,6 +153,8 @@ pixels. Align the backing through the existing origin-based pose, including its 
 verify translated, scaled and rotated backing against the composite before accepting the change.
 When a stream composite displays the held edit instead of its layer host, its successful landing must
 also certify that exact procedural tick; otherwise a normal lift waits for the next edit to settle.
+Commit validation must use the vector's document-edit version: a live stream-frame arrival changes
+its display version without changing the artwork and must not cancel the gesture.
 
 **Validation in progress (2026-10-14):** the first direct-displacement map folds under strong hard
 and patterned brushes; actual raster pictures show stationary streaks and holes. Replace that map

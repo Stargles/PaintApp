@@ -122,6 +122,8 @@ Never harvest dirty worker files: mutations may be intentional.
     reviewing atomic history, complete replacement windows and bounded preparation before integration.
     Root also identified that the stream cel-content overlay omits the layer pose; reuse pose-aware
     pixel drawing for that replacement and prove posed host/composite agreement.
+    The source guard must distinguish stream display ticks from actual edits (`documentVersion`);
+    a new laptop frame cannot reject a valid gesture or masquerade as its committed history change.
   - **Still owed:** target material-phase fix, raster completion, feature mutations,
     pending edit/undo/save and rapid overlapping previews,
     native iPad9 UI, final Debug/Release fast tiers, final audit and integrated full UI run.
