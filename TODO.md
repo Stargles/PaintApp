@@ -224,6 +224,12 @@ and an active selection limits it further. This reverses the 2026-08-22 ruling q
 flow and hardness are the strength field for free. Its brush type, size and power are a third
 `ToolProfile` — a `StrokeTool` case and a `ToolProfiles` field, which (176) built for it.
 
+**Session 49 scope question pending:** whether Liquify initially applies only to editable drawings or
+also to linked generated in-betweens. `VECTOR_INTERPOLATION.md` §3.8 specifies that a linked in-between
+needs a recipe-owned displacement field, not per-vertex offsets or `localEdits`; that field does not
+exist. The session-48 survey proposed refusing derived frames, which needs the owner's ruling before
+that limitation is treated as accepted.
+
 - [ ] Liquify on raster and vector, three modes, one undo step per stroke.
 
 ---
