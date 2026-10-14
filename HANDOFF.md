@@ -121,8 +121,10 @@ Keep Full Precision continue resetting whenever a scene opens. (183)'s selection
 flickers on the iPad; the different two-fill flash is now (190). (178) includes linked in-between frames.
 
 **Questions to ask after 10 a.m. Toronto time (plain language, with options):**
-1. (179) On big scenes the half-detail preview leaves **Fog Glow** up to twice as wide mid-drag (its Size
-   cannot go below 2) — leave it, scale it anyway, or never use half detail when a scene has Fog Glow?
+1. (179) Fog Glow premise corrected: `drawingPixelLengths` recognises only pixel-unit controls;
+   dimensionless `glare.size` is never scaled, so every size doubles in half-detail. Root is verifying
+   scaling its equivalent Bloom radius in the render recipe, preserving Size’s saved range. This
+   follows the existing same-picture rule; no new appearance choice is needed if rendered A/B agrees.
 2. Once the next build has repaired his scenes and they look right: retire the one-shot repairs.
    First run a final repair build with a new signature so the preceding build's preserved preupdate
    snapshots are also converted; verify all library packages decode before removing repair code.

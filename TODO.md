@@ -105,6 +105,12 @@ why: pictures handed to Core Animation faster than the render server frees them)
       merged (`1a715ec`..`0f09447`, `bd5ffec`, `f6586c9`, commits 6, 8, 9 and 10), and the graph-band
       channel drags; 7 is (35)'s.
 - [x] Half-detail drag preview above the size threshold (PERFORMANCE.md §30.4).
+- [ ] Integration correction (2026-10-14): Fog Glow’s `size` has no pixel unit, so
+      `drawingPixelLengths` skips it entirely. The carried minimum-2 explanation was incomplete:
+      every Fog Glow radius doubles during half-detail preview. Scale its equivalent Bloom radius
+      in the render recipe, preserving the saved Size range and full-detail appearance; render A/B
+      evidence and test it. This implements the existing “same picture, softer” rule without a new
+      appearance tradeoff or a below-minimum saved control value.
 - [x] The brush colour panel's tick: its own small publisher (`BrushColorState`) — the toolbar swatches and
       the canvas follow per tick, the editor does not re-evaluate (PERFORMANCE §33.1).
 - [ ] Measured with `PlaybackProbe` before/after, as §29 was — on the iPad 9 simulator: the effect slider

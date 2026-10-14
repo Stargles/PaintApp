@@ -3,6 +3,14 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## Fog Glow’s preview doubles its radius because Size is not a pixel-length parameter (2026-10-14)
+
+`Effect.drawingPixelLengths(at:)` selects `EffectParameter.isPixelLength`, which reads the ` px` unit.
+Fog Glow’s dimensionless Size derives a radius through `Glare.asBloom`; it is skipped at every value,
+not merely clamped at the minimum as the handoff hypothesised. Render-time conversion to the equivalent
+Bloom before scaling can preserve the artist’s chosen width without changing saved controls. Test the
+actual pixels and show the comparison before closing this.
+
 ## Fill landing can be drawn twice by the new in-place stream display (2026-10-14)
 
 Integration review of unmerged (177)/(190): `prepareLiveFillLanding` writes the committed preview
