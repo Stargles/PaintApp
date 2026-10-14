@@ -83,9 +83,10 @@ Never harvest dirty worker files: mutations may be intentional.
     Compact retained-parent/site correspondence is the candidate. A wide/scattered stamp can overhang
     a selection even when its anchor is inside. Native A/B was inspected and sent to the owner:
     shipped Streaky spacing, 48 native dabs; A moves 1,703 exterior alpha pixels, B moves zero.
-    Required behavior question is pending: A moves whole brush marks; B keeps all outside pixels
-    fixed and needs a 2D material representation to keep vectors editable. No material schema is
-    chosen. Comparison: `~/PaintWork/evidence/s49-liquify-selection-options-native-spacing/comparison.png`.
+    **Owner chose B on 2026-10-14: keep all outside pixels fixed.** Spatial material deformation must
+    preserve editable vector strokes; whole-stamp movement is rejected. The representation still
+    needs implementation and strict-format repair if its persisted shape changes.
+    Comparison: `~/PaintWork/evidence/s49-liquify-selection-options-native-spacing/comparison.png`.
     Fixture checkpoint `99ef7c8`; current vector/linked/profile UI passed 3/3 on `57d8247`.
     The canonical linked fixture reopens with zero changed sampled bits, then follows later source
     ink. Screenshots inspected under `~/PaintWork/evidence/s49-liquify-ui-current/`.
@@ -119,6 +120,8 @@ Never harvest dirty worker files: mutations may be intentional.
     The first raster build compiles; focused logic is running. The stream-composite landing must
     certify its captured procedural tick too, since a blanked layer host cannot do so. Root is
     reviewing atomic history, complete replacement windows and bounded preparation before integration.
+    Root also identified that the stream cel-content overlay omits the layer pose; reuse pose-aware
+    pixel drawing for that replacement and prove posed host/composite agreement.
   - **Still owed:** target material-phase fix, raster completion, feature mutations,
     pending edit/undo/save and rapid overlapping previews,
     native iPad9 UI, final Debug/Release fast tiers, final audit and integrated full UI run.
