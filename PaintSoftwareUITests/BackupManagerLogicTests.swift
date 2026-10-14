@@ -391,9 +391,11 @@ final class BackupManagerLogicTests: XCTestCase {
     // MARK: - Size cap
 
     func testSizeCapPrunesOldestButKeepsLatestAndOneRestorePoint() {
-        ProjectBackupManager.maxTotalBackupBytes = 1500
         let id = UUID()
         let url = makeProject(name: "Cap", id: id, rasterBytes: 400)
+        // Keep two complete current-format packages; the editor metadata is larger than the old
+        // skeleton-only fixture. The cap should make exactly the latest and newest slot survive.
+        ProjectBackupManager.maxTotalBackupBytes = ProjectBackupManager.directorySize(url) * 2 + 128
         ProjectBackupManager.refreshLatestSnapshot(projectURL: url, projectID: id)
         let dir = ProjectBackupManager.backupsDirectory(projectID: id)
         for day in 1...4 {

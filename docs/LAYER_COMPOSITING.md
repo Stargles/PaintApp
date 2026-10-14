@@ -538,7 +538,17 @@ composites the held recipe through the existing `LatestWins` surface pair. The d
 stay still until lift; lift writes the mask once, inside the existing mask-session undo bracket.
 The scene saves tuning and colours strictly. `LegacyMaskRepair` rewrites previous-build masks in
 Projects, Backups and Trash at launch, preserving source picks and flags; delete it after the owner
-confirms their existing scenes open correctly.
+confirms their existing scenes open correctly. Explicit and automatic restores clone the selected
+version into the existing `.saving-` staging area, apply the same one-shot repairs, and strictly
+decode current metadata plus validate its referenced files before replacing the live scene. The
+original saved version is never rewritten; failed repair or validation leaves the live scene in
+place, and automatic recovery tries the next candidate. A successful replacement keeps the displaced
+scene in Trash. No cel pictures are eagerly loaded for this gate.
+
+Before deleting the one-shot repairs, run a final repair build with a new build signature: the
+previous build’s preserved `preupdate-` snapshot then becomes eligible, while the final build’s new
+snapshot comes from already repaired live scenes. Verify **all** library packages read as current
+before removing the converters. Strict decoders remain current-only.
 
 **Previous-package audit:** a copy of the owner’s 2026-10-09
 `evidence-153/Backups/936C4492-5737-45C8-841A-3ADD65B16A5E/latest.paintproj` passed the existing pose/tool
