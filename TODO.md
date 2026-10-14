@@ -162,6 +162,8 @@ when storing its rest-space stroke, so the drawn mark stays under the pen rather
 A realistic 100-pixel brush / 500-pixel drag needs 75.9 million field evaluations for a 67,100-pixel
 window in the first reversible implementation; measure Release and reduce that work before accepting
 interaction performance. Distant fill curves must retain their control points as well as their shape.
+The existing source-block layer retarget and canvas-resize recipe mapping must carry the captured
+deformation along, preserving its source identity and geometry rather than leaving stale coordinates.
 
 - [ ] Liquify on raster and vector, including linked generated in-betweens, three modes, one undo step per stroke.
 
