@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 extension Notification.Name {
     /// Posted on the main thread when the launch-time backup maintenance pass finishes, so the
