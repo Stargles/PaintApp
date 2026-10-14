@@ -429,6 +429,7 @@ final class ProjectStorageUITests: PaintUITestCase {
             app.buttons["gallery.newCanvasButton"].tap()
             app.buttons["sizePicker.createButton"].tap()
             XCTAssertTrue(app.staticTexts["timeline.frameLabel"].waitForExistence(timeout: 25))
+            addVectorLayer(app)
             let canvas = app.otherElements["canvas.host"]
             drawLine(on: canvas, from: CGVector(dx: 0.35, dy: 0.45), to: CGVector(dx: 0.6, dy: 0.6))
             let field = app.textFields["timeline.projectNameField"]
@@ -450,7 +451,8 @@ final class ProjectStorageUITests: PaintUITestCase {
         app.staticTexts["Rough 2"].tap()
         XCTAssertTrue(app.staticTexts["timeline.frameLabel"].waitForExistence(timeout: 25))
         XCTAssertEqual(app.textFields["timeline.projectNameField"].value as? String, "Rough 2")
-        let marker = try XCTUnwrap(readVectorMarker(app))
+        app.buttons["toolbar.layersButton"].tap()
+        let marker = try XCTUnwrap(readVectorMarker(app, layerIndex: 1))
         XCTAssertEqual(marker.strokes, 1)
     }
 
