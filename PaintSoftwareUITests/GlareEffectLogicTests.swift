@@ -228,6 +228,35 @@ final class GlareEffectLogicTests: XCTestCase {
         XCTAssertEqual(glowGPU, bloomGPU, "The GPU must render the two identically too")
     }
 
+    /// The render recipe scales the radius derived from Size, including Size 2 where dividing
+    /// the saved control would clamp at its minimum. The old preview has twice the shown radius.
+    func testFogGlowAtHalfDetailKeepsItsFullDetailFootprint() throws {
+        let side = 256
+        var fullInput = flatBytes(0, 0, 0, side: side)
+        for y in 104..<152 { for x in 104..<152 {
+            let i = (y * side + x) * 4
+            fullInput[i] = 255; fullInput[i + 1] = 255; fullInput[i + 2] = 255
+        } }
+        func half(_ bytes: [UInt8]) -> [UInt8] {
+            var result = [UInt8](repeating: 0, count: 128 * 128 * 4)
+            for y in 0..<128 { for x in 0..<128 { for channel in 0..<4 {
+                let sum = [(0, 0), (1, 0), (0, 1), (1, 1)].reduce(0) {
+                    $0 + Int(bytes[((2 * y + $1.1) * side + 2 * x + $1.0) * 4 + channel])
+                }
+                result[(y * 128 + x) * 4 + channel] = UInt8(sum / 4)
+            } } }
+            return result
+        }
+        for size in [2.0, 6.0] {
+            let effect = Effect.glare(Effect.Glare(type: .fogGlow, threshold: 0.4, intensity: 4, size: size))
+            XCTAssertEqual(effect.drawingPixelLengths(at: 1), effect, "full detail keeps the saved effect")
+            let full = cpu(effect, fullInput, width: side, height: side)
+            let preview = cpu(effect.drawingPixelLengths(at: 0.5), half(fullInput), width: 128, height: 128)
+            XCTAssertLessThan(maxChannelDelta(half(full), preview), 20,
+                              "Size \(size) has the same glow footprint while the finger is down")
+        }
+    }
+
     // MARK: - The two backends
 
     /// **Every type through both backends, over 4096 (colour, alpha) pairs**, at the same one-channel

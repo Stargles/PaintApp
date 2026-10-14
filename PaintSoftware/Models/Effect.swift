@@ -3693,7 +3693,12 @@ extension Effect {
     /// drag preview's (`[RenderNode].drawingPixelLengths(at:)`). What reads the buffer per pixel and
     /// has no length — a noise's grain, a posterize screen, an edge filter's 3×3 — is simply softer.
     func drawingPixelLengths(at detail: Double) -> Effect {
-        parameters.reduce(self) { effect, parameter in
+        // Fog Glow's Size is dimensionless; its derived Bloom radius is the pixel length.
+        // Scale the equivalent render effect, without clamping that radius to Size's UI range.
+        if detail != 1, case .glare(let glare) = self, glare.type == .fogGlow {
+            return Effect.bloom(glare.asBloom).drawingPixelLengths(at: detail)
+        }
+        return parameters.reduce(self) { effect, parameter in
             guard parameter.isPixelLength, let length = parameter.read(effect) else { return effect }
             return parameter.write(effect, length * detail)
         }
