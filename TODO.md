@@ -5,8 +5,8 @@ The owner's asks. [BUGS.md](BUGS.md) is for what *we* find.
 **Session 49 (2026-10-14):** the owner asked to continue through every actionable item, stopping only
 for genuinely required input or context degradation. Agent count is unrestricted for now; usage
 conservation and output quality take priority over speed. Use focused delegation and cheaper models
-for routine work, with occasional queue reports. The owner is asleep until 10 a.m. Toronto time;
-continue independently and defer further questions until then.
+for routine work, with occasional queue reports. The owner asked to work independently while asleep until 10 a.m. Toronto time; that time has now
+passed. One raster-scope question remains pending below.
 
 ## How to read and keep this file
 
@@ -113,7 +113,7 @@ why: pictures handed to Core Animation faster than the render server frees them)
       `effect`, `opacity`, `shape` and `fill` modes on the owner's device. Owner saved the scene and
       unlocked it 2026-10-14. Installed `7cf3245` supports only the effect baseline; the other three
       modes need an updated build (unknown modes in that build silently run playback). Physical effect
-      baseline completed at4096² and2048×1024, PERFORMANCE §30.6; after-build checks remain.
+      baseline completed at 4096² and 2048×1024, PERFORMANCE §30.6; after-build checks remain.
 
 ## (178) Liquify tool
 
@@ -183,10 +183,16 @@ Euler inverse cuts the horizontal Push fixture to 179,020,536 evaluations (38.43
 Push directions, grain and selections before adoption; other modes retain their existing solver.
 Evidence: `~/PaintWork/s49-liquify-profile/`, `~/PaintWork/evidence/s49-liquify-sampler/` and
 `~/PaintWork/evidence/s49-liquify-inverse-acceleration/`. Raster interaction cost is still open.
-Finger lift currently resolves geometry and rasterizes the edit again on main. Reuse the finished
-procedural result and transfer its shown surface through the existing unlanded-picture lane; if the
-last tick is still drawing, finish it through the same LatestWins pipeline. Preserve document/undo
-ordering when another stroke begins before that final picture lands.
+The pending-lift finalizer now reuses finished procedural geometry and transfers the shown surface
+through the existing held-picture lane; subsequent edits and snapshots join the one producer before
+writing history. Focused logic/mutation and existing held-picture UI checks pass; feature-specific
+cold-start checks and final integrated gates remain.
+
+A local Push on a long patterned target stroke currently re-phases stamps beyond the moved region:
+2,904 distant alpha pixels change in the measured Streaky fixture. Preserve the existing material
+placement through the shared rest-walk/stamping seam; expanding the preview alone would merely show
+the unintended distant change. Curved selection limits also require the same geometric boundary for
+containment and the edge taper; the certified-curve correction is in focused validation.
 
 - [ ] Liquify on raster and vector, including linked generated in-betweens, three modes, one undo step per stroke.
 

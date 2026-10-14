@@ -17,7 +17,8 @@ is what we find.
 
 **Session 49 is in flight.** The verified starting point was `5d73184`; no prior `tmp/*` branch held
 unmerged work. (189) is merged at `8616532`, and (190) at `e6b7d81`. Active task branches under
-`~/PaintWork/` are `tmp/s49-liquify` (178) and `tmp/s49-liquify-format` (isolated storage validation).
+`~/PaintWork/` are `tmp/s49-liquify` (178), `tmp/s49-liquify-format` (isolated storage validation),
+and `tmp/s49-liquify-inverse` (same-map inverse validation).
 The integration, Fog Glow and coordination trees are retained for evidence and final regression work.
 Never harvest dirty worker files: mutations may be intentional.
 
@@ -52,54 +53,46 @@ Never harvest dirty worker files: mutations may be intentional.
   5124 tests (5120 passed, four skipped, zero failures), reconciled against source. Integrated
   `GlareUITests` passed 2/2. UI identifier/helper checks and PBX duplicate-ID scan are clean.
   Results are preserved in `~/PaintWork/s49-integration-logs/`; the QA simulator was deleted.
-- **(178) started**, including linked in-between frames as ruled. Prepared constraints are in
-  `~/PaintWork/design/s49-liquify-constraints.md`. A genuine previous-build linked-frame package was captured from the preserved `5d73184` Release
-  app and checked into the Liquify branch with provenance. Committed occurrence schema `ea0152f`
-  passes 72 focused Debug tests (32 feature, 12 repair, 28 model): captures follow source-cel/element
-  identity through regrouping and cloned cels. A subsequent numerical check supersedes the new-local-
-  ink inverse path: past gestures must affect only local edits present in their captured membership,
-  while later gestures capture newly drawn marks normally (TODO explains the precision limit).
-  Storage retarget/resize/strict-selection work is complete at `ae58c7e`, `1fd073e`, `42ff0b1`:
-  47/47 Debug, fourteen distinct faults caught in fifteen mutation runs, restored 3/3. Earlier storage
-  mutations: sixteen batches red, restored 12/12. Those checkpoints are integrated in the feature branch.
-  The original displacement folded strong brushes; reversible steps now pass small rendered fixtures.
-  Frozen Release benchmark `3434670`: hard 67,100 pixels / 75,915,422 field evaluations / 3.393 s;
-  patterned 84,956 pixels / 324,895,856 evaluations / 28.056 s, with 7,801 forward-roundtrip residual
-  failures. These are simulator timings, not device throughput. An independent 60-digit inverse
-  agrees within 3.96e-13 source pixels at all eight recorded failures; the large destination residual
-  is forward ill-conditioning, not bad raster sampling. The diagnostic forward pass is now separate
-  from production inversion, with unchanged brush strength.
-  Root's isolated `tmp/s49-liquify-cost` prepares brush data and searches indexed bins directly;
-  byte-identical raster comparison passed for both brushes; isolated Release is 2.639 s hard and
-  13.592 s patterned, with a 6,540,296-byte full-sweep field. Production-only inversion at `ddebad6`
-  passes source-reference checks: hard 54,319,422 evaluations / 1.663 s; patterned 290,752,890 /
-  12.426 s, both with zero source-solve failures in isolated Release. The patterned raster cost remains open;
-  the bounded continuous-flow experiment is complete with no adoption recommendation: the cheaper
-  variant changes the map, and tightening accuracy removes its cost advantage. Evidence is under
-  `~/PaintWork/evidence/s49-liquify-flow-prototype/`. The next shared rendering change reuses finished
-  procedural geometry and transfers the shown IOSurface on lift, retaining LatestWins and safe
-  document/undo ordering. Root shared checkpoint `25791ab` transfers frozen surfaces and correctly
-  composites multiple pending replacement windows (30/30 Debug; mutations/UI still in progress),
-  integrated in the feature branch as `c07406f`. Linked-frame
-  cold-reopen pixel comparison needs a canonical saved/reopened seed (first save quantizes ordinary
-  source strokes); raster scope still awaits the owner's answer. No Liquify code is merged yet.
-  The shared held-picture fault pass caught a test-oracle flaw: expected pixels were composed from
-  the post-hold list, so deleting an earlier replacement also deleted it from the expected result.
-  Root is comparing against the original input edits before completing the remaining mutations.
-  The independent oracle passes 30/30 at `86dd98c` and now catches deletion of an earlier picture;
-  its test-only change is integrated as `71acf33`. Actual Release sampling of `ddebad6` identifies the
-  native alpha sampler as the largest cost (6,354/11,900 main-thread samples); exact lookup and SIMD
-  experiments did not provide a reliable improvement and are not adopted. A bounded same-Euler
-  inverse acceleration cuts the horizontal fixture's evaluations by 38.43% with identical RGBA;
-  `tmp/s49-liquify-inverse` is validating arbitrary-direction Push, grain and selections before adoption.
-  Evidence is in `~/PaintWork/s49-liquify-profile/`; the profiled timing includes instrumentation and
-  contention and must not replace the isolated timings above.
-  Small transformed strokes now use the existing precise-storage path. The feature's pending-lift
-  finalizer is at `17db4c3`, focused Debug 58/58: a normal lift does no geometry work on main;
-  an overlapping edit or snapshot joins the one in-flight calculation before writing history.
-  The shared surface changes caught nineteen distinct injected faults, restored 30/30; six existing
-  held-picture UI tests are running. Curved-selection edge certification and local preview extents
-  for wide/patterned target strokes are being validated before the new feature UI pass.
+- **(178) in progress; no Liquify code is merged.** The owner requires linked in-betweens to retain
+  their source links. The feature branch includes occurrence captures (`ea0152f`): source-cel/element
+  identity survives regrouping and cloned cels. Prior gestures affect only local edits already in
+  their membership; later gestures capture newly drawn marks normally. Inverting older gestures for
+  new local ink was rejected after the high-precision check showed it cannot preserve stored precision.
+  Typed vector objects are excluded; the old flattened-raster scope still needs the owner's answer.
+  - **Storage:** actual `5d73184`-written package retained with provenance. Retarget, resize and strict
+    selection decoding (`ae58c7e`, `1fd073e`, `42ff0b1`) are integrated: 47/47 Debug, fourteen distinct
+    faults caught in fifteen runs, restored 3/3; earlier storage pass sixteen faults red, restored 12/12.
+    Expanded fixtures `f9ecedb` are undergoing a 25-fault pass; do not copy dirty mutation files.
+  - **Lift and held pictures:** shared source `25791ab`/feature `c07406f` transfers the shown IOSurface
+    and composes overlapping pending replacement windows. Independent expected-image oracle
+    `86dd98c`/feature `71acf33` corrected a test that previously shared the broken list with production.
+    Nineteen distinct faults are now red, restored logic 30/30. Existing held-picture UI **6/6 green**
+    (SelectionEditLive 2, SelectionFillRecolour 1, UnlandedInk 3); pending/landed screenshots viewed.
+    Evidence: `~/PaintWork/s49-surface-handoff-logs/`; root simulator deleted. Feature finalizer
+    `17db4c3` passes 58/58 Debug: one geometry producer, normal lift off main, subsequent edit/snapshot
+    settles the pending result before writing history. Changed strokes use existing precise storage.
+  - **Selection and target ink:** true-curve containment disagreed with chord distances at a curved
+    selection edge. The worker's certified curve-error taper passes three raster fixtures with zero
+    changed exterior bytes. A new fixture found **2,904 changed alpha pixels well outside a local
+    Push** on a 960-point Streaky target stroke: moving its spine changes the downstream stamp phase.
+    This must be fixed at the existing rest-walk/stamping seam, not hidden by a wider preview window.
+    Evidence: `~/PaintWork/evidence/s49-liquify-curved-selection/` and `s49-liquify-target-phase/`.
+  - **Raster cost:** the original direct map folded under strong brushes; bounded reversible Euler
+    steps replaced it. Prepared brush data/indexed bins and removal of a diagnostic forward pass keep
+    native pixels unchanged. Isolated Release `ddebad6`: hard 67,100 pixels / 54,319,422 field evaluations
+    / 1.663 s; patterned 84,956 / 290,752,890 / 12.426 s. Zero source-solve failures, eight independent
+    60-digit source-coordinate references agree within 3.96e-13 pixels. Simulator seconds are not
+    device throughput. Full-sweep prepared field is 6,540,296 bytes; prepare one field at a time.
+    Raster interaction cost remains open. CPU sampling identifies native alpha sampling as the largest
+    cost; exact lookup/SIMD trials had no reliable gain. Continuous-flow integration changes the map
+    or loses its saving at higher accuracy. Neither experiment is adopted. Same-Euler inverse
+    acceleration cuts the horizontal fixture's evaluations by 38.43% with identical RGBA; the isolated
+    inverse branch is validating other Push directions, grain and selections before adoption.
+    Evidence: `~/PaintWork/s49-liquify-profile/`, `~/PaintWork/evidence/s49-liquify-sampler/`,
+    `s49-liquify-flow-prototype/`, and `s49-liquify-inverse-acceleration/`.
+  - **Still owed:** target material-phase fix, feature mutations, canonical saved/reopened linked UI
+    seed (first ordinary save quantizes strokes), pending edit/undo/save and rapid overlapping previews,
+    native iPad9 UI, final Debug/Release fast tiers, final audit and integrated full UI run.
 
 The owner permits any useful agent count but prioritises usage conservation and quality over speed.
 Keep delegation focused and report the queue occasionally. It is now after the owner’s 10 a.m. return.
