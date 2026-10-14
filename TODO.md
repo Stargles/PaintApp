@@ -164,6 +164,7 @@ window in the first reversible implementation; measure Release and reduce that w
 interaction performance. Distant fill curves must retain their control points as well as their shape.
 The existing source-block layer retarget and canvas-resize recipe mapping must carry the captured
 deformation along, preserving its source identity and geometry rather than leaving stale coordinates.
+An unreadable saved selection archive must fail current decoding, never become an unrestricted field.
 
 - [ ] Liquify on raster and vector, including linked generated in-betweens, three modes, one undo step per stroke.
 
