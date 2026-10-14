@@ -67,8 +67,8 @@ Never harvest dirty worker files: mutations may be intentional.
   patterned 84,956 pixels / 324,895,856 evaluations / 28.056 s, with 7,801 forward-roundtrip residual
   failures. These are simulator timings, not device throughput. An independent 60-digit inverse
   agrees within 3.96e-13 source pixels at all eight recorded failures; the large destination residual
-  is forward ill-conditioning, not bad raster sampling. Remove the diagnostic forward pass from
-  production inversion without reducing brush strength.
+  is forward ill-conditioning, not bad raster sampling. The diagnostic forward pass is now separate
+  from production inversion, with unchanged brush strength.
   Root's isolated `tmp/s49-liquify-cost` prepares brush data and searches indexed bins directly;
   byte-identical raster comparison passed for both brushes; isolated Release is 2.639 s hard and
   13.592 s patterned, with a 6,540,296-byte full-sweep field. Production-only inversion at `ddebad6`
@@ -83,6 +83,11 @@ Never harvest dirty worker files: mutations may be intentional.
   integrated in the feature branch as `c07406f`. Linked-frame
   cold-reopen pixel comparison needs a canonical saved/reopened seed (first save quantizes ordinary
   source strokes); raster scope still awaits the owner's answer. No Liquify code is merged yet.
+  The shared held-picture fault pass caught a test-oracle flaw: expected pixels were composed from
+  the post-hold list, so deleting an earlier replacement also deleted it from the expected result.
+  Root is comparing against the original input edits before completing the remaining mutations.
+  Small transformed strokes also need the existing precise-storage path so the first save preserves
+  their spine and parent dab walk; that focused change is in progress on the feature branch.
 
 The owner permits any useful agent count but prioritises usage conservation and quality over speed.
 Keep delegation focused and report the queue occasionally. It is now after the owner’s 10 a.m. return.
