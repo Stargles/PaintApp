@@ -246,6 +246,21 @@ final class StreamDisplayLogicTests: XCTestCase {
             XCTAssertGreaterThan(pixel[0], 240, "the previous build's red last frame survives")
             XCTAssertLessThan(pixel[1], 50, "the saved red H.264/JPEG frame stays red")
         }
+        let corrupt = root.appendingPathComponent("Backups/corrupt.paintproj")
+        try FileManager.default.copyItem(at: packages[0], to: corrupt)
+        let corruptDrawing = corrupt.appendingPathComponent("drawings/\(originalDrawing.lastPathComponent)")
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: corruptDrawing)) as? [String: Any])
+        var elements = try XCTUnwrap(object["elements"] as? [[String: Any]])
+        let streamIndex = try XCTUnwrap(elements.firstIndex { $0["kind"] as? String == "stream" })
+        var record = try XCTUnwrap(elements[streamIndex]["stream"] as? [String: Any])
+        record["rendersInPlace"] = "damaged"
+        elements[streamIndex]["stream"] = record; object["elements"] = elements
+        try JSONSerialization.data(withJSONObject: object).write(to: corruptDrawing)
+        let liveBefore = try fileBytes(in: packages[0]), corruptBefore = try fileBytes(in: corrupt)
+        XCTAssertFalse(ProjectBackupManager.restoreBackup(at: corrupt, toProjectAt: packages[0]),
+                       "a malformed current stream cannot replace a healthy scene")
+        XCTAssertEqual(try fileBytes(in: packages[0]), liveBefore, "failed repair leaves live artwork untouched")
+        XCTAssertEqual(try fileBytes(in: corrupt), corruptBefore, "failed repair preserves the original backup")
         let loaded = try XCTUnwrap(ProjectStore.load(from: packages[0]))
         let rewritten = root.appendingPathComponent("Projects/roundtrip.paintproj")
         let saved = expectation(description: "strict repaired save")

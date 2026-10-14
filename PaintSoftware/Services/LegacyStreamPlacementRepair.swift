@@ -24,7 +24,7 @@ nonisolated enum LegacyStreamPlacementRepair {
         guard FileManager.default.fileExists(atPath: drawings.path) else { return .current }
         guard let files = try? FileManager.default.contentsOfDirectory(at: drawings,
             includingPropertiesForKeys: nil) else { return .unreadable }
-        var result = Outcome.current
+        var rewrites: [(URL, [String: Any])] = []
         for url in files where url.pathExtension == "json" {
             guard let data = try? Data(contentsOf: url) else { return .unreadable }
             // A cel with no stream needs neither parsing nor rewriting.
@@ -33,27 +33,38 @@ nonisolated enum LegacyStreamPlacementRepair {
                 return .unreadable
             }
             var changed = false
-            func rewrite(_ value: Any) -> Any {
+            func rewrite(_ value: Any) throws -> Any {
                 if var record = value as? [String: Any] {
-                    if record["kind"] as? String == "stream",
-                       var stream = record["stream"] as? [String: Any], stream["rendersInPlace"] == nil {
-                        stream["rendersInPlace"] = false
+                    if record["kind"] as? String == "stream" {
+                        guard var stream = record["stream"] as? [String: Any] else {
+                            throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "Missing stream record"))
+                        }
+                        if stream["rendersInPlace"] == nil {
+                            stream["rendersInPlace"] = false
+                            changed = true
+                        }
+                        _ = try JSONDecoder().decode(VectorCanvasData.StreamRef.self,
+                            from: JSONSerialization.data(withJSONObject: stream))
                         record["stream"] = stream
-                        changed = true
                     }
-                    for key in Array(record.keys) { record[key] = rewrite(record[key]!) }
+                    for key in Array(record.keys) { record[key] = try rewrite(record[key]!) }
                     return record
                 }
-                if let array = value as? [Any] { return array.map(rewrite) }
+                if let array = value as? [Any] { return try array.map(rewrite) }
                 return value
             }
-            object = rewrite(object) as! [String: Any]
-            guard changed else { continue }
-            var written = false
-            LibraryRepair.keepingItsDate(package) { written = LibraryRepair.write(object, to: url); return written }
-            guard written else { return .notWritten }
-            result = .repaired
+            do { object = try rewrite(object) as! [String: Any] }
+            catch { return .unreadable }
+            if changed { rewrites.append((url, object)) }
         }
-        return result
+        guard !rewrites.isEmpty else { return .current }
+        // Validate every stream before writing any file, including records already in today's
+        // format. A corrupt backup must never become eligible to replace the live scene.
+        var written = true
+        LibraryRepair.keepingItsDate(package) {
+            for (url, object) in rewrites where written { written = LibraryRepair.write(object, to: url) }
+            return true
+        }
+        return written ? .repaired : .notWritten
     }
 }
