@@ -553,12 +553,12 @@ final class ProjectFolderLogicTests: XCTestCase {
         let url = ProjectStore.createNewProjectURL(name: name, in: directory)
         let fm = FileManager.default
         try? fm.createDirectory(at: url.appendingPathComponent("images"), withIntermediateDirectories: true)
-        let manifest: [String: Any] = [
-            "id": UUID().uuidString,
-            "layers": [["cels": [["rasterFileName": "a.png", "rasterOmitted": true]]]]
-        ]
-        try! JSONSerialization.data(withJSONObject: manifest)
-            .write(to: url.appendingPathComponent("manifest.json"))
+        let cel = CelManifest(id: UUID(), startFrame: 0, frameCount: 1,
+                              rasterFileName: "a.png", rasterOmitted: true)
+        let layer = LayerManifest(id: UUID(), name: "Ink", opacity: 1, isVisible: true, cels: [cel])
+        let manifest = ProjectManifest(id: UUID(), name: url.deletingPathExtension().lastPathComponent,
+            canvasWidth: 64, canvasHeight: 64, fps: 12, layers: [layer], modifiedAt: Date())
+        try! JSONEncoder().encode(manifest).write(to: url.appendingPathComponent("manifest.json"))
         try! Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
             .write(to: url.appendingPathComponent("thumbnail.png"))
         return url

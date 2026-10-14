@@ -562,6 +562,17 @@ a leaf outside its own subtree. This replaces the grade-only census that could s
 coverage after a nested-mask or structural edit. Colour conversion is memoised per premultiplied RGBA
 value during one resolution, capped at 4096 values; no scene cel is eagerly loaded for this feature.
 
+`ColourMaskLogicTests` pins source membership, shared Recolour radii, premultiplied alpha, both
+backends and raster/vector parity, nested dependencies and identical-grade folder nesting, every
+key field, strict persistence, held layer/folder edits and undo, and checked-source picking.
+`LegacyMaskRepairLogicTests` pins repair values and idempotence, the library walk, and staged restores
+that preserve every original byte, retain the displaced live package, reject unreadable current
+metadata, clean staging and try the next recovery candidate. `ColourMaskUITests` reaches the controls
+from a cold launch, picks through the covering masked layer, asserts kept/excluded ink and the return
+to alpha mode, checks live threshold frames with bounded scene publishes, and exposes the complete
+controls on an iPad9 in landscape. The target is dimmed by the existing source-edit mode while that
+panel is open; the drawn-colour assertions run after closing it.
+
 ### 6.4 Live feedback while drawing
 
 A mask applied only on lift reproduces the selection clip's glitch — ink visibly crossing the
