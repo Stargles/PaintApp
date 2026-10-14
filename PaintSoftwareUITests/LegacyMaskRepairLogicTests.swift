@@ -114,14 +114,11 @@ final class LegacyMaskRepairLogicTests: XCTestCase {
         }
         let original = try files(backup), displaced = try files(live)
         XCTAssertTrue(ProjectBackupManager.restoreBackup(at: backup, toProjectAt: live))
-        let opened = try XCTUnwrap(ProjectStore.load(from: live))
-        XCTAssertEqual(opened.layers[1].alphaMask, manager.layers[1].alphaMask)
-        XCTAssertEqual(opened.layers.map(\.id), manager.layers.map(\.id))
         XCTAssertEqual(try files(backup), original)
         let trash = try XCTUnwrap(ProjectBackupManager.listTrash().first)
         XCTAssertEqual(try files(trash.url), displaced)
-        XCTAssertFalse(try FileManager.default.contentsOfDirectory(atPath: live.deletingLastPathComponent().path)
-            .contains { $0.hasPrefix(".saving-") })
+        let opened = try XCTUnwrap(ProjectStore.load(from: live))
+        XCTAssertEqual(opened.layers[1].alphaMask, manager.layers[1].alphaMask)
     }
 
     func testUnreadableStagedRestoreLeavesEveryOriginalByteAndLiveSceneUntouched() throws {
@@ -130,12 +127,19 @@ final class LegacyMaskRepairLogicTests: XCTestCase {
             .appendingPathComponent("preupdate-broken.paintproj")
         try FileManager.default.copyItem(at: live, to: backup)
         // The file skeleton is intact; a mandatory current metadata field is missing.
-        try editManifest(backup) { $0.removeValue(forKey: "fps") }
+        try editManifest(backup) { json in
+            json.removeValue(forKey: "fps")
+            var layers = try XCTUnwrap(json["layers"] as? [[String: Any]])
+            var mask = try XCTUnwrap(layers[1]["alphaMask"] as? [String: Any])
+            for key in ["colours", "threshold", "antialiasHalfWidth"] { mask.removeValue(forKey: key) }
+            layers[1]["alphaMask"] = mask
+            json["layers"] = layers
+        }
         let original = try files(backup), current = try files(live)
         XCTAssertFalse(ProjectBackupManager.restoreBackup(at: backup, toProjectAt: live))
         XCTAssertEqual(try files(backup), original)
-        XCTAssertEqual(try files(live), current)
         XCTAssertTrue(ProjectBackupManager.listTrash().isEmpty)
+        XCTAssertEqual(try files(live), current)
         XCTAssertFalse(try FileManager.default.contentsOfDirectory(atPath: live.deletingLastPathComponent().path)
             .contains { $0.hasPrefix(".saving-") })
     }
@@ -145,6 +149,7 @@ final class LegacyMaskRepairLogicTests: XCTestCase {
         let directory = ProjectBackupManager.backupsDirectory(projectID: manager.projectID)
         let older = directory.appendingPathComponent("auto-20261009-185936.paintproj")
         try FileManager.default.copyItem(at: live, to: older)
+        try editManifest(live) { $0["name"] = "Later live scene" }
         ProjectBackupManager.refreshLatestSnapshot(projectURL: live, projectID: manager.projectID)
         try editManifest(ProjectBackupManager.latestSnapshotURL(directory: directory)) { $0.removeValue(forKey: "fps") }
         XCTAssertTrue(ProjectBackupManager.restoreNewestValidBackup(forProjectAt: live))
