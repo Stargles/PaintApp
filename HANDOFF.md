@@ -86,6 +86,12 @@ Never harvest dirty worker files: mutations may be intentional.
   The shared held-picture fault pass caught a test-oracle flaw: expected pixels were composed from
   the post-hold list, so deleting an earlier replacement also deleted it from the expected result.
   Root is comparing against the original input edits before completing the remaining mutations.
+  The independent oracle passes 30/30 at `86dd98c` and now catches deletion of an earlier picture;
+  its test-only change is integrated as `71acf33`. Actual Release sampling of `ddebad6` identifies the
+  native alpha sampler as the largest cost (6,354/11,900 main-thread samples); the next bounded
+  experiment replaces repeated byte normalization with the same 256 exact division results.
+  Evidence is in `~/PaintWork/s49-liquify-profile/`; the profiled timing includes instrumentation and
+  contention and must not replace the isolated timings above.
   Small transformed strokes also need the existing precise-storage path so the first save preserves
   their spine and parent dab walk; that focused change is in progress on the feature branch.
 

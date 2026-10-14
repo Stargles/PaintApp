@@ -174,8 +174,12 @@ Prepared native-tip sampling preserves every raster byte but still costs 13.592 
 290,752,890 evaluations / 12.426 seconds and zero source-solve failures; this raster cost remains open.
 
 The bounded continuous-flow experiment is complete: loose integration saves field evaluations but
-changes the map; tighter integration loses the saving. Keep the current verified map and profile the
-remaining production cost (evidence: `~/PaintWork/evidence/s49-liquify-flow-prototype/README.md`).
+changes the map; tighter integration loses the saving. Keep the current verified map
+(evidence: `~/PaintWork/evidence/s49-liquify-flow-prototype/README.md`). An actual Release CPU sample
+places 6,354 of 11,900 main-thread samples in the brush mask sampler; its optimized instructions still
+divide four alpha bytes by 255 per lookup. Evaluate a shared 256-entry table of those exact division
+results (2 KiB), keeping the native mask bytes and the field arithmetic unchanged. Profile evidence:
+`~/PaintWork/s49-liquify-profile/`; no speedup is claimed until the rendered result and Release cost agree.
 Finger lift currently resolves geometry and rasterizes the edit again on main. Reuse the finished
 procedural result and transfer its shown surface through the existing unlanded-picture lane; if the
 last tick is still drawing, finish it through the same LatestWins pipeline. Preserve document/undo
