@@ -17,8 +17,9 @@ is what we find.
 
 **Session 49 is in flight.** The verified starting point was `5d73184`; no prior `tmp/*` branch held
 unmerged work. (189) is merged at `8616532`, and (190) at `e6b7d81`. Active task branches under
-`~/PaintWork/` are `tmp/s49-integration` (fill/stream restore), `tmp/s49-fogglow` (179),
-`tmp/s49-liquify` (178), and `tmp/s49-session` (coordination). Never harvest dirty worker files: mutations may be intentional.
+`~/PaintWork/` are `tmp/s49-liquify` (178) and `tmp/s49-liquify-format` (isolated storage validation).
+The integration, Fog Glow and coordination trees are retained for evidence and final regression work.
+Never harvest dirty worker files: mutations may be intentional.
 
 - **(190) merged:** the owner’s transient-to-baked theory was confirmed. Commit writes the fill before
   transferring its exact preview to the existing held-picture lane. Debug/Release 5089 each, four skips,
@@ -29,14 +30,14 @@ unmerged work. (189) is merged at `8616532`, and (190) at `e6b7d81`. Active task
   is minted, while keeping the old surface until the replacement is held.
 - **(177) merged** at `4d396c6`. Debug 5101 and Release 5102 (extra merged189
   assertion), four skips and zero failures each. New UI class 4/4, production mutants red/restored,
-  actual prior-build package roundtrip and native landscape inspected. Combined fill landing and staged backup repair are validated below; the integration fast tiers
-  remain the merge gate.
+  actual prior-build package roundtrip and native landscape inspected. Combined fill landing and
+  staged backup repair also passed the integration gates below.
 - **(35) merged** at `b625710`: Debug and Release at `deb168f` each ran 5107 tests,
   5103 passed and four skipped. Nineteen mutation batches restored, feature/recovery and filing UI
   green, native landscape inspected. Strict staged restore exposed package collision/queued-rename
-  bugs, fixed through the existing serialized save queue with exact marker rollback. Rebased census
-  is 5124 fast / 5692 overall; the combined tiers remain root’s integration check.
-- **Fill/stream integration** is validated on `tmp/s49-integration`: clear the held model before
+  bugs, fixed through the existing serialized save queue with exact marker rollback. The combined tree passes
+  5124 fast tests in each configuration; its overall census is 5694.
+- **Fill/stream integration is merged:** clear the held model before
   transferring the committed fill picture, then release the old surface. Reverting the order produces
   a visible second coat (red 126→64→126); restored ordering stays at one. Four staged-restore mutations
   fail: actual previous-build stream backups restore through a repaired copy, original snapshot bytes
@@ -44,11 +45,13 @@ unmerged work. (189) is merged at `8616532`, and (190) at `e6b7d81`. Active task
   retains only drawing paths and validates/rewrites one file at a time. The combined touched classes
   passed 21/21 on an erased simulator; two earlier Guide-menu setup failures did not recur with the
   same preceding tests. No menu workaround was added.
-- **Fog Glow** is integrated through `840d68a`: convert to the existing equivalent Bloom before scaling
+- **Fog Glow is merged** (source through `840d68a`): convert to the existing equivalent Bloom before scaling
   its render radius. Dimensionless Size was never scaled, so every size widened in half-detail.
   Focused logic/UI 3/3 green; reverting the fix fails actual pixels at Size 2 and 6 and during a held
-  slider drag. Comparison panels and native iPad9 landscape were viewed. Combined Debug passed
-  5124 tests (5120 passed, four skipped); Release and the integrated Glare UI class remain in progress.
+  slider drag. Comparison panels and native iPad9 landscape were viewed. Combined Debug and Release each passed
+  5124 tests (5120 passed, four skipped, zero failures), reconciled against source. Integrated
+  `GlareUITests` passed 2/2. UI identifier/helper checks and PBX duplicate-ID scan are clean.
+  Results are preserved in `~/PaintWork/s49-integration-logs/`; the QA simulator was deleted.
 - **(178) started**, including linked in-between frames as ruled. Prepared constraints are in
   `~/PaintWork/design/s49-liquify-constraints.md`. A genuine previous-build linked-frame package was captured from the preserved `5d73184` Release
   app and checked into the Liquify branch with provenance. Focused baseline at `3ea3165` is 64/64
@@ -79,15 +82,15 @@ should run before that, or the re-sign ships an unproven build. **The next insta
 `LegacyToolSettingsRepair` on the owner's scenes** (TODO (176)'s one-shot repair, below) — tell the owner
 when it lands and ask them to open a few scenes.
 
-**Fast tier at `48418d9`**: 5086 tests, Release green; Debug green after one source-scan count was updated
-for the deleted fill image view (re-run passed). The full UI suite has not been run since `38a3dd6`
+**Latest integrated fast tier (app/test source `840d68a`)**: Debug and Release each 5124 tests,
+5120 passed, four skipped and zero failures; static full census 5694. The full UI suite has not been run since `38a3dd6`
 (session 47) — every item since ran its own UI classes; **run it (CLAUDE.md "Full run", erased device)
 before the next device install**, since ~70 merges landed without one.
 
 ## What is next
 
-1. **TODO (179)** — finish the combined integration fast tiers, then the
-   owner's iPad `PlaybackProbe` after-measurements on an updated build.
+1. **TODO (179)** — the combined integration gates are complete; run the
+   owner's iPad `PlaybackProbe` after-measurements on an updated build after the final full UI suite.
    **(189) merged** at `8616532`: 100 onion-opacity ticks cause zero editor passes (previously 100);
    Debug and Release fast tier 5087 each, 4 skipped, zero failures. **(190)** merged at `e6b7d81`.
 2. **TODO (177) and (35) are merged.** Their shared integration checks are described above.
