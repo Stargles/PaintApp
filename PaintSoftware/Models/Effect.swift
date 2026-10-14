@@ -1301,8 +1301,6 @@ struct GradientStop: Equatable, Codable {
     var color: CodableColor
 }
 
-/// One from→to pair of a recolour, with its own tolerance and softness. Alpha on both colours is
-/// ignored: a grade never changes coverage, and the *from* is matched on colour alone.
 /// The source-colour criterion shared by Recolour and masks. Recolour preserves its established
 /// flat file record through `key`; masks save this value directly.
 struct ColourKey: Codable, Equatable, Hashable {
@@ -1342,6 +1340,8 @@ struct ColourKeyTableEntry {
     }
 }
 
+/// One from→to pair of a recolour, with its own tolerance and softness. Alpha on both colours is
+/// ignored: a grade never changes coverage, and the *from* is matched on colour alone.
 struct RecolorEntry: Equatable {
     var key: ColourKey {
         get { ColourKey(from: from, tolerance: tolerance, softness: softness) }

@@ -340,8 +340,7 @@ struct EffectSettingsBar: View {
         //
         // **No identifier on that card.** An accessibility identifier on a container propagates to its
         // descendants and beats their own, so `slider` below puts its name on the `Slider` rather
-        // than the row, and
-        // one here would rename every control in the bar after the bar. `layerOptions.subMenuTitle` in
+        // than the row. One on the card would rename every control in the bar after the bar. `layerOptions.subMenuTitle` in
         // the header is what a test should look for to say this is on screen.
     }
 
@@ -1419,12 +1418,12 @@ struct RecolorEntriesEditor: View {
                 swatch(index, .from)
                 eyedropperButton(index, .from)
                 if maskTarget == nil {
-                Image(systemName: "arrow.right")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.5))
-                    .accessibilityHidden(true)
-                swatch(index, .to)
-                eyedropperButton(index, .to)
+                    Image(systemName: "arrow.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.5))
+                        .accessibilityHidden(true)
+                    swatch(index, .to)
+                    eyedropperButton(index, .to)
                 }
                 Spacer()
                 Button {
