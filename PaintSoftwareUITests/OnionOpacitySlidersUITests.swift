@@ -99,6 +99,44 @@ final class OnionOpacitySlidersUITests: PaintUITestCase {
         attachScreenshot(app, "onion-sliders-independent")
     }
 
+    /// A fresh drawing pair and a real change to the first Behind slider: zero hides the ghost at
+    /// the probe, then restoring opacity brings its tinted pixels back onto the canvas.
+    func testOpacitySliderChangesTheGhostDrawnOnTheCanvas() throws {
+        let app = XCUIApplication()
+        XCUIDevice.shared.orientation = .landscapeLeft
+        XCTAssertTrue(launchIntoEditor(app))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        drawLine(on: canvas, from: CGVector(dx: 0.30, dy: 0.50), to: CGVector(dx: 0.70, dy: 0.50))
+        let firstBlock = app.otherElements["timeline.cel.0.0"]
+        performDrag(app, identifier: "timeline.cel.0.0.rightHandle", totalDelta: -260)
+        let shrunk = try XCTUnwrap(readCel(app, layerIndex: 0, celIndex: 0))
+        let gapSlot = firstBlock.coordinate(withNormalizedOffset:
+            CGVector(dx: (Double(shrunk.length) + 2.0) / Double(shrunk.length), dy: 0.5))
+        gapSlot.tap()
+        gapSlot.tap()
+        let addDrawing = app.buttons["Add Drawing"]
+        XCTAssertTrue(addDrawing.waitForExistence(timeout: 5))
+        addDrawing.tap()
+
+        let probe = (dx: 0.50, dy: 0.50)
+        let visibleGhost = try XCTUnwrap(rgbaPixel(of: canvas, dx: probe.dx, dy: probe.dy))
+        XCTAssertFalse(isWhitish(visibleGhost), "the previous drawing's ghost reaches the blank current drawing")
+
+        openOnionPanel(app)
+        let slider = opacitySlider(app, "previous", 1)
+        drag(slider, to: 0)
+        XCTAssertNotNil(waitForPixel(canvas, at: CGVector(dx: probe.dx, dy: probe.dy), timeout: 5,
+                                     matches: { isWhitish($0) }),
+                        "zero opacity removes the ghost from the rendered canvas")
+        drag(slider, to: 0.9)
+        XCTAssertNotNil(waitForPixel(canvas, at: CGVector(dx: probe.dx, dy: probe.dy), timeout: 5,
+                                     matches: { !isWhitish($0) }),
+                        "raising opacity restores the ghost on the rendered canvas")
+        attachScreenshot(app, "onion-opacity-changes-drawn-ghost")
+    }
+
     /// **TODO (138)'s follow-up, cold start: the chain links one side's two ends.** The owner: *"keep
     /// it, links one side. When it is on, the user can select the furthest left or right sliders per
     /// side and every slider in between will be linearly interpolated between the two."*

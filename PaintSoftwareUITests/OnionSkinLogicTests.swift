@@ -1,6 +1,7 @@
 import XCTest
 import UIKit
 import CoreGraphics
+import Combine
 
 /// Pure-logic tests for the onion-skin feature: the source, the linked-opacity ramp, the slot
 /// planner's index arithmetic, and the composite's memory ceiling.
@@ -19,6 +20,21 @@ import CoreGraphics
 /// two apart; a two-cel fixture with *distinguishable* content can, which is why
 /// `assertCelsAreDistinguishable` runs before anything is asserted about which one came back.
 final class OnionSkinLogicTests: XCTestCase {
+
+    func testOpacitySettingsPublishToTheirOwnStateWithoutPublishingTheEditor() {
+        let manager = CanvasManager()
+        var editorPublishes = 0
+        var onionPublishes = 0
+        let editorSubscription = manager.objectWillChange.sink { editorPublishes += 1 }
+        let onionSubscription = manager.onionSkinState.objectWillChange.sink { onionPublishes += 1 }
+
+        manager.onionSkin.setOpacity(0.8, slot: 1, on: .previous)
+
+        XCTAssertEqual(manager.onionSkin.nearestOpacity(on: .previous), 0.8)
+        XCTAssertEqual(onionPublishes, 1, "the onion canvas and panel receive the changed setting")
+        XCTAssertEqual(editorPublishes, 0, "an opacity tick does not publish through the whole editor")
+        withExtendedLifetime((editorSubscription, onionSubscription)) {}
+    }
 
     private func fixedBrush(size: CGFloat = 10) -> Brush {
         Brush(name: "test", tip: .round, size: size)

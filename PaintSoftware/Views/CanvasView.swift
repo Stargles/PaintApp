@@ -324,6 +324,7 @@ struct CanvasView: UIViewRepresentable {
         context.coordinator.hostView = host
         context.coordinator.observeKeyboard()
         context.coordinator.observeBrushColor()
+        context.coordinator.observeOnionSkin()
         context.coordinator.containerView = container
         context.coordinator.onionSkinView = onionSkin
         context.coordinator.paperView = paper
@@ -1347,6 +1348,7 @@ struct CanvasView: UIViewRepresentable {
         }
 
         private var brushColorSubscription: AnyCancellable?
+        private var onionSkinSubscription: AnyCancellable?
 
         /// **The brush's colour reaches the canvas without a pass over the editor** — it is published on
         /// its own object (`BrushColorState`, TODO (179)), so a tick of its picker re-renders only the
@@ -1359,6 +1361,16 @@ struct CanvasView: UIViewRepresentable {
                 .sink { [weak self] _ in
                     self?.updateActiveLayerAndTool()
                     self?.publishCanvasState()
+                }
+        }
+
+        /// Onion settings reach the canvas directly. In particular, opacity ticks redraw the ghost
+        /// without making `CanvasManager` publish to the editor's SwiftUI view tree.
+        func observeOnionSkin() {
+            onionSkinSubscription = canvasManager.onionSkinState.$settings
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] _ in
+                    self?.updateOnionSkin()
                 }
         }
 

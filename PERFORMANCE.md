@@ -6227,7 +6227,7 @@ Every tick still renders and is shown (100 of 100), and the main thread's share 
 ~12 ms to ~4.5 ms: what it lost is Core Animation preparing a 20 MB image per render. The surfaces are two
 of the fill's window at its working size, held while the fill is adjustable. Not measured: the device.
 
-### 34.2 The scrub's decode and the onion skin's surface — measured, and not built
+### 34.2 The scrub's decode and the onion skin's surface — measured, and the opacity publisher (2026-10-14)
 
 The assessment planned both for this commit only if a measurement asked for them. Neither did.
 
@@ -6240,11 +6240,29 @@ The assessment planned both for this commit only if a measurement asked for them
   4096² scrub. **The larger cost is the onion skin's**: with it on, the same scrub is 2.99 s of main
   thread, 1.33 s of it the ghost's frames built inside `updateUIView` (`onionFrames`, ~22 ms a step) — not
   this item's, and not built here.
-- **The onion skin's opacity slider** (`-probeMode onion`, new: the first Behind slot swept for 100 ticks
-  at 4096²) handed Core Animation **4** images of 4 MB or more in all and ran one `onionComposite`: an
-  opacity tick does not rebuild the ghost, so its present does not churn the render server and a surface
-  would buy nothing. What a tick does cost is a SwiftUI pass over the editor — `onionSkin` is `@Published`
-  on `CanvasManager` — 100 `updateUIView`s and 1.31 s of main thread over the 8.4 s drag (~13 ms a tick):
-  the brush colour's shape (§33.1), not fixed here.
+- **The onion skin's opacity slider** handed Core Animation **4** images of 4 MB or more in all and ran one
+  `onionComposite`: an opacity tick does not rebuild the ghost, so a surface would buy nothing. What it
+  cost was a SwiftUI pass over the editor — `onionSkin` was `@Published` on `CanvasManager` — 100
+  `updateUIView`s and 1.31 s of main thread over an 8.4 s drag (~13 ms a tick).
+
+  **Fixed with `OnionSkinState`, using the `BrushColorState` shape (§33.1).** `CanvasManager.onionSkin`
+  remains the persistence-facing value, while the panel and canvas subscribe to the dedicated settings
+  publisher. The canvas reapplies the existing composite directly; the editor does not re-evaluate.
+
+  **MEASURED, Release, iPad (9th generation) simulator (iOS 26.5), `PlaybackProbe -probeMode onion`**:
+  4096², five vector layers × two frames, one stroke per cel, 192 MiB budget, onion on, 100 opacity ticks
+  80 ms apart. One take each on the same simulator. *Before* is `5d73184`; *after* is this change. The
+  probe counted `updateUIView` and `bodyDrawing` across the full run, and `mainBusyMs` during the 100-tick
+  interval. The first editor pass initializes both builds' canvases, so the after count includes that one
+  startup pass, not a tick.
+
+  | 100 ticks over 8.4–8.5 s | editor `updateUIView` passes | `bodyDrawing` passes | main-thread busy during drag | per tick |
+  |---|---:|---:|---:|---:|
+  | before | **100** | **100** | 724 ms | 7.24 ms |
+  | after | **0** (one startup pass total) | **0** (one startup pass total) | **42 ms** | **0.42 ms** |
+
+  Both runs composed the ghost once and handed four canvas-sized images to Core Animation. The remaining
+  ~0.4 ms a tick is the direct canvas update and its cached-frame/mask lookup; the whole editor pass is
+  gone. These are simulator figures, not a device measurement.
 
 The brush editor's scratch pad (optional in the assessment) was left as it is.

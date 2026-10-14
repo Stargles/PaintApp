@@ -1681,13 +1681,14 @@ final class CanvasManager: ObservableObject {
     /// source rather than of the two that exist today.
     var showsOnionSkin: Bool { isOnionSkinEnabled && !isPlaying }
 
-    /// Everything the onion-skin panel configures — how many skins, which side, how they are tinted
-    /// and how opaque each one is. See `OnionSkinSettings`.
-    ///
-    /// **One value, not a dozen `@Published` properties**, because the render path compares the
-    /// settings that produced the picture on screen against the settings now, and one `==` is what
-    /// makes that comparison possible to get right.
-    @Published var onionSkin = OnionSkinSettings()
+    /// Onion settings have their own publisher: opacity ticks must update the panel and canvas without
+    /// sending `objectWillChange` through the whole editor (TODO 189). The Codable value remains the
+    /// boundary used by scene persistence.
+    let onionSkinState = OnionSkinState()
+    var onionSkin: OnionSkinSettings {
+        get { onionSkinState.settings }
+        set { onionSkinState.settings = newValue }
+    }
     @Published var isLoopEnabled: Bool = true
     /// The frame range playback loops within, set via the ruler's frame-number tap menu. Nil means
     /// "the whole scene"; highlighted blue across its span once set, independent of `isLoopEnabled`.

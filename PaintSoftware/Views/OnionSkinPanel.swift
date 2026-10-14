@@ -29,7 +29,13 @@ import SwiftUI
 /// composite is allowed to be — lives in `OnionSkinSource.swift` as pure functions, so the whole
 /// feature is testable without a simulator and this file has nothing to get wrong but layout.
 struct OnionSkinPanel: View {
-    @ObservedObject var canvasManager: CanvasManager
+    let canvasManager: CanvasManager
+    @ObservedObject private var onionSkinState: OnionSkinState
+
+    init(canvasManager: CanvasManager) {
+        self.canvasManager = canvasManager
+        self.onionSkinState = canvasManager.onionSkinState
+    }
 
     /// TODO (72): *"the color picker in onion skin isnt the same color picker as the color picker
     /// used in everything else… Make it the same as the normal color picker."* These two open
@@ -39,7 +45,7 @@ struct OnionSkinPanel: View {
     @State private var showPreviousTintPicker = false
     @State private var showNextTintPicker = false
 
-    private var settings: OnionSkinSettings { canvasManager.onionSkin }
+    private var settings: OnionSkinSettings { onionSkinState.settings }
 
     var body: some View {
         ScrollView {

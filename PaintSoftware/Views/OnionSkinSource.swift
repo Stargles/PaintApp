@@ -1,4 +1,5 @@
 import UIKit
+import Combine
 
 /// What the onion-skin layer should display. `OnionSkinSettingsSource` answers "the neighbouring
 /// drawings/frames on the current layer, as the onion-skin panel is configured"; interpolate mode
@@ -535,6 +536,13 @@ struct OnionSkinSettings: Equatable, Codable {
              previousTint, nextTint, isOpacityLinked, linkedPrevious, linkedNext,
              freePreviousOpacities, freeNextOpacities
     }
+}
+
+/// The onion settings publish independently from `CanvasManager`, so changing opacity updates the
+/// canvas and its panel without invalidating every editor view. Persistence still stores the plain
+/// `OnionSkinSettings` value through `CanvasManager.onionSkin`.
+final class OnionSkinState: ObservableObject {
+    @Published var settings = OnionSkinSettings()
 }
 
 // MARK: - Linked opacity

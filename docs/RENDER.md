@@ -560,6 +560,11 @@ and 13.5 at 2048²**, against this file's 41.7 ms budget, on the owner's own iPa
 It has its own serial queue now, like the baker, the halves and the vector base. **The rule to apply to
 the next one is not "does it engage the compositor" but "does anything on this pass make pixels".**
 
+The onion opacity slider follows the same narrow-update rule. Its settings publish from `OnionSkinState`,
+so a tick redraws the onion panel and asks the canvas to apply its cached ghost without publishing through
+`CanvasManager` to the whole editor; changing opacity does not rebuild the ghost composite (PERFORMANCE.md
+§34.2).
+
 **The general shape, for whoever adds the next thing the flat row cannot draw:** this file's promise that playback
 comes off disk is only as wide as that predicate. A feature whose picture Core Animation cannot produce must
 either engage the compositor or accept that it is rendering on the main thread every frame — and the second is
