@@ -27,7 +27,10 @@ The owner is asleep until 10 a.m. Toronto time; defer further questions until th
 An interruption at 03:40 was recovered from the existing worktrees: the mask worker restored its
 deliberate backup-repair mutation before resuming. No worker is ready to merge yet.
 The full UI suite is owed on the integrated tree before the next install. Earlier session design notes
-remain in `~/PaintWork/design/`.
+remain in `~/PaintWork/design/`; `s49-liquify-constraints.md` records the current reuse seams and
+superseded premises for (178). The mask branch has rebased onto `4dde4ca`: its 13 mutation batches and
+five feature/recovery UI tests are complete; final Debug/Release tiers remain. Stream validation and
+the two-fill reproduction are still running. No worker is ready to merge yet.
 
 **Build from `~/PaintWork`, not `~/Desktop`** (CLAUDE.md "Build and test", first paragraph).
 `~/PaintWork/deploy` is a detached worktree kept for device builds.
@@ -74,7 +77,8 @@ before the next device install**, since ~70 merges landed without one.
   a 4096² fill-slider drag handed Core Animation 102 canvas-sized images before and 2 after.
 - **(183) A window surface is not drawn while the render server still shows it**
   (`WindowSurfaceView.present` waits on `IOSurface.isInUse`); the colour picker no longer rebuilds per
-  tick (`PickerColor`, PERFORMANCE §31). The owner's on-device confirmation of the flicker is owed.
+  tick (`PickerColor`, PERFORMANCE §31). The owner confirmed the selection-colour flicker is fixed;
+  the separate first-fill flash when starting another fill is (190).
 - **(176) Where options are saved** — ruled row by row (`~/PaintWork/design/s48-176-ruling.md`): tools,
   brush/eraser size-opacity-colour, fill, text, interpolate switches, picker tab, recent colours,
   selected palette and active view are **per scene** (`SceneTools` in `EditorStateManifest`, decoded
@@ -111,8 +115,8 @@ flickers on the iPad; the different two-fill flash is now (190). (178) includes 
    (and `LegacyPoseTrackRepair`, if the keyed scene from session 47 was restored and animates — still
    unconfirmed: Gallery → scene "1" → Versions… → Oct 9 "Before app update" → Restore).
 
-**To check on the iPad** (`7cf3245`): the selection-colour flicker (lasso, Fill, Edit, drag the colour),
-colour-picker drags, the polygon lasso, a selection kept across layers and frames, the padding veil, a
+**To check on the iPad** (`7cf3245`): colour-picker drags, the polygon lasso, a selection kept across
+layers and frames, the padding veil, a
 long effect-slider drag; and still from session 47: the graph-node drag, the Move box, the gap slider,
 idle with a stream connected. Send the next `flight-…` file after a "Caught a canvas freeze" badge.
 
