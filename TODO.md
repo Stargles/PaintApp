@@ -105,18 +105,8 @@ why: pictures handed to Core Animation faster than the render server frees them)
       merged (`1a715ec`..`0f09447`, `bd5ffec`, `f6586c9`, commits 6, 8, 9 and 10), and the graph-band
       channel drags; 7 is (35)'s.
 - [x] Half-detail drag preview above the size threshold (PERFORMANCE.md §30.4).
-- [ ] Integration correction (2026-10-14): Fog Glow’s `size` has no pixel unit, so
-      `drawingPixelLengths` skips it entirely. The carried minimum-2 explanation was incomplete:
-      every Fog Glow radius doubles during half-detail preview. Scale its equivalent Bloom radius
-      in the render recipe, preserving the saved Size range and full-detail appearance; render A/B
-      evidence and test it. This implements the existing “same picture, softer” rule without a new
-      appearance tradeoff or a below-minimum saved control value.
 - [x] The brush colour panel's tick: its own small publisher (`BrushColorState`) — the toolbar swatches and
       the canvas follow per tick, the editor does not re-evaluate (PERFORMANCE §33.1).
-- [ ] Stream/mask integration (2026-10-14): restore old stream snapshots through the shared staged
-      repair sequence. Validate present stream metadata before replacement too: the existing repair
-      only adds a missing placement field, while the package validator checks drawing-file existence.
-      A malformed present stream record must leave the live scene and original backup untouched.
 - [ ] Measured with `PlaybackProbe` before/after, as §29 was — on the iPad 9 simulator: the effect slider
       (PERFORMANCE.md §30), half detail (§30.4), the Opacity slider (§30.5), a smart shape's handle drag
       (§32), the brush colour (§33.1) and the fill slider (§34.1). **Owed: the iPad itself** — the probe's

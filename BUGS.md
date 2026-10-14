@@ -3,23 +3,6 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
-## Fog Glow’s preview doubles its radius because Size is not a pixel-length parameter (2026-10-14)
-
-`Effect.drawingPixelLengths(at:)` selects `EffectParameter.isPixelLength`, which reads the ` px` unit.
-Fog Glow’s dimensionless Size derives a radius through `Glare.asBloom`; it is skipped at every value,
-not merely clamped at the minimum as the handoff hypothesised. Render-time conversion to the equivalent
-Bloom before scaling can preserve the artist’s chosen width without changing saved controls. Test the
-actual pixels and show the comparison before closing this.
-
-## Fill landing can be drawn twice by the new in-place stream display (2026-10-14)
-
-Integration review of unmerged (177)/(190): `prepareLiveFillLanding` writes the committed preview
-into `UnlandedInk`, whose `showOverlays` notification can synchronously mint a stream display recipe.
-The model already contains the fill while `liveFill` still exposes the same overlay, so translucent
-fill can be drawn twice for that frame. The ordinary stroke teardown clears its scratch before this
-notification and is unaffected. Transfer the fill's picture after clearing its held model value but
-before notifying the canvas to remove the old surface; test the combined boundary and drawn colour.
-
 ## A scrub at 4096² with the onion skin on spends ~1.3 s of main thread building the ghost (2026-10-13)
 
 Found by TODO (179)'s `PlaybackProbe -probeMode scrub`/`onion` (PERFORMANCE.md §34.2), iPad 9 simulator,
