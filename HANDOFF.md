@@ -17,8 +17,8 @@ is what we find.
 
 **Session 49 is in flight.** The verified starting point was `5d73184`; no prior `tmp/*` branch held
 unmerged work. (189) is merged at `8616532`, and (190) at `e6b7d81`. Active task branches under
-`~/PaintWork/` are `tmp/s49-stream` (177), `tmp/s49-masks` (35), `tmp/s49-liquify` (178), and
-`tmp/s49-session` (coordination). Never harvest dirty worker files: mutations may be intentional.
+`~/PaintWork/` are `tmp/s49-integration` (fill/stream restore), `tmp/s49-fogglow` (179),
+`tmp/s49-liquify` (178), and `tmp/s49-session` (coordination). Never harvest dirty worker files: mutations may be intentional.
 
 - **(190) merged:** the owner’s transient-to-baked theory was confirmed. Commit writes the fill before
   transferring its exact preview to the existing held-picture lane. Debug/Release 5089 each, four skips,
@@ -31,10 +31,18 @@ unmerged work. (189) is merged at `8616532`, and (190) at `e6b7d81`. Active task
   assertion), four skips and zero failures each. New UI class 4/4, production mutants red/restored,
   actual prior-build package roundtrip and native landscape inspected. Root owns combined fill landing
   and adding stream repair to `LibraryRepair.prepareForCurrentRead` after (35) lands.
-- **(35):** final source `deb168f`; 19 mutation batches restored, feature/recovery and filing UI green,
-  native landscape inspected. Strict staged restore exposed real package collision/queued-rename bugs,
-  now fixed through the existing serialized save queue with exact marker rollback. Final Debug was
-  interrupted; resumed Debug/Release are running (5107 selected). No repeated UI/mutation work needed.
+- **(35) merged** at `b625710`: Debug and Release at `deb168f` each ran 5107 tests,
+  5103 passed and four skipped. Nineteen mutation batches restored, feature/recovery and filing UI
+  green, native landscape inspected. Strict staged restore exposed package collision/queued-rename
+  bugs, fixed through the existing serialized save queue with exact marker rollback. Rebased census
+  is 5124 fast / 5692 overall; the combined tiers remain root’s integration check.
+- **Fill/stream integration** is implemented and focused UI validated on `tmp/s49-integration`.
+  The old ordering produces a visible double coat (red 126→64→126); restored ordering stays at one.
+  The whole class had one menu setup failure; its unchanged isolated retry passed. The branch also
+  adds stream repair to staged restore and rejects malformed present stream records before replacing
+  live artwork; actual previous-build snapshot checks are in progress.
+- **Fog Glow** correction at `tmp/s49-fogglow` converts to the existing equivalent Bloom before
+  scaling the rendering radius. Focused pixel/UI/mutation validation is in progress; not yet merged.
 - **(178) started**, including linked in-between frames as ruled. Prepared constraints are in
   `~/PaintWork/design/s49-liquify-constraints.md`. Keep the old `5d73184` Release app at
   `/tmp/s49-onion-before-derived` until a genuine previous-build interpolation package is captured.
@@ -65,15 +73,12 @@ before the next device install**, since ~70 merges landed without one.
 
 ## What is next
 
-1. **TODO (179) is built** — only the owner's iPad `PlaybackProbe` run is owed (its last box).
+1. **TODO (179)** — finish Fog Glow preview validation and combined fill/stream checks, then the
+   owner's iPad `PlaybackProbe` after-measurements on an updated build.
    **(189) merged** at `8616532`: 100 onion-opacity ticks cause zero editor passes (previously 100);
    Debug and Release fast tier 5087 each, 4 skipped, zero failures. **(190)** merged at `e6b7d81`.
-2. **TODO (177)** — a stream layer drawn in place: one more consumer of (179)'s seam (a windowed
-   recomposite of the layers above the stream per stream tick). Survey:
-   `~/PaintWork/design/s48-survey-masks-stream-liquify.md` §B.
-3. **TODO (35)** — the colour mask on the ticked layers, mask tuning per mask, and mask tuning's live
-   preview (the assessment's commit 7, moved here). Survey §A.
-4. **TODO (178)** — liquify (raster + vector, Push / Pinch-Expand / Twirl, active layer, selection limits
+2. **TODO (177) and (35) are merged.** Their shared integration checks are described above.
+3. **TODO (178)** — liquify (raster + vector, Push / Pinch-Expand / Twirl, active layer, selection limits
    it), on (176)'s `ToolProfiles` as a third tool. Survey §C.
 
 ## What shipped this session (48)
