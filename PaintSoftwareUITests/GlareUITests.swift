@@ -215,7 +215,6 @@ final class GlareUITests: PaintUITestCase {
                                  "The held half-detail picture matches the full-detail glow footprint (max luma delta \(largestDelta))")
         XCUIDevice.shared.orientation = .landscapeLeft
         attachScreenshot(app, "fog-glow-size-native-landscape")
-        Thread.sleep(forTimeInterval: 3)
     }
 }
 
