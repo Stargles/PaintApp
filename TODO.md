@@ -130,13 +130,13 @@ canvas to remove the old surface. Otherwise that mint sees the committed fill an
 together, darkening translucent fills. Pin the combined boundary before merging the integration.
 
 - [ ] Reproduce with two successive fills; fix the cause and pin the visible handoff with a cold-start UI test.
-  Baseline confirmed on the iPad 9 simulator at `8616532`: a cold UI test filled two enclosed vector
-  regions in sequence and sampled the first fill every 50 ms while starting the second. Without a delay
-  seed, sampling missed the sub-frame gap; with the existing simulator-only
-  `-uiTestSlowVectorRenderMillis 300` seed, it caught the first fill disappearing while the stale base
-  was rasterized. The seed delays the background vector-render queue, not the main thread. The cause is
-  the transient fill surface being removed synchronously before the vector element or raster pixels are
-  written; the next committed base is still pending.
+  Initial baseline sampling forced landscape, but `MidGestureSampler` uses portrait raw screenshot
+  coordinates. That baseline result is invalid and is not evidence of the gap; rerun the seeded and fixed
+  transition test in portrait before accepting its pixels. The existing simulator-only
+  `-uiTestSlowVectorRenderMillis 300` seed delays the background vector-render queue, not the main
+  thread. Code tracing identifies the hypothesis to test: the transient fill surface may be removed
+  synchronously before the vector element or raster pixels are written, while the next committed base
+  is pending.
 
 ## (177) A stream layer can draw in place in the layer stack
 

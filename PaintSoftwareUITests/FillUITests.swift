@@ -16,7 +16,7 @@ final class FillContainmentUITests: PaintUITestCase {
     /// every sample after the first fill lands must still show the first fill, not the stale base.
     func testStartingASecondFillKeepsTheFirstFillVisible() throws {
         let app = XCUIApplication()
-        XCUIDevice.shared.orientation = .landscapeLeft
+        XCUIDevice.shared.orientation = .portrait
         app.launchArguments += ["-uiTestSlowVectorRenderMillis", "300"]
         XCTAssertTrue(launchIntoEditor(app))
         let canvas = app.otherElements["canvas.host"]
