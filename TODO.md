@@ -124,6 +124,11 @@ Test the owner's transient-to-bake handoff theory first. Preserve the first fill
 until its committed replacement has landed; use the existing fill/surface presentation lifecycle,
 without a second holding path or timing delay.
 
+**Integration check, 2026-10-14:** (177)'s stream display can mint synchronously during (190)'s
+landing callback. Clear the held model value before transferring its picture, then notify the
+canvas to remove the old surface. Otherwise that mint sees the committed fill and its live overlay
+together, darkening translucent fills. Pin the combined boundary before merging the integration.
+
 - [ ] Reproduce with two successive fills; fix the cause and pin the visible handoff with a cold-start UI test.
 
 ## (177) A stream layer can draw in place in the layer stack

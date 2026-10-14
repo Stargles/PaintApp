@@ -26,6 +26,8 @@ Do not harvest uncommitted worker files: they may be deliberate test mutations. 
   evidence was invalid because `MidGestureSampler` assumes portrait; keep that limitation explicit.
   The raster sequence also passes in portrait. An existing reference-layer test fails its iPad9 probe
   but passes on a fresh 13-inch simulator (known geometry debt).
+  Integration with (177) must clear the held fill model before its landing callback can mint a stream
+  recipe, while keeping the old surface until the replacement is held (BUGS.md records the trace).
 - **(177):** Debug fast tier 5101, four skips, zero failures before rebasing onto `0ad03d2`; new UI class
   four tests green. Logic and UI mutations exercised the stream sources, ordering and persistence.
   Final Release and cleanup remain. Native landscape capture `/tmp/s49-stream-landscape.png` reviewed.
