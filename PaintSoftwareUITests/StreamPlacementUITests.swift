@@ -83,11 +83,6 @@ final class StreamPlacementUITests: StreamUITestCase {
         XCTAssertTrue(readScreenNow([inkPoint]).first.flatMap { $0 }.map { Colour.black.matches($0) } == true,
             "the landed composite retains the ink beside the Guide")
         attachScreenshot(XCUIScreen.main, "Guide remains above stream-layer ink")
-        // The shared sampler reads portrait pixels; the owner's layout is captured natively below.
-        XCUIDevice.shared.orientation = .landscapeLeft
-        Thread.sleep(forTimeInterval: 1)
-        print("S49 STREAM LANDSCAPE READY")
-        Thread.sleep(forTimeInterval: 3)
     }
 
     func testAnOverlappingOnTopStreamRemainsOverTheInPlaceWindow() throws {

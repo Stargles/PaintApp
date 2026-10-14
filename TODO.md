@@ -114,28 +114,6 @@ why: pictures handed to Core Animation faster than the render server frees them)
       unlocked it 2026-10-14. Installed `7cf3245` supports only the effect baseline; the other three
       modes need an updated build (unknown modes in that build silently run playback).
 
-## (177) A stream layer can draw in place in the layer stack
-
-**Status** — asked 2026-10-12.
-
-*"currently the stream layer renders on top of everything. It would be nice if the stream layer still
-followed the layer heigharchy. I'm pretty sure this measure was to prevent re-rendering every time the
-stream moves, but I feel like it is okay as long as we add a switch to the stream options menu where you
-can flip it from rendering on top or in place."*
-
-**What the survey found**: the stream is already in layer order while every layer above it is plain; it
-goes on top only when a layer above blends, masks, grades or is a Guide (`LivePairCut.overHost`). In
-place means re-compositing the layers above the stream every stream tick, in a window — one more consumer
-of (179)'s scheduler, so this follows (179). Decided 2026-10-12 (the orchestrator; the owner may
-overrule): the switch is stored **per stream**, beside Freeze (`StreamRef`), and defaults to **on top**.
-
-- [ ] A switch in the stream bar: on top (today) / in place.
-
-**In flight, session 49** — per-stream viewing state; display-only window recipe with the live stroke
-entered at its layer before grading, masks and blends. The newest request scheduler and reusable
-surfaces bound the queue; saved packages receive a one-shot strict-format repair. Bake/export remain
-reference-free. Implementation: `tmp/s49-stream`.
-
 ## (35) Advanced masks — colour masks beside the alpha mask
 
 **Status** — promoted from "Later" 2026-10-12; the owner will describe what it is meant to be once told
@@ -252,9 +230,6 @@ device figure §5.3 asks for.
 - [ ] The redraw tick's cost MEASURED on the iPad (STREAM.md §8 names the outlet: the
       `ScreenStream` log line or the bar's `streamBar.tickSummary` marker).
 - [ ] Owner-verified: Ctrl+V of a bitmap into the drop box (not exercisable over SSH).
-
-**Ruled 2026-10-01: keep the limitation** — a stream layer under a blend mode or effect is not live
-(46–73 ms a tick); the bar says so. Opacity is fine.
 
 ---
 

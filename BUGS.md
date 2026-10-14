@@ -2184,9 +2184,3 @@ menu's keyframe items, and deliberately not fixed there.
 - **A vector cel still carries `fillImage`/`bakedImage`**, so raster features allocate canvas-sized
   bitmaps on a vector layer. The product owner wants vector fully divorced from raster —
   [VECTOR_INTERPOLATION.md](docs/VECTOR_INTERPOLATION.md) §4 item 26 is the full write-up.
-
-## The stream connection sheet leaves Add selected after placing its layer (2026-10-14)
-
-Found by `StreamPlacementUITests` while adding two streams: after the first sheet closes and the Move
-box commits, Add is still the active panel. The next + tap closes it; Stream Screen is absent. In
-flight on `tmp/s49-stream`: close Add when its connection sheet dismisses.

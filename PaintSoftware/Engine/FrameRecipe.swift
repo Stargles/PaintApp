@@ -72,8 +72,8 @@ struct FrameRecipe {
     /// **Nil for a whole frame, and set for one horizontal strip of one** — RENDER.md §3.8, and the
     /// only field that makes `canvasSize` mean something other than "the frame".
     ///
-    /// Every recipe anything but `StripedCompositor` mints leaves this nil, so it is the identity
-    /// for the live canvas, the bake, the thumbnail and the eyedropper alike. When it is set,
+    /// Ordinary whole-frame recipes leave this nil. Strip consumers and the stream display carry
+    /// a window so sources retain the whole frame's coordinates. When it is set,
     /// `canvasSize` is the strip's own buffer and this says where that buffer sits in the frame —
     /// which is what `resolveSources` needs to draw a cel through a translated CTM, what both memo
     /// keys need so two strips of equal height cannot collide, and what the effect kernels need so a
