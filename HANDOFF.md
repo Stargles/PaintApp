@@ -16,14 +16,16 @@ is what we find.
 — `origin/main` is a shared ref and a cut-off session's work sits on its branch.
 
 **Session 49 is in flight.** The verified starting point is `5d73184`; no prior `tmp/*` branch held
-unmerged work. Current task branches are `tmp/s49-onion` (189), `tmp/s49-stream` (177),
-`tmp/s49-masks` (35), and `tmp/s49-session` (coordination). Their worktrees are under `~/PaintWork/`.
+unmerged work. (189) is merged at `8616532`. Current task branches are `tmp/s49-fill-handoff` (190),
+`tmp/s49-stream` (177), `tmp/s49-masks` (35), and `tmp/s49-session` (coordination). Their worktrees are under `~/PaintWork/`.
 Do not harvest a worker's uncommitted files: the worker may be mutation-testing. Liquify (178) follows,
 including linked in-between frames (owner ruled 2026-10-14). New (190) is a brief first-fill flash when
 starting a second fill; test the owner's transient-to-bake handoff theory first.
 The owner permits any useful agent count but prioritises usage conservation and output quality over
 speed. Keep delegation focused, use cheaper models for routine work, and report the queue occasionally.
 The owner is asleep until 10 a.m. Toronto time; defer further questions until then.
+An interruption at 03:40 was recovered from the existing worktrees: the mask worker restored its
+deliberate backup-repair mutation before resuming. No worker is ready to merge yet.
 The full UI suite is owed on the integrated tree before the next install. Earlier session design notes
 remain in `~/PaintWork/design/`.
 
@@ -45,8 +47,9 @@ before the next device install**, since ~70 merges landed without one.
 
 ## What is next
 
-1. **TODO (179) is built** — only the owner's iPad `PlaybackProbe` run is owed (its last box). **TODO (189)**,
-   small: the onion skin's opacity slider on its own publisher, the brush colour's shape.
+1. **TODO (179) is built** — only the owner's iPad `PlaybackProbe` run is owed (its last box).
+   **(189) merged** at `8616532`: 100 onion-opacity ticks cause zero editor passes (previously 100);
+   Debug and Release fast tier 5087 each, 4 skipped, zero failures. **(190)** is in flight.
 2. **TODO (177)** — a stream layer drawn in place: one more consumer of (179)'s seam (a windowed
    recomposite of the layers above the stream per stream tick). Survey:
    `~/PaintWork/design/s48-survey-masks-stream-liquify.md` §B.
@@ -101,7 +104,10 @@ flickers on the iPad; the different two-fill flash is now (190). (178) includes 
 **Questions to ask after 10 a.m. Toronto time (plain language, with options):**
 1. (179) On big scenes the half-detail preview leaves **Fog Glow** up to twice as wide mid-drag (its Size
    cannot go below 2) — leave it, scale it anyway, or never use half detail when a scene has Fog Glow?
-2. Once the next build has repaired his scenes and they look right: delete `LegacyToolSettingsRepair`
+2. Once the next build has repaired his scenes and they look right: retire the one-shot repairs.
+   First run a final repair build with a new signature so the preceding build's preserved preupdate
+   snapshots are also converted; verify all library packages decode before removing repair code.
+   This keeps old snapshots usable without a permanent legacy decoder. Delete `LegacyToolSettingsRepair`
    (and `LegacyPoseTrackRepair`, if the keyed scene from session 47 was restored and animates — still
    unconfirmed: Gallery → scene "1" → Versions… → Oct 9 "Before app update" → Restore).
 

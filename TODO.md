@@ -112,8 +112,6 @@ why: pictures handed to Core Animation faster than the render server frees them)
       (§32), the brush colour (§33.1) and the fill slider (§34.1). **Owed: the iPad itself** — the probe's
       `effect`, `opacity`, `shape` and `fill` modes on the owner's device.
 
-## (183) Recolouring a filled selection flickers
-
 ## (190) Starting a second fill briefly flashes the first fill
 
 **Status** — reported 2026-10-14 after the owner confirmed (183)'s recolour flicker is gone.
