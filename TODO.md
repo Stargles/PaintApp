@@ -170,7 +170,9 @@ The existing source-block layer retarget and canvas-resize recipe mapping must c
 deformation along, preserving its source identity and geometry rather than leaving stale coordinates.
 An unreadable saved selection archive must fail current decoding, never become an unrestricted field.
 Prepared native-tip sampling preserves every raster byte but still costs 13.592 seconds for the
-84,956-pixel patterned window in isolated Release. Remove production-only diagnostic work first;
+84,956-pixel patterned window in isolated Release. Removing the production diagnostic pass yields
+290,752,890 evaluations / 12.426 seconds and zero source-solve failures; this raster cost remains open.
+
 The bounded continuous-flow experiment is complete: loose integration saves field evaluations but
 changes the map; tighter integration loses the saving. Keep the current verified map pending the
 production-only measurement (evidence: `~/PaintWork/evidence/s49-liquify-flow-prototype/README.md`).

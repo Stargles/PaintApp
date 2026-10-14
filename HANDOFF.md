@@ -59,8 +59,9 @@ Never harvest dirty worker files: mutations may be intentional.
   identity through regrouping and cloned cels. A subsequent numerical check supersedes the new-local-
   ink inverse path: past gestures must affect only local edits present in their captured membership,
   while later gestures capture newly drawn marks normally (TODO explains the precision limit).
-  The storage worker is extending source-block retarget, canvas-resize conjugation,
-  and strict selection-archive decoding. Earlier storage mutations: 16 batches red, restored 12/12.
+  Storage retarget/resize/strict-selection work is complete at `ae58c7e`, `1fd073e`, `42ff0b1`:
+  47/47 Debug, fourteen distinct faults caught in fifteen mutation runs, restored 3/3. Earlier storage
+  mutations: sixteen batches red, restored 12/12. Those checkpoints are integrated in the feature branch.
   The original displacement folded strong brushes; reversible steps now pass small rendered fixtures.
   Frozen Release benchmark `3434670`: hard 67,100 pixels / 75,915,422 field evaluations / 3.393 s;
   patterned 84,956 pixels / 324,895,856 evaluations / 28.056 s, with 7,801 forward-roundtrip residual
@@ -70,12 +71,16 @@ Never harvest dirty worker files: mutations may be intentional.
   production inversion without reducing brush strength.
   Root's isolated `tmp/s49-liquify-cost` prepares brush data and searches indexed bins directly;
   byte-identical raster comparison passed for both brushes; isolated Release is 2.639 s hard and
-  13.592 s patterned, with a 6,540,296-byte full-sweep field. Production diagnostic removal is next;
+  13.592 s patterned, with a 6,540,296-byte full-sweep field. Production-only inversion at `ddebad6`
+  passes source-reference checks: hard 54,319,422 evaluations / 1.663 s; patterned 290,752,890 /
+  12.426 s, both with zero source-solve failures in isolated Release. The patterned raster cost remains open;
   the bounded continuous-flow experiment is complete with no adoption recommendation: the cheaper
   variant changes the map, and tightening accuracy removes its cost advantage. Evidence is under
   `~/PaintWork/evidence/s49-liquify-flow-prototype/`. The next shared rendering change reuses finished
   procedural geometry and transfers the shown IOSurface on lift, retaining LatestWins and safe
-  document/undo ordering. Linked-frame
+  document/undo ordering. Root shared checkpoint `25791ab` transfers frozen surfaces and correctly
+  composites multiple pending replacement windows (30/30 Debug; mutations/UI still in progress),
+  integrated in the feature branch as `c07406f`. Linked-frame
   cold-reopen pixel comparison needs a canonical saved/reopened seed (first save quantizes ordinary
   source strokes); raster scope still awaits the owner's answer. No Liquify code is merged yet.
 
