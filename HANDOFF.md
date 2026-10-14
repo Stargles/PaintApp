@@ -127,13 +127,17 @@ Never harvest dirty worker files: mutations may be intentional.
     although `PixelOps` poses it. Align its origin-based layout and replacement hole with the shared
     pose, and verify actual translated/scaled/rotated pixels. Its current center anchor cannot simply
     receive the fill plane's origin-based transform.
-    The first raster build compiles; focused logic is running. The stream-composite landing must
+    The initial raster draft compiled; the latest source checkpoint is `ecd4aa0`, with its focused
+    baseline still owed after the full-run resource hold. The stream-composite landing must
     certify its captured procedural tick too, since a blanked layer host cannot do so. Root is
     reviewing atomic history, complete replacement windows and bounded preparation before integration.
     Root also identified that the stream cel-content overlay omits the layer pose; reuse pose-aware
     pixel drawing for that replacement and prove posed host/composite agreement.
     The source guard must distinguish stream display ticks from actual edits (`documentVersion`);
     a new laptop frame cannot reject a valid gesture or masquerade as its committed history change.
+    Carry immutable cel/commit coverage with each asynchronous base request and derived image;
+    a bounded version-history FIFO can lose that coverage during a long render and must go.
+    Preserve frozen painted-bounds entries for untouched elements when replacing edited ink.
   - **Still owed:** target material-phase fix, raster completion, feature mutations,
     pending edit/undo/save and rapid overlapping previews,
     native iPad9 UI, final Debug/Release fast tiers, final audit and integrated full UI run.
@@ -167,7 +171,7 @@ This qualifies the existing main before the scheduled profile refresh; Liquify n
 integrated gates after its remaining work is complete.
 All four clones have started. One early Fog Glow UI failure awaits archived-result triage; no cause is
 assigned. Measured memory pressure prompted pausing other simulator batches. Raster checkpoint
-`9df625e` is clean but its newest baseline never launched; workers continue source-only work.
+`ecd4aa0` has source checks only; workers continue source-only work.
 
 **Latest integrated fast tier (app/test source `840d68a`)**: Debug and Release each 5124 tests,
 5120 passed, four skipped and zero failures; static full census 5694. The full UI suite has not been run since `38a3dd6`
@@ -229,10 +233,9 @@ Keep Full Precision continue resetting whenever a scene opens. (183)'s selection
 flickers on the iPad; the different two-fill flash is now (190). (178) includes linked in-between frames.
 
 **Liquify raster scope ruled:** *"Move all raster pixels; leave editable objects alone."* This includes
-flattened pictures/text that old raster layers can no longer distinguish from paint. **A separate vector selection-edge choice is pending**, with a native A/B already shown:
-A carries whole brush marks (including overhang); B keeps every outside pixel fixed (recommended),
-requiring 2D material deformation while retaining editable strokes. Do not infer an answer from elapsed
-time. Independent raster and current feature UI work continues.
+flattened pictures/text that old raster layers can no longer distinguish from paint. **Vector selection
+edge is also ruled:** *"B — Keep outside ink fixed."* Keep every exterior pixel fixed through spatial
+material deformation while retaining editable strokes. There is no open Liquify scope question.
 
 **After the next install:**
 Once the next build has repaired his scenes and they look right: retire the one-shot repairs.

@@ -155,6 +155,9 @@ When a stream composite displays the held edit instead of its layer host, its su
 also certify that exact procedural tick; otherwise a normal lift waits for the next edit to settle.
 Commit validation must use the vector's document-edit version: a live stream-frame arrival changes
 its display version without changing the artwork and must not cancel the gesture.
+Asynchronous base requests and derived images must carry immutable coverage of the edit they
+rendered; a finite history of display versions can evict that identity before a delayed base lands.
+Frozen previews must retain cached painted bounds for untouched elements.
 
 **Validation in progress (2026-10-14):** the first direct-displacement map folds under strong hard
 and patterned brushes; actual raster pictures show stationary streaks and holes. Replace that map
