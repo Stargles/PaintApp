@@ -116,6 +116,9 @@ Never harvest dirty worker files: mutations may be intentional.
     although `PixelOps` poses it. Align its origin-based layout and replacement hole with the shared
     pose, and verify actual translated/scaled/rotated pixels. Its current center anchor cannot simply
     receive the fill plane's origin-based transform.
+    The first raster build compiles; focused logic is running. The stream-composite landing must
+    certify its captured procedural tick too, since a blanked layer host cannot do so. Root is
+    reviewing atomic history, complete replacement windows and bounded preparation before integration.
   - **Still owed:** target material-phase fix, raster completion, feature mutations,
     pending edit/undo/save and rapid overlapping previews,
     native iPad9 UI, final Debug/Release fast tiers, final audit and integrated full UI run.
@@ -138,6 +141,12 @@ pass of 210 UI tests — every red was the known 13"-geometry debt or environmen
 should run before that, or the re-sign ships an unproven build. **The next install runs
 `LegacyToolSettingsRepair` on the owner's scenes** (TODO (176)'s one-shot repair, below) — tell the owner
 when it lands and ask them to open a few scenes.
+
+**Full regression is running** on `e3b487c` (app/test source still `840d68a`), fresh 13-inch M5,
+four clones, normal simlock. Evidence and automatic result archive:
+`~/PaintWork/s49-final-validation/full-main/`; owned simulator `C6A539C3-8499-4BE1-99D5-9FD694C93AF1`.
+This qualifies the existing main before the scheduled profile refresh; Liquify needs its own final
+integrated gates after its remaining work is complete.
 
 **Latest integrated fast tier (app/test source `840d68a`)**: Debug and Release each 5124 tests,
 5120 passed, four skipped and zero failures; static full census 5694. The full UI suite has not been run since `38a3dd6`

@@ -151,6 +151,8 @@ The shared raster replacement also exposes a pose mismatch: `LayerHostView.shown
 strokes and fill previews but leaves `bakedImageView` unposed, while `PixelOps` poses the same stored
 pixels. Align the backing through the existing origin-based pose, including its replacement hole;
 verify translated, scaled and rotated backing against the composite before accepting the change.
+When a stream composite displays the held edit instead of its layer host, its successful landing must
+also certify that exact procedural tick; otherwise a normal lift waits for the next edit to settle.
 
 **Validation in progress (2026-10-14):** the first direct-displacement map folds under strong hard
 and patterned brushes; actual raster pictures show stationary streaks and holes. Replace that map
