@@ -105,20 +105,21 @@ the laptop.
   (162): *"a live stream does not require to be rendered because it is only used as reference"* —
   point 11's *"actively moving"* extended to always). The frame bake, its keys and its store, an
   export, a thumbnail, an onion skin, the compositor's halves and a derived (posed or interpolated)
-  picture are all drawn **without** the stream, frozen or not; the one place a stream is drawn is its
-  own layer's host, in that layer's place in the stack — layers above still cover it, layers below
-  are under it. A frame therefore changes nothing a bake reads and a pause in the computer's motion
+  picture are all drawn **without** the stream, frozen or not; a stream is drawn only on the live canvas. **On Top** keeps the plain host path;
+  **In Place** includes its frozen frame at its layer in a display-only window composite (§5.3). A frame therefore changes nothing a bake reads and a pause in the computer's motion
   re-bakes nothing. **Bake Frame (2.4) is the one way a stream's picture becomes part of the drawing**:
   the image object it makes is an ordinary image and renders like any. This replaces 2026-10-01's
   *"a stream under a blend mode or effect is not live"* and 2026-10-02's *"Live, then exact when
   still"*, both gone with the settle that served them. The one consequence the owner has since ruled on
   is 2.14; the rest are defaults in §6.
-- **2.14 The plain run stays plain** (owner, 2026-10-10, asked whether the layers between a visible
-  stream and the active layer should keep their blend modes and effects on screen: *"Keep today's plain
-  run"*). While a live stream is visible, the run from the stream up to the active layer
-  (`CanvasManager.liveHostRun`, §5.3) is drawn plain on screen — the stream, its layer's own ink and every
-  layer between them and the active one, each without its blend mode, mask or effect — and the bar says
-  so (`plain`, §5.3). Every picture the document keeps still has them.
+- **2.14 On Top keeps the plain run** (owner, 2026-10-10: *"Keep today's plain run"*). The
+  per-stream switch requested 2026-10-12 adds **In Place**: that stream and the layers around it use
+  their actual masks, blend modes and effects in the live display. The original plain run remains
+  the default, named On Top because a graded upper band makes it draw over the rest of the frame.
+- **2.15 Placement is saved per stream**, beside Freeze, and new and repaired streams start On Top.
+  It is a viewing choice, so it is not an undo step. In Place can present fewer pictures per second
+  when upper layers are expensive; newest-frame coalescing bounds its queue. Exports, thumbnails,
+  onion skins and playback still exclude the reference (2.13).
 
 ## 3. The wire protocol — `paintstream/1`
 
@@ -460,7 +461,7 @@ them is TODO (96) and TODO (97) respectively:
 2. **For the elements on a visible layer whose cel is the one at the current frame, it presents the
    frame** through a closure `CanvasView` installs (`onStreamFrame`, the shape of
    `StrokeCanvasView.guideOverlayNeedsUpdate` — never `objectWillChange`, which is a whole SwiftUI
-   pass thirty times a second). The host answers with `presentStreamFrame`: the element's *window*
+   pass thirty times a second). On Top answers with `presentStreamFrame`: the element's *window*
    — its footprint, clipped to its quad, in true z-order with the ink under and over it — is drawn
    off the main thread by the memo's own walk (`VectorCanvas.drawStreamWindow`) into one of two
    `IOSurface`s the host owns per stream element (`WindowSurfaceView`), frame-positioned over the
@@ -492,45 +493,44 @@ decoder stops announcing frames (`H264StreamDecoder.announcesFrames`) — it sti
 P-frame needs its reference, and still keeps the newest frame in its slot — so a moving screen does not
 wake the main thread thirty times a second for a canvas that can draw none of them.
 
-**A canvas the compositor draws shows a stream through the live pair, for as long as it is on the
-frame** — TODO (112), made permanent by TODO (162). A blend mode, a mask, an effect or a container pose
-anywhere in the document puts the canvas on a composite image, and a frame reaches the screen through
-its layer host's surface and nowhere else. A per-tick composite of the frame is not the alternative: it
-MEASURED **45.8 ms on CoreGraphics and 72.7 ms on Metal** (Debug, 2048², three layers, a 1920×1080
-frame; a bench since retired with the question it priced), and a canvas-sized image per frame is what killed the render server
-(TODO (97)). Until (112) the canvas simply stood on whatever the last bake froze — *"pauses and
-refuses to update until I draw something"*. Now **a stream on the frame is what the pair is for**
-(`SandwichPresentation.live`, `SandwichPresentation.Live.stream`): `CanvasManager.liveHostRun` is the
-leaves from the lowest to the highest of the active layer (unless it is an effect layer, which no host
-can draw: TODO (165)) and every stream
-(`CanvasManager.streamLayerIndices`: on a visible layer, a stream on the cel shown at this frame, a
-leaf, not posed — frozen or not), the pair is cut around that run, those hosts draw themselves between
-the two halves, and **the bake, which no stream is in (2.13), is never the picture to wait for** — so the
-presentation stays `live` as long as the stream is on the frame, and `rest` only once it has left it
-(hidden, played past, or the animation playing — playback reads the bake and shows no stream, §2.9).
-**The price is the near picture, now a rule rather than a stage** (owner, 2026-10-01, *"for the fast
-one it can be just the layer without any effects added"*, and 2026-10-10, *"a live stream does not
-require to be rendered"*): the layers in the run are drawn plain — the stream, the stream layer's own
-ink, and every layer between the stream and the active one — and where a layer above the run blends or
-grades, the run is drawn over one exact picture of everything else (`LivePairCut.overHost`, TODO (160))
-rather than under that layer composited onto transparency, so **a blend mode, mask or effect never
-reaches a stream**. When the stream sits at the bottom and the artist draws on a layer above, the run
-is all of it. The
-2026-10-02 *"Live, then exact when still"* — a settle that committed the frames after
-`settleInterval` (0.6 s, outlasting Windows' 530 ms caret blink) so the sweep re-baked the cel's span
-and the exact, effected picture replaced the pair — is gone with the settle: it re-baked every frame
-the cel spans, ~16 × 350 ms on the owner's iPad 9, for a picture that is only reference.
+**On Top is the existing plain live pair.** `CanvasManager.liveHostRun` cuts around the active
+layer and every visible unposed stream. Plain upper layers cover the run; when an upper band blends,
+masks or grades, `LivePairCut.overHost` places the run over the remaining picture. A stream never
+waits for a bake, since no bake contains it. The bar's `plain` note describes this mode.
 
-**A stream a transformation layer or a Move channel of its own poses is not shown.** It cannot be
-drawn by its host — the cel is drawn from a derived image, which the surface cannot sit over
-(`presentStreamFrame` refuses a derived base) — and a derived image is a picture the document keeps,
-so it carries no stream (`posedCelContent`, `videoCelContent` and the interpolation evaluator drop it).
-The bar says so (`CanvasManager.activeStreamNote`, `streamBar.pictureNote`, value `hiddenByAPose`): *"A
-pose moves this layer, so the live screen isn't shown."* Where the document is the compositor's the
-same note slot says what the artist is looking at, value `plain`: *"A live screen is drawn plain: blend
-modes, masks and effects don't apply to it."* A *dimmed* reference is a layer opacity, which stays on
-the flat row and says nothing. **Freeze changes none of this**: it is a viewing state, not an edit, and
-the frozen stream is the same reference held still, drawn by the same host.
+**In Place composites the actual tree in a window**, through `CanvasManager.makeStreamDisplayRecipe`.
+An In Place-only stream leaves the permanent plain host run, so the exact ordinary canvas picture
+remains under the window and outside it. At mint time selected streams are frozen with their current frames (`VectorCanvas.freezeDisplay`);
+ordinary `freeze` remains reference-free. The window contains full-width rows around the screen's
+footprint, expanded by the sum of the effects' kernel reaches. The output gets a second input apron,
+so an upper blur reads actual neighbouring pixels. `FrameRecipe.windowed` carries the global origin
+through nested memory-budget strips; masks, Guide coordinates and the GPU upload memo read that
+origin exactly as they do on an ordinary stripped frame. Frozen vector geometry draws directly into
+the window, with no native canvas image in between.
+
+`CanvasView` owns one `WindowSurfaceView` for this display on the existing serial composite queue.
+`LatestWins` permits one draw and one pending request; the mint reads the newest frame only when the
+worker frees. Two reusable surfaces reach Core Animation, with the previous front kept until a
+resized window's first frame lands. Scratch changes request the same display directly: the existing
+scratch image, its rectangle, opacity and replacement role enter at their layer before masks,
+blends, effects and Guides. The committed recipe replaces that scratch after lift, so the pen's
+ordering never switches to On Top. Held element edits, fills and Move pieces enter as transient
+sources too; held grades and channels resolve through the existing held recipe. During a whole-frame
+held preview the stream window uses the same preview detail and stays above it, so stream ticks never
+ask for another whole-frame preview. Their windows grow
+only to the affected artwork and its effect reach. On Top streams retain their own hosts over this
+display if both modes are present.
+
+**A stream a transformation layer or a Move channel poses is still hidden.** It is absent from the
+cel's derived picture; `streamBar.pictureNote` says `hiddenByAPose`. Freeze keeps the same placement
+and the same frame; toggling placement alone dirties no bake. Closing the Add menu’s connection sheet also closes Add, so + immediately opens it again to insert
+another stream. `StreamBar.placementButton` exposes
+`onTop` or `inPlace`; In Place omits the plain-picture note. The viewing choice lives strictly in
+`StreamRef.rendersInPlace`. `LegacyStreamPlacementRepair` adds On Top once to earlier stream records
+under Projects, older Backups and Trash before the gallery lists them. It takes and preserves the
+running build’s pristine before-update snapshot; restoring such a snapshot repairs its staged copy
+before the strict decoder opens it. Delete this repair after the owner confirms the library opens
+correctly. A real baseline `5d73184` package pins repair and strict save/load of its last screen frame.
 
 MEASURED on the simulator (Debug, 2048² canvas, a 1280×720 `testsrc` from the fake streamer,
 2026-09-17): the tick delivers **23–29 frames/s at 0.38–0.48 ms mean, ≤1.5 ms max** on the main
@@ -901,10 +901,9 @@ updated to observe directly; §7's deploy step is that.
 - The last frame is saved as JPEG q0.9, on save alone (§5.6); the bake snapshot as the image
   path's existing format.
 - A bake's neighbours keep the stream element's id; only the baked cel is re-identified (§5.5).
-- A stream on a canvas the compositor draws is drawn by its host between the two halves, the layers
-  around it plain, for as long as it is on the frame, and the bar says so; there is no exact picture
-  to come to, because a stream is reference (2.13, §5.3). Consequently **blend modes, masks and
-  effects never reach a stream**, and the layers from it up to the active one are drawn plain (2.14).
+- Placement defaults to **On Top**, per stream. **In Place** applies the actual layer tree on the
+  live canvas, including while painting or moving; both modes remain reference-free in saved
+  pictures (2.13–15, §5.3).
 - **Export, thumbnails, onion skin and playback show the frame without the stream** (2.13). The Export
   sheet's caption says *"screen stream not included"* while a visible stream is in the document.
 - **A stream a transformation layer or a Move channel poses is not shown**, and the bar says so (§5.3).

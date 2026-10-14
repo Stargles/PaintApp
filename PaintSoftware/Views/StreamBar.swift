@@ -68,6 +68,17 @@ struct StreamBar: View {
                 .accessibilityValue(element.isFrozen ? "frozen" : "live")
 
                 Button {
+                    canvasManager.setStreamInPlace(layerIndex: layerIndex, celIndex: celIndex,
+                                                   elementID: element.id, !element.rendersInPlace)
+                } label: {
+                    Text(element.rendersInPlace ? "In Place" : "On Top").font(.subheadline)
+                }
+                .foregroundColor(.white)
+                .accessibilityLabel("Stream placement")
+                .accessibilityIdentifier("streamBar.placementButton")
+                .accessibilityValue(element.rendersInPlace ? "inPlace" : "onTop")
+
+                Button {
                     let outcome = canvasManager.bakeStreamFrame(layerIndex: layerIndex, celIndex: celIndex,
                                                                 atFrame: canvasManager.currentFrame)
                     if case .refused(let reason) = outcome {

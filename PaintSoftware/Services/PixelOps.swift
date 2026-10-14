@@ -206,6 +206,24 @@ enum PixelOps {
     /// buffer per raster leaf being edited, and it is what "the expensive state is already
     /// copy-on-write" buys: the alternative is `ProjectStore.SaveSnapshot`'s eager copy of every cel,
     /// which is the cost this stage removes.
+    /// A transient source for a display recipe. No save, bake, thumbnail or export supplies one.
+    struct CelDisplay {
+        let identity = UUID()
+        var vector: VectorCanvas.Frozen?
+        var windows: [InkWindow] = []
+        var replacingBase: UIImage?
+        var drawOverlays: ((CGContext, CGRect) -> Void)?
+    }
+
+    /// The stroke scratch as drawn on glass, held immutably until a window composite lands.
+    struct InkWindow {
+        let image: UIImage
+        let rect: CGRect
+        let canvasSize: CGSize
+        let opacity: CGFloat
+        let replacesBase: Bool
+    }
+
     struct FrozenCel {
 
         /// Identity of a flatten, drawn entirely from model state.
@@ -265,6 +283,7 @@ enum PixelOps {
         }
 
         let identity: Identity
+        let display: CelDisplay?
         let bakedImage: UIImage?
         /// The raster tier's pixels, or nil where it holds no bitmap at all — the skip
         /// `rasterizeUncached` has always made, taken at freeze time so the answer cannot change
@@ -278,21 +297,22 @@ enum PixelOps {
         let pose: PoseMap?
 
         init(cel: Cel, identity: Identity, derived: DerivedCelContent?,
-             pose: PoseMap? = nil, quality: RenderQuality) {
+             pose: PoseMap? = nil, quality: RenderQuality, display: CelDisplay? = nil) {
+            self.display = display
             self.identity = identity
-            self.derived = derived
+            self.derived = display?.vector == nil ? derived : nil
             self.pose = pose
             bakedImage = cel.bakedImage
             strokesImage = cel.raster.hasContent ? cel.raster.renderToUIImage() : nil
             // Frozen even when `derived` will replace it: the thunk answers nil for a recipe that
             // is not evaluable yet, and the fallback is this tier (see `rasterizeUncached`).
-            vector = cel.vector?.freeze(quality: quality)
+            vector = display?.vector ?? cel.vector?.freeze(quality: quality)
         }
 
         init(cel: Cel, derived: DerivedCelContent?, pose: PoseMap? = nil,
-             quality: RenderQuality) {
-            self.init(cel: cel, identity: Identity(cel: cel, derived: derived?.identity, pose: pose),
-                      derived: derived, pose: pose, quality: quality)
+             quality: RenderQuality, display: CelDisplay? = nil) {
+            self.init(cel: cel, identity: Identity(cel: cel, derived: display.map { AnyHashable($0.identity) } ?? derived?.identity, pose: pose),
+                      derived: derived, pose: pose, quality: quality, display: display)
         }
     }
 
@@ -554,7 +574,7 @@ enum PixelOps {
         // in canvas coordinates and the seam's contract is an image, so the same fix is available
         // there and is a larger change — see `DerivedCelContent.render`.
         let vectorImage = cel.derived?.render(quality)
-            ?? cel.vector?.render(quality: quality, fittingInto: content.size)
+            ?? ((window == nil && cel.display == nil) ? cel.vector?.render(quality: quality, fittingInto: content.size) : nil)
         let renderer = UIGraphicsImageRenderer(bounds: bounds, format: transparentFormat())
         return renderer.image { context in
             // **KEYFRAMES §2.12's raster half, and it is the *other* currency from the vector one.**
@@ -591,11 +611,25 @@ enum PixelOps {
             // The rect the posed tiers draw into: the frame in its own coordinates, since the shift
             // above has already moved the origin. Identical to `content` when there is no window.
             let frameRect = CGRect(origin: .zero, size: window?.frameSize ?? canvasSize)
+            if let replacement = cel.display?.replacingBase { replacement.draw(in: content) }
+            else {
             posedTiers {
                 cel.bakedImage?.draw(in: cel.pose == nil ? content : frameRect)
                 cel.strokesImage?.draw(in: cel.pose == nil ? content : frameRect)
             }
-            vectorImage?.draw(in: content)
+            if let vectorImage { vectorImage.draw(in: content) }
+            else { cel.vector?.draw(into: context.cgContext, frameRect: content, quality: quality) }
+            }
+            cel.display?.drawOverlays?(context.cgContext, content)
+            for ink in cel.display?.windows ?? [] {
+                let scaleX = content.width / ink.canvasSize.width
+                let scaleY = content.height / ink.canvasSize.height
+                let rect = CGRect(x: content.minX + ink.rect.minX * scaleX,
+                                  y: content.minY + ink.rect.minY * scaleY,
+                                  width: ink.rect.width * scaleX, height: ink.rect.height * scaleY)
+                if ink.replacesBase { context.cgContext.clear(rect) }
+                ink.image.draw(in: rect, blendMode: .normal, alpha: ink.opacity)
+            }
         }
     }
 
@@ -712,36 +746,27 @@ enum PixelOps {
     static func render(floatingPiece piece: FloatingPiece, into canvasSize: CGSize) -> UIImage {
         let bounds = CGRect(origin: .zero, size: canvasSize)
         let renderer = UIGraphicsImageRenderer(bounds: bounds, format: transparentFormat())
-        // **The distort arm, and it is the same matrix the live preview was shown under** — see
-        // `FloatingPiece.homography`, which both read. `destination` is clipped to the canvas first,
-        // because pixels outside it are the ones the composite is about to throw away and allocating
-        // them was never anything but cost (`TextLayout.warpedGlyphs`' own rule).
+        return renderer.image { ctx in drawFloatingPiece(piece, into: ctx.cgContext, clippedTo: bounds) }
+    }
+
+    /// The live display draws the existing cropped bitmap into its own window, never a canvas image.
+    static func drawFloatingPiece(_ piece: FloatingPiece, into cg: CGContext, clippedTo clip: CGRect) {
         if piece.distortQuad != nil, let source = piece.pieceImage.cgImage,
-           piece.baseSize.width > 0, source.width > 0, let homography = piece.homography {
-            // Source **texels per box point**, taken from the bitmap rather than from
-            // `pieceImage.scale` — `crop` rounds its pixel rectangle to `.integral`, so the two differ
-            // by up to a texel on a piece whose bounds are not whole pixels. `TextLayout.warpedGlyphs`
-            // measures it the same way and for the same reason.
-            let sourceScale = CGFloat(source.width) / piece.baseSize.width
-            let destination = piece.canvasQuad.boundingBox.integral.intersection(bounds.integral)
-            if destination.width >= 1, destination.height >= 1,
-               let warped = ImageWarp.warpedImage(
-                source: source, sourceScale: sourceScale, boxSize: piece.baseSize,
-                homography: homography, destination: destination,
-                maximumDestinationTexels: maximumFloatingWarpTexels) {
-                return renderer.image { _ in
-                    UIImage(cgImage: warped, scale: 1, orientation: .up).draw(in: destination)
-                }
-            }
+           piece.baseSize.width > 0, let map = piece.homography {
+            let destination = piece.canvasQuad.boundingBox.integral.intersection(clip.integral)
+            guard destination.width >= 1, destination.height >= 1,
+                  let warped = ImageWarp.warpedImage(source: source,
+                    sourceScale: CGFloat(source.width) / piece.baseSize.width, boxSize: piece.baseSize,
+                    homography: map, destination: destination,
+                    maximumDestinationTexels: maximumFloatingWarpTexels) else { return }
+            UIImage(cgImage: warped, scale: 1, orientation: .up).draw(in: destination)
+            return
         }
-        return renderer.image { ctx in
-            ctx.cgContext.saveGState()
-            ctx.cgContext.concatenate(piece.transform.affineTransform)
-            let half = CGSize(width: piece.baseSize.width / 2, height: piece.baseSize.height / 2)
-            let drawRect = CGRect(x: -half.width, y: -half.height, width: piece.baseSize.width, height: piece.baseSize.height)
-            piece.pieceImage.draw(in: drawRect)
-            ctx.cgContext.restoreGState()
-        }
+        cg.saveGState()
+        cg.concatenate(piece.transform.affineTransform)
+        piece.pieceImage.draw(in: CGRect(x: -piece.baseSize.width / 2, y: -piece.baseSize.height / 2,
+                                         width: piece.baseSize.width, height: piece.baseSize.height))
+        cg.restoreGState()
     }
 
     /// A `newSize` copy of a canvas-sized image with its whole extent re-placed into `content` (a

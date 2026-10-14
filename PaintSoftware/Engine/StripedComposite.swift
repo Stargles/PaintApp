@@ -194,7 +194,7 @@ enum StripedCompositor {
     static func plan(for recipe: FrameRecipe,
                      budgetBytes: Int = CompositorBudget.textureBudgetBytes) -> [PlannedStrip] {
         plan(tree: recipe.tree, maskStacks: recipe.maskStacks, canvasSize: recipe.canvasSize,
-             budgetBytes: budgetBytes)
+             budgetBytes: budgetBytes, effectFrameSize: recipe.window?.frameSize)
     }
 
     /// The plan without a recipe — **pure, and no pixel anywhere in it**, which is what lets a test
@@ -203,13 +203,15 @@ enum StripedCompositor {
     /// `CompositorBudget.textureBudgetBytes(physicalMemory:)` exists for.
     static func plan(tree: [RenderNode], maskStacks: [MaskSource: [RenderNode]],
                      canvasSize: CGSize,
-                     budgetBytes: Int = CompositorBudget.textureBudgetBytes) -> [PlannedStrip] {
+                     budgetBytes: Int = CompositorBudget.textureBudgetBytes,
+                     effectFrameSize: CGSize? = nil) -> [PlannedStrip] {
         let frame = CGRect(origin: .zero, size: canvasSize)
         let frameRows = Int(canvasSize.height.rounded())
         guard frameRows > 0, canvasSize.width > 0 else { return [] }
 
         let apron = apron(of: tree, maskStacks: maskStacks,
-                          frameSize: (Int(canvasSize.width.rounded()), frameRows))
+                          frameSize: (Int((effectFrameSize ?? canvasSize).width.rounded()),
+                                      Int((effectFrameSize ?? canvasSize).height.rounded())))
         let bufferRows = ChunkedCompositor.affordableRows(width: canvasSize.width,
                                                           tree: tree, budgetBytes: budgetBytes)
         // The whole frame in one piece — including the case where the apron alone would not fit,

@@ -745,7 +745,8 @@ extension CanvasManager {
                          quality: RenderQuality = .full,
                          includeBackground: Bool,
                          sizing: RenderSizing = .native,
-                         holding held: HeldEdit? = nil) -> FrameRecipe? {
+                         holding held: HeldEdit? = nil,
+                         liveDisplay: [UUID: PixelOps.CelDisplay] = [:]) -> FrameRecipe? {
         guard let canvasSize, canvasSize.width > 0, canvasSize.height > 0 else { return nil }
 
         let walk = renderTreeAndPoses(atFrame: frame, holding: held)
@@ -775,7 +776,8 @@ extension CanvasManager {
         return FrameRecipe(
             tree: tree,
             leaves: leafSnapshots(atFrame: frame, quality: quality, poses: poses, frames: frames,
-                                  alsoIncluding: maskedLayerIndices(in: maskStacks), holding: held),
+                                  alsoIncluding: maskedLayerIndices(in: maskStacks), holding: held,
+                                  liveDisplay: liveDisplay),
             maskStacks: maskStacks,
             frame: frame,
             canvasSize: renderSize,
@@ -1151,7 +1153,7 @@ extension CanvasManager {
     /// carries, so a pair minted for one cut is never taken for another's.
     @MainActor
     func liveHostsBesidesTheActive(atFrame frame: Int? = nil, walk: RenderWalk? = nil) -> [Int] {
-        Set(streamLayerIndices(atFrame: frame, walk: walk)).union(heldHostLayerIndices).sorted()
+        Set(onTopStreamLayerIndices(atFrame: frame, walk: walk)).union(heldHostLayerIndices).sorted()
     }
 
     /// **The layers whose hosts draw what the document does not hold yet** — every part of a lasso's
@@ -1377,7 +1379,8 @@ extension CanvasManager {
                                poses: [Int: PoseMap] = [:],
                                frames: [Int: Int] = [:],
                                alsoIncluding maskSourceLayers: Set<Int> = [],
-                               holding held: HeldEdit? = nil) -> [LeafSnapshot?] {
+                               holding held: HeldEdit? = nil,
+                               liveDisplay: [UUID: PixelOps.CelDisplay] = [:]) -> [LeafSnapshot?] {
         var leaves = [LeafSnapshot?](repeating: nil, count: layers.count)
         // **`derived` is resolved here rather than in `resolve()`, and that placement is
         // load-bearing.** Resolving a `CelContentProvider` reads the document (`layers`, the guide
@@ -1444,8 +1447,12 @@ extension CanvasManager {
             // the source frame (§7).
             let derived = (leafFrame == frame ? provider : provider.at(leafFrame))
                 .content(for: layer.cels[celIndex], inheriting: pose)
-            let version = Self.contentVersion(of: layer, celIndex: celIndex, atFrame: leafFrame,
-                                              derived: derived, pose: pose)
+            let display = liveDisplay[layer.id]
+            let version = display.map {
+                LayerContentVersion(cel: layer.cels[celIndex], effect: layer.layerEffect(atFrame: leafFrame),
+                                    derived: AnyHashable($0.identity), pose: pose)
+            } ?? Self.contentVersion(of: layer, celIndex: celIndex, atFrame: leafFrame,
+                                     derived: derived, pose: pose)
             // **A transformation layer is elided exactly as a grading one is**, and for the identical
             // reason: §4.4's transform mode holds no pixels, so rasterizing its blank cel would mint
             // a canvas-sized transparent image per frame for a leaf whose whole contribution is
@@ -1492,7 +1499,7 @@ extension CanvasManager {
             leaves[index] = LeafSnapshot(
                 version: version,
                 content: .cel(PixelOps.FrozenCel(cel: layer.cels[celIndex], derived: derived,
-                                                 pose: pose, quality: quality)))
+                                                 pose: pose, quality: quality, display: display)))
         }
         return leaves
     }

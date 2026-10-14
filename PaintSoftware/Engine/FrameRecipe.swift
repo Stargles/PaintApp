@@ -120,7 +120,9 @@ struct FrameRecipe {
                                  rect: $0.rect.offsetBy(dx: -rect.origin.x, dy: -rect.origin.y))
             },
             quality: quality,
-            window: StripWindow(frameSize: canvasSize, origin: rect.origin))
+            window: StripWindow(frameSize: window?.frameSize ?? canvasSize,
+                                origin: CGPoint(x: (window?.origin.x ?? 0) + rect.minX,
+                                                y: (window?.origin.y ?? 0) + rect.minY)))
     }
 
     /// **This frame as an image, under a memory ceiling** — RENDER.md §3.4, and the way a whole frame

@@ -33,7 +33,7 @@ struct AddMenu: View {
         .scrollBounceBehavior(.basedOnSize)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color.black.opacity(0.9))
-        .sheet(isPresented: $showingStreamConnect) {
+        .sheet(isPresented: $showingStreamConnect, onDismiss: { activePanel = .none }) {
             StreamConnectSheet(canvasManager: canvasManager)
         }
     }

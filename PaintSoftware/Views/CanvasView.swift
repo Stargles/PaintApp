@@ -903,6 +903,7 @@ struct CanvasView: UIViewRepresentable {
                         self.handleStrokeMoved(sample, penTime: penTime, host: host)
                     }
                 }
+                host.strokeView.onDisplayInkChanged = { [weak self] in self?.requestStreamDisplay() }
                 host.strokeView.onLiveInkChanged = { [weak self] image, rect, alpha in
                     self?.updateTimingInk(image: image, rect: rect, alpha: alpha)
                 }
@@ -1689,6 +1690,7 @@ struct CanvasView: UIViewRepresentable {
             if coordinator.onStreamFrame == nil {
                 coordinator.onStreamFrame = { [weak self] layerID, elementID in
                     guard let self, let host = self.layerHosts[layerID] else { return }
+                    self.requestStreamDisplay()
                     if let part = self.canvasManager.vectorFloat?.part(carrying: elementID, onLayer: layerID) {
                         host.strokeView.presentStreamFrame(elementID: elementID, isolating: part.insideIDs,
                                                            posedBy: part.poses)
@@ -1715,6 +1717,7 @@ struct CanvasView: UIViewRepresentable {
         /// Called at the end of `reconcileLayers` — so every host exists and has had its own
         /// `isHidden`/`alpha`/interaction settled — and again from the far end of each rebuild.
         private func updateSandwich(tree: [RenderNode], engaged: Bool) {
+            defer { reconcileStreamDisplay() }
             guard let belowView = sandwichBelowView, let aboveView = sandwichAboveView else { return }
 
             /// Every exit from this function agrees with the view stack about who is painting the
@@ -1829,7 +1832,7 @@ struct CanvasView: UIViewRepresentable {
             let presentation = SandwichPresentation.next(
                 from: sandwichPresentation,
                 live: .init(stroke: isSandwichStrokeLive, transformEdit: edit != nil,
-                            stream: !canvasManager.streamLayerIndices().isEmpty,
+                            stream: !canvasManager.onTopStreamLayerIndices().isEmpty,
                             held: !canvasManager.heldHostLayerIndices.isEmpty),
                 held: .init(bakeIsCurrent: sandwichFullKey == key,
                             livePair: LivePairFit(held: livePicture.map { (key: $0.key, cut: $0.cut) },
@@ -2019,6 +2022,7 @@ struct CanvasView: UIViewRepresentable {
         /// pass that lands them reads the held pose. The fill is drawn by its own host, which the canvas
         /// keeps drawing while the fill is up (`CanvasManager.heldHostLayerIndices`).
         func heldPictureMoved() {
+            defer { requestStreamDisplay() }
             if sandwichPresentation == .moving, let picture = livePicture, case .aroundRuns = picture.cut {
                 showMovingBands(picture, editIsLive: true)
             }
@@ -2148,6 +2152,165 @@ struct CanvasView: UIViewRepresentable {
             if host.backgroundColor != fillColour { host.backgroundColor = fillColour }
         }
 
+        // MARK: Display-only streams, composited at their own layers (TODO (177))
+
+        private var streamDisplaySurface: WindowSurfaceView?
+        private var hasInPlaceStreams = false
+
+        private func reconcileStreamDisplay() {
+            let streams = canvasManager.inPlaceStreams()
+            hasInPlaceStreams = !streams.isEmpty
+            let byLayer = Dictionary(uniqueKeysWithValues: streams.map { (canvasManager.layers[$0.layerIndex].id, $0.ids) })
+            for (id, host) in layerHosts { host.strokeView.streamIDsDrawnByComposite = byLayer[id] ?? [] }
+            guard hasInPlaceStreams else {
+                streamDisplaySurface?.removeFromSuperview()
+                streamDisplaySurface = nil
+                floatingOverlay?.setPictureComposited(false)
+                return
+            }
+            requestStreamDisplay()
+            frontStreamDisplay()
+        }
+
+        /// One O(1) request; the recipe and transient sources are read only when the worker frees.
+        private func requestStreamDisplay() {
+            guard hasInPlaceStreams, let container = containerView else { return }
+            let surface: WindowSurfaceView
+            if let existing = streamDisplaySurface { surface = existing }
+            else {
+                surface = WindowSurfaceView(queue: Coordinator.sandwichQueue)
+                container.addSubview(surface)
+                streamDisplaySurface = surface
+            }
+            surface.present { [weak self] in self?.mintStreamDisplay() }
+        }
+
+        /// Keep legacy On Top hosts over this display, and all chrome/ghosts over the artwork.
+        private func frontStreamDisplay() {
+            guard let surface = streamDisplaySurface, let container = containerView else { return }
+            let chrome: [UIView?] = [onionSkinView, paddingCoverView, guideOverlay, selectionOverlay,
+                transformOverlay, floatingOverlay, shapeOverlay, textOverlay, textTransformOverlay, timingInkView]
+            let ids = Set(chrome.compactMap { $0 }.map(ObjectIdentifier.init))
+            let orderedChrome = container.subviews.filter { ids.contains(ObjectIdentifier($0)) }
+            container.bringSubviewToFront(surface)
+            for index in canvasManager.onTopStreamLayerIndices() {
+                if let host = layerHosts[canvasManager.layers[index].id] { container.bringSubviewToFront(host) }
+            }
+            floatingOverlay?.setPictureComposited(!surface.isHidden && canvasManager.shownFloatingPiece?.kind == .move)
+            for overlay in orderedChrome { container.bringSubviewToFront(overlay) }
+        }
+
+        /// Transient sources enter at their layer before every blend, mask, effect and Guide.
+        /// These values are frozen at mint time; no view or mutable cel crosses to the worker.
+        private func streamDisplaySources() -> (values: [UUID: PixelOps.CelDisplay], bounds: CGRect) {
+            var values: [UUID: PixelOps.CelDisplay] = [:]
+            var bounds = CGRect.null
+            let size = canvasManager.canvasSize ?? .zero
+            for (id, host) in layerHosts {
+                if let ink = host.strokeView.displayInk {
+                    values[id] = PixelOps.CelDisplay(windows: [ink])
+                    bounds = bounds.union(ink.rect)
+                }
+            }
+            if let edit = canvasManager.liveElementEdit,
+               let index = canvasManager.layers.firstIndex(where: { $0.id == edit.layerID }),
+               let cel = canvasManager.layers[index].cels.first(where: { $0.id == edit.celID }), let vector = cel.vector {
+                let refs = Set(vector.streams.filter(\.rendersInPlace).map(\.id))
+                var value = values[edit.layerID] ?? PixelOps.CelDisplay()
+                value.vector = vector.freezeDisplay(quality: .full, referenceIDs: refs, replacing: edit.elements)
+                values[edit.layerID] = value
+                bounds = bounds.union(edit.window)
+            }
+            if let fill = canvasManager.liveFill, let render = fill.render {
+                var value = values[fill.layerID] ?? PixelOps.CelDisplay()
+                let clip = fill.clip
+                value.drawOverlays = { _, content in
+                    guard let preview = render.preview(clippedTo: clip) else { return }
+                    let sx = content.width / size.width, sy = content.height / size.height
+                    preview.image.draw(in: CGRect(x: content.minX + preview.rect.minX * sx,
+                        y: content.minY + preview.rect.minY * sy,
+                        width: preview.rect.width * sx, height: preview.rect.height * sy))
+                }
+                values[fill.layerID] = value
+                bounds = bounds.union(render.window.rect)
+            }
+            if let float = canvasManager.vectorFloat, float.wantsLatch {
+                let pose = liveVectorFloatPose ?? Self.pose(of: float)
+                let written = CanvasManager.floatPictureMap(of: float, transform: float.frame.transform,
+                    aspect: float.frame.aspect, stretchAxis: float.frame.stretchAxis, distort: float.distort)
+                let shown = CanvasManager.floatPictureMap(of: float, transform: pose.transform,
+                    aspect: pose.aspect, stretchAxis: pose.stretchAxis, distort: pose.distort)
+                let delta = written.inverse.map { PoseMap(shown * $0) } ?? PoseMap(CGAffineTransform.identity)
+                for part in float.parts where part.isShown {
+                    guard let vector = canvasManager.vectorCanvas(of: part) else { continue }
+                    let mappings = canvasManager.celPoseMaps(vector.elements, layerID: part.layerID,
+                        celID: part.celID, atFrame: canvasManager.currentFrame)
+                    let elements = vector.elements.compactMap { element -> VectorElement? in
+                        let map = part.insideIDs.contains(element.id) ? part.poses[element.id] : mappings[element.id]
+                        let posed = map.flatMap { VectorCanvas.posing(element, through: $0) } ?? element
+                        return part.insideIDs.contains(element.id) ? VectorCanvas.posing(posed, through: delta) : posed
+                    }
+                    let before = vector.elements.filter { part.insideIDs.contains($0.id) }
+                    let after = elements.filter { part.insideIDs.contains($0.id) }
+                    if let old = CanvasManager.localBounds(of: before) { bounds = bounds.union(old.applying(vector.transform)) }
+                    if let new = CanvasManager.localBounds(of: after) { bounds = bounds.union(new.applying(vector.transform)) }
+                    let refs = Set(vector.streams.filter(\.rendersInPlace).map(\.id))
+                    var value = values[part.layerID] ?? PixelOps.CelDisplay()
+                    value.vector = vector.freezeDisplay(quality: .full, referenceIDs: refs,
+                        replacing: elements, unsuppressing: part.insideIDs)
+                    values[part.layerID] = value
+                }
+            }
+            if let piece = canvasManager.shownFloatingPiece, piece.kind == .move {
+                var value = values[piece.sourceLayerID] ?? PixelOps.CelDisplay()
+                value.replacingBase = piece.remainderPreview
+                value.drawOverlays = { cg, content in
+                    cg.saveGState()
+                    cg.translateBy(x: content.minX, y: content.minY)
+                    cg.scaleBy(x: content.width / size.width, y: content.height / size.height)
+                    PixelOps.drawFloatingPiece(piece, into: cg, clippedTo: cg.boundingBoxOfClipPath)
+                    cg.restoreGState()
+                }
+                values[piece.sourceLayerID] = value
+                let original = CGRect(x: -piece.baseSize.width / 2, y: -piece.baseSize.height / 2,
+                                      width: piece.baseSize.width, height: piece.baseSize.height)
+                    .applying(piece.liftTransform.affineTransform)
+                bounds = bounds.union(original).union(piece.canvasQuad.boundingBox)
+            }
+            for entry in canvasManager.inPlaceStreams() {
+                let id = canvasManager.layers[entry.layerIndex].id
+                if values[id]?.vector == nil {
+                    var value = values[id] ?? PixelOps.CelDisplay()
+                    value.vector = entry.vector.freezeDisplay(quality: .full, referenceIDs: entry.ids)
+                    values[id] = value
+                }
+            }
+            return (values, bounds)
+        }
+
+        private func mintStreamDisplay() -> WindowSurfaceView.Frame? {
+            let sources = streamDisplaySources()
+            guard hasInPlaceStreams, let size = canvasManager.canvasSize,
+                  let display = canvasManager.makeStreamDisplayRecipe(display: sources.values,
+                                                                       transientBounds: sources.bounds,
+                    sizing: heldDrawsWholeFrame ? .dragPreview : .liveComposite)
+            else { streamDisplaySurface?.isHidden = true; return nil }
+            let scale = CGAffineTransform(scaleX: size.width / (display.recipe.window?.frameSize.width ?? size.width),
+                                          y: size.height / (display.recipe.window?.frameSize.height ?? size.height))
+            let budget = canvasManager.frameBaker.budgetBytes
+            return WindowSurfaceView.Frame(window: display.core, placement: scale, draw: { cg in
+                guard let image = display.recipe.composite(budgetBytes: budget) else { return nil }
+                PaddingCoverView.marginGrey.setFill()
+                cg.fill(CGRect(origin: .zero, size: display.core.size))
+                UIImage(cgImage: image, scale: 1, orientation: .up).draw(in:
+                    display.buffer.offsetBy(dx: -display.core.minX, dy: -display.core.minY))
+                return display.core
+            }, finished: { [weak self] shown in
+                guard shown else { return }
+                self?.frontStreamDisplay()
+            })
+        }
+
         // MARK: The held frame — a grade, a channel or a flat colour under the finger (TODO (179))
 
         /// **Asks for the whole frame as the finger holds it** — the document's own walk with the hold
@@ -2193,10 +2356,11 @@ struct CanvasView: UIViewRepresentable {
         /// picture with transparency left in it, the ink a grade had just faded out would still show.
         private func mintHeldFrame() -> WindowSurfaceView.Frame? {
             let frame = canvasManager.currentFrame
+            let streamSources = hasInPlaceStreams ? streamDisplaySources().values : [:]
             guard let canvasSize = canvasManager.canvasSize,
                   let recipe = canvasManager.makeFrameRecipe(atFrame: frame, includeBackground: true,
                                                              sizing: .dragPreview,
-                                                             holding: canvasManager.liveEdit)
+                                                             holding: canvasManager.liveEdit, liveDisplay: streamSources)
             else { return nil }
             heldFrameMintedAt = frame
             let window = CGRect(origin: .zero, size: recipe.canvasSize)
@@ -2736,6 +2900,7 @@ struct CanvasView: UIViewRepresentable {
         /// `CALayer` transform on each of the two marching-ants layers. No allocation, no rasterize,
         /// no model write.
         private func showVectorFloat(_ float: VectorFloat, at pose: ObjectTransformDrag.Pose) {
+            defer { requestStreamDisplay() }
             // **The projective arm, taken whenever either end of the delta carries a keystone.** Both
             // ends matter: a distorted float that is merely being *moved* has an affine delta and a
             // projective picture, and measuring that with the affine arm would show the piece
@@ -3043,6 +3208,8 @@ struct CanvasView: UIViewRepresentable {
             floatingOverlay?.pencilOnlyDrawing = canvasManager.pencilOnlyDrawing
             // The piece as its box shows it: a pass that lands mid-drag draws the box under the finger,
             // whose travel the piece learns only at the lift (`CanvasManager.boxNudge`).
+            floatingOverlay?.setPictureComposited(hasInPlaceStreams && streamDisplaySurface?.isHidden == false
+                                                  && canvasManager.shownFloatingPiece?.kind == .move)
             floatingOverlay?.update(canvasManager.shownFloatingPiece,
                                     isInteractive: canvasTouchInputs().floatingOverlayIsInteractive)
             guard let overlay = floatingOverlay, let container = containerView else { return }

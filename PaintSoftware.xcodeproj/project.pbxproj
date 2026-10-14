@@ -7,6 +7,11 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		482D432E592645E4B96B36C7 /* PaintSoftwareUITests/Fixtures/stream-before-placement.paintproj in Resources */ = {isa = PBXBuildFile; fileRef = 2B60FCE756B2482FAB6119B1 /* PaintSoftwareUITests/Fixtures/stream-before-placement.paintproj */; };
+		5982EAF6D24E4807A626DAAA /* StreamPlacementUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01456F71C4884A2D85897632 /* StreamPlacementUITests.swift */; };
+		5A6E952135BA40B5A9C0AC7D /* StreamDisplayLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F396A7389E2541F094B273BF /* StreamDisplayLogicTests.swift */; };
+		D6A08A1C88F646DCBDE42ECF /* PaintSoftware/Services/LegacyStreamPlacementRepair.swift in Sources */ = {isa = PBXBuildFile; fileRef = A39C46C255BB4B74BBC89CE8 /* PaintSoftware/Services/LegacyStreamPlacementRepair.swift */; };
+		226F63DF26774ECB8E6EC7B5 /* PaintSoftware/Models/CanvasManager+StreamDisplay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56AB9E23E1C44DD0828CFA00 /* PaintSoftware/Models/CanvasManager+StreamDisplay.swift */; };
 		2B2D45E7E45CEAC0997FF6B3 /* PlacementLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AD7FFF9C7072CCD856D01D7 /* PlacementLogicTests.swift */; };
 		D2B8319C29D1B75C86FFC1C2 /* PaintSoftware/Models/CanvasManager+Placement.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7706DFF2E57D65DDEC94400 /* PaintSoftware/Models/CanvasManager+Placement.swift */; };
 		71F151DE4A87F102F1E4E356 /* TapSelectUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DBCE9405A10F642474B7885 /* TapSelectUITests.swift */; };
@@ -640,6 +645,11 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		2B60FCE756B2482FAB6119B1 /* PaintSoftwareUITests/Fixtures/stream-before-placement.paintproj */ = {isa = PBXFileReference; lastKnownFileType = folder; path = "PaintSoftwareUITests/Fixtures/stream-before-placement.paintproj"; sourceTree = SOURCE_ROOT; };
+		01456F71C4884A2D85897632 /* StreamPlacementUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamPlacementUITests.swift; sourceTree = "<group>"; };
+		F396A7389E2541F094B273BF /* StreamDisplayLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamDisplayLogicTests.swift; sourceTree = "<group>"; };
+		A39C46C255BB4B74BBC89CE8 /* PaintSoftware/Services/LegacyStreamPlacementRepair.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Services/LegacyStreamPlacementRepair.swift"; sourceTree = "<group>"; };
+		56AB9E23E1C44DD0828CFA00 /* PaintSoftware/Models/CanvasManager+StreamDisplay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/CanvasManager+StreamDisplay.swift"; sourceTree = "<group>"; };
 		2AD7FFF9C7072CCD856D01D7 /* PlacementLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PlacementLogicTests.swift; sourceTree = "<group>"; };
 		E7706DFF2E57D65DDEC94400 /* PaintSoftware/Models/CanvasManager+Placement.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/CanvasManager+Placement.swift"; sourceTree = "<group>"; };
 		7DBCE9405A10F642474B7885 /* TapSelectUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TapSelectUITests.swift; sourceTree = "<group>"; };
@@ -1471,6 +1481,9 @@
 				6DFB4F070B6477FDE867B36B /* VideoCropLogicTests.swift */,
 				3629FFDD8E8481D83190A185 /* VideoImportLogicTests.swift */,
 				BD7051C5682971B7AC36EBDD /* StreamElementLogicTests.swift */,
+				01456F71C4884A2D85897632 /* StreamPlacementUITests.swift */,
+				F396A7389E2541F094B273BF /* StreamDisplayLogicTests.swift */,
+				2B60FCE756B2482FAB6119B1 /* PaintSoftwareUITests/Fixtures/stream-before-placement.paintproj */,
 				1AD66CD8F109808E8A21CBF2 /* StreamFramingLogicTests.swift */,
 				037AF953F7EB901D3D7C8F20 /* H264StreamDecoderLogicTests.swift */,
 				7085445339FC5EF8443854B8 /* StreamInsertLogicTests.swift */,
@@ -1798,6 +1811,8 @@
 				BF97DD0C48546AE04CF84556 /* PaintSoftware/Services/LegacyPoseTrackRepair.swift */,
 				D62570BD1F8B8623CE5DFAB2 /* PaintSoftware/Services/LegacyToolSettingsRepair.swift */,
 				A9B5C4870DC60CC72601144D /* PaintSoftware/Services/LibraryRepair.swift */,
+				A39C46C255BB4B74BBC89CE8 /* PaintSoftware/Services/LegacyStreamPlacementRepair.swift */,
+				56AB9E23E1C44DD0828CFA00 /* PaintSoftware/Models/CanvasManager+StreamDisplay.swift */,
 				3B923D864862C44458B5E437 /* PaintSoftware/Services/VersionRetention.swift */,
 				852F0F19F2B96DFC95C8834A /* PaintSoftware/Services/ProjectLibraryMigration.swift */,
 				6086245D66A63521879B8F2B /* PaintSoftware/Services/ProjectPackageLayout.swift */,
@@ -2043,6 +2058,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				482D432E592645E4B96B36C7 /* PaintSoftwareUITests/Fixtures/stream-before-placement.paintproj in Resources */,
 				156D4BD6599824D130604FBC /* PaintSoftware/Resources/brushtip-square.png in Resources */,
 				9731E4DA5B5DFE376F4370A4 /* PaintSoftwareUITests/Fixtures/owner-tuned-library-2026-09-05.json in Resources */,
 				608800FA8E0EEF2A9A6680DB /* PaintSoftwareUITests/Fixtures/stream-testsrc-640x360.h264 in Resources */,
@@ -2423,6 +2439,10 @@
 				18ED051326885FF25299B09A /* PaintSoftware/Services/LegacyPoseTrackRepair.swift in Sources */,
 				A8D420C5243226015076D802 /* PaintSoftware/Services/LegacyToolSettingsRepair.swift in Sources */,
 				48A09763C4F89ACD4435D05A /* PaintSoftware/Services/LibraryRepair.swift in Sources */,
+				5982EAF6D24E4807A626DAAA /* StreamPlacementUITests.swift in Sources */,
+				5A6E952135BA40B5A9C0AC7D /* StreamDisplayLogicTests.swift in Sources */,
+				D6A08A1C88F646DCBDE42ECF /* PaintSoftware/Services/LegacyStreamPlacementRepair.swift in Sources */,
+				226F63DF26774ECB8E6EC7B5 /* PaintSoftware/Models/CanvasManager+StreamDisplay.swift in Sources */,
 				EDBA1BE13604DF94F6CD22A6 /* PaintSoftware/Services/VersionRetention.swift in Sources */,
 				601037081B1ADF05E27131D9 /* PaintSoftware/Services/ProjectLibraryMigration.swift in Sources */,
 				EF822BFDE6E45CFEB32898CD /* PaintSoftware/Services/ProjectPackageLayout.swift in Sources */,

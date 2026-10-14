@@ -870,8 +870,12 @@ format-migration path, so a stored bake outlives the code that wrote it in a way
 export, and none of it should ride in on export's back.
 ### 3.10 What a composite is not
 
-Floating Move pieces, lasso floats, motion-group overlays, guides and onion skins are drawn outside every cel and are
-in no composite (`RenderRequest.swift:882-923`). A baked frame is the artwork, not the screen. `sandwichEngagesOnCanvas`
+Floating Move pieces, lasso floats, motion-group overlays, guides and onion skins are outside the
+saved artwork. A baked frame is the artwork, not the screen. The In Place stream display is an explicit
+canvas-only recipe: selected reference frames and transient scratch/Move/fill sources enter the
+ordinary tree inside a spatial window (`CanvasManager+StreamDisplay.swift`, STREAM.md §5.3). No bake,
+export, thumbnail or onion recipe supplies these sources. Frozen vector geometry can draw straight
+into a window context; nested `FrameRecipe.windowed` calls retain the whole frame and sum origins. `sandwichEngagesOnCanvas`
 (`RenderRequest.swift`) is the live-canvas predicate and is not the bake predicate: a document with one plain
 vector layer still bakes, because play and export need it.
 

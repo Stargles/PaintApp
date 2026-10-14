@@ -32,6 +32,7 @@ struct PaintApp: App {
         // from the artist's own values, before anything — the gallery's first listing included — reads
         // a manifest. See `LegacyToolSettingsRepair` for why here and not in the maintenance pass.
         LegacyToolSettingsRepair.repairLibraryAndRetireKeys()
+        LegacyStreamPlacementRepair.repairLibrary()
         AppSettings.standard.forgetIfRequested()
         // Launch-time safety pass (off the main thread): snapshot every project if the app binary
         // changed (update/dev redeploy), auto-repair any damaged project package from its backups,

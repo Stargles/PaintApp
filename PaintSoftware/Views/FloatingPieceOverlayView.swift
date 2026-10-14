@@ -62,6 +62,9 @@ final class FloatingPieceOverlayView: TransformOverlayView, UIGestureRecognizerD
     private var piece: FloatingPiece?
 
     private let pieceImageView = UIImageView()
+    /// Keep the grips and outline while the In Place display draws the bitmap at its layer.
+    func setPictureComposited(_ composited: Bool) { pieceImageView.isHidden = composited }
+
     private let outlineView = UIView()
     private let outlineDashLayer = CAShapeLayer()
     private let corners: [TransformHandleView] = (0..<4).map { _ in TransformHandleView(kind: .scale, cornerRadius: 4) }

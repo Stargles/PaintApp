@@ -1,0 +1,3 @@
+Unmodified package written by baseline 5d73184 Release app on 2026-10-14.
+Captured on s49-stream iPad9 simulator by StreamLiveEngagedUITests.testTheStreamResumesOnAnEngagedCanvasWhenTheAppComesBack using the immutable prior app at /tmp/s49-onion-before-derived/Build/Products/Release-iphonesimulator/PaintSoftware.app.
+Home triggered ProjectStore.save while the live reference was red. The old stream JSON has no rendersInPlace. Retain this provenance with the temporary repair fixture.

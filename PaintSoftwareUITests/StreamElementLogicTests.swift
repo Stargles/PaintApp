@@ -44,6 +44,7 @@ final class StreamElementLogicTests: XCTestCase {
             StoredField(name: "port", mutate: { $0.port = 5000 }, read: { "\($0.port)" }),
             StoredField(name: "sourceLabel", mutate: { $0.sourceLabel = "Blender" }, read: \.sourceLabel),
             StoredField(name: "isFrozen", mutate: { $0.isFrozen = true }, read: { "\($0.isFrozen)" }),
+            StoredField(name: "rendersInPlace", mutate: { $0.rendersInPlace = true }, read: { "\($0.rendersInPlace)" }),
             StoredField(name: "lastFrameFileName", mutate: { $0.lastFrameFileName = "last.jpg" },
                         read: { $0.lastFrameFileName ?? "nil" }),
             StoredField(name: "position", mutate: { $0.transform.position = CGPoint(x: 12.5, y: -3.25) },

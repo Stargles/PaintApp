@@ -6266,3 +6266,21 @@ The assessment planned both for this commit only if a measurement asked for them
   gone. These are simulator figures, not a device measurement.
 
 The brush editor's scratch pad (optional in the assessment) was left as it is.
+
+## 35. In Place screen references — bounded window, session 49
+
+`StreamDisplayLogicTests` pins counts and allocated dimensions, rather than simulator durations. An
+eight-row screen on a 64-row canvas resolves into fewer than 16 rows, with **zero native vector
+rasterizations**, including detached canvases. Output reach and a second input apron come from the
+existing effect/mask tree; nested budget strips retain the whole frame's size and origin. A screen
+covering the whole canvas necessarily asks for the whole canvas.
+
+The display owns one `WindowSurfaceView` on the existing serial sandwich queue: two reusable window
+surfaces, one worker in flight and one newest pending request. A resize retains at most one old front
+until its replacement lands. Stream ticks publish no document edit and dirty no bake. Scratch ink is
+a frozen source at its layer, so blends, masks and Guides still apply while the pen is down. Ordinary
+bakes, onion pictures, playback and exports keep reference out.
+
+On Top remains the default plain host behavior. Mixed placement puts its host over the In Place
+window. Posed stream cels still hide their reference, including a held pose. Device throughput and
+render-server cost have not been measured for this new mode.

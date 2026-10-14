@@ -75,8 +75,7 @@ final class WindowSurfaceViewLogicTests: XCTestCase {
         XCTAssertFalse(view.isHidden)
     }
 
-    /// A window of a new size makes new surfaces and hides the view until one lands; the same size
-    /// keeps them.
+    /// A new size makes new surfaces; the same size keeps them.
     func testANewWindowSizeRemakesTheSurfacesAndTheSameSizeKeepsThem() throws {
         let view = WindowSurfaceView(queue: queue)
         present(view, window: CGRect(x: 0, y: 0, width: 8, height: 4), count: 2)
@@ -87,6 +86,28 @@ final class WindowSurfaceViewLogicTests: XCTestCase {
         present(view, window: CGRect(x: 0, y: 0, width: 16, height: 4), count: 2)
         XCTAssertFalse(view.layer.contents as AnyObject? === first, "a resized one does not")
         XCTAssertEqual(view.layer.bounds.width, 16)
+    }
+
+    func testAResizedWindowKeepsTheOldFrontUntilTheNewPictureLands() throws {
+        let view = WindowSurfaceView(queue: queue)
+        present(view, window: CGRect(x: 0, y: 0, width: 8, height: 4), count: 1)
+        let old = try XCTUnwrap(view.layer.contents as AnyObject?)
+        let gate = DispatchSemaphore(value: 0)
+        let new = CGRect(x: 0, y: 0, width: 16, height: 8)
+        view.present(window: new, placement: .identity) { cg in
+            gate.wait()
+            UIColor.red.setFill(); cg.fill(new)
+            return new
+        }
+        XCTAssertFalse(view.isHidden, "a resize never exposes the old plain hosts")
+        XCTAssertTrue(view.layer.contents as AnyObject? === old)
+        XCTAssertEqual(view.layer.bounds.size, CGSize(width: 8, height: 4), "old pixels retain their placement")
+        gate.signal()
+        let until = Date().addingTimeInterval(2)
+        while view.presentedCount < 2, Date() < until { RunLoop.main.run(until: Date().addingTimeInterval(0.005)) }
+        XCTAssertEqual(view.presentedCount, 2)
+        XCTAssertEqual(view.layer.bounds.size, new.size)
+        XCTAssertFalse(view.layer.contents as AnyObject? === old)
     }
 
     /// **One draw in flight, and the newest frame asked for during it is the one drawn next** — the

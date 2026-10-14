@@ -727,9 +727,17 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// Refused — and any surface dropped — while nothing this view draws reaches the screen, or
     /// while a derived picture owns the base slot (a posed cel is drawn without its stream, which
     /// is reference and in no picture the document keeps — `CanvasManager.StreamNote.hiddenByAPose`).
+    /// In Place references are presented by the canvas's display composite, including mid-stroke.
+    var streamIDsDrawnByComposite: Set<UUID> = [] {
+        didSet {
+            for id in streamIDsDrawnByComposite { removeStreamSurface(id) }
+        }
+    }
+
     func presentStreamFrame(elementID: UUID, isolating ids: Set<UUID>? = nil,
                             posedBy: [UUID: PoseMap] = [:]) {
-        guard let vectorCanvas, !hostIsBlanked, interpolationImage == nil,
+        guard !streamIDsDrawnByComposite.contains(elementID),
+              let vectorCanvas, !hostIsBlanked, interpolationImage == nil,
               (ids != nil) == (vectorFloatBase != nil),
               let window = vectorCanvas.streamWindow(id: elementID, posedBy: posedBy[elementID]) else {
             removeStreamSurface(elementID)
@@ -1260,7 +1268,19 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// and the artist would drag the eraser across their line and see nothing happen. The
     /// alternative — punching a canvas-sized copy of the render and showing that instead — is 1 GiB
     /// at 16383² for a stroke a few hundred points long, which is the defect this window closed.
+    /// The already drawn scratch, owned by the next display recipe until its composite lands.
+    var displayInk: PixelOps.InkWindow? {
+        guard let scratch, let image = scratchView.image, let size = canvasManager?.canvasSize else { return nil }
+        return PixelOps.InkWindow(image: image, rect: scratch.windowRect, canvasSize: size,
+                                 opacity: scratch.replacesBase ? 1 : scratch.opacity,
+                                 replacesBase: scratch.replacesBase)
+    }
+
+    /// Direct display invalidation, separate from the playback trail and from SwiftUI publishing.
+    var onDisplayInkChanged: (() -> Void)?
+
     private func showOverlays(_ scratch: StrokeScratch?) {
+        defer { onDisplayInkChanged?() }
         showHeldInk()
         // **A timing stroke's trail is drawn by a sibling of this host, never by this view** —
         // KEYFRAMES.md §7 stage 10, and it is the one thing about stage 10 that is not a partition.

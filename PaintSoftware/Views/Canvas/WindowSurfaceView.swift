@@ -38,6 +38,8 @@ final class WindowSurfaceView: UIView {
     /// Both surfaces, once `size(for:)` has made them; empty before the first present.
     private var surfaces: [Surface] = []
     private var back = 0
+    /// The previous front stays drawn while a resized window receives its first picture.
+    private var retiringFront: IOSurface?
     /// The draws, on the queue the view was made with — see the class comment.
     private let draws: LatestWins
 
@@ -166,6 +168,8 @@ final class WindowSurfaceView: UIView {
                     return
                 }
                 self.layer.contents = target.surface
+                self.retiringFront = nil
+                self.surfaceBytes = self.surfaces.reduce(0) { $0 + $1.surface.allocationSize }
                 self.layer.bounds = CGRect(origin: .zero, size: window.size)
                 self.layer.position = window.origin.applying(placement)
                 self.layer.setAffineTransform(CGAffineTransform(a: placement.a, b: placement.b,
@@ -188,17 +192,16 @@ final class WindowSurfaceView: UIView {
     }
 
     /// Makes the two surfaces for `window`, or keeps the ones already that size. A window of a
-    /// different size drops both — the old pixels are the wrong shape — and hides the view until
-    /// the first frame of the new size lands, so the base underneath shows meanwhile.
+    /// different size retires the previous front only when the new first picture lands. The old
+    /// layer bounds stay put meanwhile; at most one extra front is held across a resize.
     private func size(for window: CGRect) {
         guard surfaceWindow.size != window.size || surfaces.count != 2 else {
             surfaceWindow = window
             return
         }
+        retiringFront = layer.contents as? IOSurface
         surfaces = []
-        surfaceBytes = 0
-        isHidden = true
-        layer.contents = nil
+        surfaceBytes = retiringFront?.allocationSize ?? 0
         surfaceWindow = window
         let width = Int(window.width), height = Int(window.height)
         guard width > 0, height > 0 else { return }
@@ -219,6 +222,6 @@ final class WindowSurfaceView: UIView {
             context.scaleBy(x: 1, y: -1)
             surfaces.append(Surface(surface: surface, context: context))
         }
-        surfaceBytes = surfaces.reduce(0) { $0 + $1.surface.allocationSize }
+        surfaceBytes = surfaces.reduce(retiringFront?.allocationSize ?? 0) { $0 + $1.surface.allocationSize }
     }
 }

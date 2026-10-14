@@ -145,6 +145,9 @@ trigger — which is one line, `CanvasRepairCount.record()`, in `replaceStranded
 
 ## An effect layer between two live hosts is left out of the live picture (2026-10-11)
 
+In Place streams now composite the actual window tree, including an effect between live hosts
+(TODO (177)). The remaining issue below concerns the plain On Top path and folder floats.
+
 `CanvasManager.liveHostRun` is one span of the leaf order, from the lowest to the highest of the
 layers whose hosts draw (the active layer, every stream, every floating piece), and every layer
 inside it is drawn by its own host, plain. An effect layer *inside* that span — a Guide between a
@@ -2181,3 +2184,9 @@ menu's keyframe items, and deliberately not fixed there.
 - **A vector cel still carries `fillImage`/`bakedImage`**, so raster features allocate canvas-sized
   bitmaps on a vector layer. The product owner wants vector fully divorced from raster —
   [VECTOR_INTERPOLATION.md](docs/VECTOR_INTERPOLATION.md) §4 item 26 is the full write-up.
+
+## The stream connection sheet leaves Add selected after placing its layer (2026-10-14)
+
+Found by `StreamPlacementUITests` while adding two streams: after the first sheet closes and the Move
+box commits, Add is still the active panel. The next + tap closes it; Stream Screen is absent. In
+flight on `tmp/s49-stream`: close Add when its connection sheet dismisses.

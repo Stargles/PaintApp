@@ -131,6 +131,11 @@ overrule): the switch is stored **per stream**, beside Freeze (`StreamRef`), and
 
 - [ ] A switch in the stream bar: on top (today) / in place.
 
+**In flight, session 49** — per-stream viewing state; display-only window recipe with the live stroke
+entered at its layer before grading, masks and blends. The newest request scheduler and reusable
+surfaces bound the queue; saved packages receive a one-shot strict-format repair. Bake/export remain
+reference-free. Implementation: `tmp/s49-stream`.
+
 ## (35) Advanced masks — colour masks beside the alpha mask
 
 **Status** — promoted from "Later" 2026-10-12; the owner will describe what it is meant to be once told

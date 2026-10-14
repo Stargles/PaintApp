@@ -80,7 +80,8 @@ extension CanvasManager {
     /// **Cheap for a document with no stream**: it answers from one memoized flag per cel, which is
     /// what `ScreenStreamCoordinator.sync` already pays beside it on every canvas pass.
     @MainActor
-    func streamLayerIndices(atFrame frame: Int? = nil, walk precomputed: RenderWalk? = nil) -> [Int] {
+    func streamLayerIndices(atFrame frame: Int? = nil, walk precomputed: RenderWalk? = nil,
+                            holding held: HeldEdit? = nil) -> [Int] {
         guard !isPlaying else { return [] }
         let frame = frame ?? currentFrame
         let shownFrames = displayedFrames(atFrame: frame)
@@ -91,9 +92,22 @@ extension CanvasManager {
                 && showsAStream(layerIndex: index, atFrame: shownFrames[index] ?? frame)
         }
         guard !candidates.isEmpty else { return [] }
-        let walk = precomputed ?? renderTreeAndPoses(atFrame: frame)
+        let walk = precomputed ?? renderTreeAndPoses(atFrame: frame, holding: held)
         let leaves = Set(walk.tree.leafLayerIndices)
-        return candidates.filter { leaves.contains($0) && !streamIsMoved(onLayer: $0, in: walk, atFrame: frame) }
+        return candidates.filter { leaves.contains($0) && !streamIsMoved(onLayer: $0, in: walk, atFrame: frame, holding: held) }
+    }
+
+    /// Only On Top needs a plain host between the halves. In Place has an exact window over the
+    /// ordinary canvas picture, so it must not leave other rows standing on a plain live run.
+    @MainActor
+    func onTopStreamLayerIndices(atFrame frame: Int? = nil, walk: RenderWalk? = nil) -> [Int] {
+        let frame = frame ?? currentFrame
+        let shown = displayedFrames(atFrame: frame)
+        return streamLayerIndices(atFrame: frame, walk: walk).filter { index in
+            guard let cel = activeCelIndex(inLayer: index, atFrame: shown[index] ?? frame),
+                  let vector = layers[index].cels[cel].vector else { return false }
+            return vector.streams.contains { !$0.rendersInPlace }
+        }
     }
 
     @MainActor
@@ -105,11 +119,12 @@ extension CanvasManager {
     /// Whether `walk` poses the cel this layer shows — the one thing a stream's host cannot draw
     /// through (`streamLayerIndices`).
     @MainActor
-    private func streamIsMoved(onLayer index: Int, in walk: RenderWalk, atFrame frame: Int) -> Bool {
+    private func streamIsMoved(onLayer index: Int, in walk: RenderWalk, atFrame frame: Int,
+                               holding held: HeldEdit? = nil) -> Bool {
         let shownFrame = walk.frames[index] ?? frame
         guard let celIndex = activeCelIndex(inLayer: index, atFrame: shownFrame) else { return false }
         return derivedCelContent(for: layers[index].cels[celIndex], atFrame: shownFrame,
-                                 inheriting: walk.poses[index]) != nil
+                                 inheriting: walk.poses[index], holding: held) != nil
     }
 
     /// **What the bar tells the artist about the picture they are looking at** — nil when there is
@@ -162,7 +177,7 @@ extension CanvasManager {
               isLayerEffectivelyVisible(active.layerIndex) else { return nil }
         let walk = renderTreeAndPoses(atFrame: currentFrame)
         if streamIsMoved(onLayer: active.layerIndex, in: walk, atFrame: currentFrame) { return .hiddenByAPose }
-        return walk.tree.needsCompositorOnCanvas || hasContainerPoseInForce ? .drawnPlain : nil
+        return !active.element.rendersInPlace && (walk.tree.needsCompositorOnCanvas || hasContainerPoseInForce) ? .drawnPlain : nil
     }
 
     // MARK: - The address row (STREAM.md §5.7)
@@ -196,6 +211,17 @@ extension CanvasManager {
             celContentChangedOutsideStroke(layerID: layerID, celID: celID)
         }
         streamCoordinator.sync()
+        return true
+    }
+
+    /// Per-stream display choice. A split's neighbours may share an element id, so address the cel.
+    @MainActor
+    @discardableResult
+    func setStreamInPlace(layerIndex: Int, celIndex: Int, elementID: UUID, _ inPlace: Bool) -> Bool {
+        guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex),
+              let vector = layers[layerIndex].cels[celIndex].vector,
+              vector.setStreamInPlace(id: elementID, inPlace) else { return false }
+        layers = layers
         return true
     }
 

@@ -1117,6 +1117,8 @@ struct VectorStreamElement: Identifiable, PlacedRectangle {
 
     /// STREAM.md §5.4. See the type's header.
     var isFrozen: Bool = false
+    /// Display-only compositing at this element’s layer, persisted per stream.
+    var rendersInPlace: Bool = false
 
     /// STREAM.md §5.6 — the JPEG the last save wrote for this element, or nil for one never saved
     /// with a picture. **Written by the save alone**, never by a freeze, a bake or a disconnect:
@@ -1791,6 +1793,17 @@ final class VectorCanvas {
               case .stream(var stream) = _elements[index], stream.isFrozen != frozen else { return false }
         stream.isFrozen = frozen
         if frozen { stream.picture = StreamPicture(frame: stream.picture.frame, index: stream.picture.index) }
+        _elements[index] = .stream(stream)
+        return true
+    }
+
+    /// A saved viewing choice, addressed by cel by the caller. It dirties no frame bake.
+    @discardableResult
+    func setStreamInPlace(id: UUID, _ inPlace: Bool) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard let index = _elements.firstIndex(where: { $0.id == id }),
+              case .stream(var stream) = _elements[index], stream.rendersInPlace != inPlace else { return false }
+        stream.rendersInPlace = inPlace
         _elements[index] = .stream(stream)
         return true
     }
@@ -6096,6 +6109,7 @@ final class VectorCanvas {
         fileprivate let elements: [VectorElement]
         fileprivate let transform: CGAffineTransform
         fileprivate let suppressed: Set<UUID>
+        fileprivate var known: [UUID: CGRect] = [:]
 
         /// The pixels these frozen values render to, safe to call from any thread.
         ///
@@ -6141,6 +6155,19 @@ final class VectorCanvas {
             if let shared = source?.render(quality: quality, resolution: resolution,
                                            ifStillAtVersion: version) { return shared }
             return detached().render(quality: quality, resolution: resolution)
+        }
+
+        /// Draws frozen geometry directly into the caller's window. No canvas-sized intermediate.
+        func draw(into cg: CGContext, frameRect: CGRect, quality: RenderQuality) {
+            guard size.width > 0, size.height > 0 else { return }
+            cg.saveGState()
+            cg.translateBy(x: frameRect.minX, y: frameRect.minY)
+            cg.scaleBy(x: frameRect.width / size.width, y: frameRect.height / size.height)
+            cg.concatenate(transform)
+            _ = VectorCanvas.drawLocalContent(into: cg,
+                elements: elements.filter { !suppressed.contains($0.id) },
+                quality: quality, clippedTo: cg.boundingBoxOfClipPath, known: known)
+            cg.restoreGState()
         }
 
         /// How many raster pixels per canvas point a buffer of `destination` points can show. Not
@@ -6193,11 +6220,28 @@ final class VectorCanvas {
             return Frozen(source: self, version: version,
                           memoized: quality == .full ? cachedImage : cachedPreviewImage,
                           size: size, elements: _elements, transform: _transform,
-                          suppressed: _suppressedElementIDs)
+                          suppressed: _suppressedElementIDs, known: paintedBounds)
         }
         return Frozen(source: nil, version: version, memoized: nil,
                       size: size, elements: _elements.withoutReference, transform: _transform,
-                      suppressed: _suppressedElementIDs)
+                      suppressed: _suppressedElementIDs, known: paintedBounds)
+    }
+
+    /// The live display's explicit exception to reference-free freezing. Each stream frame is
+    /// captured by value, so a decoder tick cannot change a recipe already drawing off-main.
+    func freezeDisplay(quality: RenderQuality, referenceIDs: Set<UUID>,
+                       replacing elements: [VectorElement]? = nil,
+                       unsuppressing shownIDs: Set<UUID> = []) -> Frozen {
+        lock.lock(); defer { lock.unlock() }
+        let captured = (elements ?? _elements).compactMap { element -> VectorElement? in
+            guard case .stream(var stream) = element else { return element }
+            guard referenceIDs.contains(stream.id) else { return nil }
+            stream.picture = StreamPicture(frame: stream.picture.frame, index: stream.picture.index)
+            return .stream(stream)
+        }
+        return Frozen(source: nil, version: version, memoized: nil, size: size, elements: captured,
+                      transform: _transform, suppressed: _suppressedElementIDs.subtracting(shownIDs),
+                      known: elements == nil ? paintedBounds : [:])
     }
 
     /// **What one rasterize reads, taken under a single `lock` acquisition** — everything `walk`
@@ -7671,9 +7715,9 @@ struct VectorCanvasData: Codable {
 
     /// The persisted form of a `VectorStreamElement` — STREAM.md §5.1's fields, and nothing runtime.
     ///
-    /// Every key but the two that mean "untagged" and "never written" is non-optional, for
-    /// `VideoRef`'s reason: no build shipped a stream before this one, so there is no older file to
-    /// be compatible with and "absent means the default" would only be a second spelling.
+    /// Every key but the two that mean "untagged" and "never written" is non-optional. Earlier
+    /// placement records are rewritten once at launch by `LegacyStreamPlacementRepair`; the decoder
+    /// knows only the current format.
     /// `lastFrameFileName` is optional because nil is a *value* there — stage 2 writes it on freeze,
     /// bake, disconnect and save, and a document stage 1 wrote has never had one.
     struct StreamRef: Codable {
@@ -7681,6 +7725,7 @@ struct VectorCanvasData: Codable {
         var port: UInt16
         var sourceLabel: String
         var isFrozen: Bool
+        var rendersInPlace: Bool
         var lastFrameFileName: String?
         /// `VectorStreamElement.naturalSize`, split as `VideoRef` splits it.
         var width: Double
@@ -7967,7 +8012,7 @@ struct VectorCanvasData: Codable {
                 // Nothing dropped and nothing resolved: the payload is an address, and
                 // `displayFrame` is runtime-only.
                 return .stream(StreamRef(host: el.host, port: el.port, sourceLabel: el.sourceLabel,
-                                         isFrozen: el.isFrozen,
+                                         isFrozen: el.isFrozen, rendersInPlace: el.rendersInPlace,
                                          lastFrameFileName: streamFrameFileNames[el.id] ?? el.lastFrameFileName,
                                          width: Double(el.naturalSize.width),
                                          height: Double(el.naturalSize.height),
@@ -8123,7 +8168,7 @@ struct VectorCanvasData: Codable {
                 var element = VectorStreamElement(
                     naturalSize: CGSize(width: ref.width, height: ref.height),
                     host: ref.host, port: ref.port, sourceLabel: ref.sourceLabel,
-                    isFrozen: ref.isFrozen, lastFrameFileName: ref.lastFrameFileName,
+                    isFrozen: ref.isFrozen, rendersInPlace: ref.rendersInPlace, lastFrameFileName: ref.lastFrameFileName,
                     transform: LayerTransform(position: CGPoint(x: ref.x, y: ref.y),
                                               scale: ref.scale, rotation: ref.rotation),
                     aspect: CGFloat(ref.aspect), stretchAxis: CGFloat(ref.stretchAxis),
