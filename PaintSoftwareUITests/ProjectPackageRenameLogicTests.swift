@@ -53,8 +53,9 @@ final class ProjectPackageRenameLogicTests: XCTestCase {
         manager.projectName = "Final"
         let finished = expectation(description: "pending rename completed")
         ProjectStore.save(manager, to: original) { finished.fulfill() }
-        let moved = try XCTUnwrap(ProjectStore.moveProject(at: original, into: folder))
+        let landing = ProjectStore.moveProject(at: original, into: folder)
         wait(for: [finished], timeout: 30)
+        let moved = try XCTUnwrap(landing)
         XCTAssertEqual(moved.lastPathComponent, "Final.paintproj")
         // A completion queued before the move can still hand the document the former address.
         save(manager, to: original)
