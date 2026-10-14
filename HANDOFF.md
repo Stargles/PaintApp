@@ -88,12 +88,18 @@ Never harvest dirty worker files: mutations may be intentional.
   Root is comparing against the original input edits before completing the remaining mutations.
   The independent oracle passes 30/30 at `86dd98c` and now catches deletion of an earlier picture;
   its test-only change is integrated as `71acf33`. Actual Release sampling of `ddebad6` identifies the
-  native alpha sampler as the largest cost (6,354/11,900 main-thread samples); the next bounded
-  experiment replaces repeated byte normalization with the same 256 exact division results.
+  native alpha sampler as the largest cost (6,354/11,900 main-thread samples); exact lookup and SIMD
+  experiments did not provide a reliable improvement and are not adopted. A bounded same-Euler
+  inverse acceleration cuts the horizontal fixture's evaluations by 38.43% with identical RGBA;
+  `tmp/s49-liquify-inverse` is validating arbitrary-direction Push, grain and selections before adoption.
   Evidence is in `~/PaintWork/s49-liquify-profile/`; the profiled timing includes instrumentation and
   contention and must not replace the isolated timings above.
-  Small transformed strokes also need the existing precise-storage path so the first save preserves
-  their spine and parent dab walk; that focused change is in progress on the feature branch.
+  Small transformed strokes now use the existing precise-storage path. The feature's pending-lift
+  finalizer is at `17db4c3`, focused Debug 58/58: a normal lift does no geometry work on main;
+  an overlapping edit or snapshot joins the one in-flight calculation before writing history.
+  The shared surface changes caught nineteen distinct injected faults, restored 30/30; six existing
+  held-picture UI tests are running. Curved-selection edge certification and local preview extents
+  for wide/patterned target strokes are being validated before the new feature UI pass.
 
 The owner permits any useful agent count but prioritises usage conservation and quality over speed.
 Keep delegation focused and report the queue occasionally. It is now after the owner’s 10 a.m. return.

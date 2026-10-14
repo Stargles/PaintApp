@@ -176,10 +176,13 @@ Prepared native-tip sampling preserves every raster byte but still costs 13.592 
 The bounded continuous-flow experiment is complete: loose integration saves field evaluations but
 changes the map; tighter integration loses the saving. Keep the current verified map
 (evidence: `~/PaintWork/evidence/s49-liquify-flow-prototype/README.md`). An actual Release CPU sample
-places 6,354 of 11,900 main-thread samples in the brush mask sampler; its optimized instructions still
-divide four alpha bytes by 255 per lookup. Evaluate a shared 256-entry table of those exact division
-results (2 KiB), keeping the native mask bytes and the field arithmetic unchanged. Profile evidence:
-`~/PaintWork/s49-liquify-profile/`; no speedup is claimed until the rendered result and Release cost agree.
+places 6,354 of 11,900 main-thread samples in the brush mask sampler. Exact lookup/SIMD experiments
+did not show a reliable improvement and are not adopted. A safeguarded acceleration of the same
+Euler inverse cuts the horizontal Push fixture to 179,020,536 evaluations (38.43% fewer), with all
+339,824 rendered bytes unchanged and no failed source solves. Native validation must cover arbitrary
+Push directions, grain and selections before adoption; other modes retain their existing solver.
+Evidence: `~/PaintWork/s49-liquify-profile/`, `~/PaintWork/evidence/s49-liquify-sampler/` and
+`~/PaintWork/evidence/s49-liquify-inverse-acceleration/`. Raster interaction cost is still open.
 Finger lift currently resolves geometry and rasterizes the edit again on main. Reuse the finished
 procedural result and transfer its shown surface through the existing unlanded-picture lane; if the
 last tick is still drawing, finish it through the same LatestWins pipeline. Preserve document/undo
