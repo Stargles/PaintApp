@@ -545,6 +545,17 @@ original saved version is never rewritten; failed repair or validation leaves th
 place, and automatic recovery tries the next candidate. A successful replacement keeps the displaced
 scene in Trash. No cel pictures are eagerly loaded for this gate.
 
+A collision when filing or restoring a package updates its manifest title through the shared
+`ProjectPackageName.move` metadata writer, so the filename, gallery tile and recovery name agree.
+Explicit artist moves serialize with saves, capture project identity before waiting, follow pending
+renames and record the landing through `PackageRenameGate.renamingOpenPackage`; launch repairs keep
+their idle-only gate. The existing backup-origin marker is written before the directory move and
+restored to its exact previous bytes or absence on refusal. A collision refreshes the latest recovery snapshot with the new title.
+A failed metadata write moves nothing, and a refused directory move restores the original metadata
+without replacing its occupant. These operations decode no cel pictures. Folder and package-rename
+logic tests cover both refusals, identity, recovery and a pending-save move; the cold gallery UI test
+draws, files onto an occupied name, sees both titles and reopens the incoming vector drawing.
+
 Before deleting the one-shot repairs, run a final repair build with a new build signature: the
 previous build’s preserved `preupdate-` snapshot then becomes eligible, while the final build’s new
 snapshot comes from already repaired live scenes. Verify **all** library packages read as current
