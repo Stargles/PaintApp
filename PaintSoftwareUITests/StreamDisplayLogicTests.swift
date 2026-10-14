@@ -215,11 +215,26 @@ final class StreamDisplayLogicTests: XCTestCase {
         let originalDrawing = try XCTUnwrap(FileManager.default.contentsOfDirectory(at: source.appendingPathComponent("drawings"), includingPropertiesForKeys: nil).first)
         let originalBytes = try Data(contentsOf: originalDrawing)
         LegacyStreamPlacementRepair.repairLibrary()
+        LegacyMaskRepair.repairLibrary()
         let untouched = ProjectBackupManager.takeUpdateSnapshotIfNeeded()
         let pristine = try XCTUnwrap(ProjectBackupManager.allProjectPackages(in: root.appendingPathComponent("Backups"))
             .first { $0.lastPathComponent.hasPrefix(untouched) })
         let pristineDrawing = pristine.appendingPathComponent("drawings/\(originalDrawing.lastPathComponent)")
         XCTAssertEqual(try Data(contentsOf: pristineDrawing), originalBytes, "the before-update original is pristine")
+        func fileBytes(in package: URL) throws -> [String: Data] {
+            let files = try XCTUnwrap(FileManager.default.enumerator(at: package,
+                includingPropertiesForKeys: [.isRegularFileKey]))
+            var bytes: [String: Data] = [:]
+            for case let file as URL in files where try file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true {
+                bytes[String(file.path.dropFirst(package.path.count))] = try Data(contentsOf: file)
+            }
+            return bytes
+        }
+        let pristineBytes = try fileBytes(in: pristine)
+        XCTAssertTrue(ProjectBackupManager.restoreBackup(at: pristine, toProjectAt: packages[0]),
+                      "an actual previous-build snapshot is repaired on its staged restore copy")
+        XCTAssertEqual(try fileBytes(in: pristine), pristineBytes,
+                       "restoring preserves every original snapshot file byte for byte")
         for package in packages {
             let loaded = try XCTUnwrap(ProjectStore.load(from: package))
             XCTAssertTrue(!loaded.loadDamage.isDamaged, "strict load after repair has no lost marks in \(package.path)")
