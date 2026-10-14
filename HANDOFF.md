@@ -69,7 +69,10 @@ Never harvest dirty worker files: mutations may be intentional.
   is forward ill-conditioning, not bad raster sampling. Remove the diagnostic forward pass from
   production inversion without reducing brush strength.
   Root's isolated `tmp/s49-liquify-cost` prepares brush data and searches indexed bins directly;
-  byte-identical raster comparison and Release cost are running before acceptance. Linked-frame
+  byte-identical raster comparison passed for both brushes; isolated Release is 2.639 s hard and
+  13.592 s patterned, with a 6,540,296-byte full-sweep field. Production diagnostic removal is next;
+  an isolated continuous-flow prototype may address the remaining raster cost without a second
+  renderer. No change to field semantics is accepted before source-error and image evidence. Linked-frame
   cold-reopen pixel comparison needs a canonical saved/reopened seed (first save quantizes ordinary
   source strokes); raster scope still awaits the owner's answer. No Liquify code is merged yet.
 

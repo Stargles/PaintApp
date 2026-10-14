@@ -169,6 +169,10 @@ interaction performance. Distant fill curves must retain their control points as
 The existing source-block layer retarget and canvas-resize recipe mapping must carry the captured
 deformation along, preserving its source identity and geometry rather than leaving stale coordinates.
 An unreadable saved selection archive must fail current decoding, never become an unrestricted field.
+Prepared native-tip sampling preserves every raster byte but still costs 13.592 seconds for the
+84,956-pixel patterned window in isolated Release. Remove production-only diagnostic work first;
+probe adaptive forward/reverse integration of the same continuous brush velocity outside shipping
+code if necessary, measuring source error, sample counts and pictures before changing field semantics.
 
 - [ ] Liquify on raster and vector, including linked generated in-betweens, three modes, one undo step per stroke.
 
