@@ -120,6 +120,10 @@ before the next device install**, since ~70 merges landed without one.
 Keep Full Precision continue resetting whenever a scene opens. (183)'s selection recolour no longer
 flickers on the iPad; the different two-fill flash is now (190). (178) includes linked in-between frames.
 
+**Liquify raster scope question pending:** old raster pixels no longer say whether they came from
+paint, pasted images or text. Ask whether to deform all raster pixels (excluding editable vector
+objects), or only the separate brush tier, which leaves some paint/fills/moved content unmoved.
+
 **Questions to ask after 10 a.m. Toronto time (plain language, with options):**
 1. (179) Fog Glow premise corrected: `drawingPixelLengths` recognises only pixel-unit controls;
    dimensionless `glare.size` is never scaled, so every size doubles in half-detail. Root is verifying

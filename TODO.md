@@ -178,6 +178,12 @@ recipe-owned rest-space displacement field, never per-vertex offsets or `localEd
 alongside the editable-drawing tool. The session-48 survey's proposed refusal of derived frames is
 superseded by this ruling.
 
+**Implementation constraint found 2026-10-14:** old raster cels mix imported pictures/text, fills and
+moved paint in `bakedImage`, without origin/type information. Typed vector objects can be excluded
+exactly; old flattened raster content cannot. Owner choice pending: move all raster pixels while
+leaving typed objects alone, or only the separate brush tier (which leaves some ordinary painted
+areas unmoved). Continue vector/linked/settings work while this is decided.
+
 - [ ] Liquify on raster and vector, including linked generated in-betweens, three modes, one undo step per stroke.
 
 ---
