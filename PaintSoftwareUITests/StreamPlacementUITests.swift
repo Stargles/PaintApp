@@ -123,12 +123,11 @@ final class StreamPlacementUITests: StreamUITestCase {
         waitForPicture(.red, on: canvas)
         let unpainted = try XCTUnwrap(centre(canvas), "the frozen red reference is drawn")
 
-        let opacity = app.sliders["sideToolbar.brushOpacitySlider"]
+        openBrushEditor(app)
+        let opacity = app.sliders["brushPanel.opacitySlider"]
         XCTAssertTrue(opacity.waitForExistence(timeout: 5))
-        opacity.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0))
-            .press(forDuration: 0.4,
-                   thenDragTo: opacity.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)),
-                   withVelocity: .slow, thenHoldForDuration: 0.3)
+        opacity.adjust(toNormalizedSliderPosition: 0.5)
+        closeBrushEditor(app)
         app.buttons["toolbar.fillButton"].tap()
         canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         let oneCoatRed = Double(unpainted.r) * 0.5
