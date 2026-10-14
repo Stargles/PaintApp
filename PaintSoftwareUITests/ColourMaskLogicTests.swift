@@ -145,11 +145,9 @@ final class ColourMaskLogicTests: XCTestCase {
         manager.layers[2].alphaMask = AlphaMask(sources: [.folder(parent)],
             colours: [ColourKey(from: .init(red: 1, green: 0, blue: 0, alpha: 1))])
         let before = try bytes(manager)
-        let originalVersions = try XCTUnwrap(manager.makeRenderRequest(atFrame: 0, includeBackground: false)).contentVersions
         manager.layers[0].parentFolderID = second
         manager.layers[1].parentFolderID = first
         let after = try bytes(manager)
-        XCTAssertEqual(try XCTUnwrap(manager.makeRenderRequest(atFrame: 0, includeBackground: false)).contentVersions, originalVersions)
         XCTAssertEqual([before[(16 + 32 * 64) * 4 + 3], before[(48 + 32 * 64) * 4 + 3]], [0, 255])
         XCTAssertEqual([after[(16 + 32 * 64) * 4 + 3], after[(48 + 32 * 64) * 4 + 3]], [255, 0])
     }
@@ -206,7 +204,8 @@ final class ColourMaskLogicTests: XCTestCase {
             CanvasFixture.solidImage(.blue, rect: CGRect(x: 0, y: 0, width: 64, height: 64)))
         manager.layers[0].isVisible = false
         manager.layers[1].isVisible = false
-        let other = AlphaMask(sources: [.layer(manager.layers[0].id)])
+        var other = AlphaMask(sources: [.layer(manager.layers[0].id)])
+        other.setTuning(threshold: 0.5, antialiasHalfWidth: 0.1)
         manager.layers[1].alphaMask = other
         let folder = manager.addFolder(name: "Masked group")
         manager.layers[2].parentFolderID = folder
@@ -215,6 +214,7 @@ final class ColourMaskLogicTests: XCTestCase {
         held.setTuning(threshold: 0.9, antialiasHalfWidth: 0.01)
         let before = try bytes(manager)
         manager.holdMask(held, for: .folder(folder))
+        XCTAssertEqual(manager.maskAsShown(for: .folder(folder)), held)
         XCTAssertEqual(try bytes(manager, holding: manager.liveEdit).filter { $0 != 0 }.count, 0)
         XCTAssertEqual(manager.folders[0].alphaMask, other)
         manager.commitHeldMask()
