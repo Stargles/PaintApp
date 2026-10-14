@@ -81,8 +81,12 @@ Never harvest dirty worker files: mutations may be intentional.
     Push** on a 960-point Streaky target stroke: moving its spine changes the downstream stamp phase.
     This must be fixed at the existing rest-walk/stamping seam, not hidden by a wider preview window.
     Compact retained-parent/site correspondence is the candidate. A wide/scattered stamp can overhang
-    a selection even when its anchor is inside; the worker is preparing a native A/B against strict
-    pixel-boundary deformation before choosing that visible behavior with the owner.
+    a selection even when its anchor is inside. Native A/B was inspected and sent to the owner:
+    shipped Streaky spacing, 48 native dabs; A moves 1,703 exterior alpha pixels, B moves zero.
+    Required behavior question is pending: A moves whole brush marks; B keeps all outside pixels
+    fixed and needs a 2D material representation to keep vectors editable. No material schema is
+    chosen. Comparison: `~/PaintWork/evidence/s49-liquify-selection-options-native-spacing/comparison.png`.
+    Fixture checkpoint `99ef7c8`; current vector/linked/profile UI is running independently.
     Evidence: `~/PaintWork/evidence/s49-liquify-curved-selection/` and `s49-liquify-target-phase/`.
   - **Raster cost:** the original direct map folded under strong brushes; bounded reversible Euler
     steps replaced it. Prepared brush data/indexed bins and removal of a diagnostic forward pass keep
@@ -96,7 +100,7 @@ Never harvest dirty worker files: mutations may be intentional.
     acceleration cuts the horizontal fixture's evaluations by 38.43% with identical RGBA. Focused
     native Release validation passed 7/7: 18 signed/diagonal/pattern/grain/selection fixtures have
     identical RGBA and zero source failures. Hard-window evaluations fall to 48,236,266; patterned
-    to 179,020,536. Ready commits `ac8a177`, then `2acece9`: temporary oracle removed, restored
+    to 179,020,536. Commits `ac8a177`, `2acece9` (feature `ab99f9d`, `57d8247`): temporary oracle removed, restored
     Release 7/7, seven solver mutations and five retained-assertion input faults red. Inverse worker
     simulator deleted. Root reviewed code and image pairs. Timings were not paired, so claim
     evaluation savings, not a speed ratio. `~/PaintWork/evidence/s49-liquify-inverse-native/README.md`.
@@ -189,7 +193,10 @@ Keep Full Precision continue resetting whenever a scene opens. (183)'s selection
 flickers on the iPad; the different two-fill flash is now (190). (178) includes linked in-between frames.
 
 **Liquify raster scope ruled:** *"Move all raster pixels; leave editable objects alone."* This includes
-flattened pictures/text that old raster layers can no longer distinguish from paint. A separate thick-vector selection-edge comparison is being prepared before a behavior choice.
+flattened pictures/text that old raster layers can no longer distinguish from paint. **A separate vector selection-edge choice is pending**, with a native A/B already shown:
+A carries whole brush marks (including overhang); B keeps every outside pixel fixed (recommended),
+requiring 2D material deformation while retaining editable strokes. Do not infer an answer from elapsed
+time. Independent raster and current feature UI work continues.
 
 **After the next install:**
 Once the next build has repaired his scenes and they look right: retire the one-shot repairs.

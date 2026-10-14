@@ -6,7 +6,7 @@ The owner's asks. [BUGS.md](BUGS.md) is for what *we* find.
 for genuinely required input or context degradation. Agent count is unrestricted for now; usage
 conservation and output quality take priority over speed. Use focused delegation and cheaper models
 for routine work, with occasional queue reports. The owner asked to work independently while asleep until 10 a.m. Toronto time; that time has now
-passed. Raster scope is ruled below; a visible vector selection-edge comparison is being prepared.
+passed. Raster scope is ruled below; the vector selection-edge behavior question is pending with native pictures shown.
 
 ## How to read and keep this file
 
@@ -180,7 +180,7 @@ did not show a reliable improvement and are not adopted. A safeguarded accelerat
 Euler inverse cuts the horizontal Push fixture to 179,020,536 evaluations (38.43% fewer), with all
 339,824 rendered bytes unchanged and no failed source solves. Native Release validation now covers 18 signed/diagonal, grain, selection and other-mode fixtures:
 all pixels match, no source solves fail, and non-Push coordinates/counts remain exact. The temporary
-oracle is removed; restored Release 7/7 passed. Integrate `ac8a177`, then `2acece9`; final combined
+oracle is removed; restored Release 7/7 passed. Integrated into the feature branch as `ab99f9d`, `57d8247`; final combined
 gates remain. Other modes retain ordinary iteration.
 Evidence: `~/PaintWork/s49-liquify-profile/`, `~/PaintWork/evidence/s49-liquify-sampler/` and
 `~/PaintWork/evidence/s49-liquify-inverse-acceleration/`. Raster interaction cost is still open.
@@ -197,8 +197,10 @@ containment and the edge taper; the certified-curve correction is in focused val
 The compact material-retention proposal keeps each vector brush mark's original appearance and moves
 it by its spine site's displacement. A wide/scattered mark anchored inside a selection can therefore
 carry painted pixels beyond the selection boundary. Exact fixed exterior pixels require spatial
-material deformation instead. Render a native comparison of those behaviors and obtain the owner's
-choice before committing the material representation; the raster path already fixes exterior pixels.
+material deformation instead. The native comparison was shown
+(48 shipped-spacing Streaky stamps: A changes 1,703 exterior alpha pixels, B changes zero). The owner's
+choice is pending before committing the material representation. The raster inverse kernel already
+fixes exterior pixels. Evidence: `~/PaintWork/evidence/s49-liquify-selection-options-native-spacing/`.
 
 - [ ] Liquify on raster and vector, including linked generated in-betweens, three modes, one undo step per stroke.
 
