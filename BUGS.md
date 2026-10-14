@@ -8,6 +8,15 @@ manifest before moving the live scene. The original snapshot stays byte-for-byte
 
 # Known Issues
 
+
+## Moving or restoring onto an occupied project name leaves the gallery title behind (2026-10-14)
+
+A complete current-format folder fixture exposed this: `moveProject` gives the incoming package the
+free filename `Rough 2.paintproj`, but its manifest still names it `Rough`, so both gallery tiles read
+`Rough`. Collision restores from Trash use the same directory-only move and can announce a new name
+that the tile does not show. Keep one metadata-and-package rename path, preserve the project and its
+backup history, and refuse a metadata-write failure before moving either package.
+
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
