@@ -10,15 +10,19 @@ file, then [CLAUDE.md](CLAUDE.md) (build, test, merge, deploy), then the specifi
 pick up. [TODO.md](TODO.md) is the owner's asks **in queue order — the top is next**; [BUGS.md](BUGS.md)
 is what we find.
 
-## State (session 48 closed, 2026-10-13)
+## State (session 49 in progress, 2026-10-14)
 
 **Check `git worktree list` and every `tmp/*` branch first** (`git log --oneline origin/main..<branch>`)
 — `origin/main` is a shared ref and a cut-off session's work sits on its branch.
 
-**Nothing is in flight.** Session 48 closed with `main` at the commit that carries this file; no
-`tmp/*` branch holds unmerged work. The next session may be run by Codex or another agent — everything it
-needs is in the repo (AGENTS.md, CLAUDE.md, this file, TODO.md, BUGS.md, the specs) plus the design notes
-in `~/PaintWork/design/` on this Mac.
+**Session 49 is in flight.** The verified starting point is `5d73184`; no prior `tmp/*` branch held
+unmerged work. Current task branches are `tmp/s49-onion` (189), `tmp/s49-stream` (177),
+`tmp/s49-masks` (35), and `tmp/s49-session` (coordination). Their worktrees are under `~/PaintWork/`.
+Do not harvest a worker's uncommitted files: the worker may be mutation-testing. Liquify (178) follows.
+The owner permits any useful agent count but prioritises usage conservation and output quality over
+speed. Keep delegation focused, use cheaper models for routine work, and report the queue occasionally.
+The full UI suite is owed on the integrated tree before the next install. Earlier session design notes
+remain in `~/PaintWork/design/`.
 
 **Build from `~/PaintWork`, not `~/Desktop`** (CLAUDE.md "Build and test", first paragraph).
 `~/PaintWork/deploy` is a detached worktree kept for device builds.

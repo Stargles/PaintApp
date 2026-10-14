@@ -2,6 +2,11 @@
 
 The owner's asks. [BUGS.md](BUGS.md) is for what *we* find.
 
+**Session 49 (2026-10-14):** the owner asked to continue through every actionable item, stopping only
+for genuinely required input or context degradation. Agent count is unrestricted for now; usage
+conservation and output quality take priority over speed. Use focused delegation and cheaper models
+for routine work, with occasional queue reports.
+
 ## How to read and keep this file
 
 Every item is a **status**, a short **description** a future session can pick up cold, and **what is
