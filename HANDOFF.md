@@ -86,6 +86,12 @@ Never harvest dirty worker files: mutations may be intentional.
     **Owner chose B on 2026-10-14: keep all outside pixels fixed.** Spatial material deformation must
     preserve editable vector strokes; whole-stamp movement is rejected. The representation still
     needs implementation and strict-format repair if its persisted shape changes.
+    The design review favors one retained native material source, subsuming `StrokeDistort` ownership,
+    ordered compact spatial operations and bounded inverse-coordinate tiles sampled from regenerated
+    original material once. Reuse native stamping, stroke-group opacity/eraser order and `ImageWarp`.
+    Runtime element copies must retain shared immutable operation definitions; deduplicate them at the
+    strict sidecar codec boundary, never through a global prepared-field pool. Stationary-boundary
+    gradient fills, scattered paint, size edits, cuts and transformed/linked frames are required cases.
     Comparison: `~/PaintWork/evidence/s49-liquify-selection-options-native-spacing/comparison.png`.
     Fixture checkpoint `99ef7c8`; current vector/linked/profile UI passed 3/3 on `57d8247`.
     The canonical linked fixture reopens with zero changed sampled bits, then follows later source
@@ -152,6 +158,9 @@ four clones, normal simlock. Evidence and automatic result archive:
 `~/PaintWork/s49-final-validation/full-main/`; owned simulator `C6A539C3-8499-4BE1-99D5-9FD694C93AF1`.
 This qualifies the existing main before the scheduled profile refresh; Liquify needs its own final
 integrated gates after its remaining work is complete.
+All four clones have started. One early Fog Glow UI failure awaits archived-result triage; no cause is
+assigned. Measured memory pressure prompted pausing other simulator batches. Raster checkpoint
+`9df625e` is clean but its newest baseline never launched; workers continue source-only work.
 
 **Latest integrated fast tier (app/test source `840d68a`)**: Debug and Release each 5124 tests,
 5120 passed, four skipped and zero failures; static full census 5694. The full UI suite has not been run since `38a3dd6`
