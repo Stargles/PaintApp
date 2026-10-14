@@ -56,14 +56,18 @@ Never harvest dirty worker files: mutations may be intentional.
   `~/PaintWork/design/s49-liquify-constraints.md`. A genuine previous-build linked-frame package was captured from the preserved `5d73184` Release
   app and checked into the Liquify branch with provenance. Committed occurrence schema `ea0152f`
   passes 72 focused Debug tests (32 feature, 12 repair, 28 model): captures follow source-cel/element
-  identity through regrouping and cloned cels, and new ink inverts chronological deformation to stay
-  under the pen. The storage worker is extending source-block retarget, canvas-resize conjugation,
+  identity through regrouping and cloned cels. A subsequent numerical check supersedes the new-local-
+  ink inverse path: past gestures must affect only local edits present in their captured membership,
+  while later gestures capture newly drawn marks normally (TODO explains the precision limit).
+  The storage worker is extending source-block retarget, canvas-resize conjugation,
   and strict selection-archive decoding. Earlier storage mutations: 16 batches red, restored 12/12.
   The original displacement folded strong brushes; reversible steps now pass small rendered fixtures.
   Frozen Release benchmark `3434670`: hard 67,100 pixels / 75,915,422 field evaluations / 3.393 s;
   patterned 84,956 pixels / 324,895,856 evaluations / 28.056 s, with 7,801 forward-roundtrip residual
-  failures. These are simulator timings, not device throughput. Independent source-coordinate
-  accuracy is being checked because a strongly stretched map can amplify tiny numeric errors.
+  failures. These are simulator timings, not device throughput. An independent 60-digit inverse
+  agrees within 3.96e-13 source pixels at all eight recorded failures; the large destination residual
+  is forward ill-conditioning, not bad raster sampling. Remove the diagnostic forward pass from
+  production inversion without reducing brush strength.
   Root's isolated `tmp/s49-liquify-cost` prepares brush data and searches indexed bins directly;
   byte-identical raster comparison and Release cost are running before acceptance. Linked-frame
   cold-reopen pixel comparison needs a canonical saved/reopened seed (first save quantizes ordinary

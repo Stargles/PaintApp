@@ -157,8 +157,12 @@ segments unchanged when only a local part is deformed, and verify selection limi
 Re-registration and motion-group splitting can replace group UUIDs: deformation captures must keep
 their connection to the original source ink through stable source-cel/element occurrence identity,
 including regrouping and cloned cels that share element UUIDs.
-Drawing new ink on an already-liquified in-between must invert the same chronological deformation
-when storing its rest-space stroke, so the drawn mark stays under the pen rather than moving twice.
+New ink drawn directly on an in-between must stay under the pen. The 60-digit source-coordinate
+check shows why reversing old gestures is insufficient: a long patterned Push can map source
+positions only 1e-15 pixels apart to destinations hundreds of pixels apart, beyond stored stroke
+precision. Prior gestures therefore affect only local edits already named in their capture membership;
+a newly drawn local edit uses the ordinary current-lattice storage path, and later gestures capture it
+normally. Newly added source/subject ink still inherits a surviving or unambiguous group capture.
 A realistic 100-pixel brush / 500-pixel drag needs 75.9 million field evaluations for a 67,100-pixel
 window in the first reversible implementation; measure Release and reduce that work before accepting
 interaction performance. Distant fill curves must retain their control points as well as their shape.
