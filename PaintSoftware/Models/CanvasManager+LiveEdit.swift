@@ -359,10 +359,13 @@ extension CanvasManager {
 
     /// **The hold is over** — its value is in the document by now, or was thrown away. Tells the canvas,
     /// which takes the picture down, and publishes once so it re-cuts without the hold's host.
-    func endLiveEdit() {
+    func endLiveEdit(beforeNotify: () -> Void = {}) {
         guard liveEdit != nil else { return }
         liveEdit = nil
         mirrorLiveEdit()
+        // Transfer any committed picture after clearing the model hold, before removing its surface.
+        // A transfer can synchronously mint another consumer's recipe; it must see the write only once.
+        beforeNotify()
         onHeldPictureMoved?()
         objectWillChange.send()
     }

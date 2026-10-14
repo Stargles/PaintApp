@@ -163,9 +163,10 @@ extension CanvasManager {
     /// Lets the gesture's picture go — its pixels are in the document by now, or were thrown away —
     /// and publishes once, so the canvas re-cuts without the fill's host.
     private func endLiveFill(landing preview: FillPreview? = nil) {
-        guard liveFill != nil else { return }
-        if let preview { onLiveFillWillLand?(preview) }
-        endLiveEdit()
+        guard let fill = liveFill else { return }
+        endLiveEdit {
+            if let preview { onLiveFillWillLand?(fill.layerID, fill.celID, preview) }
+        }
     }
 
     /// How far a fill's picture can depend on pixels beyond its window — `FillWindow.halo` at the

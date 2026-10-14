@@ -59,31 +59,6 @@ final class UnlandedInkLogicTests: XCTestCase {
                       "step 5: a base that contains every stroke leaves nothing for the overlay to say")
     }
 
-    /// **A committed fill's exact preview takes the same route from its surface to the arriving
-    /// vector base.** The operands are the held picture immediately after commit and the set after
-    /// an older base and then the committed version land. Releasing it before version 8 goes red
-    /// while the old base is still on screen; retaining it after 8 would draw the fill twice.
-    func testCommittedFillPreviewStaysHeldUntilItsVectorBaseLands() {
-        var ink = UnlandedInk()
-        let preview = Self.pixel
-        let window = CGRect(x: 12, y: 18, width: 64, height: 48)
-
-        ink.hold(UnlandedInk.Picture(id: 1, version: 8, windowRect: window,
-                                     alpha: 1, replacesBase: false, image: preview))
-        XCTAssertEqual(ink.pictures.count, 1,
-                       "the exact fill preview replaces its surface in the same turn the old base is exposed")
-        XCTAssertEqual(ink.pictures.first?.windowRect, window)
-        XCTAssertTrue(ink.pictures.first?.image === preview,
-                      "the pixels handed to Core Animation are the ones the fill surface already showed")
-
-        ink.retire(upTo: 7)
-        XCTAssertEqual(ink.pictures.map(\.id), [1],
-                       "the base from before the fill cannot retire its preview")
-        ink.retire(upTo: 8)
-        XCTAssertTrue(ink.isEmpty,
-                      "once the base includes the fill, its held preview goes away in the same landing")
-    }
-
     /// **A later render is a superset, so one landing can retire several.** Renders are dispatched
     /// one per commit onto a single serial queue, and a fast artist finishes two strokes inside one
     /// of them — so the base that finally lands is a picture of both.

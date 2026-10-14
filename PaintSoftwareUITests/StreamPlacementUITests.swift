@@ -107,6 +107,53 @@ final class StreamPlacementUITests: StreamUITestCase {
         attachScreenshot(XCUIScreen.main, "Overlapping streams with different placement choices")
     }
 
+    /// A 50% black fill darkens the red reference once. The fill remains adjustable after the tap;
+    /// choosing Brush commits it. Stretch each window draw so the first recipe minted by the landing
+    /// callback stays on screen long enough to read, even when a corrected recipe is already queued.
+    func testASemitransparentFillKeepsOneCoatWhileItLandsOverAnInPlaceStream() throws {
+        let app = XCUIApplication()
+        XCUIDevice.shared.orientation = .portrait
+        app.launchArguments += ["-uiTestSlowWindowDrawMillis", "1600"]
+        let canvas = launchWithALiveStream(app)
+        laptop.show(.red)
+        waitForPicture(.red, on: canvas)
+        app.buttons["streamBar.placementButton"].tap()
+        app.buttons["streamBar.freezeButton"].tap()
+        waitForBarState(app, "frozen")
+        waitForPicture(.red, on: canvas)
+        let unpainted = try XCTUnwrap(centre(canvas), "the frozen red reference is drawn")
+
+        let opacity = app.sliders["sideToolbar.brushOpacitySlider"]
+        XCTAssertTrue(opacity.waitForExistence(timeout: 5))
+        opacity.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0))
+            .press(forDuration: 0.4,
+                   thenDragTo: opacity.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)),
+                   withVelocity: .slow, thenHoldForDuration: 0.3)
+        app.buttons["toolbar.fillButton"].tap()
+        canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        let oneCoatRed = Double(unpainted.r) * 0.5
+        func isOneCoat(_ pixel: RGBA?) -> Bool {
+            guard let pixel else { return false }
+            return abs(Double(pixel.r) - oneCoatRed) < 18 && pixel.g < 55 && pixel.b < 55
+        }
+        XCTAssertNotNil(waitForPixel(canvas, at: CGVector(dx: 0.5, dy: 0.5), matches: isOneCoat),
+                        "PREMISE: the adjustable black fill shows 50% red, not opaque black")
+        // Frozen references do not send unrelated frames. Let both the running draw and its one
+        // newest pending draw land, so the commit callback can mint its first recipe synchronously.
+        Thread.sleep(forTimeInterval: 3.4)
+        let probe = CGPoint(x: canvas.frame.midX, y: canvas.frame.midY)
+        let sampler = MidGestureSampler(points: [probe], interval: 0.05)
+        sampler.start()
+        app.buttons["toolbar.brushButton"].tap()
+        Thread.sleep(forTimeInterval: 5)
+        let samples = sampler.stop()
+        XCTAssertFalse(samples.isEmpty, "the first committed window was sampled")
+        XCTAssertTrue(samples.allSatisfy { isOneCoat($0.pixels.first ?? nil) },
+                      "the visible fill keeps one coat through commit; a second coat halves red again: \(samples.map { $0.pixels })")
+        XCTAssertTrue(isOneCoat(centre(canvas)), "the final committed composite is the same 50% fill")
+        attachScreenshot(app, "one semitransparent fill over a frozen In Place reference")
+    }
+
     func testPlacementSurvivesASaveAndColdRelaunch() throws {
         let app = XCUIApplication()
         let canvas = launchWithALiveStream(app)

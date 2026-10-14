@@ -345,8 +345,8 @@ struct CanvasView: UIViewRepresentable {
         context.coordinator.canvasManager.onHeldPictureMoved = { [weak coordinator = context.coordinator] in
             coordinator?.heldPictureMoved()
         }
-        context.coordinator.canvasManager.onLiveFillWillLand = { [weak coordinator = context.coordinator] preview in
-            coordinator?.prepareLiveFillLanding(preview)
+        context.coordinator.canvasManager.onLiveFillWillLand = { [weak coordinator = context.coordinator] layerID, celID, preview in
+            coordinator?.prepareLiveFillLanding(preview, layerID: layerID, celID: celID)
         }
 
         // One undo step per whole move/scale/rotate drag, not per intermediate value — see
@@ -2067,11 +2067,10 @@ struct CanvasView: UIViewRepresentable {
         /// vector base is rasterized asynchronously, so its exact visible preview joins the same
         /// `UnlandedInk` set as a finished stroke until that version lands. A raster base can be
         /// installed synchronously, so refresh it first and then let the fill surface go.
-        func prepareLiveFillLanding(_ preview: FillPreview) {
-            guard let fill = canvasManager.liveFill,
-                  let layerIndex = canvasManager.layers.firstIndex(where: { $0.id == fill.layerID }),
-                  let celIndex = canvasManager.layers[layerIndex].cels.firstIndex(where: { $0.id == fill.celID }),
-                  let host = layerHosts[fill.layerID] else { return }
+        func prepareLiveFillLanding(_ preview: FillPreview, layerID: UUID, celID: UUID) {
+            guard let layerIndex = canvasManager.layers.firstIndex(where: { $0.id == layerID }),
+                  let celIndex = canvasManager.layers[layerIndex].cels.firstIndex(where: { $0.id == celID }),
+                  let host = layerHosts[layerID] else { return }
 
             let cel = canvasManager.layers[layerIndex].cels[celIndex]
             if let vectorCanvas = cel.vector {

@@ -155,7 +155,7 @@ final class FillWindowLogicTests: XCTestCase {
 
     // MARK: - The gesture
 
-    /// The view must receive the already-committed picture while the editable fill is still held:
+    /// The view receives the committed picture after the model hold clears, before surface teardown:
     /// a vector's version has advanced, and a raster's replaced texture is installed. Cancelling a
     /// live fill drops the surface without pretending that anything landed.
     func testFillLandingCallbackRunsAfterWriteBeforePreviewRelease() throws {
@@ -168,27 +168,35 @@ final class FillWindowLogicTests: XCTestCase {
         vectorManager.layers[0].cels[0].vector = vectorCanvas
         let initialVectorVersion = vectorCanvas.version
         var vectorLandingObserved = false
-        vectorManager.onLiveFillWillLand = { preview in
-            vectorLandingObserved = vectorManager.liveFill != nil
+        var expectedPreviewRect: CGRect?
+        var events: [String] = []
+        vectorManager.onLiveFillWillLand = { layerID, celID, preview in
+            events.append("landing")
+            vectorLandingObserved = vectorManager.liveFill == nil
                 && vectorCanvas.version > initialVectorVersion
-                && preview.rect == vectorManager.fillLastRender?.window.rect
+                && preview.rect == expectedPreviewRect
+                && layerID == vectorManager.layers[0].id
+                && celID == vectorManager.layers[0].cels[0].id
         }
         vectorManager.beginInteractiveFill(at: CGPoint(x: 32, y: 32))
         vectorManager.endInteractiveFill()
         vectorManager.fillQueue.sync {}
         settle()
         XCTAssertNotNil(vectorManager.liveFill?.preview, "the vector fill has a visible surface before commit")
+        expectedPreviewRect = vectorManager.liveFill?.preview?.rect
+        vectorManager.onHeldPictureMoved = { events.append("teardown") }
         vectorManager.commitInteractiveFill()
         XCTAssertTrue(vectorLandingObserved,
-                      "the vector replacement is written before the exact preview is handed off")
+                      "the callback sees the committed vector, without a duplicate held fill")
+        XCTAssertEqual(events, ["landing", "teardown"], "hold the replacement before removing the old surface")
         XCTAssertNil(vectorManager.liveFill, "the fill surface is released after its replacement is held")
 
         let rasterManager = CanvasFixture.manager()
         rasterManager.brushColor = Self.red
         let oldRaster = rasterManager.layers[0].cels[0].raster
         var rasterLandingObserved = false
-        rasterManager.onLiveFillWillLand = { _ in
-            rasterLandingObserved = rasterManager.liveFill != nil
+        rasterManager.onLiveFillWillLand = { _, _, _ in
+            rasterLandingObserved = rasterManager.liveFill == nil
                 && rasterManager.layers[0].cels[0].raster !== oldRaster
         }
         rasterManager.beginInteractiveFill(at: CGPoint(x: 32, y: 32))
@@ -203,7 +211,7 @@ final class FillWindowLogicTests: XCTestCase {
         let cancelledManager = CanvasFixture.manager()
         cancelledManager.brushColor = Self.red
         var cancelledLandingObserved = false
-        cancelledManager.onLiveFillWillLand = { _ in cancelledLandingObserved = true }
+        cancelledManager.onLiveFillWillLand = { _, _, _ in cancelledLandingObserved = true }
         cancelledManager.beginInteractiveFill(at: CGPoint(x: 32, y: 32))
         cancelledManager.endInteractiveFill()
         cancelledManager.fillQueue.sync {}
