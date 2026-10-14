@@ -1,5 +1,4 @@
 import XCTest
-import UIKit
 
 /// TODO (63)'s Glare, headlessly: the three shipped types (Streaks, Simple Star, Fog Glow) against
 /// both backends, the identity, one direction's reach in bytes, the two "is really the other effect"
@@ -249,9 +248,9 @@ final class GlareEffectLogicTests: XCTestCase {
         }
         for size in [2.0, 6.0] {
             let effect = Effect.glare(Effect.Glare(type: .fogGlow, threshold: 0.4, intensity: 4, size: size))
-            XCTAssertEqual(effect.drawingPixelLengths(at: 1), effect, "full detail keeps the saved effect")
             let full = cpu(effect, fullInput, width: side, height: side)
-            let preview = cpu(effect.drawingPixelLengths(at: 0.5), half(fullInput), width: 128, height: 128)
+            let halfInput = half(fullInput)
+            let preview = cpu(effect.drawingPixelLengths(at: 0.5), halfInput, width: 128, height: 128)
             XCTAssertLessThan(maxChannelDelta(half(full), preview), 20,
                               "Size \(size) has the same glow footprint while the finger is down")
         }

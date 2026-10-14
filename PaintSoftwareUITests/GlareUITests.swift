@@ -121,6 +121,102 @@ final class GlareUITests: PaintUITestCase {
             """)
         attachScreenshot(app, "3-after-the-streak")
     }
+
+    /// **On a large canvas, Fog Glow keeps its drawn footprint while Size is held and after the lift.**
+    /// This follows the artist's cold-start path on a 5.76 MP canvas, where drag previews are half
+    /// detail: black ink, a small white source, + → Value Layer → Blend Mode → Glare → Fog Glow, then
+    /// drag Size to its largest value. A line of screen pixels across the glow is sampled during the
+    /// hold and compared with the full-detail bake after the finger lifts.
+    func testFogGlowSizePreviewKeepsItsDrawnFootprintThroughLift() throws {
+        defer { XCUIDevice.shared.orientation = .portrait }
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app, size: CGSize(width: 2400, height: 2400)))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5), "The canvas host")
+        let paper = paperRect(in: canvas)
+        let cy = rowAboveTheDock(canvas)
+
+        setBrushColor(app, hex: "000000")
+        setBrushSize(app, normalized: 0.9)
+        drawLine(on: canvas, from: CGVector(dx: 0.35, dy: cy), to: CGVector(dx: 0.65, dy: cy))
+        XCTAssertTrue(waitUntilFilled(canvas, dx: 0.4, dy: cy), "The black source stroke landed before sampling")
+        setBrushColor(app, hex: "FFFFFF")
+        setBrushSize(app, normalized: 0.22)
+        drawLine(on: canvas, from: CGVector(dx: 0.495, dy: cy), to: CGVector(dx: 0.505, dy: cy))
+        let paperY = (cy - Double(paper.minY)) / Double(paper.height)
+        let points = paperRow(canvas, paper, x: 0.47...0.53, y: paperY)
+        let beforeEffect = readScreenNow(points)
+        let darkInkBefore = beforeEffect.compactMap { pixel -> Int? in
+            guard let pixel else { return nil }
+            return (Int(pixel.r) + Int(pixel.g) + Int(pixel.b)) / 3
+        }
+        XCTAssertTrue(darkInkBefore.contains { $0 < 40 }, "The screen row crosses the black stroke")
+
+        openLayerPanel(app)
+        addValueLayerFromAddMenu(app)
+        let row = app.staticTexts["layerPanel.row.1"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "The value layer landed above the drawing")
+        row.tap()
+        app.buttons["layerOptions.blendModeButton"].tap()
+        let glareItem = app.buttons["layerOptions.blendMode.glare"]
+        XCTAssertTrue(glareItem.waitForExistence(timeout: 5), "The Blend Mode menu lists Glare")
+        glareItem.tap()
+        closeLayerRail(app)
+        let typeRow = app.buttons["effectSettings.glareTypeButton"]
+        XCTAssertTrue(typeRow.waitForExistence(timeout: 5), "The Glare settings are visible")
+        typeRow.tap()
+        let fogGlow = app.buttons["effectSettings.glareType.fogGlow"]
+        XCTAssertTrue(fogGlow.waitForExistence(timeout: 5), "The type picker lists Fog Glow")
+        fogGlow.tap()
+        app.sliders["effectSettings.threshold"].adjust(toNormalizedSliderPosition: 0.4)
+        app.sliders["effectSettings.intensity"].adjust(toNormalizedSliderPosition: 1.0)
+        XCTAssertTrue(waitForSandwichState(app, "rest", timeout: 30, "the bright source has a visible Fog Glow"))
+
+        let size = app.sliders["effectSettings.size"]
+        XCTAssertTrue(size.waitForExistence(timeout: 5), "Fog Glow exposes its Size slider")
+        let startPosition = Double(size.normalizedSliderPosition)
+        let inset = 14.0
+        let travel = Double(size.frame.width) - 2 * inset
+        let start = size.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0.5))
+            .withOffset(CGVector(dx: inset + travel * startPosition, dy: 0))
+        let end = size.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0.5))
+            .withOffset(CGVector(dx: inset + travel * 0.98, dy: 0))
+        let held = samplesDuring(points, "Fog Glow Size drag") {
+            start.press(forDuration: 0.3, thenDragTo: end,
+                        withVelocity: XCUIGestureVelocity(60), thenHoldForDuration: 4.0)
+        }
+        attachScreenshot(app, "fog-glow-size-held")
+
+        XCTAssertTrue(waitForSandwichState(app, "rest", timeout: 30, "the full-detail Fog Glow bake lands"))
+        let fullDetail = readScreenNow(points)
+        attachScreenshot(app, "fog-glow-size-after-lift")
+        let samples = held.map(\.pixels)
+        let mid = try XCTUnwrap(samples.dropFirst(samples.count / 2).first,
+                                "At least one mid-gesture screen sample was captured")
+        XCTAssertEqual(mid.count, fullDetail.count, "The same footprint points are read during and after")
+        let paired = zip(mid, fullDetail).compactMap { during, landed -> (Int, Int)? in
+            guard let during, let landed else { return nil }
+            let duringLuma = (Int(during.r) + Int(during.g) + Int(during.b)) / 3
+            let landedLuma = (Int(landed.r) + Int(landed.g) + Int(landed.b)) / 3
+            return (duringLuma, landedLuma)
+        }
+        XCTAssertGreaterThan(paired.count, 10, "The screen sampler reads the glow row")
+        let brightenedInk = zip(beforeEffect, fullDetail).compactMap { before, after -> Bool? in
+            guard let before, let after else { return nil }
+            let oldLuma = (Int(before.r) + Int(before.g) + Int(before.b)) / 3
+            let newLuma = (Int(after.r) + Int(after.g) + Int(after.b)) / 3
+            return oldLuma < 40 && newLuma > oldLuma + 35
+        }
+        XCTAssertTrue(brightenedInk.contains(true),
+                      "Fog Glow must brighten actual black ink around its white source, not just expose a stored Size")
+        let largestDelta = paired.map { abs($0.0 - $0.1) }.max() ?? 255
+        XCTAssertLessThanOrEqual(largestDelta, 35,
+                                 "The held half-detail picture matches the full-detail glow footprint (max luma delta \(largestDelta))")
+        XCUIDevice.shared.orientation = .landscapeLeft
+        attachScreenshot(app, "fog-glow-size-native-landscape")
+        Thread.sleep(forTimeInterval: 3)
+    }
 }
 
 private extension PaintUITestCase.RGB {
