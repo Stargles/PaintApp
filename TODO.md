@@ -148,6 +148,13 @@ exactly; old flattened raster content cannot. Owner choice pending: move all ras
 leaving typed objects alone, or only the separate brush tier (which leaves some ordinary painted
 areas unmoved). Continue vector/linked/settings work while this is decided.
 
+**Validation in progress (2026-10-14):** the first direct-displacement map folds under strong hard
+and patterned brushes; actual raster pictures show stationary streaks and holes. Replace that map
+with bounded reversible steps, shared by vector movement and raster resampling. A 4096² row sweep
+expands a 2,126-byte saved gesture to about 7.7 MB of runtime field; evaluate one field across the
+consumers and release it rather than retaining every gesture's field. Keep distant curved fill
+segments unchanged when only a local part is deformed, and verify selection limits on linked frames.
+
 - [ ] Liquify on raster and vector, including linked generated in-betweens, three modes, one undo step per stroke.
 
 ---
