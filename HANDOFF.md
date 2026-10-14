@@ -54,14 +54,20 @@ Never harvest dirty worker files: mutations may be intentional.
   Results are preserved in `~/PaintWork/s49-integration-logs/`; the QA simulator was deleted.
 - **(178) started**, including linked in-between frames as ruled. Prepared constraints are in
   `~/PaintWork/design/s49-liquify-constraints.md`. A genuine previous-build linked-frame package was captured from the preserved `5d73184` Release
-  app and checked into the Liquify branch with provenance. Focused baseline at `3ea3165` is 64/64
-  (24 feature, 12 repair, 28 model). Storage's 16 production mutation batches all failed as intended,
-  followed by a restored 12/12 baseline; its worker is idle until the final capture schema lands.
-  The original displacement folded strong brushes; reversible steps now pass the small rendered
-  fixtures. A realistic 67,100-pixel window takes 75.9 million field evaluations, so optimized-build
-  cost is being measured before acceptance. Source-ink occurrence identity must survive regrouping
-  and cloned cels; new strokes must invert the same deformation to stay under the pen. Linked-frame
-  cold-reopen picture validation and raster scope remain open.
+  app and checked into the Liquify branch with provenance. Committed occurrence schema `ea0152f`
+  passes 72 focused Debug tests (32 feature, 12 repair, 28 model): captures follow source-cel/element
+  identity through regrouping and cloned cels, and new ink inverts chronological deformation to stay
+  under the pen. The storage worker is extending source-block retarget, canvas-resize conjugation,
+  and strict selection-archive decoding. Earlier storage mutations: 16 batches red, restored 12/12.
+  The original displacement folded strong brushes; reversible steps now pass small rendered fixtures.
+  Frozen Release benchmark `3434670`: hard 67,100 pixels / 75,915,422 field evaluations / 3.393 s;
+  patterned 84,956 pixels / 324,895,856 evaluations / 28.056 s, with 7,801 forward-roundtrip residual
+  failures. These are simulator timings, not device throughput. Independent source-coordinate
+  accuracy is being checked because a strongly stretched map can amplify tiny numeric errors.
+  Root's isolated `tmp/s49-liquify-cost` prepares brush data and searches indexed bins directly;
+  byte-identical raster comparison and Release cost are running before acceptance. Linked-frame
+  cold-reopen pixel comparison needs a canonical saved/reopened seed (first save quantizes ordinary
+  source strokes); raster scope still awaits the owner's answer. No Liquify code is merged yet.
 
 The owner permits any useful agent count but prioritises usage conservation and quality over speed.
 Keep delegation focused and report the queue occasionally. It is now after the owner’s 10 a.m. return.
