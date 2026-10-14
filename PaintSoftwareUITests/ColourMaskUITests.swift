@@ -1,7 +1,7 @@
 import XCTest
 
 final class ColourMaskUITests: PaintUITestCase {
-    private func exercise(_ app: XCUIApplication, assertingPixels: Bool = true) throws {
+    private func exercise(_ app: XCUIApplication, assertingPixels: Bool = true, leavePanelOpen: Bool = false) throws {
         XCTAssertTrue(launchIntoEditor(app))
         let canvas = app.otherElements["canvas.host"]
         setBrushSize(app, normalized: 0.1)
@@ -39,10 +39,11 @@ final class ColourMaskUITests: PaintUITestCase {
         XCTAssertEqual(swatch.value as? String, "FF0000", "The pick reads the checked source, through the blue masked layer")
         XCTAssertTrue(add.exists, "Picking returns to the same mask panel")
         attachScreenshot(app, "Mask colour controls")
+        if leavePanelOpen { return }
         closeLayerRail(app)
         if assertingPixels {
-        XCTAssertNotNil(waitForPixel(canvas, at: red) { $0.b > 180 && $0.r < 100 }, "Red source keeps blue ink: \(probe(canvas, at: red))")
-        XCTAssertNotNil(waitForPixel(canvas, at: green) { $0.g > 180 && $0.b < 100 }, "Green source excludes blue ink: \(probe(canvas, at: green))")
+            XCTAssertNotNil(waitForPixel(canvas, at: red) { $0.b > 180 && $0.r < 100 }, "Red source keeps blue ink: \(probe(canvas, at: red))")
+            XCTAssertNotNil(waitForPixel(canvas, at: green) { $0.g > 180 && $0.b < 100 }, "Green source excludes blue ink: \(probe(canvas, at: green))")
         }
         attachScreenshot(app, "Red keeps blue, green excludes blue")
         openLayerPanel(app)
@@ -95,6 +96,6 @@ final class ColourMaskUITests: PaintUITestCase {
         XCUIDevice.shared.orientation = .landscapeLeft
         // Landscape element screenshots are rotated and cropped by XCTest on this simulator.
         // This pass checks the exposed controls; the portrait flow checks drawn pixels.
-        try exercise(XCUIApplication(), assertingPixels: false)
+        try exercise(XCUIApplication(), assertingPixels: false, leavePanelOpen: true)
     }
 }

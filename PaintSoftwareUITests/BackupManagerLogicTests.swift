@@ -4,9 +4,7 @@ import XCTest
 /// retention, app-update snapshots, the size cap, and the launch-time repair pass — run against a
 /// per-test temp directory via the manager's `rootDirectoryOverride`, with no simulator gestures
 /// or app launch. `Services/ProjectBackupManager.swift` is compiled directly into this test bundle
-/// (same pattern as `Engine/Brush.swift` — see BrushEngineLogicTests' header comment for why
-/// `@testable import` can't be used in this target), and is deliberately pure Foundation so that's
-/// possible.
+/// (the shared-source pattern used by the rest of the logic tier).
 final class BackupManagerLogicTests: XCTestCase {
 
     private var settingsSuite = ""
@@ -65,7 +63,10 @@ final class BackupManagerLogicTests: XCTestCase {
         let manifest: [String: Any] = [
             "id": id.uuidString,
             "name": name,
-            "layers": [["cels": [cel]]]
+            "canvasWidth": 64, "canvasHeight": 64, "fps": 12, "modifiedAt": 0,
+            "editorState": try! JSONSerialization.jsonObject(with: JSONEncoder().encode(EditorStateManifest())),
+            "layers": [["id": UUID().uuidString, "name": "Ink", "opacity": 1,
+                        "isVisible": true, "cels": [cel]]]
         ]
         try! JSONSerialization.data(withJSONObject: manifest).write(to: url.appendingPathComponent("manifest.json"))
         return url

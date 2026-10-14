@@ -339,8 +339,8 @@ struct EffectSettingsBar: View {
         // `.bottomDockCard(width:)`, one definition for every docked panel (TODO item (49)).
         //
         // **No identifier on that card.** An accessibility identifier on a container propagates to its
-        // descendants and beats their own — the mistake `MaskTuningSection` records at the foot of its
-        // body, and the reason `slider` below puts its name on the `Slider` rather than the row — so
+        // descendants and beats their own, so `slider` below puts its name on the `Slider` rather
+        // than the row, and
         // one here would rename every control in the bar after the bar. `layerOptions.subMenuTitle` in
         // the header is what a test should look for to say this is on screen.
     }
@@ -718,8 +718,7 @@ struct EffectSettingsBar: View {
     /// it was, and the row is a little over half as tall.
     ///
     /// **The identifier rides the `Slider`, never the enclosing `VStack`.** An identifier on a
-    /// container propagates to its descendants and beats their own (see CLAUDE.md, and the comment at
-    /// the foot of `MaskTuningSection.body` that records what that cost), so a name up there would
+    /// container propagates to its descendants and beats their own (see CLAUDE.md), so a name up there would
     /// give every row in this panel the same one.
     private func sliderRow(_ label: String, _ value: Double, _ range: ClosedRange<Double>,
                            _ identifier: String, format: String = "%.2f",

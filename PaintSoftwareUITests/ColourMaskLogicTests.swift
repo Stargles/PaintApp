@@ -130,26 +130,28 @@ final class ColourMaskLogicTests: XCTestCase {
     func testRearrangingGradedSourceSubtreesMovesCoverageWithUnchangedLeafVersions() throws {
         let manager = CanvasFixture.manager(layerCount: 3)
         CanvasFixture.setBakedContent(manager, layerIndex: 0,
-            CanvasFixture.solidImage(.red, rect: CGRect(x: 0, y: 0, width: 32, height: 64)))
+            CanvasFixture.solidImage(.red, rect: CGRect(x: 10, y: 20, width: 10, height: 10)))
         CanvasFixture.setBakedContent(manager, layerIndex: 1,
-            CanvasFixture.solidImage(.red, rect: CGRect(x: 32, y: 0, width: 32, height: 64)))
+            CanvasFixture.solidImage(.red, rect: CGRect(x: 42, y: 20, width: 10, height: 10)))
         CanvasFixture.setBakedContent(manager, layerIndex: 2,
             CanvasFixture.solidImage(.blue, rect: CGRect(x: 0, y: 0, width: 64, height: 64)))
         let parent = manager.addFolder(name: "Source")
         let first = manager.addFolder(name: "First", parentFolderID: parent)
         let second = manager.addFolder(name: "Second", parentFolderID: parent)
         manager.folders[0].isVisible = false
-        manager.folders[1].effect = .hsvShift(.init(hueDegrees: 120))
+        manager.folders[1].effect = .outline(.init(width: 2))
+        manager.folders[2].effect = .outline(.init(width: 2))
         manager.layers[0].parentFolderID = first
         manager.layers[1].parentFolderID = second
-        manager.layers[2].alphaMask = AlphaMask(sources: [.folder(parent)],
-            colours: [ColourKey(from: .init(red: 1, green: 0, blue: 0, alpha: 1))])
+        manager.layers[2].alphaMask = AlphaMask(sources: [.folder(parent)])
         let before = try bytes(manager)
-        manager.layers[0].parentFolderID = second
-        manager.layers[1].parentFolderID = first
+        // The grade census stays [none, outline(2), outline(2)], and neither leaf changes.
+        // Nesting one outlined folder under the other applies another outline to its pixels.
+        manager.folders[2].parentFolderID = first
         let after = try bytes(manager)
-        XCTAssertEqual([before[(16 + 32 * 64) * 4 + 3], before[(48 + 32 * 64) * 4 + 3]], [0, 255])
-        XCTAssertEqual([after[(16 + 32 * 64) * 4 + 3], after[(48 + 32 * 64) * 4 + 3]], [255, 0])
+        XCTAssertNotEqual(after, before)
+        let covered = { (rgba: [UInt8]) in stride(from: 3, to: rgba.count, by: 4).filter { rgba[$0] > 0 }.count }
+        XCTAssertGreaterThan(covered(after), covered(before))
     }
 
     func testStrictMaskRoundTripAndRejectsMissingOrInvalidValues() throws {

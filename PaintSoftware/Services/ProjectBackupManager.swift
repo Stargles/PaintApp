@@ -511,7 +511,7 @@ nonisolated enum ProjectBackupManager {
     @discardableResult
     static func restoreNewestValidBackup(forProjectAt projectURL: URL, trashTag: String = "corrupt") -> Bool {
         for backup in listBackups(forProjectAt: projectURL) where backup.isValid {
-            return restoreBackup(at: backup.url, toProjectAt: projectURL, trashTag: trashTag)
+            if restoreBackup(at: backup.url, toProjectAt: projectURL, trashTag: trashTag) { return true }
         }
         return false
     }

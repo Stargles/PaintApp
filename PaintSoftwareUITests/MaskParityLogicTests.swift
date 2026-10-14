@@ -696,7 +696,7 @@ final class MaskParityLogicTests: XCTestCase {
     /// none of which fall inside the ~2%-wide band 0.1±0.01 spans, so the delta-0 assertion below
     /// would have passed having tested nothing — the same silent failure
     /// `testNestedClipsAgreeByteForByteDespiteTheDoubleRounding` had. 0.05 (the pre-bake default)
-    /// lands on real levels (measured: ~6% and ~14%); restored after regardless of outcome.
+    /// lands on real levels (measured: ~6% and ~14%) and belongs only to this fixture.
     func testAMaskWithAFractionalEdgeAgreesBetweenTheBackends() throws {
         try skipUnlessGPUAvailable()
         // An ellipse's antialiased rim is where the coverage bytes are fractional, which is the only
@@ -898,7 +898,7 @@ final class MaskParityLogicTests: XCTestCase {
     /// lands partial for both masks and the premise below is false before double rounding ever enters
     /// it. The test is about surviving double rounding across a feathered edge, not about whichever
     /// half-width happens to be live, so it sets one wide enough to guarantee that edge exists — 0.05,
-    /// the pre-bake default this fixture was written against — and restores it whatever happens next.
+    /// the pre-bake default this fixture was written against.
     func testNestedClipsAgreeByteForByteDespiteTheDoubleRounding() {
         let manager = CanvasFixture.manager(layerCount: 3)
         // Soft-edged sources, so the antialiased band the two paths can disagree across actually
