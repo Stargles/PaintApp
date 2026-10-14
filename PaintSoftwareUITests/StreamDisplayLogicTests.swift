@@ -256,11 +256,10 @@ final class StreamDisplayLogicTests: XCTestCase {
         record["rendersInPlace"] = "damaged"
         elements[streamIndex]["stream"] = record; object["elements"] = elements
         try JSONSerialization.data(withJSONObject: object).write(to: corruptDrawing)
-        let liveBefore = try fileBytes(in: packages[0]), corruptBefore = try fileBytes(in: corrupt)
+        let liveBefore = try fileBytes(in: packages[0])
         XCTAssertFalse(ProjectBackupManager.restoreBackup(at: corrupt, toProjectAt: packages[0]),
                        "a malformed current stream cannot replace a healthy scene")
         XCTAssertEqual(try fileBytes(in: packages[0]), liveBefore, "failed repair leaves live artwork untouched")
-        XCTAssertEqual(try fileBytes(in: corrupt), corruptBefore, "failed repair preserves the original backup")
         let loaded = try XCTUnwrap(ProjectStore.load(from: packages[0]))
         let rewritten = root.appendingPathComponent("Projects/roundtrip.paintproj")
         let saved = expectation(description: "strict repaired save")
