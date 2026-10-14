@@ -4,6 +4,7 @@ final class ColourMaskUITests: PaintUITestCase {
     private func exercise(_ app: XCUIApplication) throws {
         XCTAssertTrue(launchIntoEditor(app))
         let canvas = app.otherElements["canvas.host"]
+        setBrushSize(app, normalized: 0.1)
         let red = CGVector(dx: 0.25, dy: 0.30)
         let green = CGVector(dx: 0.25, dy: 0.40)
         setBrushColor(app, hex: "FF0000")
