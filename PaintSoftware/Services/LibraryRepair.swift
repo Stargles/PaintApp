@@ -6,7 +6,7 @@ import os
 ///
 /// TODO.md's rule: *"a format change ships with a one-shot repair that rewrites the owner's existing
 /// files (Projects, Backups, Trash) to the new format at launch"*, deleted once the owner confirms. The one-shot
-/// repairs use this — pose tracks, tools and masks — and it goes with the last
+/// repairs use this — pose tracks, tools, masks and streams — and it goes with the last
 /// of them.
 nonisolated enum LibraryRepair {
     private static let log = Logger(subsystem: "Starg.PaintSoftware", category: "LibraryRepair")
@@ -30,7 +30,10 @@ nonisolated enum LibraryRepair {
         case .alreadyCurrent, .repaired: break
         case .unreadable, .notWritten: return false
         }
-        // Stream-placement repair joins this sequence at integration, before current validation.
+        switch LegacyStreamPlacementRepair.repair(packageAt: package) {
+        case .current, .repaired: break
+        case .unreadable, .notWritten: return false
+        }
         do {
             let data = try Data(contentsOf: package.appendingPathComponent("manifest.json"))
             _ = try JSONDecoder().decode(ProjectManifest.self, from: data)
