@@ -47,13 +47,18 @@ unmerged work. (189) is merged at `8616532`, and (190) at `e6b7d81`. Active task
 - **Fog Glow** is integrated through `840d68a`: convert to the existing equivalent Bloom before scaling
   its render radius. Dimensionless Size was never scaled, so every size widened in half-detail.
   Focused logic/UI 3/3 green; reverting the fix fails actual pixels at Size 2 and 6 and during a held
-  slider drag. Comparison panels and native iPad9 landscape were viewed. Combined Debug/Release tiers
-  and the integrated Glare UI class are now running.
+  slider drag. Comparison panels and native iPad9 landscape were viewed. Combined Debug passed
+  5124 tests (5120 passed, four skipped); Release and the integrated Glare UI class remain in progress.
 - **(178) started**, including linked in-between frames as ruled. Prepared constraints are in
   `~/PaintWork/design/s49-liquify-constraints.md`. A genuine previous-build linked-frame package was captured from the preserved `5d73184` Release
   app and checked into the Liquify branch with provenance. Focused baseline at `3ea3165` is 64/64
-  (24 feature, 12 repair, 28 model). Storage mutations run in their own tree; artist-path tests,
-  rendered inverse-map checks and realistic stroke memory checks are in progress.
+  (24 feature, 12 repair, 28 model). Storage's 16 production mutation batches all failed as intended,
+  followed by a restored 12/12 baseline; its worker is idle until the final capture schema lands.
+  The original displacement folded strong brushes; reversible steps now pass the small rendered
+  fixtures. A realistic 67,100-pixel window takes 75.9 million field evaluations, so optimized-build
+  cost is being measured before acceptance. Source-ink occurrence identity must survive regrouping
+  and cloned cels; new strokes must invert the same deformation to stay under the pen. Linked-frame
+  cold-reopen picture validation and raster scope remain open.
 
 The owner permits any useful agent count but prioritises usage conservation and quality over speed.
 Keep delegation focused and report the queue occasionally. It is now after the owner’s 10 a.m. return.

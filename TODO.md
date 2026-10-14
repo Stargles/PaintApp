@@ -154,6 +154,14 @@ with bounded reversible steps, shared by vector movement and raster resampling. 
 expands a 2,126-byte saved gesture to about 7.7 MB of runtime field; evaluate one field across the
 consumers and release it rather than retaining every gesture's field. Keep distant curved fill
 segments unchanged when only a local part is deformed, and verify selection limits on linked frames.
+Re-registration and motion-group splitting can replace group UUIDs: deformation captures must keep
+their connection to the original source ink through stable source-cel/element occurrence identity,
+including regrouping and cloned cels that share element UUIDs.
+Drawing new ink on an already-liquified in-between must invert the same chronological deformation
+when storing its rest-space stroke, so the drawn mark stays under the pen rather than moving twice.
+A realistic 100-pixel brush / 500-pixel drag needs 75.9 million field evaluations for a 67,100-pixel
+window in the first reversible implementation; measure Release and reduce that work before accepting
+interaction performance. Distant fill curves must retain their control points as well as their shape.
 
 - [ ] Liquify on raster and vector, including linked generated in-betweens, three modes, one undo step per stroke.
 
