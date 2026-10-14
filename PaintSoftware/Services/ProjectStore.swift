@@ -195,22 +195,23 @@ enum ProjectStore {
     /// Returns the new URL, or nil if the move failed — a package left exactly where it was.
     @discardableResult
     static func moveProject(at url: URL, into directory: URL) -> URL? {
+        let projectID = ProjectBackupManager.manifestID(at: url)
         return serializingPackageMutation {
-        let url = ProjectBackupManager.manifestID(at: url).map {
-            PackageRenameGate.currentLocation(of: url, projectID: $0)
-        } ?? url
-        let fm = FileManager.default
-        guard url.deletingLastPathComponent().standardizedFileURL != directory.standardizedFileURL else { return url }
-        try? fm.createDirectory(at: directory, withIntermediateDirectories: true)
-        let base = url.deletingPathExtension().lastPathComponent
-        var destination = directory.appendingPathComponent("\(base).paintproj")
-        var suffix = 2
-        while fm.fileExists(atPath: destination.path) {
-            destination = directory.appendingPathComponent("\(base) \(suffix).paintproj")
-            suffix += 1
-        }
-        let title = destination.deletingPathExtension().lastPathComponent
-        return ProjectPackageName.move(url, to: destination, retitling: title == base ? nil : title)
+            let url = projectID.map {
+                PackageRenameGate.currentLocation(of: url, projectID: $0)
+            } ?? url
+            let fm = FileManager.default
+            guard url.deletingLastPathComponent().standardizedFileURL != directory.standardizedFileURL else { return url }
+            try? fm.createDirectory(at: directory, withIntermediateDirectories: true)
+            let base = url.deletingPathExtension().lastPathComponent
+            var destination = directory.appendingPathComponent("\(base).paintproj")
+            var suffix = 2
+            while fm.fileExists(atPath: destination.path) {
+                destination = directory.appendingPathComponent("\(base) \(suffix).paintproj")
+                suffix += 1
+            }
+            let title = destination.deletingPathExtension().lastPathComponent
+            return ProjectPackageName.move(url, to: destination, retitling: title == base ? nil : title)
         }
     }
 

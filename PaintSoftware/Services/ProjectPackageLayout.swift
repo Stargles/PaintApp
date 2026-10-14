@@ -640,56 +640,56 @@ nonisolated enum ProjectPackageName {
     static func move(_ source: URL, to destination: URL, retitling title: String? = nil) -> URL? {
         let projectID = ProjectBackupManager.manifestID(at: source)
         return ProjectStore.serializingPackageMutation {
-        let source = projectID.map { PackageRenameGate.currentLocation(of: source, projectID: $0) } ?? source
-        let fm = FileManager.default
-        let move = { () -> URL? in
-            let manifestURL = source.appendingPathComponent("manifest.json")
-            var original: Data?
-            if let title {
-                do {
-                    let bytes = try Data(contentsOf: manifestURL)
-                    guard var fields = try JSONSerialization.jsonObject(with: bytes) as? [String: Any],
-                          fields["name"] is String else { return nil }
-                    fields["name"] = title
-                    let renamed = try JSONSerialization.data(withJSONObject: fields,
-                        options: [.sortedKeys, .withoutEscapingSlashes])
-                    try renamed.write(to: manifestURL, options: .atomic)
-                    original = bytes
-                } catch { return nil }
-            }
-            if let projectID {
-                ProjectBackupManager.noteProjectRenamed(projectID: projectID,
-                    to: destination.lastPathComponent)
-            }
-            do {
-                try fm.moveItem(at: source, to: destination)
-                if let projectID {
-                    if title != nil {
-                        ProjectBackupManager.refreshLatestSnapshot(projectURL: destination, projectID: projectID)
-                    }
+            let source = projectID.map { PackageRenameGate.currentLocation(of: source, projectID: $0) } ?? source
+            let fm = FileManager.default
+            let move = { () -> URL? in
+                let manifestURL = source.appendingPathComponent("manifest.json")
+                var original: Data?
+                if let title {
+                    do {
+                        let bytes = try Data(contentsOf: manifestURL)
+                        guard var fields = try JSONSerialization.jsonObject(with: bytes) as? [String: Any],
+                              fields["name"] is String else { return nil }
+                        fields["name"] = title
+                        let renamed = try JSONSerialization.data(withJSONObject: fields,
+                            options: [.sortedKeys, .withoutEscapingSlashes])
+                        try renamed.write(to: manifestURL, options: .atomic)
+                        original = bytes
+                    } catch { return nil }
                 }
-                return destination
-            } catch {
                 if let projectID {
                     ProjectBackupManager.noteProjectRenamed(projectID: projectID,
-                        to: source.lastPathComponent)
+                        to: destination.lastPathComponent)
                 }
-                if let original {
-                    do { try original.write(to: manifestURL, options: .atomic) }
-                    catch {
-                        // The package remains complete at its original location even if its title
-                        // could not be put back. Never delete it to hide a refused filing operation.
-                        Logger(subsystem: "Starg.PaintSoftware", category: "ProjectRename")
-                            .error("Project title rollback failed: \(String(describing: error), privacy: .public)")
+                do {
+                    try fm.moveItem(at: source, to: destination)
+                    if let projectID {
+                        if title != nil {
+                            ProjectBackupManager.refreshLatestSnapshot(projectURL: destination, projectID: projectID)
+                        }
                     }
+                    return destination
+                } catch {
+                    if let projectID {
+                        ProjectBackupManager.noteProjectRenamed(projectID: projectID,
+                            to: source.lastPathComponent)
+                    }
+                    if let original {
+                        do { try original.write(to: manifestURL, options: .atomic) }
+                        catch {
+                            // The package remains complete at its original location even if its title
+                            // could not be put back. Never delete it to hide a refused filing operation.
+                            Logger(subsystem: "Starg.PaintSoftware", category: "ProjectRename")
+                                .error("Project title rollback failed: \(String(describing: error), privacy: .public)")
+                        }
+                    }
+                    return nil
                 }
-                return nil
             }
-        }
-        if let projectID {
-            return PackageRenameGate.renamingOpenPackage(from: source, projectID: projectID, move)
-        }
-        return move()
+            if let projectID {
+                return PackageRenameGate.renamingOpenPackage(from: source, projectID: projectID, move)
+            }
+            return move()
         }
     }
 
