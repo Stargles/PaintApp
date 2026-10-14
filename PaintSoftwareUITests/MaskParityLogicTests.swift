@@ -183,14 +183,7 @@ final class MaskParityLogicTests: XCTestCase {
                           + "even now that it keeps nearly all of them")
         XCTAssertEqual(pixel(masked, 32, 32), [0, 0, 255, 255], "The dab's centre is solid, so the content shows there")
 
-        let priorThreshold = AlphaMask.threshold
-        let priorHalfWidth = AlphaMask.antialiasHalfWidth
-        AlphaMask.threshold = 0.5      // the pre-hardware guess this test used to assume
-        AlphaMask.antialiasHalfWidth = 0.05
-        defer {
-            AlphaMask.threshold = priorThreshold
-            AlphaMask.antialiasHalfWidth = priorHalfWidth
-        }
+        manager.layers[1].alphaMask?.setTuning(threshold: 0.5, antialiasHalfWidth: 0.05)
         guard let solidCoreOnly = composite(manager) else { return XCTFail("Fixture must composite") }
         let keptAtOldGuess = coveredPixelCount(solidCoreOnly)
         XCTAssertGreaterThan(kept, keptAtOldGuess,
@@ -559,7 +552,7 @@ final class MaskParityLogicTests: XCTestCase {
         let manager = CanvasFixture.manager(layerCount: 2)
         CanvasFixture.setBakedContent(manager, layerIndex: 0,
                                       CanvasFixture.solidImage(red, rect: CGRect(x: 0, y: 0, width: 32, height: 64)))
-        let mask = AlphaMask(sources: [.layer(manager.layers[0].id)])
+        var mask = AlphaMask(sources: [.layer(manager.layers[0].id)])
         manager.layers[1].alphaMask = mask
 
         guard let request = manager.makeRenderRequest(atFrame: 0, includeBackground: false),
@@ -583,19 +576,9 @@ final class MaskParityLogicTests: XCTestCase {
         XCTAssertNotEqual(before.coverage, after.coverage, "…and the new coverage really is the new shape")
     }
 
-    // MARK: - MASK-TUNE's cache invalidation (temporary; delete this test alongside the harness)
+    // MARK: - Per-mask tuning invalidates its cached coverage
 
-    /// **The harness's one way to fail.** `AlphaMask.threshold`/`.antialiasHalfWidth` are `static
-    /// var`s the on-iPad tuning harness (`MaskTuningSection`) writes — they are not stored properties
-    /// of the `AlphaMask` values `CacheKey` hashes, so a slider write is invisible to the key on its
-    /// own. Without `tuningGeneration` folded into that key (see `AlphaMask.swift`,
-    /// `MaskResolver.CacheKey`), this would keep handing back the `ResolvedMask` computed under the
-    /// old value — the exact "slider changes the number, canvas shows stale pixels" failure §10 item 1
-    /// warns against. This pins the fix rather than assuming it holds.
     func testMutatingTheTuningThresholdInvalidatesTheMaskCache() {
-        let originalThreshold = AlphaMask.threshold
-        defer { AlphaMask.threshold = originalThreshold }
-
         let manager = CanvasFixture.manager(layerCount: 2)
         guard let celIndex = manager.activeCelIndex(inLayer: 0, atFrame: 0) else {
             return XCTFail("Fixture needs a cel to stamp into")
@@ -610,7 +593,7 @@ final class MaskParityLogicTests: XCTestCase {
                               brushSize: 40,
                               random: DabRandom(seed: 0), arcWidths: 0)
         manager.layers[0].isVisible = false
-        let mask = AlphaMask(sources: [.layer(manager.layers[0].id)])
+        var mask = AlphaMask(sources: [.layer(manager.layers[0].id)])
         manager.layers[1].alphaMask = mask
 
         guard let request = manager.makeRenderRequest(atFrame: 0, includeBackground: false),
@@ -618,7 +601,8 @@ final class MaskParityLogicTests: XCTestCase {
             return XCTFail("The mask must resolve")
         }
 
-        AlphaMask.threshold = 0.9   // far from the dab's default-threshold (0.1) coverage
+        mask.setTuning(threshold: 0.9, antialiasHalfWidth: 0.01)
+        manager.layers[1].alphaMask = mask
 
         guard let after = manager.makeRenderRequest(atFrame: 0, includeBackground: false)
             .flatMap({ MaskResolver.coverage(for: [mask], of: $0) }) else {
@@ -715,13 +699,10 @@ final class MaskParityLogicTests: XCTestCase {
     /// lands on real levels (measured: ~6% and ~14%); restored after regardless of outcome.
     func testAMaskWithAFractionalEdgeAgreesBetweenTheBackends() throws {
         try skipUnlessGPUAvailable()
-        let originalHalfWidth = AlphaMask.antialiasHalfWidth
-        AlphaMask.antialiasHalfWidth = 0.05
-        defer { AlphaMask.antialiasHalfWidth = originalHalfWidth }
-
         // An ellipse's antialiased rim is where the coverage bytes are fractional, which is the only
         // place the two multiplies could round apart.
         let manager = clippedManager()
+        manager.layers[1].alphaMask?.setTuning(threshold: 0.1, antialiasHalfWidth: 0.05)
         CanvasFixture.setBakedContent(manager, layerIndex: 0, UIGraphicsImageRenderer(
             size: CanvasFixture.canvasSize, format: PixelOps.transparentFormat()).image { ctx in
                 red.setFill()
@@ -869,8 +850,10 @@ final class MaskParityLogicTests: XCTestCase {
                                       CanvasFixture.solidImage(red, rect: CGRect(x: 0, y: 0, width: 32, height: 64)))
         CanvasFixture.setBakedContent(manager, layerIndex: 1,
                                       CanvasFixture.solidImage(green, rect: CGRect(x: 0, y: 0, width: 64, height: 32)))
-        let leafMask = AlphaMask(sources: [.layer(manager.layers[0].id)])
-        let groupMask = AlphaMask(sources: [.layer(manager.layers[1].id)])
+        var leafMask = AlphaMask(sources: [.layer(manager.layers[0].id)])
+        var groupMask = AlphaMask(sources: [.layer(manager.layers[1].id)])
+        leafMask.setTuning(threshold: 0.1, antialiasHalfWidth: 0.05)
+        groupMask.setTuning(threshold: 0.1, antialiasHalfWidth: 0.05)
         manager.layers[2].alphaMask = leafMask
         guard let folderIndex = nest(layerIndex: 2, in: manager, mask: groupMask) else {
             return XCTFail("Fixture needs the group")
@@ -917,10 +900,6 @@ final class MaskParityLogicTests: XCTestCase {
     /// half-width happens to be live, so it sets one wide enough to guarantee that edge exists — 0.05,
     /// the pre-bake default this fixture was written against — and restores it whatever happens next.
     func testNestedClipsAgreeByteForByteDespiteTheDoubleRounding() {
-        let originalHalfWidth = AlphaMask.antialiasHalfWidth
-        AlphaMask.antialiasHalfWidth = 0.05
-        defer { AlphaMask.antialiasHalfWidth = originalHalfWidth }
-
         let manager = CanvasFixture.manager(layerCount: 3)
         // Soft-edged sources, so the antialiased band the two paths can disagree across actually
         // exists — a hard rectangle is 0 or 255 everywhere and would agree trivially.
@@ -928,8 +907,10 @@ final class MaskParityLogicTests: XCTestCase {
         CanvasFixture.setBakedContent(manager, layerIndex: 1, softDisc(at: CGPoint(x: 38, y: 32), radius: 20))
         CanvasFixture.setBakedContent(manager, layerIndex: 2,
                                       CanvasFixture.solidImage(blue, rect: CGRect(origin: .zero, size: CanvasFixture.canvasSize)))
-        let leafMask = AlphaMask(sources: [.layer(manager.layers[0].id)])
-        let groupMask = AlphaMask(sources: [.layer(manager.layers[1].id)])
+        var leafMask = AlphaMask(sources: [.layer(manager.layers[0].id)])
+        var groupMask = AlphaMask(sources: [.layer(manager.layers[1].id)])
+        leafMask.setTuning(threshold: 0.1, antialiasHalfWidth: 0.05)
+        groupMask.setTuning(threshold: 0.1, antialiasHalfWidth: 0.05)
         manager.layers[2].alphaMask = leafMask
         guard nest(layerIndex: 2, in: manager, mask: groupMask) != nil else {
             return XCTFail("Fixture needs the group")

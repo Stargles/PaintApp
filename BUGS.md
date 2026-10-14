@@ -2009,22 +2009,6 @@ where this report is deterministic ("pick Fill and the canvas will not pan"). Th
 ActionRecorder and that answer is now computed from live state rather than from a flag pushed a pass
 earlier — so the `failureRequirement` lines are evidence about the moment of the gesture.
 
-## The mask cache key still cannot see the mask stack's *structure* (2026-08-15, narrowed 2026-08-29)
-
-**The half that shipped.** "A mask sourced from a graded group can be stale" was open here for two
-weeks and is **fixed** — `6158e8b`, `MaskResolver.nodeEffects(readBy:of:)` puts the mask stacks' node
-grades into the cache key. It was filed as needing an artist edit to bite and was therefore deferred;
-KEYFRAMES §2.21's folder tracks made a *keyframe* change that grade on every frame of playback, which
-is what forced it. Worth keeping as a shape: a deferred invalidation gap stops being cheap the moment
-something animates its input.
-
-**The half that did not.** The key now carries the leaves' content versions and the nodes' grades, but
-not the arrangement of the nodes. Two graded nodes **swapping** grades inside one mask source's subtree
-leave every version and every `Effect` in the key unchanged, and the mask stays stale. Nothing
-frame-varying can cause it — it needs a structural edit, so no playback reaches it — and closing it
-means putting the `[RenderNode]` stacks themselves in the key, which is a broader invalidation change
-than the pass that found it should have made.
-
 ## Whether UIKit honours a `.began -> .failed` transition is unverified, in both directions (2026-08-15)
 
 `StrokeGestureRecognizer.failTrackedStroke` exists to fail a stroke that has already begun, and

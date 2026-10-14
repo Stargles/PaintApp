@@ -160,7 +160,7 @@ re-flattened.
 
 One key names the pixels of a frame: `FrameBakeKey` (`Engine/FrameBakeKey.swift`), built from a `FrameRecipe`,
 carrying everything the live canvas's own `SandwichKey` compares — **`frame` is in neither of them now; see
-§3.7's "a hold costs one composite on both sides of the seam"** — and three inputs no in-memory cache carries:
+§3.7's "a hold costs one composite on both sides of the seam"** — and the persistent store’s settings:
 
 - the resolved tree (`[RenderNode]`: structure, opacity, visibility, blend mode, isolation, masks including the
   implicit clip-to-below mask, each node's effect resolved at the frame — a **folder's** grade is resolved here
@@ -169,9 +169,9 @@ carrying everything the live canvas's own `SandwichKey` compares — **`frame` i
   `DerivedCelContent.identity` of an in-between;
 - the mask source stacks;
 - render size, `RenderResolution`, `RenderQuality`, paper colour, paper visibility and canvas padding;
-- **`AlphaMask.tuningGeneration`**, **`Compositor.backend`** (both accessors over a lock — §4), and a
-  **store format version** — a persistent store must carry what a
-  process-lifetime cache could ignore.
+- **`Compositor.backend`** and a **store format version** — a persistent store must carry what a
+  process-lifetime cache could ignore. Each mask’s threshold, antialias and colour keys are values in
+  its resolved node; no process-wide tuning generation remains.
 
 `frame` affects no pixel: the compositor reads it only to rebuild sub-requests (`Compositor.swift:1103-1106`,
 `Engine/MaskResolver.swift:191-196`). Leaving it out is what makes a nine-frame hold one file. It is safe only while the
@@ -507,7 +507,7 @@ mint and no composite:
 2. **Every frame**, for any structural change, which is this section's own ruling rather than a compromise.
    `StructuralStamp` is `renderTree(atFrame: 0)` — the model's own projection of order, folders, opacity,
    visibility, blend, isolation and masks, already `Equatable` because `SandwichKey` compares whole trees —
-   plus the paper, the knob, the scene length, `AlphaMask.tuningGeneration`, `Compositor.backend`, and
+   plus the paper, the knob, the scene length, `Compositor.backend`, and
    `effectTracks`/`keyframeMarks`. **The probe frame is 0 and fixed**, so scrubbing does not read as a
    structural change; `effectTracks` is what closes the gap that leaves, since a curve moving frame 7 and not
    frame 0 is invisible in the tree at the probe frame.
@@ -861,10 +861,8 @@ to remove; so it **must be memoized against the in-memory version counters the p
 frame. The first mint after opening a document still hashes every cel once, and that is the real cost to measure
 before building it.
 
-**And the stamp is not the whole of it, which is the argument for a stage rather than a corner of this one.** Three
-more things are unanswered: `AlphaMask.tuningGeneration` is in the key (§3.3) and is an in-memory counter that
-restarts at 0 every launch, so two different tunings both read as generation 0 across a relaunch and collide — it
-has to become a hash of the tuning *values*; a kept store lives at `Documents/Projects/<Name>.paintbake/` and needs
+**And the stamp is not the whole of it, which is the argument for a stage rather than a corner of this one.** Two
+more things are unanswered: a kept store lives at `Documents/Projects/<Name>.paintbake/` and needs
 a rename, delete and orphan-sweep policy that `Library/Caches` gets from the OS for free; and `FrameBakeStore` has no
 format-migration path, so a stored bake outlives the code that wrote it in a way a cache never does. None of that is
 export, and none of it should ride in on export's back.
@@ -886,10 +884,9 @@ vector layer still bakes, because play and export need it.
   mark per pool, the map's total inside `CompositorBudget.textureBudgetBytes` — so a consumer at a new size evicts
   the least recently used pool rather than whichever one the live canvas is holding. **The baker is the third
   consumer that limit is sized for**; a fourth means raising it, not changing the rule.
-- `Compositor.backend`, `CompositorBudget.budgetOverrideBytes` and `AlphaMask`'s two tunables plus `tuningGeneration`
-  are accessors over a lock, and the tuning is one `AlphaMask.Tuning` snapshot so `coverage(forSourceAlpha:)` cannot
-  read a pair from two different writes. The bake key (§3.3) reads them through those accessors. Nothing on a render
-  queue touches a plain static.
+- `Compositor.backend` and `CompositorBudget.budgetOverrideBytes` are accessors over a lock. Each
+  `AlphaMask` owns its tuning and colours as value fields, frozen with the recipe; a render queue reads
+  no shared tuning state. The bake key (§3.3) encodes the mask values.
 - `UndoHistory` has no lock (`Models/UndoHistory.swift`); the baker never records undo.
 - `textureBudgetBytes` being static is correct and stays (`Compositor.swift:120-126`): the request and the engine
   must agree on one number, and the baker reads the same one.

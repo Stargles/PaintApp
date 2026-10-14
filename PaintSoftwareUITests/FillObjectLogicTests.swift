@@ -373,7 +373,7 @@ final class FillObjectLogicTests: XCTestCase {
         func digest() throws -> String {
             let recipe = try XCTUnwrap(manager.makeFrameRecipe(atFrame: 0, quality: .full,
                                                                 includeBackground: true, sizing: .native))
-            return FrameBakeKey(recipe: recipe, renderResolution: .full, maskTuningGeneration: 0,
+            return FrameBakeKey(recipe: recipe, renderResolution: .full,
                                 backend: .coreGraphics, formatVersion: FrameBakeStore.formatVersion).fileName
         }
         func version() -> LayerContentVersion {

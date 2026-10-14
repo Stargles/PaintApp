@@ -1395,6 +1395,9 @@ struct RecolorEntriesEditor: View {
     let pickTarget: KeyframeTarget?
     var onChange: ([RecolorEntry]) -> Void
     var onEditEnded: () -> Void
+    /// A mask uses the same editor's source swatch and radii, with no destination colour.
+    var maskTarget: MaskSource? = nil
+    private var prefix: String { maskTarget == nil ? "effectSettings.recolor" : "maskColours" }
 
     /// Which swatch's colour popover is open — `(index, end)`, one at a time, the
     /// `GradientStopsEditor.colorPickerIndex` shape with the end added.
@@ -1416,12 +1419,14 @@ struct RecolorEntriesEditor: View {
             HStack(spacing: 8) {
                 swatch(index, .from)
                 eyedropperButton(index, .from)
+                if maskTarget == nil {
                 Image(systemName: "arrow.right")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(.white.opacity(0.5))
                     .accessibilityHidden(true)
                 swatch(index, .to)
                 eyedropperButton(index, .to)
+                }
                 Spacer()
                 Button {
                     var updated = entries
@@ -1434,9 +1439,11 @@ struct RecolorEntriesEditor: View {
                         .foregroundColor(.white.opacity(0.7))
                 }
                 .buttonStyle(.plain)
-                .accessibilityIdentifier("effectSettings.recolorEntry.\(index).remove")
+                .accessibilityIdentifier("\(prefix)Entry.\(index).remove")
             }
-            HStack(spacing: BottomDock.rowSpacing) {
+            let layout = maskTarget == nil ? AnyLayout(HStackLayout(spacing: BottomDock.rowSpacing))
+                                           : AnyLayout(VStackLayout(spacing: 4))
+            layout {
                 radiusSlider(index, "Tolerance", \.tolerance, "tolerance",
                              range: 0...RecolorEntriesEditor.toleranceSliderCeiling)
                 radiusSlider(index, "Softness", \.softness, "softness", range: 0...1)
@@ -1461,7 +1468,7 @@ struct RecolorEntriesEditor: View {
                 .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color.white.opacity(0.25), lineWidth: 1))
         }
         .buttonStyle(.plain)
-        .accessibilityIdentifier("effectSettings.recolorEntry.\(index).\(end)")
+        .accessibilityIdentifier("\(prefix)Entry.\(index).\(end)")
         // The hex, for the reason `colorRow` gives: it survives the panel closing and reopening, so
         // a test can confirm a pick reached the model rather than only the button it landed on.
         .accessibilityValue(colour.color.hexString)
@@ -1484,8 +1491,12 @@ struct RecolorEntriesEditor: View {
     private func eyedropperButton(_ index: Int, _ end: CanvasManager.EyedropperDestination.RecolorEnd) -> some View {
         let armed = isArmed(index, end)
         return Button {
-            guard let pickTarget else { return }
-            canvasManager.selectEyedropper(for: .recolorEntry(target: pickTarget, index: index, end: end))
+            if let maskTarget {
+                canvasManager.commitHeldMask()
+                canvasManager.selectEyedropper(for: .maskColour(target: maskTarget, index: index))
+            } else if let pickTarget {
+                canvasManager.selectEyedropper(for: .recolorEntry(target: pickTarget, index: index, end: end))
+            }
         } label: {
             Image(systemName: "eyedropper")
                 .font(.system(size: 13))
@@ -1494,12 +1505,15 @@ struct RecolorEntriesEditor: View {
                 .background(RoundedRectangle(cornerRadius: 4).fill(armed ? Color.blue.opacity(0.2) : Color.clear))
         }
         .buttonStyle(.plain)
-        .disabled(pickTarget == nil)
-        .accessibilityIdentifier("effectSettings.recolorEntry.\(index).\(end)Eyedropper")
+        .disabled(pickTarget == nil && maskTarget == nil)
+        .accessibilityIdentifier("\(prefix)Entry.\(index).\(end)Eyedropper")
         .accessibilityAddTraits(armed ? .isSelected : [])
     }
 
     private func isArmed(_ index: Int, _ end: CanvasManager.EyedropperDestination.RecolorEnd) -> Bool {
+        if let maskTarget, case .maskColour(let target, let armedIndex) = canvasManager.eyedropperDestination {
+            return canvasManager.selectedTool == .eyedropper && target == maskTarget && armedIndex == index
+        }
         guard canvasManager.selectedTool == .eyedropper, let pickTarget,
               case .recolorEntry(let target, let armedIndex, let armedEnd) = canvasManager.eyedropperDestination
         else { return false }
@@ -1528,7 +1542,7 @@ struct RecolorEntriesEditor: View {
             ), in: range) { editing in
                 if !editing { onEditEnded() }
             }
-            .accessibilityIdentifier("effectSettings.recolorEntry.\(index).\(identifier)")
+            .accessibilityIdentifier("\(prefix)Entry.\(index).\(identifier)")
             .accessibilityValue(String(format: "%.4f", value))
             Text(String(format: "%.2f", value))
                 .font(.system(size: 11, design: .monospaced))
@@ -1555,7 +1569,7 @@ struct RecolorEntriesEditor: View {
         }
         .buttonStyle(.plain)
         .disabled(atCap)
-        .accessibilityIdentifier("effectSettings.recolorAddEntry")
+        .accessibilityIdentifier("\(prefix)AddEntry")
     }
 
     private func color(_ index: Int, _ end: CanvasManager.EyedropperDestination.RecolorEnd) -> CodableColor {

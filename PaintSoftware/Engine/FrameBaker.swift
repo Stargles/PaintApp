@@ -405,10 +405,8 @@ final class FrameBaker {
     }
 
     /// Marks every frame and starts baking — for the inputs that are not in the document at all and
-    /// so cannot be swept for: `AlphaMask`'s tuning sliders, `Compositor.backend`, a store purge.
-    ///
-    /// The structural sweep does carry `maskTuningGeneration` and `backend`, so calling this for
-    /// those two is belt to the sweep's braces rather than the only cover.
+    /// so cannot be swept for: a backend change or a store purge. The structural sweep also carries
+    /// the backend; mask tuning is an ordinary document change.
     func markEverythingDirty() {
         if let manager { bakeQueue.frameCount = manager.contentEndFrame }
         bakeQueue.markAllDirty()
@@ -997,10 +995,8 @@ final class FrameBaker {
         let paperVisible: Bool
         let renderResolution: RenderResolution
         let contentEndFrame: Int
-        /// RENDER §4: both are accessors over a lock and both are fields of the bake key, so both
-        /// move the picture without touching the document. Swept here so that
-        /// `markEverythingDirty()` is a convenience rather than the only cover.
-        let maskTuningGeneration: Int
+        /// A process setting that moves the picture without touching the document. Swept here too,
+        /// so explicit dirtying is a convenience rather than the only cover.
         let backend: CompositorBackend
 
         @MainActor
@@ -1020,7 +1016,6 @@ final class FrameBaker {
             paperVisible = manager.isCanvasBackgroundVisible
             renderResolution = manager.renderResolution
             contentEndFrame = manager.contentEndFrame
-            maskTuningGeneration = AlphaMask.tuningGeneration
             backend = Compositor.backend
         }
     }

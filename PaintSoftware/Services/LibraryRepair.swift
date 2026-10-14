@@ -4,8 +4,8 @@ import Foundation
 /// have, and the rewrite of one JSON file that leaves the package dated as it was.
 ///
 /// TODO.md's rule: *"a format change ships with a one-shot repair that rewrites the owner's existing
-/// files (Projects, Backups, Trash) to the new format at launch"*, deleted once the owner confirms. Two
-/// repairs use this — `LegacyPoseTrackRepair` and `LegacyToolSettingsRepair` — and it goes with the last
+/// files (Projects, Backups, Trash) to the new format at launch"*, deleted once the owner confirms. The one-shot
+/// repairs use this — pose tracks, tools and masks — and it goes with the last
 /// of them.
 nonisolated enum LibraryRepair {
 

@@ -26,6 +26,7 @@ extension CanvasManager {
     enum EyedropperDestination: Equatable {
         /// `brushColor`, sampled from the composite the artist is looking at.
         case brushColor
+        case maskColour(target: MaskSource, index: Int)
         /// One end of `entry` on `target`'s recolour. **The `from` end samples what is UNDER the
         /// effect** — see `eyedropperProbe(for:atCanvasPoint:)` — because the picture on screen may already carry an
         /// earlier entry's replacement, and a mapping whose source no longer exists once the artist's
@@ -50,7 +51,7 @@ extension CanvasManager {
         var picksIntoAnOpenPanel: Bool {
             switch self {
             case .brushColor: return false
-            case .recolorEntry: return true
+            case .recolorEntry, .maskColour: return true
             }
         }
     }
@@ -170,6 +171,19 @@ extension CanvasManager {
                          atCanvasPoint point: CGPoint) -> EyedropperProbe? {
         guard let full = makeFrameRecipe(atFrame: currentFrame, quality: .full, includeBackground: true)
         else { return nil }
+        if case .maskColour(let target, _) = destination {
+            let mask = alphaMask(for: target) ?? AlphaMask()
+            guard let pixel = Eyedropper.pixel(at: point, canvasSize: full.canvasSize) else { return nil }
+            let row = CGRect(x: 0, y: CGFloat(pixel.y), width: full.canvasSize.width, height: 1)
+            // Exactly the source subtrees used by the resolver, including hidden sources. Read one
+            // source at a time, so overlap does not invent a mixed colour no source contains.
+            return EyedropperProbe(recipes: mask.sources.reversed().compactMap { source in
+                guard let stack = full.maskStacks[source] else { return nil }
+                return FrameRecipe(tree: stack, leaves: full.leaves, maskStacks: full.maskStacks,
+                                   frame: full.frame, canvasSize: full.canvasSize,
+                                   background: nil, quality: full.quality).windowed(to: row)
+            })
+        }
         guard case .recolorEntry(let target, _, .from) = destination else {
             return EyedropperProbe(recipes: eyedropperMode == .layer
                                    ? Self.objectRecipes(under: point, in: full) : [full])
@@ -331,6 +345,14 @@ extension CanvasManager {
         case .brushColor:
             brushColor = picked
             ActionRecorder.ifRecording { $0.model("brushColor", picked.hexString) }
+            return true
+        case .maskColour(let target, let index):
+            guard var mask = alphaMask(for: target), mask.colours.indices.contains(index) else {
+                raise(.nothingToPick)
+                return false
+            }
+            mask.colours[index].from = picked.codable
+            withMaskSessionUndo { setAlphaMask(mask, for: target) }
             return true
         case .recolorEntry(let target, let index, let end):
             return setRecolorEntryColor(of: target, index: index, end: end, to: picked)

@@ -488,6 +488,9 @@ struct AlphaMask {
     var sources: [MaskSource]   // .layer(UUID) | .folder(UUID)
     var isEnabled: Bool
     var invert: Bool
+    var colours: [ColourKey]    // empty = alpha; nonempty = selected source colours
+    var threshold: Float
+    var antialiasHalfWidth: Float
 }
 ```
 
@@ -515,24 +518,39 @@ its whole radius; a threshold instead cuts that faintest skirt away, and reduces
 brush regardless of where it sits. A narrow smoothstep across the threshold antialiases the resulting
 edge (a hard boolean edge stair-steps on diagonals) without reintroducing the source's own falloff.
 
-Both constants live in `Models/AlphaMask.swift`: `AlphaMask.threshold` (0.1) and
-`AlphaMask.antialiasHalfWidth` (0.01), feeding the one function that defines the mask,
-`coverage(forSourceAlpha:)`. Neither was derived — they were judged by eye on the iPad against a soft
-brush, in a Release build, and they replaced 0.5/0.05, which had been a reasoned guess that threshold
-≈ 0.5 would land on the visually solid part of a stroke. Measurement on hardware disagreed: the
-shipped threshold tracks nearly the whole extent of a soft dab rather than only its solid core, so 0.1
-sits close to the `> 0` this section argues against, not close to 0.5. The antialias half-width moved
-with it to 0.01 — about a third of a pixel of ramp across a soft dab's falloff, so **the smoothstep is
-vestigial at the shipped value** rather than serving the anti-stair-stepping purpose the paragraph
-above describes for it. The number stays where the owner put it; what moved is the claim made for it.
+Each mask stores its own `threshold` (default 0.1) and `antialiasHalfWidth` (default 0.01).
+Those defaults were judged by eye on the owner’s iPad against a soft brush in Release. `setTuning`
+keeps the half-width at least one alpha-byte step below the threshold, so empty pixels stay empty;
+a zero half-width uses the hard `alpha > threshold` test without division by zero.
 
-The two are one setting with an invariant between them, enforced in `AlphaMask.setTuning`: the
-half-width is kept strictly below the threshold. At or past it the ramp's low end reaches zero and
-every pixel on the canvas picks up partial coverage — a transparent pixel stops being fully masked
-out, which is a mask that hides nothing. The sliders reach that easily (half-width to 0.25 against a
-threshold floor of 0.1), so the guard lives on the model rather than on the widget, and
-`MaskGuardLogicTests` pins the property (`coverage(forSourceAlpha: 0) == 0` everywhere reachable)
-rather than the clamp.
+**Colour masks (35), 2026-10-14:** the colour list reads the **checked source layers or folders**.
+With no colours, the existing alpha test above is unchanged. With colours, each source pixel is
+unpremultiplied and converted to Oklab; its greatest key weight times its source alpha is its coverage.
+Sources still union, and Invert complements the union. Colour mode’s Tolerance and Softness replace
+the alpha-mode Threshold and Antialias controls. `ColourKey`, `ColourKeyTableEntry` and the existing
+Recolour weight ramp define the metric and soft ring once; Recolour keeps its existing flat file
+record through `RecolorEntry.key`. Its editor is shared in source-only mode for masks, including the
+colour picker, radii and remove/add controls. The mask eyedropper reads the checked source subtrees,
+including hidden sources, without the masked output obscuring the colour it needs to name.
+
+Every slider or picker tick holds the mask in `CanvasManager.liveEdit` (`HeldEdit.mask`) and lane F
+composites the held recipe through the existing `LatestWins` surface pair. The document and bake key
+stay still until lift; lift writes the mask once, inside the existing mask-session undo bracket.
+The scene saves tuning and colours strictly. `LegacyMaskRepair` rewrites previous-build masks in
+Projects, Backups and Trash at launch, preserving source picks and flags; delete it after the owner
+confirms their existing scenes open correctly.
+
+**Previous-package audit:** a copy of the owner’s 2026-10-09
+`evidence-153/Backups/936C4492-5737-45C8-841A-3ADD65B16A5E/latest.paintproj` passed the existing pose/tool
+repairs and this repair, loaded strictly with 17 layers and two masks (three and one source picks),
+saved in the current format and reopened with the same layer identities and mask values. The original
+was read only; its artwork stays outside git. The repair tests keep its earlier mask record.
+
+The resolver caches the **complete transitive source stacks** and their leaf content versions.
+Folder opacity, grades, nesting and masks on sources are all inputs, including a source mask reading
+a leaf outside its own subtree. This replaces the grade-only census that could serve stale outer
+coverage after a nested-mask or structural edit. Colour conversion is memoised per premultiplied RGBA
+value during one resolution, capped at 4096 values; no scene cel is eagerly loaded for this feature.
 
 ### 6.4 Live feedback while drawing
 

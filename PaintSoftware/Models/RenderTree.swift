@@ -1444,7 +1444,7 @@ extension CanvasManager {
                                   // first mask (`MaskSource.ink`). A value layer's grade has no
                                   // ink and takes no such mask; a vector layer without a grade
                                   // draws its ink as pixels and takes none either.
-                                  masks: masks(ofNode: layer.id, declared: layer.alphaMask,
+                                  masks: masks(ofNode: layer.id, declared: held?.mask.flatMap { $0.target == .layer(layer.id) ? $0.value : nil } ?? layer.alphaMask,
                                                clippingTo: layer.blendMode == .clipToBelow ? below : nil,
                                                inkOf: effect != nil && layer.kind.holdsPixels ? layer.id : nil),
                                   effect: effect))
@@ -1521,7 +1521,7 @@ extension CanvasManager {
                                   // blended against the backdrop under its own node would not be an
                                   // input to it in any sense the op could use.
                                   isIsolated: containerIsNode ? true : folder.isIsolated,
-                                  masks: masks(ofNode: folder.id, declared: folder.alphaMask,
+                                  masks: masks(ofNode: folder.id, declared: held?.mask.flatMap { $0.target == .folder(folder.id) ? $0.value : nil } ?? folder.alphaMask,
                                                clippingTo: folder.blendMode == .clipToBelow ? below : nil),
                                   // §4.4's second wrapper (phase 9b): the folder's own grade, carried
                                   // through unconditionally like the leaf's `effect: effect` above.

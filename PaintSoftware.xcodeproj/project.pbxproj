@@ -632,6 +632,10 @@
 		FB33E707CDFFBACBC4BB166A /* PaintSoftware/Models/ModifierHold.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39CC0A38D04CF1B886B0D9EF /* PaintSoftware/Models/ModifierHold.swift */; };
 		1486ACB5DC9C24C805DCB4A7 /* ModifierHoldLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71D523D4CBFDCEFA9DC75754 /* ModifierHoldLogicTests.swift */; };
 		F34E55E1C81E6DB18AE8C2A0 /* HeldFingerUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2017B06D57A10538766C9A69 /* HeldFingerUITests.swift */; };
+		647EE788852F4938A02A0593 /* ColourMaskLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9353CB58C9594CA3A67ED827 /* ColourMaskLogicTests.swift */; };
+		AA24D80703F2448E9A31D8B9 /* ColourMaskUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F135B0971644C92B94CF0B6 /* ColourMaskUITests.swift */; };
+		0F1F0BCBE7324F5E8C1FB3FD /* LegacyMaskRepairLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F86D895B174439EB8F1F993 /* LegacyMaskRepairLogicTests.swift */; };
+		495AA13809E144DAA113F421 /* PaintSoftware/Services/LegacyMaskRepair.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A577CADA4D846189D05CEAE /* PaintSoftware/Services/LegacyMaskRepair.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -1272,6 +1276,10 @@
 		39CC0A38D04CF1B886B0D9EF /* PaintSoftware/Models/ModifierHold.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/ModifierHold.swift; sourceTree = "<group>"; };
 		71D523D4CBFDCEFA9DC75754 /* ModifierHoldLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "ModifierHoldLogicTests.swift"; sourceTree = "<group>"; };
 		2017B06D57A10538766C9A69 /* HeldFingerUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "HeldFingerUITests.swift"; sourceTree = "<group>"; };
+		9353CB58C9594CA3A67ED827 /* ColourMaskLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ColourMaskLogicTests.swift; sourceTree = "<group>"; };
+		5F135B0971644C92B94CF0B6 /* ColourMaskUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ColourMaskUITests.swift; sourceTree = "<group>"; };
+		4F86D895B174439EB8F1F993 /* LegacyMaskRepairLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LegacyMaskRepairLogicTests.swift; sourceTree = "<group>"; };
+		0A577CADA4D846189D05CEAE /* PaintSoftware/Services/LegacyMaskRepair.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Services/LegacyMaskRepair.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -1699,6 +1707,9 @@
 				18AD451484C4AE161A3E7CD1 /* ToolReturnPathLogicTests.swift */,
 				F0F0231FFF9A4F2EF26D173F /* JoinedTouchesLogicTests.swift */,
 				2017B06D57A10538766C9A69 /* HeldFingerUITests.swift */,
+				9353CB58C9594CA3A67ED827 /* ColourMaskLogicTests.swift */,
+				5F135B0971644C92B94CF0B6 /* ColourMaskUITests.swift */,
+				4F86D895B174439EB8F1F993 /* LegacyMaskRepairLogicTests.swift */,
 				71D523D4CBFDCEFA9DC75754 /* ModifierHoldLogicTests.swift */,
 				34229C332D4C2E3A15E83EA4 /* AxisLockLogicTests.swift */,
 			);
@@ -1810,6 +1821,7 @@
 				C9D0E1F2A3B4C5D6E7F80103 /* PaintSoftware/Services/ProjectBackupManager.swift */,
 				BF97DD0C48546AE04CF84556 /* PaintSoftware/Services/LegacyPoseTrackRepair.swift */,
 				D62570BD1F8B8623CE5DFAB2 /* PaintSoftware/Services/LegacyToolSettingsRepair.swift */,
+				0A577CADA4D846189D05CEAE /* PaintSoftware/Services/LegacyMaskRepair.swift */,
 				A9B5C4870DC60CC72601144D /* PaintSoftware/Services/LibraryRepair.swift */,
 				A39C46C255BB4B74BBC89CE8 /* PaintSoftware/Services/LegacyStreamPlacementRepair.swift */,
 				56AB9E23E1C44DD0828CFA00 /* PaintSoftware/Models/CanvasManager+StreamDisplay.swift */,
@@ -2438,6 +2450,7 @@
 				C9D0E1F2A3B4C5D6E7F80104 /* PaintSoftware/Services/ProjectBackupManager.swift in Sources */,
 				18ED051326885FF25299B09A /* PaintSoftware/Services/LegacyPoseTrackRepair.swift in Sources */,
 				A8D420C5243226015076D802 /* PaintSoftware/Services/LegacyToolSettingsRepair.swift in Sources */,
+				495AA13809E144DAA113F421 /* PaintSoftware/Services/LegacyMaskRepair.swift in Sources */,
 				48A09763C4F89ACD4435D05A /* PaintSoftware/Services/LibraryRepair.swift in Sources */,
 				5982EAF6D24E4807A626DAAA /* StreamPlacementUITests.swift in Sources */,
 				5A6E952135BA40B5A9C0AC7D /* StreamDisplayLogicTests.swift in Sources */,
@@ -2690,6 +2703,9 @@
 				674B9D22D85AE10214B90A4B /* ToolReturnPathLogicTests.swift in Sources */,
 				06E1D2A76E84F1D749518316 /* JoinedTouchesLogicTests.swift in Sources */,
 				F34E55E1C81E6DB18AE8C2A0 /* HeldFingerUITests.swift in Sources */,
+				647EE788852F4938A02A0593 /* ColourMaskLogicTests.swift in Sources */,
+				AA24D80703F2448E9A31D8B9 /* ColourMaskUITests.swift in Sources */,
+				0F1F0BCBE7324F5E8C1FB3FD /* LegacyMaskRepairLogicTests.swift in Sources */,
 				1486ACB5DC9C24C805DCB4A7 /* ModifierHoldLogicTests.swift in Sources */,
 				3999BD4D3D56D0C2E3807574 /* AxisLockLogicTests.swift in Sources */,
 				7CE83813927AD8AFD21510D5 /* PaintSoftware/Models/CanvasTouchSettle.swift in Sources */,

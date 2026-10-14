@@ -68,171 +68,29 @@ struct AlphaMask: Hashable {
     /// hides everything — it is no mask, and the layer renders unmasked (§6.6).
     var isActive: Bool { isEnabled && !sources.isEmpty }
 
-    // MARK: - The tunables (§6.3, §10 item 1)
+    /// Empty reads source alpha; otherwise only these colours on the chosen sources contribute.
+    var colours: [ColourKey] = []
+    private(set) var threshold: Float = 0.1
+    private(set) var antialiasHalfWidth: Float = 0.01
+    static let minimumTuningGap: Float = 1 / 255
 
-    /// **The coverage test, tuned once there was something to look at.** `mask = sourceAlpha >
-    /// threshold`.
-    ///
-    /// It cannot be `alpha > 0`: the default brush is `softRound`, whose dab is a radial gradient
-    /// falling to alpha ≈ 0 across its whole radius, so `> 0` would keep every pixel the dab touched
-    /// however faintly. A threshold still excludes that faintest skirt — but 0.1 is not a derived
-    /// number, it is what the product owner judged by eye on the iPad, against a soft brush, in a
-    /// Release build. It replaced 0.5, the pre-hardware reasoned guess that this comment used to
-    /// defend as "the visually solid part of a stroke"; measurement on a screen disagreed; the number
-    /// is now the one the owner picked, not the one the reasoning predicted. `MaskParityLogicTests.
-    /// testTheThresholdExcludesOnlyTheFaintestSkirtOfASoftDab` is the measurement behind that
-    /// sentence rather than a restatement of it. Still reduces to `> 0` for a hard brush either way.
-    ///
-    /// MASK-TUNE (see `MaskTuningSection.swift`): `var` rather than `let` so the mask menu's tuning
-    /// sliders can scrub it live. The shipping default is 0.1; nothing but that section writes here.
-    /// Every write goes through `setTuning`, which enforces the guard below and bumps
-    /// `tuningGeneration` — see its doc comment for why that counter is load-bearing rather than
-    /// decoration.
-    static var threshold: Float {
-        get { tuning.threshold }
-        set { updateTuning { (newValue, $0.antialiasHalfWidth) } }
+    /// A value owned by this mask, so a held recipe and a background render read the same pair.
+    mutating func setTuning(threshold requestedThreshold: Float, antialiasHalfWidth requestedWidth: Float) {
+        let wantedThreshold = requestedThreshold.isFinite ? requestedThreshold : threshold
+        let wantedWidth = requestedWidth.isFinite ? requestedWidth : antialiasHalfWidth
+        threshold = min(max(wantedThreshold, Self.minimumTuningGap), 1)
+        antialiasHalfWidth = min(max(wantedWidth, 0), threshold - Self.minimumTuningGap)
     }
 
-    /// Half-width of the smoothstep across `threshold`, in alpha units — **antialiasing only**.
-    ///
-    /// A hard boolean edge stair-steps on diagonals; a ramp wide enough to fix that must still be
-    /// narrow enough not to reintroduce the source's own falloff, which is the whole point of the
-    /// threshold. 0.01 is narrower than the 0.05 this replaced — the same on-iPad judgement that moved
-    /// `threshold` down to 0.1 also pulled this in, so the resolved edge sits nearer a hard boolean
-    /// than the original reasoning here anticipated — at 0.01 the ramp is **vestigial**, about a third
-    /// of a pixel across a soft dab's falloff, rather than the diagonal-smoothing width the paragraph
-    /// above describes. Widen it and the mask starts inheriting the brush's own ramp, which is the
-    /// failure §6.3 names; the guard below is what stops the far end of that.
-    ///
-    /// MASK-TUNE: same story as `threshold` above — `var` for the tuning sliders, shipping default
-    /// 0.01, and **kept strictly below `threshold`** by `setTuning`.
-    static var antialiasHalfWidth: Float {
-        get { tuning.antialiasHalfWidth }
-        set { updateTuning { ($0.threshold, newValue) } }
-    }
-
-    /// **The two tunables and their generation, read as one value under one lock.**
-    ///
-    /// These were three plain statics (RENDER.md §4). They are written on the main actor by the mask
-    /// tuning sliders and read from whichever queue is
-    /// compositing — `CanvasView.sandwichQueue` for the live canvas, `ProjectStore`'s save queue for
-    /// the thumbnail, and RENDER §3.6's baker next — so the plain reads were a data race in the
-    /// language's terms whatever the hardware did with them.
-    ///
-    /// **One value rather than three accessors, because the tear was the sharper half of the bug.**
-    /// `coverage(forSourceAlpha:)` reads the threshold and the half-width to compute one ramp; two
-    /// separately-locked reads could straddle a slider write and produce a `low` above `high` — the
-    /// exact invariant `setTuning` exists to enforce, broken by the reader rather than by the writer.
-    /// Bundling the generation in as well is what lets `MaskResolver.CacheKey` name the pair it
-    /// actually resolved under rather than a counter read at a different instant.
-    struct Tuning: Equatable {
-        let threshold: Float
-        let antialiasHalfWidth: Float
-        /// See `AlphaMask.tuningGeneration`.
-        let generation: Int
-    }
-
-    /// The current tuning, as one consistent snapshot. Every reader on a render queue takes this
-    /// once and works from the value.
-    static var tuning: Tuning {
-        tuningLock.lock()
-        defer { tuningLock.unlock() }
-        return storedTuning
-    }
-
-    private static let tuningLock = NSLock()
-    private static var storedTuning = Tuning(threshold: 0.1, antialiasHalfWidth: 0.01, generation: 0)
-
-    /// The gap `setTuning` keeps between the two, and the reason it is a gap rather than zero: at
-    /// `antialiasHalfWidth == threshold` the ramp starts at alpha 0, which is exactly the `alpha > 0`
-    /// test §6.3 exists to avoid — the soft brush's faintest skirt comes back, softened. One 8-bit
-    /// alpha step is the smallest separation the resolved coverage bytes can represent at all
-    /// (`MaskResolver.resolve` samples alpha at `i / 255`), so anything narrower would be a
-    /// distinction the render path cannot see.
-    static let minimumTuningGap: Float = 1.0 / 255
-
-    /// **The one writer of the two tunables, and the guard on them.**
-    ///
-    /// `coverage(forSourceAlpha:)` ramps between `threshold ± antialiasHalfWidth`. When the
-    /// half-width reaches the threshold, the ramp's low end reaches 0 and **every pixel on the canvas
-    /// picks up partial coverage** — a fully transparent pixel stops being fully masked out, so the
-    /// mask no longer hides anything. Past it (`low < 0`) it is worse: alpha 0 lands *inside* the
-    /// ramp, and at threshold 0.1 / half-width 0.25 a zero-alpha pixel resolved to 55/255. The
-    /// shipped slider ranges reach that (half-width runs to 0.25, threshold floors at 0.1), so the
-    /// invariant is enforced here rather than in the sliders: a second writer tomorrow gets it for
-    /// free, and the sliders are left free to state the artist-facing range they want.
-    ///
-    /// **The half-width yields, whichever of the two moved.** Raising it above the threshold parks it
-    /// just under; lowering the threshold under it pulls it down. The alternative (pushing the
-    /// threshold up to make room) would move the number the artist did *not* touch.
-    ///
-    /// Written as one function taking both rather than as two `didSet`s, because two `didSet`s that
-    /// correct each other recurse — and because "these two are one setting with an invariant between
-    /// them" is then a fact of the type rather than of the order the writes happened to arrive in.
-    /// `MaskGuardLogicTests` sweeps both write orders over both slider ranges.
-    static func setTuning(threshold newThreshold: Float, antialiasHalfWidth newHalfWidth: Float) {
-        updateTuning { _ in (newThreshold, newHalfWidth) }
-    }
-
-    /// `setTuning`'s body, and the read-modify-write both single-value setters need.
-    ///
-    /// **The whole of it is inside one lock, including the read of what the caller did not pass.**
-    /// `threshold`'s setter asks for the current half-width and `antialiasHalfWidth`'s asks for the
-    /// current threshold, so a read outside the lock followed by a write inside it would let two
-    /// slider writes interleave into a pair neither of them asked for — which is the invariant this
-    /// function exists to hold, lost in the plumbing rather than in the arithmetic. `requested` is
-    /// handed the current value for exactly that reason.
-    private static func updateTuning(_ requested: (Tuning) -> (threshold: Float, antialiasHalfWidth: Float)) {
-        tuningLock.lock()
-        defer { tuningLock.unlock() }
-        let current = storedTuning
-        let asked = requested(current)
-        // A non-finite write is a caller bug, not a tuning; keep the last good value rather than
-        // poisoning every coverage byte with a NaN that traps on its way into `UInt8`.
-        let requestedThreshold = asked.threshold.isFinite ? asked.threshold : current.threshold
-        let requestedHalfWidth = asked.antialiasHalfWidth.isFinite ? asked.antialiasHalfWidth : current.antialiasHalfWidth
-        // Floored one gap above zero so there is always a legal half-width; capped at 1 because the
-        // test is on an alpha and nothing above 1 is a different mask.
-        let threshold = min(max(requestedThreshold, minimumTuningGap), 1)
-        storedTuning = Tuning(threshold: threshold,
-                              antialiasHalfWidth: min(max(requestedHalfWidth, 0), threshold - minimumTuningGap),
-                              generation: current.generation + 1)
-    }
-
-    /// MASK-TUNE: **this is what makes the sliders' cache invalidation real rather than assumed.**
-    /// `MaskResolver.CacheKey` keys on `AlphaMask`'s *stored* properties (`sources`, `isEnabled`,
-    /// `invert`) plus content versions — `threshold`/`antialiasHalfWidth` are statics, not stored
-    /// properties, so mutating them changes nothing the cache key can see on its own. This counter is
-    /// folded into that key (see `MaskResolver.swift`) so a slider write invalidates every cached
-    /// resolution instead of a `clearCache()` call the UI has to remember to make.
-    /// `MaskParityLogicTests.testMutatingTheTuningThresholdInvalidatesTheMaskCache` is the regression
-    /// this closes. Costs the shipping path nothing — it never moves off 0 there.
-    static var tuningGeneration: Int { tuning.generation }
-
-    /// The resolved coverage for one source alpha: the threshold test, softened only across the
-    /// narrow band above, then inverted if asked.
-    ///
-    /// **Written here rather than in either backend** because it is the definition of the mask, and
-    /// both backends consume the bytes it produces rather than computing them (see `MaskResolver`,
-    /// which resolves through the CoreGraphics reference for both).
-    /// `setTuning` keeps `low` above zero, which is what makes a transparent pixel resolve to exactly
-    /// no coverage (`MaskGuardLogicTests`). A **zero** half-width is still legal — the sliders' range
-    /// starts there and it is the hard boolean edge this section's doc describes — and it has to be
-    /// spelled out rather than reached through the ramp, because `(alpha - low) / (high - low)` is
-    /// `0/0` at exactly `alpha == threshold` and a NaN coverage traps on its way into a byte in
-    /// `MaskResolver.resolve`.
     func coverage(forSourceAlpha alpha: Float) -> Float {
-        // One snapshot, not three static reads: see `Tuning` for why a torn pair is the failure this
-        // guards against rather than a stale one.
-        let tuning = Self.tuning
-        let low = tuning.threshold - tuning.antialiasHalfWidth
-        let high = tuning.threshold + tuning.antialiasHalfWidth
+        let low = threshold - antialiasHalfWidth
+        let high = threshold + antialiasHalfWidth
         let smooth: Float
         if high > low {
             let t = min(max((alpha - low) / (high - low), 0), 1)
             smooth = t * t * (3 - 2 * t)
         } else {
-            smooth = alpha > tuning.threshold ? 1 : 0
+            smooth = alpha > threshold ? 1 : 0
         }
         return invert ? 1 - smooth : smooth
     }
@@ -295,17 +153,24 @@ extension MaskSource: Codable {
 }
 
 extension AlphaMask: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case sources, isEnabled, invert, colours, threshold, antialiasHalfWidth
+    }
 
-    private enum CodingKeys: String, CodingKey { case sources, isEnabled, invert }
-
-    /// Every field `decodeIfPresent`, so a manifest written with only some of them still loads —
-    /// the same rule `FolderManifest` follows, and the reason §4.1 could defer this field to phase 6
-    /// at no migration cost. The *absent* case is handled a level up: `LayerManifest` and
-    /// `FolderManifest` decode a missing `alphaMask` key as nil, which is "no mask".
     init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        sources = try container.decodeIfPresent([MaskSource].self, forKey: .sources) ?? []
-        isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
-        invert = try container.decodeIfPresent(Bool.self, forKey: .invert) ?? false
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        sources = try c.decode([MaskSource].self, forKey: .sources)
+        isEnabled = try c.decode(Bool.self, forKey: .isEnabled)
+        invert = try c.decode(Bool.self, forKey: .invert)
+        colours = try c.decode([ColourKey].self, forKey: .colours)
+        threshold = try c.decode(Float.self, forKey: .threshold)
+        antialiasHalfWidth = try c.decode(Float.self, forKey: .antialiasHalfWidth)
+        guard colours.count <= Effect.maxRecolorEntries, threshold.isFinite,
+              threshold >= Self.minimumTuningGap, threshold <= 1,
+              antialiasHalfWidth.isFinite, antialiasHalfWidth >= 0,
+              antialiasHalfWidth <= threshold - Self.minimumTuningGap else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath,
+                                                    debugDescription: "Invalid mask tuning or colour count"))
+        }
     }
 }

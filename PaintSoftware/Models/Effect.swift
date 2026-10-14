@@ -1303,7 +1303,52 @@ struct GradientStop: Equatable, Codable {
 
 /// One from→to pair of a recolour, with its own tolerance and softness. Alpha on both colours is
 /// ignored: a grade never changes coverage, and the *from* is matched on colour alone.
+/// The source-colour criterion shared by Recolour and masks. Recolour preserves its established
+/// flat file record through `key`; masks save this value directly.
+struct ColourKey: Codable, Equatable, Hashable {
+    var from: CodableColor
+    var tolerance: Double = ColourKey.defaultTolerance
+    var softness: Double = ColourKey.defaultSoftness
+    static let defaultTolerance = 0.1
+    static let defaultSoftness = 0.5
+
+    static var blank: ColourKey { RecolorEntry.blank.key }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(from.red); hasher.combine(from.green); hasher.combine(from.blue)
+        hasher.combine(from.alpha); hasher.combine(tolerance); hasher.combine(softness)
+    }
+}
+
+/// Resolved colour and radii, once per edit. Both CPU consumers use Recolour's exact ramp.
+struct ColourKeyTableEntry {
+    let lab: SIMD3<Float>
+    let tolerance: Float
+    let inner: Float
+
+    init(_ key: ColourKey) {
+        let from = ColorMath.rgbToOklab(r: min(max(key.from.red, 0), 1),
+                                        g: min(max(key.from.green, 0), 1),
+                                        b: min(max(key.from.blue, 0), 1))
+        lab = SIMD3(Float(from.L), Float(from.a), Float(from.b))
+        let outer = key.tolerance.isFinite ? max(key.tolerance, 0) : 0
+        let softness = key.softness.isFinite ? min(max(key.softness, 0), 1) : 0
+        tolerance = Float(outer)
+        inner = Float(outer * (1 - softness))
+    }
+
+    func weight(for pixel: SIMD3<Float>) -> Float {
+        let delta = pixel - lab
+        let distance = sqrt(delta.x * delta.x + delta.y * delta.y + delta.z * delta.z)
+        return RecolorTableEntry.weight(distance: distance, tolerance: tolerance, inner: inner)
+    }
+}
+
 struct RecolorEntry: Equatable {
+    var key: ColourKey {
+        get { ColourKey(from: from, tolerance: tolerance, softness: softness) }
+        set { from = newValue.from; tolerance = newValue.tolerance; softness = newValue.softness }
+    }
     var from: CodableColor
     var to: CodableColor
     /// The Oklab distance from `from` within which a pixel is claimed at all. Oklab's `L` spans
@@ -1313,8 +1358,8 @@ struct RecolorEntry: Equatable {
     /// What fraction of the tolerance is the soft ring. 0 is a hard edge, 1 eases from the centre.
     var softness: Double = RecolorEntry.defaultSoftness
 
-    static let defaultTolerance = 0.1
-    static let defaultSoftness = 0.5
+    static let defaultTolerance = ColourKey.defaultTolerance
+    static let defaultSoftness = ColourKey.defaultSoftness
 
     /// What Add hands the artist: mid-grey to mid-grey, which recolours nothing until a swatch is
     /// picked, at the two defaults above.
@@ -1370,19 +1415,15 @@ struct RecolorTableEntry: Equatable {
     init() {}
 
     init(_ entry: RecolorEntry) {
-        let from = ColorMath.rgbToOklab(r: min(max(entry.from.red, 0), 1),
-                                        g: min(max(entry.from.green, 0), 1),
-                                        b: min(max(entry.from.blue, 0), 1))
+        let key = ColourKeyTableEntry(entry.key)
         let toRGB = (r: min(max(entry.to.red, 0), 1), g: min(max(entry.to.green, 0), 1),
                      b: min(max(entry.to.blue, 0), 1))
         let to = ColorMath.rgbToOklab(r: toRGB.r, g: toRGB.g, b: toRGB.b)
-        fromL = Float(from.L); fromA = Float(from.a); fromB = Float(from.b)
+        fromL = key.lab.x; fromA = key.lab.y; fromB = key.lab.z
         toL = Float(to.L); toA = Float(to.a); toB = Float(to.b)
         toRed = Float(toRGB.r); toGreen = Float(toRGB.g); toBlue = Float(toRGB.b)
-        let outer = entry.tolerance.isFinite ? max(entry.tolerance, 0) : 0
-        let softness = entry.softness.isFinite ? min(max(entry.softness, 0), 1) : 0
-        tolerance = Float(outer)
-        inner = Float(outer * (1 - softness))
+        tolerance = key.tolerance
+        inner = key.inner
     }
 
     /// The ramp above, on one distance. Shared by `EffectReference` and by the tests that pin the

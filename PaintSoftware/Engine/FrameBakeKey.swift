@@ -178,9 +178,8 @@ struct BakeKeyEncoder {
 /// What names one frame's pixels on disk. RENDER.md §3.3.
 ///
 /// Build it from a `FrameRecipe` — which already carries the resolved tree, the leaf versions, the
-/// mask stacks, the render size, the paper and the quality — plus the four inputs no in-memory
-/// cache carries: the `RenderResolution`, `AlphaMask.tuningGeneration`, `Compositor.backend` and
-/// the store's format version.
+/// mask stacks, the render size, the paper and the quality — plus the resolution, backend and
+/// store format version. Mask tuning and colour keys are in the recipe’s mask values.
 struct FrameBakeKey: Hashable {
 
     /// SHA-256 of the canonical encoding — 32 bytes.
@@ -193,12 +192,10 @@ struct FrameBakeKey: Hashable {
 
     init(recipe: FrameRecipe,
          renderResolution: RenderResolution,
-         maskTuningGeneration: Int = AlphaMask.tuningGeneration,
          backend: CompositorBackend = Compositor.backend,
          formatVersion: UInt16 = FrameBakeStore.formatVersion) {
         let bytes = Self.canonicalBytes(recipe: recipe,
                                         renderResolution: renderResolution,
-                                        maskTuningGeneration: maskTuningGeneration,
                                         backend: backend,
                                         formatVersion: formatVersion)
         digest = Data(SHA256.hash(data: bytes))
@@ -213,13 +210,12 @@ struct FrameBakeKey: Hashable {
     /// **`frame` is not in here.** See this file's header; it is the design.
     static func canonicalBytes(recipe: FrameRecipe,
                                renderResolution: RenderResolution,
-                               maskTuningGeneration: Int,
                                backend: CompositorBackend,
                                formatVersion: UInt16) -> Data {
         var e = BakeKeyEncoder()
         // A version byte for the *encoding*, distinct from the store's file format version: changing
         // how a field is written must invalidate every digest even if the file layout is unchanged.
-        e.tag(0x02)
+        e.tag(0x03)
         e.u16(formatVersion)
 
         // The buffer. `FrameRecipe.canvasSize` is a `RenderSizing` already applied and rounded to
@@ -233,10 +229,7 @@ struct FrameBakeKey: Hashable {
         e.tag(renderResolution.bakeKeyTag)
         e.tag(recipe.quality.bakeKeyTag)
 
-        // RENDER §4: both of these are accessors over a lock, and the key reads them through those
-        // accessors. `tuningGeneration` is what makes a mask-tuning slider write invalidate a baked
-        // frame — the two tunables are statics and reach no other field of this key.
-        e.int(maskTuningGeneration)
+        // The backend is a process setting; per-mask tuning is encoded with its mask below.
         e.tag(backend.bakeKeyTag)
 
         // The paper, which is an input to the picture since EFFECT_BACKDROP §6 step 3 — and the only
@@ -310,6 +303,10 @@ private extension BakeKeyEncoder {
         array(mask.sources) { e, source in e.encode(maskSource: source) }
         bool(mask.isEnabled)
         bool(mask.invert)
+        float(mask.threshold); float(mask.antialiasHalfWidth)
+        array(mask.colours) { e, key in
+            e.encode(codableColor: key.from); e.double(key.tolerance); e.double(key.softness)
+        }
     }
 
     mutating func encode(maskSource: MaskSource) {

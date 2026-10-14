@@ -31,9 +31,6 @@ final class FrameBakeKeyLogicTests: XCTestCase {
 
     override func tearDown() {
         Compositor.backend = Compositor.defaultBackend
-        // The shipping defaults, restored by value — `AlphaMask`'s generation counter cannot be put
-        // back and does not need to be, since nothing keys on its absolute value.
-        AlphaMask.setTuning(threshold: 0.1, antialiasHalfWidth: 0.01)
         MaskResolver.clearCache()
         super.tearDown()
     }
@@ -42,15 +39,12 @@ final class FrameBakeKeyLogicTests: XCTestCase {
 
     /// Every key in this suite goes through here, so a test states only the thing it is varying.
     ///
-    /// The three lock-backed inputs are passed explicitly and default to fixed values rather than
-    /// being read from their accessors: `AlphaMask.tuningGeneration` and `Compositor.backend` are
-    /// process-wide, and a suite that read them live would be measuring whatever ran before it.
-    /// `testTheMaskTuningGenerationMovesTheDigest` is where the live accessor is exercised.
+    /// Backend and format version are passed explicitly, keeping each case independent of the
+    /// previous suite’s process settings. Masks carry their own tuning in the recipe.
     private func key(_ manager: CanvasManager,
                      frame: Int = 0,
                      resolution: RenderResolution = .full,
                      quality: RenderQuality = .full,
-                     tuningGeneration: Int = 0,
                      backend: CompositorBackend = .coreGraphics,
                      formatVersion: UInt16 = FrameBakeStore.formatVersion,
                      includeBackground: Bool = true,
@@ -62,8 +56,7 @@ final class FrameBakeKeyLogicTests: XCTestCase {
             XCTFail("The manager has no canvas size, so it mints no recipe.", file: file, line: line)
             return ""
         }
-        return FrameBakeKey(recipe: recipe, renderResolution: resolution,
-                            maskTuningGeneration: tuningGeneration, backend: backend,
+        return FrameBakeKey(recipe: recipe, renderResolution: resolution, backend: backend,
                             formatVersion: formatVersion).fileName
     }
 
@@ -108,8 +101,7 @@ final class FrameBakeKeyLogicTests: XCTestCase {
             return XCTFail("No recipe.")
         }
         func bytes() -> Data {
-            FrameBakeKey.canonicalBytes(recipe: recipe, renderResolution: .full,
-                                        maskTuningGeneration: 0, backend: .coreGraphics,
+            FrameBakeKey.canonicalBytes(recipe: recipe, renderResolution: .full, backend: .coreGraphics,
                                         formatVersion: FrameBakeStore.formatVersion)
         }
         XCTAssertEqual(bytes(), bytes(), "The encoding must be a pure function of the recipe.")
@@ -187,7 +179,7 @@ final class FrameBakeKeyLogicTests: XCTestCase {
                 recipe: FrameRecipe(tree: recipe.tree, leaves: recipe.leaves, maskStacks: stacks,
                                     frame: recipe.frame, canvasSize: recipe.canvasSize,
                                     background: recipe.background, quality: recipe.quality),
-                renderResolution: .full, maskTuningGeneration: 0, backend: .coreGraphics,
+                renderResolution: .full, backend: .coreGraphics,
                 formatVersion: FrameBakeStore.formatVersion)
         }
         XCTAssertEqual(bytes(recipe.maskStacks), bytes(reordered),
@@ -347,8 +339,7 @@ final class FrameBakeKeyLogicTests: XCTestCase {
                        + duplicateReport(digests))
     }
 
-    /// The inputs that are not in the document: the sizing knob, the quality, the two lock-backed
-    /// globals and the store's own format version.
+    /// The inputs that are not in the document: the sizing knob, the quality, the backend and the store's own format version.
     func testEveryNonDocumentInputMovesTheDigest() {
         let manager = CanvasFixture.chunkingZoo()
         var digests: [String: String] = [:]
@@ -356,7 +347,6 @@ final class FrameBakeKeyLogicTests: XCTestCase {
         digests["resolution 75%"] = key(manager, resolution: .threeQuarter)
         digests["resolution 50%"] = key(manager, resolution: .half)
         digests["quality preview"] = key(manager, quality: .preview)
-        digests["tuning generation"] = key(manager, tuningGeneration: 1)
         digests["backend metal"] = key(manager, backend: .metal)
         digests["backend automatic"] = key(manager, backend: .automatic)
         digests["format version"] = key(manager, formatVersion: FrameBakeStore.formatVersion &+ 1)
@@ -377,29 +367,21 @@ final class FrameBakeKeyLogicTests: XCTestCase {
         guard let recipe = manager.makeFrameRecipe(atFrame: 0, includeBackground: true, sizing: .native) else {
             return XCTFail("No recipe.")
         }
-        let full = FrameBakeKey(recipe: recipe, renderResolution: .full, maskTuningGeneration: 0,
+        let full = FrameBakeKey(recipe: recipe, renderResolution: .full,
                                 backend: .coreGraphics, formatVersion: FrameBakeStore.formatVersion)
-        let half = FrameBakeKey(recipe: recipe, renderResolution: .half, maskTuningGeneration: 0,
+        let half = FrameBakeKey(recipe: recipe, renderResolution: .half,
                                 backend: .coreGraphics, formatVersion: FrameBakeStore.formatVersion)
         XCTAssertNotEqual(full.fileName, half.fileName,
                           "One buffer size, two knob positions — and they must not be one file.")
     }
 
-    /// The live accessor, rather than the parameter. RENDER §4 says the key reads
-    /// `AlphaMask.tuningGeneration` through its lock; a slider write bumps it, and every baked frame
-    /// of a masked document is stale the instant it does.
-    func testTheMaskTuningGenerationMovesTheDigest() {
+    /// Tuning is encoded on the mask’s node, so only a recipe reading that mask changes its digest.
+    func testPerMaskTuningMovesOnlyTheMaskedDigest() {
         let manager = CanvasFixture.chunkingZoo()
-        guard let recipe = manager.makeFrameRecipe(atFrame: 0, includeBackground: true) else {
-            return XCTFail("No recipe.")
-        }
-        func liveKey() -> String {
-            FrameBakeKey(recipe: recipe, renderResolution: .full, backend: .coreGraphics).fileName
-        }
-        let before = liveKey()
-        AlphaMask.setTuning(threshold: 0.2, antialiasHalfWidth: 0.02)
-        XCTAssertNotEqual(before, liveKey(),
-                          "A mask-tuning write must invalidate every baked frame; the generation is how.")
+        manager.layers[1].alphaMask = AlphaMask(sources: [.layer(manager.layers[0].id)])
+        let before = key(manager)
+        manager.layers[1].alphaMask?.setTuning(threshold: 0.2, antialiasHalfWidth: 0.02)
+        XCTAssertNotEqual(before, key(manager), "Tuning is part of the rendered mask value.")
     }
 
     /// The live `Compositor.backend` accessor, for the same reason — its own doc comment says "the
@@ -410,9 +392,9 @@ final class FrameBakeKeyLogicTests: XCTestCase {
             return XCTFail("No recipe.")
         }
         Compositor.backend = .coreGraphics
-        let cpu = FrameBakeKey(recipe: recipe, renderResolution: .full, maskTuningGeneration: 0).fileName
+        let cpu = FrameBakeKey(recipe: recipe, renderResolution: .full).fileName
         Compositor.backend = .metal
-        let gpu = FrameBakeKey(recipe: recipe, renderResolution: .full, maskTuningGeneration: 0).fileName
+        let gpu = FrameBakeKey(recipe: recipe, renderResolution: .full).fileName
         Compositor.backend = .coreGraphics
         XCTAssertNotEqual(cpu, gpu,
                           "The two backends agree only to within a channel step, so a frame is not interchangeable.")

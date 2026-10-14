@@ -1,256 +1,76 @@
 import XCTest
 
-/// §6.3's guard: `AlphaMask.antialiasHalfWidth` is kept strictly below `AlphaMask.threshold`, so a
-/// fully transparent pixel always resolves to no coverage at all.
-///
-/// **The bug this closes.** `coverage(forSourceAlpha:)` ramps between `threshold ±
-/// antialiasHalfWidth`. Nothing used to stop the half-width reaching or passing the threshold, and
-/// the shipped sliders reach it easily — the half-width runs to 0.25 while the threshold floors at
-/// 0.1, so more than half of that slider's travel drove the ramp's low end to or below zero. At
-/// threshold 0.1 / half-width 0.25 a zero-alpha pixel resolved to 55/255: **every pixel on the
-/// canvas** picked up partial coverage, and a mask that does not fully hide the empty parts of its
-/// source is not hiding anything. It was unreachable in practice only because nobody opened the
-/// tuning harness; the mask menu (`LayerPanel.maskMenu`) is what puts that slider in an artist's
-/// hands, so the guard has to exist before the menu ships.
-///
-/// **What these assert is the invariant, not the clamp.** "The slider stops at 0.09" is a fact about
-/// one widget and one range, and a test of it would keep passing against a `coverage` rewritten to
-/// divide differently, or fail for nothing the day the range moves. The property the guard exists to
-/// protect is `coverage(forSourceAlpha: 0) == 0` — at every combination of the two constants the UI
-/// can reach, whichever of them was written last.
+/// Every reachable tuning excludes empty pixels, independently on every mask.
 final class MaskGuardLogicTests: XCTestCase {
-
-    /// The sliders' own ranges (`MaskTuningSection`), which are what "reachable" means here.
-    private let thresholdRange: ClosedRange<Float> = 0.1...0.9
-    private let halfWidthRange: ClosedRange<Float> = 0.0...0.25
-
-    /// The mask under test is deliberately **not inverted** — see
-    /// `testTheInvariantBelongsToANonInvertedMask`.
-    private let mask = AlphaMask(sources: [.layer(UUID())])
-
-    private var savedThreshold: Float = 0
-    private var savedHalfWidth: Float = 0
-
-    override func setUp() {
-        super.setUp()
-        savedThreshold = AlphaMask.threshold
-        savedHalfWidth = AlphaMask.antialiasHalfWidth
-    }
-
-    override func tearDown() {
-        // Restored through the one writer, so the pair lands in a legal state in a single step
-        // regardless of which order the two would otherwise have been assigned in.
-        AlphaMask.setTuning(threshold: savedThreshold, antialiasHalfWidth: savedHalfWidth)
-        super.tearDown()
-    }
-
-    private func threshold(step: Int, of steps: Int) -> Float {
-        thresholdRange.lowerBound
-            + (thresholdRange.upperBound - thresholdRange.lowerBound) * Float(step) / Float(steps)
-    }
-
-    private func halfWidth(step: Int, of steps: Int) -> Float {
-        halfWidthRange.lowerBound
-            + (halfWidthRange.upperBound - halfWidthRange.lowerBound) * Float(step) / Float(steps)
-    }
-
-    // MARK: - The invariant
-
-    /// The sweep. Every combination of the two slider ranges, written in **both orders**, because
-    /// they are two different ways to break the invariant and the guard clamps them in different
-    /// arms: raising the half-width past a fixed threshold, and lowering the threshold under a
-    /// half-width already set high.
-    ///
-    /// Failures are collected rather than asserted per combination: 16,000 `XCTAssert` calls cost
-    /// more than the arithmetic they check, and the first few offending pairs are what a reader
-    /// needs anyway.
     func testATransparentPixelResolvesToNoCoverageAtEveryReachableTuning() {
-        let thresholdSteps = 80, halfWidthSteps = 50
-        var failures: [String] = []
-
-        for t in 0...thresholdSteps {
-            for h in 0...halfWidthSteps {
-                let wantedThreshold = threshold(step: t, of: thresholdSteps)
-                let wantedHalfWidth = halfWidth(step: h, of: halfWidthSteps)
-
-                // Direction 1 — the half-width is raised against a threshold already in place.
-                AlphaMask.threshold = wantedThreshold
-                AlphaMask.antialiasHalfWidth = wantedHalfWidth
-                record(&failures, wantedThreshold, wantedHalfWidth, "half-width raised last")
-
-                // Direction 2 — the half-width is set with room to spare (threshold at the top of
-                // its range, which clears the whole half-width range), and *then* the threshold is
-                // dropped underneath it. Without the first write this arm would silently test the
-                // same thing direction 1 does, since the half-width would already have been clamped.
-                AlphaMask.threshold = thresholdRange.upperBound
-                AlphaMask.antialiasHalfWidth = wantedHalfWidth
-                AlphaMask.threshold = wantedThreshold
-                record(&failures, wantedThreshold, wantedHalfWidth, "threshold lowered last")
+        var mask = AlphaMask(sources: [.layer(UUID())])
+        var failures = 0
+        for thresholdStep in 0...80 {
+            for widthStep in 0...50 {
+                let threshold = 0.1 + Float(thresholdStep) * 0.01
+                let width = Float(widthStep) * 0.005
+                mask.setTuning(threshold: threshold, antialiasHalfWidth: width)
+                if mask.coverage(forSourceAlpha: 0) != 0 { failures += 1 }
+                mask.setTuning(threshold: 0.9, antialiasHalfWidth: width)
+                mask.setTuning(threshold: threshold, antialiasHalfWidth: mask.antialiasHalfWidth)
+                if mask.coverage(forSourceAlpha: 0) != 0 { failures += 1 }
             }
         }
-
-        XCTAssertEqual(failures.count, 0,
-                       "A fully transparent pixel must resolve to zero coverage at every tuning the "
-                       + "sliders can reach. First failures: \(failures.prefix(5).joined(separator: "; "))")
+        XCTAssertEqual(failures, 0)
     }
 
-    private func record(_ failures: inout [String], _ wantedThreshold: Float, _ wantedHalfWidth: Float,
-                        _ direction: String) {
-        let coverage = mask.coverage(forSourceAlpha: 0)
-        guard coverage != 0 else { return }
-        failures.append("wanted (\(wantedThreshold), \(wantedHalfWidth)) \(direction) -> settled at "
-                        + "(\(AlphaMask.threshold), \(AlphaMask.antialiasHalfWidth)), coverage \(coverage)")
-    }
-
-    /// The same sweep's other half: no tuning may produce a coverage that is not a number in `0...1`.
-    ///
-    /// A **zero** half-width stays legal — the slider's range starts there and it is the hard boolean
-    /// edge §6.3 describes — and it is the one that makes the ramp's divisor zero, so `alpha ==
-    /// threshold` divides 0 by 0. A NaN there is not a wrong picture, it is a trap: `MaskResolver`
-    /// narrows the coverage into a `UInt8`, and `UInt8(Float.nan)` is a runtime crash.
     func testNoReachableTuningProducesACoverageOutsideZeroToOne() {
-        var failures: [String] = []
-        let tunings: [(Float, Float)] = [
-            (0.1, 0), (0.2, 0), (0.5, 0), (0.9, 0),          // the zero-width band, where 0/0 lives
-            (0.1, 0.25), (0.1, 0.1), (0.5, 0.5), (0.9, 0.25) // half-width at or past the threshold
-        ]
-        for (wantedThreshold, wantedHalfWidth) in tunings {
-            AlphaMask.setTuning(threshold: wantedThreshold, antialiasHalfWidth: wantedHalfWidth)
+        var mask = AlphaMask()
+        var failures = 0
+        for (threshold, width): (Float, Float) in [(0.1, 0), (0.2, 0), (0.5, 0), (0.9, 0),
+                                                  (0.1, 0.25), (0.1, 0.1), (0.5, 0.5), (0.9, 0.25)] {
+            mask.setTuning(threshold: threshold, antialiasHalfWidth: width)
             for byte in 0...255 {
                 let coverage = mask.coverage(forSourceAlpha: Float(byte) / 255)
-                if coverage.isNaN || coverage < 0 || coverage > 1 {
-                    failures.append("(\(wantedThreshold), \(wantedHalfWidth)) at alpha \(byte) -> \(coverage)")
-                }
+                if !coverage.isFinite || !(0...1).contains(coverage) { failures += 1 }
             }
         }
-        XCTAssertEqual(failures.count, 0,
-                       "Coverage must stay a number in 0...1 for every source alpha. "
-                       + "First failures: \(failures.prefix(5).joined(separator: "; "))")
+        XCTAssertEqual(failures, 0)
     }
 
-    /// Why the sweep uses a mask that is not inverted: inversion is applied *after* the threshold, so
-    /// `coverage(forSourceAlpha: 0) == 1` on an inverted mask is the feature rather than the bug —
-    /// "show me everything the source does not cover" has to cover the empty pixels. The invariant is
-    /// stated on the un-inverted mask, and inversion's job is to be exactly its complement.
     func testTheInvariantBelongsToANonInvertedMask() {
+        let mask = AlphaMask()
         var inverted = mask
         inverted.invert = true
-        AlphaMask.setTuning(threshold: 0.1, antialiasHalfWidth: 0.01)
-
-        XCTAssertEqual(mask.coverage(forSourceAlpha: 0), 0)
-        XCTAssertEqual(inverted.coverage(forSourceAlpha: 0), 1)
+        var failures = 0
         for byte in 0...255 {
-            let alpha = Float(byte) / 255
-            XCTAssertEqual(inverted.coverage(forSourceAlpha: alpha),
-                           1 - mask.coverage(forSourceAlpha: alpha), accuracy: 1e-6)
+            if inverted.coverage(forSourceAlpha: Float(byte) / 255) != 1 - mask.coverage(forSourceAlpha: Float(byte) / 255) {
+                failures += 1
+            }
         }
+        XCTAssertEqual(failures, 0)
     }
 
-    // MARK: - The mechanism
-
-    /// The clamp itself, stated once in each direction so a failure of the sweep above is easy to
-    /// localise. This is the *implementation* the sweep is deliberately independent of — if a later
-    /// change moves the guard somewhere else, these two are the tests to delete, and the sweep is the
-    /// one that still has to pass.
     func testTheHalfWidthYieldsInBothDirections() {
-        AlphaMask.threshold = 0.5
-        AlphaMask.antialiasHalfWidth = 0.4
-        XCTAssertEqual(AlphaMask.threshold, 0.5, "The threshold is the number the artist did not touch")
-        XCTAssertLessThan(AlphaMask.antialiasHalfWidth, AlphaMask.threshold,
-                          "Raising the half-width past the threshold parks it just under")
-
-        AlphaMask.threshold = 0.2
-        XCTAssertEqual(AlphaMask.threshold, 0.2, accuracy: 1e-6)
-        XCTAssertLessThan(AlphaMask.antialiasHalfWidth, AlphaMask.threshold,
-                          "Lowering the threshold under the half-width pulls the half-width down with it")
+        var mask = AlphaMask()
+        mask.setTuning(threshold: 0.5, antialiasHalfWidth: 0.8)
+        XCTAssertEqual(mask.threshold, 0.5)
+        XCTAssertLessThan(mask.antialiasHalfWidth, mask.threshold)
+        mask.setTuning(threshold: 0.2, antialiasHalfWidth: mask.antialiasHalfWidth)
+        XCTAssertEqual(mask.threshold, 0.2, accuracy: 1e-6)
+        XCTAssertLessThan(mask.antialiasHalfWidth, mask.threshold)
     }
 
-    /// A tuning write still invalidates the mask cache, whether or not the guard changed the value
-    /// the caller asked for — `MaskResolver.CacheKey` can only see these two constants through
-    /// `tuningGeneration` (see its doc comment), and a clamped write is still a write.
-    func testAClampedWriteStillBumpsTheTuningGeneration() {
-        let before = AlphaMask.tuningGeneration
-        AlphaMask.antialiasHalfWidth = 10   // far outside anything legal
-        XCTAssertGreaterThan(AlphaMask.tuningGeneration, before)
-        XCTAssertLessThan(AlphaMask.antialiasHalfWidth, AlphaMask.threshold)
-    }
-
-    /// A non-finite write is a caller bug, and the guard answers it by keeping the last good value
-    /// rather than poisoning every coverage byte in the document with a NaN.
     func testANonFiniteWriteIsRefusedRatherThanStored() {
-        AlphaMask.setTuning(threshold: 0.4, antialiasHalfWidth: 0.05)
-        AlphaMask.threshold = .nan
-        AlphaMask.antialiasHalfWidth = .infinity
-        XCTAssertEqual(AlphaMask.threshold, 0.4, accuracy: 1e-6)
-        XCTAssertLessThan(AlphaMask.antialiasHalfWidth, AlphaMask.threshold)
-        XCTAssertEqual(mask.coverage(forSourceAlpha: 0), 0)
+        var mask = AlphaMask()
+        mask.setTuning(threshold: 0.4, antialiasHalfWidth: 0.05)
+        mask.setTuning(threshold: .nan, antialiasHalfWidth: .infinity)
+        XCTAssertEqual(mask.threshold, 0.4)
+        XCTAssertEqual(mask.antialiasHalfWidth, 0.05)
     }
 
-    // MARK: - The invariant survives a reader on another thread (RENDER.md §4)
-
-    /// **The guard can be broken by the reader as well as by the writer, and it was.** The two
-    /// tunables were plain statics written by the tuning sliders on the main actor and
-    /// read by `coverage(forSourceAlpha:)` on whichever queue is compositing — `CanvasView
-    /// .sandwichQueue`, `ProjectStore`'s save queue, and RENDER.md §3.6's baker next. `coverage` read
-    /// them one at a time, so a write landing between the two reads handed it a pair neither the
-    /// slider nor `setTuning` ever produced: threshold 0.1 from the new value with half-width 0.5
-    /// from the old makes `low` negative, and a transparent pixel resolves to partial coverage —
-    /// which is the exact failure the rest of this file exists to prevent, reached from the other
-    /// side. `AlphaMask.Tuning` is one value under one lock, so `coverage` cannot mix two writes.
-    ///
-    /// **This is a race, so its red is probabilistic and its green is not.** With the snapshot in
-    /// place no interleaving can produce a violating pair at all, so the case cannot go flaky-red;
-    /// without it, the sweep below straddles the two extremes of the sliders' own ranges and the
-    /// window is wide (a whole smoothstep between the reads). Run under the thread sanitiser it is
-    /// definitive in both directions.
-    func testCoverageNeverObservesATornTuningWhileTheSlidersAreScrubbed() {
-        let scrubbing = expectation(description: "the tuning sliders have finished scrubbing")
-        // The two ends of the sliders' ranges, chosen because the *mixture* of them is illegal:
-        // (0.1, 0.25) is the tuning this file's header records resolving alpha 0 to 55/255.
-        let extremes: [(Float, Float)] = [(0.9, 0.25), (0.1, 0.0)]
-        DispatchQueue.global(qos: .userInitiated).async {
-            for iteration in 0..<4_000 {
-                let (threshold, halfWidth) = extremes[iteration % extremes.count]
-                AlphaMask.setTuning(threshold: threshold, antialiasHalfWidth: halfWidth)
-            }
-            scrubbing.fulfill()
-        }
-
-        var violations: [String] = []
-        for _ in 0..<20_000 {
-            let coverage = mask.coverage(forSourceAlpha: 0)
-            if coverage != 0 {
-                let seen = AlphaMask.tuning
-                violations.append("coverage \(coverage) at (\(seen.threshold), \(seen.antialiasHalfWidth))")
-            }
-            // Every snapshot must satisfy the invariant on its own, whichever write produced it.
-            let seen = AlphaMask.tuning
-            if !(seen.antialiasHalfWidth <= seen.threshold - AlphaMask.minimumTuningGap) {
-                violations.append("torn pair (\(seen.threshold), \(seen.antialiasHalfWidth))")
-            }
-        }
-        wait(for: [scrubbing], timeout: 30)
-
-        XCTAssertEqual(violations.count, 0,
-                       "A transparent pixel must resolve to no coverage even while another thread is "
-                       + "writing the tuning. First: \(violations.prefix(5).joined(separator: "; "))")
-    }
-
-    /// The three values are one snapshot and there is no second copy of them — the structural half of
-    /// the case above, which a future edit re-introducing separate storage would fail immediately
-    /// rather than probabilistically.
-    func testTheTunablesAndTheGenerationComeFromOneSnapshot() {
-        AlphaMask.setTuning(threshold: 0.4, antialiasHalfWidth: 0.05)
-        let snapshot = AlphaMask.tuning
-        XCTAssertEqual(snapshot.threshold, AlphaMask.threshold)
-        XCTAssertEqual(snapshot.antialiasHalfWidth, AlphaMask.antialiasHalfWidth)
-        XCTAssertEqual(snapshot.generation, AlphaMask.tuningGeneration)
-
-        AlphaMask.threshold = 0.6
-        let next = AlphaMask.tuning
-        XCTAssertEqual(next.generation, snapshot.generation + 1,
-                       "One write, one generation — the counter `MaskResolver.CacheKey` keys on")
-        XCTAssertEqual(next.antialiasHalfWidth, snapshot.antialiasHalfWidth,
-                       "Writing one tunable must carry the other through unchanged, and read it under the same lock")
+    func testMasksCarryIndependentTuningAndFrozenCopies() {
+        var edited = AlphaMask()
+        let other = AlphaMask()
+        let frozen = edited
+        edited.setTuning(threshold: 0.8, antialiasHalfWidth: 0.1)
+        XCTAssertEqual(other.coverage(forSourceAlpha: 0.5), 1)
+        XCTAssertEqual(frozen.coverage(forSourceAlpha: 0.5), 1)
+        XCTAssertEqual(edited.coverage(forSourceAlpha: 0.5), 0)
     }
 }

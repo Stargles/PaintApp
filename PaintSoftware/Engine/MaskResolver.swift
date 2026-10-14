@@ -86,11 +86,11 @@ enum MaskResolver {
         let height = Int(request.canvasSize.height.rounded())
         guard width > 0, height > 0 else { return nil }
 
+        let sourceStacks = stacksRead(by: masks, of: request)
         let key = CacheKey(masks: masks, width: width, height: height, window: request.window,
                            quality: request.quality,
-                           versions: contentVersions(readBy: masks, of: request),
-                           nodeEffects: nodeEffects(readBy: masks, of: request),
-                           tuningGeneration: AlphaMask.tuningGeneration)
+                           versions: contentVersions(in: sourceStacks, of: request),
+                           sourceStacks: sourceStacks)
         if let hit = cache.value(for: key) { return hit }
         guard let resolved = resolveUncached(masks, of: request, width: width, height: height) else { return nil }
         cache.store(resolved, for: key)
@@ -203,6 +203,11 @@ enum MaskResolver {
         var union = [UInt8](repeating: 0, count: width * height)
         var resolvedAnyClip = false
         var amounts: [UInt8]?
+        let colourTable = mask.colours.map(ColourKeyTableEntry.init)
+        // Bounded and local to this resolution. A flat patch converts once rather than per pixel;
+        // photographic sources cannot grow an unbudgeted dictionary over the whole canvas.
+        var colourMemo: [UInt32: UInt8] = [:]
+        let memoLimit = 4096
 
         for source in mask.sources {
             // A source naming something that is not in the document contributes no alpha rather than
@@ -231,7 +236,27 @@ enum MaskResolver {
             }
             resolvedAnyClip = true
             for pixel in 0..<(width * height) {
-                union[pixel] = max(union[pixel], bytes[pixel * 4 + 3])
+                let offset = pixel * 4
+                let alpha = bytes[offset + 3]
+                if colourTable.isEmpty {
+                    union[pixel] = max(union[pixel], alpha)
+                } else if alpha > 0 {
+                    let packed = UInt32(bytes[offset]) | UInt32(bytes[offset + 1]) << 8
+                        | UInt32(bytes[offset + 2]) << 16 | UInt32(alpha) << 24
+                    let coverage: UInt8
+                    if let hit = colourMemo[packed] {
+                        coverage = hit
+                    } else {
+                        let lab = ColorMath.rgbToOklab(r: Double(bytes[offset]) / Double(alpha),
+                                                       g: Double(bytes[offset + 1]) / Double(alpha),
+                                                       b: Double(bytes[offset + 2]) / Double(alpha))
+                        let colour = SIMD3(Float(lab.L), Float(lab.a), Float(lab.b))
+                        let membership = colourTable.reduce(Float(0)) { max($0, $1.weight(for: colour)) }
+                        coverage = UInt8((membership * Float(alpha)).rounded(.toNearestOrEven))
+                        if colourMemo.count < memoLimit { colourMemo[packed] = coverage }
+                    }
+                    union[pixel] = max(union[pixel], coverage)
+                }
             }
         }
         // An enabled mask whose every source failed to resolve is not a mask that hides everything;
@@ -243,7 +268,8 @@ enum MaskResolver {
             // The threshold is a function of one alpha byte, so 256 answers cover the canvas. Worth
             // the table: this runs over 4.2M pixels at 2048².
             let table: [UInt8] = (0...255).map { alpha in
-                UInt8((min(max(mask.coverage(forSourceAlpha: Float(alpha) / 255), 0), 1) * 255).rounded(.toNearestOrEven))
+                if !colourTable.isEmpty { return mask.invert ? 255 - UInt8(alpha) : UInt8(alpha) }
+                return UInt8((min(max(mask.coverage(forSourceAlpha: Float(alpha) / 255), 0), 1) * 255).rounded(.toNearestOrEven))
             }
             for pixel in union.indices { union[pixel] = table[Int(union[pixel])] }
         }
@@ -255,90 +281,41 @@ enum MaskResolver {
         return union
     }
 
-    /// The content versions of exactly the layers these masks read, so an edit somewhere else in the
-    /// document does not invalidate a mask that cannot have changed.
-    private static func contentVersions(readBy masks: [AlphaMask],
-                                        of request: RenderRequest) -> [LayerContentVersion?] {
-        var indices: [Int] = []
-        for mask in masks {
-            for source in mask.sources {
-                guard let stack = request.maskStacks[source] else { continue }
-                indices.append(contentsOf: stack.leafLayerIndices)
+    /// Every source dependency, including masks on sources and on their descendants. A source's
+    /// mask can read a leaf outside its subtree; stopping at the first subtree misses that leaf's edits.
+    private static func stacksRead(by masks: [AlphaMask], of request: RenderRequest) -> [[RenderNode]] {
+        var pending = masks.flatMap(\.sources)
+        var visited: Set<MaskSource> = []
+        var stacks: [MaskSource: [RenderNode]] = [:]
+        func dependencies(in nodes: [RenderNode]) -> [MaskSource] {
+            nodes.flatMap { node -> [MaskSource] in
+                let own = node.masks.flatMap(\.sources)
+                if case .node(_, let inputs) = node.content { return own + inputs.flatMap(dependencies) }
+                return own
             }
         }
-        // Sorted and de-duplicated so two masks naming the same sources in different orders produce
-        // the same key and therefore share the entry.
-        return Set(indices).sorted().map { index in
+        while let source = pending.popLast() {
+            guard visited.insert(source).inserted, let stack = request.maskStacks[source] else { continue }
+            stacks[source] = stack
+            pending.append(contentsOf: dependencies(in: stack))
+        }
+        return stacks.keys.sorted {
+            if $0.id != $1.id { return $0.id.uuidString < $1.id.uuidString }
+            return String(describing: $0) < String(describing: $1)
+        }.compactMap { stacks[$0] }
+    }
+
+    private static func contentVersions(in stacks: [[RenderNode]],
+                                        of request: RenderRequest) -> [LayerContentVersion?] {
+        Set(stacks.flatMap(\.leafLayerIndices)).sorted().map { index in
             request.contentVersions.indices.contains(index) ? request.contentVersions[index] : nil
-        }
-    }
-
-    /// **The grades carried by the *node* forms in the stacks these masks read** — the other half of
-    /// what "the model this coverage was resolved from" means, and until 2026-08-29 it was missing.
-    ///
-    /// `contentVersions` above is indexed by *layer*, gathered from `stack.leafLayerIndices`, so it
-    /// covers a grading **layer** inside a mask source's subtree (that is `LayerContentVersion.effect`)
-    /// and cannot see a grading **folder** at all, because a folder is not a leaf. But a mask source
-    /// naming a folder resolves that folder's whole node through `CoreGraphicsCompositor.composite`,
-    /// which applies `RenderNode.effect` — so a grade that reshapes alpha (`reshapesCoverage`: outline,
-    /// blur, bloom, Sobel, sharpen) genuinely changes the coverage this cache holds, and nothing in the
-    /// key moved when it changed. This closes that.
-    ///
-    /// **It was a real defect before a keyframe could animate one, and §2.21 is what made it urgent
-    /// rather than what caused it.** Editing a folder's grade by hand already served stale coverage
-    /// until something else evicted the entry; a folder effect *track* makes it fire on every frame of
-    /// playback, with no edit at all, which is the difference between a bug an artist hits once and one
-    /// they cannot look away from.
-    ///
-    /// **Node grades and not the whole `[RenderNode]`.** Putting the stacks' trees in the key would
-    /// also invalidate on every structural change to them, which is strictly more invalidation for a
-    /// hazard nothing has demonstrated; the grade is the field that is both frame-varying and invisible
-    /// to `versions`. A nil is appended for an ungraded node so the *count* of node forms is pinned too,
-    /// which is what makes a grade being removed from one node of several a different key.
-    ///
-    /// Sources are de-duplicated and ordered by id for `contentVersions`' reason: two masks naming the
-    /// same sources in different orders must produce one key and share the entry.
-    private static func nodeEffects(readBy masks: [AlphaMask], of request: RenderRequest) -> [Effect?] {
-        var sources: Set<MaskSource> = []
-        for mask in masks { sources.formUnion(mask.sources) }
-        guard !sources.isEmpty else { return [] }
-
-        var effects: [Effect?] = []
-        for source in sources.sorted(by: { $0.id.uuidString < $1.id.uuidString }) {
-            guard let stack = request.maskStacks[source] else { continue }
-            collectNodeEffects(in: stack, into: &effects)
-        }
-        return effects
-    }
-
-    /// Depth first, node before its inputs — the same walk shape `collectMaskSources` makes, so the
-    /// order is the tree's and therefore deterministic where a dictionary's would not be.
-    private static func collectNodeEffects(in nodes: [RenderNode], into effects: inout [Effect?]) {
-        for node in nodes {
-            guard case .node(_, let inputs) = node.content else { continue }
-            effects.append(node.effect)
-            for input in inputs { collectNodeEffects(in: input, into: &effects) }
         }
     }
 
     // MARK: - The cache
 
-    /// **Keyed on the model, never on the rendered result.** §9.1's original `contentVersion` keyed
-    /// on the `CGImage` that `PixelOps.rasterize` mints fresh every call and was deleted in phase 2
-    /// after being measured at a zero hit rate; `LayerContentVersion` is the key that post-mortem
-    /// prescribed, carried on the request so this cache and §5.2's sandwich share one answer.
-    ///
-    /// The masks themselves are in the key rather than the masked node's id, which is the difference
-    /// between "cached per distinct mask" and "cached per masked layer" — ten layers clipped to the
-    /// same shape resolve it once.
-    ///
-    /// **The gap this comment used to describe is closed** — a *folder's* grade is in the key now, as
-    /// `nodeEffects`, and that method carries the argument. It was documented here as a KNOWN GAP from
-    /// phase 9b until 2026-08-29 and prescribed its own fix ("putting the stacks' node grades in this
-    /// key rather than extending a per-layer version"), which is exactly what landed when KEYFRAMES.md
-    /// §2.21 gave a folder's grade a keyframe track and turned an edit-time staleness into a per-frame
-    /// one. The live canvas was never affected either way: `CanvasView.SandwichKey` compares whole
-    /// `[RenderNode]` trees and so has always seen both grade forms.
+    /// Masks and the complete source dependency graph, by model value. The trees include folder
+    /// opacity, masks and grades as resolved for this frame; leaf versions include their actual ink.
     private struct CacheKey: Hashable {
         let masks: [AlphaMask]
         let width: Int
@@ -350,19 +327,10 @@ enum MaskResolver {
         let window: StripWindow?
         let quality: RenderQuality
         let versions: [LayerContentVersion?]
-        /// The grades on the node forms inside the mask sources' stacks — see `nodeEffects(readBy:of:)`.
-        let nodeEffects: [Effect?]
-        // MASK-TUNE: `AlphaMask.threshold`/`.antialiasHalfWidth` are statics, not stored properties,
-        // so `masks` above cannot see a change to either — without this field the cache would keep
-        // serving a `ResolvedMask` computed under the old value. See `AlphaMask.tuningGeneration`'s
-        // doc comment. Costs nothing in a document nobody has tuned, where the generation stays 0.
-        let tuningGeneration: Int
+        let sourceStacks: [[RenderNode]]
 
-        /// **Hand-written, and only to skip `nodeEffects`** — `LayerContentVersion.hash(into:)`'s trick
-        /// for `LayerContentVersion.effect`, needed here for the same reason and stated there at
-        /// length: `Effect` is `Equatable` but not `Hashable`, and conforming it plus its thirteen
-        /// payload structs would buy nothing but bucket spread. Hashing may collide; **equality** is
-        /// what decides a cache hit, and `==` is synthesized over every field including this one.
+        /// RenderNode carries Equatable effects. Hashing the count is enough for buckets; synthesized
+        /// equality still compares every source tree, including nested masks and folder opacity.
         func hash(into hasher: inout Hasher) {
             hasher.combine(masks)
             hasher.combine(width)
@@ -370,8 +338,7 @@ enum MaskResolver {
             hasher.combine(window)
             hasher.combine(quality)
             hasher.combine(versions)
-            hasher.combine(nodeEffects.count)
-            hasher.combine(tuningGeneration)
+            hasher.combine(sourceStacks.count)
         }
     }
 

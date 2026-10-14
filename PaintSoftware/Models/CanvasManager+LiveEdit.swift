@@ -34,6 +34,8 @@ enum HeldEdit {
     /// whole frame from it (`CanvasView.Coordinator`'s held frame), and the render walk reads it in
     /// place of the document's grade.
     case grade(HeldGrade)
+    /// A mask’s tuning or colours, composited through lane F and written only at lift.
+    case mask(HeldMask)
     /// A target channel under the finger — a layer's or folder's Opacity, a transformation layer's
     /// Rotate speed or Shake amplitudes, an item's Parallax share (TODO (179)). Opacity on a canvas Core
     /// Animation draws is a host's alpha; everything else is drawn whole, as a grade is
@@ -68,6 +70,11 @@ enum HeldEdit {
 
     var fill: CanvasManager.LiveFill? {
         if case .fill(let fill) = self { return fill }
+        return nil
+    }
+
+    var mask: HeldMask? {
+        if case .mask(let mask) = self { return mask }
         return nil
     }
 
@@ -138,7 +145,7 @@ enum HeldEdit {
     /// canvas with no composite (`heldHostLayerIndices`).
     var hostLayerID: UUID? {
         switch self {
-        case .pose, .grade, .channel, .valueFill: return nil
+        case .pose, .grade, .mask, .channel, .valueFill: return nil
         case .elements(let edit): return edit.layerID
         case .fill(let fill): return fill.layerID
         case .interpolation(let held): return held.layerID
@@ -154,7 +161,7 @@ enum HeldEdit {
     /// leaf is drawn by the composite or re-derived by its host, so it is drawn whole.
     func drawsWholeFrame(canvasEngaged: Bool) -> Bool {
         switch self {
-        case .grade: return true
+        case .grade, .mask: return true
         case .channel(let held): return canvasEngaged || held.channel != .opacity
         case .channelCurves(let held): return canvasEngaged || held.curves.keys.contains { $0 != TargetChannel.opacity.id }
         case .valueFill, .groupPose: return canvasEngaged
@@ -300,7 +307,13 @@ struct HeldInterpolation {
 /// the hold removes. So the hold is mirrored here, on an object only those controls observe
 /// (`FillSettings`' shape, TODO (157)), and they read it back as `CanvasManager.effectAsShown` and
 /// `channelAsShown`.
+struct HeldMask: Equatable {
+    let target: MaskSource
+    var value: AlphaMask
+}
+
 final class LiveEditState: ObservableObject {
+    @Published fileprivate(set) var mask: HeldMask?
     @Published fileprivate(set) var grade: HeldGrade?
     /// The held target channel, for the layer options' channel rows (`CanvasManager.channelAsShown`).
     @Published fileprivate(set) var channel: HeldChannel?
@@ -366,6 +379,8 @@ extension CanvasManager {
 
     /// Puts the held grade and channel where the controls read them, only when they moved.
     private func mirrorLiveEdit() {
+        let mask = liveEdit?.mask
+        if liveEditState.mask != mask { liveEditState.mask = mask }
         let grade = liveEdit?.grade
         if liveEditState.grade != grade { liveEditState.grade = grade }
         let channel = liveEdit?.channel
@@ -747,5 +762,24 @@ extension HeldChannel {
     /// Itself when it holds `channel` on `target`, nil otherwise.
     func holding(_ channel: TargetChannel, of target: KeyframeTarget) -> HeldChannel? {
         self.channel == channel && self.target == target ? self : nil
+    }
+}
+
+// MARK: - A mask under the finger
+extension CanvasManager {
+    func maskAsShown(for target: MaskSource) -> AlphaMask {
+        if let held = liveEditState.mask, held.target == target { return held.value }
+        return alphaMask(for: target) ?? AlphaMask()
+    }
+
+    func holdMask(_ mask: AlphaMask, for target: MaskSource) {
+        if liveEdit?.mask == nil { beginCanvasEdit() }
+        holdLiveEdit(.mask(HeldMask(target: target, value: mask)))
+    }
+
+    func commitHeldMask() {
+        guard let held = liveEdit?.mask else { return }
+        withMaskSessionUndo { setAlphaMask(held.value, for: held.target) }
+        endLiveEdit()
     }
 }

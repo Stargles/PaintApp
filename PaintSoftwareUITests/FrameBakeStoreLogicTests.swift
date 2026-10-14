@@ -101,8 +101,7 @@ final class FrameBakeStoreLogicTests: XCTestCase {
               let composited = recipe.composite() else {
             return XCTFail("The zoo must composite.")
         }
-        let key = FrameBakeKey(recipe: recipe, renderResolution: .full,
-                               maskTuningGeneration: 0, backend: .coreGraphics)
+        let key = FrameBakeKey(recipe: recipe, renderResolution: .full, backend: .coreGraphics)
         let store = store()
         guard case .success = store.store(composited, for: key) else {
             return XCTFail("The write must succeed into a fresh temp root.")

@@ -33,6 +33,7 @@ struct PaintApp: App {
         // a manifest. See `LegacyToolSettingsRepair` for why here and not in the maintenance pass.
         LegacyToolSettingsRepair.repairLibraryAndRetireKeys()
         LegacyStreamPlacementRepair.repairLibrary()
+        LegacyMaskRepair.repairLibrary()
         AppSettings.standard.forgetIfRequested()
         // Launch-time safety pass (off the main thread): snapshot every project if the app binary
         // changed (update/dev redeploy), auto-repair any damaged project package from its backups,

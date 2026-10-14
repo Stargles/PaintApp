@@ -84,7 +84,7 @@ final class VectorLayerEffectLogicTests: XCTestCase {
         guard let recipe = manager.makeFrameRecipe(atFrame: 0, quality: .full, includeBackground: true, sizing: .native) else {
             XCTFail("No recipe without a canvas"); return ""
         }
-        return FrameBakeKey(recipe: recipe, renderResolution: .full, maskTuningGeneration: 0,
+        return FrameBakeKey(recipe: recipe, renderResolution: .full,
                             backend: .coreGraphics, formatVersion: FrameBakeStore.formatVersion).fileName
     }
 

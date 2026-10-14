@@ -1303,7 +1303,7 @@ private func maskMenu(canvasManager: CanvasManager, target: MaskSource, mask: Al
 
         // §6.3's two constants, beside the mask controls they govern rather than floating over the
         // canvas — which is where they could reach the trailing chrome and eat its taps.
-        MaskTuningSection()
+        MaskTuningSection(canvasManager: canvasManager, liveState: canvasManager.liveEditState, target: target)
     }
 }
 

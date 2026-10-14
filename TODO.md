@@ -123,8 +123,8 @@ why: pictures handed to Core Animation faster than the render server frees them)
 
 ## (35) Advanced masks — colour masks beside the alpha mask
 
-**Status** — promoted from "Later" 2026-10-12; the owner will describe what it is meant to be once told
-what is already recorded.
+**Status** — implementation in session 49: colour membership shares Recolour’s Oklab keys and editor;
+tuning is saved per mask and held off the scene during a drag. Existing packages receive a one-shot repair.
 
 The original ask (2026-09-01): *"right now we have alpha masks. I like the idea of more advanced masks.
 This includes the ability to mask specific sets of colours (with a deviation threshold range), and a new

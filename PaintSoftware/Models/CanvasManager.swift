@@ -4102,7 +4102,7 @@ final class CanvasManager: ObservableObject {
 
     /// Routes to the by-index/by-id overload `target` names — kept here rather than duplicated,
     /// since a `MaskSource` already carries which one applies.
-    private func setAlphaMask(_ mask: AlphaMask?, for target: MaskSource) {
+    func setAlphaMask(_ mask: AlphaMask?, for target: MaskSource) {
         switch target {
         case .layer(let id):
             guard let index = layers.firstIndex(where: { $0.id == id }) else { return }
@@ -4124,6 +4124,7 @@ final class CanvasManager: ObservableObject {
     /// pending, and idempotent — the panel calls it both from the action about to edit structure and
     /// again when SwiftUI notices the menu closed.
     func endMaskEdit() {
+        commitHeldMask()
         guard maskEditTarget != nil else { return }
         maskEditTarget = nil
         guard maskSessionIsRecording else { return }
@@ -4140,7 +4141,7 @@ final class CanvasManager: ObservableObject {
     /// entry would record an empty step for every menu the artist merely looked at, and creating the
     /// empty `AlphaMask` there — which is what used to give that step something to hold — would hang
     /// a mask off every node whose menu was ever opened.
-    private func withMaskSessionUndo(_ body: () -> Void) {
+    func withMaskSessionUndo(_ body: () -> Void) {
         if maskEditTarget != nil, !maskSessionIsRecording {
             maskSessionIsRecording = true
             beginStructureGesture()

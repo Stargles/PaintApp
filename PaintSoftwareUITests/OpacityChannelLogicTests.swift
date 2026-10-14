@@ -92,8 +92,7 @@ final class OpacityChannelLogicTests: XCTestCase {
                     file: file, line: line)
             return ""
         }
-        return FrameBakeKey(recipe: recipe, renderResolution: .full,
-                            maskTuningGeneration: 0, backend: .coreGraphics).fileName
+        return FrameBakeKey(recipe: recipe, renderResolution: .full, backend: .coreGraphics).fileName
     }
 
     // MARK: - What is drawn

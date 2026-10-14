@@ -428,7 +428,7 @@ final class VideoFrameMapLogicTests: XCTestCase {
     private func digest(_ manager: CanvasManager, frame: Int) throws -> String {
         let recipe = try XCTUnwrap(manager.makeFrameRecipe(atFrame: frame, quality: .full,
                                                            includeBackground: true, sizing: .native))
-        return FrameBakeKey(recipe: recipe, renderResolution: .full, maskTuningGeneration: 0,
+        return FrameBakeKey(recipe: recipe, renderResolution: .full,
                             backend: .coreGraphics,
                             formatVersion: FrameBakeStore.formatVersion).fileName
     }
