@@ -8,6 +8,14 @@ manifest before moving the live scene. The original snapshot stays byte-for-byte
 
 # Known Issues
 
+## A filing move refuses a scene opened in this process (2026-10-14)
+
+The new collision rename helper used the launch-repair gate, which deliberately refuses every
+package ever loaded or saved in the process. A just-drawn scene therefore cannot move from the
+gallery. Explicit artist moves must serialize with saves, follow the project's latest URL and
+record the landing through the open-document rename gate; clearing the open registry is unsafe.
+
+
 
 ## Moving or restoring onto an occupied project name leaves the gallery title behind (2026-10-14)
 
