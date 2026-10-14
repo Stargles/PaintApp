@@ -61,7 +61,7 @@ final class FillContainmentUITests: PaintUITestCase {
     /// artist sequence on a raster layer, whose committed texture is installed synchronously.
     func testStartingASecondRasterFillKeepsTheFirstVisible() throws {
         let app = XCUIApplication()
-        XCUIDevice.shared.orientation = .landscapeLeft
+        XCUIDevice.shared.orientation = .portrait
         XCTAssertTrue(launchIntoEditor(app))
         addRasterLayer(app)
         let canvas = app.otherElements["canvas.host"]
@@ -84,6 +84,7 @@ final class FillContainmentUITests: PaintUITestCase {
         canvas.coordinate(withNormalizedOffset: first).tap()
         XCTAssertNotNil(waitForPixel(canvas, at: first, matches: { isRed($0) }),
                         "the first raster region is filled")
+        attachScreenshot(app, "first raster region visible before the second fill")
         canvas.coordinate(withNormalizedOffset: second).tap()
         XCTAssertNotNil(waitForPixel(canvas, at: first, matches: { isRed($0) }),
                         "replacing the raster base does not drop the first fill")
