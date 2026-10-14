@@ -110,7 +110,9 @@ why: pictures handed to Core Animation faster than the render server frees them)
 - [ ] Measured with `PlaybackProbe` before/after, as §29 was — on the iPad 9 simulator: the effect slider
       (PERFORMANCE.md §30), half detail (§30.4), the Opacity slider (§30.5), a smart shape's handle drag
       (§32), the brush colour (§33.1) and the fill slider (§34.1). **Owed: the iPad itself** — the probe's
-      `effect`, `opacity`, `shape` and `fill` modes on the owner's device.
+      `effect`, `opacity`, `shape` and `fill` modes on the owner's device. Owner saved the scene and
+      unlocked it 2026-10-14. Installed `7cf3245` supports only the effect baseline; the other three
+      modes need an updated build (unknown modes in that build silently run playback).
 
 ## (177) A stream layer can draw in place in the layer stack
 

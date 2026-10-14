@@ -16,34 +16,34 @@ is what we find.
 — `origin/main` is a shared ref and a cut-off session's work sits on its branch.
 
 **Session 49 is in flight.** The verified starting point was `5d73184`; no prior `tmp/*` branch held
-unmerged work. (189) is merged at `8616532`. Task branches are `tmp/s49-fill-handoff` (190),
-`tmp/s49-stream` (177), `tmp/s49-masks` (35), and `tmp/s49-session` (coordination), under `~/PaintWork/`.
-Do not harvest uncommitted worker files: they may be deliberate test mutations. None is merge-ready yet.
+unmerged work. (189) is merged at `8616532`, and (190) at `e6b7d81`. Active task branches under
+`~/PaintWork/` are `tmp/s49-stream` (177), `tmp/s49-masks` (35), `tmp/s49-liquify` (178), and
+`tmp/s49-session` (coordination). Never harvest dirty worker files: mutations may be intentional.
 
-- **(190):** the first-fill flash is reproduced in portrait with a 300 ms background-render delay.
-  The restored fix and real commit-boundary logic test pass; missing handoff, early callback and false
-  cancellation landing mutations go red. Full UI/fast-tier checks remain. The earlier landscape pixel
-  evidence was invalid because `MidGestureSampler` assumes portrait; keep that limitation explicit.
-  The raster sequence also passes in portrait. An existing reference-layer test fails its iPad9 probe
-  but passes on a fresh 13-inch simulator (known geometry debt).
+- **(190) merged:** the owner’s transient-to-baked theory was confirmed. Commit writes the fill before
+  transferring its exact preview to the existing held-picture lane. Debug/Release 5089 each, four skips,
+  zero failures; touched classes 19/19 green. Missing handoff, early callback and false cancellation
+  mutations fail. Native iPad9 fill and onion-panel screenshots were inspected. Existing reference-layer
+  geometry fails on iPad9 and passes on fresh 13-inch. `MidGestureSampler` assumes portrait.
   Integration with (177) must clear the held fill model before its landing callback can mint a stream
   recipe, while keeping the old surface until the replacement is held (BUGS.md records the trace).
-- **(177):** Debug fast tier 5101, four skips, zero failures before rebasing onto `0ad03d2`; new UI class
-  four tests green. Logic and UI mutations exercised the stream sources, ordering and persistence.
-  Final Release and cleanup remain. Native landscape capture `/tmp/s49-stream-landscape.png` reviewed.
-- **(35):** 13 mutation batches and five feature/recovery UI tests complete; native landscape capture
-  `~/PaintWork/s49-mask-logs/mask-ipad9-controls-landscape.png` reviewed. Final Debug at 5103 exposed an
-  old partial-manifest fixture, now made current; that exposed a real move-to-colliding-folder title
-  inconsistency, being fixed through the existing rename writer. A timing red passed warm. Final
-  Debug/Release remain. At integration, add stream repair to `LibraryRepair.prepareForCurrentRead`.
+- **(177) ready:** clean `231b61b`, rebasing onto (190). Debug 5101 and Release 5102 (extra merged189
+  assertion), four skips and zero failures each. New UI class 4/4, production mutants red/restored,
+  actual prior-build package roundtrip and native landscape inspected. Root owns combined fill landing
+  and adding stream repair to `LibraryRepair.prepareForCurrentRead` after (35) lands.
+- **(35):** final source `deb168f`; 19 mutation batches restored, feature/recovery and filing UI green,
+  native landscape inspected. Strict staged restore exposed real package collision/queued-rename bugs,
+  now fixed through the existing serialized save queue with exact marker rollback. Final Debug was
+  interrupted; resumed Debug/Release are running (5107 selected). No repeated UI/mutation work needed.
+- **(178) started**, including linked in-between frames as ruled. Prepared constraints are in
+  `~/PaintWork/design/s49-liquify-constraints.md`. Keep the old `5d73184` Release app at
+  `/tmp/s49-onion-before-derived` until a genuine previous-build interpolation package is captured.
 
-Liquify (178) follows, **including linked in-between frames** (owner ruled 2026-10-14). The current reuse,
-format and validation constraints are in `~/PaintWork/design/s49-liquify-constraints.md`; earlier surveys
-are alongside it. Keep the old `5d73184` Release app at `/tmp/s49-onion-before-derived` until a genuine
-previous-build interpolation package has been captured for its format repair.
-The owner permits any useful agent count but prioritises usage conservation and output quality over
-speed. Keep delegation focused, use cheaper models for routine work, and report the queue occasionally.
-The owner is asleep until 10 a.m. Toronto time; defer further questions until then.
+The owner permits any useful agent count but prioritises usage conservation and quality over speed.
+Keep delegation focused and report the queue occasionally. It is now after the owner’s 10 a.m. return.
+**Owner saved the scene and unlocked the iPad on 2026-10-14 for probes.** Installed `7cf3245` only supports
+playback/edit/recolour/effect; unknown modes silently fall back to playback. Collect effect baselines
+now; opacity/shape/fill after-measurements require the updated build. Do not mislabel old-build probes.
 The full UI suite is owed on the integrated tree before the next install.
 
 **Build from `~/PaintWork`, not `~/Desktop`** (CLAUDE.md "Build and test", first paragraph).
@@ -66,7 +66,7 @@ before the next device install**, since ~70 merges landed without one.
 
 1. **TODO (179) is built** — only the owner's iPad `PlaybackProbe` run is owed (its last box).
    **(189) merged** at `8616532`: 100 onion-opacity ticks cause zero editor passes (previously 100);
-   Debug and Release fast tier 5087 each, 4 skipped, zero failures. **(190)** is in flight.
+   Debug and Release fast tier 5087 each, 4 skipped, zero failures. **(190)** merged at `e6b7d81`.
 2. **TODO (177)** — a stream layer drawn in place: one more consumer of (179)'s seam (a windowed
    recomposite of the layers above the stream per stream tick). Survey:
    `~/PaintWork/design/s48-survey-masks-stream-liquify.md` §B.
