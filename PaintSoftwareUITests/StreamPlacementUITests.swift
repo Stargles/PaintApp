@@ -61,21 +61,35 @@ final class StreamPlacementUITests: StreamUITestCase {
         setBrushSize(app, normalized: 0.1)
         let probe = paperPatch(canvas, paper, x: 0.42...0.58, y: 0.49...0.51)
         let before = readScreenNow(probe)
-        let crossingIndex = try XCTUnwrap(before.indices.first { isGuideBlue(before[$0]) },
-            "PREMISE: a Guide line crosses the middle of the In Place stream")
+        let crossingIndex = try XCTUnwrap(before.indices.first { index in
+            isGuideBlue(before[index]) && before.indices.contains { neighbour in
+                abs(probe[neighbour].y - probe[index].y) < 1
+                    && before[neighbour].map { Colour.red.matches($0) } == true
+            }
+        }, "PREMISE: a vertical Guide crosses a red row where held ink can be seen beside it")
         let crossing = probe[crossingIndex]
+        let inkIndex = try XCTUnwrap(before.indices.first { index in
+            abs(probe[index].y - crossing.y) < 1 && before[index].map { Colour.red.matches($0) } == true
+        })
+        let inkPoint = probe[inkIndex]
         let relativeY = (crossing.y - canvas.frame.minY) / canvas.frame.height
         let start = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: relativeY))
         let end = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: relativeY))
-        let held = samplesDuring([crossing], "Guide over stream-layer scratch") {
+        let held = samplesDuring([crossing, inkPoint], "Guide over stream-layer scratch") {
             start.press(forDuration: 0.3, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 4)
         }
         for sample in held.suffix(3) {
             XCTAssertTrue(isGuideBlue(sample.pixels.first ?? nil),
                 "the Guide is over the black scratch before lift: \(sample.pixels)")
+            XCTAssertTrue(sample.pixels[1].map { Colour.black.matches($0) } == true,
+                "held ink is visible beside the crossing: \(sample.pixels)")
         }
         XCTAssertTrue(isGuideBlue(readScreenNow([crossing]).first ?? nil), "the committed stroke keeps the same order")
+        XCTAssertTrue(readScreenNow([inkPoint]).first.flatMap { $0 }.map { Colour.black.matches($0) } == true,
+            "the landed composite retains the ink beside the Guide")
         attachScreenshot(XCUIScreen.main, "Guide remains above stream-layer ink")
+        print("S49 STREAM LANDSCAPE READY")
+        Thread.sleep(forTimeInterval: 3)
     }
 
     func testAnOverlappingOnTopStreamRemainsOverTheInPlaceWindow() throws {

@@ -128,9 +128,9 @@ extension CanvasManager {
     }
 
     /// **What the bar tells the artist about the picture they are looking at** — nil when there is
-    /// nothing to add. A stream is reference, so the document's grading never reaches it
-    /// (STREAM.md §2.13), and the two ways that shows are said in words rather than left to look like
-    /// a fault.
+    /// nothing to add. On Top draws reference plain; In Place opts into the display compositor.
+    /// Posed streams remain hidden in either mode. The bar explains these two limitations in words
+    /// (STREAM.md §2.13).
     enum StreamNote: Equatable {
         /// The canvas is the compositor's — a blend mode, mask, effect or container pose somewhere in
         /// the document — and the stream is drawn plain by its host: none of it applies to the
