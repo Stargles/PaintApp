@@ -58,11 +58,13 @@ Never harvest dirty worker files: mutations may be intentional.
   identity survives regrouping and cloned cels. Prior gestures affect only local edits already in
   their membership; later gestures capture newly drawn marks normally. Inverting older gestures for
   new local ink was rejected after the high-precision check showed it cannot preserve stored precision.
-  Typed vector objects are excluded; the old flattened-raster scope still needs the owner's answer.
+  The owner ruled all raster pixels move, including flattened pictures/text; separately editable
+  text, picture, video and stream objects remain untouched.
   - **Storage:** actual `5d73184`-written package retained with provenance. Retarget, resize and strict
     selection decoding (`ae58c7e`, `1fd073e`, `42ff0b1`) are integrated: 47/47 Debug, fourteen distinct
     faults caught in fifteen runs, restored 3/3; earlier storage pass sixteen faults red, restored 12/12.
-    Expanded fixtures `f9ecedb` are undergoing a 25-fault pass; do not copy dirty mutation files.
+    Expanded fixtures `f9ecedb`: all 25 distinct faults caught across 31 selected executions, restored
+    11/11 green. The fixture-only commit is ready to integrate; format worker simulator deleted.
   - **Lift and held pictures:** shared source `25791ab`/feature `c07406f` transfers the shown IOSurface
     and composes overlapping pending replacement windows. Independent expected-image oracle
     `86dd98c`/feature `71acf33` corrected a test that previously shared the broken list with production.
@@ -172,9 +174,9 @@ before the next device install**, since ~70 merges landed without one.
 Keep Full Precision continue resetting whenever a scene opens. (183)'s selection recolour no longer
 flickers on the iPad; the different two-fill flash is now (190). (178) includes linked in-between frames.
 
-**Liquify raster scope question pending:** old raster pixels no longer say whether they came from
-paint, pasted images or text. Ask whether to deform all raster pixels (excluding editable vector
-objects), or only the separate brush tier, which leaves some paint/fills/moved content unmoved.
+**Liquify raster scope ruled:** *"Move all raster pixels; leave editable objects alone."* This includes
+flattened pictures/text that old raster layers can no longer distinguish from paint. No implementation
+choice currently waits for the owner.
 
 **After the next install:**
 Once the next build has repaired his scenes and they look right: retire the one-shot repairs.

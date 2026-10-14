@@ -6,7 +6,7 @@ The owner's asks. [BUGS.md](BUGS.md) is for what *we* find.
 for genuinely required input or context degradation. Agent count is unrestricted for now; usage
 conservation and output quality take priority over speed. Use focused delegation and cheaper models
 for routine work, with occasional queue reports. The owner asked to work independently while asleep until 10 a.m. Toronto time; that time has now
-passed. One raster-scope question remains pending below.
+passed. Raster scope is now ruled below; no implementation decision is awaiting the owner.
 
 ## How to read and keep this file
 
@@ -142,11 +142,10 @@ recipe-owned rest-space displacement field, never per-vertex offsets or `localEd
 alongside the editable-drawing tool. The session-48 survey's proposed refusal of derived frames is
 superseded by this ruling.
 
-**Implementation constraint found 2026-10-14:** old raster cels mix imported pictures/text, fills and
-moved paint in `bakedImage`, without origin/type information. Typed vector objects can be excluded
-exactly; old flattened raster content cannot. Owner choice pending: move all raster pixels while
-leaving typed objects alone, or only the separate brush tier (which leaves some ordinary painted
-areas unmoved). Continue vector/linked/settings work while this is decided.
+**Raster scope ruled 2026-10-14:** *"Move all raster pixels; leave editable objects alone."* Old raster
+cels mix imported pictures/text, fills and moved paint in `bakedImage`, without origin/type information.
+Liquify therefore moves every raster pixel in the active layer, including that flattened content;
+separately editable text, picture, video and stream objects remain untouched.
 
 **Validation in progress (2026-10-14):** the first direct-displacement map folds under strong hard
 and patterned brushes; actual raster pictures show stationary streaks and holes. Replace that map
