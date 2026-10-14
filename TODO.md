@@ -171,8 +171,13 @@ deformation along, preserving its source identity and geometry rather than leavi
 An unreadable saved selection archive must fail current decoding, never become an unrestricted field.
 Prepared native-tip sampling preserves every raster byte but still costs 13.592 seconds for the
 84,956-pixel patterned window in isolated Release. Remove production-only diagnostic work first;
-probe adaptive forward/reverse integration of the same continuous brush velocity outside shipping
-code if necessary, measuring source error, sample counts and pictures before changing field semantics.
+The bounded continuous-flow experiment is complete: loose integration saves field evaluations but
+changes the map; tighter integration loses the saving. Keep the current verified map pending the
+production-only measurement (evidence: `~/PaintWork/evidence/s49-liquify-flow-prototype/README.md`).
+Finger lift currently resolves geometry and rasterizes the edit again on main. Reuse the finished
+procedural result and transfer its shown surface through the existing unlanded-picture lane; if the
+last tick is still drawing, finish it through the same LatestWins pipeline. Preserve document/undo
+ordering when another stroke begins before that final picture lands.
 
 - [ ] Liquify on raster and vector, including linked generated in-betweens, three modes, one undo step per stroke.
 

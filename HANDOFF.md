@@ -71,8 +71,11 @@ Never harvest dirty worker files: mutations may be intentional.
   Root's isolated `tmp/s49-liquify-cost` prepares brush data and searches indexed bins directly;
   byte-identical raster comparison passed for both brushes; isolated Release is 2.639 s hard and
   13.592 s patterned, with a 6,540,296-byte full-sweep field. Production diagnostic removal is next;
-  an isolated continuous-flow prototype may address the remaining raster cost without a second
-  renderer. No change to field semantics is accepted before source-error and image evidence. Linked-frame
+  the bounded continuous-flow experiment is complete with no adoption recommendation: the cheaper
+  variant changes the map, and tightening accuracy removes its cost advantage. Evidence is under
+  `~/PaintWork/evidence/s49-liquify-flow-prototype/`. The next shared rendering change reuses finished
+  procedural geometry and transfers the shown IOSurface on lift, retaining LatestWins and safe
+  document/undo ordering. Linked-frame
   cold-reopen pixel comparison needs a canonical saved/reopened seed (first save quantizes ordinary
   source strokes); raster scope still awaits the owner's answer. No Liquify code is merged yet.
 
