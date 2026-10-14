@@ -27,7 +27,7 @@ unmerged work. (189) is merged at `8616532`, and (190) at `e6b7d81`. Active task
   geometry fails on iPad9 and passes on fresh 13-inch. `MidGestureSampler` assumes portrait.
   Integration with (177) must clear the held fill model before its landing callback can mint a stream
   recipe, while keeping the old surface until the replacement is held (BUGS.md records the trace).
-- **(177) ready:** clean `231b61b`, rebasing onto (190). Debug 5101 and Release 5102 (extra merged189
+- **(177) merged** at `4d396c6`. Debug 5101 and Release 5102 (extra merged189
   assertion), four skips and zero failures each. New UI class 4/4, production mutants red/restored,
   actual prior-build package roundtrip and native landscape inspected. Root owns combined fill landing
   and adding stream repair to `LibraryRepair.prepareForCurrentRead` after (35) lands.
@@ -43,7 +43,8 @@ The owner permits any useful agent count but prioritises usage conservation and 
 Keep delegation focused and report the queue occasionally. It is now after the owner’s 10 a.m. return.
 **Owner saved the scene and unlocked the iPad on 2026-10-14 for probes.** Installed `7cf3245` only supports
 playback/edit/recolour/effect; unknown modes silently fall back to playback. Collect effect baselines
-now; opacity/shape/fill after-measurements require the updated build. Do not mislabel old-build probes.
+now completed:100 effect ticks produced9 held pictures at4096² and100 at2048×1024 (PERFORMANCE §30.6).
+Opacity/shape/fill after-measurements require the updated build. Do not mislabel old-build probes.
 The full UI suite is owed on the integrated tree before the next install.
 
 **Build from `~/PaintWork`, not `~/Desktop`** (CLAUDE.md "Build and test", first paragraph).

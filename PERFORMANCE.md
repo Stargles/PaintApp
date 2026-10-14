@@ -6284,3 +6284,24 @@ bakes, onion pictures, playback and exports keep reference out.
 On Top remains the default plain host behavior. Mixed placement puts its host over the In Place
 window. Posed stream cels still hide their reference, including a held pose. Device throughput and
 render-server cost have not been measured for this new mode.
+
+
+### 30.6. Physical iPad baseline before the queued build (2026-10-14)
+
+**MEASURED**, owner’s iPad9 (`iPad12,1`, iOS26.6.2), installed Release `7cf3245`
+(build stamp2026-10-13T11:56:24Z). Owner saved the scene and unlocked the device. `tools/probe-run.sh`
+ran `-probeMode effect`, five layers, two frames, 100 ticks80ms apart, onion on,
+`-probeBudgetBytes 201326592`. Both initial bakes completed; each process exited0 with no failed bakes.
+This build predates half-detail previews; its probe supports only playback/edit/recolour/effect.
+Unknown modes silently select playback, so opacity/shape/fill must wait for the updated build.
+
+| Canvas | Held preview composites during100 changes | Editor passes (whole measured run) | Bake composites (whole run) | App footprint growth / peak |
+| --- | ---: | ---: | ---: | ---: |
+| 4096×4096 | 9 | 2 | 1 | 612MB /1541MB |
+| 2048×1024 | 100 | 2 | 2 | 119MB /304MB |
+
+The whole-run counts include opening/closing the hold and final bake; they are not per-tick publishes.
+These are one take per size, not an after-build comparison. Reports are preserved at
+`~/PaintWork/s49-device-probes/playback-s49-7cf3245-effect-4096-20261014-103113.json` and
+`playback-s49-7cf3245-effect-2048x1024-20261014-103217.json`. Re-run the matching effect fixture and
+new opacity/shape/fill modes after the integrated build is validated and can be signed for installation.

@@ -112,7 +112,8 @@ why: pictures handed to Core Animation faster than the render server frees them)
       (§32), the brush colour (§33.1) and the fill slider (§34.1). **Owed: the iPad itself** — the probe's
       `effect`, `opacity`, `shape` and `fill` modes on the owner's device. Owner saved the scene and
       unlocked it 2026-10-14. Installed `7cf3245` supports only the effect baseline; the other three
-      modes need an updated build (unknown modes in that build silently run playback).
+      modes need an updated build (unknown modes in that build silently run playback). Physical effect
+      baseline completed at4096² and2048×1024, PERFORMANCE §30.6; after-build checks remain.
 
 ## (35) Advanced masks — colour masks beside the alpha mask
 
