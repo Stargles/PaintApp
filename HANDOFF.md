@@ -86,7 +86,9 @@ Never harvest dirty worker files: mutations may be intentional.
     Required behavior question is pending: A moves whole brush marks; B keeps all outside pixels
     fixed and needs a 2D material representation to keep vectors editable. No material schema is
     chosen. Comparison: `~/PaintWork/evidence/s49-liquify-selection-options-native-spacing/comparison.png`.
-    Fixture checkpoint `99ef7c8`; current vector/linked/profile UI is running independently.
+    Fixture checkpoint `99ef7c8`; current vector/linked/profile UI passed 3/3 on `57d8247`.
+    The canonical linked fixture reopens with zero changed sampled bits, then follows later source
+    ink. Screenshots inspected under `~/PaintWork/evidence/s49-liquify-ui-current/`.
     Evidence: `~/PaintWork/evidence/s49-liquify-curved-selection/` and `s49-liquify-target-phase/`.
   - **Raster cost:** the original direct map folded under strong brushes; bounded reversible Euler
     steps replaced it. Prepared brush data/indexed bins and removal of a diagnostic forward pass keep
@@ -110,8 +112,12 @@ Never harvest dirty worker files: mutations may be intentional.
     flattened backing on a vector cel; typed editable objects stay unchanged. The raster worker owns
     the shared cel-content window generalization, one-producer resolution, atomic mixed history,
     drawn-pixel/undo/reopen tests. Reuse one window presenter rather than parallel vector/raster lanes.
-  - **Still owed:** target material-phase fix, raster completion, feature mutations, canonical saved/reopened linked UI
-    seed (first ordinary save quantizes strokes), pending edit/undo/save and rapid overlapping previews,
+    Reading exposed a backing-pose mismatch: `LayerHostView.shownPose` leaves `bakedImageView` unposed
+    although `PixelOps` poses it. Align its origin-based layout and replacement hole with the shared
+    pose, and verify actual translated/scaled/rotated pixels. Its current center anchor cannot simply
+    receive the fill plane's origin-based transform.
+  - **Still owed:** target material-phase fix, raster completion, feature mutations,
+    pending edit/undo/save and rapid overlapping previews,
     native iPad9 UI, final Debug/Release fast tiers, final audit and integrated full UI run.
 
 The owner permits any useful agent count but prioritises usage conservation and quality over speed.
