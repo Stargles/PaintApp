@@ -6,7 +6,7 @@ The owner's asks. [BUGS.md](BUGS.md) is for what *we* find.
 for genuinely required input or context degradation. Agent count is unrestricted for now; usage
 conservation and output quality take priority over speed. Use focused delegation and cheaper models
 for routine work, with occasional queue reports. The owner asked to work independently while asleep until 10 a.m. Toronto time; that time has now
-passed. Raster scope is now ruled below; no implementation decision is awaiting the owner.
+passed. Raster scope is ruled below; a visible vector selection-edge comparison is being prepared.
 
 ## How to read and keep this file
 
@@ -192,6 +192,11 @@ A local Push on a long patterned target stroke currently re-phases stamps beyond
 placement through the shared rest-walk/stamping seam; expanding the preview alone would merely show
 the unintended distant change. Curved selection limits also require the same geometric boundary for
 containment and the edge taper; the certified-curve correction is in focused validation.
+The compact material-retention proposal keeps each vector brush mark's original appearance and moves
+it by its spine site's displacement. A wide/scattered mark anchored inside a selection can therefore
+carry painted pixels beyond the selection boundary. Exact fixed exterior pixels require spatial
+material deformation instead. Render a native comparison of those behaviors and obtain the owner's
+choice before committing the material representation; the raster path already fixes exterior pixels.
 
 - [ ] Liquify on raster and vector, including linked generated in-betweens, three modes, one undo step per stroke.
 

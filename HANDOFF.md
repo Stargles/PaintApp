@@ -18,7 +18,8 @@ is what we find.
 **Session 49 is in flight.** The verified starting point was `5d73184`; no prior `tmp/*` branch held
 unmerged work. (189) is merged at `8616532`, and (190) at `e6b7d81`. Active task branches under
 `~/PaintWork/` are `tmp/s49-liquify` (178), `tmp/s49-liquify-format` (isolated storage validation),
-and `tmp/s49-liquify-inverse` (same-map inverse validation).
+`tmp/s49-liquify-inverse` (same-map inverse validation), and `tmp/s49-liquify-raster` (the now-ruled
+raster/mixed cel path).
 The integration, Fog Glow and coordination trees are retained for evidence and final regression work.
 Never harvest dirty worker files: mutations may be intentional.
 
@@ -64,7 +65,8 @@ Never harvest dirty worker files: mutations may be intentional.
     selection decoding (`ae58c7e`, `1fd073e`, `42ff0b1`) are integrated: 47/47 Debug, fourteen distinct
     faults caught in fifteen runs, restored 3/3; earlier storage pass sixteen faults red, restored 12/12.
     Expanded fixtures `f9ecedb`: all 25 distinct faults caught across 31 selected executions, restored
-    11/11 green. The fixture-only commit is ready to integrate; format worker simulator deleted.
+    11/11 green. The fixture-only commit is ready to integrate; format worker simulator deleted. That worker now
+    owns the isolated raster task.
   - **Lift and held pictures:** shared source `25791ab`/feature `c07406f` transfers the shown IOSurface
     and composes overlapping pending replacement windows. Independent expected-image oracle
     `86dd98c`/feature `71acf33` corrected a test that previously shared the broken list with production.
@@ -78,6 +80,9 @@ Never harvest dirty worker files: mutations may be intentional.
     changed exterior bytes. A new fixture found **2,904 changed alpha pixels well outside a local
     Push** on a 960-point Streaky target stroke: moving its spine changes the downstream stamp phase.
     This must be fixed at the existing rest-walk/stamping seam, not hidden by a wider preview window.
+    Compact retained-parent/site correspondence is the candidate. A wide/scattered stamp can overhang
+    a selection even when its anchor is inside; the worker is preparing a native A/B against strict
+    pixel-boundary deformation before choosing that visible behavior with the owner.
     Evidence: `~/PaintWork/evidence/s49-liquify-curved-selection/` and `s49-liquify-target-phase/`.
   - **Raster cost:** the original direct map folded under strong brushes; bounded reversible Euler
     steps replaced it. Prepared brush data/indexed bins and removal of a diagnostic forward pass keep
@@ -89,10 +94,17 @@ Never harvest dirty worker files: mutations may be intentional.
     cost; exact lookup/SIMD trials had no reliable gain. Continuous-flow integration changes the map
     or loses its saving at higher accuracy. Neither experiment is adopted. Same-Euler inverse
     acceleration cuts the horizontal fixture's evaluations by 38.43% with identical RGBA; the isolated
-    inverse branch is validating other Push directions, grain and selections before adoption.
+    native Release validation passed 7/7: 18 signed/diagonal/pattern/grain/selection fixtures have
+    identical RGBA and zero source failures. Hard-window evaluations fall to 48,236,266; patterned
+    to 179,020,536. Temporary oracle removal and restored checks remain before adoption. Timings were
+    not paired, so claim evaluation savings, not a speed ratio.
     Evidence: `~/PaintWork/s49-liquify-profile/`, `~/PaintWork/evidence/s49-liquify-sampler/`,
     `s49-liquify-flow-prototype/`, and `s49-liquify-inverse-acceleration/`.
-  - **Still owed:** target material-phase fix, feature mutations, canonical saved/reopened linked UI
+  - **Raster:** ordinary raster hold/commit was absent. The owner ruled all pixels move, including
+    flattened backing on a vector cel; typed editable objects stay unchanged. The raster worker owns
+    the shared cel-content window generalization, one-producer resolution, atomic mixed history,
+    drawn-pixel/undo/reopen tests. Reuse one window presenter rather than parallel vector/raster lanes.
+  - **Still owed:** target material-phase fix, raster completion, feature mutations, canonical saved/reopened linked UI
     seed (first ordinary save quantizes strokes), pending edit/undo/save and rapid overlapping previews,
     native iPad9 UI, final Debug/Release fast tiers, final audit and integrated full UI run.
 
@@ -175,8 +187,7 @@ Keep Full Precision continue resetting whenever a scene opens. (183)'s selection
 flickers on the iPad; the different two-fill flash is now (190). (178) includes linked in-between frames.
 
 **Liquify raster scope ruled:** *"Move all raster pixels; leave editable objects alone."* This includes
-flattened pictures/text that old raster layers can no longer distinguish from paint. No implementation
-choice currently waits for the owner.
+flattened pictures/text that old raster layers can no longer distinguish from paint. A separate thick-vector selection-edge comparison is being prepared before a behavior choice.
 
 **After the next install:**
 Once the next build has repaired his scenes and they look right: retire the one-shot repairs.
