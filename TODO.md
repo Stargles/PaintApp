@@ -112,32 +112,6 @@ why: pictures handed to Core Animation faster than the render server frees them)
       (§32), the brush colour (§33.1) and the fill slider (§34.1). **Owed: the iPad itself** — the probe's
       `effect`, `opacity`, `shape` and `fill` modes on the owner's device.
 
-## (190) Starting a second fill briefly flashes the first fill
-
-**Status** — reported 2026-10-14 after the owner confirmed (183)'s recolour flicker is gone.
-
-*"when I fill one place, then fill another place, the first place briefly flickers once. I believe this
-is because it is getting baked from the transient state. It is minor though and should be a simple fix
-(i think)."*
-
-Test the owner's transient-to-bake handoff theory first. Preserve the first fill's displayed picture
-until its committed replacement has landed; use the existing fill/surface presentation lifecycle,
-without a second holding path or timing delay.
-
-**Integration check, 2026-10-14:** (177)'s stream display can mint synchronously during (190)'s
-landing callback. Clear the held model value before transferring its picture, then notify the
-canvas to remove the old surface. Otherwise that mint sees the committed fill and its live overlay
-together, darkening translucent fills. Pin the combined boundary before merging the integration.
-
-- [ ] Reproduce with two successive fills; fix the cause and pin the visible handoff with a cold-start UI test.
-  The seeded pre-fix path fails the transition UI assertion in portrait at `55a1795`: the first filled
-  region is visible before the second tap, then at least one 50 ms sample loses it while the 300 ms
-  background vector-render delay is active. The earlier landscape sample was invalid because
-  `MidGestureSampler` reads portrait screenshot coordinates. The seed delays the background render queue,
-  not the main thread. A logic test now exercises the real `commitInteractiveFill` boundary: the vector
-  version or raster texture must already be replaced while `liveFill` remains present for handoff; a
-  cancelled fill and empty commit must not announce a landing.
-
 ## (177) A stream layer can draw in place in the layer stack
 
 **Status** — asked 2026-10-12.
