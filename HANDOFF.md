@@ -25,33 +25,41 @@ unmerged work. (189) is merged at `8616532`, and (190) at `e6b7d81`. Active task
   zero failures; touched classes 19/19 green. Missing handoff, early callback and false cancellation
   mutations fail. Native iPad9 fill and onion-panel screenshots were inspected. Existing reference-layer
   geometry fails on iPad9 and passes on fresh 13-inch. `MidGestureSampler` assumes portrait.
-  Integration with (177) must clear the held fill model before its landing callback can mint a stream
-  recipe, while keeping the old surface until the replacement is held (BUGS.md records the trace).
+  The combined stream landing correction below clears the held fill before a new stream recipe
+  is minted, while keeping the old surface until the replacement is held.
 - **(177) merged** at `4d396c6`. Debug 5101 and Release 5102 (extra merged189
   assertion), four skips and zero failures each. New UI class 4/4, production mutants red/restored,
-  actual prior-build package roundtrip and native landscape inspected. Root owns combined fill landing
-  and adding stream repair to `LibraryRepair.prepareForCurrentRead` after (35) lands.
+  actual prior-build package roundtrip and native landscape inspected. Combined fill landing and staged backup repair are validated below; the integration fast tiers
+  remain the merge gate.
 - **(35) merged** at `b625710`: Debug and Release at `deb168f` each ran 5107 tests,
   5103 passed and four skipped. Nineteen mutation batches restored, feature/recovery and filing UI
   green, native landscape inspected. Strict staged restore exposed package collision/queued-rename
   bugs, fixed through the existing serialized save queue with exact marker rollback. Rebased census
   is 5124 fast / 5692 overall; the combined tiers remain root’s integration check.
-- **Fill/stream integration** is implemented and focused UI validated on `tmp/s49-integration`.
-  The old ordering produces a visible double coat (red 126→64→126); restored ordering stays at one.
-  The whole class had one menu setup failure; its unchanged isolated retry passed. The branch also
-  adds stream repair to staged restore and rejects malformed present stream records before replacing
-  live artwork; actual previous-build snapshot checks are in progress.
-- **Fog Glow** correction at `tmp/s49-fogglow` converts to the existing equivalent Bloom before
-  scaling the rendering radius. Focused pixel/UI/mutation validation is in progress; not yet merged.
+- **Fill/stream integration** is validated on `tmp/s49-integration`: clear the held model before
+  transferring the committed fill picture, then release the old surface. Reverting the order produces
+  a visible second coat (red 126→64→126); restored ordering stays at one. Four staged-restore mutations
+  fail: actual previous-build stream backups restore through a repaired copy, original snapshot bytes
+  remain pristine, and malformed present stream metadata cannot replace healthy artwork. Repair
+  retains only drawing paths and validates/rewrites one file at a time. The combined touched classes
+  passed 21/21 on an erased simulator; two earlier Guide-menu setup failures did not recur with the
+  same preceding tests. No menu workaround was added.
+- **Fog Glow** is integrated through `840d68a`: convert to the existing equivalent Bloom before scaling
+  its render radius. Dimensionless Size was never scaled, so every size widened in half-detail.
+  Focused logic/UI 3/3 green; reverting the fix fails actual pixels at Size 2 and 6 and during a held
+  slider drag. Comparison panels and native iPad9 landscape were viewed. Combined Debug/Release tiers
+  and the integrated Glare UI class are now running.
 - **(178) started**, including linked in-between frames as ruled. Prepared constraints are in
-  `~/PaintWork/design/s49-liquify-constraints.md`. Keep the old `5d73184` Release app at
-  `/tmp/s49-onion-before-derived` until a genuine previous-build interpolation package is captured.
+  `~/PaintWork/design/s49-liquify-constraints.md`. A genuine previous-build linked-frame package was captured from the preserved `5d73184` Release
+  app and checked into the Liquify branch with provenance. Focused baseline at `3ea3165` is 64/64
+  (24 feature, 12 repair, 28 model). Storage mutations run in their own tree; artist-path tests,
+  rendered inverse-map checks and realistic stroke memory checks are in progress.
 
 The owner permits any useful agent count but prioritises usage conservation and quality over speed.
 Keep delegation focused and report the queue occasionally. It is now after the owner’s 10 a.m. return.
 **Owner saved the scene and unlocked the iPad on 2026-10-14 for probes.** Installed `7cf3245` only supports
-playback/edit/recolour/effect; unknown modes silently fall back to playback. Collect effect baselines
-now completed:100 effect ticks produced9 held pictures at4096² and100 at2048×1024 (PERFORMANCE §30.6).
+playback/edit/recolour/effect; unknown modes silently fall back to playback. Physical effect baselines
+are complete: 100 ticks produced 9 held pictures at 4096² and 100 at 2048×1024 (PERFORMANCE §30.6).
 Opacity/shape/fill after-measurements require the updated build. Do not mislabel old-build probes.
 The full UI suite is owed on the integrated tree before the next install.
 
@@ -73,7 +81,7 @@ before the next device install**, since ~70 merges landed without one.
 
 ## What is next
 
-1. **TODO (179)** — finish Fog Glow preview validation and combined fill/stream checks, then the
+1. **TODO (179)** — finish the combined integration fast tiers, then the
    owner's iPad `PlaybackProbe` after-measurements on an updated build.
    **(189) merged** at `8616532`: 100 onion-opacity ticks cause zero editor passes (previously 100);
    Debug and Release fast tier 5087 each, 4 skipped, zero failures. **(190)** merged at `e6b7d81`.
@@ -129,12 +137,8 @@ flickers on the iPad; the different two-fill flash is now (190). (178) includes 
 paint, pasted images or text. Ask whether to deform all raster pixels (excluding editable vector
 objects), or only the separate brush tier, which leaves some paint/fills/moved content unmoved.
 
-**Questions to ask after 10 a.m. Toronto time (plain language, with options):**
-1. (179) Fog Glow premise corrected: `drawingPixelLengths` recognises only pixel-unit controls;
-   dimensionless `glare.size` is never scaled, so every size doubles in half-detail. Root is verifying
-   scaling its equivalent Bloom radius in the render recipe, preserving Size’s saved range. This
-   follows the existing same-picture rule; no new appearance choice is needed if rendered A/B agrees.
-2. Once the next build has repaired his scenes and they look right: retire the one-shot repairs.
+**After the next install:**
+Once the next build has repaired his scenes and they look right: retire the one-shot repairs.
    First run a final repair build with a new signature so the preceding build's preserved preupdate
    snapshots are also converted; verify all library packages decode before removing repair code.
    This keeps old snapshots usable without a permanent legacy decoder. Delete `LegacyToolSettingsRepair`
