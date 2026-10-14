@@ -1,31 +1,4 @@
-## Restoring an untouched update snapshot copies an old format into the live scene (2026-10-14)
-
-`restoreBackup` checks file presence through `ManifestSkeleton`, which intentionally ignores tools,
-poses and mask fields. A snapshot taken before the one-shot repairs passes that check, is copied over
-the live scene, and then fails the current strict decoder. The live scene has already moved to Trash.
-Restore must repair a staged copy through the existing one-shot repairs and strictly decode its
-manifest before moving the live scene. The original snapshot stays byte-for-byte untouched.
-
 # Known Issues
-
-## A filing move refuses a scene opened in this process (2026-10-14)
-
-The new collision rename helper used the launch-repair gate, which deliberately refuses every
-package ever loaded or saved in the process. A just-drawn scene therefore cannot move from the
-gallery. Explicit artist moves must serialize with saves, follow the project's latest URL and
-record the landing through the open-document rename gate; clearing the open registry is unsafe.
-
-
-
-## Moving or restoring onto an occupied project name leaves the gallery title behind (2026-10-14)
-
-A complete current-format folder fixture exposed this: `moveProject` gives the incoming package the
-free filename `Rough 2.paintproj`, but its manifest still names it `Rough`, so both gallery tiles read
-`Rough`. Collision restores from Trash use the same directory-only move and can announce a new name
-that the tile does not show. Keep one metadata-and-package rename path, preserve the project and its
-backup history, and refuse a metadata-write failure before moving either package.
-A refused Trash move must also restore the exact prior backup marker bytes or absence; its
-timestamped source filename is not the original live-project marker.
 
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.

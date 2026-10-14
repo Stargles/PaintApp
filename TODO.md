@@ -121,36 +121,6 @@ why: pictures handed to Core Animation faster than the render server frees them)
       modes need an updated build (unknown modes in that build silently run playback). Physical effect
       baseline completed at4096² and2048×1024, PERFORMANCE §30.6; after-build checks remain.
 
-## (35) Advanced masks — colour masks beside the alpha mask
-
-**Status** — implementation in session 49: colour membership shares Recolour’s Oklab keys and editor;
-tuning is saved per mask and held off the scene during a drag. Existing packages receive a one-shot repair.
-
-The original ask (2026-09-01): *"right now we have alpha masks. I like the idea of more advanced masks.
-This includes the ability to mask specific sets of colours (with a deviation threshold range), and a new
-special blend mode called colour reassign, where you can select colours and reassign them to other
-colours of your choosing (you can recolour your drawings)."*
-
-2026-10-12: *"The idea I sort of have is that it is sort of like the recolour, where you can set specific
-colors as the mask. The previous alpha mask feature should also still be present. This probably will
-have a lot of overlapping code with that feature, so follow good architecture protocols."*
-
-**What is already built**: the colour-reassign half shipped as the Recolour effect (`Effect.recolor`,
-TODO (60)), so the colour mask is what is owed.
-
-**Ruled 2026-10-12**: the colour mask looks for the chosen colours **on the ticked layers**, exactly as
-today's alpha mask reads their ink. Proposed and not objected to: one mask, not a second kind —
-`AlphaMask` gains an optional colour list (Recolour's colour key, tolerance and eyedropper picking,
-shared rather than copied); with no colours picked it is today's alpha mask, and picking colours narrows
-it to those colours. The survey is `~/PaintWork/design/s48-survey-masks-stream-liquify.md` §A (four
-colour-distance definitions exist; the mask uses Recolour's; per-pixel Oklab wants memoising per value).
-
-- [ ] Mask tuning (threshold, antialias) becomes **per mask** — the owner on 2026-10-12 — replacing
-      `MaskResolver`'s process-wide statics — and its sliders preview live through (179)'s held slot and
-      lane F (the assessment's commit 7, moved here so the per-mask value is what is held).
-- [ ] Built on the existing mask and recolour modules rather than beside them.
-- [ ] After (179), which touches mask tuning's per-tick path.
-
 ## (178) Liquify tool
 
 **Status** — asked 2026-10-12.
