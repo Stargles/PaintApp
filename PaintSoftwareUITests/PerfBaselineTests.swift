@@ -3420,8 +3420,9 @@ final class PerfBaselineTests: XCTestCase {
             return measuringPeakMemory {
                 autoreleasepool {
                     for index in manager.layers.indices {
-                        _ = PixelOps.rasterize(cel: manager.layers[index].cels[0],
-                                               canvasSize: Self.ownersCanvasSize).cgImage
+                        let rendered = PixelOps.rasterize(cel: manager.layers[index].cels[0],
+                                                          canvasSize: Self.ownersCanvasSize)
+                        XCTAssertNotNil(rendered?.cgImage, "the serial snapshot oracle must render its required source")
                     }
                 }
             }.seconds

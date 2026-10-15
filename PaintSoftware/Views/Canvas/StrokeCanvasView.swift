@@ -1073,9 +1073,13 @@ final class StrokeCanvasView: CanvasPlaneView {
             case .rasterize(let version):
                 if waitingForTheRender {
                     pendingVectorRenderVersion = nil
+                    guard let rendered = PlaybackTrace.span(.vectorRasterize, { vectorCanvas.render() }) else {
+                        showOverlays(plan.showsScratchLayer ? scratch : nil)
+                        return
+                    }
                     displayedVectorVersion = version
                     shownVectorVersion = version
-                    base = PlaybackTrace.span(.vectorRasterize) { vectorCanvas.render() }
+                    base = rendered
                     installedRevision = currentRevision
                 } else {
                     pendingVectorRenderVersion = version
@@ -1140,8 +1144,7 @@ final class StrokeCanvasView: CanvasPlaneView {
     private func finishVectorRender(_ image: UIImage?, of canvas: VectorCanvas, atVersion version: Int, covering revision: Int) {
         // A different canvas is a different layer; this view has moved on and owes it nothing.
         guard canvas === vectorCanvas else { return }
-        // Nil is a rasterize that never ran — `render(quality:ifStillAtVersion:)` found the canvas
-        // already past `version` before walking anything — so there is no picture to be a frame.
+        // Nil is a superseded or refused rasterize; neither can replace the displayed picture.
         // The same plan `refreshDisplay` reads: while a derived picture owns the base slot this
         // render has nowhere to land, and the `.refuse` branch below re-plans rather than stomping
         // it — `DeferredVectorRender.landing`'s `baseIsDerived`.
@@ -1154,14 +1157,11 @@ final class StrokeCanvasView: CanvasPlaneView {
                                            shown: shownVectorVersion, hostIsBlanked: hostIsBlanked,
                                            baseIsDerived: plan.base == .interpolation)
         guard let image, landing != .refuse else {
-            // Two ways to be here. **Superseded**: a newer rasterize is already running and will
-            // land, so leave `pendingVectorRenderVersion` naming it and do nothing. **The canvas
-            // moved with nothing running for the new version**: the request this view is waiting on
-            // can never be shown, so drop it and ask again — otherwise the base stays at whatever
-            // was up until some unrelated edit happens to refresh it.
+            // A newer version needs a new request. Refusal at the same version retains the old
+            // picture and waits for the next natural refresh, rather than retrying in a tight loop.
             if pendingVectorRenderVersion == version {
                 pendingVectorRenderVersion = nil
-                refreshDisplay()
+                if canvas.version != version { refreshDisplay() }
             }
             return
         }

@@ -63,10 +63,13 @@ signature so preserved preupdate snapshots are also converted.
 **(178) Liquify: active ownership and evidence**
 
 Main is `17b438c`; Liquify remains unmerged. Root candidate `tmp/s49-integration`
-combines material `72f686f`, raster `acc9b02`, sampler `effb239`, the named-gallery helper correction,
+combines material `72f686f`, raster `ae40f66`, sampler `effb239`, the named-gallery helper correction,
 and exact inverse batching. Harvest only clean worker commits; the next raster delta starts at
-`acc9b02`. The live synchronous view refusal assertion is intentionally still red on that worker
-checkpoint; its focused fix and restored proof are next. Preserve current main documentation rather than importing workers' historical copies.
+`ae40f66`. Shared required-picture failures now retain the prior live picture and avoid immediate
+same-version retry loops. The attempted headless view assertion could not compile because that view
+is not in the logic target; it was removed, never counted as a native proof. Material is reviewing
+the view guard; raster is running the restored consumer logic and eraser UI. Preserve current main
+documentation rather than importing workers' historical copies.
 
 - **Root integration and exact batching.** Existing `PixelOps.parallelMap` fans out disjoint point
   batches and raster row strips over a shared immutable prepared field. Scalar arithmetic, global
@@ -77,7 +80,7 @@ checkpoint; its focused fix and restored proof are next. Preserve current main d
   raster fault launch ran zero tests and is explicitly excluded. The restored opt-in Debug run was
   cancelled after the18-fixture benchmark passed and four hard/one patterned actual windows matched
   every reference byte. Debug patterned batches took202.6s versus scalar90.9s; this is a real Debug
-  slowdown, not a shipped-speed claim. Release build-for-testing is active; batching acceptance
+  slowdown, not a shipped-speed claim. Release correctness is green; batching acceptance
   depends on its optimized actual-producer measurement. The cancelled run is not4/4 qualification.
   Evidence: `~/PaintWork/s49-liquify-logs/combined/batches/`. External matching C++ batches were faster
   in four alternating pairs, but native Release and device costs remain unqualified.
@@ -97,7 +100,7 @@ checkpoint; its focused fix and restored proof are next. Preserve current main d
   native warm/cold costs and numerical limits. First simulator window cost523ms included initial Metal
   engine/pipeline access; actual app/device first use remains. External qualification complete; worker
   owns no simulator job. Evidence: `~/PaintWork/s49-liquify-logs/raster/sampler/QUALIFICATION.md`.
-- **Raster — `raster_resume`, current checkpoint `3e2c1f1`, source `ccdd286`.** Shared settlement
+- **Raster — `raster_resume`, current checkpoint `ae40f66`.** Shared settlement
   reports success through every mutation/save boundary; refused edits retain state and do not close
   the scene. Required source failures propagate, nested rollback is atomic, transformed scratch
   opacity is preserved. Restored109/109 passed; two final adapter faults reproduced eight intended
@@ -105,9 +108,10 @@ checkpoint; its focused fix and restored proof are next. Preserve current main d
   root inspected all three correctly oriented1080×810pt pictures. XCTest app-cropped attachments
   were malformed, not the UI. A new pre-fix method failed19 intended assertions: full/fitted frozen
   rendering, thumbnails/onions, a posed provider and destructive merge hide required render refusal.
-  Worker is removing that non-fallible contract through existing PixelOps callers, preserving prior
-  thumbnails/onions and refusing destructive copy operations. Material is checking related derived
-  render availability/failure semantics. No duplicate renderer or empty fallback is permitted.
+  That non-fallible contract is now removed through existing PixelOps callers, preserving prior
+  thumbnails/onions and refusing destructive copy operations. Existing success tests explicitly
+  unwrap required renders. Compile-only adaptation attempts ran no tests and are excluded; restored
+  110 logic plus five raster UI methods are in progress, followed by the deliberate fallback fault.
 - **Storage/model completed.** `52eda39` storage: Debug115/115, seven fault groups/nine failed
   executions/46 diagnostics, restored18/18; genuine prior-format producer `840d68a`, nine unchanged
   provenance hashes. Model `afef15c`: five fault groups/14 failed executions across13 methods,
@@ -120,8 +124,8 @@ that opt-in and skipped it; do not report that run alone as complete. No optimiz
 
 **Native queue:** the owner is using the Mac and will notify when finished; performance measurement
 is deferred. Root Release build succeeded; slot2, simulator `80BE77F5-9118-4CDD-854D-07C3E9A9009B`,
-will run restored correctness only. No performance timing run has begun. Raster owns slot1 for optional-API compilation; material
-helps adapt existing test success premises, with production edits owned solely by raster. After final raster integration: recount,
+will run the three Liquify UI methods. No performance timing run has begun. Raster owns slot1 for
+restored consumer logic/UI; material reviews the live view guard, with production edits owned solely by raster. After final raster integration: recount,
 lints, fast Debug/Release, quiet actual-producer Release measurement, touched UI, full suite and
 pre-install legacy drives. Current static census at `149fc7a`: fast5284 across256 matching classes,
 full5866; recount after the last delta. Obtain fresh saved/unlocked readiness before device work;

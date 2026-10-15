@@ -606,23 +606,7 @@ final class LiquifyRasterLogicTests: XCTestCase {
                 transport: .lattice(captured: rest, current: stretched, pose: .identity)))
         let prefix = VectorFillElement(path: CGPath(rect: CGRect(x: 8, y: 8, width: 16, height: 24), transform: nil),
             color: .init(red: 1, green: 0, blue: 0, alpha: 1))
-        canvas.restoreElements([.fill(prefix)], changedInk: nil)
-        _ = try XCTUnwrap(canvas.render())
-        let view = StrokeCanvasView(frame: CGRect(origin: .zero, size: size))
-        view.vectorCanvas = canvas
-        view.layoutIfNeeded()
-        view.refreshDisplay(waitingForTheRender: true)
-        func shownPixels() throws -> [UInt8] {
-            let shown = UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image {
-                view.layer.render(in: $0.cgContext)
-            }
-            return try bytes(shown)
-        }
-        let priorPixels = try shownPixels()
-        XCTAssertTrue(priorPixels.contains { $0 != 0 }, "PREMISE: the real stroke view already shows valid native ink")
         canvas.restoreElements([.fill(prefix), .stroke(ink)], changedInk: nil)
-        view.refreshDisplay(waitingForTheRender: true)
-        XCTAssertTrue(try shownPixels() == priorPixels, "a refused synchronous native render preserves the displayed picture")
         let native = canvas.freeze(quality: .full)
         var completion: Int?
         let partial = UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { context in
@@ -1241,7 +1225,7 @@ final class LiquifyRasterLogicTests: XCTestCase {
         erase.composite = .erase
         let evaluation = InterpolationEvaluator.Evaluation(forward: [.image(a)], backward: [.image(b)], localEdits: [.stroke(erase)], forwardWeight: 0.37, backwardWeight: 0.63)
         let window = CGRect(x: 17, y: 13, width: 28, height: 30)
-        let full = InterpolationEvaluator.composite(evaluation, size: size)
+        let full = try XCTUnwrap(InterpolationEvaluator.composite(evaluation, size: size))
         let crop = UIGraphicsImageRenderer(size: window.size, format: PixelOps.transparentFormat()).image { _ in full.draw(at: CGPoint(x: -window.minX, y: -window.minY)) }
         XCTAssertEqual(try bytes(XCTUnwrap(InterpolationEvaluator.composite(evaluation, size: size, window: window))), try bytes(crop), "window origin, fade and local eraser preserve the full picture")
     }

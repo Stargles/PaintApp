@@ -62,10 +62,10 @@ their files are repaired. Build `2974b33` broke this rule and lost the owner's k
 Defer performance measurements until that notification; continue source review and correctness
 checks without treating contended timings as qualification.
 
-**Combined checkpoint (2026-10-15):** root `149fc7a` integrates material `72f686f`, raster
-`ccdd286` and sampler `effb239`. Material55/55, raster109/109, sampler native Debug20/20 and
+**Combined checkpoint (2026-10-15):** root integrates material `72f686f`, raster
+`ae40f66` and sampler `effb239`. Material55/55, prior raster109/109, sampler native Debug20/20 and
 Release21/21, and raster landscape UI8/8 passed. Linked Release UI1/1 proves exact cold reopen
-and live source following. Raw landscape screenshots, final combined gates and device checks remain.
+and live source following. Three raw landscape screenshots were inspected. Final combined gates and device checks remain.
 HANDOFF names current owners and exact evidence; this item remains open until merged.
 
 **Exact-map batching (2026-10-15):** existing fan-out now shares one immutable prepared field
@@ -81,12 +81,13 @@ Release and physical first-use costs remain open. Evidence:
 **Required-picture refusal review (2026-10-15):** shared settlement now reports failure through
 save, Move/Duplicate/Bake, resize, frame/layer/tool changes and other mutation boundaries. Actual
 posed scratch alpha and direct frozen window failure are fixed and mutation-tested. A new native
-pre-fix proof finds full/fitted frozen renders still substitute a transparent pixel on material
-refusal (ten intended diagnostics). Remove the non-fallible PixelOps wrapper and propagate failure
-through its actual callers: retain prior thumbnail/onion pictures and refuse destructive copy work.
-Review derived render paths for the same required-source contract, distinguishing a genuinely
-unavailable recipe from a failed required picture. Reuse the existing fallible renderer; no blank
-fallback or duplicated renderer. Raster owns this follow-up with material review.
+pre-fix proof found transparent substitution and partial pictures on material refusal (19 intended
+diagnostics across full/fitted rendering and actual consumers). The non-fallible PixelOps wrapper is
+removed; actual callers retain prior thumbnail/onion/live pictures and refuse destructive copy work.
+Unavailable recipes remain distinct from failed required pictures. Restored110 logic plus five raster
+UI methods and deliberate fault proofs are next. A direct live-view headless assertion could not
+compile because the view is absent from that target; removed and never counted. That small guard
+receives source review plus the actual eraser UI, without a duplicate rendering helper or test seam.
 
 *"It should be placed to the left of the brush tool in the top menu. When selected, it acts sort of like
 a brush (you can control the brush type, size, etc), and otherwise it does basically what a normal
