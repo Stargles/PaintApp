@@ -97,6 +97,10 @@ piece uses nil for both absence and refusal. Make latch admission require comple
 use the existing float rollback on failure. The existing oversized native-material fixture passes
 Move's geometry-only bounds checks, so this is a reachable caller gap, not an allocation hypothesis.
 Preserve legitimate empty/eraser-only pieces and existing stream/no-render behavior; no new renderer.
+The same view review found equal version counters on different cels can falsely claim coverage
+after a refused render. Reset the existing displayed/document coverage sentinels when canvas identity
+changes. Eraser-only isolated pictures are already nonnil transparent images; remove the stale
+comment saying otherwise rather than inventing a new result type.
 
 *"It should be placed to the left of the brush tool in the top menu. When selected, it acts sort of like
 a brush (you can control the brush type, size, etc), and otherwise it does basically what a normal
