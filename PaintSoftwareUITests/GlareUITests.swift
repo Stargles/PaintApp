@@ -10,9 +10,6 @@ import XCTest
 /// back the pick, and that the compositor actually repaints the canvas along a streak's own axis and
 /// leaves a diagonal alone — the composite is on the sandwich view, and a green fast tier says
 /// nothing about either.
-///
-/// One test, on purpose (CLAUDE.md's cost model: per test *class*, and this class drives a
-/// full-screen editor for every step).
 final class GlareUITests: PaintUITestCase {
 
     /// **The whole feature, cold, from an empty document**, in the order the artist meets it:
@@ -216,7 +213,4 @@ final class GlareUITests: PaintUITestCase {
         XCUIDevice.shared.orientation = .landscapeLeft
         attachScreenshot(app, "fog-glow-size-native-landscape")
     }
-}
-
-private extension PaintUITestCase.RGB {
 }
