@@ -150,6 +150,20 @@ cels mix imported pictures/text, fills and moved paint in `bakedImage`, without 
 Liquify therefore moves every raster pixel in the active layer, including that flattened content;
 separately editable text, picture, video and stream objects remain untouched.
 
+Current material characterizations (2026-10-15, four native methods, all premises pass) expose four
+remaining defects: retained exterior ink is missed by tap/outline/whole-stroke erase; a finite bridge
+can return 1.6e19, beyond supported integer sampling; partial-opacity gradients re-quantize 7,920
+exterior pixels; and linked transport moves canvas-anchored paper in 2,295 of 2,304 sampled pixels
+outside a remote field. Preserve these fixtures. Reuse inverse material transport for ink hit tests,
+retain centreline lasso membership, refuse unsupported map output, and correct opacity/paper staging
+through the existing renderer. No widened hit boxes or reduced pixel-accuracy assertion.
+A separate complete-picture defect affects differing ink and backing transforms: the shared window
+clears their union but draws each tier only in its own transformed lobe. Editing a translated stroke
+above opaque unmoved backing therefore clears unchanged backing around it. Both tiers must fill the
+whole replacement union, with changes applied only to their own edited region; use an independent
+pixel oracle and the existing snapshot/window renderer. The cropped high-sampling mismatch remains a
+separate issue awaiting the owner's appearance ruling.
+
 The shared raster replacement also exposes a pose mismatch: `LayerHostView.shownPose` updates live
 strokes and fill previews but leaves `bakedImageView` unposed, while `PixelOps` poses the same stored
 pixels. Align the backing through the existing origin-based pose, including its replacement hole;

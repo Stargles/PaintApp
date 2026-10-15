@@ -109,6 +109,19 @@ An external bounded Lanczos prototype matches full/window output and added about
 is acceptable or A must be preserved. Do not adopt it without that ruling; all transformed raster
 backing would share it for preview and committed pictures, while editable vector ink stays native.
 
+**Newest qualification results (October 15, 05:35 Toronto):** feature `afef15c` selected baseline
+60/60 green; boxing lowers VectorElement stride 1080→856 bytes (bridge 80), budget unchanged. Storage's
+model pass on that SHA catches five fault batches (14 failed executions/13 methods), then restores
+13/13 green; evidence `evidence/s49-liquify-material-model/`. Raster `97fce5a` baseline is 39/40;
+sole failing method compares transformed raster preview with committed pixels (132 channels, max120).
+Native-only posing and new placement/version checks pass. Peer review separately found incomplete
+cross-tier drawing when ink/backing poses differ; it is recorded in TODO before repair. Pending
+windows now retain only finished pixels and CGPath, not their full source producer. Feature `94d1e47`
+has four native pre-fix characterizations: four expected failed methods/seven assertions, no premise
+failures (exterior hit/outline/erase, integer-unsafe map output, fractional gradient exterior pixels,
+linked paper staging). Their concrete counts and required existing seams are recorded in TODO.
+Root `f336001` Debug fast tier is 5124/5120 passed/four skipped/zero failures; Release is running.
+
 Earlier qualified evidence remains useful only where the seam is unchanged: retained occurrence
 identity for linked captures; strict selection/retarget/resize tests; shared surface handoff 30 logic
 and six UI green with 19 faults caught; inverse acceleration Release 7/7 across 18 byte-identical
