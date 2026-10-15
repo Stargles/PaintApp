@@ -170,6 +170,10 @@ The strict material encoder can reject conflicting operation definitions. `Proje
 currently logs an encoding failure and omits that vector/recipe file, allowing staged validation to
 accept an empty cel. Propagate material encoding failure through the existing save tally so the
 atomic package swap aborts; malformed material on load must likewise fail rather than become empty.
+Cutting a precise stroke also currently constructs its shown parent dab lattice with the default
+quantized precision. Preserve the existing parent's precision (or the original stroke's precision
+when first creating it), and verify a real cut/save roundtrip so Liquify's editable cuts do not lose
+their retained geometry on reopen.
 
 **Validation in progress (2026-10-14):** the first direct-displacement map folds under strong hard
 and patterned brushes; actual raster pictures show stationary streaks and holes. Replace that map
