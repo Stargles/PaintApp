@@ -58,13 +58,12 @@ their files are repaired. Build `2974b33` broke this rule and lost the owner's k
 
 ## (178) Liquify tool
 
-**Release UI screenshot finding (2026-10-15):** `linked-release-2` passed its existing three stages
-(reshape, exact cold-reopen picture, newly drawn green source ink reaches the linked frame), but
-root's inspection of its final screenshot shows only green ink: the earlier black/red L is absent.
-The saved source package still contains both L strokes and the added green stroke, with the linked
-recipe intact at t=0.5. This may be an incomplete landing or a render defect; do not call the linked
-drive complete until it also proves existing reshaped ink remains visible after the source edit.
-Evidence and copied actual package: `~/PaintWork/s49-liquify-logs/combined/linked-release-2-*`.
+**Linked Release UI proof (2026-10-15):** `linked-release-2` passed 1/1, no skips: reshape,
+exact cold-reopen picture, and newly drawn green source ink reaching the linked frame. Root and
+material worker inspected the pictures; the existing black/red L remains byte-identical over
+the old-ink screen region after the new green stroke appears. A first visual suspicion of missing
+old ink was refuted by independent inspection and pixel comparison. The actual saved package is
+preserved beside the evidence in `~/PaintWork/s49-liquify-logs/combined/linked-release-2-*`.
 
 **Fresh Release UI fixture finding (2026-10-15):** the named linked-frame scene saves correctly,
 but `saveEditorAndReturnToGallery` searches only for Untitled. Earlier used simulators had an
