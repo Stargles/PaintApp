@@ -37,11 +37,25 @@ struct CelPixelSnapshot {
         return rect.integral.intersection(CGRect(origin: .zero, size: size))
     }
 
+    static func liquifyWorkingBytes(sourceSize: CGSize, destinationSize: CGSize) -> Int {
+        let width = Int(destinationSize.width), height = Int(destinationSize.height)
+        let rows = max(1, LiquifyField.inverseBatchSize / max(1, width))
+        let batches = (height + rows - 1) / rows
+        // Source renderer (up to RGBA16) + normalized RGBA8; all strip outputs + their joined copy.
+        // The strip scope ends before makeImage creates its provider copy. parallelMap briefly
+        // owns two arrays of optional strip headers, never two copies of their pixel payloads.
+        return Int(sourceSize.width) * Int(sourceSize.height) * 12 + width * height * 8
+            + batches * MemoryLayout<[UInt8]?>.stride * 2
+    }
+
     func liquifiedPatch(in requested: CGRect, using field: LiquifyField, through bridge: PoseMap? = nil) -> Patch? {
         let canvas = CGRect(origin: .zero, size: size)
         guard let rect = replacementRect(in: requested, through: bridge) else { return nil }
         guard rect.width >= 1, rect.height >= 1 else { return nil }
         let sourceRect = rect.insetBy(dx: -1, dy: -1).intersection(canvas)
+        let workingBytes = Self.liquifyWorkingBytes(sourceSize: sourceRect.size, destinationSize: rect.size)
+        guard workingBytes <= CompositorBudget.textureBudgetBytes,
+              CompositorBudget.hasHeadroom(for: workingBytes) else { return nil }
         let source = UIGraphicsImageRenderer(size: sourceRect.size, format: PixelOps.transparentFormat()).image { _ in
             draw(at: CGPoint(x: -sourceRect.minX, y: -sourceRect.minY))
         }
@@ -50,31 +64,42 @@ struct CelPixelSnapshot {
               let bytes = CoreGraphicsCompositor.premultipliedBytes(cg, width: sw, height: sh) else { return nil }
         let inverseBridge = bridge?.inverse
         if bridge != nil, inverseBridge == nil { return nil }
-        var failed = false
-        guard let warped = ImageWarp.warp(source: bytes, sourceWidth: sw, sourceHeight: sh,
-            destinationWidth: Int(rect.width), destinationHeight: Int(rect.height), inverseTexelMap: { local in
-                let destination = CGPoint(x: rect.minX + local.x, y: rect.minY + local.y)
-                let fieldPoint: CGPoint
-                if let bridge {
-                    guard let mapped = bridge.applied(to: destination) else { failed = true; return nil }
-                    fieldPoint = mapped
-                } else { fieldPoint = destination }
-                let solution = field.inverseSolution(fieldPoint)
-                guard solution.converged else { failed = true; return nil }
-                let point: CGPoint
-                if let inverseBridge {
-                    guard let mapped = inverseBridge.applied(to: solution.point) else { failed = true; return nil }
-                    point = mapped
-                } else { point = solution.point }
-                // An in-canvas source outside the captured support is a failed window, never a
-                // transparent sample that could silently delete pixels at commit.
-                if canvas.contains(point), !sourceRect.contains(point) { failed = true; return nil }
-                return CGPoint(x: point.x - sourceRect.minX, y: point.y - sourceRect.minY)
-            }), !failed,
-            let image = CoreGraphicsCompositor.makeImage(fromPremultiplied: warped,
-                width: Int(rect.width), height: Int(rect.height)) else { return nil }
+        let width = Int(rect.width), height = Int(rect.height)
+        let warped: [UInt8]? = {
+            let rows = max(1, LiquifyField.inverseBatchSize / width)
+            let strips = PixelOps.parallelMap((height + rows - 1) / rows) { batch -> [UInt8]? in
+                let startRow = batch * rows
+                var failed = false
+                let pixels = ImageWarp.warp(source: bytes, sourceWidth: sw, sourceHeight: sh,
+                    destinationWidth: width, destinationHeight: min(rows, height - startRow), inverseTexelMap: { local in
+                        let destination = CGPoint(x: rect.minX + local.x, y: rect.minY + (CGFloat(startRow + Int(local.y)) + 0.5))
+                        let fieldPoint: CGPoint
+                        if let bridge {
+                            guard let mapped = bridge.applied(to: destination) else { failed = true; return nil }
+                            fieldPoint = mapped
+                        } else { fieldPoint = destination }
+                        let solution = field.inverseSolution(fieldPoint)
+                        guard solution.converged else { failed = true; return nil }
+                        let point: CGPoint
+                        if let inverseBridge {
+                            guard let mapped = inverseBridge.applied(to: solution.point) else { failed = true; return nil }
+                            point = mapped
+                        } else { point = solution.point }
+                        // An in-canvas source outside the captured support is a failed window, never a
+                        // transparent sample that could silently delete pixels at commit.
+                        if canvas.contains(point), !sourceRect.contains(point) { failed = true; return nil }
+                        return CGPoint(x: point.x - sourceRect.minX, y: point.y - sourceRect.minY)
+                })
+                return failed ? nil : pixels
+            }
+            guard strips.allSatisfy({ $0 != nil }) else { return nil }
+            return strips.flatMap { $0! }
+        }()
+        guard let warped,
+              let image = CoreGraphicsCompositor.makeImage(fromPremultiplied: warped,
+                  width: width, height: height) else { return nil }
         var changed = false
-        let dx = Int(rect.minX - sourceRect.minX), dy = Int(rect.minY - sourceRect.minY), width = Int(rect.width)
+        let dx = Int(rect.minX - sourceRect.minX), dy = Int(rect.minY - sourceRect.minY)
         for y in 0..<Int(rect.height) {
             let a = (y * width) * 4, b = ((y + dy) * sw + dx) * 4
             if !warped[a..<(a + width * 4)].elementsEqual(bytes[b..<(b + width * 4)]) { changed = true; break }

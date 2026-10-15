@@ -155,6 +155,16 @@ final class LiquifyBench: XCTestCase {
                     XCTAssertEqual(actual.point, point, "outside selected ink must remain exact")
                 }
             } }
+            var batched = (0..<(side * side)).map { index in
+                CGPoint(x: origin.x + CGFloat(index % side) + 0.5,
+                        y: origin.y + CGFloat(index / side) + 0.5)
+            }
+            let batchWork = field.inverseSolutions(&batched)
+            XCTAssertNil(batchWork.failure, "the parallel production inverse must preserve every solved source")
+            XCTAssertEqual(batchWork.evaluations, evaluations, "scheduling must not change numerical work")
+            XCTAssertEqual(batched.map { Double($0.x).bitPattern }, sources.map { Double($0.x).bitPattern })
+            XCTAssertEqual(batched.map { Double($0.y).bitPattern }, sources.map { Double($0.y).bitPattern })
+            sources = batched
             func render(_ points: [CGPoint]) throws -> [UInt8] {
                 try XCTUnwrap(ImageWarp.warp(source: source, sourceWidth: side, sourceHeight: side,
                     destinationWidth: side, destinationHeight: side) { point in

@@ -656,6 +656,63 @@ final class LiquifyLogicTests: XCTestCase {
         }
     }
 
+    func testInverseBatchesKeepExactSourcesCountersAndFailuresAcrossTheTail() {
+        let field = LiquifyField(gesture())
+        var points = (0..<8_205).map { CGPoint(x: CGFloat($0 % 130) + 0.5, y: CGFloat($0 / 130) + 0.5) }
+        points[4_097] = CGPoint(x: CGFloat.nan, y: 64)
+        points[8_204] = CGPoint(x: 72, y: CGFloat.infinity)
+        let scalar = points.map(field.inverseSolution)
+        let work = field.inverseSolutions(&points)
+        XCTAssertEqual(work.failure, .nonFinite, "a failed source in any batch refuses the complete picture")
+        XCTAssertEqual(work.evaluations, scalar.reduce(0) { $0 + $1.evaluations })
+        XCTAssertEqual(points.map { Double($0.x).bitPattern }, scalar.map { Double($0.point.x).bitPattern })
+        XCTAssertEqual(points.map { Double($0.y).bitPattern }, scalar.map { Double($0.point.y).bitPattern })
+        var empty: [CGPoint] = []
+        let noWork = field.inverseSolutions(&empty)
+        XCTAssertEqual(noWork.evaluations, 0)
+        XCTAssertNil(noWork.failure)
+        XCTAssertTrue(empty.isEmpty)
+    }
+
+    func testRasterInverseStripsMatchSerialPixelsAndRespectTheirWholeWindowBudget() throws {
+        let size = CGSize(width: 320, height: 192)
+        let image = UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { ctx in
+            for y in stride(from: 0, to: 192, by: 4) {
+                for x in stride(from: 0, to: 320, by: 4) {
+                    UIColor(red: CGFloat((x * 7 + y) % 255) / 255,
+                            green: CGFloat((x + y * 3) % 255) / 255, blue: 0.7, alpha: 1).setFill()
+                    ctx.fill(CGRect(x: x, y: y, width: 4, height: 4))
+                }
+            }
+        }
+        let snapshot = CelPixelSnapshot(raster: nil, baked: image, size: size)
+        let source = try XCTUnwrap(CoreGraphicsCompositor.premultipliedBytes(try XCTUnwrap(image.cgImage), width: 320, height: 192))
+        let previousBudget = CompositorBudget.budgetOverrideBytes
+        defer { CompositorBudget.budgetOverrideBytes = previousBudget }
+        for mode in [LiquifyMode.push, .pinch, .expand, .twirl] {
+            let field = LiquifyField(gesture(mode, brush: BrushLibrary.streaky,
+                points: [CGPoint(x: 120, y: 90), CGPoint(x: 160, y: 105)]))
+            let window = field.replacementBounds
+            let rect = try XCTUnwrap(snapshot.replacementRect(in: window, through: nil))
+            let patch = try XCTUnwrap(snapshot.liquifiedPatch(in: window, using: field))
+            let expected = try XCTUnwrap(ImageWarp.warp(source: source, sourceWidth: 320, sourceHeight: 192,
+                destinationWidth: Int(rect.width), destinationHeight: Int(rect.height)) { local in
+                field.inverse(CGPoint(x: rect.minX + local.x, y: rect.minY + local.y))
+            })
+            let actual = try XCTUnwrap(CoreGraphicsCompositor.premultipliedBytes(try XCTUnwrap(patch.image.cgImage),
+                width: Int(rect.width), height: Int(rect.height)))
+            XCTAssertEqual(actual, expected, "every strip seam and nonzero origin preserves the serial picture")
+            XCTAssertTrue(patch.changed, "the parity picture must include actual deformation")
+            let sourceRect = rect.insetBy(dx: -1, dy: -1).intersection(CGRect(origin: .zero, size: size))
+            let bytes = CelPixelSnapshot.liquifyWorkingBytes(sourceSize: sourceRect.size, destinationSize: rect.size)
+            XCTAssertGreaterThan(bytes, Int(sourceRect.width * sourceRect.height) * 12 + Int(rect.width * rect.height) * 8,
+                "the join needs both output copies plus parallel result headers")
+            CompositorBudget.budgetOverrideBytes = bytes - 1
+            XCTAssertNil(snapshot.liquifiedPatch(in: window, using: field), "refuse before allocating an under-budget picture")
+            CompositorBudget.budgetOverrideBytes = previousBudget
+        }
+    }
+
     func testLongPatternPushInverseMatchesIndependentSixtyDigitSourceCoordinates() {
         let field = LiquifyField(gesture(brush: BrushLibrary.streaky,
             points: [CGPoint(x: 3000, y: 2000), CGPoint(x: 3500, y: 2000)]))

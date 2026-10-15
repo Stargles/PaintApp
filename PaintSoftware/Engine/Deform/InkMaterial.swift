@@ -298,16 +298,11 @@ struct InkMaterialProgram: Equatable, Codable {
                 work.fields += 1
                 guard let captured = binding.bridge.map(points, inverse: true) else { throw MappingFailure.transport }
                 var inverse = captured
-                var changed = [Bool](repeating: false, count: points.count)
-                for index in points.indices {
-                    let solution = field.inverseSolution(captured[index])
-                    work.evaluations += solution.evaluations
-                    guard solution.converged else { throw MappingFailure.inverse }
-                    inverse[index] = solution.point
-                    changed[index] = solution.point != captured[index]
-                }
+                let batch = field.inverseSolutions(&inverse)
+                work.evaluations += batch.evaluations
+                guard batch.failure == nil else { throw MappingFailure.inverse }
                 guard let shown = binding.bridge.map(inverse) else { throw MappingFailure.transport }
-                return points.indices.map { changed[$0] ? shown[$0] : points[$0] }
+                return points.indices.map { inverse[$0] != captured[$0] ? shown[$0] : points[$0] }
             }
         }
         guard let native = transport.map(points, inverse: true) else { throw MappingFailure.transport }

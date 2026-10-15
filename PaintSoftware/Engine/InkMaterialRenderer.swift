@@ -204,7 +204,7 @@ final class InkMaterialRenderer {
         // lattice's temporary rest vertices are also reserved; sequences execute one part at a time.
         let largest = max(transport.mappingScratchByteUpperBound, bindings.map { $0.bridge.mappingScratchByteUpperBound }.max() ?? 0)
         guard largest < budget.limit else { refuse(); return nil }
-        let scratchBytes = count * 160 + largest
+        let scratchBytes = count * 160 + largest + LiquifyField.inverseBatchScratchBytes(pointCount: count)
         let coordinateBytes = count * MemoryLayout<CGPoint>.stride
         while budget.limit - budget.current < scratchBytes + coordinateBytes, !maps.isEmpty {
             maps.removeFirst()

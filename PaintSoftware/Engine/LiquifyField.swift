@@ -146,6 +146,42 @@ final class LiquifyField {
     }
     func inverse(_ point: CGPoint) -> CGPoint { inverseSolution(point).point }
 
+    struct InverseBatchWork {
+        var evaluations = 0
+        var failure: InverseResult.Failure?
+    }
+    static let inverseBatchSize = 4096
+    static func inverseBatchScratchBytes(pointCount: Int) -> Int {
+        let batches = (pointCount + inverseBatchSize - 1) / inverseBatchSize
+        // parallelMap briefly owns both its initialized buffer and the returned Array.
+        return batches * MemoryLayout<InverseBatchWork>.stride * 2
+    }
+
+    /// The caller finishes preparing this field before the fan-out, and keeps it unchanged until
+    /// the join. Each point follows the identical scalar solve; only disjoint output ranges run
+    /// together. Counters and failures fold in input order after the workers have finished.
+    func inverseSolutions(_ points: inout [CGPoint]) -> InverseBatchWork {
+        points.withUnsafeMutableBufferPointer { storage in
+            let output = storage
+            let count = (output.count + Self.inverseBatchSize - 1) / Self.inverseBatchSize
+            let batches = PixelOps.parallelMap(count) { batch -> InverseBatchWork in
+                var work = InverseBatchWork()
+                let start = batch * Self.inverseBatchSize
+                for index in start..<min(output.count, start + Self.inverseBatchSize) {
+                    let solution = self.inverseSolution(output[index])
+                    output[index] = solution.point
+                    work.evaluations += solution.evaluations
+                    if work.failure == nil { work.failure = solution.failure }
+                }
+                return work
+            }
+            return batches.reduce(into: InverseBatchWork()) { total, batch in
+                total.evaluations += batch.evaluations
+                if total.failure == nil { total.failure = batch.failure }
+            }
+        }
+    }
+
     /// Production sampling reverses the identical contracting Euler submaps. Its convergence
     /// checks concern the source coordinate; it does not re-forward every destination pixel.
     func inverseSolution(_ point: CGPoint) -> InverseSolution {
