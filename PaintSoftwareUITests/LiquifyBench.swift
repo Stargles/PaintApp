@@ -34,11 +34,32 @@ final class LiquifyBench: XCTestCase {
                 }
                 return (bytes, evaluations, unsolved)
             }
+            // The production probe owns a real full-canvas source; its allocation is fixture setup,
+            // outside the timed bounded replacement work. Normalize the serial reference from that
+            // same picture so UIKit color conversion is not mistaken for a scheduling difference.
+            let fixtureCG = try XCTUnwrap(CoreGraphicsCompositor.makeImage(fromPremultiplied: source, width: width, height: height))
+            let fullSource = UIGraphicsImageRenderer(size: CGSize(width: 4096, height: 4096),
+                format: PixelOps.transparentFormat()).image { _ in UIImage(cgImage: fixtureCG).draw(at: window.origin) }
+            let snapshot = CelPixelSnapshot(raster: nil, baked: fullSource, size: fullSource.size)
+            let normalized = snapshot.replacementWindow(in: window)
+            source = try XCTUnwrap(CoreGraphicsCompositor.premultipliedBytes(try XCTUnwrap(normalized.cgImage), width: width, height: height))
             let cold = render()
             let start = Date()
             let warm = render()
             let duration = Date().timeIntervalSince(start)
             print("LIQUIFY REAL WINDOW \(name) pixels=\(width * height) dabs=\(field.steps.count) fieldBytes=\(field.retainedByteCount) pixelBytes=\(source.count * 2) evaluations=\(warm.evaluations) unsolved=\(warm.unsolved) warmSeconds=\(duration)")
+            for take in 0..<4 {
+                try autoreleasepool {
+                    let start = Date()
+                    let patch = try XCTUnwrap(snapshot.liquifiedPatch(in: window, using: field))
+                    let seconds = Date().timeIntervalSince(start)
+                    let actual = try XCTUnwrap(CoreGraphicsCompositor.premultipliedBytes(try XCTUnwrap(patch.image.cgImage), width: width, height: height))
+                    let expected = try XCTUnwrap(warm.bytes)
+                    let differences = zip(actual, expected).reduce(0) { $0 + ($1.0 == $1.1 ? 0 : 1) } + abs(actual.count - expected.count)
+                    let sourceRect = window.insetBy(dx: -1, dy: -1).intersection(CGRect(origin: .zero, size: fullSource.size))
+                    print("LIQUIFY PRODUCTION BATCH \(name) take=\(take) seconds=\(seconds) referenceDifferences=\(differences) chargedWindowBytes=\(CelPixelSnapshot.liquifyWorkingBytes(sourceSize: sourceRect.size, destinationSize: window.size)) fieldBytes=\(field.retainedByteCount)")
+                }
+            }
             // Native 17db4c3 used 54,319,422 / 290,752,890 evaluations for these exact windows.
             let originalEvaluations = name == "hard" ? 54_319_422 : 290_752_890
             let retainedWork = name == "hard" ? 95 : 80
@@ -52,7 +73,7 @@ final class LiquifyBench: XCTestCase {
             }
             XCTAssertEqual(warm.unsolved, 0, "every production source solve on a real4096 canvas must converge")
             XCTAssertEqual(warm.bytes, cold.bytes, "resampling the same original ink is deterministic")
-            XCTAssertLessThan(source.count * 2 + field.retainedByteCount, 2 * 1024 * 1024, "the active brush window must not allocate a full-canvas source or displacement grid")
+            XCTAssertLessThan(source.count * 2 + field.retainedByteCount, 2 * 1024 * 1024, "the reference pixel arrays and prepared field remain window-sized")
         }
     }
 

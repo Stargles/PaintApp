@@ -705,7 +705,7 @@ final class LiquifyLogicTests: XCTestCase {
             XCTAssertTrue(patch.changed, "the parity picture must include actual deformation")
             let sourceRect = rect.insetBy(dx: -1, dy: -1).intersection(CGRect(origin: .zero, size: size))
             let bytes = CelPixelSnapshot.liquifyWorkingBytes(sourceSize: sourceRect.size, destinationSize: rect.size)
-            XCTAssertGreaterThan(bytes, Int(sourceRect.width * sourceRect.height) * 12 + Int(rect.width * rect.height) * 8,
+            XCTAssertGreaterThan(bytes, Int(sourceRect.width * sourceRect.height) * 16 + Int(rect.width * rect.height) * 8,
                 "the join needs both output copies plus parallel result headers")
             CompositorBudget.budgetOverrideBytes = bytes - 1
             XCTAssertNil(snapshot.liquifiedPatch(in: window, using: field), "refuse before allocating an under-budget picture")
