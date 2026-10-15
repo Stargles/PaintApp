@@ -58,6 +58,13 @@ their files are repaired. Build `2974b33` broke this rule and lost the owner's k
 
 ## (178) Liquify tool
 
+**Exact-map batching hypothesis (2026-10-15):** the long patterned inverse remains serial per
+pixel after the measured evaluation reduction. Test bounded independent row batches externally,
+sharing one read-only prepared field and keeping every pixel's arithmetic/order unchanged. Compare
+all source bits, evaluations and failures against the frozen native-matching fixture; measure before
+changing production. Any adoption must reuse existing fan-out, preserve failure propagation and
+window memory accounting, and avoid parallelizing arbitrary callbacks with mutable captured state.
+
 **Settlement refusal review (2026-10-15):** a refused floating-pixel landing currently lets
 Move, Duplicate, Bake, resize, frame/layer changes, eyedropper and saving continue. Fix the shared
 settlement contract (`settleInteractiveState` → `commitEditsInFlight` → `commitAllInteractiveState`)
