@@ -173,6 +173,15 @@ existing high-quality sampling, and preserve the deliberately unposed linked-ink
 also depends on full source extent, so an independently cropped pixel patch can differ at lift. A
 virtual full-extent provider matches pixels but retains about 230 MiB of global resampling cache over
 100 draws, even with released providers/contexts; that prototype is not accepted as a bounded preview.
+`PixelOps.FrozenCel.pose` is the backing's container pose; ordinary native ink additionally has its
+cel pose, while linked ink intentionally declines both. The shared replacement picture must carry
+these placements independently, including the field's coordinate bridge, and remain correct if a
+pose changes while its committed picture is still held.
+The first bounded native-material renderer passes 25 of 26 focused tests, including exact exterior
+pixels, stationary-boundary gradients and long patterned tails. Its 100-stroke fixture shares one
+field and 144,000 evaluations, but temporary output image providers accumulate until the outer
+autorelease pool and reach the 24 MiB guard near stroke 90. Retire each provider after its group is
+drawn; keep the existing cap and shared coordinate cache, then rerun the same gate.
 The strict material encoder can reject conflicting operation definitions. `ProjectStore.encodeJSON`
 currently logs an encoding failure and omits that vector/recipe file, allowing staged validation to
 accept an empty cel. Propagate any JSON encoding failure through the existing save tally so the

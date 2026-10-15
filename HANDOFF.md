@@ -153,6 +153,19 @@ Never harvest dirty worker files: mutations may be intentional.
     not survive moving the failed stage to Trash, so recovery must reject it by ordinary completeness.
     Feature review also found `VectorLayer.piece(of:)` creates a shown cut-parent lattice with default
     quantized precision. Inherit the existing parent/stroke precision and prove cut/save roundtrip.
+  - **Latest material renderer:** `dd05e40` passes 25/26 focused tests (one failing method,
+    two assertions): outside-selection bytes, stationary-boundary gradient and patterned-tail
+    regression are green. The 100-stroke case reuses one field / 144,000 evaluations, but output
+    providers live until the outer autorelease pool and exhaust the 24 MiB cap near stroke 90.
+    `f15f52c` scopes image creation/draw to a group autorelease pool; same gate is running.
+    No larger cap or additional image copies are accepted. Non-CG previews and chronological
+    antialiased fill-cut coverage remain open.
+  - **Posed mixed pictures:** native ordinary ink, linked evaluated ink and raster backing need
+    independent placement. The existing backing pose is container-only; native ordinary ink adds
+    the cel pose; linked ink deliberately declines it. `CelContentPicture` is being developed at
+    the shared window/composite seam, with shown-space held-picture identity across pose changes.
+    The cropped high-quality raster mismatch is still unresolved; the virtual full-extent provider
+    prototype is rejected because Core Graphics retains an unbounded-for-this-budget scaled cache.
   - **Still owed:** target material-phase fix, raster completion, feature mutations,
     pending edit/undo/save and rapid overlapping previews,
     native iPad9 UI, final Debug/Release fast tiers, final audit and integrated full UI run.
