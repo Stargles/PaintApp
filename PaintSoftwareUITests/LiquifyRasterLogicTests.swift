@@ -607,6 +607,18 @@ final class LiquifyRasterLogicTests: XCTestCase {
         let prefix = VectorFillElement(path: CGPath(rect: CGRect(x: 8, y: 8, width: 16, height: 24), transform: nil),
             color: .init(red: 1, green: 0, blue: 0, alpha: 1))
         canvas.restoreElements([.fill(prefix), .stroke(ink)], changedInk: nil)
+        let moveBounds = try XCTUnwrap(MoveBoxInk(of: [.stroke(ink)]).bounds())
+        XCTAssertTrue(moveBounds.minX.isFinite && moveBounds.minY.isFinite
+            && moveBounds.width.isFinite && moveBounds.height.isFinite,
+            "PREMISE: the refused material has ordinary finite Move geometry, so lift bounds cannot preflight its native render")
+        XCTAssertNil(canvas.renderIsolated(ids: [ink.id]),
+            "an existing Move piece propagates required native refusal instead of returning partial or blank success")
+        let isolatedPrefix = try XCTUnwrap(canvas.renderIsolated(ids: [prefix.id]))
+        XCTAssertTrue(try bytes(isolatedPrefix).contains { $0 != 0 },
+            "PREMISE: a valid selected piece may render while the material left in its source hole refuses")
+        canvas.suppressedElementIDs = [prefix.id]
+        XCTAssertNil(canvas.render(), "a refused required hole must prevent a valid isolated piece from latching")
+        canvas.suppressedElementIDs = []
         let native = canvas.freeze(quality: .full)
         var completion: Int?
         let partial = UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { context in

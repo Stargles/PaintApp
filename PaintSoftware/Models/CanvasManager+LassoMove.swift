@@ -1765,6 +1765,14 @@ extension CanvasManager {
         refreshUndoRedoState()
     }
 
+    /// A failed latch cannot leave the source suppressed. A new lift has no authored movement to
+    /// keep; a relatch must preserve the nudges already committed to geometry and undo history.
+    func refuseVectorFloatPresentation() {
+        guard let float = vectorFloat else { return }
+        if float.nudges == 0 { cancelVectorFloat() }
+        else { commitVectorFloatIfNeeded() }
+    }
+
     /// A history press with a float open.
     ///
     /// **Zero nudges is the only case that needs anything.** The split happened and nothing else did,

@@ -605,6 +605,51 @@ final class LassoMoveLogicTests: XCTestCase {
         XCTAssertNil(manager.vectorFloat)
     }
 
+    func testRefusedFloatPresentationRestoresANewLiftAndPreservesCommittedNudges() throws {
+        for nudgeCount in [0, 2] {
+            let (manager, layerIndex, vector) = fixture()
+            vector.addStroke(stroke(from: CGPoint(x: 4, y: 30), to: CGPoint(x: 60, y: 30), size: 4))
+            func picture(_ elements: [VectorElement]) throws -> [UInt8] {
+                let image = try XCTUnwrap(VectorCanvas(size: vector.size, elements: elements).render())
+                return try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(image.cgImage)))
+            }
+            let original = try picture(vector.elements)
+            let originalIDs = vector.elements.map(\.id)
+            select(manager, layerIndex, loop(CGRect(x: 34, y: 10, width: 26, height: 40)))
+            manager.history.removeAll()
+            XCTAssertTrue(manager.beginVectorLassoMove())
+            XCTAssertFalse(vector.suppressedElementIDs.isEmpty, "PREMISE: the pending latch has suppressed its source")
+            var authored = [original]
+            for step in 0..<nudgeCount {
+                manager.nudgeVectorFloat(to: movedBy(manager, dx: CGFloat((step + 1) * 5), dy: 0))
+                authored.append(try picture(vector.elements))
+            }
+            XCTAssertEqual(manager.vectorFloat?.nudges, nudgeCount)
+            XCTAssertEqual(manager.history.undoStack.count, nudgeCount)
+            if nudgeCount > 0 {
+                XCTAssertNotEqual(authored[nudgeCount], original, "PREMISE: earlier nudges really moved drawn ink")
+            }
+
+            manager.refuseVectorFloatPresentation()
+
+            XCTAssertNil(manager.vectorFloat, "a refused presentation leaves no active latch request")
+            XCTAssertTrue(vector.suppressedElementIDs.isEmpty, "refusal must return the source to its normal renderer")
+            XCTAssertEqual(manager.history.undoStack.count, nudgeCount, "settling refusal adds or consumes no authored nudge")
+            let displayed = try XCTUnwrap(vector.render())
+            XCTAssertEqual(try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(displayed.cgImage))), authored[nudgeCount],
+                "a new lift restores its original picture; a failed relatch preserves every earlier nudge")
+            if nudgeCount == 0 {
+                XCTAssertEqual(vector.elements.map(\.id), originalIDs, "failed initial presentation also undoes the split")
+                XCTAssertNotNil(manager.selection, "the original lasso remains available")
+            } else {
+                manager.undo()
+                XCTAssertEqual(try picture(vector.elements), authored[1], "one Undo still removes exactly the last nudge")
+                manager.undo()
+                XCTAssertEqual(try picture(vector.elements), original, "the earlier nudge remains independently undoable")
+            }
+        }
+    }
+
     // MARK: - Ruling 3: an empty lasso does nothing
 
     /// A loop over blank paper plus Move does **nothing** — it does not fall back to moving the whole

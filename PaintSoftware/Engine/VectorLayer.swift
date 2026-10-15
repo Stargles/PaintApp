@@ -6735,7 +6735,8 @@ final class VectorCanvas {
     /// the artist drags it, exactly complementary to what `render()` shows with the same ids
     /// suppressed.
     ///
-    /// Nil when nothing matches, so a caller cannot mistake an empty float for a working one.
+    /// Nil when nothing matches or the required native render refuses. A valid isolated piece,
+    /// including eraser-only geometry, returns an image even when all its pixels are transparent.
     ///
     /// **A float of nothing but eraser marks legitimately renders blank, and that is not a failure.**
     /// A punch has no ink of its own — it lowers the alpha of what is beneath it *in the same display

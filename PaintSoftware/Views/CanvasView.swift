@@ -2886,16 +2886,22 @@ struct CanvasView: UIViewRepresentable {
                 // `latchedFrameTransform`, not the lift's: a `mayDiverge` float drops its latch
                 // between gestures and re-arms against geometry that has since moved, so the bitmap
                 // and the base it is measured from have to describe the same moment.
-                host.strokeView.beginVectorFloat(
-                    // **`posedBy`, or the piece is drawn at rest while the hole it came out of is
-                    // posed.** The float's geometry is stored at rest like all the rest of the cel;
-                    // the layer's own render poses what it draws and this bitmap bypasses it, so it
-                    // applies the same map itself. Empty on every unkeyframed document.
-                    image: vector.renderIsolated(ids: part.insideIDs, posedBy: part.poses),
-                    base: VectorCanvas.affine(from: float.latchedFrameTransform,
-                                              aspect: float.latchedAspect,
-                                              stretchAxis: float.latchedStretchAxis,
-                                              pivot: float.pivot))
+                // The isolated piece must exist before the view may retire held ink or latch.
+                // Eraser-only pieces return a valid transparent image, never a refusal.
+                // `posedBy` keeps the isolated picture in the same space as its source hole.
+                guard let image = vector.renderIsolated(ids: part.insideIDs, posedBy: part.poses),
+                      host.strokeView.beginVectorFloat(image: image,
+                        base: VectorCanvas.affine(from: float.latchedFrameTransform,
+                                                  aspect: float.latchedAspect,
+                                                  stretchAxis: float.latchedStretchAxis,
+                                                  pivot: float.pivot)) else {
+                    canvasManager.refuseVectorFloatPresentation()
+                    // A folder may have armed earlier parts in this same pass. All must settle
+                    // with the model, and the stale local float must never reach showVectorFloat.
+                    for host in layerHosts.values { host.strokeView.endVectorFloat() }
+                    selectionOverlay?.setLiveSelectionTransform(rasterFloatAntsTransform())
+                    return
+                }
             }
             showVectorFloat(float, at: liveVectorFloatPose ?? Self.pose(of: float))
             if let container = containerView, let overlay = transformOverlay {

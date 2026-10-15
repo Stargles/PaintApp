@@ -168,7 +168,9 @@ enum DeferredVectorRender {
             // nil (`VectorCanvas.render(quality:ifStillAtVersion:)`), so being superseded costs a
             // lock acquisition. That is what keeps a fast Mode 3 drag from queueing a canvas-sized
             // render per touch sample.
-            return pending == version ? .wait : .rasterize(version: version)
+            // A required picture waits on the canvas's existing rasterize lock/memo, even when
+            // the asynchronous request is already queued. The Move latch cannot use a stale hole.
+            return pending == version && !waitingForTheRender ? .wait : .rasterize(version: version)
         }
     }
 
@@ -222,8 +224,8 @@ enum DeferredVectorRender {
     ///   not worth the assignment — `Step.blankedByTheComposite`'s reason.
     /// - Parameter baseIsDerived: `VectorPreviewPlan.forVectorLayer(...).base == .interpolation` —
     ///   a derived picture (a posed frame, an in-between) owns the base slot, so a render of the
-    ///   cel's *own* ink has nowhere to land and is refused; the caller's refusal path re-plans and
-    ///   the derived picture stays up. **Found by a bake's undo, 2026-09-12**: undoing KEYFRAMES §6's
+    ///   cel's *own* ink has nowhere to land and is refused; the derived picture stays up until its
+    ///   owner clears or replaces it. **Found by a bake's undo, 2026-09-12**: undoing KEYFRAMES §6's
     ///   bake bumps the version of the very canvas the host is about to show, one pass starts an
     ///   off-main render of the resting ink *and then* installs the posed preview, and the render
     ///   landed over the preview — the artist saw the drawing at its stored position, on a frame

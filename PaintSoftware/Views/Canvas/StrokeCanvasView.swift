@@ -287,7 +287,9 @@ final class StrokeCanvasView: CanvasPlaneView {
                 // What a derived picture contains is a version of the canvas it was derived from.
                 interpolationPresentation.invalidateCoverage()
                 // The ordering guard for an intermediate frame is about *this* canvas's counter.
+                displayedVectorVersion = StrokeCanvasView.nothingDisplayed
                 shownVectorVersion = StrokeCanvasView.nothingDisplayed
+                baseDocumentVersion = StrokeCanvasView.nothingDisplayed
                 // A stream surface shows a window of the canvas it was drawn from, at that
                 // canvas's element's rectangle; the next tick presents the new cel's own.
                 removeStreamSurfaces()
@@ -699,19 +701,21 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// Repaints only when the backing content has moved on from what's displayed. Called once per
     /// layer on every SwiftUI pass, making in-place mutations self-healing — see
     /// `displayedRasterVersion`.
-    func refreshDisplayIfStale(waitingForTheRender wait: Bool = false) {
+    @discardableResult
+    func refreshDisplayIfStale(waitingForTheRender wait: Bool = false) -> Bool {
         if let vectorCanvas {
-            guard displayedVectorVersion != vectorCanvas.version else { return }
+            guard displayedVectorVersion != vectorCanvas.version else { return true }
             // **A stream frame moves `version` and not `documentVersion`** (`VectorCanvas.setStreamFrame`),
             // and while a surface is presenting the element the base underneath need not be redrawn
             // for it: the surface covers exactly the pixels that changed. Redrawing it anyway is what
             // TODO (97) was — a canvas-sized rasterize and upload per frame. The base catches up on
             // the next committed change, or when the surfaces go (a cel switch, a blanked host).
-            if !streamSurfaces.isEmpty, baseDocumentVersion == vectorCanvas.documentVersion { return }
-            refreshDisplay(waitingForTheRender: wait)
+            if !wait, !streamSurfaces.isEmpty, baseDocumentVersion == vectorCanvas.documentVersion { return false }
+            return refreshDisplay(waitingForTheRender: wait)
         } else if let raster, displayedRasterVersion != raster.version {
-            refreshDisplay()
+            return refreshDisplay()
         }
+        return true
     }
 
     // MARK: - A live stream's window
@@ -990,13 +994,15 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// stroke's own scratch stays over it, and the new base lands when it lands. What decides which
     /// of those happens is `DeferredVectorRender`, pure and headless for this function's own reason.
     ///
-    /// - Parameter waitingForTheRender: block until the render is in hand. **One caller passes
-    ///   true** — `beginVectorFloat`, where the picture *is* the thing the whole drag is expressed
+    /// - Parameter waitingForTheRender: block until the render is in hand. `beginVectorFloat`
+    ///   requires this because the picture *is* the thing the whole drag is expressed
     ///   against: the lasso latch shows the lifted piece over the hole it came out of, and a base
     ///   one frame behind is the layer with the piece still in it, so the artist would see their ink
-    ///   twice for the first frames of the move. Everywhere else a stale base for a frame is exactly
-    ///   what §2.13 permits.
-    func refreshDisplay(waitingForTheRender: Bool = false) {
+    ///   twice for the first frames of the move. Committing transients also waits so its overlay and
+    ///   baked picture change together; ordinary refreshes permit a stale base for one frame.
+    /// - Returns: whether a current base was installed or was already available.
+    @discardableResult
+    func refreshDisplay(waitingForTheRender: Bool = false) -> Bool {
         // While the Move tool is dragging a lifted piece, Core Animation is already showing every
         // delta (see `beginVectorFloat`) and a rasterize here would be the redundant work
         // [PERFORMANCE.md](PERFORMANCE.md) item 11 removed from the stroke path: the moved ids are
@@ -1008,9 +1014,8 @@ final class StrokeCanvasView: CanvasPlaneView {
         // A second latch, `liveLayerTransformBase`, guarded this line until TODO item (12) stage 2:
         // the Move tool used to write a whole-layer affine per touch-move and show it the same way.
         // Move with no selection lifts a float now, so there is one latch for both.
-        guard vectorFloatBase == nil else { return }
+        guard vectorFloatBase == nil else { return false }
         displayedRasterVersion = raster?.version ?? Self.nothingDisplayed
-        baseDocumentVersion = vectorCanvas?.documentVersion ?? Self.nothingDisplayed
         // A committed change under a live stream — ink drawn over it, an undo — is in the surface's
         // window too, and the surface is what the artist sees there. Redrawn from the same list the
         // base is about to be, so the two agree; dropped where `presentStreamFrame` refuses.
@@ -1020,10 +1025,12 @@ final class StrokeCanvasView: CanvasPlaneView {
             // transparency is 1 GiB at 16383², and Core Animation skips a nil contents outright.
             let base = PlaybackTrace.span(.vectorRasterize) { raster?.renderIfNonEmpty() }
             if imageView.image !== base { imageView.image = base }
+            baseDocumentVersion = Self.nothingDisplayed
             unlandedInk.retire(upTo: contentRevisions.current)
             showOverlays(scratch)
-            return
+            return true
         }
+        let documentVersion = vectorCanvas.documentVersion
         let currentRevision = contentRevisions.committed(vectorCanvas)
         let plan = VectorPreviewPlan.forVectorLayer(role: vectorScratchRole,
                                                     hasScratch: scratch != nil,
@@ -1063,7 +1070,7 @@ final class StrokeCanvasView: CanvasPlaneView {
                 // against a base that is deliberately not being kept current.
                 unlandedInk.removeAll()
                 showOverlays(plan.showsScratchLayer ? scratch : nil)
-                return
+                return false
             case .showNow(let version):
                 pendingVectorRenderVersion = nil
                 displayedVectorVersion = version
@@ -1075,7 +1082,7 @@ final class StrokeCanvasView: CanvasPlaneView {
                     pendingVectorRenderVersion = nil
                     guard let rendered = PlaybackTrace.span(.vectorRasterize, { vectorCanvas.render() }) else {
                         showOverlays(plan.showsScratchLayer ? scratch : nil)
-                        return
+                        return false
                     }
                     displayedVectorVersion = version
                     shownVectorVersion = version
@@ -1083,16 +1090,16 @@ final class StrokeCanvasView: CanvasPlaneView {
                     installedRevision = currentRevision
                 } else {
                     pendingVectorRenderVersion = version
-                    startVectorRender(of: vectorCanvas, atVersion: version)
+                    startVectorRender(of: vectorCanvas, atVersion: version, documentVersion: documentVersion)
                     // The base slot keeps what it has, and so does the held ink — which is the
                     // whole of this defect's fix: the picture the base is missing stays up until the
                     // render that contains it lands.
                     showOverlays(plan.showsScratchLayer ? scratch : nil)
-                    return
+                    return false
                 }
             case .wait:
                 showOverlays(plan.showsScratchLayer ? scratch : nil)
-                return
+                return false
             }
         }
         // **Before the base is installed and in the same main-thread turn**, so Core Animation
@@ -1104,8 +1111,10 @@ final class StrokeCanvasView: CanvasPlaneView {
         // hands back the *same* image, and re-assigning it would put a Core Animation contents
         // change on the frame for nothing.
         if imageView.image !== base { imageView.image = base }
+        if plan.base == .committedRender { baseDocumentVersion = documentVersion }
         showOverlays(plan.showsScratchLayer ? scratch : nil)
         if plan.showsScratchLayer { livePreviewFrames += 1 }
+        return true
     }
 
     /// Rasterizes `version` of `canvas` on `renderQueue` and hands the result back on main.
@@ -1118,7 +1127,7 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// canvas for the same version through `VectorCanvas.Frozen`, so whichever of the two arrives
     /// first fills `cachedImage` and the other reads it — which is the arrangement the synchronous
     /// code had for free and the one thing this change could quietly have thrown away.
-    private func startVectorRender(of canvas: VectorCanvas, atVersion version: Int) {
+    private func startVectorRender(of canvas: VectorCanvas, atVersion version: Int, documentVersion: Int) {
         let revision = contentRevisions.committed(canvas)
         Self.renderQueue.async { [weak self] in
             // **Zero on every ordinary launch** — `-uiTestSlowVectorRenderMillis` and nothing else,
@@ -1135,19 +1144,20 @@ final class StrokeCanvasView: CanvasPlaneView {
             }
             DispatchQueue.main.async {
                 PlaybackTrace.span(.renderLanded) {
-                    self?.finishVectorRender(image, of: canvas, atVersion: version, covering: revision)
+                    self?.finishVectorRender(image, of: canvas, atVersion: version,
+                                             documentVersion: documentVersion, covering: revision)
                 }
             }
         }
     }
 
-    private func finishVectorRender(_ image: UIImage?, of canvas: VectorCanvas, atVersion version: Int, covering revision: Int) {
+    private func finishVectorRender(_ image: UIImage?, of canvas: VectorCanvas, atVersion version: Int,
+                                    documentVersion: Int, covering revision: Int) {
         // A different canvas is a different layer; this view has moved on and owes it nothing.
         guard canvas === vectorCanvas else { return }
         // Nil is a superseded or refused rasterize; neither can replace the displayed picture.
         // The same plan `refreshDisplay` reads: while a derived picture owns the base slot this
-        // render has nowhere to land, and the `.refuse` branch below re-plans rather than stomping
-        // it — `DeferredVectorRender.landing`'s `baseIsDerived`.
+        // render has nowhere to land; `DeferredVectorRender.landing`'s `baseIsDerived` preserves it.
         let plan = VectorPreviewPlan.forVectorLayer(role: vectorScratchRole,
                                                     hasScratch: scratch != nil,
                                                     hasInterpolationImage: interpolationImage != nil)
@@ -1173,6 +1183,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         // drawn over it.
         retireUnlandedInk(coveredByRevision: revision)
         if imageView.image !== image { imageView.image = image }
+        baseDocumentVersion = documentVersion
         shownVectorVersion = version
         // **Recorded as displayed only when it is the canvas's own version.** An intermediate frame
         // (`DeferredVectorRender.landing`, TODO (42)) leaves `displayedVectorVersion` stale on
@@ -1209,31 +1220,25 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// every stroke in the layer plus a canvas-sized alpha scan — the owner measured 5 fps on their
     /// iPad on 2026-08-21 — and the fix was not a faster re-render but *no* re-render, because Core
     /// Animation was compositing the result anyway.
-    func beginVectorFloat(image: UIImage?, base: CGAffineTransform) {
+    @discardableResult
+    func beginVectorFloat(image: UIImage, base: CGAffineTransform) -> Bool {
         // Before the latch, or a stale hole would be the picture the whole drag is expressed
         // against — and **synchronously**, which is the one place RENDER.md §2.13's "the previous
         // picture for a split second" is not good enough: the previous picture here is the layer
         // with the lifted piece still in it, under a float showing the same piece again.
-        refreshDisplayIfStale(waitingForTheRender: true)
-        // **And nothing held survives the latch**, whether or not that refresh managed to install a
-        // current base — `DeferredVectorRender.step` answers `.wait` even to a caller that is
-        // blocking, when a rasterize for this very version is already running. A held picture left
-        // standing under a float would draw a stroke that the float is *also* drawing, which reads
-        // as the ink having duplicated: strictly worse than the missing frame it would be sparing.
-        // Reachable only by starting a lasso move inside one render of a pen-up (§11.12 measures
-        // that at 14–30 ms), which is why it is a guard rather than a fix.
+        guard refreshDisplayIfStale(waitingForTheRender: true) else { return false }
+        // The current hole and the isolated picture are both ready before held ink is retired.
         unlandedInk.removeAll()
         _ = showHeldInk(covering: [])
         vectorFloatBase = base
         floatView.transform = .identity
         floatView.image = image
-        // A float made only of eraser marks renders to nothing, legitimately — see
-        // `VectorCanvas.renderIsolated(ids:)`. The view is still latched: the piece is real geometry
-        // and it lands when the move bakes.
-        floatView.isHidden = image == nil
+        // Eraser-only pieces have a valid transparent image and still carry editable geometry.
+        floatView.isHidden = false
         // A lifted stream is presented inside `floatView` from the next tick; a surface over the
         // base would show it at the rest position under a box that has moved on.
         removeStreamSurfaces()
+        return true
     }
 
     /// Shows the piece under a **projective** map without rasterizing anything — a lasso Distort's

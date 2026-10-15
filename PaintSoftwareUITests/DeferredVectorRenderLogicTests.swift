@@ -114,6 +114,10 @@ final class DeferredVectorRenderLogicTests: XCTestCase {
                                                  hostIsBlanked: true, waitingForTheRender: true),
                        .rasterize(version: inked.version),
                        "It is asking for the image, not for the screen")
+        XCTAssertEqual(DeferredVectorRender.step(for: inked.cachedRender(), pending: inked.version,
+                                                 hostIsBlanked: false, waitingForTheRender: true),
+                       .rasterize(version: inked.version),
+                       "a required Move hole must finish through the shared render lock/memo even if a background request is pending")
     }
 
     /// The completion rule, both clauses. Either one alone lets a wrong thing through — a stale
@@ -168,8 +172,8 @@ final class DeferredVectorRenderLogicTests: XCTestCase {
     /// screen would have been wrong for. Undoing KEYFRAMES §6's bake is how it was found: the undo
     /// bumps the canvas the host is about to show, the pass rasterizes the resting ink off-main and
     /// then installs the posed preview, and the render landed over the preview until the next scrub.
-    /// The caller's `.refuse` branch re-plans, so the preview stays and the render is memoized for
-    /// the next resting frame.
+    /// The preview stays, and the render is memoized for the next resting frame; clearing the
+    /// derived slot asks for that resting frame through the ordinary refresh.
     ///
     /// Mutation caught: dropping the `baseIsDerived` guard from `landing` reddens the first
     /// assertion; the second is what keeps the guard from being "always refuse".
