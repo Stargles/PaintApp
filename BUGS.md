@@ -8,9 +8,12 @@ One section per bug, newest first.
 `GlareUITests.testFogGlowSizePreviewKeepsItsDrawnFootprintThroughLift` stops at the Glare menu
 entry on two fresh simulators with unchanged app source `840d68a`. The options panel and Blend
 Mode button are present, but no submenu appears after its tap; inspected recording and hierarchy
-agree. The first Glare method passed in the initial batch. Capture the existing flight recorder at
-this exact boundary before changing menu or test timing. Evidence: `s49-final-validation/triage/`
-`regression-ui/` and `regression-ui-2/`.
+agree. The first Glare method passed in the initial batch. Two diagnostic runs (warm and freshly
+created simulator) then opened the menu on the first tap; their flight recordings show the expected
+`layerBlendMenu` presentation. The diagnostic stops at that boundary, so it does not qualify the
+complete Fog Glow drive. The failure remains intermittent and its cause is unconfirmed; no retry,
+delay or menu change has been added. Evidence: `s49-final-validation/triage/` — `regression-ui/`,
+`regression-ui-2/`, `fog-flight/` and `fog-flight-fresh/`.
 
 ## Interpolation UI Commit check repeats a missing local-stroke assertion (2026-10-15)
 
