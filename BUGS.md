@@ -3,6 +3,15 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## A value-layer Blend Mode tap does not open its menu in the Fog Glow drive (2026-10-15)
+
+`GlareUITests.testFogGlowSizePreviewKeepsItsDrawnFootprintThroughLift` stops at the Glare menu
+entry on two fresh simulators with unchanged app source `840d68a`. The options panel and Blend
+Mode button are present, but no submenu appears after its tap; inspected recording and hierarchy
+agree. The first Glare method passed in the initial batch. Capture the existing flight recorder at
+this exact boundary before changing menu or test timing. Evidence: `s49-final-validation/triage/`
+`regression-ui/` and `regression-ui-2/`.
+
 ## Interpolation UI Commit check repeats a missing local-stroke assertion (2026-10-15)
 
 The full run, serial rerun and individual fresh-device run fail the same final drawn-ink assertion.
