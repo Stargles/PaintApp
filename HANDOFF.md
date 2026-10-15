@@ -46,30 +46,32 @@ delay or menu workaround was added. No second full suite was run just for these 
 
 **The iPad has `f813346` Release**, automatically re-signed/installed October 15 at 01:08 Toronto
 while usage was limited. App source is `840d68a`, without Liquify; profile expiry
-`2026-10-22T05:08:05Z`. Fresh saved-scene/unlocked readiness is required before restarting it into
-probes. Keep one-shot repairs until the owner confirms real scenes; first run the final repair
+`2026-10-22T05:08:05Z`. The owner trusted the developer on October 15; six physical probes then
+completed successfully (PERFORMANCE §30.7). The iPad is released for ordinary use again.
+Keep one-shot repairs until the owner confirms real scenes; first run the final repair
 signature so preserved preupdate snapshots are also converted.
 
 **(178) Liquify: active ownership and evidence**
 
-- **Feature/material — `tmp/s49-liquify`.** Linked generated frames keep source links; all raster
-  pixels move, including flattened pictures/text; editable typed objects stay untouched; exterior
-  selection pixels stay fixed while vectors remain editable. Required placement replaces old
-  Distort/rest ownership. Immutable material operations are shared and strictly codec-deduplicated,
-  never globally pooled. Combined storage/native baseline `afef15c` passed 60/60. Boxing the lattice
-  lowers VectorElement stride 1080→856 B, bridge 80 B, unchanged budget. Prior native/preview gates 26/26
-  and 30/30 remain evidence only for unchanged seams. A 100-stroke fixture shares one field,
-  144000 evaluations, 99 coordinate hits, 11,535,208 peak counted bytes including the field under the
-  unchanged 24 MiB payload cap plus one field. Scoped autorelease lifetimes prevent accumulation.
-  Four preserved pre-fix methods exposed exterior hit/outline/erase, unsupported map output,
-  fractional gradient quantization and linked paper anchoring. Clean `3bf3d47` passed 22/23: the
-  first three now pass, paper still fails exact RGB (phase/alpha improved; direct-byte diagnostic
-  pending). It shares inverse transport and native tile sampling; lasso membership stays centreline.
-  Review then found large supported integer texels rounding into the next tile and a negative
-  local index. Recorded before integer-division fix `d74e247`; actual tile-lookup regression is in
-  its focused 13-method run. The same run measures repeated native walks for 100 distant eraser
-  candidates before optimizing through existing painted bounds, with no new cache. A paper
-  precision change is only being evaluated, not yet qualified. Slot 2 currently belongs to this run.
+- **Feature/material — `tmp/s49-liquify`, agent `material_resume`.** Required placement and immutable
+  spatial material replace old Distort/rest ownership. Linked frames preserve source links; raster
+  scope and fixed exterior vector pixels are ruled. Storage baseline `afef15c` passed 60/60.
+  Lattice boxing gives VectorElement 856 B / bridge 80 B. The 100-stroke fixture shares one field,
+  144,000 evaluations, 99 coordinate hits and 11,535,208 peak counted bytes under the unchanged 24 MiB
+  payload cap plus one field. Bounds rejection removes 100 distant full walks; near queries walk once.
+  Supported integer tile indexing uses integer division (`d74e247`), avoiding a negative pointer index.
+  Four preserved pre-fix methods exposed retained-ink hit/outline/erase, invalid map output,
+  fractional gradient quantization and linked paper anchoring. Those first three passed at `3bf3d47`;
+  native paper was narrowed to canvas-anchored gradient dither, not colour-space/layout conversion.
+  Float-format experiments are deleted. `fede254` reuses native geometry mapping/stamping before
+  spatial sampling, shares this with hit/bounds readers, and keeps paper plus opacity in that native
+  pass. The final UIImage draw previously overrode group opacity. Focused 35 now proves exact 2,304
+  linked-paper RGBA samples and all four fractional-opacity tile-seam cases with active interior
+  movement. Two remaining reds: geometry preparation must retain oversized-lattice refusal, and the
+  low-alpha query fixture needs a genuinely visible alpha 1 edge. Nonlinear geometry+active selected
+  Push oracle and a genuine alpha-1 query are now in the 36-method run at `8b76292`, which also
+  reserves geometry preparation through the existing renderer budget. Fault proofs/restoration and
+  final combined gates remain. Agent owns native slot 2.
 - **Storage/model — completed slices.** `tmp/s49-liquify-material-format`, clean `52eda39`:
   Debug 115/115; seven faults/nine expected failed executions/46 diagnostics, restored 18/18.
   Twelve owned commits are already integrated at `afef15c`. Genuine producer `840d68a` wrote the
@@ -79,38 +81,33 @@ signature so preserved preupdate snapshots are also converted.
   five fault batches, 14 failed executions across 13 methods, then restored 13/13. Evidence:
   `~/PaintWork/evidence/s49-liquify-material-{format,model}/`. Their own simulators were deleted;
   no further cherry-picks. Final combined Release/full/UI remains owed.
-- **Raster/shared presentation — `tmp/s49-liquify-raster`, clean `0d3c628`.** One held cel picture
-  and pending-window presenter replace parallel vector/raster procedures. Atomic mixed history,
-  one producer, exact stream tick certification, document-version guards and immutable coverage
-  are implemented. Ordinary ink follows container+cel pose; backing follows container only;
-  linked ink intentionally stays unposed. Required refusal preserves prior pixels/history.
-  Pending windows retain pixels+path only. Equal-key reuse certifies the actually installed image,
-  raster identity and displayed raster version; stale/cross-cel and delayed-base guards are tested.
-  Independent review found both tiers were only drawing inside their own transformed lobe after
-  clearing their union. Actual Colour/Opacity host+stream oracles produced four intended reds;
-  `19e0153` redraws both tiers through the shared union using the existing snapshot/window renderer.
-  Focused 41 now 40 passed/1 failed/zero skipped: the sole remaining method is the raster sampling
-  mismatch below. Native-only posing and all placement/version/refusal checks pass. Latest images
-  localize 156 differing channels/max 80 to 78 pixels around the painted raster edge, identical in
-  raster/mixed cases. Fixture-only `0d3c628` retains union before/after pictures for its proof run.
-  Cold portrait UI 5 is now running in slot 1; native iPad 9 landscape and current mutations follow.
-  No supported small-pose projective refusal was demonstrated by source review: oversized output
-  downsamples, noninvertibility refuses earlier, and allocation failure was not artificially induced.
+- **Raster/shared presentation — `tmp/s49-liquify-raster`, agent `raster_resume`.** One complete cel
+  picture/held procedure owns atomic raster/vector/recipe history, independent ink/backing poses,
+  exact stream tick certification and immutable version/coverage guards. Required render refusal
+  preserves prior pixels/history. Pending pictures retain only pixels/path. Independent union-window
+  oracles produced four intended reds; `19e0153` redraws both tiers across the union. Focused 41 passed 40,
+  leaving the separately ruled raster sampling mismatch. Both raster portrait UI flows passed in
+  placement-ui-2; linked UI fails its first deformation assertion, before persistence/source checks.
+  Root inspected unchanged pictures and recognizer flight (20 delivered moves); a 21.5-second Settings delay
+  suggests tracing completion/refusal before changing timeout. Root's temporary lift/callback recorder
+  notes are in the next batch; preserve its simulator flight/container before relaunch.
+  Three new cold UI pre-fix methods at `9c36371` fail exactly on stationary backing during host erase,
+  erased-ink placement in a stream and additive stream placement. Source fixes `75c83e3` consolidate
+  scratch through CelContentPicture, captured source/placement and existing-window-version cache,
+  explicit additive window pose and shared contents filters; old local flatten fields are removed.
+  Current scratch+linked batch at `141ef4d` expects 6 methods; native slot 1. Restored proofs, mutations and
+  iPad 9 landscape remain. Native sampler work is external until qualified: direct Accelerate affine
+  Lanczos3 still differs by source extent, so it is not adopted unchanged.
 
-**Newest source review:** the ordinary vector-eraser scratch still flattens ink plus backing in
-`StrokeCanvasView.displayedScratch`, then host and stream apply different poses to that combined
-picture. This bypasses the new complete cel-picture owner. Recorded in TODO before a native
-reproduction; raster worker will characterize integer-translated ink over stationary nonuniform
-backing, then consolidate the sibling path through the existing presenter if confirmed.
-
-**Raster appearance choice C accepted 2026-10-15, conditional on compact code and measured cost.** Core Graphics high sampling depends on full source extent,
+**Raster appearance choice C accepted 2026-10-15, conditional on compact code and measured cost.**
+Core Graphics high sampling depends on full source extent,
 so a cropped preview can differ at lift. A virtual full-extent provider matched but retained about
 230 MiB of scaled-image cache over 100 draws and was rejected. An external bounded Lanczos prototype
 matches full/window output and added about 3.2 MB peak over 100 512-square draws. It visibly smooths
 reduced grain. Root inspected/sent `~/PaintWork/s49-liquify-logs/raster/pose-sampling-A-C-comparison.png`;
 The owner accepts C (smoother), provided its code and runtime cost are proportionate.
-Record and measure the shared implementation before accepting it. All transformed raster backing would share preview/committed sampling; native vector ink
-stays native. Prototype figures are not production/device qualification.
+Record and measure the shared implementation before accepting it. All transformed raster backing would
+share preview/committed sampling; native vector ink stays native. Prototype figures are not production/device qualification.
 
 Earlier surface-handoff 30 logic/6 UI with 19 faults, inverse Release 7/7 over 18 byte-identical fixtures,
 and pre-material linked UI 3/3 remain reusable only where the seam is unchanged. No speed-ratio claim.
@@ -118,15 +115,16 @@ New placement and rendering paths need current proof. Preserve evidence before c
 
 ## What is next
 
-1. Finish material precision and bounded hit queries, raster UI/mutations and the pending sampling
-   decision. Combine clean branches; final Debug/Release census/lints, touched UI, native iPad 9
+1. Finish material precision/refusal/query tests, raster scratch UI/mutations and the accepted bounded
+   sampling implementation (measure cost and code size). Combine clean branches; final Debug/Release
+   census/lints, touched UI, native iPad 9
    landscape and a full suite. Before Liquify install, drive playback, grey-area pan, Move box,
    graph node drag/release and a stroke too. Remove (178) whole only in its completed merge.
-2. **(179) physical probes:** updated iPad build supports effect, opacity, shape and fill. Prior
-   `7cf3245` supported only effect among these; unknown modes fell back to playback. Physical effect
-   baselines at 4096²/2048×1024 yielded 9/100 held pictures over 100 ticks (PERFORMANCE §30.6).
-   After-build measurements start now: the owner reconfirmed saved/unlocked on October 15. Preserve whole-
-   trace counts. Probe CLI: 100 ticks at 80 ms, not JSON tickCount (frame events).
+2. **(179) is complete:** six physical probes on `f813346`, every process exited 0, no failed bakes or
+   trace overflow. Effect preview 99/100 at 4096² and 100/100 at 2048×1024; opacity 100/100 both. Every
+   drag had zero editor passes (two whole-trace passes). Shape/fill picture counts are not instrumented.
+   PERFORMANCE §30.7 and `~/PaintWork/s49-device-probes/README-after-20261015.md` preserve exact scope,
+   arguments, raw reports and memory limits. Removed the completed TODO item whole in this merge.
 3. (27) laptop verification is owner-deferred; (22)/(10) deprioritised; (37) dropped; Later features
    await a design discussion. Do not research those while the owner is unavailable.
 

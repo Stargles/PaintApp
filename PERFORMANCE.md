@@ -6010,8 +6010,44 @@ Unknown modes silently select playback, so opacity/shape/fill must wait for the 
 The whole-run counts include opening/closing the hold and final bake; they are not per-tick publishes.
 These are one take per size, not an after-build comparison. Reports are preserved at
 `~/PaintWork/s49-device-probes/playback-s49-7cf3245-effect-4096-20261014-103113.json` and
-`playback-s49-7cf3245-effect-2048x1024-20261014-103217.json`. Re-run the matching effect fixture and
-new opacity/shape/fill modes after the integrated build is validated and can be signed for installation.
+`playback-s49-7cf3245-effect-2048x1024-20261014-103217.json`. The matching effect fixture and new opacity/shape/fill modes were completed in §30.7.
+
+### 30.7. Physical iPad completion of the held-control checks (2026-10-15)
+
+**MEASURED**, the same physical iPad9 (`iPad12,1`, iPadOS 26.6.2), Release `f813346`
+(app source `840d68a`, build stamp `2026-10-15T04:07:09Z`). The automatic re-sign log records this
+commit installed at 01:08 Toronto; the owner trusted its developer and reconfirmed the scene saved
+and device unlocked before these runs. No new app was installed for this measurement.
+
+`tools/probe-run.sh` ran six fresh processes, each with 100 requested changes 80 ms apart, two frames,
+one stroke per cel, onion on and a 201326592-byte texture budget. Effect/opacity/shape used five layers;
+fill used three. Only opacity used `-probeGraded`. Every JSON confirms the intended operation, initial
+bake completed, zero failed bakes and no trace overflow; every process exited 0.
+
+| Control | Canvas | Held preview composites | Editor passes, whole trace / drag | Bake composites | App footprint growth / peak (MB) | Peak surface bytes (MiB) |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| effect | 4096×4096 | 99 | 2 / 0 | 1 | 466.8 / 801.4 | 32.0 |
+| effect | 2048×1024 | 100 | 2 / 0 | 2 | 71.2 / 302.0 | 16.0 |
+| opacity | 4096×4096 | 100 | 2 / 0 | 2 | 34.4 / 827.4 | 32.0 |
+| opacity | 2048×1024 | 100 | 2 / 0 | 2 | 31.7 / 347.4 | 16.0 |
+| shape | 4096×4096 | not counted | 2 / 0 | 1 | 279.2 / 741.4 | 128.0 |
+| fill | 4096×4096 | not counted | 2 / 0 | 1 | 445.0 / 853.6 | 38.9 |
+
+The matching effect baseline in §30.6 produced 9/100 pictures at 4096² and 100/100 at 2048×1024.
+The updated large-scene half-detail preview produces **99/100**; the normal-size preview remains
+**100/100**. Both versions have two whole-trace editor passes. Large-scene peak app footprint is
+1541→801 MB in these takes. This is one take per build/size, not a throughput ratio or leak claim.
+
+The whole-trace memory proxy includes scene construction, cache warmup, initial/final bakes and
+settling; its growth is not growth during the drag alone. Shape/fill surface presentations and images
+handed to Core Animation are not instrumented by this installed probe, so their picture counts are
+**not measured**, not zero. Their 100-change operations did complete, with zero editor passes in the
+drag interval. There is no physical before-build opacity/shape/fill comparison: the old installed
+probe did not support those modes. The earlier simulator image-count evidence remains in §32/§34.1.
+
+Raw reports, exact arguments and compact derived summary:
+`~/PaintWork/s49-device-probes/README-after-20261015.md`, `s49-after-device-summary.json`, and the six
+`playback-s49-f813346-after-*-1015*.json` reports. This completes (179)'s outstanding physical checks.
 
 ## 31. A colour picker's tick rebuilt the whole picker, and the Wheel's shading was 14,400 rectangles (2026-10-13)
 
@@ -6167,7 +6203,7 @@ Two takes each, 45–79% idle at the start (another session's build), 75–92% a
   process here).
 - **The surfaces are 128 MiB while a shape is pending at 4096²** (16 MiB at 2048×1024) — what the old texture
   and its cached image held between them in the app, and they are mapped once by the render server where the
-  old images were copied. Held only while a shape is up. Not measured: the device.
+  old images were copied. Held only while a shape is up. The device surface/whole-process check is §30.7; its installed probe does not count shape presents.
 
 ## 33. The brush colour, an in-between's drags and a graph-band curve were still written per tick (2026-10-13)
 
