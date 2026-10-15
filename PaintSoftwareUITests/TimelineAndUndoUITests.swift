@@ -881,7 +881,7 @@ final class InterpolationWorkflowUITests: PaintUITestCase {
         func inkedColumns() throws -> [Double] {
             let pixels = try pixelProbe(canvas)
             return stride(from: 0.14, through: 0.92, by: 0.02).filter {
-                !isWhitish(pixels($0, editRow))
+                isInk(pixels($0, editRow))
             }
         }
         func meanColumn(_ columns: [Double]) -> Double {
