@@ -478,7 +478,7 @@ enum PixelOps {
     /// Samples global canvas coordinates into the caller's private picture. Full frames and windows
     /// share the same grid and request only the source support each bounded tile actually needs.
     static func drawPosedRaster(canvasSize: CGSize, through pose: PoseMap, into cg: CGContext,
-                                source: (CGRect) -> UIImage?) -> Bool {
+                                opacity: CGFloat = 1, source: (CGRect) -> UIImage?) -> Bool {
         let frame = CGRect(origin: .zero, size: canvasSize)
         guard let mapped = pose.mapped(CGPath(rect: frame, transform: nil)) else { return false }
         let shown = mapped.boundingBoxOfPath.intersection(cg.boundingBoxOfClipPath)
@@ -491,7 +491,8 @@ enum PixelOps {
         let output = shown.applying(CGAffineTransform(scaleX: scale, y: scale)).integral
         return ImageWarp.drawRaster(sourceSize: canvasSize, destination: output, inverseTexelMap: map,
             source: { source($0)?.cgImage }, consume: { image, rect in
-                UIImage(cgImage: image).draw(in: rect.applying(CGAffineTransform(scaleX: 1 / scale, y: 1 / scale)))
+                UIImage(cgImage: image).draw(in: rect.applying(CGAffineTransform(scaleX: 1 / scale, y: 1 / scale)),
+                                           blendMode: .normal, alpha: opacity)
             })
     }
 
@@ -505,14 +506,11 @@ enum PixelOps {
         withCelWindow(footprint: pose?.mapped(local) ?? local, canvasSize: canvasSize, into: cg,
                       content: content, replacing: replacing) {
             if let pose, !pose.isIdentity {
-                cg.saveGState()
-                cg.setAlpha(opacity)
-                completed = drawPosedRaster(canvasSize: canvasSize, through: pose, into: cg) { crop in
+                completed = drawPosedRaster(canvasSize: canvasSize, through: pose, into: cg, opacity: opacity) { crop in
                     UIGraphicsImageRenderer(size: crop.size, format: transparentFormat()).image { _ in
                         image.draw(in: rect.offsetBy(dx: -crop.minX, dy: -crop.minY))
                     }
                 }
-                cg.restoreGState()
             } else { image.draw(in: rect, blendMode: .normal, alpha: opacity) }
         }
         return completed
@@ -584,7 +582,11 @@ enum PixelOps {
                 }
                 // Native geometry keeps its existing renderer and independently resolved placement.
                 if let vectorImage { vectorImage.draw(in: content) }
-                else { cel.vector?.draw(into: cg, frameRect: content, quality: quality) }
+                else if let vector = cel.vector {
+                    guard vector.draw(into: cg, frameRect: content, quality: quality) != nil else {
+                        completed = false; return
+                    }
+                }
             }
             if let overlays = cel.display?.drawOverlays, !overlays(cg, content) { completed = false; return }
             for ink in cel.display?.windows ?? [] {

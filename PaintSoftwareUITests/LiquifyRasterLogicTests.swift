@@ -550,6 +550,91 @@ final class LiquifyRasterLogicTests: XCTestCase {
     }
 
     @MainActor
+    func testPosedAdditiveWindowKeepsFractionalOpacityInWholeAndStreamStrips() throws {
+        defer { PixelOps.clearRasterizeCache() }
+        let manager = CanvasFixture.manager()
+        let rect = CGRect(x: 12, y: 18, width: 20, height: 16)
+        let patch = UIGraphicsImageRenderer(size: rect.size, format: PixelOps.transparentFormat()).image { context in
+            UIColor.red.setFill(); context.fill(CGRect(origin: .zero, size: rect.size))
+        }
+        let opacity: CGFloat = 0.37
+        let pose = PoseMap(CGAffineTransform(translationX: 8, y: 0))
+        let ink = PixelOps.InkWindow(image: patch, rect: rect, canvasSize: size,
+            opacity: opacity, replacesBase: false, pose: pose)
+        let display = PixelOps.CelDisplay(windows: [ink])
+        let cel = manager.layers[0].cels[0]
+        let frozen = PixelOps.FrozenCel(cel: cel, derived: nil, quality: .full, display: display)
+        let expected = UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { _ in
+            patch.draw(in: rect.offsetBy(dx: 8, dy: 0), blendMode: .normal, alpha: opacity)
+        }
+        let reference = try bytes(expected)
+        XCTAssertEqual(reference[(24 * 64 + 26) * 4 + 3], 94, "PREMISE: the independent picture has fractional coverage")
+        let direct = try XCTUnwrap(PixelOps.rasterize(frozen, canvasSize: size, quality: .full))
+        XCTAssertEqual(zip(try bytes(direct), reference).filter { $0 != $1 }.count, 0,
+            "posed scratch opacity must reach the final sampler tile draw")
+        let recipe = try XCTUnwrap(manager.makeFrameRecipe(atFrame: 0, includeBackground: false,
+            liveDisplay: [manager.layers[0].id: display]))
+        let band = CGRect(x: 0, y: 20, width: size.width, height: 10)
+        let strip = recipe.windowed(to: band)
+        let actual = UIImage(cgImage: try XCTUnwrap(Compositor.composite(strip.resolve(), resolving: .coreGraphics)))
+        let crop = try XCTUnwrap(PixelOps.copiedSubimage(of: expected, in: band))
+        XCTAssertEqual(zip(try bytes(actual), try bytes(crop)).filter { $0 != $1 }.count, 0,
+            "the stream recipe's translated strip retains the same fractional scratch pixels")
+    }
+
+    @MainActor
+    func testRequiredNativeMaterialRefusalRejectsPartialDisplayAndStripSources() throws {
+        defer { PixelOps.clearRasterizeCache() }
+        let manager = CanvasFixture.manager(layerCount: 0); manager.addVectorLayer()
+        let canvas = try XCTUnwrap(manager.layers[0].cels[0].vector)
+        let samples = StrokeSamples(points: [CGPoint(x: 4, y: 20), CGPoint(x: 60, y: 20)])
+        let operation = InkMaterialOperation(LiquifyDeformation(brush: TestBrushes.hardRound,
+            size: 40, power: 0.8, mode: .push, seed: 17, samples: samples))
+        let rest = Lattice(cols: 64, rows: 64, restOrigin: .zero, restCellSize: 1)
+        var stretched = rest
+        for row in 0...64 { for col in 0...64 {
+            stretched.vertices[row * 65 + col] = CGPoint(x: col.isMultiple(of: 2) ? -1000 : 1000,
+                                                        y: row.isMultiple(of: 2) ? -1000 : 1000)
+        } }
+        XCTAssertGreaterThan(DeformedCellIndex.storageByteUpperBound(lattice: stretched), InkMaterialRenderer.byteBudget,
+            "PREMISE: native material itself exceeds its counted index budget; no whole-compositor budget override")
+        let ink = VectorStroke(brush: TestBrushes.pencil, color: .init(red: 0, green: 0, blue: 0, alpha: 1),
+            size: 8, opacity: 1, samples: samples, seed: 7,
+            placement: StrokePlacement(map: .identity, restSize: 8,
+                source: .retained(samples: samples, lattice: nil, precise: true),
+                material: InkMaterialProgram(bindings: [.init(operation: operation, bridge: .identity)]),
+                transport: .lattice(captured: rest, current: stretched, pose: .identity)))
+        let prefix = VectorFillElement(path: CGPath(rect: CGRect(x: 8, y: 8, width: 16, height: 24), transform: nil),
+            color: .init(red: 1, green: 0, blue: 0, alpha: 1))
+        canvas.restoreElements([.fill(prefix), .stroke(ink)], changedInk: nil)
+        let native = canvas.freeze(quality: .full)
+        var completion: Int?
+        let partial = UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { context in
+            completion = native.draw(into: context.cgContext, frameRect: CGRect(origin: .zero, size: size), quality: .full)
+        }
+        XCTAssertNil(completion, "PREMISE: existing native renderer actually refuses this required source")
+        XCTAssertTrue(try bytes(partial).contains { $0 != 0 }, "PREMISE: earlier valid ink already painted before refusal")
+        PixelOps.clearRasterizeCache()
+        let display = PixelOps.CelDisplay(vector: native)
+        let direct = PixelOps.FrozenCel(cel: manager.layers[0].cels[0], derived: nil, quality: .full, display: display)
+        XCTAssertNil(PixelOps.rasterize(direct, canvasSize: size, quality: .full),
+            "a display source may not return the native painter's partial picture")
+        XCTAssertEqual(PixelOps.rasterizeCacheBytes, 0, "failed native display pixels never enter the flatten memo")
+        let recipe = try XCTUnwrap(manager.makeFrameRecipe(atFrame: 0, includeBackground: false))
+        let band = CGRect(x: 0, y: 12, width: size.width, height: 16)
+        let request = recipe.windowed(to: band).resolve()
+        XCTAssertTrue(request.sourceResolutionFailed, "strip resolution propagates required native failure")
+        XCTAssertNil(request.sources[0], "partial native strip pixels cannot become a compositor leaf")
+        XCTAssertNil(Compositor.composite(request, resolving: .coreGraphics), "the existing frame refusal guard rejects partial native strips")
+        XCTAssertEqual(PixelOps.rasterizeCacheBytes, 0, "failed native strips never enter the flatten memo")
+        let empty = CanvasFixture.manager(layerCount: 0); empty.addVectorLayer()
+        let emptyRecipe = try XCTUnwrap(empty.makeFrameRecipe(atFrame: 0, includeBackground: false))
+        let emptyRequest = emptyRecipe.windowed(to: band).resolve()
+        XCTAssertFalse(emptyRequest.sourceResolutionFailed, "a genuinely empty vector leaf remains valid")
+        XCTAssertNotNil(Compositor.composite(emptyRequest, resolving: .coreGraphics))
+    }
+
+    @MainActor
     private func posedRasterRefusalFixture() -> CanvasManager {
         let manager = CanvasFixture.manager()
         manager.layers[0].cels[0].bakedImage = image()
