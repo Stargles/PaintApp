@@ -58,62 +58,50 @@ their files are repaired. Build `2974b33` broke this rule and lost the owner's k
 
 ## (178) Liquify tool
 
-**Owner availability, 2026-10-15:** the owner is using the Mac and will say when finished.
-Defer performance measurements until that notification; continue source review and correctness
-checks without treating contended timings as qualification.
-The owner subsequently asked to park at a good checkpoint. Finish the already-running eight-method
-UI batch, archive its results, commit the handoff and stop. Do not start the final regression,
-Release build, performance or physical-device runs before resumption.
+**Parked at the owner's request, 2026-10-15.** All work is committed in
+`~/PaintWork/PaintApp-s49-integration` on `tmp/s49-integration`; app/test source checkpoint `9dfd96b`.
+Liquify is **not merged or installed**. No agent, simulator job or deliberate fault remains active.
+The owner is using the Mac and will notify when finished; quiet performance measurements still wait
+for that notice. Obtain fresh saved/unlocked iPad readiness only when the final device checks are ready.
 
-**Combined checkpoint (2026-10-15):** root integrates material `72f686f`, raster
-`ae40f66` and sampler `effb239`. Material55/55, prior raster109/109, sampler native Debug20/20 and
-Release21/21, and raster landscape UI8/8 passed. Linked Release UI1/1 proves exact cold reopen
-and live source following. Three raw landscape screenshots were inspected. Final combined gates and device checks remain.
-HANDOFF names current owners and exact evidence; this item remains open until merged.
+**Implemented:** material `72f686f`, raster through `f056af7`, bounded sampler `effb239`, exact inverse
+batching, and caller fixes `f66bd95` are integrated. Required render refusal propagates through shared
+picture consumers; prior previews survive and destructive work stops. Display coverage follows actual
+accepted pictures and resets when cel identity changes. Move requires both its isolated piece and hole;
+initial failure restores the lift, while relatch failure preserves earlier moves and Undo steps. The old
+forced blank wrapper and stale eraser-nil explanation are removed, with no duplicate renderer/cache.
 
-**Exact-map batching (2026-10-15):** existing fan-out now shares one immutable prepared field
-across disjoint points/row strips; no new worker framework or cache. Baseline Debug34/34 passed,
-three committed-baseline faults caught132 intended diagnostics, and sources are restored. The18-fixture native benchmark and five actual Debug production windows
-match every serial reference byte. The long Debug run was then cancelled (patterned batching202.6s
-versus scalar90.9s); final optimized Release cost decides whether batching stays.
-Four external alternating C++ pairs preserved84,956 source Doubles and179,020,536 evaluations exactly;
-contended batch1.62–2.29seconds versus serial5.39–8.66 is not native/device qualification. Quiet
-Release and physical first-use costs remain open. Evidence:
-`~/PaintWork/evidence/s49-liquify-row-batches/` and `~/PaintWork/s49-liquify-logs/combined/batches/`.
+**Latest qualification:** caller baseline/restored4/4 each; two fault batches2/2 red each caught18
+intended diagnostics. The broader raster115 run had114 passes and one invalid one-reference fixture;
+its corrected two-source fixture and two refusal methods subsequently passed3/3, with deliberate
+invalid/empty-source faults verified. Earlier material/sampler/storage qualifications remain recorded
+in HANDOFF and their evidence indexes.
 
-**Required-picture refusal review (2026-10-15):** shared settlement now reports failure through
-save, Move/Duplicate/Bake, resize, frame/layer/tool changes and other mutation boundaries. Actual
-posed scratch alpha and direct frozen window failure are fixed and mutation-tested. A new native
-pre-fix proof found transparent substitution and partial pictures on material refusal (19 intended
-diagnostics across full/fitted rendering and actual consumers). The non-fallible PixelOps wrapper is
-removed; actual callers retain prior thumbnail/onion/live pictures and refuse destructive copy work.
-Unavailable recipes remain distinct from failed required pictures. Restored110 logic plus five raster
-UI methods and deliberate fault proofs are next. A direct live-view headless assertion could not
-compile because the view is absent from that target; removed and never counted. That small guard
-receives source review plus the actual eraser UI, without a duplicate rendering helper or test seam.
+**Current UI checkpoint:8 total,7 passed,1 failed,0 skipped.** All five raster flows pass, including
+explicit `addRasterLayer` in the corrected cold authoring test. Vector Push and saved controls pass.
+The linked-frame test timed out at its visible-change predicate and stopped; later reopen/source-edit
+steps did not run in this batch. Root inspected the before/after screenshots: the later picture visibly
+deforms, so the cause is unclassified (polling/capture/render timing must be checked before claiming a
+product regression or changing a threshold). The modes landscape screenshot caught rotation mid-flight,
+so a settled native iPad9 controls picture remains required. Pictures, exact test-scene copies, hashes,
+counts and inspection notes: `~/PaintWork/s49-liquify-logs/combined/final/liquify-ui-final-1-review.md`.
+The owned simulator was deleted after archival.
 
-**Follow-up review (2026-10-15):** the live view still advances `baseDocumentVersion` before a
-successful picture. With a live stream, that false coverage claim suppresses every later retry of
-the failed edit. Capture document coverage with each request and publish it only with its accepted
-picture. Move also clears held ink and latches after its required hole render fails; its isolated
-piece uses nil for both absence and refusal. Make latch admission require complete pictures and
-use the existing float rollback on failure. The existing oversized native-material fixture passes
-Move's geometry-only bounds checks, so this is a reachable caller gap, not an allocation hypothesis.
-Preserve legitimate empty/eraser-only pieces and existing stream/no-render behavior; no new renderer.
-The same view review found equal version counters on different cels can falsely claim coverage
-after a refused render. Reset the existing displayed/document coverage sentinels when canvas identity
-changes. Eraser-only isolated pictures are already nonnil transparent images; remove the stale
-comment saying otherwise rather than inventing a new result type.
+**Remaining on resumption:** isolate the linked UI failure; obtain a settled owner-sized controls
+capture; build final Release; measure exact batching on a quiet Mac before deciding to keep it; run
+final fast Debug/Release and the full suite; execute safe physical legacy/raster UI plus the native
+cold/warm sampling benchmark. Final current census is fast5282 across256 classes/full5864. The earlier
+5284/5866 count wrongly included three private static helpers; one real Move test was then added.
+Both UI lints pass. Final regression and device runs have not started.
 
-**UI fixture correction (2026-10-15):** the cold raster Liquify test only drew on the default
-vector layer; `commitPendingShape` does not convert it to raster. Its previous pass proves a vector
-workflow, not raster authoring. Add the existing `addRasterLayer` step before drawing and rerun the
-same visible/Undo/Redo/reopen assertions. The other seeded mixed-backing/eraser UI cases genuinely
-author raster backing and remain valid. Physical first-use preparation also found that the backing
-seed is simulator-only and prewarms its reference; use an explicit raster-layer app flow for device
-correctness, and report native component cost separately from uninstrumented app presentation.
-Finish the modes/profile UI in landscape with a full-screen screenshot and drive that method on
-the owner's iPad9 simulator size; the earlier three native9 pictures show the raster/eraser workflows.
+**Cost remains a gate:** Release exact-source/pixel correctness passed, but long Debug patterned
+batching was202.6s versus scalar90.9s before cancellation. Do not infer a shipped speedup from the
+faster external C++ experiment. Sampler C uses one bounded kernel without an added cache/CG fallback;
+PERFORMANCE§36 records qualified numerical/memory limits and earlier native costs. Final physical
+first-use cost is unmeasured. The external five-method device patch preserves user libraries/settings;
+it and the separate native CelContentPicture benchmark are prepared, not compiled or executed.
+Existing app hooks cannot isolate C-specific gesture latency; keep that claim separate from native
+production-path cost and actual-app raster correctness.
 
 *"It should be placed to the left of the brush tool in the top menu. When selected, it acts sort of like
 a brush (you can control the brush type, size, etc), and otherwise it does basically what a normal

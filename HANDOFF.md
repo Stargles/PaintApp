@@ -10,7 +10,11 @@ file, then [CLAUDE.md](CLAUDE.md) (build, test, merge, deploy), then the specifi
 pick up. [TODO.md](TODO.md) is the owner's asks **in queue order — the top is next**; [BUGS.md](BUGS.md)
 is what we find.
 
-## State (session 49 in progress, resumed 2026-10-15)
+## State (session 49 parked at the owner’s request, 2026-10-15)
+
+**Parked after the requested current UI batch.** App/test checkpoint `9dfd96b` is committed in
+`~/PaintWork/PaintApp-s49-integration` (`tmp/s49-integration`). No active jobs or faults remain.
+Resume only when the owner asks; performance still waits for their Mac-idle notice.
 
 Verify `git fetch origin`, `git worktree list` and every `tmp/*` branch before resuming. Worktrees
 live under `~/PaintWork`, outside Desktop. Never harvest a dirty worker tree: deliberate faults may
@@ -65,8 +69,8 @@ signature so preserved preupdate snapshots are also converted.
 Main remains `17b438c`; Liquify is unmerged. Root `tmp/s49-integration` has material `72f686f`,
 raster `f056af7`, sampler `effb239`, exact inverse batching, and root caller fixes `f66bd95`.
 Raster's final delta is integrated; do not cherry-pick its older history. Never harvest a dirty
-worker/root tree: root is reserved by `material_resume` for committed-baseline deliberate faults.
-Documentation-only commits after `f66bd95` do not change that source baseline.
+worker/root tree. All worker tasks are complete and faults restored; root source is clean.
+`9dfd96b` adds the explicit raster-layer UI setup and a landscape controls capture attempt.
 
 - **Required-picture refusal.** The shared optional contract replaces the old forced transparent
   fallback through actual render/copy/merge/save/thumbnail/onion consumers. Root `f66bd95` also
@@ -75,9 +79,9 @@ Documentation-only commits after `f66bd95` do not change that source baseline.
   hole. A failed initial lift rolls back; a failed relatch preserves earlier nudges and their Undo
   steps through existing settlement. Eraser-only isolated images were already valid transparent
   images; the contrary old comment is deleted. No new renderer, result enum or cache.
-- **Caller proof — material owns root slot2.** Focused native baseline4 passed4/4 at `f66bd95`.
-  FaultA failed2/2 with exactly two diagnostics (lost authored nudge and required render incorrectly
-  waiting). FaultB and restored4 are in progress. Evidence:
+- **Caller proof — complete.** Focused native baseline and restored gates each passed4/4 at
+  `f66bd95`. FaultA failed2/2 with two diagnostics; faultB failed2/2 with16. All eight source files
+  restored exactly; slot and simulator returned to root. Evidence:
   `~/PaintWork/s49-liquify-logs/combined/final/caller-refusal/`. View installation/coverage and canvas
   identity are source-reviewed: the actual view is absent from the headless target; no compiled
   native-view assertion is claimed. Existing scheduling, actual rendering and settlement are tested.
@@ -88,14 +92,15 @@ Documentation-only commits after `f66bd95` do not change that source baseline.
   caught the visible-ink assertion; final restored3 passed. Earlier restored109 and adapter faults
   remain valid. Index: `raster/final-raster-handoff.md` and `sampler-adapter-proof.md` under the Liquify
   logs. Both owned simulators deleted, slot1 free; 0.91GiB of rebuildable caches removed, evidence kept.
-- **UI coverage correction.** The first cold-raster UI method previously used the default vector
-  layer. Its pass is vector evidence; root will add existing `addRasterLayer` before drawing after
-  material releases the source, retaining pixel/Undo/Redo/reopen assertions. The other four seeded
-  mixed-backing/eraser methods genuinely author raster backing. Three native9 landscape raw captures
-  were inspected and are valid for those depicted workflows; the first cold-reopen picture was vector.
-  Run both Liquify UI classes (eight methods) on the final source. End modes/profile UI in landscape
-  with a full-screen capture, and run that method at native iPad9 size. Linked Release UI previously
-  passed1/1: exact reopen and new green source ink follows the linked frame.
+- **Final UI checkpoint —7/8 passed,0 skips at9dfd96b.** The corrected cold test explicitly creates
+  raster backing; all five raster methods pass, plus vector Push and saved controls. The linked test
+  timed out at line97 and stopped before later reopen/source-following steps. Root viewed before/after:
+  deformation is visible in the later still. Cause remains unclassified; isolate it and inspect timing
+  before changing product code or thresholds. Earlier linked Release1/1 is a different source/run.
+  The controls landscape image caught system rotation mid-flight and is not settled layout evidence.
+  Native iPad9 controls capture remains. The earlier three native9 images were inspected; mixed backing
+  and eraser are valid raster evidence, while the old cold-reopen image was on the default vector tier.
+  Evidence/counts/saved171-file Documents copy: `combined/final/liquify-ui-final-1-review.md`.
 - **Exact batching.** Existing PixelOps fan-out shares an immutable field across disjoint point/row
   batches; exact scalar arithmetic, global pixel centres, failure and counts are retained. All
   temporary arrays are budgeted, joined allocation exact-sized. Debug34/34 and three faults132
@@ -115,33 +120,33 @@ Documentation-only commits after `f66bd95` do not change that source baseline.
   do not redo. Keep one-shot repair until owner confirms. A new executable signature converts older
   preupdate snapshots; the current signature's own backup intentionally retains the prior format.
 
-**Remaining qualification:** owner is using the Mac and will notify when finished. Defer every
-performance measurement; correctness runs are permitted, with no timing claim. Root simulator
-`80BE77F5-9118-4CDD-854D-07C3E9A9009B`/integration DerivedData is reserved by material for the caller
-faults/restoration. Root UI compile attempts1–4 ran zero tests; mechanical optional test adaptation
-is complete and baseline4 compiled. Final census at f66bd95 is **fast5282/256 classes, full5864**;
-the former5284/5866 count included three private static testBrush helpers, then one new actual Move
-method was added. Both UI lints pass, PBX IDs unique. Final scripts in `combined/final/run-{fast,full}.sh`
-are prepared but not run. Recount after edits, run fast Debug/Release, quiet batching cost, full suite,
-and safe device checks. No final Release compile after the optional API/caller changes yet.
+**Remaining qualification:** parked. No active native/compiler jobs or agents; root's owned
+`80BE77F5-9118-4CDD-854D-07C3E9A9009B` simulator was already shut down after the UI batch and is now
+deleted, with its Documents copied and171 file hashes verified. Create a fresh owned simulator on
+resumption; integration DerivedData remains available. The owner is using the Mac and will notify when
+finished; performance is deferred. Final census: **fast5282/256 classes, full5864**. Both UI lints pass,
+PBX IDs unique. Final fast/full scripts are prepared but not run. No final Release build after optional
+API/caller changes, quiet batching measurement, owner-sized controls capture or new physical run.
+Root UI compile attempts1–4 ran zero tests; the final8-method batch compiled and ran as recorded above.
 
 **Physical preparation, not execution:** external `combined/final/device-drive.patch` and exact-byte
 apply/restore helper preserve user preferences, brush/palette libraries and packages. Ordinary helpers
-reset physical preferences/libraries, so never run them unchanged on the iPad. Four legacy methods
-cover playback/grey pan/Move/graph with actual held-pixel checks; the patch has not compiled or run.
+reset physical preferences/libraries, so never run them unchanged on the iPad. Five methods
+cover playback/grey pan/Move/graph and an explicit raster layer under a transform with actual held-pixel checks; the patch has not compiled or run.
 A separate temporary actual-CelContentPicture benchmark is prepared for native process-cold/warm
 cost and exact pixels, not app gesture latency. The seeded backing UI is simulator-only and prewarms
-its reference; sampler is checking an existing explicitly raster app flow for physical first-presentation
-correctness. No new production timing hook. Get fresh saved/unlocked readiness only when ready for
+its reference; the existing explicit raster app flow is prepared for physical first-presentation
+correctness (`device-raster-app-first-use.md`). No new production timing hook. Get fresh saved/unlocked readiness only when ready for
 device work; the prior readiness was consumed by179 and the iPad is released to ordinary use.
 
 ## What is next
 
-1. Finish material precision/refusal/query tests, raster scratch UI/mutations and the accepted bounded
-   sampling implementation (measure cost and code size). Combine clean branches; final Debug/Release
-   census/lints, touched UI, native iPad 9
-   landscape and a full suite. Before Liquify install, drive playback, grey-area pan, Move box,
-   graph node drag/release and a stroke too. Remove (178) whole only in its completed merge.
+1. On owner resumption, isolate the linked UI predicate failure and capture settled Liquify controls
+   at native iPad9 size. Then build Release, qualify optimized batching cost once the Mac is quiet,
+   run final fast Debug/Release and full suite, and obtain fresh device readiness for the five safe
+   UI drives plus native cold/warm sampler cost. Keep screenshots and actual scene packages. No
+   threshold change or timing claim is justified by the contended UI failure alone. Remove (178)
+   whole only in its fully qualified merge; no Liquify is currently on main or the iPad.
 2. **(179) is complete:** six physical probes on `f813346`, every process exited 0, no failed bakes or
    trace overflow. Effect preview 99/100 at 4096² and 100/100 at 2048×1024; opacity 100/100 both. Every
    drag had zero editor passes (two whole-trace passes). Shape/fill picture counts are not instrumented.
