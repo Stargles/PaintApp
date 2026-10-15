@@ -291,7 +291,7 @@ final class StrokeScratch: MaterialDabTarget {
         if let material {
             let shift = Homography(CGAffineTransform(translationX: offset.x, y: offset.y))
             window.material = InkMaterialPaint(program: material.program.conjugated(by: shift),
-                transport: material.transport.moved(by: shift))
+                transport: material.transport.moved(by: shift), geometry: material.geometry)
         }
         defer { window.material = nil }
         window.beginStrokeGroup(opacity: group.opacity, blendMode: group.blendMode,

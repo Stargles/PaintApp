@@ -574,7 +574,7 @@ final class CGContextDabTarget: MaterialDabTarget {
         if let material, material.requiresWarp(in: ctx.boundingBoxOfClipPath) {
             func draw(_ renderer: InkMaterialRenderer) -> Bool {
                 renderer.draw(into: ctx, nativeBounds: group.bounds, program: material.program,
-                    transport: material.transport, blendMode: group.blendMode) { source, clip in
+                    transport: material.transport, geometry: material.geometry, blendMode: group.blendMode) { source, clip in
                     self.paintNative(group, into: source, over: clip)
                 }
                 return renderer.completed

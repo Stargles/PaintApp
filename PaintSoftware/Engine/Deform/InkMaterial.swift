@@ -633,6 +633,7 @@ extension VectorElement {
 struct InkMaterialPaint {
     let program: InkMaterialProgram
     let transport: InkMaterialBridge
+    var geometry: InkMaterialRenderer.GeometryReservation? = nil
     func bounds(of native: CGRect) -> CGRect {
         program.bindings.reduce(transport.bounds(of: native)) {
             $0.union($1.bridge.bounds(of: $1.operation.supportBounds))

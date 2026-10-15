@@ -392,6 +392,8 @@ final class InkMaterialLogicTests: XCTestCase {
         // entries, before capacity headroom. This is a counted allocation refusal, not a timer.
         XCTAssertGreaterThan(DeformedCellIndex.storageByteUpperBound(lattice: stretched), InkMaterialRenderer.byteBudget)
         ink.placement?.transport = .lattice(captured: rest, current: stretched, pose: .identity)
+        XCTAssertTrue(VectorCanvas.materialBounds(of: ink).isInfinite,
+                      "refused native geometry is an unknown footprint, never empty ink that can be culled")
         let paper = UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { context in
             UIColor.white.setFill(); context.fill(CGRect(origin: .zero, size: size))
         }
@@ -416,6 +418,30 @@ final class InkMaterialLogicTests: XCTestCase {
             completion = frozen.draw(into: context.cgContext, frameRect: CGRect(origin: .zero, size: size), quality: .full)
         }
         XCTAssertNil(completion, "Frozen draw must propagate the same budget refusal to its window caller")
+    }
+
+    func testPreparedNativeGeometryRemainsCountedByItsPainterAndPreviewDestination() throws {
+        let size = CGSize(width: 64, height: 64)
+        let bounds = CGRect(origin: .zero, size: size)
+        for separateDestination in [false, true] {
+            let owner = InkMaterialRenderer(window: bounds, scale: 1)
+            let prepared = try XCTUnwrap(owner.prepareGeometry(transport: .identity, pointCount: 100_000) {
+                [CGPoint](repeating: CGPoint(x: 32, y: 32), count: 100_000)
+            })
+            let painter = separateDestination ? InkMaterialRenderer(window: bounds, scale: 1) : owner
+            let image = UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { context in
+                painter.draw(into: context.cgContext, nativeBounds: bounds,
+                    program: InkMaterialProgram(bindings: [.init(operation: operation(), bridge: .identity)]),
+                    transport: .identity, geometry: prepared.reservation, blendMode: .normal) { native, _ in
+                        native.setFillColor(UIColor.red.cgColor)
+                        for point in prepared.value { native.fill(CGRect(x: point.x, y: point.y, width: 1, height: 1)) }
+                    }
+            }
+            XCTAssertFalse(painter.completed,
+                           "live mapped samples and inverse arrays share one cap, including a later preview destination")
+            let bytes = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(image.cgImage)))
+            XCTAssertFalse(bytes.contains { $0 != 0 }, "refusal happens before exposing any partial native picture")
+        }
     }
 
     func testChronologicalFillCutKeepsNativeAntialiasedCoverage() throws {
@@ -687,6 +713,45 @@ final class InkMaterialLogicTests: XCTestCase {
         for (name, image) in zip(["control", "liquified"], images) {
             let attachment = XCTAttachment(image: image)
             attachment.name = "linked-active-paper-" + name; attachment.lifetime = .keepAlways; add(attachment)
+        }
+    }
+
+    func testLinkedGradientFillKeepsEveryExteriorNativePixel() throws {
+        let size = CGSize(width: 256, height: 256)
+        let source = VectorFillElement(path: CGPath(rect: CGRect(x: 8, y: 8, width: 240, height: 240), transform: nil),
+            paint: .linearGradient(LinearGradientPaint(start: color,
+                end: CodableColor(red: 0.1, green: 0.2, blue: 0.9, alpha: 0.4),
+                from: CGPoint(x: 16, y: 80), to: CGPoint(x: 208, y: 144))), opacity: 0.37)
+        let rest = Lattice(cols: 2, rows: 2, restOrigin: .zero, restCellSize: 128)
+        var current = rest; current.vertices[4] = CGPoint(x: 148, y: 114)
+        let transport = InkMaterialBridge.lattice(captured: rest, current: current, pose: .identity)
+        let control = VectorGeometryMap.fill(source) { transport.map($0)! }
+        let selection = CGPath(rect: CGRect(x: 128, y: 0, width: 128, height: 256), transform: nil)
+        let deformation = LiquifyDeformation(brush: TestBrushes.hardRound, size: 80, power: 0.8,
+            mode: .push, seed: 4, samples: StrokeSamples(points: [CGPoint(x: 144, y: 120), CGPoint(x: 168, y: 144)]),
+            selection: selection)
+        let operation = InkMaterialOperation(deformation)
+        var material = VectorGeometryMap.fill(source, mapPaint: false) { transport.map($0)! }
+        material.placement = FillPlacement(pathData: source.pathData,
+            material: InkMaterialProgram(bindings: [InkMaterialBinding(operation: operation, bridge: .identity)]),
+            transport: transport)
+        let images = [VectorCanvas(size: size, elements: [.fill(control)]).render(),
+                      VectorCanvas(size: size, elements: [.fill(material)]).render()]
+        let a = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(images[0].cgImage)))
+        let b = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(images[1].cgImage)))
+        var outside = 0, inside = 0
+        for y in 0..<256 { for x in 0..<256 {
+            let i = (y * 256 + x) * 4
+            guard a[i..<i + 4] != b[i..<i + 4] else { continue }
+            let point = CGPoint(x: CGFloat(x) + 0.5, y: CGFloat(y) + 0.5)
+            if selection.contains(point), operation.supportBounds.contains(point) { inside += 1 }
+            else { outside += 1 }
+        } }
+        XCTAssertGreaterThan(inside, 100, "PREMISE: the selected Push changes the linked gradient interior")
+        XCTAssertEqual(outside, 0, "ordinary linked gradient geometry and native dither stay fixed outside the spatial operation")
+        for (name, image) in zip(["control", "liquified"], images) {
+            let attachment = XCTAttachment(image: image)
+            attachment.name = "linked-active-gradient-" + name; attachment.lifetime = .keepAlways; add(attachment)
         }
     }
 

@@ -52,7 +52,7 @@ final class InkMaterialRenderer {
 
     /// Payload allocations reserve before allocating, including scratch and failure paths. Raw
     /// pixel leases follow their CGDataProvider lifetime, rather than ending at draw() return.
-    private final class Budget {
+    fileprivate final class Budget {
         let limit: Int
         var current = 0
         var peak = 0
@@ -64,7 +64,7 @@ final class InkMaterialRenderer {
             return Lease(owner: self, bytes: rounded)
         }
     }
-    private final class Lease {
+    fileprivate final class Lease {
         let owner: Budget
         let bytes: Int
         init(owner: Budget, bytes: Int) { self.owner = owner; self.bytes = bytes }
@@ -114,6 +114,29 @@ final class InkMaterialRenderer {
 
     func rejectTransport() { refuse(.transport) }
 
+    /// The prepared value and its payload reservation have one lifetime, including when a hit
+    /// closure or cut preview retains the mapped native walk beyond the preparation call.
+    struct PreparedGeometry<Value> {
+        let value: Value
+        let reservation: GeometryReservation?
+        init(unchanged value: Value) { self.value = value; self.reservation = nil }
+        fileprivate init(value: Value, lease: Lease) {
+            self.value = value; self.reservation = GeometryReservation(lease)
+        }
+    }
+    final class GeometryReservation {
+        fileprivate let lease: Lease
+        fileprivate init(_ lease: Lease) { self.lease = lease }
+    }
+
+    /// A standalone preview can prepare geometry before its destination tile exists. Count that
+    /// live payload in the destination budget too; an existing owner never counts it twice.
+    private func accountGeometry(_ geometry: GeometryReservation?) -> Lease? {
+        let bytes = geometry.map { $0.lease.owner === budget ? 0 : $0.lease.bytes } ?? 0
+        guard let lease = budget.reserve(bytes) else { refuse(); return nil }
+        return lease
+    }
+
     private func allocatePixels() -> Pixels? {
         guard let lease = budget.reserve(Self.tileSide * Self.tileSide * 4) else { refuse(); return nil }
         return Pixels(side: Self.tileSide, lease: lease)
@@ -121,14 +144,15 @@ final class InkMaterialRenderer {
 
     /// Native geometry preparation shares the render tile's budget and can evict only its
     /// disposable inverse maps. Standalone scratch/hit callers use the same owner before mapping.
-    func withGeometryScratch<T>(transport: InkMaterialBridge, pointCount: Int, _ body: () -> T?) -> T? {
+    func prepareGeometry<T>(transport: InkMaterialBridge, pointCount: Int, _ body: () -> T?) -> PreparedGeometry<T>? {
         let extra = transport.mappingScratchByteUpperBound
         let (points, overflow) = pointCount.multipliedReportingOverflow(by: 160)
         guard !overflow, extra <= budget.limit, points <= budget.limit - extra else { refuse(); return nil }
         let bytes = points + extra
         while budget.limit - budget.current < bytes, !maps.isEmpty { maps.removeFirst() }
         guard let lease = budget.reserve(bytes) else { refuse(); return nil }
-        return withExtendedLifetime(lease, body)
+        guard let value = withExtendedLifetime(lease, body) else { return nil }
+        return PreparedGeometry(value: value, lease: lease)
     }
 
     private func inverse(_ points: [CGPoint], program: InkMaterialProgram,
@@ -257,10 +281,13 @@ final class InkMaterialRenderer {
     /// fill renderer; it does not reinterpret spacing, sensors, random values, opacity or paper.
     func draw(into destination: CGContext, nativeBounds: CGRect,
               program: InkMaterialProgram, transport: InkMaterialBridge,
+              geometry: GeometryReservation? = nil,
               coverage: [InkMaterialCoverage] = [], evenOdd: Bool = false,
               blendMode: CGBlendMode,
               paint: @escaping (CGContext, CGRect) -> Void) {
-        guard completed, !nativeBounds.isNull, !nativeBounds.isEmpty,
+        guard completed, let geometryLease = accountGeometry(geometry) else { return }
+        defer { withExtendedLifetime((geometryLease, geometry)) {} }
+        guard !nativeBounds.isNull, !nativeBounds.isEmpty,
               let inverse = coordinates(bindings: program.bindings, transport: transport),
               let output = allocatePixels() else { return }
         let side = Self.tileSide

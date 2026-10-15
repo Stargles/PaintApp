@@ -5470,9 +5470,10 @@ final class VectorCanvas {
 
             // The same fallback `stamp(stroke:into:isEraser:)` makes: a lattice with no usable range
             // would replay the *parent* whole, which is worse than ignoring it.
-            let native = stroke.materialProgram.flatMap { _ in
+            let preparedNative = stroke.materialProgram.flatMap { _ in
                 Self.mapping(.stroke(stroke), throughSimilarity: _transform).stroke.flatMap { Self.materialWalk(for: $0) }
             }
+            let native = preparedNative?.value
             let lattice = (native?.lattice ?? stroke.lattice).flatMap { $0.range == nil ? nil : $0 }
             let source = lattice?.samples ?? native?.samples ?? stroke.samples
             let canvasSize = stroke.size * scale
@@ -5541,7 +5542,8 @@ final class VectorCanvas {
                                         opacity: stroke.opacity,
                                         color: stroke.uiColor,
                                         pose: native?.pose,
-                                        material: native?.material.map { InkMaterialPaint(program: $0, transport: native?.transport ?? .identity) }))
+                                        material: native?.material.map { InkMaterialPaint(program: $0, transport: native?.transport ?? .identity,
+                                            geometry: preparedNative?.reservation) }))
         }
         return edits
     }
@@ -7257,14 +7259,30 @@ final class VectorCanvas {
                   let native = placement.map.mapped(nativePath) else { renderer.rejectTransport(); return }
             var unwarped = fill.reshaped(to: native)
             unwarped.placement = nil
-            renderer.draw(into: cg, nativeBounds: native.boundingBoxOfPath,
-                program: placement.material, transport: placement.transport,
-                coverage: placement.coverage, evenOdd: fill.evenOddFill,
-                // A fill's alpha belongs to its native paint pass. Applying it after an extra
-                // 8-bit offscreen pass re-quantizes even untouched gradient pixels.
-                blendMode: .normal) { context, _ in
-                    Self.draw(fill: unwarped, into: context)
+            func paint(_ geometry: VectorFillElement) {
+                guard let path = geometry.cgPath else { renderer.rejectTransport(); return }
+                renderer.draw(into: cg, nativeBounds: path.boundingBoxOfPath,
+                    program: placement.material, transport: .identity,
+                    coverage: placement.coverage, evenOdd: fill.evenOddFill,
+                    blendMode: .normal) { context, _ in
+                        Self.draw(fill: geometry, into: context)
+                    }
+            }
+            if placement.transport == .identity { paint(unwarped) }
+            else {
+                var count = 2 // Gradient endpoints, when present.
+                native.applyWithBlock { count += VectorGeometryMap.pointCount(of: $0.pointee.type) }
+                _ = renderer.prepareGeometry(transport: placement.transport, pointCount: count) { () -> Bool? in
+                    var valid = true
+                    let geometry = VectorGeometryMap.fill(unwarped) { points in
+                        guard let moved = placement.transport.map(points) else { valid = false; return [] }
+                        return moved
+                    }
+                    guard valid else { renderer.rejectTransport(); return nil }
+                    paint(geometry)
+                    return renderer.completed
                 }
+            }
             return
         }
         guard let path = fill.cgPath else { return }
@@ -7591,7 +7609,7 @@ final class VectorCanvas {
     private static func nativeInkBounds(of stroke: VectorStroke) -> CGRect {
         InkMaterialRenderProbe.recordNativeBoundsWalk()
         let collector = BrushStamper.CollectingDabTarget()
-        stamp(stroke: stroke, into: collector, isEraser: stroke.composite == .erase)
+        guard stamp(stroke: stroke, into: collector, isEraser: stroke.composite == .erase) else { return .infinite }
         var bounds = CGRect.null
         for dab in collector.dabs {
             let painted: CGRect
@@ -7616,16 +7634,19 @@ final class VectorCanvas {
     }
 
     private static func materialInkQuery(for stroke: VectorStroke, nativeBounds: CGRect? = nil) -> (([CGPoint]) -> Bool?)? {
-        guard var walk = materialWalk(for: stroke), let program = walk.material else { return nil }
-        let bounds = nativeBounds ?? nativeInkBounds(of: stroke), transport = walk.transport
+        let bounds = nativeBounds ?? nativeInkBounds(of: stroke)
+        let renderer = InkMaterialRenderer(window: .zero, scale: 1)
+        guard let prepared = materialWalk(for: stroke, renderer: renderer), let program = prepared.value.material else { return nil }
+        var walk = prepared.value
+        let transport = walk.transport
         let shownBounds = InkMaterialPaint(program: program, transport: transport).bounds(of: bounds)
         var native = stroke
         walk.material = nil; walk.transport = .identity
         native.restWalk = walk; native.placement = nil
         let gradients = DabGradientCache(), images = DabImageCache()
         return { points in
+            defer { withExtendedLifetime(prepared) {} }
             guard points.contains(where: shownBounds.contains) else { return false }
-            let renderer = InkMaterialRenderer(window: .zero, scale: 1)
             return renderer.hasInk(at: points, nativeBounds: bounds, program: program,
                 transport: transport) { context, _ in
                     let target = CGContextDabTarget(context, gradients: gradients, images: images)
@@ -7681,11 +7702,11 @@ final class VectorCanvas {
     /// Linked geometry enters the ordinary native painter before spatial edits. Reusing the
     /// geometry mapper preserves its Distort residue, parent walk and paper/dither canvas phase;
     /// only Liquify bindings remain pixel operations, in their original chronological order.
-    private static func materialWalk(for stroke: VectorStroke, renderer: InkMaterialRenderer? = nil) -> StrokeRestWalk? {
+    private static func materialWalk(for stroke: VectorStroke, renderer: InkMaterialRenderer? = nil) -> InkMaterialRenderer.PreparedGeometry<StrokeRestWalk>? {
         guard let walk = stroke.effectiveWalk, let program = walk.material else { return nil }
-        guard walk.transport != .identity else { return walk }
+        guard walk.transport != .identity else { return .init(unchanged: walk) }
         let owner = renderer ?? InkMaterialRenderer(window: .zero, scale: 1)
-        return owner.withGeometryScratch(transport: walk.transport,
+        return owner.prepareGeometry(transport: walk.transport,
             pointCount: walk.samples.count + (walk.lattice?.samples.count ?? 0)) {
             var native = stroke
             native.samples = walk.samples; native.lattice = walk.lattice; native.size = walk.size
@@ -7702,18 +7723,22 @@ final class VectorCanvas {
         }
     }
 
-    private static func stamp(stroke: VectorStroke, into target: DabTarget, isEraser: Bool) {
+    @discardableResult
+    private static func stamp(stroke: VectorStroke, into target: DabTarget, isEraser: Bool) -> Bool {
         // **`effectiveWalk`, not `restWalk`**: a Distort the artist committed is stored as a map on
         // the stroke rather than as a walk, and the two have to reach this line the same way or a
         // saved keystone would draw at one width the moment it was reloaded.
-        let rest = stroke.materialProgram == nil ? stroke.effectiveWalk
+        let prepared = stroke.materialProgram == nil ? nil
             : materialWalk(for: stroke, renderer: (target as? CGContextDabTarget)?.materialRenderer)
+        defer { withExtendedLifetime(prepared) {} }
+        let rest = stroke.materialProgram == nil ? stroke.effectiveWalk : prepared?.value
         let pixelTarget = target as? MaterialDabTarget
         guard stroke.materialProgram == nil || rest != nil else {
             pixelTarget?.rejectMaterialTransport()
-            return
+            return false
         }
-        pixelTarget?.material = rest?.material.map { InkMaterialPaint(program: $0, transport: rest?.transport ?? .identity) }
+        pixelTarget?.material = rest?.material.map { InkMaterialPaint(program: $0, transport: rest?.transport ?? .identity,
+            geometry: prepared?.reservation) }
         defer { pixelTarget?.material = nil }
         // A lattice without a usable range would otherwise stamp the *parent* whole, which is worse
         // than either option — so an unreadable one falls back to the stroke's own geometry.
@@ -7725,6 +7750,7 @@ final class VectorCanvas {
                                  brushOpacity: stroke.opacity, isEraser: isEraser,
                                  random: stroke.dabRandom,
                                  visibleRange: lattice?.range)
+        return pixelTarget?.completed ?? true
     }
 }
 
