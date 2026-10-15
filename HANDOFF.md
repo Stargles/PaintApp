@@ -62,53 +62,59 @@ signature so preserved preupdate snapshots are also converted.
 
 **(178) Liquify: active ownership and evidence**
 
-Main is `17b438c`; Liquify is unmerged. Root candidate `tmp/s49-integration` at `700e1ae`
-combines material `72f686f` and raster `7d6d4eb`, plus the shared named-gallery helper correction.
-The candidate does not yet contain the accepted C sampler or raster refusal adapters. Harvest only
-clean worker commits; apply bounded deltas and preserve current main documentation.
+Main is `17b438c`; Liquify remains unmerged. Root candidate `tmp/s49-integration` at `149fc7a`
+combines material `72f686f`, raster `ccdd286`, sampler `effb239`, the named-gallery helper correction,
+and exact inverse batching. Harvest only clean worker commits; the next raster delta starts at
+`ccdd286`. Preserve current main documentation rather than importing workers' historical copies.
 
-- **Root integration/profiling.** `linked-release-2` passed 1/1 in Release: deformation, exact
-  cold-reopen picture and later green source ink reaching its linked frame. Existing black/red ink
-  is byte-identical across the source edit; a visual suspicion of missing ink was refuted. The saved
-  package and inspected images are in `~/PaintWork/s49-liquify-logs/combined/`. Both named-save UI
-  calls now use the shared helper with their actual scene name; final modes/profile UI remains.
-  The real-window Release benchmark passed 1/1: hard/pattern 48,236,266 / 179,020,536 evaluations,
-  zero failed solves. Profiled contended warm times 0.93 / 10.35 seconds are not isolated/device
-  qualification. Long patterned inverse cost remains open. Exact alpha predecoding, lookup/SIMD
-  and changed-map continuous-flow experiments were rejected; see evidence before repeating them.
-- **Material — `tmp/s49-liquify`, `material_resume`.** Prior restored slice passed 54/54 at app
-  `900331c`, including rendered Push/cut/later-Push/lattice/Move chronology. Four fault batches caught
-  15 intended failed method executions; separate alpha-only faults cover actual alpha-1 query ink.
-  Evidence: `~/PaintWork/s49-liquify-logs/material-native-{handoff.md,evidence-index.json}`.
-  Clean `72f686f` clips coordinate/sampling work to actual visible output while preserving global
-  pixel centres and full native source tiles; root integrated this delta. New full-versus-clipped
-  pixel/count proof, two faults and restored 55-method slice are queued after sampler's quiet run.
-- **Sampler — `tmp/s49-raster-sampler`, `raster_sampler`.** Owner accepted smoother C provided code
-  and cost are proportionate. One shared bounded Lanczos kernel uses global coordinates; no extra
-  cache, Core Graphics fallback or arbitrary scale cutoff. Clean `89440a2` passed native Debug20/20
-  (11 sampling + nine warp agreement). Quiet Release21 includes the cost/retention method and is
-  compiling. Afterwards only a small allocation cleanup in the CPU source-apron scan is planned,
-  followed by focused restoration; final root Release will cover final bytes. Evidence:
-  `~/PaintWork/s49-liquify-logs/raster/sampler/QUALIFICATION.md`.
-- **Raster — `tmp/s49-liquify-raster`, `raster_resume`.** Root has its baseline `7d6d4eb`; later
-  commits integrate sampler/adapters and atomic refusal. Earlier adapter run passed 76/77; the one
-  raw-image mismatch was an invalid oracle comparing pixels outside the clipped held footprint.
-  The actual held-window draw over unchanged base matches the full committed picture exactly.
-  New native pre-fix proofs expose nested rollback, final texture allocation and ignored settlement
-  failure. `6522ba8` addresses rollback/allocation; `63d8cae` removes temporary diagnostic notes.
-  Clean `fcd35fa` adds actual save/resize/frame/layer/tool refusal tests. The worker is preparing
-  central Bool success propagation and all mutating callers; failed save cannot close the scene.
-  Restored/fault batches and all five raster UI methods on iPad 9 landscape remain.
+- **Root integration and exact batching.** Existing `PixelOps.parallelMap` fans out disjoint point
+  batches and raster row strips over a shared immutable prepared field. Scalar arithmetic, global
+  pixel centres, ordered failure and evaluation counts remain exact. All temporary arrays are
+  charged; the joined raster allocation is exact-sized. Baseline Debug34/34 passed. Three committed-
+  baseline faults caught wrong sources/counters, hidden or invented failure, strip offsets and
+  underestimated memory (2/3, 2/3, 1/3 methods failed respectively); sources were restored. The first
+  raster fault launch ran zero tests and is explicitly excluded. Restored four-method native run at
+  `149fc7a` is in progress, including the actual bounded raster producer against a serial reference.
+  Evidence: `~/PaintWork/s49-liquify-logs/combined/batches/`. External matching C++ batches were faster
+  in four alternating pairs, but native Release and device costs remain unqualified.
+- **Linked UI.** `linked-release-2` passed 1/1 in Release: deformation, exact cold-reopen picture and
+  green source ink subsequently reaching the linked frame. Existing black/red ink stays byte-identical;
+  the missing-ink suspicion was refuted. Both named saves use the shared helper with the scene name.
+  Final modes/profile UI remains. Evidence/package: `~/PaintWork/s49-liquify-logs/combined/`.
+- **Material — `material_resume`, clean `aee14ec`, source `72f686f`.** Restored55/55 passed, including
+  clipped output and rendered Push/cut/later-Push/lattice/Move chronology. Same fractional crop now
+  processes17,248/38,577 output points at scales1/1.5 instead of262,144 each; global source sampling is
+  unchanged. Full-tile and lost-origin faults caught six intended assertions. Earlier model/query
+  faults remain qualified. Evidence: `material-visible-handoff.md` and `material-native-handoff.md`
+  under the Liquify log directory. Currently reviewing the shared refusal boundaries read-only.
+- **Sampler — `raster_sampler`, final `effb239`.** Native Debug20/20 and quiet Release21/21 passed;
+  final allocation-only cleanup passed11/11 production-source Mac checks. One bounded Lanczos kernel,
+  no added cache, arbitrary filter cutoff or Core Graphics fallback. PERFORMANCE§36 records memory,
+  native warm/cold costs and numerical limits. First simulator window cost523ms included initial Metal
+  engine/pipeline access; actual app/device first use remains. External qualification complete; worker
+  owns no simulator job. Evidence: `~/PaintWork/s49-liquify-logs/raster/sampler/QUALIFICATION.md`.
+- **Raster — `raster_resume`, current checkpoint `3e2c1f1`, source `ccdd286`.** Shared settlement
+  reports success through every mutation/save boundary; refused edits retain state and do not close
+  the scene. Required source failures propagate, nested rollback is atomic, transformed scratch
+  opacity is preserved. Restored109/109 passed; two final adapter faults reproduced eight intended
+  diagnostics. Native iPad9 landscape8/8 UI passed, but app-cropped attachments are malformed; raw
+  simctl captures are being taken before judging the layout. A new pre-fix method failed10 intended
+  assertions: full and fitted `Frozen.render` can still hide material refusal as a transparent pixel.
+  Worker is removing that non-fallible contract through existing PixelOps callers, preserving prior
+  thumbnails/onions and refusing destructive copy operations. Material is checking related derived
+  render availability/failure semantics. No duplicate renderer or empty fallback is permitted.
 - **Storage/model completed.** `52eda39` storage: Debug115/115, seven fault groups/nine failed
   executions/46 diagnostics, restored18/18; genuine prior-format producer `840d68a`, nine unchanged
   provenance hashes. Model `afef15c`: five fault groups/14 failed executions across13 methods,
-  restored13/13. All source commits are already integrated. Evidence:
+  restored13/13. Source is integrated. Evidence:
   `~/PaintWork/evidence/s49-liquify-material-{format,model}/`; do not repeat or cherry-pick again.
 
-**Native queue:** sampler alone owns slot1 through quiet Release cost; all other simulators are
-parked. Material then takes slot2 for its four qualification runs, followed by raster's restoration,
-faults and landscape UI. Root has no native job running. Final combined census/lints, fast tiers,
-touched UI, landscape inspection, full suite and pre-install legacy drives remain.
+**Native queue:** root owns slot2, simulator `80BE77F5-9118-4CDD-854D-07C3E9A9009B`, for restored
+batching checks. Raster owns slot1 and its iPad9 simulator. After final raster integration: recount,
+lints, fast Debug/Release, quiet actual-producer Release measurement, touched UI, full suite and
+pre-install legacy drives. Current static census at `149fc7a`: fast5284 across256 matching classes,
+full5866; recount after the last delta. Obtain fresh saved/unlocked readiness before device work;
+the earlier readiness was consumed by the completed179 probes and the iPad has been released.
 
 ## What is next
 

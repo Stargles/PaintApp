@@ -58,66 +58,30 @@ their files are repaired. Build `2974b33` broke this rule and lost the owner's k
 
 ## (178) Liquify tool
 
-**Combined source checkpoint (2026-10-15):** integrated clean raster`6e16bc4` over baseline
-`7d6d4eb`, including sampler`effb239`, shared required-source failure propagation and central
-settlement refusal. Restored raster97/97 passed before the sampler's allocation-only cleanup;
-material55/55 passed with clipping counts and both deliberate faults. Sampler native Debug20/20
-and Release21/21 passed; PERFORMANCE§36 carries bounded memory, warm/cold costs and limits.
-Adapter fault proofs, final combined gates, landscape UI and actual first-use cost remain pending.
+**Combined checkpoint (2026-10-15):** root `149fc7a` integrates material `72f686f`, raster
+`ccdd286` and sampler `effb239`. Material55/55, raster109/109, sampler native Debug20/20 and
+Release21/21, and raster landscape UI8/8 passed. Linked Release UI1/1 proves exact cold reopen
+and live source following. Raw landscape screenshots, final combined gates and device checks remain.
+HANDOFF names current owners and exact evidence; this item remains open until merged.
 
-**Exact-map batching hypothesis (2026-10-15):** the long patterned inverse remains serial per
-pixel after the measured evaluation reduction. Test bounded independent row batches externally,
-sharing one read-only prepared field and keeping every pixel's arithmetic/order unchanged. Compare
-all source bits, evaluations and failures against the frozen native-matching fixture before
-changing production. Four alternating external pairs now preserve all84,956 source Doubles and
-179,020,536 evaluations exactly, with zero failures; contended Mac batches take1.62–2.29seconds
-versus5.39–8.66serial. This is not native/device qualification. Evidence:
-`~/PaintWork/evidence/s49-liquify-row-batches/README.md`. Any adoption must reuse existing fan-out,
-preserve failure propagation/window accounting and never parallelize arbitrary mutable callbacks.
+**Exact-map batching (2026-10-15):** existing fan-out now shares one immutable prepared field
+across disjoint points/row strips; no new worker framework or cache. Baseline Debug34/34 passed,
+three committed-baseline faults caught132 intended diagnostics, and sources are restored. Current
+native four-method run checks the actual bounded raster producer against unchanged serial pixels.
+Four external alternating C++ pairs preserved84,956 source Doubles and179,020,536 evaluations exactly;
+contended batch1.62–2.29seconds versus serial5.39–8.66 is not native/device qualification. Quiet
+Release and physical first-use costs remain open. Evidence:
+`~/PaintWork/evidence/s49-liquify-row-batches/` and `~/PaintWork/s49-liquify-logs/combined/batches/`.
 
-**Settlement refusal review (2026-10-15):** a refused floating-pixel landing currently lets
-Move, Duplicate, Bake, resize, frame/layer changes, eyedropper and saving continue. Fix the shared
-settlement contract (`settleInteractiveState` → `commitEditsInFlight` → `commitAllInteractiveState`)
-to report success and make each mutation boundary respect failure. No pending float is success;
-ordinary between-gesture native boxes remain open when saving. Save must neither write a package
-nor run its successful-close completion after refusal. Preserve autosave retry state and context
-selection on failure. Raster worker owns this coherent change and the recorded pre-fix proofs at
-`fcd35fa`; do not add independent guards to only the first three reported actions.
-
-**Linked Release UI proof (2026-10-15):** `linked-release-2` passed 1/1, no skips: reshape,
-exact cold-reopen picture, and newly drawn green source ink reaching the linked frame. Root and
-material worker inspected the pictures; the existing black/red L remains byte-identical over
-the old-ink screen region after the new green stroke appears. A first visual suspicion of missing
-old ink was refuted by independent inspection and pixel comparison. The actual saved package is
-preserved beside the evidence in `~/PaintWork/s49-liquify-logs/combined/linked-release-2-*`.
-
-**Fresh Release UI fixture finding (2026-10-15):** the named linked-frame scene saves correctly,
-but `saveEditorAndReturnToGallery` searches only for Untitled. Earlier used simulators had an
-unrelated Untitled tile, masking the bad precondition. Root Release candidate `7ef3dd7` fails
-before Liquify; the accessibility hierarchy contains its exact saved name. Reuse the shared
-helper with an explicit expected name, retaining Untitled as the default for existing callers.
-Both named-save calls now pass their actual scene name through the shared helper. The linked
-Release rerun passed; the modes/profile call will run in the final touched UI class.
-
-**Status** — asked 2026-10-12. Integration candidate is being assembled outside main.
-Material app source `900331c` passed the restored 54-method slice, including the rendered cut
-chronology test at `1ec87b9`; 15 deliberately faulty method executions were caught. Raster baseline
-`7d6d4eb` passed the two restored scratch oracles after separate union, stale-window and double-pose faults.
-Linked UI failure is now traced to a successful final producer taking 29.05 seconds in Debug,
-not a refused or empty gesture. Profile the current combined Release path before changing it.
-Accepted C raster sampling is under compact implementation and cost qualification.
-Adapters at `28abbfa` now propagate required-source refusal through compositing and mutators;
-review found nested rollback and pre-existing pending-crop gaps, which must be corrected and proved.
-Material performance review found output work ignores the visible clip: each touched tile maps and
-samples all 65,536 pixels, even for a 153×111 picture (16,983 visible pixels). Measure and remove
-only that redundant output work, keeping the global pixel centres, 256-pixel native source tiles,
-operation order and exact RGBA. This is a count hypothesis, not a measured speed claim; it does not
-resolve the separate long patterned raster inverse cost.
-Exact native alpha predecoding is also rejected: 881,408 sample-bit comparisons match, but six
-alternating microbenchmark trials show only 1.055× active-tip and 0.988× whole-tip median CPU ratios
-while mask payload grows eightfold. No production change. Evidence:
-`~/PaintWork/evidence/s49-liquify-alpha-predecode/README.md`; do not repeat this experiment.
-Final combined gates, landscape UI and install remain pending.
+**Required-picture refusal review (2026-10-15):** shared settlement now reports failure through
+save, Move/Duplicate/Bake, resize, frame/layer/tool changes and other mutation boundaries. Actual
+posed scratch alpha and direct frozen window failure are fixed and mutation-tested. A new native
+pre-fix proof finds full/fitted frozen renders still substitute a transparent pixel on material
+refusal (ten intended diagnostics). Remove the non-fallible PixelOps wrapper and propagate failure
+through its actual callers: retain prior thumbnail/onion pictures and refuse destructive copy work.
+Review derived render paths for the same required-source contract, distinguishing a genuinely
+unavailable recipe from a failed required picture. Reuse the existing fallible renderer; no blank
+fallback or duplicated renderer. Raster owns this follow-up with material review.
 
 *"It should be placed to the left of the brush tool in the top menu. When selected, it acts sort of like
 a brush (you can control the brush type, size, etc), and otherwise it does basically what a normal
@@ -147,31 +111,10 @@ cels mix imported pictures/text, fills and moved paint in `bakedImage`, without 
 Liquify therefore moves every raster pixel in the active layer, including that flattened content;
 separately editable text, picture, video and stream objects remain untouched.
 
-Current material characterizations (2026-10-15, four native methods, all premises pass) expose four
-remaining defects: retained exterior ink is missed by tap/outline/whole-stroke erase; a finite bridge
-can return 1.6e19, beyond supported integer sampling; partial-opacity gradients re-quantize 7,920
-exterior pixels; and linked transport moves canvas-anchored paper in 2,295 of 2,304 sampled pixels
-outside a remote field. Preserve these fixtures. Reuse inverse material transport for ink hit tests,
-retain centreline lasso membership, refuse unsupported map output, and correct opacity/paper staging
-through the existing renderer. No widened hit boxes or reduced pixel-accuracy assertion.
-A separate complete-picture defect affects differing ink and backing transforms: the shared window
-clears their union but draws each tier only in its own transformed lobe. Editing a translated stroke
-above opaque unmoved backing therefore clears unchanged backing around it. Both tiers must fill the
-whole replacement union, with changes applied only to their own edited region; use an independent
-pixel oracle and the existing snapshot/window renderer. The cropped high-sampling mismatch remains a
-separate issue awaiting the owner's appearance ruling.
-
-Source review also found a remaining sibling path in `StrokeCanvasView.displayedScratch` and
-`displayInk`: vector eraser scratch flattens stationary backing together with ink, then the host
-moves both through the ink pose, while the stream uses the backing pose. Characterize the actual
-preview and held lift with an integer-translated stroke over nonuniform backing. Consolidate this
-through the existing complete cel-picture presenter; remove the superseded local flatten ownership,
-rather than adding another pose-specific compositor. This is recorded before a native reproduction.
-
-The current linked-frame cold UI drive fails its first visible-deformation assertion, before save/reopen
-or source-follow checks. The recorder proves the Liquify touch reaches the correct stroke recognizer
-and gets 20 moves. Before/after pictures are unchanged; Settings subsequently takes 21.5 seconds to
-open. Trace producer completion/refusal before changing timing or calling this persistence damage.
+Material queries, exact exterior opacity/paper, the complete replacement union, and translated
+vector scratch backing are fixed and have restored native/fault proof. Linked-frame cold UI now
+passes; its earlier apparent refusal was a slow Debug producer, followed by a stale gallery-name
+precondition. Both causes and the independent pixel evidence are preserved in HANDOFF and logs.
 
 **Raster sampling ruled 2026-10-15:** the owner accepts comparison C's smoother reduced grain,
 "as long as it isnt cery bloaty or expensive for that difference". Replace full/window raster
