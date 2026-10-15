@@ -18,6 +18,7 @@ final class LiquifyRasterUITests: PaintUITestCase {
     func testColdRasterPaintMovesUnderFingerOneUndoAndColdReopenPreserveThePicture() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app, size: CGSize(width: 256, height: 256)))
+        addRasterLayer(app)
         let canvas = app.otherElements["canvas.host"], paper = paperRect(in: canvas)
         drawLine(on: canvas, from: onHost(paper, 0.2, 0.30), to: onHost(paper, 0.8, 0.30))
         commitPendingShape(on: app)

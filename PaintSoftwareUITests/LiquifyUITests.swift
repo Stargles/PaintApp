@@ -158,5 +158,7 @@ final class LiquifyUITests: PaintUITestCase {
         XCTAssertTrue(picker.buttons["Twirl"].isSelected, "the saved mode reopens")
         XCTAssertTrue(streaky.isSelected, "the saved patterned brush reopens")
         attachScreenshot(app, "liquify-controls-reopened")
+        rotateDevice(app, to: .landscapeLeft)
+        attachScreenshot(XCUIScreen.main, "liquify-controls-reopened-landscape")
     }
 }
