@@ -124,11 +124,14 @@ that opt-in and skipped it; do not report that run alone as complete. No optimiz
 
 **Native queue:** the owner is using the Mac and will notify when finished; performance measurement
 is deferred. Root Release build succeeded; slot2, simulator `80BE77F5-9118-4CDD-854D-07C3E9A9009B`,
-will run the three Liquify UI methods. No performance timing run has begun. Raster owns slot1 for
-restored consumer logic/UI; material reviews the live view guard, with production edits owned solely by raster. After final raster integration: recount,
+is idle after three compile-only UI attempts (zero tests). Material is adapting the integration-only
+material success fixtures; raster owns slot1 for restored consumer logic/UI and remaining helper
+compiler fixes. No performance timing run has begun. After final raster integration: recount,
 lints, fast Debug/Release, quiet actual-producer Release measurement, touched UI, full suite and
-pre-install legacy drives. Current static census at `149fc7a`: fast5284 across256 matching classes,
-full5866; recount after the last delta. Obtain fresh saved/unlocked readiness before device work;
+pre-install legacy drives. Corrected static census at `045a6f7`: fast5281 across256 matching classes,
+full5863. The earlier5284/5866 count included three private static `testBrush` helpers, not executable
+tests; the final scripts already count only instance test methods. Both UI lints pass and PBX
+definitions have no duplicate IDs. Recount after the last delta. Obtain fresh saved/unlocked readiness before device work;
 the earlier readiness was consumed by the completed179 probes and the iPad has been released.
 
 ## What is next
