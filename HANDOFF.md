@@ -68,7 +68,10 @@ and exact inverse batching. Harvest only clean worker commits; the next raster d
 `ae40f66`. Shared required-picture failures now retain the prior live picture and avoid immediate
 same-version retry loops. The attempted headless view assertion could not compile because that view
 is not in the logic target; it was removed, never counted as a native proof. Material is reviewing
-the view guard; raster is running the restored consumer logic and eraser UI. Preserve current main
+the view guard; raster is running the restored consumer logic and eraser UI. Review found two
+remaining caller gaps recorded in TODO: document coverage is advanced before successful installation
+(blocking retries beside streams), and Move latches even when its hole or isolated piece refuses.
+Root/material will close these at the existing display/rollback seams. Preserve current main
 documentation rather than importing workers' historical copies.
 
 - **Root integration and exact batching.** Existing `PixelOps.parallelMap` fans out disjoint point

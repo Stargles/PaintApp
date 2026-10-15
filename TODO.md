@@ -89,6 +89,15 @@ UI methods and deliberate fault proofs are next. A direct live-view headless ass
 compile because the view is absent from that target; removed and never counted. That small guard
 receives source review plus the actual eraser UI, without a duplicate rendering helper or test seam.
 
+**Follow-up review (2026-10-15):** the live view still advances `baseDocumentVersion` before a
+successful picture. With a live stream, that false coverage claim suppresses every later retry of
+the failed edit. Capture document coverage with each request and publish it only with its accepted
+picture. Move also clears held ink and latches after its required hole render fails; its isolated
+piece uses nil for both absence and refusal. Make latch admission require complete pictures and
+use the existing float rollback on failure. The existing oversized native-material fixture passes
+Move's geometry-only bounds checks, so this is a reachable caller gap, not an allocation hypothesis.
+Preserve legitimate empty/eraser-only pieces and existing stream/no-render behavior; no new renderer.
+
 *"It should be placed to the left of the brush tool in the top menu. When selected, it acts sort of like
 a brush (you can control the brush type, size, etc), and otherwise it does basically what a normal
 liquify tool does. The opacity slider turns into the liquify power, and the brush type also controls the
