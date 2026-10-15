@@ -6,10 +6,12 @@ One section per bug, newest first.
 ## Interpolation UI Commit check repeats a missing local-stroke assertion (2026-10-15)
 
 The full run, serial rerun and individual fresh-device run fail the same final drawn-ink assertion.
-The recording already lacks that stroke before Commit, after returning the continuous Timing slider
-to approximately the stroke's visibility threshold. Save that exact pre-Commit scene and inspect
-the stored timing/threshold before changing product code or the test's precondition. Evidence:
-`~/PaintWork/s49-final-validation/triage/isolated-interpolation.xcresult` and `interpolation-attachments/`.
+A genuine pre-Commit save proves the cause: the local stroke's visibility threshold is
+0.4980711340904236, while the second synthetic slider adjustment lands at 0.49741339683532715.
+The stroke is correctly absent before Commit. The UI test must commit at an unambiguously later
+interior time and assert visible local ink immediately before committing, then check it afterward.
+Reuse the existing single-screenshot pixel probe for its row sweeps instead of taking a picture for
+every column. Evidence: `~/PaintWork/s49-final-validation/triage/precommit-capture/`.
 
 ## Pad benchmark still has an unconditional wall-clock assertion (2026-10-15)
 
