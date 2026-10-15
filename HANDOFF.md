@@ -153,19 +153,32 @@ Never harvest dirty worker files: mutations may be intentional.
     not survive moving the failed stage to Trash, so recovery must reject it by ordinary completeness.
     Feature review also found `VectorLayer.piece(of:)` creates a shown cut-parent lattice with default
     quantized precision. Inherit the existing parent/stroke precision and prove cut/save roundtrip.
-  - **Latest material renderer:** `dd05e40` passes 25/26 focused tests (one failing method,
-    two assertions): outside-selection bytes, stationary-boundary gradient and patterned-tail
-    regression are green. The 100-stroke case reuses one field / 144,000 evaluations, but output
-    providers live until the outer autorelease pool and exhaust the 24 MiB cap near stroke 90.
-    `f15f52c` scopes image creation/draw to a group autorelease pool; same gate is running.
-    No larger cap or additional image copies are accepted. Non-CG previews and chronological
-    antialiased fill-cut coverage remain open.
+  - **Latest material renderer:** `f15f52c` passes 26/26 focused methods. Outside-selection
+    bytes, stationary-boundary gradients and the patterned-tail regression are green. Scoping each
+    output image's autorelease lifetime fixes the 100-stroke refusal: one field / 144,000 inverse
+    evaluations / 99 coordinate-cache hits / 11,535,208 peak counted bytes including its field.
+    The 24 MiB payload cap is unchanged. Root inspected the native before/after pictures.
+    `f49f7ac` adds the shared pixel-target preview path and an AA fill-cut characterization; its
+    30-method gate is running, with the new center-containment coverage test expected to fail.
+    Preview failure must preserve the previous shown picture. Material-aware hit testing is being
+    investigated; a concrete rendered counterexample is required before changing that seam.
+  - **Storage:** `tmp/s49-liquify-material-format` at `52eda39` passes 115/115 Debug, zero skips.
+    The genuine pre-material producer under `evidence/s49-liquify-material-format/producer-840d68a`
+    covers ordinary, Distort, retained bake and precise cut-parent strokes plus a recipe local edit;
+    all nine hashes match the bundled resource. Native walks, RGBA, roundtrip and staged restore pass.
+    Two of six planned fault groups are red/restored (fatal material read: one method/six assertions;
+    omitted drawing-repair walk: two methods/five assertions). Four groups and restored gate remain.
   - **Posed mixed pictures:** native ordinary ink, linked evaluated ink and raster backing need
     independent placement. The existing backing pose is container-only; native ordinary ink adds
-    the cel pose; linked ink deliberately declines it. `CelContentPicture` is being developed at
-    the shared window/composite seam, with shown-space held-picture identity across pose changes.
-    The cropped high-quality raster mismatch is still unresolved; the virtual full-extent provider
-    prototype is rejected because Core Graphics retains an unbounded-for-this-budget scaled cache.
+    the cel pose; linked ink deliberately declines it. `CelContentPicture` reuses native posing and
+    the shared window/composite seam; its initial four tests pass. The raster branch is integrating
+    immutable `f15f52c` and propagating render refusal, then handles held-picture pose changes.
+    The cropped high-quality raster mismatch is unresolved. A virtual full-extent provider is rejected
+    for retaining about 230 MiB of scaled-image cache. An external bounded Lanczos prototype matches
+    its full/window outputs and adds about 3.2 MB peak memory over 100 512-square draws, but changes
+    fine grain under raster transforms. It is not adopted. A/C reference images (not app screenshots)
+    are in `s49-liquify-logs/raster/pose-sampling-A-C-comparison.png`. Changing the shared committed and
+    preview raster sampler requires the owner's appearance ruling; ordinary vector ink stays native.
   - **Still owed:** target material-phase fix, raster completion, feature mutations,
     pending edit/undo/save and rapid overlapping previews,
     native iPad9 UI, final Debug/Release fast tiers, final audit and integrated full UI run.
@@ -200,14 +213,17 @@ This qualifies the existing main before the scheduled profile refresh; Liquify n
 integrated gates after its remaining work is complete.
 Isolated warm pad timing passed four repetitions of the existing opt-in cap (43.97–45.11 ms/stroke).
 `tmp/s49-regression` removes a redundant unconditional per-stroke timing cap; its gates are pending.
-Serial fresh-device rerun of the twelve UI failures passed ten. Guide-above now fails at menu setup
-(different from the full run); interpolation repeats the missing local-ink assertion after Commit.
-Individual fresh-device runs and drawn-image investigation remain before classifying either.
-The individual Guide-above run now passes. Interpolation repeats the same assertion in isolation;
-its recording shows local ink absent before Commit, after returning the continuous Timing slider
-near the local stroke's visibility threshold. Capture the actual pre-Commit saved recipe to verify
-that hypothesis before changing the test or product. The earlier isolated-green history is not a
-reason to dismiss this reproduced failure.
+Serial fresh-device rerun of the twelve UI failures passed ten. Individual Guide-above passes;
+interpolation repeated in isolation. An actual pre-Commit saved recipe proved its second synthetic
+slider adjustment landed at 0.49741339683532715, below the local stroke's 0.4980711340904236 threshold.
+The correct ink was absent before Commit. Root's regression fixes commit at 0.75, require visible ink
+beforehand and compare it after; sweeps reuse one screenshot. The first revised run also counted the
+cyan guide as ink; the inspected image explains the sole x=0.20 difference after the guide disappears.
+`tmp/s49-integration` at `c6282a2` now uses the existing black-ink predicate. A fresh two-case retry
+(interpolation and Fog Glow's menu-setup failure) is running. Conditional scripts then run two
+assertion faults, restore source, rerun touched classes and run Debug/Release fast tiers. No root
+regression code is merged yet. Evidence is under `triage/regression-ui{,-2}/`; do not harvest this
+worktree while the mutation script is active. `tmp/s49-regression` remains at its earlier checkpoint.
 The archived summary and per-class table are intact under `s49-final-validation/triage/`.
 
 **Latest integrated fast tier (app/test source `840d68a`)**: Debug and Release each 5124 tests,

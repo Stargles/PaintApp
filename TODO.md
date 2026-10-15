@@ -181,7 +181,11 @@ The first bounded native-material renderer passes 25 of 26 focused tests, includ
 pixels, stationary-boundary gradients and long patterned tails. Its 100-stroke fixture shares one
 field and 144,000 evaluations, but temporary output image providers accumulate until the outer
 autorelease pool and reach the 24 MiB guard near stroke 90. Retire each provider after its group is
-drawn; keep the existing cap and shared coordinate cache, then rerun the same gate.
+drawn; keep the existing cap and shared coordinate cache. The corrected branch passes 26/26 methods,
+with one field, 99 coordinate-cache hits and 11,535,208 peak counted bytes for 100 strokes. Final
+integration gates remain. A separate bounded Lanczos prototype fixes full/window raster sampling
+parity, but visibly changes grain under raster transforms. It stays external pending the owner's
+appearance ruling; both preview and committed backing would need the same shared sampler.
 The strict material encoder can reject conflicting operation definitions. `ProjectStore.encodeJSON`
 currently logs an encoding failure and omits that vector/recipe file, allowing staged validation to
 accept an empty cel. Propagate any JSON encoding failure through the existing save tally so the
