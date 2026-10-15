@@ -109,6 +109,8 @@ same visible/Undo/Redo/reopen assertions. The other seeded mixed-backing/eraser 
 author raster backing and remain valid. Physical first-use preparation also found that the backing
 seed is simulator-only and prewarms its reference; use an explicit raster-layer app flow for device
 correctness, and report native component cost separately from uninstrumented app presentation.
+Finish the modes/profile UI in landscape with a full-screen screenshot and drive that method on
+the owner's iPad9 simulator size; the earlier three native9 pictures show the raster/eraser workflows.
 
 *"It should be placed to the left of the brush tool in the top menu. When selected, it acts sort of like
 a brush (you can control the brush type, size, etc), and otherwise it does basically what a normal
