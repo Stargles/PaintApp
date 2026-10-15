@@ -288,10 +288,10 @@ final class InkMaterialLogicTests: XCTestCase {
             linked.placement = linked.placement?.transported(by: transport)
             return VectorCanvas.mapping(.fill(linked), throughStretch: shift)
         }
-        let picture = VectorCanvas(size: size, elements: [linkedAndMoved(laterInk)]).render()
+        let picture = try XCTUnwrap(VectorCanvas(size: size, elements: [linkedAndMoved(laterInk)]).render())
         let pixels = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(picture.cgImage)))
         guard case .fill(let uncutInk) = second.mapping([.fill(firstInk)])[0] else { return XCTFail("uncut control stays editable") }
-        let uncut = VectorCanvas(size: size, elements: [linkedAndMoved(uncutInk)]).render()
+        let uncut = try XCTUnwrap(VectorCanvas(size: size, elements: [linkedAndMoved(uncutInk)]).render())
         let uncutPixels = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(uncut.cgImage)))
         for (point, survives) in [(CGPoint(x: 60, y: 64), true), (CGPoint(x: 68, y: 64), false)] {
             let pushed = second.map(point)
@@ -592,7 +592,8 @@ final class InkMaterialLogicTests: XCTestCase {
         XCTAssertGreaterThan(StrokeGeometry.distanceSquared(from: point, toPolyline: ink.samples), radius * radius,
                              "PREMISE: the moved spine no longer accounts for this exterior ink")
         let canvas = VectorCanvas(size: size, elements: moved)
-        let bytes = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(canvas.render().cgImage)))
+        let picture = try XCTUnwrap(canvas.render())
+        let bytes = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(picture.cgImage)))
         XCTAssertGreaterThan(bytes[(11 * 128 + 62) * 4 + 3], 240,
                              "PREMISE: the actual renderer keeps opaque paint outside the selection")
         let empty = CGPoint(x: 50.5, y: 2.5)
@@ -628,8 +629,8 @@ final class InkMaterialLogicTests: XCTestCase {
             material: InkMaterialProgram(bindings: [InkMaterialBinding(operation: remote, bridge: .identity)]), transport: transport)
         var control = material; control.placement = nil
         InkMaterialRenderProbe.begin()
-        let images = [VectorCanvas(size: size, elements: [.stroke(control)]).render(),
-                      VectorCanvas(size: size, elements: [.stroke(material)]).render()]
+        let images = [try XCTUnwrap(VectorCanvas(size: size, elements: [.stroke(control)]).render()),
+                      try XCTUnwrap(VectorCanvas(size: size, elements: [.stroke(material)]).render())]
         let work = InkMaterialRenderProbe.end()
         XCTAssertFalse(work.isEmpty, "PREMISE: the production material window was rendered")
         XCTAssertTrue(work.allSatisfy(\.completed))
@@ -693,8 +694,8 @@ final class InkMaterialLogicTests: XCTestCase {
                 from: .zero, to: CGPoint(x: 96, y: 0))), opacity: 0.37)
         let field = LiquifyField(LiquifyDeformation(brush: TestBrushes.hardRound, size: 30,
             power: 1, mode: .expand, seed: 11, samples: StrokeSamples(points: [CGPoint(x: 48, y: 48)])))
-        let before = VectorCanvas(size: size, elements: [.fill(fill)]).render()
-        let after = VectorCanvas(size: size, elements: field.mapping([.fill(fill)])).render()
+        let before = try XCTUnwrap(VectorCanvas(size: size, elements: [.fill(fill)]).render())
+        let after = try XCTUnwrap(VectorCanvas(size: size, elements: field.mapping([.fill(fill)])).render())
         let a = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(before.cgImage)))
         let b = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(after.cgImage)))
         var outside = 0, inside = 0
@@ -730,8 +731,8 @@ final class InkMaterialLogicTests: XCTestCase {
             material: InkMaterialProgram(bindings: [InkMaterialBinding(operation: operation, bridge: .identity)]),
             transport: .homography(.translation(x: 8, y: 0)))
         var control = material; control.placement = nil
-        let images = [VectorCanvas(size: size, elements: [.stroke(control)]).render(),
-                      VectorCanvas(size: size, elements: [.stroke(material)]).render()]
+        let images = [try XCTUnwrap(VectorCanvas(size: size, elements: [.stroke(control)]).render()),
+                      try XCTUnwrap(VectorCanvas(size: size, elements: [.stroke(material)]).render())]
         let a = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(images[0].cgImage)))
         let b = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(images[1].cgImage)))
         var exterior = 0, interior = 0, seamInk = 0
@@ -751,7 +752,8 @@ final class InkMaterialLogicTests: XCTestCase {
             boundaryInk.opacity = 0.005
             boundaryInk.brush.tip = .round; boundaryInk.brush.dab.hardness = 0.15
             let boundaryCanvas = VectorCanvas(size: size, elements: [.stroke(boundaryInk)])
-            let pixels = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(boundaryCanvas.render().cgImage)))
+            let boundaryPicture = try XCTUnwrap(boundaryCanvas.render())
+            let pixels = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(boundaryPicture.cgImage)))
             var boundary: [CGPoint] = []
             for y in 1..<127 { for x in 248..<256 where pixels[(y * 512 + x) * 4 + 3] == 1 {
                 if boundary.count < 4 { boundary.append(CGPoint(x: CGFloat(x) + 0.5, y: CGFloat(y) + 0.5)) }
@@ -792,8 +794,8 @@ final class InkMaterialLogicTests: XCTestCase {
             source: .retained(samples: source.samples, lattice: nil, precise: true),
             material: InkMaterialProgram(bindings: [InkMaterialBinding(operation: operation, bridge: .identity)]), transport: transport)
         InkMaterialRenderProbe.begin()
-        let images = [VectorCanvas(size: size, elements: [.stroke(control)]).render(),
-                      VectorCanvas(size: size, elements: [.stroke(material)]).render()]
+        let images = [try XCTUnwrap(VectorCanvas(size: size, elements: [.stroke(control)]).render()),
+                      try XCTUnwrap(VectorCanvas(size: size, elements: [.stroke(material)]).render())]
         let work = InkMaterialRenderProbe.end()
         XCTAssertGreaterThan(work.reduce(0) { $0 + $1.evaluations }, 0, "PREMISE: nonlinear geometry and the active spatial inverse both run")
         XCTAssertTrue(work.allSatisfy { $0.completed && $0.peakBytes <= InkMaterialRenderer.byteBudget + $0.peakFieldBytes })
@@ -834,8 +836,8 @@ final class InkMaterialLogicTests: XCTestCase {
         material.placement = FillPlacement(pathData: source.pathData,
             material: InkMaterialProgram(bindings: [InkMaterialBinding(operation: operation, bridge: .identity)]),
             transport: transport)
-        let images = [VectorCanvas(size: size, elements: [.fill(control)]).render(),
-                      VectorCanvas(size: size, elements: [.fill(material)]).render()]
+        let images = [try XCTUnwrap(VectorCanvas(size: size, elements: [.fill(control)]).render()),
+                      try XCTUnwrap(VectorCanvas(size: size, elements: [.fill(material)]).render())]
         let a = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(images[0].cgImage)))
         let b = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(images[1].cgImage)))
         var outside = 0, inside = 0
