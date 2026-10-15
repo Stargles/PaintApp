@@ -561,7 +561,7 @@ final class LegacyLiquifyRepairLogicTests: XCTestCase {
         let drawing = try vectorURL(package), recipe = try recipeURL(package)
         let current = try XCTUnwrap(ProjectStore.load(from: package))
         let expected = try XCTUnwrap(current.layers[0].cels[0].vector)
-        let expectedPixels = try XCTUnwrap(CanvasFixture.rgbaBytes(XCTUnwrap(expected.render(quality: .full).cgImage)))
+        let expectedPixels = try XCTUnwrap(CanvasFixture.rgbaBytes(XCTUnwrap(expected.render(quality: .full)?.cgImage)))
         // A synthetic wire-shape unit fixture. Genuine prior-writer packages are tested separately.
         func oldStroke(_ original: [String: Any]) -> [String: Any] {
             var ink = original
@@ -613,7 +613,7 @@ final class LegacyLiquifyRepairLogicTests: XCTestCase {
         XCTAssertEqual(ink.strokes.map(\.precise), [false, true, false])
         XCTAssertEqual(repaired.layers[0].cels[0].interpolation?.localEdits.first?.stroke.placement,
                        current.layers[0].cels[0].interpolation?.localEdits.first?.stroke.placement)
-        XCTAssertEqual(try XCTUnwrap(CanvasFixture.rgbaBytes(XCTUnwrap(ink.render(quality: .full).cgImage))), expectedPixels)
+        XCTAssertEqual(try XCTUnwrap(CanvasFixture.rgbaBytes(XCTUnwrap(ink.render(quality: .full)?.cgImage))), expectedPixels)
         let new = try object(drawing)["elements"] as! [[String: Any]]
         for i in 0..<2 {
             let priorStroke = old[i]["stroke"] as! [String: Any], stroke = new[i]["stroke"] as! [String: Any]
@@ -663,7 +663,7 @@ final class LegacyLiquifyRepairLogicTests: XCTestCase {
                 + manager.layers[1].cels[1].interpolation!.localEdits.map { record($0.stroke) }
             XCTAssertEqual(records.count, 5)
             XCTAssertTrue(NSArray(array: records).isEqual(nativeWalks), "current native walks must equal the old writer's independent source records")
-            let image = try XCTUnwrap(vector.render(quality: .full).cgImage)
+            let image = try XCTUnwrap(vector.render(quality: .full)?.cgImage)
             XCTAssertEqual(Data(try XCTUnwrap(CanvasFixture.rgbaBytes(image))), expected,
                            "migrated native material must match the old app's rendered bytes")
         }
