@@ -3,6 +3,14 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## Interpolation UI Commit check repeats a missing local-stroke assertion (2026-10-15)
+
+The full run, serial rerun and individual fresh-device run fail the same final drawn-ink assertion.
+The recording already lacks that stroke before Commit, after returning the continuous Timing slider
+to approximately the stroke's visibility threshold. Save that exact pre-Commit scene and inspect
+the stored timing/threshold before changing product code or the test's precondition. Evidence:
+`~/PaintWork/s49-final-validation/triage/isolated-interpolation.xcresult` and `interpolation-attachments/`.
+
 ## A scrub at 4096² with the onion skin on spends ~1.3 s of main thread building the ghost (2026-10-13)
 
 Found by TODO (179)'s `PlaybackProbe -probeMode scrub`/`onion` (PERFORMANCE.md §34.2), iPad 9 simulator,

@@ -168,7 +168,7 @@ already installed: the latter must not replace newer covered ink. Reuse the inst
 for this ordering, rather than adding another history or cache.
 The strict material encoder can reject conflicting operation definitions. `ProjectStore.encodeJSON`
 currently logs an encoding failure and omits that vector/recipe file, allowing staged validation to
-accept an empty cel. Propagate material encoding failure through the existing save tally so the
+accept an empty cel. Propagate any JSON encoding failure through the existing save tally so the
 atomic package swap aborts; malformed material on load must likewise fail rather than become empty.
 Cutting a precise stroke also currently constructs its shown parent dab lattice with the default
 quantized precision. Preserve the existing parent's precision (or the original stroke's precision

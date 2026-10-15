@@ -188,6 +188,11 @@ Isolated warm pad timing passed four repetitions of the existing opt-in cap (43.
 Serial fresh-device rerun of the twelve UI failures passed ten. Guide-above now fails at menu setup
 (different from the full run); interpolation repeats the missing local-ink assertion after Commit.
 Individual fresh-device runs and drawn-image investigation remain before classifying either.
+The individual Guide-above run now passes. Interpolation repeats the same assertion in isolation;
+its recording shows local ink absent before Commit, after returning the continuous Timing slider
+near the local stroke's visibility threshold. Capture the actual pre-Commit saved recipe to verify
+that hypothesis before changing the test or product. The earlier isolated-green history is not a
+reason to dismiss this reproduced failure.
 The archived summary and per-class table are intact under `s49-final-validation/triage/`.
 
 **Latest integrated fast tier (app/test source `840d68a`)**: Debug and Release each 5124 tests,
