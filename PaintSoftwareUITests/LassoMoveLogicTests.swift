@@ -130,7 +130,7 @@ final class LassoMoveLogicTests: XCTestCase {
         }
 
         let paths: [(name: String, act: (CanvasManager, Int) -> Void,
-                     ink: ((CanvasManager, Int) -> CGRect?)?)] = [
+                     ink: ((CanvasManager, Int) throws -> CGRect?)?)] = [
             ("commit", { manager, _ in manager.commitVectorFloatIfNeeded() }, nil),
             ("cancel", { manager, _ in manager.cancelVectorFloat() }, nil),
             ("tool switch", { manager, _ in manager.commitAllInteractiveState() }, nil),
@@ -200,7 +200,7 @@ final class LassoMoveLogicTests: XCTestCase {
                 XCTAssertFalse(vector.elements.isEmpty, "\(label): the display list was emptied")
                 if let ink = path.ink {
                     guard let before = inkBefore else { return XCTFail("\(label): nothing rendered before the lift") }
-                    guard let after = ink(manager, layerIndex) else {
+                    guard let after = try ink(manager, layerIndex) else {
                         return XCTFail("\(label): the flatten is blank — the whole cel was baked away")
                     }
                     XCTAssertEqual(after.minX, before.minX, accuracy: 1.5, "\(label): the flatten lost ink on the left")
