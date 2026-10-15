@@ -375,6 +375,8 @@ struct RenderRequest {
     /// snapshots a hidden layer that is somebody's mask source. The nil case is unchanged and still
     /// means "contributes nothing at this frame".
     let sources: [LayerRenderSource?]
+    /// A required leaf declined its private render. This is distinct from a genuinely empty leaf.
+    let sourceResolutionFailed: Bool
 
     /// Parallel to `sources`: what each leaf *is*, by model identity, for the caches downstream of
     /// this request that key on content rather than on the image object.
@@ -488,9 +490,11 @@ struct RenderRequest {
     init(tree: [RenderNode], sources: [LayerRenderSource?], contentVersions: [LayerContentVersion?],
          maskStacks: [MaskSource: [RenderNode]], frame: Int, canvasSize: CGSize,
          background: RenderBackground?, quality: RenderQuality,
-         continuation: ChunkContinuation? = nil, window: StripWindow? = nil) {
+         continuation: ChunkContinuation? = nil, window: StripWindow? = nil,
+         sourceResolutionFailed: Bool = false) {
         self.tree = tree
         self.sources = sources
+        self.sourceResolutionFailed = sourceResolutionFailed
         self.contentVersions = contentVersions
         self.maskStacks = maskStacks
         self.frame = frame

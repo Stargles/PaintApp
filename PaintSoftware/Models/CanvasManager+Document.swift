@@ -612,7 +612,7 @@ extension CanvasManager {
                              height: clampedArtwork.height + 2 * canvasPadding)
         guard newSize != oldSize else { return nil }
 
-        commitAllInteractiveState()
+        guard commitAllInteractiveState() else { return nil }
         let map = CanvasResizeMap(from: oldSize, to: newSize, padding: canvasPadding, mode: mode)
         return CanvasResizePlan(map: map, audit: auditDocumentForResize(), padding: canvasPadding)
     }
@@ -760,7 +760,7 @@ extension CanvasManager {
         // mis-scaled once it eventually committed). Already done by `planResize` on the "Resize
         // Canvas" path, where the audit has to see the baked display list; a second call finds
         // nothing pending and is a no-op.
-        commitAllInteractiveState()
+        guard commitAllInteractiveState() else { return false }
         selection = nil
 
         let placement = map.contentRect
@@ -859,7 +859,7 @@ extension CanvasManager {
         guard let canvasSize else { return }
         // Mirroring is a canvas edit: bake first, or the pending shape/fill would commit afterwards
         // at its un-mirrored geometry, landing on the wrong side of the canvas it was drawn on.
-        commitAllInteractiveState()
+        guard commitAllInteractiveState() else { return }
         for layerIndex in layers.indices {
             for celIndex in layers[layerIndex].cels.indices {
                 layers[layerIndex].cels[celIndex].raster = layers[layerIndex].cels[celIndex].raster.flipped(horizontal: horizontal)
@@ -943,7 +943,7 @@ extension CanvasManager {
     /// this path specifically, a float whose strokes this very session marked precise.
     @discardableResult
     func bakePreciseStrokes() -> Int {
-        commitAllInteractiveState()
+        guard commitAllInteractiveState() else { return 0 }
 
         struct Edit {
             let canvas: VectorCanvas

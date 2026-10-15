@@ -54,6 +54,7 @@ final class LiquifyRasterUITests: PaintUITestCase {
         restoreEventually(reopenedPoints, after)
         attachScreenshot(app, "liquify-raster-cold-reopen")
         rotateDevice(app, to: .landscapeLeft)
+        openLayerPanel(app); closeLayerRail(app)
         attachScreenshot(app, "liquify-raster-cold-reopen-landscape")
     }
 
@@ -75,17 +76,19 @@ final class LiquifyRasterUITests: PaintUITestCase {
             dy: (initial.map(\.y).reduce(0, +) / CGFloat(initial.count) - canvas.frame.minY) / canvas.frame.height)
         attachScreenshot(app, "liquify-mixed-posed-host")
         openLayerPanel(app)
-        app.buttons["layerPanel.row.0.visibility"].tap()
-        app.buttons["layerPanel.row.2.visibility"].tap()
+        XCTAssertTrue(tapWhenHittable(app.buttons["layerPanel.row.0.visibility"]))
+        XCTAssertTrue(tapWhenHittable(app.buttons["layerPanel.row.2.visibility"]))
         openLayerPanel(app)
+        _ = try XCTUnwrap(waitForPixel(canvas, at: restorationProbe, timeout: 20) { self.red($0) },
+            "the reference picture must be visible before comparing its pixels")
         let reference = readScreenNow(probes()).map(red)
         XCTAssertGreaterThan(reference.filter { $0 }.count, 50, "PREMISE: PixelOps reference is visible")
         let differences = zip(actual, reference).filter { $0 != $1 }.count
         XCTAssertLessThanOrEqual(differences, max(4, reference.filter { $0 }.count / 20), "displayed translation/rotation/scale must agree with the ordinary PixelOps picture")
         attachScreenshot(app, "liquify-mixed-pixelops-reference")
         openLayerPanel(app)
-        app.buttons["layerPanel.row.2.visibility"].tap()
-        app.buttons["layerPanel.row.0.visibility"].tap()
+        XCTAssertTrue(tapWhenHittable(app.buttons["layerPanel.row.2.visibility"]))
+        XCTAssertTrue(tapWhenHittable(app.buttons["layerPanel.row.0.visibility"]))
         openLayerPanel(app)
         _ = try XCTUnwrap(waitForPixel(canvas, at: restorationProbe, timeout: 20) { self.red($0) },
             "restored painted backing must be visible before choosing a gesture target")
@@ -111,6 +114,7 @@ final class LiquifyRasterUITests: PaintUITestCase {
         wait(for: [XCTNSPredicateExpectation(predicate: undone, object: nil)], timeout: 20)
         attachScreenshot(app, "liquify-mixed-stream-one-undo")
         rotateDevice(app, to: .landscapeLeft)
+        openLayerPanel(app); closeLayerRail(app)
         attachScreenshot(app, "liquify-mixed-stream-one-undo-landscape")
     }
 
@@ -159,6 +163,7 @@ final class LiquifyRasterUITests: PaintUITestCase {
             "the vector stroke actually lost ink at the translated gesture")
         if !stream {
             rotateDevice(app, to: .landscapeLeft)
+            openLayerPanel(app); closeLayerRail(app)
             attachScreenshot(app, "eraser-host-landed-landscape")
         }
     }

@@ -466,7 +466,7 @@ extension CanvasManager {
     /// property and the two tools cannot answer "what did the loop catch" differently.
     @discardableResult
     func beginVectorLassoMove() -> Bool {
-        commitAllInteractiveState()
+        guard commitAllInteractiveState() else { return false }
         guard let selection, let target = activeVectorMoveTarget(),
               selection.acts(onLayer: target.layerID, cel: target.celID) else { return false }
         let vector = target.vector
@@ -592,7 +592,7 @@ extension CanvasManager {
     ///   were — nothing here mutates before the last refusal.
     @discardableResult
     func beginVectorLassoDuplicate() -> Bool {
-        commitAllInteractiveState()
+        guard commitAllInteractiveState() else { return false }
         guard let selection, let target = activeVectorMoveTarget(),
               selection.acts(onLayer: target.layerID, cel: target.celID) else { return false }
         let source = target.vector
@@ -665,7 +665,7 @@ extension CanvasManager {
     ///   were — nothing here mutates before the last refusal.
     @discardableResult
     func moveVectorSelectionToNewLayer() -> Bool {
-        commitAllInteractiveState()
+        guard commitAllInteractiveState() else { return false }
         guard let selection, let target = activeVectorMoveTarget(),
               selection.acts(onLayer: target.layerID, cel: target.celID) else { return false }
         let source = target.vector
@@ -911,7 +911,7 @@ extension CanvasManager {
     ///     every kind as of stage 3c; nothing greys out but Reset, and only until the first nudge.
     @discardableResult
     func beginVectorWholeCelMove() -> Bool {
-        commitAllInteractiveState()
+        guard commitAllInteractiveState() else { return false }
         guard let target = activeVectorMoveTarget(), let lift = target.vector.liftWholeCel()
         else { return false }
         // **It can never fire here, and it is called anyway.** `liftWholeCel` returns every id on the
@@ -983,7 +983,7 @@ extension CanvasManager {
     ///   there is none to hug.
     @discardableResult
     func beginVectorFolderMove(_ folderID: UUID) -> Bool {
-        commitAllInteractiveState()
+        guard commitAllInteractiveState() else { return false }
         guard folders.contains(where: { $0.id == folderID }) else { return false }
         let scope = folderMoveScope
         var shown: [VectorFloatPart] = []
@@ -1104,7 +1104,7 @@ extension CanvasManager {
     ///   curve is real, it is only the drawing that is not here.
     @discardableResult
     func beginVectorChannelMove(_ channel: TransformChannelID) -> Bool {
-        commitAllInteractiveState()
+        guard commitAllInteractiveState() else { return false }
         guard let target = activeVectorMoveTarget() else { return false }
         let lifted: (elements: [VectorElement], insideIDs: Set<UUID>, mayDiverge: Bool)?
         switch channel {
@@ -1133,7 +1133,7 @@ extension CanvasManager {
     ///   own refusal, banner included, so a caller that must not raise that banner asks first.
     @discardableResult
     func beginVectorMove(ofElementIDs ids: Set<UUID>) -> Bool {
-        commitAllInteractiveState()
+        guard commitAllInteractiveState() else { return false }
         guard let target = activeVectorMoveTarget(), let lift = target.vector.lift(elementIDs: ids)
         else { return false }
         return beginVectorFloat(target: target, lift: lift)

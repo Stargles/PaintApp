@@ -1380,3 +1380,91 @@ kernel void warpHomography(texture2d<float, access::read>  source [[texture(0)]]
     float v = (params.m3 * p.x + params.m4 * p.y + params.m5) * inv;
     result.write(sampleBilinearTransparent(source, float2(u, v) - 0.5f), gid);
 }
+
+// Raster backing uses one explicit Lanczos3 filter in full images and cropped previews. Core
+// Graphics' high filter depends on the full input extent; the extent here only bounds reads.
+struct RasterWarpParams {
+    WarpParams map;
+    int sourceX, sourceY, destinationX, destinationY;
+};
+
+static inline float rasterLanczos(float x) {
+    x = abs(x);
+    if (x < 1e-6f) { return 1.0f; }
+    if (x >= 3.0f) { return 0.0f; }
+    float p = M_PI_F * x;
+    return sin(p) * sin(p / 3.0f) / (p * p / 3.0f);
+}
+
+// Poisson summation bounds this integral normalization's two-axis error below 0.009 of an
+// RGBA8 step at scale <= 1/32. Above it, at most 192 weights are summed. See PERFORMANCE §36.
+static inline float rasterNormalization(float uv, float scale, int lo, int hi) {
+    if (scale <= 1.0f / 32.0f) { return 0.9970553459543397f / scale; }
+    float sum = 0;
+    for (int i = lo; i <= hi; ++i) { sum += rasterLanczos((uv - i) * scale); }
+    return sum;
+}
+
+static inline float4 rasterQuantize(float4 value, float norm) {
+    value = clamp(round(value / norm * 255.0f) / 255.0f, float4(0), float4(1));
+    value.xyz = min(value.xyz, float3(value.w));
+    return value;
+}
+
+kernel void warpRasterLanczos(texture2d<float, access::read> source [[texture(0)]],
+                              texture2d<float, access::write> result [[texture(1)]],
+                              constant RasterWarpParams &params [[buffer(0)]],
+                              uint2 gid [[thread_position_in_grid]],
+                              uint lane [[thread_index_in_simdgroup]],
+                              uint lanes [[threads_per_simdgroup]]) {
+    // The dispatch fills complete SIMD groups, including a masked tail. Every lane must reach
+    // the cooperative reduction even when its own pixel is outside the output or behind a horizon.
+    bool output = gid.x < result.get_width() && gid.y < result.get_height();
+    float2 p = float2(int2(gid) + int2(params.destinationX, params.destinationY)) + 0.5f;
+    constant WarpParams &m = params.map;
+    float w = m.m6 * p.x + m.m7 * p.y + m.m8;
+    bool valid = output && w > 0;
+    float2 q = valid ? float2(m.m0 * p.x + m.m1 * p.y + m.m2, m.m3 * p.x + m.m4 * p.y + m.m5) / w : float2(0);
+    float2 dx = valid ? (float2(m.m0, m.m3) - q * m.m6) / w : float2(0);
+    float2 dy = valid ? (float2(m.m1, m.m4) - q * m.m7) / w : float2(0);
+    // Each source-axis footprint follows the local inverse Jacobian, including perspective.
+    float2 scale = 1.0f / max(float2(1), float2(length(float2(dx.x, dy.x)), length(float2(dx.y, dy.y))));
+    float2 uv = q - 0.5f, radius = 3.0f / scale;
+    int2 lo = int2(ceil(uv - radius)), hi = int2(floor(uv + radius));
+    int2 origin(params.sourceX, params.sourceY);
+    int2 start = max(lo, origin), end = min(hi, origin + int2(source.get_width(), source.get_height()) - 1);
+    bool ink = valid && all(start <= end);
+    float norm = ink ? rasterNormalization(uv.x, scale.x, lo.x, hi.x)
+                    * rasterNormalization(uv.y, scale.y, lo.y, hi.y) : 1;
+    int row = max(0, end.x - start.x + 1), count = row * max(0, end.y - start.y + 1);
+    // This changes work distribution only, never support or quality. Bounds are global source
+    // coordinates, so a full image and every crop choose the same summation for the same pixel.
+    bool wide = ink && count > 1024;
+    float4 value = 0;
+    if (ink && !wide) {
+        for (int y = start.y; y <= end.y; ++y) {
+            float wy = rasterLanczos((uv.y - y) * scale.y);
+            for (int x = start.x; x <= end.x; ++x) {
+                value += source.read(uint2(int2(x, y) - origin)) * (rasterLanczos((uv.x - x) * scale.x) * wy);
+            }
+        }
+    }
+    if (output && !wide) { result.write(rasterQuantize(value, norm), gid); }
+    if (simd_any(wide)) {
+        for (uint owner = 0; owner < lanes; ++owner) {
+            if (!simd_shuffle(uint(wide), owner)) { continue; }
+            float2 u = simd_shuffle(uv, owner), s = simd_shuffle(scale, owner);
+            int2 first = simd_shuffle(start, owner);
+            int2 last = simd_shuffle(end, owner);
+            float4 sum = 0;
+            for (int y = first.y; y <= last.y; ++y) {
+                float wy = rasterLanczos((u.y - y) * s.y);
+                for (int x = first.x + int(lane); x <= last.x; x += int(lanes)) {
+                    sum += source.read(uint2(int2(x, y) - origin)) * (rasterLanczos((u.x - x) * s.x) * wy);
+                }
+            }
+            sum = simd_sum(sum);
+            if (lane == owner) { result.write(rasterQuantize(sum, norm), gid); }
+        }
+    }
+}

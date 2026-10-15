@@ -33,11 +33,13 @@ extension CanvasManager {
         /// The file opens, but nothing in the block's own span decoded — a crop naming a range the
         /// asset has nothing in.
         case noDecodableFrames
+        case pendingEdit
 
         var phrase: String {
             switch self {
             case .noVideo: return "this block doesn't hold a video"
             case .unreadableAsset: return "that video's file can't be read"
+            case .pendingEdit: return "the held picture could not be placed; try again"
             case .noDecodableFrames: return "no frames could be read from that video"
             }
         }
@@ -136,7 +138,7 @@ extension CanvasManager {
 
         // KEYFRAMES §6's recipe: a pending float baked first, so it lands as its own earlier step
         // rather than being swallowed into (or re-baked on top of) this one.
-        commitAllInteractiveState()
+        guard commitAllInteractiveState() else { return .refused(.pendingEdit) }
 
         // `touching: [vector]` — see the doc comment above for why only the *original* canvas
         // needs its elements snapshotted explicitly.

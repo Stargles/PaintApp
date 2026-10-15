@@ -1309,7 +1309,10 @@ final class StrokeCanvasView: CanvasPlaneView {
         guard let scratch, let image = scratchView.image, let size = canvasManager?.canvasSize else { return nil }
         if let shown = scratch.renderedCelContent {
             var value = PixelOps.CelDisplay()
-            value.drawOverlays = { cg, content in shown.draw(into: cg, content: content, canvasSize: size) }
+            value.drawOverlays = { cg, content in
+                shown.draw(into: cg, content: content, canvasSize: size)
+                return true
+            }
             return (value, shown.footprint.boundingBoxOfPath)
         }
         guard scratch.celContent == nil else { return nil }

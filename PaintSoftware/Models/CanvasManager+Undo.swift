@@ -153,22 +153,35 @@ extension CanvasManager {
     /// one undo step — without this, merging would record a bare "Delete Layer" that reverses half
     /// the operation and leaves the survivor flattened.
     func withStructureUndo(label: HistoryActionLabel, _ body: () -> Void) {
-        guard structureUndoDepth == 0, gestureSnapshot == nil else {
-            body() // an enclosing scope is already recording this
-            return
-        }
+        guard structureUndoDepth == 0, gestureSnapshot == nil else { body(); return }
+        _ = withStructureTransaction(label: label) { body(); return true }
+    }
+
+    /// Fresh-tier edits can decline without consuming the old structure or recording history.
+    @discardableResult
+    func withStructureTransaction(label: HistoryActionLabel, _ body: () -> Bool) -> Bool {
+        let records = structureUndoDepth == 0 && gestureSnapshot == nil
         // Every structural edit is a canvas edit, so a pending shape/fill bakes first — before the
         // snapshot below, so the transient lands as its own earlier undo step rather than being
         // swallowed into this one (or re-baking afterwards on top of it). This one call is what
         // covers add/delete/merge/duplicate/group/restack/rasterize/clear and every cel-timeline
         // operation: they all funnel through here. See `beginCanvasEdit`.
-        beginCanvasEdit()
+        if records { beginCanvasEdit() }
+        // A fallible nested edit restores its entry, preserving any earlier enclosing gesture work.
         let before = captureStructure()
+        let cropBefore = pendingKeyframeCrop
         structureUndoDepth += 1
         defer { structureUndoDepth -= 1 }
-        body()
-        recordStructureChange(label: label, from: before, to: captureStructure())
-        flushPendingKeyframeCrop()
+        guard body() else {
+            restoreStructure(before)
+            pendingKeyframeCrop = cropBefore
+            return false
+        }
+        if records {
+            recordStructureChange(label: label, from: before, to: captureStructure())
+            flushPendingKeyframeCrop()
+        }
+        return true
     }
 
     // MARK: - Saying what a span change discarded (TODO 62)

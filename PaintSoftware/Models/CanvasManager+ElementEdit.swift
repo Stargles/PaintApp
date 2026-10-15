@@ -121,10 +121,11 @@ struct LiveCelContentEdit {
         replacementFootprint(placement: placement).boundingBoxOfPath
     }
 
-    func displaySource(placement: CelContentPlacement, canvasSize: CGSize) -> (CGContext, CGRect) -> Void {
+    func displaySource(placement: CelContentPlacement, canvasSize: CGSize) -> (CGContext, CGRect) -> Bool {
         { cg, content in
-            guard let picture = presentation(placement: placement) else { return }
+            guard let picture = presentation(placement: placement) else { return false }
             picture.draw(into: cg, content: content, canvasSize: canvasSize)
+            return true
         }
     }
 

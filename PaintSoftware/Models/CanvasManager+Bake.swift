@@ -99,40 +99,53 @@ extension CanvasManager {
     /// enough, and it gives every cache a new identity at the same time.
     @discardableResult
     func bakeLayer(id: UUID) -> BakeOutcome {
-        commitAllInteractiveState()
+        guard commitAllInteractiveState() else {
+            raise(.bakeRefused(.renderUnavailable))
+            return .refused(.renderUnavailable)
+        }
         switch bakePlan(forLayerID: id) {
         case .refused(let refusal):
             raise(.bakeRefused(refusal))
             return .refused(refusal)
         case .plan(let plan):
-            withStructureUndo(label: .bakeLayer) { perform(plan) }
+            guard withStructureTransaction(label: .bakeLayer, { perform(plan) }) else {
+                raise(.bakeRefused(.renderUnavailable))
+                return .refused(.renderUnavailable)
+            }
             if !plan.leftovers.isEmpty { raise(.bakedWithLeftovers(plan.leftovers)) }
             return .baked(plan)
         }
     }
 
-    private func perform(_ plan: BakePlan) {
+    private func perform(_ plan: BakePlan) -> Bool {
         let memo = BakeColourMemo()
-        for layerBake in plan.layers { bake(layerBake, memo: memo) }
+        for layerBake in plan.layers {
+            guard bake(layerBake, memo: memo) else { return false }
+        }
         if let at = layers.firstIndex(where: { $0.id == plan.bakerID }) { deleteLayer(at: at) }
+        return true
     }
 
-    private func bake(_ layerBake: LayerBake, memo: BakeColourMemo) {
-        guard let canvasSize, let at = layers.firstIndex(where: { $0.id == layerBake.layerID }) else { return }
+    private func bake(_ layerBake: LayerBake, memo: BakeColourMemo) -> Bool {
+        guard let canvasSize, let at = layers.firstIndex(where: { $0.id == layerBake.layerID }) else { return false }
         switch layerBake.medium {
         case .flatColour(let operation):
-            guard let fill = layers[at].fill else { return }
+            guard let fill = layers[at].fill else { return false }
             let baked = operation.baked(fill.color.color.codable)
             layers[at].fill = ValueFill(color: PaletteColor(color: baked.color))
         case .ink, .pixels:
             // The cels are addressed by id from here on, so nothing depends on the layer keeping its index.
-            if layerBake.rasterizes { rasterizeLayer(layerIndex: at) }
+            if layerBake.rasterizes {
+                rasterizeLayer(layerIndex: at)
+                guard layers[at].kind == .raster, layers[at].cels.allSatisfy({ $0.raster.hasContent }) else { return false }
+            }
             for cel in layerBake.cels {
-                bakeCel(layerID: layerBake.layerID, celID: cel.celID, segments: cel.segments,
-                        canvasSize: canvasSize, memo: memo)
+                guard bakeCel(layerID: layerBake.layerID, celID: cel.celID, segments: cel.segments,
+                              canvasSize: canvasSize, memo: memo) else { return false }
             }
             if let loop = layerBake.loop { replay(loop, onLayerID: layerBake.layerID) }
         }
+        return true
     }
 
     /// **Cuts a cel into the runs `segments` names and writes each one's treatment** — the body Bake
@@ -143,9 +156,10 @@ extension CanvasManager {
     /// The segments were resolved on the uncut cel (`bakeSegments`), and **the order is load-bearing**:
     /// §3.1 says a split re-parameterises a bezier on both sides, so re-reading a half after cutting
     /// would bake frames the artist never saw.
+    @discardableResult
     func bakeCel(layerID: UUID, celID: UUID, segments: [BakeSegment<BakeTreatment?>],
-                 canvasSize: CGSize, memo: BakeColourMemo = BakeColourMemo()) {
-        guard let at = celIndices(forCel: celID, inLayer: layerID) else { return }
+                 canvasSize: CGSize, memo: BakeColourMemo = BakeColourMemo()) -> Bool {
+        guard let at = celIndices(forCel: celID, inLayer: layerID) else { return false }
         let startFrame = layers[at.layer].cels[at.cel].startFrame
         for segment in segments.dropFirst() {
             let cut = startFrame + segment.localStart
@@ -156,9 +170,10 @@ extension CanvasManager {
             guard let treatment = segment.treatment,
                   let idx = activeCelIndex(inLayer: at.layer, atFrame: startFrame + segment.localStart)
             else { continue }
-            write(treatment, layerID: layerID, celID: layers[at.layer].cels[idx].id,
-                  canvasSize: canvasSize, memo: memo)
+            guard write(treatment, layerID: layerID, celID: layers[at.layer].cels[idx].id,
+                        canvasSize: canvasSize, memo: memo) else { return false }
         }
+        return true
     }
 
     /// **One run's drawing rewritten.** A vector cel gets a brand-new display list (`bakeLayer` says why);
@@ -168,11 +183,11 @@ extension CanvasManager {
     /// baselines go with the motion, because a live rig under drawings the artist is about to edit would
     /// be a lie (KEYFRAMES.md §2.9). An effect leaves them alone.
     private func write(_ treatment: BakeTreatment, layerID: UUID, celID: UUID,
-                       canvasSize: CGSize, memo: BakeColourMemo) {
-        guard let at = celIndices(forCel: celID, inLayer: layerID) else { return }
+                       canvasSize: CGSize, memo: BakeColourMemo) -> Bool {
+        guard let at = celIndices(forCel: celID, inLayer: layerID) else { return true }
         let cel = layers[at.layer].cels[at.cel]
         if layers[at.layer].kind == .vector {
-            guard let vector = cel.vector else { return }
+            guard let vector = cel.vector else { return true }
             let elements: [VectorElement]
             switch treatment {
             case .operation(let operation):
@@ -186,18 +201,21 @@ extension CanvasManager {
             layers[at.layer].cels[at.cel].vector =
                 VectorCanvas(size: vector.size, elements: elements, transform: vector.transform)
         } else {
-            guard !cel.isCertainlyBlank else { return }
+            guard !cel.isCertainlyBlank else { return true }
             let image: UIImage
             switch treatment {
             case .operation(let operation):
                 image = operation.baked(PixelOps.rasterize(cel: cel, canvasSize: canvasSize))
             case .pose(let run):
-                image = PixelOps.rasterize(cel: cel, canvasSize: canvasSize, pose: run.inherited)
+                guard let rendered = PixelOps.rasterize(cel: cel, canvasSize: canvasSize, pose: run.inherited) else { return false }
+                image = rendered
             }
-            layers[at.layer].cels[at.cel].raster = bakedRasterTexture(image: image, likeExisting: cel.raster)
+            guard let raster = preparedRasterTexture(image: image, likeExisting: cel.raster) else { return false }
+            layers[at.layer].cels[at.cel].raster = raster
             layers[at.layer].cels[at.cel].bakedImage = nil
         }
         celContentChangedOutsideStroke(layerID: layerID, celID: celID)
+        return true
     }
 
     /// **A Repeat's loop, written onto one layer as the drawings it showed** — each run becomes a cel of

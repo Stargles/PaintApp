@@ -846,7 +846,8 @@ extension CanvasManager {
     /// (TODO (185), (187)) and is never put down here; a tapped set is put down by any move off the cel
     /// its objects live on. Same-cel frame ticks (scrubbing within one cel's frame range)
     /// intentionally leave all of it alone.
-    func handleActiveContextChanged() {
+    @discardableResult
+    func handleActiveContextChanged() -> Bool {
         // A still-adjustable fill or shape can't follow the user to another cel — bake both here so
         // they land as committed steps on the global history, against the cel they were drawn on,
         // before the active context moves off it.
@@ -855,9 +856,7 @@ extension CanvasManager {
         let activeCelID = self.activeCelID(inLayer: currentLayerIndex, atFrame: currentFrame)
         if let piece = floatingPiece {
             let stillTargeted = piece.targetLayerID == activeLayerID && piece.targetCelID == activeCelID
-            if !stillTargeted, !recordingOwnsMoveBox {
-                commitFloatingPieceIfNeeded()
-            }
+            if !stillTargeted, !recordingOwnsMoveBox, !commitFloatingPieceIfNeeded() { return false }
         }
         // The lasso move's float, on the same rule and for the same reason. Explicit rather than
         // inherited: `beginCanvasEdit()` above deliberately does not settle floats, so a float left
@@ -883,6 +882,7 @@ extension CanvasManager {
         // each canvas's lock, MEASURED at 0.154 ms a tick on 300 cels (RENDER.md §5 stage 7). It is
         // `VectorRenderCache` now, driven by a canvas memoizing a render rather than by the playhead
         // moving, so a tick that changes nothing costs nothing.
+        return true
     }
 
     /// The id of the cel `layerIndex` shows at `frame`, or nil for a gap or a layer that is not there.
@@ -963,7 +963,7 @@ extension CanvasManager {
     // MARK: Making a selection
 
     func beginSelection(mode: SelectionMode) {
-        commitAllInteractiveState()
+        guard commitAllInteractiveState() else { return }
         selectionMode = mode
     }
 
@@ -1052,8 +1052,8 @@ extension CanvasManager {
         let derived = derivedCelContent(for: cel, atFrame: currentFrame,
                                         inheriting: containerPose(ofLayerAt: currentLayerIndex,
                                                                   atFrame: currentFrame))
-        let image = PixelOps.rasterize(cel: cel, canvasSize: canvasSize, derived: derived,
-                                       pose: inkPose(forLayerID: layers[currentLayerIndex].id))
+        guard let image = PixelOps.rasterize(cel: cel, canvasSize: canvasSize, derived: derived,
+                                       pose: inkPose(forLayerID: layers[currentLayerIndex].id)) else { return }
         guard let path = PixelOps.floodFillMask(image: image, point: point, tolerance: magicWandTolerance) else { return }
         finishSelection(path: path)
     }
@@ -1107,7 +1107,7 @@ extension CanvasManager {
         // the transient fill preview), so anything still transient must be committed first — else
         // the fill is carried into the floating piece AND re-bakes into the source cel later, which
         // is exactly the "the filled section gets duplicated" report.
-        commitAllInteractiveState()
+        guard commitAllInteractiveState() else { return }
         guard let canvasSize, layers.indices.contains(currentLayerIndex),
               let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame) else { return }
 
@@ -1121,7 +1121,11 @@ extension CanvasManager {
         // the one loop wherever nothing poses the layer.
         let pose = inkPose(forLayerID: sourceLayerID)
         let stored = PixelOps.rasterize(cel: cel, canvasSize: canvasSize)
-        let shown = pose.map { PixelOps.rasterize(cel: cel, canvasSize: canvasSize, pose: $0) } ?? stored
+        let shown: UIImage
+        if let pose {
+            guard let image = PixelOps.rasterize(cel: cel, canvasSize: canvasSize, pose: pose) else { return }
+            shown = image
+        } else { shown = stored }
         let canvasRect = CGRect(origin: .zero, size: canvasSize)
         let path: CGPath
         let bounds: CGRect
@@ -1195,7 +1199,7 @@ extension CanvasManager {
     ///   has a canvas size to measure the frame against.
     @discardableResult
     func beginContainerPoseMove(for target: KeyframeTarget? = nil) -> Bool {
-        commitAllInteractiveState()
+        guard commitAllInteractiveState() else { return false }
         guard let canvasSize, layers.indices.contains(currentLayerIndex) else { return false }
         let target = target ?? .layer(id: layers[currentLayerIndex].id)
         guard containerPose(of: target) != nil, case .layer(let id) = target,
@@ -1253,7 +1257,7 @@ extension CanvasManager {
     ///   layer's bar does not cover the playhead, or before the document has a canvas size.
     @discardableResult
     func beginEffectBoxMove(for target: KeyframeTarget) -> Bool {
-        commitAllInteractiveState()
+        guard commitAllInteractiveState() else { return false }
         guard let canvasSize, layers.indices.contains(currentLayerIndex),
               case .duplicateOffset? = storedEffect(of: target),
               let resolved = resolvedEffect(of: target, atFrame: currentFrame),
@@ -1397,15 +1401,15 @@ extension CanvasManager {
         guard let selection, let canvasSize,
               layers.indices.contains(currentLayerIndex) else { return }
         // Same reasoning as `beginMove`: the copy is taken from flattened content, so bake first.
-        commitAllInteractiveState()
+        guard commitAllInteractiveState() else { return }
 
         let sourceLayerIndex = currentLayerIndex
         guard let celIndex = activeCelIndex(inLayer: sourceLayerIndex, atFrame: currentFrame) else { return }
         let cel = layers[sourceLayerIndex].cels[celIndex]
         // The copy is taken from what the canvas shows — the loop was drawn round that picture, which
         // under a transformation layer is the cel carried through its pose (`beginMove`).
-        let shown = PixelOps.rasterize(cel: cel, canvasSize: canvasSize,
-                                       pose: inkPose(forLayerID: layers[sourceLayerIndex].id))
+        guard let shown = PixelOps.rasterize(cel: cel, canvasSize: canvasSize,
+                                       pose: inkPose(forLayerID: layers[sourceLayerIndex].id)) else { return }
         let bounds = selection.bounds.intersection(CGRect(origin: .zero, size: canvasSize))
         guard bounds.width > 0, bounds.height > 0 else { return }
 
@@ -1460,7 +1464,7 @@ extension CanvasManager {
         let requested = selection
         // `clearSelectionPixels`' reason: settle a lifted piece before reading the cel it left a
         // hole in.
-        commitAllInteractiveState()
+        guard commitAllInteractiveState() else { return }
         guard let selection = requested, let canvasSize,
               let celIndex = activeCelIndex(actedOnBy: selection) else { return }
         let sourceIndex = currentLayerIndex
@@ -1994,61 +1998,58 @@ extension CanvasManager {
     @discardableResult
     func commitFloatingPieceIfNeeded() -> Bool {
         guard var piece = floatingPiece, let canvasSize else { return false }
-        floatingPiece = nil
         // **The two boxes bake nothing and return here**, before a single line of the pixel path
         // below. Neither has a `pieceImage` worth rendering, a remainder to composite against or a cel
         // to write into: every gesture they took has already landed at its own settle, and what is
         // left is at most the one still open — a routed write onto `Layer.transform`, or five onto a
         // grade.
         if piece.kind == .containerPose || piece.kind == .effectBox {
+            floatingPiece = nil
             if let nudge = boxNudge {
                 boxNudge = nil
                 commitBoxNudge(nudge, of: piece)
             }
             return true
         }
-        // §5.6, and since 2026-08-22 the raster tool's rule as well as the vector one: the ants clear
-        // when the piece bakes, not when it lifts. `.duplicate` cleared its own at lift and is
-        // untouched — a copy is not a region the artist is still holding.
-        if piece.kind == .move { selection = nil }
         // A bitmap set down with a finger still on its box — a tool switch or a save mid-drag — lands
         // where the box is, which the piece has not learnt yet (`boxNudge`).
         if let nudge = boxNudge {
-            boxNudge = nil
             piece.transform = nudge.transform
             piece.distortQuad = nudge.distortQuad
         }
         guard let targetLayerIndex = layerIndex(ofID: piece.targetLayerID),
-              let targetCelIndex = layers[targetLayerIndex].cels.firstIndex(where: { $0.id == piece.targetCelID }) else { return true }
+              let targetCelIndex = layers[targetLayerIndex].cels.firstIndex(where: { $0.id == piece.targetCelID }) else {
+            floatingPiece = nil; boxNudge = nil
+            if piece.kind == .move { selection = nil }
+            return true
+        }
 
         // The piece floats in canvas points, where the artist sees it; the layer stores its pixels
         // in its own space, so what lands is the picture written back through the pose it is shown
         // through (`landingPose`) — the identity on a layer nothing poses.
         let shown = PixelOps.render(floatingPiece: piece, into: canvasSize)
-        let rendered = piece.landingPose?.inverse.map { PixelOps.posed(shown, through: $0) } ?? shown
+        let rendered: UIImage
+        if let pose = piece.landingPose {
+            guard let inverse = pose.inverse, let image = PixelOps.posed(shown, through: inverse) else { return false }
+            rendered = image
+        } else { rendered = shown }
         let targetCel = layers[targetLayerIndex].cels[targetCelIndex]
+        let base = piece.kind == .move ? piece.remainderPreview ?? targetCel.bakedImage : targetCel.bakedImage
+        let finalImage = PixelOps.compositeOver(base: base, overlay: rendered)
+        guard let finalRaster = preparedRasterTexture(image: finalImage, likeExisting: targetCel.raster) else { return false }
+        // The selection and held picture are released only after the complete landing is ready.
+        floatingPiece = nil
+        boxNudge = nil
+        if piece.kind == .move { selection = nil }
 
         switch piece.kind {
-        case .containerPose, .effectBox:
-            // Unreachable: the early returns above take both kinds before a pixel is touched. Spelled
-            // out rather than folded into a `default:`, so the next kind to arrive is a compiler
-            // error here instead of a silent bake into somebody's cel.
-            break
+        case .containerPose, .effectBox: break // the native boxes return before pixel rendering
         case .move:
-            // remainderPreview was rendered from PixelOps.rasterize (see beginMove), which already
-            // folds bakedImage/the old raster strokes into it — so the result lands purely
-            // on the raster tier (see `bakedRasterTexture`'s doc comment): a raster-layer cel must
-            // hold its content in exactly one place at rest, or the eraser (which only ever stamps
-            // `Cel.raster`) can never touch whatever landed in `bakedImage` instead.
-            let baseForComposite = piece.remainderPreview ?? targetCel.bakedImage
-            let newImage = PixelOps.compositeOver(base: baseForComposite, overlay: rendered)
             registerUndoableCelChange(layerID: layers[targetLayerIndex].id, celID: targetCel.id,
                                        oldRaster: targetCel.raster, oldBaked: targetCel.bakedImage,
-                                       newRaster: bakedRasterTexture(image: newImage, likeExisting: targetCel.raster),
-                                       newBaked: nil, label: .move)
+                                       newRaster: finalRaster, newBaked: nil, label: .move)
         case .duplicate:
-            let newImage = PixelOps.compositeOver(base: targetCel.bakedImage, overlay: rendered)
-            registerUndoableLayerInsertion(layerIndex: targetLayerIndex, finalImage: newImage, label: .duplicatePiece)
+            registerUndoableLayerInsertion(layerIndex: targetLayerIndex, finalRaster: finalRaster, label: .duplicatePiece)
         }
         return true
     }
@@ -2075,7 +2076,7 @@ extension CanvasManager {
         // `commitAllInteractiveState`, not `beginCanvasEdit`: a selection now outlives a Move lift
         // (see `beginMove`), so without settling the piece first this would paint into the cel that
         // is currently showing a hole, and the piece would then bake over the top of it.
-        commitAllInteractiveState()
+        guard commitAllInteractiveState() else { return }
         guard let selection = requested, let celIndex = activeCelIndex(actedOnBy: selection) else { return }
         // The same add path the fill tool and Add → Rectangle take, so "Fill" means one thing
         // whichever door it arrives from: a vector layer gets an element on top of everything
@@ -2157,7 +2158,7 @@ extension CanvasManager {
         // `commitAllInteractiveState`, not `beginCanvasEdit`: a selection now outlives a Move lift
         // (see `beginMove`), so without settling the piece first this would paint into the cel that
         // is currently showing a hole, and the piece would then bake over the top of it.
-        commitAllInteractiveState()
+        guard commitAllInteractiveState() else { return }
         guard let selection = requested, let canvasSize,
               let celIndex = activeCelIndex(actedOnBy: selection) else { return }
         let cel = layers[currentLayerIndex].cels[celIndex]
@@ -2282,7 +2283,7 @@ extension CanvasManager {
         let requested = selection
         // `commitAllInteractiveState`, not `beginCanvasEdit`: a selection outlives a Move lift, and a
         // float still up would bake its own strokes over the top carrying the brush this is replacing.
-        commitAllInteractiveState()
+        guard commitAllInteractiveState() else { return }
         guard applyBrushUnavailableReason == nil,
               let selection = requested,
               let celIndex = activeCelIndex(actedOnBy: selection),
@@ -2436,6 +2437,14 @@ extension CanvasManager {
         RasterLayerTexture(size: existing.size, image: image, strokeCount: max(existing.strokeCount, 1))
     }
 
+    /// A fallible commit prepares its replacement before releasing the held picture or saved tiers.
+    /// An allocated transparent context is valid; a missing allocation must never become empty paint.
+    func preparedRasterTexture(image: UIImage, likeExisting existing: RasterLayerTexture) -> RasterLayerTexture? {
+        guard CompositorBudget.hasHeadroom(for: existing.pixelWidth * existing.pixelHeight * 4) else { return nil }
+        let raster = bakedRasterTexture(image: image, likeExisting: existing)
+        return raster.hasContent ? raster : nil
+    }
+
     private func applyCelChange(layerID: UUID, celID: UUID, raster: RasterLayerTexture, baked: UIImage?,
                                 vector: (VectorCanvas, [VectorElement], Set<UUID>)? = nil,
                                 recipe: InterpolationRecipe? = nil) {
@@ -2453,17 +2462,17 @@ extension CanvasManager {
     /// if other layers have since shifted its index); the redo side re-inserts at the position it
     /// was originally created at, which is safe because `history`'s redo stack only ever holds this
     /// action while nothing else has been recorded in between (any new edit clears it).
-    private func registerUndoableLayerInsertion(layerIndex: Int, finalImage: UIImage, label: HistoryActionLabel) {
+    private func registerUndoableLayerInsertion(layerIndex: Int, finalRaster: RasterLayerTexture, label: HistoryActionLabel) {
         guard layers.indices.contains(layerIndex) else { return }
         // Same "raster tier only" rule as `registerUndoableCelChange` — the freshly-inserted cel
         // starts with an empty `raster` (see `beginDuplicate`), so without this the duplicated
         // content would land solely in `bakedImage` and never be eraseable on the new layer either.
-        layers[layerIndex].cels[0].raster = bakedRasterTexture(image: finalImage, likeExisting: layers[layerIndex].cels[0].raster)
+        layers[layerIndex].cels[0].raster = finalRaster
         scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: 0)
         let insertedLayer = layers[layerIndex]
         let insertedLayerID = insertedLayer.id
 
-        recordUndo(label: label, cost: Self.approximateImageCost(finalImage), undo: { [weak self] in
+        recordUndo(label: label, cost: finalRaster.approximateCost, undo: { [weak self] in
             guard let self, let idx = self.layers.firstIndex(where: { $0.id == insertedLayerID }) else { return }
             self.layers.remove(at: idx)
             if self.currentLayerIndex >= self.layers.count {

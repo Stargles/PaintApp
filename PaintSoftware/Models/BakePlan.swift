@@ -246,9 +246,11 @@ extension CanvasManager {
         case nothingBeneath
         /// Everything beneath it was either outside its frames or left as it was.
         case nothingToBake([BakeLeftover])
+        case renderUnavailable
 
         var phrase: String {
             switch self {
+            case .renderUnavailable: return "the transformed picture could not be rendered; the drawings and transform are unchanged"
             case .notABakingLayer: return "this layer holds drawings, so it is merged rather than baked"
             case .hidden: return "this layer is hidden, so it changes nothing to bake"
             case .partialCoverage: return "this layer has a mask, so it reaches only part of what is beneath it"

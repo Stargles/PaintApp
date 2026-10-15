@@ -425,7 +425,7 @@ enum ChunkedCompositor {
                                  maskStacks: recipe.maskStacks, frame: recipe.frame,
                                  canvasSize: recipe.canvasSize, background: background,
                                  quality: recipe.quality, continuation: continuation,
-                                 window: recipe.window)
+                                 window: recipe.window, sourceResolutionFailed: resolved.failed)
         }
 
         /// The accumulator, or an assembled atom, as something the compositor cannot tell from a

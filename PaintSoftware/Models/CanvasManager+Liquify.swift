@@ -113,14 +113,11 @@ extension CanvasManager {
         }
         guard let held = liveCelContentEdit, let procedure = held.procedure,
               procedure.deformation == session.gesture else { endLiveEdit(); return }
-        let diagnosticLift = ProcessInfo.processInfo.systemUptime
-        ActionRecorder.ifRecording { $0.note("Liquify lift: tick=\(held.tick) recipe=\(session.recipeBefore != nil) resolving=\(procedure.isResolving) presented=\(procedure.isPresented) window=\(session.window)") }
         procedure.finishWhenPresented { [weak self] resolved in
             guard let self,
                   let layer = self.layers.firstIndex(where: { $0.id == session.layerID }),
                   let index = self.layers[layer].cels.firstIndex(where: { $0.id == session.celID }) else { return }
             let current = self.layers[layer].cels[index]
-            ActionRecorder.ifRecording { $0.note("Liquify result: after=\(ProcessInfo.processInfo.systemUptime - diagnosticLift) failed=\(resolved.failed) emptyField=\(resolved.fieldIsEmpty) changed=\(resolved.changed.count) pixelsChanged=\(resolved.pixels?.changed == true) identityMatches=\(CelContentIdentity(current) == session.sourceIdentity) picture=\(resolved.presentation.map { String(describing: $0.window) } ?? "none")") }
             guard !resolved.failed,
                   CelContentIdentity(current) == session.sourceIdentity else {
                 self.endLiveEdit(); return
@@ -136,7 +133,10 @@ extension CanvasManager {
                     raster = RasterLayerTexture(size: session.oldRaster.size)
                     baked = image
                 } else {
-                    raster = self.bakedRasterTexture(image: image, likeExisting: session.oldRaster)
+                    guard let prepared = self.preparedRasterTexture(image: image, likeExisting: session.oldRaster) else {
+                        self.endLiveEdit(); return
+                    }
+                    raster = prepared
                     baked = nil
                 }
             }

@@ -427,16 +427,14 @@ enum ProjectStore {
         /// agree; two literals is exactly how they would stop agreeing.
         static let thumbnailBounds = CGSize(width: 320, height: 320)
 
-        /// First settles any completed procedural stroke awaiting its final worker picture, so a
-        /// snapshot cannot omit a finished gesture. That explicit boundary may wait for geometry
-        /// and render its replacement window. The snapshot then reads state and shares cel images,
+        /// The save entry settles completed edits before constructing this snapshot, so it cannot
+        /// omit a held picture that failed to land. The snapshot reads state and shares cel images,
         /// with no encoding or further pixel work on the artist's thread.
         /// `renderToUIImage()` is a memo read for a cel the canvas has already displayed and a
         /// copy-on-write share of the cel's own bitmap otherwise; `makeCopy()` shares the display
         /// list the same way (PERFORMANCE.md §13.6). `SaveProfile.snapshotSeconds` is its clock.
         @MainActor
         init(_ canvasManager: CanvasManager) {
-            canvasManager.settlePendingCelContentProcedure()
             projectID = canvasManager.projectID
             projectName = canvasManager.projectName
             canvasSize = canvasManager.canvasSize ?? .zero
@@ -838,6 +836,10 @@ enum ProjectStore {
                                              answered: canvasManager.damagedSaveAnswered,
                                              intent: intent)
         guard decision != .ask else { return .ask }
+        guard canvasManager.settleInteractiveState() else {
+            onSaveFailed?()
+            return .refused
+        }
 
         // The clock starts here rather than on `saveQueue`, because the question this instrument
         // exists to answer — "how long does leaving to the gallery take" — is about the wait

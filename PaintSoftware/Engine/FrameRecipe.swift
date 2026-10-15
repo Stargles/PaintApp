@@ -92,7 +92,8 @@ struct FrameRecipe {
                                                   window: window)
         return RenderRequest(tree: tree, sources: resolved.sources, contentVersions: resolved.versions,
                              maskStacks: maskStacks, frame: frame, canvasSize: canvasSize,
-                             background: background, quality: quality, window: window)
+                             background: background, quality: quality, window: window,
+                             sourceResolutionFailed: resolved.failed)
     }
 
     /// **This recipe restricted to one horizontal band of its own frame** — RENDER.md §3.8's strip,
@@ -156,10 +157,11 @@ struct FrameRecipe {
     /// share one. A version is eight bytes of identity; the pixels are what the subset is about.
     static func resolveSources(_ leaves: [LeafSnapshot?], canvasSize: CGSize, quality: RenderQuality,
                                subset: Set<Int>? = nil, window: StripWindow? = nil)
-    -> (sources: [LayerRenderSource?], versions: [LayerContentVersion?]) {
+    -> (sources: [LayerRenderSource?], versions: [LayerContentVersion?], failed: Bool) {
         var sources = [LayerRenderSource?](repeating: nil, count: leaves.count)
         var versions = [LayerContentVersion?](repeating: nil, count: leaves.count)
         var rasterJobs: [(index: Int, cel: PixelOps.FrozenCel)] = []
+        var failed = false
         for (index, leaf) in leaves.enumerated() {
             guard let leaf else { continue }
             versions[index] = leaf.version
@@ -174,20 +176,20 @@ struct FrameRecipe {
                 // is the one leaf a strip costs nothing at all.
                 if let image = LayerRenderSource.solid(color, canvasSize: canvasSize) {
                     sources[index] = LayerRenderSource(image: image)
-                }
+                } else { failed = true }
             case .cel(let cel):
                 rasterJobs.append((index, cel))
             }
         }
         let images = PixelOps.parallelMap(rasterJobs.count) { job in
             PixelOps.rasterize(rasterJobs[job].cel, canvasSize: canvasSize, quality: quality,
-                               window: window).cgImage
+                               window: window)?.cgImage
         }
         for (job, image) in zip(rasterJobs, images) {
-            guard let image else { continue }
+            guard let image else { failed = true; continue }
             sources[job.index] = LayerRenderSource(image: image)
         }
-        return (sources, versions)
+        return (sources, versions, failed)
     }
 }
 
@@ -318,7 +320,7 @@ struct SandwichRecipe {
         func request(_ tree: [RenderNode], background: RenderBackground?) -> RenderRequest {
             RenderRequest(tree: tree, sources: resolved.sources, contentVersions: resolved.versions,
                           maskStacks: maskStacks, frame: frame, canvasSize: canvasSize,
-                          background: background, quality: quality)
+                          background: background, quality: quality, sourceResolutionFailed: resolved.failed)
         }
         return SandwichRequests(full: request(tree, background: paper),
                                 below: request(below, background: paper),

@@ -326,6 +326,11 @@ final class LiquifyRasterLogicTests: XCTestCase {
         canvas.elements = [.stream(stream)]; canvas.bumpVersion()
         canvas.setStreamFrame(id: stream.id, image: image(.blue), index: 1)
         manager.currentLayerIndex = 0
+        let initialCel = manager.layers[0].cels[0]
+        let initialPlacement = manager.celContentPlacement(forLayerID: manager.layers[0].id)
+        let unchanged = try XCTUnwrap(PixelOps.rasterize(cel: initialCel, canvasSize: size, memoize: false,
+            derived: manager.derivedCelContent(for: initialCel, atFrame: manager.currentFrame, inheriting: initialPlacement.backing),
+            pose: initialPlacement.backing))
         var session = try held(manager, layer: 0)
         session.window = CGRect(x: 3, y: 3, width: 57, height: 45)
         manager.holdLiquify(&session)
@@ -343,13 +348,21 @@ final class LiquifyRasterLogicTests: XCTestCase {
         let committedImage = try XCTUnwrap(committed.recipe.composite())
         let shown = try XCTUnwrap(edit.presentation(placement: placement))
         let cel = manager.layers[0].cels[0]
-        let independent = PixelOps.rasterize(cel: cel, canvasSize: size, memoize: false,
+        let independent = try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: size, memoize: false,
             derived: manager.derivedCelContent(for: cel, atFrame: manager.currentFrame, inheriting: placement.backing),
-            pose: placement.backing)
-        let expected = try XCTUnwrap(PixelOps.copiedSubimage(of: independent, in: shown.window))
-        let windowA = try bytes(shown.image), windowB = try bytes(expected)
-        XCTAssertTrue(windowA == windowB,
-            "the production shown-space window must equal the ordinary committed cel at that placement; differing channels: \(zip(windowA, windowB).filter { $0 != $1 }.count)")
+            pose: placement.backing))
+        let actual = UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { ctx in
+            unchanged.draw(at: .zero)
+            shown.draw(into: ctx.cgContext, content: CGRect(origin: .zero, size: size), canvasSize: size)
+        }
+        for (name, image) in [("posed-host-held", actual), ("posed-host-committed", independent)] {
+            let attachment = XCTAttachment(image: image)
+            attachment.name = name + (mixed ? "-mixed" : "-raster")
+            attachment.lifetime = .keepAlways; add(attachment)
+        }
+        let hostA = try bytes(actual), hostB = try bytes(independent)
+        XCTAssertTrue(hostA == hostB,
+            "the actual held replacement over unchanged backing must equal the committed cel; differing channels: \(zip(hostA, hostB).filter { $0 != $1 }.count)")
         let heldPicture = UIImage(cgImage: heldImage), committedPicture = UIImage(cgImage: committedImage)
         for (name, picture) in [("posed-stream-held", heldPicture), ("posed-stream-committed", committedPicture)] {
             let attachment = XCTAttachment(image: picture)
@@ -534,6 +547,320 @@ final class LiquifyRasterLogicTests: XCTestCase {
             XCTAssertTrue(try bytes(next.image) == bytes(nextCrop), "a later dab inside the same window invalidates its complete picture")
             XCTAssertTrue(try bytes(first.image) == bytes(crop), "the earlier held picture stays immutable as the scratch advances")
         }
+    }
+
+    @MainActor
+    private func posedRasterRefusalFixture() -> CanvasManager {
+        let manager = CanvasFixture.manager()
+        manager.layers[0].cels[0].bakedImage = image()
+        manager.addTransformLayer(name: "Raster pose")
+        manager.layers[1].transform = LayerPose(pose: PoseQuad(box: CGRect(origin: .zero, size: size),
+            mappedBy: CGAffineTransform(translationX: 8, y: 0)), mode: .move)
+        manager.currentLayerIndex = 0
+        manager.history.removeAll()
+        PixelOps.clearRasterizeCache()
+        return manager
+    }
+
+    @MainActor
+    func testPosedRasterRefusalPreservesSelectionAndSourceBeforeLiftOrDuplicate() throws {
+        defer { CompositorBudget.budgetOverrideBytes = nil; PixelOps.clearRasterizeCache() }
+        for duplicate in [false, true] {
+            CompositorBudget.budgetOverrideBytes = nil
+            let manager = posedRasterRefusalFixture()
+            let original = manager.layers[0].cels[0]
+            let loop = CGRect(x: 24, y: 14, width: 24, height: 24)
+            manager.selection = Selection(path: CGPath(rect: loop, transform: nil), bounds: loop)
+            let selection = try XCTUnwrap(manager.selection)
+            XCTAssertNotNil(manager.inkPose(forLayerID: manager.layers[0].id), "PREMISE: the pixels are shown through a real pose")
+            CompositorBudget.budgetOverrideBytes = 1
+            if duplicate { manager.beginDuplicate() } else { manager.beginMove() }
+            XCTAssertNil(manager.floatingPiece, "a refused posed picture cannot become an empty or partial lifted piece")
+            XCTAssertEqual(manager.layers.count, 2, "refused Duplicate must not insert a layer")
+            XCTAssertTrue(manager.layers[0].cels[0].raster === original.raster)
+            XCTAssertTrue(manager.layers[0].cels[0].bakedImage === original.bakedImage)
+            XCTAssertEqual(manager.selection?.path, selection.path, "refusal preserves the artist's selection")
+            XCTAssertEqual(manager.history.currentCost, 0, "a refused lift records no document edit")
+        }
+    }
+
+    @MainActor
+    func testPosedRasterRefusalPreservesFloatingPictureAtLanding() throws {
+        defer { CompositorBudget.budgetOverrideBytes = nil; PixelOps.clearRasterizeCache() }
+        let manager = posedRasterRefusalFixture()
+        let loop = CGRect(x: 24, y: 14, width: 24, height: 24)
+        manager.selection = Selection(path: CGPath(rect: loop, transform: nil), bounds: loop)
+        manager.beginMove()
+        let piece = try XCTUnwrap(manager.floatingPiece, "PREMISE: an ordinary posed lift succeeds before resource pressure")
+        XCTAssertNotNil(piece.landingPose)
+        let selected = try XCTUnwrap(manager.selection)
+        let source = manager.layers[0].cels[0]
+        let history = manager.history.currentCost
+        PixelOps.clearRasterizeCache()
+        CompositorBudget.budgetOverrideBytes = 1
+        XCTAssertFalse(manager.commitFloatingPieceIfNeeded(), "a refused inverse pose cannot complete the landing")
+        XCTAssertTrue(manager.floatingPiece?.pieceImage === piece.pieceImage, "keep the actual held picture on screen")
+        XCTAssertEqual(manager.floatingPiece?.transform, piece.transform)
+        XCTAssertEqual(manager.selection?.path, selected.path)
+        XCTAssertTrue(manager.layers[0].cels[0].raster === source.raster)
+        XCTAssertTrue(manager.layers[0].cels[0].bakedImage === source.bakedImage)
+        XCTAssertEqual(manager.history.currentCost, history)
+    }
+
+    @MainActor
+    private func posedBakeRefusalFixture() -> CanvasManager {
+        let manager = CanvasFixture.manager(layerCount: 0)
+        manager.addLayer(name: "Pixels")
+        manager.layers[0].cels[0].bakedImage = image()
+        manager.addVectorLayer(name: "Native ink")
+        manager.layers[1].cels[0].vector?.addStroke(VectorStroke(brush: TestBrushes.hardRound,
+            color: .init(red: 0, green: 0, blue: 0, alpha: 1), size: 4, opacity: 1,
+            samples: StrokeSamples([VectorSample(x: 12, y: 12), VectorSample(x: 24, y: 12)], channels: .pressureOnly)))
+        manager.addTransformLayer(name: "Pose")
+        manager.layers[2].transform = LayerPose(pose: PoseQuad(box: CGRect(origin: .zero, size: size),
+            mappedBy: CGAffineTransform(translationX: 8, y: 0)), mode: .move)
+        return manager
+    }
+
+    @MainActor
+    func testPosedRasterRefusalRollsBackBakeWithoutConsumingPoseOrHistory() throws {
+        defer { CompositorBudget.budgetOverrideBytes = nil; PixelOps.clearRasterizeCache() }
+        let manager = posedBakeRefusalFixture()
+        let vector = try XCTUnwrap(manager.layers[1].cels[0].vector)
+        let baker = manager.layers[2].id, ids = manager.layers.map(\.id)
+        let pixels = manager.layers[0].cels[0]
+        let originalInk = vector.elements
+        guard case .plan(let plan) = manager.bakePlan(forLayerID: baker) else { return XCTFail("PREMISE: the transform has a valid bake plan") }
+        XCTAssertEqual(plan.layers.map(\.layerID), [manager.layers[1].id, manager.layers[0].id],
+            "PREMISE: native ink is rewritten before the raster portion refuses")
+        manager.history.removeAll(); PixelOps.clearRasterizeCache()
+        CompositorBudget.budgetOverrideBytes = 1
+        let result = manager.bakeLayer(id: baker)
+        if case .baked = result { XCTFail("the failed raster portion must refuse the entire Bake") }
+        XCTAssertEqual(manager.layers.map(\.id), ids, "the transform layer and every drawing remain")
+        XCTAssertTrue(manager.layers[1].cels[0].vector === vector, "rollback also restores the native tier that ran before raster refusal")
+        let restoredInk = manager.layers[1].cels[0].vector?.elements ?? []
+        XCTAssertTrue(restoredInk.count == originalInk.count && zip(restoredInk, originalInk).allSatisfy {
+            $0.id == $1.id && $0.hasSameSpatialInk(as: $1)
+        }, "rollback restores the original native drawing")
+        XCTAssertTrue(manager.layers[0].cels[0].raster === pixels.raster)
+        XCTAssertTrue(manager.layers[0].cels[0].bakedImage === pixels.bakedImage)
+        XCTAssertEqual(manager.history.currentCost, 0)
+    }
+
+    @MainActor
+    func testPosedRasterRefusalRejectsCompositeRatherThanTreatingRequiredLeafAsEmpty() throws {
+        defer { CompositorBudget.budgetOverrideBytes = nil; PixelOps.clearRasterizeCache() }
+        let manager = posedRasterRefusalFixture()
+        let recipe = try XCTUnwrap(manager.makeFrameRecipe(atFrame: 0, includeBackground: false))
+        guard case .cel(let required)? = recipe.leaves[0]?.content else { return XCTFail("PREMISE: the frame actually requires this cel") }
+        XCTAssertNotNil(required.pose)
+        XCTAssertNotNil(required.bakedImage, "PREMISE: required painted pixels are distinct from an empty leaf")
+        XCTAssertNotNil(Compositor.composite(recipe.resolve(), resolving: .coreGraphics), "PREMISE: the same scene renders before resource pressure")
+        PixelOps.clearRasterizeCache()
+        CompositorBudget.budgetOverrideBytes = 1
+        XCTAssertNil(Compositor.composite(recipe.resolve(), resolving: .coreGraphics),
+            "required raster refusal reaches the existing optional frame result; a missing leaf is not transparency")
+        let empty = CanvasFixture.manager()
+        let emptyRecipe = try XCTUnwrap(empty.makeFrameRecipe(atFrame: 0, includeBackground: false))
+        XCTAssertNotNil(Compositor.composite(emptyRecipe.resolve(), resolving: .coreGraphics),
+            "an actually empty leaf remains a valid transparent frame under the same budget")
+    }
+
+    @MainActor
+    func testPosedRasterRefusalPreservesLiquifyPixelsAndHistory() throws {
+        defer { CompositorBudget.budgetOverrideBytes = nil; PixelOps.clearRasterizeCache() }
+        let manager = posedRasterRefusalFixture()
+        let original = manager.layers[0].cels[0]
+        let session = try held(manager, layer: 0)
+        XCTAssertNotNil(session.placement.backing, "PREMISE: the completed Liquify picture needs a posed raster window")
+        CompositorBudget.budgetOverrideBytes = 1
+        manager.commitLiquify(session)
+        XCTAssertTrue(manager.layers[0].cels[0].raster === original.raster)
+        XCTAssertTrue(manager.layers[0].cels[0].bakedImage === original.bakedImage)
+        XCTAssertEqual(manager.history.currentCost, 0, "a refused private replacement never lands pixels or an undo record")
+    }
+
+    @MainActor
+    func testNestedBakeRefusalRestoresItsEntryStateAndPreservesPendingCrop() throws {
+        defer { CompositorBudget.budgetOverrideBytes = nil; PixelOps.clearRasterizeCache() }
+        let manager = posedBakeRefusalFixture()
+        let vector = try XCTUnwrap(manager.layers[1].cels[0].vector)
+        manager.layers[1].name = "Before gesture"
+        guard case .plan(let plan) = manager.bakePlan(forLayerID: manager.layers[2].id) else { return XCTFail("valid Bake") }
+        XCTAssertEqual(plan.layers.map(\.layerID), [manager.layers[1].id, manager.layers[0].id],
+            "PREMISE: the failed transaction has already changed native ink")
+        manager.history.removeAll()
+        manager.beginStructureGesture()
+        manager.layers[1].name = "Earlier gesture edit"
+        var crop = KeyframeCrop()
+        crop.record(channel: "cel.x", frames: [8])
+        manager.noteKeyframeCrop(crop)
+        XCTAssertNotNil(manager.gestureSnapshot, "PREMISE: the enclosing gesture owns its own baseline")
+        CompositorBudget.budgetOverrideBytes = 1
+        if case .baked = manager.bakeLayer(id: manager.layers[2].id) { XCTFail("nested Bake must decline") }
+        XCTAssertTrue(manager.layers[1].cels[0].vector === vector, "a failed nested Bake restores its entry drawing")
+        XCTAssertEqual(manager.layers[1].name, "Earlier gesture edit", "rollback must not consume the enclosing gesture's earlier edit")
+        XCTAssertEqual(manager.pendingKeyframeCrop, crop, "rollback preserves a crop already owned by the enclosing gesture")
+        XCTAssertNotNil(manager.gestureSnapshot, "the enclosing gesture remains open")
+        XCTAssertEqual(manager.history.currentCost, 0)
+        CompositorBudget.budgetOverrideBytes = nil
+        manager.commitStructureGesture(label: .renameLayer)
+        XCTAssertEqual(manager.history.undo(), .renameLayer)
+        XCTAssertEqual(manager.layers[1].name, "Before gesture")
+        XCTAssertTrue(manager.layers[1].cels[0].vector === vector)
+        XCTAssertNil(manager.history.undo(), "only the earlier gesture was recorded")
+    }
+
+    @MainActor
+    func testLandingAllocationRefusalKeepsHeldPixelsAndAcceptsValidTransparency() throws {
+        defer { CompositorBudget.availableMemoryOverrideBytes = nil }
+        let blank = CanvasFixture.manager()
+        blank.beginMove()
+        XCTAssertNotNil(blank.floatingPiece, "PREMISE: transparent pixels can be a valid held image")
+        XCTAssertTrue(blank.commitFloatingPieceIfNeeded())
+        XCTAssertTrue(blank.layers[0].cels[0].raster.hasContent,
+            "a valid transparent landing owns an allocated context")
+
+        let manager = CanvasFixture.manager()
+        manager.layers[0].cels[0].bakedImage = image()
+        manager.history.removeAll()
+        manager.beginMove()
+        let piece = try XCTUnwrap(manager.floatingPiece)
+        XCTAssertNil(piece.landingPose, "PREMISE: this checks the final texture allocation after unposed rendering")
+        let original = manager.layers[0].cels[0]
+        CompositorBudget.availableMemoryOverrideBytes = 1
+        XCTAssertFalse(manager.commitFloatingPieceIfNeeded())
+        XCTAssertTrue(manager.floatingPiece?.pieceImage === piece.pieceImage)
+        XCTAssertTrue(manager.layers[0].cels[0].raster === original.raster)
+        XCTAssertTrue(manager.layers[0].cels[0].bakedImage === original.bakedImage)
+        XCTAssertEqual(manager.history.currentCost, 0)
+    }
+
+    @MainActor
+    func testRefusedLandingSurvivesAnotherMoveDuplicateOrBake() throws {
+        defer { CompositorBudget.availableMemoryOverrideBytes = nil }
+        for action in ["move", "duplicate", "bake"] {
+            CompositorBudget.availableMemoryOverrideBytes = nil
+            let manager = CanvasFixture.manager(layerCount: 0)
+            manager.addVectorLayer(name: "Native ink")
+            let vector = try XCTUnwrap(manager.layers[0].cels[0].vector)
+            vector.addStroke(VectorStroke(brush: TestBrushes.hardRound,
+                color: .init(red: 0, green: 0, blue: 0, alpha: 1), size: 4, opacity: 1,
+                samples: StrokeSamples([VectorSample(x: 12, y: 12), VectorSample(x: 24, y: 12)], channels: .pressureOnly)))
+            manager.addTransformLayer(name: "Native pose")
+            manager.layers[1].transform = LayerPose(pose: PoseQuad(box: CGRect(origin: .zero, size: size),
+                mappedBy: CGAffineTransform(translationX: 8, y: 0)), mode: .move)
+            let baker = manager.layers[1].id
+            manager.addLayer(name: "Held pixels")
+            manager.layers[2].cels[0].bakedImage = image()
+            manager.currentLayerIndex = 2
+            let loop = CGRect(x: 24, y: 14, width: 24, height: 24)
+            manager.selection = Selection(path: CGPath(rect: loop, transform: nil), bounds: loop)
+            manager.beginMove()
+            manager.floatingPiece?.transform.position.x += 5
+            manager.floatingPiece?.transform.position.y += 3
+            let piece = try XCTUnwrap(manager.floatingPiece)
+            XCTAssertNil(piece.landingPose, "PREMISE: held pixels sit above the native-only Bake scope")
+            guard case .plan(let plan) = manager.bakePlan(forLayerID: baker) else { return XCTFail("valid native Bake") }
+            XCTAssertEqual(plan.layers.map(\.layerID), [manager.layers[0].id])
+            let ids = manager.layers.map(\.id), selected = manager.selection?.path
+            manager.history.removeAll()
+            CompositorBudget.availableMemoryOverrideBytes = 1
+            switch action {
+            case "move": manager.beginMove()
+            case "duplicate": manager.beginDuplicate()
+            default:
+                if case .baked = manager.bakeLayer(id: baker) { XCTFail("Bake must wait for the held pixels to land") }
+            }
+            XCTAssertTrue(manager.floatingPiece?.pieceImage === piece.pieceImage, "\(action) keeps the refused held picture")
+            XCTAssertEqual(manager.floatingPiece?.transform, piece.transform, "\(action) preserves its displacement")
+            XCTAssertEqual(manager.layers.map(\.id), ids, "\(action) cannot insert or remove a layer after refusal")
+            XCTAssertTrue(manager.layers[0].cels[0].vector === vector, "\(action) cannot rewrite native ink after refusal")
+            XCTAssertEqual(manager.selection?.path, selected)
+            XCTAssertEqual(manager.currentLayerIndex, 2)
+            XCTAssertEqual(manager.history.currentCost, 0)
+        }
+    }
+
+    @MainActor
+    func testRefusedLandingPreservesDocumentContextSizeAndTool() throws {
+        defer { CompositorBudget.availableMemoryOverrideBytes = nil }
+        for action in ["resize", "frame", "layer", "eyedropper", "delete"] {
+            CompositorBudget.availableMemoryOverrideBytes = nil
+            let manager = CanvasFixture.manager(layerCount: 2)
+            manager.currentLayerIndex = 0
+            manager.layers[0].cels[0].bakedImage = image()
+            manager.beginMove()
+            manager.floatingPiece?.transform.position.x += 5
+            let piece = try XCTUnwrap(manager.floatingPiece), original = manager.layers[0].cels[0]
+            let canvasSize = manager.canvasSize, tool = manager.selectedTool, ids = manager.layers.map(\.id)
+            XCTAssertNil(manager.activeCelID(inLayer: 0, atFrame: original.endFrame),
+                "PREMISE: the frame action leaves the held cel rather than ticking inside it")
+            manager.history.removeAll()
+            CompositorBudget.availableMemoryOverrideBytes = 1
+            switch action {
+            case "resize": XCTAssertFalse(manager.resizeCanvas(to: CGSize(width: 96, height: 96)))
+            case "frame": manager.currentFrame = original.endFrame
+            case "layer": manager.currentLayerIndex = 1
+            case "delete": manager.deleteLayer(at: 0)
+            default: manager.selectEyedropper()
+            }
+            XCTAssertEqual(manager.canvasSize, canvasSize, "\(action) must wait for the held landing")
+            XCTAssertEqual(manager.currentLayerIndex, 0)
+            XCTAssertEqual(manager.currentFrame, 0)
+            XCTAssertEqual(manager.selectedTool, tool)
+            XCTAssertEqual(manager.layers.map(\.id), ids)
+            XCTAssertTrue(manager.floatingPiece?.pieceImage === piece.pieceImage)
+            XCTAssertEqual(manager.floatingPiece?.transform, piece.transform)
+            XCTAssertTrue(manager.layers[0].cels[0].raster === original.raster)
+            XCTAssertTrue(manager.layers[0].cels[0].bakedImage === original.bakedImage)
+            XCTAssertEqual(manager.history.currentCost, 0)
+        }
+    }
+
+    @MainActor
+    func testRefusedLandingDoesNotSnapshotOrCompleteSave() throws {
+        defer { CompositorBudget.availableMemoryOverrideBytes = nil }
+        let manager = CanvasFixture.manager()
+        manager.layers[0].cels[0].bakedImage = image()
+        manager.beginMove()
+        manager.floatingPiece?.transform.position.x += 5
+        let piece = try XCTUnwrap(manager.floatingPiece)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("Held.paintproj")
+        let finished = expectation(description: "save accepts or refuses")
+        var failed = false, completed = false
+        CompositorBudget.availableMemoryOverrideBytes = 1
+        _ = ProjectStore.save(manager, to: url, onSaveFailed: {
+            failed = true; finished.fulfill()
+        }, completion: {
+            completed = true; finished.fulfill()
+        })
+        wait(for: [finished], timeout: 30)
+        XCTAssertTrue(failed, "the actual save entry refuses its snapshot while pixels cannot land")
+        XCTAssertFalse(completed, "the gallery completion cannot discard an unresolved held picture")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+        XCTAssertTrue(manager.floatingPiece?.pieceImage === piece.pieceImage)
+        XCTAssertEqual(manager.floatingPiece?.transform, piece.transform)
+    }
+
+    @MainActor
+    func testLiquifyFinalAllocationRefusalPreservesSourceAndHistory() throws {
+        defer { CompositorBudget.availableMemoryOverrideBytes = nil }
+        let manager = CanvasFixture.manager()
+        manager.layers[0].cels[0].bakedImage = image()
+        manager.history.removeAll()
+        let source = manager.layers[0].cels[0]
+        let session = try held(manager, layer: 0)
+        XCTAssertNil(session.placement.backing, "PREMISE: the final allocation follows an unposed pixel picture")
+        CompositorBudget.availableMemoryOverrideBytes = 1
+        manager.commitLiquify(session)
+        XCTAssertTrue(manager.layers[0].cels[0].raster === source.raster)
+        XCTAssertTrue(manager.layers[0].cels[0].bakedImage === source.bakedImage)
+        XCTAssertEqual(manager.history.currentCost, 0)
     }
 
     func testFrozenReplacementStampsOnlyRewrittenInkInsideTheWindow() throws {

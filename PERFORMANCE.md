@@ -6441,3 +6441,74 @@ lattices inline. Making that enum case indirect, without a new owner or archive 
 lattice, copied-placement and current/previous-package round-trips. Result:
 `~/PaintWork/s49-liquify-logs/material-combined-1.xcresult`. These are allocation/work counts;
 this gate makes no simulator throughput claim.
+
+## 36. Bounded transformed raster filter — session 49 qualification
+
+The raster sampler uses the owner's accepted premultiplied Lanczos3 filter in global source/output
+coordinates. Its integral normalization for wide supports is a numerical implementation of that
+filter, with no radius cutoff. Let `L(x) = sinc(πx) sinc(πx/3)` on `|x| < 3`, zero outside, and
+`A = integral L = (4/π) Si(4π) - (2/π) Si(2π) = 0.9970553459543397`. For filter scale `s`, the
+exact discrete normalization is `N = sum_n L(s(t-n))`, including transparent exterior taps.
+
+A conservative bound follows from Poisson summation. The sinc integral representation gives
+`L(x) = 1/2 integral_0^1 integral_0^1 [cos(πx(u-v/3)) + cos(πx(u+v/3))] du dv`.
+The two absolute cubic moments are `53/405` and `13/27`. Thus the integral of `|L'''|` inside the
+six-unit support is at most `6*(π³/2)*(53/405+13/27)`. The jumps of `L''` at the two endpoints
+add `4/9`, so its total variation is at most `C = 57.404123086773`. Three integrations by parts
+bound `|Fourier(L)(f)| <= C/(2π|f|)^3`. Summing the nonzero Poisson terms gives
+`|s*N - A| <= 2*C*zeta(3)/(2π)^3 * s³ = 0.556363338444*s³`, uniformly in phase `t`.
+At `s <= 1/32`, replacing `N` by `A/s` changes the two-axis normalized/clamped color by less than
+**0.009 of one RGBA8 step**. Ordinary Float arithmetic still has the separate one-step reference
+tolerance. Above that scale, direct normalization sums fewer than 192 weights per axis.
+
+The independent external Double sweep at `~/PaintWork/s49-liquify-logs/raster/sampler/normalization-sweep.cpp`
+checks 257 phases at each of ten scales from 1/32 through 1/100000 (2,570 cases). Maximum observed
+scaled-normalization error was `1.03e-7`; the smallest-scale comparisons reach ordinary Double
+summation roundoff, which is separately allowed at `1e-11`. Native tests compare the whole filter
+against a direct Double oracle at 1/32, 0.0307 and 1/64, including fractional alpha, and require
+exact full/window bytes.
+
+Normal footprints retain one thread per pixel. A footprint above 1,024 source texels shares its
+reads across one SIMD group, using the same filter and global bounds. This threshold changes work
+distribution only. Masked complete groups keep the reduction identical even for a one-pixel window.
+There are no variable tap arrays, retained source textures or scene cache. A finite near-horizon
+example with 30-million-texel radii reads 256 source texels and uses constant normalization work.
+A 6000² source reduced to one pixel is charged **432,000,012 bytes** and is refused before reading
+source under the 192 MiB iPad budget. If a larger device budget admits it, its 36 million source
+reads are distributed across the SIMD group. An independent Double oracle and the GPU both produce
+`[47, 47, 47, 95]` for the 6000² patterned fractional-alpha fixture. The external warm Mac run took
+457 ms including normalization/upload/readback, 367 ms inside the GPU command; that run was contended
+and is only a cost warning for a budget-admitted extreme, not device performance evidence.
+
+**Native Release qualification at `89440a2`, iOS 26.5 13-inch M5 simulator, one test job.** Other workers'
+simulators were shut down; no other build or probe ran during the measurement. `RasterSamplingBench`
+includes source crop normalization, Metal upload/readback and drawing tiles into a newly owned UIKit
+picture. Five takes per size use a 2048×1024 patterned source with fractional alpha, scaled to 73%
+and rotated 0.22 radians. The warm range/median excludes the first take; these are simulator timings.
+
+| Output | Tiles | Source texels requested | Peak sampler byte charge | Warm ms range / median |
+|---|---:|---:|---:|---:|
+| 512×512 window | 1 | 719,104 | 11,774,976 | 6.54–8.69 / 6.70 |
+| 2048×1024 whole picture | 8 | 2,943,566 | 9,963,648 per tile | 31.79–36.70 / 33.22 |
+
+The original Core Graphics high draw, measured afterward against the same full source, had warm
+medians 8.63 ms/window and 21.91 ms/whole picture. Its retained caches therefore cannot contaminate
+the sampler retention run. The sampler's **first window draw was 523 ms**, including first access to
+the Metal engine and pipeline creation; that cost was not separately profiled. The first whole
+picture was 38.75 ms. Actual app first use and physical-device cost remain required integration
+checks; the sampler benchmark does not include the adapter's base/patch composition callback.
+
+After warmup, 100 window draws took process footprint from 50,088,216 to 52,250,904 bytes, peak 52,283,672:
+**2,162,688 bytes final rise**, including the test runner/driver. A separate production-source Mac
+100-draw run ended below its warmed baseline (37,798,536→31,359,624, peak39,764,616). The previously
+rejected virtual provider retained roughly 230 MiB in its external Mac probe. This sampler holds no
+images or textures between calls. The output picture and immutable source fixture remain caller owned.
+
+Validation at `89440a2`: native Debug 20/20 and Release 21/21, zero skips/failures (11 sampler methods,
+9 existing warp-agreement methods, plus the Release benchmark). The original 8 sampler methods each
+went red under committed-baseline native faults. The 3 new methods have isolated production-source
+Mac fault proof for wide normalization, complete SIMD groups, byte charges and read/publish refusal;
+all 11 restored Mac tests pass. The final source delta removes only temporary bounds arrays from the
+exceptional CPU horizon scan, using scalar extrema and `CollectionOfOne`; full native gates on the
+combined app remain the integration owner's responsibility. Evidence and exact run provenance are
+in `~/PaintWork/s49-liquify-logs/raster/sampler/QUALIFICATION.md` and its adjacent xcresults/logs.

@@ -58,6 +58,13 @@ their files are repaired. Build `2974b33` broke this rule and lost the owner's k
 
 ## (178) Liquify tool
 
+**Combined source checkpoint (2026-10-15):** integrated clean raster`6e16bc4` over baseline
+`7d6d4eb`, including sampler`effb239`, shared required-source failure propagation and central
+settlement refusal. Restored raster97/97 passed before the sampler's allocation-only cleanup;
+material55/55 passed with clipping counts and both deliberate faults. Sampler native Debug20/20
+and Release21/21 passed; PERFORMANCE§36 carries bounded memory, warm/cold costs and limits.
+Adapter fault proofs, final combined gates, landscape UI and actual first-use cost remain pending.
+
 **Exact-map batching hypothesis (2026-10-15):** the long patterned inverse remains serial per
 pixel after the measured evaluation reduction. Test bounded independent row batches externally,
 sharing one read-only prepared field and keeping every pixel's arithmetic/order unchanged. Compare

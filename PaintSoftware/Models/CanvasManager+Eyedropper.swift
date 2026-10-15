@@ -69,7 +69,7 @@ extension CanvasManager {
     /// second tap on the sidebar button, or a double-tap would strand the artist in the tool with
     /// "previous" pointing at the tool they are already in.
     func selectEyedropper() {
-        commitEditsInFlight()
+        guard commitEditsInFlight() else { return }
         selectEyedropper(for: .brushColor)
     }
 

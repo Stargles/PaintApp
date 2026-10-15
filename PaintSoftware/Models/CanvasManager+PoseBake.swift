@@ -28,10 +28,12 @@ extension CanvasManager {
         case notAnimated
         /// The cel has no vector tier to write the posed ink into.
         case noDrawing
+        case pendingEdit
 
         var phrase: String {
             switch self {
             case .notAnimated: return "this block isn't animated"
+            case .pendingEdit: return "the held picture could not be placed; try again"
             case .noDrawing: return "this block has no drawing to bake"
             }
         }
@@ -134,7 +136,7 @@ extension CanvasManager {
         // §6's recipe: a float under the artist's finger lands as its own earlier step rather than
         // being baked mid-motion — and it un-suppresses whatever it was carrying, so the display list
         // read below is the whole drawing.
-        commitAllInteractiveState()
+        guard commitAllInteractiveState() else { return .refused(.pendingEdit) }
 
         let startFrame = cel.startFrame
         let layerID = layers[layerIndex].id

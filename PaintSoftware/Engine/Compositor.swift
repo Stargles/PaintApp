@@ -389,6 +389,7 @@ enum Compositor {
     /// per-composite fallback the app has always had, and it fires for reasons that are properties of
     /// the device rather than of the chunk boundary.
     static func composite(_ request: RenderRequest, resolving choice: CompositorBackend) -> CGImage? {
+        guard !request.sourceResolutionFailed else { return nil }
         CompositeProbe.record(request.canvasSize)
         switch choice {
         case .coreGraphics:
@@ -764,6 +765,7 @@ private func setSat(_ c: Triple, _ s: Float) -> Triple {
 enum CoreGraphicsCompositor {
 
     static func composite(_ request: RenderRequest) -> CGImage? {
+        guard !request.sourceResolutionFailed else { return nil }
         let size = request.canvasSize
         guard size.width > 0, size.height > 0 else { return nil }
         let bounds = CGRect(origin: .zero, size: size)

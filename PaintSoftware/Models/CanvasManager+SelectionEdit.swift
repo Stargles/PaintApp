@@ -460,7 +460,7 @@ extension CanvasManager {
         // `commitAllInteractiveState`, not `beginCanvasEdit`, for `applyBrushToSelection`'s reason: a
         // selection outlives a Move lift, and a float still up would bake its own old values over
         // the top of every tick.
-        commitAllInteractiveState()
+        guard commitAllInteractiveState() else { return false }
         guard selectionEditUnavailableReason == nil,
               let selection = requested,
               let celIndex = activeCelIndex(actedOnBy: selection),

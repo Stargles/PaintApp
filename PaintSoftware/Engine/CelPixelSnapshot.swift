@@ -8,6 +8,12 @@ struct CelPixelSnapshot {
     let baked: UIImage?
     let size: CGSize
 
+    init(raster: UIImage?, baked: UIImage?, size: CGSize) {
+        self.raster = raster
+        self.baked = baked
+        self.size = size
+    }
+
     init?(cel: Cel) {
         raster = cel.raster.hasContent ? cel.raster.renderToUIImage() : nil
         baked = cel.bakedImage

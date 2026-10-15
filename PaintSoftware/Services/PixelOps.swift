@@ -139,8 +139,16 @@ enum PixelOps {
     /// (`CanvasView.SandwichKey`, which compares the whole node tree) rebuild happily from the stale
     /// entry. KEYFRAMES §4.5, "pin this on day one".
     static func rasterize(cel: Cel, canvasSize: CGSize, quality: RenderQuality = .full,
+                          memoize: Bool = true, derived: DerivedCelContent? = nil) -> UIImage {
+        // Stored, unposed tiers do not enter the fallible sampler. Keep this existing call contract.
+        rasterize(cel: cel, canvasSize: canvasSize, quality: quality,
+                  memoize: memoize, derived: derived, pose: nil)!
+    }
+
+    /// Explicit placement can refuse its private picture. Callers must preserve their prior state.
+    static func rasterize(cel: Cel, canvasSize: CGSize, quality: RenderQuality = .full,
                           memoize: Bool = true, derived: DerivedCelContent? = nil,
-                          pose: PoseMap? = nil) -> UIImage {
+                          pose: PoseMap?) -> UIImage? {
         let identity = FrozenCel.Identity(cel: cel, derived: derived?.identity, pose: pose)
         guard memoize else {
             return rasterizeUncached(FrozenCel(cel: cel, identity: identity, derived: derived,
@@ -155,7 +163,7 @@ enum PixelOps {
         let image = rasterizeUncached(FrozenCel(cel: cel, identity: identity, derived: derived,
                                                 pose: pose, quality: quality),
                                       canvasSize: canvasSize, quality: quality)
-        rasterizeCache.store(image, for: key)
+        if let image { rasterizeCache.store(image, for: key) }
         return image
     }
 
@@ -172,12 +180,12 @@ enum PixelOps {
     /// cel at the same *frame* scale into a `canvasSize` buffer that is a band of it — a translated
     /// CTM, not a smaller drawing, so a strip of a cel is byte-identical to that band of the whole.
     static func rasterize(_ frozen: FrozenCel, canvasSize: CGSize, quality: RenderQuality,
-                          window: StripWindow? = nil) -> UIImage {
+                          window: StripWindow? = nil) -> UIImage? {
         let key = RasterizeKey(cel: frozen.identity, canvasSize: canvasSize, quality: quality,
                                window: window)
         if let hit = rasterizeCache.value(for: key) { return hit }
         let image = rasterizeUncached(frozen, canvasSize: canvasSize, quality: quality, window: window)
-        rasterizeCache.store(image, for: key)
+        if let image { rasterizeCache.store(image, for: key) }
         return image
     }
 
@@ -212,7 +220,7 @@ enum PixelOps {
         var vector: VectorCanvas.Frozen?
         var windows: [InkWindow] = []
         var replacingBase: UIImage?
-        var drawOverlays: ((CGContext, CGRect) -> Void)?
+        var drawOverlays: ((CGContext, CGRect) -> Bool)?
     }
 
     /// The stroke scratch as drawn on glass, held immutably until a window composite lands.
@@ -288,6 +296,7 @@ enum PixelOps {
         }
 
         let identity: Identity
+        let size: CGSize
         let display: CelDisplay?
         let bakedImage: UIImage?
         /// The raster tier's pixels, or nil where it holds no bitmap at all — the skip
@@ -304,6 +313,7 @@ enum PixelOps {
         init(cel: Cel, identity: Identity, derived: DerivedCelContent?,
              pose: PoseMap? = nil, quality: RenderQuality, display: CelDisplay? = nil) {
             self.display = display
+            size = cel.raster.size
             self.identity = identity
             self.derived = display?.vector == nil ? derived : nil
             self.pose = pose
@@ -465,84 +475,51 @@ enum PixelOps {
     /// What the flatten memo is holding, for `PerfBaselineTests`. Nothing in the render path reads it.
     static var rasterizeCacheBytes: Int { rasterizeCache.bytesResident }
 
-    /// **A container pose's raster tiers, rasterised flat and carried onto the pose's quad** —
-    /// KEYFRAMES.md §2.12's *"a transform layer resamples raster content below it"* with the resample
-    /// spelled projectively, since §8 stage 5b lets that pose be a keystone.
-    ///
-    /// **Two allocations rather than one, and that is inherent rather than sloppy.** An affine pose
-    /// is a CTM, so CoreGraphics resamples straight into the destination context; a homography has no
-    /// CTM, so the tiers have to exist as pixels *before* they can be warped. That is the same
-    /// trade-off `TextLayout.warpedGlyphs` accepts, and it is paid only by a cel actually underneath
-    /// a keystoned transformation layer.
-    ///
-    /// **The destination is clipped to the frame first**, `render(floatingPiece:into:)`'s own rule:
-    /// pixels outside are the ones the caller's context is about to clip away, and allocating them
-    /// was never anything but cost. `maximumFloatingWarpTexels` is what bounds the rest.
-    ///
-    /// The caller has already applied the strip window's shift to the CTM, so both the source frame
-    /// and the returned destination are in the *frame's* own coordinates.
-    private static func warpedPosedTiers(frame: CGRect, through homography: Homography,
-                                         clippedTo clip: CGRect? = nil, drawing draw: () -> Void) -> (image: UIImage, destination: CGRect)? {
-        guard frame.width >= 1, frame.height >= 1,
-              let quad = PoseInterpolation.mapped(Quad.rect(frame), through: homography) else { return nil }
-        let destination = quad.boundingBox.integral.intersection((clip ?? frame).integral)
-        guard destination.width >= 1, destination.height >= 1 else { return nil }
-        // Scale 1, which is the format the caller's own renderer uses — the raster tiers are bitmaps
-        // that carry their own resolution and `RenderQuality` reaches only the vector tier, so a
-        // second scale here would resample the tiers twice.
-        let flat = UIGraphicsImageRenderer(bounds: frame, format: transparentFormat())
-            .image { _ in draw() }
-        guard let source = flat.cgImage, source.width > 0 else { return nil }
-        // Source **texels per frame point**, measured off the bitmap rather than assumed to be the
-        // format's scale — the renderer rounds its pixel size, so the two differ by up to a texel on a
-        // frame whose points are not whole texels. `render(floatingPiece:into:)` measures it the same
-        // way and for the same reason.
-        let sourceScale = CGFloat(source.width) / frame.width
-        guard let warped = ImageWarp.warpedImage(source: source, sourceScale: sourceScale,
-                                                 boxSize: frame.size,
-                                                 homography: homography * .translation(x: frame.minX, y: frame.minY),
-                                                 destination: destination,
-                                                 maximumDestinationTexels: maximumFloatingWarpTexels)
-        else { return nil }
-        return (UIImage(cgImage: warped, scale: 1, orientation: .up), destination)
+    /// Samples global canvas coordinates into the caller's private picture. Full frames and windows
+    /// share the same grid and request only the source support each bounded tile actually needs.
+    static func drawPosedRaster(canvasSize: CGSize, through pose: PoseMap, into cg: CGContext,
+                                source: (CGRect) -> UIImage?) -> Bool {
+        let frame = CGRect(origin: .zero, size: canvasSize)
+        guard let mapped = pose.mapped(CGPath(rect: frame, transform: nil)) else { return false }
+        let shown = mapped.boundingBoxOfPath.intersection(cg.boundingBoxOfClipPath)
+        if shown.isNull || shown.isEmpty { return true }
+        let transform = cg.ctm
+        let scale = max(hypot(transform.a, transform.b), hypot(transform.c, transform.d))
+        guard scale.isFinite, scale > 0,
+              let map = ImageWarp.inverseTexelMap(homography: pose.homography, boxSize: canvasSize,
+                sourceScale: 1, destinationOrigin: .zero, destinationScale: scale) else { return false }
+        let output = shown.applying(CGAffineTransform(scaleX: scale, y: scale)).integral
+        return ImageWarp.drawRaster(sourceSize: canvasSize, destination: output, inverseTexelMap: map,
+            source: { source($0)?.cgImage }, consume: { image, rect in
+                UIImage(cgImage: image).draw(in: rect.applying(CGAffineTransform(scaleX: 1 / scale, y: 1 / scale)))
+            })
     }
 
-    /// **`draw`'s picture carried through `pose` into `context`** — the one place a pose meets pixels.
-    /// An affine pose is a CTM; a keystone has no CTM to be, so the picture is rasterised flat over
-    /// `frame` and warped (`warpedPosedTiers`). `rasterizeUncached` draws a cel's raster tiers through
-    /// it and `posed(_:through:)` draws a finished picture, so the two cannot resample differently.
-    private static func drawPosed(through pose: PoseMap, in context: CGContext, frame: CGRect,
-                                  clippedTo clip: CGRect? = nil, drawing draw: () -> Void) {
-        switch pose {
-        case .affine(let transform):
-            context.concatenate(transform)
-            draw()
-        case .projective(let homography):
-            if let warped = warpedPosedTiers(frame: frame, through: homography, clippedTo: clip, drawing: draw) {
-                warped.image.draw(in: warped.destination)
-            }
-        }
-    }
-
-    /// A layer-local immutable window drawn in the same pose space as the cel's backing.
-    /// Replacement clears only its mapped footprint; transparent pixels still replace older ink.
+    /// A layer-local immutable window. Transparent pixels replace only its mapped footprint.
+    @discardableResult
     static func drawWindow(_ image: UIImage, rect: CGRect, canvasSize: CGSize,
                            through pose: PoseMap?, into cg: CGContext, content: CGRect,
-                           opacity: CGFloat = 1, replacing: Bool) {
+                           opacity: CGFloat = 1, replacing: Bool) -> Bool {
         let local = CGPath(rect: rect, transform: nil)
+        var completed = true
         withCelWindow(footprint: pose?.mapped(local) ?? local, canvasSize: canvasSize, into: cg,
                       content: content, replacing: replacing) {
-            if let pose {
-                drawPosed(through: pose, in: cg, frame: rect,
-                          clippedTo: CGRect(origin: .zero, size: canvasSize).intersection(cg.boundingBoxOfClipPath)) {
-                    image.draw(in: rect, blendMode: .normal, alpha: opacity)
+            if let pose, !pose.isIdentity {
+                cg.saveGState()
+                cg.setAlpha(opacity)
+                completed = drawPosedRaster(canvasSize: canvasSize, through: pose, into: cg) { crop in
+                    UIGraphicsImageRenderer(size: crop.size, format: transparentFormat()).image { _ in
+                        image.draw(in: rect.offsetBy(dx: -crop.minX, dy: -crop.minY))
+                    }
                 }
+                cg.restoreGState()
             } else { image.draw(in: rect, blendMode: .normal, alpha: opacity) }
         }
+        return completed
     }
 
     /// Shared canvas placement and replacement hole for a complete cel-content picture. Its ink
-    /// renderer chooses native geometry posing; its raster renderer uses the existing pixel warp.
+    /// renderer chooses native geometry posing; transformed raster uses the shared bounded sampler.
     static func withCelWindow(footprint: CGPath, canvasSize: CGSize,
                               into cg: CGContext, content: CGRect, replacing: Bool,
                               drawing draw: () -> Void) {
@@ -566,111 +543,57 @@ enum PixelOps {
     /// map its layer is shown through (TODO (124): `CanvasManager.inkPose`). Run through a pose's
     /// *inverse* it is the other direction, which is how a picture the artist moved on screen is
     /// written back into the layer's own space.
-    static func posed(_ image: UIImage, through pose: PoseMap) -> UIImage {
-        let bounds = CGRect(origin: .zero, size: image.size)
-        return UIGraphicsImageRenderer(bounds: bounds, format: transparentFormat()).image { context in
-            drawPosed(through: pose, in: context.cgContext, frame: bounds) { image.draw(in: bounds) }
+    static func posed(_ image: UIImage, through pose: PoseMap) -> UIImage? {
+        guard !pose.isIdentity else { return image }
+        let source = CelPixelSnapshot(raster: nil, baked: image, size: image.size)
+        var completed = true
+        let output = UIGraphicsImageRenderer(size: image.size, format: transparentFormat()).image { context in
+            completed = drawPosedRaster(canvasSize: image.size, through: pose, into: context.cgContext) {
+                source.replacementWindow(in: $0)
+            }
         }
+        return completed ? output : nil
     }
 
     private static func rasterizeUncached(_ cel: FrozenCel, canvasSize: CGSize,
                                           quality: RenderQuality,
-                                          window: StripWindow? = nil) -> UIImage {
+                                          window: StripWindow? = nil) -> UIImage? {
         let bounds = CGRect(origin: .zero, size: canvasSize)
-        // **The rect every tier is drawn into.** Without a window it is the buffer, which is what
-        // this function has always done. With one it is the *frame*, shifted so that the window's
-        // top-left lands at the buffer's — the same drawing at the same scale, seen through a hole.
-        // CoreGraphics clips it to the context, so nothing outside the band is rasterized and the
-        // strip costs a strip's memory rather than a frame's.
         let content = window.map {
             CGRect(origin: CGPoint(x: -$0.origin.x, y: -$0.origin.y), size: $0.frameSize)
         } ?? bounds
-        // **The raster tier is skipped outright when it holds no bitmap**, rather than drawn as a
-        // sheet of transparency. Every vector cel has an empty raster tier, so this is the common
-        // case and not the odd one, and the draw it removes is a full-canvas blit of nothing. The
-        // test is `FrozenCel.strokesImage` being nil, taken when the cel was frozen.
-        //
-        // A vector cel's live strokes/images live in `vector` (rendered to a native-res image),
-        // not in `raster` — include it so fill, select/move, and cross-layer fill references treat
-        // a vector layer's content as pixels just like a raster layer's.
-        //
-        // **Derived content *replaces* that tier rather than stacking above it**, which matters for
-        // exactly one of the two recipe modes. A `.generate` in-between stores no display list at
-        // all, so either order looks the same; a `.reproject` one keeps the artist's own strokes in
-        // `vector` and the evaluation is those same strokes *re-posed*, so drawing both would show
-        // the drawing twice — once where it was drawn and once where it moved to.
-        //
-        // A nil answer from the thunk is "not yet" (a recipe mid-edit is not evaluable), and falls
-        // back to the stored tier rather than to a hole.
-        //
-        // **`content` is passed because the vector tier is the only one that can be asked for fewer
-        // pixels, and asking is free.** The other three are `UIImage`s, and `draw(in:)` resamples one
-        // as it draws — a flatten into a small buffer costs the small buffer for all three. The
-        // vector tier is a *drawing*, so it was rendering at the canvas's own resolution and then
-        // being resampled down: on a 6000² document filling a 480-point thumbnail box, a
-        // 36-megapixel rasterize and then a resample of it, on whatever thread asked — which for a
-        // cel thumbnail is the main one. **MEASURED at 34.1–35.1 ms in Release even with the rasterize
-        // memoized away, and flat in stroke count**, because what is left is the resample and the resample is
-        // the canvas (PERFORMANCE.md §11.11c). `Frozen.render(quality:fittingInto:)` does the
-        // arithmetic; a caller drawing 1:1 or larger is untouched, which is every native flatten.
-        //
-        // `cel.derived` gets no such overload yet and still renders at canvas size: its geometry is
-        // in canvas coordinates and the seam's contract is an image, so the same fix is available
-        // there and is a larger change — see `DerivedCelContent.render`.
         let vectorImage = cel.derived?.render(quality)
             ?? ((window == nil && cel.display == nil) ? cel.vector?.render(quality: quality, fittingInto: content.size) : nil)
-        let renderer = UIGraphicsImageRenderer(bounds: bounds, format: transparentFormat())
-        return renderer.image { context in
-            // **KEYFRAMES §2.12's raster half, and it is the *other* currency from the vector one.**
-            // A transformation layer *re-poses* vector objects — `cel.derived` above already holds
-            // ink stamped at the posed position, so `vectorImage` must not be touched here — and
-            // *resamples* raster content, which is what this CTM is. The owner ruled the difference
-            // inherent rather than a defect to chase: "a raster layer softens under a push-in while
-            // the vector layer beside it stays sharp".
-            //
-            // **The window is handled by translating rather than by the `content` rect**, because a
-            // rect offset only composes with the pose the way it does with the identity. Drawing an
-            // image into `content` maps a frame point p to p − origin; what a posed strip wants is
-            // pose(p) − origin, so the shift goes on the CTM outside the pose and the draw is into
-            // the frame's own rect. With no pose this branch is not taken at all, so every existing
-            // caller's bytes are the bytes they were.
-            //
-            // **The projective arm is a warp and not a CTM, which is KEYFRAMES.md §8 stage 5b's raster
-            // half.** CoreGraphics has no projective CTM at all, so a keystoned container pose is
-            // rasterised flat and carried onto its quad by `ImageWarp` — the same call
-            // `render(floatingPiece:into:)` and `TextLayout.warpedGlyphs` already make. The affine arm
-            // below is untouched and stays a `concatenate`, so **every document that has never held a
-            // keystone renders byte for byte what it rendered**: `PoseMap` demotes an affine
-            // homography before it gets here, so `.projective` is a fact about the pose rather than
-            // about which initialiser ran.
-            let posedTiers: (() -> Void) -> Void = { draw in
-                guard let pose = cel.pose else { return draw() }
-                context.cgContext.saveGState()
-                if let window { context.cgContext.translateBy(x: -window.origin.x, y: -window.origin.y) }
-                Self.drawPosed(through: pose, in: context.cgContext,
-                               frame: CGRect(origin: .zero, size: window?.frameSize ?? canvasSize),
-                               drawing: draw)
-                context.cgContext.restoreGState()
-            }
-            // The rect the posed tiers draw into: the frame in its own coordinates, since the shift
-            // above has already moved the origin. Identical to `content` when there is no window.
-            let frameRect = CGRect(origin: .zero, size: window?.frameSize ?? canvasSize)
+        var completed = true
+        let image = UIGraphicsImageRenderer(bounds: bounds, format: transparentFormat()).image { context in
+            let cg = context.cgContext
             if let replacement = cel.display?.replacingBase { replacement.draw(in: content) }
             else {
-            posedTiers {
-                cel.bakedImage?.draw(in: cel.pose == nil ? content : frameRect)
-                cel.strokesImage?.draw(in: cel.pose == nil ? content : frameRect)
+                if let pose = cel.pose, !pose.isIdentity, cel.bakedImage != nil || cel.strokesImage != nil {
+                    let source = CelPixelSnapshot(raster: cel.strokesImage, baked: cel.bakedImage, size: cel.size)
+                    withCelWindow(footprint: CGPath(rect: CGRect(origin: .zero, size: cel.size), transform: nil),
+                                  canvasSize: cel.size, into: cg, content: content, replacing: false) {
+                        completed = drawPosedRaster(canvasSize: cel.size, through: pose, into: cg) {
+                            source.replacementWindow(in: $0)
+                        }
+                    }
+                    guard completed else { return }
+                } else {
+                    cel.bakedImage?.draw(in: content)
+                    cel.strokesImage?.draw(in: content)
+                }
+                // Native geometry keeps its existing renderer and independently resolved placement.
+                if let vectorImage { vectorImage.draw(in: content) }
+                else { cel.vector?.draw(into: cg, frameRect: content, quality: quality) }
             }
-            if let vectorImage { vectorImage.draw(in: content) }
-            else { cel.vector?.draw(into: context.cgContext, frameRect: content, quality: quality) }
-            }
-            cel.display?.drawOverlays?(context.cgContext, content)
+            if let overlays = cel.display?.drawOverlays, !overlays(cg, content) { completed = false; return }
             for ink in cel.display?.windows ?? [] {
-                drawWindow(ink.image, rect: ink.rect, canvasSize: ink.canvasSize, through: ink.pose,
-                           into: context.cgContext, content: content, opacity: ink.opacity,
-                           replacing: ink.replacesBase)
+                guard drawWindow(ink.image, rect: ink.rect, canvasSize: ink.canvasSize, through: ink.pose,
+                                 into: cg, content: content, opacity: ink.opacity,
+                                 replacing: ink.replacesBase) else { completed = false; return }
             }
         }
+        return completed ? image : nil
     }
 
     // `compositeCanvas` lived here: a flat walk of `layers` that drew each visible layer's active cel

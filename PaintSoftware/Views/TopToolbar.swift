@@ -72,7 +72,10 @@ struct TopToolbar: View {
             HStack(spacing: 10) {
                 iconButton(system: "water.waves", isActive: !isToolHighlightSuppressed && canvasManager.selectedTool == .liquify) {
                     if canvasManager.selectedTool == .liquify { $activePanel.toggleSettingsPanel(.liquify) }
-                    else { canvasManager.commitAllInteractiveState(); canvasManager.selectedTool = .liquify; activePanel = .none }
+                    else {
+                        guard canvasManager.commitAllInteractiveState() else { return }
+                        canvasManager.selectedTool = .liquify; activePanel = .none
+                    }
                 }
                 .accessibilityIdentifier("toolbar.liquifyButton")
                 iconButton(system: "paintbrush.pointed", isActive: !isToolHighlightSuppressed && (activePanel == .brush || canvasManager.selectedTool == .pen || canvasManager.selectedTool == .pencil)) {
@@ -150,7 +153,7 @@ struct TopToolbar: View {
         // Switching to any other tool/panel commits an in-progress Move/Duplicate/shape/fill rather
         // than silently discarding or stranding it — Undo is the way to back out of a completed move,
         // matching Procreate (there's no separate "cancel transform").
-        canvasManager.commitAllInteractiveState()
+        guard canvasManager.commitAllInteractiveState() else { return }
         // **Tapping Select off clears the selection** — TODO (94), the owner: *"when the select tool
         // icon is deselected (clicked), the selection disappears."* The loop is the tool's own state
         // and the icon reads as lit for as long as either the panel or a loop is up
@@ -178,7 +181,7 @@ struct TopToolbar: View {
         // transient tier, then get silently re-baked (at its *original*, undragged geometry) the
         // next time something else forces a commit, producing exactly the "content teleports back"
         // bug this guards against.
-        canvasManager.commitAllInteractiveState()
+        guard canvasManager.commitAllInteractiveState() else { return }
         // On a vector layer, Move lifts geometry into a float and drags it with the on-canvas box —
         // no raster floating piece, and, since 2026-08-27, no whole-layer `_transform` either.
         if canvasManager.activeLayerIsVector {
@@ -233,7 +236,7 @@ struct TopToolbar: View {
         if brushActive {
             $activePanel.toggleSettingsPanel(.brush)
         } else {
-            canvasManager.commitAllInteractiveState()
+            guard canvasManager.commitAllInteractiveState() else { return }
             canvasManager.selectedTool = .pen
             activePanel = .none
         }
@@ -244,7 +247,7 @@ struct TopToolbar: View {
         if eraserActive {
             $activePanel.toggleSettingsPanel(.eraser)
         } else {
-            canvasManager.commitAllInteractiveState()
+            guard canvasManager.commitAllInteractiveState() else { return }
             canvasManager.selectedTool = .eraser
             activePanel = .none
         }
@@ -255,7 +258,7 @@ struct TopToolbar: View {
         if fillActive {
             $activePanel.toggleSettingsPanel(.fill)
         } else {
-            canvasManager.commitAllInteractiveState()
+            guard canvasManager.commitAllInteractiveState() else { return }
             canvasManager.selectedTool = .fill
             activePanel = .none
         }

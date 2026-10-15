@@ -184,7 +184,7 @@ nonisolated enum SaveIntent: Equatable {
     case automatic
 }
 
-/// What a save should do, given what the project lost on the way in.
+/// Whether a save writes, waits for a damage decision, or cannot safely snapshot the document.
 nonisolated enum SaveDecision: Equatable {
     /// Write the project package, the ordinary path.
     case write
@@ -193,6 +193,8 @@ nonisolated enum SaveDecision: Equatable {
     case writeAside
     /// Write nothing. Raise the banner and wait for an answer.
     case ask
+    /// A held picture could not land; no snapshot was taken and the editor stays open.
+    case refused
 }
 
 /// Whether a save may overwrite a project that loaded with something unreadable.

@@ -405,12 +405,12 @@ final class TransformLayerLogicTests: XCTestCase {
         let cel = manager.layers[drawn].cels[0]
         XCTAssertTrue(cel.transformTracks.isEmpty, "The premise: this cel is moved only from above")
 
-        let resting = PixelOps.rasterize(cel: cel, canvasSize: size, derived: nil, pose: nil)
-        let posed = PixelOps.rasterize(cel: cel, canvasSize: size,
+        let resting = try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: size, derived: nil, pose: nil))
+        let posed = try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: size,
                                        derived: manager.derivedCelContent(
                                         for: cel, atFrame: 0,
                                         inheriting: manager.layerPoses(atFrame: 0)[drawn]),
-                                       pose: manager.layerPoses(atFrame: 0)[drawn])
+                                       pose: manager.layerPoses(atFrame: 0)[drawn]))
         let restBounds = try XCTUnwrap(inkBounds(resting))
         let posedBounds = try XCTUnwrap(inkBounds(posed))
         XCTAssertEqual(posedBounds.minX - restBounds.minX, 20, accuracy: 1.5)
@@ -481,9 +481,9 @@ final class TransformLayerLogicTests: XCTestCase {
                                                inheriting: manager.layerPoses(atFrame: 0)[drawn]),
                      "The premise: a cel with no vector tier has no derivation at all")
 
-        let resting = PixelOps.rasterize(cel: cel, canvasSize: size, pose: nil)
-        let posed = PixelOps.rasterize(cel: cel, canvasSize: size,
-                                       pose: manager.layerPoses(atFrame: 0)[drawn])
+        let resting = try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: size, pose: nil))
+        let posed = try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: size,
+                                       pose: manager.layerPoses(atFrame: 0)[drawn]))
         let restBounds = try XCTUnwrap(inkBounds(resting))
         let posedBounds = try XCTUnwrap(inkBounds(posed))
         XCTAssertEqual(posedBounds.minX - restBounds.minX, 20, accuracy: 1.5)
@@ -500,12 +500,12 @@ final class TransformLayerLogicTests: XCTestCase {
         let (manager, drawn) = posedVectorLayer(animatedPose(CGAffineTransform(translationX: 24, y: 0)))
         let cel = manager.layers[drawn].cels[0]
 
-        func flatten(_ frame: Int) -> UIImage {
+        func flatten(_ frame: Int) throws -> UIImage {
             let pose = manager.layerPoses(atFrame: frame)[drawn]
-            return PixelOps.rasterize(cel: cel, canvasSize: size,
+            return try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: size,
                                       derived: manager.derivedCelContent(for: cel, atFrame: frame,
                                                                          inheriting: pose),
-                                      pose: pose)
+                                      pose: pose))
         }
         let early = try XCTUnwrap(inkBounds(flatten(2)))
         let late = try XCTUnwrap(inkBounds(flatten(8)))
@@ -540,10 +540,10 @@ final class TransformLayerLogicTests: XCTestCase {
         let (manager, drawn) = posedRasterLayer(animatedPose(CGAffineTransform(translationX: 24, y: 0)))
         let cel = manager.layers[drawn].cels[0]
 
-        let early = try XCTUnwrap(inkBounds(PixelOps.rasterize(
-            cel: cel, canvasSize: size, pose: manager.layerPoses(atFrame: 2)[drawn])))
-        let late = try XCTUnwrap(inkBounds(PixelOps.rasterize(
-            cel: cel, canvasSize: size, pose: manager.layerPoses(atFrame: 8)[drawn])))
+        let early = try XCTUnwrap(inkBounds(try XCTUnwrap(PixelOps.rasterize(
+            cel: cel, canvasSize: size, pose: manager.layerPoses(atFrame: 2)[drawn]))))
+        let late = try XCTUnwrap(inkBounds(try XCTUnwrap(PixelOps.rasterize(
+            cel: cel, canvasSize: size, pose: manager.layerPoses(atFrame: 8)[drawn]))))
         XCTAssertGreaterThan(late.minX - early.minX, 12)
     }
 

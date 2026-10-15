@@ -124,24 +124,22 @@ final class CelContentPicture {
             defer { cg.restoreGState() }
             cg.addPath(footprint)
             cg.clip()
-            // This is still the existing high-quality pixel path. Its cropped-source parity gap is
-            // tracked separately; never substitute a lower-quality filter for the raster tier.
             if let backing {
-                let rest: CGPath
                 if let pose = placement.backing {
-                    guard let mapped = pose.inverse?.mapped(footprint) else { completed = false; return }
-                    rest = mapped
-                } else { rest = footprint }
-                let sourceWindow = rest.boundingBoxOfPath.integral.intersection(CGRect(origin: .zero, size: size))
-                if !sourceWindow.isEmpty, !sourceWindow.isNull {
-                    let pixels = backing.replacementWindow(in: sourceWindow, applying: patch)
-                    PixelOps.drawWindow(pixels, rect: sourceWindow, canvasSize: size, through: placement.backing,
-                        into: cg, content: CGRect(origin: .zero, size: size), replacing: false)
+                    completed = PixelOps.drawPosedRaster(canvasSize: size, through: pose, into: cg) {
+                        backing.replacementWindow(in: $0, applying: patch)
+                    }
+                } else {
+                    let sourceWindow = footprint.boundingBoxOfPath.integral.intersection(CGRect(origin: .zero, size: size))
+                    if !sourceWindow.isEmpty, !sourceWindow.isNull {
+                        backing.replacementWindow(in: sourceWindow, applying: patch).draw(in: sourceWindow)
+                    }
                 }
             } else if let patch {
-                PixelOps.drawWindow(patch.image, rect: patch.rect, canvasSize: size, through: placement.backing,
+                completed = PixelOps.drawWindow(patch.image, rect: patch.rect, canvasSize: size, through: placement.backing,
                     into: cg, content: CGRect(origin: .zero, size: size), replacing: false)
             }
+            guard completed else { return }
             cg.saveGState()
             if inkPatch != nil {
                 let local = CGPath(rect: window, transform: nil)
@@ -168,8 +166,9 @@ final class CelContentPicture {
             case nil: break
             }
             cg.restoreGState()
+            guard completed else { return }
             if let inkPatch {
-                PixelOps.drawWindow(inkPatch, rect: window, canvasSize: size,
+                completed = PixelOps.drawWindow(inkPatch, rect: window, canvasSize: size,
                     through: inkPose(placement: placement), into: cg,
                     content: CGRect(origin: .zero, size: size), replacing: false)
             }

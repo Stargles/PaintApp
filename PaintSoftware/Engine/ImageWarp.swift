@@ -1,6 +1,6 @@
 import CoreGraphics
 import Metal
-import UIKit
+import Foundation
 
 // MARK: - The parameter block both backends read
 
@@ -28,6 +28,14 @@ struct WarpParams: Equatable {
     }
 }
 
+/// Raster windows keep the matrix in the whole destination's pixel grid. Folding a window's
+/// origin into Float matrix coefficients would round differently from the full-frame draw.
+struct RasterWarpParams {
+    var map: WarpParams
+    var sourceX: Int32, sourceY: Int32
+    var destinationX: Int32, destinationY: Int32
+}
+
 // MARK: - The warp
 
 /// Carrying an image through a projective map — ADD_TEXT.md §3 stage 5's bake, and the layer that
@@ -45,6 +53,140 @@ struct WarpParams: Equatable {
 /// each other, not each against itself"). It is also the real path on a device with no Metal library,
 /// the way `EffectReference` backs `applyEffect`.
 enum ImageWarp {
+
+    /// A source apron and its complete transient byte charge. Source coordinates are global
+    /// texels, destination coordinates are global output texels; the matrix includes output scale
+    /// but never the output window's origin. Source pixels outside the canvas are transparent.
+    struct RasterPlan {
+        let sourceRect: CGRect
+        let destinationRect: CGRect
+        let params: RasterWarpParams
+        let workingBytes: Int
+
+        init?(sourceSize: CGSize, destination: CGRect, inverseTexelMap: Homography) {
+            let limit = CGFloat(Int32.max / 4)
+            guard sourceSize.width > 0, sourceSize.height > 0,
+                  sourceSize.width < limit, sourceSize.height < limit,
+                  sourceSize.width.rounded() == sourceSize.width,
+                  sourceSize.height.rounded() == sourceSize.height,
+                  !destination.isEmpty, !destination.isNull, destination == destination.integral,
+                  [destination.minX, destination.minY, destination.maxX, destination.maxY]
+                    .allSatisfy({ $0.isFinite && abs($0) < limit }) else { return nil }
+            let p = WarpParams(inverseTexelMap)
+            let m = [p.m0, p.m1, p.m2, p.m3, p.m4, p.m5, p.m6, p.m7, p.m8].map(Double.init)
+            guard m.allSatisfy(\.isFinite) else { return nil }
+            let corners = [CGPoint(x: destination.minX + 0.5, y: destination.minY + 0.5),
+                           CGPoint(x: destination.maxX - 0.5, y: destination.minY + 0.5),
+                           CGPoint(x: destination.minX + 0.5, y: destination.maxY - 0.5),
+                           CGPoint(x: destination.maxX - 0.5, y: destination.maxY - 0.5)]
+            let weights = corners.map { m[6] * $0.x + m[7] * $0.y + m[8] }
+            var needed = CGRect.null
+            func include<Points: Sequence>(_ points: Points, minimumWeight: Double) -> Bool where Points.Element == CGPoint {
+                var x0 = Double.infinity, x1 = -Double.infinity, y0 = Double.infinity, y1 = -Double.infinity
+                var dx = 0.0, dy = 0.0, ex = 0.0, ey = 0.0
+                for point in points {
+                    let x = point.x, y = point.y, w = m[6] * x + m[7] * y + m[8]
+                    let u = (m[0] * x + m[1] * y + m[2]) / w
+                    let v = (m[3] * x + m[4] * y + m[5]) / w
+                    x0 = min(x0, u); x1 = max(x1, u); y0 = min(y0, v); y1 = max(y1, v)
+                    // Derivative numerators are linear; their absolute maxima are at corners.
+                    dx = max(dx, abs((m[0] * m[7] - m[1] * m[6]) * y + m[0] * m[8] - m[2] * m[6]))
+                    dy = max(dy, abs((m[1] * m[6] - m[0] * m[7]) * x + m[1] * m[8] - m[2] * m[7]))
+                    ex = max(ex, abs((m[3] * m[7] - m[4] * m[6]) * y + m[3] * m[8] - m[5] * m[6]))
+                    ey = max(ey, abs((m[4] * m[6] - m[3] * m[7]) * x + m[4] * m[8] - m[5] * m[7]))
+                }
+                let denominator = minimumWeight * minimumWeight
+                let rx = 3 * max(1, hypot(dx, dy) / denominator)
+                let ry = 3 * max(1, hypot(ex, ey) / denominator)
+                func fits(_ value: Double) -> Bool { value.isFinite && abs(value) < Double(limit) }
+                guard fits(x0), fits(x1), fits(y0), fits(y1), fits(rx), fits(ry) else { return false }
+                // Cover Float evaluation/rounding as well as the mathematical filter support.
+                let apron = 1 + 8 * Double(Float.ulpOfOne) * max(abs(x0), abs(x1), abs(y0), abs(y1), rx, ry)
+                needed = needed.union(CGRect(x: x0 - 0.5 - rx - apron, y: y0 - 0.5 - ry - apron,
+                                            width: x1 - x0 + 2 * (rx + apron) + 1,
+                                            height: y1 - y0 + 2 * (ry + apron) + 1))
+                return true
+            }
+            if let minimum = weights.min(), minimum > 0 {
+                guard include(corners, minimumWeight: minimum) else { return nil }
+            } else if weights.contains(where: { $0 > 0 }) {
+                // A tile crosses the horizon. Only actual positive-weight pixel centres matter;
+                // scanning this exceptional tile avoids refusing the valid part of a perspective.
+                for y in Int(destination.minY)..<Int(destination.maxY) {
+                    for x in Int(destination.minX)..<Int(destination.maxX) {
+                        let point = CGPoint(x: Double(x) + 0.5, y: Double(y) + 0.5)
+                        let w = m[6] * point.x + m[7] * point.y + m[8]
+                        if w > 0, !include(CollectionOfOne(point), minimumWeight: w) { return nil }
+                    }
+                }
+            }
+            let clipped = needed.intersection(CGRect(origin: .zero, size: sourceSize))
+            sourceRect = clipped.isNull ? .zero : clipped.integral
+            destinationRect = destination
+            params = RasterWarpParams(map: p, sourceX: Int32(sourceRect.minX), sourceY: Int32(sourceRect.minY),
+                                      destinationX: Int32(destination.minX), destinationY: Int32(destination.minY))
+            // Cropped image + normalized bytes + upload; output texture + readback + image.
+            let bytes = 12 * (sourceRect.width * sourceRect.height + destination.width * destination.height)
+            guard bytes.isFinite, bytes < CGFloat(Int.max / 2) else { return nil }
+            workingBytes = Int(bytes)
+        }
+    }
+
+    /// The same bounded sampler serves a full image and any output window. Tiles change only
+    /// storage, never coordinates or filter support. The consumer must discard its new picture on
+    /// false; a failed tile must not become an intentional clear or certify an edit.
+    static func drawRaster(sourceSize: CGSize, destination: CGRect, inverseTexelMap: Homography,
+                           maximumWorkingBytes: Int = CompositorBudget.textureBudgetBytes,
+                           source: (CGRect) -> CGImage?, consume: (CGImage, CGRect) -> Void) -> Bool {
+        guard !destination.isNull, !destination.isEmpty, destination == destination.integral,
+              [destination.minX, destination.minY, destination.maxX, destination.maxY]
+                .allSatisfy({ $0.isFinite && abs($0) < CGFloat(Int32.max / 4) }),
+              maximumWorkingBytes > 0 else { return false }
+        func draw(_ rect: CGRect) -> Bool {
+            guard let plan = RasterPlan(sourceSize: sourceSize, destination: rect,
+                                        inverseTexelMap: inverseTexelMap) else { return false }
+            if plan.workingBytes > maximumWorkingBytes {
+                guard max(rect.width, rect.height) > 1 else { return false }
+                let vertical = rect.width >= rect.height
+                let first = floor((vertical ? rect.width : rect.height) / 2)
+                let a = CGRect(x: rect.minX, y: rect.minY,
+                               width: vertical ? first : rect.width, height: vertical ? rect.height : first)
+                let b = CGRect(x: vertical ? a.maxX : rect.minX, y: vertical ? rect.minY : a.maxY,
+                               width: vertical ? rect.width - first : rect.width,
+                               height: vertical ? rect.height : rect.height - first)
+                return draw(a) && draw(b)
+            }
+            return autoreleasepool {
+                guard let image = rasterImage(plan: plan, maximumWorkingBytes: maximumWorkingBytes, source: source) else { return false }
+                consume(image, rect)
+                return true
+            }
+        }
+        for y in stride(from: destination.minY, to: destination.maxY, by: 512) {
+            for x in stride(from: destination.minX, to: destination.maxX, by: 512) {
+                if !draw(CGRect(x: x, y: y, width: min(512, destination.maxX - x),
+                                height: min(512, destination.maxY - y))) { return false }
+            }
+        }
+        return true
+    }
+
+    static func rasterImage(plan: RasterPlan, maximumWorkingBytes: Int = CompositorBudget.textureBudgetBytes,
+                            source: (CGRect) -> CGImage?) -> CGImage? {
+        guard plan.workingBytes <= maximumWorkingBytes,
+              CompositorBudget.hasHeadroom(for: plan.workingBytes) else { return nil }
+        let width = Int(plan.destinationRect.width), height = Int(plan.destinationRect.height)
+        let bytes: [UInt8]
+        if plan.sourceRect.isEmpty { bytes = [UInt8](repeating: 0, count: width * height * 4) }
+        else {
+            let sw = Int(plan.sourceRect.width), sh = Int(plan.sourceRect.height)
+            guard let image = source(plan.sourceRect), image.width == sw, image.height == sh,
+                  let input = CoreGraphicsCompositor.premultipliedBytes(image, width: sw, height: sh),
+                  let result = MetalWarpEngine.shared?.raster(input, plan: plan) else { return nil }
+            bytes = result
+        }
+        return CoreGraphicsCompositor.makeImage(fromPremultiplied: bytes, width: width, height: height)
+    }
 
     /// One destination pixel's worth of the rule, stated once so both readers of this file — and the
     /// MSL beside it — can be checked against the same sentence:
@@ -264,8 +406,8 @@ enum ImageWarp {
 /// there is no `UIGraphicsImageRenderer`, no colour space and no second byte layout anywhere in the
 /// comparison.
 ///
-/// It is **not** the render path in the sense a frame is: this uploads and reads back per call, which
-/// is exactly right for a bake that happens once at commit and would be wrong for anything per-frame.
+/// Glyph bakes and bounded transformed-raster windows share this dispatch. Raster sampling keeps
+/// no source images, textures or scene cache between calls.
 final class MetalWarpEngine {
 
     static let shared = MetalWarpEngine()
@@ -273,6 +415,7 @@ final class MetalWarpEngine {
     private let device: MTLDevice
     private let queue: MTLCommandQueue
     private let state: MTLComputePipelineState
+    private let rasterState: MTLComputePipelineState?
 
     private init?() {
         guard let device = MTLCreateSystemDefaultDevice(),
@@ -289,12 +432,31 @@ final class MetalWarpEngine {
         self.device = device
         self.queue = queue
         self.state = state
+        self.rasterState = library.makeFunction(name: "warpRasterLanczos").flatMap {
+            try? device.makeComputePipelineState(function: $0)
+        }
     }
 
     /// Returns nil for a degenerate size or an allocation this device would not make — never a
     /// silently wrong answer, so `ImageWarp.warpedImage` can fall through to the scalar reference.
     func warp(_ bytes: [UInt8], sourceWidth: Int, sourceHeight: Int,
               destinationWidth: Int, destinationHeight: Int, params: WarpParams) -> [UInt8]? {
+        dispatch(bytes, sourceWidth: sourceWidth, sourceHeight: sourceHeight,
+                 destinationWidth: destinationWidth, destinationHeight: destinationHeight,
+                 params: params, state: state)
+    }
+
+    func raster(_ bytes: [UInt8], plan: ImageWarp.RasterPlan) -> [UInt8]? {
+        guard let rasterState else { return nil }
+        return dispatch(bytes, sourceWidth: Int(plan.sourceRect.width), sourceHeight: Int(plan.sourceRect.height),
+                        destinationWidth: Int(plan.destinationRect.width), destinationHeight: Int(plan.destinationRect.height),
+                        params: plan.params, state: rasterState, completeSIMDGroups: true)
+    }
+
+    private func dispatch<Parameters>(_ bytes: [UInt8], sourceWidth: Int, sourceHeight: Int,
+                                     destinationWidth: Int, destinationHeight: Int,
+                                     params: Parameters, state: MTLComputePipelineState,
+                                     completeSIMDGroups: Bool = false) -> [UInt8]? {
         guard sourceWidth > 0, sourceHeight > 0, destinationWidth > 0, destinationHeight > 0,
               bytes.count >= sourceWidth * sourceHeight * 4 else { return nil }
         guard let source = makeTexture(width: sourceWidth, height: sourceHeight, usage: [.shaderRead]),
@@ -312,10 +474,13 @@ final class MetalWarpEngine {
         encoder.setComputePipelineState(state)
         encoder.setTexture(source, index: 0)
         encoder.setTexture(result, index: 1)
-        encoder.setBytes(&params, length: MemoryLayout<WarpParams>.stride, index: 0)
-        let tw = min(16, state.maxTotalThreadsPerThreadgroup)
-        let th = min(16, max(1, state.maxTotalThreadsPerThreadgroup / tw))
-        encoder.dispatchThreads(MTLSize(width: destinationWidth, height: destinationHeight, depth: 1),
+        withUnsafeBytes(of: &params) { raw in
+            encoder.setBytes(raw.baseAddress!, length: raw.count, index: 0)
+        }
+        let tw = completeSIMDGroups ? state.threadExecutionWidth : min(16, state.maxTotalThreadsPerThreadgroup)
+        let th = completeSIMDGroups ? 1 : min(16, max(1, state.maxTotalThreadsPerThreadgroup / tw))
+        let dispatchedWidth = completeSIMDGroups ? ((destinationWidth + tw - 1) / tw) * tw : destinationWidth
+        encoder.dispatchThreads(MTLSize(width: dispatchedWidth, height: destinationHeight, depth: 1),
                                 threadsPerThreadgroup: MTLSize(width: tw, height: th, depth: 1))
         encoder.endEncoding()
         commands.commit()

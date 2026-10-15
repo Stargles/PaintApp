@@ -142,7 +142,7 @@ extension CanvasManager {
     /// nothing.
     func primeObject(_ object: PrimedObject) {
         guard canvasSize != nil else { return }
-        commitAllInteractiveState()
+        guard commitAllInteractiveState() else { return }
         if selectedTool == .eyedropper { leaveEyedropper() }
         primedObject = object
         enterMomentaryTool(.place)

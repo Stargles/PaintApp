@@ -511,8 +511,8 @@ final class CanvasManager: ObservableObject {
                 // this back to the value it already holds, and a folder band's own drag is undone
                 // through exactly that restore, so an unconditional clear here would move the band
                 // off the folder on the first press of Undo.
+                guard handleActiveContextChanged() else { currentLayerIndex = oldValue; return }
                 if selectedFolderID != nil { selectedFolderID = nil }
-                handleActiveContextChanged()
                 // The action recorder (see `ActionRecorder.ifRecording`). The *value*, not
                 // just the fact of a change — "which layer was active" is what decides where a stroke
                 // landed and which stroke recognizer the transform gestures were waiting on.
@@ -1657,7 +1657,7 @@ final class CanvasManager: ObservableObject {
     @Published var currentFrame: Int = 0 {
         didSet {
             if oldValue != currentFrame {
-                handleActiveContextChanged()
+                guard handleActiveContextChanged() else { currentFrame = oldValue; return }
                 // **After `handleActiveContextChanged`, which is what settles anything the outgoing
                 // frame was still holding** — and before the SwiftUI pass, which is the whole point:
                 // see `onTimingStrokeFrameAdvanced`. Guarded on the flag rather than on `isRecording`
@@ -1958,27 +1958,31 @@ final class CanvasManager: ObservableObject {
     /// **Lands every edit still in flight, and leaves a Move box between gestures up** — what a save
     /// does before it snapshots. A save is not a tool switch: a box that holds nothing the document
     /// lacks is left where the artist put it, so an autosave does not take it away from under them.
-    func settleInteractiveState() {
+    @discardableResult
+    func settleInteractiveState() -> Bool {
         beginCanvasEdit()
         // A selection edit still open when the tool changes out from under the artist is committed
         // as the one step it was going to be (TODO (42)) — the lifted-but-adjustable fill's rule. A
         // drag with nothing applied yet commits to nothing and records nothing.
         commitSelectionEdit()
-        if floatingPieceHoldsUnsettledEdit { commitFloatingPieceIfNeeded() }
+        if floatingPieceHoldsUnsettledEdit, !commitFloatingPieceIfNeeded() { return false }
         // A lasso move's float joins the raster piece at the same chokepoint, and that one line is
         // what covers tool switch, panel switch, save and backgrounding. Missing one of those is how
         // a float gets stranded — suppressed artwork in the saved document, rendering nowhere.
         commitVectorFloatIfNeeded()
+        return true
     }
 
     /// `settleInteractiveState()` plus taking down a Move box — for the points where the active tool
     /// is being replaced (tool switch, layer/frame change, an edit that needs the canvas to itself),
     /// at which a piece left floating would otherwise be stranded or silently discarded.
-    func commitAllInteractiveState() {
-        commitEditsInFlight()
+    @discardableResult
+    func commitAllInteractiveState() -> Bool {
+        guard commitEditsInFlight() else { return false }
         // The tool is being replaced, and an open lasso is the Select tool's own unfinished work —
         // unlike a save (`settleInteractiveState`), which must not take it from under the artist's pen.
         abandonOpenLasso()
+        return true
     }
 
     /// **Lands every edit in flight and takes a Move box down, and replaces nothing** — the half of
@@ -1987,9 +1991,10 @@ final class CanvasManager: ObservableObject {
     /// piece to be content the pick can see, but it is an interruption of the tool beneath it and not a
     /// replacement of it: the Select tool's open lasso is still there when the pick is done
     /// (TODO (187)).
-    func commitEditsInFlight() {
-        settleInteractiveState()
-        commitFloatingPieceIfNeeded()
+    @discardableResult
+    func commitEditsInFlight() -> Bool {
+        guard settleInteractiveState() else { return false }
+        return floatingPiece == nil || commitFloatingPieceIfNeeded()
     }
 
     /// Enters the text tool — the Actions menu's "Add Text" row, and the only way in.
@@ -2901,6 +2906,9 @@ final class CanvasManager: ObservableObject {
 
     func deleteLayer(at index: Int) {
         guard layers.indices.contains(index) else { return }
+        if floatingPiece?.targetLayerID == layers[index].id {
+            guard commitEditsInFlight() else { return }
+        }
         // Settle a float lifted from this layer *before* the layer goes, for `rasterizeLayer`'s
         // reason one door along. `handleActiveContextChanged` below does commit it, but by then the
         // layer is out of `layers`, so `vectorCanvas(of:)` resolves nothing and the suppression

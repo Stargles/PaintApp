@@ -658,6 +658,8 @@
 		79DEB415DFE7611A2BE28E09 /* LiquifyLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFA768F451DB7C3308F73DB4 /* LiquifyLogicTests.swift */; };
 		786AF213DEAB41406ABC1781 /* LiquifyUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 786AF213DEAB41406ABC1780 /* LiquifyUITests.swift */; };
 		786AF213DEAB41406ABC1783 /* LiquifyBench.swift in Sources */ = {isa = PBXBuildFile; fileRef = 786AF213DEAB41406ABC1782 /* LiquifyBench.swift */; };
+		5B74E61948504D11B601E202 /* RasterSamplingLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B74E61948504D11B601E201 /* RasterSamplingLogicTests.swift */; };
+		83A52AB211004A949CCFB502 /* RasterSamplingBench.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83A52AB211004A949CCFB501 /* RasterSamplingBench.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -1324,6 +1326,8 @@
 		AFA768F451DB7C3308F73DB4 /* LiquifyLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LiquifyLogicTests.swift; sourceTree = "<group>"; };
 		786AF213DEAB41406ABC1780 /* LiquifyUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LiquifyUITests.swift; sourceTree = "<group>"; };
 		786AF213DEAB41406ABC1782 /* LiquifyBench.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LiquifyBench.swift; sourceTree = "<group>"; };
+		5B74E61948504D11B601E201 /* RasterSamplingLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RasterSamplingLogicTests.swift; sourceTree = "<group>"; };
+		83A52AB211004A949CCFB501 /* RasterSamplingBench.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RasterSamplingBench.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -1453,6 +1457,8 @@
 				D866C6F41451162E01B37988 /* PoseInterpolationLogicTests.swift */,
 				D29AB2368795155752F8517B /* AnimatedDistortLogicTests.swift */,
 				26A9C3CB17EDDB6D1B679901 /* WarpAgreementCharacterizationTests.swift */,
+				5B74E61948504D11B601E201 /* RasterSamplingLogicTests.swift */,
+				83A52AB211004A949CCFB501 /* RasterSamplingBench.swift */,
 				75CBE473A285415901A09832 /* ObjectTransformLogicTests.swift */,
 				0997C0EA936D7E159238B001 /* FontResolveLogicTests.swift */,
 				7F1EC86AAE98AC9EBE2C6C01 /* TextBakeCharacterizationTests.swift */,
@@ -2234,6 +2240,8 @@
 				D2644D6EFA5281BB5DB35C3D /* PoseInterpolationLogicTests.swift in Sources */,
 				23A3A6AD0FD2B1CB2EB676BC /* AnimatedDistortLogicTests.swift in Sources */,
 				26A9C3CB17EDDB6D1B679902 /* WarpAgreementCharacterizationTests.swift in Sources */,
+				5B74E61948504D11B601E202 /* RasterSamplingLogicTests.swift in Sources */,
+				83A52AB211004A949CCFB502 /* RasterSamplingBench.swift in Sources */,
 				55AD836D577F389E88B68F02 /* PaintSoftware/Engine/TextLayout.swift in Sources */,
 				9503DF989F335799429B8002 /* PaintSoftware/Engine/FontLibrary.swift in Sources */,
 				83228C9D6C066AEBE8B60A02 /* PaintSoftware/Models/CanvasManager+Text.swift in Sources */,

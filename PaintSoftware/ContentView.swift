@@ -238,7 +238,10 @@ struct ContentView: View {
         // UI-only state (see `CanvasManager.beginCanvasEdit`) — bake every one of them in before
         // saving, or backgrounding the app silently drops whichever was still pending. A Move box
         // between gestures holds none, and stays up (`settleInteractiveState`).
-        canvasManager.settleInteractiveState()
+        guard canvasManager.settleInteractiveState() else {
+            canvasManager.raise(.saveFailed)
+            return
+        }
         let url = canvasManager.projectURL
             ?? ProjectStore.createNewProjectURL(name: canvasManager.projectName,
                                                 in: newProjectFolder ?? ProjectStore.projectsDirectory)
@@ -259,6 +262,8 @@ struct ContentView: View {
             // Nothing was written and `completion` did not run, so the editor stays put with the
             // banner up. The two buttons below are the only ways out.
             pendingDamagedSave = PendingDamagedSave(completion: completion)
+        } else if decision == .refused {
+            autosave.saveFinished()
         }
     }
 

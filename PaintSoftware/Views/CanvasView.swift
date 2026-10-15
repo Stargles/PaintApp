@@ -2226,11 +2226,12 @@ struct CanvasView: UIViewRepresentable {
                 var value = values[fill.layerID] ?? PixelOps.CelDisplay()
                 let clip = fill.clip
                 value.drawOverlays = { _, content in
-                    guard let preview = render.preview(clippedTo: clip) else { return }
+                    guard let preview = render.preview(clippedTo: clip) else { return false }
                     let sx = content.width / size.width, sy = content.height / size.height
                     preview.image.draw(in: CGRect(x: content.minX + preview.rect.minX * sx,
                         y: content.minY + preview.rect.minY * sy,
                         width: preview.rect.width * sx, height: preview.rect.height * sy))
+                    return true
                 }
                 values[fill.layerID] = value
                 bounds = bounds.union(render.window.rect)
@@ -2271,6 +2272,7 @@ struct CanvasView: UIViewRepresentable {
                     cg.scaleBy(x: content.width / size.width, y: content.height / size.height)
                     PixelOps.drawFloatingPiece(piece, into: cg, clippedTo: cg.boundingBoxOfClipPath)
                     cg.restoreGState()
+                    return true
                 }
                 values[piece.sourceLayerID] = value
                 let original = CGRect(x: -piece.baseSize.width / 2, y: -piece.baseSize.height / 2,

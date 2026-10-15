@@ -510,7 +510,7 @@ final class AnimatedDistortLogicTests: XCTestCase {
         let map = try XCTUnwrap(PoseQuad(box: celBox, corners: quad).map)
         XCTAssertTrue(map.isProjective, "Fixture: the container pose is a keystone")
 
-        let warped = PixelOps.rasterize(cel: cel, canvasSize: size, memoize: false, pose: map)
+        let warped = try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: size, memoize: false, pose: map))
         let drawn = try XCTUnwrap(PixelOps.opaqueContentBounds(warped),
                                   "the tier is on screen somewhere")
 

@@ -32,10 +32,12 @@ extension CanvasManager {
         /// The cel at that frame on that layer holds no stream. The bar shows only on one that
         /// does, so a real artist never meets this; a direct caller or a test does.
         case notOnStreamCel
+        case pendingEdit
 
         var phrase: String {
             switch self {
             case .noFrameYet: return "No picture from the computer yet"
+            case .pendingEdit: return "the held picture could not be placed; try again"
             case .notOnStreamCel: return "This frame doesn't hold a screen stream"
             }
         }
@@ -296,7 +298,7 @@ extension CanvasManager {
         let streamID = stream.id
 
         // KEYFRAMES §6's recipe: a pending float baked first, so it lands as its own earlier step.
-        commitAllInteractiveState()
+        guard commitAllInteractiveState() else { return .refused(.pendingEdit) }
 
         // `touching: [vector]`: the block's own canvas is the one `splitCel` never copies (it keeps
         // the left half), and it is the one the swap mutates whenever `frame` is the block's first

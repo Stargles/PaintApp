@@ -235,7 +235,7 @@ extension CanvasManager {
         // selection outlives a Move lift, so without settling the piece first this would rewrite the
         // geometry of a cel that is currently showing a hole and the float would bake its own copy of
         // that geometry over the top.
-        commitAllInteractiveState()
+        guard commitAllInteractiveState() else { return false }
         guard animationGroupEditUnavailableReason == nil,
               let selection = requested,
               let celIndex = activeCelIndex(actedOnBy: selection),

@@ -44,7 +44,8 @@ enum LiquifyRasterUITestSeeds {
         let pose = manager.inkPose(forLayerID: manager.layers[0].id)
         let cel = manager.layers[0].cels[0]
         let derived = manager.derivedCelContent(for: cel, atFrame: 0, inheriting: pose)
-        let reference = PixelOps.rasterize(cel: cel, canvasSize: size, memoize: false, derived: derived, pose: pose)
+        guard let reference = PixelOps.rasterize(cel: cel, canvasSize: size, memoize: false, derived: derived, pose: pose)
+        else { preconditionFailure("The posed reference fixture must render before the drive") }
         manager.addLayer(name: "Reference")
         manager.layers[2].cels[0].bakedImage = reference
         manager.layers[2].isVisible = false
