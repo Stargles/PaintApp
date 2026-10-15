@@ -97,6 +97,12 @@ signature so preserved preupdate snapshots are also converted.
   No supported small-pose projective refusal was demonstrated by source review: oversized output
   downsamples, noninvertibility refuses earlier, and allocation failure was not artificially induced.
 
+**Newest source review:** the ordinary vector-eraser scratch still flattens ink plus backing in
+`StrokeCanvasView.displayedScratch`, then host and stream apply different poses to that combined
+picture. This bypasses the new complete cel-picture owner. Recorded in TODO before a native
+reproduction; raster worker will characterize integer-translated ink over stationary nonuniform
+backing, then consolidate the sibling path through the existing presenter if confirmed.
+
 **Raster appearance choice is pending.** Core Graphics high sampling depends on full source extent,
 so a cropped preview can differ at lift. A virtual full-extent provider matched but retained about
 230 MiB of scaled-image cache over 100 draws and was rejected. An external bounded Lanczos prototype

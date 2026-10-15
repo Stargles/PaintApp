@@ -167,6 +167,13 @@ whole replacement union, with changes applied only to their own edited region; u
 pixel oracle and the existing snapshot/window renderer. The cropped high-sampling mismatch remains a
 separate issue awaiting the owner's appearance ruling.
 
+Source review also found a remaining sibling path in `StrokeCanvasView.displayedScratch` and
+`displayInk`: vector eraser scratch flattens stationary backing together with ink, then the host
+moves both through the ink pose, while the stream uses the backing pose. Characterize the actual
+preview and held lift with an integer-translated stroke over nonuniform backing. Consolidate this
+through the existing complete cel-picture presenter; remove the superseded local flatten ownership,
+rather than adding another pose-specific compositor. This is recorded before a native reproduction.
+
 The shared raster replacement also exposes a pose mismatch: `LayerHostView.shownPose` updates live
 strokes and fill previews but leaves `bakedImageView` unposed, while `PixelOps` poses the same stored
 pixels. Align the backing through the existing origin-based pose, including its replacement hole;
