@@ -118,8 +118,8 @@ why: pictures handed to Core Animation faster than the render server frees them)
       session was usage-limited. Full regression completed 5694 tests. Isolated triage found a
       continuous-slider test precondition error and an unconditional benchmark cap; corrected touched
       UI passes, and final Debug/Release each ran 5124 tests (5120 passed, four skipped, zero failures),
-      matching the source census. An intermittent Blend Mode menu failure remains open. Confirm the
-      current scene is saved and iPad unlocked before restarting probes.
+      matching the source census. An intermittent Blend Mode menu failure remains open. Owner confirmed the scene saved and iPad unlocked again on 2026-10-15; start the
+      six effect/opacity/shape/fill probes now while the device is awake.
 
 ## (178) Liquify tool
 
@@ -173,6 +173,12 @@ moves both through the ink pose, while the stream uses the backing pose. Charact
 preview and held lift with an integer-translated stroke over nonuniform backing. Consolidate this
 through the existing complete cel-picture presenter; remove the superseded local flatten ownership,
 rather than adding another pose-specific compositor. This is recorded before a native reproduction.
+
+**Raster sampling ruled 2026-10-15:** the owner accepts comparison C's smoother reduced grain,
+"as long as it isnt cery bloaty or expensive for that difference". Replace full/window raster
+transform sampling through one bounded shared implementation, remove the superseded path, and
+measure native cost and memory before accepting it. This changes transformed raster paint only;
+editable vector strokes retain their native renderer.
 
 The shared raster replacement also exposes a pose mismatch: `LayerHostView.shownPose` updates live
 strokes and fill previews but leaves `bakedImageView` unposed, while `PixelOps` poses the same stored

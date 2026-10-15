@@ -103,13 +103,13 @@ picture. This bypasses the new complete cel-picture owner. Recorded in TODO befo
 reproduction; raster worker will characterize integer-translated ink over stationary nonuniform
 backing, then consolidate the sibling path through the existing presenter if confirmed.
 
-**Raster appearance choice is pending.** Core Graphics high sampling depends on full source extent,
+**Raster appearance choice C accepted 2026-10-15, conditional on compact code and measured cost.** Core Graphics high sampling depends on full source extent,
 so a cropped preview can differ at lift. A virtual full-extent provider matched but retained about
 230 MiB of scaled-image cache over 100 draws and was rejected. An external bounded Lanczos prototype
 matches full/window output and added about 3.2 MB peak over 100 512-square draws. It visibly smooths
 reduced grain. Root inspected/sent `~/PaintWork/s49-liquify-logs/raster/pose-sampling-A-C-comparison.png`;
-owner choice C (smoother) versus A (preserve appearance) remains unanswered. Do not adopt without that
-ruling. All transformed raster backing would share preview/committed sampling; native vector ink
+The owner accepts C (smoother), provided its code and runtime cost are proportionate.
+Record and measure the shared implementation before accepting it. All transformed raster backing would share preview/committed sampling; native vector ink
 stays native. Prototype figures are not production/device qualification.
 
 Earlier surface-handoff 30 logic/6 UI with 19 faults, inverse Release 7/7 over 18 byte-identical fixtures,
@@ -125,7 +125,7 @@ New placement and rendering paths need current proof. Preserve evidence before c
 2. **(179) physical probes:** updated iPad build supports effect, opacity, shape and fill. Prior
    `7cf3245` supported only effect among these; unknown modes fell back to playback. Physical effect
    baselines at 4096²/2048×1024 yielded 9/100 held pictures over 100 ticks (PERFORMANCE §30.6).
-   After-build measurements remain. Ask for fresh saved-scene/unlocked readiness; preserve whole-
+   After-build measurements start now: the owner reconfirmed saved/unlocked on October 15. Preserve whole-
    trace counts. Probe CLI: 100 ticks at 80 ms, not JSON tickCount (frame events).
 3. (27) laptop verification is owner-deferred; (22)/(10) deprioritised; (37) dropped; Later features
    await a design discussion. Do not research those while the owner is unavailable.
