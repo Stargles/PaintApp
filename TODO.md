@@ -80,10 +80,10 @@ samples all 65,536 pixels, even for a 153×111 picture (16,983 visible pixels). 
 only that redundant output work, keeping the global pixel centres, 256-pixel native source tiles,
 operation order and exact RGBA. This is a count hypothesis, not a measured speed claim; it does not
 resolve the separate long patterned raster inverse cost.
-For that inverse cost, root will cheaply test predecoded native alpha samples outside the repo:
-the exact existing Double divisions are performed once per mask, instead of once per tap. This is
-distinct from the already rejected 256-entry lookup table, but costs eight times the mask payload;
-adopt nothing without a material measured gain and unchanged sample bits.
+Exact native alpha predecoding is also rejected: 881,408 sample-bit comparisons match, but six
+alternating microbenchmark trials show only 1.055× active-tip and 0.988× whole-tip median CPU ratios
+while mask payload grows eightfold. No production change. Evidence:
+`~/PaintWork/evidence/s49-liquify-alpha-predecode/README.md`; do not repeat this experiment.
 Final combined gates, landscape UI and install remain pending.
 
 *"It should be placed to the left of the brush tool in the top menu. When selected, it acts sort of like
