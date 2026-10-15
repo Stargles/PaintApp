@@ -11,7 +11,9 @@ A genuine pre-Commit save proves the cause: the local stroke's visibility thresh
 The stroke is correctly absent before Commit. The UI test must commit at an unambiguously later
 interior time and assert visible local ink immediately before committing, then check it afterward.
 Reuse the existing single-screenshot pixel probe for its row sweeps instead of taking a picture for
-every column. Evidence: `~/PaintWork/s49-final-validation/triage/precommit-capture/`.
+every column. The first revised run preserved every local-stroke column but also counted the cyan
+guide at x=0.20 before Commit; that guide correctly disappears at Commit. The inspected screenshot
+confirms it is chrome, not lost ink. Use the existing `isInk` predicate for this black-stroke row. Evidence: `~/PaintWork/s49-final-validation/triage/precommit-capture/`.
 
 ## Pad benchmark still has an unconditional wall-clock assertion (2026-10-15)
 
