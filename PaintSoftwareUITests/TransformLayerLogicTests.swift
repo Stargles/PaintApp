@@ -616,12 +616,12 @@ final class TransformLayerLogicTests: XCTestCase {
     /// started posing and this test needs replacing with one that measures the pixels.
     func testAnInterpolatedCelDeclinesTheContainerPoseAndDoesNotKeyOnIt() throws {
         let (manager, drawn) = posedVectorLayer(pose(CGAffineTransform(translationX: 24, y: 0)))
-        let first = manager.layers[drawn].cels[0]
+        var first = manager.layers[drawn].cels[0]
         first.frameCount = 1
         let last = Cel(id: UUID(), startFrame: 2, frameCount: 1, raster: .empty(size: size),
                        vector: .empty(size: size))
         last.vector?.addStroke(stroke([CGPoint(x: 6, y: 10), CGPoint(x: 18, y: 10)]))
-        let cel = Cel(id: UUID(), startFrame: 1, frameCount: 1, raster: .empty(size: size),
+        var cel = Cel(id: UUID(), startFrame: 1, frameCount: 1, raster: .empty(size: size),
                       vector: .empty(size: size))
         let layerID = manager.layers[drawn].id
         let recipe = InterpolationRecipe(references: [
@@ -633,7 +633,7 @@ final class TransformLayerLogicTests: XCTestCase {
         XCTAssertTrue(recipe.isWellFormed, "The identity belongs to an evaluable in-between")
 
         let unposedContent = try XCTUnwrap(manager.derivedCelContent(for: cel, atFrame: 1))
-        let rendered = try XCTUnwrap(unposedContent.render(.full))
+        let rendered = try XCTUnwrap(unposedContent.render(.full)?.cgImage)
         let bytes = try XCTUnwrap(CanvasFixture.rgbaBytes(rendered))
         XCTAssertTrue(stride(from: 3, to: bytes.count, by: 4).contains { bytes[$0] > 0 },
                       "The two actual source keyframes produce visible ink")
