@@ -452,7 +452,7 @@ final class InkDistortLogicTests: XCTestCase {
     /// This is the whole of stage B. The design question it settles was open and named nowhere: what
     /// a projective float *commits* to. `StrokeRestWalk` is transient and absent from
     /// `VectorCanvasData`, so the nudge cannot leave the answer there — and `VectorStroke.size` is one
-    /// scalar, so it cannot leave it in the geometry either. The answer is `VectorStroke.distort`:
+    /// scalar, so it cannot leave it in the geometry either. The answer is `VectorStroke.placement`:
     /// the **map** and the artist's own width, ten numbers, with the pre-image rebuilt at render
     /// (`effectiveWalk`). Its own doc comment carries why that beats persisting the walk and why
     /// re-sampling is not available at all.
@@ -506,23 +506,27 @@ final class InkDistortLogicTests: XCTestCase {
             .elements.compactMap(\.stroke)
         XCTAssertFalse(strokes.isEmpty, "setup: the float carries ink")
         for stroke in strokes {
-            XCTAssertNotNil(stroke.distort, "a nudge writes the keystone where a save can find it")
+            XCTAssertNotNil(stroke.placement, "a nudge writes the keystone where a save can find it")
             XCTAssertNil(stroke.restWalk,
                          "and not as a per-frame memo, which a cut piece would copy into a double pose")
         }
     }
 
-    /// **An undistorted stroke's payload does not gain a byte**, which is what `encodeIfPresent` buys
-    /// and what makes the format change free for every document nobody has distorted.
-    func testAnUndistortedStrokeWritesNoDistortKey() throws {
-        let data = try JSONEncoder().encode(stroke())
-        let json = try XCTUnwrap(String(data: data, encoding: .utf8))
-        XCTAssertFalse(json.contains("distort"), "an ordinary stroke is byte-for-byte what it was")
-
+    /// Native placement is one required nullable owner; old independent rest keys are retired.
+    func testAnOrdinaryStrokeHasNullPlacementAndAKeystoneHasOneDerivedOwner() throws {
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(stroke())) as? [String: Any])
+        XCTAssertTrue(json["placement"] is NSNull, "ordinary ink needs no retained native geometry")
+        XCTAssertNil(json["distort"])
+        XCTAssertNil(json["distortRest"])
+        XCTAssertNil(json["distortRestLattice"])
         let keystoned = try XCTUnwrap(VectorCanvas.mapping(.stroke(stroke()), through: keystone()))
         guard case .stroke(let out) = keystoned else { return XCTFail("a stroke maps to a stroke") }
-        let carried = try XCTUnwrap(String(data: try JSONEncoder().encode(out), encoding: .utf8))
-        XCTAssertTrue(carried.contains("distort"), "and a keystoned one carries the key it needs")
+        let placement = try XCTUnwrap(out.placement)
+        guard case .derived = placement.source else { return XCTFail("homography-only ink keeps compact derived geometry") }
+        XCTAssertEqual(placement.transport, .identity)
+        XCTAssertNil(placement.material)
+        let read = try JSONDecoder().decode(VectorStroke.self, from: JSONEncoder().encode(out))
+        XCTAssertEqual(read.placement, placement, "the single owner survives a standalone archive")
     }
 
     /// **The commit and the pose draw the same picture** — the same claim the raster tier makes about
@@ -569,7 +573,7 @@ final class InkDistortLogicTests: XCTestCase {
             XCTAssertEqual(b.radius, a.radius, accuracy: 1e-6)
         }
         guard case .stroke(let out) = moved else { return XCTFail("a stroke maps to a stroke") }
-        XCTAssertEqual(try XCTUnwrap(out.distort).restSize, ink.size, accuracy: 1e-9,
+        XCTAssertEqual(try XCTUnwrap(out.placement).restSize, ink.size, accuracy: 1e-9,
                        "and the artist's own width did **not** move: the similarity is in the map, and "
                        + "scaling it here as well stamps 1.3x-wide dabs on a 1.3x-coarser walk")
     }
@@ -595,7 +599,7 @@ final class InkDistortLogicTests: XCTestCase {
                       "setup: the sweep cut the line")
         let pieces = canvas.elements.compactMap(\.stroke).filter { $0.composite == .paint }
         XCTAssertGreaterThan(pieces.count, 1, "setup: it really did split")
-        XCTAssertTrue(pieces.allSatisfy { $0.distort != nil },
+        XCTAssertTrue(pieces.allSatisfy { $0.placement != nil },
                       "every piece inherited the keystone by being a copy of its parent")
 
         // Every dab a piece stamps is one the whole stroke stamped, at the same place and width.
@@ -624,7 +628,7 @@ final class InkDistortLogicTests: XCTestCase {
                       "setup: Mode 2 cut the line")
         let pieces = canvas.elements.compactMap(\.stroke).filter { $0.composite == .paint }
         XCTAssertGreaterThan(pieces.count, 1, "setup: it really did split")
-        XCTAssertTrue(pieces.allSatisfy { $0.lattice != nil && $0.distort != nil },
+        XCTAssertTrue(pieces.allSatisfy { $0.lattice != nil && $0.placement != nil },
                       "a piece replays its parent's walk and inherits its keystone")
 
         let inverse = try XCTUnwrap(map.inverse)

@@ -48,7 +48,7 @@ struct SizePreviewWindow: View {
                 // What the mark lands on. Paper for the brush; transparency, drawn as a
                 // checkerboard, for the eraser — whose stamp is a hole in the ink above it.
                 switch request.tool {
-                case .brush: Color.white
+                case .brush, .liquify: Color.white
                 case .eraser: CheckerboardPattern()
                 }
 

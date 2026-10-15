@@ -809,6 +809,7 @@ final class MemoryBudgetLogicTests: XCTestCase {
     /// below the old constant and the long-stroke case above it, which is a statement about the shape
     /// of the model and survives a change to the stride.
     func testAnUndoStepIsChargedTheArrayItHoldsAndTheGeometryOnlyItRetains() {
+        print("NATIVE MATERIAL LAYOUT element=\(MemoryLayout<VectorElement>.stride) bridge=\(MemoryLayout<InkMaterialBridge>.stride)")
         func stroke(samples n: Int) -> VectorElement {
             var samples = StrokeSamples(channels: .pressureOnly)
             samples.reserveCapacity(n)

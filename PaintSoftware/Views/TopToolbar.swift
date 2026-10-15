@@ -70,6 +70,11 @@ struct TopToolbar: View {
             sceneNameField
 
             HStack(spacing: 10) {
+                iconButton(system: "water.waves", isActive: !isToolHighlightSuppressed && canvasManager.selectedTool == .liquify) {
+                    if canvasManager.selectedTool == .liquify { $activePanel.toggleSettingsPanel(.liquify) }
+                    else { canvasManager.commitAllInteractiveState(); canvasManager.selectedTool = .liquify; activePanel = .none }
+                }
+                .accessibilityIdentifier("toolbar.liquifyButton")
                 iconButton(system: "paintbrush.pointed", isActive: !isToolHighlightSuppressed && (activePanel == .brush || canvasManager.selectedTool == .pen || canvasManager.selectedTool == .pencil)) {
                     selectBrushToolAndTogglePanel()
                 }

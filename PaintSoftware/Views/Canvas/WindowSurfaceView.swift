@@ -30,16 +30,35 @@ import UIKit
 /// new shape must be transparent, not last frame's.
 final class WindowSurfaceView: UIView {
 
-    private struct Surface {
+    /// Counts an allocation for its actual lifetime, including a draw finishing after cancellation
+    /// or a finished picture waiting for the base. Moving ownership never changes the byte count.
+    fileprivate final class Surface {
         let surface: IOSurface
         let context: CGContext
+
+        init(surface: IOSurface, context: CGContext) {
+            self.surface = surface
+            self.context = context
+            WindowSurfaceView.adjustResidentBytes(by: surface.allocationSize)
+        }
+
+        deinit { WindowSurfaceView.adjustResidentBytes(by: -surface.allocationSize) }
+    }
+
+    /// The exact picture already shown, with no bitmap copy. Its surface is removed from the view's
+    /// writable pair before it escapes; retaining this value keeps that allocation accounted for.
+    struct FrozenWindow {
+        fileprivate let storage: Surface
+        let window: CGRect
+        let placement: CGAffineTransform
+        var surface: IOSurface { storage.surface }
     }
 
     /// Both surfaces, once `size(for:)` has made them; empty before the first present.
     private var surfaces: [Surface] = []
     private var back = 0
-    /// The previous front stays drawn while a resized window receives its first picture.
-    private var retiringFront: IOSurface?
+    /// The actual front, including its old placement while a resized window is still drawing.
+    private var presented: FrozenWindow?
     /// The draws, on the queue the view was made with — see the class comment.
     private let draws: LatestWins
 
@@ -50,12 +69,21 @@ final class WindowSurfaceView: UIView {
     static var drawDelay: TimeInterval = 0
 
     /// **The bytes every view's surfaces hold, process-wide** — what a live picture costs in memory
-    /// while it is up (two canvas-sized surfaces for a held frame, PERFORMANCE.md §30). Main thread:
-    /// surfaces are made at a mint and dropped there or with the view. `PlaybackProbe` reports its peak.
-    private(set) static var residentBytes = 0
-    /// This view's share of `residentBytes`.
-    private var surfaceBytes = 0 {
-        didSet { Self.residentBytes += surfaceBytes - oldValue }
+    /// while it is up (two canvas-sized surfaces for a held frame, PERFORMANCE.md §30), including
+    /// frozen pictures and cancelled draws still using their allocation. `PlaybackProbe` reports its peak.
+    private static let residentLock = NSLock()
+    private static var residentTotal = 0
+    static var residentBytes: Int {
+        residentLock.lock()
+        defer { residentLock.unlock() }
+        return residentTotal
+    }
+
+    /// A cancelled worker can release its last allocation off main.
+    private static func adjustResidentBytes(by delta: Int) {
+        residentLock.lock()
+        defer { residentLock.unlock() }
+        residentTotal += delta
     }
 
     /// How many frames have been presented — for tests, which spin the run loop until it moves.
@@ -84,7 +112,20 @@ final class WindowSurfaceView: UIView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    deinit { Self.residentBytes -= surfaceBytes }
+    /// Transfers the last picture actually shown. Cancelling prevents an older landing or waiting
+    /// request from changing it; clearing the writable pair prevents future draws from reusing it.
+    /// An in-flight draw owns only the other surface and may finish safely in the background.
+    func freezePresented() -> FrozenWindow? {
+        draws.cancel()
+        let frozen = presented
+        presented = nil
+        layer.contents = nil
+        isHidden = true
+        surfaces.removeAll()
+        surfaceWindow = .null
+        back = 0
+        return frozen
+    }
 
     /// **One frame, as the main thread mints it**: where it goes and how it is drawn.
     ///
@@ -142,7 +183,7 @@ final class WindowSurfaceView: UIView {
         guard surfaces.count == 2 else { return nil }
         let target = surfaces[back]
         let delay = Self.drawDelay
-        return {
+        return { [weak self] in
             // **The back surface may still be on screen.** It was the contents until the swap that
             // put the other one up, and that swap reaches the render server only when the main
             // thread's transaction commits — while this draw is minted *in* the landing's turn
@@ -168,8 +209,7 @@ final class WindowSurfaceView: UIView {
                     return
                 }
                 self.layer.contents = target.surface
-                self.retiringFront = nil
-                self.surfaceBytes = self.surfaces.reduce(0) { $0 + $1.surface.allocationSize }
+                self.presented = FrozenWindow(storage: target, window: window, placement: placement)
                 self.layer.bounds = CGRect(origin: .zero, size: window.size)
                 self.layer.position = window.origin.applying(placement)
                 self.layer.setAffineTransform(CGAffineTransform(a: placement.a, b: placement.b,
@@ -199,9 +239,7 @@ final class WindowSurfaceView: UIView {
             surfaceWindow = window
             return
         }
-        retiringFront = layer.contents as? IOSurface
         surfaces = []
-        surfaceBytes = retiringFront?.allocationSize ?? 0
         surfaceWindow = window
         let width = Int(window.width), height = Int(window.height)
         guard width > 0, height > 0 else { return }
@@ -222,6 +260,5 @@ final class WindowSurfaceView: UIView {
             context.scaleBy(x: 1, y: -1)
             surfaces.append(Surface(surface: surface, context: context))
         }
-        surfaceBytes = surfaces.reduce(retiringFront?.allocationSize ?? 0) { $0 + $1.surface.allocationSize }
     }
 }

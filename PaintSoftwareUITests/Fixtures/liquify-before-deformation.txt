@@ -1,0 +1,22 @@
+Genuine Release package saved by prior build 5d73184 on 2026-10-14.
+
+Captured with preserved app at /tmp/s49-onion-before-derived/Build/Products/Release-iphonesimulator/PaintSoftware.app/PaintSoftware
+Executable SHA256: d989a6367fa2cae43b5961cd42b356dba1452d5fd4b157b35b4877b035d7ef25
+
+Cold-start XCUITest on a freshly installed app drove Gallery → New Canvas,
+-uiTestSeedGuidedIntervals (two generated linked intervals, five cels, three
+drawn source poses and a guide), saved through Gallery, reopened the same
+scene, and returned to Gallery again. Passed 1/1 in
+s49-liquify-prior-preserved3.xcresult; two inspected screenshots.
+The full package is unmodified prior-build output: two interpolation sidecars
+have their original source UUIDs, t=0.5, and no deformations field.
+
+File hashes:
+brushtable.json 0eafafb554ba5e1db9a477b008aeaef5f7e2f9b33200424e54e9dc480603e279
+drawings/4150DC1A-9F4D-497A-B95A-5E229402A3F2.json 4de20668936df5301c95fb8be2a8af24eb771dddeb8adec74bc9085df8acc51a
+drawings/813D7CB6-A749-409D-9E6B-19FE3B372832-interpolation.json c4a6ea8cbd545c8c845b9b87813c8a4817df63bebabd7547cbbdcb8806903b27
+drawings/CC69119F-76EF-4B32-BAF6-C617C999650A.json a9b4878f564ab7d72b4c953fac218fa401312a97a2137b8ad3761c05ef79d3b2
+drawings/DA47CE04-EEDB-49BC-BC79-CE854D965E4D-interpolation.json bad59c05390262208fbef53a6ae874a2e097736ec657a15eb36022f3c4e0b94f
+drawings/F70E750A-CF48-45D8-A95A-18A874A6C096.json 49c4649bf2b5b681228f71f6147065bf613bfab3e4de9f5e62661740bb3201ee
+manifest.json 78d3970d04a314835794377812d79470444b4c41247f53998a56950f1274635d
+thumbnail.png d5c5c8497f8c7375d16690a6ee1a2e8da864a5fa38376c6459366d64fb40fe43

@@ -34,6 +34,10 @@ nonisolated enum LibraryRepair {
         case .current, .repaired: break
         case .unreadable, .notWritten: return false
         }
+        switch LegacyLiquifyRepair.repair(packageAt: package) {
+        case .current, .repaired: break
+        case .unreadable, .notWritten: return false
+        }
         do {
             let data = try Data(contentsOf: package.appendingPathComponent("manifest.json"))
             _ = try JSONDecoder().decode(ProjectManifest.self, from: data)

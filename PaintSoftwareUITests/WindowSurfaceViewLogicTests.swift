@@ -369,4 +369,123 @@ final class WindowSurfaceViewLogicTests: XCTestCase {
         lock.lock(); let order = drawn; lock.unlock()
         XCTAssertEqual(order, ["first asked", "newest"], "the replaced frame was never drawn")
     }
+
+    /// Freeze while the other buffer is drawing, then reuse the same view. The finished picture
+    /// must retain its pixels and identity; neither the cancelled landing nor a later draw owns it.
+    func testFrozenPictureSurvivesInFlightAndFutureDraws() throws {
+        let view = WindowSurfaceView(queue: queue)
+        let window = CGRect(x: 10, y: 20, width: 8, height: 4)
+        present(view, window: window, count: 1)
+        let original = try XCTUnwrap(view.layer.contents as? IOSurface)
+        let gate = DispatchSemaphore(value: 0)
+        var cancelledFinished = false
+        var replacedMinted = false
+        view.present(window: window, placement: .identity, draw: { cg in
+            gate.wait()
+            UIColor.red.setFill(); cg.fill(CGRect(origin: .zero, size: window.size))
+            return window
+        }, finished: { _ in cancelledFinished = true })
+        defer { gate.signal() }
+        view.present { replacedMinted = true; return nil }
+        let frozen = try XCTUnwrap(view.freezePresented())
+        XCTAssertTrue(frozen.surface === original, "transfer the exact allocation already on screen")
+        XCTAssertNil(view.layer.contents, "the old view no longer displays the transferred picture")
+        XCTAssertTrue(view.isHidden)
+        XCTAssertNil(view.freezePresented(), "a picture transfers only once")
+        gate.signal()
+        var drained = false
+        queue.async { DispatchQueue.main.async { drained = true } }
+        spin(until: { drained }, "the cancelled work has finished")
+        present(view, window: window, count: 2, color: { _ in .blue })
+        XCTAssertFalse(cancelledFinished, "the draw predating the transfer cannot land")
+        XCTAssertFalse(replacedMinted, "the pending request was cancelled too")
+        XCTAssertFalse(view.layer.contents as? IOSurface === original,
+                       "reusing the view allocates a new writable pair")
+        _ = original.lock(options: [.readOnly], seed: nil)
+        defer { _ = original.unlock(options: [.readOnly], seed: nil) }
+        let bytes = original.baseAddress.assumingMemoryBound(to: UInt8.self)
+        XCTAssertEqual(Array(UnsafeBufferPointer(start: bytes, count: 4)), [0, 255, 0, 255],
+                       "the retired green picture was neither cleared nor repainted blue")
+    }
+
+    /// A resize updates the requested window before it changes the picture actually shown.
+    /// A transferred front must carry its own geometry, not that of the unfinished request.
+    func testFreezeDuringResizeKeepsThePresentedWindowAndPlacement() throws {
+        let view = WindowSurfaceView(queue: queue)
+        let old = CGRect(x: 10, y: 20, width: 8, height: 4)
+        let placement = CGAffineTransform(a: 2, b: 0.25, c: 0.5, d: 3, tx: 7, ty: 9)
+        view.presentFirst(.init(window: old, placement: placement, draw: { _ in old }))
+        let gate = DispatchSemaphore(value: 0)
+        let resized = CGRect(x: 30, y: 40, width: 16, height: 8)
+        view.present(window: resized, placement: .identity) { _ in gate.wait(); return resized }
+        defer { gate.signal() }
+        let frozen = try XCTUnwrap(view.freezePresented())
+        XCTAssertEqual(frozen.window, old)
+        XCTAssertEqual(frozen.placement, placement)
+        XCTAssertEqual(frozen.surface.width, 8)
+        XCTAssertEqual(frozen.surface.height, 4)
+        gate.signal()
+        present(view, window: resized, count: 1)
+    }
+
+    func testFreezingBeforeTheFirstPictureCancelsItsLanding() {
+        let view = WindowSurfaceView(queue: queue)
+        let window = CGRect(x: 0, y: 0, width: 8, height: 4)
+        let gate = DispatchSemaphore(value: 0)
+        var cancelledFinished = false
+        view.present(window: window, placement: .identity, draw: { _ in gate.wait(); return window },
+                     finished: { _ in cancelledFinished = true })
+        XCTAssertNil(view.freezePresented(), "a pending draw is not a presented picture")
+        gate.signal()
+        present(view, window: window, count: 1)
+        XCTAssertFalse(cancelledFinished)
+        XCTAssertEqual(view.presentedCount, 1, "only the post-transfer request lands")
+    }
+
+    /// Frozen allocations count until the base covers them, even after their old view is gone.
+    /// This is the memory count that the iPad probe reports, not a count of live UIView owners.
+    func testFrozenSurfaceStaysAccountedForUntilTheBaseRetiresIt() throws {
+        let before = WindowSurfaceView.residentBytes
+        try autoreleasepool {
+            var view: WindowSurfaceView? = WindowSurfaceView(queue: queue)
+            let window = CGRect(x: 0, y: 0, width: 8, height: 4)
+            view!.presentFirst(.init(window: window, placement: .identity, draw: { _ in window }))
+            var frozen = try XCTUnwrap(view!.freezePresented()) as WindowSurfaceView.FrozenWindow?
+            let bytes = frozen!.surface.allocationSize
+        let surface = frozen!.surface
+            var ink = UnlandedInk()
+            ink.hold(.init(id: 1, version: 7, windowRect: window, alpha: 1,
+                           replacesBase: true, contents: .surface(frozen!)))
+            frozen = nil
+            view = nil
+            XCTAssertEqual(WindowSurfaceView.residentBytes - before, bytes)
+            let shown = ink.pictures[0].contents.makeView()
+            XCTAssertTrue(shown.layer.contents as? IOSurface === surface,
+                          "the held lane presents the same storage without a snapshot")
+            shown.layer.contents = nil
+            ink.retire(upTo: 6)
+            XCTAssertEqual(WindowSurfaceView.residentBytes - before, bytes,
+                           "an old base cannot release the finished picture")
+            ink.retire(upTo: 7)
+            XCTAssertEqual(WindowSurfaceView.residentBytes, before)
+        }
+    }
+    func testAnAbandonedViewKeepsOnlyItsInFlightAllocationUntilTheDrawEnds() throws {
+        let before = WindowSurfaceView.residentBytes
+        var view: WindowSurfaceView? = WindowSurfaceView(queue: queue)
+        let window = CGRect(x: 0, y: 0, width: 8, height: 4)
+        view!.presentFirst(.init(window: window, placement: .identity, draw: { _ in window }))
+        let bytes = try XCTUnwrap(view!.layer.contents as? IOSurface).allocationSize
+        let gate = DispatchSemaphore(value: 0)
+        view!.present(window: window, placement: .identity) { _ in gate.wait(); return window }
+        view = nil
+        XCTAssertEqual(WindowSurfaceView.residentBytes - before, bytes,
+                       "the worker retains its writable buffer, not the departed view's pair")
+        var drained = false
+        queue.async { DispatchQueue.main.async { drained = true } }
+        gate.signal()
+        spin(until: { drained }, "the abandoned draw finished")
+        XCTAssertEqual(WindowSurfaceView.residentBytes, before)
+    }
+
 }

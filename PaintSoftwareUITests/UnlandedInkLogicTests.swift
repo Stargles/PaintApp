@@ -16,6 +16,15 @@ import UIKit
 /// every assertion below is taken at a named step of the artist's sequence rather than after it.
 final class UnlandedInkLogicTests: XCTestCase {
 
+    func testImagePicturesHandTheirExistingBitmapToTheLayer() throws {
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 1, height: 1)).image { _ in }
+        let picture = UnlandedInk.Picture(id: 1, version: 1, windowRect: .zero, alpha: 1,
+                                         replacesBase: false, image: image)
+        let shown = try XCTUnwrap(picture.contents.makeView() as? UIImageView)
+        XCTAssertTrue(shown.image === image,
+                      "brush pictures keep UIImage's scale and orientation handling without a copy")
+    }
+
     // MARK: - The defect
 
     /// **The whole defect, as five steps.** Stroke *n* is finished and its render is in flight;
@@ -125,22 +134,53 @@ final class UnlandedInkLogicTests: XCTestCase {
                        + "single overlay this replaced could carry only one of the two")
     }
 
-    /// **The base hole is the removal's window, and there is at most one of them.** See
-    /// `UnlandedInk.hold`: two removals need two holes, `setBaseHole` builds one even-odd path, and
-    /// two overlapping rectangles in an even-odd path cancel back to opaque.
-    ///
-    /// Operands: `baseHole` after two erasers against the *second* one's rect. Red if `hold` kept
-    /// both (the hole would be the first's) or dropped the incoming one.
-    func testASecondRemovalReplacesTheFirstRatherThanAddingASecondHole() {
+    /// Compare the actual sibling views/masks with sequential clear-and-draw compositing. The
+    /// latter is how replacement windows commit, independent of the display plan's path booleans.
+    func testReplacementWindowsCompositeAsSequentialEdits() throws {
+        for second in [CGRect(x: 52, y: 8, width: 28, height: 28),
+                       CGRect(x: 24, y: 14, width: 28, height: 28),
+                       CGRect(x: 8, y: 4, width: 48, height: 44)] {
+            let edits = [
+                Self.windowPicture(id: 1, rect: CGRect(x: 4, y: 4, width: 40, height: 28),
+                                   color: .green, replacing: false),
+                Self.windowPicture(id: 2, rect: CGRect(x: 12, y: 8, width: 28, height: 28),
+                                   color: .red, replacing: true),
+                Self.windowPicture(id: 3, rect: second, color: .blue, replacing: true),
+                Self.windowPicture(id: 4, rect: CGRect(x: 20, y: 16, width: 14, height: 10),
+                                   color: .yellow, replacing: false)
+            ]
+            var ink = UnlandedInk()
+            for edit in edits { ink.hold(edit) }
+            for covering in [[], [CGRect(x: 22, y: 18, width: 12, height: 12)]] {
+                // The expected result uses the original edits: a broken hold may discard one.
+                let truth = Self.sequentialPicture(edits, covering: covering)
+                let screen = Self.plannedPicture(ink.displayPlan(covering: covering))
+                XCTAssertEqual(try Self.worstChannelDifference(Self.bytes(of: screen), Self.bytes(of: truth)), 0,
+                               "disjoint gaps, transparent overlap, and newer live replacements stay correct: \(second), \(covering)")
+            }
+        }
+    }
+
+    func testMovingLiveReplacementUpdatesAndRemovesAnExistingPictureClip() throws {
         var ink = UnlandedInk()
-        let first = CGRect(x: 10, y: 10, width: 40, height: 40)
-        let second = CGRect(x: 200, y: 200, width: 30, height: 30)
-        ink.hold(Self.erase(id: 1, version: 1, window: first))
-        XCTAssertEqual(ink.baseHole, first, "one removal punches its own window out of the base")
-        ink.hold(Self.erase(id: 2, version: 2, window: second))
-        XCTAssertEqual(ink.pictures.map(\.id), [2],
-                       "the older removal goes rather than leaving a hole nothing draws into")
-        XCTAssertEqual(ink.baseHole, second, "the hole follows the removal that is on screen")
+        let rect = CGRect(x: 12, y: 8, width: 28, height: 28)
+        ink.hold(Self.windowPicture(id: 1, rect: rect, color: .red, replacing: false))
+        let view = ink.pictures[0].contents.makeView()
+        view.frame = rect
+        for covering in [[CGRect(x: 10, y: 10, width: 14, height: 24)],
+                         [CGRect(x: 26, y: 8, width: 14, height: 28)], []] {
+            let visible = try XCTUnwrap(ink.displayPlan(covering: covering).pictures.first)
+            visible.applyClip(to: view)
+            let actual = UIGraphicsImageRenderer(size: rect.size, format: PixelOps.transparentFormat()).image {
+                view.layer.render(in: $0.cgContext)
+            }
+            let expected = UIGraphicsImageRenderer(size: rect.size, format: PixelOps.transparentFormat()).image { ctx in
+                if case .image(let image) = ink.pictures[0].contents { image.draw(at: .zero) }
+                for hole in covering { ctx.cgContext.clear(hole.offsetBy(dx: -rect.minX, dy: -rect.minY)) }
+            }
+            XCTAssertEqual(try Self.worstChannelDifference(Self.bytes(of: actual), Self.bytes(of: expected)), 0,
+                           "the same displayed view follows the live window and loses its mask when it ends")
+        }
     }
 
     /// **An additive picture is kept whatever is below it, including a removal**, and the composite
@@ -158,7 +198,7 @@ final class UnlandedInkLogicTests: XCTestCase {
         XCTAssertEqual(ink.pictures.map(\.id), [1, 2],
                        "the erase stands in for the base inside its window and the later stroke's "
                        + "ink goes over it, which is what drawing after erasing means")
-        XCTAssertEqual(ink.baseHole, window,
+        XCTAssertEqual(ink.displayPlan().baseHole?.boundingBoxOfPath, window,
                        "the removal still needs the base punched out under it — the ink drawn "
                        + "afterwards does not put the erased pixels back")
     }
@@ -176,7 +216,7 @@ final class UnlandedInkLogicTests: XCTestCase {
         XCTAssertEqual(ink.pictures.count, 2, "Setup: there is something to lose")
         ink.removeAll()
         XCTAssertTrue(ink.isEmpty, "held ink belongs to the canvas it was drawn on")
-        XCTAssertNil(ink.baseHole, "and so does the hole it asked for")
+        XCTAssertNil(ink.displayPlan().baseHole, "and so does the hole it asked for")
     }
 
     // MARK: - Alpha, checked with pixels
@@ -266,6 +306,50 @@ final class UnlandedInkLogicTests: XCTestCase {
     private static func erase(id: Int, version: Int, window: CGRect) -> UnlandedInk.Picture {
         UnlandedInk.Picture(id: id, version: version, windowRect: window,
                             alpha: 1, replacesBase: true, image: pixel)
+    }
+
+    /// Replacement fixtures deliberately leave half their window transparent.
+    private static func windowPicture(id: Int, rect: CGRect, color: UIColor,
+                                      replacing: Bool) -> UnlandedInk.Picture {
+        let image = UIGraphicsImageRenderer(size: rect.size, format: PixelOps.transparentFormat()).image { ctx in
+            color.setFill()
+            ctx.fill(CGRect(x: 0, y: 0, width: replacing ? rect.width / 2 : rect.width, height: rect.height))
+        }
+        return .init(id: id, version: id, windowRect: rect, alpha: 1, replacesBase: replacing, image: image)
+    }
+
+    private static func sequentialPicture(_ pictures: [UnlandedInk.Picture], covering: [CGRect]) -> UIImage {
+        UIGraphicsImageRenderer(size: canvasSize, format: PixelOps.transparentFormat()).image { ctx in
+            UIColor.black.setFill(); ctx.fill(CGRect(origin: .zero, size: canvasSize))
+            for picture in pictures {
+                if picture.replacesBase { ctx.cgContext.clear(picture.windowRect) }
+                if case .image(let image) = picture.contents { image.draw(in: picture.windowRect) }
+            }
+            for rect in covering { ctx.cgContext.clear(rect) }
+        }
+    }
+
+    private static func plannedPicture(_ plan: UnlandedInk.DisplayPlan) -> UIImage {
+        let bounds = CGRect(origin: .zero, size: canvasSize)
+        let root = UIView(frame: bounds)
+        let base = UIView(frame: bounds)
+        base.backgroundColor = .black
+        if let hole = plan.baseHole {
+            let path = CGMutablePath(); path.addRect(bounds); path.addPath(hole)
+            let mask = CAShapeLayer(); mask.frame = bounds; mask.fillRule = .evenOdd; mask.path = path
+            base.layer.mask = mask
+        }
+        root.addSubview(base)
+        for visible in plan.pictures {
+            let view = visible.picture.contents.makeView()
+            view.frame = visible.picture.windowRect
+            view.alpha = visible.picture.alpha
+            visible.applyClip(to: view)
+            root.addSubview(view)
+        }
+        return UIGraphicsImageRenderer(size: canvasSize, format: PixelOps.transparentFormat()).image {
+            root.layer.render(in: $0.cgContext)
+        }
     }
 
     // MARK: - Pixel plumbing

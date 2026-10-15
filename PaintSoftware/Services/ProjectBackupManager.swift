@@ -326,7 +326,7 @@ nonisolated enum ProjectBackupManager {
     static func snapshotAllProjectsForAppUpdate(signature: String) {
         let sig = sanitizedSignature(signature)
         for url in allProjectPackages() {
-            guard validateProject(at: url), let id = manifestID(at: url) else { continue }
+            guard validateProjectForRestore(at: url), let id = manifestID(at: url) else { continue }
             let dir = backupsDirectory(projectID: id)
             writeOriginMarker(directory: dir, projectFileName: url.lastPathComponent)
             _ = cloneItem(at: url, to: uniqueSlotURL(directory: dir, prefix: "preupdate-\(sig)"))
@@ -489,7 +489,7 @@ nonisolated enum ProjectBackupManager {
     @discardableResult
     static func restoreBackup(at backupURL: URL, toProjectAt projectURL: URL, trashTag: String = "replaced") -> Bool {
         let fm = FileManager.default
-        guard validateProject(at: backupURL) else { return false }
+        guard validateProjectForRestore(at: backupURL) else { return false }
         let staged = projectURL.deletingLastPathComponent()
             .appendingPathComponent(".saving-restore-\(UUID().uuidString).paintproj")
         defer { try? fm.removeItem(at: staged) }
@@ -534,7 +534,7 @@ nonisolated enum ProjectBackupManager {
         } else {
             label = "Before save"
         }
-        return ProjectBackup(url: url, label: label, date: slotDate(url), isLatest: isLatest, isValid: validateProject(at: url))
+        return ProjectBackup(url: url, label: label, date: slotDate(url), isLatest: isLatest, isValid: validateProjectForRestore(at: url))
     }
 
     // MARK: - Trash
@@ -854,12 +854,6 @@ nonisolated enum ProjectBackupManager {
             /// Mirrors `CelManifest.animationFileName` — KEYFRAMES.md §3.5's *"add it to the
             /// validator on day one"*.
             ///
-            /// **`interpolationFileName` is still not here, and that is the gap this key exists not
-            /// to inherit.** §3.5 records it as real and existing: a cel whose recipe sidecar is
-            /// missing validates today and the atomic save proceeds over it. Fixing that is a change
-            /// to what the validator *rejects* on documents that already exist, which is not this
-            /// stage's to make; adding this one costs nothing, because no package in the world yet
-            /// names an animation file.
             var animationFileName: String?
 
             /// This cel's recorded name for one of the three moved roles — TODO (57). One switch so
@@ -873,11 +867,7 @@ nonisolated enum ProjectBackupManager {
                 default:             return nil
                 }
             }
-            /// **Still not decoded, and the gap is still real** — see `animationFileName` above. A cel
-            /// whose recipe sidecar is missing validates today and the atomic save proceeds over it.
-            /// (57) resolves this field's *address* through the same rule as the other two, which is
-            /// why the accessor above knows about it; closing the validation gap is a change to what
-            /// existing documents are called damaged for, and is not this item's to make.
+            /// A named recipe must exist and decode as current metadata before ordinary reads or saves.
             var interpolationFileName: String?
         }
     }
@@ -888,10 +878,20 @@ nonisolated enum ProjectBackupManager {
     /// references (raster/fill/baked PNGs, vector JSON) both exists and — for PNGs — starts with the
     /// 8-byte PNG signature (catches crash-truncated writes, not just missing files).
     static func validateProject(at url: URL) -> Bool {
+        guard let data = try? Data(contentsOf: url.appendingPathComponent("manifest.json")) else { return false }
+        return validateProjectFiles(at: url, manifestData: data) && ProjectRecipeMetadata.validate(in: url, manifestData: data)
+    }
+
+    /// Read-only preflight for preserved earlier versions. A staged clone is repaired and strictly
+    /// validated before replacement; the source version and preupdate snapshot keep their bytes.
+    static func validateProjectForRestore(at url: URL) -> Bool {
+        guard let data = try? Data(contentsOf: url.appendingPathComponent("manifest.json")) else { return false }
+        return validateProjectFiles(at: url, manifestData: data) && LegacyLiquifyRepair.inkIsRepairable(in: url, manifestData: data)
+    }
+
+    private static func validateProjectFiles(at url: URL, manifestData: Data) -> Bool {
         let fm = FileManager.default
-        let manifestURL = url.appendingPathComponent("manifest.json")
-        guard let data = try? Data(contentsOf: manifestURL),
-              let skeleton = try? JSONDecoder().decode(ManifestSkeleton.self, from: data) else {
+        guard let skeleton = try? JSONDecoder().decode(ManifestSkeleton.self, from: manifestData) else {
             return false
         }
         // **Resolved through `ProjectPackageLayout`, not joined to `images/`** — TODO (57). The

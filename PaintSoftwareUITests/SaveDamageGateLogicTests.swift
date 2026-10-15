@@ -121,7 +121,7 @@ final class SaveDamageGateLogicTests: XCTestCase {
     /// is nonsense. This is *damage* — the artist drew it and it is gone.
     private func breakFirstStroke(in projectURL: URL) throws {
         try rewriteElements(at: try vectorPayloadURL(in: projectURL)) { elements in
-            elements[0] = ["kind": "stroke", "stroke": ["not": "a stroke"]]
+            elements[0] = ["kind": "stroke", "stroke": ["not": "a stroke", "placement": NSNull()]]
         }
     }
 
@@ -238,7 +238,7 @@ final class SaveDamageGateLogicTests: XCTestCase {
     func testAMalformedEntryBesideAnUnknownOneCountsOnlyTheMalformedOne() throws {
         let url = writtenProject()
         try rewriteElements(at: try vectorPayloadURL(in: url)) { elements in
-            elements[0] = ["kind": "stroke", "stroke": ["not": "a stroke"]]
+            elements[0] = ["kind": "stroke", "stroke": ["not": "a stroke", "placement": NSNull()]]
             elements.append(Self.unknownKindElement)
         }
         let reopened = try XCTUnwrap(ProjectStore.load(from: url))

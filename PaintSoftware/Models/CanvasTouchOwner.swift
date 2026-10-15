@@ -692,7 +692,7 @@ extension Tool {
     /// trusting it.
     func canvasRecognizerOwner(fillMode: FillMode) -> CanvasTouchOwner? {
         switch self {
-        case .pen, .pencil, .eraser:
+        case .pen, .pencil, .eraser, .liquify:
             return nil
         case .fill:
             switch fillMode {

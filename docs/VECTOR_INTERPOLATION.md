@@ -86,8 +86,16 @@ Things that are cheap to break and expensive to relearn.
    by build. Assert a property both branches share.
 8. **A liquify at *t* is a rest-space displacement gesture in its own field on the recipe** — never
    per-vertex offsets (indices do not survive lattice expansion or re-registration) and never inside
-   `localEdits` (content is warped *by* the lattice; a liquify *is* the lattice). The field is not
-   built; answering the question is what let `LocalEdit` stay strokes-only.
+   `localEdits`. `InterpolationRecipe.deformations` stores each captured brush walk and its
+   immutable group lattice geometry. Evaluation conjugates the shown-space brush field through
+   that capture and applies it in rest space, so retiming and source edits preserve the link.
+   Liquify capture lineage uses source cel occurrence plus element UUID, with separate local-edit and
+   reprojection-subject namespaces. Existing ink keeps its own capture after group deletion, splitting,
+   merging or re-registration. New source or subject ink inherits a surviving group UUID, or the single captured lineage
+   in a replacement group. If a replacement group merges multiple histories, newly added ink inherits
+   no arbitrary old reshape; its older members retain their individual histories. Local marks participate only in gestures
+   that captured their LocalEdit.id: a mark drawn now does not replay gestures made before it existed. Ungrouped ink stores
+   a scoped identity capture, allowing canvas resize to conjugate the map without changing native grain.
 9. **Commit trades exactness for vectors.** No display list can express an in-between at an interior
    *t* — an `.erase` stroke reaches everything beneath it and `VectorElement` has no group case to
    hold a per-set alpha — so Commit concatenates and accepts the drift. One-way by design.
@@ -377,7 +385,7 @@ two references, which nothing gathers.
 
 - **Spline interpolation across 4+ keyframes.** Pairwise only; the data model allows it.
 - **Range interpolation.** Architecture must not preclude it.
-- **The liquify / mesh-distort tool** (fact 8 is where it would be stored) and **lasso resize**.
+- **The mesh-distort tool** and **lasso resize**.
 - **The GPU dab rasteriser.** Separate pre-existing project; the polyline preview tier is this
   project's answer.
 - **Break-link.** Commit exists and is one-way; break-link does not.

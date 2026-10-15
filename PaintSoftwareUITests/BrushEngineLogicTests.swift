@@ -662,6 +662,7 @@ final class BrushEngineLogicTests: XCTestCase {
             "strokes": try strokes.map { try jsonObject($0) },
             "fills": try fills.map { try jsonObject($0) },
             "images": try images.map { try jsonObject($0) },
+            "materialOperations": [],
             "transform": transform
         ]
         return try JSONSerialization.data(withJSONObject: root)

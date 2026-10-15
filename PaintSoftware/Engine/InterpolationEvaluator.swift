@@ -153,46 +153,65 @@ enum InterpolationEvaluator {
         // much louder failure than content carried by a neighbouring group's motion.
         let fallbackID = recipe.groups.first?.groupID
         let fallback = fallbackID.flatMap { warps[$0] }
-
-        // **Reproject: one set, not two, and nothing is derived.** The cel's own linework is the
-        // frame; all that slides is its pose. So there is no cross-fade to weight —
-        // the subject sits at full strength at every `t` — and `backward` is empty rather than
-        // holding a second copy of the same drawing.
-        //
-        // The subject rides the lattice **from rest**, exactly as a local edit does, because the rest
-        // grid of a reprojection's lattice is the one drawn over *this cel's* cloud rather than a
-        // keyframe's. See `CanvasManager.registerReprojection`.
-        if recipe.mode == .reproject {
-            // The artist's own linework at this frame, not a keyframe's content being faded in or
-            // out — so it is never thinned, for the same reason a local edit is not. Solo/mute still
-            // applies: it is a view filter over whatever is on screen.
-            var full = options
-            full.thicknessFade = .none
-            return Evaluation(
-                forward: warped(subject, at: t, weight: 1, direction: .fromRest, warps: warps,
-                                fallback: fallback, fallbackID: fallbackID, options: full),
-                backward: [],
-                localEdits: warpedLocalEdits(recipe.localEdits, at: t, warps: warps,
-                                             fallback: fallback, fallbackID: fallbackID,
-                                             hidden: options.hiddenGroups),
-                forwardWeight: 1,
-                backwardWeight: 0)
+        let packets = inkPackets(recipe: recipe, at: t, content: content, subject: subject)
+        let members = (packets.forward + packets.backward + packets.local).map(\.membership)
+        func shown(_ ink: [Ink], weight: CGFloat, direction: Direction, options: Options) -> [Ink] {
+            ink.compactMap { item in
+                guard let element = warped([item.element], at: t, weight: weight, direction: direction,
+                    warps: warps, fallback: fallback, fallbackID: fallbackID, options: options).first else { return nil }
+                return Ink(element: element, membership: item.membership)
+            }
         }
+        var full = options
+        if recipe.mode == .reproject { full.thicknessFade = .none }
+        var forward = shown(packets.forward, weight: recipe.mode == .reproject ? 1 : 1 - local,
+                            direction: recipe.mode == .reproject ? .fromRest : .forward, options: full)
+        var backward = shown(packets.backward, weight: local, direction: .backward, options: options)
+        var localInk = recipe.localEdits.compactMap { edit -> Ink? in
+            guard let element = warpedLocalEdits([edit], at: t, warps: warps, fallback: fallback,
+                fallbackID: fallbackID, hidden: options.hiddenGroups).first else { return nil }
+            return Ink(element: element, membership: .init(id: .init(kind: .local, elementID: edit.id),
+                groupID: logicalGroup(edit.groupID, recipe: recipe)))
+        }
+        // Stream one field through all three collections; no scene-wide retained field cache.
+        for gesture in recipe.deformations {
+            let field = LiquifyField(gesture)
+            let operation = InkMaterialOperation(gesture, supportBounds: field.replacementBounds)
+            let resolver = LiquifyDeformation.CaptureResolver(captures: gesture.captures, members: members)
+            forward = deformedShown(forward, gesture: gesture, operation: operation, field: field, resolver: resolver, warps: warps, fallback: fallback)
+            backward = deformedShown(backward, gesture: gesture, operation: operation, field: field, resolver: resolver, warps: warps, fallback: fallback)
+            localInk = deformedShown(localInk, gesture: gesture, operation: operation, field: field, resolver: resolver, warps: warps, fallback: fallback)
+        }
+        return Evaluation(forward: forward.map(\.element), backward: backward.map(\.element),
+            localEdits: localInk.map(\.element), forwardWeight: recipe.mode == .reproject ? 1 : 1 - local,
+            backwardWeight: recipe.mode == .reproject ? 0 : local)
+    }
 
-        let forwardElements = recipe.references[index].cels.flatMap(content)
-        let backwardElements = recipe.references[index + 1].cels.flatMap(content)
-
-        return Evaluation(
-            forward: warped(forwardElements, at: t, weight: 1 - local, direction: .forward,
-                            warps: warps, fallback: fallback, fallbackID: fallbackID,
-                            options: options),
-            backward: warped(backwardElements, at: t, weight: local, direction: .backward,
-                             warps: warps, fallback: fallback, fallbackID: fallbackID,
-                             options: options),
-            localEdits: warpedLocalEdits(recipe.localEdits, at: t, warps: warps, fallback: fallback,
-                                         fallbackID: fallbackID, hidden: options.hiddenGroups),
-            forwardWeight: 1 - local,
-            backwardWeight: local)
+    private struct Ink {
+        var element: VectorElement
+        var membership: LiquifyDeformation.Membership
+    }
+    private static func logicalGroup(_ tag: UUID?, recipe: InterpolationRecipe) -> UUID? {
+        if let tag, recipe.groups.contains(where: { $0.groupID == tag }) { return tag }
+        return recipe.groups.first?.groupID
+    }
+    /// Only the active source pair and this cel's own edits enter the occurrence registry.
+    private static func inkPackets(recipe: InterpolationRecipe, at t: CGFloat, content: ContentProvider,
+                                   subject: [VectorElement]) -> (forward: [Ink], backward: [Ink], local: [Ink]) {
+        func packet(_ element: VectorElement, id: LiquifyDeformation.InkID, group: UUID? = nil) -> Ink {
+            Ink(element: element, membership: .init(id: id,
+                groupID: logicalGroup(group ?? element.stroke?.motionGroupID, recipe: recipe)))
+        }
+        let local = recipe.localEdits.map { packet(.stroke($0.stroke), id: .init(kind: .local, elementID: $0.id), group: $0.groupID) }
+        if recipe.mode == .reproject {
+            return (subject.map { packet($0, id: .init(kind: .subject, elementID: $0.id)) }, [], local)
+        }
+        let span = CGFloat(recipe.references.count - 1)
+        let index = min(max(Int((recipe.spacing.eased(t) * span).rounded(.down)), 0), recipe.references.count - 2)
+        func source(_ reference: InterpolationReference) -> [Ink] {
+            reference.cels.flatMap { ref in content(ref).map { packet($0, id: .init(kind: .source, elementID: $0.id, reference: ref)) } }
+        }
+        return (source(recipe.references[index]), source(recipe.references[index + 1]), local)
     }
 
     /// One warp per motion group binding, evaluated at `t`.
@@ -307,8 +326,7 @@ enum InterpolationEvaluator {
         // stroke stores verbatim. Recording it is still right — the artist drew it, and it renders
         // at full strength from τ onward exactly like any other local edit.
         guard !recipe.groups.isEmpty else {
-            return LocalEditPlan(restPoints: points, bindingIndex: nil, groupID: nil,
-                                 grownLattices: nil)
+            return LocalEditPlan(restPoints: points, bindingIndex: nil, groupID: nil, grownLattices: nil)
         }
 
         let index = bindingCarrying(points, recipe: recipe, at: t, segment: segment, span: span,
@@ -398,9 +416,27 @@ enum InterpolationEvaluator {
             }
         }
 
+        func sourceFromRest(_ points: [CGPoint], direction: Direction) -> [CGPoint] {
+            switch direction {
+            case .forward: return from.warp(from.embedInRest(points))
+            case .backward: return to.warp(to.embedInRest(points))
+            case .fromRest: return points
+            }
+        }
+
         /// A local edit is stored in rest space (`LocalEdit`), so it embeds in the rest grid and
         /// warps with whatever the lattice is doing now — which is what makes it follow the motion
         /// instead of sitting still.
+        func materialTransport(_ direction: Direction) -> InkMaterialBridge {
+            let source: Lattice
+            switch direction {
+            case .forward: source = from
+            case .backward: source = to
+            case .fromRest: source = current.restConfiguration
+            }
+            return .lattice(captured: source, current: current, pose: .identity)
+        }
+
         func mapFromRest(_ points: [CGPoint]) -> [CGPoint] {
             current.warp(current.embedInRest(points))
         }
@@ -430,7 +466,7 @@ enum InterpolationEvaluator {
                                direction: Direction, warps: [UUID: GroupWarp],
                                fallback: GroupWarp?, fallbackID: UUID?,
                                options: Options) -> [VectorElement] {
-        elements.compactMap { element in
+        return elements.compactMap { element in
             // Hidden by the group the element *would move as*: its own tag when it has one, and the
             // recipe's first binding when it does not. A fill or a placed image never has one
             // (see `VECTOR_INTERPOLATION.md` §4 item 11), so it is always the fallback that decides
@@ -443,12 +479,11 @@ enum InterpolationEvaluator {
                 guard !hidden(stroke.motionGroupID) else { return nil }
                 let warp = stroke.motionGroupID.flatMap { warps[$0] } ?? fallback
                 guard let visible = visible(stroke, at: t) else { return nil }
-                return .stroke(warped(visible, weight: weight, options: options) {
-                    warp?.map($0, direction) ?? $0
-                })
+                return .stroke(warped(visible, weight: weight, options: options,
+                    transport: warp?.materialTransport(direction)) { warp?.map($0, direction) ?? $0 })
             case .fill(let fill):
                 guard !hidden(nil) else { return nil }
-                return .fill(warped(fill) { fallback?.map($0, direction) ?? $0 })
+                return .fill(warped(fill, transport: fallback?.materialTransport(direction)) { fallback?.map($0, direction) ?? $0 })
             case .image(let image):
                 guard !hidden(nil) else { return nil }
                 return .image(warped(image) { fallback?.map($0, direction) ?? $0 })
@@ -481,15 +516,53 @@ enum InterpolationEvaluator {
                                          warps: [UUID: GroupWarp],
                                          fallback: GroupWarp?, fallbackID: UUID?,
                                          hidden: Set<UUID>) -> [VectorElement] {
-        edits.compactMap { edit in
+        return edits.compactMap { edit in
             guard (edit.groupID ?? fallbackID).map(hidden.contains) != true else { return nil }
             guard let visible = visible(edit.stroke, at: t) else { return nil }
             let warp = edit.groupID.flatMap { warps[$0] } ?? fallback
             // Weight 1 and no thickness fade: a local edit is the artist's own content at this
             // frame, not a keyframe's content being faded in or out.
-            return .stroke(warped(visible, weight: 1, options: Options()) {
-                warp?.mapFromRest($0) ?? $0
-            })
+            return .stroke(warped(visible, weight: 1, options: Options(),
+                transport: warp?.materialTransport(.fromRest)) { warp?.mapFromRest($0) ?? $0 })
+        }
+    }
+
+    /// Apply one captured brush field to ink already shown through its current group pose.
+    /// Typed objects stay on interpolation's normal path; only ink geometry enters the field.
+    private static func deformedShown(_ elements: [Ink], gesture: LiquifyDeformation,
+                                      operation: InkMaterialOperation, field: LiquifyField, resolver: LiquifyDeformation.CaptureResolver,
+                                      warps: [UUID: GroupWarp], fallback: GroupWarp?) -> [Ink] {
+        elements.map { ink in
+            var ink = ink
+            let element = ink.element
+            let groupID = ink.membership.groupID
+            guard let capture = resolver.capture(for: ink.membership.id, groupID: groupID) else { return ink }
+            let warp = groupID.flatMap { warps[$0] } ?? fallback
+            guard let restBounds = gesture.restBounds(capture: capture, using: field) else { return ink }
+            let corners = [CGPoint(x: restBounds.minX, y: restBounds.minY), CGPoint(x: restBounds.maxX, y: restBounds.minY),
+                           CGPoint(x: restBounds.maxX, y: restBounds.maxY), CGPoint(x: restBounds.minX, y: restBounds.maxY)]
+            let shown = warp?.mapFromRest(corners) ?? corners
+            let region = shown.reduce(CGRect.null) { $0.union(CGRect(origin: $1, size: CGSize(width: 0.001, height: 0.001))) }.insetBy(dx: -2, dy: -2)
+            func move(_ points: [CGPoint]) -> [CGPoint] {
+                let rest = warp?.mapToRest(points) ?? points
+                let moved = gesture.mapRest(rest, capture: capture, using: field)
+                return zip(points.indices, zip(rest, moved)).map { index, pair in
+                    guard pair.0 != pair.1 else { return points[index] }
+                    return warp?.mapFromRest([pair.1]).first ?? pair.1
+                }
+            }
+            let current = warp?.current ?? capture.lattice.restConfiguration
+            let binding = InkMaterialBinding(operation: operation,
+                bridge: .lattice(captured: capture.lattice, current: current, pose: .identity))
+            switch element {
+            case .stroke(let stroke):
+                guard VectorCanvas.materialBounds(of: stroke).intersects(region) else { return ink }
+            case .fill(let fill):
+                guard fill.cgPath?.boundingBoxOfPath.intersects(region) == true else { return ink }
+            case .image, .video, .stream, .text: return ink
+            }
+            ink.element = VectorGeometryMap.liquified(element, region: region, binding: binding, by: move)
+            return ink
         }
     }
 
@@ -527,10 +600,10 @@ enum InterpolationEvaluator {
         guard kept.count < stroke.samples.count else { return trimmed }
 
         trimmed.samples = stroke.samples.replacingSamples(kept.map { stroke.samples[$0] })
-        // A stored rest spine names every sample; a trimmed sub-run is not that, so the walk
-        // recovers it from the map instead (`StrokeDistort.rest`). The rest *lattice* stays: it is
-        // the parent's whole walk, which trimming does not touch.
-        trimmed.distort?.rest = nil
+        if var placement = trimmed.placement {
+            placement.source = placement.source.remapped(onto: kept.map { CGFloat($0) })
+            trimmed.placement = placement
+        }
         // A piece's `parameters` are aligned with its own samples, so they trim at the same indices.
         // The parent walk in `lattice.samples` is untouched — trimming narrows the piece's `range`,
         // which is exactly the effect wanted: fewer of the parent's dabs are drawn.
@@ -544,49 +617,19 @@ enum InterpolationEvaluator {
     // MARK: - Warping one element
 
     private static func warped(_ stroke: VectorStroke, weight: CGFloat, options: Options,
+                               densify: Bool = false, region: CGRect? = nil, transport: InkMaterialBridge? = nil,
                                by map: ([CGPoint]) -> [CGPoint]) -> VectorStroke {
-        var result = stroke
-        // `angleRotation: 0` is a claim, and it is written down rather than defaulted: a lattice warp
-        // is not an affine, so it has no single rotation, and BRUSH.md §2.7's azimuth would need the
-        // *local* Jacobian to turn correctly here. Nothing reads azimuth until §12 stage 7's angle
-        // output, and until then carrying it unchanged is the honest answer rather than a guessed one.
-        // BRUSH.md §13 carries the open question.
-        let moved = map(stroke.samples.map(\.point))
-        if moved.count == stroke.samples.count {
-            var i = -1
-            result.samples = stroke.samples.replacingPositions({ _ in i += 1; return moved[i] },
-                                                               angleRotation: 0)
-        }
-        // The warp moved the spine by something the map cannot express, so a bake's stored rest spine
-        // no longer names it — the walk pulls the warped spine back instead, which is the round trip
-        // the comment below says cancels where it matters (`StrokeDistort.rest`).
-        result.distort = result.distort?.withoutStoredRest
-        // A piece's dabs come from its *parent's* walk, so the parent's samples have to travel too —
-        // otherwise the stroke's geometry moves and its ink stays behind. See `DabLattice`.
-        if var lattice = result.lattice {
-            let movedParent = map(lattice.samples.map(\.point))
-            if movedParent.count == lattice.samples.count {
-                var j = -1
-                lattice.samples = lattice.samples.replacingPositions({ _ in j += 1; return movedParent[j] },
-                                                                     angleRotation: 0)
-                result.lattice = lattice
+        var result = VectorGeometryMap.stroke(stroke, densify: densify, region: region, by: map)
+        let scale = options.thicknessFade.scale(weight: weight)
+        result.size *= scale
+        if var native = stroke.effectiveWalk, native.material != nil {
+            if let transport {
+                native.transport = native.transport.followed(by: transport)
+                native.material = native.material?.transported(by: transport)
             }
+            native.size *= scale
+            result.restWalk = native
         }
-        result.size *= options.thicknessFade.scale(weight: weight)
-        // **A committed Distort (`VectorStroke.distort`) is carried through untouched, and that is
-        // the answer rather than the absence of one.** The obvious move is to clear it — the map says
-        // *"my samples are the image of these others"* and a lattice warp has just moved the samples
-        // by something that is not a homography, so the claim is no longer literally true. Clearing it
-        // is **worse**, and measurably so: that stroke's `size` is the *footprint envelope* of its
-        // keystone, so a stroke with no map draws at its widest point along its whole length, and an
-        // interpolated frame of a keystoned line would come out visibly fatter than either keyframe.
-        //
-        // Carried, the round trip cancels where it matters. `effectiveWalk` walks `H^-1` of the
-        // *warped* samples and re-poses through `H`, so every dab centre lands exactly on the warped
-        // spine; what is approximate is only *where along the keystone* each width is read, and for
-        // the small lattice displacements this feature uses that is within a sample of the right
-        // place. Widening the stroke arm to a genuine per-point width is `InterpolationEvaluator`'s
-        // own open question (BRUSH.md §13), and it would subsume this.
         return result
     }
 
@@ -602,10 +645,34 @@ enum InterpolationEvaluator {
     /// The id is carried across (`reshaped` keeps everything that is not geometry). Nothing in
     /// rendering reads a fill's id, but keeping it stable is what lets a future matcher recognise the
     /// same fill at two keyframes (e.g. to lerp colour between corresponded fills).
-    private static func warped(_ fill: VectorFillElement, by map: ([CGPoint]) -> [CGPoint]) -> VectorFillElement {
-        guard let path = fill.cgPath else { return fill }
-        return fill.reshaped(to: warped(path: path, by: map),
-                             paint: fill.paint.mapped(by: { map([$0]).first }) ?? fill.paint)
+    private static func warped(_ fill: VectorFillElement, transport: InkMaterialBridge? = nil,
+                               by map: ([CGPoint]) -> [CGPoint]) -> VectorFillElement {
+        var result = VectorGeometryMap.fill(fill, mapPaint: fill.placement == nil, by: map)
+        if var placement = result.placement, let transport {
+            placement = placement.transported(by: transport)
+            result.placement = placement
+        }
+        return result
+    }
+
+    static func liquifyCaptures(recipe: InterpolationRecipe, content: ContentProvider = { _ in [] },
+                                subject: [VectorElement] = [], guides: [GuideStroke] = []) -> [LiquifyDeformation.Capture] {
+        let span = CGFloat(recipe.references.count - 1)
+        guard span >= 1 else { return [] }
+        let index = min(max(Int((recipe.spacing.eased(recipe.t) * span).rounded(.down)), 0), recipe.references.count - 2)
+        let warps = groupWarps(recipe: recipe, at: recipe.t, segment: index, span: span, guides: guides, options: Options())
+        let packets = inkPackets(recipe: recipe, at: recipe.t, content: content, subject: subject)
+        let ink = (packets.forward + packets.backward + packets.local).filter {
+            switch $0.element { case .stroke, .fill: return true; case .image, .video, .stream, .text: return false }
+        }
+        let identity = Lattice(cols: 1, rows: 1, restOrigin: .zero, restCellSize: 1)
+        if recipe.groups.isEmpty {
+            return [.init(groupID: nil, lattice: identity, inkIDs: Set(ink.map { $0.membership.id }))]
+        }
+        return recipe.groups.compactMap { binding in
+            warps[binding.groupID].map { .init(groupID: binding.groupID, lattice: $0.current,
+                inkIDs: Set(ink.filter { $0.membership.groupID == binding.groupID }.map { $0.membership.id })) }
+        }
     }
 
     /// A placed image, moved.
@@ -621,55 +688,6 @@ enum InterpolationEvaluator {
             result.transform.position = moved
         }
         return result
-    }
-
-    /// `path` with every point run through `map`, in one batch.
-    ///
-    /// Batched rather than point-by-point because the map is a lattice warp, and a warp of *n* points
-    /// is one embedding pass plus *n* bilinear evaluations — while *n* warps of one point each would
-    /// rebuild the deformed-cell index *n* times.
-    static func warped(path: CGPath, by map: ([CGPoint]) -> [CGPoint]) -> CGPath {
-        var points: [CGPoint] = []
-        path.applyWithBlock { element in
-            for i in 0..<pointCount(of: element.pointee.type) {
-                points.append(element.pointee.points[i])
-            }
-        }
-        let moved = map(points)
-        guard moved.count == points.count else { return path }
-
-        let result = CGMutablePath()
-        var next = 0
-        path.applyWithBlock { element in
-            let type = element.pointee.type
-            let taken = pointCount(of: type)
-            defer { next += taken }
-            switch type {
-            case .moveToPoint:
-                result.move(to: moved[next])
-            case .addLineToPoint:
-                result.addLine(to: moved[next])
-            case .addQuadCurveToPoint:
-                result.addQuadCurve(to: moved[next + 1], control: moved[next])
-            case .addCurveToPoint:
-                result.addCurve(to: moved[next + 2], control1: moved[next], control2: moved[next + 1])
-            case .closeSubpath:
-                result.closeSubpath()
-            @unknown default:
-                break
-            }
-        }
-        return result
-    }
-
-    private static func pointCount(of type: CGPathElementType) -> Int {
-        switch type {
-        case .moveToPoint, .addLineToPoint: return 1
-        case .addQuadCurveToPoint: return 2
-        case .addCurveToPoint: return 3
-        case .closeSubpath: return 0
-        @unknown default: return 0
-        }
     }
 
     // MARK: - Compositing

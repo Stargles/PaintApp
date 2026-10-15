@@ -195,20 +195,21 @@ old accessor did at up to 218% error across a strong keystone.
 | the per-dab width | `BrushStamper.DabPose.scale(at:)`/`rotation(at:)`, which answer per dab exactly when the map is projective. There is no single scalar on this path to be wrong |
 | the live drag, rasterizing nothing | `Homography.catransform3D` on the float's latched bitmap (`CanvasView.showDistortedVectorFloat` → `StrokeCanvasView.updateVectorFloat(projective:)`), with `LiveLayerTransform.viewMap` doing the anchor-point conjugation |
 | one corner, dragged | `ObjectTransformDrag.distorted(to:)` — `TextFrameDrag.distortedFrame`'s three rules again, sharing `Homography.isValidQuad` with it and with `FloatingDistortDrag` and nothing else |
-| the commit | `VectorStroke.distort` — the **map** plus the artist's own width, ten numbers. See below |
+| the commit | `VectorStroke.placement` — the homography and native width, with a derived source for ordinary Distort. Spatial Liquify material uses the same owner with a retained native walk. See below |
 | Reset | clears the quad with the transform; `canResetFloating` gains it as a fourth term |
 
-**What a projective float commits to was the one genuinely open design question, and it is settled
-here: the stroke stores the *map*, not the pre-image walk.** `StrokeRestWalk` is the obvious thing to
-persist and it is the wrong one. The centre line has to be stored **posed**, because that is what
-every geometry reader asks for — bounds, the spatial index, lasso membership, the eraser's candidacy
-test, damage rectangles, thumbnails. What is left over is each dab's radius and angle, and that is
-exactly a homography plus one width. Storing the walk instead would put a second copy of every sample
-on disk **and** need a rest-space arm in `piece(of:samples:parameters:)` and a second `precise` flag
-beside it; storing the map needs **none** of that, because a cut piece's
-lattice is the parent's posed walk and pulling it back through the map the piece inherited *is* the
-parent's rest walk. `VectorStroke.effectiveWalk` is where the pre-image is rebuilt, once, at render —
-one inverse and two array maps, paid only by a distorted stroke.
+**One placement owns native ink.** An ordinary projective float commits its homography and the
+artist's own width in `StrokePlacement`, using the compact `.derived` source. Its displayed centreline
+and cut lattice remain posed; `effectiveWalk` pulls them back through the inverse homography when
+rendering. This retains the existing per-dab width and angle without storing an extra walk.
+
+Liquify adds spatial material to that same placement. Its `.retained` source keeps the original native
+walk and, for a cut piece, its ancestor walk and parameter correspondence. Those are necessary because
+nonlinear geometry cannot reconstruct the original spacing, random values or brush texture from an
+inverse homography. The retained walk has its own inherited precision; cuts preserve its ancestor
+parameters instead of choosing a nearby point at a self-crossing. The displayed centreline remains
+editable and continues to govern lasso membership (§5.4). Material drawing, bounds and tap/eraser
+candidacy must additionally account for paint that remains outside the moved centreline.
 
 **Re-sampling was the alternative and it is not available.** `VectorStroke` holds one width, and
 per-sample pressure drives alpha and flow as well as radius, so smuggling the width into pressure
@@ -1348,7 +1349,8 @@ fourth are decisions this stage had to make and are recorded so they are not re-
     if Select is still the artist's open panel. Suppressing a presentation and closing a panel look
     identical for the length of the move and differ entirely at the end of it: the artist should not
     have to find their place again because they moved something.
-14. **Warp is not a feature.** Verbatim: *"Unlike procreate, Warp will not be a feature (like
+14. **Historical Warp ruling, superseded for the standalone Liquify tool by TODO (178).**
+    `TransformMode.warp` remains deleted; Liquify is its own brush tool, not a Move-box mode. Verbatim: *"Unlike procreate, Warp will not be a feature (like
     liquify)."* The case is **deleted from `TransformMode`**, not hidden — a permanently-hidden case
     stays in `allCases`, keeps answering `switch`es, and gives the next reader no way to tell "not
     yet" from "never". Nothing decoded it, so no migration was owed. `.distort` was the opposite kind

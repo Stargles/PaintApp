@@ -35,6 +35,7 @@ struct ToolProfile: Codable, Equatable {
 enum StrokeTool: String, CaseIterable {
     case brush
     case eraser
+    case liquify
 }
 
 extension Tool {
@@ -43,6 +44,7 @@ extension Tool {
         switch self {
         case .pen, .pencil: return .brush
         case .eraser: return .eraser
+        case .liquify: return .liquify
         case .fill, .eyedropper, .text, .place: return nil
         }
     }
@@ -56,6 +58,7 @@ extension Tool {
 struct ToolProfiles: Codable, Equatable {
     var brush = ToolProfile(preset: BrushLibrary.roundSoft, size: 5, opacity: 1)
     var eraser = ToolProfile(preset: BrushLibrary.roundHard, size: 20, opacity: 1)
+    var liquify = ToolProfile(preset: BrushLibrary.roundSoft, size: 100, opacity: 0.5)
 
     /// Every tool's preset, in `StrokeTool` order — what a saved package carries tip files for.
     var presets: [Brush] { StrokeTool.allCases.map { self[$0].preset } }
@@ -65,12 +68,14 @@ struct ToolProfiles: Codable, Equatable {
             switch tool {
             case .brush: return brush
             case .eraser: return eraser
+            case .liquify: return liquify
             }
         }
         set {
             switch tool {
             case .brush: brush = newValue
             case .eraser: eraser = newValue
+            case .liquify: liquify = newValue
             }
         }
     }

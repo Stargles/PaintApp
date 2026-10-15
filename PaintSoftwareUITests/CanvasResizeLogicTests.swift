@@ -241,6 +241,69 @@ final class CanvasResizeLogicTests: XCTestCase {
         XCTAssertEqual(recipe.t, 0.5, accuracy: 1e-12, "normalised time is not geometry")
     }
 
+    func testResizeConjugatesGroupedAndUnboundLiquifyWithoutChangingItsNativeField() throws {
+        for mode in CanvasResizeMode.allCases {
+            let manager = CanvasFixture.manager(layerCount: 1)
+            let source = CelRef(layerID: manager.layers[0].id, celID: UUID())
+            var lattice = Lattice(cols: 4, rows: 3, restOrigin: CGPoint(x: 3, y: 5),
+                                  restCellSize: 32, activeCells: [2, 6, 9])
+            lattice.vertices[12].x += 4
+            let captures = [LiquifyDeformation.Capture(groupID: UUID(), lattice: lattice,
+                               inkIDs: [.init(kind: .source, elementID: UUID(), reference: source)]),
+                            LiquifyDeformation.Capture(groupID: nil,
+                               lattice: Lattice(cols: 3, rows: 4, restOrigin: CGPoint(x: 7, y: 9),
+                                                restCellSize: 32, activeCells: [1, 4, 8]),
+                               inkIDs: [.init(kind: .local, elementID: UUID())])]
+            let selection = CGPath(rect: CGRect(x: 40, y: 40, width: 65, height: 60), transform: nil)
+            let gesture = LiquifyDeformation(brush: TestBrushes.hardRound, size: 80, power: 0.6,
+                mode: .expand, seed: 42, samples: [VectorSample(x: 64, y: 64, pressure: 1)],
+                selection: selection, captures: captures)
+            var recipe = InterpolationRecipe(t: 0.5)
+            recipe.deformations = [gesture]
+            manager.layers[0].cels[0].interpolation = recipe
+            let newSize = CGSize(width: 128, height: 96)
+            let map = CanvasResizeMap(from: CanvasFixture.canvasSize, to: newSize, mode: mode)
+            XCTAssertTrue(manager.resizeCanvas(to: newSize, mode: mode))
+            let resized = try XCTUnwrap(manager.layers[0].cels[0].interpolation?.deformations.first)
+            var native = resized
+            native.captures = gesture.captures
+            XCTAssertEqual(native, gesture, "The native path bytes, selection, brush and seed must stay identical")
+            let points = [CGPoint(x: 70, y: 64), CGPoint(x: 86, y: 68), CGPoint(x: 104, y: 70), CGPoint(x: 20, y: 20)]
+            let field = LiquifyField(gesture)
+            for (old, moved) in zip(gesture.captures, resized.captures) {
+                XCTAssertEqual(moved.groupID, old.groupID)
+                XCTAssertEqual(moved.inkIDs, old.inkIDs)
+                XCTAssertEqual(moved.lattice.vertices, old.lattice.vertices)
+                XCTAssertEqual(moved.lattice.activeCells, old.lattice.activeCells)
+                XCTAssertEqual(moved.lattice.cols, old.lattice.cols)
+                XCTAssertEqual(moved.lattice.rows, old.lattice.rows)
+                XCTAssertEqual(moved.lattice.restOrigin, map.apply(old.lattice.restOrigin))
+                XCTAssertEqual(moved.lattice.restCellSize, old.lattice.restCellSize * map.scale)
+                let before = gesture.mapRest(points, capture: old, using: field)
+                XCTAssertGreaterThan(hypot(before[0].x - points[0].x, before[0].y - points[0].y), 0.01)
+                let after = resized.mapRest(points.map(map.apply), capture: moved, using: LiquifyField(resized))
+                for (actual, original) in zip(after, before) {
+                    let expected = map.apply(original)
+                    XCTAssertEqual(actual.x, expected.x, accuracy: 1e-7)
+                    XCTAssertEqual(actual.y, expected.y, accuracy: 1e-7)
+                }
+            }
+            manager.undo()
+            var restored = try XCTUnwrap(manager.layers[0].cels[0].interpolation?.deformations.first)
+            for index in restored.captures.indices {
+                let actual = restored.captures[index].lattice, original = gesture.captures[index].lattice
+                XCTAssertEqual(actual.restOrigin.x, original.restOrigin.x, accuracy: 1e-9)
+                XCTAssertEqual(actual.restOrigin.y, original.restOrigin.y, accuracy: 1e-9)
+                XCTAssertEqual(actual.restCellSize, original.restCellSize, accuracy: 1e-9)
+                // A scale/inverse scale can round its origin by a few floating-point bits.
+                restored.captures[index].lattice = Lattice(cols: actual.cols, rows: actual.rows,
+                    restOrigin: original.restOrigin, restCellSize: original.restCellSize,
+                    vertices: actual.vertices, activeCells: actual.activeCells)
+            }
+            XCTAssertEqual(restored, gesture)
+        }
+    }
+
     // MARK: - 3. The two fixes
 
     /// **Guides are document-level canvas coordinates and were left behind by every resize until

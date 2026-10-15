@@ -39,6 +39,7 @@ enum VectorHitTest {
         switch element {
         case .stroke(let stroke):
             guard stroke.composite == .paint, !stroke.samples.isEmpty else { return false }
+            if stroke.materialProgram != nil { return VectorCanvas.materialInkCovers(stroke, at: point, slop: slop) }
             let limit = slop + StrokeGeometry.stampRadius(forPressure: 1, brush: stroke.brush, size: stroke.size)
             return StrokeGeometry.distanceSquared(from: point, toPolyline: stroke.samples) <= limit * limit
         case .fill(let fill):
@@ -69,6 +70,11 @@ enum VectorHitTest {
         switch element {
         case .stroke(let stroke):
             guard !stroke.samples.isEmpty else { return nil }
+            if stroke.materialProgram != nil {
+                let box = VectorCanvas.materialBounds(of: stroke)
+                guard !box.isNull, !box.isInfinite else { return nil }
+                return CGPath(rect: box.insetBy(dx: -outlineMargin, dy: -outlineMargin), transform: nil)
+            }
             var box = CGRect.null
             for sample in stroke.samples { box = box.union(CGRect(origin: sample.point, size: .zero)) }
             let reach = StrokeGeometry.stampRadius(forPressure: 1, brush: stroke.brush, size: stroke.size)

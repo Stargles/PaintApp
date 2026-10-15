@@ -247,8 +247,22 @@ enum ProjectStore {
     /// and for a round one (it is arithmetic), and since BRUSH.md §2.25 it answers for the brush's
     /// **paper** as well as its tip — a textured brush whose sheet did not travel is the same defect
     /// this method was written to close, one field along.
-    private static func importedTextureFileNames(table: BrushTable, palette: [Brush]) -> Set<String> {
-        palette.reduce(into: table.importedTextureFileNames) { $0.formUnion($1.importedTextureFileNames) }
+    private static func importedTextureFileNames(table: BrushTable, palette: [Brush],
+                                                 vectors: [VectorCanvas?], recipes: [InterpolationRecipe?]) -> Set<String> {
+        var names = palette.reduce(into: table.importedTextureFileNames) { $0.formUnion($1.importedTextureFileNames) }
+        func collect(_ program: InkMaterialProgram?) {
+            for binding in program?.bindings ?? [] {
+                names.formUnion(binding.operation.deformation.brush.importedTextureFileNames)
+            }
+        }
+        for vector in vectors {
+            for element in vector?.elements ?? [] { collect(element.materialProgram) }
+        }
+        for recipe in recipes {
+            for deformation in recipe?.deformations ?? [] { names.formUnion(deformation.brush.importedTextureFileNames) }
+            for local in recipe?.localEdits ?? [] { collect(local.stroke.placement?.material) }
+        }
+        return names
     }
 
     /// Copies every imported stamp texture the given file names refer to out of the brush library
@@ -413,13 +427,16 @@ enum ProjectStore {
         /// agree; two literals is exactly how they would stop agreeing.
         static let thumbnailBounds = CGSize(width: 320, height: 320)
 
-        /// Reads published state and takes the per-cel images; deliberately does no encoding and no
-        /// pixel work, so it stays the cheap half — the only half on the artist's own thread.
+        /// First settles any completed procedural stroke awaiting its final worker picture, so a
+        /// snapshot cannot omit a finished gesture. That explicit boundary may wait for geometry
+        /// and render its replacement window. The snapshot then reads state and shares cel images,
+        /// with no encoding or further pixel work on the artist's thread.
         /// `renderToUIImage()` is a memo read for a cel the canvas has already displayed and a
         /// copy-on-write share of the cel's own bitmap otherwise; `makeCopy()` shares the display
         /// list the same way (PERFORMANCE.md §13.6). `SaveProfile.snapshotSeconds` is its clock.
         @MainActor
         init(_ canvasManager: CanvasManager) {
+            canvasManager.settlePendingElementProcedure()
             projectID = canvasManager.projectID
             projectName = canvasManager.projectName
             canvasSize = canvasManager.canvasSize ?? .zero
@@ -746,24 +763,26 @@ enum ProjectStore {
         private var encoded = 0
         private var reused = 0
         private var bytes = 0
+        private var jsonEncodingFailed = false
         private var threads = Set<ObjectIdentifier>()
 
         func record(encodeSeconds: Double, writeSeconds: Double,
-                    pngsEncoded: Int, pngsReused: Int, bytesWritten: Int) {
+                    pngsEncoded: Int, pngsReused: Int, bytesWritten: Int, jsonEncodingFailed: Bool) {
             lock.lock()
             encode += encodeSeconds
             write += writeSeconds
             encoded += pngsEncoded
             reused += pngsReused
             bytes += bytesWritten
+            self.jsonEncodingFailed = self.jsonEncodingFailed || jsonEncodingFailed
             threads.insert(ObjectIdentifier(Thread.current))
             lock.unlock()
         }
 
-        var totals: (encode: Double, write: Double, encoded: Int, reused: Int, bytes: Int, threads: Int) {
+        var totals: (encode: Double, write: Double, encoded: Int, reused: Int, bytes: Int, threads: Int, jsonEncodingFailed: Bool) {
             lock.lock()
             defer { lock.unlock() }
-            return (encode, write, encoded, reused, bytes, threads.count)
+            return (encode, write, encoded, reused, bytes, threads.count, jsonEncodingFailed)
         }
     }
 
@@ -1285,7 +1304,9 @@ enum ProjectStore {
         // both the drawing and the palette need into the project package for self-containment.
         copyCustomBrushTexturesIntoProject(
             importedTextureFileNames(table: brushTable,
-                                     palette: snapshot.editorState.tools.profiles.presets + snapshot.customBrushes),
+                                     palette: snapshot.editorState.tools.profiles.presets + snapshot.customBrushes,
+                                     vectors: snapshot.layers.flatMap(\.cels).map(\.vector),
+                                     recipes: snapshot.layers.flatMap(\.cels).map(\.interpolation)),
             projectURL: url)
 
         let manifest = ProjectManifest(
@@ -1309,7 +1330,9 @@ enum ProjectStore {
             brushTableFileName: brushTableFileName,
             editorState: snapshot.editorState
         )
-        if let data = try? JSONEncoder().encode(manifest) {
+        // The manifest certifies a complete package. Omitting it on a failed sidecar lets the
+        // existing validator reject this stage now and if its diagnostic Trash copy is restored.
+        if !tally.totals.jsonEncodingFailed, let data = try? JSONEncoder().encode(manifest) {
             try? data.write(to: url.appendingPathComponent("manifest.json"))
         }
 
@@ -1426,7 +1449,8 @@ enum ProjectStore {
         }
 
         tally.record(encodeSeconds: cost.encodeSeconds, writeSeconds: cost.writeSeconds,
-                     pngsEncoded: cost.encoded, pngsReused: cost.reused, bytesWritten: cost.bytes)
+                     pngsEncoded: cost.encoded, pngsReused: cost.reused, bytesWritten: cost.bytes,
+                     jsonEncodingFailed: cost.jsonEncodingFailed)
 
         let manifest = CelManifest(id: cel.id, startFrame: cel.startFrame, frameCount: cel.frameCount,
                                    rasterFileName: pixelTiers.rasterFileName,
@@ -1450,6 +1474,7 @@ enum ProjectStore {
         var encoded = 0
         var reused = 0
         var bytes = 0
+        var jsonEncodingFailed = false
     }
 
     private static func encodeJSON<T: Encodable>(_ value: T, cel: UUID, sampleOrigin: CGPoint,
@@ -1465,6 +1490,9 @@ enum ProjectStore {
         do {
             return try encoder.encode(value)
         } catch {
+            // A failed archive cannot be represented by omitting the sidecar: that would
+            // make the staged manifest describe an empty drawing and pass ordinary validation.
+            cost.jsonEncodingFailed = true
             log.error("""
                 Encoding \(String(describing: T.self), privacy: .public) for cel \
                 \(cel.uuidString, privacy: .public) failed, so that content is not written: \
@@ -1773,7 +1801,7 @@ enum ProjectStore {
         PackageRenameGate.noteOpen(url)
         guard let manifest = loadManifest(at: url) else { return nil }
         let canvasSize = CGSize(width: manifest.canvasWidth, height: manifest.canvasHeight)
-        let decoded = decodeCels(manifest: manifest, projectURL: url, canvasSize: canvasSize)
+        guard let decoded = decodeCels(manifest: manifest, projectURL: url, canvasSize: canvasSize) else { return nil }
         return assemble(manifest: manifest, decoded: decoded, url: url, startedAt: loadStarted)
     }
 
@@ -1803,14 +1831,15 @@ enum ProjectStore {
         PackageRenameGate.noteOpen(url)
         guard let manifest = loadManifest(at: url) else { return nil }
         let canvasSize = CGSize(width: manifest.canvasWidth, height: manifest.canvasHeight)
-        let decoded: Transfer<DecodedCels> = await withCheckedContinuation { continuation in
+        let decoded: Transfer<DecodedCels?> = await withCheckedContinuation { continuation in
             loadQueue.async {
                 continuation.resume(returning: Transfer(decodeCels(manifest: manifest, projectURL: url,
                                                                    canvasSize: canvasSize)))
             }
         }
+        guard let decoded = decoded.value else { return nil }
         return await MainActor.run {
-            let manager = assemble(manifest: manifest, decoded: decoded.value, url: url,
+            let manager = assemble(manifest: manifest, decoded: decoded, url: url,
                                    startedAt: loadStarted, generatingThumbnails: false)
             // Item 9(c). The thumbnails are a third of what an open used to cost (MEASURED: 96.3 ms
             // of 303.6 ms) and none of it is needed to show the artwork, so the open no longer waits
@@ -1855,7 +1884,7 @@ enum ProjectStore {
     /// what `activeCelIndex` scans and what `addCel` maintains with an explicit sort — so this is the
     /// one property of the change that would be quiet if it were wrong, and it is therefore the one
     /// that is arranged rather than assumed.
-    private static func decodeCels(manifest: ProjectManifest, projectURL: URL, canvasSize: CGSize) -> DecodedCels {
+    private static func decodeCels(manifest: ProjectManifest, projectURL: URL, canvasSize: CGSize) -> DecodedCels? {
         // Read before the fan-out, because `concurrentPerform` recruits its caller as one of the
         // workers: asking inside an iteration would sometimes answer for the caller's thread and
         // sometimes for a pool thread, and the question is about the caller.
@@ -1882,6 +1911,7 @@ enum ProjectStore {
         // per-cel reports have already been merged and the association is gone.
         var damageByLayer = [ProjectLoadDamage.LayerDamage](repeating: .init(), count: manifest.layers.count)
         for (index, result) in decoded.enumerated() {
+            guard let result else { return nil }
             let layerIndex = jobs[index].layerIndex
             celsByLayer[layerIndex].append(result.cel)
             damageByLayer[layerIndex].merge(result.damage)
@@ -1947,7 +1977,7 @@ enum ProjectStore {
 
     private static func decodeCel(_ celManifest: CelManifest, layerKind: LayerKind,
                                   projectURL: URL, canvasSize: CGSize,
-                                  brushes: BrushTable.Remap) -> DecodedCel {
+                                  brushes: BrushTable.Remap) -> DecodedCel? {
         var damage = ProjectLoadDamage.LayerDamage()
         /// Where one of this cel's files actually is — TODO (57). Every read below goes through it,
         /// **including the four whose answer never changes**: one rule, asked one way, is what stops
@@ -2091,6 +2121,9 @@ enum ProjectStore {
                     for _ in 0..<payload.decodeReport.malformedCount {
                         damage.countMalformed(kind: named.next())
                     }
+                } catch let error as InkMaterialCodingError {
+                    log.error("Cannot open material in cel \(celManifest.id, privacy: .public): \(String(describing: error), privacy: .public)")
+                    return nil
                 } catch {
                     // The whole cel's vector content, gone: the file is present (so `validateProject`
                     // passed it) but is not a payload at all. The largest of the three losses, and the
@@ -2115,20 +2148,21 @@ enum ProjectStore {
             vector = .empty(size: canvasSize)
         }
 
-        // The interpolation recipe. A cel whose recipe file is missing or unreadable loads as
-        // an ordinary cel rather than failing the whole project: the recipe *derives*
-        // content, so losing it costs the link, not the drawing.
+        // A named recipe is part of the drawing: losing it would freeze its linked motion and
+        // deformation. Propagate failure to both open paths before they can expose or save a cel.
         var interpolation: InterpolationRecipe?
-        if let interpolationFileName = celManifest.interpolationFileName,
-           let data = try? Data(contentsOf: fileURL(interpolationFileName, .interpolation)) {
-            interpolation = try? decoder().decode(InterpolationRecipe.self, from: data)
+        if let name = celManifest.interpolationFileName {
+            do {
+                interpolation = try decoder().decode(InterpolationRecipe.self,
+                    from: Data(contentsOf: fileURL(name, .interpolation)))
+            } catch {
+                log.error("Cannot open linked cel \(celManifest.id, privacy: .public): \(String(describing: error), privacy: .public)")
+                return nil
+            }
         }
 
-        // The pose channels. A cel whose animation file is missing or unreadable loads with its ink
-        // where it stores it rather than failing the project — the same "the link, not the drawing"
-        // rule the recipe above follows, and the reason both are sidecars. **But the loss is counted**:
-        // the motion is the artist's work, and an unreported loss is one the next save makes
-        // permanent, which `SaveDamageGate` exists to stop.
+        // The pose channels retain their existing reported-damage policy: the motion is the
+        // artist's work, and an unreported loss is one the next save makes permanent.
         var animation = CelAnimationData()
         if let animationFileName = celManifest.animationFileName {
             if let data = try? Data(contentsOf: fileURL(animationFileName, .animation)),
@@ -2180,7 +2214,9 @@ enum ProjectStore {
         // was deleted) — see copyCustomBrushTexturesIntoProject's doc comment for the save side.
         restoreCustomBrushTexturesFromProject(
             importedTextureFileNames(table: decoded.brushTable,
-                                     palette: manifest.editorState.tools.profiles.presets + manifest.customBrushes),
+                                     palette: manifest.editorState.tools.profiles.presets + manifest.customBrushes,
+                                     vectors: decoded.celsByLayer.flatMap { $0 }.map(\.vector),
+                                     recipes: decoded.celsByLayer.flatMap { $0 }.map(\.interpolation)),
             projectURL: url)
         manager.customBrushes = manifest.customBrushes
         // BRUSH.md §8.1: the library is app-level and the manifest's list is this *document's*.

@@ -47,7 +47,10 @@ import CoreGraphics
 /// `A = 1 - ∏(1 - aᵢ)` and one punch at the stroke's opacity `o` leaves `1 - o·A`. At `o == 1` those
 /// are the same number; below it, only the second obeys *"a 50% eraser removes exactly 50% wherever
 /// the stroke goes, however often it crosses back over itself"*.
-final class StrokeScratch: DabTarget {
+final class StrokeScratch: MaterialDabTarget {
+    var material: InkMaterialPaint?
+    private(set) var completed = true
+    func rejectMaterialTransport() { completed = false }
 
     /// What the window's pixels mean, and therefore how they are shown and how they commit.
     enum Role {
@@ -141,7 +144,7 @@ final class StrokeScratch: DabTarget {
     /// opacity. That is the same arithmetic `commit` performs against the cel, one crop wide, which
     /// is what makes the ink that lands the ink that was under the pen.
     var image: UIImage? {
-        guard let window, !windowRect.isNull else { return nil }
+        guard completed, let window, !windowRect.isNull else { return nil }
         guard case .subtractive(let backdrop) = role else { return windowContents }
         // Memoized on the window's own version, exactly as `RasterLayerTexture.renderToUIImage` is
         // memoized on it. `StrokeCanvasView.refreshDisplay` asks for this once per SwiftUI pass and
@@ -259,9 +262,16 @@ final class StrokeScratch: DabTarget {
     func endStrokeGroup() {
         guard let group else { return }
         self.group = nil
+        guard completed else { return }
         guard !group.isEmpty, !group.bounds.isNull,
-              let window = window(containing: group.bounds) else { return }
+              let window = window(containing: material?.bounds(of: group.bounds) ?? group.bounds) else { return }
         let offset = CGPoint(x: -windowRect.minX, y: -windowRect.minY)
+        if let material {
+            let shift = Homography(CGAffineTransform(translationX: offset.x, y: offset.y))
+            window.material = InkMaterialPaint(program: material.program.conjugated(by: shift),
+                transport: material.transport.moved(by: shift))
+        }
+        defer { window.material = nil }
         window.beginStrokeGroup(opacity: group.opacity, blendMode: group.blendMode,
                                 texture: group.texture)
         for dab in group.dabs {
@@ -276,6 +286,7 @@ final class StrokeScratch: DabTarget {
             }
         }
         window.endStrokeGroup()
+        completed = completed && window.completed
     }
 
     func stampCircle(at point: CGPoint, radius: CGFloat, color: UIColor,
@@ -361,7 +372,7 @@ final class StrokeScratch: DabTarget {
     ///   included — a source-over draw could not take ink away). It commits nothing today: the cut
     ///   preview it belongs to is a preview, and the cut itself is vector geometry.
     func commit(into texture: RasterLayerTexture) {
-        guard !windowRect.isNull else { return }
+        guard completed, !windowRect.isNull else { return }
         switch role {
         case .additive:
             guard let image else { return }

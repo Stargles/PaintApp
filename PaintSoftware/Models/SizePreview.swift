@@ -290,6 +290,8 @@ enum SizePreviewStampRenderer {
             let cg = context.cgContext
             let blendMode: CGBlendMode
             switch tool {
+            case .liquify:
+                blendMode = .normal
             case .brush:
                 blendMode = brush.stroke.blendMode.cgBlendMode
             case .eraser:

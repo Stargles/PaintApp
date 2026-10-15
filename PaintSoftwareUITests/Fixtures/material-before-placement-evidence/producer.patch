@@ -1,0 +1,86 @@
+diff --git a/PaintSoftwareUITests/PoseBakeLogicTests.swift b/PaintSoftwareUITests/PoseBakeLogicTests.swift
+index 1c95cc0..a05248e 100644
+--- a/PaintSoftwareUITests/PoseBakeLogicTests.swift
++++ b/PaintSoftwareUITests/PoseBakeLogicTests.swift
+@@ -504,4 +504,81 @@ final class PoseBakeLogicTests: XCTestCase {
+         XCTAssertTrue(video.contains("47 more cels"), video)
+         XCTAssertTrue(video.contains(CanvasManager.saveCostPhrase(addedCels: 47, millisecondsPerCel: raster) + " more"), video)
+     }
++
++    // Temporary producer: run against immutable pre-material app source 840d68a only.
++    func testProducePreMaterialPlacementPackage() throws {
++        let output = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
++            .appendingPathComponent("material-before-placement-evidence", isDirectory: true)
++        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
++        let package = output.appendingPathComponent("material-before-placement.paintproj")
++        let manager = CanvasFixture.manager(layerCount: 1)
++        manager.addVectorLayer()
++        let canvasSize = try XCTUnwrap(manager.canvasSize)
++        let native = StrokeSamples([VectorSample(x: 5.125, y: 8.375, pressure: 0.6),
++            VectorSample(x: 19.4375, y: 10.8125, pressure: 1),
++            VectorSample(x: 35.0625, y: 6.1875, pressure: 0.8),
++            VectorSample(x: 51.6875, y: 9.5625, pressure: 1)], channels: .pressureOnly)
++        func stroke(_ samples: StrokeSamples, precise: Bool) -> VectorStroke {
++            var ink = VectorStroke(brush: TestBrushes.pencil,
++                color: CodableColor(red: 0.7, green: 0.1, blue: 0.3, alpha: 1),
++                size: 4, opacity: 0.8, samples: samples, seed: 321)
++            if precise { ink = ink.markedPrecise() }
++            return ink
++        }
++        let projective = Homography(a: 1, b: 0.04, c: 1.25, d: 0.02, e: 1, f: 12,
++                                    g: 0.0008, h: 0.0005, i: 1)
++        let hand = try XCTUnwrap(VectorCanvas.mapping(.stroke(stroke(native, precise: false)), through: projective))
++        let baked = try XCTUnwrap(VectorCanvas.baking(.stroke(stroke(native, precise: false)),
++            through: PoseMap(CGAffineTransform(translationX: 1.75, y: 28))))
++        var piece = stroke(StrokeSamples([native[1], native[2]], channels: .pressureOnly), precise: true)
++        piece.lattice = DabLattice(samples: native, parameters: [1, 2], precise: true)
++        guard case .stroke(var bakedPiece)? = VectorCanvas.baking(.stroke(piece),
++            through: PoseMap(CGAffineTransform(translationX: 0.375, y: 43))) else {
++            return XCTFail("native cut bake must exist")
++        }
++        // Old effectiveWalk reads the live range, not this deliberately stale retained range.
++        bakedPiece.distort?.restLattice?.parameters = [0, 3]
++        let fill = VectorFillElement(path: CGPath(rect: CGRect(x: 56, y: 5, width: 4, height: 51), transform: nil),
++            color: CodableColor(red: 0.1, green: 0.6, blue: 0.2, alpha: 1))
++        let source = Cel(id: UUID(), startFrame: 0, frameCount: 1, raster: .empty(size: canvasSize),
++            vector: VectorCanvas(size: canvasSize,
++                elements: [.stroke(stroke(native, precise: false)), hand, baked, .stroke(bakedPiece), .fill(fill)]))
++        let local = LocalEdit(stroke: bakedPiece)
++        let reference = InterpolationReference(layerID: manager.layers[1].id, celID: source.id)
++        let linked = Cel(id: UUID(), startFrame: 1, frameCount: 1, raster: .empty(size: canvasSize),
++            interpolation: InterpolationRecipe(references: [reference, reference], t: 0.5, localEdits: [local]))
++        manager.layers[1].cels = [source, linked]
++        let saved = expectation(description: "old writer saves material predecessor")
++        ProjectStore.save(manager, to: package) { saved.fulfill() }
++        wait(for: [saved], timeout: 30)
++        let loaded = try XCTUnwrap(ProjectStore.load(from: package))
++        let vector = try XCTUnwrap(loaded.layers[1].cels[0].vector)
++        let picture = vector.render(quality: .full)
++        try XCTUnwrap(picture.pngData()).write(to: output.appendingPathComponent("native.png"))
++        try Data(XCTUnwrap(CanvasFixture.rgbaBytes(XCTUnwrap(picture.cgImage))))
++            .write(to: output.appendingPathComponent("native.rgba"))
++        func positions(_ samples: StrokeSamples) -> [[Double]] {
++            samples.map { [Double($0.x), Double($0.y), Double($0.pressure)] }
++        }
++        func record(_ stroke: VectorStroke) -> [String: Any] {
++            var result: [String: Any] = ["id": stroke.id.uuidString, "samples": positions(stroke.samples),
++                "precise": stroke.precise, "size": Double(stroke.size)]
++            if let walk = stroke.effectiveWalk {
++                result["nativeSamples"] = positions(walk.samples)
++                result["nativeSize"] = Double(walk.size)
++                if let lattice = walk.lattice {
++                    result["nativeParent"] = positions(lattice.samples)
++                    result["nativeParameters"] = lattice.parameters.map(Double.init)
++                    result["parentPrecise"] = lattice.precise
++                }
++            }
++            return result
++        }
++        let records = vector.strokes.map(record)
++            + loaded.layers[1].cels[1].interpolation!.localEdits.map { record($0.stroke) }
++        try JSONSerialization.data(withJSONObject: records, options: [.sortedKeys, .prettyPrinted])
++            .write(to: output.appendingPathComponent("native-walks.json"))
++        XCTAssertEqual(records.count, 5)
++        print("PRE_MATERIAL_FIXTURE=" + output.path)
++    }
+ }

@@ -148,7 +148,7 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// allocation and an autolayout pass at the worst possible moment.
     private let scratchView = UIImageView()
 
-    /// **Where `unlandedInk` reaches the screen** — one `UIImageView` per held picture, stacked in
+    /// **Where `unlandedInk` reaches the screen** — one view per held picture, stacked in
     /// commit order, between the base and the live stroke.
     ///
     /// A container rather than a single view because the held set has more than one member whenever
@@ -221,6 +221,8 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// the last margin of the pen's path until it knows which way the stroke ends — the lift flushes it
     /// (`StrokeHeading`), so every path that ends the gesture must call `finish`.
     private var liveWalk = BrushStamper.LiveWalk(seed: 0)
+    private var liquifySession: LiquifySession?
+    private let liquifyCollector = BrushStamper.CollectingDabTarget(tracksTravel: true)
 
     /// **The random field this gesture's dabs are drawn from** — BRUSH.md §4, minted at pen-down
     /// rather than at commit.
@@ -396,6 +398,9 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// pass, and rebuilding a view hierarchy there is the cost `scratchView`'s stored `let` exists
     /// to avoid.
     private var heldInkIDsOnScreen: [Int] = []
+    /// A live replacement can move without changing any committed picture ID.
+    private var heldInkCoveringRects: [CGRect] = []
+    private var heldInkBaseHole: CGPath?
     /// The `RasterLayerTexture.version` last shown — the raster twin of `displayedVectorVersion`.
     /// Both texture types are reference types mutated in place, so a content change alone never
     /// triggers a SwiftUI repaint; without this guard a baked shape or undone fill stays stale
@@ -816,13 +821,17 @@ final class StrokeCanvasView: CanvasPlaneView {
             poseSpace.insertSubview(surface, at: 0)
             heldEditSurface = surface
         }
-        let window = edit.window, elements = edit.elements, rewriting = edit.rewriting
+        let window = edit.window
         surface.present(window: window, placement: .identity, draw: { cg in
-            canvas.drawEditWindow(of: elements, in: window, into: cg, rewriting: rewriting)
+            let picture = edit.picture()
+            return canvas.drawEditWindow(of: picture.elements, in: window, into: cg, rewriting: picture.rewriting)
         }, finished: { [weak self] shown in
-            guard let self, self.heldEditSurface === surface, shown, self.heldEditHole != window else { return }
-            self.heldEditHole = window
-            self.showOverlays(self.scratch)
+            guard let self, self.heldEditSurface === surface, shown else { return }
+            if self.heldEditHole != window {
+                self.heldEditHole = window
+                self.showOverlays(self.scratch)
+            }
+            edit.procedure?.didPresent()
         })
     }
 
@@ -836,17 +845,26 @@ final class StrokeCanvasView: CanvasPlaneView {
     private func takeDownHeldEdit(landing: Bool) -> Bool {
         guard heldEdit != nil || heldEditSurface != nil else { return false }
         let edit = heldEdit
+        let surface = heldEditSurface
         heldEdit = nil
         heldEditHole = nil
         heldEditSurface?.removeFromSuperview()
         heldEditSurface = nil
         if landing, let edit, let canvas = vectorCanvas, edit.vectorCanvas === canvas,
            canvas.version != heldEditBaseVersion {
+            if edit.procedure?.isPresented == true, let frozen = surface?.freezePresented() {
+                unlandedInk.hold(UnlandedInk.Picture(id: nextUnlandedInkID, version: canvas.version,
+                    windowRect: frozen.window, alpha: 1, replacesBase: true, contents: .surface(frozen)))
+                nextUnlandedInkID += 1
+                showOverlays(scratch)
+                return true
+            }
             let window = edit.window
             let format = PixelOps.transparentFormat()
             format.preferredRange = .standard
             let image = UIGraphicsImageRenderer(size: window.size, format: format).image { ctx in
-                canvas.drawEditWindow(of: canvas.elements, in: window, into: ctx.cgContext, rewriting: [])
+                let picture = edit.picture(from: canvas.elements)
+                canvas.drawEditWindow(of: picture.elements, in: window, into: ctx.cgContext, rewriting: picture.rewriting)
             }
             holdUnlandedPicture(image, rect: window, alpha: 1, replacesBase: true,
                                 at: canvas.version)
@@ -1187,7 +1205,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         // Reachable only by starting a lasso move inside one render of a pen-up (§11.12 measures
         // that at 14–30 ms), which is why it is a guard rather than a fix.
         unlandedInk.removeAll()
-        showHeldInk()
+        _ = showHeldInk(covering: [])
         vectorFloatBase = base
         floatView.transform = .identity
         floatView.image = image
@@ -1281,7 +1299,12 @@ final class StrokeCanvasView: CanvasPlaneView {
 
     private func showOverlays(_ scratch: StrokeScratch?) {
         defer { onDisplayInkChanged?() }
-        showHeldInk()
+        let liveHole = timingStroke == nil ? scratch.flatMap { $0.replacesBase ? $0.windowRect : nil } : nil
+        var covering: [CGRect] = []
+        if let liveHole { covering.append(liveHole) }
+        if let heldEditHole { covering.append(heldEditHole) }
+        if let heldDerivationHole { covering.append(heldDerivationHole) }
+        let baseHole = showHeldInk(covering: covering)
         // **A timing stroke's trail is drawn by a sibling of this host, never by this view** —
         // KEYFRAMES.md §7 stage 10, and it is the one thing about stage 10 that is not a partition.
         //
@@ -1306,16 +1329,11 @@ final class StrokeCanvasView: CanvasPlaneView {
             // A timing stroke is never an eraser (`beginTimingTakeIfArmed` refuses one), so the live
             // window never replaces the base — but held ink from an earlier eraser stroke can still
             // be up, and it owns the hole. The same call the ordinary path makes with `liveHole` nil.
-            setBaseHole(heldEditHole ?? heldDerivationHole ?? unlandedInk.baseHole)
+            setBaseHole(baseHole)
             return
         }
         let image = scratch?.image
-        // **The live stroke's window wins the hole, and the held one is the fallback.** Both stand
-        // in for the base inside their window and only one of them can be a removal at a time: an
-        // eraser's touch-down renders the canvas synchronously and so retires everything held (see
-        // `UnlandedInk.hold`), and `UnlandedInk` holds at most one removal in any case.
-        let liveHole = scratch.flatMap { $0.replacesBase ? $0.windowRect : nil }
-        setBaseHole(liveHole ?? heldEditHole ?? heldDerivationHole ?? unlandedInk.baseHole)
+        setBaseHole(baseHole)
         // **BRUSH.md §2.11's cap, on the display side.** An `.additive` window holds the stroke's
         // ink at full flow and is shown at the stroke's own opacity, which is exactly what
         // `StrokeScratch.commit` will do to it at lift — so what the artist watches build up under
@@ -1377,41 +1395,40 @@ final class StrokeCanvasView: CanvasPlaneView {
         unlandedInk.retire(upTo: version)
     }
 
-    /// Rebuilds `heldInkView`'s subviews when the held set has changed, and does nothing at all when
-    /// it has not — which is the overwhelmingly common call, once per layer per SwiftUI pass.
-    private func showHeldInk() {
-        // The overwhelmingly common call, and it is two `isEmpty` reads: nothing is held and nothing
-        // is shown. `refreshDisplay` runs once per layer per SwiftUI pass, so anything here that
-        // allocates is an allocation per layer per pass.
-        if unlandedInk.isEmpty, heldInkIDsOnScreen.isEmpty { return }
-        let ids = unlandedInk.pictures.map(\.id)
-        guard ids != heldInkIDsOnScreen else { return }
-        heldInkIDsOnScreen = ids
-        for subview in heldInkView.subviews { subview.removeFromSuperview() }
-        for picture in unlandedInk.pictures {
-            let view = UIImageView(image: picture.image)
-            // Identical to `scratchView` in every respect and for every one of its reasons — same
-            // sample grid, same crispness contract, same mipmap under minification. This is the very
-            // picture that was in `scratchView` a moment ago and it must not change appearance as it
-            // moves.
-            view.contentMode = .scaleToFill
-            view.isUserInteractionEnabled = false
-            view.layer.magnificationFilter = .nearest
-            view.layer.minificationFilter = .trilinear
-            view.frame = picture.windowRect
-            view.alpha = picture.alpha
-            heldInkView.addSubview(view)
+    /// Rebuilds views only when pictures change; a moved live replacement updates their clipping
+    /// without replacing their image/surface storage. The common empty case allocates no plan.
+    private func showHeldInk(covering: [CGRect]) -> CGPath? {
+        if unlandedInk.isEmpty, heldInkIDsOnScreen.isEmpty, covering.isEmpty {
+            heldInkCoveringRects = []
+            heldInkBaseHole = nil
+            return nil
         }
+        let ids = unlandedInk.pictures.map(\.id)
+        let picturesChanged = ids != heldInkIDsOnScreen
+        guard picturesChanged || covering != heldInkCoveringRects else { return heldInkBaseHole }
+        let plan = unlandedInk.displayPlan(covering: covering)
+        heldInkIDsOnScreen = ids
+        heldInkCoveringRects = covering
+        heldInkBaseHole = plan.baseHole
+        if picturesChanged {
+            for subview in heldInkView.subviews { subview.removeFromSuperview() }
+            for visible in plan.pictures {
+                let picture = visible.picture
+                let view = picture.contents.makeView()
+                view.contentMode = .scaleToFill
+                view.isUserInteractionEnabled = false
+                view.frame = picture.windowRect
+                view.alpha = picture.alpha
+                heldInkView.addSubview(view)
+            }
+        }
+        for (visible, view) in zip(plan.pictures, heldInkView.subviews) { visible.applyClip(to: view) }
         heldInkView.isHidden = unlandedInk.isEmpty
+        return plan.baseHole
     }
 
-    /// Cuts `rect` out of the layer's own picture, or puts it back whole when nil.
-    ///
-    /// An even-odd path over the whole canvas plus the hole is the least machinery that expresses
-    /// "everything except this rectangle" — a mask layer covers what it is given and hides the rest,
-    /// so anything smaller than the canvas would hide the artwork. The mask is only ever installed
-    /// while a base-replacing scratch is live, which is a vector eraser in Modes 1 and 2 or a raster
-    /// eraser, and is removed the moment the stroke lifts.
+    /// Cuts the union of live and held replacement windows out of the base. The union is already
+    /// normalized, so overlapping windows cannot cancel each other under the even-odd fill rule.
     ///
     /// **The window's edge is a seam and it is a sub-pixel one.** The base is masked to fractional
     /// alpha along a boundary the window then draws over at full alpha, so semi-transparent ink can
@@ -1419,8 +1436,8 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// the boundary on a pixel edge. It is the same class of difference the two sibling layers
     /// already accept under minification (see `scratchView`), it lives in the growth margin rather
     /// than under the eraser, and it is gone at lift.
-    private func setBaseHole(_ rect: CGRect?) {
-        guard let rect else {
+    private func setBaseHole(_ hole: CGPath?) {
+        guard let hole else {
             // Guarded because this runs once per layer per SwiftUI pass with nothing to punch, and
             // assigning a layer property is not free even when the value does not change.
             if imageView.layer.mask != nil { imageView.layer.mask = nil }
@@ -1431,9 +1448,8 @@ final class StrokeCanvasView: CanvasPlaneView {
         path.addRect(canvas)
         // The window is in `poseSpace`; a raster base is shown through the same pose and takes it
         // as it is, and a vector base is the posed picture in canvas points and takes it mapped.
-        let window = CGPath(rect: rect, transform: nil)
         let posedBase = vectorCanvas != nil ? poseSpacePose : nil
-        path.addPath(posedBase.flatMap { $0.mapped(window) } ?? window)
+        path.addPath(posedBase.flatMap { $0.mapped(hole) } ?? hole)
         let mask = (imageView.layer.mask as? CAShapeLayer) ?? {
             let created = CAShapeLayer()
             created.fillRule = .evenOdd
@@ -1444,6 +1460,59 @@ final class StrokeCanvasView: CanvasPlaneView {
         }()
         mask.frame = canvas
         mask.path = path
+    }
+
+    private func beginLiquifyGesture(_ touch: UITouch) {
+        onStrokeBegan?()
+        strokeSeed = DabRandom.freshSeed()
+        liveWalk = BrushStamper.LiveWalk(seed: strokeSeed)
+        lastSampleTime = nil
+        _ = liquifyCollector.drain()
+        beginGesture(inCanvasPoints: false, at: touch.location(in: self))
+        guard let manager = canvasManager, let layerID,
+              let session = manager.beginLiquify(layerID: layerID, profile: profile,
+                  size: gestureBrushSize, seed: strokeSeed) else {
+            endGesture(); onStrokeCancelled?(); return
+        }
+        liquifySession = session
+        let input = StrokeInput(touch: touch, in: poseSpace)
+        appendLiquifySample(liveSample(input, at: input.position))
+    }
+
+    private func moveLiquifyGesture(_ touch: UITouch, _ event: UIEvent) {
+        for touch in event.coalescedTouches(for: touch) ?? [touch] {
+            let input = StrokeInput(touch: touch, in: poseSpace)
+            appendLiquifySample(liveSample(input, at: input.position))
+        }
+    }
+
+    private func appendLiquifySample(_ sample: VectorSample) {
+        guard var session = liquifySession else { return }
+        session.samples.append(sample)
+        liveWalk.stamp(to: sample, into: liquifyCollector, brush: profile.preset,
+                       color: .white, brushSize: gestureBrushSize)
+        updateLiquifyWindow(&session)
+        canvasManager?.holdLiquify(&session)
+        liquifySession = session
+    }
+
+    private func updateLiquifyWindow(_ session: inout LiquifySession) {
+        session.includeBrushFootprints(liquifyCollector.drain(),
+            canvasSize: session.vector?.size ?? raster?.size ?? bounds.size)
+    }
+
+    private func finishLiquifyGesture(_ touch: UITouch?) {
+        if let touch {
+            let input = StrokeInput(touch: touch, in: poseSpace)
+            appendLiquifySample(liveSample(input, at: input.position))
+        }
+        guard var session = liquifySession else { return }
+        liveWalk.finish(into: liquifyCollector, brush: profile.preset, color: .white, brushSize: gestureBrushSize)
+        updateLiquifyWindow(&session)
+        canvasManager?.holdLiquify(&session)
+        liquifySession = nil
+        canvasManager?.commitLiquify(session)
+        endGesture(); refreshDisplay(); onStrokeEnded?()
     }
 
     /// **The retagging gesture.** While interpolate mode is on and a motion group is armed from its
@@ -1528,6 +1597,7 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// failure `CanvasView`'s `onStrokeBegan` comment orders `sandwichStrokeBegan` after the cel spawn
     /// to avoid. It would also spawn a block for a guide stroke, which is not a drawing at all.
     private func handleBegin(_ touch: UITouch) {
+        if strokeTool == .liquify { beginLiquifyGesture(touch); return }
         if beginGuideStrokeIfArmed(touch) { return }
         if consumeAsMotionGroupTap(touch) { return }
         // **Before `onStrokeBegan`, and that ordering is load-bearing** — KEYFRAMES.md §7 stage 10.
@@ -1585,6 +1655,7 @@ final class StrokeCanvasView: CanvasPlaneView {
     }
 
     private func handleMove(_ touch: UITouch, _ event: UIEvent) {
+        if liquifySession != nil { moveLiquifyGesture(touch, event); return }
         if guideStartTime != nil { recordGuideSample(touch, event); return }
         if consumedAsMotionGroupTap { return }
         if vectorCanvas != nil {
@@ -1619,6 +1690,7 @@ final class StrokeCanvasView: CanvasPlaneView {
     }
 
     private func handleEnd(_ touch: UITouch) {
+        if liquifySession != nil { finishLiquifyGesture(touch); return }
         if guideStartTime != nil { endGuideStroke(touch); return }
         if consumedAsMotionGroupTap { consumedAsMotionGroupTap = false; return }
         if vectorCanvas != nil { endVectorStroke(touch); return }
@@ -1700,6 +1772,7 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// only at lift (`endGuideStroke` needs the lift point), and it is two seconds to redraw. The
     /// rule this function implements is about the artist's *ink*.
     private func handleInterrupted() {
+        if liquifySession != nil { finishLiquifyGesture(nil); return }
         if guideStartTime != nil { cancelGuideStroke(); return }
         // A retag already landed as its own undo step, so there's only the flag to clear.
         if consumedAsMotionGroupTap { consumedAsMotionGroupTap = false; return }
@@ -1725,6 +1798,10 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// takes, and that is how a stroke the artist drew on purpose came to vanish when they started
     /// the next one.
     private func handleCancel() {
+        if liquifySession != nil {
+            liquifySession = nil; _ = liquifyCollector.drain()
+            canvasManager?.endLiveEdit(); endGesture(); onStrokeCancelled?(); return
+        }
         // A guide only commits at lift, which a cancel never reaches, so its samples are dropped.
         if guideStartTime != nil { cancelGuideStroke(); return }
         // A retag already landed as its own undo step, so there's only the flag to clear.
@@ -2172,6 +2249,7 @@ final class StrokeCanvasView: CanvasPlaneView {
     private static func scratchRole(tool: StrokeTool, mode: VectorEraserMode) -> VectorScratchRole {
         switch tool {
         case .brush: return .overlay
+        case .liquify: return .replacement
         case .eraser: return mode == .cutToIntersection ? .none : .replacement
         }
     }

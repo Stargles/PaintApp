@@ -241,6 +241,20 @@ extension InterpolationRecipe {
             }
             return binding
         }
+        // Keep the native brush field and capture vertices untouched. Moving only the rest
+        // grid conjugates the captured field through the resize, preserving grain and selection taper.
+        moved.deformations = deformations.map { deformation in
+            var deformation = deformation
+            deformation.captures = deformation.captures.map { capture in
+                var capture = capture
+                let lattice = capture.lattice
+                capture.lattice = Lattice(cols: lattice.cols, rows: lattice.rows,
+                    restOrigin: map.apply(lattice.restOrigin), restCellSize: lattice.restCellSize * k,
+                    vertices: lattice.vertices, activeCells: lattice.activeCells)
+                return capture
+            }
+            return deformation
+        }
         moved.localEdits = localEdits.map { edit in
             var edit = edit
             if case .stroke(let stroke) = VectorCanvas.mapping(.stroke(edit.stroke), throughSimilarity: t) {
@@ -960,15 +974,15 @@ extension CanvasManager {
                         lattice.precise = false
                         stroke.lattice = lattice
                     }
-                    // A baked stroke's stored rest spine goes to the same grid — it is written with
-                    // the stroke's own `precise` flag, so it is the same bytes either way.
-                    if let rest = stroke.distort?.rest {
-                        stroke.distort?.rest = PackedSampleRun(rest, about: centre).samples
-                    }
-                    if var restLattice = stroke.distort?.restLattice {
-                        restLattice.samples = PackedSampleRun(restLattice.samples, about: centre).samples
-                        restLattice.precise = false
-                        stroke.distort?.restLattice = restLattice
+                    if var placement = stroke.placement,
+                       case .retained(let native, var ancestor, _) = placement.source {
+                        let snapped = PackedSampleRun(native, about: centre).samples
+                        if var lattice = ancestor {
+                            lattice.samples = PackedSampleRun(lattice.samples, about: centre).samples
+                            lattice.precise = false; ancestor = lattice
+                        }
+                        placement.source = .retained(samples: snapped, lattice: ancestor, precise: false)
+                        stroke.placement = placement
                     }
                     stroke.precise = false
                     return .stroke(stroke)

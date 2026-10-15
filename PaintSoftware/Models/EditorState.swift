@@ -63,6 +63,7 @@ struct SceneTools: Codable, Equatable {
     /// What the eyedropper reads under the finger — TODO (119).
     var eyedropperMode: Eyedropper.Mode = .layer
     var vectorEraserMode: VectorEraserMode = .default
+    var liquifyMode: LiquifyMode = .push
     /// Whether the eraser reaches every visible vector layer — TODO (82).
     var universalEraser = false
     var fill = FillToolManifest()
@@ -80,7 +81,7 @@ extension Tool {
     /// open the editor mid-gesture with nothing to finish.
     var isRestoredOnOpening: Bool {
         switch self {
-        case .pen, .pencil, .eraser, .fill: return true
+        case .pen, .pencil, .eraser, .liquify, .fill: return true
         case .eyedropper, .text, .place:    return false
         }
     }
@@ -114,6 +115,7 @@ extension CanvasManager {
         tools.color = brushColor.codable
         tools.eyedropperMode = eyedropperMode
         tools.vectorEraserMode = vectorEraserMode
+        tools.liquifyMode = liquifyMode
         tools.universalEraser = universalEraser
         tools.fill = FillToolManifest(mode: fillMode, settings: fillSettings)
         tools.text = textRecipe.styleOnly
@@ -147,6 +149,7 @@ extension CanvasManager {
         brushColor = tools.color.color
         eyedropperMode = tools.eyedropperMode
         vectorEraserMode = tools.vectorEraserMode
+        liquifyMode = tools.liquifyMode
         universalEraser = tools.universalEraser
         fillMode = tools.fill.mode
         tools.fill.apply(to: fillSettings)

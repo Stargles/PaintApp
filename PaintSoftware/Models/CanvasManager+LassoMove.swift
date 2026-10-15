@@ -1574,7 +1574,7 @@ extension CanvasManager {
         if let projected {
             let map = Self.restDelta(projected, pose: part.poses[element.id])
             // **`mapping`, not `posing`** — a nudge writes the artist's own geometry, so the
-            // keystone lands in `VectorStroke.distort`, which is persisted, rather than in a rest
+            // keystone lands in `VectorStroke.placement`, which is persisted, rather than in a rest
             // walk, which is a per-frame view and is not. Same three arms, same composition, one
             // fewer memo.
             guard let moved = VectorCanvas.mapping(lifted, through: map.homography) else { return element }
@@ -1602,7 +1602,7 @@ extension CanvasManager {
             // the *lifted* stroke's, which is the width before any nudge, since every nudge maps
             // `liftedInside` absolutely. A stroke already carrying a keystone is left to the map
             // — see `keepsStrokeWidthOnMove`.
-            if keepsStrokeWidth, case .stroke(var stroke) = moved, stroke.distort == nil,
+            if keepsStrokeWidth, case .stroke(var stroke) = moved, stroke.placement == nil,
                case .stroke(let drawn) = lifted {
                 stroke.size = drawn.size
                 moved = .stroke(stroke)

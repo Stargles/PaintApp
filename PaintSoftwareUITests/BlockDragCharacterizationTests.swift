@@ -255,6 +255,37 @@ final class BlockDragCharacterizationTests: XCTestCase {
                       "References to blocks that did not move are untouched")
     }
 
+    func testMovingABlockRetargetsCapturedSourceOccurrencesWithoutChangingClonesOrLocalInk() throws {
+        let manager = twoLayerManager(secondIsVector: false)
+        CanvasFixture.setCelLayout(manager, layerIndex: 1, [(start: 0, length: 2), (start: 9, length: 1)])
+        let moving = try XCTUnwrap(manager.layers[1].cels.first { $0.startFrame == 9 })
+        let other = try XCTUnwrap(manager.layers[1].cels.first { $0.startFrame == 0 })
+        let source = manager.layers[1].id, target = manager.layers[0].id
+        let element = UUID()
+        let stale = CelRef(layerID: source, celID: moving.id)
+        let clone = CelRef(layerID: source, celID: other.id)
+        typealias Ink = LiquifyDeformation.InkID
+        let original: Set<Ink> = [.init(kind: .source, elementID: element, reference: stale),
+                                 .init(kind: .source, elementID: element, reference: clone),
+                                 .init(kind: .local, elementID: element), .init(kind: .subject, elementID: element)]
+        let capture = LiquifyDeformation.Capture(groupID: nil,
+            lattice: Lattice(cols: 1, rows: 1, restOrigin: .zero, restCellSize: 64), inkIDs: original)
+        let gesture = LiquifyDeformation(brush: TestBrushes.hardRound, size: 20, power: 1,
+            mode: .expand, seed: 42, samples: [VectorSample(x: 20, y: 20, pressure: 1)], captures: [capture])
+        // No ordinary reference needs retargeting: the captured occurrence alone must trigger the write.
+        var recipe = InterpolationRecipe(references: [InterpolationReference(layerID: source, celID: other.id),
+                                                      InterpolationReference(layerID: target, celID: UUID())], t: 0.5)
+        recipe.deformations = [gesture]
+        manager.layers[0].cels[0].interpolation = recipe
+        XCTAssertTrue(manager.moveCelToLayer(celID: moving.id, fromLayer: source, toLayer: target, startFrame: 7))
+        var expected = original
+        expected.remove(.init(kind: .source, elementID: element, reference: stale))
+        expected.insert(.init(kind: .source, elementID: element, reference: CelRef(layerID: target, celID: moving.id)))
+        XCTAssertEqual(manager.layers[0].cels[0].interpolation?.deformations.first?.captures.first?.inkIDs, expected)
+        manager.undo()
+        XCTAssertEqual(manager.layers[0].cels[0].interpolation?.deformations.first?.captures.first?.inkIDs, original)
+    }
+
     func testMovingBetweenLayersIsOneUndoStep() {
         let manager = twoLayerManager(secondIsVector: false)
         CanvasFixture.setCelLayout(manager, layerIndex: 1, [(start: 0, length: 2), (start: 9, length: 1)])

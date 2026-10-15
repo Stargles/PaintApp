@@ -925,6 +925,14 @@ it is the dependency order.
    fill instead installs its replaced raster into `StrokeCanvasView` synchronously before the surface
    comes down. Cancelling or committing no pixels simply removes the transient surface.
 
+   **Finished procedural edits transfer their shown surface.** `WindowSurfaceView.freezePresented`
+   detaches its exact front and cancels outstanding landings; the unlanded picture owns that allocation
+   until a covering base arrives. Allocation accounting follows ownership, including cancelled draws.
+   Multiple replacement windows remain held together. `UnlandedInk.displayPlan` unions the base holes
+   and subtracts later replacement windows from earlier pictures, including additive ink and transparent
+   overlap. Newer live replacement windows enter the same plan; a changed live window invalidates the
+   clipping cache even when the committed picture IDs have not changed.
+
    **Two things worth carrying forward.** (a) `VectorCanvas.Frozen` keeps a live reference beside its
    frozen values and renders through `render(quality:ifStillAtVersion:)`, so the composite shares the
    display's memo instead of re-stamping the cel — MEASURED on the owner's iPad 9 in Release,

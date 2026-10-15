@@ -7,6 +7,7 @@ enum Tool: String, Codable, CaseIterable {
     case pen
     case pencil
     case eraser
+    case liquify
     case fill
     /// Tap the canvas to take the colour under the tap as the brush colour. A *tool* rather than a
     /// swatch that opens a picker — the owner's wording, 2026-08-17.
@@ -44,7 +45,7 @@ extension Tool {
     var isMomentary: Bool {
         switch self {
         case .eyedropper, .place: return true
-        case .pen, .pencil, .eraser, .fill, .text: return false
+        case .pen, .pencil, .eraser, .liquify, .fill, .text: return false
         }
     }
 }
@@ -72,7 +73,7 @@ extension Tool {
     /// after this cannot repeat that — it will not compile until it says which side it is on.
     var paintsOnCanvas: Bool {
         switch self {
-        case .pen, .pencil, .eraser:
+        case .pen, .pencil, .eraser, .liquify:
             // The eraser included: it is a stroke like any other, `.destinationOut` on a raster
             // layer and a real gesture on a vector one, and it goes through the same recognizer.
             return true
@@ -131,7 +132,7 @@ extension Tool {
             // The preset *is* this tool's preset. Following it is what makes picking "Pencil" in the
             // brush panel switch to the pencil, which is the feature.
             return true
-        case .eraser:
+        case .eraser, .liquify:
             // The eraser keeps its own profile (`toolProfiles.eraser`) entirely separate, so a tap in
             // the paint-brush panel while erasing must not silently put the artist back to painting.
             // The original rule, unchanged.

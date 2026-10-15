@@ -113,58 +113,12 @@ struct VectorStroke: Identifiable, Codable {
     /// stroke needs to vanish progressively along its length instead of all at once.
     var sampleVisibilityThresholds: [Int: CGFloat]? = nil
 
-    /// **Set only on the throwaway copy a pose makes** — KEYFRAMES.md §4.2's rest-space dab bake.
-    /// Nil on every stroke the artist owns, every stroke on disk and every stroke a Move commits.
-    ///
-    /// **Not persisted, and that costs no migration.** `init(from:)`/`encode(to:)` below name every
-    /// key by hand, so a field absent from `CodingKeys` is absent from the wire by construction
-    /// rather than by a decision anyone has to remember. That is the right answer here and not merely
-    /// the cheap one: a pose is re-resolved from `Cel.transformTracks` on every render, so a stored
-    /// walk could only ever be a second copy of something the tracks already say — `precise`'s
-    /// argument about derivable data, one level up.
-    ///
-    /// **A committed Distort is the case that looks like an exception and is not**: it is the
-    /// artist's own edit rather than a per-frame view, so it has to survive a save — and it is stored
-    /// as `distort` below, the *map* rather than the walk, precisely so that this field can stay
-    /// transient. `effectiveWalk` is where the two meet, and it is what every reader asks.
+    /// Transient pose memo; reconstructed from tracks rather than persisted.
     var restWalk: StrokeRestWalk? = nil
 
-    /// **The projective warp the artist committed into this stroke** — TODO item (12), and the one
-    /// thing on a stroke that `samples` plus one `size` cannot say.
-    ///
-    /// **Why anything is stored at all.** A Distort's local scale varies across the plane, so the ink
-    /// is a different width at each end of one line and `size` — a scalar — has no right value. The
-    /// centre line *is* expressible and is stored **posed**, because that is what every geometry
-    /// reader asks for: `localContentBounds`, `StrokeSpatialIndex`, lasso membership, the eraser's
-    /// candidacy test, damage rectangles and thumbnails all want to know where the ink *is*. What is
-    /// left over is each dab's radius and tip angle, and that is exactly a map: nine numbers, plus the
-    /// width the artist actually drew at.
-    ///
-    /// **Why the map and not the pre-image walk.** `StrokeRestWalk` is the same information and the
-    /// obvious thing to persist, and it is the wrong one: it would put a second copy of every sample
-    /// on disk, and it would need its own `precise` flag, its own `DabLattice`, and a rest-space arm
-    /// in `piece(of:samples:parameters:)`. The map costs ten numbers and **no change
-    /// to any of those**: a cut piece's lattice is the parent's posed walk, and pulling it back
-    /// through this map is the parent's rest walk, so a piece inherits the whole arrangement by being
-    /// a copy of its parent. `effectiveWalk` is where the pre-image is rebuilt, once, at render.
-    ///
-    /// **Why re-sampling is not an option**, which is the other half of the decision. `VectorStroke`
-    /// holds one width, and per-sample pressure drives alpha and flow as well as radius — so
-    /// smuggling the width into pressure changes the picture, not just the weight. Splitting into runs
-    /// of near-constant scale needs about sixty-four pieces at 5% tolerance over the 8.5× span
-    /// KEYFRAMES.md §8 measured, and it destroys the stroke's identity for undo, recolour, Apply Brush
-    /// and the eraser, every one of which addresses a stroke by id.
-    ///
-    /// **It composes, which is what keeps the stroke editable.** A later Move, rotate, scale,
-    /// Freeform or canvas resize pre-multiplies `map` (`drawn(_:through:widthScale:)`, one line) and a
-    /// second Distort pre-multiplies its own homography; a keyframe pose composes on top of it in
-    /// `composedWalk` without touching it. LASSO_MOVE.md §5.17's `sqrt(|det|)` rule is unchanged by
-    /// any of it — its counterpart here is `Homography.localScale(at:)`, the same quantity asked per
-    /// dab because it is no longer constant.
-    ///
-    /// Nil on every stroke nobody has distorted, which is every stroke in every document today; the
-    /// key is absent from the wire for those, so their bytes are unchanged.
-    var distort: StrokeDistort? = nil
+    /// One native placement/material owner. Homography-only ink can recover its source; a spatial
+    /// deformation or exact bake retains it. The public spine remains authoritative edit geometry.
+    var placement: StrokePlacement? = nil
 
     /// The brush `brushRef` names. A `BrushPool` entry is never mutated, so this is a read of a value
     /// that cannot change underneath a caller holding it; the setter interns, which is where a brush
@@ -191,7 +145,7 @@ struct VectorStroke: Identifiable, Codable {
          lattice: DabLattice? = nil, seed: UInt64 = DabRandom.freshSeed(),
          motionGroupID: UUID? = nil, animationGroupID: UUID? = nil,
          visibilityThreshold: CGFloat? = nil, sampleVisibilityThresholds: [Int: CGFloat]? = nil,
-         restWalk: StrokeRestWalk? = nil, distort: StrokeDistort? = nil) {
+         restWalk: StrokeRestWalk? = nil, placement: StrokePlacement? = nil) {
         self.id = id
         self.brushRef = BrushPool.intern(brush)
         self.color = color
@@ -207,7 +161,7 @@ struct VectorStroke: Identifiable, Codable {
         self.visibilityThreshold = visibilityThreshold
         self.sampleVisibilityThresholds = sampleVisibilityThresholds
         self.restWalk = restWalk
-        self.distort = distort
+        self.placement = placement
     }
 
     var uiColor: UIColor { color.uiColor }
@@ -221,10 +175,7 @@ struct VectorStroke: Identifiable, Codable {
     enum CodingKeys: String, CodingKey {
         case id, brush, color, size, opacity, samples, composite, lattice, seed
         case motionGroupID, animationGroupID, visibilityThreshold, sampleVisibilityThresholds
-        case distort
-        /// `StrokeDistort.rest` and `.restLattice`, written beside `distort` rather than inside it —
-        /// see that type's `CodingKeys`. Present only on a stroke KEYFRAMES.md §6's bake wrote.
-        case distortRest, distortRestLattice
+        case placement
     }
 }
 
@@ -303,72 +254,8 @@ struct StrokeRestWalk {
     /// Rest → posed. Carries a `Homography` rather than a `CGAffineTransform` precisely so stage 5b
     /// changes the pose that is built here and not one line of what consumes it.
     var pose: BrushStamper.DabPose
-}
-
-/// **A projective warp committed into a stroke's own geometry** — see `VectorStroke.distort`, which
-/// carries the whole argument for why this is the stored form and `StrokeRestWalk` is not.
-///
-/// Ten numbers: the map, and the width the artist drew at. Both are needed, and the second is not
-/// derivable from `VectorStroke.size`: that scalar is the *footprint envelope* under this map (the
-/// maximum local scale over the stroke), which is what every bounds reader pads by and which a later
-/// affine multiplies by its own factor — so recovering the artist's width from it would mean
-/// re-deriving an envelope that has since been composed with something else.
-struct StrokeDistort: Codable, Equatable {
-    /// The artist's own geometry onto `VectorStroke.samples`. Nine numbers, and a homography is
-    /// defined up to scale, so two maps that differ by a factor are the same warp.
-    var map: Homography
-    /// `VectorStroke.size` before this map's envelope was multiplied into it — the width
-    /// `BrushStamper.stampStroke` walks with, in the space the artist drew in.
-    var restSize: CGFloat
-
-    /// **The artist's own spine, kept rather than recovered** — set only by KEYFRAMES.md §6's bake,
-    /// nil on every stroke a hand Distort committed.
-    ///
-    /// **Why a bake keeps it when a Distort does not.** `VectorStroke.effectiveWalk` recovers the
-    /// rest spine by pulling `samples` back through `map`'s inverse, which is a floating-point round
-    /// trip — MEASURED at 4e-15 pt on a 24 pt slide-and-scale, and on three of twelve frames of an
-    /// integer fixture that was enough to drop the last dab of a 29-dab walk: `Int(length / spacing)`
-    /// sits on a knife edge that any error crosses. A Distort is the artist's own edit and an ulp is
-    /// nothing to it; a bake's promise is that the drawing it writes is *the frame the animation
-    /// rendered*, and the round trip breaks that at exactly the places a test can find. **And across
-    /// a save the round trip is not an ulp but an eighth of a pixel**: `samples` are written
-    /// quarter-pixel quantised, and pulling a quantised posed spine back through the map does not land
-    /// on the artist's spine. This one is written through the same packing the animated stroke's own
-    /// `samples` get, so a baked document reopens to the frames the animated one would have.
-    ///
-    /// **Valid only while it is the pre-image of `samples` under `map`.** A writer that rewrites
-    /// `samples` by something other than composing an affine onto `map` — the interpolation warp, a
-    /// local edit's reprojection — must drop it (`withoutStoredRest`), and
-    /// the walk falls back to the pull-back, which is what a hand Distort always does. `drawn(_:through:)`
-    /// keeps it, because a Move composes onto the map and the artist's spine is unchanged.
-    var rest: StrokeSamples? = nil
-
-    /// The walk's lattice at rest, for a baked stroke that was a cut piece — `VectorStroke.lattice`
-    /// before the bake posed it. Only its `samples` are read (`effectiveWalk` takes the parameters
-    /// from the live lattice, so a later trim is honoured), and only while they are the pre-image of
-    /// `lattice.samples`, which every writer of the lattice keeps true or clears.
-    var restLattice: DabLattice? = nil
-
-    /// **Off this type's own wire.** `VectorStroke.encode` writes `rest` and `restLattice` under keys
-    /// of its own, through `VectorSample.packed` with the stroke's `precise` flag — the only encoder
-    /// that knows the quantisation origin and the layout, and the one whose bytes the animated
-    /// stroke's `samples` would have taken.
-    enum CodingKeys: String, CodingKey {
-        case map, restSize
-    }
-
-    init(map: Homography, restSize: CGFloat, rest: StrokeSamples? = nil, restLattice: DabLattice? = nil) {
-        self.map = map
-        self.restSize = restSize
-        self.rest = rest
-        self.restLattice = restLattice
-    }
-
-    /// This map with the stored spine forgotten — for a writer that has just moved `samples` by
-    /// something the map cannot express.
-    var withoutStoredRest: StrokeDistort {
-        StrokeDistort(map: map, restSize: restSize)
-    }
+    var material: InkMaterialProgram? = nil
+    var transport: InkMaterialBridge = .identity
 }
 
 extension DabLattice {
@@ -391,56 +278,35 @@ extension DabLattice {
 }
 
 extension VectorStroke {
+    var materialProgram: InkMaterialProgram? { restWalk?.material ?? placement?.material }
 
-    /// **The walk this stroke's dabs are laid on, whatever put it there** — the transient one a
-    /// keyframe pose attached, or the one rebuilt from a committed `distort`, or nil for the
-    /// overwhelming majority of strokes, which have neither.
-    ///
-    /// **One accessor rather than two call sites asking two questions.** `stamp` and
-    /// `VectorCanvas.composedWalk` both need "what is the pre-image of this ink, and by what map", and
-    /// they would otherwise each have to know that there are two ways for a stroke to have one — which
-    /// is how a keyframe pose on top of a committed Distort comes to drop the Distort.
-    ///
-    /// **Rebuilding costs one inverse and two array maps, and only a distorted stroke pays it.** That
-    /// is the price of storing the map instead of the pre-image, and it is the right side of the
-    /// trade: the alternative doubles every distorted stroke's bytes on disk and puts a rest-space arm
-    /// in every cutter. INFERRED, not measured — the walk it feeds already costs a pass over the same
-    /// arrays, so this is a constant factor on a path that is already O(samples).
-    ///
-    /// **The lattice is pulled back too**, and that is what makes a cut piece work with no change to
-    /// `piece(of:samples:parameters:)`: a piece's lattice holds the parent's *posed* walk, and the
-    /// same inverse turns it into the parent's rest walk. The parameters are indices into that array
-    /// and are the same numbers in either space.
-    ///
-    /// Nil when the map has no inverse or the ink lands on the vanishing line — neither of which a
-    /// drag can produce (`Homography.isValidQuad` refuses the delta), so it is the guard rather than a
-    /// case anything reaches. The stroke then draws on its own posed samples at its own `size`, which
-    /// is the honest fallback: the ink is in the right place and its width is the envelope.
+    /// Native walk for a transient pose or a committed placement. A derived homography pulls back
+    /// the live geometry; a retained source preserves native spacing, sensors and parent identity.
     var effectiveWalk: StrokeRestWalk? {
         if let restWalk { return restWalk }
-        guard let distort, let inverse = distort.map.inverse else { return nil }
-        // The artist's own spine when a bake kept it (`StrokeDistort.rest`), else recovered.
+        guard let placement, let inverse = placement.map.inverse else { return nil }
         let rest: StrokeSamples
-        if let kept = distort.rest {
-            rest = kept
-        } else {
+        var nativeLattice: DabLattice?
+        switch placement.source {
+        case .derived:
             guard let pulled = samples.mapped(through: inverse) else { return nil }
             rest = pulled
-        }
-        var pulled: DabLattice?
-        if var lattice = self.lattice {
-            // Only the *spine* comes from the stored copy; the parameters — which dabs of the parent's
-            // walk this piece draws — are the live lattice's, so a trim that narrowed them is honoured.
-            if let kept = distort.restLattice, kept.samples.count == lattice.samples.count {
-                lattice.samples = kept.samples
-            } else {
+            if var lattice {
                 guard let walked = lattice.samples.mapped(through: inverse) else { return nil }
-                lattice.samples = walked
+                lattice.samples = walked; nativeLattice = lattice
             }
-            pulled = lattice
+        case .retained(let own, let ancestor, _):
+            rest = own
+            nativeLattice = ancestor
+            if placement.material == nil, var live = lattice {
+                // Homography-only trimming still uses the live ancestor range. Spatial material
+                // keeps its own remapped native correspondence through every geometry writer.
+                guard let walked = ancestor?.samples ?? live.samples.mapped(through: inverse) else { return nil }
+                live.samples = walked; nativeLattice = live
+            }
         }
-        return StrokeRestWalk(samples: rest, lattice: pulled, size: distort.restSize,
-                              pose: BrushStamper.DabPose(distort.map))
+        return StrokeRestWalk(samples: rest, lattice: nativeLattice, size: placement.restSize,
+                              pose: BrushStamper.DabPose(placement.map), material: placement.material, transport: placement.transport)
     }
 
     /// This stroke marked as stored at full precision — **and the lattice it walks with it**.
@@ -458,7 +324,7 @@ extension VectorStroke {
         var copy = self
         copy.precise = true
         copy.lattice?.precise = true
-        copy.distort?.restLattice?.precise = true
+        if var placement = copy.placement { placement.source = placement.source.markedPrecise(); copy.placement = placement }
         return copy
     }
 }
@@ -466,8 +332,16 @@ extension VectorStroke {
 /// `init(from:)`/`encode(to:)` live in an extension so declaring them doesn't suppress the
 /// memberwise initialiser every call site here builds with.
 extension VectorStroke {
-    init(from decoder: Decoder) throws {
+    init(from decoder: Decoder) throws { try self.init(from: decoder, materialTable: nil) }
+    init(from decoder: Decoder, materialTable: InkMaterialTable?) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        // Validate material before ordinary lossy geometry fields: malformed colour or samples
+        // cannot hide a dangling spatial operation reference.
+        placement = try InkMaterialCodingError.preserving {
+            guard c.contains(.placement) else { throw InkMaterialCodingError.invalid("missing stroke placement") }
+            return try c.decodeNil(forKey: .placement) ? nil :
+                StrokePlacement(from: c.superDecoder(forKey: .placement), table: materialTable)
+        }
         id = try c.decode(UUID.self, forKey: .id)
         // A number, redeemed against whatever table this decode was given — BRUSH.md §5.4. A file's
         // number is meaningless without its document's `BrushTable`, and `BrushPool.resolve` is where
@@ -495,19 +369,10 @@ extension VectorStroke {
         visibilityThreshold = try c.decodeIfPresent(CGFloat.self, forKey: .visibilityThreshold)
         sampleVisibilityThresholds = try c.decodeIfPresent([Int: CGFloat].self,
                                                            forKey: .sampleVisibilityThresholds)
-        // Absent on every stroke nobody has distorted, which is every stroke written before TODO item
-        // (12). `restWalk` is deliberately *not* here and never will be — it is a view of a stroke
-        // that a keyframe pose mints per frame, and this is the artist's own edit.
-        distort = try c.decodeIfPresent(StrokeDistort.self, forKey: .distort)
-        if distort != nil, c.contains(.distortRest) {
-            // The same decoder `samples` went through, so the spine comes back exactly as the
-            // animated stroke's own would have — which is the whole point of storing it.
-            distort?.rest = try VectorSample.decodeRun(from: c, forKey: .distortRest).samples
-            distort?.restLattice = try c.decodeIfPresent(DabLattice.self, forKey: .distortRestLattice)
-        }
     }
 
-    func encode(to encoder: Encoder) throws {
+    func encode(to encoder: Encoder) throws { try encode(to: encoder, materialTable: nil) }
+    func encode(to encoder: Encoder, materialTable: InkMaterialTable?) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(id, forKey: .id)
         try c.encode(brushRef, forKey: .brush)
@@ -545,14 +410,8 @@ extension VectorStroke {
         try c.encodeIfPresent(animationGroupID, forKey: .animationGroupID)
         try c.encodeIfPresent(visibilityThreshold, forKey: .visibilityThreshold)
         try c.encodeIfPresent(sampleVisibilityThresholds, forKey: .sampleVisibilityThresholds)
-        // Written only when present, so an undistorted stroke's payload is byte-for-byte what it was.
-        try c.encodeIfPresent(distort, forKey: .distort)
-        // A baked stroke's rest spine, packed exactly as `samples` are — same origin, same layout —
-        // so the bytes a reload hands the walk are the bytes the animated stroke would have stored.
-        if let rest = distort?.rest {
-            try c.encode(VectorSample.packed(rest, for: encoder, precise: precise), forKey: .distortRest)
-            try c.encodeIfPresent(distort?.restLattice, forKey: .distortRestLattice)
-        }
+        if let placement { try placement.encode(to: c.superEncoder(forKey: .placement), table: materialTable) }
+        else { try c.encodeNil(forKey: .placement) }
     }
 }
 
@@ -686,6 +545,7 @@ struct VectorFillElement: Identifiable, Codable {
     /// Archiver data for the fill path (supports multi-subpath via UIBezierPath's NSSecureCoding).
     var pathData: Data
     var paint: FillPaint
+    var placement: FillPlacement? = nil
     /// Additional opacity multiplier on top of the paint's own alpha (matches `VectorStroke.opacity`).
     var opacity: Double
     /// When true the path is rendered with the even-odd fill rule (used for clear-selection holes).
@@ -710,7 +570,11 @@ struct VectorFillElement: Identifiable, Codable {
     }
 
     var cgPath: CGPath? {
-        guard let bezier = try? NSKeyedUnarchiver.unarchivedObject(ofClass: UIBezierPath.self, from: pathData) else { return nil }
+        Self.decodePath(pathData)
+    }
+
+    static func decodePath(_ data: Data) -> CGPath? {
+        guard let bezier = try? NSKeyedUnarchiver.unarchivedObject(ofClass: UIBezierPath.self, from: data) else { return nil }
         return bezier.cgPath
     }
 
@@ -741,6 +605,15 @@ struct VectorFillElement: Identifiable, Codable {
         return result
     }
 
+    /// Cutting changes the material's visible coverage at this chronological stage. Ordinary fills
+    /// still need only their new boundary; spatial fills retain a mask instead of restoring native
+    /// paint outside the selected fragment on the next render.
+    func clipped(to path: CGPath, mask: CGPath? = nil, inverted: Bool = false) -> VectorFillElement {
+        var result = reshaped(to: path)
+        result.placement = placement?.clipped(to: mask.map(Self.archived) ?? result.pathData, inverted: inverted)
+        return result
+    }
+
     private static func archived(_ path: CGPath) -> Data {
         (try? NSKeyedArchiver.archivedData(withRootObject: UIBezierPath(cgPath: path), requiringSecureCoding: true)) ?? Data()
     }
@@ -749,11 +622,19 @@ struct VectorFillElement: Identifiable, Codable {
     // `gradient` with no `color` beside it. A document written before gradients decodes unchanged, and
     // a flat fill's payload is byte-for-byte what it was.
     private enum CodingKeys: String, CodingKey {
-        case id, pathData, color, gradient, opacity, evenOddFill, animationGroupID
+        case id, pathData, color, gradient, opacity, evenOddFill, animationGroupID, placement
     }
 
-    init(from decoder: Decoder) throws {
+    init(from decoder: Decoder) throws { try self.init(from: decoder, materialTable: nil) }
+    init(from decoder: Decoder, materialTable: InkMaterialTable?) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        // Validate material before ordinary lossy geometry fields: malformed colour or samples
+        // cannot hide a dangling spatial operation reference.
+        placement = try InkMaterialCodingError.preserving {
+            guard c.contains(.placement) else { throw InkMaterialCodingError.invalid("missing fill placement") }
+            return try c.decodeNil(forKey: .placement) ? nil :
+                FillPlacement(from: c.superDecoder(forKey: .placement), table: materialTable)
+        }
         id = try c.decode(UUID.self, forKey: .id)
         pathData = try c.decode(Data.self, forKey: .pathData)
         if let gradient = try c.decodeIfPresent(LinearGradientPaint.self, forKey: .gradient) {
@@ -766,7 +647,8 @@ struct VectorFillElement: Identifiable, Codable {
         animationGroupID = try c.decodeIfPresent(UUID.self, forKey: .animationGroupID)
     }
 
-    func encode(to encoder: Encoder) throws {
+    func encode(to encoder: Encoder) throws { try encode(to: encoder, materialTable: nil) }
+    func encode(to encoder: Encoder, materialTable: InkMaterialTable?) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(id, forKey: .id)
         try c.encode(pathData, forKey: .pathData)
@@ -777,6 +659,8 @@ struct VectorFillElement: Identifiable, Codable {
         try c.encode(opacity, forKey: .opacity)
         try c.encode(evenOddFill, forKey: .evenOddFill)
         try c.encodeIfPresent(animationGroupID, forKey: .animationGroupID)
+        if let placement { try placement.encode(to: c.superEncoder(forKey: .placement), table: materialTable) }
+        else { try c.encodeNil(forKey: .placement) }
     }
 }
 
@@ -2832,7 +2716,7 @@ final class VectorCanvas {
     /// same limit stated for the eraser, which cannot retry and so refuses instead.
     ///
     /// The width used is `size`, which for a distorted stroke is the footprint envelope rather than
-    /// the artist's width — `StrokeDistort.restSize`'s doc says why that is the right number for a
+    /// the artist's width — `StrokePlacement.restSize`'s doc says why that is the right number for a
     /// bounds reader.
     private static func strokeInkHint(of stroke: VectorStroke) -> CGRect? {
         let values = stroke.brush.dabValues(atPressure: 1)
@@ -2853,7 +2737,7 @@ final class VectorCanvas {
     private static func rewrittenInk(of new: VectorStroke, replacing old: VectorStroke,
                                      measured: CGRect?) -> CGRect? {
         if let measured, new.samples == old.samples, new.lattice == old.lattice,
-           new.distort == old.distort, new.size == old.size, new.brushRef == old.brushRef {
+           new.placement == old.placement, new.size == old.size, new.brushRef == old.brushRef {
             return measured
         }
         return strokeInkHint(of: new)
@@ -3826,6 +3710,7 @@ final class VectorCanvas {
                   // A scattering stroke throws dabs off its centreline, so the capsule chain the
                   // coverage test uses does not bound its ink.
                   VectorEraser.supportsSplitting(strokeBrush: stroke.brush),
+                  stroke.materialProgram == nil,
                   VectorEraser.isEntirelyCovered(stroke.samples, brush: stroke.brush, size: stroke.size,
                                                  by: erasers, sweep: sweep) else {
                 result.append(element)
@@ -3865,7 +3750,7 @@ final class VectorCanvas {
                   stroke.samples.count > 1,
                   // As in the deletion pass: a scattering stroke's ink isn't bounded by the capsule
                   // chain the coverage test measures.
-                  VectorEraser.supportsSplitting(strokeBrush: stroke.brush) else {
+                  VectorEraser.supportsSplitting(strokeBrush: stroke.brush), stroke.materialProgram == nil else {
                 result.append(element)
                 continue
             }
@@ -3929,14 +3814,10 @@ final class VectorCanvas {
         piece.samples = stroke.samples.replacingSamples(samples)
         let mapped = stroke.lattice.map { parameters.map($0.parentParameter(of:)) } ?? parameters
         piece.lattice = DabLattice(samples: stroke.lattice?.samples ?? stroke.samples,
-                                   parameters: mapped)
-        // A baked stroke's stored rest spine becomes the piece's rest *lattice*, under the same
-        // parameters as the posed one — the walk is the parent's whole walk either way, and the
-        // piece's own sub-run is not something a stored spine can name. `StrokeDistort.rest`'s rule.
-        if let distort = stroke.distort {
-            let restWalk = distort.restLattice?.samples ?? distort.rest
-            piece.distort = StrokeDistort(map: distort.map, restSize: distort.restSize, rest: nil,
-                                          restLattice: restWalk.map { DabLattice(samples: $0, parameters: mapped) })
+                                   parameters: mapped, precise: stroke.lattice?.precise ?? stroke.precise)
+        if var placement = stroke.placement {
+            placement.source = placement.source.remapped(onto: parameters)
+            piece.placement = placement
         }
         piece.sampleVisibilityThresholds = remapped(stroke.sampleVisibilityThresholds, onto: parameters)
         return piece
@@ -3950,7 +3831,7 @@ final class VectorCanvas {
     /// the app populates it; the interpolation tests do), which is exactly why it is worth one
     /// function here instead of a corrupted in-between later. A boundary sample sits at a fractional
     /// parameter and so inherits nothing — it is a new sample, not one of the parent's.
-    private static func remapped(_ thresholds: [Int: CGFloat]?, onto parameters: [CGFloat]) -> [Int: CGFloat]? {
+    static func remapped(_ thresholds: [Int: CGFloat]?, onto parameters: [CGFloat]) -> [Int: CGFloat]? {
         guard let thresholds, !thresholds.isEmpty else { return thresholds }
         var result: [Int: CGFloat] = [:]
         for (index, parameter) in parameters.enumerated() {
@@ -4023,9 +3904,19 @@ final class VectorCanvas {
         for ref in strokeIndex().segments(near: sweep.bounds.insetBy(dx: -reach, dy: -reach))
         where seen.insert(ref.elementIndex).inserted {
             guard let stroke = _elements[ref.elementIndex].stroke, stroke.composite == .paint,
+                  stroke.materialProgram == nil,
                   VectorEraser.touchesInk(of: stroke.samples, brush: stroke.brush, size: stroke.size,
                                           sweep: sweep) else { continue }
             touched.append(ref.elementIndex)
+        }
+        // The centreline index cannot find material retained beyond a moved spine. Its bounded
+        // native-alpha query shares the rendering inverse, including brush scatter and cut ranges.
+        for (index, element) in _elements.enumerated() {
+            guard let stroke = element.stroke, stroke.composite == .paint, stroke.materialProgram != nil else { continue }
+            if let known = paintedBounds[stroke.id], !known.intersects(sweep.bounds) { continue }
+            guard
+                  Self.materialInkTouches(stroke, sweep: sweep) else { continue }
+            touched.append(index)
         }
         return touched.sorted()
     }
@@ -4526,8 +4417,8 @@ final class VectorCanvas {
                 // window — and its animation group (§3.4: membership is a field on the element, and
                 // a half that lost it would drop out of the channel that was moving it and stop
                 // animating, silently). Only the id is the half's own.
-                var insideFill = fill.reshaped(to: insidePart)
-                var outsideFill = fill.reshaped(to: outsidePart)
+                var insideFill = fill.clipped(to: insidePart, mask: loop)
+                var outsideFill = fill.clipped(to: outsidePart, mask: loop, inverted: true)
                 insideFill.id = UUID()
                 outsideFill.id = UUID()
                 insideIDs.insert(insideFill.id)
@@ -5034,7 +4925,8 @@ final class VectorCanvas {
         }
         return StrokeRestWalk(samples: existing.samples, lattice: existing.lattice,
                               size: existing.size,
-                              pose: BrushStamper.DabPose(map * existing.pose.map))
+                              pose: BrushStamper.DabPose(map * existing.pose.map),
+                              material: existing.material?.conjugated(by: map), transport: existing.transport.moved(by: map))
     }
 
     static func posing(_ element: VectorElement, through t: CGAffineTransform) -> VectorElement {
@@ -5139,7 +5031,7 @@ final class VectorCanvas {
     /// same reason.
     ///
     /// **The projective commit already is the persisted form, and it does not care that the map is
-    /// affine.** `distorted(_:through:)` stores the posed spine and `StrokeDistort` — the map and the
+    /// affine.** `distorted(_:through:)` stores the posed spine and `StrokePlacement` — the map and the
     /// rest width — and `effectiveWalk` rebuilds the rest walk from them on every read, so
     /// `stamp` runs the identical `PosedDabTarget` path a pose runs. `mapping(_:through: Homography)`
     /// short-circuits an affine map away from that arm, which is right for a Distort dragged back to
@@ -5179,7 +5071,7 @@ final class VectorCanvas {
     ///
     /// The pair is `mapping`/`posing` one currency wider, and the split is the one the affine pair
     /// already states: *a pose is a view of a stroke; a commit is a new stroke.* What differs here is
-    /// only the memo — both write `VectorStroke.distort`, because with the map persisted the pre-image
+    /// only the memo — both write `VectorStroke.placement`, because with the map persisted the pre-image
     /// is derivable and there is nothing for the two to disagree about.
     ///
     /// **`distort` composes rather than replaces**, through `composedWalk`, so a second Distort on an
@@ -5240,9 +5132,9 @@ final class VectorCanvas {
         out.size = walk.size * widest
         // `walk.samples`/`walk.lattice` are the artist's own spine and lattice whatever the stroke
         // already carried: `composedWalk` reads them off an existing walk rather than off `samples`.
-        out.distort = StrokeDistort(map: walk.pose.map, restSize: walk.size,
-                                    rest: keepingRest ? walk.samples : nil,
-                                    restLattice: keepingRest ? walk.lattice : nil)
+        out.placement = StrokePlacement(map: walk.pose.map, restSize: walk.size,
+            source: keepingRest || walk.material != nil ? .retained(samples: walk.samples, lattice: walk.lattice, precise: stroke.precise || walk.material != nil) : .derived,
+            material: walk.material, transport: walk.transport)
         return out
     }
 
@@ -5265,7 +5157,9 @@ final class VectorCanvas {
         // Identity, not geometry — `drawn(_:through:widthScale:)`'s reason, restated: a nudge moves
         // an element, it does not mint a new one, and the float tracks its pieces by id.
         // `reshaped` keeps the id and the animation group, which are the same kind of thing.
-        return fill.reshaped(to: moved, paint: paint)
+        var result = fill.reshaped(to: moved, paint: paint)
+        result.placement = fill.placement?.transformed(by: map)
+        return result
     }
 
     /// The text arm. **Exact, and that is a theorem rather than a tolerance**: a homography is
@@ -5376,9 +5270,11 @@ final class VectorCanvas {
             // a dab count of 274 against 357, which is what
             // `testAnAffineAfterACommittedKeystoneComposesRatherThanStranding` was written to catch.
             // Untouched on the overwhelming majority of strokes, which carry no distort at all.
-            if var distort = stroke.distort {
+            if var distort = stroke.placement {
                 distort.map = Homography(t) * distort.map
-                stroke.distort = distort
+                distort.material = distort.material?.conjugated(by: Homography(t))
+                distort.transport = distort.transport.moved(by: Homography(t))
+                stroke.placement = distort
             }
             return .stroke(stroke)
         case .fill(let fill):
@@ -5391,7 +5287,9 @@ final class VectorCanvas {
             // arm dropped until 2026-09-06 — every lasso nudge and canvas resize silently un-tagged a
             // fill, which stopped travelling with its group at the first Move (KEYFRAMES.md §3.4).
             // The gradient's two points go through the same affine as the path, which is exact.
-            return .fill(fill.reshaped(to: moved, paint: fill.paint.transformed(by: t)))
+            var result = fill.reshaped(to: moved, paint: fill.paint.transformed(by: t))
+            result.placement = fill.placement?.transformed(by: Homography(t))
+            return .fill(result)
         case .image, .text, .video, .stream:
             // The kinds whose placement is a stored pose or four ordered corners. Each caller answers
             // for them itself, because the currency differs — see the header.
@@ -5487,6 +5385,10 @@ final class VectorCanvas {
         var size: CGFloat
         var opacity: Double
         var color: UIColor
+        /// Spatial ink replays its retained native parent through the existing posed-dab sink.
+        /// Parametric spans below are in this parent's domain, not a nearest-point correspondence.
+        var pose: BrushStamper.DabPose? = nil
+        var material: InkMaterialPaint? = nil
     }
 
     /// What a Mode 2 gesture ending here would take away, as something a caller can draw.
@@ -5568,8 +5470,11 @@ final class VectorCanvas {
 
             // The same fallback `stamp(stroke:into:isEraser:)` makes: a lattice with no usable range
             // would replay the *parent* whole, which is worse than ignoring it.
-            let lattice = stroke.lattice.flatMap { $0.range == nil ? nil : $0 }
-            let source = lattice?.samples ?? stroke.samples
+            let native = stroke.materialProgram.flatMap { _ in
+                Self.mapping(.stroke(stroke), throughSimilarity: _transform).stroke.flatMap { Self.materialWalk(for: $0) }
+            }
+            let lattice = (native?.lattice ?? stroke.lattice).flatMap { $0.range == nil ? nil : $0 }
+            let source = lattice?.samples ?? native?.samples ?? stroke.samples
             let canvasSize = stroke.size * scale
             let strokeRadius = StrokeGeometry.stampRadius(forPressure: 1, brush: stroke.brush,
                                                           size: canvasSize)
@@ -5627,14 +5532,16 @@ final class VectorCanvas {
             }
 
             guard !eraseRanges.isEmpty else { continue }
-            edits.append(CutPreviewEdit(eraseWalk: Self.canvasSamples(source, through: _transform),
+            edits.append(CutPreviewEdit(eraseWalk: native == nil ? Self.canvasSamples(source, through: _transform) : source,
                                         eraseRandom: stroke.dabRandom,
                                         eraseRanges: eraseRanges,
                                         restamps: restamps,
                                         brush: stroke.brush,
-                                        size: canvasSize,
+                                        size: native?.size ?? canvasSize,
                                         opacity: stroke.opacity,
-                                        color: stroke.uiColor))
+                                        color: stroke.uiColor,
+                                        pose: native?.pose,
+                                        material: native?.material.map { InkMaterialPaint(program: $0, transport: native?.transport ?? .identity) }))
         }
         return edits
     }
@@ -5712,8 +5619,12 @@ final class VectorCanvas {
     /// is why `stamp(stroke:into:isEraser: true)` above hands the *stroke's* colour through unchanged
     /// and is none the worse for it. The restamp's colour is not arbitrary and is the stroke's own.
     static func applyPreview(_ edit: CutPreviewEdit, into target: DabTarget) {
+        let pixelTarget = target as? MaterialDabTarget
+        pixelTarget?.material = edit.material
+        defer { pixelTarget?.material = nil }
+        let sink: DabTarget = edit.pose.map { BrushStamper.PosedDabTarget(target, pose: $0) } ?? target
         for range in edit.eraseRanges {
-            BrushStamper.stampStroke(into: target, samples: edit.eraseWalk, brush: edit.brush,
+            BrushStamper.stampStroke(into: sink, samples: edit.eraseWalk, brush: edit.brush,
                                      color: .black, brushSize: edit.size,
                                      brushOpacity: edit.opacity, isEraser: true,
                                      random: edit.eraseRandom, visibleRange: range)
@@ -5721,7 +5632,7 @@ final class VectorCanvas {
         for range in edit.restamps {
             // The same walk and the same field the pieces will be drawn on once the cut commits, so
             // the dabs drawn back are the dabs the lift keeps.
-            BrushStamper.stampStroke(into: target, samples: edit.eraseWalk, brush: edit.brush,
+            BrushStamper.stampStroke(into: sink, samples: edit.eraseWalk, brush: edit.brush,
                                      color: edit.color, brushSize: edit.size,
                                      brushOpacity: edit.opacity, isEraser: false,
                                      random: edit.eraseRandom, visibleRange: range)
@@ -6158,16 +6069,18 @@ final class VectorCanvas {
         }
 
         /// Draws frozen geometry directly into the caller's window. No canvas-sized intermediate.
-        func draw(into cg: CGContext, frameRect: CGRect, quality: RenderQuality) {
-            guard size.width > 0, size.height > 0 else { return }
+        @discardableResult
+        func draw(into cg: CGContext, frameRect: CGRect, quality: RenderQuality) -> Int? {
+            guard size.width > 0, size.height > 0 else { return nil }
             cg.saveGState()
             cg.translateBy(x: frameRect.minX, y: frameRect.minY)
             cg.scaleBy(x: frameRect.width / size.width, y: frameRect.height / size.height)
             cg.concatenate(transform)
-            _ = VectorCanvas.drawLocalContent(into: cg,
+            let walked = VectorCanvas.drawLocalContent(into: cg,
                 elements: elements.filter { !suppressed.contains($0.id) },
                 quality: quality, clippedTo: cg.boundingBoxOfClipPath, known: known)
             cg.restoreGState()
+            return walked.completed ? walked.dabCount : nil
         }
 
         /// How many raster pixels per canvas point a buffer of `destination` points can show. Not
@@ -7161,7 +7074,7 @@ final class VectorCanvas {
             walked = drawLocalContent(into: cg, elements: elements, quality: quality,
                                       clippedTo: clip, known: knownBounds)
         }
-        guard let walked, image.cgImage != nil else {
+        guard let walked, walked.completed, image.cgImage != nil else {
             MemoryPressure.signal(.allocationRefused)
             return nil
         }
@@ -7172,9 +7085,10 @@ final class VectorCanvas {
     /// What one walk learned — the footprints it measured, where it painted outside its clip
     /// (`.null` when it did not), and the dabs it stamped. `LocalContent` is this plus the picture.
     private struct Walk {
-        let escaped: CGRect
-        let measured: [UUID: CGRect]
-        let dabCount: Int
+        var escaped: CGRect
+        var measured: [UUID: CGRect]
+        var dabCount: Int
+        var completed = true
     }
 
     /// **The walk itself, into a context the caller owns** — `renderLocalContent`'s body, so that a
@@ -7190,9 +7104,29 @@ final class VectorCanvas {
     private static func drawLocalContent(into cg: CGContext, elements: [VectorElement],
                                          quality: RenderQuality, clippedTo clip: CGRect?,
                                          known knownBounds: [UUID: CGRect]) -> Walk {
+        guard quality == .full, elements.contains(where: { $0.materialProgram != nil }) else {
+            return drawLocalContentPass(into: cg, elements: elements, quality: quality,
+                clippedTo: clip, known: knownBounds, materialRenderer: nil)
+        }
+        var result = Walk(escaped: .null, measured: [:], dabCount: 0)
+        let completed = InkMaterialRenderer.visitTiles(into: cg) { renderer in
+            let pass = drawLocalContentPass(into: cg, elements: elements, quality: quality,
+                clippedTo: clip, known: knownBounds, materialRenderer: renderer)
+            result.escaped = result.escaped.union(pass.escaped)
+            result.dabCount += pass.dabCount
+            for (id, box) in pass.measured { result.measured[id] = box }
+            return pass.completed
+        }
+        result.completed = completed
+        return result
+    }
+
+    private static func drawLocalContentPass(into cg: CGContext, elements: [VectorElement],
+                                         quality: RenderQuality, clippedTo clip: CGRect?,
+                                         known knownBounds: [UUID: CGRect], materialRenderer: InkMaterialRenderer?) -> Walk {
         // One target — and so one `DabGradientCache` — for the whole walk: a per-run target would
         // throw away the cache's hit rate at every fill or eraser.
-        let target = CGContextDabTarget(cg)
+        let target = CGContextDabTarget(cg, materialRenderer: materialRenderer)
         // Measured footprints from this walk, handed back for the caller to apply to `paintedBounds`
         // — never during, because the skip test below reads the *previous* walk's answer (`known`)
         // and must not see this one's.
@@ -7225,7 +7159,7 @@ final class VectorCanvas {
                 // footprint, they are a handful per cel where strokes are thousands, and under
                 // the clip each is one bounded draw. Adding a bound for them would buy a few
                 // microseconds and cost a second thing that can be wrong.
-                Self.draw(fill: fill, into: cg)
+                Self.draw(fill: fill, into: cg, materialRenderer: materialRenderer)
                 index += 1
             case .image(let element):
                 Self.draw(image: element, into: cg)
@@ -7266,7 +7200,8 @@ final class VectorCanvas {
                 index = end
             }
         }
-        return Walk(escaped: escaped, measured: measured, dabCount: target.dabCount)
+        return Walk(escaped: escaped, measured: measured, dabCount: target.dabCount,
+                    completed: target.completed && (materialRenderer?.completed ?? true))
     }
 
     /// One walk's output: the picture, **where it went outside its clip** (`.null` when it did not),
@@ -7302,7 +7237,23 @@ final class VectorCanvas {
         return stroke
     }
 
-    private static func draw(fill: VectorFillElement, into cg: CGContext) {
+    private static func draw(fill: VectorFillElement, into cg: CGContext,
+                             materialRenderer: InkMaterialRenderer? = nil) {
+        if let placement = fill.placement, let renderer = materialRenderer {
+            guard let nativePath = VectorFillElement.decodePath(placement.pathData),
+                  let native = placement.map.mapped(nativePath) else { renderer.rejectTransport(); return }
+            var unwarped = fill.reshaped(to: native)
+            unwarped.placement = nil
+            renderer.draw(into: cg, nativeBounds: native.boundingBoxOfPath,
+                program: placement.material, transport: placement.transport,
+                coverage: placement.coverage, evenOdd: fill.evenOddFill,
+                // A fill's alpha belongs to its native paint pass. Applying it after an extra
+                // 8-bit offscreen pass re-quantizes even untouched gradient pixels.
+                blendMode: .normal) { context, _ in
+                    Self.draw(fill: unwarped, into: context)
+                }
+            return
+        }
         guard let path = fill.cgPath else { return }
         cg.setAlpha(fill.opacity)
         switch fill.paint {
@@ -7624,11 +7575,133 @@ final class VectorCanvas {
     /// `stampApproximateSquare` builds its sub-lattice from the rest diameter against its own 1 pt
     /// floors; and the random field is addressed at the rest walk's arc lengths, so a posed dab draws
     /// what the artist's own dab drew.
+    private static func nativeInkBounds(of stroke: VectorStroke) -> CGRect {
+        InkMaterialRenderProbe.recordNativeBoundsWalk()
+        let collector = BrushStamper.CollectingDabTarget()
+        stamp(stroke: stroke, into: collector, isEraser: stroke.composite == .erase)
+        var bounds = CGRect.null
+        for dab in collector.dabs {
+            let painted: CGRect
+            switch dab.tip {
+            case .round: painted = dabCircleBounds(at: dab.center, radius: dab.radius)
+            case .image(_, let angle): painted = dabImageBounds(at: dab.center, diameter: dab.radius * 2, angle: angle)
+            }
+            bounds = bounds.union(painted)
+        }
+        return bounds
+    }
+
+    static func materialBounds(of stroke: VectorStroke) -> CGRect {
+        var bounds = nativeInkBounds(of: stroke)
+        // A spatial operation preserves its own support. Include the transported native footprint
+        // and each current field support; no guessed brush modulation envelope is involved.
+        let walk = stroke.effectiveWalk
+        for binding in walk?.material?.bindings ?? [] {
+            bounds = bounds.union(binding.bridge.bounds(of: binding.operation.supportBounds))
+        }
+        return bounds
+    }
+
+    private static func materialInkQuery(for stroke: VectorStroke, nativeBounds: CGRect? = nil) -> (([CGPoint]) -> Bool?)? {
+        guard var walk = materialWalk(for: stroke), let program = walk.material else { return nil }
+        let bounds = nativeBounds ?? nativeInkBounds(of: stroke), transport = walk.transport
+        let shownBounds = InkMaterialPaint(program: program, transport: transport).bounds(of: bounds)
+        var native = stroke
+        walk.material = nil; walk.transport = .identity
+        native.restWalk = walk; native.placement = nil
+        let gradients = DabGradientCache(), images = DabImageCache()
+        return { points in
+            guard points.contains(where: shownBounds.contains) else { return false }
+            let renderer = InkMaterialRenderer(window: .zero, scale: 1)
+            return renderer.hasInk(at: points, nativeBounds: bounds, program: program,
+                transport: transport) { context, _ in
+                    let target = CGContextDabTarget(context, gradients: gradients, images: images)
+                    stamp(stroke: native, into: target, isEraser: false)
+                }
+        }
+    }
+
+    /// The same native paint query powers tap/retag and whole-stroke eraser candidacy. Centreline
+    /// lasso membership deliberately continues to read samples; spatial material does not change it.
+    static func materialInkCovers(_ stroke: VectorStroke, at point: CGPoint, slop: CGFloat) -> Bool {
+        guard let query = materialInkQuery(for: stroke), point.x.isFinite, point.y.isFinite else { return false }
+        let points = [point]
+        let reach = max(0, slop)
+        if reach > 0 {
+            let bounds = CGRect(x: point.x - reach, y: point.y - reach, width: reach * 2, height: reach * 2)
+            return scanMaterialInk(in: bounds, query: query) {
+                let dx = $0.x - point.x, dy = $0.y - point.y
+                return dx * dx + dy * dy <= reach * reach
+            } || query(points) == true
+        }
+        return query(points) == true
+    }
+
+    static func materialInkTouches(_ stroke: VectorStroke, sweep: VectorEraser.Sweep) -> Bool {
+        guard let walk = stroke.effectiveWalk, let program = walk.material else { return false }
+        let native = nativeInkBounds(of: stroke)
+        let bounds = InkMaterialPaint(program: program, transport: .identity).bounds(of: native).intersection(sweep.bounds)
+        guard !bounds.isNull, !bounds.isEmpty, let query = materialInkQuery(for: stroke, nativeBounds: native) else { return false }
+        return scanMaterialInk(in: bounds, query: query, contains: sweep.contains)
+    }
+
+    /// Pixel-centre probes match the displayed native alpha. Each batch is at most 64² points;
+    /// neither a long eraser sweep nor a large selection allocates a canvas-sized query grid.
+    private static func scanMaterialInk(in bounds: CGRect, query: ([CGPoint]) -> Bool?,
+                                        contains: (CGPoint) -> Bool) -> Bool {
+        let edges = [floor(bounds.minX), ceil(bounds.maxX), floor(bounds.minY), ceil(bounds.maxY)]
+        guard edges.allSatisfy({ $0.isFinite && abs($0) < CGFloat(Int.max / 4) }) else { return false }
+        for top in stride(from: Int(edges[2]), to: Int(edges[3]), by: 64) {
+            for left in stride(from: Int(edges[0]), to: Int(edges[1]), by: 64) {
+                var points: [CGPoint] = []; points.reserveCapacity(64 * 64)
+                for y in top..<min(top + 64, Int(edges[3])) { for x in left..<min(left + 64, Int(edges[1])) {
+                    let point = CGPoint(x: CGFloat(x) + 0.5, y: CGFloat(y) + 0.5)
+                    if contains(point) { points.append(point) }
+                } }
+                guard let hit = query(points) else { return false }
+                if hit { return true }
+            }
+        }
+        return false
+    }
+
+    /// Linked geometry enters the ordinary native painter before spatial edits. Reusing the
+    /// geometry mapper preserves its Distort residue, parent walk and paper/dither canvas phase;
+    /// only Liquify bindings remain pixel operations, in their original chronological order.
+    private static func materialWalk(for stroke: VectorStroke, renderer: InkMaterialRenderer? = nil) -> StrokeRestWalk? {
+        guard let walk = stroke.effectiveWalk, let program = walk.material else { return nil }
+        guard walk.transport != .identity else { return walk }
+        let owner = renderer ?? InkMaterialRenderer(window: .zero, scale: 1)
+        return owner.withGeometryScratch(transport: walk.transport,
+            pointCount: walk.samples.count + (walk.lattice?.samples.count ?? 0)) {
+            var native = stroke
+            native.samples = walk.samples; native.lattice = walk.lattice; native.size = walk.size
+            native.placement = nil; native.restWalk = nil
+            guard let posed = distorted(native, through: walk.pose.map) else { return nil }
+            var valid = true
+            let geometry = VectorGeometryMap.stroke(posed) { points in
+                guard let moved = walk.transport.map(points) else { valid = false; return [] }
+                return moved
+            }
+            guard valid, var prepared = geometry.effectiveWalk else { return nil }
+            prepared.material = program
+            return prepared
+        }
+    }
+
     private static func stamp(stroke: VectorStroke, into target: DabTarget, isEraser: Bool) {
         // **`effectiveWalk`, not `restWalk`**: a Distort the artist committed is stored as a map on
         // the stroke rather than as a walk, and the two have to reach this line the same way or a
         // saved keystone would draw at one width the moment it was reloaded.
-        let rest = stroke.effectiveWalk
+        let rest = stroke.materialProgram == nil ? stroke.effectiveWalk
+            : materialWalk(for: stroke, renderer: (target as? CGContextDabTarget)?.materialRenderer)
+        let pixelTarget = target as? MaterialDabTarget
+        guard stroke.materialProgram == nil || rest != nil else {
+            pixelTarget?.rejectMaterialTransport()
+            return
+        }
+        pixelTarget?.material = rest?.material.map { InkMaterialPaint(program: $0, transport: rest?.transport ?? .identity) }
+        defer { pixelTarget?.material = nil }
         // A lattice without a usable range would otherwise stamp the *parent* whole, which is worse
         // than either option — so an unreadable one falls back to the stroke's own geometry.
         let lattice = (rest?.lattice ?? stroke.lattice).flatMap { $0.range == nil ? nil : $0 }
@@ -7785,7 +7858,8 @@ struct VectorCanvasData: Codable {
         private enum Kind: String, Codable { case stroke, fill, image, text, video, stream }
         private enum CodingKeys: String, CodingKey { case kind, stroke, fill, image, text, video, stream }
 
-        init(from decoder: Decoder) throws {
+        init(from decoder: Decoder) throws { try self.init(from: decoder, materialTable: nil) }
+        init(from decoder: Decoder, materialTable: InkMaterialTable?) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             // Decoded as `String`, not as `Kind`: `Kind`'s synthesized decoder answers the same
             // `dataCorrupted` for "no such case" as for "not a string at all", and those are the two
@@ -7793,8 +7867,8 @@ struct VectorCanvasData: Codable {
             let raw = try c.decode(String.self, forKey: .kind)
             guard let kind = Kind(rawValue: raw) else { throw Failure.unknownKind(raw) }
             switch kind {
-            case .stroke: self = .stroke(try c.decode(VectorStroke.self, forKey: .stroke))
-            case .fill: self = .fill(try c.decode(VectorFillElement.self, forKey: .fill))
+            case .stroke: self = .stroke(try VectorStroke(from: c.superDecoder(forKey: .stroke), materialTable: materialTable))
+            case .fill: self = .fill(try VectorFillElement(from: c.superDecoder(forKey: .fill), materialTable: materialTable))
             case .image: self = .image(try c.decode(ImageRef.self, forKey: .image))
             case .text: self = .text(try c.decode(VectorTextElement.self, forKey: .text))
             case .video: self = .video(try c.decode(VideoRef.self, forKey: .video))
@@ -7802,15 +7876,16 @@ struct VectorCanvasData: Codable {
             }
         }
 
-        func encode(to encoder: Encoder) throws {
+        func encode(to encoder: Encoder) throws { try encode(to: encoder, materialTable: nil) }
+        func encode(to encoder: Encoder, materialTable: InkMaterialTable?) throws {
             var c = encoder.container(keyedBy: CodingKeys.self)
             switch self {
             case .stroke(let stroke):
                 try c.encode(Kind.stroke, forKey: .kind)
-                try c.encode(stroke, forKey: .stroke)
+                try stroke.encode(to: c.superEncoder(forKey: .stroke), materialTable: materialTable)
             case .fill(let fill):
                 try c.encode(Kind.fill, forKey: .kind)
-                try c.encode(fill, forKey: .fill)
+                try fill.encode(to: c.superEncoder(forKey: .fill), materialTable: materialTable)
             case .image(let ref):
                 try c.encode(Kind.image, forKey: .kind)
                 try c.encode(ref, forKey: .image)
@@ -7874,11 +7949,9 @@ struct VectorCanvasData: Codable {
     /// One slot of the persisted `elements` array, decoded so a failure is a *value* rather than a
     /// thrown error.
     ///
-    /// **`init(from:)` never throws, and that is the load-bearing part rather than a stylistic
-    /// choice.** `JSONDecoder`'s unkeyed container advances `currentIndex` only *after* a successful
-    /// `decode`, so the obvious hand-rolled `while !container.isAtEnd { do { … } catch { continue } }`
-    /// over `[ElementData]` re-reads the failing slot forever. Decoding `[LossySlot]` in one call
-    /// sidesteps it entirely: every slot succeeds, and the ones holding nothing say why.
+    /// Ordinary malformed entries are classified after their decoder has advanced into a slot's
+    /// super-decoder. Material archive failures escape: dropping those entries could silently turn
+    /// damaged deformation data into a different drawing.
     private struct LossySlot: Decodable {
         enum Outcome {
             case decoded(ElementData)
@@ -7896,9 +7969,12 @@ struct VectorCanvasData: Codable {
         /// that is already the failure path.
         private enum KindProbe: String, CodingKey { case kind }
 
-        init(from decoder: Decoder) throws {
+        init(from decoder: Decoder) throws { try self.init(from: decoder, materialTable: nil) }
+        init(from decoder: Decoder, materialTable: InkMaterialTable?) throws {
             do {
-                outcome = .decoded(try ElementData(from: decoder))
+                outcome = .decoded(try ElementData(from: decoder, materialTable: materialTable))
+            } catch let error as InkMaterialCodingError {
+                throw error
             } catch ElementData.Failure.unknownKind(let raw) {
                 outcome = .unknownKind(raw)
             } catch {
@@ -7912,7 +7988,11 @@ struct VectorCanvasData: Codable {
     /// failure there is malformed by definition and there is nothing to classify.
     private struct LossyValue<Value: Decodable>: Decodable {
         let value: Value?
-        init(from decoder: Decoder) throws { value = try? Value(from: decoder) }
+        init(from decoder: Decoder) throws {
+            do { value = try Value(from: decoder) }
+            catch let error as InkMaterialCodingError { throw error }
+            catch { value = nil }
+        }
     }
 
     /// Kind-filtered reads of the display list, mirroring `VectorCanvas`'s compatibility accessors.
@@ -7937,7 +8017,7 @@ struct VectorCanvasData: Codable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case elements
+        case elements, materialOperations
         /// Legacy keys. Decoded, never written.
         ///
         /// `transform` joined the other three in TODO item (12) stage 3: a cel's geometry is stored
@@ -8029,24 +8109,30 @@ struct VectorCanvasData: Codable {
 
     /// **The rule: a broken *element* costs that element; a broken *payload* still throws.**
     ///
-    /// The two are different events and the load path needs them apart — "this file is not a vector
+    /// Material ownership is payload integrity: missing or conflicting definitions always throw.
+    /// The two ordinary damage cases need to stay apart — "this file is not a vector
     /// payload at all" is unsalvageable and worth shouting about, while "this file has an entry I
     /// cannot read" costs one entry and the rest of the drawing is fine. So the container itself, and
     /// the choice between the ordered and legacy shapes, are still `try`; only the entries inside are
     /// tolerated.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        let materialTable = try InkMaterialCodingError.preserving {
+            try InkMaterialTable(definitions: c.decode([LiquifyDeformation].self, forKey: .materialOperations))
+        }
         // A missing or unreadable transform costs the transform, not the drawing. `affineTransform`
         // below has always answered `.identity` for anything that is not six numbers and its comment
         // has always said so; it was this line, requiring the key, that could still throw the cel away
         // over it.
         transform = (try? c.decode([Double].self, forKey: .transform)) ?? []
 
-        if let slots = try c.decodeIfPresent([LossySlot].self, forKey: .elements) {
+        if c.contains(.elements), try !c.decodeNil(forKey: .elements) {
+            var slots = try c.nestedUnkeyedContainer(forKey: .elements)
             var decoded: [ElementData] = []
-            decoded.reserveCapacity(slots.count)
+            decoded.reserveCapacity(slots.count ?? 0)
             var report = DecodeReport()
-            for slot in slots {
+            while !slots.isAtEnd {
+                let slot = try LossySlot(from: slots.superDecoder(), materialTable: materialTable)
                 switch slot.outcome {
                 case .decoded(let element): decoded.append(element)
                 case .unknownKind(let raw): report.unknownKinds.append(raw)
@@ -8078,7 +8164,17 @@ struct VectorCanvasData: Codable {
     /// listed in a legacy `strokes` array would render as paint in an older build.
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
-        try c.encode(elements, forKey: .elements)
+        let programs = elements.compactMap { element -> InkMaterialProgram? in
+            switch element {
+            case .stroke(let stroke): return stroke.placement?.material
+            case .fill(let fill): return fill.placement?.material
+            default: return nil
+            }
+        }
+        let table = try InkMaterialTable(programs: programs)
+        try c.encode(table.definitions, forKey: .materialOperations)
+        var slots = c.nestedUnkeyedContainer(forKey: .elements)
+        for element in elements { try element.encode(to: slots.superEncoder(), materialTable: table) }
     }
 
     /// Rebuilds the ordered display list **in canvas coordinates**, turning each `ImageRef` back into

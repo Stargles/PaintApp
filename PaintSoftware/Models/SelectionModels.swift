@@ -36,12 +36,8 @@ enum SelectionMode: String, CaseIterable, Identifiable {
 
 /// What a drag on the Move box's corners does.
 ///
-/// **There is no `warp`, and there is not going to be one** — the owner ruled it out on 2026-08-22:
-/// *"Unlike procreate, Warp will not be a feature (like liquify)."* The case was **deleted** rather
-/// than hidden behind a flag, because a permanently-hidden case is the thing that drifts: it stays in
-/// `allCases`, keeps answering `switch`es, keeps its string in whatever gets persisted next, and the
-/// next reader has no way to tell "not yet" from "never". Nothing decoded it — `TransformMode` is
-/// live UI state and appears nowhere in `ProjectStore` — so removing it needed no migration.
+/// The Move box has Freeform, Uniform and Distort. Liquify is a separate brush tool (owner,
+/// 2026-10-12); it moves ordinary ink directly and does not add a mode to the box.
 ///
 /// `.distort` was the opposite kind of absence — *"coming"* rather than ruled out — and it arrived on
 /// 2026-09-02 (LASSO_MOVE.md §3 stage 5). It moves each corner of the box on its own, which is a
@@ -52,7 +48,7 @@ enum SelectionMode: String, CaseIterable, Identifiable {
 ///
 /// **It reached the raster floating piece only until 2026-09-06**, on a measurement that had already
 /// expired — a lassoed drawing takes a Distort now, through `VectorCanvas.mapping(_:through:)`'s
-/// `Homography` overload and `VectorStroke.distort` (TODO item (12)). A **transformation layer**'s box
+/// `Homography` overload and `VectorStroke.placement` (TODO item (12)). A **transformation layer**'s box
 /// followed on 2026-09-06 with KEYFRAMES §8 stage 5b, which removed the linearisation its refusal
 /// named. What is still refused is a float carrying a placed image or a video;
 /// `CanvasManager.distortUnavailableReason` is where the bar says so and where the argument is

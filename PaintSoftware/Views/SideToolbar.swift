@@ -142,11 +142,11 @@ struct SideToolbar: View {
                 .cornerRadius(6)
         }
         labeledSlider(
-            title: "Opacity",
+            title: tool == .liquify ? "Power" : "Opacity",
             value: Binding(get: { canvasManager.toolProfiles[tool].opacity },
                            set: { canvasManager.toolProfiles[tool].opacity = $0 }),
             range: 0...1,
-            identifier: "sideToolbar.\(tool.rawValue)OpacitySlider",
+            identifier: tool == .liquify ? "sideToolbar.liquifyPowerSlider" : "sideToolbar.\(tool.rawValue)OpacitySlider",
             showsPercentWhileAdjusting: true
         )
     }

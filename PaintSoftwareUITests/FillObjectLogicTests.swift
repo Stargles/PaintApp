@@ -498,10 +498,10 @@ final class FillObjectLogicTests: XCTestCase {
         XCTAssertEqual(decoded.id, ramp.id)
         XCTAssertNotNil(decoded.cgPath)
 
-        // A document written before gradients existed: the same keys as today's flat payload.
+        // Flat paint uses the current nullable placement plus its existing color field, no ramp.
         let legacy = try XCTUnwrap(try JSONSerialization.jsonObject(with: JSONEncoder().encode(flat)) as? [String: Any])
-        XCTAssertEqual(Set(legacy.keys), ["id", "pathData", "color", "opacity", "evenOddFill"],
-                       "the flat payload's keys are the legacy ones")
+        XCTAssertEqual(Set(legacy.keys), ["id", "pathData", "color", "opacity", "evenOddFill", "placement"],
+                       "the flat payload writes no gradient fields")
         let restored = try JSONDecoder().decode(VectorFillElement.self,
                                                 from: JSONSerialization.data(withJSONObject: legacy))
         XCTAssertEqual(restored.solidColor, flat.solidColor)

@@ -754,38 +754,61 @@ struct DeformedCellIndex {
     private let bucketHeight: CGFloat
     private let buckets: [[Int]]
 
-    init(lattice: Lattice) {
-        let raw = lattice.currentBounds
-        // A degenerate (collapsed) lattice still has to produce a usable index rather than dividing
-        // by zero, so the box is inflated to at least one point in each axis.
-        let box = CGRect(x: raw.minX, y: raw.minY,
-                         width: max(raw.width, 1), height: max(raw.height, 1)).insetBy(dx: -1, dy: -1)
-        let bc = max(1, min(lattice.cols, 64))
-        let br = max(1, min(lattice.rows, 64))
-        var lists = [[Int]](repeating: [], count: bc * br)
-        let bw = box.width / CGFloat(bc), bh = box.height / CGFloat(br)
-
-        for cell in 0..<lattice.cellCount {
-            let (i00, i10, i11, i01) = lattice.corners(ofCell: cell)
-            let xs = [lattice.vertices[i00].x, lattice.vertices[i10].x, lattice.vertices[i11].x, lattice.vertices[i01].x]
-            let ys = [lattice.vertices[i00].y, lattice.vertices[i10].y, lattice.vertices[i11].y, lattice.vertices[i01].y]
-            guard let minX = xs.min(), let maxX = xs.max(), let minY = ys.min(), let maxY = ys.max(),
-                  minX.isFinite, maxX.isFinite, minY.isFinite, maxY.isFinite else { continue }
-            let c0 = min(max(Int((minX - box.minX) / bw), 0), bc - 1)
-            let c1 = min(max(Int((maxX - box.minX) / bw), 0), bc - 1)
-            let r0 = min(max(Int((minY - box.minY) / bh), 0), br - 1)
-            let r1 = min(max(Int((maxY - box.minY) / bh), 0), br - 1)
-            for r in r0...r1 {
-                for c in c0...c1 { lists[r * bc + c].append(cell) }
-            }
+    private struct Layout {
+        let box: CGRect
+        let cols: Int
+        let rows: Int
+        let width: CGFloat
+        let height: CGFloat
+        init(_ lattice: Lattice) {
+            let raw = lattice.currentBounds
+            box = CGRect(x: raw.minX, y: raw.minY, width: max(raw.width, 1), height: max(raw.height, 1)).insetBy(dx: -1, dy: -1)
+            cols = max(1, min(lattice.cols, 64)); rows = max(1, min(lattice.rows, 64))
+            width = box.width / CGFloat(cols); height = box.height / CGFloat(rows)
         }
+        func buckets(for cell: Int, in lattice: Lattice) -> (ClosedRange<Int>, ClosedRange<Int>)? {
+            let indices = lattice.corners(ofCell: cell)
+            var minX = CGFloat.infinity, minY = CGFloat.infinity
+            var maxX = -CGFloat.infinity, maxY = -CGFloat.infinity
+            for index in [indices.0, indices.1, indices.2, indices.3] {
+                let point = lattice.vertices[index]
+                guard point.x.isFinite, point.y.isFinite else { return nil }
+                minX = min(minX, point.x); maxX = max(maxX, point.x)
+                minY = min(minY, point.y); maxY = max(maxY, point.y)
+            }
+            let c0 = min(max(Int((minX - box.minX) / width), 0), cols - 1)
+            let c1 = min(max(Int((maxX - box.minX) / width), 0), cols - 1)
+            let r0 = min(max(Int((minY - box.minY) / height), 0), rows - 1)
+            let r1 = min(max(Int((maxY - box.minY) / height), 0), rows - 1)
+            return (c0...c1, r0...r1)
+        }
+    }
 
-        self.bounds = box
-        self.bucketCols = bc
-        self.bucketRows = br
-        self.bucketWidth = bw
-        self.bucketHeight = bh
-        self.buckets = lists
+    /// The same bucket ranges as construction, counted before allocation. Native material windows
+    /// reserve this scratch explicitly; a warped large grid cannot bypass their tile budget.
+    static func storageByteUpperBound(lattice: Lattice) -> Int {
+        let layout = Layout(lattice)
+        var entries = 0
+        for cell in 0..<lattice.cellCount {
+            guard let (cols, rows) = layout.buckets(for: cell, in: lattice) else { continue }
+            let added = entries.addingReportingOverflow(cols.count * rows.count)
+            guard !added.overflow else { return Int.max }
+            entries = added.partialValue
+        }
+        let bytes = entries.multipliedReportingOverflow(by: 2 * MemoryLayout<Int>.stride)
+        guard !bytes.overflow, bytes.partialValue <= Int.max - layout.cols * layout.rows * 128 - 4096 else { return Int.max }
+        return bytes.partialValue + layout.cols * layout.rows * 128 + 4096
+    }
+
+    init(lattice: Lattice) {
+        let layout = Layout(lattice)
+        var lists = [[Int]](repeating: [], count: layout.cols * layout.rows)
+        for cell in 0..<lattice.cellCount {
+            guard let (cols, rows) = layout.buckets(for: cell, in: lattice) else { continue }
+            for row in rows { for col in cols { lists[row * layout.cols + col].append(cell) } }
+        }
+        bounds = layout.box; bucketCols = layout.cols; bucketRows = layout.rows
+        bucketWidth = layout.width; bucketHeight = layout.height; buckets = lists
     }
 
     /// The cell `point` belongs to, and its bilinear coordinates there.

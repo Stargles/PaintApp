@@ -777,31 +777,93 @@ enum StrokeGeometry {
     /// nib either over- or under-erases, because the nearest *sample* to the eraser can sit well
     /// outside its footprint. Densifying to the eraser's radius first makes sample-granularity
     /// decisions land within a radius of the truth.
-    static func subdivided(_ samples: some SampleRun, maxSpacing: CGFloat) -> [VectorSample] {
-        guard samples.count > 1, maxSpacing > 0 else { return Array(samples) }
-        var result: [VectorSample] = []
-        result.reserveCapacity(samples.count)
-        result.append(samples[0])
+    struct Subdivision {
+        let samples: [VectorSample]
+        /// Each new sample's parameter in the original run's knot domain.
+        let parameters: [CGFloat]
+        func newParameter(for original: CGFloat) -> CGFloat {
+            guard parameters.count > 1 else { return 0 }
+            var low = 0, high = parameters.count
+            while low < high {
+                let middle = (low + high) / 2
+                if parameters[middle] < original { low = middle + 1 } else { high = middle }
+            }
+            if high == 0 { return 0 }
+            if high >= parameters.count { return CGFloat(parameters.count - 1) }
+            let a = parameters[high - 1], b = parameters[high]
+            return CGFloat(high - 1) + (b > a ? (original - a) / (b - a) : 0)
+        }
+    }
+
+    static func subdivided(_ samples: some SampleRun, maxSpacing: CGFloat,
+                           followingCurve: Bool = false) -> [VectorSample] {
+        subdivision(samples, maxSpacing: maxSpacing, followingCurve: followingCurve).samples
+    }
+
+    /// Insert geometry only in the brush's bounded region, while carrying every sensor interval
+    /// and returning the parameter map split-stroke parent walks need when indices change.
+    static func subdivision(_ samples: some SampleRun, maxSpacing: CGFloat,
+                            followingCurve: Bool = false, region: CGRect? = nil) -> Subdivision {
+        guard samples.count > 1, maxSpacing > 0 else {
+            return Subdivision(samples: Array(samples), parameters: samples.indices.map { CGFloat($0) })
+        }
+        var result = [samples[0]]
+        var parameters: [CGFloat] = [0]
+        let path = followingCurve ? StrokePath(points: samples.map(\.point)) : nil
         for i in 1..<samples.count {
             let from = samples[i - 1], to = samples[i]
-            let distance = hypot(to.x - from.x, to.y - from.y)
-            if distance > maxSpacing {
-                let steps = Int((distance / maxSpacing).rounded(.up))
-                // `previous` is the *raw* lerp, before it was reduced — an interval channel's value
-                // there is "elapsed since the segment began", so differencing consecutive raws is what
-                // turns the run back into per-point intervals. See `SampleChannel.isCumulative`.
-                var previous = from
-                for step in 1..<steps {
-                    let raw = lerp(from, to, CGFloat(step) / CGFloat(steps))
-                    result.append(raw.afterInsertedPredecessor(previous))
-                    previous = raw
+            let distance = path?.length(ofSegment: i - 1) ?? hypot(to.x - from.x, to.y - from.y)
+            var ranges: [ClosedRange<CGFloat>] = []
+            if let region {
+                let segments: Int
+                if let path {
+                    let tangents = path.tangents(segment: i - 1)
+                    segments = StrokePath.subdivisions(p1: from.point, p2: to.point, m1: tangents.0, m2: tangents.1)
+                } else { segments = 1 }
+                for chord in 0..<segments {
+                    let a = CGFloat(chord) / CGFloat(segments), b = CGFloat(chord + 1) / CGFloat(segments)
+                    let p = path?.point(at: CGFloat(i - 1) + a) ?? lerp(from, to, a).point
+                    let q = path?.point(at: CGFloat(i - 1) + b) ?? lerp(from, to, b).point
+                    guard let clipped = clippedSegment(p, q, to: region.insetBy(dx: -1, dy: -1)) else { continue }
+                    ranges.append((a + (b - a) * clipped.lowerBound)...(a + (b - a) * clipped.upperBound))
                 }
-                result.append(to.afterInsertedPredecessor(previous))
-            } else {
-                result.append(to)
+            } else { ranges = [0...1] }
+            var sites: [CGFloat] = []
+            for range in ranges {
+                let count = max(1, Int(ceil(distance * (range.upperBound - range.lowerBound) / maxSpacing)))
+                for step in 0...count {
+                    let t = range.lowerBound + (range.upperBound - range.lowerBound) * CGFloat(step) / CGFloat(count)
+                    if t > 0, t < 1 { sites.append(t) }
+                }
             }
+            sites.sort()
+            var previous = from
+            for channel in SampleChannel.allCases where channel.isCumulative { previous[channel] = 0 }
+            var lastT: CGFloat = -1
+            for t in sites where t - lastT > 1e-9 {
+                var raw = lerp(from, to, t)
+                if let point = path?.point(at: CGFloat(i - 1) + t) { raw.x = point.x; raw.y = point.y }
+                result.append(raw.afterInsertedPredecessor(previous))
+                parameters.append(CGFloat(i - 1) + t)
+                previous = raw; lastT = t
+            }
+            result.append(to.afterInsertedPredecessor(previous))
+            parameters.append(CGFloat(i))
         }
-        return result
+        return Subdivision(samples: result, parameters: parameters)
+    }
+
+    static func clippedSegment(_ a: CGPoint, _ b: CGPoint, to rect: CGRect) -> ClosedRange<CGFloat>? {
+        let dx = b.x - a.x, dy = b.y - a.y
+        var low: CGFloat = 0, high: CGFloat = 1
+        for (p, q) in [(-dx, a.x - rect.minX), (dx, rect.maxX - a.x),
+                       (-dy, a.y - rect.minY), (dy, rect.maxY - a.y)] {
+            if abs(p) < 1e-12 { if q < 0 { return nil }; continue }
+            let t = q / p
+            if p < 0 { low = max(low, t) } else { high = min(high, t) }
+            if low > high { return nil }
+        }
+        return low...high
     }
 
     // MARK: - Splitting
@@ -1046,44 +1108,71 @@ enum StrokeGeometry {
     /// costs nothing at all. **Measured in the path's own space**, before any magnification: the
     /// caller's map can blow a source point up, so the honest bound is stated where the geometry is
     /// and the cap is what keeps a pathological path finite.
-    static func flattened(_ path: CGPath) -> CGPath? {
+    /// An optional edge observer receives the certified curve-to-chord error in source points.
+    /// Linear interpolation on an interval h has error at most max(||B''||) * h² / 8. A quadratic's
+    /// second derivative is constant; a cubic's is linear, so its maximum norm is bounded by its
+    /// two endpoint norms. The existing chord cap remains explicit in the resulting error.
+    static func flattened(_ path: CGPath, closeSubpaths: Bool = false,
+                          edge: ((CGPoint, CGPoint, CGFloat) -> Void)? = nil) -> CGPath? {
         let out = CGMutablePath()
         var current = CGPoint.zero
         var start = CGPoint.zero
         var malformed = false
+        var open = false
+        func line(to end: CGPoint, error: CGFloat = 0) {
+            edge?(current, end, error)
+            out.addLine(to: end)
+            current = end
+        }
+        func close() {
+            if current != start { edge?(current, start, 0) }
+            out.closeSubpath(); current = start; open = false
+        }
         path.applyWithBlock { raw in
             let element = raw.pointee
             switch element.type {
             case .moveToPoint:
+                if closeSubpaths && open { close() }
                 current = element.points[0]; start = current
                 out.move(to: current)
+                open = true
             case .addLineToPoint:
-                current = element.points[0]
-                out.addLine(to: current)
+                line(to: element.points[0])
             case .addQuadCurveToPoint:
+                let begin = current
                 let control = element.points[0], end = element.points[1]
                 let steps = flatteningSteps([current, control, end])
+                let error = edge == nil ? 0 : chordErrorBound([begin, control, end], steps: steps)
                 for step in 1...steps {
                     let t = CGFloat(step) / CGFloat(steps)
-                    out.addLine(to: quadPoint(current, control, end, t))
+                    line(to: quadPoint(begin, control, end, t), error: error)
                 }
-                current = end
             case .addCurveToPoint:
+                let begin = current
                 let c1 = element.points[0], c2 = element.points[1], end = element.points[2]
                 let steps = flatteningSteps([current, c1, c2, end])
+                let error = edge == nil ? 0 : chordErrorBound([begin, c1, c2, end], steps: steps)
                 for step in 1...steps {
                     let t = CGFloat(step) / CGFloat(steps)
-                    out.addLine(to: cubicPoint(current, c1, c2, end, t))
+                    line(to: cubicPoint(begin, c1, c2, end, t), error: error)
                 }
-                current = end
             case .closeSubpath:
-                out.closeSubpath()
-                current = start
+                close()
             @unknown default:
                 malformed = true
             }
         }
+        if closeSubpaths && open { close() }
         return malformed ? nil : out
+    }
+
+    private static func chordErrorBound(_ polygon: [CGPoint], steps: Int) -> CGFloat {
+        func secondDifference(_ a: CGPoint, _ b: CGPoint, _ c: CGPoint) -> CGFloat {
+            hypot(a.x - 2 * b.x + c.x, a.y - 2 * b.y + c.y)
+        }
+        let secondDerivative = polygon.count == 3 ? 2 * secondDifference(polygon[0], polygon[1], polygon[2]) :
+            6 * max(secondDifference(polygon[0], polygon[1], polygon[2]), secondDifference(polygon[1], polygon[2], polygon[3]))
+        return secondDerivative / (8 * CGFloat(steps * steps))
     }
 
     /// One chord per point of control-polygon length, floored at 4 and capped at 64. The floor keeps

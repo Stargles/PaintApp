@@ -3055,7 +3055,7 @@ struct CanvasView: UIViewRepresentable {
             // The eraser is excluded: it only ever takes content away, so a touch with it on an
             // empty frame has nothing to act on, and spawning a block would leave a blank one behind
             // plus an undo step for a gesture that changed nothing the artist can see.
-            guard canvasManager.selectedTool != .eraser else { return }
+            guard canvasManager.selectedTool != .eraser && canvasManager.selectedTool != .liquify else { return }
             // `displayedCelIndex`: under a Repeat the frame that has to be empty is the source
             // frame's, which is where `ensureCelAtCurrentFrame` spawns (§5.5, ruling 13).
             guard let host, canvasManager.layers.indices.contains(index),

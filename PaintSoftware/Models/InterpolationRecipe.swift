@@ -150,6 +150,21 @@ struct LocalEdit: Identifiable, Codable {
         self.stroke = stroke
         self.groupID = groupID
     }
+    private enum CodingKeys: String, CodingKey { case id, stroke, groupID }
+    init(from decoder: Decoder) throws { try self.init(from: decoder, materialTable: nil) }
+    init(from decoder: Decoder, materialTable: InkMaterialTable?) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        stroke = try VectorStroke(from: c.superDecoder(forKey: .stroke), materialTable: materialTable)
+        groupID = try c.decodeIfPresent(UUID.self, forKey: .groupID)
+    }
+    func encode(to encoder: Encoder) throws { try encode(to: encoder, materialTable: nil) }
+    func encode(to encoder: Encoder, materialTable: InkMaterialTable?) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id); try c.encodeIfPresent(groupID, forKey: .groupID)
+        try stroke.encode(to: c.superEncoder(forKey: .stroke), materialTable: materialTable)
+    }
+
 }
 
 /// What makes a cel an **interpolated** cel: its content is computed from `references` at time `t`
@@ -200,6 +215,9 @@ struct InterpolationRecipe: Codable {
     /// Strokes drawn at an in-between, stored in keyframe space. See `LocalEdit`.
     var localEdits: [LocalEdit]
 
+    /// Brush deformations in group rest space; source links remain intact.
+    var deformations: [LiquifyDeformation]
+
     /// Frame-wide easing. A group with its own `spacing` overrides this.
     var spacing: SpacingCurve
     /// **What decides an in-between's picture, out of what this recipe stores** — the fingerprint
@@ -218,7 +236,7 @@ struct InterpolationRecipe: Codable {
     /// identity's rather than this fingerprint's, and closing it means giving `LocalEdit` a version.
     var contentFingerprint: ContentFingerprint {
         ContentFingerprint(t: t, mode: mode, spacing: spacing, groups: groups,
-                           guideIDs: guideIDs, localEditIDs: localEdits.map(\.id))
+                           guideIDs: guideIDs, localEditIDs: localEdits.map(\.id), deformations: deformations)
     }
 
     struct ContentFingerprint: Equatable {
@@ -228,6 +246,7 @@ struct InterpolationRecipe: Codable {
         let groups: [MotionGroupBinding]
         let guideIDs: [UUID]
         let localEditIDs: [UUID]
+        let deformations: [LiquifyDeformation]
     }
 
 
@@ -237,7 +256,8 @@ struct InterpolationRecipe: Codable {
          groups: [MotionGroupBinding] = [],
          guideIDs: [UUID] = [],
          localEdits: [LocalEdit] = [],
-         spacing: SpacingCurve = .linear) {
+         spacing: SpacingCurve = .linear,
+         deformations: [LiquifyDeformation] = []) {
         self.references = references
         self.t = t
         self.mode = mode
@@ -245,23 +265,41 @@ struct InterpolationRecipe: Codable {
         self.guideIDs = guideIDs
         self.localEdits = localEdits
         self.spacing = spacing
+        self.deformations = deformations
     }
 
     private enum CodingKeys: String, CodingKey {
-        case references, t, mode, groups, guideIDs, localEdits, spacing
+        case references, t, mode, groups, guideIDs, localEdits, spacing, deformations, materialOperations
     }
 
-    /// Hand-written so a recipe saved by an earlier build doesn't fail to load because a field
-    /// added later is absent. Only `references` and `t` are required.
+    /// Current packages carry every recipe field. The launch repair rewrites earlier sidecars.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        let table = try InkMaterialCodingError.preserving {
+            try InkMaterialTable(definitions: c.decode([LiquifyDeformation].self, forKey: .materialOperations))
+        }
         references = try c.decode([InterpolationReference].self, forKey: .references)
         t = try c.decode(CGFloat.self, forKey: .t)
-        mode = try c.decodeIfPresent(InterpolationMode.self, forKey: .mode) ?? .generate
-        groups = try c.decodeIfPresent([MotionGroupBinding].self, forKey: .groups) ?? []
-        guideIDs = try c.decodeIfPresent([UUID].self, forKey: .guideIDs) ?? []
-        localEdits = try c.decodeIfPresent([LocalEdit].self, forKey: .localEdits) ?? []
-        spacing = try c.decodeIfPresent(SpacingCurve.self, forKey: .spacing) ?? .linear
+        mode = try c.decode(InterpolationMode.self, forKey: .mode)
+        groups = try c.decode([MotionGroupBinding].self, forKey: .groups)
+        guideIDs = try c.decode([UUID].self, forKey: .guideIDs)
+        var edits = try c.nestedUnkeyedContainer(forKey: .localEdits)
+        localEdits = []
+        while !edits.isAtEnd { localEdits.append(try LocalEdit(from: edits.superDecoder(), materialTable: table)) }
+        spacing = try c.decode(SpacingCurve.self, forKey: .spacing)
+        deformations = try c.decode([LiquifyDeformation].self, forKey: .deformations)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        let table = try InkMaterialTable(programs: localEdits.compactMap { $0.stroke.placement?.material })
+        try c.encode(table.definitions, forKey: .materialOperations)
+        try c.encode(references, forKey: .references); try c.encode(t, forKey: .t)
+        try c.encode(mode, forKey: .mode); try c.encode(groups, forKey: .groups)
+        try c.encode(guideIDs, forKey: .guideIDs); try c.encode(spacing, forKey: .spacing)
+        try c.encode(deformations, forKey: .deformations)
+        var edits = c.nestedUnkeyedContainer(forKey: .localEdits)
+        for edit in localEdits { try edit.encode(to: edits.superEncoder(), materialTable: table) }
     }
 
     /// Every cel any part of this recipe reads, deduplicated. What a "does this keyframe still

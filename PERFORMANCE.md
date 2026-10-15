@@ -6340,3 +6340,104 @@ bakes, onion pictures, playback and exports keep reference out.
 On Top remains the default plain host behavior. Mixed placement puts its host over the In Place
 window. Posed stream cels still hide their reference, including a held pose. Device throughput and
 render-server cost have not been measured for this new mode.
+
+
+## Liquify field sizing — 2026-10-14 (development baseline)
+
+Saved Liquify gestures retain brush settings, packed input samples and capture lattices rather than
+canvas-sized displacement grids. A complete4096×4096 serpentine sweep with a100pt brush produced
+35,227 dabs, a2,126-byte saved definition (before source occurrence membership), and an estimated
+7,949,376 bytes of evaluated field data. Evaluation streams one gesture across forward, backward and
+local ink, then releases it; retaining100 such fields would instead cost794,937,600 bytes. These are
+working-set counts, not a limit on how many scene cels may exist.
+
+The explicit `LiquifyBench` fixture pushes a100pt brush500pt at canvas coordinates around(3000,2000).
+The scalar inverse samples the original source once through `ImageWarp`'s existing premultiplied
+bilinear sampler. `window-1.xcresult` measured the following before hot-path optimization:
+
+| Brush | Destination pixels | Dabs | Field bytes | Source+destination bytes | Velocity evaluations | Unsolved pixels | Warm Debug simulator seconds |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Round Hard | 67,100 | 101 | 23,544 | 536,800 | 75,915,422 | 0 | 60.91 |
+| Streaky | 84,956 | 126 | 95,968 | 679,648 | 324,895,856 | 7,801 | 379.72 |
+
+The counts and simulator durations are separate evidence. Neither duration is a device-rate claim.
+Release sizing is recorded below. The large-coordinate patterned failures require a cause breakdown
+before this raster method is accepted; the small128×128 image fixtures have zero unsolved pixels,
+which alone did not cover this real window. The benchmark stays outside the filename-selected fast
+tier, has no wall-clock assertions, and is invoked explicitly with
+`TEST_RUNNER_PAINTAPP_BENCH=1 … -configuration Release -only-testing:PaintSoftwareUITests/LiquifyBench`.
+
+Frozen native-arm64 Release baseline (3434670) repeats exactly the Debug work counts: hard
+75,915,422 velocity evaluations/0 residual failures, Streaky324,895,856/7,801. Controlled warm
+window renders took3.393s and28.056s respectively; these are internal simulator sizing results,
+not device rates. Both runs resample the same original source (deterministic resampling); they do
+not by themselves verify production preview retention. Sparse diagnostics find98/680 destination
+residual failures at large coordinates and97/680 after a grain-phase-preserving near-origin
+translation, with no submap iteration-limit failures. Source-space sampling accuracy and actual
+rendered pictures must determine whether those residual failures reflect visible inverse error.
+
+Prepared-field checkpoint `66e5302` resolves native masks, rotation, hardness and Push limits once
+per dab and uses binary search in the current bin. A temporary frozen3434670 oracle verified
+byte-identical complete windows for hard and patterned brushes and was removed after validation.
+The isolated native-arm64 Release `test-without-building` pass measured:
+
+| Brush | Field bytes | Velocity evaluations | Warm simulator seconds |
+| --- | ---: | ---: | ---: |
+| Round Hard | 19,504 | 75,032,518 | 2.639 |
+| Streaky | 90,928 | 323,134,832 | 13.592 |
+
+Full-sweep retained field bytes are6,540,296, using actual Step stride; bin/bounds/sweep tests
+passed3/3. Results: `~/PaintWork/s49-liquify-logs/window-prepared-isolated-Release`; native pictures
+in `~/PaintWork/evidence/s49-liquify-window-prepared` were inspected and show stretched ribbons
+without transparent holes in the opaque band. Earlier3.431/16.977s timings overlapped compiler work.
+
+Independent source-space proof uses Decimal60 over the exact126 native-tip dabs and one alpha
+mask, without spatial bins:534,240 velocity evaluations for eight recorded failing destinations.
+Source errors were2.35e-13–3.96e-13px even when forward destination residual reached385.33px.
+Frozen export SHA256:42ce3aa65363f9e3354dce20a19e0702d53f6031ed8956e861d432c515be35b9.
+Reference script/results: `~/PaintWork/s49-liquify-logs/high_precision_inverse.{py,txt}`; native
+input: `~/PaintWork/evidence/s49-liquify-reference-1/2127F5D0-EE85-4A0A-883F-9F84DE5747FA.json`.
+The unconditional regression tolerance is1e-8 source pixels: multiplying by the maximum8-bit
+bilinear channel slope255 still gives only2.55e-6 of a channel level. Production convergence
+checks now concern the inverse source; re-forwarding is an explicit optional diagnostic.
+
+Production-only inverse checkpoint `ddebad6` retains the same verified source solver and omits
+the diagnostic forward replay from pixel sampling. The isolated native-arm64 Release
+`test-without-building` run (`window-production-isolated-Release`) evaluated67,100 hard-brush
+pixels with54,319,422 velocity calls and84,956 patterned pixels with290,752,890 calls, with zero
+source-solver failures. Field bytes remained19,504/90,928 and source plus destination buffers
+536,800/679,648 bytes respectively. Warm simulator renders took1.663/12.426s. These internal
+sizing durations are separate from work counts; the patterned path still costs too much for live
+raster interaction. The earlier1.078/14.937s run overlapped compiler work.
+
+An actual Release CPU sample of that same `ddebad6` product captured11,900 main-thread samples
+during the patterned window:6,354(53.4%) in `AlphaMask.sample`,3,389 in the inverse body,949 in
+`hypot` or its stub and744 in `CGRectContainsPoint` or its stub. Evidence:
+`~/PaintWork/s49-liquify-profile/pattern.sample.txt` and `profile-summary.json`. The profiled18.79s
+duration includes sampling and concurrent compiler contention and is not a throughput comparison.
+
+The same conditioning prevents a new local vector mark from storing/re-forwarding an inverse
+through gestures predating its birth. `source-check-1` reproduced that rejected pen mark red.
+LocalEdit membership now gives chronology: only gestures that captured a local ID reshape it;
+new source/subject ink still inherits surviving or uniquely replaced groups. No saved timestamp
+or inverse-deformation planner path is needed.
+
+
+### Spatial material window and inline model sizing — 2026-10-15
+
+Native Debug gate `material-native-3` at `f15f52c` passed 26 methods. One stroke and one hundred
+strokes sharing a gesture both performed 144,000 velocity evaluations and prepared one field; the
+hundred-stroke case had 99 exact coordinate-cache hits. Peak counted payload was 11,535,208 bytes,
+including the field. The allocator cap remains 24 MiB plus one streamed field. Source and output
+providers retain counted leases until retirement. An outer autorelease pool previously retained
+outputs across groups and reached the cap; draining UIKit's temporary output image at each merge
+fixes that lifetime without copying pixels or changing the cap.
+
+The first broad Debug tier at `d52950b` measured `VectorElement` stride at 1,080 bytes, making the
+existing 1,000-element undo budget assertion fail. `InkMaterialBridge.lattice` held two complete
+lattices inline. Making that enum case indirect, without a new owner or archive format, reduced
+`VectorElement` stride to 856 bytes and the bridge to 80 bytes. The selected combined gate at
+`afef15c` passed all 60 methods, including the unchanged undo-budget assertion and ordinary,
+lattice, copied-placement and current/previous-package round-trips. Result:
+`~/PaintWork/s49-liquify-logs/material-combined-1.xcresult`. These are allocation/work counts;
+this gate makes no simulator throughput claim.

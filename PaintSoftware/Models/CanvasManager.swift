@@ -991,7 +991,7 @@ final class CanvasManager: ObservableObject {
     ///
     /// **A keystoned stroke is outside it, and that is the shape of the thing rather than a gap.** Under
     /// Distort a stroke's width is not one number: each dab takes its radius from the map's local scale
-    /// where it lands (`StrokeDistort`, KEYFRAMES.md §8), so "unchanged" has no single width to name.
+    /// where it lands (`StrokePlacement`, KEYFRAMES.md §8), so "unchanged" has no single width to name.
     /// The switch governs the two affine arms, which is every Move, scale, turn, Freeform and Mirror.
     @Published var keepsStrokeWidthOnMove = false {
         didSet { recordSwitch("keepsStrokeWidthOnMove", from: oldValue, to: keepsStrokeWidthOnMove) }
@@ -1196,6 +1196,7 @@ final class CanvasManager: ObservableObject {
     /// `CanvasManager+BrushSize.swift` — which is presentation only, so a document opened at a
     /// different canvas size draws the same point size and reads as a different percentage.
     @Published var toolProfiles = ToolProfiles()
+    @Published var liquifyMode: LiquifyMode = .push
     /// The brush's colour — observed by the swatches that show it and by the canvas, and by nothing else,
     /// so a tick of its picker is not a pass over the editor (TODO (179); see `BrushColorState`).
     let brushColorState = BrushColorState()
@@ -1346,7 +1347,7 @@ final class CanvasManager: ObservableObject {
             // in hardness, spacing and dynamics. Which *preset* this is belongs to the library —
             // see `BrushLibrary.isPencilPreset` for why it is not a field on `Brush`.
             selectedTool = BrushLibrary.isPencilPreset(preset) ? .pencil : .pen
-        case .eraser:
+        case .eraser, .liquify:
             break
         }
     }
@@ -1927,6 +1928,7 @@ final class CanvasManager: ObservableObject {
         guard canvasEditDepth == 0 else { return }
         canvasEditDepth += 1
         defer { canvasEditDepth -= 1 }
+        settlePendingElementProcedure()
         commitInteractiveFill()
         commitInteractiveShape()
         // Last in the list, because the text overlay draws above the shape overlay and committing
@@ -1949,7 +1951,7 @@ final class CanvasManager: ObservableObject {
     /// editor's channel list stays up through a whole keying session, and an autosave held for as long
     /// as it was up would leave that session's keys out of every saved version.
     var hasInteractiveStatePending: Bool {
-        fillGestureActive || shapeGestureActive || textGestureActive || selectionEdit != nil
+        liveElementEdit?.procedure != nil || fillGestureActive || shapeGestureActive || textGestureActive || selectionEdit != nil
             || gradientEdit != nil || floatingPieceHoldsUnsettledEdit || vectorFloat != nil
     }
 
@@ -3537,7 +3539,7 @@ final class CanvasManager: ObservableObject {
         // `paintsOnCanvas` tool reaches this method on a lift, but the eraser is one of them and
         // paints nothing with `brushColor` (`.destinationOut`/a punch, not ink), so it is excluded
         // here rather than left to flood the list with whatever colour happened to be selected.
-        if selectedTool != .eraser {
+        if selectedTool != .eraser && selectedTool != .liquify {
             colorPanel.recordPainted(brushColor)
         }
     }
@@ -4649,6 +4651,7 @@ final class CanvasManager: ObservableObject {
     /// one is committed so it becomes a real step the following `undo()` reverts, instead of the
     /// undo silently hitting the previous action while it lingers.
     private func finalizePendingGesturesForHistoryAction() {
+        settlePendingElementProcedure()
         // A drag still open on a Move box is dropped, like the fill and the shape under a finger
         // below; `cancelBoxNudge` says why it is not settled instead.
         cancelBoxNudge()

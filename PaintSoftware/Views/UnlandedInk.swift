@@ -20,6 +20,7 @@ import UIKit
 /// is the second, and a stroke moves from one to the other at pen-up.
 ///
 /// **It allocates no pixels.** A held picture is the `UIImage` the live scratch was already showing
+/// or the frozen `IOSurface` a held edit was already presenting
 /// — windowed to the stroke's own box (`StrokeScratch`), never canvas-sized — so holding it retains
 /// a bitmap that existed a moment ago and would otherwise have been released. It is in fact *less*
 /// than the shipped code held: that kept the whole `StrokeScratch`, including its
@@ -60,10 +61,47 @@ struct UnlandedInk {
         /// pixels. BRUSH.md §2.11's cap, on the display side.
         let alpha: CGFloat
         /// Whether the picture *stands in for* the base inside its window rather than sitting over
-        /// it — a vector eraser in Modes 1 and 2. The base is punched out underneath, exactly as it
+        /// it — a vector eraser or an element edit. The base is punched out underneath, exactly as it
         /// is for a live one.
         let replacesBase: Bool
-        let image: UIImage
+        enum Contents {
+            case image(UIImage)
+            case surface(WindowSurfaceView.FrozenWindow)
+
+            /// Preserve UIImage's scale/orientation handling for strokes, while a frozen window
+            /// hands its existing surface straight to Core Animation. Neither arm copies pixels.
+            func makeView() -> UIView {
+                let view: UIView
+                switch self {
+                case .image(let image): view = UIImageView(image: image)
+                case .surface(let frozen):
+                    view = UIView()
+                    view.layer.contents = frozen.surface
+                    view.layer.contentsScale = 1
+                    view.layer.contentsGravity = .resize
+                }
+                view.layer.magnificationFilter = .nearest
+                view.layer.minificationFilter = .trilinear
+                return view
+            }
+        }
+        let contents: Contents
+
+        init(id: Int, version: Int, windowRect: CGRect, alpha: CGFloat,
+             replacesBase: Bool, contents: Contents) {
+            self.id = id
+            self.version = version
+            self.windowRect = windowRect
+            self.alpha = alpha
+            self.replacesBase = replacesBase
+            self.contents = contents
+        }
+
+        init(id: Int, version: Int, windowRect: CGRect, alpha: CGFloat,
+             replacesBase: Bool, image: UIImage) {
+            self.init(id: id, version: version, windowRect: windowRect, alpha: alpha,
+                      replacesBase: replacesBase, contents: .image(image))
+        }
     }
 
     /// **In commit order, which is z-order.** Source-over of finished strokes in the order they were
@@ -74,28 +112,65 @@ struct UnlandedInk {
 
     var isEmpty: Bool { pictures.isEmpty }
 
-    /// **The rectangle the base is punched out under**, or nil. See
-    /// `StrokeCanvasView.setBaseHole`: an erase lowers alpha and Core Animation composites siblings
-    /// source-over, so the layer's own ink would fill the removal straight back in.
-    var baseHole: CGRect? { pictures.first(where: \.replacesBase)?.windowRect }
+    /// A held picture's visible part after newer replacements have covered it. A replacement's
+    /// transparent pixels still remove earlier ink, so ordinary source-over stacking is not enough.
+    struct VisiblePicture {
+        let picture: Picture
+        /// In canvas-local points; nil means the entire window remains visible.
+        let clip: CGPath?
 
-    /// **Holding a base-replacing picture retires any earlier one, and that is the base hole's
-    /// geometry rather than a cap on memory.** Two removals need two holes; a `CAShapeLayer` with an
-    /// even-odd path takes one, and two overlapping rectangles in an even-odd path cancel back to
-    /// opaque. Widening to their bounding box over-punches the gap between them, which shows as the
-    /// artist's ink disappearing where they did not erase.
-    ///
-    /// **It is unreachable in the shipped app, and this is belt and braces.** A Mode 1 or Mode 2
-    /// eraser's touch-down builds its window from `VectorCanvas.renderIfNonEmpty()` — a *synchronous*
-    /// canvas render, which fills the memo, so the `refreshDisplay` at the end of
-    /// `beginVectorStroke` finds `.ready` and installs a current base. Everything held retires
-    /// there, one call before this one could see it. What this rule buys is that the invariant is
-    /// provable from this file rather than from a property of another one.
-    ///
-    /// An **additive** picture is kept whatever is below it, and needs no rule at all: it is the
-    /// stroke's own ink over whatever was there, which is what source-over means.
+        func applyClip(to view: UIView) {
+            guard let clip else {
+                if view.layer.mask != nil { view.layer.mask = nil }
+                return
+            }
+            var local = CGAffineTransform(translationX: -picture.windowRect.minX,
+                                          y: -picture.windowRect.minY)
+            let mask = (view.layer.mask as? CAShapeLayer) ?? {
+                let created = CAShapeLayer()
+                created.actions = ["path": NSNull(), "bounds": NSNull(), "position": NSNull()]
+                view.layer.mask = created
+                return created
+            }()
+            mask.frame = view.bounds
+            mask.path = clip.copy(using: &local)
+        }
+    }
+
+    struct DisplayPlan {
+        let pictures: [VisiblePicture]
+        /// A geometric union: overlapping replacement windows never cancel each other's hole.
+        let baseHole: CGPath?
+    }
+
+    /// Walk newest to oldest, cutting every earlier picture under each newer replacement. The
+    /// Core Graphics booleans are shared with selection composition; no pixel buffers are made.
+    /// `covering` contains newer live replacement windows, which also cover held pictures.
+    func displayPlan(covering: [CGRect] = []) -> DisplayPlan {
+        var covered: CGPath?
+        func cover(_ rect: CGRect) {
+            guard !rect.isNull, !rect.isEmpty else { return }
+            let path = CGPath(rect: rect, transform: nil)
+            covered = covered.map { $0.union(path, using: .winding) } ?? path
+        }
+        for rect in covering { cover(rect) }
+        var visible: [VisiblePicture] = []
+        for picture in pictures.reversed() {
+            let clip: CGPath?
+            if let covered, picture.windowRect.intersects(covered.boundingBoxOfPath) {
+                clip = CGPath(rect: picture.windowRect, transform: nil).subtracting(covered, using: .winding)
+            } else {
+                clip = nil
+            }
+            visible.append(VisiblePicture(picture: picture, clip: clip))
+            if picture.replacesBase { cover(picture.windowRect) }
+        }
+        return DisplayPlan(pictures: visible.reversed(), baseHole: covered)
+    }
+
+    /// Every finished window survives until a base containing it lands. In particular, a second
+    /// replacement can be disjoint from the first; retaining only the newer one loses visible ink.
     mutating func hold(_ picture: Picture) {
-        if picture.replacesBase { pictures.removeAll(where: \.replacesBase) }
         pictures.append(picture)
     }
 

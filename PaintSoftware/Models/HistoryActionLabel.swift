@@ -28,6 +28,7 @@ enum HistoryActionLabel: CaseIterable, Equatable {
     /// artist who erased something undone as "brush stroke" would read the banner as wrong.
     case brushStroke
     case erase
+    case liquify
     case shape
     case fill
     /// The fill tool's lasso mode. Named apart from `.fill` for the same reason `.erase` is named
@@ -283,6 +284,7 @@ enum HistoryActionLabel: CaseIterable, Equatable {
     var phrase: String {
         switch self {
         case .brushStroke: return "brush stroke"
+        case .liquify: return "liquify stroke"
         case .erase: return "erase"
         case .shape: return "shape"
         case .fill: return "fill"

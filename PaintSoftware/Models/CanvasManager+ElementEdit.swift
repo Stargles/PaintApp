@@ -79,9 +79,139 @@ struct LiveElementEdit {
     var elements: [VectorElement]
     /// Moves on every tick, so a host can tell a picture it has shown from one it has not.
     var tick = 0
+    /// One complete procedural value owns the matching field, selection and shown-space poses.
+    /// The window host asks for a picture; it does not interpret brush displacement data.
+    var procedure: ElementEditProcedure? = nil
+
+    func picture(from committed: [VectorElement]? = nil) -> (elements: [VectorElement], rewriting: Set<UUID>) {
+        let shown = committed.map { procedure?.shown($0) ?? $0 } ?? procedure?.picture(elements) ?? elements
+        return (shown, procedure?.poses.isEmpty == false ? Set(shown.map(\.id)) : (committed == nil ? rewriting : []))
+    }
+}
+
+struct ElementEditProcedure {
+    let deformation: LiquifyDeformation
+    let selectedIDs: Set<UUID>?
+    let poses: [UUID: PoseMap]
+    let sourceVersion: Int
+    private let resolution = Resolution()
+
+    init(deformation: LiquifyDeformation, selectedIDs: Set<UUID>?, poses: [UUID: PoseMap], sourceVersion: Int) {
+        self.deformation = deformation
+        self.selectedIDs = selectedIDs
+        self.poses = poses
+        self.sourceVersion = sourceVersion
+    }
+
+    struct Resolved {
+        let elements: [VectorElement]
+        let shown: [VectorElement]
+        let changed: Set<UUID>
+    }
+
+    /// One tick's worker result and its matching presented picture. A later tick has a different
+    /// memo; an old worker cannot complete its replacement's pending write.
+    private final class Resolution {
+        let lock = NSCondition()
+        var value: Resolved?
+        var presented = false
+        var finish: ((Resolved) -> Void)?
+        var cancelled = false
+        var computations = 0
+        var resolving = false
+    }
+
+    var isPending: Bool {
+        resolution.lock.lock(); defer { resolution.lock.unlock() }
+        return resolution.finish != nil
+    }
+    var isPresented: Bool {
+        resolution.lock.lock(); defer { resolution.lock.unlock() }
+        return resolution.presented
+    }
+    var resolutionCount: Int {
+        resolution.lock.lock(); defer { resolution.lock.unlock() }
+        return resolution.computations
+    }
+    var isResolving: Bool {
+        resolution.lock.lock(); defer { resolution.lock.unlock() }
+        return resolution.resolving
+    }
+
+    func resolve(_ original: [VectorElement]) -> [VectorElement] {
+        resolved(original).elements
+    }
+    private func resolved(_ original: [VectorElement]) -> Resolved {
+        resolution.lock.lock()
+        while resolution.resolving { resolution.lock.wait() }
+        if let cached = resolution.value { resolution.lock.unlock(); return cached }
+        resolution.resolving = true
+        resolution.computations += 1
+        resolution.lock.unlock()
+        let elements = LiquifyField(deformation).mapping(original, selectedIDs: selectedIDs, poses: poses)
+        let changed = Set(zip(original, elements).compactMap { old, new -> UUID? in
+            switch (old, new) {
+            case (.stroke(let a), .stroke(let b)): return a.samples != b.samples || a.lattice != b.lattice ? a.id : nil
+            case (.fill(let a), .fill(let b)): return a.pathData != b.pathData ? a.id : nil
+            default: return nil
+            }
+        })
+        let value = Resolved(elements: elements, shown: shown(elements), changed: changed)
+        resolution.lock.lock()
+        resolution.value = value
+        resolution.resolving = false
+        resolution.lock.broadcast()
+        resolution.lock.unlock()
+        return value
+    }
+    func picture(_ original: [VectorElement]) -> [VectorElement] { resolved(original).shown }
+
+    /// Called on the main thread after this exact tick's surface is presented.
+    func didPresent() {
+        resolution.lock.lock()
+        resolution.presented = true
+        let value = resolution.value
+        let finish = value == nil ? nil : resolution.finish
+        if finish != nil { resolution.finish = nil }
+        resolution.lock.unlock()
+        if let value { finish?(value) }
+    }
+    func finishWhenPresented(_ finish: @escaping (Resolved) -> Void) {
+        resolution.lock.lock()
+        guard !resolution.cancelled else { resolution.lock.unlock(); return }
+        let ready = resolution.presented ? resolution.value : nil
+        if ready == nil { resolution.finish = finish }
+        resolution.lock.unlock()
+        if let ready { finish(ready) }
+    }
+    /// A subsequent document operation must settle the completed gesture first. Clear before the
+    /// callback: its commit ends the hold and may itself enter another mutation boundary.
+    func settlePending(_ original: [VectorElement]) {
+        resolution.lock.lock()
+        let finish = resolution.finish
+        resolution.finish = nil
+        resolution.lock.unlock()
+        if let finish { finish(resolved(original)) }
+    }
+    func cancel() {
+        resolution.lock.lock(); defer { resolution.lock.unlock() }
+        resolution.cancelled = true
+        resolution.finish = nil
+    }
+    func shown(_ resolved: [VectorElement]) -> [VectorElement] {
+        guard !poses.isEmpty else { return resolved }
+        return resolved.compactMap { element in
+            poses[element.id].flatMap { VectorCanvas.mapping(element, through: $0) } ?? element
+        }
+    }
 }
 
 extension CanvasManager {
+
+    func settlePendingElementProcedure() {
+        guard let edit = liveElementEdit else { return }
+        edit.procedure?.settlePending(edit.elements)
+    }
 
     /// **Opens a live edit on `vectorCanvas`'s cel** and lifts its picture into a held window the
     /// canvas draws. Writes nothing; publishes once, so the canvas cuts its live picture around the

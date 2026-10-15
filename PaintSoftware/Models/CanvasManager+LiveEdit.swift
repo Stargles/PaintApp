@@ -280,7 +280,7 @@ struct HeldValueFill: Equatable {
 /// and written once, at the lift, as one undo step.
 struct HeldInterpolation {
     /// Which of the three drags holds it — what each one's lift and tick ask before touching it.
-    enum Drag { case timing, guideHandle, spacing }
+    enum Drag { case timing, guideHandle, spacing, liquify }
     let drag: Drag
     /// The in-between the drag is over — the interpolation target when it began.
     let layerID: UUID
@@ -361,6 +361,7 @@ extension CanvasManager {
     /// which takes the picture down, and publishes once so it re-cuts without the hold's host.
     func endLiveEdit(beforeNotify: () -> Void = {}) {
         guard liveEdit != nil else { return }
+        liveElementEdit?.procedure?.cancel()
         liveEdit = nil
         mirrorLiveEdit()
         // Transfer any committed picture after clearing the model hold, before removing its surface.

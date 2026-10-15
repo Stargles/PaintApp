@@ -15,6 +15,8 @@ import CoreGraphics
 /// `stampImage` would silently drop every square-brush dab, which is the failure this protocol is
 /// shaped to make impossible to write by accident.
 protocol DabTarget: AnyObject {
+    /// The unscattered walk site; collectors use travel for positional tools. Pixel targets ignore it.
+    func dabSite(at point: CGPoint, travel: CGPoint)
     func beginStroke()
     func endStroke()
 
@@ -78,6 +80,18 @@ protocol DabTarget: AnyObject {
     ///   falloff.
     func stampImage(_ texture: BrushTextureRef, at point: CGPoint, diameter: CGFloat,
                     angle: CGFloat, color: UIColor, alpha: CGFloat, blendMode: CGBlendMode)
+}
+
+extension DabTarget {
+    func dabSite(at point: CGPoint, travel: CGPoint) {}
+}
+
+/// Pixel sinks resolve native material at the existing stroke-group merge. Geometry collectors
+/// intentionally stay outside this protocol: they must observe the unchanged native walk.
+protocol MaterialDabTarget: DabTarget {
+    var material: InkMaterialPaint? { get set }
+    var completed: Bool { get }
+    func rejectMaterialTransport()
 }
 
 /// The pixels an image dab of `diameter` turned by `angle` about `point` can touch.
@@ -261,6 +275,13 @@ final class DabGradientCache {
     }
 
     /// Paints one round dab into `ctx`, at `point` in the context's current user space.
+    /// The same three-stop radial falloff the gradient below draws, for positional brush fields.
+    static func coverage(distanceFraction: CGFloat, hardness: CGFloat) -> CGFloat {
+        guard distanceFraction < 1 else { return 0 }
+        let core = min(1, max(0, hardness))
+        return distanceFraction <= core ? 1 : (1 - distanceFraction) / (1 - core)
+    }
+
     func stamp(into ctx: CGContext, at point: CGPoint, radius: CGFloat, color: UIColor,
                alpha: CGFloat, hardness: CGFloat, blendMode: CGBlendMode) {
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, ignoredAlpha: CGFloat = 0
@@ -471,8 +492,12 @@ final class DabImageCache {
 /// `beginStroke`/`endStroke` are no-ops. They exist on `RasterLayerTexture` to maintain
 /// `strokeCount`, which is display-only bookkeeping for a *persistent* texture; a render-local
 /// context has no such state and nothing reads a stroke count off it.
-final class CGContextDabTarget: DabTarget {
+final class CGContextDabTarget: MaterialDabTarget {
     private let ctx: CGContext
+    var material: InkMaterialPaint?
+    let materialRenderer: InkMaterialRenderer?
+    private(set) var completed = true
+    func rejectMaterialTransport() { completed = false; materialRenderer?.rejectTransport() }
     /// **Where this context's own `(0, 0)` sits in canvas points** — BRUSH.md §2.25's phase, and the
     /// whole of what "canvas-anchored" needs from a target.
     ///
@@ -482,17 +507,20 @@ final class CGContextDabTarget: DabTarget {
     /// It is here rather than inferred, because a target that guessed would guess wrong the first
     /// time someone renders a strip (RENDER.md §3.8) or a tile.
     private let canvasOrigin: CGPoint
-    private let gradients = DabGradientCache()
-    private let images = DabImageCache()
+    private let gradients: DabGradientCache
+    private let images: DabImageCache
 
     /// Dabs actually rasterized (i.e. that passed the guard below) — read by `VectorCanvas` after a
     /// render to populate `lastRenderDabCount`. A skipped stamp does no gradient work, so it is
     /// correctly excluded: this counts cost, not calls.
     private(set) var dabCount = 0
 
-    init(_ ctx: CGContext, canvasOrigin: CGPoint = .zero) {
+    init(_ ctx: CGContext, canvasOrigin: CGPoint = .zero, materialRenderer: InkMaterialRenderer? = nil,
+         gradients: DabGradientCache = DabGradientCache(), images: DabImageCache = DabImageCache()) {
         self.ctx = ctx
         self.canvasOrigin = canvasOrigin
+        self.materialRenderer = materialRenderer
+        self.gradients = gradients; self.images = images
     }
 
     func beginStroke() {}
@@ -534,8 +562,28 @@ final class CGContextDabTarget: DabTarget {
     func endStrokeGroup() {
         guard let group else { return }
         self.group = nil
-        lastGroupBounds = group.bounds
+        merge(group)
+    }
+
+    /// Shared by CGContext rendering and persistent/scratch pixel targets, preserving one native
+    /// group renderer and their existing gradient/tip caches.
+    func merge(_ group: StrokeGroupBuffer) {
+        guard completed else { return }
+        lastGroupBounds = material?.bounds(of: group.bounds) ?? group.bounds
         guard !group.isEmpty, !group.bounds.isNull else { return }
+        if let material, material.requiresWarp(in: ctx.boundingBoxOfClipPath) {
+            func draw(_ renderer: InkMaterialRenderer) -> Bool {
+                renderer.draw(into: ctx, nativeBounds: group.bounds, program: material.program,
+                    transport: material.transport, blendMode: group.blendMode) { source, clip in
+                    self.paintNative(group, into: source, over: clip)
+                }
+                return renderer.completed
+            }
+            let finished = materialRenderer.map(draw) ?? InkMaterialRenderer.visitTiles(into: ctx,
+                over: material.bounds(of: group.bounds), draw: draw)
+            completed = completed && finished
+            return
+        }
         ctx.saveGState()
         // **Integral, and that is not tidiness.** A clip on a fractional rectangle is antialiased, so
         // the group's outermost row of pixels would come out at partial coverage — MEASURED at
@@ -556,7 +604,8 @@ final class CGContextDabTarget: DabTarget {
         ctx.restoreGState()
     }
 
-    private func draw(_ dab: BrushStamper.BakedDab) {
+    private func draw(_ dab: BrushStamper.BakedDab, into context: CGContext? = nil) {
+        let ctx = context ?? self.ctx
         switch dab.tip {
         case .round(let hardness):
             gradients.stamp(into: ctx, at: dab.center, radius: dab.radius, color: dab.color,
@@ -565,6 +614,17 @@ final class CGContextDabTarget: DabTarget {
             images.stamp(into: ctx, texture: texture, at: dab.center, diameter: dab.radius * 2,
                          angle: angle, color: dab.color, alpha: dab.alpha, blendMode: dab.blendMode)
         }
+    }
+
+    private func paintNative(_ group: StrokeGroupBuffer, into context: CGContext, over clip: CGRect) {
+        context.saveGState()
+        context.clip(to: group.bounds.integral)
+        context.setAlpha(group.opacity); context.setBlendMode(.normal)
+        context.beginTransparencyLayer(auxiliaryInfo: nil)
+        for dab in group.dabs { draw(dab, into: context) }
+        BrushTextureMerge.apply(group.texture, into: context, over: clip, canvasOrigin: canvasOrigin)
+        context.endTransparencyLayer()
+        context.restoreGState()
     }
 
     func stampCircle(at point: CGPoint, radius: CGFloat, color: UIColor,
@@ -619,7 +679,10 @@ final class CGContextDabTarget: DabTarget {
 /// it happens at most once per change, not once per stamp. The public API here (`renderToUIImage`,
 /// `stamp`, `beginStroke`/`endStroke`, `makeCopy`, `flipped`, `reset`/`clear`) is the seam every
 /// other piece of the engine depends on — keep it stable even if the internals move to GPU.
-final class RasterLayerTexture: DabTarget {
+final class RasterLayerTexture: MaterialDabTarget {
+    var material: InkMaterialPaint?
+    private(set) var completed = true
+    func rejectMaterialTransport() { completed = false }
     let size: CGSize
     let pixelWidth: Int
     let pixelHeight: Int
@@ -1010,23 +1073,13 @@ final class RasterLayerTexture: DabTarget {
         defer { lock.unlock() }
         guard let group else { return }
         self.group = nil
-        guard !group.isEmpty, !group.bounds.isNull, let ctx = ensureContext() else { return }
-        ctx.saveGState()
-        // **Integral, and that is not tidiness.** A clip on a fractional rectangle is antialiased, so
-        // the group's outermost row of pixels would come out at partial coverage — MEASURED at
-        // alpha 193 where 255 was drawn, which is ink lost at a seam rather than a rounding
-        // difference. Rounded out to the pixel grid the clip lands between pixels and takes nothing.
-        let clip = group.bounds.integral
-        ctx.clip(to: clip)
-        ctx.setAlpha(group.opacity)
-        ctx.setBlendMode(group.blendMode)
-        ctx.beginTransparencyLayer(auxiliaryInfo: nil)
-        for dab in group.dabs { draw(dab, into: ctx) }
-        // BRUSH.md §2.25 — the paper, multiplied into the untextured stroke while it is still the
-        // transparency mask the owner's rule names, and before the opacity that scales it.
-        BrushTextureMerge.apply(group.texture, into: ctx, over: clip, canvasOrigin: canvasOrigin)
-        ctx.endTransparencyLayer()
-        ctx.restoreGState()
+        guard completed else { return }
+        guard !group.isEmpty, !group.bounds.isNull else { return }
+        guard let ctx = ensureContext() else { if material != nil { completed = false }; return }
+        let target = CGContextDabTarget(ctx, canvasOrigin: canvasOrigin, gradients: dabGradients, images: dabImages)
+        target.material = material
+        target.merge(group)
+        completed = completed && target.completed
         cachedImage = nil
         version += 1
     }

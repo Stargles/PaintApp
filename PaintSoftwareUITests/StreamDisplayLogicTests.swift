@@ -216,6 +216,7 @@ final class StreamDisplayLogicTests: XCTestCase {
         let originalBytes = try Data(contentsOf: originalDrawing)
         LegacyStreamPlacementRepair.repairLibrary()
         LegacyMaskRepair.repairLibrary()
+        LegacyLiquifyRepair.repairLibrary()
         let untouched = ProjectBackupManager.takeUpdateSnapshotIfNeeded()
         let pristine = try XCTUnwrap(ProjectBackupManager.allProjectPackages(in: root.appendingPathComponent("Backups"))
             .first { $0.lastPathComponent.hasPrefix(untouched) })

@@ -942,7 +942,7 @@ struct DrawingView: View {
 
     private var panelMaxHeight: CGFloat {
         switch activePanel {
-        case .brush, .eraser: return DropdownHeight.brushes
+        case .brush, .eraser, .liquify: return DropdownHeight.brushes
         case .color: return DropdownHeight.colour
         default: return DropdownHeight.menu
         }
@@ -995,6 +995,9 @@ struct DrawingView: View {
         case .eraser:
             EraserSettingsPanel(canvasManager: canvasManager,
                                 onEditBrush: { brushEditing = EraserSettingsPanel.spec })
+        case .liquify:
+            LiquifySettingsPanel(canvasManager: canvasManager,
+                                 onEditBrush: { brushEditing = LiquifySettingsPanel.spec })
         case .color:
             ActiveColourPicker(canvasManager: canvasManager, brush: canvasManager.brushColorState,
                                text: canvasManager.textSettings)

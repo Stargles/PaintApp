@@ -43,6 +43,7 @@ final class ToolLogicTests: XCTestCase {
         // The eraser is a stroke like any other — `.destinationOut` on a raster layer, a real
         // gesture on a vector one — and goes through the same recognizer.
         .eraser: true,
+        .liquify: true,
         // The fill and the eyedropper act on a canvas touch too, but through their own
         // `TouchTypePressRecognizer` mounted on the *container*. The layer host declining the touch
         // is a precondition for either of theirs ever seeing it: the host fully covers the
@@ -132,6 +133,7 @@ final class ToolLogicTests: XCTestCase {
         // The eraser keeps a wholly separate preset (`selectedEraserBrush`), so a tap in the paint
         // brush's panel must not put the artist silently back to painting. The original rule.
         .eraser: false,
+        .liquify: false,
         // The fill's rule, also original.
         .fill: false,
         // Added by this test file, and both are omissions rather than decisions anybody made: the

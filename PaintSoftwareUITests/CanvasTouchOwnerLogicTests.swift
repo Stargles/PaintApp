@@ -1,12 +1,10 @@
 import XCTest
 
-/// Walks the **whole** input space of "who owns this canvas touch" — 2,304 combinations for each
-/// (tool, fill mode) pair, 528 of them states the app can actually be in — rather than sampling it.
+/// Walks the **whole** input space of "who owns this canvas touch" — 2,496 combinations for each
+/// (tool, fill mode) pair, 572 of them states the app can actually be in — rather than sampling it.
 ///
-/// Both figures halved on 2026-08-27 when TODO item (12) stage 2 deleted the `isVectorTransforming`
-/// axis: 3,840 and 490 are the numbers with it. **And both scaled by 12/10 on 2026-09-24** when TODO
-/// (103)/(104) added `ActivePanel.add`/`.settings` (10 cases to 12) — `isReachable` never reads
-/// `panel` at all, so the ratio is exact and no reachability rule changed.
+/// Liquify adds the thirteenth panel. `isReachable` never reads the panel, tool or fill mode, so
+/// every pair retains the same 44 reachable states per panel.
 ///
 /// **Exhaustion is the point.** Every defect this type was extracted to retire was a combination
 /// nobody thought to try: the pick tool with the Select panel open (owned by nobody), a shape's
@@ -118,7 +116,7 @@ final class CanvasTouchOwnerLogicTests: XCTestCase {
     }
 
     /// A combination named the way a reader can act on: the tool, whether Select is open, what is
-    /// floating, what the active layer is, and what the touch landed on. The nine non-`.select`
+    /// floating, what the active layer is, and what the touch landed on. The non-`.select`
     /// panels collapse, because no gate distinguishes them — `testTheOnlySettingsPanelAnyGateReads`
     /// proves that rather than assuming it.
     private func signature(_ i: CanvasTouchInputs) -> String {
@@ -175,16 +173,14 @@ final class CanvasTouchOwnerLogicTests: XCTestCase {
         let pairs = Tool.allCases.count * FillMode.allCases.count
         XCTAssertEqual(totalByPair.count, pairs, "every (tool, fill mode) pair should have been walked")
         for (pair, count) in totalByPair.sorted(by: { $0.key < $1.key }) {
-            // TODO (103)/(104) added `ActivePanel.add`/`.settings` — 10 cases to 12, so 1,920
-            // becomes 1,920 × 12/10 = 2,304. `isReachable` never reads `panel` (see below), so every
-            // other figure in this file scales by the same ratio and none of its own logic changed.
-            XCTAssertEqual(count, 2_304,
+            // Thirteen panels × 192 combinations of floats, layer, visibility and chrome.
+            XCTAssertEqual(count, 2_496,
                            "\(pair): the enumerated space changed — a case was added to `ActivePanel`, "
                            + "`CanvasActiveLayer` or `CanvasTouchChrome`")
         }
         for (pair, count) in reachableByPair.sorted(by: { $0.key < $1.key }) {
-            // 440 × 12/10 = 528, for the identical reason the total above scaled.
-            XCTAssertEqual(count, 528,
+            // Thirteen panels × 44 reachable combinations, independent of tool/fill mode.
+            XCTAssertEqual(count, 572,
                            "\(pair): the reachability rules changed; re-read `isReachable`'s clauses. "
                            + "A figure that differs *between* pairs means a clause has started reading "
                            + "the tool, which this file's per-pair counting assumes it does not.")

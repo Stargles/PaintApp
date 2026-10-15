@@ -347,7 +347,7 @@ final class VectorCanvasDataLogicTests: XCTestCase {
     /// Builds a pre-display-list payload: three parallel arrays, no `elements` key.
     private func legacyJSON(strokes: [Any], fills: [Any], images: [Any],
                             transform: [Double]? = [1, 0, 0, 1, 0, 0]) throws -> Data {
-        var root: [String: Any] = ["strokes": strokes, "fills": fills, "images": images]
+        var root: [String: Any] = ["strokes": strokes, "fills": fills, "images": images, "materialOperations": []]
         if let transform { root["transform"] = transform }
         return try jsonData(root)
     }

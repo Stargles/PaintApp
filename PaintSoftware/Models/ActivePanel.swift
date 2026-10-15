@@ -22,7 +22,7 @@ import Foundation
 /// question today** — every one of the fourteen gates that consults this enum spells `== .select` or
 /// `!= .select` — and enumerating the rest is what makes that fact checkable instead of assumed.
 enum ActivePanel: Equatable, CaseIterable {
-    case none, actions, select, move, layers, brush, color, fill, eraser
+    case none, actions, select, move, layers, brush, color, fill, eraser, liquify
     /// The text tool's settings panel. **Not opened from the toolbar** — there is no text icon
     /// there; the way in is the Add menu's "Add Text" row, which is why `AddMenu` is one of the two
     /// panels that had to grow an `activePanel` binding (`ActionsMenu` is the other, for its own

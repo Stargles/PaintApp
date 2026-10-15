@@ -916,6 +916,7 @@ struct BrushEditorScreen: View {
     private var padColor: UIColor {
         switch spec.tool {
         case .brush: return UIColor(canvasManager.brushColor)
+        case .liquify: return .white
         case .eraser: return UIColor(white: 0.35, alpha: 1)
         }
     }

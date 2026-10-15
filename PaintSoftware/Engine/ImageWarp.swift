@@ -65,36 +65,48 @@ enum ImageWarp {
     static func warp(source: [UInt8], sourceWidth: Int, sourceHeight: Int,
                      destinationWidth width: Int, destinationHeight height: Int,
                      params: WarpParams) -> [UInt8]? {
+        let m0 = Double(params.m0), m1 = Double(params.m1), m2 = Double(params.m2)
+        let m3 = Double(params.m3), m4 = Double(params.m4), m5 = Double(params.m5)
+        let m6 = Double(params.m6), m7 = Double(params.m7), m8 = Double(params.m8)
+        return warp(source: source, sourceWidth: sourceWidth, sourceHeight: sourceHeight,
+                    destinationWidth: width, destinationHeight: height) { point in
+            let px = Double(point.x), py = Double(point.y)
+            let w = m6 * px + m7 * py + m8
+            guard w > 0 else { return nil }
+            let inv = 1 / w
+            return CGPoint(x: (m0 * px + m1 * py + m2) * inv,
+                           y: (m3 * px + m4 * py + m5) * inv)
+        }
+    }
+
+    /// The same premultiplied bilinear sampler with an arbitrary destination-to-source map.
+    /// Coordinates are texel centres; nil means transparent. Liquify supplies its composed inverse
+    /// here so geometry and pixels use one field rather than separate displacement implementations.
+    static func warp(source: [UInt8], sourceWidth: Int, sourceHeight: Int,
+                     destinationWidth width: Int, destinationHeight height: Int,
+                     inverseTexelMap: (CGPoint) -> CGPoint?) -> [UInt8]? {
         guard sourceWidth > 0, sourceHeight > 0, width > 0, height > 0,
               source.count >= sourceWidth * sourceHeight * 4 else { return nil }
         var out = [UInt8](repeating: 0, count: width * height * 4)
 
-        // Read as `Double` from the `Float` block: same numbers the kernel gets, arithmetic wide
-        // enough that this side is the reference rather than a second approximation.
-        let m0 = Double(params.m0), m1 = Double(params.m1), m2 = Double(params.m2)
-        let m3 = Double(params.m3), m4 = Double(params.m4), m5 = Double(params.m5)
-        let m6 = Double(params.m6), m7 = Double(params.m7), m8 = Double(params.m8)
-
         source.withUnsafeBufferPointer { src in
             out.withUnsafeMutableBufferPointer { dst in
-                func texel(_ x: Int, _ y: Int) -> (Double, Double, Double, Double) {
+                func texel(_ x: Int, _ y: Int) -> PremultipliedPixel {
                     guard x >= 0, y >= 0, x < sourceWidth, y < sourceHeight else { return (0, 0, 0, 0) }
                     let o = (y * sourceWidth + x) * 4
-                    return (Double(src[o]), Double(src[o + 1]), Double(src[o + 2]), Double(src[o + 3]))
+                    return (src[o], src[o + 1], src[o + 2], src[o + 3])
                 }
                 for y in 0..<height {
                     let py = Double(y) + 0.5
                     for x in 0..<width {
                         let px = Double(x) + 0.5
-                        let w = m6 * px + m7 * py + m8
                         let offset = (y * width + x) * 4
-                        guard w > 0 else {
+                        guard let mapped = inverseTexelMap(CGPoint(x: px, y: py)) else {
                             dst[offset] = 0; dst[offset + 1] = 0; dst[offset + 2] = 0; dst[offset + 3] = 0
                             continue
                         }
-                        let inv = 1 / w
-                        let u = (m0 * px + m1 * py + m2) * inv - 0.5
-                        let v = (m3 * px + m4 * py + m5) * inv - 0.5
+                        let u = Double(mapped.x) - 0.5
+                        let v = Double(mapped.y) - 0.5
                         // **The one place this loop can crash rather than draw nothing.** A
                         // destination pixel a hair inside the vanishing line has `w` a hair above
                         // zero, so `u` and `v` come out at 1e17 and beyond — and `Int(_:)` on a
@@ -112,26 +124,41 @@ enum ImageWarp {
                             dst[offset] = 0; dst[offset + 1] = 0; dst[offset + 2] = 0; dst[offset + 3] = 0
                             continue
                         }
-                        let x0 = (u).rounded(.down), y0 = (v).rounded(.down)
-                        let fx = u - x0, fy = v - y0
-                        let ix = Int(x0), iy = Int(y0)
-                        let t00 = texel(ix, iy), t10 = texel(ix + 1, iy)
-                        let t01 = texel(ix, iy + 1), t11 = texel(ix + 1, iy + 1)
-                        func blend(_ a: Double, _ b: Double, _ c: Double, _ d: Double) -> UInt8 {
-                            let top = a + (b - a) * fx
-                            let bottom = c + (d - c) * fx
-                            let value = top + (bottom - top) * fy
-                            return UInt8(max(0, min(255, value.rounded())))
-                        }
-                        dst[offset] = blend(t00.0, t10.0, t01.0, t11.0)
-                        dst[offset + 1] = blend(t00.1, t10.1, t01.1, t11.1)
-                        dst[offset + 2] = blend(t00.2, t10.2, t01.2, t11.2)
-                        dst[offset + 3] = blend(t00.3, t10.3, t01.3, t11.3)
+                        let pixel = samplePremultiplied(at: mapped, texel: texel)
+                        dst[offset] = pixel.0; dst[offset + 1] = pixel.1
+                        dst[offset + 2] = pixel.2; dst[offset + 3] = pixel.3
                     }
                 }
             }
         }
         return out
+    }
+
+    typealias PremultipliedPixel = (UInt8, UInt8, UInt8, UInt8)
+
+    /// The tiled sampler's integer domain. A bounded image may treat unsupported points as outside;
+    /// a procedural picture must check this first so unsupported transport refuses the whole draw.
+    static func supportsSampling(at point: CGPoint) -> Bool {
+        let u = Double(point.x) - 0.5, v = Double(point.y) - 0.5
+        return u.isFinite && v.isFinite && abs(u) < Double(Int.max / 4) && abs(v) < Double(Int.max / 4)
+    }
+
+    /// Shared bilinear rule for contiguous images and bounded native-material tiles. Source texels
+    /// are supplied explicitly so a long vector stroke never requires a whole-stroke bitmap.
+    static func samplePremultiplied(at point: CGPoint,
+                                   texel: (Int, Int) -> PremultipliedPixel) -> PremultipliedPixel {
+        let u = Double(point.x) - 0.5, v = Double(point.y) - 0.5
+        guard supportsSampling(at: point) else { return (0, 0, 0, 0) }
+        let x0 = u.rounded(.down), y0 = v.rounded(.down)
+        let fx = u - x0, fy = v - y0, ix = Int(x0), iy = Int(y0)
+        let a = texel(ix, iy), b = texel(ix + 1, iy), c = texel(ix, iy + 1), d = texel(ix + 1, iy + 1)
+        func blend(_ a: UInt8, _ b: UInt8, _ c: UInt8, _ d: UInt8) -> UInt8 {
+            let top = Double(a) + (Double(b) - Double(a)) * fx
+            let bottom = Double(c) + (Double(d) - Double(c)) * fx
+            return UInt8(max(0, min(255, (top + (bottom - top) * fy).rounded())))
+        }
+        return (blend(a.0, b.0, c.0, d.0), blend(a.1, b.1, c.1, d.1),
+                blend(a.2, b.2, c.2, d.2), blend(a.3, b.3, c.3, d.3))
     }
 
     // MARK: - Composing the matrix

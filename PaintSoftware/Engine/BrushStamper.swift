@@ -180,7 +180,7 @@ enum BrushStamper {
                 BrushStamper.stampDab(into: target, at: dab, brush: brush, values: resolved,
                                       color: color, brushSize: brushSize,
                                       random: random, arcWidths: walked,
-                                      tangent: sensors.direction(at: DabSite(parameter: u, arcWidths: walked)))
+                                      tangent: sensors.direction(at: DabSite(parameter: u, arcWidths: walked)), travel: step)
                 return BrushStamper.stampSpacing(brushSize: brushSize, fraction: resolved.spacing)
             }
             arcWidths = walked
@@ -337,7 +337,7 @@ enum BrushStamper {
                     // direction-following tip cannot disagree about which way the stroke is going.
                     stampDab(into: raster, at: dab, brush: brush, values: resolved,
                              color: color, brushSize: brushSize, random: random, arcWidths: arcWidths,
-                             tangent: sensors.direction(at: site))
+                             tangent: sensors.direction(at: site), travel: walked)
                 }
                 return stampSpacing(brushSize: brushSize, fraction: resolved.spacing)
             }
@@ -385,7 +385,7 @@ enum BrushStamper {
     static func stampDab(into raster: DabTarget, at point: CGPoint, brush: Brush,
                          values: BrushDabValues, color: UIColor, brushSize: CGFloat,
                          random: DabRandom, arcWidths: CGFloat,
-                         tangent: CGPoint = CGPoint(x: 1, y: 0)) {
+                         tangent: CGPoint = CGPoint(x: 1, y: 0), travel: CGFloat = 0) {
         // **BRUSH.md §2.32 — the dab is stamped when its resolved `density` is at least 0.5.**
         //
         // One comparison, and no draw of its own. Until 2026-09-05 this rolled an intrinsic dice
@@ -405,6 +405,7 @@ enum BrushStamper {
         let alpha = CGFloat(values.flow)
         guard alpha > 0, radius > 0 else { return }
 
+        raster.dabSite(at: point, travel: CGPoint(x: tangent.x * travel, y: tangent.y * travel))
         let stampPoint = applyScatter(to: point, radius: radius,
                                       across: values.scatterAcross, along: values.scatterAlong,
                                       tangent: tangent, random: random, arcWidths: arcWidths)
@@ -616,6 +617,15 @@ extension BrushStamper {
     /// It has state, so each bake owns one rather than sharing.
     final class CollectingDabTarget: DabTarget {
         private(set) var dabs: [BakedDab] = []
+        private(set) var travels: [CGPoint] = []
+        private let tracksTravel: Bool
+        private var siteTravel: CGPoint = .zero
+        func dabSite(at point: CGPoint, travel: CGPoint) { siteTravel = travel }
+        func drain() -> [(BakedDab, CGPoint)] {
+            let result = Array(zip(dabs, travels))
+            dabs.removeAll(keepingCapacity: true); travels.removeAll(keepingCapacity: true)
+            return result
+        }
         /// **The stroke-level merge, kept beside the dabs rather than folded into them** — BRUSH.md
         /// §2.11. A flat `[BakedDab]` cannot carry an opacity cap or a blend mode that belong to the
         /// walk as a whole, and folding either into each dab would be exactly the double-darkening
@@ -625,7 +635,7 @@ extension BrushStamper {
         /// BRUSH.md §2.25's paper, kept beside the dabs for the same reason the two above are: it is
         /// a property of the merge, and a per-dab copy would be the sprite §2.4 deleted.
         private(set) var texture: BrushTextureSettings?
-        init() {}
+        init(tracksTravel: Bool = false) { self.tracksTravel = tracksTravel }
         func beginStroke() {}
         func endStroke() {}
         func beginStrokeGroup(opacity: CGFloat, blendMode: CGBlendMode, texture: BrushTextureSettings?) {
@@ -636,12 +646,14 @@ extension BrushStamper {
         func endStrokeGroup() {}
         func stampCircle(at point: CGPoint, radius: CGFloat, color: UIColor,
                          alpha: CGFloat, hardness: CGFloat, blendMode: CGBlendMode) {
+            if tracksTravel { travels.append(siteTravel) }
             dabs.append(BakedDab(center: point, radius: radius, color: color, alpha: alpha,
                                  blendMode: blendMode, tip: .round(hardness: hardness)))
         }
 
         func stampImage(_ texture: BrushTextureRef, at point: CGPoint, diameter: CGFloat,
                         angle: CGFloat, color: UIColor, alpha: CGFloat, blendMode: CGBlendMode) {
+            if tracksTravel { travels.append(siteTravel) }
             dabs.append(BakedDab(center: point, radius: diameter / 2, color: color, alpha: alpha,
                                  blendMode: blendMode, tip: .image(texture, angle: angle)))
         }

@@ -138,6 +138,14 @@ enum SelectionEditKind: Equatable {
             guard soleColour(of: element) != nil else { return nil }
             return element.mappingColours { Self.recoloured($0, to: picked) }
         case (.size(let size), .stroke(var stroke)):
+            if var placement = stroke.placement {
+                placement.restSize = stroke.size > 0 ? placement.restSize * size / stroke.size : size
+                stroke.placement = placement
+            }
+            if var walk = stroke.restWalk {
+                walk.size = stroke.size > 0 ? walk.size * size / stroke.size : size
+                stroke.restWalk = walk
+            }
             stroke.size = size
             return .stroke(stroke)
         case (.opacity(let opacity), .stroke(var stroke)):

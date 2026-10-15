@@ -275,7 +275,7 @@ final class PoseBakeLogicTests: XCTestCase {
     /// reopened and re-walk after; stored through the affine commit it would re-walk from the start;
     /// stored as a posed spine pulled back through the map it would reopen an eighth of a pixel off,
     /// because `samples` are written quarter-pixel quantised. Only the rest spine kept beside the map
-    /// — `StrokeDistort.rest`, packed as the animated stroke's own `samples` are — reloads to the same
+    /// — `StrokePlacement.Source.retained`, packed as the animated stroke's own `samples` are — reloads to the same
     /// bytes, which is why the bake writes it.
     ///
     /// The honest operand is the reloaded animated document, since a reload quantises *its* spine
@@ -313,9 +313,9 @@ final class PoseBakeLogicTests: XCTestCase {
         for frame in 0..<12 {
             assertSameBytes(try compositeBytes(manager, atFrame: frame), animated[frame], "premise: identical in memory (\(frame))")
         }
-        let baked = try XCTUnwrap(manager.layers[1].cels[6].vector?.strokes.first?.distort,
+        let baked = try XCTUnwrap(manager.layers[1].cels[6].vector?.strokes.first?.placement,
                                   "the baked stroke carries its rest walk as a stored map, which is what survives")
-        XCTAssertNotNil(baked.rest, "and the artist's own spine beside it — the pull-back is not exact")
+        guard case .retained = baked.source else { return XCTFail("the artist's own spine is retained; the pull-back is not exact") }
 
         let url = root.appendingPathComponent("baked.paintproj", isDirectory: true)
         let finished = expectation(description: "ProjectStore.save completion")
@@ -326,8 +326,8 @@ final class PoseBakeLogicTests: XCTestCase {
         XCTAssertEqual(reloaded.layers[layerIndex].cels.count, 12, "twelve baked cels come back")
         XCTAssertTrue(reloaded.layers[layerIndex].cels.allSatisfy { $0.transformTracks.isEmpty },
                       "and none of them carries a channel")
-        XCTAssertNotNil(reloaded.layers[layerIndex].cels[6].vector?.strokes.first?.distort?.rest,
-                        "the stored spine survives the round trip")
+        let savedPlacement = try XCTUnwrap(reloaded.layers[layerIndex].cels[6].vector?.strokes.first?.placement)
+        guard case .retained = savedPlacement.source else { return XCTFail("the stored spine survives the round trip") }
         for frame in 0..<12 {
             assertSameBytes(try compositeBytes(reloaded, atFrame: frame),
                             try compositeBytes(reopenedAnimated, atFrame: frame),

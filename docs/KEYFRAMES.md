@@ -1580,7 +1580,7 @@ channel; `PoseBakeLogicTests` and `PoseBakeUITests`. What the build settled, bey
   re-parameterises a bezier segment on both sides (MEASURED by mutation: on a bezier pair every middle
   frame changed when the halves were re-read; on a linear pair none did).
 - **The pin — a baked frame is byte-identical to the animated frame on both backends, before a save
-  and after a reload — needed a persisted form of §4.2's rest walk, and it is `StrokeDistort.rest`.**
+  and after a reload — needs the retained source in `StrokePlacement`.**
   `posing`'s `restWalk` is transient; the affine Move commit re-walks in posed space (§4.2's finding
   4); the projective commit's pull-back through the map's inverse is a floating-point round trip
   that dropped the last dab on three of twelve frames of an integer fixture (MEASURED, 4e-15 pt of
@@ -1591,7 +1591,9 @@ channel; `PoseBakeLogicTests` and `PoseBakeUITests`. What the build settled, bey
   hand Distort is unchanged — it still pulls back, and an ulp is nothing to it. The stored spine is
   valid only while it is the pre-image of `samples` under the map: `drawn` composes onto the map and
   keeps it, `piece(of:)` carries it as the piece's rest lattice, and the interpolation warp and a
-  local edit's reprojection drop it (`withoutStoredRest`).
+  local edit's reprojection can derive new native geometry when there is no spatial material
+  (`withoutStoredGeometry`). Material-bearing placement instead retains its native walk and composes
+  the explicit transport, so the existing brush spacing survives nonlinear geometry changes.
 - **The cost is disclosed with a number computed from the count and a MEASURED rate**
   (`CanvasManager.measuredSaveMillisecondsPerVectorCel`, from `PerfBaselineTests`' vector-only save
   bench on this Mac), not the 15.2 ms/cel above — that is the raster cel's `pngData()`, and a baked

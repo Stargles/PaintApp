@@ -509,8 +509,8 @@ extension CanvasManager {
         var i = -1
         stored.samples = stroke.samples.replacingPositions({ _ in i += 1; return plan.restPoints[i] },
                                                            angleRotation: 0)
-        // Reprojected by a lattice warp, so a stored rest spine would be stale — `StrokeDistort.rest`.
-        stored.distort = stored.distort?.withoutStoredRest
+        // Reprojected by a lattice warp, so a stored rest spine would be stale — `StrokePlacement.Source.retained`.
+        stored.placement = stored.placement?.withoutStoredGeometry
         // τ = `t`: enforced by the evaluator's `t >= τ` test, so sliding earlier than where it was
         // drawn hides the edit again.
         stored.visibilityThreshold = recipe.t
@@ -1404,6 +1404,7 @@ extension CanvasManager {
             groups: recipe.groups,
             guideIDs: recipe.guideIDs,
             localEditIDs: recipe.localEdits.map(\.id),
+            deformations: recipe.deformations,
             references: references,
             referenceVersions: referenceVersions,
             guides: guideStrokes,
@@ -1956,6 +1957,7 @@ private struct InterpolatedCelIdentity: Hashable {
     /// Ids rather than count, so undo/redo of one edit is told apart from a different edit —
     /// `InterpolationPreviewKey`'s reasoning, and the bug that produced it.
     let localEditIDs: [UUID]
+    let deformations: [LiquifyDeformation]
     /// *Which* cels are read, beside what version they were at: re-pointing a reference at another
     /// cel of the same version is a different picture.
     let references: [CelRef]

@@ -75,15 +75,14 @@ final class InterpolationModelLogicTests: XCTestCase {
 
     // MARK: - Byte identity: nothing new on disk until the feature is used
 
-    /// The headline back-compat property for `VectorStroke`: three fields were added to the most
-    /// numerous type in the format, and a stroke that uses none of them must encode as if they did
-    /// not exist. `encodeIfPresent` on a nil optional writes no key at all — this is what says so.
+    /// An ordinary stroke omits optional interpolation fields. The current-format placement key is
+    /// unconditional and nullable, independently of interpolation membership.
     func testUntaggedStrokeEncodesWithoutAnyInterpolationKeys() throws {
         let keys = try topLevelKeys(try encoded(sampleStroke()))
         // `seed` joined the unconditional set with BRUSH.md §4: it is minted per stroke rather than
         // derived from anything else on the wire, so there is nowhere else for it to live. Every
         // interpolation key is still absent, which is what this test is about.
-        XCTAssertEqual(keys, ["id", "brush", "color", "size", "opacity", "samples", "composite", "seed"],
+        XCTAssertEqual(keys, ["id", "brush", "color", "size", "opacity", "samples", "composite", "seed", "placement"],
                        "An ordinary stroke's payload must carry no interpolation key")
     }
 
@@ -238,17 +237,10 @@ final class InterpolationModelLogicTests: XCTestCase {
                       "One lattice per reference is what well-formed means, at two references or at four")
     }
 
-    /// A recipe saved by a build that had fewer fields still loads: only `references` and `t` are
-    /// required, and everything else has a meaningful empty value.
-    func testMinimalRecipePayloadDecodesWithDefaults() throws {
+    /// Earlier recipes are converted by the one-shot repair before the current decoder reads them.
+    func testMinimalRecipePayloadRequiresRepairBeforeCurrentDecoding() {
         let json = Data(#"{"references":[],"t":0.25}"#.utf8)
-        let decoded = try JSONDecoder().decode(InterpolationRecipe.self, from: json)
-        XCTAssertEqual(decoded.t, 0.25)
-        XCTAssertEqual(decoded.mode, .generate)
-        XCTAssertTrue(decoded.groups.isEmpty)
-        XCTAssertTrue(decoded.localEdits.isEmpty)
-        XCTAssertEqual(decoded.spacing, .linear)
-        XCTAssertFalse(decoded.isWellFormed, "Fewer than two keyframes is not evaluable")
+        XCTAssertThrowsError(try JSONDecoder().decode(InterpolationRecipe.self, from: json))
     }
 
     func testMultiLayerReferenceKeepsEveryContributingCel() throws {

@@ -275,6 +275,19 @@ extension CanvasManager {
                         changed = true
                     }
                 }
+                for deformationIndex in recipe.deformations.indices {
+                    for captureIndex in recipe.deformations[deformationIndex].captures.indices {
+                        let members = recipe.deformations[deformationIndex].captures[captureIndex].inkIDs
+                        guard members.contains(where: { $0.kind == .source && $0.reference == stale }) else { continue }
+                        recipe.deformations[deformationIndex].captures[captureIndex].inkIDs = Set(members.map { member in
+                            guard member.kind == .source, member.reference == stale else { return member }
+                            var member = member
+                            member.reference?.layerID = newLayerID
+                            changed = true
+                            return member
+                        })
+                    }
+                }
                 if changed { layers[layerIndex].cels[celIndex].interpolation = recipe }
             }
         }

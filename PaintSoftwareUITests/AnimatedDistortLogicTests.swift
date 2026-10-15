@@ -8,7 +8,7 @@ import CoreGraphics
 /// ## What is new here, and what is deliberately not
 ///
 /// The *unkeyed* projective ink shipped on 2026-09-06 and `InkDistortLogicTests` pins it — the per-dab
-/// `localScale`, the persisted `VectorStroke.distort`, the rest walk. Nothing here re-asserts any of
+/// `localScale`, the persisted `VectorStroke.placement`, the rest walk. Nothing here re-asserts any of
 /// that. What stage 5b added is the path between a **key** and that renderer, and it is exactly five
 /// things: a key that stores a keystone rather than its affine part, two render reads that answer a
 /// `PoseMap` rather than a linearisation, a blend that carries the perspective row, cache keys wide
