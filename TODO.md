@@ -166,6 +166,10 @@ whose captured cel differs from the current host before assigning it or retiring
 For the same cel, distinguish an image stale relative to the model from one older than the image
 already installed: the latter must not replace newer covered ink. Reuse the installed coverage value
 for this ordering, rather than adding another history or cache.
+The strict material encoder can reject conflicting operation definitions. `ProjectStore.encodeJSON`
+currently logs an encoding failure and omits that vector/recipe file, allowing staged validation to
+accept an empty cel. Propagate material encoding failure through the existing save tally so the
+atomic package swap aborts; malformed material on load must likewise fail rather than become empty.
 
 **Validation in progress (2026-10-14):** the first direct-displacement map folds under strong hard
 and patterned brushes; actual raster pictures show stationary streaks and holes. Replace that map

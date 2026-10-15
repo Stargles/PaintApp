@@ -144,6 +144,11 @@ Never harvest dirty worker files: mutations may be intentional.
     That rejection is implemented at `9c5032d`; also preserve monotonic installed coverage for the
     same cel. A picture may trail the model while advancing what is shown, but must not roll back
     an already newer image and its retired previews.
+  - **Material storage follow-up:** `tmp/s49-liquify-material-format` owns the new placement/table
+    one-shot repair and strict load/save handling. Rejecting a material encode must abort the atomic
+    save, not let `ProjectStore.encodeJSON` omit the file and stage an empty cel. Reuse the existing
+    save tally and package metadata reader. The genuine `5d73184` fixture lacks old Distort/rest
+    fields; a second package must be written by the unchanged pre-material producer to cover those.
   - **Still owed:** target material-phase fix, raster completion, feature mutations,
     pending edit/undo/save and rapid overlapping previews,
     native iPad9 UI, final Debug/Release fast tiers, final audit and integrated full UI run.
@@ -176,10 +181,12 @@ The static census reconciles. Evidence and automatic result archive:
 `~/PaintWork/s49-final-validation/full-main/`; owned simulator `C6A539C3-8499-4BE1-99D5-9FD694C93AF1`.
 This qualifies the existing main before the scheduled profile refresh; Liquify needs its own final
 integrated gates after its remaining work is complete.
-Failure triage is next: twelve UI failures across ten classes and one pad timing assertion. Four UI
-failures report event-synthesis timeouts; no failure is classified from that alone. The archived
-summary and per-class table are intact. Clones cleaned themselves up and no simulator was booted
-on resumption. The prior resource hold is released after isolated warm timing triage.
+Isolated warm pad timing passed four repetitions of the existing opt-in cap (43.97–45.11 ms/stroke).
+`tmp/s49-regression` removes a redundant unconditional per-stroke timing cap; its gates are pending.
+Serial fresh-device rerun of the twelve UI failures passed ten. Guide-above now fails at menu setup
+(different from the full run); interpolation repeats the missing local-ink assertion after Commit.
+Individual fresh-device runs and drawn-image investigation remain before classifying either.
+The archived summary and per-class table are intact under `s49-final-validation/triage/`.
 
 **Latest integrated fast tier (app/test source `840d68a`)**: Debug and Release each 5124 tests,
 5120 passed, four skipped and zero failures; static full census 5694. The full run above closes the
