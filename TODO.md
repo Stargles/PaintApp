@@ -61,6 +61,9 @@ their files are repaired. Build `2974b33` broke this rule and lost the owner's k
 **Owner availability, 2026-10-15:** the owner is using the Mac and will say when finished.
 Defer performance measurements until that notification; continue source review and correctness
 checks without treating contended timings as qualification.
+The owner subsequently asked to park at a good checkpoint. Finish the already-running eight-method
+UI batch, archive its results, commit the handoff and stop. Do not start the final regression,
+Release build, performance or physical-device runs before resumption.
 
 **Combined checkpoint (2026-10-15):** root integrates material `72f686f`, raster
 `ae40f66` and sampler `effb239`. Material55/55, prior raster109/109, sampler native Debug20/20 and
