@@ -75,6 +75,11 @@ not a refused or empty gesture. Profile the current combined Release path before
 Accepted C raster sampling is under compact implementation and cost qualification.
 Adapters at `28abbfa` now propagate required-source refusal through compositing and mutators;
 review found nested rollback and pre-existing pending-crop gaps, which must be corrected and proved.
+Material performance review found output work ignores the visible clip: each touched tile maps and
+samples all 65,536 pixels, even for a 153×111 picture (16,983 visible pixels). Measure and remove
+only that redundant output work, keeping the global pixel centres, 256-pixel native source tiles,
+operation order and exact RGBA. This is a count hypothesis, not a measured speed claim; it does not
+resolve the separate long patterned raster inverse cost.
 Final combined gates, landscape UI and install remain pending.
 
 *"It should be placed to the left of the brush tool in the top menu. When selected, it acts sort of like
