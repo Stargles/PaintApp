@@ -149,6 +149,8 @@ Never harvest dirty worker files: mutations may be intentional.
     save, not let `ProjectStore.encodeJSON` omit the file and stage an empty cel. Reuse the existing
     save tally and package metadata reader. The genuine `5d73184` fixture lacks old Distort/rest
     fields; a second package must be written by the unchanged pre-material producer to cover those.
+    A stage with a JSON error must never write its final manifest: its in-memory failure flag does
+    not survive moving the failed stage to Trash, so recovery must reject it by ordinary completeness.
     Feature review also found `VectorLayer.piece(of:)` creates a shown cut-parent lattice with default
     quantized precision. Inherit the existing parent/stroke precision and prove cut/save roundtrip.
   - **Still owed:** target material-phase fix, raster completion, feature mutations,

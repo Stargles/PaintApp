@@ -166,10 +166,20 @@ whose captured cel differs from the current host before assigning it or retiring
 For the same cel, distinguish an image stale relative to the model from one older than the image
 already installed: the latter must not replace newer covered ink. Reuse the installed coverage value
 for this ordering, rather than adding another history or cache.
+Complete posed replacement pictures must reuse native element posing for ordinary vector ink;
+posing its already-rasterized preview differs from committed re-stamping. Keep raster tiers on their
+existing high-quality sampling, and preserve the deliberately unposed linked-ink behavior pinned by
+`testAnInterpolatedCelDeclinesTheContainerPoseAndDoesNotKeyOnIt`. Core Graphics' high-quality sampling
+also depends on full source extent, so an independently cropped pixel patch can differ at lift. A
+virtual full-extent provider matches pixels but retains about 230 MiB of global resampling cache over
+100 draws, even with released providers/contexts; that prototype is not accepted as a bounded preview.
 The strict material encoder can reject conflicting operation definitions. `ProjectStore.encodeJSON`
 currently logs an encoding failure and omits that vector/recipe file, allowing staged validation to
 accept an empty cel. Propagate any JSON encoding failure through the existing save tally so the
 atomic package swap aborts; malformed material on load must likewise fail rather than become empty.
+A failed JSON stage must also omit its final manifest. Otherwise moving it to Trash loses the
+in-memory failure flag and later recovery could accept the omitted drawing as an empty cel. Reuse
+the existing manifest-completeness check; no extra recovery marker or schema is needed.
 Cutting a precise stroke also currently constructs its shown parent dab lattice with the default
 quantized precision. Preserve the existing parent's precision (or the original stroke's precision
 when first creating it), and verify a real cut/save roundtrip so Liquify's editable cuts do not lose
