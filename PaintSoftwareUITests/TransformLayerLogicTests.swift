@@ -616,16 +616,31 @@ final class TransformLayerLogicTests: XCTestCase {
     /// started posing and this test needs replacing with one that measures the pixels.
     func testAnInterpolatedCelDeclinesTheContainerPoseAndDoesNotKeyOnIt() throws {
         let (manager, drawn) = posedVectorLayer(pose(CGAffineTransform(translationX: 24, y: 0)))
-        let celID = manager.layers[drawn].cels[0].id
+        let first = manager.layers[drawn].cels[0]
+        first.frameCount = 1
+        let last = Cel(id: UUID(), startFrame: 2, frameCount: 1, raster: .empty(size: size),
+                       vector: .empty(size: size))
+        last.vector?.addStroke(stroke([CGPoint(x: 6, y: 10), CGPoint(x: 18, y: 10)]))
+        let cel = Cel(id: UUID(), startFrame: 1, frameCount: 1, raster: .empty(size: size),
+                      vector: .empty(size: size))
         let layerID = manager.layers[drawn].id
-        manager.layers[drawn].cels[0].interpolation = InterpolationRecipe(
-            references: [InterpolationReference(layerID: layerID, celID: celID)], t: 0.5)
-        let cel = manager.layers[drawn].cels[0]
+        let recipe = InterpolationRecipe(references: [
+            InterpolationReference(layerID: layerID, celID: first.id),
+            InterpolationReference(layerID: layerID, celID: last.id)
+        ], t: 0.5)
+        cel.interpolation = recipe
+        manager.layers[drawn].cels = [first, cel, last]
+        XCTAssertTrue(recipe.isWellFormed, "The identity belongs to an evaluable in-between")
 
-        let unposed = try XCTUnwrap(manager.derivedCelContent(for: cel, atFrame: 0)?.identity)
+        let unposedContent = try XCTUnwrap(manager.derivedCelContent(for: cel, atFrame: 1))
+        let rendered = try XCTUnwrap(unposedContent.render(.full))
+        let bytes = try XCTUnwrap(CanvasFixture.rgbaBytes(rendered))
+        XCTAssertTrue(stride(from: 3, to: bytes.count, by: 4).contains { bytes[$0] > 0 },
+                      "The two actual source keyframes produce visible ink")
+        let unposed = unposedContent.identity
         let posed = try XCTUnwrap(manager.derivedCelContent(
-            for: cel, atFrame: 0,
-            inheriting: manager.layerPoses(atFrame: 0)[drawn])?.identity)
+            for: cel, atFrame: 1,
+            inheriting: manager.layerPoses(atFrame: 1)[drawn])?.identity)
         XCTAssertEqual(unposed, posed)
     }
 
