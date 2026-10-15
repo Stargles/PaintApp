@@ -10,6 +10,10 @@ final class InkMaterialRenderer {
     private let budget = Budget(limit: InkMaterialRenderer.byteBudget)
     let window: CGRect
     let scale: CGFloat
+    private let pixelRect: CGRect
+    private var pixelWidth: Int { Int(pixelRect.width) }
+    private var pixelHeight: Int { Int(pixelRect.height) }
+    private var pixelCount: Int { pixelWidth * pixelHeight }
     private var maps: [CoordinateMap] = []
     enum Failure { case allocation, transport, inverse }
     private(set) var failure: Failure?
@@ -17,11 +21,19 @@ final class InkMaterialRenderer {
     private(set) var evaluations = 0
     private(set) var preparedFields = 0
     private(set) var coordinateHits = 0
+    private(set) var coordinatePoints = 0
     private(set) var sourceTiles = 0
     private(set) var peakFieldBytes = 0
     var peakBytes: Int { budget.peak + peakFieldBytes }
 
-    init(window: CGRect, scale: CGFloat) { self.window = window; self.scale = scale }
+    convenience init(window: CGRect, scale: CGFloat) {
+        self.init(window: window, scale: scale,
+            pixelRect: CGRect(x: 0, y: 0, width: Self.tileSide, height: Self.tileSide))
+    }
+
+    private init(window: CGRect, scale: CGFloat, pixelRect: CGRect) {
+        self.window = window; self.scale = scale; self.pixelRect = pixelRect
+    }
 
     /// One bounded tile walk for ordered canvas rendering and standalone pixel preview groups.
     /// Every caller uses the same pixel grid and owns no cache beyond the current output tile.
@@ -40,7 +52,15 @@ final class InkMaterialRenderer {
         for y in Int(coordinates[2])..<Int(coordinates[3]) { for x in Int(coordinates[0])..<Int(coordinates[1]) {
             let window = CGRect(x: CGFloat(x) * side / scale, y: CGFloat(y) * side / scale,
                                 width: side / scale, height: side / scale)
-            let renderer = InkMaterialRenderer(window: window, scale: scale)
+            // Keep the full tile origin for the original sample-centre arithmetic. Only output
+            // work shrinks; native source tiles and their paper/dither remain globally anchored.
+            let left = max(0, floor(visible.minX * scale) - CGFloat(x) * side)
+            let top = max(0, floor(visible.minY * scale) - CGFloat(y) * side)
+            let right = min(side, ceil(visible.maxX * scale) - CGFloat(x) * side)
+            let bottom = min(side, ceil(visible.maxY * scale) - CGFloat(y) * side)
+            guard right > left, bottom > top else { return false }
+            let renderer = InkMaterialRenderer(window: window, scale: scale,
+                pixelRect: CGRect(x: left, y: top, width: right - left, height: bottom - top))
             context.saveGState(); context.clip(to: window)
             let completed = draw(renderer)
             context.restoreGState()
@@ -72,23 +92,24 @@ final class InkMaterialRenderer {
     }
     private final class Pixels {
         let raw: UnsafeMutableRawPointer
-        let side: Int
+        let width: Int
+        let height: Int
         let lease: Lease
-        init(side: Int, lease: Lease) {
-            self.side = side; self.lease = lease
-            raw = .allocate(byteCount: side * side * 4, alignment: 64)
-            raw.initializeMemory(as: UInt8.self, repeating: 0, count: side * side * 4)
+        init(width: Int, height: Int, lease: Lease) {
+            self.width = width; self.height = height; self.lease = lease
+            raw = .allocate(byteCount: width * height * 4, alignment: 64)
+            raw.initializeMemory(as: UInt8.self, repeating: 0, count: width * height * 4)
         }
         deinit { raw.deallocate() }
         var bytes: UnsafeMutablePointer<UInt8> { raw.assumingMemoryBound(to: UInt8.self) }
         func image() -> CGImage? {
             let info = Unmanaged.passRetained(self).toOpaque()
-            guard let provider = CGDataProvider(dataInfo: info, data: raw, size: side * side * 4,
+            guard let provider = CGDataProvider(dataInfo: info, data: raw, size: width * height * 4,
                 releaseData: { info, _, _ in if let info { Unmanaged<Pixels>.fromOpaque(info).release() } }) else {
                 Unmanaged<Pixels>.fromOpaque(info).release(); return nil
             }
-            return CGImage(width: side, height: side, bitsPerComponent: 8, bitsPerPixel: 32,
-                bytesPerRow: side * 4, space: PixelOps.deviceRGBColorSpace,
+            return CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
+                bytesPerRow: width * 4, space: PixelOps.deviceRGBColorSpace,
                 bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
                 provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
         }
@@ -137,9 +158,9 @@ final class InkMaterialRenderer {
         return lease
     }
 
-    private func allocatePixels() -> Pixels? {
-        guard let lease = budget.reserve(Self.tileSide * Self.tileSide * 4) else { refuse(); return nil }
-        return Pixels(side: Self.tileSide, lease: lease)
+    private func allocatePixels(width: Int, height: Int) -> Pixels? {
+        guard let lease = budget.reserve(width * height * 4) else { refuse(); return nil }
+        return Pixels(width: width, height: height, lease: lease)
     }
 
     /// Native geometry preparation shares the render tile's budget and can evict only its
@@ -178,7 +199,7 @@ final class InkMaterialRenderer {
         if let hit = maps.first(where: { $0.bindings == bindings && $0.transport == transport }) {
             coordinateHits += 1; return hit
         }
-        let side = Self.tileSide, count = side * side
+        let width = pixelWidth, count = pixelCount
         // At most two geometry maps, their three-array embeddings and their outputs coexist. The
         // lattice's temporary rest vertices are also reserved; sequences execute one part at a time.
         let largest = max(transport.mappingScratchByteUpperBound, bindings.map { $0.bridge.mappingScratchByteUpperBound }.max() ?? 0)
@@ -191,9 +212,10 @@ final class InkMaterialRenderer {
         guard let scratch = budget.reserve(scratchBytes), let retained = budget.reserve(coordinateBytes) else { refuse(); return nil }
         let coordinates = withExtendedLifetime(scratch) { () -> [CGPoint]? in
             let points = (0..<count).map { i in
-                CGPoint(x: window.minX + (CGFloat(i % side) + 0.5) / scale,
-                        y: window.minY + (CGFloat(i / side) + 0.5) / scale)
+                CGPoint(x: window.minX + (pixelRect.minX + CGFloat(i % width) + 0.5) / scale,
+                        y: window.minY + (pixelRect.minY + CGFloat(i / width) + 0.5) / scale)
             }
+            coordinatePoints += points.count
             return inverse(points, program: InkMaterialProgram(bindings: bindings), transport: transport)
         }
         guard let coordinates else { return nil }
@@ -232,7 +254,7 @@ final class InkMaterialRenderer {
             if let existing = pixels[key] { tile = existing }
             else {
                 while order.count >= 8 { pixels.removeValue(forKey: order.removeFirst()) }
-                guard let allocated = renderer.allocatePixels() else { return nil }
+                guard let allocated = renderer.allocatePixels(width: side, height: side) else { return nil }
                 let rect = CGRect(x: CGFloat(key.x * side) / scale, y: CGFloat(key.y * side) / scale,
                                   width: CGFloat(side) / scale, height: CGFloat(side) / scale)
                 guard let context = CGContext(data: allocated.raw, width: side, height: side, bitsPerComponent: 8,
@@ -289,16 +311,16 @@ final class InkMaterialRenderer {
         defer { withExtendedLifetime((geometryLease, geometry)) {} }
         guard !nativeBounds.isNull, !nativeBounds.isEmpty,
               let inverse = coordinates(bindings: program.bindings, transport: transport),
-              let output = allocatePixels() else { return }
-        let side = Self.tileSide
-        guard let maskLease = budget.reserve(side * side) else { refuse(); return }
-        var alpha = [UInt8](repeating: 255, count: side * side)
+              let output = allocatePixels(width: pixelWidth, height: pixelHeight) else { return }
+        let count = pixelCount
+        guard let maskLease = budget.reserve(count) else { refuse(); return }
+        var alpha = [UInt8](repeating: 255, count: count)
         for clip in coverage {
             guard let path = VectorFillElement.decodePath(clip.pathData),
                   let stage = program.bindings.firstIndex(where: { $0.operation.id == clip.afterOperation }),
                   let points = coordinates(bindings: Array(program.bindings.dropFirst(stage + 1)), transport: .identity) else { refuse(.transport); return }
             let extra = clip.bridge.mappingScratchByteUpperBound
-            guard extra < budget.limit, let scratch = budget.reserve(side * side * 160 + extra) else { refuse(); return }
+            guard extra < budget.limit, let scratch = budget.reserve(count * 160 + extra) else { refuse(); return }
             let valid = withExtendedLifetime(scratch) { () -> Bool in
                 guard let local = clip.bridge.map(points.points, inverse: true),
                       local.allSatisfy({ ImageWarp.supportsSampling(at: CGPoint(x: $0.x * scale, y: $0.y * scale)) }) else { return false }
@@ -335,7 +357,10 @@ final class InkMaterialRenderer {
             destination.saveGState()
             // Drain UIKit's temporary image after this group, so its provider releases the counted
             // output tile before the next group reserves one. The coordinate tile stays shared.
-            UIImage(cgImage: image, scale: scale, orientation: .up).draw(in: window, blendMode: blendMode, alpha: 1)
+            let outputWindow = CGRect(x: window.minX + pixelRect.minX / scale,
+                y: window.minY + pixelRect.minY / scale,
+                width: pixelRect.width / scale, height: pixelRect.height / scale)
+            UIImage(cgImage: image, scale: scale, orientation: .up).draw(in: outputWindow, blendMode: blendMode, alpha: 1)
             destination.restoreGState()
         }
     }
@@ -348,6 +373,7 @@ enum InkMaterialRenderProbe {
         let evaluations: Int
         let fields: Int
         let hits: Int
+        let coordinatePoints: Int
         let sourceTiles: Int
         let peakBytes: Int
         let peakFieldBytes: Int
@@ -365,7 +391,8 @@ enum InkMaterialRenderProbe {
         lock.lock(); defer { lock.unlock() }
         guard armed else { return }
         samples.append(Sample(evaluations: renderer.evaluations, fields: renderer.preparedFields,
-            hits: renderer.coordinateHits, sourceTiles: renderer.sourceTiles, peakBytes: renderer.peakBytes,
+            hits: renderer.coordinateHits, coordinatePoints: renderer.coordinatePoints,
+            sourceTiles: renderer.sourceTiles, peakBytes: renderer.peakBytes,
             peakFieldBytes: renderer.peakFieldBytes, completed: renderer.completed))
     }
     static func recordNativeBoundsWalk() {

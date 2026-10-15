@@ -267,6 +267,49 @@ final class InkMaterialLogicTests: XCTestCase {
             from: JSONSerialization.data(withJSONObject: archive))) { XCTAssertTrue($0 is InkMaterialCodingError) }
     }
 
+    func testLinkedFillCutKeepsItsPaintedStageThroughLaterPushAndMove() throws {
+        let size = CGSize(width: 144, height: 128)
+        let source = VectorFillElement(path: CGPath(rect: CGRect(x: 0, y: 0, width: 128, height: 128), transform: nil), color: color)
+        func push(_ start: CGFloat, _ end: CGFloat) -> LiquifyField {
+            LiquifyField(LiquifyDeformation(brush: TestBrushes.hardRound, size: 48, power: 0.8,
+                mode: .push, seed: 4, samples: StrokeSamples(points: [CGPoint(x: start, y: 64), CGPoint(x: end, y: 64)])))
+        }
+        let first = push(48, 64), second = push(64, 80)
+        guard case .fill(let firstInk) = first.mapping([.fill(source)])[0] else { return XCTFail("native fill stays editable") }
+        let cut = CGPath(rect: CGRect(x: 0, y: 0, width: 64, height: 128), transform: nil)
+        let retained = firstInk.clipped(to: cut)
+        guard case .fill(let laterInk) = second.mapping([.fill(retained)])[0] else { return XCTFail("cut fill stays editable") }
+        let rest = Lattice(cols: 2, rows: 2, restOrigin: .zero, restCellSize: 64)
+        var current = rest; current.vertices[4] = CGPoint(x: 72, y: 60)
+        let transport = InkMaterialBridge.lattice(captured: rest, current: current, pose: .identity)
+        let shift = CGAffineTransform(translationX: 8, y: 0)
+        func linkedAndMoved(_ fill: VectorFillElement) -> VectorElement {
+            var linked = VectorGeometryMap.fill(fill, mapPaint: false) { transport.map($0)! }
+            linked.placement = linked.placement?.transported(by: transport)
+            return VectorCanvas.mapping(.fill(linked), throughStretch: shift)
+        }
+        let picture = VectorCanvas(size: size, elements: [linkedAndMoved(laterInk)]).render()
+        let pixels = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(picture.cgImage)))
+        guard case .fill(let uncutInk) = second.mapping([.fill(firstInk)])[0] else { return XCTFail("uncut control stays editable") }
+        let uncut = VectorCanvas(size: size, elements: [linkedAndMoved(uncutInk)]).render()
+        let uncutPixels = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(uncut.cgImage)))
+        for (point, survives) in [(CGPoint(x: 60, y: 64), true), (CGPoint(x: 68, y: 64), false)] {
+            let pushed = second.map(point)
+            let shown = try XCTUnwrap(transport.map([pushed])?.first).applying(shift)
+            let alpha = pixels[(Int(shown.y) * 144 + Int(shown.x)) * 4 + 3]
+            XCTAssertGreaterThan(uncutPixels[(Int(shown.y) * 144 + Int(shown.x)) * 4 + 3], 240,
+                                 "PREMISE: both retained and discarded witnesses contain actual uncut native paint")
+            if survives {
+                XCTAssertGreaterThan(pushed.x, 68, "PREMISE: later Push carries retained paint beyond the cut's old boundary")
+                XCTAssertGreaterThan(alpha, 240, "the later Push and linked geometry carry the half retained at the cut stage")
+            } else {
+                XCTAssertEqual(alpha, 0, "later operations and Move cannot restore the half discarded after the first Push")
+            }
+        }
+        let attachment = XCTAttachment(image: picture)
+        attachment.name = "linked-fill-cut-later-push-move"; attachment.lifetime = .keepAlways; add(attachment)
+    }
+
     func testMaterialPreflightPreservesUnknownAndMalformedNonmaterialSlots() throws {
         let archive: [String: Any] = ["materialOperations": [], "elements": [
             ["kind": "future-kind", "stroke": "future payload"],
@@ -353,6 +396,62 @@ final class InkMaterialLogicTests: XCTestCase {
         XCTAssertEqual(many.reduce(0) { $0 + $1.hits }, 99)
         XCTAssertTrue(many.allSatisfy { $0.peakBytes <= InkMaterialRenderer.byteBudget + $0.peakFieldBytes })
         print("LIQUIFY MATERIAL TILE one=\(one) hundred=\(hundred) fields=\(many.map(\.fields)) hits=\(many.map(\.hits)) peak=\(many.map(\.peakBytes))")
+    }
+
+    func testFractionalVisibleWindowMatchesFullNativePictureWithOnlyVisibleInversePoints() throws {
+        let size = CGSize(width: 320, height: 320)
+        let frame = CGRect(origin: .zero, size: size)
+        let clip = CGRect(x: 151.25, y: 153.5, width: 153, height: 111)
+        var brush = TestBrushes.hardRound
+        brush.texture = BrushTextureSettings(mask: .builtIn(.canvasWeave), tileSize: 37)
+        let source = VectorStroke(brush: brush, color: color, size: 96, opacity: 0.37,
+            samples: StrokeSamples(points: [CGPoint(x: 160, y: 240), CGPoint(x: 240, y: 240), CGPoint(x: 300, y: 240)]), seed: 8)
+        let rest = Lattice(cols: 2, rows: 2, restOrigin: .zero, restCellSize: 160)
+        var current = rest; current.vertices[4] = CGPoint(x: 176, y: 154)
+        let transport = InkMaterialBridge.lattice(captured: rest, current: current, pose: .identity)
+        let operation = InkMaterialOperation(LiquifyDeformation(brush: TestBrushes.hardRound, size: 180,
+            power: 0.8, mode: .push, seed: 4,
+            samples: StrokeSamples(points: [CGPoint(x: 224, y: 224), CGPoint(x: 240, y: 240)])))
+        var material = VectorGeometryMap.stroke(source) { transport.map($0)! }
+        material.placement = StrokePlacement(map: .identity, restSize: source.size,
+            source: .retained(samples: source.samples, lattice: nil, precise: true),
+            material: InkMaterialProgram(bindings: [.init(operation: operation, bridge: .identity)]), transport: transport)
+        let frozen = VectorCanvas(size: size, elements: [.stroke(material)]).freeze(quality: .full)
+        for scale in [CGFloat(1), 1.5] {
+            let format = PixelOps.transparentFormat(scale: scale); format.preferredRange = .standard
+            func render(clipped: Bool) -> (UIImage, [InkMaterialRenderProbe.Sample]) {
+                InkMaterialRenderProbe.begin()
+                let image = UIGraphicsImageRenderer(size: size, format: format).image { context in
+                    if clipped { context.cgContext.clip(to: clip) }
+                    XCTAssertNotNil(frozen.draw(into: context.cgContext, frameRect: frame, quality: .full))
+                }
+                return (image, InkMaterialRenderProbe.end())
+            }
+            let (full, fullWork) = render(clipped: false)
+            let expected = UIGraphicsImageRenderer(size: size, format: format).image { context in
+                context.cgContext.clip(to: clip); full.draw(at: .zero)
+            }
+            let (actual, work) = render(clipped: true)
+            let a = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(expected.cgImage)))
+            let b = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(actual.cgImage)))
+            XCTAssertGreaterThan(stride(from: 3, to: b.count, by: 4).filter { b[$0] > 0 && b[$0] < 255 }.count, 100,
+                                 "PREMISE: the fractional clip contains visible paper and translucent linked ink")
+            XCTAssertEqual(zip(a, b).filter { $0 != $1 }.count, 0,
+                           "a fractional window across tile seams must preserve every full-render RGBA byte at scale \(scale)")
+            XCTAssertTrue((fullWork + work).allSatisfy { $0.completed && $0.peakBytes <= InkMaterialRenderer.byteBudget + $0.peakFieldBytes })
+            XCTAssertGreaterThan(work.reduce(0) { $0 + $1.evaluations }, 0,
+                                 "PREMISE: the clipped picture actually runs the spatial inverse")
+            let expectedPoints = Int((ceil(clip.maxX * scale) - floor(clip.minX * scale)) *
+                                     (ceil(clip.maxY * scale) - floor(clip.minY * scale)))
+            let fullPoints = fullWork.reduce(0) { $0 + $1.coordinatePoints }
+            let clippedPoints = work.reduce(0) { $0 + $1.coordinatePoints }
+            XCTAssertEqual(fullPoints, Int(size.width * scale) * Int(size.height * scale))
+            XCTAssertEqual(clippedPoints, expectedPoints,
+                           "only pixel centres in the outward-rounded visible window enter the inverse")
+            print("MATERIAL VISIBLE WINDOW scale=\(scale) full=\(fullPoints) clipped=\(clippedPoints) evaluations=\(work.reduce(0) { $0 + $1.evaluations }) sourceTiles=\(work.reduce(0) { $0 + $1.sourceTiles })")
+            let attachment = XCTAttachment(image: actual)
+            attachment.name = "material-fractional-window-\(scale)"; attachment.lifetime = .keepAlways; add(attachment)
+        }
     }
 
     func testScratchWholeStrokePreviewUsesNativeMaterialAtANonzeroWindowOrigin() throws {
