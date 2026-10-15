@@ -174,6 +174,11 @@ preview and held lift with an integer-translated stroke over nonuniform backing.
 through the existing complete cel-picture presenter; remove the superseded local flatten ownership,
 rather than adding another pose-specific compositor. This is recorded before a native reproduction.
 
+The current linked-frame cold UI drive fails its first visible-deformation assertion, before save/reopen
+or source-follow checks. The recorder proves the Liquify touch reaches the correct stroke recognizer
+and gets 20 moves. Before/after pictures are unchanged; Settings subsequently takes 21.5 seconds to
+open. Trace producer completion/refusal before changing timing or calling this persistence damage.
+
 **Raster sampling ruled 2026-10-15:** the owner accepts comparison C's smoother reduced grain,
 "as long as it isnt cery bloaty or expensive for that difference". Replace full/window raster
 transform sampling through one bounded shared implementation, remove the superseded path, and
