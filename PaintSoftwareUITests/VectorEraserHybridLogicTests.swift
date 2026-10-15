@@ -139,7 +139,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
     /// this restriction is understood rather than forgotten.
     private func parityOfHybrid(_ scenario: ParityScenario) throws -> ParityReport? {
         let (canvas, backdrop, _) = erased(scenario)
-        let texture = RasterVectorParity.rasterBase(scenario, backdrop: backdrop)
+        let texture = try RasterVectorParity.rasterBase(scenario, backdrop: backdrop)
         RasterVectorParity.stamp(RasterVectorParity.paintStroke(scenario), into: texture, isEraser: false)
         RasterVectorParity.stamp(RasterVectorParity.eraseStroke(scenario), into: texture, isEraser: true)
         return RasterVectorParity.report(raster: texture.renderToUIImage(), vector: (try XCTUnwrap(canvas.render())),
@@ -163,7 +163,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
                     let name = "\(brush.name) / eraser opacity \(eraserOpacity) / \(gesture.label) / \(backdropName)"
                     let scene = scenario(brush: brush, eraserOpacity: eraserOpacity,
                                          gesture: gesture, backdrop: backdrop, name: name)
-                    XCTContext.runActivity(named: name) { _ in
+                    try XCTContext.runActivity(named: name) { _ in
                         guard let report = try parityOfHybrid(scene) else {
                             return XCTFail("Could not read back both tiers for \(name)", file: file, line: line)
                         }
@@ -276,7 +276,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
         ]
 
         for (name, expectedPieces, scene) in cases {
-            XCTContext.runActivity(named: name) { _ in
+            try XCTContext.runActivity(named: name) { _ in
                 let (canvas, _, _) = erased(scene)
                 let paint = strokes(canvas, .paint)
                 XCTAssertEqual(paint.count, expectedPieces,
@@ -525,7 +525,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
 
         // The whole point: two erases in, the surviving ink is still the original's dabs, so the result
         // matches raster erasing the same line with the same two gestures.
-        let texture = RasterVectorParity.rasterBase(scene, backdrop: nil)
+        let texture = try RasterVectorParity.rasterBase(scene, backdrop: nil)
         RasterVectorParity.stamp(paint, into: texture, isEraser: false)
         for gesture in [first, second] {
             var punch = RasterVectorParity.eraseStroke(scene)
@@ -753,7 +753,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
 
         // Two identical full-opacity punches remove exactly what one does, so the render is still the
         // raster ground truth for a single erase.
-        let texture = RasterVectorParity.rasterBase(scene, backdrop: nil)
+        let texture = try RasterVectorParity.rasterBase(scene, backdrop: nil)
         RasterVectorParity.stamp(RasterVectorParity.paintStroke(scene), into: texture, isEraser: false)
         RasterVectorParity.stamp(RasterVectorParity.eraseStroke(scene), into: texture, isEraser: true)
         guard let report = RasterVectorParity.report(raster: texture.renderToUIImage(),
