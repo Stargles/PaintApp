@@ -115,8 +115,9 @@ why: pictures handed to Core Animation faster than the render server frees them)
       modes need an updated build (unknown modes in that build silently run playback). Physical effect
       baseline completed at 4096² and 2048×1024, PERFORMANCE §30.6; after-build checks remain.
       Automatic re-sign installed updated main `f813346` at 01:08 Toronto on 2026-10-15 while the
-      session was usage-limited. Full regression completed 5694 tests with 13 failures awaiting
-      isolated triage. Confirm the current scene is saved and iPad unlocked before restarting probes.
+      session was usage-limited. Full regression completed 5694 tests. Isolated triage found a continuous-slider test
+      precondition error and an unconditional benchmark cap; their corrected branch passes touched
+      UI and still needs Debug/Release gates. An intermittent Blend Mode menu failure remains open. Confirm the current scene is saved and iPad unlocked before restarting probes.
 
 ## (178) Liquify tool
 

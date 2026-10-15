@@ -15,27 +15,6 @@ complete Fog Glow drive. The failure remains intermittent and its cause is uncon
 delay or menu change has been added. Evidence: `s49-final-validation/triage/` — `regression-ui/`,
 `regression-ui-2/`, `fog-flight/` and `fog-flight-fresh/`.
 
-## Interpolation UI Commit check repeats a missing local-stroke assertion (2026-10-15)
-
-The full run, serial rerun and individual fresh-device run fail the same final drawn-ink assertion.
-A genuine pre-Commit save proves the cause: the local stroke's visibility threshold is
-0.4980711340904236, while the second synthetic slider adjustment lands at 0.49741339683532715.
-The stroke is correctly absent before Commit. The UI test must commit at an unambiguously later
-interior time and assert visible local ink immediately before committing, then check it afterward.
-Reuse the existing single-screenshot pixel probe for its row sweeps instead of taking a picture for
-every column. The first revised run preserved every local-stroke column but also counted the cyan
-guide at x=0.20 before Commit; that guide correctly disappears at Commit. The inspected screenshot
-confirms it is chrome, not lost ink. Use the existing `isInk` predicate for this black-stroke row. Evidence: `~/PaintWork/s49-final-validation/triage/precommit-capture/`.
-
-## Pad benchmark still has an unconditional wall-clock assertion (2026-10-15)
-
-The full main regression failed `DabCostBench.testWhatThePadsRewalkCostsAtItsStrokeCap` at
-162.9 ms per stroke against 150 ms under four parallel simulators. The test's stricter total-pad
-bound already requires `PAINTAPP_PADCAP`, but its earlier per-stroke bound runs unconditionally.
-The first isolated warm measurement was 48.58 ms per stroke; four opt-in repeats are in progress.
-Use the existing opt-in total-pad bound as the single timing gate, retaining unconditional measured
-output and the structural stroke-count assertion. No product threshold needs changing.
-
 ## A scrub at 4096² with the onion skin on spends ~1.3 s of main thread building the ghost (2026-10-13)
 
 Found by TODO (179)'s `PlaybackProbe -probeMode scrub`/`onion` (PERFORMANCE.md §34.2), iPad 9 simulator,

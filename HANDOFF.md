@@ -40,11 +40,12 @@ below the local stroke's 0.4980711340904236 visibility threshold. No Commit prod
 Root's `tmp/s49-integration` now commits at 0.75, requires visible ink before Commit, compares the
 same black-ink columns afterward and uses one screenshot per sweep. Cyan guide pixels were excluded
 with the existing `isInk` predicate. The revised test passes; both deliberate faults are caught
-(invisible precondition and missing committed local ink). Restored touched UI is currently running.
+(invisible precondition and missing committed local ink). Restored touched UI passes: interpolation
+and both Glare methods, three passed and one opt-in pad check skipped.
 The pad timing failure also exposed a redundant unconditional cap: four warm opt-in runs measured
 43.97–45.11 ms/stroke, below the existing stricter total-pad bound. That opt-in bound remains the sole
-timing gate; structural checks and printed measurements remain. Root changes are committed through
-`7561b91`, but not merged; Debug/Release fast gates still remain. The mutation script restores exact
+timing gate; structural checks and printed measurements remain. Root changes are committed on `tmp/s49-integration`, but not merged; Debug/Release fast gates
+still remain. The mutation script restores exact
 committed source on exit. `tmp/s49-regression` is an earlier checkpoint, not authoritative.
 
 A new intermittent Blend Mode menu failure occurred twice in the complete Fog Glow drive on fresh
@@ -66,11 +67,12 @@ no retry, delay or menu workaround was added. Evidence: `s49-final-validation/tr
   counted bytes including the field, below the unchanged 24 MiB payload cap. Scoped autorelease
   lifetimes removed accumulation near stroke 90. Outside-selection bytes, stationary-boundary
   gradients, long patterned tails, nonzero scratch offsets, render refusal and antialiased cuts pass.
-  Root inspected native pictures. A broad Debug run is currently frozen at `d52950b`, expected
-  **5218 methods in 254 filename-selected classes**. Known failures so far include panel/filter audit
-  assumptions, storage repair not yet integrated, and a real per-stroke stride increase. The latter
-  must be fixed by compact representation, not a higher memory assertion. After the run: integrate
-  storage, fix those omissions, pin rendered-ink tap/retag and eraser candidacy before changing hit
+  Root inspected native pictures. Broad Debug at `d52950b` ran
+  **5218 methods: 5206 passed, four skipped, eight failed**, matching the static count in 254 classes.
+  The failures were panel/filter audits, pending storage integration and a real per-stroke stride
+  increase. Clean combined `afef15c` integrates storage, aligns the audits and boxes only the large
+  lattice enum payload; the memory assertion is unchanged. Its selected 60-method verification is
+  running. Next pin rendered-ink tap/retag and eraser candidacy before changing hit
   testing (lasso membership remains authoritative centreline), pin linked paper staging before any
   change, guard finite but integer-unsafe bridge outputs, and finish current assertion mutations.
 - **Storage — `tmp/s49-liquify-material-format`, clean `52eda39`.** Focused Debug **115/115**, zero
