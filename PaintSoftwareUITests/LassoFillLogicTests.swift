@@ -1185,7 +1185,7 @@ final class LassoFillLogicTests: XCTestCase {
 
         XCTAssertEqual(canvas.elements.count, 2, "The fill was added")
         XCTAssertNotNil(canvas.elements.last?.fill, "…on top of the stroke, not under it")
-        let onTheStroke = try pixelOf(canvas.render(), at: CGPoint(x: 32, y: 32))
+        let onTheStroke = try pixelOf((try XCTUnwrap(canvas.render())), at: CGPoint(x: 32, y: 32))
         XCTAssertGreaterThan(onTheStroke.r, 200, "…so the stroke's own pixels come out the fill's colour")
         XCTAssertLessThan(onTheStroke.g, 60)
     }
@@ -1231,7 +1231,7 @@ final class LassoFillLogicTests: XCTestCase {
         let cel = try XCTUnwrap(manager.layers[0].cels.first)
         let preview = try XCTUnwrap(manager.liveFill?.preview,
                                     "Fixture check: the preview is shown and nothing is committed yet")
-        let underneath = PixelOps.rasterize(cel: cel, canvasSize: CanvasFixture.canvasSize, memoize: false)
+        let underneath = (try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: CanvasFixture.canvasSize, memoize: false)))
         let shown = UIGraphicsImageRenderer(size: CanvasFixture.canvasSize, format: PixelOps.transparentFormat()).image { _ in
             underneath.draw(in: CGRect(origin: .zero, size: CanvasFixture.canvasSize))
             preview.draw()

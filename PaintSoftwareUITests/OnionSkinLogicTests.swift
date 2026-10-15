@@ -95,9 +95,9 @@ final class OnionSkinLogicTests: XCTestCase {
     /// whose two cels rasterize identically would pass those assertions while proving nothing —
     /// the failure mode that let the original one-cel version of this file stay green.
     private func assertCelsAreDistinguishable(_ manager: CanvasManager,
-                                              file: StaticString = #filePath, line: UInt = #line) {
-        let first = PixelOps.rasterize(cel: manager.layers[0].cels[0], canvasSize: CanvasFixture.canvasSize)
-        let second = PixelOps.rasterize(cel: manager.layers[0].cels[1], canvasSize: CanvasFixture.canvasSize)
+                                              file: StaticString = #filePath, line: UInt = #line) throws {
+        let first = try XCTUnwrap(PixelOps.rasterize(cel: manager.layers[0].cels[0], canvasSize: CanvasFixture.canvasSize))
+        let second = try XCTUnwrap(PixelOps.rasterize(cel: manager.layers[0].cels[1], canvasSize: CanvasFixture.canvasSize))
         XCTAssertTrue(hasVisibleContent(first), "fixture cel 0 must actually have ink", file: file, line: line)
         XCTAssertTrue(hasVisibleContent(second), "fixture cel 1 must actually have ink", file: file, line: line)
         XCTAssertNotEqual(first.pngData(), second.pngData(),
@@ -107,20 +107,20 @@ final class OnionSkinLogicTests: XCTestCase {
 
     // MARK: - The source
 
-    func testVectorCelWithStrokeProducesNonBlankOnionSkin() {
+    func testVectorCelWithStrokeProducesNonBlankOnionSkin() throws {
         let manager = twoCelManager()
-        assertCelsAreDistinguishable(manager)
+        try assertCelsAreDistinguishable(manager)
         manager.currentFrame = 8          // inside cel 1, so cel 0 is a genuine previous cel
 
-        let frames = OnionSkinSettingsSource().frames(for: manager)
+        let frames = try XCTUnwrap(OnionSkinSettingsSource().frames(for: manager))
 
         XCTAssertEqual(frames.count, 1)
         XCTAssertTrue(hasVisibleContent(frames[0].image), "a vector cel with a stroke must not onion-skin blank")
     }
 
-    func testDefaultSettingsReturnExactlyThePreviousCel() {
+    func testDefaultSettingsReturnExactlyThePreviousCel() throws {
         let manager = twoCelManager()
-        assertCelsAreDistinguishable(manager)
+        try assertCelsAreDistinguishable(manager)
         manager.currentFrame = 8
 
         // The shipped default is one skin either side; there is no cel after cel 1, so exactly one
@@ -128,9 +128,9 @@ final class OnionSkinLogicTests: XCTestCase {
         XCTAssertEqual(manager.onionSkin.previousCount, 1)
         XCTAssertEqual(manager.onionSkin.nextCount, 1)
 
-        let previous = PixelOps.rasterize(cel: manager.layers[0].cels[0], canvasSize: CanvasFixture.canvasSize)
-        let current  = PixelOps.rasterize(cel: manager.layers[0].cels[1], canvasSize: CanvasFixture.canvasSize)
-        let frames = OnionSkinSettingsSource().frames(for: manager)
+        let previous = try XCTUnwrap(PixelOps.rasterize(cel: manager.layers[0].cels[0], canvasSize: CanvasFixture.canvasSize))
+        let current  = try XCTUnwrap(PixelOps.rasterize(cel: manager.layers[0].cels[1], canvasSize: CanvasFixture.canvasSize))
+        let frames = try XCTUnwrap(OnionSkinSettingsSource().frames(for: manager))
 
         XCTAssertEqual(frames.count, 1)
         XCTAssertEqual(frames[0].image.pngData(), previous.pngData(), "must return the PREVIOUS cel")
@@ -148,7 +148,7 @@ final class OnionSkinLogicTests: XCTestCase {
     /// scene, so from frame 5 a `currentFrame - 1` lookup resolves to that very cel and the onion
     /// skin draws the live artwork as a ghost of itself. There is no other *drawing* here, so there
     /// is nothing to onion-skin — in either neighbourhood, with or without looping.
-    func testThePlayheadInsideACelDoesNotOnionSkinThatCelOntoItself() {
+    func testThePlayheadInsideACelDoesNotOnionSkinThatCelOntoItself() throws {
         let manager = CanvasFixture.manager(layerCount: 0)
         manager.addVectorLayer()
         manager.currentLayerIndex = 0
@@ -160,8 +160,8 @@ final class OnionSkinLogicTests: XCTestCase {
         // does carry ink — otherwise an empty result below would be trivially true.
         XCTAssertEqual(manager.layers[0].cels.count, 1)
         XCTAssertEqual(manager.activeCelIndex(inLayer: 0, atFrame: 5), 0)
-        XCTAssertTrue(hasVisibleContent(PixelOps.rasterize(cel: manager.layers[0].cels[0],
-                                                           canvasSize: CanvasFixture.canvasSize)))
+        XCTAssertTrue(hasVisibleContent(try XCTUnwrap(PixelOps.rasterize(cel: manager.layers[0].cels[0],
+                                                           canvasSize: CanvasFixture.canvasSize))))
 
         for neighbourhood in OnionSkinSettings.Neighbourhood.allCases {
             for loops in [false, true] {
@@ -169,52 +169,52 @@ final class OnionSkinLogicTests: XCTestCase {
                 manager.onionSkin.loops = loops
                 for frame in 0...11 {
                     manager.currentFrame = frame
-                    XCTAssertTrue(OnionSkinSettingsSource().frames(for: manager).isEmpty,
+                    XCTAssertTrue(try XCTUnwrap(OnionSkinSettingsSource().frames(for: manager)).isEmpty,
                                   "frame \(frame), \(neighbourhood.rawValue), loops=\(loops): the only cel is the one being drawn on")
                 }
             }
         }
     }
 
-    func testEmptyCelReturnsNothing() {
+    func testEmptyCelReturnsNothing() throws {
         // Frame 0 has no previous frame — the same "nothing to show" case today's guard hides for.
         let manager = CanvasFixture.manager(layerCount: 1)
         manager.currentLayerIndex = 0
         manager.currentFrame = 0
 
-        XCTAssertTrue(OnionSkinSettingsSource().frames(for: manager).isEmpty)
+        XCTAssertTrue(try XCTUnwrap(OnionSkinSettingsSource().frames(for: manager)).isEmpty)
     }
 
-    func testTintedColouringTintsEachSideAndOriginalColorsDoesNot() {
+    func testTintedColouringTintsEachSideAndOriginalColorsDoesNot() throws {
         let manager = twoCelManager()
         manager.currentFrame = 3          // inside cel 0, so cel 1 is the next drawing
         manager.onionSkin.colouring = .tinted
 
-        let tinted = OnionSkinSettingsSource().frames(for: manager)
+        let tinted = try XCTUnwrap(OnionSkinSettingsSource().frames(for: manager))
         XCTAssertEqual(tinted.count, 1, "cel 0 is first, so only the next side has anything")
         XCTAssertEqual(tinted[0].tint, manager.onionSkin.nextTint.uiColor)
 
         manager.onionSkin.colouring = .originalColors
-        XCTAssertNil(OnionSkinSettingsSource().frames(for: manager).first?.tint)
+        XCTAssertNil((try XCTUnwrap(OnionSkinSettingsSource().frames(for: manager))).first?.tint)
     }
 
-    func testASlotAtZeroOpacityIsNotCompositedAtAll() {
+    func testASlotAtZeroOpacityIsNotCompositedAtAll() throws {
         let manager = twoCelManager()
         manager.currentFrame = 8
         manager.onionSkin.linkedPrevious.nearest = 0
         manager.onionSkin.linkedNext.nearest = 0
 
-        XCTAssertTrue(OnionSkinSettingsSource().frames(for: manager).isEmpty,
+        XCTAssertTrue(try XCTUnwrap(OnionSkinSettingsSource().frames(for: manager)).isEmpty,
                       "a skin at zero opacity is a canvas-sized draw that produces nothing")
     }
 
-    func testABlankCelIsSkippedRatherThanComposited() {
+    func testABlankCelIsSkippedRatherThanComposited() throws {
         let manager = twoCelManager()
         manager.layers[0].cels[0].vector = .empty(size: CanvasFixture.canvasSize)
         manager.currentFrame = 8
 
         XCTAssertTrue(manager.layers[0].cels[0].isCertainlyBlank)
-        XCTAssertTrue(OnionSkinSettingsSource().frames(for: manager).isEmpty)
+        XCTAssertTrue(try XCTUnwrap(OnionSkinSettingsSource().frames(for: manager)).isEmpty)
     }
 
     // MARK: - Linked opacity: a straight line between a side's two ends
@@ -686,7 +686,7 @@ final class OnionSkinLogicTests: XCTestCase {
 
     /// **Changing the resolution must not serve skins at the old one.** Both caches key on the size,
     /// and this is the assertion that says so rather than the comment that hopes so.
-    func testChangingResolutionMintsFreshSourcesRatherThanReusingTheOldOnes() {
+    func testChangingResolutionMintsFreshSourcesRatherThanReusingTheOldOnes() throws {
         let canvas = CGSize(width: 4096, height: 4096)
         var cel = Cel(id: UUID(), startFrame: 0, frameCount: 1, raster: .empty(size: canvas))
         cel.bakedImage = CanvasFixture.solidImage(.red, rect: CGRect(x: 0, y: 0, width: 2000, height: 2000),
@@ -697,20 +697,20 @@ final class OnionSkinLogicTests: XCTestCase {
         let half = OnionSkinBudget.compositeSize(for: canvas, resolution: .half)
         XCTAssertNotEqual(quarter, half, "premise: the two settings really do differ on this canvas")
 
-        let atQuarter = OnionSkinRasterCache.image(for: cel, canvasSize: canvas, at: quarter)
-        let atHalf = OnionSkinRasterCache.image(for: cel, canvasSize: canvas, at: half)
+        let atQuarter = try XCTUnwrap(OnionSkinRasterCache.image(for: cel, canvasSize: canvas, at: quarter))
+        let atHalf = try XCTUnwrap(OnionSkinRasterCache.image(for: cel, canvasSize: canvas, at: half))
         XCTAssertEqual(atQuarter.size, quarter)
         XCTAssertEqual(atHalf.size, half)
         XCTAssertFalse(atQuarter === atHalf, "a resolution change must not hand back the old size")
         // And going back is still a hit, so flipping between two settings does not re-render both.
-        XCTAssertTrue(OnionSkinRasterCache.image(for: cel, canvasSize: canvas, at: quarter) === atQuarter)
+        XCTAssertTrue(try XCTUnwrap(OnionSkinRasterCache.image(for: cel, canvasSize: canvas, at: quarter)) === atQuarter)
         OnionSkinRasterCache.removeAll()
     }
 
     /// A reduced source is built once per cel version and then handed back by identity — the property
     /// the rebuild cost depends on, asserted rather than assumed. `===`, not `==`: an equal image
     /// rebuilt every call would pass a content comparison and would have fixed nothing.
-    func testAReducedSourceIsBuiltOncePerCelVersionAndSkippedEntirelyWhenNoReductionIsNeeded() {
+    func testAReducedSourceIsBuiltOncePerCelVersionAndSkippedEntirelyWhenNoReductionIsNeeded() throws {
         let canvas = CGSize(width: 2048, height: 2048)
         let small = OnionSkinBudget.compositeSize(for: canvas, resolution: .quarter)
         var cel = Cel(id: UUID(), startFrame: 0, frameCount: 1, raster: .empty(size: canvas))
@@ -718,8 +718,8 @@ final class OnionSkinLogicTests: XCTestCase {
                                                   size: canvas)
         OnionSkinRasterCache.removeAll()
 
-        let first = OnionSkinRasterCache.image(for: cel, canvasSize: canvas, at: small)
-        let second = OnionSkinRasterCache.image(for: cel, canvasSize: canvas, at: small)
+        let first = try XCTUnwrap(OnionSkinRasterCache.image(for: cel, canvasSize: canvas, at: small))
+        let second = try XCTUnwrap(OnionSkinRasterCache.image(for: cel, canvasSize: canvas, at: small))
         XCTAssertTrue(first === second, "the second call must be a cache hit, not an equal rebuild")
         XCTAssertEqual(first.size, small)
 
@@ -727,7 +727,7 @@ final class OnionSkinLogicTests: XCTestCase {
         // pixels here would show the artist a stale ghost of their own drawing.
         cel.bakedImage = CanvasFixture.solidImage(.blue, rect: CGRect(x: 0, y: 0, width: 500, height: 500),
                                                   size: canvas)
-        XCTAssertFalse(OnionSkinRasterCache.image(for: cel, canvasSize: canvas, at: small) === first)
+        XCTAssertFalse(try XCTUnwrap(OnionSkinRasterCache.image(for: cel, canvasSize: canvas, at: small)) === first)
 
         // And a canvas already within the cap is passed straight through: same object as the shared
         // rasterize, no second copy, nothing added to this cache at all.
@@ -735,9 +735,9 @@ final class OnionSkinLogicTests: XCTestCase {
         let tiny = CanvasFixture.canvasSize
         var smallCel = Cel(id: UUID(), startFrame: 0, frameCount: 1, raster: .empty(size: tiny))
         smallCel.bakedImage = CanvasFixture.solidImage(.red, rect: CGRect(x: 0, y: 0, width: 20, height: 20))
-        let passthrough = OnionSkinRasterCache.image(for: smallCel, canvasSize: tiny,
-                                                     at: OnionSkinBudget.compositeSize(for: tiny, resolution: .quarter))
-        XCTAssertTrue(passthrough === PixelOps.rasterize(cel: smallCel, canvasSize: tiny))
+        let passthrough = try XCTUnwrap(OnionSkinRasterCache.image(for: smallCel, canvasSize: tiny,
+                                                     at: OnionSkinBudget.compositeSize(for: tiny, resolution: .quarter)))
+        XCTAssertTrue(passthrough === (try XCTUnwrap(PixelOps.rasterize(cel: smallCel, canvasSize: tiny))))
         XCTAssertEqual(OnionSkinRasterCache.residentBytes, 0,
                        "a document under the cap must not fill an onion cache it has no use for")
     }
@@ -1197,16 +1197,16 @@ final class OnionSkinLogicTests: XCTestCase {
     /// What gets subtracted is the drawing the artist is *on*, not the drawing being skinned. Those
     /// are different cels of the same layer, which is exactly the confusion this file's header
     /// records a one-cel fixture hiding.
-    func testWhatBehindSubtractsIsTheCurrentCelAndNotTheOneBeingSkinned() {
+    func testWhatBehindSubtractsIsTheCurrentCelAndNotTheOneBeingSkinned() throws {
         let manager = twoCelManager()
-        assertCelsAreDistinguishable(manager)
+        try assertCelsAreDistinguishable(manager)
         manager.currentFrame = 8          // inside cel 1; cel 0 is what the ghost shows
 
         guard let ink = manager.onionSkinInkToSubtract(at: CanvasFixture.canvasSize) else {
             return XCTFail("the current cel has ink")
         }
-        let current = PixelOps.rasterize(cel: manager.layers[0].cels[1], canvasSize: CanvasFixture.canvasSize)
-        let skinned = PixelOps.rasterize(cel: manager.layers[0].cels[0], canvasSize: CanvasFixture.canvasSize)
+        let current = try XCTUnwrap(PixelOps.rasterize(cel: manager.layers[0].cels[1], canvasSize: CanvasFixture.canvasSize))
+        let skinned = try XCTUnwrap(PixelOps.rasterize(cel: manager.layers[0].cels[0], canvasSize: CanvasFixture.canvasSize))
         XCTAssertEqual(ink.pngData(), current.pngData(), "must subtract the cel the playhead is in")
         XCTAssertNotEqual(ink.pngData(), skinned.pngData(), "must not subtract the cel being skinned")
     }
@@ -1219,16 +1219,16 @@ final class OnionSkinLogicTests: XCTestCase {
     /// The fixture's two strokes cross at (25, 25): the red one is the ghost, the blue one is what
     /// the artist has drawn on the current frame. Every premise is asserted before the conclusion
     /// is, because an assertion about a cut is worthless if there was nothing there to cut.
-    func testTheGhostIsErasedWhereTheCurrentDrawingCoversItAndSurvivesElsewhere() {
+    func testTheGhostIsErasedWhereTheCurrentDrawingCoversItAndSurvivesElsewhere() throws {
         let manager = twoCelManager()
-        assertCelsAreDistinguishable(manager)
+        try assertCelsAreDistinguishable(manager)
         manager.currentFrame = 8
         let size = OnionSkinBudget.compositeSize(for: CanvasFixture.canvasSize,
                                                  resolution: manager.onionSkin.resolution)
         XCTAssertEqual(size, CanvasFixture.canvasSize,
                        "premise: on this fixture the skin is canvas-sized, so pixel coordinates are 1:1")
 
-        let frames = OnionSkinSettingsSource().frames(for: manager)
+        let frames = try XCTUnwrap(OnionSkinSettingsSource().frames(for: manager))
         guard let ghost = OnionSkinFrame.composite(frames, size: size),
               let ink = manager.onionSkinInkToSubtract(at: size) else {
             return XCTFail("premise: one ghost frame and the current drawing's ink")
@@ -1354,13 +1354,13 @@ final class OnionSkinLogicTests: XCTestCase {
     /// frame — precisely so that this test is about playback being *engaged* and not about where the
     /// playhead ended up. The first assertion is the premise: there really is a ghost at frame 8 to
     /// hide, so the empty answer in the middle is a refusal rather than a document with nothing in it.
-    func testEngagingPlaybackHidesTheOnionSkinAndStoppingItBringsItBack() {
+    func testEngagingPlaybackHidesTheOnionSkinAndStoppingItBringsItBack() throws {
         let manager = twoCelManager()
-        assertCelsAreDistinguishable(manager)
+        try assertCelsAreDistinguishable(manager)
         manager.currentFrame = 8
         let source = OnionSkinSettingsSource()
 
-        let atRest = source.visibleFrames(for: manager)
+        let atRest = try XCTUnwrap(source.visibleFrames(for: manager))
         XCTAssertEqual(atRest.count, 1,
                        "the fixture shows \(atRest.count) skins at rest where one was wanted — with "
                        + "nothing to hide, the assertion below could not fail")
@@ -1370,8 +1370,8 @@ final class OnionSkinLogicTests: XCTestCase {
         XCTAssertTrue(manager.isPlaying,
                       "`play()` did not engage playback, so the next assertion is about a stopped "
                       + "document and proves nothing")
-        XCTAssertTrue(source.visibleFrames(for: manager).isEmpty,
-                      "the onion skin still resolved to \(source.visibleFrames(for: manager).count) "
+        XCTAssertTrue(try XCTUnwrap(source.visibleFrames(for: manager)).isEmpty,
+                      "the onion skin still resolved to \(source.visibleFrames(for: manager)?.count ?? -1) "
                       + "skin(s) while the animation was playing — the owner asked for it hidden, and "
                       + "each one is a skin-sized composite drawn over the frames they are watching")
 
@@ -1379,7 +1379,7 @@ final class OnionSkinLogicTests: XCTestCase {
         XCTAssertEqual(manager.currentFrame, 8,
                        "stopping playback moved the playhead, so the reading below is at a different "
                        + "frame from the one at rest and the comparison is not like for like")
-        XCTAssertEqual(source.visibleFrames(for: manager).count, atRest.count,
+        XCTAssertEqual(try XCTUnwrap(source.visibleFrames(for: manager)).count, atRest.count,
                        "the onion skin did not come back when playback stopped: the ghosts are "
                        + "supposed to disappear on play and return on stop, not disappear for good")
     }
@@ -1390,29 +1390,29 @@ final class OnionSkinLogicTests: XCTestCase {
     /// protocol extension, and a source written next year gets the ruling for free. `AlwaysOneSkin`
     /// answers unconditionally, so if the guard were moved into the two shipped conformances instead
     /// this test would go red while the app still looked right — which is exactly what it is for.
-    func testAnySourceIsHiddenByPlayback() {
+    func testAnySourceIsHiddenByPlayback() throws {
         let manager = twoCelManager()
         manager.currentFrame = 8
         let source = AlwaysOneSkin()
 
-        XCTAssertEqual(source.visibleFrames(for: manager).count, 1,
+        XCTAssertEqual(try XCTUnwrap(source.visibleFrames(for: manager)).count, 1,
                        "the stub source answers one skin unconditionally; if it does not, nothing "
                        + "below is measuring the protocol")
 
         manager.play()
-        XCTAssertTrue(source.visibleFrames(for: manager).isEmpty,
+        XCTAssertTrue(try XCTUnwrap(source.visibleFrames(for: manager)).isEmpty,
                       "a source that knows nothing about playback still drew a skin while the "
                       + "animation was playing, so the rule is not on the protocol")
 
         manager.stopPlayback()
-        XCTAssertEqual(source.visibleFrames(for: manager).count, 1,
+        XCTAssertEqual(try XCTUnwrap(source.visibleFrames(for: manager)).count, 1,
                        "the stub source stayed hidden after playback stopped")
     }
 
     /// **The artist's own toggle still wins, and playback is a second reason rather than a
     /// replacement for the first.** Without this, a `showsOnionSkin` that read only `isPlaying`
     /// would pass every assertion above while ignoring the button in the timeline.
-    func testTurningTheOnionSkinOffStillHidesItWhileStopped() {
+    func testTurningTheOnionSkinOffStillHidesItWhileStopped() throws {
         let manager = twoCelManager()
         manager.currentFrame = 8
         let source = OnionSkinSettingsSource()
@@ -1421,7 +1421,7 @@ final class OnionSkinLogicTests: XCTestCase {
                        + "the toggle")
         manager.isOnionSkinEnabled = false
 
-        XCTAssertTrue(source.visibleFrames(for: manager).isEmpty,
+        XCTAssertTrue(try XCTUnwrap(source.visibleFrames(for: manager)).isEmpty,
                       "the onion skin drew with the artist's own toggle off")
     }
 
@@ -1429,7 +1429,7 @@ final class OnionSkinLogicTests: XCTestCase {
     /// `testAnySourceIsHiddenByPlayback` to hold the rule against the protocol rather than against
     /// the two conformances that ship.
     private struct AlwaysOneSkin: OnionSkinSource {
-        func frames(for manager: CanvasManager) -> [OnionSkinFrame] {
+        func frames(for manager: CanvasManager) -> [OnionSkinFrame]? {
             [OnionSkinFrame(image: UIImage(), opacity: 1, tint: nil)]
         }
     }

@@ -81,13 +81,13 @@ final class MergeBakeLogicTests: XCTestCase {
     /// **Through `mergeLayers` rather than through `CoreGraphicsCompositor.mergedDown` directly**, so
     /// what is measured is the merge the artist performs — including the cel tier the result is
     /// written into and read back out of.
-    private func mergedBytes(_ manager: CanvasManager) -> [UInt8]? {
+    private func mergedBytes(_ manager: CanvasManager) throws -> [UInt8]? {
         let survivorID = manager.layers[0].id
         XCTAssertTrue(manager.mergeLayers(manager.layers[0].id, manager.layers[1].id),
                       "Fixture must be mergeable")
         guard let survivor = manager.layers.firstIndex(where: { $0.id == survivorID }),
               let cel = manager.layers[survivor].cels.first,
-              let image = PixelOps.rasterize(cel: cel, canvasSize: CanvasFixture.canvasSize).cgImage
+              let image = (try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: CanvasFixture.canvasSize))).cgImage
         else { return nil }
         return CanvasFixture.rgbaBytes(image)
     }
@@ -115,10 +115,10 @@ final class MergeBakeLogicTests: XCTestCase {
 
     /// *"This may be an issue other blend modes."* Screen over an opaque backdrop is
     /// `1 - (1 - cb)(1 - cs)`, so red under blue is magenta. 0,0,255 is Normal's answer.
-    func testRedUnderABlueScreenLayerMergesToMagenta() {
+    func testRedUnderABlueScreenLayerMergesToMagenta() throws {
         let manager = pair(bottom: (red, whole), top: (blue, whole), topMode: .screen)
 
-        guard let bytes = mergedBytes(manager) else { return XCTFail("Merge must produce pixels") }
+        guard let bytes = try mergedBytes(manager) else { return XCTFail("Merge must produce pixels") }
 
         XCTAssertEqual(pixel(bytes, side / 2, side / 2), [255, 0, 255, 255],
                        "Screen, not Normal — 0,0,255 here is the upper layer's mode being ignored")
@@ -130,11 +130,11 @@ final class MergeBakeLogicTests: XCTestCase {
     /// baking the paper and the layers beneath into the result, which makes the merged layer opaque —
     /// so this is the pin that says the owner's choice is the one implemented: where *neither* layer
     /// drew, the merged layer is still empty.
-    func testAMergedBlendLeavesTheRegionNeitherLayerDrewInTransparent() {
+    func testAMergedBlendLeavesTheRegionNeitherLayerDrewInTransparent() throws {
         let narrow = CGRect(x: 0, y: 0, width: CGFloat(side) / 4, height: CGFloat(side))
         let manager = pair(bottom: (red, narrow), top: (blue, narrow), topMode: .multiply)
 
-        guard let bytes = mergedBytes(manager) else { return XCTFail("Merge must produce pixels") }
+        guard let bytes = try mergedBytes(manager) else { return XCTFail("Merge must produce pixels") }
 
         XCTAssertEqual(pixel(bytes, side / 8, side / 2), [0, 0, 0, 255], "Red times blue is black, at full coverage")
         XCTAssertEqual(pixel(bytes, side * 7 / 8, side / 2), [0, 0, 0, 0],
@@ -158,7 +158,7 @@ final class MergeBakeLogicTests: XCTestCase {
     /// swapped, so a merge that blended the *backdrop* onto the *source* — the one direction a
     /// hand-rolled second implementation gets wrong — swaps their two answers and nothing else here
     /// would notice.
-    func testASpreadOfBlendModesMergesToTheirPublishedFormula() {
+    func testASpreadOfBlendModesMergesToTheirPublishedFormula() throws {
         let expected: [BlendMode: [Int]] = [
             .multiply: [0, 0, 0, 255],
             .screen: [255, 0, 255, 255],
@@ -168,7 +168,7 @@ final class MergeBakeLogicTests: XCTestCase {
 
         for (mode, want) in expected {
             let manager = pair(bottom: (red, whole), top: (blue, whole), topMode: mode)
-            guard let bytes = mergedBytes(manager) else {
+            guard let bytes = try mergedBytes(manager) else {
                 return XCTFail("Merge must produce pixels for \(mode.displayName)")
             }
             XCTAssertEqual(pixel(bytes, side / 2, side / 2), want,
@@ -200,13 +200,13 @@ final class MergeBakeLogicTests: XCTestCase {
     /// that is opaque in one region, transparent in another and absent in a third — a fixture where
     /// both layers covered the whole canvas could not tell a blend against transparency apart from a
     /// blend against ink.
-    func testEveryBlendModeMergesToWhatTheCompositorMakesOfThePairAlone() {
+    func testEveryBlendModeMergesToWhatTheCompositorMakesOfThePairAlone() throws {
         for mode in BlendMode.allCases where mode != .clipToBelow {
             let manager = pair(bottom: (red, leftBias), top: (blue, rightBias), topMode: mode)
             guard let expected = compositedBytes(manager) else {
                 return XCTFail("Fixture must composite for \(mode.displayName)")
             }
-            guard let merged = mergedBytes(manager) else {
+            guard let merged = try mergedBytes(manager) else {
                 return XCTFail("Merge must produce pixels for \(mode.displayName)")
             }
             assertBytesEqual(merged, expected, mode.displayName)
@@ -221,13 +221,13 @@ final class MergeBakeLogicTests: XCTestCase {
     /// for want of memory (`CompositorBudget.hasHeadroom`), and a merge is a one-shot destructive bake
     /// the artist cannot retry — so a backend that may answer "not now" is the wrong shape for it.
     /// The CPU path is also the byte-for-byte reference this file's sweep compares against.
-    func testMergingIsUnaffectedByWhichBackendTheCanvasIsUsing() {
+    func testMergingIsUnaffectedByWhichBackendTheCanvasIsUsing() throws {
         let onCPU = pair(bottom: (red, leftBias), top: (blue, rightBias), topMode: .multiply)
-        guard let cpu = mergedBytes(onCPU) else { return XCTFail("Merge must produce pixels") }
+        guard let cpu = try mergedBytes(onCPU) else { return XCTFail("Merge must produce pixels") }
 
         Compositor.backend = .metal
         let onGPU = pair(bottom: (red, leftBias), top: (blue, rightBias), topMode: .multiply)
-        guard let gpu = mergedBytes(onGPU) else { return XCTFail("Merge must produce pixels") }
+        guard let gpu = try mergedBytes(onGPU) else { return XCTFail("Merge must produce pixels") }
 
         assertBytesEqual(gpu, cpu, "the same merge with the backend flag flipped")
     }

@@ -51,7 +51,7 @@ final class LassoMoveLogicTests: XCTestCase {
         manager.selection = Selection(path: path, bounds: path.boundingBoxOfPath)
     }
 
-    private func cgImage(_ vector: VectorCanvas) -> CGImage? { vector.render().cgImage }
+    private func cgImage(_ vector: VectorCanvas) throws -> CGImage? { (try XCTUnwrap(vector.render())).cgImage }
 
     /// `a·d − b·c`. Its **sign** is the whole question a mirror asks: negative is a plane turned over,
     /// positive is a plane merely turned. `CGAffineTransform` has no such accessor of its own.
@@ -67,8 +67,8 @@ final class LassoMoveLogicTests: XCTestCase {
     /// The opaque bounding box of what a canvas actually draws — the question "did the *ink* move",
     /// which is not the same question as "did the samples move". See
     /// `testANudgeMovesTheRenderedInkAndNotOnlyTheSamples`.
-    private func inkBounds(_ vector: VectorCanvas) -> CGRect? {
-        PixelOps.opaqueContentBounds(vector.render())
+    private func inkBounds(_ vector: VectorCanvas) throws -> CGRect? {
+        PixelOps.opaqueContentBounds((try XCTUnwrap(vector.render())))
     }
 
     // MARK: - The one that would silently lose artwork
@@ -119,14 +119,14 @@ final class LassoMoveLogicTests: XCTestCase {
     /// the lassoed half gone — against
     /// *whole cel / rasterize: the flatten is blank — the whole cel was baked away*.
     /// Merge Down went red on the same run for the same reason.
-    func testEveryTeardownPathLeavesNothingSuppressedAndNothingDropped() {
+    func testEveryTeardownPathLeavesNothingSuppressedAndNothingDropped() throws {
         /// The flattened image of the layer's first cel — what Rasterize and Merge Down actually
         /// wrote. Nil when the flatten is blank, which is the whole-cel failure.
-        func flattenedInk(_ manager: CanvasManager, _ layerIndex: Int) -> CGRect? {
+        func flattenedInk(_ manager: CanvasManager, _ layerIndex: Int) throws -> CGRect? {
             guard manager.layers.indices.contains(layerIndex),
                   let cel = manager.layers[layerIndex].cels.first else { return nil }
             return PixelOps.opaqueContentBounds(
-                PixelOps.rasterize(cel: cel, canvasSize: CanvasFixture.canvasSize))
+                (try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: CanvasFixture.canvasSize))))
         }
 
         let paths: [(name: String, act: (CanvasManager, Int) -> Void,
@@ -170,10 +170,10 @@ final class LassoMoveLogicTests: XCTestCase {
             // baked away, and no drag happened, so the picture is the one that was there before.
             ("rasterize", { manager, layerIndex in
                 manager.rasterizeLayer(layerIndex: layerIndex)
-            }, { manager, layerIndex in flattenedInk(manager, layerIndex) }),
+            }, { manager, layerIndex in try flattenedInk(manager, layerIndex) }),
             ("merge down", { manager, layerIndex in
                 manager.mergeLayers(manager.layers[layerIndex].id, manager.layers[layerIndex - 1].id)
-            }, { manager, _ in flattenedInk(manager, 0) })
+            }, { manager, _ in try flattenedInk(manager, 0) })
         ]
         for kind in LiftKind.allCases {
             for path in paths {
@@ -184,7 +184,7 @@ final class LassoMoveLogicTests: XCTestCase {
                 let idsBefore = Set(vector.elements.map(\.id))
                 // Taken before the lift: afterwards the moved ids are suppressed, so the render is
                 // the hole rather than the drawing and comparing against it would assert nothing.
-                let inkBefore = inkBounds(vector)
+                let inkBefore = try inkBounds(vector)
                 XCTAssertTrue(lift(kind, manager, layerIndex), "\(label): the lift should have caught something")
 
                 path.act(manager, layerIndex)
@@ -224,7 +224,7 @@ final class LassoMoveLogicTests: XCTestCase {
     /// closing run, so the two halves no longer shared it: *Composites differ at (22, 15) channel A:
     /// got 182, expected 255* — one dab's worth of ink gone from the seam, which is exactly the
     /// amount a lost boundary sample costs.
-    func testALiftAndBakeWithNoDragIsPixelIdenticalToTheDrawingBefore() {
+    func testALiftAndBakeWithNoDragIsPixelIdenticalToTheDrawingBefore() throws {
         let (manager, layerIndex, vector) = fixture()
         vector.addStroke(stroke(from: CGPoint(x: 6, y: 18), to: CGPoint(x: 58, y: 18), size: 6))
         vector.addStroke(stroke(from: CGPoint(x: 6, y: 46), to: CGPoint(x: 58, y: 46), size: 3))
@@ -232,13 +232,13 @@ final class LassoMoveLogicTests: XCTestCase {
                                                       transform: nil),
                                          color: CodableColor(red: 1, green: 0, blue: 0, alpha: 1),
                                          opacity: 1))
-        let before = cgImage(vector)
+        let before = try cgImage(vector)
 
         select(manager, layerIndex, loop(CGRect(x: 22, y: 2, width: 26, height: 60)))
         XCTAssertTrue(manager.beginVectorLassoMove())
         manager.commitVectorFloatIfNeeded()
 
-        assertPixelsIdentical(cgImage(vector), before,
+        assertPixelsIdentical(try cgImage(vector), before,
                               "A lift and a bake with no drag is not an edit, and must change no pixel.")
     }
 
@@ -318,13 +318,13 @@ final class LassoMoveLogicTests: XCTestCase {
     /// A pixel comparison rather than an assertion about the resulting paths' shape, because the
     /// question the fill arm has to get right is a *fill-rule* question and a path can be the right
     /// region drawn with the wrong rule.
-    func testAFillCrossingTheLoopBecomesTwoFillsWhosePixelsEqualTheOriginal() {
+    func testAFillCrossingTheLoopBecomesTwoFillsWhosePixelsEqualTheOriginal() throws {
         let (manager, layerIndex, vector) = fixture()
         vector.addFill(VectorFillElement(path: CGPath(rect: CGRect(x: 8, y: 8, width: 44, height: 30),
                                                       transform: nil),
                                          color: CodableColor(red: 0, green: 0, blue: 1, alpha: 1),
                                          opacity: 1))
-        let before = cgImage(vector)
+        let before = try cgImage(vector)
 
         select(manager, layerIndex, loop(CGRect(x: 24, y: 2, width: 40, height: 60)))
         XCTAssertTrue(manager.beginVectorLassoMove())
@@ -332,7 +332,7 @@ final class LassoMoveLogicTests: XCTestCase {
         XCTAssertEqual(manager.vectorFloat?.parts[0].insideIDs.count, 1)
         manager.commitVectorFloatIfNeeded()
 
-        assertPixelsIdentical(cgImage(vector), before, "the two halves must sum to the original fill")
+        assertPixelsIdentical(try cgImage(vector), before, "the two halves must sum to the original fill")
     }
 
     /// Text whose centre is inside moves whole, with `pointSize` and the box untouched.
@@ -408,7 +408,7 @@ final class LassoMoveLogicTests: XCTestCase {
     /// **A float made only of eraser marks renders blank, and that is not an error.** A punch has no
     /// ink of its own; drawn alone into a transparent bitmap it draws nothing. The lift still
     /// succeeds, the piece is still real geometry, and the hole lands where it is dropped.
-    func testAFloatOfOnlyEraserMarksRendersBlankAndStillMovesItsHole() {
+    func testAFloatOfOnlyEraserMarksRendersBlankAndStillMovesItsHole() throws {
         let (manager, layerIndex, vector) = fixture()
         vector.addStroke(stroke(from: CGPoint(x: 4, y: 32), to: CGPoint(x: 60, y: 32), size: 24))
         vector.addStroke(stroke(from: CGPoint(x: 14, y: 32), to: CGPoint(x: 18, y: 32),
@@ -429,8 +429,8 @@ final class LassoMoveLogicTests: XCTestCase {
         let holeWasAt = CGPoint(x: 16, y: 32)
         manager.nudgeVectorFloat(to: movedBy(manager, dx: 24, dy: 0))
         manager.commitVectorFloatIfNeeded()
-        XCTAssertTrue(isOpaque(vector, at: holeWasAt), "the hole no longer bites where it was")
-        XCTAssertFalse(isOpaque(vector, at: CGPoint(x: holeWasAt.x + 24, y: holeWasAt.y)),
+        XCTAssertTrue(try isOpaque(vector, at: holeWasAt), "the hole no longer bites where it was")
+        XCTAssertFalse(try isOpaque(vector, at: CGPoint(x: holeWasAt.x + 24, y: holeWasAt.y)),
                        "it bites where it landed instead")
     }
 
@@ -442,7 +442,7 @@ final class LassoMoveLogicTests: XCTestCase {
     /// Watched failing with the `if var lattice = stroke.lattice` arm of `VectorCanvas.mapping`
     /// removed: *("0.0") is not equal to ("12.0") +/- ("1.5")* — the samples moved twelve points and
     /// the rendered ink did not move at all.
-    func testANudgeMovesTheRenderedInkAndNotOnlyTheSamples() {
+    func testANudgeMovesTheRenderedInkAndNotOnlyTheSamples() throws {
         let (manager, layerIndex, vector) = fixture()
         // Crossing the loop, so the travelling half is a *split piece* and therefore carries a
         // lattice — which is the only case where the two can disagree.
@@ -460,13 +460,13 @@ final class LassoMoveLogicTests: XCTestCase {
         XCTAssertNotNil(vector.elements.first { $0.id == movedID }?.stroke?.lattice,
                         "fixture precondition: the travelling piece carries a parent lattice")
         manager.cancelVectorFloat()
-        let inkBefore = inkBounds(vector)
+        let inkBefore = try inkBounds(vector)
         select(manager, layerIndex, loop(CGRect(x: 34, y: 10, width: 26, height: 40)))
         XCTAssertTrue(manager.beginVectorLassoMove())
         manager.nudgeVectorFloat(to: movedBy(manager, dx: 0, dy: 12))
         manager.commitVectorFloatIfNeeded()
 
-        guard let inkBefore, let inkAfter = inkBounds(vector) else { return XCTFail("nothing rendered") }
+        guard let inkBefore, let inkAfter = try inkBounds(vector) else { return XCTFail("nothing rendered") }
         XCTAssertEqual(inkAfter.maxY - inkBefore.maxY, 12, accuracy: 1.5,
                        "the rendered ink must follow the nudge, not only the stored samples")
     }
@@ -479,7 +479,7 @@ final class LassoMoveLogicTests: XCTestCase {
     /// `hypot(t.a, t.b)` and `atan2(t.b, t.a)` off the delta, so a base transform that is not
     /// axis-aligned is on the bake path in a way it was not before, and a zero-delta nudge is where a
     /// mis-derived scale or angle would show up as a piece that jumps the moment it is picked up.
-    func testAZeroDeltaNudgeChangesNoSampleAndNoPixelOnATransformedLayer() {
+    func testAZeroDeltaNudgeChangesNoSampleAndNoPixelOnATransformedLayer() throws {
         for transform in [CGAffineTransform.identity,
                           CGAffineTransform(translationX: 7, y: -3).scaledBy(x: 1.4, y: 1.4),
                           CGAffineTransform(rotationAngle: 0.4).concatenating(
@@ -498,7 +498,7 @@ final class LassoMoveLogicTests: XCTestCase {
             let canvasLoop = CGPath(rect: localLoop, transform: &mapping)
             // Both taken *before* the lift: after it the moved ids are suppressed, so the render is
             // the hole rather than the drawing, and comparing against that would assert nothing.
-            let pixelsBefore = cgImage(vector)
+            let pixelsBefore = try cgImage(vector)
             select(manager, layerIndex, canvasLoop)
             XCTAssertTrue(manager.beginVectorLassoMove(), "transform \(transform)")
             guard let float = manager.vectorFloat else { return XCTFail("no float") }
@@ -516,24 +516,24 @@ final class LassoMoveLogicTests: XCTestCase {
                 }
             }
             manager.commitVectorFloatIfNeeded()
-            assertPixelsIdentical(cgImage(vector), pixelsBefore, "transform \(transform)")
+            assertPixelsIdentical(try cgImage(vector), pixelsBefore, "transform \(transform)")
         }
     }
 
     /// A nudge on a transformed layer lands the ink where the box was dragged, in **canvas** points —
     /// which is the assertion that catches a delta applied in the wrong space.
-    func testANudgeOnAScaledLayerMovesTheInkByTheCanvasDistanceDragged() {
+    func testANudgeOnAScaledLayerMovesTheInkByTheCanvasDistanceDragged() throws {
         let (manager, layerIndex, vector) = fixture()
         vector.setTransform(CGAffineTransform(scaleX: 2, y: 2))
         vector.addStroke(stroke(from: CGPoint(x: 4, y: 8), to: CGPoint(x: 12, y: 8), size: 2))
-        let before = inkBounds(vector)
+        let before = try inkBounds(vector)
         select(manager, layerIndex, loop(CGRect(x: 0, y: 0, width: 40, height: 40)))
         XCTAssertTrue(manager.beginVectorLassoMove())
 
         manager.nudgeVectorFloat(to: movedBy(manager, dx: 10, dy: 0))
         manager.commitVectorFloatIfNeeded()
 
-        guard let before, let after = inkBounds(vector) else { return XCTFail("nothing rendered") }
+        guard let before, let after = try inkBounds(vector) else { return XCTFail("nothing rendered") }
         XCTAssertEqual(after.midX - before.midX, 10, accuracy: 1.0,
                        "a 10 pt drag on a 2× layer is 10 canvas points, not 5 and not 20")
     }
@@ -807,17 +807,17 @@ final class LassoMoveLogicTests: XCTestCase {
     /// *("8.0") is not equal to ("16.0")* on the height — a spine spread 2× with its width untouched
     /// — and *("40.0") is not equal to ("48.0")* on the width, which is the same defect seen from the
     /// other side: 16 pt of spine doubled to 32 while the 8 pt of dab that pads each end did not.
-    func testAScaledFloatKeepsItsInkWeightRelativeToItsSpine() {
+    func testAScaledFloatKeepsItsInkWeightRelativeToItsSpine() throws {
         let (manager, layerIndex, vector) = fixture()
         vector.addStroke(stroke(from: CGPoint(x: 24, y: 32), to: CGPoint(x: 40, y: 32), size: 8))
-        guard let before = inkBounds(vector) else { return XCTFail("nothing rendered") }
+        guard let before = try inkBounds(vector) else { return XCTFail("nothing rendered") }
 
         select(manager, layerIndex, loop(CGRect(x: 12, y: 20, width: 40, height: 24)))
         XCTAssertTrue(manager.beginVectorLassoMove())
         manager.nudgeVectorFloat(to: scaledBy(manager, 2))
         manager.commitVectorFloatIfNeeded()
 
-        guard let after = inkBounds(vector) else { return XCTFail("nothing rendered") }
+        guard let after = try inkBounds(vector) else { return XCTFail("nothing rendered") }
         // A pixel and a half, for the grid: Hard Round's 0.95 hardness leaves no measurable fringe for
         // `opaqueContentBounds` (`alpha > 0`) to pick up — the source measured 24 × 8 for a 16 pt
         // spine with an 8 pt dab, exactly the geometry — so this is rounding, not softness.
@@ -975,21 +975,21 @@ final class LassoMoveLogicTests: XCTestCase {
     /// The pixel *count* rather than a pixel comparison: a turned raster is resampled onto a
     /// different set of grid cells, so pinning bytes would be pinning the rasterizer. Count is the
     /// conservation quantity, and it catches ink loss without pinning resampling.
-    func testARotatedFloatIsTheSameInkTurned() {
+    func testARotatedFloatIsTheSameInkTurned() throws {
         let (manager, layerIndex, vector) = fixture()
         vector.addStroke(stroke(from: CGPoint(x: 20, y: 32), to: CGPoint(x: 44, y: 32), size: 6))
-        guard let before = inkBounds(vector) else { return XCTFail("nothing rendered") }
-        let inkBefore = opaquePixelCount(vector)
+        guard let before = try inkBounds(vector) else { return XCTFail("nothing rendered") }
+        let inkBefore = try opaquePixelCount(vector)
 
         select(manager, layerIndex, loop(CGRect(x: 12, y: 22, width: 40, height: 20)))
         XCTAssertTrue(manager.beginVectorLassoMove())
         manager.nudgeVectorFloat(to: turnedBy(manager, .pi / 2))
         manager.commitVectorFloatIfNeeded()
 
-        guard let after = inkBounds(vector) else { return XCTFail("nothing rendered") }
+        guard let after = try inkBounds(vector) else { return XCTFail("nothing rendered") }
         XCTAssertEqual(after.width, before.height, accuracy: 1.5, "a quarter turn transposes the box")
         XCTAssertEqual(after.height, before.width, accuracy: 1.5)
-        XCTAssertEqual(Double(opaquePixelCount(vector)), Double(inkBefore),
+        XCTAssertEqual(Double(try opaquePixelCount(vector)), Double(inkBefore),
                        accuracy: Double(inkBefore) * 0.1,
                        "and turning ink does not destroy any of it")
     }
@@ -1008,14 +1008,14 @@ final class LassoMoveLogicTests: XCTestCase {
     /// absolute map into an incremental one: *Composites differ at (26, 0) channel A: got 142,
     /// expected 0*, i.e. ink 26 points up the canvas that the drawing never had, from a piece that
     /// came back at 2.5³ rather than at 1.
-    func testAScaleOutAndBackIsPixelIdentical() {
+    func testAScaleOutAndBackIsPixelIdentical() throws {
         let (manager, layerIndex, vector) = fixture()
         vector.addStroke(stroke(from: CGPoint(x: 24, y: 26), to: CGPoint(x: 40, y: 26), size: 5))
         vector.addFill(VectorFillElement(path: CGPath(rect: CGRect(x: 26, y: 34, width: 12, height: 6),
                                                       transform: nil),
                                          color: CodableColor(red: 1, green: 0, blue: 0, alpha: 1),
                                          opacity: 1))
-        let before = cgImage(vector)
+        let before = try cgImage(vector)
 
         select(manager, layerIndex, loop(CGRect(x: 14, y: 16, width: 36, height: 32)))
         XCTAssertTrue(manager.beginVectorLassoMove())
@@ -1025,7 +1025,7 @@ final class LassoMoveLogicTests: XCTestCase {
         manager.nudgeVectorFloat(to: lift)          // the box dragged back to exactly where it started
         manager.commitVectorFloatIfNeeded()
 
-        assertPixelsIdentical(cgImage(vector), before,
+        assertPixelsIdentical(try cgImage(vector), before,
                               "a scale out and back is not an edit, and must change no pixel")
     }
 
@@ -1189,7 +1189,7 @@ final class LassoMoveLogicTests: XCTestCase {
     /// `testAZeroDeltaNudgeChangesNoSampleAndNoPixelOnATransformedLayer`'s reason: a zero-delta map on
     /// a transformed layer is a `base ∘ base⁻¹` round trip, which is exactly the identity only when
     /// `base` is.
-    func testEightPressesOfRotate45LandTheFloatExactlyWhereItStarted() {
+    func testEightPressesOfRotate45LandTheFloatExactlyWhereItStarted() throws {
         for layerRotation in [CGFloat(0), 1.1] {
             let (manager, layerIndex, vector) = fixture()
             let layerTransform = CGAffineTransform(rotationAngle: layerRotation)
@@ -1199,7 +1199,7 @@ final class LassoMoveLogicTests: XCTestCase {
                                                           transform: nil),
                                              color: CodableColor(red: 0, green: 0.5, blue: 1, alpha: 1),
                                              opacity: 1))
-            let pixelsBefore = cgImage(vector)
+            let pixelsBefore = try cgImage(vector)
             let note = "layer at \(layerRotation) rad"
 
             // The loop is canvas space and the geometry is local, so on the turned layer the two are
@@ -1235,7 +1235,7 @@ final class LassoMoveLogicTests: XCTestCase {
                 }
             }
             manager.commitVectorFloatIfNeeded()
-            assertPixelsIdentical(cgImage(vector), pixelsBefore,
+            assertPixelsIdentical(try cgImage(vector), pixelsBefore,
                                   "the drawing after the bake is the drawing before the lift — \(note)")
         }
     }
@@ -1455,10 +1455,10 @@ final class LassoMoveLogicTests: XCTestCase {
     /// Watched failing with `mirror` left out of `applyToVectorFloat`'s `localDelta` (the map built
     /// from the box alone): *XCTAssertEqual failed: ("20.0") is not equal to ("44.0")* — the button
     /// changed the stored flag and not one sample.
-    func testMirrorFlipsALassoedPieceAboutItsOwnCentreAndSurvivesALaterDrag() {
+    func testMirrorFlipsALassoedPieceAboutItsOwnCentreAndSurvivesALaterDrag() throws {
         let (manager, layerIndex, vector) = fixture()
         vector.addStroke(stroke(from: CGPoint(x: 20, y: 20), to: CGPoint(x: 44, y: 28), size: 4))
-        let pixelsBefore = cgImage(vector)
+        let pixelsBefore = try cgImage(vector)
         select(manager, layerIndex, loop(CGRect(x: 12, y: 12, width: 40, height: 26)))
         XCTAssertTrue(manager.beginVectorLassoMove())
         guard let float = manager.vectorFloat else { return XCTFail("no float") }
@@ -1484,7 +1484,7 @@ final class LassoMoveLogicTests: XCTestCase {
         manager.nudgeVectorFloat(to: float.frame.transform)
         XCTAssertEqual(manager.vectorFloat?.mirror, CGAffineTransform.identity, "two presses cancel")
         manager.commitVectorFloatIfNeeded()
-        assertPixelsIdentical(cgImage(vector), pixelsBefore,
+        assertPixelsIdentical(try cgImage(vector), pixelsBefore,
                               "a mirror and a mirror back must change no pixel")
     }
 
@@ -1519,7 +1519,7 @@ final class LassoMoveLogicTests: XCTestCase {
     /// `PlacedImageShapeLogicTests` covers: the stroke reflects through the map point for point and the
     /// photo through a decomposed pose, and the two have to agree about the axis or the drawing comes
     /// apart at the seam.
-    func testMirroringAPieceCarryingAStrokeAndAPhotoFlipsBothTogether() {
+    func testMirroringAPieceCarryingAStrokeAndAPhotoFlipsBothTogether() throws {
         let (manager, layerIndex, vector) = fixture()
         vector.addStroke(stroke(from: CGPoint(x: 26, y: 24), to: CGPoint(x: 38, y: 24), size: 3))
         vector.addImage(VectorImageElement(image: CanvasFixture.solidImage(.green,
@@ -1527,7 +1527,7 @@ final class LassoMoveLogicTests: XCTestCase {
                                                                            size: CGSize(width: 6, height: 6)),
                                            transform: LayerTransform(position: CGPoint(x: 30, y: 34),
                                                                      scale: 1, rotation: 0)))
-        let pixelsBefore = cgImage(vector)
+        let pixelsBefore = try cgImage(vector)
         select(manager, layerIndex, loop(CGRect(x: 18, y: 16, width: 32, height: 30)))
         XCTAssertTrue(manager.beginVectorLassoMove(), "the lift should have caught both")
         guard let pivot = manager.vectorFloat?.pivot else { return XCTFail("no float") }
@@ -1548,7 +1548,7 @@ final class LassoMoveLogicTests: XCTestCase {
 
         manager.mirrorFloating(horizontal: true)
         manager.commitVectorFloatIfNeeded()
-        assertPixelsIdentical(cgImage(vector), pixelsBefore,
+        assertPixelsIdentical(try cgImage(vector), pixelsBefore,
                               "a mirror and a mirror back must change no pixel, photo included")
     }
 
@@ -1570,7 +1570,7 @@ final class LassoMoveLogicTests: XCTestCase {
         vector.upsertText(VectorTextElement(id: UUID(), recipe: recipe,
                                             frame: TextFrame(origin: CGPoint(x: 22, y: 22),
                                                              size: CGSize(width: 20, height: 18))))
-        let pixelsBefore = cgImage(vector)
+        let pixelsBefore = try cgImage(vector)
         let before = try XCTUnwrap(vector.elements.compactMap(\.text).first)
         let determinantBefore = determinant(try XCTUnwrap(before.frame.affineTransform))
         XCTAssertGreaterThan(determinantBefore, 0, "fixture precondition: an ordinary, unreflected box")
@@ -1594,7 +1594,7 @@ final class LassoMoveLogicTests: XCTestCase {
 
         manager.mirrorFloating(horizontal: true)
         manager.commitVectorFloatIfNeeded()
-        assertPixelsIdentical(cgImage(vector), pixelsBefore,
+        assertPixelsIdentical(try cgImage(vector), pixelsBefore,
                               "mirror and mirror back must be exactly the original")
     }
 
@@ -1682,10 +1682,10 @@ final class LassoMoveLogicTests: XCTestCase {
     ///
     /// Watched failing with `stroke.size *= k` removed from the shared `drawn` arm: *("8.0") is not
     /// equal to ("13.86…")* — the spine spread and the ink did not follow it at all.
-    func testAFreeformStretchSpreadsThePathAndKeepsTheInkRound() {
+    func testAFreeformStretchSpreadsThePathAndKeepsTheInkRound() throws {
         let (manager, layerIndex, vector) = fixture()
         vector.addStroke(stroke(from: CGPoint(x: 24, y: 32), to: CGPoint(x: 40, y: 32), size: 8))
-        guard let before = inkBounds(vector) else { return XCTFail("nothing rendered") }
+        guard let before = try inkBounds(vector) else { return XCTFail("nothing rendered") }
 
         select(manager, layerIndex, loop(CGRect(x: 12, y: 20, width: 40, height: 24)))
         XCTAssertTrue(manager.beginVectorLassoMove())
@@ -1700,7 +1700,7 @@ final class LassoMoveLogicTests: XCTestCase {
         XCTAssertEqual(stroke.samples.first?.y ?? 0, 32, accuracy: 1e-6, "with the other axis untouched")
 
         manager.commitVectorFloatIfNeeded()
-        guard let after = inkBounds(vector) else { return XCTFail("nothing rendered") }
+        guard let after = try inkBounds(vector) else { return XCTFail("nothing rendered") }
         XCTAssertEqual(after.width, 3 * 16 + 8 * sqrt(3), accuracy: 1.5,
                        "48 pt of spine plus a dab's worth of cap at each end")
         XCTAssertEqual(after.height, before.height * sqrt(3), accuracy: 1.5,
@@ -1809,10 +1809,10 @@ final class LassoMoveLogicTests: XCTestCase {
     /// Watched failing with the `frame.aspect != 1` clause removed from `canResetFloating`: *Reset has
     /// something to put back* fails first, and `resetFloating`'s own guard then makes the press inert,
     /// so the piece stays stretched with no way back short of Undo.
-    func testResetPutsAStretchedPieceBackSquareAndIsOfferedForAStretchAlone() {
+    func testResetPutsAStretchedPieceBackSquareAndIsOfferedForAStretchAlone() throws {
         let (manager, layerIndex, vector) = fixture()
         vector.addStroke(stroke(from: CGPoint(x: 24, y: 32), to: CGPoint(x: 40, y: 32), size: 6))
-        let before = cgImage(vector)
+        let before = try cgImage(vector)
         select(manager, layerIndex, loop(CGRect(x: 12, y: 20, width: 40, height: 24)))
         XCTAssertTrue(manager.beginVectorLassoMove())
         guard let box = manager.vectorFloat?.frame.transform else { return XCTFail("no float") }
@@ -1827,7 +1827,7 @@ final class LassoMoveLogicTests: XCTestCase {
 
         XCTAssertEqual(manager.vectorFloat?.frame.aspect ?? 0, 1, accuracy: 1e-9)
         manager.commitVectorFloatIfNeeded()
-        assertPixelsIdentical(cgImage(vector), before, "and the drawing is the one that was lifted")
+        assertPixelsIdentical(try cgImage(vector), before, "and the drawing is the one that was lifted")
     }
 
     /// **Freeform is offered on every kind a vector cel can hold**, and the piece with all four in it
@@ -2162,14 +2162,14 @@ final class LassoMoveLogicTests: XCTestCase {
         let (_, _, untouched) = fixture()
         untouched.addStroke(canvasSpaceStroke: theLine())
         for point in alongTheLine {
-            XCTAssertTrue(isOpaque(untouched, at: point),
+            XCTAssertTrue(try isOpaque(untouched, at: point),
                           "fixture precondition: \(point) is on the line on an untouched cel")
         }
 
         // The fix: a 0.3x shrink through Move with no selection.
         let (manager, _, viaTheFloat) = fixture()
         viaTheFloat.addStroke(theObject())
-        let objectBefore = try XCTUnwrap(inkBounds(viaTheFloat), "fixture precondition: the object has ink")
+        let objectBefore = try XCTUnwrap(try inkBounds(viaTheFloat), "fixture precondition: the object has ink")
         XCTAssertTrue(manager.beginVectorWholeCelMove(), "Move with no selection lifts the whole cel")
         manager.nudgeVectorFloat(to: scaledBy(manager, 0.3))
         manager.commitVectorFloatIfNeeded()
@@ -2181,17 +2181,17 @@ final class LassoMoveLogicTests: XCTestCase {
         // was doing, said against the mechanism that ships. An alpha-scanned box is a couple of
         // points wider than the geometry on each side, so the tolerance is loose on purpose; 0.3x of
         // a 16 pt diagonal is unmistakable at any of it.
-        let theShrinkHappened = try XCTUnwrap(inkBounds(viaTheFloat))
+        let theShrinkHappened = try XCTUnwrap(try inkBounds(viaTheFloat))
         XCTAssertLessThan(theShrinkHappened.width, objectBefore.width * 0.6,
                           "the whole-cel Move must actually have contracted the ink, or the assertions "
                           + "below are about a cel nothing happened to")
 
         viaTheFloat.addStroke(canvasSpaceStroke: theLine())
         for point in alongTheLine {
-            XCTAssertTrue(isOpaque(viaTheFloat, at: point),
+            XCTAssertTrue(try isOpaque(viaTheFloat, at: point),
                           "every sample of a line drawn after a whole-cel shrink must survive the render; \(point) did not")
         }
-        guard let after = inkBounds(viaTheFloat), let control = inkBounds(untouched) else {
+        guard let after = try inkBounds(viaTheFloat), let control = try inkBounds(untouched) else {
             return XCTFail("nothing rendered")
         }
         XCTAssertLessThanOrEqual(after.minX, control.minX + 1.5, "the line reaches as far left as it does untouched")
@@ -2287,11 +2287,11 @@ final class LassoMoveLogicTests: XCTestCase {
 
     /// The bake identity, for the whole-cel lift: a nudge to exactly where the box was lifted changes
     /// no sample and no pixel.
-    func testAZeroDeltaWholeCelNudgeChangesNoSampleAndNoPixel() {
+    func testAZeroDeltaWholeCelNudgeChangesNoSampleAndNoPixel() throws {
         let (manager, _, vector) = fixture()
         vector.addStroke(stroke(from: CGPoint(x: 6, y: 22), to: CGPoint(x: 40, y: 22), size: 5))
         vector.addStroke(stroke(from: CGPoint(x: 6, y: 34), to: CGPoint(x: 40, y: 34), size: 5))
-        let pixelsBefore = cgImage(vector)
+        let pixelsBefore = try cgImage(vector)
 
         XCTAssertTrue(manager.beginVectorWholeCelMove())
         guard let float = manager.vectorFloat else { return XCTFail("no float") }
@@ -2308,7 +2308,7 @@ final class LassoMoveLogicTests: XCTestCase {
             }
         }
         manager.commitVectorFloatIfNeeded()
-        assertPixelsIdentical(cgImage(vector), pixelsBefore)
+        assertPixelsIdentical(try cgImage(vector), pixelsBefore)
     }
 
     /// Move on an empty vector cel does **nothing** — no float, no suppression, no undo step. The
@@ -2519,7 +2519,7 @@ final class LassoMoveLogicTests: XCTestCase {
     /// gesture — any gesture, including one that moves nothing — that re-derives the map and drags
     /// the ink. A test that asserted only "the box turned and nothing moved" would have passed
     /// against a build that jumps the artist's drawing on their very next touch.
-    func testANonZeroBoxAngleChangesNoSampleAndNoPixel() {
+    func testANonZeroBoxAngleChangesNoSampleAndNoPixel() throws {
         for transform in [CGAffineTransform.identity,
                           CGAffineTransform(translationX: 7, y: -3).scaledBy(x: 1.4, y: 1.4),
                           CGAffineTransform(rotationAngle: 0.4).concatenating(
@@ -2531,7 +2531,7 @@ final class LassoMoveLogicTests: XCTestCase {
             let localLoop = CGRect(x: 20, y: 4, width: 40, height: 50)
             var mapping = transform
             let canvasLoop = CGPath(rect: localLoop, transform: &mapping)
-            let pixelsBefore = cgImage(vector)
+            let pixelsBefore = try cgImage(vector)
             select(manager, layerIndex, canvasLoop)
             XCTAssertTrue(manager.beginVectorLassoMove(), "transform \(transform)")
             guard let float = manager.vectorFloat else { return XCTFail("no float") }
@@ -2553,7 +2553,7 @@ final class LassoMoveLogicTests: XCTestCase {
                            "and a nudge does not straighten the box — transform \(transform)")
 
             manager.commitVectorFloatIfNeeded()
-            assertPixelsIdentical(cgImage(vector), pixelsBefore, "transform \(transform)")
+            assertPixelsIdentical(try cgImage(vector), pixelsBefore, "transform \(transform)")
         }
     }
 
@@ -2610,13 +2610,13 @@ final class LassoMoveLogicTests: XCTestCase {
     /// `rotateFloating` goes through that same map, so eight presses on a turned box no longer close
     /// the loop and the samples come back moved. It went red together with
     /// `testANonZeroBoxAngleChangesNoSampleAndNoPixel` and with nothing else in 1839 tests.
-    func testEightPressesOfRotate45StayBitExactOnAHandTurnedBox() {
+    func testEightPressesOfRotate45StayBitExactOnAHandTurnedBox() throws {
         for layerRotation in [CGFloat(0), 1.1] {
             let (manager, layerIndex, vector) = fixture()
             let layerTransform = CGAffineTransform(rotationAngle: layerRotation)
             vector.setTransform(layerTransform)
             vector.addStroke(stroke(from: CGPoint(x: 20, y: 20), to: CGPoint(x: 44, y: 30), size: 5))
-            let pixelsBefore = cgImage(vector)
+            let pixelsBefore = try cgImage(vector)
             let note = "layer at \(layerRotation) rad"
 
             var mapping = layerTransform
@@ -2652,7 +2652,7 @@ final class LassoMoveLogicTests: XCTestCase {
                 }
             }
             manager.commitVectorFloatIfNeeded()
-            assertPixelsIdentical(cgImage(vector), pixelsBefore, note)
+            assertPixelsIdentical(try cgImage(vector), pixelsBefore, note)
         }
     }
 
@@ -2856,7 +2856,7 @@ final class LassoMoveLogicTests: XCTestCase {
     /// `testANonZeroBoxAngleChangesNoSampleAndNoPixel`: a leak could enter at the turn, at the
     /// zero-delta nudge an artist's next drag re-derives its map from, or at the bake. Run on a
     /// **transformed** layer, because `base ∘ base⁻¹` is exactly the identity only when `base` is.
-    func testTurningTheBoxAfterAStretchChangesNoSampleAndNoPixel() {
+    func testTurningTheBoxAfterAStretchChangesNoSampleAndNoPixel() throws {
         for transform in [CGAffineTransform.identity,
                           CGAffineTransform(rotationAngle: 0.4).concatenating(
                             CGAffineTransform(translationX: 6, y: 9))] {
@@ -2880,7 +2880,7 @@ final class LassoMoveLogicTests: XCTestCase {
 
             // From here on the drawing must not move, however the box is turned.
             let samplesAfterStretch = vector.elements.compactMap(\.stroke).map(\.samples)
-            let pixelsAfterStretch = cgImage(vector)
+            let pixelsAfterStretch = try cgImage(vector)
             let boxAfterStretch = manager.vectorFloat?.frame.transform
 
             for angle in [CGFloat(1.9), -0.4, 0] {
@@ -2903,7 +2903,7 @@ final class LassoMoveLogicTests: XCTestCase {
             XCTAssertEqual(manager.vectorFloat?.frame.stretchAxis ?? 0, 0.7, accuracy: 1e-12)
 
             manager.commitVectorFloatIfNeeded()
-            assertPixelsIdentical(cgImage(vector), pixelsAfterStretch, "transform \(transform)")
+            assertPixelsIdentical(try cgImage(vector), pixelsAfterStretch, "transform \(transform)")
         }
     }
 
@@ -3278,14 +3278,14 @@ final class LassoMoveLogicTests: XCTestCase {
     /// the *zero-delta nudge* — what an artist's next drag re-derives its map from — and the bake
     /// that show a leak. `testANonZeroBoxAngleChangesNoSampleAndNoPixel` learned that the hard way
     /// against `87081de`, and an offset folded into the map fails in exactly the same place.
-    func testTheBoxCentreTravelsAsItRefitsAndTheGeometryAnchorDoesNot() {
+    func testTheBoxCentreTravelsAsItRefitsAndTheGeometryAnchorDoesNot() throws {
         let (manager, _, vector) = fixture()
         vector.setTransform(CGAffineTransform(rotationAngle: 0.3).concatenating(
             CGAffineTransform(translationX: 5, y: -4)))
         vector.addStroke(stroke(from: CGPoint(x: 10, y: 10), to: CGPoint(x: 50, y: 10), size: 4))
         vector.addStroke(stroke(from: CGPoint(x: 50, y: 10), to: CGPoint(x: 10, y: 50), size: 4))
         vector.addStroke(stroke(from: CGPoint(x: 10, y: 50), to: CGPoint(x: 10, y: 10), size: 4))
-        let pixelsBefore = cgImage(vector)
+        let pixelsBefore = try cgImage(vector)
         XCTAssertTrue(manager.beginVectorWholeCelMove())
         guard let float = manager.vectorFloat else { return XCTFail("no float") }
         let pivot = float.pivot, position = float.frame.transform.position
@@ -3315,7 +3315,7 @@ final class LassoMoveLogicTests: XCTestCase {
         manager.nudgeVectorFloat(to: float.frame.transform)
         assertSamplesUnmoved(vector, samplesBefore, "after the zero-delta nudge that follows them")
         manager.commitVectorFloatIfNeeded()
-        assertPixelsIdentical(cgImage(vector), pixelsBefore, "and the bake")
+        assertPixelsIdentical(try cgImage(vector), pixelsBefore, "and the bake")
     }
 
     /// **The green knob turns ink and box together, so the fit does not move — and that is arithmetic
@@ -3847,7 +3847,7 @@ final class LassoMoveLogicTests: XCTestCase {
 
         func redPixelCount() throws -> Int {
             let cel = manager.layers[layerIndex].cels[0]
-            let flat = PixelOps.rasterize(cel: cel, canvasSize: Self.size)
+            let flat = (try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: Self.size)))
             let bytes = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(flat.cgImage)))
             return stride(from: 0, to: bytes.count, by: 4).count {
                 bytes[$0] > 200 && bytes[$0 + 1] < 60 && bytes[$0 + 2] < 60 && bytes[$0 + 3] > 200
@@ -3994,7 +3994,7 @@ final class LassoMoveLogicTests: XCTestCase {
     ///
     /// The second of the two reproduction tests, and the one nobody had reported: it is the reason
     /// the helper is deleted rather than merely bypassed.
-    func testClearingBlankPaperDoesNotPaintADistantFillsColourIntoTheLoop() {
+    func testClearingBlankPaperDoesNotPaintADistantFillsColourIntoTheLoop() throws {
         let (manager, layerIndex, vector) = fixture()
         vector.addFill(VectorFillElement(path: CGPath(rect: CGRect(x: 2, y: 2, width: 10, height: 10),
                                                       transform: nil),
@@ -4005,9 +4005,9 @@ final class LassoMoveLogicTests: XCTestCase {
         let baseline = manager.history.undoStack.count
         manager.clearSelectionPixels()
 
-        XCTAssertFalse(isOpaque(vector, at: CGPoint(x: 40, y: 40)),
+        XCTAssertFalse(try isOpaque(vector, at: CGPoint(x: 40, y: 40)),
                        "the cleared corner stays bare paper")
-        XCTAssertTrue(isOpaque(vector, at: CGPoint(x: 6, y: 6)), "and the fill across the canvas is untouched")
+        XCTAssertTrue(try isOpaque(vector, at: CGPoint(x: 6, y: 6)), "and the fill across the canvas is untouched")
         XCTAssertEqual(vector.elements.map(\.id), before.map(\.id), "no element was rewritten")
         XCTAssertEqual(stepsSince(baseline, manager), 0,
                        "a clear that catches nothing is a silent no-op with no undo step")
@@ -4021,7 +4021,7 @@ final class LassoMoveLogicTests: XCTestCase {
     /// list by hand. A cut piece renders on its parent's `DabLattice`, so the half that stayed keeps
     /// its dab phase and a scattering brush does not visibly re-roll along the part the artist did
     /// *not* touch — the precise defect `DabLattice` exists to prevent, and it comes free here.
-    func testAStrokeStraddlingTheLoopIsCutAndTheOutsideHalfKeepsItsGeometry() {
+    func testAStrokeStraddlingTheLoopIsCutAndTheOutsideHalfKeepsItsGeometry() throws {
         let (manager, layerIndex, vector) = fixture()
         vector.addStroke(stroke(from: CGPoint(x: 6, y: 20), to: CGPoint(x: 58, y: 20), size: 6))
         let originalID = vector.elements[0].id
@@ -4041,8 +4041,8 @@ final class LassoMoveLogicTests: XCTestCase {
         XCTAssertNotEqual(survivor.id, originalID, "a split makes two independent strokes (§5.2)")
         XCTAssertEqual(survivor.lattice?.samples.count, 3,
                        "but it draws on its parent's whole walk, so its dabs do not re-phase")
-        XCTAssertTrue(isOpaque(vector, at: CGPoint(x: 12, y: 20)), "ink outside the loop stayed")
-        XCTAssertFalse(isOpaque(vector, at: CGPoint(x: 44, y: 20)), "ink inside the loop went")
+        XCTAssertTrue(try isOpaque(vector, at: CGPoint(x: 12, y: 20)), "ink outside the loop stayed")
+        XCTAssertFalse(try isOpaque(vector, at: CGPoint(x: 44, y: 20)), "ink inside the loop went")
     }
 
     /// **A fill still clips, and a hole punched by an older build of Clear stays a hole.** The
@@ -4052,7 +4052,7 @@ final class LassoMoveLogicTests: XCTestCase {
     ///
     /// `splitForLassoMove` cuts each fill with its own stored rule, so this passes for the documents
     /// on the owner's iPad as well as for the ones a future Clear will make.
-    func testAFillWithAHoleIsCutWithItsOwnEvenOddRuleAndKeepsTheHole() {
+    func testAFillWithAHoleIsCutWithItsOwnEvenOddRuleAndKeepsTheHole() throws {
         let (manager, layerIndex, vector) = fixture()
         let ring = CGMutablePath()
         ring.addRect(CGRect(x: 8, y: 8, width: 48, height: 48))
@@ -4060,7 +4060,7 @@ final class LassoMoveLogicTests: XCTestCase {
         vector.addFill(VectorFillElement(path: ring,
                                          color: CodableColor(red: 0, green: 0, blue: 1, alpha: 1),
                                          opacity: 1, evenOddFill: true))
-        XCTAssertFalse(isOpaque(vector, at: CGPoint(x: 32, y: 32)), "fixture precondition: a hole")
+        XCTAssertFalse(try isOpaque(vector, at: CGPoint(x: 32, y: 32)), "fixture precondition: a hole")
 
         select(manager, layerIndex, loop(CGRect(x: 44, y: 0, width: 20, height: 64)))
         manager.clearSelectionPixels()
@@ -4072,9 +4072,9 @@ final class LassoMoveLogicTests: XCTestCase {
         XCTAssertEqual(vector.elements.count, 1, "the outside remnant is one fill, not one per component")
         guard let remnant = vector.elements.first?.fill else { return XCTFail("the survivor is a fill") }
         XCTAssertTrue(remnant.evenOddFill, "cut with, and keeping, its own rule")
-        XCTAssertTrue(isOpaque(vector, at: CGPoint(x: 12, y: 32)), "the part outside the loop stayed")
-        XCTAssertFalse(isOpaque(vector, at: CGPoint(x: 50, y: 32)), "the part inside it went")
-        XCTAssertFalse(isOpaque(vector, at: CGPoint(x: 32, y: 32)), "and the hole is still a hole")
+        XCTAssertTrue(try isOpaque(vector, at: CGPoint(x: 12, y: 32)), "the part outside the loop stayed")
+        XCTAssertFalse(try isOpaque(vector, at: CGPoint(x: 50, y: 32)), "the part inside it went")
+        XCTAssertFalse(try isOpaque(vector, at: CGPoint(x: 32, y: 32)), "and the hole is still a hole")
     }
 
     /// **A fill wholly inside the loop is deleted, not hollowed to an empty shell.** The old walk
@@ -4169,7 +4169,7 @@ final class LassoMoveLogicTests: XCTestCase {
 
     /// **One undo press puts everything back** — the cut halves, the deleted whole objects and the
     /// z-order, in one step rather than one per element the clear happened to touch.
-    func testOneUndoPressRestoresEverythingAClearRemoved() {
+    func testOneUndoPressRestoresEverythingAClearRemoved() throws {
         let (manager, layerIndex, vector) = fixture()
         vector.addFill(VectorFillElement(path: CGPath(rect: CGRect(x: 8, y: 8, width: 40, height: 12),
                                                       transform: nil),
@@ -4178,7 +4178,7 @@ final class LassoMoveLogicTests: XCTestCase {
         vector.addStroke(stroke(from: CGPoint(x: 6, y: 30), to: CGPoint(x: 58, y: 30), size: 6))
         vector.addStroke(stroke(from: CGPoint(x: 20, y: 44), to: CGPoint(x: 36, y: 44), size: 5))
         let before = vector.elements.map(\.id)
-        let inkBefore = opaquePixelCount(vector)
+        let inkBefore = try opaquePixelCount(vector)
 
         select(manager, layerIndex, loop(CGRect(x: 14, y: 4, width: 40, height: 56)))
         manager.clearSelectionPixels()
@@ -4188,7 +4188,7 @@ final class LassoMoveLogicTests: XCTestCase {
 
         XCTAssertEqual(vector.elements.map(\.id), before,
                        "every element is back, with its identity and its z-position")
-        XCTAssertEqual(opaquePixelCount(vector), inkBefore, "and so is every pixel of ink")
+        XCTAssertEqual(try opaquePixelCount(vector), inkBefore, "and so is every pixel of ink")
     }
 
     /// **A clear that catches nothing records no history step**, even on a cel full of ink. The
@@ -4305,25 +4305,25 @@ final class LassoMoveLogicTests: XCTestCase {
     /// display list and leave the artist looking at their drawing. Asking through the cache, after
     /// warming it with the pre-clear flatten, is the only assertion that can tell the two apart:
     /// `vector.render()` would pass either way.
-    func testTheClearIsVisibleThroughTheRasterizeCacheAndNotOnlyInTheModel() {
+    func testTheClearIsVisibleThroughTheRasterizeCacheAndNotOnlyInTheModel() throws {
         let (manager, layerIndex, vector) = fixture()
         vector.addStroke(stroke(from: CGPoint(x: 20, y: 20), to: CGPoint(x: 44, y: 20), size: 8))
-        XCTAssertTrue(isOpaqueThroughRasterize(manager, layerIndex, at: CGPoint(x: 32, y: 20)),
+        XCTAssertTrue(try isOpaqueThroughRasterize(manager, layerIndex, at: CGPoint(x: 32, y: 20)),
                       "fixture precondition: the flatten is warm and carries the stroke")
 
         select(manager, layerIndex, loop(CGRect(x: 10, y: 10, width: 48, height: 30)))
         manager.clearSelectionPixels()
 
-        XCTAssertFalse(isOpaqueThroughRasterize(manager, layerIndex, at: CGPoint(x: 32, y: 20)),
+        XCTAssertFalse(try isOpaqueThroughRasterize(manager, layerIndex, at: CGPoint(x: 32, y: 20)),
                        "the clear reaches the flatten every on-screen tier is built from")
     }
 
     /// The active cel flattened the way the compositor flattens it — **through the memoized path**,
     /// so a stale entry is a failure rather than something the test quietly renders past.
     private func isOpaqueThroughRasterize(_ manager: CanvasManager, _ layerIndex: Int,
-                                          at point: CGPoint) -> Bool {
-        let image = PixelOps.rasterize(cel: manager.layers[layerIndex].cels[0],
-                                       canvasSize: LassoMoveLogicTests.size)
+                                          at point: CGPoint) throws -> Bool {
+        let image = (try XCTUnwrap(PixelOps.rasterize(cel: manager.layers[layerIndex].cels[0],
+                                       canvasSize: LassoMoveLogicTests.size)))
         guard let cg = image.cgImage, let bytes = CanvasFixture.rgbaBytes(cg) else { return false }
         let x = Int(point.x), y = Int(point.y)
         guard x >= 0, y >= 0, x < cg.width, y < cg.height else { return false }
@@ -4393,14 +4393,14 @@ final class LassoMoveLogicTests: XCTestCase {
     /// in the worse direction, leaving such a stroke behind *silently* with nothing on screen to
     /// explain it; and ink membership has no primitive in this codebase (§1). The ink genuinely does
     /// hang outside, which is what the first assertion measures rather than assumes.
-    func testAThickStrokeWhoseSpineIsEnclosedTravelsWholeEvenWhereItsInkPokesOut() {
+    func testAThickStrokeWhoseSpineIsEnclosedTravelsWholeEvenWhereItsInkPokesOut() throws {
         let (_, _, vector) = fixture()
         // Spine along y = 30, 60 pt wide: the ink reaches y = 0 and y = 60.
         vector.addStroke(stroke(from: CGPoint(x: 10, y: 30), to: CGPoint(x: 54, y: 30), size: 60))
         let id = vector.elements[0].id
         // The loop holds the whole spine (x 10…54, y 30) and none of the ink's top or bottom.
         let rect = CGRect(x: 4, y: 10, width: 56, height: 40)
-        let ink = inkBounds(vector)
+        let ink = try inkBounds(vector)
         XCTAssertLessThan(ink?.minY ?? 99, rect.minY, "the ink really does hang out of the loop above")
         XCTAssertGreaterThan(ink?.maxY ?? 0, rect.maxY, "and below")
 
@@ -4997,13 +4997,13 @@ final class LassoMoveLogicTests: XCTestCase {
 
     /// How many pixels carry ink — the conservation quantity a rotation preserves and a lost element
     /// does not.
-    private func opaquePixelCount(_ vector: VectorCanvas) -> Int {
-        guard let cg = vector.render().cgImage, let bytes = CanvasFixture.rgbaBytes(cg) else { return 0 }
+    private func opaquePixelCount(_ vector: VectorCanvas) throws -> Int {
+        guard let cg = (try XCTUnwrap(vector.render())).cgImage, let bytes = CanvasFixture.rgbaBytes(cg) else { return 0 }
         return stride(from: 3, to: bytes.count, by: 4).reduce(0) { $0 + (bytes[$1] > 128 ? 1 : 0) }
     }
 
-    private func isOpaque(_ vector: VectorCanvas, at point: CGPoint) -> Bool {
-        guard let cg = vector.render().cgImage, let bytes = CanvasFixture.rgbaBytes(cg) else { return false }
+    private func isOpaque(_ vector: VectorCanvas, at point: CGPoint) throws -> Bool {
+        guard let cg = (try XCTUnwrap(vector.render())).cgImage, let bytes = CanvasFixture.rgbaBytes(cg) else { return false }
         let x = Int(point.x), y = Int(point.y)
         guard x >= 0, y >= 0, x < cg.width, y < cg.height else { return false }
         return bytes[(y * cg.width + x) * 4 + 3] > 128

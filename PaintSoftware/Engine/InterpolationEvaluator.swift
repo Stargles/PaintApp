@@ -703,13 +703,8 @@ enum InterpolationEvaluator {
     /// code and no change to the walk. It costs one extra canvas-sized render and only happens when
     /// there are edits to draw.
     static func composite(_ evaluation: Evaluation, size: CGSize,
-                          quality: RenderQuality = .full) -> UIImage {
-        // The existing full renderer always produces an image. Only the bounded direct draw can
-        // refuse a material tile, and that answer travels through the optional window overload.
-        guard let image = compositeResult(evaluation, size: size, window: nil, quality: quality) else {
-            preconditionFailure("Full interpolation rendering did not produce an image")
-        }
-        return image
+                          quality: RenderQuality = .full) -> UIImage? {
+        compositeResult(evaluation, size: size, window: nil, quality: quality)
     }
 
     static func composite(_ evaluation: Evaluation, size: CGSize, window: CGRect,

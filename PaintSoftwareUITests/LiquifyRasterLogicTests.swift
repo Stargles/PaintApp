@@ -382,7 +382,7 @@ final class LiquifyRasterLogicTests: XCTestCase {
             samples: StrokeSamples([VectorSample(x: 18, y: 24), VectorSample(x: 38, y: 24)], channels: .pressureOnly))
         canvas.addStroke(ink)
         manager.layers[1].cels[0].bakedImage = image()
-        let original = PixelOps.rasterize(cel: manager.layers[1].cels[0], canvasSize: size, memoize: false)
+        let original = try XCTUnwrap(PixelOps.rasterize(cel: manager.layers[1].cels[0], canvasSize: size, memoize: false))
         let session = try held(manager, layer: 1)
         let old = try XCTUnwrap(manager.liveCelContentEdit)
         let oldRendered = try XCTUnwrap(old.presentation(placement: .identity))
@@ -398,7 +398,7 @@ final class LiquifyRasterLogicTests: XCTestCase {
         let newer = try XCTUnwrap(manager.liveCelContentEdit)
         let newRendered = try XCTUnwrap(newer.presentation(placement: .identity))
         manager.recordElementEdit(panel, finalElements: afterPanel, label: .liquify)
-        let truth = PixelOps.rasterize(cel: manager.layers[1].cels[0], canvasSize: size, memoize: false)
+        let truth = try XCTUnwrap(PixelOps.rasterize(cel: manager.layers[1].cels[0], canvasSize: size, memoize: false))
         var pending = UnlandedInk()
         pending.hold(.init(id: 1, version: 1, windowRect: oldRendered.window, replacing: oldRendered.footprint,
             contents: .image(oldRendered.image)))
@@ -438,12 +438,12 @@ final class LiquifyRasterLogicTests: XCTestCase {
                 CanvasFixture.poseTrack([(0, PoseQuad(restingIn: box)),
                     (6, PoseQuad(box: box, mappedBy: .init(translationX: 12, y: 0)))], interpolation: .linear))
             manager.currentFrame = 6
-            func committed() -> UIImage {
+            func committed() throws -> UIImage {
                 let cel = manager.layers[1].cels[0]
-                return PixelOps.rasterize(cel: cel, canvasSize: size, memoize: false,
-                    derived: manager.derivedCelContent(for: cel, atFrame: manager.currentFrame))
+                return try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: size, memoize: false,
+                    derived: manager.derivedCelContent(for: cel, atFrame: manager.currentFrame)))
             }
-            let before = committed()
+            let before = try committed()
             let original = canvas.elements
             var changed = target
             if opacityEdit { changed.opacity = 0.35 }
@@ -460,7 +460,7 @@ final class LiquifyRasterLogicTests: XCTestCase {
                 live.displaySource(placement: placement, canvasSize: size)(ctx.cgContext, box)
             }
             manager.recordElementEdit(panel, finalElements: final, label: .liquify)
-            let truth = committed()
+            let truth = try committed()
             let crop = try XCTUnwrap(PixelOps.copiedSubimage(of: truth, in: presented.window))
             for (name, image) in [("held-window", presented.image), ("committed-window", crop),
                                   ("shown-cel", actual), ("committed-cel", truth)] {
@@ -486,7 +486,7 @@ final class LiquifyRasterLogicTests: XCTestCase {
             }
             canvas.restoreElements([mark(96, 130, 100, .init(red: 0, green: 0, blue: 0, alpha: 1)),
                 mark(16, 24, 80, .init(red: 0, green: 0, blue: 1, alpha: 1))], changedInk: nil)
-            let backdrop = try XCTUnwrap(canvas.renderIfNonEmpty())
+            let backdrop = try XCTUnwrap(canvas.render())
             let backing = UIGraphicsImageRenderer(size: side, format: PixelOps.transparentFormat()).image { ctx in
                 UIColor.red.setFill(); ctx.fill(CGRect(x: 60, y: 20, width: 36, height: 180))
                 UIColor.green.setFill(); ctx.fill(CGRect(x: 156, y: 20, width: 28, height: 180))
@@ -606,7 +606,23 @@ final class LiquifyRasterLogicTests: XCTestCase {
                 transport: .lattice(captured: rest, current: stretched, pose: .identity)))
         let prefix = VectorFillElement(path: CGPath(rect: CGRect(x: 8, y: 8, width: 16, height: 24), transform: nil),
             color: .init(red: 1, green: 0, blue: 0, alpha: 1))
+        canvas.restoreElements([.fill(prefix)], changedInk: nil)
+        _ = try XCTUnwrap(canvas.render())
+        let view = StrokeCanvasView(frame: CGRect(origin: .zero, size: size))
+        view.vectorCanvas = canvas
+        view.layoutIfNeeded()
+        view.refreshDisplay(waitingForTheRender: true)
+        func shownPixels() throws -> [UInt8] {
+            let shown = UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image {
+                view.layer.render(in: $0.cgContext)
+            }
+            return try bytes(shown)
+        }
+        let priorPixels = try shownPixels()
+        XCTAssertTrue(priorPixels.contains { $0 != 0 }, "PREMISE: the real stroke view already shows valid native ink")
         canvas.restoreElements([.fill(prefix), .stroke(ink)], changedInk: nil)
+        view.refreshDisplay(waitingForTheRender: true)
+        XCTAssertTrue(try shownPixels() == priorPixels, "a refused synchronous native render preserves the displayed picture")
         let native = canvas.freeze(quality: .full)
         var completion: Int?
         let partial = UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { context in
@@ -627,11 +643,52 @@ final class LiquifyRasterLogicTests: XCTestCase {
         XCTAssertNil(request.sources[0], "partial native strip pixels cannot become a compositor leaf")
         XCTAssertNil(Compositor.composite(request, resolving: .coreGraphics), "the existing frame refusal guard rejects partial native strips")
         XCTAssertEqual(PixelOps.rasterizeCacheBytes, 0, "failed native strips never enter the flatten memo")
+        XCTAssertNil(native.render(quality: .full), "the frozen full renderer must retain native refusal")
+        XCTAssertNil(native.render(quality: .full, fittingInto: CGSize(width: 32, height: 32)),
+            "the fitted frozen renderer must retain native refusal")
+        for sizing: RenderSizing in [.native, .fitting(CGSize(width: 32, height: 32))] {
+            PixelOps.clearRasterizeCache()
+            let whole = try XCTUnwrap(manager.makeFrameRecipe(atFrame: 0, includeBackground: false, sizing: sizing))
+            let fullRequest = whole.resolve()
+            XCTAssertTrue(fullRequest.sourceResolutionFailed, "full and fitted frames must propagate required native failure")
+            XCTAssertNil(fullRequest.sources[0], "a refused native whole source is not transparent success")
+            XCTAssertNil(Compositor.composite(fullRequest, resolving: .coreGraphics))
+            XCTAssertEqual(PixelOps.rasterizeCacheBytes, 0, "refused native whole frames never enter the flatten memo")
+        }
         let empty = CanvasFixture.manager(layerCount: 0); empty.addVectorLayer()
         let emptyRecipe = try XCTUnwrap(empty.makeFrameRecipe(atFrame: 0, includeBackground: false))
         let emptyRequest = emptyRecipe.windowed(to: band).resolve()
         XCTAssertFalse(emptyRequest.sourceResolutionFailed, "a genuinely empty vector leaf remains valid")
         XCTAssertNotNil(Compositor.composite(emptyRequest, resolving: .coreGraphics))
+        OnionSkinRasterCache.removeAll()
+        defer { OnionSkinRasterCache.removeAll() }
+        let priorThumbnail = image(.green)
+        manager.layers[0].cels[0].thumbnail = priorThumbnail
+        manager.regenerateThumbnail(layerIndex: 0, celIndex: 0)
+        XCTAssertTrue(manager.layers[0].cels[0].thumbnail === priorThumbnail,
+            "a refused thumbnail keeps the exact previously displayed tile")
+        XCTAssertNil(OnionSkinRasterCache.image(for: manager.layers[0].cels[0], canvasSize: size,
+            at: CGSize(width: 32, height: 32)), "a required onion source refuses without becoming a blank ghost")
+        XCTAssertEqual(OnionSkinRasterCache.residentBytes, 0, "refused onion source cannot enter its reduced cache")
+        manager.addTransformLayer(name: "native refusal pose")
+        manager.layers[1].transform = LayerPose(pose: PoseQuad(box: CGRect(origin: .zero, size: size),
+            mappedBy: CGAffineTransform(translationX: 8, y: 0)), mode: .move)
+        let placement = manager.celContentPlacement(forLayerID: manager.layers[0].id)
+        let derived = try XCTUnwrap(manager.derivedCelContent(for: manager.layers[0].cels[0], atFrame: 0,
+            inheriting: placement.backing), "PREMISE: a posed native drawing has a required derived provider")
+        XCTAssertNil(derived.render(.full), "a present posed provider retains the same native material refusal")
+        PixelOps.clearRasterizeCache()
+        let posedRecipe = try XCTUnwrap(manager.makeFrameRecipe(atFrame: 0, includeBackground: false))
+        XCTAssertTrue(posedRecipe.resolve().sourceResolutionFailed,
+            "a refused present provider cannot fall back to its unposed stored drawing")
+        manager.deleteLayer(at: 1)
+        manager.addLayer()
+        let layerIDs = manager.layers.map(\.id)
+        manager.history.removeAll()
+        XCTAssertFalse(manager.mergeLayers(layerIDs[0], layerIDs[1]), "native refusal prevents a destructive pixel merge")
+        XCTAssertEqual(manager.layers.map(\.id), layerIDs, "refused merge restores both source layers")
+        XCTAssertTrue(manager.layers[0].cels[0].vector === canvas, "refused merge retains the original native drawing")
+        XCTAssertFalse(manager.history.canUndo, "refused merge adds no successful history entry")
     }
 
     @MainActor

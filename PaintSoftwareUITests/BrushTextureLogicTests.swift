@@ -653,7 +653,7 @@ final class BrushTextureLogicTests: XCTestCase {
                                       samples: [VectorSample(x: 6, y: 30, pressure: 1),
                                                 VectorSample(x: 30, y: 30, pressure: 1),
                                                 VectorSample(x: 56, y: 30, pressure: 1)]))
-        let expected = try Self.pixels(vector.render())
+        let expected = try Self.pixels((try XCTUnwrap(vector.render())))
         XCTAssertFalse(expected.isBlank, "fixture precondition: the textured stroke drew something")
 
         let url = ProjectStore.createNewProjectURL(name: "Papered")
@@ -676,7 +676,7 @@ final class BrushTextureLogicTests: XCTestCase {
                       "and a load puts it back, so the next stroke drawn with that brush has paper too")
         let canvas = try XCTUnwrap(reopened.layers.compactMap { $0.cels.first?.vector }
                                                   .first { !$0.strokes.isEmpty })
-        XCTAssertEqual(try Self.pixels(canvas.render()).bytes, expected.bytes,
+        XCTAssertEqual(try Self.pixels((try XCTUnwrap(canvas.render()))).bytes, expected.bytes,
                        "the ink is unchanged by a save and reopen")
 
         // And what was compared is textured ink, not two pictures of a plain stroke.
@@ -689,7 +689,7 @@ final class BrushTextureLogicTests: XCTestCase {
                                        samples: [VectorSample(x: 6, y: 30, pressure: 1),
                                                  VectorSample(x: 30, y: 30, pressure: 1),
                                                  VectorSample(x: 56, y: 30, pressure: 1)]))
-        XCTAssertNotEqual(try Self.pixels(control.render()).bytes, expected.bytes,
+        XCTAssertNotEqual(try Self.pixels((try XCTUnwrap(control.render()))).bytes, expected.bytes,
                           "the round trip preserved *textured* pixels — an implementation that lost "
                           + "the texture on both sides would have passed the comparison above")
     }

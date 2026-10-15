@@ -571,7 +571,7 @@ final class StreamBarStateLogicTests: XCTestCase {
             endpoint == Self.endpoint ? (slot.0, slot.1.cgImage!) : nil
         }
         coordinator.tick()
-        XCTAssertGreaterThan(Int(pixel(try XCTUnwrap(vector.render().cgImage), 32, 32).g), 100,
+        XCTAssertGreaterThan(Int(pixel(try XCTUnwrap((try XCTUnwrap(vector.render())).cgImage), 32, 32).g), 100,
                              "CONTROL: the host's picture of the stream cel is the green frame")
 
         let baker = manager.frameBaker

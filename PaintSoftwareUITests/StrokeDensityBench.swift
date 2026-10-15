@@ -317,7 +317,7 @@ final class StrokeDensityBench: XCTestCase {
 
         // A zoom is a transform on the canvas *view*, not on the model: `VectorCanvas` has no input
         // a pinch could reach, and `render()` is always canvas-native.
-        XCTAssertEqual(canvas.render().size, Self.canvasSize)
+        XCTAssertEqual(try XCTUnwrap(canvas.render()).size, Self.canvasSize)
 
         let manager = CanvasManager()
         manager.canvasSize = Self.canvasSize
@@ -843,7 +843,9 @@ final class StrokeDensityBench: XCTestCase {
         // The replicas — the same canvas-sized buffer work with no ink in it at all, once against a
         // buffer the allocator can hand back warm and once against memory never touched before.
         autoreleasepool {
-            let standing = VectorCanvas(size: Self.canvasSize, strokes: Self.scene(200)).render()
+            guard let standing = VectorCanvas(size: Self.canvasSize, strokes: Self.scene(200)).render() else {
+                XCTFail("Fixture standing render was refused"); return
+            }
             let format = PixelOps.transparentFormat()
             format.preferredRange = .standard
             func renderer(_ body: @escaping (UIGraphicsImageRendererContext) -> Void) -> UIImage {
@@ -1073,7 +1075,8 @@ final class StrokeDensityBench: XCTestCase {
     /// nowhere for a rounding difference to enter, and anything but equality is a defect.
     /// `IncrementalAppendLogicTests` is where that is pinned; this is here so a *measurement* cannot
     /// quietly be of two different pictures.
-    private static func identicalBytes(_ a: UIImage, _ b: UIImage) -> Bool {
+    private static func identicalBytes(_ a: UIImage?, _ b: UIImage?) -> Bool {
+        guard let a, let b else { XCTFail("Fixture render was refused"); return false }
         guard let ca = a.cgImage, let cb = b.cgImage,
               ca.width == cb.width, ca.height == cb.height,
               ca.bytesPerRow == cb.bytesPerRow, ca.bitmapInfo == cb.bitmapInfo,

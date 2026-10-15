@@ -81,15 +81,15 @@ final class InterpolatedCelCopyLogicTests: XCTestCase {
 
     /// The picture the document actually shows for `cel` — literally the call a thumbnail, the onion
     /// skin and an export make, rather than a second implementation of it.
-    private func shown(_ manager: CanvasManager, _ cel: Cel) -> UIImage {
-        PixelOps.rasterize(cel: cel, canvasSize: size,
-                           derived: manager.derivedCelContent(for: cel, atFrame: cel.startFrame))
+    private func shown(_ manager: CanvasManager, _ cel: Cel) throws -> UIImage {
+        (try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: size,
+                           derived: manager.derivedCelContent(for: cel, atFrame: cel.startFrame))))
     }
 
     /// The picture a cel shows out of its **own storage**, with no derivation offered — what a copy
     /// has to be able to produce on its own for the ruling to hold.
-    private func stored(_ cel: Cel) -> UIImage {
-        PixelOps.rasterize(cel: cel, canvasSize: size)
+    private func stored(_ cel: Cel) throws -> UIImage {
+        (try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: size)))
     }
 
     private func bytes(of image: UIImage) -> Data { image.pngData() ?? Data() }
@@ -105,7 +105,7 @@ final class InterpolatedCelCopyLogicTests: XCTestCase {
     /// comparison go red.
     func testDuplicatingAnInBetweenCopiesThePictureItShowedRatherThanBlank() throws {
         let (manager, _, _) = try interpolated()
-        let want = shown(manager, manager.layers[1].cels[1])
+        let want = try shown(manager, manager.layers[1].cels[1])
         XCTAssertFalse(isBlank(want), "Setup: the in-between shows a picture to begin with")
 
         manager.duplicateCel(layerIndex: 1, celIndex: 1)
@@ -113,7 +113,7 @@ final class InterpolatedCelCopyLogicTests: XCTestCase {
         let copy = try XCTUnwrap(manager.layers[1].cels.first { $0.startFrame == 6 })
 
         PixelOps.clearRasterizeCache()
-        let got = stored(copy)
+        let got = try stored(copy)
         XCTAssertFalse(isBlank(got), "a duplicate of an in-between is not blank")
         XCTAssertEqual(bytes(of: got), bytes(of: want),
                        "and it is the same picture, now stored rather than derived")
@@ -129,7 +129,7 @@ final class InterpolatedCelCopyLogicTests: XCTestCase {
     /// cel is blank.
     func testCopyingAndPastingAnInBetweenPlantsThePictureRatherThanBlank() throws {
         let (manager, _, _) = try interpolated()
-        let want = shown(manager, manager.layers[1].cels[1])
+        let want = try shown(manager, manager.layers[1].cels[1])
         XCTAssertFalse(isBlank(want), "Setup: the in-between shows a picture to begin with")
 
         manager.copyCel(layerIndex: 1, celIndex: 1)
@@ -137,7 +137,7 @@ final class InterpolatedCelCopyLogicTests: XCTestCase {
         let pasted = try XCTUnwrap(manager.layers[1].cels.first { $0.startFrame == 20 })
 
         PixelOps.clearRasterizeCache()
-        let got = stored(pasted)
+        let got = try stored(pasted)
         XCTAssertFalse(isBlank(got), "a paste of an in-between is not blank")
         XCTAssertEqual(bytes(of: got), bytes(of: want))
         XCTAssertNil(manager.derivedCelContent(for: pasted, atFrame: pasted.startFrame))
@@ -163,18 +163,18 @@ final class InterpolatedCelCopyLogicTests: XCTestCase {
         manager.duplicateCel(layerIndex: 1, celIndex: 1)
         let copyID = try XCTUnwrap(manager.layers[1].cels.first { $0.startFrame == 6 }?.id)
         func copyNow() throws -> Data {
-            bytes(of: shown(manager, try XCTUnwrap(manager.layers[1].cels.first { $0.id == copyID })))
+            bytes(of: try shown(manager, try XCTUnwrap(manager.layers[1].cels.first { $0.id == copyID })))
         }
 
         PixelOps.clearRasterizeCache()
         let copyBefore = try copyNow()
-        let sourceBefore = bytes(of: shown(manager, manager.layers[1].cels[1]))
+        let sourceBefore = bytes(of: try shown(manager, manager.layers[1].cels[1]))
 
         // Redraw the first keyframe somewhere else entirely.
         cels[0].vector?.addStroke(stroke([CGPoint(x: 8, y: 50), CGPoint(x: 56, y: 50)]))
 
         PixelOps.clearRasterizeCache()
-        let sourceAfter = bytes(of: shown(manager, manager.layers[1].cels[1]))
+        let sourceAfter = bytes(of: try shown(manager, manager.layers[1].cels[1]))
         XCTAssertNotEqual(sourceAfter, sourceBefore,
                           "Control: the in-between itself does still follow its keyframes")
         XCTAssertEqual(try copyNow(), copyBefore,
@@ -204,7 +204,7 @@ final class InterpolatedCelCopyLogicTests: XCTestCase {
                                                             mappedBy: CGAffineTransform(translationX: 30, y: 0)))], interpolation: .linear)
         ]
         manager.layers[1].cels[1].pendingPoseBaselines = [TransformChannelID.cel.id: PoseQuad(restingIn: box)]
-        let want = bytes(of: shown(manager, manager.layers[1].cels[1]))
+        let want = bytes(of: try shown(manager, manager.layers[1].cels[1]))
 
         manager.duplicateCel(layerIndex: 1, celIndex: 1)
         let copy = try XCTUnwrap(manager.layers[1].cels.first { $0.startFrame == 6 })
@@ -216,7 +216,7 @@ final class InterpolatedCelCopyLogicTests: XCTestCase {
         }
 
         PixelOps.clearRasterizeCache()
-        XCTAssertEqual(bytes(of: stored(copy)), want,
+        XCTAssertEqual(bytes(of: try stored(copy)), want,
                        "and what it stores is the un-posed in-between the artist was looking at")
     }
 
@@ -282,8 +282,8 @@ final class InterpolatedCelCopyLogicTests: XCTestCase {
     func testSplittingAnInBetweenLeavesAnInBetweenOnBothSidesOfTheCut() throws {
         let (manager, _, _) = try interpolated()
         manager.layers[1].cels[1].frameCount = 4
-        let want = bytes(of: shown(manager, manager.layers[1].cels[1]))
-        XCTAssertFalse(isBlank(shown(manager, manager.layers[1].cels[1])),
+        let want = bytes(of: try shown(manager, manager.layers[1].cels[1]))
+        XCTAssertFalse(isBlank(try shown(manager, manager.layers[1].cels[1])),
                        "Setup: the whole in-between shows a picture")
 
         manager.splitCel(layerIndex: 1, celIndex: 1, atFrame: 6)
@@ -295,7 +295,7 @@ final class InterpolatedCelCopyLogicTests: XCTestCase {
         for (name, half) in halves {
             let derived = try XCTUnwrap(manager.derivedCelContent(for: half, atFrame: half.startFrame),
                                         "the \(name) half still derives a picture")
-            let got = PixelOps.rasterize(cel: half, canvasSize: size, derived: derived)
+            let got = (try XCTUnwrap(PixelOps.rasterize(cel: half, canvasSize: size, derived: derived)))
             XCTAssertFalse(isBlank(got), "the \(name) half is not blank")
             XCTAssertEqual(bytes(of: got), want, "the \(name) half shows what the whole cel showed")
         }
@@ -324,7 +324,7 @@ final class InterpolatedCelCopyLogicTests: XCTestCase {
     /// frameCount:raster:bakedImage:vector:)`: the duplicated layer's middle cel is blank.
     func testDuplicatingALayerCopiesAnInBetweensPictureRatherThanBlank() throws {
         let (manager, _, _) = try interpolated()
-        let want = shown(manager, manager.layers[1].cels[1])
+        let want = try shown(manager, manager.layers[1].cels[1])
         XCTAssertFalse(isBlank(want), "Setup: the in-between shows a picture to begin with")
 
         manager.duplicateLayer(at: 1)
@@ -333,7 +333,7 @@ final class InterpolatedCelCopyLogicTests: XCTestCase {
         XCTAssertEqual(copy.startFrame, manager.layers[1].cels[1].startFrame, "Setup: same slot")
 
         PixelOps.clearRasterizeCache()
-        let got = stored(copy)
+        let got = try stored(copy)
         XCTAssertFalse(isBlank(got), "a duplicated layer's in-between is not blank")
         XCTAssertEqual(bytes(of: got), bytes(of: want),
                        "and it is the same picture, now stored rather than derived")

@@ -111,9 +111,9 @@ final class VectorMergeLogicTests: XCTestCase {
             .flatMap(CanvasFixture.rgbaBytes)
     }
 
-    private func survivorBytes(_ manager: CanvasManager) -> [UInt8]? {
+    private func survivorBytes(_ manager: CanvasManager) throws -> [UInt8]? {
         guard let cel = manager.layers.first?.cels.first,
-              let image = PixelOps.rasterize(cel: cel, canvasSize: CanvasFixture.canvasSize).cgImage
+              let image = (try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: CanvasFixture.canvasSize))).cgImage
         else { return nil }
         return CanvasFixture.rgbaBytes(image)
     }
@@ -141,13 +141,13 @@ final class VectorMergeLogicTests: XCTestCase {
     /// composite on the right. MEASURED at `maxChannelDelta` below across every fixture in this file.
     private func assertSurvivorMatchesTheCompositeItReplaced(
         _ manager: CanvasManager, _ what: String,
-        file: StaticString = #filePath, line: UInt = #line) {
+        file: StaticString = #filePath, line: UInt = #line) throws {
         guard let expected = compositedBytes(manager) else {
             return XCTFail("\(what): could not composite the pre-merge document", file: file, line: line)
         }
         XCTAssertTrue(manager.mergeLayers(manager.layers[0].id, manager.layers[1].id),
                       "\(what): the fixture must be mergeable", file: file, line: line)
-        guard let actual = survivorBytes(manager) else {
+        guard let actual = try survivorBytes(manager) else {
             return XCTFail("\(what): the survivor produced no pixels", file: file, line: line)
         }
         XCTAssertEqual(actual.count, expected.count, "\(what): buffer sizes differ", file: file, line: line)
@@ -172,11 +172,11 @@ final class VectorMergeLogicTests: XCTestCase {
 
     /// The whole of the ask, in one test: the survivor is still a vector layer, it holds every stroke
     /// from both sides, and it draws exactly what the two layers drew.
-    func testTwoPlainVectorLayersMergeToOneVectorLayerHoldingBothDisplayLists() {
+    func testTwoPlainVectorLayersMergeToOneVectorLayerHoldingBothDisplayLists() throws {
         let manager = plainPair()
         let survivorID = manager.layers[0].id
 
-        assertSurvivorMatchesTheCompositeItReplaced(manager, "two plain vector layers")
+        try assertSurvivorMatchesTheCompositeItReplaced(manager, "two plain vector layers")
 
         XCTAssertEqual(manager.layers.count, 1)
         XCTAssertEqual(manager.layers[0].id, survivorID, "The lower layer survives, as in any merge")
@@ -275,7 +275,7 @@ final class VectorMergeLogicTests: XCTestCase {
     /// it *in its own list*. B's eraser has nothing of its own to erase, so B draws blank and the
     /// lower layer's ink is untouched. Concatenate the two lists and that same eraser starts eating
     /// the lower layer's drawing — a hole straight through the artist's work.
-    func testAnEraserInTheUpperLayerFallsBackToPixelsAndLeavesTheLowerLayersInkIntact() {
+    func testAnEraserInTheUpperLayerFallsBackToPixelsAndLeavesTheLowerLayersInkIntact() throws {
         let manager = pair(lower: [.stroke(Self.stroke(0)), .stroke(Self.stroke(1))],
                            upper: [.stroke(Self.eraser())])
         guard let before = compositedBytes(manager) else { return XCTFail("no pre-merge composite") }
@@ -284,11 +284,11 @@ final class VectorMergeLogicTests: XCTestCase {
         for x in 0..<side where alpha(before, x, 26) == 255 { probe = (x, 26); break }
         guard let probe else { return XCTFail("Setup: the lower layer must paint something opaque on row 26") }
 
-        assertSurvivorMatchesTheCompositeItReplaced(manager, "an eraser above")
+        try assertSurvivorMatchesTheCompositeItReplaced(manager, "an eraser above")
 
         XCTAssertEqual(manager.layers[0].kind, .raster,
                        "The concatenated list would punch the layer below, so this one bakes")
-        guard let after = survivorBytes(manager) else { return XCTFail("no survivor pixels") }
+        guard let after = try survivorBytes(manager) else { return XCTFail("no survivor pixels") }
         XCTAssertEqual(alpha(after, probe.x, probe.y), 255,
                        "The lower layer's ink under the upper layer's eraser is still opaque")
         XCTAssertEqual(manager.notice?.kind, .mergedAsPixels,
@@ -297,11 +297,11 @@ final class VectorMergeLogicTests: XCTestCase {
 
     /// **An eraser in the *lower* layer is fine and deliberately allowed.** It punches only what
     /// precedes it in its own list, and concatenation moves nothing before it.
-    func testAnEraserInTheLowerLayerStaysVector() {
+    func testAnEraserInTheLowerLayerStaysVector() throws {
         let manager = pair(lower: [.stroke(Self.stroke(0)), .stroke(Self.eraser())],
                            upper: [.stroke(Self.stroke(2, y: 34))])
 
-        assertSurvivorMatchesTheCompositeItReplaced(manager, "an eraser below")
+        try assertSurvivorMatchesTheCompositeItReplaced(manager, "an eraser below")
 
         XCTAssertEqual(manager.layers[0].kind, .vector)
         XCTAssertEqual(manager.layers[0].cels[0].vector?.elements.count, 3)
@@ -310,11 +310,11 @@ final class VectorMergeLogicTests: XCTestCase {
     /// **Rule 2's paint-run isolation, which is the one thing an element reads from its neighbours.**
     /// A non-`.normal` stroke anywhere in a run isolates the whole run — so joining the survivor's
     /// trailing run to the incoming leading run changes the survivor's *own* pixels.
-    func testANonNormalStrokeBlendAcrossTheSeamFallsBackToPixels() {
+    func testANonNormalStrokeBlendAcrossTheSeamFallsBackToPixels() throws {
         let manager = pair(lower: [.stroke(Self.stroke(0))],
                            upper: [.stroke(Self.stroke(2, blend: .multiply, y: 30))])
 
-        assertSurvivorMatchesTheCompositeItReplaced(manager, "a multiply stroke across the seam")
+        try assertSurvivorMatchesTheCompositeItReplaced(manager, "a multiply stroke across the seam")
 
         XCTAssertEqual(manager.layers[0].kind, .raster)
         XCTAssertEqual(manager.notice?.kind, .mergedAsPixels)
@@ -323,12 +323,12 @@ final class VectorMergeLogicTests: XCTestCase {
     /// …and the same brush setting is harmless when a fill closes the run before the seam. This is the
     /// operand that stops the test above passing for the wrong reason — "any non-normal stroke
     /// anywhere" would fail here, and the rule is about the run at the cut.
-    func testANonNormalStrokeAwayFromTheSeamStaysVector() {
+    func testANonNormalStrokeAwayFromTheSeamStaysVector() throws {
         let manager = pair(lower: [.stroke(Self.stroke(0, blend: .multiply)), .fill(Self.fill()),
                                    .stroke(Self.stroke(1))],
                            upper: [.stroke(Self.stroke(2, y: 34))])
 
-        assertSurvivorMatchesTheCompositeItReplaced(manager, "a multiply stroke behind a fill")
+        try assertSurvivorMatchesTheCompositeItReplaced(manager, "a multiply stroke behind a fill")
 
         XCTAssertEqual(manager.layers[0].kind, .vector)
         XCTAssertEqual(manager.layers[0].cels[0].vector?.elements.count, 4)
@@ -336,12 +336,12 @@ final class VectorMergeLogicTests: XCTestCase {
 
     /// `(A over B)·p ≠ (A·p) over (B·p)` wherever the two overlap, so a layer opacity below 1 cannot
     /// ride on a concatenated list. Either side.
-    func testALayerOpacityBelowOneFallsBackToPixels() {
+    func testALayerOpacityBelowOneFallsBackToPixels() throws {
         for index in 0...1 {
             let manager = plainPair()
             manager.layers[index].opacity = 0.5
 
-            assertSurvivorMatchesTheCompositeItReplaced(manager, "opacity 0.5 on layer \(index)")
+            try assertSurvivorMatchesTheCompositeItReplaced(manager, "opacity 0.5 on layer \(index)")
 
             XCTAssertEqual(manager.layers[0].kind, .raster, "opacity on layer \(index)")
             XCTAssertEqual(manager.layers[0].opacity, 1,
@@ -351,11 +351,11 @@ final class VectorMergeLogicTests: XCTestCase {
 
     /// The upper layer's blend mode composites its **rendered image** against the lower layer's; a
     /// display list has no way to say "these elements, as a group, multiply".
-    func testANonNormalBlendModeOnTheUpperLayerFallsBackToPixels() {
+    func testANonNormalBlendModeOnTheUpperLayerFallsBackToPixels() throws {
         let manager = plainPair()
         manager.layers[1].blendMode = .multiply
 
-        assertSurvivorMatchesTheCompositeItReplaced(manager, "Multiply above")
+        try assertSurvivorMatchesTheCompositeItReplaced(manager, "Multiply above")
 
         XCTAssertEqual(manager.layers[0].kind, .raster)
     }
@@ -403,13 +403,13 @@ final class VectorMergeLogicTests: XCTestCase {
 
     /// A vector cel still has the raster, fill and baked tiers, and `rasterizeUncached` draws them
     /// **under** the vector ink. Two cels with pixels in them do not concatenate into one.
-    func testAVectorCelCarryingBakedPixelsFallsBackToPixels() {
+    func testAVectorCelCarryingBakedPixelsFallsBackToPixels() throws {
         for index in 0...1 {
             let manager = plainPair()
             manager.layers[index].cels[0].bakedImage =
                 CanvasFixture.solidImage(.green, rect: CGRect(x: 2, y: 2, width: 20, height: 20))
 
-            assertSurvivorMatchesTheCompositeItReplaced(manager, "baked pixels on layer \(index)")
+            try assertSurvivorMatchesTheCompositeItReplaced(manager, "baked pixels on layer \(index)")
 
             XCTAssertEqual(manager.layers[0].kind, .raster, "baked pixels on layer \(index)")
         }
@@ -499,10 +499,10 @@ final class VectorMergeLogicTests: XCTestCase {
     /// applied** — `mergeContribution`'s `isVisible` guard, and `mergeLossKind`'s statement that
     /// visibility is deliberately not a loss to warn about. Both directions, and the byte comparison
     /// is what says the two arms agree about it.
-    func testAHiddenLayerContributesNothingToAVectorMergeJustAsToAPixelOne() {
+    func testAHiddenLayerContributesNothingToAVectorMergeJustAsToAPixelOne() throws {
         let hiddenAbove = plainPair()
         hiddenAbove.layers[1].isVisible = false
-        assertSurvivorMatchesTheCompositeItReplaced(hiddenAbove, "a hidden upper layer")
+        try assertSurvivorMatchesTheCompositeItReplaced(hiddenAbove, "a hidden upper layer")
         XCTAssertEqual(hiddenAbove.layers[0].kind, .vector)
         XCTAssertEqual(hiddenAbove.layers[0].cels[0].vector?.elements.count, 2,
                        "The hidden layer's ink is dropped, exactly as its pixels always were")
@@ -510,7 +510,7 @@ final class VectorMergeLogicTests: XCTestCase {
 
         let hiddenBelow = plainPair()
         hiddenBelow.layers[0].isVisible = false
-        assertSurvivorMatchesTheCompositeItReplaced(hiddenBelow, "a hidden lower layer")
+        try assertSurvivorMatchesTheCompositeItReplaced(hiddenBelow, "a hidden lower layer")
         XCTAssertEqual(hiddenBelow.layers[0].cels[0].vector?.elements.count, 2)
         XCTAssertTrue(hiddenBelow.layers[0].isVisible)
     }
@@ -518,11 +518,11 @@ final class VectorMergeLogicTests: XCTestCase {
     /// `render()` applies `_transform` by resampling the finished content, so two differently
     /// transformed lists are not one list. Nothing in the app writes `setTransform`, so this guards a
     /// state only a test can build — which is exactly why it needs a test.
-    func testDifferingCanvasTransformsFallBackToPixels() {
+    func testDifferingCanvasTransformsFallBackToPixels() throws {
         let manager = plainPair()
         manager.layers[1].cels[0].vector?.setTransform(CGAffineTransform(translationX: 6, y: 0))
 
-        assertSurvivorMatchesTheCompositeItReplaced(manager, "a transformed upper canvas")
+        try assertSurvivorMatchesTheCompositeItReplaced(manager, "a transformed upper canvas")
 
         XCTAssertEqual(manager.layers[0].kind, .raster)
     }
@@ -584,10 +584,10 @@ final class VectorMergeLogicTests: XCTestCase {
     }
 
     /// The survivor's flatten at `frame`, or nil where it has no cel.
-    private func survivorBytes(_ manager: CanvasManager, atFrame frame: Int) -> [UInt8]? {
+    private func survivorBytes(_ manager: CanvasManager, atFrame frame: Int) throws -> [UInt8]? {
         guard let celIndex = manager.activeCelIndex(inLayer: 0, atFrame: frame),
-              let image = PixelOps.rasterize(cel: manager.layers[0].cels[celIndex],
-                                             canvasSize: CanvasFixture.canvasSize).cgImage
+              let image = (try XCTUnwrap(PixelOps.rasterize(cel: manager.layers[0].cels[celIndex],
+                                             canvasSize: CanvasFixture.canvasSize))).cgImage
         else { return nil }
         return CanvasFixture.rgbaBytes(image)
     }
@@ -604,7 +604,7 @@ final class VectorMergeLogicTests: XCTestCase {
     /// then deleted the upper layer whole. Every other frame of it went with it: an animated document
     /// merged at frame 0 lost every drawing the upper layer held from frame 1 on, with nothing said
     /// and no test in the suite driving a merge on a document with more than one cel.
-    func testMergingCarriesTheUpperLayersInkAtEveryFrameAndNotOnlyTheCurrentOne() {
+    func testMergingCarriesTheUpperLayersInkAtEveryFrameAndNotOnlyTheCurrentOne() throws {
         let manager = animatedPair(
             lower: [cel(0, 6, [.stroke(Self.stroke(0))]), cel(6, 6, [.stroke(Self.stroke(1))])],
             upper: [cel(0, 6, [.stroke(Self.stroke(2, y: 34))]), cel(6, 6, [.stroke(Self.stroke(3, y: 34))])])
@@ -616,7 +616,7 @@ final class VectorMergeLogicTests: XCTestCase {
         XCTAssertEqual(manager.layers[0].kind, .vector)
         XCTAssertEqual(manager.layers[0].cels.count, 2, "The survivor keeps its own timeline")
         for (index, frame) in [0, 6].enumerated() {
-            guard let want = expected[index], let got = survivorBytes(manager, atFrame: frame) else {
+            guard let want = expected[index], let got = try survivorBytes(manager, atFrame: frame) else {
                 XCTFail("frame \(frame): missing operand"); continue
             }
             let (worst, differing) = compare(got, want)
@@ -632,7 +632,7 @@ final class VectorMergeLogicTests: XCTestCase {
     /// **Cel boundaries that do not line up.** The lower layer holds one drawing across the whole
     /// scene and the upper holds one across the middle of it, so there is no single picture the
     /// survivor's one cel could show. It is cut at the boundaries the pair actually has.
-    func testMisalignedCelSpansAreCutToTheBoundariesThePairActuallyHas() {
+    func testMisalignedCelSpansAreCutToTheBoundariesThePairActuallyHas() throws {
         let manager = animatedPair(
             lower: [cel(0, 12, [.stroke(Self.stroke(0))])],
             upper: [cel(4, 4, [.stroke(Self.stroke(2, y: 34))])])
@@ -646,7 +646,7 @@ final class VectorMergeLogicTests: XCTestCase {
                        "One drawing across twelve frames becomes three blocks, because the picture is three pictures")
         XCTAssertEqual(manager.layers[0].kind, .vector)
         for (index, frame) in [0, 4, 8].enumerated() {
-            guard let want = expected[index], let got = survivorBytes(manager, atFrame: frame) else {
+            guard let want = expected[index], let got = try survivorBytes(manager, atFrame: frame) else {
                 XCTFail("frame \(frame): missing operand"); continue
             }
             let (worst, differing) = compare(got, want)
@@ -663,7 +663,7 @@ final class VectorMergeLogicTests: XCTestCase {
     /// **A frame where only the upper layer has a drawing becomes a cel on the survivor.** There is
     /// nothing to merge it into, so the drawing arrives whole rather than being dropped for having no
     /// partner.
-    func testAFrameWhereOnlyTheUpperLayerHasACelBecomesACelOnTheSurvivor() {
+    func testAFrameWhereOnlyTheUpperLayerHasACelBecomesACelOnTheSurvivor() throws {
         let manager = animatedPair(
             lower: [cel(0, 4, [.stroke(Self.stroke(0))])],
             upper: [cel(0, 4, [.stroke(Self.stroke(2, y: 34))]), cel(4, 4, [.stroke(Self.stroke(3, y: 34))])])
@@ -676,7 +676,7 @@ final class VectorMergeLogicTests: XCTestCase {
         guard manager.layers[0].cels.count == 2 else { return }
         XCTAssertEqual(manager.layers[0].cels[1].vector?.elements.count, 1,
                        "The upper layer's orphan drawing came across whole")
-        guard let want = expected, let got = survivorBytes(manager, atFrame: 5) else {
+        guard let want = expected, let got = try survivorBytes(manager, atFrame: 5) else {
             return XCTFail("missing operand at frame 5")
         }
         let (worst, differing) = compare(got, want)
@@ -686,7 +686,7 @@ final class VectorMergeLogicTests: XCTestCase {
 
     /// **A cel that cannot merge as strokes takes the whole layer with it**, because `kind` is a
     /// property of the layer and not of a cel. One eraser at one frame is enough.
-    func testOneUnmergeableCelPairTakesTheWholeLayerToPixels() {
+    func testOneUnmergeableCelPairTakesTheWholeLayerToPixels() throws {
         let manager = animatedPair(
             lower: [cel(0, 6, [.stroke(Self.stroke(0))]), cel(6, 6, [.stroke(Self.stroke(1))])],
             upper: [cel(0, 6, [.stroke(Self.stroke(2, y: 34))]), cel(6, 6, [.stroke(Self.eraser())])])
@@ -698,7 +698,7 @@ final class VectorMergeLogicTests: XCTestCase {
                        "A layer has one kind — the frame that cannot stay strokes decides for all of them")
         XCTAssertEqual(manager.notice?.kind, .mergedAsPixels)
         for (index, frame) in [0, 6].enumerated() {
-            guard let want = expected[index], let got = survivorBytes(manager, atFrame: frame) else {
+            guard let want = expected[index], let got = try survivorBytes(manager, atFrame: frame) else {
                 XCTFail("frame \(frame): missing operand"); continue
             }
             let (worst, differing) = compare(got, want)

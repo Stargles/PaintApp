@@ -851,9 +851,10 @@ final class CanvasManager: ObservableObject {
     /// before flattening, so a vector layer never comes out of a merge still labeled `.vector` with
     /// stale geometry. The nested `withStructureUndo` below coalesces into whichever scope is
     /// already open, so calling this from inside `mergeLayers`'s own scope adds no extra step.
-    func rasterizeLayer(layerIndex: Int) {
-        guard layers.indices.contains(layerIndex), layers[layerIndex].kind == .vector,
-              let canvasSize else { return }
+    @discardableResult
+    func rasterizeLayer(layerIndex: Int) -> Bool {
+        guard layers.indices.contains(layerIndex), let canvasSize else { return false }
+        guard layers[layerIndex].kind == .vector else { return true }
         // **The float's settle must stay above `withStructureUndo`, and it is silent artwork loss
         // without it.** A
         // float suppresses its ids out of the layer's own render; the suppression setter invalidates,
@@ -865,7 +866,7 @@ final class CanvasManager: ObservableObject {
         // recoverable only by relaunch. Above `withStructureUndo` for that line's own reason: the
         // settle must be part of the state the snapshot is taken *of*, not of the step it records.
         commitVectorFloatIfLifted(fromLayer: layers[layerIndex].id)
-        withStructureUndo(label: .rasterize) {
+        return withStructureTransaction(label: .rasterize) {
             // **Every derivation is resolved before the first cel is mutated, and the ordering is a
             // correctness requirement rather than tidiness.** An in-between's references are usually
             // other cels *in this same layer*, and the loop below clears `vector` as it goes — so
@@ -880,9 +881,10 @@ final class CanvasManager: ObservableObject {
                 // and then `vector = nil` and `kind = .raster` took away every way back — the same
                 // "silent artwork loss" the float-settle above guards against, arriving by another
                 // door. Item 18's own filing names rasterize as the chokepoint every consumer shares.
-                let flattened = PixelOps.rasterize(cel: cel, canvasSize: canvasSize,
-                                                   derived: derived[celIndex])
-                layers[layerIndex].cels[celIndex].raster = bakedRasterTexture(image: flattened, likeExisting: cel.raster)
+                guard let flattened = PixelOps.rasterize(cel: cel, canvasSize: canvasSize,
+                        derived: derived[celIndex]),
+                      let raster = preparedRasterTexture(image: flattened, likeExisting: cel.raster) else { return false }
+                layers[layerIndex].cels[celIndex].raster = raster
                 layers[layerIndex].cels[celIndex].bakedImage = nil
                 layers[layerIndex].cels[celIndex].vector = nil
                 // The recipe has to go with the geometry, and **both** modes, not just `.reproject`.
@@ -892,6 +894,7 @@ final class CanvasManager: ObservableObject {
                 layers[layerIndex].cels[celIndex].interpolation = nil
             }
             layers[layerIndex].kind = .raster
+            return true
         }
     }
 
@@ -3659,7 +3662,7 @@ final class CanvasManager: ObservableObject {
     /// neither `bakedImage` nor `vector`, so without this clause it took the raster branch below and
     /// rendered a blank timeline thumbnail for a frame the canvas was showing ink on.
     static func celThumbnailImage(for cel: Cel, canvasSize: CGSize,
-                                  derived: DerivedCelContent? = nil) -> UIImage {
+                                  derived: DerivedCelContent? = nil) -> UIImage? {
         if derived != nil || cel.bakedImage != nil || cel.vector != nil {
             // PixelOps.rasterize folds bakedImage/raster/vector into one image already —
             // into `celThumbnailRasterBound` rather than the whole canvas, which is what keeps its
@@ -3674,6 +3677,7 @@ final class CanvasManager: ObservableObject {
                                                                         within: celThumbnailRasterBound),
                                    derived: derived)
             }
+            guard let flattened else { return nil }
             return PlaybackTrace.span(.thumbnailDownsample) {
                 ThumbnailRenderer.render(flattened, canvasSize: canvasSize,
                                          thumbnailSize: celThumbnailSize)
@@ -3701,6 +3705,7 @@ final class CanvasManager: ObservableObject {
             Self.celThumbnailImage(for: cel, canvasSize: canvasSize,
                                    derived: derivedCelContent(for: cel, atFrame: cel.startFrame))
         }
+        guard let image else { return }
         PlaybackTrace.span(.thumbnailInstall, value: layers[layerIndex].cels.count) {
             installThumbnail(image, layerIndex: layerIndex, celIndex: celIndex)
         }

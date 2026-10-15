@@ -715,20 +715,20 @@ final class PerfBaselineTests: XCTestCase {
     /// 360 KB. Two earlier drafts of this test failed on exactly that, in both directions. What is
     /// asserted instead is the retained *bitmap* itself, which is what "retains a canvas-sized
     /// allocation" actually means and is exact. The footprint is still reported, as an observation.
-    func testEmptyVectorLayersRetainNothingWhenTheDisplayRefreshes() {
+    func testEmptyVectorLayersRetainNothingWhenTheDisplayRefreshes() throws {
         let layerCount = 8
         let canvasBytes = Int(Self.canvasSize.width * Self.canvasSize.height) * 4
 
         // Warm-up: the first render of either kind faults in shared renderer machinery that would
         // otherwise be charged to whichever measurement ran first.
-        _ = autoreleasepool { VectorCanvas.empty(size: Self.canvasSize).renderIfNonEmpty() }
+        _ = autoreleasepool { VectorCanvas.empty(size: Self.canvasSize).cachedRender().image }
         _ = autoreleasepool { VectorCanvas(size: Self.canvasSize, strokes: [Self.emptyLayerProbeStroke()]).render() }
 
         let footprintBefore = residentBytes()
         var empties: [VectorCanvas] = []
         for _ in 0..<layerCount {
             let canvas = VectorCanvas.empty(size: Self.canvasSize)
-            XCTAssertNil(canvas.renderIfNonEmpty(),
+            XCTAssertNil(canvas.cachedRender().image,
                          "The display path must get nil for an empty canvas, so the image view holds no image at all")
             XCTAssertFalse(canvas.hasCachedImage,
                            "And nothing is memoized, so eviction never spends its budget on a canvas that cost nothing")
@@ -737,12 +737,12 @@ final class PerfBaselineTests: XCTestCase {
         var loaded: [VectorCanvas] = []
         for _ in 0..<layerCount {
             let canvas = VectorCanvas(size: Self.canvasSize, strokes: [Self.emptyLayerProbeStroke()])
-            XCTAssertNotNil(canvas.renderIfNonEmpty(), "Content still renders through the same call")
+            XCTAssertNotNil(canvas.render(), "Nonempty content still renders")
             loaded.append(canvas)
         }
 
-        let emptyBytes = empties.reduce(0) { $0 + Self.retainedBitmapBytes($1) }
-        let loadedBytes = loaded.reduce(0) { $0 + Self.retainedBitmapBytes($1) }
+        let emptyBytes = try empties.reduce(0) { $0 + (try Self.retainedBitmapBytes($1)) }
+        let loadedBytes = try loaded.reduce(0) { $0 + (try Self.retainedBitmapBytes($1)) }
 
         report("empty vector layer retention", [
             ("layersPerSide", "\(layerCount)"),
@@ -758,12 +758,12 @@ final class PerfBaselineTests: XCTestCase {
         XCTAssertGreaterThan(loadedBytes, canvasBytes * layerCount / 2,
                              "The control must retain its canvas-sized renders, or the assertion above is measuring nothing")
 
-        // The contract the ~10 non-display callers rely on: `render()` stays non-optional, and its
+        // The empty-canvas contract callers rely on: `render()` succeeds, and its
         // empty answer is a shared 1x1 that every one of them stretches into a rect it already knows.
         let empty = VectorCanvas.empty(size: Self.canvasSize)
-        let placeholder = empty.render()
+        let placeholder = (try XCTUnwrap(empty.render()))
         XCTAssertEqual(placeholder.size, CGSize(width: 1, height: 1))
-        XCTAssertTrue(empty.render() === placeholder, "And every caller gets the same one image")
+        XCTAssertTrue((try XCTUnwrap(empty.render())) === placeholder, "And every caller gets the same one image")
 
         // Stretched over the canvas rect it is the transparent sheet it replaced, pixel for pixel.
         let stretched = UIGraphicsImageRenderer(size: Self.canvasSize, format: PixelOps.transparentFormat()).image { _ in
@@ -777,8 +777,8 @@ final class PerfBaselineTests: XCTestCase {
     /// Bytes of bitmap a canvas is holding on to once rendered — the allocation an empty layer must
     /// not have. Read off `cgImage` rather than inferred from the canvas size, so a render that
     /// quietly went back to producing a full sheet is caught by its actual width and height.
-    private static func retainedBitmapBytes(_ canvas: VectorCanvas) -> Int {
-        guard let cg = canvas.render().cgImage else { return 0 }
+    private static func retainedBitmapBytes(_ canvas: VectorCanvas) throws -> Int {
+        guard let cg = (try XCTUnwrap(canvas.render())).cgImage else { return 0 }
         return cg.bytesPerRow * cg.height
     }
 
@@ -807,7 +807,7 @@ final class PerfBaselineTests: XCTestCase {
     /// Memory is measured inside `autoreleasepool` for the reason `stamp` documents: without it, the
     /// canvas-sized CGImages this path materializes read as a leak that the app's run loop would
     /// never actually show.
-    func testVectorLayerRenderCostAndMemory() {
+    func testVectorLayerRenderCostAndMemory() throws {
         let strokeCount = 20
         var strokes: [VectorStroke] = []
         for i in 0..<strokeCount {
@@ -1031,7 +1031,7 @@ final class PerfBaselineTests: XCTestCase {
     /// `.missed`/`.unchanged` sample is a cache hit (`render()` returns `cachedImage` in O(1)), and a
     /// `.cut` sample is the one that pays the full re-stamp. Averaging the two together would hide the
     /// asymmetry item 10 exists to quantify.
-    func testCutToIntersectionLiveDragCostPerSample() {
+    func testCutToIntersectionLiveDragCostPerSample() throws {
         let canvas = VectorCanvas(size: Self.canvasSize, strokes: Self.eraseScenePaintStrokes())
         let elementsBefore = canvas.elements.count
 
@@ -1107,7 +1107,7 @@ final class PerfBaselineTests: XCTestCase {
     /// The three per-sample costs, on the same scene and the same drag:
     ///
     /// - **(a) Cut as it was** — no scratch, no preview. `refreshDisplay()` re-reads
-    ///   `renderIfNonEmpty()`, which is memoized on `version`, and `version` does not move during a
+    ///   `render()`, which is memoized on `version`, and `version` does not move during a
     ///   Mode 2 drag. So this is the cache hit, and it is the floor everything else is measured
     ///   against.
     /// - **(b) The exact-span preview** — `cutPreviewEdits` (spatial-index query + the same
@@ -1132,7 +1132,7 @@ final class PerfBaselineTests: XCTestCase {
     /// is a probe walk and a handful of dabs against a spatial-index query that comes back empty.
     /// Averaging the two together on a drag whose mix is an artefact of the scene would be a number
     /// about the scene.
-    func testCutPointsLivePreviewCostPerSample() {
+    func testCutPointsLivePreviewCostPerSample() throws {
         let canvas = VectorCanvas(size: Self.canvasSize, strokes: Self.eraseScenePaintStrokes())
 
         // Warm-up, same reasoning as the two tests above: faults in the spatial index and the first
@@ -1155,7 +1155,7 @@ final class PerfBaselineTests: XCTestCase {
         for _ in points {
             autoreleasepool {
                 let start = CFAbsoluteTimeGetCurrent()
-                _ = canvas.renderIfNonEmpty()
+                _ = canvas.render()
                 noPreview.append(CFAbsoluteTimeGetCurrent() - start)
             }
         }
@@ -1163,7 +1163,7 @@ final class PerfBaselineTests: XCTestCase {
         // The scratch a `.replacement` role allocates once per gesture: a canvas-sized copy of the
         // layer's own render. Mode 1 has always paid this; Mode 2 now does too, once, at touch-down.
         let scratchStart = CFAbsoluteTimeGetCurrent()
-        let scratch = RasterLayerTexture.load(from: canvas.render(), size: Self.canvasSize)
+        let scratch = RasterLayerTexture.load(from: (try XCTUnwrap(canvas.render())), size: Self.canvasSize)
         let scratchAllocation = CFAbsoluteTimeGetCurrent() - scratchStart
 
         // (b) The exact-span preview, driven exactly as `recordVectorSample` drives it: one
@@ -1218,7 +1218,7 @@ final class PerfBaselineTests: XCTestCase {
         }
 
         // (c) The footprint punch, on its own fresh scratch: the live walk itself.
-        let footprintScratch = RasterLayerTexture.load(from: canvas.render(), size: Self.canvasSize)
+        let footprintScratch = RasterLayerTexture.load(from: (try XCTUnwrap(canvas.render())), size: Self.canvasSize)
         var footprint: [Double] = []
         var footprintWalk = BrushStamper.LiveWalk(seed: 0)
         for point in points {
@@ -2355,7 +2355,7 @@ final class PerfBaselineTests: XCTestCase {
             func compositedFrame() {
                 autoreleasepool {
                     dab(into: scratch)
-                    let base = committed.renderIfNonEmpty()
+                    let base = committed.render()
                     _ = UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { _ in
                         base?.draw(in: bounds)
                         scratch.renderToUIImage().draw(in: bounds)
@@ -2365,13 +2365,13 @@ final class PerfBaselineTests: XCTestCase {
             // Verbatim `StrokeCanvasView.refreshDisplay`'s `.overlay` branch as it stands now: the
             // scratch rendered once into `scratchView`, and a base read that the identity check in
             // `refreshDisplay` turns into a memo hit for every touch-move of a stroke (an `.overlay`
-            // gesture does not touch the canvas until lift, so `renderIfNonEmpty` returns the same
+            // gesture does not touch the canvas until lift, so `render` returns the same
             // object each time and the assignment never happens). Core Animation composites the two
             // layers on the GPU and none of that is on this thread, which is exactly the point.
             func layeredFrame() {
                 autoreleasepool {
                     dab(into: scratch)
-                    _ = committed.renderIfNonEmpty()
+                    _ = committed.render()
                     _ = scratch.renderToUIImage()
                 }
             }
@@ -4583,7 +4583,7 @@ final class PerfBaselineTests: XCTestCase {
     /// does is still the arithmetic PERFORMANCE.md item 11 is about — one canvas-sized rasterize per
     /// sample against none — and the ratio is why the float's latch is shaped the way it is, so the
     /// measurement is left standing rather than deleted with the path it was taken on.
-    func testWhatOneSampleOfAMoveDragCosts() {
+    func testWhatOneSampleOfAMoveDragCosts() throws {
         let canvasSize = CGSize(width: 2048, height: 1024)
         let strokes = Self.movingSceneStrokes(size: canvasSize)
         let canvas = VectorCanvas(size: canvasSize, strokes: strokes)
@@ -5313,8 +5313,8 @@ final class PerfBaselineTests: XCTestCase {
 
     /// Flat colour under ink: what a paint-bucket pass leaves behind. Six colours, large polygons,
     /// hard edges, and no gradient anywhere — §2.8's "a lot of flat colors".
-    private static func celArtFrame(size: CGSize) -> CGImage {
-        let inkImage = VectorCanvas(size: size, strokes: celInkStrokes(size: size)).render()
+    private static func celArtFrame(size: CGSize) throws -> CGImage {
+        let inkImage = (try XCTUnwrap(VectorCanvas(size: size, strokes: celInkStrokes(size: size)).render()))
         let w = size.width, h = size.height
         let palette: [UIColor] = [
             UIColor(red: 0.96, green: 0.95, blue: 0.91, alpha: 1),   // paper / sky
@@ -5352,8 +5352,8 @@ final class PerfBaselineTests: XCTestCase {
     /// A hold: three strokes and nothing else, on transparency. Most frames of an animated scene are
     /// this, and a content-addressed store keeps one file for the whole span (§3.3) — so this is what
     /// the *disk* mostly holds.
-    private static func holdFrame(size: CGSize) -> CGImage {
-        VectorCanvas(size: size, strokes: Array(celInkStrokes(size: size).prefix(3))).render().cgImage!
+    private static func holdFrame(size: CGSize) throws -> CGImage {
+        (try XCTUnwrap(VectorCanvas(size: size, strokes: Array(celInkStrokes(size: size).prefix(3))).render())).cgImage!
     }
 
     /// A painted background: two-axis gradient plus ±3 of grain. Gradients have no exact byte repeat
@@ -5398,10 +5398,10 @@ final class PerfBaselineTests: XCTestCase {
         return DecodedFrame(width: w, height: h, pixels: Data(bytes)).makeImage()!
     }
 
-    private static func bakeFixture(_ kind: BakeFixture, size: CGSize) -> CGImage {
+    private static func bakeFixture(_ kind: BakeFixture, size: CGSize) throws -> CGImage {
         switch kind {
-        case .celArt:   return celArtFrame(size: size)
-        case .hold:     return holdFrame(size: size)
+        case .celArt:   return try celArtFrame(size: size)
+        case .hold:     return try holdFrame(size: size)
         case .painted:  return paintedFrame(size: size)
         case .noise:    return noiseFrame(size: size)
         }
@@ -5483,7 +5483,7 @@ final class PerfBaselineTests: XCTestCase {
 
     /// Ratio, encode and decode for every fixture at every canvas size, each split into the pieces
     /// that a design decision could actually move.
-    func testWhatOneBakedFrameCostsToCompressStoreAndDecode() {
+    func testWhatOneBakedFrameCostsToCompressStoreAndDecode() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("BakeCodec-" + UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -5497,12 +5497,12 @@ final class PerfBaselineTests: XCTestCase {
 
         for row in Self.bakeMatrix {
             for fixture in row.fixtures {
-                autoreleasepool {
+                try autoreleasepool {
                     let label = "\(row.name) \(fixture.rawValue)"
                     let pixels = Int(row.size.width * row.size.height)
                     let reps = pixels >= 4096 * 4096 ? 3 : 5
                     let key = FrameBakeKey(rawDigest: Self.syntheticBakeDigest(label))
-                    let image = Self.bakeFixture(fixture, size: row.size)
+                    let image = try Self.bakeFixture(fixture, size: row.size)
 
                     guard let bgra = FrameBakeStore.bgraBytes(image) else {
                         return XCTFail("\(label): the fixture must be readable as BGRA")
@@ -5621,16 +5621,16 @@ final class PerfBaselineTests: XCTestCase {
     /// The cost side is measured too, because it is not free: the filter is a full pass over the
     /// frame on the way in and the un-filter is another on the way out, and the un-filter lands on
     /// the **decode** path, which is the one with a 41.6 ms budget.
-    func testWhetherAPerRowFilterBeforeLZ4WouldBuyAnything() {
+    func testWhetherAPerRowFilterBeforeLZ4WouldBuyAnything() throws {
         let sizes: [(String, CGSize)] = [("2048x1024", CGSize(width: 2048, height: 1024)),
                                          ("2048x2048", CGSize(width: 2048, height: 2048))]
         var anyMeasured = false
 
         for (sizeName, size) in sizes {
             for fixture in [BakeFixture.celArt, .hold, .painted] {
-                autoreleasepool {
+                try autoreleasepool {
                     let label = "\(sizeName) \(fixture.rawValue)"
-                    let image = Self.bakeFixture(fixture, size: size)
+                    let image = try Self.bakeFixture(fixture, size: size)
                     guard let bgra = FrameBakeStore.bgraBytes(image) else {
                         return XCTFail("\(label): the fixture must be readable as BGRA")
                     }

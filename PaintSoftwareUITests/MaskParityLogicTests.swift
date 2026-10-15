@@ -153,7 +153,7 @@ final class MaskParityLogicTests: XCTestCase {
     /// the shift structurally — the shipped threshold has to keep meaningfully more of the dab than the
     /// old 0.5 guess would, while still not being `alpha > 0` outright. Both halves matter: a threshold
     /// of 0 would pass the "keeps more" half and fail the "still not everything" half.
-    func testTheThresholdExcludesOnlyTheFaintestSkirtOfASoftDab() {
+    func testTheThresholdExcludesOnlyTheFaintestSkirtOfASoftDab() throws {
         let manager = CanvasFixture.manager(layerCount: 2)
         guard let celIndex = manager.activeCelIndex(inLayer: 0, atFrame: 0) else {
             return XCTFail("Fixture needs a cel to stamp into")
@@ -170,7 +170,7 @@ final class MaskParityLogicTests: XCTestCase {
         manager.layers[1].alphaMask = AlphaMask(sources: [.layer(manager.layers[0].id)])
 
         guard let canvasSize = manager.canvasSize,
-              let dab = PixelOps.rasterize(cel: manager.layers[0].cels[celIndex], canvasSize: canvasSize).cgImage,
+              let dab = (try XCTUnwrap(PixelOps.rasterize(cel: manager.layers[0].cels[celIndex], canvasSize: canvasSize))).cgImage,
               let masked = composite(manager) else { return XCTFail("Fixture must composite") }
 
         let touched = coveredPixelCount(dab)
@@ -229,7 +229,7 @@ final class MaskParityLogicTests: XCTestCase {
     /// A `VectorFillElement` draws through `VectorCanvas.render`, whose antialiased edge is exactly
     /// the kind of fractional alpha a mask can round differently. Flattening that layer's cel gives
     /// the raster copy those same bytes, so any difference after masking is the mask's.
-    func testAVectorLayersOwnGeometryIsMaskedTheSameWayARasterCopyOfItIs() {
+    func testAVectorLayersOwnGeometryIsMaskedTheSameWayARasterCopyOfItIs() throws {
         let vector = CanvasFixture.manager(layerCount: 2)
         vector.layers[1].kind = .vector
         guard let canvasSize = vector.canvasSize,
@@ -248,7 +248,7 @@ final class MaskParityLogicTests: XCTestCase {
         CanvasFixture.setBakedContent(raster, layerIndex: 0,
                                       CanvasFixture.solidImage(red, rect: CGRect(x: 0, y: 0, width: 32, height: 64)))
         CanvasFixture.setBakedContent(raster, layerIndex: 1,
-                                      PixelOps.rasterize(cel: vector.layers[1].cels[celIndex], canvasSize: canvasSize))
+                                      (try XCTUnwrap(PixelOps.rasterize(cel: vector.layers[1].cels[celIndex], canvasSize: canvasSize))))
         raster.layers[0].isVisible = false
 
         assertPixelsIdentical(composite(raster), composite(vector),

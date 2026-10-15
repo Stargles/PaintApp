@@ -117,10 +117,10 @@ final class StreamBakeLogicTests: XCTestCase {
     /// in, which is how the artist sees a live stream, and which no composite has (a stream is
     /// reference, STREAM.md §2.13).
     private func hostedPixel(_ fixture: Fixture, atFrame frame: Int, x: Int, y: Int,
-                             file: StaticString = #filePath, line: UInt = #line)
+                             file: StaticString = #filePath, line: UInt = #line) throws
         -> (r: UInt8, g: UInt8, b: UInt8, a: UInt8) {
         guard let celIndex = fixture.manager.activeCelIndex(inLayer: fixture.layerIndex, atFrame: frame),
-              let vector = fixture.cels[celIndex].vector, let cg = vector.render().cgImage else {
+              let vector = fixture.cels[celIndex].vector, let cg = (try XCTUnwrap(vector.render())).cgImage else {
             XCTFail("No cel to draw at frame \(frame)", file: file, line: line)
             return (0, 0, 0, 0)
         }
@@ -241,7 +241,7 @@ final class StreamBakeLogicTests: XCTestCase {
         // A newer frame, red, reaches the restored cel through the tick.
         f.manager.currentFrame = 1
         feed(f, color: .red, index: 2)
-        assertRed(hostedPixel(f, atFrame: 1, x: 32, y: 32), "after undo the stream is live again")
+        assertRed(try hostedPixel(f, atFrame: 1, x: 32, y: 32), "after undo the stream is live again")
 
         f.manager.redo()
         XCTAssertEqual(f.spans, [0..<1, 1..<2, 2..<4], "redo bakes again")
@@ -270,8 +270,8 @@ final class StreamBakeLogicTests: XCTestCase {
         f.manager.currentFrame = 1
         feed(f, color: .red, index: 2)
 
-        assertRed(hostedPixel(f, atFrame: 0, x: 32, y: 32), "[1] follows the stream")
-        assertRed(hostedPixel(f, atFrame: 3, x: 32, y: 32), "[3–4] follows the stream")
+        assertRed(try hostedPixel(f, atFrame: 0, x: 32, y: 32), "[1] follows the stream")
+        assertRed(try hostedPixel(f, atFrame: 3, x: 32, y: 32), "[3–4] follows the stream")
         XCTAssertEqual(compositedPixel(f, atFrame: 0, x: 32, y: 32).a, 0, "[1] is not in the composite")
         XCTAssertEqual(compositedPixel(f, atFrame: 3, x: 32, y: 32).a, 0, "[3–4] is not in the composite")
         assertGreen(compositedPixel(f, atFrame: 1, x: 32, y: 32), "[2] is baked and holds green")
@@ -286,11 +286,11 @@ final class StreamBakeLogicTests: XCTestCase {
         XCTAssertEqual(bake(f, atFrame: 1), .baked)
         f.manager.currentFrame = 0
         feed(f, color: .red, index: 2)
-        assertRed(hostedPixel(f, atFrame: 0, x: 32, y: 32), "Setup: [1] drew slot 2")
+        assertRed(try hostedPixel(f, atFrame: 0, x: 32, y: 32), "Setup: [1] drew slot 2")
         // Same slot index, other cel. A memo keyed on the element alone would skip this.
         f.manager.currentFrame = 3
         feed(f, color: .red, index: 2)
-        assertRed(hostedPixel(f, atFrame: 3, x: 32, y: 32), "[3–4] drew slot 2 too")
+        assertRed(try hostedPixel(f, atFrame: 3, x: 32, y: 32), "[3–4] drew slot 2 too")
     }
 
     // MARK: - Refusals
@@ -349,7 +349,7 @@ final class StreamBakeLogicTests: XCTestCase {
                                                  elementID: stream.id, true), "already frozen: no change")
 
         feed(f, color: .red, index: 2)
-        assertGreen(hostedPixel(f, atFrame: 0, x: 32, y: 32), "frozen: the red frame did not land")
+        assertGreen(try hostedPixel(f, atFrame: 0, x: 32, y: 32), "frozen: the red frame did not land")
 
         XCTAssertEqual(bake(f, atFrame: 1), .baked)
         assertGreen(compositedPixel(f, atFrame: 1, x: 32, y: 32), "the bake is the frozen green")
@@ -360,7 +360,7 @@ final class StreamBakeLogicTests: XCTestCase {
         XCTAssertEqual(f.manager.history.undoStack.count, stepsBefore + 1, "only the bake was a step")
         f.manager.currentFrame = 0
         feed(f, color: .red, index: 3)
-        assertRed(hostedPixel(f, atFrame: 0, x: 32, y: 32), "unfrozen: the next frame lands")
+        assertRed(try hostedPixel(f, atFrame: 0, x: 32, y: 32), "unfrozen: the next frame lands")
     }
 
     /// **Freezing is a viewing state and moves nothing the document keeps.** `version` stays and so
@@ -373,12 +373,12 @@ final class StreamBakeLogicTests: XCTestCase {
         let stream = try XCTUnwrap(vector.streams.first)
         let documentVersion = vector.documentVersion
         let version = vector.version
-        let rendered = vector.render()
+        let rendered = (try XCTUnwrap(vector.render()))
         XCTAssertTrue(f.manager.setStreamFrozen(layerIndex: f.layerIndex, celIndex: 0,
                                                 elementID: stream.id, true))
         XCTAssertEqual(vector.documentVersion, documentVersion, "the document's picture did not change")
         XCTAssertEqual(vector.version, version, "and nothing is stale")
-        XCTAssertTrue(vector.render() === rendered, "so the memo of the picture that did not change stands")
+        XCTAssertTrue((try XCTUnwrap(vector.render())) === rendered, "so the memo of the picture that did not change stands")
 
         XCTAssertTrue(f.manager.setStreamFrozen(layerIndex: f.layerIndex, celIndex: 0,
                                                 elementID: stream.id, false))

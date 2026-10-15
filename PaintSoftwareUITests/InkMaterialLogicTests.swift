@@ -330,7 +330,7 @@ final class InkMaterialLogicTests: XCTestCase {
             mode: .push, seed: 41, samples: StrokeSamples(points: [CGPoint(x: 72, y: 64), CGPoint(x: 90, y: 86)]), selection: selection)
         let moved = LiquifyField(gesture).mapping([.stroke(ink)])
         let size = CGSize(width: 128, height: 128)
-        let images = [VectorCanvas(size: size, elements: [.stroke(ink)]).render(), VectorCanvas(size: size, elements: moved).render()]
+        let images = [(try XCTUnwrap(VectorCanvas(size: size, elements: [.stroke(ink)]).render())), (try XCTUnwrap(VectorCanvas(size: size, elements: moved).render()))]
         let before = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(images[0].cgImage)))
         let after = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(images[1].cgImage)))
         var interior = 0, exterior = 0
@@ -364,8 +364,8 @@ final class InkMaterialLogicTests: XCTestCase {
         let mapped = field.mapping([.fill(fill)])
         guard case .fill(let deformed) = mapped[0] else { return XCTFail("editable fill") }
         XCTAssertEqual(deformed.pathData, fill.pathData, "PREMISE: only interior paint, not a path point, is under the brush")
-        let before = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(VectorCanvas(size: size, elements: [.fill(fill)]).render().cgImage)))
-        let after = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(VectorCanvas(size: size, elements: mapped).render().cgImage)))
+        let before = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap((try XCTUnwrap(VectorCanvas(size: size, elements: [.fill(fill)]).render())).cgImage)))
+        let after = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap((try XCTUnwrap(VectorCanvas(size: size, elements: mapped).render())).cgImage)))
         var inside = 0, outside = 0
         for y in 0..<128 { for x in 0..<128 {
             let i = (y * 128 + x) * 4
@@ -461,9 +461,9 @@ final class InkMaterialLogicTests: XCTestCase {
             throughStretch: CGAffineTransform(translationX: 300, y: 200)) else { return XCTFail("Move retains stroke") }
         let paper = VectorFillElement(path: CGPath(rect: CGRect(origin: .zero, size: size), transform: nil),
             color: CodableColor(red: 1, green: 1, blue: 1, alpha: 1))
-        let before = VectorCanvas(size: size, elements: [.fill(paper), .stroke(moved)]).render()
+        let before = (try XCTUnwrap(VectorCanvas(size: size, elements: [.fill(paper), .stroke(moved)]).render()))
         var erase = moved; erase.composite = .erase
-        let expected = VectorCanvas(size: size, elements: [.fill(paper), .stroke(moved), .stroke(erase)]).render()
+        let expected = (try XCTUnwrap(VectorCanvas(size: size, elements: [.fill(paper), .stroke(moved), .stroke(erase)]).render()))
         let scratch = StrokeScratch(canvasSize: size, role: .replacing(backdrop: before))
         VectorCanvas.applyPreview(erasing: moved, into: scratch)
         XCTAssertTrue(scratch.completed)
@@ -554,8 +554,8 @@ final class InkMaterialLogicTests: XCTestCase {
         let mask = CGPath(ellipseIn: CGRect(x: 9.3, y: 8.7, width: 43.2, height: 47.9), transform: nil)
         let fragment = fill.clipped(to: mask)
         var plain = fill.reshaped(to: mask); plain.placement = nil
-        let actual = VectorCanvas(size: size, elements: [.fill(fragment)]).render()
-        let expected = VectorCanvas(size: size, elements: [.fill(plain)]).render()
+        let actual = (try XCTUnwrap(VectorCanvas(size: size, elements: [.fill(fragment)]).render()))
+        let expected = (try XCTUnwrap(VectorCanvas(size: size, elements: [.fill(plain)]).render()))
         let a = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(actual.cgImage)))
         let b = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(expected.cgImage)))
         XCTAssertGreaterThan(stride(from: 3, to: b.count, by: 4).filter { b[$0] > 0 && b[$0] < 255 }.count, 20,
@@ -569,8 +569,8 @@ final class InkMaterialLogicTests: XCTestCase {
         let outsidePath = path.subtracting(mask)
         let outside = fill.clipped(to: outsidePath, mask: mask, inverted: true)
         var plainOutside = fill.reshaped(to: outsidePath); plainOutside.placement = nil
-        let outsideActual = VectorCanvas(size: size, elements: [.fill(outside)]).render()
-        let outsideExpected = VectorCanvas(size: size, elements: [.fill(plainOutside)]).render()
+        let outsideActual = (try XCTUnwrap(VectorCanvas(size: size, elements: [.fill(outside)]).render()))
+        let outsideExpected = (try XCTUnwrap(VectorCanvas(size: size, elements: [.fill(plainOutside)]).render()))
         let c = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(outsideActual.cgImage)))
         let d = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(outsideExpected.cgImage)))
         XCTAssertLessThanOrEqual(zip(c, d).map { abs(Int($0.0) - Int($0.1)) }.max() ?? 0, 1,

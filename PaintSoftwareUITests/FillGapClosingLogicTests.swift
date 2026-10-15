@@ -362,7 +362,7 @@ final class FillGapClosingLogicTests: XCTestCase {
         // and onto three sides, the fill runs up to the first pixel the ink walls off — alpha past the
         // 0.15 threshold's 77 — read off the outline's own render rather than off any fill.
         let ink = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(
-            VectorCanvas(size: CGSize(width: 2048, height: 1024), strokes: ownersOutline().strokes).render().cgImage)))
+            (try XCTUnwrap(VectorCanvas(size: CGSize(width: 2048, height: 1024), strokes: ownersOutline().strokes).render())).cgImage)))
         let middle = CGPoint(x: 600, y: 460)
         for (name, target) in [("top-left", CGPoint(x: 250, y: 110)), ("top-right", CGPoint(x: 950, y: 100)),
                                ("bottom-right", CGPoint(x: 960, y: 820)), ("bottom-left", CGPoint(x: 240, y: 810)),

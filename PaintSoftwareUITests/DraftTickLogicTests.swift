@@ -149,7 +149,7 @@ final class DraftTickLogicTests: XCTestCase {
         XCTAssertTrue(manager.commitFloatingPieceIfNeeded())
         XCTAssertNil(manager.boxNudge, "setting the piece down ends the gesture")
 
-        let landed = PixelOps.rasterize(cel: manager.layers[0].cels[0], canvasSize: CanvasFixture.canvasSize)
+        let landed = (try XCTUnwrap(PixelOps.rasterize(cel: manager.layers[0].cels[0], canvasSize: CanvasFixture.canvasSize)))
         let opaque = try XCTUnwrap(opaqueColumns(landed, row: 32), "ink landed on the row")
         XCTAssertEqual(opaque.lowerBound, 28, accuracy: 1, "the ink begins where the box was, 12 px on")
         XCTAssertEqual(opaque.upperBound, 59, accuracy: 1)

@@ -161,9 +161,9 @@ enum RasterVectorParity {
     /// truth against a display list it mutates through `VectorCanvas.erase` — it needs this half
     /// without the vector half `tiers(_:)` builds alongside it, and must share the *same* backdrop
     /// element.
-    static func rasterBase(_ scenario: ParityScenario, backdrop: VectorElement?) -> RasterLayerTexture {
+    static func rasterBase(_ scenario: ParityScenario, backdrop: VectorElement?) throws -> RasterLayerTexture {
         guard let backdrop else { return RasterLayerTexture.empty(size: scenario.canvasSize) }
-        let image = VectorCanvas(size: scenario.canvasSize, elements: [backdrop]).render()
+        let image = (try XCTUnwrap(VectorCanvas(size: scenario.canvasSize, elements: [backdrop]).render()))
         return RasterLayerTexture.load(from: image, size: scenario.canvasSize)
     }
 
@@ -173,18 +173,18 @@ enum RasterVectorParity {
     ///   stamped `isEraser: true` — i.e. exactly what a raster layer does when a user erases.
     /// - Vector tier: the display list `[backdrop?, .stroke(paint), .stroke(erase)]`, where the erase
     ///   element punches `.destinationOut` against everything beneath it.
-    static func tiers(_ scenario: ParityScenario) -> (raster: UIImage, vector: UIImage) {
+    static func tiers(_ scenario: ParityScenario) throws -> (raster: UIImage, vector: UIImage) {
         let paint = paintStroke(scenario)
         let erase = eraseStroke(scenario)
         // Built once and shared, so the placed image is literally the same `UIImage` in both tiers.
         let backdrop = backdropElement(scenario)
 
-        let texture = rasterBase(scenario, backdrop: backdrop)
+        let texture = try rasterBase(scenario, backdrop: backdrop)
         stamp(paint, into: texture, isEraser: false)
         stamp(erase, into: texture, isEraser: true)
 
         let elements = (backdrop.map { [$0] } ?? []) + [.stroke(paint), .stroke(erase)]
-        let vector = VectorCanvas(size: scenario.canvasSize, elements: elements).render()
+        let vector = (try XCTUnwrap(VectorCanvas(size: scenario.canvasSize, elements: elements).render()))
         return (texture.renderToUIImage(), vector)
     }
 
@@ -264,8 +264,8 @@ enum RasterVectorParity {
     }
 
     /// The acceptance measurement: retained-`.erase`-element vector result vs raster ground truth.
-    static func parityOfRetainedPunch(_ scenario: ParityScenario, tolerance: Int = 0) -> ParityReport? {
-        let (raster, vector) = tiers(scenario)
+    static func parityOfRetainedPunch(_ scenario: ParityScenario, tolerance: Int = 0) throws -> ParityReport? {
+        let (raster, vector) = try tiers(scenario)
         return report(raster: raster, vector: vector, size: scenario.canvasSize, tolerance: tolerance)
     }
 
@@ -296,13 +296,13 @@ enum RasterVectorParity {
     ///   it came from. Irrelevant for a brush with no scatter or rotation jitter; for one that has
     ///   them, a split visibly re-rolls the grain of the pieces and that shows up here as real delta.
     ///   Whether the pieces should inherit a derived-but-stable seed is an open question.
-    static func parityOfGeometricSplit(_ scenario: ParityScenario, tolerance: Int = 0) -> ParityReport? {
+    static func parityOfGeometricSplit(_ scenario: ParityScenario, tolerance: Int = 0) throws -> ParityReport? {
         let paint = paintStroke(scenario)
         let erase = eraseStroke(scenario)
         let backdrop = backdropElement(scenario)
 
         // Ground truth is unchanged: the raster layer really is erased.
-        let texture = rasterBase(scenario, backdrop: backdrop)
+        let texture = try rasterBase(scenario, backdrop: backdrop)
         stamp(paint, into: texture, isEraser: false)
         stamp(erase, into: texture, isEraser: true)
 
@@ -318,7 +318,7 @@ enum RasterVectorParity {
         }
 
         let elements = (backdrop.map { [$0] } ?? []) + pieces
-        let vector = VectorCanvas(size: scenario.canvasSize, elements: elements).render()
+        let vector = (try XCTUnwrap(VectorCanvas(size: scenario.canvasSize, elements: elements).render()))
         return report(raster: texture.renderToUIImage(), vector: vector,
                       size: scenario.canvasSize, tolerance: tolerance)
     }
@@ -426,15 +426,15 @@ final class RasterVectorParityLogicTests: XCTestCase {
     /// Runs brush × eraser-opacity × gesture for one backdrop. One `runActivity` per case, so a
     /// failure names the case instead of leaving twelve identical-looking assertions to sort out.
     private func assertPunchMatchesRaster(over backdropName: String, _ backdrop: ParityScenario.Backdrop,
-                                          file: StaticString = #filePath, line: UInt = #line) {
+                                          file: StaticString = #filePath, line: UInt = #line) throws {
         for brush in Self.brushes {
             for eraserOpacity in Self.eraserOpacities {
                 for gesture in Gesture.allCases {
                     let name = "\(brush.name) / eraser opacity \(eraserOpacity) / \(gesture.label) / \(backdropName)"
                     let scene = scenario(brush: brush, eraserOpacity: eraserOpacity,
                                          gesture: gesture, backdrop: backdrop, name: name)
-                    XCTContext.runActivity(named: scene.name) { _ in
-                        guard let report = RasterVectorParity.parityOfRetainedPunch(scene) else {
+                    try XCTContext.runActivity(named: scene.name) { _ in
+                        guard let report = try RasterVectorParity.parityOfRetainedPunch(scene) else {
                             return XCTFail("Could not read back both tiers for \(scene.name)", file: file, line: line)
                         }
                         XCTAssertTrue(report.isExact,
@@ -446,22 +446,22 @@ final class RasterVectorParityLogicTests: XCTestCase {
         }
     }
 
-    func testPunchOverABareStrokeIsPixelIdenticalToRasterErasing() {
-        assertPunchMatchesRaster(over: "bare stroke", .none)
+    func testPunchOverABareStrokeIsPixelIdenticalToRasterErasing() throws {
+        try assertPunchMatchesRaster(over: "bare stroke", .none)
     }
 
     /// The punch must reach *everything* beneath it, fills included — which is why
     /// `renderLocalContent`'s rule 3 keeps an `.erase` element out of any transparency layer. If that
     /// rule regressed, the vector tier would leave the fill intact where the raster tier removed it,
     /// and the delta here would be the fill's own colour rather than a rounding artefact.
-    func testPunchOverAVectorFillIsPixelIdenticalToRasterErasing() {
+    func testPunchOverAVectorFillIsPixelIdenticalToRasterErasing() throws {
         let rect = CGRect(x: 8, y: 40, width: 112, height: 48)
-        assertPunchMatchesRaster(over: "over a fill",
+        try assertPunchMatchesRaster(over: "over a fill",
                                  .fill(CodableColor(red: 0.1, green: 0.3, blue: 0.9, alpha: 1), rect))
     }
 
-    func testPunchOverAPlacedImageIsPixelIdenticalToRasterErasing() {
-        assertPunchMatchesRaster(over: "over a placed image",
+    func testPunchOverAPlacedImageIsPixelIdenticalToRasterErasing() throws {
+        try assertPunchMatchesRaster(over: "over a placed image",
                                  .image(UIColor(red: 0.1, green: 0.7, blue: 0.2, alpha: 1),
                                         CGSize(width: 64, height: 64)))
     }
@@ -472,15 +472,15 @@ final class RasterVectorParityLogicTests: XCTestCase {
     /// also agree, so without this a gesture that missed the stroke entirely — or an erase element
     /// that silently stopped being drawn in both tiers — would sail through twelve green assertions.
     /// This pins that each gesture actually removes ink from the vector render.
-    func testEachGestureActuallyRemovesInkSoTheMatrixIsNotVacuous() {
+    func testEachGestureActuallyRemovesInkSoTheMatrixIsNotVacuous() throws {
         for gesture in Gesture.allCases {
             let scene = scenario(brush: TestBrushes.hardRound, eraserOpacity: 1,
                                  gesture: gesture, backdrop: .none)
             let paint = RasterVectorParity.paintStroke(scene)
             let erase = RasterVectorParity.eraseStroke(scene)
-            let before = VectorCanvas(size: scene.canvasSize, elements: [.stroke(paint)]).render()
-            let after = VectorCanvas(size: scene.canvasSize,
-                                     elements: [.stroke(paint), .stroke(erase)]).render()
+            let before = (try XCTUnwrap(VectorCanvas(size: scene.canvasSize, elements: [.stroke(paint)]).render()))
+            let after = (try XCTUnwrap(VectorCanvas(size: scene.canvasSize,
+                                     elements: [.stroke(paint), .stroke(erase)]).render()))
             guard let report = RasterVectorParity.report(raster: before, vector: after,
                                                          size: scene.canvasSize) else {
                 return XCTFail("Could not read back the before/after renders for \(gesture.label)")
@@ -501,7 +501,7 @@ final class RasterVectorParityLogicTests: XCTestCase {
     /// The probe is at (64, 40): under the square cut's path, inside both backdrops, and clear of the
     /// paint stroke's own ink (which spans y ∈ [52, 76]) — so whatever is found there came from the
     /// backdrop alone.
-    func testThePunchReachesTheBackdropSoTheBackdropCasesAreNotVacuous() {
+    func testThePunchReachesTheBackdropSoTheBackdropCasesAreNotVacuous() throws {
         let backdrops: [(String, ParityScenario.Backdrop)] = [
             ("fill", .fill(CodableColor(red: 0.1, green: 0.3, blue: 0.9, alpha: 1),
                            CGRect(x: 8, y: 40, width: 112, height: 48))),
@@ -515,10 +515,10 @@ final class RasterVectorParityLogicTests: XCTestCase {
                                  gesture: .squareCut, backdrop: backdrop)
             guard let element = RasterVectorParity.backdropElement(scene),
                   let intact = RasterVectorParity.premultipliedBytes(
-                    of: VectorCanvas(size: scene.canvasSize, elements: [element]).render(),
+                    of: (try XCTUnwrap(VectorCanvas(size: scene.canvasSize, elements: [element]).render())),
                     size: scene.canvasSize),
                   let punched = RasterVectorParity.premultipliedBytes(
-                    of: RasterVectorParity.tiers(scene).vector, size: scene.canvasSize) else {
+                    of: try RasterVectorParity.tiers(scene).vector, size: scene.canvasSize) else {
                 return XCTFail("Could not read back the \(name) backdrop")
             }
             XCTAssertEqual(intact[alphaIndex], 255, "The \(name) backdrop should cover the probe point")
@@ -530,14 +530,14 @@ final class RasterVectorParityLogicTests: XCTestCase {
     /// A partial-opacity eraser has to *fade* rather than cut, or "real partial fade" is
     /// only a claim about a code path nobody measured. Erasing at 0.4 must leave a band of ink that a
     /// full-opacity pass over the same gesture removes completely.
-    func testAPartialOpacityEraserFadesRatherThanCuts() {
+    func testAPartialOpacityEraserFadesRatherThanCuts() throws {
         let full = scenario(brush: TestBrushes.hardRound, eraserOpacity: 1,
                             gesture: .squareCut, backdrop: .none)
         let partial = scenario(brush: TestBrushes.hardRound, eraserOpacity: 0.4,
                                gesture: .squareCut, backdrop: .none)
-        guard let bytes = RasterVectorParity.premultipliedBytes(of: RasterVectorParity.tiers(partial).vector,
+        guard let bytes = RasterVectorParity.premultipliedBytes(of: try RasterVectorParity.tiers(partial).vector,
                                                                 size: partial.canvasSize),
-              let cleared = RasterVectorParity.premultipliedBytes(of: RasterVectorParity.tiers(full).vector,
+              let cleared = RasterVectorParity.premultipliedBytes(of: try RasterVectorParity.tiers(full).vector,
                                                                   size: full.canvasSize) else {
             return XCTFail("Could not read back the erased renders")
         }
@@ -558,12 +558,12 @@ final class RasterVectorParityLogicTests: XCTestCase {
     /// **Two rasterizers, one walk** — which is the limit of what this file can say about randomness.
     /// It cannot notice a split, a refit, a spacing edit or a punch moving a draw, because both sides
     /// walk the identical samples; `DabRandomLogicTests` is where those live.
-    func testAScatteringBrushMatchesBecauseBothTiersDrawFromOneField() {
+    func testAScatteringBrushMatchesBecauseBothTiersDrawFromOneField() throws {
         var scattering = TestBrushes.hardRound
         scattering.dab.scatterAcross = 0.5
         scattering.dab.scatterAlong = 0.5
         let scene = scenario(brush: scattering, eraserOpacity: 1, gesture: .squareCut, backdrop: .none)
-        guard let report = RasterVectorParity.parityOfRetainedPunch(scene) else {
+        guard let report = try RasterVectorParity.parityOfRetainedPunch(scene) else {
             return XCTFail("Could not read back both tiers")
         }
         XCTAssertTrue(report.isExact,
@@ -573,7 +573,7 @@ final class RasterVectorParityLogicTests: XCTestCase {
     /// The negative control for the test above: hand the raster tier a different field and the two
     /// tiers must diverge. Without this, a harness that accidentally compared an image with itself
     /// would look just as green.
-    func testADifferentFieldOnTheRasterTierDoesDivergeSoTheFieldTestIsNotVacuous() {
+    func testADifferentFieldOnTheRasterTierDoesDivergeSoTheFieldTestIsNotVacuous() throws {
         var scattering = TestBrushes.hardRound
         scattering.dab.scatterAcross = 0.5
         scattering.dab.scatterAlong = 0.5
@@ -589,8 +589,8 @@ final class RasterVectorParityLogicTests: XCTestCase {
                                  random: DabRandom(seed: DabRandom.seed(for: Self.eraserID)))  // deliberately the wrong field
         RasterVectorParity.stamp(erase, into: texture, isEraser: true)
 
-        let vector = VectorCanvas(size: scene.canvasSize,
-                                  elements: [.stroke(paint), .stroke(erase)]).render()
+        let vector = (try XCTUnwrap(VectorCanvas(size: scene.canvasSize,
+                                  elements: [.stroke(paint), .stroke(erase)]).render()))
         guard let report = RasterVectorParity.report(raster: texture.renderToUIImage(), vector: vector,
                                                      size: scene.canvasSize) else {
             return XCTFail("Could not read back both tiers")
@@ -604,10 +604,10 @@ final class RasterVectorParityLogicTests: XCTestCase {
     /// Not an assertion about the split's quality — this only pins that
     /// `RasterVectorParity.parityOfGeometricSplit` runs end to end and returns a report, so the hook
     /// itself is known to work.
-    func testTheGeometricSplitHookProducesAReport() {
+    func testTheGeometricSplitHookProducesAReport() throws {
         let scene = scenario(brush: TestBrushes.hardRound, eraserOpacity: 1,
                              gesture: .squareCut, backdrop: .none)
-        guard let report = RasterVectorParity.parityOfGeometricSplit(scene) else {
+        guard let report = try RasterVectorParity.parityOfGeometricSplit(scene) else {
             return XCTFail("The Phase 4c measurement hook should produce a report")
         }
         XCTAssertEqual(report.totalPixelCount,

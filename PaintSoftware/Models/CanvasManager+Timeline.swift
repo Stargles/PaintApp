@@ -183,43 +183,18 @@ extension CanvasManager {
     /// still. They are dropped, explicitly rather than by defaulting, because defaulting an
     /// unmentioned field is precisely how these two came to be lost in the first place.
     ///
-    /// ## A recipe that is not evaluable at this instant
-    ///
-    /// `PixelOps.rasterize` falls back to the cel's stored tiers when the thunk answers nil (a
-    /// recipe mid-repick), so the copy is then whatever a flatten of that cel produces *at that
-    /// instant* — byte-for-byte what its own thumbnail, the onion skin and an export would produce.
-    /// That is the property worth having and it is true by construction: this is the same call with
-    /// the same arguments, not a second implementation of it.
-    ///
-    /// Returns nil for a cel that shows what it stores, which is every cel in a document that has
-    /// never been interpolated, so the ordinary verb costs one optional test and copies verbatim.
-    private func flattenedStill(of cel: Cel) -> Cel.CopyTiers? {
-        guard cel.interpolation != nil, let canvasSize,
-              let derived = derivedCelContent(for: cel, atFrame: cel.startFrame) else { return nil }
-        let flat = PixelOps.rasterize(cel: cel, canvasSize: canvasSize, derived: derived)
-        // **Everything lands in `bakedImage` and the other tiers are emptied**, because
-        // `PixelOps.rasterize` composited all four of them into `flat` — keeping any of them would
-        // draw that content twice. `bakedImage` rather than `raster` is the tier for it here, where
-        // `rasterizeLayer` and the block drag chose `raster`: those two are *becoming raster layers*,
-        // where a cel holds its content in exactly one tier, while a copy made by these verbs stays
-        // on the vector layer it came from, and `Cel.bakedImage` is that layer's tier for "flattened
-        // raster content baked in by a pixel-level operation" — a list whose examples already
-        // include duplicate.
-        //
-        // **The vector tier is emptied, not removed.** A vector layer's cel with no `VectorCanvas`
-        // is a cel `StrokeCanvasView` silently drops back to raster mode on (`addCel` spells the
-        // consequences out), so the artist could not draw on the copy at all. An empty canvas over a
-        // baked still is exactly the state a select-and-move bake leaves behind, and new ink lands
-        // on top of the still because `rasterizeUncached` draws `bakedImage` first.
-        return Cel.CopyTiers(raster: .empty(size: cel.raster.size), bakedImage: flat,
-                             vector: cel.vector.map { .empty(size: $0.size) },
-                             transformTracks: [:], pendingPoseBaselines: [:])
-    }
-
-    /// The tiers of a copy of `cel`: the flattened still when it derives its picture, and the cel's
-    /// own content otherwise.
-    func copyTiers(of cel: Cel) -> Cel.CopyTiers {
-        flattenedStill(of: cel) ?? Cel.CopyTiers(
+    /// An unavailable recipe copies its stored tiers. A present recipe that refuses rendering
+    /// aborts the copy, preserving the clipboard or timeline that the caller already owns.
+    func copyTiers(of cel: Cel) -> Cel.CopyTiers? {
+        if cel.interpolation != nil, let canvasSize,
+           let derived = derivedCelContent(for: cel, atFrame: cel.startFrame) {
+            guard let flat = PixelOps.rasterize(cel: cel, canvasSize: canvasSize, derived: derived) else { return nil }
+            // A flattened still keeps an empty vector tier so new strokes remain native ink.
+            return Cel.CopyTiers(raster: .empty(size: cel.raster.size), bakedImage: flat,
+                                 vector: cel.vector.map { .empty(size: $0.size) },
+                                 transformTracks: [:], pendingPoseBaselines: [:])
+        }
+        return Cel.CopyTiers(
             raster: cel.raster.makeCopy(), bakedImage: cel.bakedImage,
             vector: cel.vector?.makeCopy(),
             // **The pose channels come with the drawing** — KEYFRAMES.md §3.1's *"it rides the cel
@@ -243,7 +218,7 @@ extension CanvasManager {
     /// `clampedCelLength` returns nil and this is a no-op. That is deliberate — see BUGS.md — and it
     /// is currently silent; a UI affordance for it is logged there as a low-priority follow-up.
     ///
-    /// A copy of an in-between is a flattened still and carries no recipe — see `flattenedStill`.
+    /// A copy of an in-between is a flattened still and carries no recipe — see `copyTiers`.
     ///
     /// **A copy clamped shorter than its source loses the source's keys past the copy's end, and says
     /// so** — TODO (62). The keys ride across cel-local, so a copy that is `length` frames where the
@@ -257,7 +232,7 @@ extension CanvasManager {
         let source = layers[layerIndex].cels[celIndex]
         let newStart = source.endFrame
         guard let length = clampedCelLength(layerIndex: layerIndex, startFrame: newStart, maxLength: source.frameCount) else { return KeyframeCrop() }
-        let tiers = copyTiers(of: source)
+        guard let tiers = copyTiers(of: source) else { return KeyframeCrop() }
         var crop = KeyframeCrop()
         withStructureUndo(label: .duplicateFrame) {
             // No `interpolation:` argument, on either arm — a copy never derives. On the flatten arm
@@ -292,7 +267,7 @@ extension CanvasManager {
         beginCanvasEdit()
         guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
         let source = layers[layerIndex].cels[celIndex]
-        let tiers = copyTiers(of: source)
+        guard let tiers = copyTiers(of: source) else { return }
         copiedCel = CopiedCel(raster: tiers.raster,
                               bakedImage: tiers.bakedImage, vector: tiers.vector,
                               transformTracks: tiers.transformTracks,

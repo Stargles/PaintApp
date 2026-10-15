@@ -562,7 +562,7 @@ final class TextTransformLogicTests: XCTestCase {
 
     /// Undo after a drag-and-commit puts the cel back the way it was — the step is real, not merely
     /// present.
-    func testUndoingAfterADragRestoresAnEmptyCel() {
+    func testUndoingAfterADragRestoresAnEmptyCel() throws {
         let manager = manager()
         manager.beginTextSession(at: CGPoint(x: 20, y: 20))
         manager.textRecipe.typography.pointSize = 40
@@ -571,10 +571,10 @@ final class TextTransformLogicTests: XCTestCase {
         manager.dragTextHandle(to: CGPoint(x: 180, y: 150))
         manager.endTextHandleDrag()
         manager.commitInteractiveText()
-        XCTAssertGreaterThan(coveredPixelCount(manager), 0)
+        XCTAssertGreaterThan(try coveredPixelCount(manager), 0)
 
         manager.undo()
-        XCTAssertEqual(coveredPixelCount(manager), 0)
+        XCTAssertEqual(try coveredPixelCount(manager), 0)
     }
 
     // MARK: - `autoSize` through the model
@@ -1322,13 +1322,13 @@ final class TextTransformLogicTests: XCTestCase {
         return manager
     }
 
-    private func coveredPixelCount(_ manager: CanvasManager) -> Int {
+    private func coveredPixelCount(_ manager: CanvasManager) throws -> Int {
         guard let celIndex = manager.activeCelIndex(inLayer: 0, atFrame: manager.currentFrame) else {
             XCTFail("No cel to read")
             return 0
         }
         let cel = manager.layers[0].cels[celIndex]
-        let image = PixelOps.rasterize(cel: cel, canvasSize: Self.canvasSize, memoize: false)
+        let image = (try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: Self.canvasSize, memoize: false)))
         guard let cg = image.cgImage, let bytes = CanvasFixture.rgbaBytes(cg) else { return 0 }
         return stride(from: 3, to: bytes.count, by: 4).reduce(0) { $0 + (bytes[$1] > 0 ? 1 : 0) }
     }

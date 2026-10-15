@@ -178,7 +178,7 @@ extension CanvasManager {
         // whole cel, once Move with no selection lifts every id. Settled before the scope, as there.
         commitVectorFloatIfLifted(fromLayer: sourceLayerID, cel: celID)
 
-        withStructureUndo(label: .moveFrameToLayer) {
+        return withStructureTransaction(label: .moveFrameToLayer) {
             var cel = layers[sourceIndex].cels.remove(at: celIndex)
 
             if case .needsRasterization = verdict, let canvasSize {
@@ -187,9 +187,10 @@ extension CanvasManager {
                 // content in exactly one tier at rest.
                 // Through the `ContentProvider` seam, for `rasterizeLayer`'s reason: an in-between
                 // stores nothing, so flattening it without one baked the block away as blank.
-                let flattened = PixelOps.rasterize(cel: cel, canvasSize: canvasSize,
-                                                   derived: derivedCelContent(for: cel, atFrame: cel.startFrame))
-                cel.raster = bakedRasterTexture(image: flattened, likeExisting: cel.raster)
+                guard let flattened = PixelOps.rasterize(cel: cel, canvasSize: canvasSize,
+                        derived: derivedCelContent(for: cel, atFrame: cel.startFrame)),
+                      let raster = preparedRasterTexture(image: flattened, likeExisting: cel.raster) else { return false }
+                cel.raster = raster
                 cel.vector = nil
                 cel.bakedImage = nil
                 // The recipe goes with the geometry — **both** modes now, where this used to drop
@@ -212,8 +213,8 @@ extension CanvasManager {
                 scheduleThumbnailRegen(layerIndex: targetIndex, celIndex: moved)
             }
             currentLayerIndex = targetIndex
+            return true
         }
-        return true
     }
 
     /// Where a block dropped at `startFrame` actually lands on a layer: never straddling the block

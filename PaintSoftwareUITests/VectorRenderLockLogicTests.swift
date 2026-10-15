@@ -162,9 +162,9 @@ final class VectorRenderLockLogicTests: XCTestCase {
     /// **A cold canvas built from `elements`, which cannot take any fast path** — a fresh canvas has
     /// no memo, no incremental base and no region base, so this is the full walk by construction and
     /// is the only honest reference for what a display list is supposed to look like.
-    private func coldRender(of elements: [VectorElement]) -> UIImage {
+    private func coldRender(of elements: [VectorElement]) throws -> UIImage {
         let cold = VectorCanvas(size: Self.canvasSize, elements: elements)
-        let image = cold.render()
+        let image = (try XCTUnwrap(cold.render()))
         XCTAssertEqual(cold.rasterizations, 1,
                        "the reference arm must have rasterized exactly once — if it did not, it is "
                        + "not the cold full walk this comparison needs")
@@ -204,7 +204,7 @@ final class VectorRenderLockLogicTests: XCTestCase {
         return canvas.rasterizations > atEdit
     }
 
-    func testAnUndoLandingDuringARenderNeverLeavesTheMemoShowingTheUndoneStroke() {
+    func testAnUndoLandingDuringARenderNeverLeavesTheMemoShowingTheUndoneStroke() throws {
         let base = Self.elements(160)
         let canvas = VectorCanvas(size: Self.canvasSize, elements: base)
         // The memo and the incremental base, so the raced render takes the append path — which is the
@@ -227,7 +227,7 @@ final class VectorRenderLockLogicTests: XCTestCase {
             // the longer list installed under the version `base` was restored at would show the
             // undone stroke, and that is exactly the difference this catches.
             // One report is enough; eight would bury it.
-            guard assertSamePixels(canvas.render(), coldRender(of: base),
+            guard assertSamePixels((try XCTUnwrap(canvas.render())), try coldRender(of: base),
                                    "round \(round): the canvas's own render disagrees with a cold "
                                    + "walk of the elements it currently holds — a render planned "
                                    + "before the undo was installed after it, so the memo is a "
@@ -244,7 +244,7 @@ final class VectorRenderLockLogicTests: XCTestCase {
     /// The same guarantee from the other end of the class: an edit that is *not* an append, so the
     /// raced render is a region repair rather than an append, and the install has to refuse a
     /// `paintedBounds` table measured against a list that has since been replaced.
-    func testARestoreLandingDuringARepairNeverLeavesStaleFootprintsBehind() {
+    func testARestoreLandingDuringARepairNeverLeavesStaleFootprintsBehind() throws {
         let base = Self.elements(160)
         let canvas = VectorCanvas(size: Self.canvasSize, elements: base)
         _ = canvas.render()
@@ -261,7 +261,7 @@ final class VectorRenderLockLogicTests: XCTestCase {
             if race(on: canvas, atVersion: canvas.version,
                     editing: { canvas.restoreElements(base, changedInk: damage) }) { racedRounds += 1 }
 
-            guard assertSamePixels(canvas.render(), coldRender(of: base),
+            guard assertSamePixels((try XCTUnwrap(canvas.render())), try coldRender(of: base),
                                    "round \(round): a repair planned before the restore was "
                                    + "installed after it — either its pixels or the footprints it "
                                    + "measured, both of which are claims about a display list this "

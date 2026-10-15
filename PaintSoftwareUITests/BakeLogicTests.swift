@@ -433,7 +433,7 @@ final class BakeLogicTests: XCTestCase {
     /// **Every grade, baked into a raster layer, is the compositor's answer for that pair — byte for
     /// byte** — including the three effects that depend on position or neighbours and so could never be
     /// a colour (Glare, Lens Blur, Guide).
-    func testEveryGradeBakedIntoARasterLayerMakesWhatTheCompositorMakesOfIt() {
+    func testEveryGradeBakedIntoARasterLayerMakesWhatTheCompositorMakesOfIt() throws {
         let grades: [Effect] = [
             Self.hueRotate,
             .brightnessContrast(Effect.BrightnessContrast(brightness: 1.2, contrast: 1.5)),
@@ -460,8 +460,8 @@ final class BakeLogicTests: XCTestCase {
 
             let outcome = manager.bakeLayer(id: layer)
             guard bakePlan(outcome) != nil, let at = manager.layers.firstIndex(where: { $0.id == floor }),
-                  let image = PixelOps.rasterize(cel: manager.layers[at].cels[0],
-                                                 canvasSize: CanvasFixture.canvasSize).cgImage,
+                  let image = (try XCTUnwrap(PixelOps.rasterize(cel: manager.layers[at].cels[0],
+                                                 canvasSize: CanvasFixture.canvasSize))).cgImage,
                   let baked = CanvasFixture.rgbaBytes(image)
             else { return XCTFail("\(grade.displayName): must bake, got \(outcome)") }
 
@@ -473,7 +473,7 @@ final class BakeLogicTests: XCTestCase {
     /// compositor inside the ink — and the layer's gaps stay gaps.** Over transparency the compositor
     /// shows the sheet itself (a blend against nothing is its source), which is the paper's business;
     /// Bake changes the drawings only, so where the layer drew nothing it still draws nothing.
-    func testEveryBlendModeBakedIntoARasterLayerMatchesTheCompositorInsideTheInk() {
+    func testEveryBlendModeBakedIntoARasterLayerMatchesTheCompositorInsideTheInk() throws {
         for mode in BlendMode.allCases where mode != .clipToBelow {
             let manager = document()
             let floor = addRaster(manager, "Floor", UIColor(red: 0.9, green: 0.3, blue: 0.1, alpha: 1), leftHalf)
@@ -484,8 +484,8 @@ final class BakeLogicTests: XCTestCase {
 
             XCTAssertNotNil(bakePlan(manager.bakeLayer(id: tint)), "\(mode.displayName): must bake")
             guard let at = manager.layers.firstIndex(where: { $0.id == floor }),
-                  let image = PixelOps.rasterize(cel: manager.layers[at].cels[0],
-                                                 canvasSize: CanvasFixture.canvasSize).cgImage,
+                  let image = (try XCTUnwrap(PixelOps.rasterize(cel: manager.layers[at].cels[0],
+                                                 canvasSize: CanvasFixture.canvasSize))).cgImage,
                   let baked = CanvasFixture.rgbaBytes(image)
             else { return XCTFail("\(mode.displayName): must read back") }
 

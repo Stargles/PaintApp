@@ -313,8 +313,8 @@ final class InkPoseLogicTests: XCTestCase {
     }
 
     /// Whether a pixel of a layer's *stored* picture is inked.
-    private func storedInk(_ manager: CanvasManager, layer: Int = 0, _ x: Int, _ y: Int) -> Bool {
-        let image = PixelOps.rasterize(cel: manager.layers[layer].cels[0], canvasSize: Self.size)
+    private func storedInk(_ manager: CanvasManager, layer: Int = 0, _ x: Int, _ y: Int) throws -> Bool {
+        let image = (try XCTUnwrap(PixelOps.rasterize(cel: manager.layers[layer].cels[0], canvasSize: Self.size)))
         guard let cg = image.cgImage, let bytes = CanvasFixture.rgbaBytes(cg) else { return false }
         return bytes[(y * cg.width + x) * 4 + 3] > 200
     }
@@ -344,12 +344,12 @@ final class InkPoseLogicTests: XCTestCase {
         try nudgeFloat(manager, dx: 30)
         manager.commitFloatingPieceIfNeeded()
 
-        XCTAssertFalse(storedInk(manager, 30, 120), "the square is still where it was stored")
-        XCTAssertTrue(storedInk(manager, 70, 120),
+        XCTAssertFalse(try storedInk(manager, 30, 120), "the square is still where it was stored")
+        XCTAssertTrue(try storedInk(manager, 70, 120),
                       "dropped 30 points right of where it was shown, the square is not stored 30 right of where it was")
-        XCTAssertFalse(storedInk(manager, 150, 120), "the drop was written at the pen's own coordinates, a pose away")
-        XCTAssertTrue(storedInk(manager, 110, 30), "what the loop was not round moved: it is no longer stored where it was")
-        XCTAssertFalse(storedInk(manager, 190, 30), "what the loop was not round was carried a pose along with the cel's remainder")
+        XCTAssertFalse(try storedInk(manager, 150, 120), "the drop was written at the pen's own coordinates, a pose away")
+        XCTAssertTrue(try storedInk(manager, 110, 30), "what the loop was not round moved: it is no longer stored where it was")
+        XCTAssertFalse(try storedInk(manager, 190, 30), "what the loop was not round was carried a pose along with the cel's remainder")
     }
 
     /// **Duplicate copies what the loop is round onto a new layer, and the new layer is shown under
@@ -363,9 +363,9 @@ final class InkPoseLogicTests: XCTestCase {
         manager.commitFloatingPieceIfNeeded()
 
         let copy = try XCTUnwrap(manager.layers.firstIndex { $0.id != manager.layers[0].id && $0.kind == .raster })
-        XCTAssertTrue(storedInk(manager, layer: copy, 30, 120), "the copy is not stored where the original is")
-        XCTAssertFalse(storedInk(manager, layer: copy, 110, 120), "the copy was written at the pen's own coordinates")
-        XCTAssertTrue(storedInk(manager, layer: 0, 30, 120), "a copy took the original with it")
+        XCTAssertTrue(try storedInk(manager, layer: copy, 30, 120), "the copy is not stored where the original is")
+        XCTAssertFalse(try storedInk(manager, layer: copy, 110, 120), "the copy was written at the pen's own coordinates")
+        XCTAssertTrue(try storedInk(manager, layer: 0, 30, 120), "a copy took the original with it")
     }
 
     /// **To New Layer cuts in the layer's own space**: the piece leaves the source and arrives where it
@@ -378,8 +378,8 @@ final class InkPoseLogicTests: XCTestCase {
 
         let source = try XCTUnwrap(manager.layers.firstIndex { $0.name == "ink" })
         let moved = try XCTUnwrap(manager.layers.firstIndex { $0.kind == .raster && $0.name != "ink" })
-        XCTAssertFalse(storedInk(manager, layer: source, 30, 120), "the source kept what the loop is round")
-        XCTAssertTrue(storedInk(manager, layer: moved, 30, 120), "the new layer did not get it")
+        XCTAssertFalse(try storedInk(manager, layer: source, 30, 120), "the source kept what the loop is round")
+        XCTAssertTrue(try storedInk(manager, layer: moved, 30, 120), "the new layer did not get it")
     }
 
     /// **Clear and Fill reach the stored pixels through the loop pulled back**, not through the loop as
@@ -388,15 +388,15 @@ final class InkPoseLogicTests: XCTestCase {
         let cleared = pixelsUnderMove()
         selectShownSquare(cleared)
         cleared.clearSelectionPixels()
-        XCTAssertFalse(storedInk(cleared, 30, 120), "Clear missed the ink the loop is round")
+        XCTAssertFalse(try storedInk(cleared, 30, 120), "Clear missed the ink the loop is round")
 
         let filled = pixelsUnderMove()
         filled.brushColor = Color(.sRGB, red: 1, green: 0, blue: 0, opacity: 1)
         filled.toolProfiles.brush.opacity = 1
         selectShownSquare(filled)
         filled.fillSelection()
-        XCTAssertTrue(storedInk(filled, 40, 95), "Fill painted nowhere the loop is shown")
-        XCTAssertFalse(storedInk(filled, 140, 95), "Fill painted at the pen's own coordinates, a pose away")
+        XCTAssertTrue(try storedInk(filled, 40, 95), "Fill painted nowhere the loop is shown")
+        XCTAssertFalse(try storedInk(filled, 140, 95), "Fill painted at the pen's own coordinates, a pose away")
     }
 
     /// **Fill on a vector selection** goes through the same pull-back: the element it lays down is
@@ -457,8 +457,8 @@ final class InkPoseLogicTests: XCTestCase {
 
         XCTAssertTrue(manager.dragOut(.ellipse, from: CGPoint(x: 128, y: 128), to: CGPoint(x: 188, y: 128)))
 
-        XCTAssertTrue(storedInk(manager, 128 - 80, 128), "the ellipse was not painted where the Move layer shows it")
-        XCTAssertFalse(storedInk(manager, 128, 128), "the ellipse was painted where it was dragged, a pose away")
+        XCTAssertTrue(try storedInk(manager, 128 - 80, 128), "the ellipse was not painted where the Move layer shows it")
+        XCTAssertFalse(try storedInk(manager, 128, 128), "the ellipse was painted where it was dragged, a pose away")
     }
 
     /// **A gradient is carried whole**: the path *and* the two ends of its ramp go through the pose's

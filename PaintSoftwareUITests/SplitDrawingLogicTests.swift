@@ -54,8 +54,8 @@ final class SplitDrawingLogicTests: XCTestCase {
 
     /// The picture a cel shows from its own storage — what `splitCel`'s copy has to reproduce for
     /// "both halves hold the drawing" to mean anything beyond frame arithmetic.
-    private func picture(_ cel: Cel) -> UIImage {
-        PixelOps.rasterize(cel: cel, canvasSize: size)
+    private func picture(_ cel: Cel) throws -> UIImage {
+        (try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: size)))
     }
 
     private func bytes(_ image: UIImage) -> Data { image.pngData() ?? Data() }
@@ -69,9 +69,9 @@ final class SplitDrawingLogicTests: XCTestCase {
     /// If this went red on the frame numbers alone the code could still be wrong in the way
     /// `InterpolatedCelCopyLogicTests` documents happened before: a `Cel(...)` built with a field
     /// defaulted away. The byte comparison is what a frame-count-only assertion would have missed.
-    func testSplittingAnOrdinaryCelProducesTwoCelsBothHoldingTheDrawing() {
+    func testSplittingAnOrdinaryCelProducesTwoCelsBothHoldingTheDrawing() throws {
         let (manager, _, _) = fixture()
-        let wantBytes = bytes(picture(manager.layers[1].cels[0]))
+        let wantBytes = bytes(try picture(manager.layers[1].cels[0]))
         XCTAssertFalse(wantBytes.isEmpty, "Setup: the fixture actually draws something")
 
         manager.splitCel(layerIndex: 1, celIndex: 0, atFrame: 6)
@@ -83,15 +83,15 @@ final class SplitDrawingLogicTests: XCTestCase {
         XCTAssertEqual(cels[1].startFrame, 6)
         XCTAssertEqual(cels[1].frameCount, 4, "6..<10")
 
-        XCTAssertEqual(bytes(picture(cels[0])), wantBytes, "left half holds the drawing")
-        XCTAssertEqual(bytes(picture(cels[1])), wantBytes, "right half holds the same drawing")
+        XCTAssertEqual(bytes(try picture(cels[0])), wantBytes, "left half holds the drawing")
+        XCTAssertEqual(bytes(try picture(cels[1])), wantBytes, "right half holds the same drawing")
     }
 
     /// One undo step restores one cel — the original span, with the drawing back, not just a cel of
     /// the right frame range.
-    func testUndoingASplitRestoresOneCelWithTheDrawingIntact() {
+    func testUndoingASplitRestoresOneCelWithTheDrawingIntact() throws {
         let (manager, _, _) = fixture()
-        let wantBytes = bytes(picture(manager.layers[1].cels[0]))
+        let wantBytes = bytes(try picture(manager.layers[1].cels[0]))
 
         manager.splitCel(layerIndex: 1, celIndex: 0, atFrame: 6)
         XCTAssertEqual(manager.layers[1].cels.count, 2, "Setup: the split happened")
@@ -102,7 +102,7 @@ final class SplitDrawingLogicTests: XCTestCase {
         let restored = manager.layers[1].cels[0]
         XCTAssertEqual(restored.startFrame, 3)
         XCTAssertEqual(restored.frameCount, 7)
-        XCTAssertEqual(bytes(picture(restored)), wantBytes, "the drawing is back, not just the frame range")
+        XCTAssertEqual(bytes(try picture(restored)), wantBytes, "the drawing is back, not just the frame range")
     }
 
     // MARK: - The gate: where the menu row is offered

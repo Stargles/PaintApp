@@ -138,17 +138,10 @@ enum PixelOps {
     /// cannot tell them apart — and the symptom is silence, because the caches *above* this one
     /// (`CanvasView.SandwichKey`, which compares the whole node tree) rebuild happily from the stale
     /// entry. KEYFRAMES §4.5, "pin this on day one".
-    static func rasterize(cel: Cel, canvasSize: CGSize, quality: RenderQuality = .full,
-                          memoize: Bool = true, derived: DerivedCelContent? = nil) -> UIImage {
-        // Stored, unposed tiers do not enter the fallible sampler. Keep this existing call contract.
-        rasterize(cel: cel, canvasSize: canvasSize, quality: quality,
-                  memoize: memoize, derived: derived, pose: nil)!
-    }
-
-    /// Explicit placement can refuse its private picture. Callers must preserve their prior state.
+    /// Required native or raster rendering may refuse its private picture. Callers preserve prior state.
     static func rasterize(cel: Cel, canvasSize: CGSize, quality: RenderQuality = .full,
                           memoize: Bool = true, derived: DerivedCelContent? = nil,
-                          pose: PoseMap?) -> UIImage? {
+                          pose: PoseMap? = nil) -> UIImage? {
         let identity = FrozenCel.Identity(cel: cel, derived: derived?.identity, pose: pose)
         guard memoize else {
             return rasterizeUncached(FrozenCel(cel: cel, identity: identity, derived: derived,
@@ -319,8 +312,8 @@ enum PixelOps {
             self.pose = pose
             bakedImage = cel.bakedImage
             strokesImage = cel.raster.hasContent ? cel.raster.renderToUIImage() : nil
-            // Frozen even when `derived` will replace it: the thunk answers nil for a recipe that
-            // is not evaluable yet, and the fallback is this tier (see `rasterizeUncached`).
+            // The native tier remains available to direct window/display rendering. A present
+            // derived provider owns its pixels and cannot fall back here after refusing.
             vector = display?.vector ?? cel.vector?.freeze(quality: quality)
         }
 
@@ -560,8 +553,14 @@ enum PixelOps {
         let content = window.map {
             CGRect(origin: CGPoint(x: -$0.origin.x, y: -$0.origin.y), size: $0.frameSize)
         } ?? bounds
-        let vectorImage = cel.derived?.render(quality)
-            ?? ((window == nil && cel.display == nil) ? cel.vector?.render(quality: quality, fittingInto: content.size) : nil)
+        var vectorImage: UIImage?
+        if cel.display?.replacingBase == nil, let derived = cel.derived {
+            guard let rendered = derived.render(quality) else { return nil }
+            vectorImage = rendered
+        } else if window == nil, cel.display == nil, let vector = cel.vector {
+            guard let rendered = vector.render(quality: quality, fittingInto: content.size) else { return nil }
+            vectorImage = rendered
+        }
         var completed = true
         let image = UIGraphicsImageRenderer(bounds: bounds, format: transparentFormat()).image { context in
             let cg = context.cgContext

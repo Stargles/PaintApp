@@ -83,7 +83,7 @@ final class StreamPersistenceLogicTests: XCTestCase {
     /// reloaded cel renders green at the stream's centre — against a placeholder that is grey.
     func testAReloadedStreamDrawsThePictureTheSaveWrote() throws {
         let (manager, _, vector) = try managerWithAGreenFrame()
-        let before = pixel(vector.render(), 32, 32)
+        let before = pixel((try XCTUnwrap(vector.render())), 32, 32)
         XCTAssertGreaterThan(Int(before.g), Int(before.r) + 100, "Setup: the live picture is green")
 
         let projectURL = ProjectStore.createNewProjectURL(name: "WithStream")
@@ -103,10 +103,10 @@ final class StreamPersistenceLogicTests: XCTestCase {
         XCTAssertEqual(reloaded.lastFrameFileName, jpegs.first, "the ref names the file")
         XCTAssertNotNil(reloaded.displayFrame, "the picture is on the element at load")
 
-        let after = pixel(reloadedVector.render(), 32, 32)
+        let after = pixel((try XCTUnwrap(reloadedVector.render())), 32, 32)
         XCTAssertEqual(after.a, 255)
         XCTAssertGreaterThan(Int(after.g), Int(after.r) + 100, "the reloaded cel draws the saved green")
-        XCTAssertEqual(pixel(reloadedVector.render(), 2, 2).a, 0, "and nothing outside the rect")
+        XCTAssertEqual(pixel((try XCTUnwrap(reloadedVector.render())), 2, 2).a, 0, "and nothing outside the rect")
 
         // And the reloaded picture is what a bake with the laptop off bakes.
         reopened.streamCoordinator.startsClients = false
@@ -114,7 +114,7 @@ final class StreamPersistenceLogicTests: XCTestCase {
         XCTAssertEqual(reopened.bakeStreamFrame(layerIndex: layerIndex, celIndex: 0, atFrame: 0), .baked)
         let bakedVector = try XCTUnwrap(reopened.layers[layerIndex].cels[0].vector)
         XCTAssertNotNil(bakedVector.images.first)
-        let baked = pixel(bakedVector.render(), 32, 32)
+        let baked = pixel((try XCTUnwrap(bakedVector.render())), 32, 32)
         XCTAssertGreaterThan(Int(baked.g), Int(baked.r) + 100, "the bake is the saved picture")
     }
 
@@ -167,7 +167,7 @@ final class StreamPersistenceLogicTests: XCTestCase {
         let again = try XCTUnwrap(ProjectStore.load(from: projectURL))
         let (vector, reloaded) = try XCTUnwrap(streamElement(in: again))
         XCTAssertNotNil(reloaded.displayFrame)
-        let p = pixel(vector.render(), 32, 32)
+        let p = pixel((try XCTUnwrap(vector.render())), 32, 32)
         XCTAssertGreaterThan(Int(p.g), Int(p.r) + 100, "still green after two saves")
     }
 

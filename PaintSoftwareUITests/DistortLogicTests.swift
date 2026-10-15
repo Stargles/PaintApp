@@ -476,7 +476,7 @@ final class DistortLogicTests: XCTestCase {
         XCTAssertTrue(manager.commitFloatingPieceIfNeeded())
         XCTAssertNil(manager.floatingPiece)
 
-        let flattened = PixelOps.rasterize(cel: manager.layers[0].cels[0], canvasSize: Self.canvas)
+        let flattened = (try XCTUnwrap(PixelOps.rasterize(cel: manager.layers[0].cels[0], canvasSize: Self.canvas)))
         let top = opaqueRun(flattened, row: 27)
         let bottom = opaqueRun(flattened, row: 37)
         XCTAssertGreaterThan(bottom, 24, "the untouched bottom edge kept the lifted width")

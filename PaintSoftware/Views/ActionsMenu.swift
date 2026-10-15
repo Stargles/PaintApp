@@ -125,7 +125,7 @@ struct ActionsMenu: View {
               let celIndex = canvasManager.activeCelIndex(actedOnBy: selection)
         else { return false }
         let cel = canvasManager.layers[canvasManager.currentLayerIndex].cels[celIndex]
-        let flattened = PixelOps.rasterize(cel: cel, canvasSize: canvasSize)
+        guard let flattened = PixelOps.rasterize(cel: cel, canvasSize: canvasSize) else { return false }
         guard let cropped = PixelOps.copiedSubimage(of: flattened, in: selection.path.boundingBoxOfPath)
         else { return false }
         UIPasteboard.general.image = cropped

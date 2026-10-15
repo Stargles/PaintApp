@@ -287,7 +287,7 @@ final class BrushEngineLogicTests: XCTestCase {
     /// **multiply** laid over a **red** fill renders green when isolated (the stroke layer composites
     /// source-over), but `multiply((0,1,0), (1,0,0))` = black if the dab blends directly against the
     /// fill. Green vs. black is unambiguous.
-    func testVectorMultiplyStrokeDoesNotBlendWithTheFillBeneathIt() {
+    func testVectorMultiplyStrokeDoesNotBlendWithTheFillBeneathIt() throws {
         let size = CGSize(width: 64, height: 64)
         let fillPath = CGPath(rect: CGRect(x: 0, y: 0, width: 64, height: 64), transform: nil)
         let fill = VectorFillElement(path: fillPath,
@@ -300,7 +300,7 @@ final class BrushEngineLogicTests: XCTestCase {
                                             VectorSample(x: 32, y: 32, pressure: 1)])
         let canvas = VectorCanvas(size: size, strokes: [stroke], fills: [fill])
 
-        guard let pixels = rgbaPixels(of: canvas.render(), width: 64, height: 64) else {
+        guard let pixels = rgbaPixels(of: (try XCTUnwrap(canvas.render())), width: 64, height: 64) else {
             return XCTFail("Could not read back the rendered vector canvas")
         }
         let (r, g, b) = rgb(pixels, x: 32, y: 32)
@@ -318,7 +318,7 @@ final class BrushEngineLogicTests: XCTestCase {
     /// fill still lands on top of it. Source-over is associative, so this needs no isolation — but if
     /// the transparency-layer condition were inverted, or the dabs stopped reaching the context at
     /// all, this is what would catch it.
-    func testVectorNormalStrokeStillPaintsOverTheFill() {
+    func testVectorNormalStrokeStillPaintsOverTheFill() throws {
         let size = CGSize(width: 64, height: 64)
         let fillPath = CGPath(rect: CGRect(x: 0, y: 0, width: 64, height: 64), transform: nil)
         let fill = VectorFillElement(path: fillPath,
@@ -331,7 +331,7 @@ final class BrushEngineLogicTests: XCTestCase {
                                             VectorSample(x: 32, y: 32, pressure: 1)])
         let canvas = VectorCanvas(size: size, strokes: [stroke], fills: [fill])
 
-        guard let pixels = rgbaPixels(of: canvas.render(), width: 64, height: 64) else {
+        guard let pixels = rgbaPixels(of: (try XCTUnwrap(canvas.render())), width: 64, height: 64) else {
             return XCTFail("Could not read back the rendered vector canvas")
         }
         let (r, _, b) = rgb(pixels, x: 32, y: 32)
@@ -404,12 +404,12 @@ final class BrushEngineLogicTests: XCTestCase {
                            fileName: "placed.png")
     }
 
-    private func renderedBytes(_ canvas: VectorCanvas) -> [UInt8]? {
-        rgbaPixels(of: canvas.render(), width: Self.canvasSide, height: Self.canvasSide)?.bytes
+    private func renderedBytes(_ canvas: VectorCanvas) throws -> [UInt8]? {
+        rgbaPixels(of: (try XCTUnwrap(canvas.render())), width: Self.canvasSide, height: Self.canvasSide)?.bytes
     }
 
-    private func alphaAtCentre(_ canvas: VectorCanvas) -> CGFloat? {
-        guard let pixels = rgbaPixels(of: canvas.render(), width: Self.canvasSide, height: Self.canvasSide) else { return nil }
+    private func alphaAtCentre(_ canvas: VectorCanvas) throws -> CGFloat? {
+        guard let pixels = rgbaPixels(of: (try XCTUnwrap(canvas.render())), width: Self.canvasSide, height: Self.canvasSide) else { return nil }
         return alpha(pixels, x: 32, y: 32)
     }
 
@@ -719,7 +719,7 @@ final class BrushEngineLogicTests: XCTestCase {
         let after = VectorCanvas(size: Self.canvasSize,
                                  elements: second.canvasSpaceElements(resolvingImages: resolve,
                                                                       resolvingVideos: { _ in nil }))
-        XCTAssertEqual(renderedBytes(before), renderedBytes(after),
+        XCTAssertEqual(try renderedBytes(before), try renderedBytes(after),
                        "A migrated payload must render exactly as the legacy one it came from")
 
         // And both must match what the pre-change three-array construction produced, which is the
@@ -728,7 +728,7 @@ final class BrushEngineLogicTests: XCTestCase {
                                         images: [VectorImageElement(image: solidImage(.green),
                                                                     transform: LayerTransform(position: CGPoint(x: 20, y: 20), scale: 1, rotation: 0),
                                                                     fileName: "a.png")])
-        XCTAssertEqual(renderedBytes(before), renderedBytes(legacyShaped),
+        XCTAssertEqual(try renderedBytes(before), try renderedBytes(legacyShaped),
                        "The reconstructed display list must render identically to the fixed fills→images→strokes order it replaces")
     }
 
@@ -813,9 +813,9 @@ final class BrushEngineLogicTests: XCTestCase {
         let decoded = try JSONDecoder().decode(VectorStroke.self,
                                                from: try JSONEncoder().encode(piece))
         XCTAssertEqual(decoded.lattice, piece.lattice, "The lattice must round-trip intact")
-        let before = try XCTUnwrap(renderedBytes(VectorCanvas(size: Self.canvasSize, elements: [.stroke(piece)])),
+        let before = try XCTUnwrap(try renderedBytes(VectorCanvas(size: Self.canvasSize, elements: [.stroke(piece)])),
                                    "Setup: the saved piece must render")
-        let after = try XCTUnwrap(renderedBytes(VectorCanvas(size: Self.canvasSize, elements: [.stroke(decoded)])),
+        let after = try XCTUnwrap(try renderedBytes(VectorCanvas(size: Self.canvasSize, elements: [.stroke(decoded)])),
                                   "Setup: the reloaded piece must render")
         XCTAssertEqual(after, before,
                        "A reloaded piece must render exactly as the one that was saved")
@@ -832,12 +832,12 @@ final class BrushEngineLogicTests: XCTestCase {
     /// "The eraser lowers the alpha of everything beneath it" — fills included, which three parallel
     /// arrays could never express because strokes were always drawn last but erasing was a *destructive*
     /// sample edit that never touched a fill.
-    func testEraseStrokeAfterAFillRemovesAlphaFromThatFill() {
+    func testEraseStrokeAfterAFillRemovesAlphaFromThatFill() throws {
         let canvas = VectorCanvas(size: Self.canvasSize,
                                   elements: [.fill(opaqueFill(CodableColor(red: 1, green: 0, blue: 0, alpha: 1))),
                                              .stroke(centreStroke(CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                                                                   composite: .erase))])
-        guard let pixels = rgbaPixels(of: canvas.render(), width: Self.canvasSide, height: Self.canvasSide) else {
+        guard let pixels = rgbaPixels(of: (try XCTUnwrap(canvas.render())), width: Self.canvasSide, height: Self.canvasSide) else {
             return XCTFail("Could not read back the rendered vector canvas")
         }
         XCTAssertEqual(alpha(pixels, x: 32, y: 32), 0, accuracy: 0.02,
@@ -849,14 +849,14 @@ final class BrushEngineLogicTests: XCTestCase {
     /// The bug this whole refactor exists to prevent. With erasers pinned to the end of a fixed render
     /// order, a stroke drawn *after* an erase would be eaten by it. Position in the display list is what
     /// decides, and it has to decide in both directions.
-    func testStrokeDrawnAfterAnEraseElementIsNotEatenByIt() {
+    func testStrokeDrawnAfterAnEraseElementIsNotEatenByIt() throws {
         let blue = CodableColor(red: 0, green: 0, blue: 1, alpha: 1)
         let eraser = centreStroke(CodableColor(red: 0, green: 0, blue: 0, alpha: 1), composite: .erase)
         let fill = opaqueFill(CodableColor(red: 1, green: 0, blue: 0, alpha: 1))
 
         let strokeAfter = VectorCanvas(size: Self.canvasSize,
                                        elements: [.fill(fill), .stroke(eraser), .stroke(centreStroke(blue))])
-        guard let pixels = rgbaPixels(of: strokeAfter.render(), width: Self.canvasSide, height: Self.canvasSide) else {
+        guard let pixels = rgbaPixels(of: (try XCTUnwrap(strokeAfter.render())), width: Self.canvasSide, height: Self.canvasSide) else {
             return XCTFail("Could not read back the rendered vector canvas")
         }
         XCTAssertEqual(alpha(pixels, x: 32, y: 32), 1, accuracy: 0.02,
@@ -869,7 +869,7 @@ final class BrushEngineLogicTests: XCTestCase {
         // content, different z-order, opposite result — which is the point.
         let strokeBefore = VectorCanvas(size: Self.canvasSize,
                                         elements: [.fill(fill), .stroke(centreStroke(blue)), .stroke(eraser)])
-        XCTAssertEqual(alphaAtCentre(strokeBefore) ?? -1, 0, accuracy: 0.02,
+        XCTAssertEqual(try alphaAtCentre(strokeBefore) ?? -1, 0, accuracy: 0.02,
                        "An erase element after the stroke removes it, so order is genuinely what decides")
     }
 
@@ -877,7 +877,7 @@ final class BrushEngineLogicTests: XCTestCase {
     /// own transparency layer if it needs one — otherwise a non-normal brush drawn after an erase would
     /// start blending with the fill beneath it, the exact regression
     /// `testVectorMultiplyStrokeDoesNotBlendWithTheFillBeneathIt` pins for the simple case.
-    func testANonNormalRunAfterAnEraseElementIsStillIsolated() {
+    func testANonNormalRunAfterAnEraseElementIsStillIsolated() throws {
         // The eraser sits in a corner so it doesn't overlap the assertion point.
         var eraser = centreStroke(CodableColor(red: 0, green: 0, blue: 0, alpha: 1), composite: .erase)
         eraser.samples = [VectorSample(x: 4, y: 4, pressure: 1), VectorSample(x: 4, y: 4, pressure: 1)]
@@ -886,7 +886,7 @@ final class BrushEngineLogicTests: XCTestCase {
                                              .stroke(eraser),
                                              .stroke(centreStroke(CodableColor(red: 0, green: 1, blue: 0, alpha: 1),
                                                                   blendMode: .multiply))])
-        guard let pixels = rgbaPixels(of: canvas.render(), width: Self.canvasSide, height: Self.canvasSide) else {
+        guard let pixels = rgbaPixels(of: (try XCTUnwrap(canvas.render())), width: Self.canvasSide, height: Self.canvasSide) else {
             return XCTFail("Could not read back the rendered vector canvas")
         }
         let (r, g, b) = rgb(pixels, x: 32, y: 32)

@@ -616,7 +616,7 @@ final class BrushTipGeneratorLogicTests: XCTestCase {
                                                        pressure: 0.95)
                                       }, channels: .pressureOnly))
             let canvas = VectorCanvas(size: size, strokes: [stroke], fills: [])
-            let image = canvas.render()
+            let image = (try XCTUnwrap(canvas.render()))
             let cg = try XCTUnwrap(image.cgImage)
             var bytes = [UInt8](repeating: 0, count: cg.width * cg.height * 4)
             bytes.withUnsafeMutableBytes { raw in

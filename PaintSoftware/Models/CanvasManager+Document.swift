@@ -1122,9 +1122,10 @@ extension CanvasManager {
 
     /// Puts a batch on its cels, skipping any that moved, vanished, or changed while it rendered.
     @MainActor
-    private func install(_ images: [UIImage], from batch: ThumbnailBatch, layerID: UUID) {
+    private func install(_ images: [UIImage?], from batch: ThumbnailBatch, layerID: UUID) {
         guard let layerIndex = layers.firstIndex(where: { $0.id == layerID }) else { return }
         for (entry, image) in zip(batch.entries, images) {
+            guard let image else { continue }
             guard let celIndex = layers[layerIndex].cels.firstIndex(where: { $0.id == entry.cel.id })
             else { continue }
             let live = layers[layerIndex].cels[celIndex]
@@ -1157,7 +1158,7 @@ extension CanvasManager {
 
     /// One layer's rendered thumbnails, on their way back to the main actor.
     private struct ThumbnailImages: @unchecked Sendable {
-        let images: [UIImage]
+        let images: [UIImage?]
     }
 }
 
@@ -1285,7 +1286,7 @@ extension CanvasManager {
     /// Reached only from the `Task { @MainActor }` in `flushPendingThumbnailRegensDeferred`, which is
     /// what puts it on the main thread; see `takePendingThumbnailRegenJobs` for why that is a
     /// convention here rather than an annotation.
-    private func installRegeneratedThumbnails(_ images: [UIImage], from batch: ThumbnailRegenBatch) {
+    private func installRegeneratedThumbnails(_ images: [UIImage?], from batch: ThumbnailRegenBatch) {
         for (entry, image) in zip(batch.entries, images) {
             guard let layerIndex = layers.firstIndex(where: { $0.id == entry.layerID }),
                   let celIndex = layers[layerIndex].cels
@@ -1296,6 +1297,7 @@ extension CanvasManager {
                 scheduleThumbnailRegen(layerID: entry.layerID, celID: entry.cel.id)
                 continue
             }
+            guard let image else { continue }
             PlaybackTrace.span(.thumbnailInstall, value: layers[layerIndex].cels.count) {
                 installThumbnail(image, layerIndex: layerIndex, celIndex: celIndex)
             }

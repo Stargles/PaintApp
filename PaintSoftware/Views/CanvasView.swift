@@ -3863,7 +3863,11 @@ struct CanvasView: UIViewRepresentable {
             // during playback"*) are decided once, on the protocol, so a source cannot forget one.
             // An empty answer falls into the `blank()` below, which hides the view *and* drops the
             // skin-sized images, so a playing animation neither draws ghosts nor holds their pixels.
-            let frames = PlaybackTrace.span(.onionFrames) { source.visibleFrames(for: canvasManager) }
+            guard let frames = PlaybackTrace.span(.onionFrames, { source.visibleFrames(for: canvasManager) }) else {
+                onionRequestedKey = nil
+                onionRebuilds.cancel()
+                return
+            }
             guard !frames.isEmpty, let canvasSize = canvasManager.canvasSize else { return blank() }
 
             // **§6.4's mask, applied to the ghost as well as to the artwork.** BUGS.md's
@@ -3952,9 +3956,11 @@ struct CanvasView: UIViewRepresentable {
                                          inkOpacity: CGFloat) {
             onionRebuilds.request {
                 return {
-                    let composite = OnionSkinFrame.composite(frames, size: size)
-                    let clip = OnionSkinClip.mask(layerMask: mask, subtracting: ink?.render(),
-                                                  size: size, opacity: inkOpacity)
+                    let inkImage = ink?.render()
+                    let composite = ink == nil || inkImage != nil ? OnionSkinFrame.composite(frames, size: size) : nil
+                    let clip = composite.flatMap { _ in
+                        OnionSkinClip.mask(layerMask: mask, subtracting: inkImage, size: size, opacity: inkOpacity)
+                    }
                     return { [weak self] in
                         PlaybackTrace.span(.renderLanded) {
                             self?.finishOnionRebuild(key: key, composite: composite, clip: clip)
@@ -3971,6 +3977,7 @@ struct CanvasView: UIViewRepresentable {
         private func finishOnionRebuild(key: OnionSkinRenderKey, composite: UIImage?,
                                         clip: CGImage?) {
             guard key == onionRequestedKey else { return }
+            guard let composite else { onionRequestedKey = nil; return }
             onionSkinComposite = composite
             onionSkinClipImage = clip
             // `showsOnionSkin` rather than `isOnionSkinEnabled`, and the difference is a real race

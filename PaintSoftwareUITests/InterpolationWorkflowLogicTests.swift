@@ -1113,37 +1113,37 @@ final class InterpolationWorkflowLogicTests: XCTestCase {
 
     /// Interpolate mode's onion skin is the two references, not the previous cel — and they are
     /// tinted apart, because a twelve-frame span with both in one colour is unreadable.
-    func testTheInterpolateOnionSkinShowsBothReferencesTintedApart() {
+    func testTheInterpolateOnionSkinShowsBothReferencesTintedApart() throws {
         let manager = manager()
         let cels = threeCels(manager, layerIndex: 1)
         manager.enterInterpolateMode()
         setReferences(manager, layerIndex: 1, cels: [cels[0], cels[2]])
         manager.currentFrame = 5
 
-        let frames = InterpolationReferenceOnionSkinSource().frames(for: manager)
+        let frames = (try XCTUnwrap(InterpolationReferenceOnionSkinSource().frames(for: manager)))
         XCTAssertEqual(frames.count, 2)
         XCTAssertEqual(frames[0].tint, InterpolationReferenceOnionSkinSource.pastTint)
         XCTAssertEqual(frames[1].tint, InterpolationReferenceOnionSkinSource.futureTint)
     }
 
-    func testTheInterpolateOnionSkinShowsNothingUntilTwoReferencesExist() {
+    func testTheInterpolateOnionSkinShowsNothingUntilTwoReferencesExist() throws {
         let manager = manager()
         let cels = threeCels(manager, layerIndex: 1)
         manager.enterInterpolateMode()
         setReferences(manager, layerIndex: 1, cels: [cels[0]])
-        XCTAssertTrue(InterpolationReferenceOnionSkinSource().frames(for: manager).isEmpty)
+        XCTAssertTrue((try XCTUnwrap(InterpolationReferenceOnionSkinSource().frames(for: manager))).isEmpty)
     }
 
     /// A multi-layer keyframe is one skin, not two — otherwise lineart and its flats would tint as
     /// separate references and read as four keyframes.
-    func testAMultiLayerKeyframeFlattensIntoOneOnionSkinFrame() {
+    func testAMultiLayerKeyframeFlattensIntoOneOnionSkinFrame() throws {
         let manager = manager(vectorLayers: 2)
         let lineart = threeCels(manager, layerIndex: 1)
         let flats = threeCels(manager, layerIndex: 2)
         manager.enterInterpolateMode()
         setReferences(manager, layerIndex: 1, cels: [lineart[0], lineart[2]])
         setReferences(manager, layerIndex: 2, cels: [flats[0], flats[2]])
-        XCTAssertEqual(InterpolationReferenceOnionSkinSource().frames(for: manager).count, 2)
+        XCTAssertEqual((try XCTUnwrap(InterpolationReferenceOnionSkinSource().frames(for: manager))).count, 2)
     }
 
     // MARK: - Helpers

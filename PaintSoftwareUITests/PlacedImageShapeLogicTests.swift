@@ -81,7 +81,7 @@ final class PlacedImageShapeLogicTests: XCTestCase {
         XCTAssertEqual(stretched.stretchAxis, 0, accuracy: 1e-9, "made about the box's own x axis")
         XCTAssertFalse(stretched.mirrored, "and a positive determinant is not a reflection")
 
-        let drawn = try XCTUnwrap(renderedInk(of: stretched), "the stretched photo renders somewhere")
+        let drawn = try XCTUnwrap(try renderedInk(of: stretched), "the stretched photo renders somewhere")
         XCTAssertEqual(drawn.width, 12, accuracy: 1.5,
                        "a 6 pt square stretched 4:1 is 12 pt across: \(drawn)")
         XCTAssertEqual(drawn.height, 3, accuracy: 1.5, "and 3 pt tall: \(drawn)")
@@ -463,10 +463,10 @@ final class PlacedImageShapeLogicTests: XCTestCase {
     }
 
     /// The element drawn alone on a canvas, reduced to the box its opaque pixels occupy.
-    private func renderedInk(of element: VectorImageElement) -> CGRect? {
+    private func renderedInk(of element: VectorImageElement) throws -> CGRect? {
         let (_, _, vector) = fixture()
         vector.addImage(element)
-        return PixelOps.opaqueContentBounds(vector.render())
+        return PixelOps.opaqueContentBounds((try XCTUnwrap(vector.render())))
     }
 
     /// `mapping(_:throughSimilarity:)`, skipped for a delta it is not allowed to be handed. Its own

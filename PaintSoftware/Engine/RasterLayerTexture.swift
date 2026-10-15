@@ -889,7 +889,7 @@ final class RasterLayerTexture: MaterialDabTarget {
     }
 
     /// `renderToUIImage()` for the display path, which can say "no image" in a way the drawing
-    /// paths cannot — the exact twin of `VectorCanvas.renderIfNonEmpty()`, and for the same reason.
+    /// paths cannot.
     /// A blank tier's image view is left holding nil rather than a canvas-sized sheet of
     /// transparency: Core Animation skips the layer's contents entirely, and — the point — the
     /// sheet is never minted. At 16383² that sheet is 1 GiB spent to show nothing.

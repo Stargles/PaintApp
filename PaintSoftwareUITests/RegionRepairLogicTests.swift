@@ -246,9 +246,9 @@ final class RegionRepairLogicTests: XCTestCase {
 
     /// The full re-walk of `canvas`'s display list, guaranteed cold: a freshly constructed canvas
     /// has no memo, no base and no measured footprints, so it cannot take any fast path.
-    private func fullReWalk(of canvas: VectorCanvas) -> (image: UIImage, dabs: Int) {
+    private func fullReWalk(of canvas: VectorCanvas) throws -> (image: UIImage, dabs: Int) {
         let cold = VectorCanvas(size: canvas.size, elements: canvas.elements)
-        let image = cold.render()
+        let image = (try XCTUnwrap(cold.render()))
         XCTAssertEqual(cold.rasterizations, 1, "the reference arm must have rasterized exactly once")
         XCTAssertEqual(cold.regionRepairs, 0, "the reference arm must not have repaired anything")
         return (image, cold.lastRenderDabCount)
@@ -300,15 +300,15 @@ final class RegionRepairLogicTests: XCTestCase {
     // MARK: - (2) Byte identity, three ways
 
     /// **The headline pin, on the ordinary cut.**
-    func testACutRepairedInPlaceIsByteIdenticalToTheFullWalk() {
+    func testACutRepairedInPlaceIsByteIdenticalToTheFullWalk() throws {
         let canvas = Self.drawnCanvas(48)
         XCTAssertTrue(canvas.erase(alongPath: Self.flick(over: 19), brush: Self.brush(),
                                    size: 14, opacity: 1, mode: .cutPoints))
-        let repaired = canvas.render()
+        let repaired = (try XCTUnwrap(canvas.render()))
         XCTAssertEqual(canvas.regionRepairs, 1, "the repair must have run, or this pins nothing")
         XCTAssertEqual(canvas.regionRepairsAbandoned, 0,
                        "an abandoned repair costs both walks and would hide a bad bound behind a good picture")
-        assertMatchesToWithinARoundingUnit(repaired, fullReWalk(of: canvas).image,
+        assertMatchesToWithinARoundingUnit(repaired, try fullReWalk(of: canvas).image,
                                            inside: canvas.lastRepairedRegion,
                                            "a Mode 2 cut, repaired in place")
     }
@@ -331,7 +331,7 @@ final class RegionRepairLogicTests: XCTestCase {
     /// So the ink here is two **bars** long enough that the flick cuts their middles and leaves
     /// pieces standing at both ends, inside the rectangle the cut declares; and the punch runs the
     /// bars' whole length, so those surviving pieces are exactly what it eats.
-    func testACutUnderAnEraserRedrawsTheRectangleFromTheBottomOfTheStack() {
+    func testACutUnderAnEraserRedrawsTheRectangleFromTheBottomOfTheStack() throws {
         let cell = 27
         let centre = Self.cellCentre(cell)
         var elements: [VectorElement] = (0..<48).map { .stroke(Self.mark($0)) }
@@ -366,15 +366,15 @@ final class RegionRepairLogicTests: XCTestCase {
         let withoutPunch = VectorCanvas(size: Self.canvasSize,
                                         elements: survived.filter { $0.stroke?.composite != .erase })
         let withPunch = VectorCanvas(size: Self.canvasSize, elements: survived)
-        XCTAssertTrue(differs(withoutPunch.render(), withPunch.render()),
+        XCTAssertTrue(differs((try XCTUnwrap(withoutPunch.render())), (try XCTUnwrap(withPunch.render()))),
                       "setup: after the cut the eraser must still remove pixels, or this test has no subject")
 
-        let repaired = canvas.render()
+        let repaired = (try XCTUnwrap(canvas.render()))
         XCTAssertEqual(canvas.regionRepairs, 1)
         XCTAssertEqual(canvas.regionRepairsAbandoned, 0)
         XCTAssertLessThan(regionFraction(canvas), 0.5,
                           "setup: the rectangle must be a fraction of the canvas, or nothing is skipped")
-        assertMatchesToWithinARoundingUnit(repaired, fullReWalk(of: canvas).image,
+        assertMatchesToWithinARoundingUnit(repaired, try fullReWalk(of: canvas).image,
                                            inside: canvas.lastRepairedRegion,
                                            "a cut inside a rectangle an `.erase` element punches")
     }
@@ -393,7 +393,7 @@ final class RegionRepairLogicTests: XCTestCase {
     /// transparency layer removed from every clipped walk. So there is a fill underneath now, and
     /// two short bars that cross each other inside the repaired rectangle without being cut by the
     /// nib that declares it.
-    func testABlendModeRunStraddlingTheRectangleIsByteIdentical() {
+    func testABlendModeRunStraddlingTheRectangleIsByteIdentical() throws {
         let page = CGRect(origin: .zero, size: Self.canvasSize)
         // The backdrop the run is isolated *from*. A fill is the cheapest one that is not itself a
         // stroke, so it cannot join the run it sits under (rule 1).
@@ -429,7 +429,7 @@ final class RegionRepairLogicTests: XCTestCase {
         _ = canvas.render()
         XCTAssertTrue(canvas.erase(alongPath: Self.flick(over: 11), brush: Self.brush(),
                                    size: 14, opacity: 1, mode: .cutPoints))
-        let repaired = canvas.render()
+        let repaired = (try XCTUnwrap(canvas.render()))
         XCTAssertEqual(canvas.regionRepairs, 1)
         XCTAssertEqual(canvas.regionRepairsAbandoned, 0)
         XCTAssertLessThan(regionFraction(canvas), 0.5,
@@ -438,7 +438,7 @@ final class RegionRepairLogicTests: XCTestCase {
         // is never redrawn and this fixture is the blind one again.
         XCTAssertTrue(canvas.lastRepairedRegion.contains(CGPoint(x: 121, y: 33)),
                       "setup: the run's internal overlap must fall inside the repaired rectangle")
-        assertMatchesToWithinARoundingUnit(repaired, fullReWalk(of: canvas).image,
+        assertMatchesToWithinARoundingUnit(repaired, try fullReWalk(of: canvas).image,
                                            inside: canvas.lastRepairedRegion,
                                            "a cut inside a `.multiply` run that reaches past the rectangle")
     }
@@ -462,7 +462,7 @@ final class RegionRepairLogicTests: XCTestCase {
     /// defect this test exists to catch. The cut is on a long bar now, so the rectangle is wide and
     /// thin, and the straddler crosses its top and bottom edges well away from the nib; the setup
     /// assertion checks that in the stroke's own geometry rather than assuming it.
-    func testAStrokeCrossingTheRectanglesEdgeMergesAtItsOwnOpacity() {
+    func testAStrokeCrossingTheRectanglesEdgeMergesAtItsOwnOpacity() throws {
         var elements: [VectorElement] = (0..<48).map { .stroke(Self.mark($0, opacity: 0.55)) }
         // The bar the nib cuts, and therefore the rectangle: wide, thin, and low on the canvas.
         var bar = Self.mark(499, opacity: 0.55)
@@ -492,7 +492,7 @@ final class RegionRepairLogicTests: XCTestCase {
                                  VectorSample(x: 40, y: 91, pressure: 1)], channels: .pressureOnly)
         XCTAssertTrue(canvas.erase(alongPath: nib, brush: Self.brush(),
                                    size: 8, opacity: 1, mode: .cutPoints))
-        let repaired = canvas.render()
+        let repaired = (try XCTUnwrap(canvas.render()))
         XCTAssertEqual(canvas.regionRepairs, 1)
         XCTAssertEqual(canvas.regionRepairsAbandoned, 0)
         XCTAssertLessThan(regionFraction(canvas), 0.5,
@@ -510,7 +510,7 @@ final class RegionRepairLogicTests: XCTestCase {
         XCTAssertTrue(canvas.elements.contains { $0.stroke?.id == straddler.id },
                       "setup: the nib must not have cut the straddler, or its footprint joins the rectangle")
 
-        assertMatchesToWithinARoundingUnit(repaired, fullReWalk(of: canvas).image,
+        assertMatchesToWithinARoundingUnit(repaired, try fullReWalk(of: canvas).image,
                                            inside: region,
                                            "a stroke crossing the repaired rectangle's edge")
     }
@@ -520,7 +520,7 @@ final class RegionRepairLogicTests: XCTestCase {
     /// it resolves and invalidates **once per touch sample**, so it pays whatever a cut costs
     /// forty times in one drag. Ten samples here, each one repaired, each one still the picture the
     /// walk makes.
-    func testAToCrossDragRepairsEverySampleAndStaysByteIdentical() {
+    func testAToCrossDragRepairsEverySampleAndStaysByteIdentical() throws {
         let canvas = Self.drawnCanvas(48)
         var driver = VectorEraser.IntersectionDriver()
         var cuts = 0
@@ -544,7 +544,7 @@ final class RegionRepairLogicTests: XCTestCase {
         // that grew with the drag. It does not — MEASURED at one unit after ten, the same as after
         // one — because the difference is CoreGraphics rounding the *edge* of each clip, and each
         // clip is somewhere else.
-        assertMatchesToWithinARoundingUnit(canvas.render(), fullReWalk(of: canvas).image,
+        assertMatchesToWithinARoundingUnit((try XCTUnwrap(canvas.render())), try fullReWalk(of: canvas).image,
                                            inside: CGRect(origin: .zero, size: Self.canvasSize),
                                            "a whole To Cross drag")
     }
@@ -557,7 +557,7 @@ final class RegionRepairLogicTests: XCTestCase {
     ///
     /// The two operands are the repair's own `lastRenderDabCount` and a cold canvas's, over the
     /// *same* display list — so the ratio is exactly what the bound bought.
-    func testASmallCutStampsFarFewerDabsThanTheFullWalk() {
+    func testASmallCutStampsFarFewerDabsThanTheFullWalk() throws {
         // **A long bar rather than one of the grid marks, and the reason is a measurement.** A 14 pt
         // mark under any usable nib is covered end to end, so `cutAlongFootprint` deletes it whole
         // and the repair stamps **0 dabs** — the cheapest possible outcome, and a fixture that
@@ -581,7 +581,7 @@ final class RegionRepairLogicTests: XCTestCase {
         XCTAssertEqual(canvas.regionRepairs, 1, "the repair must have run, or the count below is a full walk")
         XCTAssertEqual(canvas.regionRepairsAbandoned, 0)
         let repairDabs = canvas.lastRenderDabCount
-        let full = fullReWalk(of: canvas)
+        let full = try fullReWalk(of: canvas)
         XCTAssertGreaterThan(repairDabs, 0, "the fixture must leave pieces to re-stamp")
         XCTAssertLessThan(repairDabs, full.dabs / 3,
                           "the repair stamped \(repairDabs) of the layer's \(full.dabs) dabs — "
@@ -597,7 +597,7 @@ final class RegionRepairLogicTests: XCTestCase {
     /// `repairClip` refuses it: a clip that rejects nothing is a full walk with extra bookkeeping.
     /// TODO (41) says this in so many words — the guarantee is that cost scales with the area
     /// touched, not that it is always small.
-    func testACutAcrossTheWholeCanvasFallsBackToTheFullWalk() {
+    func testACutAcrossTheWholeCanvasFallsBackToTheFullWalk() throws {
         // **A corner-to-corner sweep across the grid is not enough**, and finding that out is worth
         // more than the assertion was: the union of forty-eight inset marks' footprints comes to
         // about 80% of the canvas, which `repairClip` accepts. It is a bad deal rather than a wrong
@@ -620,10 +620,10 @@ final class RegionRepairLogicTests: XCTestCase {
 
         XCTAssertTrue(canvas.erase(alongPath: Self.sweep(), brush: Self.brush(),
                                    size: 16, opacity: 1, mode: .cutPoints))
-        let drawn = canvas.render()
+        let drawn = (try XCTUnwrap(canvas.render()))
         XCTAssertEqual(canvas.regionRepairs, 0,
                        "a canvas-sized rectangle must take the slow path outright, not through a clip")
-        let full = fullReWalk(of: canvas)
+        let full = try fullReWalk(of: canvas)
         assertIdentical(drawn, full.image, "a cut across the whole canvas")
         XCTAssertEqual(canvas.lastRenderDabCount, full.dabs,
                        "and it stamped the whole layer, which is what falling back means")
@@ -655,7 +655,7 @@ final class RegionRepairLogicTests: XCTestCase {
     /// **A repaired cel still appends incrementally**, which is the check that the two bases have
     /// not started fighting over the same memo: a cut, a repair, then a new stroke that must stamp
     /// only its own dabs and land on the picture the walk would make.
-    func testAnAppendAfterARepairIsStillIncrementalAndStillByteIdentical() {
+    func testAnAppendAfterARepairIsStillIncrementalAndStillByteIdentical() throws {
         let canvas = Self.drawnCanvas(48)
         XCTAssertTrue(canvas.erase(alongPath: Self.flick(over: 19), brush: Self.brush(),
                                    size: 14, opacity: 1, mode: .cutPoints))
@@ -668,10 +668,10 @@ final class RegionRepairLogicTests: XCTestCase {
 
         canvas.addStroke(added)
         XCTAssertEqual(canvas.lastDamage, .appended(count: 1))
-        let appended = canvas.render()
+        let appended = (try XCTUnwrap(canvas.render()))
         XCTAssertEqual(canvas.lastRenderDabCount, soloDabs,
                        "the append after a repair must still stamp only the new stroke's dabs")
-        assertMatchesToWithinARoundingUnit(appended, fullReWalk(of: canvas).image,
+        assertMatchesToWithinARoundingUnit(appended, try fullReWalk(of: canvas).image,
                                            inside: canvas.lastRepairedRegion,
                                            "an append onto a repaired cel")
     }
@@ -698,7 +698,7 @@ final class RegionRepairLogicTests: XCTestCase {
     /// re-measures every stroke it draws before any repair can read a stale entry. That invariant is
     /// what makes the line dead, so a change that lets a *clipped* walk follow `.everything` without
     /// a full one in between brings it back to life.
-    func testAnUndoBeforeTheRenderLandsDropsTheRegionBase() {
+    func testAnUndoBeforeTheRenderLandsDropsTheRegionBase() throws {
         let canvas = Self.drawnCanvas(24)
         let snapshot = canvas.elements
         XCTAssertTrue(canvas.erase(alongPath: Self.flick(over: 9), brush: Self.brush(),
@@ -714,10 +714,10 @@ final class RegionRepairLogicTests: XCTestCase {
         canvas.bumpVersion()
         XCTAssertEqual(canvas.lastDamage, .everything)
 
-        let restored = canvas.render()
+        let restored = (try XCTUnwrap(canvas.render()))
         XCTAssertEqual(canvas.regionRepairs, 0,
                        "a base taken against one display list must not be used against another")
-        assertIdentical(restored, fullReWalk(of: canvas).image,
+        assertIdentical(restored, try fullReWalk(of: canvas).image,
                         "the cel replaced before the cut's render landed")
 
         // And the cel still works afterwards: the next cut repairs, and still draws the walk's
@@ -727,7 +727,7 @@ final class RegionRepairLogicTests: XCTestCase {
         _ = canvas.render()
         XCTAssertEqual(canvas.regionRepairs, 1, "the cut after the replacement should repair")
         XCTAssertEqual(canvas.regionRepairsAbandoned, 0)
-        assertMatchesToWithinARoundingUnit(canvas.render(), fullReWalk(of: canvas).image,
+        assertMatchesToWithinARoundingUnit((try XCTUnwrap(canvas.render())), try fullReWalk(of: canvas).image,
                                            inside: canvas.lastRepairedRegion,
                                            "a cut after a replacement")
     }

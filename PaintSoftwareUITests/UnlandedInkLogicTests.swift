@@ -154,7 +154,7 @@ final class UnlandedInkLogicTests: XCTestCase {
             for covering in [[], [CGRect(x: 22, y: 18, width: 12, height: 12)]] {
                 // The expected result uses the original edits: a broken hold may discard one.
                 let truth = Self.sequentialPicture(edits, covering: covering)
-                let screen = Self.plannedPicture(ink.displayPlan(covering: covering))
+                let screen = try Self.plannedPicture(ink.displayPlan(covering: covering))
                 XCTAssertEqual(try Self.worstChannelDifference(Self.bytes(of: screen), Self.bytes(of: truth)), 0,
                                "disjoint gaps, transparent overlap, and newer live replacements stay correct: \(second), \(covering)")
             }
@@ -172,7 +172,7 @@ final class UnlandedInkLogicTests: XCTestCase {
             let visible = try XCTUnwrap(ink.displayPlan(covering: covering).pictures.first)
             visible.applyClip(to: view)
             let actual = UIGraphicsImageRenderer(size: rect.size, format: PixelOps.transparentFormat()).image {
-                view.layer.render(in: $0.cgContext)
+                try view.layer.render(in: $0.cgContext)
             }
             let expected = UIGraphicsImageRenderer(size: rect.size, format: PixelOps.transparentFormat()).image { ctx in
                 if case .image(let image) = ink.pictures[0].contents { image.draw(at: .zero) }
@@ -242,10 +242,10 @@ final class UnlandedInkLogicTests: XCTestCase {
         let faint = Self.mark(seed: 1, y: 40, opacity: 0.35)
         let solid = Self.mark(seed: 2, y: 46, opacity: 1)
 
-        let truth = try Self.bytes(of: Self.render([faint, solid]))
+        let truth = try Self.bytes(of: try Self.render([faint, solid]))
         let screen = try Self.bytes(of: Self.composite([
-            (Self.render([Self.atFullOpacity(faint)]), 0.35),
-            (Self.render([Self.atFullOpacity(solid)]), 1)
+            (try Self.render([Self.atFullOpacity(faint)]), 0.35),
+            (try Self.render([Self.atFullOpacity(solid)]), 1)
         ]))
 
         let worst = try Self.worstChannelDifference(truth, screen)
@@ -272,10 +272,10 @@ final class UnlandedInkLogicTests: XCTestCase {
         let faint = Self.mark(seed: 1, y: 40, opacity: 0.35)
         let solid = Self.mark(seed: 2, y: 46, opacity: 1)
 
-        let truth = try Self.bytes(of: Self.render([faint, solid]))
+        let truth = try Self.bytes(of: try Self.render([faint, solid]))
         let accumulated = try Self.bytes(of: Self.composite([
-            (Self.render([Self.atFullOpacity(faint)]), 1),
-            (Self.render([Self.atFullOpacity(solid)]), 1)
+            (try Self.render([Self.atFullOpacity(faint)]), 1),
+            (try Self.render([Self.atFullOpacity(solid)]), 1)
         ]))
 
         let worst = try Self.worstChannelDifference(truth, accumulated)
@@ -329,7 +329,7 @@ final class UnlandedInkLogicTests: XCTestCase {
         }
     }
 
-    private static func plannedPicture(_ plan: UnlandedInk.DisplayPlan) -> UIImage {
+    private static func plannedPicture(_ plan: UnlandedInk.DisplayPlan) throws -> UIImage {
         let bounds = CGRect(origin: .zero, size: canvasSize)
         let root = UIView(frame: bounds)
         let base = UIView(frame: bounds)
@@ -348,7 +348,7 @@ final class UnlandedInkLogicTests: XCTestCase {
             root.addSubview(view)
         }
         return UIGraphicsImageRenderer(size: canvasSize, format: PixelOps.transparentFormat()).image {
-            root.layer.render(in: $0.cgContext)
+            try root.layer.render(in: $0.cgContext)
         }
     }
 
@@ -376,10 +376,10 @@ final class UnlandedInkLogicTests: XCTestCase {
                      samples: stroke.samples, composite: stroke.composite, seed: stroke.seed)
     }
 
-    private static func render(_ strokes: [VectorStroke]) -> UIImage {
+    private static func render(_ strokes: [VectorStroke]) throws -> UIImage {
         let canvas = VectorCanvas(size: canvasSize)
         for stroke in strokes { canvas.addStroke(stroke) }
-        return canvas.render()
+        return (try XCTUnwrap(try canvas.render()))
     }
 
     /// Core Animation's sibling composite, on the CPU: each picture source-over at its own alpha, in

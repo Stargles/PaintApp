@@ -2235,7 +2235,7 @@ final class StrokeCanvasView: CanvasPlaneView {
                                              mode: inBetweenCelID != nil ? .erase : vectorEraserMode)
         // Mode 1 previews by punching into a copy of what's already on screen — at an in-between
         // that's the evaluated frame, not the (empty) canvas. The copy is of the window only, and
-        // the backdrop it copies from is the render already on screen (`renderIfNonEmpty`, memoized
+        // the backdrop it copies from is the render already on screen (`render`, memoized
         // on the canvas's version) rather than a second one: this used to be two canvas-sized
         // buffers at touch-down, 2 GiB at 16383².
         scratch = {
@@ -2244,7 +2244,7 @@ final class StrokeCanvasView: CanvasPlaneView {
                 // the cel's own render, which `poseSpace` shows posed, and not the posed picture in
                 // the base slot, which is already in canvas points.
                 let shown = poseSpacePose == nil ? interpolationImage : nil
-                let backdrop = shown ?? vectorCanvas.renderIfNonEmpty()
+                guard let backdrop = shown ?? vectorCanvas.render() else { return nil }
                 let elements = vectorCanvas.elements
                 let references = Set(elements.compactMap { $0.stream }.filter(\.rendersInPlace).map(\.id))
                 let ink: CelContentPicture.Ink = shown.map(CelContentPicture.Ink.rendered)
@@ -2254,7 +2254,7 @@ final class StrokeCanvasView: CanvasPlaneView {
                     placement: CelContentPlacement(ink: poseSpacePose, backing: contentPlacement.backing))
                 // **That render was synchronous and it is a picture of everything committed**, so
                 // every held picture's ink is inside it — both in this window and, because
-                // `renderIfNonEmpty` memoizes, in the base the `refreshDisplay` at the end of this
+                // `render` memoizes, in the base the `refreshDisplay` at the end of this
                 // method is about to install. Keeping them would draw that ink a second time.
                 unlandedInk.removeAll()
                 // **Mode 1 and the cutting modes want different windows, and §12 stage 8 is where
@@ -2277,6 +2277,7 @@ final class StrokeCanvasView: CanvasPlaneView {
                                  texture: profile.preset.texture)
         }()
         currentVectorSamples = StrokeSamples(channels: .captured)
+        guard scratch != nil else { handleCancel(); return }
         lastSampleTime = nil
         lastPreviewSample = nil
         previewCuts = [:]

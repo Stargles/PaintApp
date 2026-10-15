@@ -181,7 +181,7 @@ final class StreamElementLogicTests: XCTestCase {
         stream.transform = LayerTransform(position: CGPoint(x: 20, y: 20), scale: 1, rotation: 0)
         let canvas = VectorCanvas(size: Self.canvasSize, elements: [.stream(stream)])
 
-        let at = try XCTUnwrap(pixels(canvas.render()))
+        let at = try XCTUnwrap(pixels((try XCTUnwrap(canvas.render()))))
         XCTAssertGreaterThan(at(20, 20).a, 0, "the placeholder's own centre")
         XCTAssertGreaterThan(at(12, 17).a, 0, "inside the rectangle, off centre")
         XCTAssertEqual(at(20, 34).a, 0, "below the rectangle")
@@ -199,7 +199,7 @@ final class StreamElementLogicTests: XCTestCase {
         stream.transform = LayerTransform(position: CGPoint(x: 20, y: 20), scale: 1, rotation: 0)
         let canvas = VectorCanvas(size: Self.canvasSize, elements: [.stream(stream)])
 
-        let before = try XCTUnwrap(pixels(canvas.render()))
+        let before = try XCTUnwrap(pixels((try XCTUnwrap(canvas.render()))))
         let placeholder = before(20, 20)
         XCTAssertGreaterThan(placeholder.a, 0)
         XCTAssertEqual(placeholder.g, placeholder.r, accuracy: 8, "the placeholder is grey, not green")
@@ -207,7 +207,7 @@ final class StreamElementLogicTests: XCTestCase {
         let green = solidImage(.green, size: CGSize(width: 20, height: 10))
         XCTAssertTrue(canvas.setStreamFrame(id: stream.id, image: green, index: 1), "the element must be found")
 
-        let after = try XCTUnwrap(pixels(canvas.render()))
+        let after = try XCTUnwrap(pixels((try XCTUnwrap(canvas.render()))))
         let frame = after(20, 20)
         XCTAssertEqual(frame.a, 255, "the frame is opaque where the placeholder was translucent")
         XCTAssertGreaterThan(Int(frame.g), Int(frame.r) + 100, "the frame's green reached the pixel")
@@ -285,28 +285,28 @@ final class StreamElementLogicTests: XCTestCase {
         let canvas = VectorCanvas(size: Self.canvasSize, elements: [.stream(stream), .fill(ink)])
         canvas.setStreamFrame(id: stream.id, image: solidImage(.green, size: CGSize(width: 40, height: 40)), index: 1)
 
-        let host = try XCTUnwrap(pixels(canvas.render()))
+        let host = try XCTUnwrap(pixels((try XCTUnwrap(canvas.render()))))
         XCTAssertGreaterThan(Int(host(20, 20).g), Int(host(20, 20).r) + 100, "CONTROL: the host draws the stream")
         XCTAssertGreaterThan(Int(host(32, 32).r), Int(host(32, 32).g) + 100, "with the ink over it")
 
         let frozen = canvas.freeze(quality: .full)
-        let document = try XCTUnwrap(pixels(frozen.render(quality: .full)))
+        let document = try XCTUnwrap(pixels((try XCTUnwrap(frozen.render(quality: .full)))))
         XCTAssertEqual(document(20, 20).a, 0, "the document's picture has no stream")
         XCTAssertGreaterThan(Int(document(32, 32).r), Int(document(32, 32).g) + 100, "and has the ink")
-        let fitted = try XCTUnwrap(pixels(frozen.render(quality: .full, fittingInto: CGSize(width: 32, height: 32))))
+        let fitted = try XCTUnwrap(pixels((try XCTUnwrap(frozen.render(quality: .full, fittingInto: CGSize(width: 32, height: 32))))))
         XCTAssertEqual(fitted(10, 10).a, 0, "at a reduced size too")
-        XCTAssertTrue(canvas.render() === canvas.render(), "and the host's memo was neither shared nor spoiled")
-        XCTAssertGreaterThan(Int(try XCTUnwrap(pixels(canvas.render()))(20, 20).g), 100, "still the stream's")
+        XCTAssertTrue((try XCTUnwrap(canvas.render())) === (try XCTUnwrap(canvas.render())), "and the host's memo was neither shared nor spoiled")
+        XCTAssertGreaterThan(Int(try XCTUnwrap(pixels((try XCTUnwrap(canvas.render()))))(20, 20).g), 100, "still the stream's")
     }
 
     /// The complement: a canvas with no stream is untouched by the seam — its freeze still hands back
     /// the memo the host holds, so no document without a stream pays for this.
-    func testAFreezeOfACanvasWithNoStreamStillSharesItsMemo() {
+    func testAFreezeOfACanvasWithNoStreamStillSharesItsMemo() throws {
         let ink = VectorFillElement(path: CGPath(rect: CGRect(x: 10, y: 10, width: 8, height: 8), transform: nil),
                                     color: CodableColor(red: 1, green: 0, blue: 0, alpha: 1), opacity: 1)
         let canvas = VectorCanvas(size: Self.canvasSize, elements: [.fill(ink)])
-        let rendered = canvas.render()
-        XCTAssertTrue(canvas.freeze(quality: .full).render(quality: .full) === rendered)
+        let rendered = (try XCTUnwrap(canvas.render()))
+        XCTAssertTrue((try XCTUnwrap(canvas.freeze(quality: .full).render(quality: .full))) === rendered)
     }
 
     // MARK: - A suppressed element

@@ -97,10 +97,10 @@ final class TransformChannelLogicTests: XCTestCase {
         let cel = manager.layers[1].cels[0]
 
         // Warm the memo with the resting frame first, which is the order that produces the defect.
-        let resting = PixelOps.rasterize(cel: cel, canvasSize: size,
-                                         derived: manager.derivedCelContent(for: cel, atFrame: 0))
-        let posed = PixelOps.rasterize(cel: cel, canvasSize: size,
-                                       derived: manager.derivedCelContent(for: cel, atFrame: 8))
+        let resting = (try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: size,
+                                         derived: manager.derivedCelContent(for: cel, atFrame: 0))))
+        let posed = (try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: size,
+                                       derived: manager.derivedCelContent(for: cel, atFrame: 8))))
         let restBounds = try XCTUnwrap(inkBounds(resting))
         let posedBounds = try XCTUnwrap(inkBounds(posed))
         XCTAssertEqual(posedBounds.minX - restBounds.minX, 24, accuracy: 1.5,
@@ -120,10 +120,10 @@ final class TransformChannelLogicTests: XCTestCase {
         animate(manager, layerID: layerID, celID: celID)
         let cel = manager.layers[1].cels[0]
 
-        let early = PixelOps.rasterize(cel: cel, canvasSize: size,
-                                       derived: manager.derivedCelContent(for: cel, atFrame: 2))
-        let late = PixelOps.rasterize(cel: cel, canvasSize: size,
-                                      derived: manager.derivedCelContent(for: cel, atFrame: 8))
+        let early = (try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: size,
+                                       derived: manager.derivedCelContent(for: cel, atFrame: 2))))
+        let late = (try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: size,
+                                      derived: manager.derivedCelContent(for: cel, atFrame: 8))))
         let earlyBounds = try XCTUnwrap(inkBounds(early))
         let lateBounds = try XCTUnwrap(inkBounds(late))
         XCTAssertGreaterThan(lateBounds.minX - earlyBounds.minX, 12,
@@ -965,8 +965,8 @@ final class TransformChannelLogicTests: XCTestCase {
         let (manager, layerID, celID) = fixture()
         animate(manager, layerID: layerID, celID: celID)
         let source = manager.layers[1].cels[0]
-        let want = PixelOps.rasterize(cel: source, canvasSize: size,
-                                      derived: manager.derivedCelContent(for: source, atFrame: 4))
+        let want = (try XCTUnwrap(PixelOps.rasterize(cel: source, canvasSize: size,
+                                      derived: manager.derivedCelContent(for: source, atFrame: 4))))
         let wantBounds = try XCTUnwrap(inkBounds(want), "Setup: frame 4 shows a posed drawing")
 
         manager.duplicateLayer(at: 1)
@@ -975,8 +975,8 @@ final class TransformChannelLogicTests: XCTestCase {
         XCTAssertEqual(copy.transformTracks, source.transformTracks,
                        "the whole channel — keys, handles and all — travels with the copy")
 
-        let got = PixelOps.rasterize(cel: copy, canvasSize: size,
-                                     derived: manager.derivedCelContent(for: copy, atFrame: 4))
+        let got = (try XCTUnwrap(PixelOps.rasterize(cel: copy, canvasSize: size,
+                                     derived: manager.derivedCelContent(for: copy, atFrame: 4))))
         let gotBounds = try XCTUnwrap(inkBounds(got),
                                       "the copy must still derive a posed picture at frame 4")
         XCTAssertEqual(gotBounds.minX, wantBounds.minX, accuracy: 0.5,

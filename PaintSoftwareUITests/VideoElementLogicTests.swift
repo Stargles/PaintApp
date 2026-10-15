@@ -491,7 +491,7 @@ final class VideoElementLogicTests: XCTestCase {
         video.transform = LayerTransform(position: CGPoint(x: 20, y: 20), scale: 1, rotation: 0)
         let canvas = VectorCanvas(size: Self.canvasSize, elements: [.video(video)])
 
-        let pixels = try XCTUnwrap(alphaMap(canvas.render()))
+        let pixels = try XCTUnwrap(alphaMap((try XCTUnwrap(canvas.render()))))
 
         XCTAssertGreaterThan(pixels(20, 20), 0, "the placeholder's own centre")
         XCTAssertGreaterThan(pixels(12, 17), 0, "inside the rectangle, off centre")
@@ -508,11 +508,11 @@ final class VideoElementLogicTests: XCTestCase {
         var video = defaultElement(assetURL: asset)
         video.naturalSize = CGSize(width: 20, height: 10)
         video.transform = LayerTransform(position: CGPoint(x: 16, y: 16), scale: 1, rotation: 0)
-        let near = try XCTUnwrap(alphaMap(VectorCanvas(size: Self.canvasSize,
-                                                      elements: [.video(video)]).render()))
+        let near = try XCTUnwrap(alphaMap((try XCTUnwrap(VectorCanvas(size: Self.canvasSize,
+                                                      elements: [.video(video)]).render()))))
         video.transform.position = CGPoint(x: 46, y: 46)
-        let far = try XCTUnwrap(alphaMap(VectorCanvas(size: Self.canvasSize,
-                                                     elements: [.video(video)]).render()))
+        let far = try XCTUnwrap(alphaMap((try XCTUnwrap(VectorCanvas(size: Self.canvasSize,
+                                                     elements: [.video(video)]).render()))))
 
         XCTAssertGreaterThan(near(16, 16), 0)
         XCTAssertEqual(near(46, 46), 0)

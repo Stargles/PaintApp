@@ -311,7 +311,7 @@ final class FrameRecipeLogicTests: XCTestCase {
     /// when it had none — a detached copy of the display list. Only the second is the real freeze,
     /// and it is exactly the state a cel is in immediately after a stroke commits, which is the
     /// moment this whole stage is about.
-    func testAColdVectorTierResolvesFromTheFrozenDisplayListRatherThanTheLiveOne() {
+    func testAColdVectorTierResolvesFromTheFrozenDisplayListRatherThanTheLiveOne() throws {
         let (manager, vectorIndex) = everyKindOfLeaf()
         guard let canvas = manager.layers[vectorIndex].cels[0].vector else {
             return XCTFail("Setup: the vector layer must have a tier")
@@ -334,8 +334,9 @@ final class FrameRecipeLogicTests: XCTestCase {
         let oracleCanvas = VectorCanvas(size: size, elements: [])
         oracleCanvas.addStroke(stroke([CGPoint(x: 8, y: 50), CGPoint(x: 50, y: 50), CGPoint(x: 50, y: 8)],
                                       colour: CodableColor(red: 0, green: 1, blue: 1, alpha: 1)))
+        let oracleImage = try XCTUnwrap(oracleCanvas.render())
         let expected = UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { _ in
-            oracleCanvas.render().draw(in: CGRect(origin: .zero, size: size))
+            oracleImage.draw(in: CGRect(origin: .zero, size: size))
         }.cgImage
 
         XCTAssertEqual(resolved.flatMap(CanvasFixture.rgbaBytes),
@@ -352,7 +353,7 @@ final class FrameRecipeLogicTests: XCTestCase {
     /// this stage exists to remove. MEASURED on the owner's iPad 9 in Release, 2026-09-02
     /// (`testVectorLayerRenderCostAndMemory`): a 20-stroke cel at 2048² is **70.3 ms** to rasterize
     /// and **0.0 ms** to read back from the memo, so the doubling is the whole cost of the stage.
-    func testAFrozenVectorTierSharesTheCanvasesOwnMemoRatherThanStampingItTwice() {
+    func testAFrozenVectorTierSharesTheCanvasesOwnMemoRatherThanStampingItTwice() throws {
         let canvas = VectorCanvas(size: size, elements: [])
         canvas.addStroke(stroke([CGPoint(x: 4, y: 32), CGPoint(x: 60, y: 32)],
                                 colour: CodableColor(red: 0, green: 0, blue: 0, alpha: 1)))
@@ -362,7 +363,7 @@ final class FrameRecipeLogicTests: XCTestCase {
         XCTAssertEqual(canvas.rasterizations, 1, "Setup: one rasterize so far")
 
         let warm = canvas.freeze(quality: .full)
-        XCTAssertTrue(warm.render(quality: .full) === canvas.render(),
+        XCTAssertTrue((try XCTUnwrap(warm.render(quality: .full))) === (try XCTUnwrap(canvas.render())),
                       "A freeze taken while the memo is warm hands back the very image the display is showing")
         XCTAssertEqual(canvas.rasterizations, 1, "Reading a memoized render must not rasterize")
 
@@ -370,9 +371,9 @@ final class FrameRecipeLogicTests: XCTestCase {
         canvas.addStroke(stroke([CGPoint(x: 32, y: 4), CGPoint(x: 32, y: 60)],
                                 colour: CodableColor(red: 0, green: 0, blue: 0, alpha: 1)))
         let cold = canvas.freeze(quality: .full)
-        let composited = cold.render(quality: .full)
+        let composited = (try XCTUnwrap(cold.render(quality: .full)))
         XCTAssertEqual(canvas.rasterizations, 2, "Exactly one more rasterize, on the canvas itself")
-        XCTAssertTrue(composited === canvas.render(),
+        XCTAssertTrue(composited === (try XCTUnwrap(canvas.render())),
                       "The image the composite resolved must be the one the display then reads — one rasterize serves both")
         XCTAssertEqual(canvas.rasterizations, 2, "…and the display's read must still not rasterize")
     }

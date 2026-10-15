@@ -127,7 +127,7 @@ final class TextInkFootprintLogicTests: XCTestCase {
     private func assertInkInsideDeclaredRectangle(
         _ recipe: TextRecipe, rotation: CGFloat, resolution: CGFloat, _ what: String,
         file: StaticString = #filePath, line: UInt = #line
-    ) -> (escape: CGFloat, reach: CGFloat, declared: CGRect)? {
+    ) throws -> (escape: CGFloat, reach: CGFloat, declared: CGRect)? {
         guard let (canvas, element) = Self.fixture(recipe, rotation: rotation) else {
             XCTFail("\(what): could not build a frame", file: file, line: line)
             return nil
@@ -135,7 +135,7 @@ final class TextInkFootprintLogicTests: XCTestCase {
         // The standing picture — native, or the reduced slot — is rendered *before* the press, which
         // is the order the artist's undo takes: the picture is there, the object departs, and the
         // rectangle has to cover what the picture still shows.
-        let image = resolution >= 1 ? canvas.render() : canvas.render(quality: .full, resolution: resolution)
+        let image = resolution >= 1 ? (try XCTUnwrap(canvas.render())) : (try XCTUnwrap(canvas.render(quality: .full, resolution: resolution)))
         let ink = inkBox(image)
         guard let box = ink.box else {
             XCTFail("\(what): fixture precondition — the string painted no pixel at all, so there is "
@@ -255,7 +255,7 @@ final class TextInkFootprintLogicTests: XCTestCase {
 
     /// **Every face the picker exposes, one overhanging string, upright, native resolution.** The
     /// broad sweep: a face whose declared glyph bounds lie would fail here whatever else passed.
-    func testEveryFaceTheAppExposesIsBoundedUpright() {
+    func testEveryFaceTheAppExposesIsBoundedUpright() throws {
         let faces = Self.everyFace()
         XCTAssertGreaterThan(faces.count, 50, "the picker exposes \(faces.count) faces — this "
                              + "simulator's font list is not the one the sweep was written against")
@@ -263,9 +263,9 @@ final class TextInkFootprintLogicTests: XCTestCase {
         var worst: (escape: CGFloat, name: String) = (0, "")
         var furthest: (reach: CGFloat, name: String) = (-.infinity, "")
         for face in faces {
-            autoreleasepool {
+            try autoreleasepool {
                 let recipe = Self.recipe("Qfjy ÂÊÑ", font: face.descriptor, pointSize: 48)
-                guard let r = assertInkInsideDeclaredRectangle(recipe, rotation: 0, resolution: 1,
+                guard let r = try assertInkInsideDeclaredRectangle(recipe, rotation: 0, resolution: 1,
                                                               "\(face.name) 48pt upright") else { return }
                 if r.escape > worst.escape { worst = (r.escape, face.name) }
                 if r.reach > furthest.reach { furthest = (r.reach, face.name) }
@@ -282,7 +282,7 @@ final class TextInkFootprintLogicTests: XCTestCase {
     /// **The overhang faces against the overhang strings, at three sizes, three rotations and two
     /// resolutions.** The reduced arm is rendered first so the slot is standing at the press, which
     /// is the thumbnail path's order and the one that decides the pad's unit.
-    func testOverhangStringsAreBoundedAcrossSizesRotationsAndResolutions() {
+    func testOverhangStringsAreBoundedAcrossSizesRotationsAndResolutions() throws {
         var report: [String] = []
         var worst: (escape: CGFloat, what: String) = (0, "")
         var furthest: (reach: CGFloat, what: String) = (-.infinity, "")
@@ -293,11 +293,11 @@ final class TextInkFootprintLogicTests: XCTestCase {
                 for size in Self.overhangSizes {
                     for rotation in Self.overhangRotations {
                         for resolution in Self.resolutions {
-                            autoreleasepool {
+                            try autoreleasepool {
                                 let what = "\(font.faceName ?? font.familyName) \(entry.label) \(size)pt "
                                     + "rot \(rotation) res \(resolution)"
                                 let recipe = Self.recipe(entry.string, font: font, pointSize: size)
-                                guard let r = assertInkInsideDeclaredRectangle(
+                                guard let r = try assertInkInsideDeclaredRectangle(
                                     recipe, rotation: rotation, resolution: resolution, what) else { return }
                                 cases += 1
                                 if r.escape > worst.escape { worst = (r.escape, what) }
@@ -330,7 +330,7 @@ final class TextInkFootprintLogicTests: XCTestCase {
     /// bounding box by construction; a frame with a collapsed `size` and a real bounding box has no
     /// map at all and draws through the bounding-box fallback. Both are answered by the union of the
     /// two, and both are checked here against pixels.
-    func testTheWarpAndCollapsedArmsAreBoundedToo() {
+    func testTheWarpAndCollapsedArmsAreBoundedToo() throws {
         let recipe = Self.recipe("Qfjy ÂÊÑ", font: FontDescriptor(familyName: "Zapfino", faceName: "Zapfino"),
                                  pointSize: 40)
         let font = TextLayout.resolvedFont(for: recipe).font
@@ -345,7 +345,7 @@ final class TextInkFootprintLogicTests: XCTestCase {
         let warpedFrame = TextFrame(size: size, corners: warped, mode: .projective, autoSize: true)
         XCTAssertNil(warpedFrame.affineTransform, "fixture precondition: a distorted quad has no affine map")
         XCTAssertNotNil(warpedFrame.homography, "fixture precondition: a distorted quad has a homography")
-        check(VectorTextElement(recipe: recipe, frame: warpedFrame),
+        try check(VectorTextElement(recipe: recipe, frame: warpedFrame),
               canvasSize: CGSize(width: size.width + 2 * margin, height: size.height + 2 * margin),
               "projective autoSize box")
 
@@ -357,16 +357,16 @@ final class TextInkFootprintLogicTests: XCTestCase {
                                        mode: .affine, autoSize: true)
         XCTAssertNil(collapsedFrame.affineTransform, "fixture precondition: a zero size has no affine map")
         XCTAssertNil(collapsedFrame.homography, "fixture precondition: a zero size has no homography")
-        check(VectorTextElement(recipe: recipe, frame: collapsedFrame),
+        try check(VectorTextElement(recipe: recipe, frame: collapsedFrame),
               canvasSize: CGSize(width: size.width + 2 * margin, height: size.height + 2 * margin),
               "collapsed-size autoSize box")
     }
 
     private func check(_ element: VectorTextElement, canvasSize: CGSize, _ what: String,
-                       file: StaticString = #filePath, line: UInt = #line) {
+                       file: StaticString = #filePath, line: UInt = #line) throws {
         for resolution in Self.resolutions {
             let canvas = VectorCanvas(size: canvasSize, elements: [.text(element)])
-            let image = resolution >= 1 ? canvas.render() : canvas.render(quality: .full, resolution: resolution)
+            let image = resolution >= 1 ? (try XCTUnwrap(canvas.render())) : (try XCTUnwrap(canvas.render(quality: .full, resolution: resolution)))
             let ink = inkBox(image)
             guard let box = ink.box else {
                 XCTFail("\(what) at \(resolution): fixture precondition — nothing painted", file: file, line: line)
@@ -394,11 +394,11 @@ final class TextInkFootprintLogicTests: XCTestCase {
     /// else** — pinned so the pad cannot silently become a different formula. At native resolution
     /// the pad is the overshoot itself; with a half-resolution slot standing it is twice that in
     /// canvas points, because the overshoot is a device-pixel figure.
-    func testTheDeclaredRectangleIsTheOutlinePaddedForTheLowestStandingResolution() {
+    func testTheDeclaredRectangleIsTheOutlinePaddedForTheLowestStandingResolution() throws {
         let recipe = Self.recipe("Overhang fjQ", font: .system, pointSize: 64)
         for resolution in Self.resolutions {
             guard let (canvas, element) = Self.fixture(recipe, rotation: 0.3) else { return XCTFail("no fixture") }
-            _ = resolution >= 1 ? canvas.render() : canvas.render(quality: .full, resolution: resolution)
+            _ = resolution >= 1 ? (try XCTUnwrap(canvas.render())) : (try XCTUnwrap(canvas.render(quality: .full, resolution: resolution)))
             canvas.restoreElements([], changedInk: nil)
             guard case .region(let declared) = canvas.lastDamage else { return XCTFail("not a region") }
             let outline = TextMeasure.glyphOutlineBounds(of: element)
@@ -415,10 +415,10 @@ final class TextInkFootprintLogicTests: XCTestCase {
     /// **A string of nothing but spaces declares a null rectangle rather than the cel**: the flatten
     /// draws it (the string is not empty) and it paints nowhere, which is what `.null` means. The
     /// operand that says the press *did* run through the text arm is that the picture is blank.
-    func testAStringOfSpacesPaintsNowhereAndDeclaresNoRectangle() {
+    func testAStringOfSpacesPaintsNowhereAndDeclaresNoRectangle() throws {
         let recipe = Self.recipe("   ", font: .system, pointSize: 64)
         guard let (canvas, element) = Self.fixture(recipe, rotation: 0) else { return XCTFail("no fixture") }
-        XCTAssertNil(inkBox(canvas.render()).box, "spaces paint nothing")
+        XCTAssertNil(inkBox((try XCTUnwrap(canvas.render()))).box, "spaces paint nothing")
         XCTAssertTrue(TextMeasure.glyphOutlineBounds(of: element).isNull, "spaces have no outline")
         canvas.restoreElements([], changedInk: nil)
         // Nothing arrives and the one departure paints nowhere: the union is null, which the canvas

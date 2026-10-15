@@ -98,11 +98,11 @@ final class LiveElementEditLogicTests: XCTestCase {
     /// inside the window, and outside it the standing picture is already the written one. Commits.
     private func assertWindowIsExact(_ manager: CanvasManager, _ vector: VectorCanvas,
                                      file: StaticString = #filePath, line: UInt = #line) throws {
-        let standing = rgba(vector.render())
+        let standing = rgba((try XCTUnwrap(vector.render())))
         let live = try XCTUnwrap(manager.liveCelContentEdit, "an edit is held", file: file, line: line)
         let held = windowPicture(live)
         XCTAssertTrue(manager.commitSelectionEdit(), "the edit changed something", file: file, line: line)
-        let written = rgba(vector.render())
+        let written = rgba((try XCTUnwrap(vector.render())))
         let width = Int(side), window = live.window
         XCTAssertEqual(held.count, Int(window.width * window.height) * 4, "the picture is the window's size",
                        file: file, line: line)
@@ -242,7 +242,7 @@ final class LiveElementEditLogicTests: XCTestCase {
         XCTAssertEqual(live.window, live.window.integral, "whole pixels, so the clip is not antialiased")
         for id in caught {
             let element = try XCTUnwrap(vector.elements.first { $0.id == id })
-            let alone = VectorCanvas(size: vector.size, elements: [element], transform: vector.transform).render()
+            let alone = (try XCTUnwrap(VectorCanvas(size: vector.size, elements: [element], transform: vector.transform).render()))
             let ink = try XCTUnwrap(PixelOps.opaqueContentBounds(alone), "the element has ink")
             XCTAssertTrue(live.window.insetBy(dx: -1, dy: -1).contains(ink), "the window holds \(ink)")
         }

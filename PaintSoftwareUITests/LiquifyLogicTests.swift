@@ -175,8 +175,8 @@ final class LiquifyLogicTests: XCTestCase {
         let field = LiquifyField(gesture(points: [CGPoint(x: 300, y: 96), CGPoint(x: 300, y: 128)]))
         let moved = field.mapping(original)
         let size = CGSize(width: 1024, height: 256)
-        let beforeImage = VectorCanvas(size: size, elements: original).render()
-        let afterImage = VectorCanvas(size: size, elements: moved).render()
+        let beforeImage = (try XCTUnwrap(VectorCanvas(size: size, elements: original).render()))
+        let afterImage = (try XCTUnwrap(VectorCanvas(size: size, elements: moved).render()))
         let before = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(beforeImage.cgImage)))
         let after = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(afterImage.cgImage)))
         // Even a correctly padded local spine window cannot cover a later native-dab phase change.
@@ -489,9 +489,9 @@ final class LiquifyLogicTests: XCTestCase {
         recipe.groups[0].lattices = recipe.groups[0].lattices.map { $0.expanded(toContain: [CGPoint(x: -500, y: -500)]).lattice }
         let after = try XCTUnwrap(InterpolationEvaluator.evaluate(recipe: recipe, at: 0.5, content: { _ in [.stroke(ink)] }))
         let size = CGSize(width: 160, height: 160)
-        let a = try XCTUnwrap(VectorCanvas(size: size, elements: before.forward).render().cgImage)
-        let b = try XCTUnwrap(VectorCanvas(size: size, elements: after.forward).render().cgImage)
-        let unreshaped = try XCTUnwrap(VectorCanvas(size: size, elements: control.forward).render().cgImage)
+        let a = try XCTUnwrap((try XCTUnwrap(VectorCanvas(size: size, elements: before.forward).render())).cgImage)
+        let b = try XCTUnwrap((try XCTUnwrap(VectorCanvas(size: size, elements: after.forward).render())).cgImage)
+        let unreshaped = try XCTUnwrap((try XCTUnwrap(VectorCanvas(size: size, elements: control.forward).render())).cgImage)
         XCTAssertNotEqual(CanvasFixture.rgbaBytes(a), CanvasFixture.rgbaBytes(unreshaped), "the retained capture must actually reshape the picture")
         XCTAssertEqual(CanvasFixture.rgbaBytes(a), CanvasFixture.rgbaBytes(b), "immutable capture geometry cannot depend on recipe lattice cell indices")
     }

@@ -127,9 +127,9 @@ final class IncrementalAppendLogicTests: XCTestCase {
     /// has no memo and no base, so it *cannot* take the fast path. The `dabs` it reports is the
     /// whole layer's dab count, which is what the fast path must not be spending.
     private func fullReWalk(of canvas: VectorCanvas,
-                            transform: CGAffineTransform = .identity) -> (image: UIImage, dabs: Int) {
+                            transform: CGAffineTransform = .identity) throws -> (image: UIImage, dabs: Int) {
         let cold = VectorCanvas(size: canvas.size, elements: canvas.elements, transform: transform)
-        let image = cold.render()
+        let image = (try XCTUnwrap(cold.render()))
         XCTAssertEqual(cold.rasterizations, 1, "the reference arm must have rasterized exactly once")
         return (image, cold.lastRenderDabCount)
     }
@@ -266,9 +266,9 @@ final class IncrementalAppendLogicTests: XCTestCase {
     /// implementation that quietly re-walked would pass — which is exactly the shape of a change
     /// that is "correct" and buys nothing. Without the byte comparison, an implementation that drew
     /// the wrong picture cheaply would pass.
-    func testAppendingAStrokeIsByteIdenticalAndStampsOnlyItsOwnDabs() {
+    func testAppendingAStrokeIsByteIdenticalAndStampsOnlyItsOwnDabs() throws {
         let canvas = Self.canvas(12)
-        let warm = canvas.render()
+        let warm = (try XCTUnwrap(canvas.render()))
         XCTAssertEqual(canvas.rasterizations, 1)
         let wholeLayerDabs = canvas.lastRenderDabCount
         XCTAssertGreaterThan(wholeLayerDabs, 0, "setup: the fixture must actually stamp something")
@@ -278,18 +278,18 @@ final class IncrementalAppendLogicTests: XCTestCase {
         XCTAssertGreaterThan(expectedNewDabs, 0)
 
         canvas.addStroke(newStroke)
-        let incremental = canvas.render()
+        let incremental = (try XCTUnwrap(canvas.render()))
         XCTAssertNotIdentical(incremental, warm, "setup: the append must have produced a new picture")
 
         XCTAssertEqual(canvas.lastRenderDabCount, expectedNewDabs,
                        "the append must stamp the new stroke and nothing else — \(wholeLayerDabs) "
                        + "would mean the fast path was not taken")
-        assertIdentical(incremental, fullReWalk(of: canvas).image, "appending one paint stroke")
+        assertIdentical(incremental, try fullReWalk(of: canvas).image, "appending one paint stroke")
     }
 
     /// **Consecutive appends, which is what inking actually is.** Each one must chain onto the last
     /// one's result rather than re-establishing a base by walking.
-    func testEachOfARunOfAppendsCostsOnlyItsOwnDabs() {
+    func testEachOfARunOfAppendsCostsOnlyItsOwnDabs() throws {
         let canvas = Self.canvas(8)
         _ = canvas.render()
 
@@ -301,7 +301,7 @@ final class IncrementalAppendLogicTests: XCTestCase {
             XCTAssertEqual(canvas.lastRenderDabCount, expected,
                            "append \(index - 7) of 6 fell back to the full walk")
         }
-        assertIdentical(canvas.render(), fullReWalk(of: canvas).image, "six appends in a row")
+        assertIdentical((try XCTUnwrap(canvas.render())), try fullReWalk(of: canvas).image, "six appends in a row")
     }
 
     /// **The eraser question, settled by experiment rather than by argument.**
@@ -317,7 +317,7 @@ final class IncrementalAppendLogicTests: XCTestCase {
     /// non-`.normal` blend mode, so the full walk really does open and close a transparency layer
     /// before the eraser. If the base blit or the layer boundary lost anything, this is where it
     /// shows.
-    func testAnAppendedEraserOverAnIsolatedRunIsByteIdentical() {
+    func testAnAppendedEraserOverAnIsolatedRunIsByteIdentical() throws {
         let canvas = Self.canvas(6, blend: .multiply)
         _ = canvas.render()
         let wholeLayerDabs = canvas.lastRenderDabCount
@@ -325,30 +325,30 @@ final class IncrementalAppendLogicTests: XCTestCase {
         let punch = Self.eraserStroke()
         let expected = soloDabs(.stroke(punch))
         canvas.addStroke(punch)
-        let incremental = canvas.render()
+        let incremental = (try XCTUnwrap(canvas.render()))
 
         XCTAssertEqual(canvas.lastRenderDabCount, expected,
                        "an eraser appended after an isolated run must still take the fast path "
                        + "(\(wholeLayerDabs) dabs would mean it fell back)")
-        assertIdentical(incremental, fullReWalk(of: canvas).image,
+        assertIdentical(incremental, try fullReWalk(of: canvas).image,
                         "an eraser appended after a multiply run")
     }
 
     /// The ordinary eraser, over an all-`.normal` layer.
-    func testAnAppendedEraserOverPlainInkIsByteIdentical() {
+    func testAnAppendedEraserOverPlainInkIsByteIdentical() throws {
         let canvas = Self.canvas(10)
         _ = canvas.render()
         let punch = Self.eraserStroke()
         let expected = soloDabs(.stroke(punch))
         canvas.addStroke(punch)
-        let incremental = canvas.render()
+        let incremental = (try XCTUnwrap(canvas.render()))
         XCTAssertEqual(canvas.lastRenderDabCount, expected)
-        assertIdentical(incremental, fullReWalk(of: canvas).image, "an eraser appended over plain ink")
+        assertIdentical(incremental, try fullReWalk(of: canvas).image, "an eraser appended over plain ink")
     }
 
     /// **A stroke appended *after* an eraser**, which is the other side of rule 3: the new stroke
     /// starts a fresh paint run, because an `.erase` element ended the last one.
-    func testAStrokeAppendedAfterAnEraserIsByteIdentical() {
+    func testAStrokeAppendedAfterAnEraserIsByteIdentical() throws {
         let canvas = Self.canvas(6)
         canvas.addStroke(Self.eraserStroke())
         _ = canvas.render()
@@ -356,30 +356,30 @@ final class IncrementalAppendLogicTests: XCTestCase {
         let newStroke = Self.stroke(20)
         let expected = soloDabs(.stroke(newStroke))
         canvas.addStroke(newStroke)
-        let incremental = canvas.render()
+        let incremental = (try XCTUnwrap(canvas.render()))
         XCTAssertEqual(canvas.lastRenderDabCount, expected)
-        assertIdentical(incremental, fullReWalk(of: canvas).image, "a stroke appended after an eraser")
+        assertIdentical(incremental, try fullReWalk(of: canvas).image, "a stroke appended after an eraser")
     }
 
     /// A fill appended over line art — LASSO_FILL.md §2a's "cover everything". It ends the paint run
     /// beneath it, so like the eraser it needs no condition; it stamps no dabs at all, which is what
     /// makes the fallback distinguishable here.
-    func testAnAppendedFillIsByteIdenticalAndStampsNothing() {
+    func testAnAppendedFillIsByteIdenticalAndStampsNothing() throws {
         let canvas = Self.canvas(10, blend: .multiply)
         _ = canvas.render()
         let wholeLayerDabs = canvas.lastRenderDabCount
         XCTAssertGreaterThan(wholeLayerDabs, 0)
 
         canvas.addFill(Self.fill())
-        let incremental = canvas.render()
+        let incremental = (try XCTUnwrap(canvas.render()))
         XCTAssertEqual(canvas.lastRenderDabCount, 0,
                        "a fill stamps no dabs; \(wholeLayerDabs) would be the layer re-walked")
-        assertIdentical(incremental, fullReWalk(of: canvas).image, "a fill appended over a multiply run")
+        assertIdentical(incremental, try fullReWalk(of: canvas).image, "a fill appended over a multiply run")
     }
 
     /// A stroke appended after a fill: the fill ended the previous run, so the new stroke opens one
     /// of its own and cannot merge with anything the base already flattened.
-    func testAStrokeAppendedAfterAFillIsByteIdentical() {
+    func testAStrokeAppendedAfterAFillIsByteIdentical() throws {
         let canvas = Self.canvas(6, blend: .multiply)
         canvas.addFill(Self.fill())
         _ = canvas.render()
@@ -387,15 +387,15 @@ final class IncrementalAppendLogicTests: XCTestCase {
         let newStroke = Self.stroke(21)
         let expected = soloDabs(.stroke(newStroke))
         canvas.addStroke(newStroke)
-        let incremental = canvas.render()
+        let incremental = (try XCTUnwrap(canvas.render()))
         XCTAssertEqual(canvas.lastRenderDabCount, expected)
-        assertIdentical(incremental, fullReWalk(of: canvas).image, "a stroke appended after a fill")
+        assertIdentical(incremental, try fullReWalk(of: canvas).image, "a stroke appended after a fill")
     }
 
     /// **A punch appended by the shipped eraser gesture**, rather than by `addStroke` with an
     /// `.erase` composite. Reaching the fast path through `erase(alongPath:…)` is what says the
     /// declaration `eraseHybrid` returns actually arrives at the render.
-    func testTheEraserGesturesOwnPunchTakesTheFastPath() {
+    func testTheEraserGesturesOwnPunchTakesTheFastPath() throws {
         let canvas = Self.canvas(10)
         _ = canvas.render()
         let wholeLayerDabs = canvas.lastRenderDabCount
@@ -404,10 +404,10 @@ final class IncrementalAppendLogicTests: XCTestCase {
                                  channels: .pressureOnly)
         XCTAssertTrue(canvas.erase(alongPath: path, brush: Self.brush(), size: 12, opacity: 0.5,
                                    mode: .erase))
-        let incremental = canvas.render()
+        let incremental = (try XCTUnwrap(canvas.render()))
         XCTAssertLessThan(canvas.lastRenderDabCount, wholeLayerDabs / 2,
                           "an eraser gesture that only punches must not re-stamp the layer")
-        assertIdentical(incremental, fullReWalk(of: canvas).image, "the eraser gesture's own punch")
+        assertIdentical(incremental, try fullReWalk(of: canvas).image, "the eraser gesture's own punch")
     }
 
     // MARK: - (3) Everything else falls back
@@ -420,16 +420,16 @@ final class IncrementalAppendLogicTests: XCTestCase {
     /// **An appended stroke carrying a blend mode isolates the run it joins**, which pulls the
     /// prefix's own strokes inside a transparency layer the base has already flattened. Not
     /// equivalent; must re-walk.
-    func testAnAppendedBlendModeStrokeFallsBackToTheFullWalk() {
+    func testAnAppendedBlendModeStrokeFallsBackToTheFullWalk() throws {
         let canvas = Self.canvas(10)
         _ = canvas.render()
         let beforeTheAppend = canvas.lastRenderDabCount
 
         let tinted = Self.stroke(30, blend: .multiply)
         canvas.addStroke(tinted)
-        let incremental = canvas.render()
+        let incremental = (try XCTUnwrap(canvas.render()))
 
-        let reference = fullReWalk(of: canvas)
+        let reference = try fullReWalk(of: canvas)
         XCTAssertGreaterThan(reference.dabs, beforeTheAppend,
                              "setup: the reference must be the layer plus the new stroke")
         XCTAssertEqual(canvas.lastRenderDabCount, reference.dabs,
@@ -440,14 +440,14 @@ final class IncrementalAppendLogicTests: XCTestCase {
     /// The mirror image: the appended stroke is `.normal`, but the run it joins is not. One
     /// non-`.normal` stroke anywhere in the merged run isolates all of it, the base's strokes
     /// included — so scanning only the new element would be exactly wrong.
-    func testANormalStrokeAppendedOntoABlendModeRunFallsBackToTheFullWalk() {
+    func testANormalStrokeAppendedOntoABlendModeRunFallsBackToTheFullWalk() throws {
         let canvas = Self.canvas(8, blend: .multiply)
         _ = canvas.render()
 
         canvas.addStroke(Self.stroke(31))
-        let incremental = canvas.render()
+        let incremental = (try XCTUnwrap(canvas.render()))
 
-        let reference = fullReWalk(of: canvas)
+        let reference = try fullReWalk(of: canvas)
         XCTAssertEqual(canvas.lastRenderDabCount, reference.dabs,
                        "the prefix's own run carries a blend mode; appending into it is not the same "
                        + "picture, and taking the fast path here would corrupt the artwork")
@@ -457,7 +457,7 @@ final class IncrementalAppendLogicTests: XCTestCase {
     /// **A layer transform means the memo is the *resampled* picture**, and resampling a composite
     /// is not compositing two resampled halves. The base is therefore not available and the append
     /// re-walks.
-    func testAnAppendOntoATransformedLayerFallsBackToTheFullWalk() {
+    func testAnAppendOntoATransformedLayerFallsBackToTheFullWalk() throws {
         let transform = CGAffineTransform(rotationAngle: 0.3).translatedBy(x: 5, y: 7)
         let canvas = VectorCanvas(size: Self.canvasSize,
                                   elements: (0..<8).map { .stroke(Self.stroke($0)) },
@@ -465,9 +465,9 @@ final class IncrementalAppendLogicTests: XCTestCase {
         _ = canvas.render()
 
         canvas.addStroke(Self.stroke(32))
-        let incremental = canvas.render()
+        let incremental = (try XCTUnwrap(canvas.render()))
 
-        let reference = fullReWalk(of: canvas, transform: transform)
+        let reference = try fullReWalk(of: canvas, transform: transform)
         XCTAssertEqual(canvas.lastRenderDabCount, reference.dabs,
                        "a transformed layer has no pre-transform picture to append to")
         assertIdentical(incremental, reference.image, "an append onto a rotated layer")
@@ -476,7 +476,7 @@ final class IncrementalAppendLogicTests: XCTestCase {
     /// An element inserted anywhere but the end is the whole of TODO's dirty-rect item, and until
     /// that exists it must re-walk. An image goes under the line art, so it is the shipped mutation
     /// that does this.
-    func testAMiddleInsertFallsBackToTheFullWalk() {
+    func testAMiddleInsertFallsBackToTheFullWalk() throws {
         let canvas = Self.canvas(8)
         _ = canvas.render()
 
@@ -485,8 +485,8 @@ final class IncrementalAppendLogicTests: XCTestCase {
         canvas.addImage(VectorImageElement(image: photo,
                                            transform: LayerTransform(position: CGPoint(x: 50, y: 40),
                                                                      scale: 1, rotation: 0)))
-        let incremental = canvas.render()
-        let reference = fullReWalk(of: canvas)
+        let incremental = (try XCTUnwrap(canvas.render()))
+        let reference = try fullReWalk(of: canvas)
         XCTAssertEqual(canvas.lastRenderDabCount, reference.dabs)
         assertIdentical(incremental, reference.image, "an image inserted under the line art")
     }
@@ -494,7 +494,7 @@ final class IncrementalAppendLogicTests: XCTestCase {
     /// **Undo.** `bumpVersion()` is the seam every wholesale `elements =` assignment comes through
     /// and it cannot say what moved, so a restored snapshot re-walks — including the case that would
     /// be silently wrong, where the list happens to be *longer* than the base.
-    func testUndoAndRedoBothFallBackToTheFullWalk() {
+    func testUndoAndRedoBothFallBackToTheFullWalk() throws {
         let canvas = Self.canvas(8)
         _ = canvas.render()
         let snapshot = canvas.elements
@@ -507,14 +507,14 @@ final class IncrementalAppendLogicTests: XCTestCase {
         canvas.elements = snapshot
         canvas.bumpVersion()
         _ = canvas.render()
-        XCTAssertEqual(canvas.lastRenderDabCount, fullReWalk(of: canvas).dabs, "undo")
+        XCTAssertEqual(canvas.lastRenderDabCount, try fullReWalk(of: canvas).dabs, "undo")
 
         // Redo to a *longer* list than the base — the shape a count check alone would let through
         // if `bumpVersion` claimed an append.
         canvas.elements = snapshot + [.stroke(Self.stroke(42)), .stroke(Self.stroke(43))]
         canvas.bumpVersion()
-        let incremental = canvas.render()
-        let reference = fullReWalk(of: canvas)
+        let incremental = (try XCTUnwrap(canvas.render()))
+        let reference = try fullReWalk(of: canvas)
         XCTAssertEqual(canvas.lastRenderDabCount, reference.dabs, "redo")
         assertIdentical(incremental, reference.image, "a restored snapshot")
     }
@@ -523,7 +523,7 @@ final class IncrementalAppendLogicTests: XCTestCase {
     /// The five kind-filtered setters deliberately do not invalidate — their callers follow with
     /// `bumpVersion()` — but a base whose prefix claim has quietly stopped being true is the one
     /// failure that draws a *wrong* picture rather than a stale one.
-    func testAWholesaleAssignmentDropsTheBaseEvenWithoutAVersionBump() {
+    func testAWholesaleAssignmentDropsTheBaseEvenWithoutAVersionBump() throws {
         let canvas = Self.canvas(8)
         _ = canvas.render()
         var replaced = canvas.elements
@@ -532,8 +532,8 @@ final class IncrementalAppendLogicTests: XCTestCase {
 
         canvas.elements = replaced
         canvas.bumpVersion()
-        let incremental = canvas.render()
-        let reference = fullReWalk(of: canvas)
+        let incremental = (try XCTUnwrap(canvas.render()))
+        let reference = try fullReWalk(of: canvas)
         XCTAssertEqual(canvas.lastRenderDabCount, reference.dabs,
                        "the first element was replaced; the base is not a picture of this list")
         assertIdentical(incremental, reference.image, "a spliced display list")
@@ -541,7 +541,7 @@ final class IncrementalAppendLogicTests: XCTestCase {
 
     /// A text edit session hides its element while the overlay draws it, which removes something
     /// from the *middle* of the walk. Neither the suppression nor the un-suppression is an append.
-    func testSuppressingAndUnsuppressingBothFallBackToTheFullWalk() {
+    func testSuppressingAndUnsuppressingBothFallBackToTheFullWalk() throws {
         let canvas = Self.canvas(8)
         _ = canvas.render()
 
@@ -550,12 +550,12 @@ final class IncrementalAppendLogicTests: XCTestCase {
         XCTAssertEqual(canvas.lastDamage, .everything)
 
         canvas.addStroke(Self.stroke(60))
-        let duringEdit = canvas.render()
+        let duringEdit = (try XCTUnwrap(canvas.render()))
         XCTAssertEqual(canvas.lastDamage, .appended(count: 1),
                        "the site still declares what it did; the render is what declines to use it")
         let visible = canvas.elements.filter { $0.id != canvas.suppressedElementIDs.first }
         let reference = VectorCanvas(size: Self.canvasSize, elements: visible)
-        let referenceImage = reference.render()
+        let referenceImage = (try XCTUnwrap(reference.render()))
         XCTAssertEqual(canvas.lastRenderDabCount, reference.lastRenderDabCount,
                        "a cel with something suppressed must re-walk: the base would count elements "
                        + "the walk skips")
@@ -563,14 +563,14 @@ final class IncrementalAppendLogicTests: XCTestCase {
 
         canvas.suppressedElementIDs = []
         _ = canvas.render()
-        assertIdentical(canvas.render(), fullReWalk(of: canvas).image, "un-suppressing")
+        assertIdentical((try XCTUnwrap(canvas.render())), try fullReWalk(of: canvas).image, "un-suppressing")
     }
 
     /// **Cache eviction really frees the pixels.** `incrementalBase` is a second reference to a
     /// canvas-sized bitmap, so a `dropCachedImage()` that left it standing would make eviction a
     /// no-op on exactly the cels it is trying to free, and `hasCachedImage` would report nothing
     /// cached while 8 MB was held.
-    func testEvictionFreesTheAppendableBaseAndIsHonestAboutHoldingIt() {
+    func testEvictionFreesTheAppendableBaseAndIsHonestAboutHoldingIt() throws {
         let canvas = Self.canvas(8)
         _ = canvas.render()
         XCTAssertTrue(canvas.hasCachedImage)
@@ -583,7 +583,7 @@ final class IncrementalAppendLogicTests: XCTestCase {
         canvas.dropCachedImage()
         XCTAssertFalse(canvas.hasCachedImage)
         _ = canvas.render()
-        XCTAssertEqual(canvas.lastRenderDabCount, fullReWalk(of: canvas).dabs,
+        XCTAssertEqual(canvas.lastRenderDabCount, try fullReWalk(of: canvas).dabs,
                        "an evicted cel has nothing to append to")
     }
 
@@ -596,7 +596,7 @@ final class IncrementalAppendLogicTests: XCTestCase {
     /// would leave every measurement in PERFORMANCE.md §11.6 unspent. So this starts from a blank
     /// cel, draws the way an artist draws with the brushes the app ships, and asserts on the dab
     /// count of the *last* stroke rather than on anything the test arranged.
-    func testAFreshCelDrawnOnWithShippedBrushesTakesTheFastPathOnEveryStroke() {
+    func testAFreshCelDrawnOnWithShippedBrushesTakesTheFastPathOnEveryStroke() throws {
         let canvas = VectorCanvas(size: Self.canvasSize, elements: [])
         // All five shipped brushes, so this goes red the day one of them stops being `.normal`.
         let library = BrushLibrary.defaults
@@ -623,7 +623,7 @@ final class IncrementalAppendLogicTests: XCTestCase {
         XCTAssertEqual(fellBack, [],
                        "strokes \(fellBack) re-walked the layer — the fast path is not reachable "
                        + "by drawing, which is the only way it is reached")
-        assertIdentical(canvas.render(), fullReWalk(of: canvas).image, "twenty strokes drawn in order")
+        assertIdentical((try XCTUnwrap(canvas.render())), try fullReWalk(of: canvas).image, "twenty strokes drawn in order")
     }
 
     /// **The same claim at the owner's own canvas, because 128×96 is not the size that ships.**
@@ -633,7 +633,7 @@ final class IncrementalAppendLogicTests: XCTestCase {
     /// measurements taken at a canvas nobody uses. Bitmap row padding, the renderer's format
     /// negotiation and the 1:1 blit are all functions of the size, so the equality is re-taken once
     /// at 2048×1024 — the owner's canvas — rather than extrapolated from a small one.
-    func testTheAppendIsByteIdenticalAtTheOwnersCanvasSizeToo() {
+    func testTheAppendIsByteIdenticalAtTheOwnersCanvasSizeToo() throws {
         let size = CGSize(width: 2048, height: 1024)
         func placed(_ index: Int) -> VectorStroke {
             var stroke = Self.stroke(index)
@@ -650,11 +650,11 @@ final class IncrementalAppendLogicTests: XCTestCase {
         _ = solo.render()
 
         canvas.addStroke(newStroke)
-        let incremental = canvas.render()
+        let incremental = (try XCTUnwrap(canvas.render()))
         XCTAssertEqual(canvas.lastRenderDabCount, solo.lastRenderDabCount)
 
         let cold = VectorCanvas(size: size, elements: canvas.elements)
-        assertIdentical(incremental, cold.render(), "an append at 2048×1024")
+        assertIdentical(incremental, (try XCTUnwrap(cold.render())), "an append at 2048×1024")
     }
 
     /// **The cost model, stated as a countable rather than as milliseconds.** PERFORMANCE.md §11.2

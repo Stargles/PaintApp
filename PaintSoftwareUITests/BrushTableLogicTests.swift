@@ -292,7 +292,7 @@ final class BrushTableLogicTests: XCTestCase {
         let b = brush("Ink B", size: 22, hardness: 0.05, spacing: 0.25)
         vector.addStroke(stroke(a, from: CGPoint(x: 6, y: 16), to: CGPoint(x: 56, y: 16)))
         vector.addStroke(stroke(b, from: CGPoint(x: 6, y: 44), to: CGPoint(x: 56, y: 44), size: 14))
-        let expected = try XCTUnwrap(pixels(vector.render()))
+        let expected = try XCTUnwrap(pixels((try XCTUnwrap(vector.render()))))
         assertHasInk(expected, "two strokes on a 64x64 canvas")
 
         let url = projectURL(name: "Round Trip")
@@ -303,7 +303,7 @@ final class BrushTableLogicTests: XCTestCase {
             let canvas = try XCTUnwrap(reopened.layers.compactMap { $0.cels.first?.vector }
                                                      .first { !$0.strokes.isEmpty })
             XCTAssertEqual(canvas.strokes.count, 2, "both strokes came back")
-            return try XCTUnwrap(pixels(canvas.render()))
+            return try XCTUnwrap(pixels((try XCTUnwrap(canvas.render()))))
         }
 
         XCTAssertEqual(try renderOfReopened(url), expected, "the ink is unchanged by a save and reopen")
@@ -335,7 +335,7 @@ final class BrushTableLogicTests: XCTestCase {
         manager.selectionMembership = .touching
         select(manager, layerIndex, loop(CGRect(x: 2, y: 2, width: 60, height: 60)))
         manager.applyBrushToSelection()
-        let expected = try XCTUnwrap(pixels(vector.render()))
+        let expected = try XCTUnwrap(pixels((try XCTUnwrap(vector.render()))))
         assertHasInk(expected, "the re-pointed stroke")
 
         saveAndWait(manager, to: url)
@@ -345,7 +345,7 @@ final class BrushTableLogicTests: XCTestCase {
         let reopened = try XCTUnwrap(ProjectStore.load(from: url))
         let canvas = try XCTUnwrap(reopened.layers.compactMap { $0.cels.first?.vector }
                                                  .first { !$0.strokes.isEmpty })
-        XCTAssertEqual(try XCTUnwrap(pixels(canvas.render())), expected,
+        XCTAssertEqual(try XCTUnwrap(pixels((try XCTUnwrap(canvas.render())))), expected,
                        "a swept document's ink is the ink it had — the sweep drops entries, it never "
                        + "renumbers the strokes that survive")
     }
@@ -490,7 +490,7 @@ final class BrushTableLogicTests: XCTestCase {
         let asDrawn = brush("As Drawn", size: 8, hardness: 0.95, spacing: 0.05)
         manager.selectPreset(asDrawn, for: .brush)
         vector.addStroke(stroke(asDrawn, from: CGPoint(x: 8, y: 32), to: CGPoint(x: 54, y: 32), size: 12))
-        let before = try XCTUnwrap(pixels(vector.render()))
+        let before = try XCTUnwrap(pixels((try XCTUnwrap(vector.render()))))
         assertHasInk(before, "the stroke drawn before the edit")
         let drawnRef = try XCTUnwrap(vector.strokes.first).brushRef
 
@@ -504,7 +504,7 @@ final class BrushTableLogicTests: XCTestCase {
                        "the stroke keeps the entry it was drawn with")
         XCTAssertEqual(try XCTUnwrap(vector.strokes.first).brush, asDrawn,
                        "and that entry still holds the brush as it was — a pool entry is never mutated")
-        XCTAssertEqual(try XCTUnwrap(pixels(vector.render())), before,
+        XCTAssertEqual(try XCTUnwrap(pixels((try XCTUnwrap(vector.render())))), before,
                        "so no pixel of the ink already on the canvas moves")
     }
 
@@ -527,7 +527,7 @@ final class BrushTableLogicTests: XCTestCase {
                                  brushSize: 10, brushOpacity: 1, random: DabRandom(seed: 0))
         let url = projectURL(name: "Drawn Before The Edit")
         saveAndWait(manager, to: url)
-        let vectorBefore = try XCTUnwrap(pixels(vector.render()))
+        let vectorBefore = try XCTUnwrap(pixels((try XCTUnwrap(vector.render()))))
         let rasterBefore = try XCTUnwrap(pixels(manager.layers[0].cels[0].raster.renderToUIImage()))
         assertHasInk(vectorBefore, "the vector stroke drawn before the edit")
         assertHasInk(rasterBefore, "the raster stroke drawn before the edit")
@@ -543,7 +543,7 @@ final class BrushTableLogicTests: XCTestCase {
         reopened.adoptLibrarySelections()   // what `ContentView` does as the scene enters the editor
         let reopenedVector = try XCTUnwrap(reopened.layers[layerIndex].cels[0].vector)
         XCTAssertEqual(reopenedVector.strokes.first?.brush, asDrawn, "The ink already drawn keeps its brush")
-        XCTAssertEqual(try XCTUnwrap(pixels(reopenedVector.render())), vectorBefore, "…and its pixels")
+        XCTAssertEqual(try XCTUnwrap(pixels((try XCTUnwrap(reopenedVector.render())))), vectorBefore, "…and its pixels")
         XCTAssertEqual(try XCTUnwrap(pixels(reopened.layers[0].cels[0].raster.renderToUIImage())), rasterBefore,
                        "The raster ink is the pixels it was")
         XCTAssertEqual(reopened.toolProfiles.brush.preset, edited, "The next stroke is laid with the edited preset")
@@ -557,7 +557,7 @@ final class BrushTableLogicTests: XCTestCase {
         let picked = brush("Picked", size: 8, hardness: 0.05, spacing: 0.35)
         vector.addStroke(stroke(drawn, from: CGPoint(x: 8, y: 20), to: CGPoint(x: 54, y: 20), size: 11))
         vector.addStroke(stroke(drawn, from: CGPoint(x: 8, y: 44), to: CGPoint(x: 54, y: 44), size: 11))
-        let before = try XCTUnwrap(pixels(vector.render()))
+        let before = try XCTUnwrap(pixels((try XCTUnwrap(vector.render()))))
 
         manager.selectPreset(picked, for: .brush)
         manager.selectionMembership = .touching
@@ -568,13 +568,13 @@ final class BrushTableLogicTests: XCTestCase {
         XCTAssertEqual(manager.history.undoStack.count - baseline, 1,
                        "one verb, one step — however many strokes it touched")
         XCTAssertEqual(vector.strokes.map(\.brush), [picked, picked])
-        let after = try XCTUnwrap(pixels(vector.render()))
+        let after = try XCTUnwrap(pixels((try XCTUnwrap(vector.render()))))
         XCTAssertNotEqual(after, before, "and it is visible: a soft wide-spaced tip is not a hard one")
 
         manager.undo()
         XCTAssertEqual(vector.strokes.map(\.brush), [drawn, drawn],
                        "one press puts both back — not one press per stroke")
-        XCTAssertEqual(try XCTUnwrap(pixels(vector.render())), before,
+        XCTAssertEqual(try XCTUnwrap(pixels((try XCTUnwrap(vector.render())))), before,
                        "and the pixels come back with them, which the version bump is what buys")
     }
 

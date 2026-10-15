@@ -1044,9 +1044,9 @@ final class TransformLayerLogicTests: XCTestCase {
         }
         XCTAssertNotNil(manager.layers[moverAt].layerTransform,
                         "Premise: the source really is a transformation layer")
-        let wantBounds = try XCTUnwrap(inkBounds(PixelOps.rasterize(
+        let wantBounds = try XCTUnwrap(inkBounds((try XCTUnwrap(PixelOps.rasterize(
             cel: manager.layers[drawn].cels[0], canvasSize: size,
-            derived: manager.derivedCelContent(for: manager.layers[drawn].cels[0], atFrame: 8))),
+            derived: manager.derivedCelContent(for: manager.layers[drawn].cels[0], atFrame: 8))))),
             "Premise: the mover's frame-8 key really does move the ink")
 
         manager.duplicateLayer(at: moverAt)
@@ -1063,9 +1063,9 @@ final class TransformLayerLogicTests: XCTestCase {
         // composition rather than about the copy. Resting the original isolates what is being asked:
         // does the *copy*, on its own, still pose ink the way the source did.
         manager.layers[moverAt].transform = LayerPose(restingIn: canvasBox)
-        let gotBounds = try XCTUnwrap(inkBounds(PixelOps.rasterize(
+        let gotBounds = try XCTUnwrap(inkBounds((try XCTUnwrap(PixelOps.rasterize(
             cel: manager.layers[drawn].cels[0], canvasSize: size,
-            derived: manager.derivedCelContent(for: manager.layers[drawn].cels[0], atFrame: 8))),
+            derived: manager.derivedCelContent(for: manager.layers[drawn].cels[0], atFrame: 8))))),
             "the copy alone must still derive a posed picture at frame 8")
         XCTAssertEqual(gotBounds.minX, wantBounds.minX, accuracy: 0.5,
                        "the ink moves the same amount under the copy alone as it did under the source")

@@ -810,7 +810,7 @@ extension CanvasManager {
                                    celIndex: celIndex, label: label).map(SolidFillLanding.element)
         }
         let cel = layers[layerIndex].cels[celIndex]
-        let base = PixelOps.rasterize(cel: cel, canvasSize: canvasSize)
+        guard let base = PixelOps.rasterize(cel: cel, canvasSize: canvasSize) else { return nil }
         let newImage = PixelOps.fill(base: base, path: path, color: color)
         registerUndoableCelChange(layerID: layers[layerIndex].id, celID: cel.id,
                                   oldRaster: cel.raster, oldBaked: cel.bakedImage,
@@ -1206,15 +1206,19 @@ extension CanvasManager {
         let width = window.workingWidth, height = window.workingHeight
         guard width > 0, height > 0 else { return nil }
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: width, height: height), format: PixelOps.transparentFormat())
+        var completed = true
         let composited = renderer.image { _ in
             let rect = window.canvasInWorking
             for source in references {
                 source.cel.bakedImage?.draw(in: rect)
                 source.cel.raster.renderToUIImage().draw(in: rect)
-                source.cel.vector?.render().draw(in: rect)
+                if let vector = source.cel.vector {
+                    guard let image = vector.render() else { completed = false; return }
+                    image.draw(in: rect)
+                }
             }
         }
-        guard let cg = composited.cgImage else { return nil }
+        guard completed, let cg = composited.cgImage else { return nil }
         var bytes = [UInt8](repeating: 0, count: width * height * 4)
         let bytesPerRow = width * 4
         let ok: Bool = bytes.withUnsafeMutableBytes { raw in

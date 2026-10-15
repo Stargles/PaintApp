@@ -147,8 +147,8 @@ final class MoveToNewLayerLogicTests: XCTestCase {
         XCTAssertEqual(manager.history.undoStack.count - baseline, 1, "one undo step for the whole verb")
 
         func alpha(_ layer: Int, at point: CGPoint) throws -> UInt8 {
-            let image = try XCTUnwrap(PixelOps.rasterize(cel: manager.layers[layer].cels[0],
-                                                         canvasSize: size).cgImage)
+            let image = try XCTUnwrap((try XCTUnwrap(PixelOps.rasterize(cel: manager.layers[layer].cels[0],
+                                                         canvasSize: size))).cgImage)
             let bytes = try XCTUnwrap(CanvasFixture.rgbaBytes(image))
             let scaleX = image.width / Int(size.width), scaleY = image.height / Int(size.height)
             let x = Int(point.x) * scaleX, y = Int(point.y) * scaleY

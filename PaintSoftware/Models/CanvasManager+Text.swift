@@ -450,7 +450,7 @@ extension CanvasManager {
         let cel = layers[layerIndex].cels[celIndex]
         // One canvas-sized flatten, one composite, once — `ADD_TEXT.md` §4 rule 7, and the same
         // shape and cost as a fill commit, which is already accepted.
-        let base = PixelOps.rasterize(cel: cel, canvasSize: canvasSize)
+        guard let base = PixelOps.rasterize(cel: cel, canvasSize: canvasSize) else { return }
         let composited = PixelOps.compositeOver(base: base, overlay: glyphs)
         registerUndoableCelChange(layerID: layerID, celID: celID,
                                   oldRaster: cel.raster, oldBaked: cel.bakedImage,

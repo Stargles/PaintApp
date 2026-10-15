@@ -54,13 +54,13 @@ final class TextBakeCharacterizationTests: XCTestCase {
         return manager.textFrame.boundingBox
     }
 
-    private func celPixels(_ manager: CanvasManager, layerIndex: Int = 0) -> [UInt8] {
+    private func celPixels(_ manager: CanvasManager, layerIndex: Int = 0) throws -> [UInt8] {
         guard let celIndex = manager.activeCelIndex(inLayer: layerIndex, atFrame: manager.currentFrame) else {
             XCTFail("No cel to read")
             return []
         }
         let cel = manager.layers[layerIndex].cels[celIndex]
-        let image = PixelOps.rasterize(cel: cel, canvasSize: Self.canvas, memoize: false)
+        let image = (try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: Self.canvas, memoize: false)))
         guard let cg = image.cgImage, let bytes = CanvasFixture.rgbaBytes(cg) else {
             XCTFail("Could not read the cel's bytes")
             return []
@@ -81,15 +81,15 @@ final class TextBakeCharacterizationTests: XCTestCase {
 
     // MARK: - The bake puts pixels down
 
-    func testCommittingASessionPutsInkInsideTheBoxAndNowhereElse() {
+    func testCommittingASessionPutsInkInsideTheBoxAndNowhereElse() throws {
         let manager = manager()
         let box = placeText(manager, "Hi")
-        XCTAssertEqual(coveredPixelCount(celPixels(manager)), 0,
+        XCTAssertEqual(coveredPixelCount(try celPixels(manager)), 0,
                        "Nothing is on the layer while the session is live — the overlay is the "
                        + "editor, and the model owns nothing but a draft.")
 
         manager.commitInteractiveText()
-        let bytes = celPixels(manager)
+        let bytes = try celPixels(manager)
         XCTAssertGreaterThan(coveredPixelCount(bytes), 0, "The commit put no ink down at all.")
 
         for y in 0..<Int(Self.canvas.height) {
@@ -102,7 +102,7 @@ final class TextBakeCharacterizationTests: XCTestCase {
         }
     }
 
-    func testTheColourThatLandsIsTheRecipesColour() {
+    func testTheColourThatLandsIsTheRecipesColour() throws {
         let manager = manager()
         manager.textRecipe.color = CodableColor(red: 0, green: 0, blue: 1, alpha: 1)
         manager.beginTextSession(at: CGPoint(x: 10, y: 10))
@@ -110,7 +110,7 @@ final class TextBakeCharacterizationTests: XCTestCase {
         manager.updateTextString("I")
         manager.commitInteractiveText()
 
-        let bytes = celPixels(manager)
+        let bytes = try celPixels(manager)
         var sawFullyOpaqueBlue = false
         for i in stride(from: 0, to: bytes.count, by: 4) where bytes[i + 3] == 255 {
             XCTAssertEqual(bytes[i], 0, "Red channel on an opaque glyph pixel")
@@ -122,11 +122,11 @@ final class TextBakeCharacterizationTests: XCTestCase {
                       + "none were found, so nothing was really drawn.")
     }
 
-    func testMovingTheBoxMovesThePixels() {
+    func testMovingTheBoxMovesThePixels() throws {
         let left = manager()
         placeText(left, "M", at: CGPoint(x: 10, y: 10))
         left.commitInteractiveText()
-        let leftBytes = celPixels(left)
+        let leftBytes = try celPixels(left)
 
         let right = manager()
         placeText(right, "M", at: CGPoint(x: 10, y: 10))
@@ -134,7 +134,7 @@ final class TextBakeCharacterizationTests: XCTestCase {
         right.dragTextFrame(toOrigin: CGPoint(x: 90, y: 10))
         right.endTextFrameDrag()
         right.commitInteractiveText()
-        let rightBytes = celPixels(right)
+        let rightBytes = try celPixels(right)
 
         XCTAssertEqual(coveredPixelCount(leftBytes), coveredPixelCount(rightBytes),
                        "The same glyphs, moved — a translation changes where the ink is, not how "
@@ -182,33 +182,33 @@ final class TextBakeCharacterizationTests: XCTestCase {
                        + "cost accounting was never sized for.")
     }
 
-    func testUndoRestoresTheExactBytesTheCelHadBeforeAndRedoPutsThemBack() {
+    func testUndoRestoresTheExactBytesTheCelHadBeforeAndRedoPutsThemBack() throws {
         let manager = manager()
-        let before = celPixels(manager)
+        let before = try celPixels(manager)
         placeText(manager, "Wm")
         manager.commitInteractiveText()
-        let baked = celPixels(manager)
+        let baked = try celPixels(manager)
         XCTAssertNotEqual(before, baked)
 
         manager.undo()
-        XCTAssertEqual(celPixels(manager), before,
+        XCTAssertEqual(try celPixels(manager), before,
                        "Undoing a bake has to restore the cel byte for byte, not approximately.")
         manager.redo()
-        XCTAssertEqual(celPixels(manager), baked)
+        XCTAssertEqual(try celPixels(manager), baked)
     }
 
-    func testTwoSessionsAreTwoStepsAndUndoPeelsThemInOrder() {
+    func testTwoSessionsAreTwoStepsAndUndoPeelsThemInOrder() throws {
         let manager = manager()
         placeText(manager, "one", at: CGPoint(x: 5, y: 5), pointSize: 24)
         manager.commitInteractiveText()
-        let afterFirst = celPixels(manager)
+        let afterFirst = try celPixels(manager)
 
         placeText(manager, "two", at: CGPoint(x: 5, y: 60), pointSize: 24)
         manager.commitInteractiveText()
-        XCTAssertNotEqual(celPixels(manager), afterFirst)
+        XCTAssertNotEqual(try celPixels(manager), afterFirst)
 
         manager.undo()
-        XCTAssertEqual(celPixels(manager), afterFirst)
+        XCTAssertEqual(try celPixels(manager), afterFirst)
         XCTAssertTrue(manager.canUndo, "The first session's step is still there underneath.")
     }
 
@@ -216,24 +216,24 @@ final class TextBakeCharacterizationTests: XCTestCase {
 
     /// Placing a box and tapping away without typing has changed nothing about the drawing, so it
     /// leaves no step for the artist to press through.
-    func testAnEmptyBoxCommitsNothingAndRegistersNoStep() {
+    func testAnEmptyBoxCommitsNothingAndRegistersNoStep() throws {
         let manager = manager()
-        let before = celPixels(manager)
+        let before = try celPixels(manager)
         manager.beginTextSession(at: CGPoint(x: 30, y: 30))
         XCTAssertTrue(manager.textGestureActive)
         manager.commitInteractiveText()
 
         XCTAssertFalse(manager.textGestureActive)
-        XCTAssertEqual(celPixels(manager), before)
+        XCTAssertEqual(try celPixels(manager), before)
         XCTAssertFalse(manager.history.canUndo)
     }
 
-    func testABoxHoldingOnlyWhitespaceAlsoCommitsNothing() {
+    func testABoxHoldingOnlyWhitespaceAlsoCommitsNothing() throws {
         let manager = manager()
         placeText(manager, "   \n  ")
         manager.commitInteractiveText()
         XCTAssertFalse(manager.history.canUndo)
-        XCTAssertEqual(coveredPixelCount(celPixels(manager)), 0)
+        XCTAssertEqual(coveredPixelCount(try celPixels(manager)), 0)
     }
 
     // MARK: - The chokepoint (claim 3)
@@ -242,22 +242,22 @@ final class TextBakeCharacterizationTests: XCTestCase {
     /// `commitInteractiveText()` is the line in it that gives text its bake for free. Asserted
     /// through `beginCanvasEdit` rather than through the commit directly, so deleting that line
     /// fails a test instead of quietly reverting the feature to "text disappears when you draw".
-    func testBeginCanvasEditBakesALiveTextSession() {
+    func testBeginCanvasEditBakesALiveTextSession() throws {
         let manager = manager()
         placeText(manager, "x")
         manager.beginCanvasEdit()
         XCTAssertFalse(manager.textGestureActive)
-        XCTAssertGreaterThan(coveredPixelCount(celPixels(manager)), 0)
+        XCTAssertGreaterThan(coveredPixelCount(try celPixels(manager)), 0)
         XCTAssertTrue(manager.history.canUndo)
     }
 
     /// The same line, reached the way an artist reaches it: a layer switch is a canvas edit.
-    func testSwitchingLayersBakesALiveTextSession() {
+    func testSwitchingLayersBakesALiveTextSession() throws {
         let manager = manager()
         placeText(manager, "x")
         manager.addLayer()
         XCTAssertFalse(manager.textGestureActive)
-        XCTAssertGreaterThan(coveredPixelCount(celPixels(manager, layerIndex: 0)), 0,
+        XCTAssertGreaterThan(coveredPixelCount(try celPixels(manager, layerIndex: 0)), 0,
                              "The text belongs to the layer it was placed on, resolved by ID, not to "
                              + "whichever layer is active when it bakes.")
     }
@@ -278,24 +278,24 @@ final class TextBakeCharacterizationTests: XCTestCase {
     /// Second arm: lifted but still adjustable. Undo finalizes it into a real step and then reverts
     /// that step, so one press removes the text — rather than silently hitting the *previous* action
     /// while the box lingers on screen.
-    func testUndoOnALiftedBoxCommitsItAndThenRevertsIt() {
+    func testUndoOnALiftedBoxCommitsItAndThenRevertsIt() throws {
         let manager = manager()
         placeText(manager, "Q")
-        let before = celPixels(manager)
+        let before = try celPixels(manager)
         manager.undo()
         XCTAssertFalse(manager.textGestureActive)
-        XCTAssertEqual(celPixels(manager), before, "One press, and the text is gone.")
+        XCTAssertEqual(try celPixels(manager), before, "One press, and the text is gone.")
     }
 
     /// First arm: a box under the finger is discarded outright, exactly as a fill or a shape under
     /// the finger is. Nothing bakes and no step is registered.
-    func testUndoWhileTheBoxIsBeingDraggedDiscardsIt() {
+    func testUndoWhileTheBoxIsBeingDraggedDiscardsIt() throws {
         let manager = manager()
         placeText(manager, "Q")
         manager.beginTextFrameDrag()
         manager.undo()
         XCTAssertFalse(manager.textGestureActive)
-        XCTAssertEqual(coveredPixelCount(celPixels(manager)), 0)
+        XCTAssertEqual(coveredPixelCount(try celPixels(manager)), 0)
         XCTAssertFalse(manager.history.canUndo)
     }
 
@@ -341,7 +341,7 @@ final class TextBakeCharacterizationTests: XCTestCase {
 
     // MARK: - Auto-size
 
-    func testTypingGrowsAPristineBoxAndTheBakeFollowsIt() {
+    func testTypingGrowsAPristineBoxAndTheBakeFollowsIt() throws {
         let manager = manager()
         placeText(manager, "i", pointSize: 30)
         let narrow = manager.textFrame.boundingBox
@@ -354,7 +354,7 @@ final class TextBakeCharacterizationTests: XCTestCase {
                        + "artist tapped holds still.")
 
         manager.commitInteractiveText()
-        let bytes = celPixels(manager)
+        let bytes = try celPixels(manager)
         XCTAssertTrue((Int(narrow.maxX)..<Int(wide.maxX)).contains { x in
             (Int(wide.minY)..<Int(wide.maxY)).contains { y in alpha(bytes, x, y) > 0 }
         }, "Ink landed past where the box ended before it grew, so the bake used the grown frame.")
@@ -430,7 +430,7 @@ final class TextBakeCharacterizationTests: XCTestCase {
     /// content that doubles on the next re-edit; an element that renders nothing would be an object
     /// the artist cannot see, which is the same bug the vector fill's own commit path warns about
     /// ("the vector twin of the raster ghost-layer bug").
-    func testAVectorCommitLandsAnElementThatRendersAndNoRasterPixels() {
+    func testAVectorCommitLandsAnElementThatRendersAndNoRasterPixels() throws {
         let manager = vectorManager()
         placeText(manager, "Label")
         manager.commitInteractiveText()
@@ -440,26 +440,26 @@ final class TextBakeCharacterizationTests: XCTestCase {
         XCTAssertEqual(elements.first?.text?.recipe.string, "Label")
         XCTAssertEqual(rasterTierPixelCount(manager), 0,
                        "A vector layer's text must not also bake into the cel's raster tier.")
-        XCTAssertGreaterThan(coveredPixelCount(celPixels(manager, layerIndex: 1)), 0,
+        XCTAssertGreaterThan(coveredPixelCount(try celPixels(manager, layerIndex: 1)), 0,
                              "…and the element has to actually draw, or it is an invisible object.")
     }
 
     /// The suppression is visible in the pixels, which is what it is for: while the editor is open
     /// the flatten must not also show the committed glyphs underneath it, or the artist sees their
     /// text twice.
-    func testAnOpenEditRemovesTheGlyphsFromTheFlatten() {
+    func testAnOpenEditRemovesTheGlyphsFromTheFlatten() throws {
         let manager = vectorManager()
         let box = placeText(manager, "Label")
         manager.commitInteractiveText()
-        let committed = coveredPixelCount(celPixels(manager, layerIndex: 1))
+        let committed = coveredPixelCount(try celPixels(manager, layerIndex: 1))
         XCTAssertGreaterThan(committed, 0)
 
         manager.beginTextSession(at: CGPoint(x: box.midX, y: box.midY))
-        XCTAssertEqual(coveredPixelCount(celPixels(manager, layerIndex: 1)), 0,
+        XCTAssertEqual(coveredPixelCount(try celPixels(manager, layerIndex: 1)), 0,
                        "The object being edited is skipped by the flatten for the life of the session.")
 
         manager.commitInteractiveText()
-        XCTAssertEqual(coveredPixelCount(celPixels(manager, layerIndex: 1)), committed,
+        XCTAssertEqual(coveredPixelCount(try celPixels(manager, layerIndex: 1)), committed,
                        "…and comes back exactly as it was when the session commits unchanged.")
     }
 

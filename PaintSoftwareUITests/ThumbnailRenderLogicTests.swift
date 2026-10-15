@@ -89,12 +89,12 @@ final class ThumbnailRenderLogicTests: XCTestCase {
     /// Both counters are asserted, and that pairing is the point rather than belt-and-braces: a
     /// thumbnail that rendered nothing at all would leave `rasterizations` at zero too, and the
     /// second assertion is what separates "asked for the small one" from "asked for nothing".
-    func testAThumbnailWalksTheCelAtTheThumbnailsResolutionAndNotTheCanvass() {
+    func testAThumbnailWalksTheCelAtTheThumbnailsResolutionAndNotTheCanvass() throws {
         let canvas = canvas(Self.ownersCanvas, strokes: 6)
         let cel = vectorCel(canvas)
         XCTAssertEqual(canvas.rasterizations, 0, "the fixture rendered before the test did")
 
-        let tile = CanvasManager.celThumbnailImage(for: cel, canvasSize: Self.ownersCanvas)
+        let tile = try XCTUnwrap(CanvasManager.celThumbnailImage(for: cel, canvasSize: Self.ownersCanvas))
 
         XCTAssertEqual(canvas.rasterizations, 0,
                        "a cel thumbnail rasterized the vector tier at the canvas's own resolution "
@@ -137,12 +137,12 @@ final class ThumbnailRenderLogicTests: XCTestCase {
     /// **The other direction, which is the one a careless clamp breaks silently.** A native flatten —
     /// every export, every parity test, the live canvas at the resolution the artist chose — must
     /// still get the canvas's own resolution. A request may only ask for *less*.
-    func testANativeFlattenStillRendersTheCelAtTheCanvassOwnResolution() {
+    func testANativeFlattenStillRendersTheCelAtTheCanvassOwnResolution() throws {
         let size = CGSize(width: 1024, height: 512)
         let canvas = canvas(size, strokes: 6)
         let cel = vectorCel(canvas)
 
-        let flat = PixelOps.rasterize(cel: cel, canvasSize: size)
+        let flat = try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: size))
 
         XCTAssertEqual(canvas.rasterizations, 1,
                        "a native flatten performed \(canvas.rasterizations) canvas-sized walks; if "
@@ -165,12 +165,12 @@ final class ThumbnailRenderLogicTests: XCTestCase {
     ///
     /// Rendering above native invents no detail and costs four times the raster —
     /// `RenderRequest.renderSize(fitting:within:)`'s own rule, at the other end of the same seam.
-    func testFittingIntoAnOversizedBufferDoesNotRenderAboveNative() {
+    func testFittingIntoAnOversizedBufferDoesNotRenderAboveNative() throws {
         let size = CGSize(width: 512, height: 512)
         let canvas = canvas(size, strokes: 4)
         let frozen = canvas.freeze(quality: .full)
 
-        let image = frozen.render(quality: .full, fittingInto: CGSize(width: 2048, height: 2048))
+        let image = try XCTUnwrap(frozen.render(quality: .full, fittingInto: CGSize(width: 2048, height: 2048)))
 
         XCTAssertEqual(image.cgImage?.width, 512,
                        "a cel asked to fill a buffer four times its own size came back "
@@ -185,12 +185,12 @@ final class ThumbnailRenderLogicTests: XCTestCase {
     /// native render. Kept alongside the pixel assertion above rather than instead of it: this one
     /// says which path `PixelOps` took and that one says what came back, and only the pair covers
     /// both ways the clamp can be lost.
-    func testAFlattenIntoABufferLargerThanTheCelDoesNotAskForMoreResolution() {
+    func testAFlattenIntoABufferLargerThanTheCelDoesNotAskForMoreResolution() throws {
         let size = CGSize(width: 512, height: 512)
         let canvas = canvas(size, strokes: 4)
         let cel = vectorCel(canvas)
 
-        let flat = PixelOps.rasterize(cel: cel, canvasSize: CGSize(width: 2048, height: 2048))
+        let flat = try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: CGSize(width: 2048, height: 2048)))
 
         XCTAssertEqual(canvas.rasterizations, 1,
                        "a flatten into an oversized buffer took \(canvas.rasterizations) native "
@@ -236,7 +236,7 @@ final class ThumbnailRenderLogicTests: XCTestCase {
     /// The operand that makes this mean something is the *pixel width* of the second render, not the
     /// counter: a memo poisoned by the reduced walk would still count as a hit and still hand back an
     /// image whose `size` is the canvas's, because a `UIImage` carries its scale.
-    func testAThumbnailLeavesNoMemoForTheNativeRenderToInherit() {
+    func testAThumbnailLeavesNoMemoForTheNativeRenderToInherit() throws {
         let size = CGSize(width: 1200, height: 1200)
         let canvas = canvas(size, strokes: 6)
         let cel = vectorCel(canvas)
@@ -244,7 +244,7 @@ final class ThumbnailRenderLogicTests: XCTestCase {
         _ = CanvasManager.celThumbnailImage(for: cel, canvasSize: size)
         XCTAssertEqual(canvas.rasterizations, 0, "the thumbnail took the native path")
 
-        let native = canvas.render()
+        let native = try XCTUnwrap(canvas.render())
 
         XCTAssertEqual(native.cgImage?.width, Int(size.width),
                        "the native render after a thumbnail came back "
@@ -262,11 +262,11 @@ final class ThumbnailRenderLogicTests: XCTestCase {
     /// canvas-sized *format* would satisfy every other test in this file while costing exactly what
     /// it did before. And the point size has to stay the canvas's, because that is what makes
     /// `UIImage.draw(in:)` place the picture correctly for every caller downstream.
-    func testAReducedRenderIsFewerPixelsOverTheSameExtentInPoints() {
+    func testAReducedRenderIsFewerPixelsOverTheSameExtentInPoints() throws {
         let size = CGSize(width: 2400, height: 1200)
         let canvas = canvas(size, strokes: 4)
 
-        let reduced = canvas.render(quality: .full, resolution: 0.1)
+        let reduced = try XCTUnwrap(canvas.render(quality: .full, resolution: 0.1))
 
         XCTAssertEqual(reduced.cgImage?.width, 240,
                        "the reduced render came back \(reduced.cgImage?.width ?? -1) pixels wide at a "
@@ -355,17 +355,17 @@ final class ThumbnailRenderLogicTests: XCTestCase {
     /// elements the left one ended with. Byte-for-byte, because a source-over copy of the base
     /// followed by the tail's dabs *is* the walk — that equivalence is `renderLocalContent`'s own
     /// contract and it does not become approximate at a smaller scale.
-    func testAnIncrementalThumbnailIsTheThumbnailAColdWalkWouldDraw() {
+    func testAnIncrementalThumbnailIsTheThumbnailAColdWalkWouldDraw() throws {
         let size = CGSize(width: 2048, height: 1024)
         let canvas = canvas(size, strokes: 24)
         let cel = vectorCel(canvas)
         _ = CanvasManager.celThumbnailImage(for: cel, canvasSize: size)
 
         canvas.addStroke(Self.stroke(24, canvas: size))
-        let incremental = CanvasManager.celThumbnailImage(for: cel, canvasSize: size)
+        let incremental = try XCTUnwrap(CanvasManager.celThumbnailImage(for: cel, canvasSize: size))
 
         let cold = VectorCanvas(size: size, elements: canvas.elements)
-        let fresh = CanvasManager.celThumbnailImage(for: vectorCel(cold), canvasSize: size)
+        let fresh = try XCTUnwrap(CanvasManager.celThumbnailImage(for: vectorCel(cold), canvasSize: size))
 
         XCTAssertEqual(Self.maxChannelDelta(incremental, fresh), 0,
                        "a thumbnail reached by appending to the previous one differs from a thumbnail "
@@ -388,7 +388,7 @@ final class ThumbnailRenderLogicTests: XCTestCase {
     /// zero here would be asserting something the native path does not manage either. MEASURED at
     /// exactly that: **1** with the clip snapped to raster pixels and **11** with it snapped to
     /// points, which is what says the snapping is load-bearing rather than tidy.
-    func testARepairedThumbnailIsTheThumbnailAColdWalkWouldDraw() {
+    func testARepairedThumbnailIsTheThumbnailAColdWalkWouldDraw() throws {
         let size = CGSize(width: 2048, height: 1024)
         let canvas = canvas(size, strokes: 24)
         let before = canvas.elements
@@ -400,10 +400,10 @@ final class ThumbnailRenderLogicTests: XCTestCase {
         // reduced slot's `regionBase` in play — a `bumpVersion()` here would declare `.everything`
         // and this test would silently be about the full walk instead.
         canvas.restoreElements(before, changedInk: nil)
-        let repaired = CanvasManager.celThumbnailImage(for: cel, canvasSize: size)
+        let repaired = try XCTUnwrap(CanvasManager.celThumbnailImage(for: cel, canvasSize: size))
 
         let cold = VectorCanvas(size: size, elements: before)
-        let fresh = CanvasManager.celThumbnailImage(for: vectorCel(cold), canvasSize: size)
+        let fresh = try XCTUnwrap(CanvasManager.celThumbnailImage(for: vectorCel(cold), canvasSize: size))
 
         XCTAssertLessThanOrEqual(Self.maxChannelDelta(repaired, fresh) ?? 255, 1,
                                  "a thumbnail reached by repairing the rectangle an undo declared "
@@ -462,12 +462,12 @@ final class ThumbnailRenderLogicTests: XCTestCase {
     /// 120-point tile: **27 of 255** at worst, and the control arm below — the same route over an
     /// entirely different drawing — scores **255**. The bound is 64, which is 2.4x the difference the
     /// resampling actually produces and a quarter of what a wrong picture produces.
-    func testTheReducedTileMatchesTheTileTheCanvasSizedRouteProduced() {
+    func testTheReducedTileMatchesTheTileTheCanvasSizedRouteProduced() throws {
         let canvas = canvas(Self.ownersCanvas, strokes: 8)
         let cel = vectorCel(canvas)
 
-        let reduced = CanvasManager.celThumbnailImage(for: cel, canvasSize: Self.ownersCanvas)
-        let reference = Self.canvasSizedRouteTile(canvas)
+        let reduced = try XCTUnwrap(CanvasManager.celThumbnailImage(for: cel, canvasSize: Self.ownersCanvas))
+        let reference = try Self.canvasSizedRouteTile(canvas)
 
         let delta = Self.maxChannelDelta(reduced, reference)
         XCTAssertNotNil(delta, "the two tiles are not the same dimensions, so nothing below compares "
@@ -484,7 +484,7 @@ final class ThumbnailRenderLogicTests: XCTestCase {
         // tile of a *different* drawing on the same canvas has to score far worse than the bound, or
         // the bound is loose enough to accept anything.
         let other = self.canvas(Self.ownersCanvas, strokes: 8, seedOffset: 4096)
-        let wrong = Self.canvasSizedRouteTile(other)
+        let wrong = try Self.canvasSizedRouteTile(other)
         let controlDelta = Self.maxChannelDelta(reduced, wrong) ?? 0
         XCTAssertGreaterThan(controlDelta, 128,
                              "a tile of an entirely different drawing scored \(controlDelta) against "
@@ -500,12 +500,12 @@ final class ThumbnailRenderLogicTests: XCTestCase {
     /// assertion on one coordinate would be an assertion on the seed. MEASURED: **488 inked pixels
     /// against the canvas-sized route's 490**, so the bounds below are ±25% around a difference that
     /// is in practice 0.4%.
-    func testTheReducedTileCarriesTheSameAmountOfInkAsTheCanvasSizedRoute() {
+    func testTheReducedTileCarriesTheSameAmountOfInkAsTheCanvasSizedRoute() throws {
         let canvas = canvas(Self.ownersCanvas, strokes: 8)
         let cel = vectorCel(canvas)
 
-        let reduced = CanvasManager.celThumbnailImage(for: cel, canvasSize: Self.ownersCanvas)
-        let reference = Self.canvasSizedRouteTile(canvas)
+        let reduced = try XCTUnwrap(CanvasManager.celThumbnailImage(for: cel, canvasSize: Self.ownersCanvas))
+        let reference = try Self.canvasSizedRouteTile(canvas)
 
         let inked = Self.inkedPixels(reduced), referenceInked = Self.inkedPixels(reference)
         XCTAssertGreaterThan(referenceInked, 40,
@@ -526,9 +526,9 @@ final class ThumbnailRenderLogicTests: XCTestCase {
 
     /// **`PixelOps.rasterizeUncached` as it stood for a vector-only cel**, followed by the tile
     /// downscale — the route this change replaced, kept here as the pin's other operand.
-    private static func canvasSizedRouteTile(_ canvas: VectorCanvas) -> UIImage {
+    private static func canvasSizedRouteTile(_ canvas: VectorCanvas) throws -> UIImage {
         let box = thumbnailFlattenSize
-        let native = canvas.render(quality: .full)
+        let native = try XCTUnwrap(canvas.render(quality: .full))
         let flattened = UIGraphicsImageRenderer(size: box, format: PixelOps.transparentFormat())
             .image { _ in native.draw(in: CGRect(origin: .zero, size: box)) }
         return ThumbnailRenderer.render(flattened, canvasSize: canvas.size,
@@ -637,10 +637,10 @@ final class ThumbnailRenderLogicTests: XCTestCase {
     /// **Deleting the guard reddens this**, and it is worth saying which assertion: the installed
     /// tile would be the stale one, so the equality against the fresh render fails and the
     /// inequality against the stale one fails with it.
-    func testATileRenderedAgainstContentThatHasChangedIsRefusedAndTheCelIsRepainted() {
+    func testATileRenderedAgainstContentThatHasChangedIsRefusedAndTheCelIsRepainted() throws {
         let manager = deferredManager()
-        let staleTile = CanvasManager.celThumbnailImage(for: manager.layers[0].cels[0],
-                                                        canvasSize: Self.deferredCanvas)
+        let staleTile = try XCTUnwrap(CanvasManager.celThumbnailImage(for: manager.layers[0].cels[0],
+                                                        canvasSize: Self.deferredCanvas))
         manager.scheduleThumbnailRegen(layerIndex: 0, celIndex: 0)
 
         manager.flushPendingThumbnailRegensDeferred()
@@ -652,8 +652,8 @@ final class ThumbnailRenderLogicTests: XCTestCase {
         // Long enough for the refused landing, the re-queue, the 400 ms debounce and the repaint.
         pumpMainRunLoop(1.2)
 
-        let freshTile = CanvasManager.celThumbnailImage(for: manager.layers[0].cels[0],
-                                                        canvasSize: Self.deferredCanvas)
+        let freshTile = try XCTUnwrap(CanvasManager.celThumbnailImage(for: manager.layers[0].cels[0],
+                                                        canvasSize: Self.deferredCanvas))
         // Premise: the extra stroke really did change the picture. Without this the two comparisons
         // below would both hold under any implementation whatever.
         XCTAssertNotEqual(staleTile.pngData(), freshTile.pngData(),
@@ -705,9 +705,9 @@ final class ThumbnailRenderLogicTests: XCTestCase {
 
     /// Fresh pixels for a cel, through the shipped renderer so the tile under test is the tile the
     /// app would install.
-    private func tile(_ manager: CanvasManager, layer: Int = 0, cel: Int = 0) -> UIImage {
-        CanvasManager.celThumbnailImage(for: manager.layers[layer].cels[cel],
-                                        canvasSize: Self.deferredCanvas)
+    private func tile(_ manager: CanvasManager, layer: Int = 0, cel: Int = 0) throws -> UIImage {
+        try XCTUnwrap(CanvasManager.celThumbnailImage(for: manager.layers[layer].cels[cel],
+                                        canvasSize: Self.deferredCanvas))
     }
 
     /// **The measurement this pass exists for, as a count.**
@@ -718,9 +718,9 @@ final class ThumbnailRenderLogicTests: XCTestCase {
     /// with the same counter still attached — so a subscription that had quietly stopped working
     /// would fail here rather than pass above. Without it this is the classic green assertion whose
     /// operands are both nothing.
-    func testInstallingATileRepublishesNothingWhileAnOrdinaryCelEditStillDoes() {
+    func testInstallingATileRepublishesNothingWhileAnOrdinaryCelEditStillDoes() throws {
         let manager = deferredManager()
-        let image = tile(manager)
+        let image = try tile(manager)
         var publishes = 0
         let token = manager.objectWillChange.sink { _ in publishes += 1 }
         defer { token.cancel() }
@@ -809,9 +809,9 @@ final class ThumbnailRenderLogicTests: XCTestCase {
     /// The silence is worth nothing if the tile does not arrive. Operands: the object on the cel
     /// afterwards, and the object handed to `installThumbnail` — identity, because a tile is
     /// replaced wholesale rather than edited.
-    func testAnInstalledTileIsTheObjectTheCelReportsAfterwards() {
+    func testAnInstalledTileIsTheObjectTheCelReportsAfterwards() throws {
         let manager = deferredManager()
-        let image = tile(manager)
+        let image = try tile(manager)
 
         manager.installThumbnail(image, layerIndex: 0, celIndex: 0)
 
@@ -823,14 +823,14 @@ final class ThumbnailRenderLogicTests: XCTestCase {
     /// **The send is the replacement for the SwiftUI pass, so it is pinned by the same test that
     /// pins the silence.** Operands: the locations `thumbnailInstalled` published, and the
     /// `(layerID, celID)` the document says was written.
-    func testInstallingATileAnnouncesExactlyTheCelItLandedOn() {
+    func testInstallingATileAnnouncesExactlyTheCelItLandedOn() throws {
         let manager = deferredManager()
         manager.addVectorLayer()
         var announced: [CanvasManager.CelLocation] = []
         let token = manager.thumbnailInstalled.sink { announced.append($0) }
         defer { token.cancel() }
 
-        manager.installThumbnail(tile(manager, layer: 1), layerIndex: 1, celIndex: 0)
+        manager.installThumbnail(try tile(manager, layer: 1), layerIndex: 1, celIndex: 0)
 
         let expected = CanvasManager.CelLocation(layerID: manager.layers[1].id,
                                                  celID: manager.layers[1].cels[0].id)
@@ -846,9 +846,9 @@ final class ThumbnailRenderLogicTests: XCTestCase {
     /// second is what would go red if `clearThumbnail` were flattened back into
     /// `layers[i].cels[j].thumbnail = nil` — which now writes the cell silently and leaves the old
     /// picture on the block.
-    func testClearingATileAnnouncesItAsWellAsDroppingIt() {
+    func testClearingATileAnnouncesItAsWellAsDroppingIt() throws {
         let manager = deferredManager()
-        manager.installThumbnail(tile(manager), layerIndex: 0, celIndex: 0)
+        manager.installThumbnail(try tile(manager), layerIndex: 0, celIndex: 0)
         var announced: [CanvasManager.CelLocation] = []
         let token = manager.thumbnailInstalled.sink { announced.append($0) }
         defer { token.cancel() }
@@ -892,9 +892,9 @@ final class ThumbnailRenderLogicTests: XCTestCase {
 
         // Each cel gets its own picture while frame 0 is on screen — none of these installs is for
         // the cel the playhead is showing except the first.
-        let holdA = tile(manager, cel: 0)
-        let inBetween = tile(manager, cel: 1)
-        let holdB = tile(manager, cel: 2)
+        let holdA = try tile(manager, cel: 0)
+        let inBetween = try tile(manager, cel: 1)
+        let holdB = try tile(manager, cel: 2)
         manager.installThumbnail(holdA, layerIndex: 0, celIndex: 0)
         manager.installThumbnail(inBetween, layerIndex: 0, celIndex: 1)
         manager.installThumbnail(holdB, layerIndex: 0, celIndex: 2)
@@ -922,7 +922,7 @@ final class ThumbnailRenderLogicTests: XCTestCase {
     ///
     /// Operands: the set of `(layerID, celID)` the resize announced, and the set of every cel in the
     /// document. Reverting the funnel to a bare assignment empties the first and reddens this.
-    func testAResizeAnnouncesEveryCelWhoseTileItDropped() {
+    func testAResizeAnnouncesEveryCelWhoseTileItDropped() throws {
         let manager = deferredManager()
         manager.addVectorLayer()
         // **Placed past the end of the layer's existing block, and asserted.** `addCel` refuses a
@@ -935,7 +935,7 @@ final class ThumbnailRenderLogicTests: XCTestCase {
                       + "document under test has one cel per layer")
         for layerIndex in manager.layers.indices {
             for celIndex in manager.layers[layerIndex].cels.indices {
-                manager.installThumbnail(tile(manager, layer: layerIndex, cel: celIndex),
+                manager.installThumbnail(try tile(manager, layer: layerIndex, cel: celIndex),
                                          layerIndex: layerIndex, celIndex: celIndex)
             }
         }
@@ -970,10 +970,10 @@ final class ThumbnailRenderLogicTests: XCTestCase {
     /// Operands: what the copy reports, and the image written through the live cel afterwards. Under
     /// a stored `UIImage?` the copy would report the older one, so this is a real fork and not a
     /// truth of value semantics.
-    func testTwoValuesOfTheSameCelShareOneTile() {
+    func testTwoValuesOfTheSameCelShareOneTile() throws {
         let manager = deferredManager()
         let copyTakenFirst = manager.layers[0].cels[0]
-        let image = tile(manager)
+        let image = try tile(manager)
 
         manager.installThumbnail(image, layerIndex: 0, celIndex: 0)
 
@@ -991,9 +991,9 @@ final class ThumbnailRenderLogicTests: XCTestCase {
     /// repainted, and the tile the duplicate was made with. They must differ from the original's new
     /// one — sharing here would repaint both blocks from one drawing and neither artist-visible
     /// symptom would point back at this line.
-    func testADuplicatedCelGetsATileOfItsOwnRatherThanAShareOfTheOriginals() {
+    func testADuplicatedCelGetsATileOfItsOwnRatherThanAShareOfTheOriginals() throws {
         let manager = deferredManager()
-        let original = tile(manager)
+        let original = try tile(manager)
         manager.installThumbnail(original, layerIndex: 0, celIndex: 0)
 
         manager.duplicateLayer(at: 0)
@@ -1002,7 +1002,7 @@ final class ThumbnailRenderLogicTests: XCTestCase {
         XCTAssertTrue(manager.layers[duplicateIndex].cels[0].thumbnail === original,
                       "the duplicate did not start out carrying the original's picture")
 
-        let repainted = tile(manager)
+        let repainted = try tile(manager)
         manager.installThumbnail(repainted, layerIndex: 0, celIndex: 0)
 
         XCTAssertTrue(manager.layers[duplicateIndex].cels[0].thumbnail === original,
@@ -1075,7 +1075,7 @@ final class ThumbnailRenderLogicTests: XCTestCase {
 
         let after = try XCTUnwrap(manager.layers[0].cels[0].thumbnail,
                                   "the cel has no tile at all after an undo")
-        let cold = tile(manager)
+        let cold = try tile(manager)
         XCTAssertEqual(after.pngData(), cold.pngData(),
                        "the tile after the undo is not a picture of what the cel now holds")
         XCTAssertNotEqual(after.pngData(), withStroke.pngData(),

@@ -211,8 +211,8 @@ final class StreamInsertLogicTests: XCTestCase {
     }
 
     /// Whether a render of `vector` is `color` at the stream's centre (32, 32).
-    private func centreIs(_ color: UIColor, _ vector: VectorCanvas) -> Bool {
-        let p = pixel(vector.render(), 32, 32)
+    private func centreIs(_ color: UIColor, _ vector: VectorCanvas) throws -> Bool {
+        let p = pixel((try XCTUnwrap(vector.render())), 32, 32)
         switch color {
         case .green: return Int(p.g) > Int(p.r) + 100 && p.a == 255
         case .red: return Int(p.r) > Int(p.g) + 100 && p.a == 255
@@ -225,15 +225,15 @@ final class StreamInsertLogicTests: XCTestCase {
     /// grey placeholder, after it is solid green.
     func testATickDeliversTheFrameAndThePictureChanges() throws {
         let fixture = tickFixture(image: solidImage(.green))
-        let before = pixel(fixture.vector.render(), 32, 32)
+        let before = pixel((try XCTUnwrap(fixture.vector.render())), 32, 32)
         XCTAssertEqual(Int(before.g), Int(before.r), accuracy: 8, "the placeholder is grey")
 
         fixture.manager.streamCoordinator.tick()
 
         XCTAssertEqual(fixture.presents(), 1, "the displayed element is presented once")
         XCTAssertNotNil(try XCTUnwrap(fixture.vector.streams.first).displayFrame)
-        XCTAssertTrue(centreIs(.green, fixture.vector), "the green frame reached the canvas")
-        XCTAssertEqual(pixel(fixture.vector.render(), 2, 2).a, 0, "and nothing outside the rect")
+        XCTAssertTrue(try centreIs(.green, fixture.vector), "the green frame reached the canvas")
+        XCTAssertEqual(pixel((try XCTUnwrap(fixture.vector.render())), 2, 2).a, 0, "and nothing outside the rect")
     }
 
     /// A second tick on the same frame index does nothing: no write, no present.
@@ -297,10 +297,10 @@ final class StreamInsertLogicTests: XCTestCase {
     /// computer updated while on a different frame, and then the frame changes onto the one with
     /// the stream."* Green lands on screen; the artist leaves; the laptop moves to red; the artist
     /// comes back to a red cel without a further frame having to arrive.
-    func testTheFrameChangeOntoAStreamCelFindsTheNewestPicture() {
+    func testTheFrameChangeOntoAStreamCelFindsTheNewestPicture() throws {
         let fixture = tickFixture(image: solidImage(.green))
         fixture.manager.streamCoordinator.tick()
-        XCTAssertTrue(centreIs(.green, fixture.vector), "Setup: green on screen")
+        XCTAssertTrue(try centreIs(.green, fixture.vector), "Setup: green on screen")
 
         fixture.manager.currentFrame = 20   // past the cel's [0, 12)
         fixture.slot(2, solidImage(.red))
@@ -309,10 +309,10 @@ final class StreamInsertLogicTests: XCTestCase {
 
         XCTAssertEqual(fixture.presents(), 1, "the away tick presented nothing")
         XCTAssertGreaterThan(fixture.vector.version, version, "but the cel's picture is stale and says so")
-        XCTAssertTrue(centreIs(.red, fixture.vector), "and it holds red")
+        XCTAssertTrue(try centreIs(.red, fixture.vector), "and it holds red")
 
         fixture.manager.currentFrame = 0
-        XCTAssertTrue(centreIs(.red, fixture.vector), "the frame change finds red with no tick at all")
+        XCTAssertTrue(try centreIs(.red, fixture.vector), "the frame change finds red with no tick at all")
         fixture.manager.streamCoordinator.tick()
         XCTAssertEqual(fixture.presents(), 1, "the same frame is not presented again")
     }
@@ -338,7 +338,7 @@ final class StreamInsertLogicTests: XCTestCase {
         XCTAssertTrue(try XCTUnwrap(far.streams.first).displayFrame === fixture.vector.streams.first?.displayFrame,
                       "one picture between the two cels")
         XCTAssertGreaterThan(far.version, farVersion, "the far cel's memo was told")
-        XCTAssertTrue(centreIs(.red, far), "and draws red when the artist gets there")
+        XCTAssertTrue(try centreIs(.red, far), "and draws red when the artist gets there")
     }
 
     /// A frozen element is not fed — stage 2's Freeze reads this flag; the tick honours it now.
@@ -366,7 +366,7 @@ final class StreamInsertLogicTests: XCTestCase {
         XCTAssertEqual(fixture.vector.version, version, "the layer's own picture did not change")
         XCTAssertNotNil(try XCTUnwrap(fixture.vector.streams.first).displayFrame, "held for the commit")
         fixture.manager.commitVectorFloatIfNeeded()
-        XCTAssertTrue(centreIs(.green, fixture.vector), "the commit draws the newest frame")
+        XCTAssertTrue(try centreIs(.green, fixture.vector), "the commit draws the newest frame")
     }
 
     // MARK: - TODO (156): a layer nobody can see is not fed
@@ -416,10 +416,10 @@ final class StreamInsertLogicTests: XCTestCase {
 
     /// Spins the main run loop until `condition` holds — the armed tick is a timer.
     private func waitUntil(_ what: String, timeout: TimeInterval = 3, file: StaticString = #filePath,
-                           line: UInt = #line, _ condition: () -> Bool) {
+                           line: UInt = #line, _ condition: () throws -> Bool) rethrows {
         let deadline = Date().addingTimeInterval(timeout)
-        while !condition(), Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
-        XCTAssertTrue(condition(), "Timed out waiting for: \(what)", file: file, line: line)
+        while try !condition(), Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
+        XCTAssertTrue(try condition(), "Timed out waiting for: \(what)", file: file, line: line)
     }
 
     /// **A frame written to a layer nobody can see changes no picture, so it is not written.** The
@@ -431,7 +431,7 @@ final class StreamInsertLogicTests: XCTestCase {
         for viaFolder in [false, true] {
             let fixture = tickFixture(image: solidImage(.green))
             fixture.manager.streamCoordinator.tick()
-            XCTAssertTrue(centreIs(.green, fixture.vector), "Setup: green on screen")
+            XCTAssertTrue(try centreIs(.green, fixture.vector), "Setup: green on screen")
             let index = try XCTUnwrap(fixture.manager.layers.indices.last)
             hide(index, in: fixture.manager, viaFolder: viaFolder)
             fixture.slot(2, solidImage(.red))
@@ -441,7 +441,7 @@ final class StreamInsertLogicTests: XCTestCase {
 
             XCTAssertEqual(fixture.vector.version, version,
                            "a layer nobody can see is not repainted (viaFolder: \(viaFolder))")
-            XCTAssertTrue(centreIs(.green, fixture.vector), "and keeps the picture it had")
+            XCTAssertTrue(try centreIs(.green, fixture.vector), "and keeps the picture it had")
             XCTAssertEqual(fixture.presents(), 1, "and presents nothing: only the visible tick did")
         }
     }
@@ -507,12 +507,12 @@ final class StreamInsertLogicTests: XCTestCase {
             coordinator.sync()
             fixture.slot(2, solidImage(.red))
             coordinator.tick()
-            XCTAssertTrue(centreIs(.green, fixture.vector), "Setup: the hidden layer did not follow the laptop")
+            XCTAssertTrue(try centreIs(.green, fixture.vector), "Setup: the hidden layer did not follow the laptop")
 
             show(index, in: fixture.manager)
             coordinator.sync()
 
-            waitUntil("the pass that shows the layer wrote the newest picture") { centreIs(.red, fixture.vector) }
+            try waitUntil("the pass that shows the layer wrote the newest picture") { try centreIs(.red, fixture.vector) }
         }
     }
 

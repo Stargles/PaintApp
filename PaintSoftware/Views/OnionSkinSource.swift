@@ -6,7 +6,7 @@ import Combine
 /// answers "the two reference keyframes". Kept as a protocol because the two answer the same
 /// question from completely different inputs.
 protocol OnionSkinSource {
-    func frames(for manager: CanvasManager) -> [OnionSkinFrame]
+    func frames(for manager: CanvasManager) -> [OnionSkinFrame]?
 }
 
 extension OnionSkinSource {
@@ -24,7 +24,7 @@ extension OnionSkinSource {
     /// interpolate mode answers the same question from different inputs, so there will be a third —
     /// would have to be told. Here it is structural: a source answers what it is about, and *when* is
     /// decided once. The Coordinator calls this and never `frames(for:)`.
-    func visibleFrames(for manager: CanvasManager) -> [OnionSkinFrame] {
+    func visibleFrames(for manager: CanvasManager) -> [OnionSkinFrame]? {
         guard manager.showsOnionSkin else { return [] }
         return frames(for: manager)
     }
@@ -292,7 +292,7 @@ struct OnionSkinInkRequest {
 
     /// The pixels. **Off the main thread**, through the same lock-protected store the main-thread
     /// spelling used, so a skin already rendered is still a dictionary hit.
-    func render() -> UIImage {
+    func render() -> UIImage? {
         PlaybackTrace.span(.onionInk) {
             OnionSkinRasterCache.image(for: cel, canvasSize: canvasSize, at: size, derived: derived)
         }
@@ -1177,7 +1177,7 @@ enum OnionSkinRasterCache {
     /// a smaller render would clip rather than scale — so a derived skin costs one full evaluation
     /// per (cel, identity) and is then served from here for every rebuild after.
     static func image(for cel: Cel, canvasSize: CGSize, at size: CGSize,
-                      derived: DerivedCelContent? = nil) -> UIImage {
+                      derived: DerivedCelContent? = nil) -> UIImage? {
         guard size.width < canvasSize.width || size.height < canvasSize.height else {
             // No reduction called for, so there is nothing for this cache to add: hand back the
             // shared memo the compositor is already holding rather than a second copy of it.
@@ -1189,7 +1189,7 @@ enum OnionSkinRasterCache {
         if let hit = entries[key] { lock.unlock(); return hit }
         lock.unlock()
 
-        let reduced = PixelOps.rasterize(cel: cel, canvasSize: size, memoize: false, derived: derived)
+        guard let reduced = PixelOps.rasterize(cel: cel, canvasSize: size, memoize: false, derived: derived) else { return nil }
 
         lock.lock()
         installMemoryObserverIfNeeded()
@@ -1266,7 +1266,7 @@ enum OnionSkinRasterCache {
 /// lever is capping how many derived skins evaluate per rebuild, not going back to blank ghosts.
 struct OnionSkinSettingsSource: OnionSkinSource {
 
-    func frames(for manager: CanvasManager) -> [OnionSkinFrame] {
+    func frames(for manager: CanvasManager) -> [OnionSkinFrame]? {
         guard let canvasSize = manager.canvasSize,
               manager.layers.indices.contains(manager.currentLayerIndex) else { return [] }
         let settings = manager.onionSkin
@@ -1313,9 +1313,9 @@ struct OnionSkinSettingsSource: OnionSkinSource {
                 let derived = manager.derivedCelContent(for: cels[celIndex],
                                                         atFrame: cels[celIndex].startFrame)
                 guard derived != nil || !cels[celIndex].isCertainlyBlank else { continue }
-                let image = OnionSkinRasterCache.image(for: cels[celIndex],
+                guard let image = OnionSkinRasterCache.image(for: cels[celIndex],
                                                        canvasSize: canvasSize, at: skinSize,
-                                                       derived: derived)
+                                                       derived: derived) else { return nil }
                 gathered.append((distance: slot + 1,
                                  frame: OnionSkinFrame(image: image,
                                                        opacity: CGFloat(opacity),
@@ -1358,21 +1358,22 @@ struct InterpolationReferenceOnionSkinSource: OnionSkinSource {
     static let pastTint = UIColor.systemBlue
     static let futureTint = UIColor.systemRed
 
-    func frames(for manager: CanvasManager) -> [OnionSkinFrame] {
+    func frames(for manager: CanvasManager) -> [OnionSkinFrame]? {
         guard let canvasSize = manager.canvasSize else { return [] }
         let keyframes = manager.interpolationKeyframes
         guard keyframes.count >= 2 else { return [] }
 
         // Which references count as "behind" is decided by frame rather than by list position, so a
         // reference set while the playhead sits between them tints correctly either way.
-        return keyframes.enumerated().compactMap { index, reference in
+        var frames: [OnionSkinFrame] = []
+        for reference in keyframes {
             let cels = reference.cels.compactMap { ref -> Cel? in
                 guard let at = manager.celIndices(forCel: ref.celID, inLayer: ref.layerID) else {
                     return nil
                 }
                 return manager.layers[at.layer].cels[at.cel]
             }
-            guard let startFrame = cels.map(\.startFrame).min() else { return nil }
+            guard let startFrame = cels.map(\.startFrame).min() else { continue }
             // Onion-skin resolution here too. This source mints a fresh image every call — its
             // references have no cel-version identity to memoize on the way the settings source does —
             // so it is the one path that pays a full render per pass, and rendering it at 4096² was
@@ -1382,21 +1383,26 @@ struct InterpolationReferenceOnionSkinSource: OnionSkinSource {
             let bounds = CGRect(origin: .zero, size: skinSize)
             // One reference can span layers (requirement 5), so its cels flatten into one frame —
             // otherwise lineart and flats would tint as two separate onion skins.
+            var completed = true
             let image = UIGraphicsImageRenderer(size: skinSize, format: PixelOps.transparentFormat()).image { _ in
                 for cel in cels {
                     // Through the seam like every other flatten. A reference keyframe normally
                     // stores its own ink — `interpolate` refuses `.alreadyInterpolated` for the
                     // *target* but nothing forbids flagging a derived cel as a keyframe — so this
                     // costs one optional test on the ordinary path and is right on the other.
-                    PixelOps.rasterize(cel: cel, canvasSize: canvasSize,
-                                       derived: manager.derivedCelContent(for: cel, atFrame: cel.startFrame))
-                        .draw(in: bounds)
+                    guard let source = PixelOps.rasterize(cel: cel, canvasSize: canvasSize,
+                        derived: manager.derivedCelContent(for: cel, atFrame: cel.startFrame)) else {
+                        completed = false; return
+                    }
+                    source.draw(in: bounds)
                 }
             }
+            guard completed else { return nil }
             let isPast = startFrame <= manager.currentFrame
-            return OnionSkinFrame(image: image,
-                                  opacity: CGFloat(manager.onionSkin.nearestOpacity(on: isPast ? .previous : .next)),
-                                  tint: isPast ? Self.pastTint : Self.futureTint)
+            frames.append(OnionSkinFrame(image: image,
+                opacity: CGFloat(manager.onionSkin.nearestOpacity(on: isPast ? .previous : .next)),
+                tint: isPast ? Self.pastTint : Self.futureTint))
         }
+        return frames
     }
 }

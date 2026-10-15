@@ -210,7 +210,7 @@ final class BrushStorageLogicTests: XCTestCase {
         manager.addVectorLayer()
         let vector = try XCTUnwrap(manager.layers[manager.currentLayerIndex].cels[0].vector)
         vector.addStroke(Self.stroke(brush))
-        let expected = try Self.pixels(vector.render())
+        let expected = try Self.pixels((try XCTUnwrap(vector.render())))
         XCTAssertFalse(expected.isBlank, "fixture precondition: the stroke drew something")
 
         let url = ProjectStore.createNewProjectURL(name: "Relocated")
@@ -236,7 +236,7 @@ final class BrushStorageLogicTests: XCTestCase {
 
         let canvas = try XCTUnwrap(reopened.layers.compactMap { $0.cels.first?.vector }
                                                   .first { !$0.strokes.isEmpty })
-        XCTAssertEqual(try Self.pixels(canvas.render()).bytes, expected.bytes,
+        XCTAssertEqual(try Self.pixels((try XCTUnwrap(canvas.render()))).bytes, expected.bytes,
                        "and the ink is unchanged by a save and reopen under a relocated library")
     }
 
@@ -261,7 +261,7 @@ final class BrushStorageLogicTests: XCTestCase {
     private static func render(_ brush: Brush) throws -> [UInt8] {
         let vector = VectorCanvas(size: canvas)
         vector.addStroke(stroke(brush))
-        return try pixels(vector.render()).bytes
+        return try pixels((try XCTUnwrap(vector.render()))).bytes
     }
 
     private static func isBlank(_ bytes: [UInt8]) -> Bool { Pixels(bytes: bytes).isBlank }

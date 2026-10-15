@@ -136,14 +136,14 @@ extension CanvasManager {
         case .ink, .pixels:
             // The cels are addressed by id from here on, so nothing depends on the layer keeping its index.
             if layerBake.rasterizes {
-                rasterizeLayer(layerIndex: at)
+                guard rasterizeLayer(layerIndex: at) else { return false }
                 guard layers[at].kind == .raster, layers[at].cels.allSatisfy({ $0.raster.hasContent }) else { return false }
             }
             for cel in layerBake.cels {
                 guard bakeCel(layerID: layerBake.layerID, celID: cel.celID, segments: cel.segments,
                               canvasSize: canvasSize, memo: memo) else { return false }
             }
-            if let loop = layerBake.loop { replay(loop, onLayerID: layerBake.layerID) }
+            if let loop = layerBake.loop, !replay(loop, onLayerID: layerBake.layerID) { return false }
         }
         return true
     }
@@ -205,7 +205,8 @@ extension CanvasManager {
             let image: UIImage
             switch treatment {
             case .operation(let operation):
-                image = operation.baked(PixelOps.rasterize(cel: cel, canvasSize: canvasSize))
+                guard let rendered = PixelOps.rasterize(cel: cel, canvasSize: canvasSize) else { return false }
+                image = operation.baked(rendered)
             case .pose(let run):
                 guard let rendered = PixelOps.rasterize(cel: cel, canvasSize: canvasSize, pose: run.inherited) else { return false }
                 image = rendered
@@ -227,14 +228,19 @@ extension CanvasManager {
     /// drawing is made — a derived cel is flattened to the still it shows, from the drawings it refers to,
     /// and a pose comes with the drawing — so a replayed drawing is a duplicated one; and carving can drop
     /// a cel a later run's source refers to.
-    private func replay(_ loop: LoopBake, onLayerID layerID: UUID) {
-        guard let at = layers.firstIndex(where: { $0.id == layerID }) else { return }
+    private func replay(_ loop: LoopBake, onLayerID layerID: UUID) -> Bool {
+        guard let at = layers.firstIndex(where: { $0.id == layerID }) else { return false }
         let held = layers[at].cels
-        let drawings = loop.runs.map { run -> (frames: Range<Int>, cel: Cel?) in
-            guard let source = held.first(where: { $0.id == run.replay.source }) else { return (run.frames, nil) }
-            var cel = Cel(startFrame: run.frames.lowerBound, frameCount: run.frames.count, copying: copyTiers(of: source))
+        var drawings: [(frames: Range<Int>, cel: Cel?)] = []
+        for run in loop.runs {
+            guard let source = held.first(where: { $0.id == run.replay.source }) else {
+                drawings.append((run.frames, nil))
+                continue
+            }
+            guard let tiers = copyTiers(of: source) else { return false }
+            var cel = Cel(startFrame: run.frames.lowerBound, frameCount: run.frames.count, copying: tiers)
             cel.cropPoseKeysToSpan()
-            return (run.frames, cel)
+            drawings.append((run.frames, cel))
         }
         for drawing in drawings {
             vacate(drawing.frames, inLayerAt: at)
@@ -248,6 +254,7 @@ extension CanvasManager {
         if layers[at].cels.isEmpty, let first = loop.stretches.first {
             addCel(layerIndex: at, startFrame: first.start, frameCount: 1)
         }
+        return true
     }
 
     /// Empties `frames` on a layer: a drawing across either edge is cut there, and every drawing left

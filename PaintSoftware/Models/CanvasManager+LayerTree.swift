@@ -597,7 +597,7 @@ extension CanvasManager {
         let survivorID = layers[bottomIndex].id
         let bothVector = layers[bottomIndex].kind == .vector && layers[topIndex].kind == .vector
         var stayedVector = false
-        withStructureUndo(label: .mergeLayers) {
+        guard withStructureTransaction(label: .mergeLayers, {
             // **The float settle, said here rather than inherited from `rasterizeLayer`.** That method
             // does it for the pixel arm's reason — a suppressed id whose canvas is about to be
             // replaced is ink flattened away with no way back — and the vector arm never calls it, so
@@ -613,16 +613,16 @@ extension CanvasManager {
             stayedVector = vectorMergeIsExact(bottomIndex: bottomIndex, topIndex: topIndex)
 
             if !stayedVector {
-                rasterizeLayer(layerIndex: bottomIndex)
+                guard rasterizeLayer(layerIndex: bottomIndex) else { return false }
                 // **Not the top layer while it grades** (TODO (92)): `rasterizeLayer` makes it
                 // `.raster`, a kind that carries no grade, so the bake would then read the ink as
                 // pixels and composite the stencil's colour — the one thing the ruling says never
                 // happens. `mergeContribution` reads a grading vector cel through the seam itself,
                 // and the layer is deleted below whatever kind it is left in.
-                if layers[topIndex].layerEffect == nil { rasterizeLayer(layerIndex: topIndex) }
+                if layers[topIndex].layerEffect == nil, !rasterizeLayer(layerIndex: topIndex) { return false }
             }
-            mergeAlignedCels(bottomIndex: bottomIndex, topIndex: topIndex,
-                             asVector: stayedVector, canvasSize: canvasSize)
+            guard mergeAlignedCels(bottomIndex: bottomIndex, topIndex: topIndex,
+                                   asVector: stayedVector, canvasSize: canvasSize) else { return false }
             layers[bottomIndex].opacity = 1
             layers[bottomIndex].isVisible = true
             // **The opacity curve goes with the number it drove**, TODO (21). `mergeContribution`
@@ -649,7 +649,8 @@ extension CanvasManager {
 
             deleteLayer(at: topIndex)
             repointActiveLayer(at: survivorID)
-        }
+            return true
+        }) else { return false }
         // **Only when both sides were vector.** A merge that involves a raster layer produces pixels
         // because one side already is pixels, and a banner on every ordinary merge is noise.
         if bothVector && !stayedVector { raise(.mergedAsPixels) }
@@ -713,7 +714,7 @@ extension CanvasManager {
     /// layer being deleted, so `copyTiers` flattens it into a still exactly as duplicate and paste do
     /// (the 2026-09-03 ruling). Its pose channels and held baselines do come across, because they name
     /// the elements travelling with them.
-    private func mergeAlignedCels(bottomIndex: Int, topIndex: Int, asVector: Bool, canvasSize: CGSize) {
+    private func mergeAlignedCels(bottomIndex: Int, topIndex: Int, asVector: Bool, canvasSize: CGSize) -> Bool {
         var adopted: [Cel] = []
         for topCel in layers[topIndex].cels {
             guard let topCelIndex = layers[topIndex].cels.firstIndex(where: { $0.id == topCel.id }) else { continue }
@@ -722,14 +723,14 @@ extension CanvasManager {
                     concatenateVectorCels(bottomIndex: bottomIndex, bottomCel: bottomCelIndex,
                                           topIndex: topIndex, topCel: topCelIndex)
                 } else {
-                    bakeCelPair(bottomIndex: bottomIndex, bottomCel: bottomCelIndex,
-                                topIndex: topIndex, topCel: topCelIndex, canvasSize: canvasSize)
+                    guard bakeCelPair(bottomIndex: bottomIndex, bottomCel: bottomCelIndex,
+                                      topIndex: topIndex, topCel: topCelIndex, canvasSize: canvasSize) else { return false }
                 }
                 scheduleThumbnailRegen(layerIndex: bottomIndex, celIndex: bottomCelIndex)
             } else if layers[topIndex].isVisible {
                 // A hidden layer contributes nothing, which is what hiding it means — the same rule
                 // `mergeContribution` applies to a pair, applied to a cel with no partner.
-                let tiers = copyTiers(of: topCel)
+                guard let tiers = copyTiers(of: topCel) else { return false }
                 adopted.append(Cel(id: UUID(), startFrame: topCel.startFrame, frameCount: topCel.frameCount,
                                    raster: tiers.raster,
                                    bakedImage: tiers.bakedImage, vector: tiers.vector,
@@ -737,7 +738,7 @@ extension CanvasManager {
                                    pendingPoseBaselines: tiers.pendingPoseBaselines))
             }
         }
-        guard !adopted.isEmpty else { return }
+        guard !adopted.isEmpty else { return true }
         let adoptedIDs = Set(adopted.map(\.id))
         layers[bottomIndex].cels.append(contentsOf: adopted)
         layers[bottomIndex].cels.sort { $0.startFrame < $1.startFrame }
@@ -746,6 +747,7 @@ extension CanvasManager {
         for index in layers[bottomIndex].cels.indices where adoptedIDs.contains(layers[bottomIndex].cels[index].id) {
             scheduleThumbnailRegen(layerIndex: bottomIndex, celIndex: index)
         }
+        return true
     }
 
     /// One cel pair flattened to pixels, once per frame.
@@ -755,20 +757,20 @@ extension CanvasManager {
     /// (`layerEffect(atFrame:)`), and a grade that changes *within* a cel's span is not something one
     /// baked cel could hold whichever frame were picked.
     private func bakeCelPair(bottomIndex: Int, bottomCel: Int, topIndex: Int, topCel: Int,
-                             canvasSize: CGSize) {
+                             canvasSize: CGSize) -> Bool {
         let span = layers[bottomIndex].cels[bottomCel]
         let frame = (currentFrame >= span.startFrame && currentFrame < span.endFrame)
             ? currentFrame : span.startFrame
-        let flattened = CoreGraphicsCompositor.mergedDown(
-            bottom: mergeContribution(ofLayer: bottomIndex, celIndex: bottomCel, atFrame: frame,
-                                      canvasSize: canvasSize, isBackdrop: true),
-            top: mergeContribution(ofLayer: topIndex, celIndex: topCel, atFrame: frame,
-                                   canvasSize: canvasSize, isBackdrop: false),
-            canvasSize: canvasSize
-        )
-        layers[bottomIndex].cels[bottomCel].raster =
-            bakedRasterTexture(image: flattened, likeExisting: layers[bottomIndex].cels[bottomCel].raster)
+        guard let bottom = mergeContribution(ofLayer: bottomIndex, celIndex: bottomCel, atFrame: frame,
+                                             canvasSize: canvasSize, isBackdrop: true),
+              let top = mergeContribution(ofLayer: topIndex, celIndex: topCel, atFrame: frame,
+                                          canvasSize: canvasSize, isBackdrop: false) else { return false }
+        let flattened = CoreGraphicsCompositor.mergedDown(bottom: bottom, top: top, canvasSize: canvasSize)
+        guard let raster = preparedRasterTexture(image: flattened,
+                                                  likeExisting: layers[bottomIndex].cels[bottomCel].raster) else { return false }
+        layers[bottomIndex].cels[bottomCel].raster = raster
         layers[bottomIndex].cels[bottomCel].bakedImage = nil
+        return true
     }
 
     /// **Whether concatenating these two layers' display lists draws what compositing their two renders
@@ -905,7 +907,7 @@ extension CanvasManager {
     /// acts on is everything beneath the pair, which the ruling excludes. So it resolves to `.nothing`
     /// there and to `.grade` above.
     private func mergeContribution(ofLayer index: Int, celIndex: Int, atFrame frame: Int,
-                                   canvasSize: CGSize, isBackdrop: Bool) -> MergeContribution {
+                                   canvasSize: CGSize, isBackdrop: Bool) -> MergeContribution? {
         let layer = layers[index]
         // A hidden layer contributes nothing — said once here rather than as the `isVisible ?
         // opacity : 0` ternary this used to spell at each of two call sites.
@@ -916,10 +918,11 @@ extension CanvasManager {
             // as the coverage, exactly the amount the walk mixes the grade back by, so the merge and
             // the canvas agree about where the grade reached. Through the seam, since this layer was
             // *not* rasterized first (`mergeLayers` says why) and an in-between's ink is derived.
-            let coverage = PixelOps.rasterize(cel: layer.cels[celIndex], canvasSize: canvasSize,
-                                              derived: derivedCelContent(for: layer.cels[celIndex],
-                                                                         atFrame: frame)).cgImage
-                .flatMap(MaskResolver.coverage(fromAlphaOf:))
+            guard let image = PixelOps.rasterize(cel: layer.cels[celIndex], canvasSize: canvasSize,
+                                                derived: derivedCelContent(for: layer.cels[celIndex],
+                                                                           atFrame: frame)),
+                  let cgImage = image.cgImage,
+                  let coverage = MaskResolver.coverage(fromAlphaOf: cgImage) else { return nil }
             return .grade(effect, opacity: layer.opacity(atFrame: frame), coverage: coverage)
         }
         // `compositedMode` throughout, so `.clipToBelow` arrives as the `.normal` it always resolves
@@ -934,7 +937,8 @@ extension CanvasManager {
         // a merge flattens what the canvas shows at one frame, and what it shows is the opacity the
         // curve resolves to there. Reading the stored base here would bake a layer at 100% that the
         // artist is looking at faded.
-        return .pixels(PixelOps.rasterize(cel: layer.cels[celIndex], canvasSize: canvasSize),
+        guard let image = PixelOps.rasterize(cel: layer.cels[celIndex], canvasSize: canvasSize) else { return nil }
+        return .pixels(image,
                        mode: layer.blendMode.compositedMode, opacity: layer.opacity(atFrame: frame))
     }
 
@@ -944,15 +948,16 @@ extension CanvasManager {
     /// the fourth site `duplicateCel`, `splitCel` and `pasteCel` fell through before 2026-09-02:
     /// naming `raster`, `bakedImage` and `vector` but not `transformTracks` or
     /// `pendingPoseBaselines` defaults both away, so a duplicated cel's Move animation and held pose
-    /// vanished silently. `copyTiers` also flattens a `.generate` cel into a still (`flattenedStill`),
+    /// vanished silently. `copyTiers` also flattens a `.generate` cel into a still,
     /// which this site never did either — a duplicated in-between came back **blank**, since a
     /// `.generate` cel stores nothing in the tiers a bare `Cel(...)` reads. No `interpolation:`
     /// argument, on either arm, for `duplicateCel`'s own reason: a copy never derives.
     func duplicateLayer(at index: Int) {
         guard layers.indices.contains(index) else { return }
         let source = layers[index]
-        let cels = source.cels.map { cel -> Cel in
-            let tiers = copyTiers(of: cel)
+        var cels: [Cel] = []
+        for cel in source.cels {
+            guard let tiers = copyTiers(of: cel) else { return }
             let copy = Cel(id: UUID(), startFrame: cel.startFrame, frameCount: cel.frameCount,
                            raster: tiers.raster,
                            bakedImage: tiers.bakedImage, vector: tiers.vector,
@@ -964,7 +969,7 @@ extension CanvasManager {
             // duplicate's own cell; passing the field across would have shared the original's, and
             // the next edit to either drawing would have repainted both blocks.
             copy.thumbnail = cel.thumbnail
-            return copy
+            cels.append(copy)
         }
         // `fill` and `effect` are carried because each *is* its kind's content — §4.5's value layer
         // and §4.4's effect layer keep theirs outside the cel, so the cel copy above does not reach

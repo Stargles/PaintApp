@@ -392,7 +392,7 @@ final class MemoryBudgetLogicTests: XCTestCase {
     /// skipped rather than stretched over the canvas, and the flatten leaves the texture exactly as it
     /// found it. The flatten's own size is asserted first: bounding the tier must not shrink the
     /// picture the cel actually has.
-    func testFlatteningAVectorCelLeavesNothingMemoisedOnItsEmptyRasterTier() {
+    func testFlatteningAVectorCelLeavesNothingMemoisedOnItsEmptyRasterTier() throws {
         let canvas = CGSize(width: 512, height: 256)
         var cel = Cel(id: UUID(), startFrame: 0, frameCount: 1, raster: .empty(size: canvas))
         cel.vector = VectorCanvas(
@@ -401,7 +401,7 @@ final class MemoryBudgetLogicTests: XCTestCase {
                                                    transform: nil),
                                       color: CodableColor(red: 0, green: 0, blue: 1, alpha: 1))])
 
-        let flattened = PixelOps.rasterize(cel: cel, canvasSize: canvas, memoize: false)
+        let flattened = try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: canvas, memoize: false))
         XCTAssertEqual(flattened.size, canvas, "control: the flatten is canvas-sized — this cel has content")
 
         XCTAssertFalse(cel.raster.hasContent, "flattening must not allocate the empty tier's bitmap")
@@ -419,7 +419,7 @@ final class MemoryBudgetLogicTests: XCTestCase {
     /// RENDER.md §3.1 describes is a large-canvas symptom.
     ///
     /// The tile's own geometry is asserted alongside, because bounding the flatten must not move it.
-    func testACelThumbnailFlattensIntoItsOwnBoundRatherThanTheWholeCanvas() {
+    func testACelThumbnailFlattensIntoItsOwnBoundRatherThanTheWholeCanvas() throws {
         let canvas = CGSize(width: 1024, height: 512)
         let canvasEntryBytes = Int(canvas.width) * Int(canvas.height) * 4
         var cel = Cel(id: UUID(), startFrame: 0, frameCount: 1, raster: .empty(size: canvas))
@@ -428,7 +428,7 @@ final class MemoryBudgetLogicTests: XCTestCase {
 
         PixelOps.clearRasterizeCache()
         defer { PixelOps.clearRasterizeCache() }
-        let tile = CanvasManager.celThumbnailImage(for: cel, canvasSize: canvas)
+        let tile = try XCTUnwrap(CanvasManager.celThumbnailImage(for: cel, canvasSize: canvas))
 
         XCTAssertEqual(tile.size, CGSize(width: 120, height: 60),
                        "the tile itself must not move — only what it is flattened from")
@@ -745,7 +745,7 @@ final class MemoryBudgetLogicTests: XCTestCase {
     /// at all, and the walk's findings stayed an implicitly unwrapped nil. A row CoreGraphics refuses
     /// on any host — 2³¹ pixels wide — reproduces the refusal without needing the memory to run out.
     ///
-    /// Three things have to be true of the refusal: the render answers (blank, and installs no memo),
+    /// Three things have to be true of the refusal: the render refuses (nil, and installs no memo),
     /// the seam is signalled as a refusal so every cache trims, and the artist is told.
     @MainActor
     func testARefusedBitmapIsARefusedRenderThatTrimsAndTellsTheArtist() {
@@ -763,7 +763,7 @@ final class MemoryBudgetLogicTests: XCTestCase {
 
         let picture = canvas.render()
 
-        XCTAssertEqual(picture.size, CGSize(width: 1, height: 1), "a refused render is the blank pixel, drawn this once")
+        XCTAssertNil(picture, "a refused render must not become a successful blank picture")
         XCTAssertFalse(canvas.hasCachedImage, "…and nothing is memoized under it")
         XCTAssertEqual(MemoryPressure.signalsDelivered, signalsBefore + 1, "the seam was told")
         XCTAssertNil(canvas.render(quality: .full, ifStillAtVersion: canvas.version),

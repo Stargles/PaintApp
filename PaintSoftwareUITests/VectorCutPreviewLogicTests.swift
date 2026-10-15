@@ -58,8 +58,8 @@ final class VectorCutPreviewLogicTests: XCTestCase {
     /// one two-sample increment per touch sample — and hands back the scratch the artist would be
     /// looking at.
     private func previewed(_ canvas: VectorCanvas, gesture: StrokeSamples,
-                           brush: Brush, size: CGFloat) -> RasterLayerTexture {
-        let scratch = RasterLayerTexture.load(from: canvas.render(), size: Self.canvasSize)
+                           brush: Brush, size: CGFloat) throws -> RasterLayerTexture {
+        let scratch = RasterLayerTexture.load(from: (try XCTUnwrap(canvas.render())), size: Self.canvasSize)
         var previous: VectorSample?
         var accumulated: [UUID: VectorCanvas.CutPreviewProgress] = [:]
         for sample in gesture {
@@ -76,8 +76,8 @@ final class VectorCutPreviewLogicTests: XCTestCase {
     /// A footprint punch of the same gesture — the preview that was *not* shipped, built here so the
     /// difference between the two can be a number instead of an argument.
     private func footprintPunched(_ canvas: VectorCanvas, gesture: StrokeSamples,
-                                  brush: Brush, size: CGFloat) -> RasterLayerTexture {
-        let scratch = RasterLayerTexture.load(from: canvas.render(), size: Self.canvasSize)
+                                  brush: Brush, size: CGFloat) throws -> RasterLayerTexture {
+        let scratch = RasterLayerTexture.load(from: (try XCTUnwrap(canvas.render())), size: Self.canvasSize)
         let samples = StrokeSamples(gesture, channels: .pressureOnly)
         BrushStamper.stampStroke(into: scratch, samples: samples, brush: brush, color: .black,
                                  brushSize: size, brushOpacity: 1, isEraser: true,
@@ -106,7 +106,7 @@ final class VectorCutPreviewLogicTests: XCTestCase {
     /// it ([PERFORMANCE.md](PERFORMANCE.md) item 10) — every cut calls `invalidate()`, so the next
     /// `render()` runs cold over the whole layer. Mode 2 must not buy that: it reads geometry and
     /// draws into a scratch raster. If `version` ever moves here, it has.
-    func testThePreviewNeverTouchesTheDisplayList() {
+    func testThePreviewNeverTouchesTheDisplayList() throws {
         let canvas = VectorCanvas(size: Self.canvasSize, strokes: [
             stroke(line(y: 100, from: 40, to: 216), size: 24),
             stroke(line(y: 156, from: 40, to: 216), size: 24),
@@ -118,7 +118,7 @@ final class VectorCutPreviewLogicTests: XCTestCase {
         let samplesBefore = canvas.strokes.map(\.samples)
 
         let gesture = drag(x: 128, from: 60, to: 200)
-        _ = previewed(canvas, gesture: gesture, brush: opaqueBrush(size: 12), size: 12)
+        _ = try previewed(canvas, gesture: gesture, brush: opaqueBrush(size: 12), size: 12)
 
         XCTAssertEqual(canvas.elements.count, elementsBefore.count,
                        "A preview that adds or removes an element is not a preview")
@@ -144,14 +144,14 @@ final class VectorCutPreviewLogicTests: XCTestCase {
     /// This is also the "does not double-apply" test. The preview and the commit are two readings of
     /// one gesture; if the preview ever committed as well, the previewed canvas would arrive at the
     /// commit already cut and the second cut would land on different geometry.
-    func testTheCutAppliedOnLiftIsUnchangedByHavingPreviewedIt() {
+    func testTheCutAppliedOnLiftIsUnchangedByHavingPreviewedIt() throws {
         let samples = [line(y: 100, from: 40, to: 216), line(y: 156, from: 40, to: 216)]
         let build = { VectorCanvas(size: Self.canvasSize, strokes: samples.map { self.stroke($0, size: 24) }) }
         let gesture = drag(x: 128, from: 60, to: 200)
         let brush = opaqueBrush(size: 12)
 
         let withPreview = build()
-        _ = previewed(withPreview, gesture: gesture, brush: brush, size: 12)
+        _ = try previewed(withPreview, gesture: gesture, brush: brush, size: 12)
         XCTAssertTrue(withPreview.erase(alongPath: gesture, brush: brush, size: 12, mode: .cutPoints))
 
         let without = build()
@@ -162,7 +162,7 @@ final class VectorCutPreviewLogicTests: XCTestCase {
         XCTAssertEqual(withPreview.strokes.map(\.samples), without.strokes.map(\.samples),
                        "…nor where a single cut boundary lands. A difference here means the preview "
                        + "committed too, and the lift cut an already-cut layer")
-        XCTAssertEqual(pixelsChanged(withPreview.render(), without.render()), 0,
+        XCTAssertEqual(pixelsChanged((try XCTUnwrap(withPreview.render())), (try XCTUnwrap(without.render()))), 0,
                        "The two committed layers must render identically, pixel for pixel")
     }
 
@@ -179,22 +179,22 @@ final class VectorCutPreviewLogicTests: XCTestCase {
     /// preview** shows, and what a **footprint punch** would have shown. The first two have to agree
     /// and the third has to be badly wrong, or there was no accuracy problem to solve and the cheaper
     /// preview should have shipped.
-    func testAStrokeThickerThanTheEraserPreviewsTheNothingThatTheCutActuallyTakes() {
+    func testAStrokeThickerThanTheEraserPreviewsTheNothingThatTheCutActuallyTakes() throws {
         let thick = stroke(line(y: 128, from: 40, to: 216), size: 40)
         let build = { VectorCanvas(size: Self.canvasSize, strokes: [thick]) }
         let gesture = drag(x: 128, from: 96, to: 160)
         let nib = opaqueBrush(size: 8)
 
-        let original = build().render()
+        let original = (try XCTUnwrap(build().render()))
 
         let cut = build()
         XCTAssertTrue(cut.erase(alongPath: gesture, brush: nib, size: 8, mode: .cutPoints),
                       "Setup: an 8pt eraser drawn across a 40pt line must still cut the geometry")
         XCTAssertEqual(cut.strokes.count, 2, "Setup: the line should end up in two pieces")
-        let afterLift = cut.render()
+        let afterLift = (try XCTUnwrap(cut.render()))
 
-        let preview = previewed(build(), gesture: gesture, brush: nib, size: 8).renderToUIImage()
-        let footprint = footprintPunched(build(), gesture: gesture, brush: nib, size: 8).renderToUIImage()
+        let preview = try previewed(build(), gesture: gesture, brush: nib, size: 8).renderToUIImage()
+        let footprint = try footprintPunched(build(), gesture: gesture, brush: nib, size: 8).renderToUIImage()
 
         let removedByLift = pixelsChanged(original, afterLift)
         let removedByPreview = pixelsChanged(original, preview)
@@ -221,19 +221,19 @@ final class VectorCutPreviewLogicTests: XCTestCase {
     /// The same claim where the cut *does* take ink: an eraser wider than the line. Here the caps eat
     /// the stroke's own diameter out of the gap, so the footprint punch is wrong the other way — it
     /// shows the full nib-wide bite when only the middle of it survives as a hole.
-    func testAnEraserWiderThanTheLinePreviewsTheGapMinusTheCapsThatGrowBack() {
+    func testAnEraserWiderThanTheLinePreviewsTheGapMinusTheCapsThatGrowBack() throws {
         let thick = stroke(line(y: 128, from: 30, to: 226), size: 40)
         let build = { VectorCanvas(size: Self.canvasSize, strokes: [thick]) }
         let gesture = drag(x: 128, from: 80, to: 176)
         let nib = opaqueBrush(size: 72)
 
-        let original = build().render()
+        let original = (try XCTUnwrap(build().render()))
         let cut = build()
         XCTAssertTrue(cut.erase(alongPath: gesture, brush: nib, size: 72, mode: .cutPoints))
-        let afterLift = cut.render()
+        let afterLift = (try XCTUnwrap(cut.render()))
 
-        let preview = previewed(build(), gesture: gesture, brush: nib, size: 72).renderToUIImage()
-        let footprint = footprintPunched(build(), gesture: gesture, brush: nib, size: 72).renderToUIImage()
+        let preview = try previewed(build(), gesture: gesture, brush: nib, size: 72).renderToUIImage()
+        let footprint = try footprintPunched(build(), gesture: gesture, brush: nib, size: 72).renderToUIImage()
 
         let removedByLift = pixelsChanged(original, afterLift)
         let removedByFootprint = pixelsChanged(original, footprint)
@@ -258,7 +258,7 @@ final class VectorCutPreviewLogicTests: XCTestCase {
 
     /// The same claim on the ordinary line-art case — a thin stroke and a middling eraser — so the
     /// two extreme scenes above are not carrying the whole file.
-    func testAThinStrokePreviewsExactlyWhatTheCutTakes() {
+    func testAThinStrokePreviewsExactlyWhatTheCutTakes() throws {
         let thin = stroke(line(y: 128, from: 40, to: 216), size: 8)
         let build = { VectorCanvas(size: Self.canvasSize, strokes: [thin]) }
         let gesture = drag(x: 128, from: 96, to: 160)
@@ -266,10 +266,10 @@ final class VectorCutPreviewLogicTests: XCTestCase {
 
         let cut = build()
         XCTAssertTrue(cut.erase(alongPath: gesture, brush: nib, size: 24, mode: .cutPoints))
-        let afterLift = cut.render()
-        let preview = previewed(build(), gesture: gesture, brush: nib, size: 24).renderToUIImage()
+        let afterLift = (try XCTUnwrap(cut.render()))
+        let preview = try previewed(build(), gesture: gesture, brush: nib, size: 24).renderToUIImage()
 
-        let removedByLift = pixelsChanged(build().render(), afterLift)
+        let removedByLift = pixelsChanged((try XCTUnwrap(build().render())), afterLift)
         XCTAssertGreaterThan(removedByLift, 100, "Setup: the cut should take a visible bite")
         XCTAssertLessThan(Double(pixelsChanged(preview, afterLift)) / Double(removedByLift), 0.05,
                           "The preview must agree with the lift on an ordinary thin line too")
@@ -285,7 +285,7 @@ final class VectorCutPreviewLogicTests: XCTestCase {
     /// the region at risk is the overlap of two strokes inside one eraser footprint, and it is
     /// bounded by that. If a change ever makes this large, the preview needs to re-render the
     /// affected strokes rather than draw into a flat copy — and that is the term Mode 3 pays.
-    func testInkThatSurvivesTheCutIsBrieflyErasedFromTheFlattenedPreview() {
+    func testInkThatSurvivesTheCutIsBrieflyErasedFromTheFlattenedPreview() throws {
         let horizontal = stroke(line(y: 128, from: 40, to: 216), size: 20)
         let vertical = stroke(StrokeSamples((0..<17).map { VectorSample(x: 128, y: 40 + CGFloat($0) * 11, pressure: 1) },
                                             channels: .pressureOnly), size: 20)
@@ -301,10 +301,10 @@ final class VectorCutPreviewLogicTests: XCTestCase {
         let cut = build()
         XCTAssertTrue(cut.erase(alongPath: gesture, brush: nib, size: 30, mode: .cutPoints))
         XCTAssertEqual(cut.strokes.count, 2, "Setup: the horizontal line's stub gone, its right piece and the vertical intact")
-        let afterLift = cut.render()
-        let preview = previewed(build(), gesture: gesture, brush: nib, size: 30).renderToUIImage()
+        let afterLift = (try XCTUnwrap(cut.render()))
+        let preview = try previewed(build(), gesture: gesture, brush: nib, size: 30).renderToUIImage()
 
-        let removedByLift = pixelsChanged(build().render(), afterLift)
+        let removedByLift = pixelsChanged((try XCTUnwrap(build().render())), afterLift)
         let pop = pixelsChanged(preview, afterLift)
         XCTAssertGreaterThan(removedByLift, 100, "Setup: the cut should take a visible bite")
         XCTAssertLessThan(Double(pop) / Double(removedByLift), 0.10, """
@@ -320,7 +320,7 @@ final class VectorCutPreviewLogicTests: XCTestCase {
     /// as a measurement rather than asserted tightly, because the direction is the safe one — the
     /// preview shows slightly *less* being removed than the cut will remove, never more — and
     /// tightening it would mean over-punching whatever sits underneath.
-    func testASemiTransparentStrokeLeavesAFaintGhostUnderThePreview() {
+    func testASemiTransparentStrokeLeavesAFaintGhostUnderThePreview() throws {
         let translucent = stroke(line(y: 128, from: 40, to: 216), size: 24, opacity: 0.4)
         let build = { VectorCanvas(size: Self.canvasSize, strokes: [translucent]) }
         let gesture = drag(x: 128, from: 96, to: 160)
@@ -328,11 +328,11 @@ final class VectorCutPreviewLogicTests: XCTestCase {
 
         let cut = build()
         XCTAssertTrue(cut.erase(alongPath: gesture, brush: nib, size: 12, mode: .cutPoints))
-        let afterLift = cut.render()
-        let preview = previewed(build(), gesture: gesture, brush: nib, size: 12).renderToUIImage()
+        let afterLift = (try XCTUnwrap(cut.render()))
+        let preview = try previewed(build(), gesture: gesture, brush: nib, size: 12).renderToUIImage()
 
-        let removedByLift = pixelsChanged(build().render(), afterLift)
-        let removedByPreview = pixelsChanged(build().render(), preview)
+        let removedByLift = pixelsChanged((try XCTUnwrap(build().render())), afterLift)
+        let removedByPreview = pixelsChanged((try XCTUnwrap(build().render())), preview)
         XCTAssertGreaterThan(Double(removedByPreview) / Double(removedByLift), 0.9,
                              "The preview should still take away nearly all of a 40%-opacity "
                              + "stroke's doomed span — \(removedByPreview) of \(removedByLift)")

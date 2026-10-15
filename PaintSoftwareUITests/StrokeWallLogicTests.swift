@@ -93,9 +93,10 @@ final class StrokeWallLogicTests: XCTestCase {
     /// call, same byte layout — so a fill run against this is run against what the app would build.
     private func reference(_ canvas: VectorCanvas) throws -> [UInt8] {
         let rect = CGRect(origin: .zero, size: Self.canvasSize)
+        let native = try XCTUnwrap(canvas.render())
         let image = UIGraphicsImageRenderer(size: Self.canvasSize,
                                             format: PixelOps.transparentFormat()).image { _ in
-            canvas.render().draw(in: rect)
+            native.draw(in: rect)
         }
         let cg = try XCTUnwrap(image.cgImage)
         var bytes = [UInt8](repeating: 0, count: Self.side * Self.side * 4)

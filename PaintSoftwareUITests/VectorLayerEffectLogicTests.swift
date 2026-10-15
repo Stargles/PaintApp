@@ -152,10 +152,10 @@ final class VectorLayerEffectLogicTests: XCTestCase {
 
     /// **The same blob on a raster layer is ink, not a stencil** — the accessor's rule seen from the
     /// picture: a raster layer with the same stored effect draws its blue and grades nothing.
-    func testARasterLayerWithAStoredEffectDrawsItsInkAndGradesNothing() {
+    func testARasterLayerWithAStoredEffectDrawsItsInkAndGradesNothing() throws {
         let manager = floorUnderAnInkedGrade()
         guard let celIndex = manager.activeCelIndex(inLayer: 1, atFrame: 0) else { return XCTFail("Fixture needs a cel") }
-        let ink = PixelOps.rasterize(cel: manager.layers[1].cels[celIndex], canvasSize: CanvasFixture.canvasSize)
+        let ink = (try XCTUnwrap(PixelOps.rasterize(cel: manager.layers[1].cels[celIndex], canvasSize: CanvasFixture.canvasSize)))
         manager.layers[1].kind = .raster
         manager.layers[1].cels[celIndex].vector = nil
         manager.layers[1].cels[celIndex].bakedImage = ink
@@ -221,7 +221,7 @@ final class VectorLayerEffectLogicTests: XCTestCase {
     /// **Merging the grading vector layer down bakes the grade through its ink**, so the merged
     /// layer's pixels are the composite's — halved under the blob, untouched beside it, and no blue
     /// anywhere. `mergeLossKind` names no loss: nothing is dropped.
-    func testMergingDownBakesTheGradeThroughTheInk() {
+    func testMergingDownBakesTheGradeThroughTheInk() throws {
         let manager = floorUnderAnInkedGrade()
         XCTAssertNil(manager.mergeLossKind(manager.layers[0].id, manager.layers[1].id), "Nothing is dropped, so nothing to warn about")
         guard let before = composite(manager).flatMap(CanvasFixture.rgbaBytes) else { return XCTFail("Fixture must composite") }
@@ -230,7 +230,7 @@ final class VectorLayerEffectLogicTests: XCTestCase {
         XCTAssertEqual(manager.layers.count, 1)
         guard let survivor = manager.layers.firstIndex(where: { $0.id == survivorID }),
               let cel = manager.layers[survivor].cels.first,
-              let merged = PixelOps.rasterize(cel: cel, canvasSize: CanvasFixture.canvasSize).cgImage.flatMap(CanvasFixture.rgbaBytes)
+              let merged = (try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: CanvasFixture.canvasSize))).cgImage.flatMap(CanvasFixture.rgbaBytes)
         else { return XCTFail("The survivor rasterizes") }
         XCTAssertEqual(merged, before, "The merged layer is what the canvas showed, byte for byte")
         XCTAssertEqual(manager.layers[survivor].kind, .raster, "A stencil is not ink to concatenate: the merge rasterized")

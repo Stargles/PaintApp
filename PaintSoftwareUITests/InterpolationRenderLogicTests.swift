@@ -122,8 +122,8 @@ final class InterpolationRenderLogicTests: XCTestCase {
                                       content: content(a: a, c: c), quality: quality)
     }
 
-    private func flat(_ elements: [VectorElement], quality: RenderQuality = .full) -> UIImage {
-        VectorCanvas(size: Self.canvasSize, elements: elements).render(quality: quality)
+    private func flat(_ elements: [VectorElement], quality: RenderQuality = .full) throws -> UIImage {
+        (try XCTUnwrap(VectorCanvas(size: Self.canvasSize, elements: elements).render(quality: quality)))
     }
 
     /// Premultiplied alpha at one canvas point.
@@ -143,7 +143,7 @@ final class InterpolationRenderLogicTests: XCTestCase {
         let recipe = recipe(motion: Self.translated(), a: a, c: c)
 
         let evaluated = try XCTUnwrap(render(recipe, at: 0, a: a, c: c))
-        let report = try XCTUnwrap(RasterVectorParity.report(raster: flat(a), vector: evaluated,
+        let report = try XCTUnwrap(RasterVectorParity.report(raster: try flat(a), vector: evaluated,
                                                             size: Self.canvasSize))
         XCTAssertTrue(report.isExact, "t = 0 must reproduce keyframe A: \(report.diagnostic)")
     }
@@ -154,7 +154,7 @@ final class InterpolationRenderLogicTests: XCTestCase {
         let recipe = recipe(motion: Self.translated(), a: a, c: c)
 
         let evaluated = try XCTUnwrap(render(recipe, at: 1, a: a, c: c))
-        let report = try XCTUnwrap(RasterVectorParity.report(raster: flat(c), vector: evaluated,
+        let report = try XCTUnwrap(RasterVectorParity.report(raster: try flat(c), vector: evaluated,
                                                             size: Self.canvasSize))
         XCTAssertTrue(report.isExact, "t = 1 must reproduce keyframe C: \(report.diagnostic)")
     }
@@ -167,9 +167,9 @@ final class InterpolationRenderLogicTests: XCTestCase {
         let recipe = recipe(motion: Self.translated(), a: a, c: c)
 
         let middle = try XCTUnwrap(render(recipe, at: 0.5, a: a, c: c))
-        let versusA = try XCTUnwrap(RasterVectorParity.report(raster: flat(a), vector: middle,
+        let versusA = try XCTUnwrap(RasterVectorParity.report(raster: try flat(a), vector: middle,
                                                              size: Self.canvasSize))
-        let versusC = try XCTUnwrap(RasterVectorParity.report(raster: flat(c), vector: middle,
+        let versusC = try XCTUnwrap(RasterVectorParity.report(raster: try flat(c), vector: middle,
                                                              size: Self.canvasSize))
         XCTAssertFalse(versusA.isExact, "t = 0.5 must not be keyframe A")
         XCTAssertFalse(versusC.isExact, "t = 0.5 must not be keyframe C")
@@ -210,7 +210,7 @@ final class InterpolationRenderLogicTests: XCTestCase {
                              "C's stroke must survive A's eraser")
 
         // Control: the same content in one list, which is what isolation exists to prevent.
-        let concatenated = flat(c + a)
+        let concatenated = try flat(c + a)
         XCTAssertEqual(alpha(concatenated, at: hole), 0,
                        "Control: concatenating really does let A's eraser eat C's stroke")
     }
@@ -383,8 +383,8 @@ final class InterpolationRenderLogicTests: XCTestCase {
     /// would mean preview was doing the expensive thing after all.
     func testPreviewIsVisuallyCloseToFull() throws {
         let elements = Self.manyStrokes()
-        let full = flat(elements, quality: .full)
-        let preview = flat(elements, quality: .preview)
+        let full = try flat(elements, quality: .full)
+        let preview = try flat(elements, quality: .preview)
 
         let coarse = CGSize(width: 20, height: 20)
         let report = try XCTUnwrap(RasterVectorParity.report(raster: Self.downsampled(full, to: coarse),

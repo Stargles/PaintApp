@@ -1372,6 +1372,7 @@ extension CanvasManager {
             return videoCelContent(for: cel, atFrame: frame, inheriting: inherited, tracks: tracks)
                 ?? posedCelContent(for: cel, atFrame: frame, inheriting: inherited, tracks: tracks)
         }
+        guard recipe.isWellFormed else { return nil }
 
         let t = overrideT ?? recipe.t
         let options = interpolationOptions

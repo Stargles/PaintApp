@@ -185,11 +185,11 @@ final class DabRandomLogicTests: XCTestCase {
     /// carrying equal seeds while the walk is wrong: a re-phased walk moves ink. It goes red if a
     /// piece stops inheriting `seed`, if a piece stops replaying its parent's walk, or if a skipped
     /// dab stops advancing the walk's arc length.
-    func testALassoSplitOfAScatteringStrokeMovesNoPixel() {
+    func testALassoSplitOfAScatteringStrokeMovesNoPixel() throws {
         let stroke = VectorStroke(brush: Self.scatteringBrush(), color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                                   size: 10, opacity: 1, samples: Self.samples(count: 9), seed: Self.seed)
         let canvas = VectorCanvas(size: CGSize(width: 260, height: 120), elements: [.stroke(stroke)])
-        let before = canvas.render()
+        let before = (try XCTUnwrap(canvas.render()))
 
         // A loop over the right-hand half of the line, so the split falls in the middle of the walk.
         let loop = CGPath(rect: CGRect(x: 120, y: 0, width: 200, height: 120), transform: nil)
@@ -201,7 +201,7 @@ final class DabRandomLogicTests: XCTestCase {
         XCTAssertEqual(Set(pieces.map(\.seed)), [Self.seed],
                        "both pieces inherit the parent's seed rather than minting one")
 
-        let after = VectorCanvas(size: CGSize(width: 260, height: 120), elements: split.elements).render()
+        let after = (try XCTUnwrap(VectorCanvas(size: CGSize(width: 260, height: 120), elements: split.elements).render()))
         guard let report = RasterVectorParity.report(raster: before, vector: after,
                                                      size: CGSize(width: 260, height: 120)) else {
             return XCTFail("both renders should be readable")
@@ -374,7 +374,7 @@ final class DabRandomLogicTests: XCTestCase {
     /// The same claim on the **rendered canvas**, for To Cross — the other cutter that used to make
     /// a piece walk its own sub-run. A stroke crossed by another is cut back to the crossing; the
     /// pixels outside the removed span do not move.
-    func testAToCrossCutMovesNoPixelOutsideTheRemovedSpan() {
+    func testAToCrossCutMovesNoPixelOutsideTheRemovedSpan() throws {
         let brush = Self.scatteringBrush()
         let stroke = VectorStroke(brush: brush, color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                                   size: 10, opacity: 1, samples: Self.samples(count: 9), seed: Self.seed)
@@ -386,10 +386,10 @@ final class DabRandomLogicTests: XCTestCase {
                                     seed: Self.seed &+ 1)
         let size = CGSize(width: 260, height: 120)
         let canvas = VectorCanvas(size: size, elements: [.stroke(stroke), .stroke(crossing)])
-        let before = canvas.render()
+        let before = (try XCTUnwrap(canvas.render()))
         let resolved = canvas.cutToIntersection(atCanvasPoint: CGPoint(x: 60, y: 60), brush: TestBrushes.hardRound, size: 14)
         XCTAssertEqual(resolved.outcome, .cut, "Setup: the tip is on the line")
-        let after = canvas.render()
+        let after = (try XCTUnwrap(canvas.render()))
         // Everything right of the crossing is the surviving piece of the cut line plus the crossing
         // line, both untouched; compare that half of the picture.
         guard let lhs = before.cgImage?.cropping(to: CGRect(x: 175, y: 0, width: 85, height: 120)),

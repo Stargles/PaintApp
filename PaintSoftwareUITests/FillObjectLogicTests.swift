@@ -42,18 +42,18 @@ final class FillObjectLogicTests: XCTestCase {
     }
 
     /// The active cel flattened, off the model — what the canvas would show of this layer alone.
-    private func flattened(_ manager: CanvasManager, layerIndex: Int) -> CGImage? {
-        PixelOps.rasterize(cel: manager.layers[layerIndex].cels[0],
-                           canvasSize: CanvasFixture.canvasSize).cgImage
+    private func flattened(_ manager: CanvasManager, layerIndex: Int) throws -> CGImage? {
+        (try XCTUnwrap(PixelOps.rasterize(cel: manager.layers[layerIndex].cels[0],
+                           canvasSize: CanvasFixture.canvasSize))).cgImage
     }
 
     /// What the gradient panel's window shows now: the live edit's list drawn as a canvas holding it
     /// would draw it. A tick is held off the document (TODO (173)), so mid-session `flattened` still
     /// says what the cel says.
-    private func heldFlattened(_ manager: CanvasManager) -> CGImage? {
+    private func heldFlattened(_ manager: CanvasManager) throws -> CGImage? {
         guard let live = manager.liveCelContentEdit, let vector = live.vectorCanvas else { return nil }
-        return VectorCanvas(size: vector.size, elements: live.elements,
-                            transform: vector.transform).render().cgImage
+        return (try XCTUnwrap(VectorCanvas(size: vector.size, elements: live.elements,
+                            transform: vector.transform).render())).cgImage
     }
 
     private func pixel(_ image: CGImage, _ x: Int, _ y: Int) -> [Int] {
@@ -113,11 +113,11 @@ final class FillObjectLogicTests: XCTestCase {
         let rect = vectorFixture()
         rect.manager.brushColor = red
         XCTAssertTrue(dragShape(.rectangle, on: rect.manager))
-        let rectImage = try XCTUnwrap(flattened(rect.manager, layerIndex: rect.layerIndex))
+        let rectImage = try XCTUnwrap(try flattened(rect.manager, layerIndex: rect.layerIndex))
         let ellipse = vectorFixture()
         ellipse.manager.brushColor = red
         XCTAssertTrue(dragShape(.ellipse, on: ellipse.manager))
-        let ellipseImage = try XCTUnwrap(flattened(ellipse.manager, layerIndex: ellipse.layerIndex))
+        let ellipseImage = try XCTUnwrap(try flattened(ellipse.manager, layerIndex: ellipse.layerIndex))
 
         // The shape spans 12.8…51.2; (16, 16) is inside the square and outside the circle.
         XCTAssertEqual(pixel(rectImage, 32, 32), [255, 0, 0, 255], "the rectangle is solid at its centre")
@@ -151,7 +151,7 @@ final class FillObjectLogicTests: XCTestCase {
 
         XCTAssertNil(manager.vectorFloat, "a raster shape raises no Move box")
         XCTAssertEqual(manager.layers.count, 1, "and needs no new layer")
-        let image = try XCTUnwrap(flattened(manager, layerIndex: 0))
+        let image = try XCTUnwrap(try flattened(manager, layerIndex: 0))
         XCTAssertEqual(pixel(image, 32, 32), [255, 0, 0, 255], "the pixels are in the cel")
         XCTAssertEqual(pixel(image, 4, 4)[3], 0, "and only inside the shape")
         XCTAssertEqual(steps(manager) - baseline, 1, "one undo step")
@@ -214,7 +214,7 @@ final class FillObjectLogicTests: XCTestCase {
 
         XCTAssertEqual(vector.elements.compactMap(\.fill).compactMap(\.gradient).count, 1,
                        "the gradient is an element of the vector layer")
-        let image = try XCTUnwrap(flattened(manager, layerIndex: layerIndex))
+        let image = try XCTUnwrap(try flattened(manager, layerIndex: layerIndex))
         let left = pixel(image, 0, 32), middle = pixel(image, side / 2, 32), right = pixel(image, side - 1, 32)
         XCTAssertLessThan(left[0], 12, "black at the left edge")
         XCTAssertGreaterThan(right[0], 243, "white at the right edge")
@@ -249,7 +249,7 @@ final class FillObjectLogicTests: XCTestCase {
         manager.setGradientColour(.start, to: Color(.sRGB, red: 1, green: 0, blue: 0, opacity: 1))
         manager.setGradientColour(.end, to: Color(.sRGB, red: 0, green: 1, blue: 0, opacity: 1))
         manager.commitAllInteractiveState()
-        let image = try XCTUnwrap(flattened(manager, layerIndex: layerIndex))
+        let image = try XCTUnwrap(try flattened(manager, layerIndex: layerIndex))
 
         for x in [8, 20, 31, 32, 44, 56] {
             let t = (Double(x) + 0.5) / Double(side)
@@ -312,10 +312,10 @@ final class FillObjectLogicTests: XCTestCase {
         XCTAssertEqual(vector.version, version, "a tick holds the picture and writes nothing")
         XCTAssertEqual(vector.elements.compactMap(\.fill).first?.gradient, original,
                        "the document still holds the gradient the panel opened on")
-        let documentImage = try XCTUnwrap(flattened(manager, layerIndex: layerIndex))
+        let documentImage = try XCTUnwrap(try flattened(manager, layerIndex: layerIndex))
         XCTAssertEqual(pixel(documentImage, 32, 0)[0], pixel(documentImage, 32, side - 1)[0], accuracy: 1,
                        "the document's own picture still runs left to right: a column is constant")
-        let image = try XCTUnwrap(heldFlattened(manager))
+        let image = try XCTUnwrap(try heldFlattened(manager))
         XCTAssertLessThan(pixel(image, 32, 0)[0], 12, "black at the top")
         XCTAssertGreaterThan(pixel(image, 32, side - 1)[0], 243, "white at the bottom")
         // Within one 8-bit step: at 90 degrees `cos` is 6e-17 rather than 0, and with 257 stops a
@@ -469,7 +469,7 @@ final class FillObjectLogicTests: XCTestCase {
         manager.nudgeVectorFloat(to: frame)
         manager.commitAllInteractiveState()
 
-        let image = try XCTUnwrap(flattened(manager, layerIndex: layerIndex))
+        let image = try XCTUnwrap(try flattened(manager, layerIndex: layerIndex))
         XCTAssertEqual(pixel(image, 8, 32)[3], 0, "nothing is left at the old position")
         let near = pixel(image, 33, 32), far = pixel(image, 62, 32)
         XCTAssertLessThan(near[0], 20, "black at the moved fill's left edge")

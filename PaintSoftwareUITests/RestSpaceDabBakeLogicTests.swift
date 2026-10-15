@@ -437,9 +437,9 @@ final class RestSpaceDabBakeLogicTests: XCTestCase {
                                   samples: StrokeSamples((0..<6).map {
                                       VectorSample(x: 10 + CGFloat($0) * 4, y: 20, pressure: 1)
                                   }, channels: .pressureOnly))
-        let restImage = VectorCanvas(size: size, elements: [.stroke(stroke)]).render(quality: .full)
+        let restImage = (try XCTUnwrap(VectorCanvas(size: size, elements: [.stroke(stroke)]).render(quality: .full)))
         let posed = VectorCanvas.posing(.stroke(stroke), through: CGAffineTransform(translationX: 60, y: 0))
-        let posedImage = VectorCanvas(size: size, elements: [posed]).render(quality: .full)
+        let posedImage = (try XCTUnwrap(VectorCanvas(size: size, elements: [posed]).render(quality: .full)))
 
         let restBounds = try XCTUnwrap(PixelOps.opaqueContentBounds(restImage))
         let posedBounds = try XCTUnwrap(PixelOps.opaqueContentBounds(posedImage))

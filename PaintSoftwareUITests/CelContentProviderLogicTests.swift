@@ -103,10 +103,10 @@ final class CelContentProviderLogicTests: XCTestCase {
     /// exactly as it did before this existed.
     func testWithoutAProviderADerivedCelStillFlattensToNothing() throws {
         let (manager, cels, _) = try interpolated()
-        let flat = PixelOps.rasterize(cel: manager.layers[1].cels[1], canvasSize: size)
+        let flat = (try XCTUnwrap(PixelOps.rasterize(cel: manager.layers[1].cels[1], canvasSize: size)))
         XCTAssertTrue(isBlank(flat),
                       "Opt-in: no provider means the pre-seam answer, which for an in-between is blank")
-        XCTAssertFalse(isBlank(PixelOps.rasterize(cel: cels[0], canvasSize: size)),
+        XCTAssertFalse(isBlank((try XCTUnwrap(PixelOps.rasterize(cel: cels[0], canvasSize: size)))),
                        "Control: the keyframe beside it stores its ink and always flattened fine")
     }
 
@@ -116,7 +116,7 @@ final class CelContentProviderLogicTests: XCTestCase {
         let cel = manager.layers[1].cels[1]
         let derived = try XCTUnwrap(manager.derivedCelContent(for: cel, atFrame: cel.startFrame),
                                     "A cel with a recipe must derive something")
-        let flat = PixelOps.rasterize(cel: cel, canvasSize: size, derived: derived)
+        let flat = (try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: size, derived: derived)))
         XCTAssertFalse(isBlank(flat), "An in-between must flatten to the frame it displays")
     }
 
@@ -151,13 +151,13 @@ final class CelContentProviderLogicTests: XCTestCase {
     func testMovingTIsNotServedFromTheFlattenMemo() throws {
         let (manager, _, _) = try interpolated(t: 0.1)
         let cel = manager.layers[1].cels[1]
-        let early = PixelOps.rasterize(cel: cel, canvasSize: size,
-                                       derived: manager.derivedCelContent(for: cel, atFrame: 4))
+        let early = (try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: size,
+                                       derived: manager.derivedCelContent(for: cel, atFrame: 4))))
 
         manager.layers[1].cels[1].interpolation?.t = 0.9
-        let late = PixelOps.rasterize(cel: manager.layers[1].cels[1], canvasSize: size,
+        let late = (try XCTUnwrap(PixelOps.rasterize(cel: manager.layers[1].cels[1], canvasSize: size,
                                       derived: manager.derivedCelContent(for: manager.layers[1].cels[1],
-                                                                         atFrame: 4))
+                                                                         atFrame: 4))))
 
         XCTAssertNotEqual(bytes(of: early), bytes(of: late),
                           "The memo must not serve t = 0.1's pixels for t = 0.9")
@@ -188,10 +188,10 @@ final class CelContentProviderLogicTests: XCTestCase {
     func testAnUnchangedDerivedCelIsStillServedFromTheMemo() throws {
         let (manager, _, _) = try interpolated()
         let cel = manager.layers[1].cels[1]
-        let first = PixelOps.rasterize(cel: cel, canvasSize: size,
-                                       derived: manager.derivedCelContent(for: cel, atFrame: 4))
-        let second = PixelOps.rasterize(cel: cel, canvasSize: size,
-                                        derived: manager.derivedCelContent(for: cel, atFrame: 4))
+        let first = (try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: size,
+                                       derived: manager.derivedCelContent(for: cel, atFrame: 4))))
+        let second = (try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: size,
+                                        derived: manager.derivedCelContent(for: cel, atFrame: 4))))
         XCTAssertTrue(first === second,
                       "Nothing changed, so the second call must be the memo and not a re-evaluation")
     }
@@ -202,11 +202,11 @@ final class CelContentProviderLogicTests: XCTestCase {
     func testEditingAKeyframeInvalidatesTheInBetweensFlatten() throws {
         let (manager, cels, _) = try interpolated()
         let cel = manager.layers[1].cels[1]
-        let before = PixelOps.rasterize(cel: cel, canvasSize: size,
-                                        derived: manager.derivedCelContent(for: cel, atFrame: 4))
+        let before = (try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: size,
+                                        derived: manager.derivedCelContent(for: cel, atFrame: 4))))
         cels[0].vector?.addStroke(stroke([CGPoint(x: 8, y: 52), CGPoint(x: 50, y: 52)]))
-        let after = PixelOps.rasterize(cel: cel, canvasSize: size,
-                                       derived: manager.derivedCelContent(for: cel, atFrame: 4))
+        let after = (try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: size,
+                                       derived: manager.derivedCelContent(for: cel, atFrame: 4))))
         XCTAssertNotEqual(bytes(of: before), bytes(of: after),
                           "A stroke added to keyframe A must reach the in-between's flatten")
     }
@@ -219,9 +219,9 @@ final class CelContentProviderLogicTests: XCTestCase {
     func testATimelineThumbnailOfAnInBetweenIsNotBlank() throws {
         let (manager, _, _) = try interpolated()
         let cel = manager.layers[1].cels[1]
-        let without = CanvasManager.celThumbnailImage(for: cel, canvasSize: size)
-        let with = CanvasManager.celThumbnailImage(
-            for: cel, canvasSize: size, derived: manager.derivedCelContent(for: cel, atFrame: 4))
+        let without = (try XCTUnwrap(CanvasManager.celThumbnailImage(for: cel, canvasSize: size)))
+        let with = (try XCTUnwrap(CanvasManager.celThumbnailImage(
+            for: cel, canvasSize: size, derived: manager.derivedCelContent(for: cel, atFrame: 4))))
         XCTAssertTrue(isBlank(without), "Pre-seam behaviour, kept for a caller that passes nothing")
         XCTAssertFalse(isBlank(with), "The timeline tile must show the frame the artist sees")
     }
@@ -259,7 +259,7 @@ final class CelContentProviderLogicTests: XCTestCase {
         XCTAssertTrue(manager.layers[1].cels[1].isCertainlyBlank,
                       "Setup: the model still reports the in-between as storing nothing, correctly")
 
-        let frames = OnionSkinSettingsSource().frames(for: manager)
+        let frames = (try XCTUnwrap(OnionSkinSettingsSource().frames(for: manager)))
         XCTAssertFalse(frames.isEmpty, "The skin behind frame 8 is the in-between and must be drawn")
         XCTAssertFalse(frames.contains { isBlank($0.image) },
                        "A skin that renders to nothing is the bug this closes")
@@ -277,9 +277,9 @@ final class CelContentProviderLogicTests: XCTestCase {
         XCTAssertEqual(manager.layers[1].kind, .raster)
         XCTAssertNil(manager.layers[1].cels[1].interpolation,
                      "The recipe goes with the geometry, or it derives a second time over the bake")
-        XCTAssertFalse(isBlank(PixelOps.rasterize(cel: manager.layers[1].cels[1], canvasSize: size)),
+        XCTAssertFalse(isBlank((try XCTUnwrap(PixelOps.rasterize(cel: manager.layers[1].cels[1], canvasSize: size)))),
                        "The in-between's pixels have to survive the bake")
-        XCTAssertFalse(isBlank(PixelOps.rasterize(cel: manager.layers[1].cels[0], canvasSize: size)),
+        XCTAssertFalse(isBlank((try XCTUnwrap(PixelOps.rasterize(cel: manager.layers[1].cels[0], canvasSize: size)))),
                        "…and so does the keyframe it derived from, which is baked in the same loop")
     }
 

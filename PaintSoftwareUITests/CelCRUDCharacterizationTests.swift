@@ -786,37 +786,37 @@ final class CelCRUDCharacterizationTests: XCTestCase {
 
     private func size() -> CGSize { CGSize(width: 64, height: 64) }
 
-    func testFlatteningTheSameUntouchedCelTwiceReturnsTheMemoizedImage() {
+    func testFlatteningTheSameUntouchedCelTwiceReturnsTheMemoizedImage() throws {
         PixelOps.clearRasterizeCache()
         let manager = CanvasFixture.manager(layerCount: 1)
         let cel = manager.layers[0].cels[0]
 
-        let first = PixelOps.rasterize(cel: cel, canvasSize: size())
-        let second = PixelOps.rasterize(cel: cel, canvasSize: size())
+        let first = (try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: size())))
+        let second = (try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: size())))
         XCTAssertTrue(first === second, "An unchanged cel must not be flattened twice — that flatten is the 276 ms")
     }
 
-    func testAStrokeOnTheRasterTierInvalidatesTheMemo() {
+    func testAStrokeOnTheRasterTierInvalidatesTheMemo() throws {
         PixelOps.clearRasterizeCache()
         let manager = CanvasFixture.manager(layerCount: 1)
         let cel = manager.layers[0].cels[0]
-        let before = PixelOps.rasterize(cel: cel, canvasSize: size())
+        let before = (try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: size())))
 
         cel.raster.beginStroke()
         cel.raster.stampCircle(at: CGPoint(x: 20, y: 20), radius: 6, color: .red, alpha: 1, hardness: 1)
         cel.raster.endStroke()
 
-        XCTAssertFalse(PixelOps.rasterize(cel: cel, canvasSize: size()) === before,
+        XCTAssertFalse((try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: size()))) === before,
                        "RasterLayerTexture.version bumped, so the flatten must be redone")
     }
 
-    func testAVectorEditInvalidatesTheMemo() {
+    func testAVectorEditInvalidatesTheMemo() throws {
         PixelOps.clearRasterizeCache()
         let manager = CanvasFixture.manager(layerCount: 0)
         manager.addVectorLayer()
         let cel = manager.layers[0].cels[0]
         guard let vector = cel.vector else { return XCTFail("A vector layer's cel carries a VectorCanvas") }
-        let before = PixelOps.rasterize(cel: cel, canvasSize: size())
+        let before = (try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: size())))
 
         vector.addStroke(VectorStroke(brush: manager.toolProfiles.brush.preset,
                                       color: CodableColor(red: 0, green: 0, blue: 1, alpha: 1),
@@ -824,20 +824,20 @@ final class CelCRUDCharacterizationTests: XCTestCase {
                                       samples: [VectorSample(x: 8, y: 8, pressure: 1),
                                                 VectorSample(x: 40, y: 40, pressure: 1)]))
 
-        XCTAssertFalse(PixelOps.rasterize(cel: cel, canvasSize: size()) === before,
+        XCTAssertFalse((try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: size()))) === before,
                        "The vector tier has its own version and it is part of the key")
     }
 
     /// Wholesale replacement is how a bake actually lands, which is why the key compares the baked
     /// tier by object identity rather than content.
-    func testReplacingTheBakedImageInvalidatesTheMemo() {
+    func testReplacingTheBakedImageInvalidatesTheMemo() throws {
         PixelOps.clearRasterizeCache()
         let manager = CanvasFixture.manager(layerCount: 1)
         var cel = manager.layers[0].cels[0]
-        let before = PixelOps.rasterize(cel: cel, canvasSize: size())
+        let before = (try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: size())))
 
         cel.bakedImage = CanvasFixture.solidImage(.blue, rect: CGRect(x: 10, y: 10, width: 20, height: 20))
-        XCTAssertFalse(PixelOps.rasterize(cel: cel, canvasSize: size()) === before,
+        XCTAssertFalse((try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: size()))) === before,
                        "A new bakedImage is a new flatten")
     }
 
@@ -845,7 +845,7 @@ final class CelCRUDCharacterizationTests: XCTestCase {
     /// takes: a cel id outlives the buffers under it, so a reopened project presents the same id
     /// with a `RasterLayerTexture` whose version counter has restarted at 0. A version-only key
     /// would match an entry cached before the last edit and hand back pre-edit pixels.
-    func testAFreshBufferUnderTheSameCelIdIsNotAHit() {
+    func testAFreshBufferUnderTheSameCelIdIsNotAHit() throws {
         PixelOps.clearRasterizeCache()
         let manager = CanvasFixture.manager(layerCount: 1)
         var cel = manager.layers[0].cels[0]
@@ -853,24 +853,24 @@ final class CelCRUDCharacterizationTests: XCTestCase {
         cel.raster.beginStroke()
         cel.raster.stampCircle(at: CGPoint(x: 20, y: 20), radius: 6, color: .red, alpha: 1, hardness: 1)
         cel.raster.endStroke()
-        let drawn = PixelOps.rasterize(cel: cel, canvasSize: size())
+        let drawn = (try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: size())))
 
         // What a reload does: same cel id, a brand-new buffer, version back to 0.
         cel.raster = .empty(size: size())
         XCTAssertEqual(cel.raster.version, 0, "Fixture: a fresh texture starts its counter over")
-        XCTAssertFalse(PixelOps.rasterize(cel: cel, canvasSize: size()) === drawn,
+        XCTAssertFalse((try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: size()))) === drawn,
                        "A new buffer must be a new key however its version happens to read")
     }
 
-    func testQualityAndCanvasSizeAreBothPartOfTheKey() {
+    func testQualityAndCanvasSizeAreBothPartOfTheKey() throws {
         PixelOps.clearRasterizeCache()
         let manager = CanvasFixture.manager(layerCount: 1)
         let cel = manager.layers[0].cels[0]
 
-        let full = PixelOps.rasterize(cel: cel, canvasSize: size(), quality: .full)
-        XCTAssertFalse(PixelOps.rasterize(cel: cel, canvasSize: size(), quality: .preview) === full,
+        let full = (try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: size(), quality: .full)))
+        XCTAssertFalse((try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: size(), quality: .preview))) === full,
                        "`.preview` resolves the vector tier differently, so it is a different flatten")
-        XCTAssertFalse(PixelOps.rasterize(cel: cel, canvasSize: CGSize(width: 32, height: 32)) === full,
+        XCTAssertFalse((try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: CGSize(width: 32, height: 32)))) === full,
                        "A different canvas size is a different image, not a scaled one")
     }
 }

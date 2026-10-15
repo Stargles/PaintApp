@@ -49,9 +49,9 @@ struct DerivedCelContent {
     /// and not an image: resolving a provider is on every rasterize of every cel, and evaluating an
     /// in-between is two lattice embeddings, an ARAP solve and two canvas-sized renders.
     ///
-    /// Nil means "not yet" rather than "empty" — a recipe can be malformed while a reference is
-    /// being re-picked — and every caller falls back to the cel's stored content, which is what the
-    /// app did before this seam existed.
+    /// Nil means this required render refused. Provider availability is resolved before this
+    /// value is created; only an absent provider uses the cel's stored content. A genuinely empty
+    /// drawing returns a transparent image.
     ///
     /// **Renders at canvas size, always**, with no size parameter: derived geometry is in canvas
     /// coordinates, so a smaller render would *clip* rather than scale. A caller that wants a

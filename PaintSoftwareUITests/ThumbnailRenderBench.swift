@@ -98,10 +98,12 @@ final class ThumbnailRenderBench: XCTestCase {
 
     /// **`PixelOps.rasterizeUncached` as it stood for a vector-only cel**, followed by the tile
     /// downscale — the route this pass replaced, kept verbatim as the *before* arm.
-    private func canvasSizedRouteTile(_ canvas: VectorCanvas, canvasSize: CGSize) -> UIImage {
+    private func canvasSizedRouteTile(_ canvas: VectorCanvas, canvasSize: CGSize) -> UIImage? {
         let box = RenderRequest.renderSize(fitting: canvasSize,
                                            within: CanvasManager.celThumbnailRasterBound)
-        let native = canvas.render(quality: .full)
+        guard let native = canvas.render(quality: .full) else {
+            XCTFail("Fixture native render was refused"); return nil
+        }
         let flattened = UIGraphicsImageRenderer(size: box, format: PixelOps.transparentFormat())
             .image { _ in native.draw(in: CGRect(origin: .zero, size: box)) }
         return ThumbnailRenderer.render(flattened, canvasSize: canvasSize,
@@ -142,7 +144,7 @@ final class ThumbnailRenderBench: XCTestCase {
             // rectangle leaves — a full walk at canvas size and then the resample.
             autoreleasepool {
                 let t0 = CACurrentMediaTime()
-                _ = canvasSizedRouteTile(canvas, canvasSize: canvasSize).cgImage
+                _ = canvasSizedRouteTile(canvas, canvasSize: canvasSize)?.cgImage
                 cold.append(CACurrentMediaTime() - t0)
             }
             // **Warm**: the memo the walk above just installed is still standing, which is the state
@@ -152,7 +154,7 @@ final class ThumbnailRenderBench: XCTestCase {
             PixelOps.clearRasterizeCache()
             autoreleasepool {
                 let t0 = CACurrentMediaTime()
-                _ = canvasSizedRouteTile(canvas, canvasSize: canvasSize).cgImage
+                _ = canvasSizedRouteTile(canvas, canvasSize: canvasSize)?.cgImage
                 warm.append(CACurrentMediaTime() - t0)
             }
             canvas.bumpVersion()
@@ -162,7 +164,7 @@ final class ThumbnailRenderBench: XCTestCase {
             // slot exists.
             autoreleasepool {
                 let t0 = CACurrentMediaTime()
-                _ = CanvasManager.celThumbnailImage(for: cel, canvasSize: canvasSize).cgImage
+                _ = CanvasManager.celThumbnailImage(for: cel, canvasSize: canvasSize)?.cgImage
                 reduced.append(CACurrentMediaTime() - t0)
             }
             // **Reduced, one stroke later**: the slot is warm and the artist has drawn, which is
@@ -172,7 +174,7 @@ final class ThumbnailRenderBench: XCTestCase {
             PixelOps.clearRasterizeCache()
             autoreleasepool {
                 let t0 = CACurrentMediaTime()
-                _ = CanvasManager.celThumbnailImage(for: cel, canvasSize: canvasSize).cgImage
+                _ = CanvasManager.celThumbnailImage(for: cel, canvasSize: canvasSize)?.cgImage
                 appendedRuns.append(CACurrentMediaTime() - t0)
             }
             // Back to the row's own scene for the next iteration. `elements =` declares
@@ -228,8 +230,12 @@ final class ThumbnailRenderBench: XCTestCase {
                                   raster: .empty(size: canvasSize))
                     cel.vector = canvas
                     PixelOps.clearRasterizeCache()
-                    let reduced = CanvasManager.celThumbnailImage(for: cel, canvasSize: canvasSize)
-                    let reference = canvasSizedRouteTile(canvas, canvasSize: canvasSize)
+                    guard let reduced = CanvasManager.celThumbnailImage(for: cel, canvasSize: canvasSize) else {
+                        XCTFail("Fixture thumbnail render was refused"); return
+                    }
+                    guard let reference = canvasSizedRouteTile(canvas, canvasSize: canvasSize) else {
+                        XCTFail("Fixture reference render was refused"); return
+                    }
                     guard let lhs = reduced.cgImage.flatMap(CanvasFixture.rgbaBytes),
                           let rhs = reference.cgImage.flatMap(CanvasFixture.rgbaBytes),
                           lhs.count == rhs.count else {
@@ -293,7 +299,7 @@ final class ThumbnailRenderBench: XCTestCase {
         Thread.sleep(forTimeInterval: 0.005)     // `UndoContentionBench`'s head start, same reason
 
         let t0 = CACurrentMediaTime()
-        _ = CanvasManager.celThumbnailImage(for: cel, canvasSize: canvasSize).cgImage
+        _ = CanvasManager.celThumbnailImage(for: cel, canvasSize: canvasSize)?.cgImage
         let thumbnailSeconds = CACurrentMediaTime() - t0
         // A polling `wait` that succeeds has consumed the signal — see `UndoContentionBench`, whose
         // first draft hung here.
@@ -330,8 +336,12 @@ final class ThumbnailRenderBench: XCTestCase {
                 var cel = Cel(id: UUID(), startFrame: 0, frameCount: 1, raster: .empty(size: canvasSize))
                 cel.vector = canvas
                 PixelOps.clearRasterizeCache()
-                let reduced = CanvasManager.celThumbnailImage(for: cel, canvasSize: canvasSize)
-                let reference = canvasSizedRouteTile(canvas, canvasSize: canvasSize)
+                guard let reduced = CanvasManager.celThumbnailImage(for: cel, canvasSize: canvasSize) else {
+                        XCTFail("Fixture thumbnail render was refused"); return
+                    }
+                guard let reference = canvasSizedRouteTile(canvas, canvasSize: canvasSize) else {
+                        XCTFail("Fixture reference render was refused"); return
+                    }
 
                 let magnify: CGFloat = 4, gap: CGFloat = 8
                 let tile = reduced.size

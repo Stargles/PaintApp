@@ -5855,11 +5855,10 @@ final class VectorCanvas {
     ///
     /// `quality` changes only how a *stroke* is put down — see `RenderQuality`. The isolation rules
     /// that make an eraser correct are identical for both.
-    func render(quality: RenderQuality = .full) -> UIImage {
-        // `rasterize` answers nil for a version that has moved — and there is no version to have
-        // moved here — or for a bitmap the host refused (`renderLocalContent`). The blank is for the
-        // second: nothing is memoized, the picture is drawn empty this once, and the seam has been told.
-        guard let image = rasterize(quality: quality) else { return Self.transparentPixel }
+    func render(quality: RenderQuality = .full) -> UIImage? {
+        // A refused bitmap or native material group is not an empty drawing. Only planRender's
+        // genuinely empty list produces the shared transparent pixel.
+        guard let image = rasterize(quality: quality) else { return nil }
         // **After the unlock, never inside it.** `VectorRenderCache` may evict *other* canvases,
         // which takes their locks; doing that while holding this one is the only way this pair could
         // deadlock, and the ordering rule that prevents it is written down there.
@@ -5922,16 +5921,14 @@ final class VectorCanvas {
     /// resample it replaced — a 17x regression in Release and 50x in Debug, on a document the owner
     /// plausibly has. PERFORMANCE.md §11.11c
     /// carries both tables, and the second one is why this is not "walk it small".
-    func render(quality: RenderQuality = .full, resolution: CGFloat) -> UIImage {
+    func render(quality: RenderQuality = .full, resolution: CGFloat) -> UIImage? {
         // No clamp here: `rasterize` holds the one, so that this method, `planRender`, `walk` and
         // `install` cannot come to disagree about whether a request is native. A `resolution` of 1 or
         // more arrives at exactly what `render(quality:)` does.
         //
         // `rasterize` answers nil for a version that has moved, and there is none to have moved here,
         // or for a bitmap the host refused — the same guard `render(quality:)` documents.
-        guard let image = rasterize(quality: quality, requestedResolution: resolution) else {
-            return Self.transparentPixel
-        }
+        guard let image = rasterize(quality: quality, requestedResolution: resolution) else { return nil }
         // **After the unlock**, and for `render(quality:)`'s reason. It is told because this *does*
         // memoize now: a slot is ~0.9 MiB and a document of 300-1000 cels would otherwise accumulate
         // one per cel with nothing to evict them.
@@ -5956,7 +5953,7 @@ final class VectorCanvas {
     /// first is free and final, the second is a dispatch. `.ready` also covers the empty canvas's
     /// shared 1×1, which `render()` returns without memoizing — see there.
     enum CachedRender {
-        /// Nothing to draw. `renderIfNonEmpty()`'s nil, decided without touching a pixel.
+        /// Nothing to draw, decided without touching a pixel.
         case empty(version: Int)
         /// The memoized render at `version`.
         case ready(UIImage, version: Int)
@@ -5964,7 +5961,7 @@ final class VectorCanvas {
         case needsRasterize(version: Int)
 
         /// What goes in a display's base slot for the two answers that have one now — nil for an
-        /// empty canvas, which is a picture rather than a missing one (see `renderIfNonEmpty`).
+        /// empty canvas, which is an intentional empty display rather than a pending render.
         var image: UIImage? {
             if case .ready(let image, _) = self { return image }
             return nil
@@ -6047,7 +6044,7 @@ final class VectorCanvas {
         /// the two paths share one rasterize), and — only once the artist has moved on — a canvas
         /// built from the frozen values, which nothing else can reach and which is therefore the
         /// atomicity guarantee this whole type exists for.
-        func render(quality: RenderQuality) -> UIImage {
+        func render(quality: RenderQuality) -> UIImage? {
             if let memoized { return memoized }
             if let shared = source?.render(quality: quality, ifStillAtVersion: version) { return shared }
             return detached().render(quality: quality)
@@ -6066,7 +6063,7 @@ final class VectorCanvas {
         /// **The arithmetic lives here rather than at the call site because `size` is this type's**,
         /// and a caller computing the ratio would need it exposed — see `PixelOps.rasterizeUncached`,
         /// which knows the buffer it is filling and nothing about the canvas underneath it.
-        func render(quality: RenderQuality, fittingInto destination: CGSize) -> UIImage {
+        func render(quality: RenderQuality, fittingInto destination: CGSize) -> UIImage? {
             // **A branch rather than a clamp**, and the clamp is `VectorCanvas.rasterize`'s alone —
             // spelled three times it could not be reddened by any mutation, which is the shape
             // CLAUDE.md warns about. What is decided *here* is whether `memoized` may be used, and
@@ -6725,14 +6722,6 @@ final class VectorCanvas {
             index -= 1
         }
         return true
-    }
-
-    /// `render()` for the display path, which can say "no image" in a way the drawing paths cannot.
-    /// An empty layer's image view is left holding nil rather than a stretched transparent pixel:
-    /// Core Animation skips the layer's contents entirely instead of compositing a blank sheet over
-    /// every frame, and with vector as the default layer kind that is the common case, not the edge.
-    func renderIfNonEmpty(quality: RenderQuality = .full) -> UIImage? {
-        isEmpty ? nil : render(quality: quality)
     }
 
     /// `_elements` minus the suppressed ones. A free identity return when nothing is suppressed,

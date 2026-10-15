@@ -90,8 +90,11 @@ final class CompositorParityLogicTests: XCTestCase {
                 guard let cel = layer.cels.first(where: {
                     frame >= $0.startFrame && frame < $0.startFrame + $0.frameCount
                 }) else { continue }
-                PixelOps.rasterize(cel: cel, canvasSize: canvasSize)
-                    .draw(in: bounds, blendMode: .normal, alpha: CGFloat(layer.opacity))
+                guard let source = PixelOps.rasterize(cel: cel, canvasSize: canvasSize) else {
+                    XCTFail("Fixture cel render was refused")
+                    return
+                }
+                source.draw(in: bounds, blendMode: .normal, alpha: CGFloat(layer.opacity))
             }
         }.cgImage
     }

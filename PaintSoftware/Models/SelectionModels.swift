@@ -1120,7 +1120,7 @@ extension CanvasManager {
         // through the loop pulled back to where those are (`remainder`). Both are the one image and
         // the one loop wherever nothing poses the layer.
         let pose = inkPose(forLayerID: sourceLayerID)
-        let stored = PixelOps.rasterize(cel: cel, canvasSize: canvasSize)
+        guard let stored = PixelOps.rasterize(cel: cel, canvasSize: canvasSize) else { return }
         let shown: UIImage
         if let pose {
             guard let image = PixelOps.rasterize(cel: cel, canvasSize: canvasSize, pose: pose) else { return }
@@ -1473,7 +1473,7 @@ extension CanvasManager {
         // **Cut in the layer's own space**, the loop pulled back through its pose (`beginMove`): the
         // piece moves to a layer that sits directly above this one in the same container, so the same
         // transformation layers carry it and nothing needs resampling to keep it where the loop was.
-        let fullImage = PixelOps.rasterize(cel: cel, canvasSize: canvasSize)
+        guard let fullImage = PixelOps.rasterize(cel: cel, canvasSize: canvasSize) else { return }
         let (piece, remainder) = PixelOps.maskedPiece(
             image: fullImage, path: layerSpacePath(selection.path, forLayerID: sourceLayerID))
 
@@ -2216,7 +2216,7 @@ extension CanvasManager {
             // deleted them; a loop is a region and outlives what it cleared.
             if !selection.isRegion { self.selection = nil }
         } else {
-            let base = PixelOps.rasterize(cel: cel, canvasSize: canvasSize)
+            guard let base = PixelOps.rasterize(cel: cel, canvasSize: canvasSize) else { return }
             let newImage = PixelOps.clear(base: base,
                                           path: layerSpacePath(selection.path, forLayerID: layers[currentLayerIndex].id))
             registerUndoableCelChange(layerID: layers[currentLayerIndex].id, celID: cel.id,

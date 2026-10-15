@@ -76,10 +76,10 @@ final class StrokeLiftParityLogicTests: XCTestCase {
     }
 
     /// The stored stroke's picture, as the cel renders it.
-    private static func replay(_ samples: StrokeSamples, brush: Brush, size: CGFloat, opacity: Double) -> UIImage {
+    private static func replay(_ samples: StrokeSamples, brush: Brush, size: CGFloat, opacity: Double) throws -> UIImage {
         let stroke = VectorStroke(brush: brush, color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                                   size: size, opacity: opacity, samples: samples, seed: seed)
-        return VectorCanvas(size: canvasSize, elements: [.stroke(stroke)]).render()
+        return (try XCTUnwrap(VectorCanvas(size: canvasSize, elements: [.stroke(stroke)]).render()))
     }
 
     private struct Delta: CustomStringConvertible {
@@ -133,7 +133,7 @@ final class StrokeLiftParityLogicTests: XCTestCase {
         let rawRun = StrokeSamples(raw, channels: .captured)
         for (name, brush) in Self.shipped {
             let delta = try Self.delta(Self.live(raw, brush: brush, size: brush.size, opacity: 1),
-                                       Self.replay(rawRun, brush: brush, size: brush.size, opacity: 1))
+                                       try Self.replay(rawRun, brush: brush, size: brush.size, opacity: 1))
             if Self.readsTheFrame(brush) {
                 XCTAssertLessThan(delta.mean, 0.05,
                                   "\(name): a frame-reading brush differs from the curve's tangent only: \(delta)")
@@ -153,8 +153,8 @@ final class StrokeLiftParityLogicTests: XCTestCase {
         var worstRound = 0.0, worstSprite = 0.0
         for (name, brush) in Self.shipped {
             let livePicture = Self.live(raw, brush: brush, size: brush.size, opacity: 1)
-            let baked = Self.replay(stored, brush: brush, size: brush.size, opacity: 1)
-            let rawReplay = Self.replay(StrokeSamples(raw, channels: .captured), brush: brush, size: brush.size, opacity: 1)
+            let baked = try Self.replay(stored, brush: brush, size: brush.size, opacity: 1)
+            let rawReplay = try Self.replay(StrokeSamples(raw, channels: .captured), brush: brush, size: brush.size, opacity: 1)
             let lift = try Self.delta(livePicture, baked)
             let refit = try Self.delta(rawReplay, baked)
             print("MEASURED (84) \(name): live vs baked \(lift) | of which the refit \(refit)")
@@ -171,7 +171,7 @@ final class StrokeLiftParityLogicTests: XCTestCase {
         }
         let brush = BrushLibrary.roundHard
         let control = try Self.delta(Self.live(line, brush: brush, size: 16, opacity: 1),
-                                     Self.replay(Self.refit(line), brush: brush, size: 16, opacity: 1))
+                                     try Self.replay(Self.refit(line), brush: brush, size: 16, opacity: 1))
         XCTAssertEqual(control.differing, 0, "on a straight line the refit changes no pixel: \(control)")
     }
 
@@ -194,8 +194,8 @@ final class StrokeLiftParityLogicTests: XCTestCase {
         for (name, brush, ceiling) in [("roundHard", BrushLibrary.roundHard, 0.15), ("square", BrushLibrary.square, 0.7),
                                        ("splatter", BrushLibrary.splatter, 2.5)] {
             let livePicture = Self.live(raw, brush: brush, size: brush.size, opacity: 1)
-            let lift = try Self.delta(livePicture, Self.replay(stored, brush: brush, size: brush.size, opacity: 1))
-            let walk = try Self.delta(livePicture, Self.replay(StrokeSamples(raw, channels: .captured),
+            let lift = try Self.delta(livePicture, try Self.replay(stored, brush: brush, size: brush.size, opacity: 1))
+            let walk = try Self.delta(livePicture, try Self.replay(StrokeSamples(raw, channels: .captured),
                                                               brush: brush, size: brush.size, opacity: 1))
             print("MEASURED (84) tremor 0.3 pt \(name): live vs baked \(lift) | walk alone \(walk)")
             XCTAssertLessThan(lift.mean, ceiling, "\(name): \(lift)")

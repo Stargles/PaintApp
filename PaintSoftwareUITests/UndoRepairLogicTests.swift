@@ -228,9 +228,9 @@ final class UndoRepairLogicTests: XCTestCase {
 
     /// The full re-walk of `canvas`'s display list, guaranteed cold: a freshly constructed canvas has
     /// no memo, no base and no measured footprints, so it cannot take any fast path.
-    private func fullReWalk(of canvas: VectorCanvas) -> (image: UIImage, dabs: Int) {
+    private func fullReWalk(of canvas: VectorCanvas) throws -> (image: UIImage, dabs: Int) {
         let cold = VectorCanvas(size: canvas.size, elements: canvas.elements)
-        let image = cold.render()
+        let image = (try XCTUnwrap(cold.render()))
         XCTAssertEqual(cold.rasterizations, 1, "the reference arm must have rasterized exactly once")
         XCTAssertEqual(cold.regionRepairs, 0, "the reference arm must not have repaired anything")
         return (image, cold.lastRenderDabCount)
@@ -442,7 +442,7 @@ final class UndoRepairLogicTests: XCTestCase {
     /// property of chaining them rather than of this rectangle, and the honest bound on a chain is
     /// the union of its clips. It cannot grow past a rounding unit: each press redraws its own clip
     /// from the bottom of the stack.
-    func testTheRedoneAppendDrawsWhatAFullReWalkDraws() {
+    func testTheRedoneAppendDrawsWhatAFullReWalkDraws() throws {
         let canvas = Self.drawnCanvas(48)
         let before = canvas.elements
         canvas.addStroke(Self.mark(50))
@@ -450,24 +450,24 @@ final class UndoRepairLogicTests: XCTestCase {
         _ = canvas.render()
 
         canvas.restoreElements(before, changedInk: nil)
-        let undone = canvas.render()
+        let undone = (try XCTUnwrap(canvas.render()))
         let undoRegion = canvas.lastRepairedRegion
         // The control, and the operand that says the seam below is the undo's rather than the redo's:
         // this press repairs from a full walk's base, so its own picture is right inside its own clip.
-        assertMatchesToWithinARoundingUnit(undone, fullReWalk(of: canvas).image,
+        assertMatchesToWithinARoundingUnit(undone, try fullReWalk(of: canvas).image,
                                            inside: undoRegion, "the undone append")
 
         let widenedBefore = canvas.regionRepairsWidened
         let abandonedBefore = canvas.regionRepairsAbandoned
         canvas.restoreElements(after, changedInk: nil)
-        let repaired = canvas.render()
+        let repaired = (try XCTUnwrap(canvas.render()))
 
         XCTAssertEqual(canvas.regionRepairsWidened, widenedBefore,
                        "the remembered rectangle is a measurement of the same stroke value and must "
                        + "not need widening")
         XCTAssertEqual(canvas.regionRepairsAbandoned, abandonedBefore,
                        "an abandoned repair costs both walks and hides a bad bound behind a good picture")
-        assertMatchesToWithinARoundingUnit(repaired, fullReWalk(of: canvas).image,
+        assertMatchesToWithinARoundingUnit(repaired, try fullReWalk(of: canvas).image,
                                            inside: undoRegion.union(canvas.lastRepairedRegion),
                                            "a redone append")
     }
@@ -492,7 +492,7 @@ final class UndoRepairLogicTests: XCTestCase {
     /// besides. What the inset actually covers is that this box is measured from the **stored** path,
     /// whose coordinates are float32 — MEASURED, 20.3 comes back as 20.299999237, so without the
     /// slack the rectangle does not contain the one the caller asked to fill.
-    func testAddingAFillReportsWhereItLandedSoItsRedoCanBeBounded() {
+    func testAddingAFillReportsWhereItLandedSoItsRedoCanBeBounded() throws {
         let canvas = Self.drawnCanvas(48)
         let withoutFill = canvas.elements
         let rect = CGRect(x: 20.3, y: 20.7, width: 40.4, height: 30.2)
@@ -513,10 +513,10 @@ final class UndoRepairLogicTests: XCTestCase {
         XCTAssertTrue(isRegion(canvas.lastDamage),
                       "the fill coming back is bounded by where it landed, and nothing else could "
                       + "bound it")
-        let repaired = canvas.render()
+        let repaired = (try XCTUnwrap(canvas.render()))
         XCTAssertEqual(canvas.regionRepairs, repairsBefore + 1,
                        "the redo must actually repair rather than declare a rectangle and walk anyway")
-        assertMatchesToWithinARoundingUnit(repaired, fullReWalk(of: canvas).image,
+        assertMatchesToWithinARoundingUnit(repaired, try fullReWalk(of: canvas).image,
                                            inside: canvas.lastRepairedRegion, "a redone fill")
     }
 
@@ -525,7 +525,7 @@ final class UndoRepairLogicTests: XCTestCase {
     /// whole cel after that one stopped.
     ///
     /// Mutation that reddens it: return nil from `inkOfArrivals(in:standing:)`, which makes the two counts equal.
-    func testRedoingAnAppendStampsFarFewerDabsThanTheCelHolds() {
+    func testRedoingAnAppendStampsFarFewerDabsThanTheCelHolds() throws {
         let canvas = Self.drawnCanvas(48)
         let before = canvas.elements
         canvas.addStroke(Self.mark(50))
@@ -537,7 +537,7 @@ final class UndoRepairLogicTests: XCTestCase {
         canvas.restoreElements(after, changedInk: nil)
         _ = canvas.render()
         let repairDabs = canvas.lastRenderDabCount
-        let fullDabs = fullReWalk(of: canvas).dabs
+        let fullDabs = try fullReWalk(of: canvas).dabs
         XCTAssertGreaterThan(fullDabs, 0, "the reference walk must have stamped something")
         XCTAssertLessThan(repairDabs * 4, fullDabs,
                           "redoing one mark on a 49-mark grid re-stamped \(repairDabs) dabs against "
@@ -625,13 +625,13 @@ final class UndoRepairLogicTests: XCTestCase {
     private func assertARoundTripIsBoundedAndDrawsRight(
         _ element: VectorElement, _ what: String,
         file: StaticString = #filePath, line: UInt = #line
-    ) {
+    ) throws {
         let canvas = Self.drawnCanvas(24)
         let without = canvas.elements
-        let bare = canvas.render()
+        let bare = (try XCTUnwrap(canvas.render()))
         canvas.elements = without + [element]
         canvas.bumpVersion()
-        let standing = canvas.render()
+        let standing = (try XCTUnwrap(canvas.render()))
         if let d = diff(bare, standing, "\(what) fixture", file: file, line: line) {
             XCTAssertGreaterThan(d.bytes, 0,
                                  "\(what): fixture precondition — adding it to the display list "
@@ -648,14 +648,14 @@ final class UndoRepairLogicTests: XCTestCase {
                           "\(what): the \(press) declared \(canvas.lastDamage) — a \(what) carries "
                           + "its own extent in its stored geometry, so neither direction has to pay "
                           + "the cel", file: file, line: line)
-            let repaired = canvas.render()
+            let repaired = (try XCTUnwrap(canvas.render()))
             XCTAssertEqual(canvas.regionRepairs, repairsBefore + 1,
                            "\(what): the \(press) declared a rectangle and then walked the cel "
                            + "anyway, so nothing below is testing a bound", file: file, line: line)
             XCTAssertEqual(canvas.regionRepairsAbandoned, abandonedBefore,
                            "\(what): the \(press)'s repair was abandoned, which pays both walks and "
                            + "hides a rectangle that did not hold", file: file, line: line)
-            assertMatchesToWithinARoundingUnit(repaired, fullReWalk(of: canvas).image,
+            assertMatchesToWithinARoundingUnit(repaired, try fullReWalk(of: canvas).image,
                                                inside: canvas.lastRepairedRegion,
                                                "a \(press)ne \(what)", file: file, line: line)
         }
@@ -670,19 +670,19 @@ final class UndoRepairLogicTests: XCTestCase {
     ///
     /// Mutation that reddens it: restore the `guard let stroke = element.stroke else { return
     /// .everything }` in `restoreDamage`'s departing loop.
-    func testUndoingAndRedoingAFillBothDeclareARectangleAndDrawTheRightPicture() {
-        assertARoundTripIsBoundedAndDrawsRight(.fill(Self.fillElement(CGRect(x: 22.3, y: 18.7,
+    func testUndoingAndRedoingAFillBothDeclareARectangleAndDrawTheRightPicture() throws {
+        try assertARoundTripIsBoundedAndDrawsRight(.fill(Self.fillElement(CGRect(x: 22.3, y: 18.7,
                                                                             width: 44.4, height: 33.2))),
                                                "fill")
     }
 
     /// An even-odd fill with a hole in it — the same path rule, and the arm `evenOddFill` selects.
-    func testUndoingAndRedoingAFillWithAHoleIsBoundedTheSameWay() {
+    func testUndoingAndRedoingAFillWithAHoleIsBoundedTheSameWay() throws {
         let outer = CGPath(rect: CGRect(x: 20, y: 20, width: 60, height: 50), transform: nil)
         let ring = CGMutablePath()
         ring.addPath(outer)
         ring.addEllipse(in: CGRect(x: 35, y: 32, width: 30, height: 26))
-        assertARoundTripIsBoundedAndDrawsRight(
+        try assertARoundTripIsBoundedAndDrawsRight(
             .fill(VectorFillElement(path: ring,
                                     color: CodableColor(red: 0.1, green: 0.5, blue: 0.9, alpha: 1),
                                     opacity: 0.8, evenOddFill: true)),
@@ -695,8 +695,8 @@ final class UndoRepairLogicTests: XCTestCase {
     /// `quad(of:)`, so the bound and the picture cannot drift apart the way two spellings of one
     /// matrix can. The rotation is what makes it a real test: an axis-aligned box would be green
     /// against a bound that ignored `placement` entirely.
-    func testUndoingAndRedoingAPlacedImageIsBoundedByItsOwnQuad() {
-        assertARoundTripIsBoundedAndDrawsRight(
+    func testUndoingAndRedoingAPlacedImageIsBoundedByItsOwnQuad() throws {
+        try assertARoundTripIsBoundedAndDrawsRight(
             .image(Self.imageElement(at: CGPoint(x: 60, y: 55), side: 28, scale: 1.4,
                                      rotation: .pi / 7)),
             "rotated placed image")
@@ -713,8 +713,8 @@ final class UndoRepairLogicTests: XCTestCase {
     ///
     /// A gentler scale would leave the mutation alive — at `s = 6` the overhang is half a point and
     /// the slack hides it — which is the shape of a fixture that pins nothing.
-    func testUndoingAndRedoingAVideoPlaceholderIsBoundedIncludingItsBorder() {
-        assertARoundTripIsBoundedAndDrawsRight(
+    func testUndoingAndRedoingAVideoPlaceholderIsBoundedIncludingItsBorder() throws {
+        try assertARoundTripIsBoundedAndDrawsRight(
             .video(Self.videoElement(at: CGPoint(x: 70, y: 60),
                                      natural: CGSize(width: 6, height: 4), scale: 12)),
             "video placeholder")
@@ -722,8 +722,8 @@ final class UndoRepairLogicTests: XCTestCase {
 
     /// The decoded arm of the same element — one `UIImage.draw(in:)` inside the placement, exactly
     /// as a placed image, so it must bound the same way.
-    func testUndoingAndRedoingAVideoShowingAFrameIsBoundedTheSameWay() {
-        assertARoundTripIsBoundedAndDrawsRight(
+    func testUndoingAndRedoingAVideoShowingAFrameIsBoundedTheSameWay() throws {
+        try assertARoundTripIsBoundedAndDrawsRight(
             .video(Self.videoElement(at: CGPoint(x: 65, y: 58),
                                      natural: CGSize(width: 32, height: 18), scale: 1.5,
                                      rotation: .pi / 9,
@@ -735,8 +735,8 @@ final class UndoRepairLogicTests: XCTestCase {
     /// estimate.** All three arms of `draw(text:into:quality:)` pass `clip: !frame.autoSize` down to
     /// `TextLayout.draw`, which turns it into a `CGContext.clip` on the layout box — so with the bit
     /// clear, no glyph can put a pixel outside the box quad whatever the font does.
-    func testUndoingAndRedoingASizedTextObjectIsBoundedByTheBoxThatClipsIt() {
-        assertARoundTripIsBoundedAndDrawsRight(
+    func testUndoingAndRedoingASizedTextObjectIsBoundedByTheBoxThatClipsIt() throws {
+        try assertARoundTripIsBoundedAndDrawsRight(
             .text(Self.textElement("Hello there", at: CGPoint(x: 24, y: 30),
                                    size: CGSize(width: 90, height: 34), autoSize: false)),
             "sized text object")
@@ -754,8 +754,8 @@ final class UndoRepairLogicTests: XCTestCase {
     /// trip on a drawn cel: Zapfino, whose swashes reach well outside their line box, in a size that
     /// makes the reach several points. Mutation that reddens it: `guard !text.frame.autoSize else
     /// { return nil }` back in `derivedFootprint`'s text arm — the `.region` assertion goes first.
-    func testUndoingAndRedoingAnAutoSizeTextObjectIsBoundedByItsMeasuredGlyphInk() {
-        assertARoundTripIsBoundedAndDrawsRight(
+    func testUndoingAndRedoingAnAutoSizeTextObjectIsBoundedByItsMeasuredGlyphInk() throws {
+        try assertARoundTripIsBoundedAndDrawsRight(
             .text(VectorTextElement(
                 recipe: TextRecipe(string: "Qfj", font: FontDescriptor(familyName: "Zapfino", faceName: "Zapfino"),
                                    typography: Typography(pointSize: 22)),
@@ -772,16 +772,16 @@ final class UndoRepairLogicTests: XCTestCase {
     ///
     /// Mutation that reddens it: route `autoSize` back to `.everything` (the first assertion), or
     /// return `box.insetBy(-slack)` for both arms (the second).
-    func testADepartingTextObjectDeclaresARectangleWhetherOrNotItsBoxClipsAndNotTheSameOne() {
+    func testADepartingTextObjectDeclaresARectangleWhetherOrNotItsBoxClipsAndNotTheSameOne() throws {
         var declared: [Bool: CGRect] = [:]
         for autoSize in [true, false] {
             let canvas = Self.drawnCanvas(12)
             let without = canvas.elements
-            let bare = canvas.render()
+            let bare = (try XCTUnwrap(canvas.render()))
             let text = Self.textElement("Overhang", at: CGPoint(x: 30, y: 40), autoSize: autoSize)
             canvas.elements = without + [.text(text)]
             canvas.bumpVersion()
-            let standing = canvas.render()
+            let standing = (try XCTUnwrap(canvas.render()))
             if let d = diff(bare, standing, "autoSize=\(autoSize) fixture") {
                 XCTAssertGreaterThan(d.bytes, 0,
                                      "fixture precondition: the text object with autoSize="
@@ -817,7 +817,7 @@ final class UndoRepairLogicTests: XCTestCase {
     /// `testUndoingAFillStampsFarFewerDabsThanTheCelHolds`, for the press the second box was about.
     /// Mutation that reddens it: return `CGRect(origin: .zero, size: size)` from the text arm — a
     /// correct picture, worth nothing.
-    func testUndoingAnAutoSizeTextObjectStampsFarFewerDabsThanTheCelHolds() {
+    func testUndoingAnAutoSizeTextObjectStampsFarFewerDabsThanTheCelHolds() throws {
         let canvas = Self.drawnCanvas(48)
         let without = canvas.elements
         canvas.elements = without + [.text(Self.textElement("Hi", at: CGPoint(x: 30, y: 40),
@@ -829,7 +829,7 @@ final class UndoRepairLogicTests: XCTestCase {
         canvas.restoreElements(without, changedInk: nil)
         _ = canvas.render()
         let repairDabs = canvas.lastRenderDabCount
-        let fullDabs = fullReWalk(of: canvas).dabs
+        let fullDabs = try fullReWalk(of: canvas).dabs
         XCTAssertGreaterThan(fullDabs, 0, "the reference walk must have stamped something")
         XCTAssertLessThan(repairDabs * 3, fullDabs,
                           "undoing a pristine text object on a 48-mark grid re-stamped \(repairDabs) "
@@ -843,16 +843,16 @@ final class UndoRepairLogicTests: XCTestCase {
     ///
     /// The fixture puts them in opposite corners on purpose, so a rectangle that covers only one is
     /// nowhere near the other.
-    func testARestoreThatDropsAFillAndAStrokeTogetherBoundsBothOfThem() {
+    func testARestoreThatDropsAFillAndAStrokeTogetherBoundsBothOfThem() throws {
         let canvas = Self.drawnCanvas(24)
         let base = canvas.elements
-        let bare = canvas.render()
+        let bare = (try XCTUnwrap(canvas.render()))
         canvas.elements = base + [.stroke(Self.mark(41)),
                                   .fill(Self.fillElement(CGRect(x: 8, y: 8, width: 26, height: 22)))]
         // See `assertARoundTripIsBoundedAndDrawsRight`: the setter does not invalidate, so without
         // this the canvas hands back its memo and neither of the two is ever drawn or measured.
         canvas.bumpVersion()
-        let standing = canvas.render()
+        let standing = (try XCTUnwrap(canvas.render()))
         if let d = diff(bare, standing, "mixed fixture") {
             XCTAssertGreaterThan(d.bytes, 0, "fixture precondition: the added stroke and fill paint")
         }
@@ -862,10 +862,10 @@ final class UndoRepairLogicTests: XCTestCase {
         XCTAssertTrue(isRegion(canvas.lastDamage),
                       "a mixed departure must union the measured half with the derived one, not "
                       + "give up because one of the two is not a stroke")
-        let repaired = canvas.render()
+        let repaired = (try XCTUnwrap(canvas.render()))
         XCTAssertEqual(canvas.regionRepairs, repairsBefore + 1,
                        "the mixed undo must repair rather than declare a rectangle and walk anyway")
-        assertMatchesToWithinARoundingUnit(repaired, fullReWalk(of: canvas).image,
+        assertMatchesToWithinARoundingUnit(repaired, try fullReWalk(of: canvas).image,
                                            inside: canvas.lastRepairedRegion,
                                            "a fill and a stroke leaving together")
     }
@@ -877,7 +877,7 @@ final class UndoRepairLogicTests: XCTestCase {
     /// cannot tell them apart; this is the operand that can. Mutation that reddens it: return
     /// `CGRect(origin: .zero, size: size)` from `derivedFootprint`'s fill arm — still a correct
     /// picture, and worth nothing.
-    func testUndoingAFillStampsFarFewerDabsThanTheCelHolds() {
+    func testUndoingAFillStampsFarFewerDabsThanTheCelHolds() throws {
         let canvas = Self.drawnCanvas(48)
         let without = canvas.elements
         canvas.addFill(Self.fillElement(CGRect(x: 20, y: 20, width: 34, height: 26)))
@@ -886,7 +886,7 @@ final class UndoRepairLogicTests: XCTestCase {
         canvas.restoreElements(without, changedInk: nil)
         _ = canvas.render()
         let repairDabs = canvas.lastRenderDabCount
-        let fullDabs = fullReWalk(of: canvas).dabs
+        let fullDabs = try fullReWalk(of: canvas).dabs
         XCTAssertGreaterThan(fullDabs, 0, "the reference walk must have stamped something")
         XCTAssertLessThan(repairDabs * 3, fullDabs,
                           "undoing a fill on a 48-mark grid re-stamped \(repairDabs) dabs against "
@@ -974,7 +974,7 @@ final class UndoRepairLogicTests: XCTestCase {
     /// means an under-declared rectangle costs a second walk rather than a wrong picture, so the byte
     /// comparison alone would be green against a caller that declared `.null` — it would simply have
     /// paid twice. Mutation that reddens it: pass `.null` as `changedInk` from the undo closure.
-    func testTheUndoneCutDrawsWhatAFullReWalkDraws() {
+    func testTheUndoneCutDrawsWhatAFullReWalkDraws() throws {
         let canvas = Self.drawnCanvas(48)
         let before = canvas.elements
         XCTAssertTrue(canvas.erase(alongPath: Self.flick(over: 19), brush: Self.brush(),
@@ -985,7 +985,7 @@ final class UndoRepairLogicTests: XCTestCase {
         _ = canvas.render()
 
         canvas.restoreElements(before, changedInk: cutRegion)
-        let repaired = canvas.render()
+        let repaired = (try XCTUnwrap(canvas.render()))
         XCTAssertEqual(canvas.regionRepairs, 2,
                        "both the cut and its undo must have repaired, or this pins one of them")
         XCTAssertEqual(canvas.regionRepairsAbandoned, 0,
@@ -993,13 +993,13 @@ final class UndoRepairLogicTests: XCTestCase {
         XCTAssertEqual(canvas.regionRepairsWidened, 0,
                        "a widened repair is the caller's rectangle being too small — the picture would "
                        + "still be right and the press would still be slow, which is the whole bug")
-        assertMatchesToWithinARoundingUnit(repaired, fullReWalk(of: canvas).image,
+        assertMatchesToWithinARoundingUnit(repaired, try fullReWalk(of: canvas).image,
                                            inside: canvas.lastRepairedRegion,
                                            "a Mode 2 cut, undone")
     }
 
     /// **And the redo draws what a full re-walk draws**, on the same rectangle read the other way.
-    func testTheRedoneCutDrawsWhatAFullReWalkDraws() {
+    func testTheRedoneCutDrawsWhatAFullReWalkDraws() throws {
         let canvas = Self.drawnCanvas(48)
         let before = canvas.elements
         XCTAssertTrue(canvas.erase(alongPath: Self.flick(over: 19), brush: Self.brush(),
@@ -1013,11 +1013,11 @@ final class UndoRepairLogicTests: XCTestCase {
         _ = canvas.render()
 
         canvas.restoreElements(after, changedInk: cutRegion)
-        let repaired = canvas.render()
+        let repaired = (try XCTUnwrap(canvas.render()))
         XCTAssertEqual(canvas.regionRepairsWidened, 0,
                        "the redo's arrivals are the cut pieces, which cannot reach past what their "
                        + "parents painted — a widening here means the rectangle is not symmetric")
-        assertMatchesToWithinARoundingUnit(repaired, fullReWalk(of: canvas).image,
+        assertMatchesToWithinARoundingUnit(repaired, try fullReWalk(of: canvas).image,
                                            inside: canvas.lastRepairedRegion,
                                            "a Mode 2 cut, redone")
     }
@@ -1034,7 +1034,7 @@ final class UndoRepairLogicTests: XCTestCase {
     /// through its middle leaves a piece either side and the union of the two pieces' boxes is the
     /// parent's box — the gap between them is inside it by construction, so the vacated half already
     /// covers everything the parent paints and the caller's rectangle adds nothing *here*.
-    func testUndoingACutThatSplitAStrokeIsBoundedByBothHalvesOfTheRectangle() {
+    func testUndoingACutThatSplitAStrokeIsBoundedByBothHalvesOfTheRectangle() throws {
         let canvas = Self.drawnStripes()
         let before = canvas.elements
         XCTAssertTrue(canvas.erase(alongPath: Self.flick(over: 12), brush: Self.brush(),
@@ -1048,11 +1048,11 @@ final class UndoRepairLogicTests: XCTestCase {
         _ = canvas.render()
 
         canvas.restoreElements(before, changedInk: cutRegion)
-        let repaired = canvas.render()
+        let repaired = (try XCTUnwrap(canvas.render()))
         XCTAssertEqual(canvas.regionRepairsWidened, 0,
                        "the pieces departing bound their own ink and the caller's rectangle bounds "
                        + "the parent's — a widening means one of the two halves is missing")
-        assertMatchesToWithinARoundingUnit(repaired, fullReWalk(of: canvas).image,
+        assertMatchesToWithinARoundingUnit(repaired, try fullReWalk(of: canvas).image,
                                            inside: canvas.lastRepairedRegion,
                                            "a split stroke, put back")
     }
@@ -1079,7 +1079,7 @@ final class UndoRepairLogicTests: XCTestCase {
     /// arrives outside the clip, `renderLocalContent`'s escape check catches it and widens, so
     /// `regionRepairsWidened` is 1 rather than 0 — the picture stays right and the press pays two
     /// walks, which is exactly the bug this whole item is about.
-    func testUndoingAGestureThatSplitOneStrokeAndDeletedAnotherFarAwayNeedsBothHalves() {
+    func testUndoingAGestureThatSplitOneStrokeAndDeletedAnotherFarAwayNeedsBothHalves() throws {
         let canvas = Self.drawnStripeAndDistantMark()
         let before = canvas.elements
         let originalIDs = strokeIDs(before)
@@ -1131,13 +1131,13 @@ final class UndoRepairLogicTests: XCTestCase {
         _ = canvas.render()
 
         canvas.restoreElements(before, changedInk: gestureDamage)
-        let repaired = canvas.render()
+        let repaired = (try XCTUnwrap(canvas.render()))
         XCTAssertEqual(canvas.regionRepairsWidened, 0,
                        "the deleted mark arrives where nothing departed, so only the caller's "
                        + "rectangle can bound it — a widening here is the union having been dropped")
         XCTAssertEqual(canvas.regionRepairsAbandoned, 0,
                        "an abandoned repair costs both walks and hides a bad bound behind a good picture")
-        assertMatchesToWithinARoundingUnit(repaired, fullReWalk(of: canvas).image,
+        assertMatchesToWithinARoundingUnit(repaired, try fullReWalk(of: canvas).image,
                                            inside: canvas.lastRepairedRegion,
                                            "a gesture that split one stroke and deleted another")
     }
@@ -1246,7 +1246,7 @@ final class UndoRepairLogicTests: XCTestCase {
     ///
     /// Mutation that reddens it: `bumpVersion()` in the undo closure, which makes the two counts
     /// equal.
-    func testUndoingACutStampsFarFewerDabsThanTheCelHolds() {
+    func testUndoingACutStampsFarFewerDabsThanTheCelHolds() throws {
         let canvas = Self.drawnCanvas(48)
         let before = canvas.elements
         XCTAssertTrue(canvas.erase(alongPath: Self.flick(over: 19), brush: Self.brush(),
@@ -1259,7 +1259,7 @@ final class UndoRepairLogicTests: XCTestCase {
         canvas.restoreElements(before, changedInk: cutRegion)
         _ = canvas.render()
         let repairDabs = canvas.lastRenderDabCount
-        let fullDabs = fullReWalk(of: canvas).dabs
+        let fullDabs = try fullReWalk(of: canvas).dabs
         XCTAssertGreaterThan(fullDabs, 0, "the reference walk must have stamped something")
         XCTAssertLessThan(repairDabs * 4, fullDabs,
                           "undoing a cut through one cell of a 48-mark grid re-stamped \(repairDabs) "
@@ -1361,7 +1361,7 @@ final class UndoRepairLogicTests: XCTestCase {
     /// ignore `rewrites` inside `restoreDamage` (treat the set as empty) — the swap then declares a
     /// null region, the memo stands, and the *picture* assertion fails with the old colour still
     /// showing.
-    func testAnElementsUndoThatRewritesInPlaceIsBoundedInBothDirectionsAndDrawsRight() {
+    func testAnElementsUndoThatRewritesInPlaceIsBoundedInBothDirectionsAndDrawsRight() throws {
         let canvas = Self.drawnCanvas(24)
         let before = canvas.elements
         // A recolour's shape: the same ids, one of them carrying different content.
@@ -1392,7 +1392,7 @@ final class UndoRepairLogicTests: XCTestCase {
             XCTAssertNotEqual(canvas.lastDamage, .region(.null),
                               "the \(press) declared a null region, which means the rewrite was not "
                               + "seen at all and the stale picture would stand")
-            let repaired = canvas.render()
+            let repaired = (try XCTUnwrap(canvas.render()))
             XCTAssertEqual(canvas.regionRepairs, repairsBefore + 1,
                            "the \(press) declared a rectangle and then walked the cel anyway")
             XCTAssertEqual(canvas.regionRepairsWidened, widenedBefore,
@@ -1400,7 +1400,7 @@ final class UndoRepairLogicTests: XCTestCase {
                            + "footprint exactly and nothing should have escaped")
             XCTAssertEqual(fingerprints(canvas.elements), fingerprints(expected),
                            "the \(press) did not put the expected list back")
-            assertMatchesToWithinARoundingUnit(repaired, fullReWalk(of: canvas).image,
+            assertMatchesToWithinARoundingUnit(repaired, try fullReWalk(of: canvas).image,
                                                inside: canvas.lastRepairedRegion,
                                                "the \(press)ne recolour")
         }
@@ -1416,7 +1416,7 @@ final class UndoRepairLogicTests: XCTestCase {
     ///
     /// All three are pristine boxes, so every bounded answer here is the measured glyph-ink
     /// rectangle rather than the box.
-    func testTheTextCommitBoundsAnAddADeletionAndARetype() {
+    func testTheTextCommitBoundsAnAddADeletionAndARetype() throws {
         let canvas = Self.drawnCanvas(24)
         _ = canvas.render()
         let manager = manager(around: canvas)
@@ -1468,11 +1468,11 @@ final class UndoRepairLogicTests: XCTestCase {
                       "undoing the retype declared \(canvas.lastDamage) — a retyped label keeps its "
                       + "id with different content, and both contents carry their own glyph ink")
         XCTAssertNotEqual(canvas.lastDamage, .region(.null), "the retype was not seen as a rewrite")
-        let repaired = canvas.render()
+        let repaired = (try XCTUnwrap(canvas.render()))
         XCTAssertEqual(canvas.regionRepairs, repairsBefore + 1, "the retype's undo walked the cel anyway")
         XCTAssertEqual(canvas.elements.first { $0.id == placed.id }?.text?.recipe.string, "Label",
                        "the undo did not put the old string back")
-        assertMatchesToWithinARoundingUnit(repaired, fullReWalk(of: canvas).image,
+        assertMatchesToWithinARoundingUnit(repaired, try fullReWalk(of: canvas).image,
                                            inside: canvas.lastRepairedRegion, "the undone retype")
     }
 
@@ -1551,7 +1551,7 @@ final class UndoRepairLogicTests: XCTestCase {
     /// region, the memo stands, and the picture keeps the picked colour; `bumpVersion()` back in
     /// `recolorSelection` — the forward `.region` assertion; drop the `strokeInkHint` fallback in
     /// `inkOfArrivals` — the Cut arm's forward and redo assertions say `.everything`.
-    func testARecolourOfASelectionIsBoundedAndDrawsRightForwardsUndoneAndRedone() {
+    func testARecolourOfASelectionIsBoundedAndDrawsRightForwardsUndoneAndRedone() throws {
         for (membership, loop) in [(LassoMembership.touching, Self.blockLoop),
                                    (LassoMembership.cutting, Self.straddlingLoop)] {
             let what = "recolour under \(membership)"
@@ -1567,10 +1567,10 @@ final class UndoRepairLogicTests: XCTestCase {
                               + "a recolour at all")
             XCTAssertTrue(isRegion(canvas.lastDamage),
                           "\(what): the forward edit declared \(canvas.lastDamage)")
-            var repaired = canvas.render()
+            var repaired = (try XCTUnwrap(canvas.render()))
             XCTAssertEqual(canvas.regionRepairs, repairsBefore + 1,
                            "\(what): the forward edit declared a rectangle and walked the cel anyway")
-            assertMatchesToWithinARoundingUnit(repaired, fullReWalk(of: canvas).image,
+            assertMatchesToWithinARoundingUnit(repaired, try fullReWalk(of: canvas).image,
                                                inside: canvas.lastRepairedRegion, "\(what), applied")
             let after = canvas.elements
 
@@ -1584,12 +1584,12 @@ final class UndoRepairLogicTests: XCTestCase {
                                   "\(what): the \(press) saw no rewrite and would leave the picture")
                 XCTAssertEqual(fingerprints(canvas.elements), fingerprints(expected),
                                "\(what): the \(press) put the wrong list back")
-                repaired = canvas.render()
+                repaired = (try XCTUnwrap(canvas.render()))
                 XCTAssertEqual(canvas.regionRepairs, repairs + 1,
                                "\(what): the \(press) declared a rectangle and walked the cel anyway")
                 XCTAssertEqual(canvas.regionRepairsAbandoned, abandoned,
                                "\(what): the \(press)'s repair was abandoned")
-                assertMatchesToWithinARoundingUnit(repaired, fullReWalk(of: canvas).image,
+                assertMatchesToWithinARoundingUnit(repaired, try fullReWalk(of: canvas).image,
                                                    inside: canvas.lastRepairedRegion,
                                                    "\(what), \(press)ne")
             }
@@ -1608,7 +1608,7 @@ final class UndoRepairLogicTests: XCTestCase {
     /// right, which is the whole point: for a stroke, too small is a second walk, not a ghost. The
     /// picture assertion is what reddens if that retry is *also* taken away (a surviving
     /// `paintedBounds` entry, which `testARewriteInPlaceDropsTheFootprint…` pins separately).
-    func testAnApplyBrushToAWiderBrushBoundsByTheNewWidth() {
+    func testAnApplyBrushToAWiderBrushBoundsByTheNewWidth() throws {
         let canvas = Self.drawnCanvas(48)
         let before = canvas.elements
         let manager = manager(around: canvas, selecting: Self.blockLoop, membership: .touching)
@@ -1625,12 +1625,12 @@ final class UndoRepairLogicTests: XCTestCase {
                       "fixture: the loop caught nothing, so nothing below is about Apply Brush")
         XCTAssertTrue(isRegion(canvas.lastDamage),
                       "the forward Apply Brush declared \(canvas.lastDamage)")
-        var repaired = canvas.render()
+        var repaired = (try XCTUnwrap(canvas.render()))
         XCTAssertEqual(canvas.regionRepairs, repairsBefore + 1, "declared a rectangle, walked the cel")
         XCTAssertEqual(canvas.regionRepairsWidened, widenedBefore,
                        "the new brush's ink escaped the rectangle its site declared — the hint was "
                        + "padded by the old reach, not the new one")
-        assertMatchesToWithinARoundingUnit(repaired, fullReWalk(of: canvas).image,
+        assertMatchesToWithinARoundingUnit(repaired, try fullReWalk(of: canvas).image,
                                            inside: canvas.lastRepairedRegion, "Apply Brush, applied")
         let after = canvas.elements
 
@@ -1641,11 +1641,11 @@ final class UndoRepairLogicTests: XCTestCase {
             XCTAssertTrue(isRegion(canvas.lastDamage), "the \(press) declared \(canvas.lastDamage)")
             XCTAssertEqual(fingerprints(canvas.elements), fingerprints(expected),
                            "the \(press) put the wrong list back")
-            repaired = canvas.render()
+            repaired = (try XCTUnwrap(canvas.render()))
             XCTAssertEqual(canvas.regionRepairs, repairs + 1, "the \(press) walked the cel anyway")
             XCTAssertEqual(canvas.regionRepairsWidened, widened,
                            "the \(press)'s arriving width escaped the rectangle")
-            assertMatchesToWithinARoundingUnit(repaired, fullReWalk(of: canvas).image,
+            assertMatchesToWithinARoundingUnit(repaired, try fullReWalk(of: canvas).image,
                                                inside: canvas.lastRepairedRegion,
                                                "Apply Brush, \(press)ne")
         }
@@ -1666,7 +1666,7 @@ final class UndoRepairLogicTests: XCTestCase {
     /// — the nudge declares a hint, `applyToRegionBase` refuses a base under suppression, and
     /// `rasterizations` moves; drop the null-region arm in `invalidateRenderOnly` — the same
     /// operand, since a null region then falls to a full walk.
-    func testALassoNudgeWithTheLatchArmedChangesNoPixelAndCostsNoWalk() {
+    func testALassoNudgeWithTheLatchArmedChangesNoPixelAndCostsNoWalk() throws {
         let canvas = Self.drawnCanvas(48)
         let manager = manager(around: canvas, selecting: Self.straddlingLoop, membership: .cutting)
         XCTAssertTrue(manager.beginVectorLassoMove(), "fixture: the lift must take")
@@ -1675,7 +1675,7 @@ final class UndoRepairLogicTests: XCTestCase {
         XCTAssertEqual(canvas.suppressedElementIDs, float.parts[0].insideIDs,
                        "fixture: the lifted pieces are suppressed while the latch is armed")
         // The lift itself is `.everything` (the suppression changed). Settle it.
-        let settled = canvas.render()
+        let settled = (try XCTUnwrap(canvas.render()))
         let rasterizations = canvas.rasterizations
 
         var transform = float.frame.transform
@@ -1684,7 +1684,7 @@ final class UndoRepairLogicTests: XCTestCase {
         XCTAssertEqual(canvas.lastDamage, .region(.null),
                        "the nudge declared \(canvas.lastDamage) — every element it rewrote is "
                        + "suppressed, so no pixel of this canvas's picture changed")
-        let afterNudge = canvas.render()
+        let afterNudge = (try XCTUnwrap(canvas.render()))
         XCTAssertEqual(canvas.rasterizations, rasterizations,
                        "the nudge cost a walk for a picture the canvas already had")
         if let d = diff(settled, afterNudge, "nudge") {
@@ -1694,9 +1694,9 @@ final class UndoRepairLogicTests: XCTestCase {
         // Commit: un-suppressing is the one `.everything`, and the moved ink is drawn there.
         manager.commitVectorFloatIfNeeded()
         XCTAssertTrue(canvas.suppressedElementIDs.isEmpty, "the commit clears the suppression")
-        let committed = canvas.render()
+        let committed = (try XCTUnwrap(canvas.render()))
         let cold = VectorCanvas(size: canvas.size, elements: canvas.elements)
-        if let d = diff(committed, cold.render(), "committed nudge") {
+        if let d = diff(committed, (try XCTUnwrap(cold.render())), "committed nudge") {
             XCTAssertEqual(d.bytes, 0, "the committed picture is not the moved list's: \(d.summary)")
         }
         let moved = canvas.elements
@@ -1708,9 +1708,9 @@ final class UndoRepairLogicTests: XCTestCase {
         XCTAssertTrue(isRegion(canvas.lastDamage),
                       "the undo of a committed nudge declared \(canvas.lastDamage)")
         XCTAssertNotEqual(canvas.lastDamage, .region(.null), "the undo saw nothing to do")
-        let undone = canvas.render()
+        let undone = (try XCTUnwrap(canvas.render()))
         XCTAssertEqual(canvas.regionRepairs, repairsBefore + 1, "the undo walked the cel anyway")
-        assertMatchesToWithinARoundingUnit(undone, fullReWalk(of: canvas).image,
+        assertMatchesToWithinARoundingUnit(undone, try fullReWalk(of: canvas).image,
                                            inside: canvas.lastRepairedRegion, "the undone nudge")
         XCTAssertNotEqual(fingerprints(canvas.elements), fingerprints(moved),
                           "the undo did not move the geometry back")
@@ -1727,7 +1727,7 @@ final class UndoRepairLogicTests: XCTestCase {
     /// on the version — so the repair redraws a rectangle the size of the clip and nothing else.
     /// Mutation that reddens it: `bumpVersion()` back in either `setVideoSpeed` or
     /// `restoreVideoCrops` — the `.region` assertion on that side.
-    func testAVideoSpeedChangeIsBoundedByTheVideosOwnRectangleInBothDirections() {
+    func testAVideoSpeedChangeIsBoundedByTheVideosOwnRectangleInBothDirections() throws {
         let canvas = Self.drawnCanvas(24)
         let video = Self.videoElement(at: CGPoint(x: 100, y: 70))
         canvas.elements = canvas.elements + [.video(video)]
@@ -1744,18 +1744,18 @@ final class UndoRepairLogicTests: XCTestCase {
             XCTAssertTrue(rect.width < canvas.size.width / 2 && rect.height < canvas.size.height / 2,
                           "the rectangle \(rect) is not the clip's own quad")
         }
-        var repaired = canvas.render()
+        var repaired = (try XCTUnwrap(canvas.render()))
         XCTAssertEqual(canvas.regionRepairs, repairsBefore + 1, "declared a rectangle, walked the cel")
-        assertMatchesToWithinARoundingUnit(repaired, fullReWalk(of: canvas).image,
+        assertMatchesToWithinARoundingUnit(repaired, try fullReWalk(of: canvas).image,
                                            inside: canvas.lastRepairedRegion, "speed, applied")
 
         let repairs = canvas.regionRepairs
         manager.undo()
         XCTAssertEqual(canvas.elements.last?.video?.speed, 1, "the undo did not put the speed back")
         XCTAssertTrue(isRegion(canvas.lastDamage), "the undo declared \(canvas.lastDamage)")
-        repaired = canvas.render()
+        repaired = (try XCTUnwrap(canvas.render()))
         XCTAssertEqual(canvas.regionRepairs, repairs + 1, "the undo walked the cel anyway")
-        assertMatchesToWithinARoundingUnit(repaired, fullReWalk(of: canvas).image,
+        assertMatchesToWithinARoundingUnit(repaired, try fullReWalk(of: canvas).image,
                                            inside: canvas.lastRepairedRegion, "speed, undone")
     }
 
@@ -1774,7 +1774,7 @@ final class UndoRepairLogicTests: XCTestCase {
     /// `.everything` for a rewritten stroke with no entry — the `.region` assertion on tick two;
     /// take `rect` instead of `standing.region.union(rect)` in `applyToRegionBase` — the picture,
     /// with the stroke's ink at A left standing as a ghost.
-    func testASecondRewriteBeforeTheFirstHasRenderedIsStillBounded() {
+    func testASecondRewriteBeforeTheFirstHasRenderedIsStillBounded() throws {
         let canvas = Self.drawnCanvas(24)
         guard case .stroke(let stroke) = canvas.elements[3] else {
             return XCTFail("the fixture must hold strokes")
@@ -1797,9 +1797,9 @@ final class UndoRepairLogicTests: XCTestCase {
         XCTAssertTrue(isRegion(canvas.lastDamage),
                       "tick two declared \(canvas.lastDamage) — a rewritten stroke with no measured "
                       + "footprint has its old ink inside the pending region already")
-        let repaired = canvas.render()
+        let repaired = (try XCTUnwrap(canvas.render()))
         XCTAssertEqual(canvas.regionRepairs, repairsBefore + 1, "the ticks declared and then walked")
-        assertMatchesToWithinARoundingUnit(repaired, fullReWalk(of: canvas).image,
+        assertMatchesToWithinARoundingUnit(repaired, try fullReWalk(of: canvas).image,
                                            inside: canvas.lastRepairedRegion, "two ticks, one render")
     }
 

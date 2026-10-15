@@ -62,10 +62,11 @@ signature so preserved preupdate snapshots are also converted.
 
 **(178) Liquify: active ownership and evidence**
 
-Main is `17b438c`; Liquify remains unmerged. Root candidate `tmp/s49-integration` at `149fc7a`
-combines material `72f686f`, raster `ccdd286`, sampler `effb239`, the named-gallery helper correction,
+Main is `17b438c`; Liquify remains unmerged. Root candidate `tmp/s49-integration`
+combines material `72f686f`, raster `acc9b02`, sampler `effb239`, the named-gallery helper correction,
 and exact inverse batching. Harvest only clean worker commits; the next raster delta starts at
-`ccdd286`. Preserve current main documentation rather than importing workers' historical copies.
+`acc9b02`. The live synchronous view refusal assertion is intentionally still red on that worker
+checkpoint; its focused fix and restored proof are next. Preserve current main documentation rather than importing workers' historical copies.
 
 - **Root integration and exact batching.** Existing `PixelOps.parallelMap` fans out disjoint point
   batches and raster row strips over a shared immutable prepared field. Scalar arithmetic, global
@@ -112,6 +113,10 @@ and exact inverse batching. Harvest only clean worker commits; the next raster d
   provenance hashes. Model `afef15c`: five fault groups/14 failed executions across13 methods,
   restored13/13. Source is integrated. Evidence:
   `~/PaintWork/evidence/s49-liquify-material-{format,model}/`; do not repeat or cherry-pick again.
+
+**Restored Release batching correctness:** both new logic methods passed, followed by all 18 native
+source/pixel fixtures in a separately opted-in method (1/1, zero skips). The first selection omitted
+that opt-in and skipped it; do not report that run alone as complete. No optimized timing was run.
 
 **Native queue:** the owner is using the Mac and will notify when finished; performance measurement
 is deferred. Root Release build succeeded; slot2, simulator `80BE77F5-9118-4CDD-854D-07C3E9A9009B`,
