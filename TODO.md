@@ -5,8 +5,8 @@ The owner's asks. [BUGS.md](BUGS.md) is for what *we* find.
 **Session 49 (2026-10-14):** the owner asked to continue through every actionable item, stopping only
 for genuinely required input or context degradation. Agent count is unrestricted for now; usage
 conservation and output quality take priority over speed. Use focused delegation and cheaper models
-for routine work, with occasional queue reports. The owner asked to work independently while asleep until 10 a.m. Toronto time; that time has now
-passed. Raster scope and fixed exterior pixels for vector selections are ruled below.
+for routine work, with occasional queue reports. The owner asked to work independently while asleep
+until 10 a.m. Toronto time. Raster scope and fixed exterior pixels for vector selections are ruled below.
 
 ## How to read and keep this file
 
@@ -115,9 +115,11 @@ why: pictures handed to Core Animation faster than the render server frees them)
       modes need an updated build (unknown modes in that build silently run playback). Physical effect
       baseline completed at 4096² and 2048×1024, PERFORMANCE §30.6; after-build checks remain.
       Automatic re-sign installed updated main `f813346` at 01:08 Toronto on 2026-10-15 while the
-      session was usage-limited. Full regression completed 5694 tests. Isolated triage found a continuous-slider test
-      precondition error and an unconditional benchmark cap; their corrected branch passes touched
-      UI and still needs Debug/Release gates. An intermittent Blend Mode menu failure remains open. Confirm the current scene is saved and iPad unlocked before restarting probes.
+      session was usage-limited. Full regression completed 5694 tests. Isolated triage found a
+      continuous-slider test precondition error and an unconditional benchmark cap; corrected touched
+      UI passes, and final Debug/Release each ran 5124 tests (5120 passed, four skipped, zero failures),
+      matching the source census. An intermittent Blend Mode menu failure remains open. Confirm the
+      current scene is saved and iPad unlocked before restarting probes.
 
 ## (178) Liquify tool
 
