@@ -96,15 +96,12 @@ final class LiquifyUITests: PaintUITestCase {
         }
         XCTAssertEqual(changeResult, .completed, "The linked drawing must visibly change after the Liquify gesture")
         let reshaped = readScreenNow(region).map(dark)
-        print("LIQUIFY BEFORE REOPEN frame=\(canvas.frame) paper=\(paper) label=\(canvas.label) dark=\(reshaped.filter { $0 }.count)")
         XCTAssertTrue(app.sliders["interpolate.tSlider"].exists, "Liquify must leave the frame linked and its Timing slider available")
         attachScreenshot(app, "liquify-linked-reshaped")
         reopenSavedScene(app, named: name)
         let reopenedPaper = paperRect(in: canvas)
         let reopenedRegion = paperPatch(canvas, reopenedPaper, x: 0.6...0.85, y: 0.25...0.45)
         attachScreenshot(app, "liquify-linked-cold-reopen-before-compare")
-        let read = readScreenNow(reopenedRegion).map(dark)
-        print("LIQUIFY AFTER REOPEN frame=\(canvas.frame) paper=\(reopenedPaper) label=\(canvas.label) dark=\(read.filter { $0 }.count) changed=\(zip(read, reshaped).filter { $0 != $1 }.count)")
         let reopened = NSPredicate { _, _ in self.readScreenNow(reopenedRegion).map(self.dark) == reshaped }
         wait(for: [XCTNSPredicateExpectation(predicate: reopened, object: nil)], timeout: 15)
         app.otherElements["timeline.cel.0.2"].tap()
@@ -149,7 +146,7 @@ final class LiquifyUITests: PaintUITestCase {
         let name = "Liquify " + UUID().uuidString.prefix(8)
         let nameField = app.textFields["timeline.projectNameField"]
         nameField.tap(); nameField.typeText(name + "\n")
-        saveEditorAndReturnToGallery(app)
+        saveEditorAndReturnToGallery(app, named: name)
         app.terminate(); app.launchArguments = []; app.launch()
         let tile = app.staticTexts.matching(NSPredicate(format: "label == %@", name)).firstMatch
         XCTAssertTrue(tile.waitForExistence(timeout: 10), "saved scene")

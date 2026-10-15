@@ -70,8 +70,8 @@ but `saveEditorAndReturnToGallery` searches only for Untitled. Earlier used simu
 unrelated Untitled tile, masking the bad precondition. Root Release candidate `7ef3dd7` fails
 before Liquify; the accessibility hierarchy contains its exact saved name. Reuse the shared
 helper with an explicit expected name, retaining Untitled as the default for existing callers.
-The same named-save premise also occurs in the modes/profile UI; update its call after the current
-linked Release build. Root owns both calls. The helper fix is `be34826`; linked rerun is underway.
+Both named-save calls now pass their actual scene name through the shared helper. The linked
+Release rerun passed; the modes/profile call will run in the final touched UI class.
 
 **Status** — asked 2026-10-12. Integration candidate is being assembled outside main.
 Material app source `900331c` passed the restored 54-method slice, including the rendered cut
