@@ -102,6 +102,14 @@ after a refused render. Reset the existing displayed/document coverage sentinels
 changes. Eraser-only isolated pictures are already nonnil transparent images; remove the stale
 comment saying otherwise rather than inventing a new result type.
 
+**UI fixture correction (2026-10-15):** the cold raster Liquify test only drew on the default
+vector layer; `commitPendingShape` does not convert it to raster. Its previous pass proves a vector
+workflow, not raster authoring. Add the existing `addRasterLayer` step before drawing and rerun the
+same visible/Undo/Redo/reopen assertions. The other seeded mixed-backing/eraser UI cases genuinely
+author raster backing and remain valid. Physical first-use preparation also found that the backing
+seed is simulator-only and prewarms its reference; use an explicit raster-layer app flow for device
+correctness, and report native component cost separately from uninstrumented app presentation.
+
 *"It should be placed to the left of the brush tool in the top menu. When selected, it acts sort of like
 a brush (you can control the brush type, size, etc), and otherwise it does basically what a normal
 liquify tool does. The opacity slider turns into the liquify power, and the brush type also controls the
