@@ -61,9 +61,12 @@ their files are repaired. Build `2974b33` broke this rule and lost the owner's k
 **Exact-map batching hypothesis (2026-10-15):** the long patterned inverse remains serial per
 pixel after the measured evaluation reduction. Test bounded independent row batches externally,
 sharing one read-only prepared field and keeping every pixel's arithmetic/order unchanged. Compare
-all source bits, evaluations and failures against the frozen native-matching fixture; measure before
-changing production. Any adoption must reuse existing fan-out, preserve failure propagation and
-window memory accounting, and avoid parallelizing arbitrary callbacks with mutable captured state.
+all source bits, evaluations and failures against the frozen native-matching fixture before
+changing production. Four alternating external pairs now preserve all84,956 source Doubles and
+179,020,536 evaluations exactly, with zero failures; contended Mac batches take1.62–2.29seconds
+versus5.39–8.66serial. This is not native/device qualification. Evidence:
+`~/PaintWork/evidence/s49-liquify-row-batches/README.md`. Any adoption must reuse existing fan-out,
+preserve failure propagation/window accounting and never parallelize arbitrary mutable callbacks.
 
 **Settlement refusal review (2026-10-15):** a refused floating-pixel landing currently lets
 Move, Duplicate, Bake, resize, frame/layer changes, eyedropper and saving continue. Fix the shared
