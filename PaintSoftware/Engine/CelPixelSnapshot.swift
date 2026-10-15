@@ -41,10 +41,11 @@ struct CelPixelSnapshot {
         let width = Int(destinationSize.width), height = Int(destinationSize.height)
         let rows = max(1, LiquifyField.inverseBatchSize / max(1, width))
         let batches = (height + rows - 1) / rows
-        // Source renderer (up to RGBA16) + normalized RGBA8; all strip outputs + their joined copy.
+        // Two source surfaces at up to RGBA16 also cover the later image + normalized RGBA8;
+        // all strip outputs coexist with their joined copy.
         // The strip scope ends before makeImage creates its provider copy. parallelMap briefly
         // owns two arrays of optional strip headers, never two copies of their pixel payloads.
-        return Int(sourceSize.width) * Int(sourceSize.height) * 12 + width * height * 8
+        return Int(sourceSize.width) * Int(sourceSize.height) * 16 + width * height * 8
             + batches * MemoryLayout<[UInt8]?>.stride * 2
     }
 
@@ -93,7 +94,17 @@ struct CelPixelSnapshot {
                 return failed ? nil : pixels
             }
             guard strips.allSatisfy({ $0 != nil }) else { return nil }
-            return strips.flatMap { $0! }
+            var joined = [UInt8](repeating: 0, count: width * height * 4)
+            joined.withUnsafeMutableBytes { output in
+                var offset = 0
+                for case let strip? in strips {
+                    strip.withUnsafeBytes { input in
+                        output.baseAddress!.advanced(by: offset).copyMemory(from: input.baseAddress!, byteCount: input.count)
+                    }
+                    offset += strip.count
+                }
+            }
+            return joined
         }()
         guard let warped,
               let image = CoreGraphicsCompositor.makeImage(fromPremultiplied: warped,
