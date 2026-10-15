@@ -58,6 +58,12 @@ their files are repaired. Build `2974b33` broke this rule and lost the owner's k
 
 ## (178) Liquify tool
 
+**Fresh Release UI fixture finding (2026-10-15):** the named linked-frame scene saves correctly,
+but `saveEditorAndReturnToGallery` searches only for Untitled. Earlier used simulators had an
+unrelated Untitled tile, masking the bad precondition. Root Release candidate `7ef3dd7` fails
+before Liquify; the accessibility hierarchy contains its exact saved name. Reuse the shared
+helper with an explicit expected name, retaining Untitled as the default for existing callers.
+
 **Status** — asked 2026-10-12. Integration candidate is being assembled outside main.
 Material baseline `8b76292` passed 36 focused methods; raster baseline `7d6d4eb` passed
 the two restored scratch oracles after separate union, stale-window and double-pose faults.
