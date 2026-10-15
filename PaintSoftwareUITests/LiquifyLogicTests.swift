@@ -835,7 +835,7 @@ final class LiquifyLogicTests: XCTestCase {
         XCTAssertEqual(redone.samples, changed.samples)
     }
 
-    private func pendingGesture(inkCopies: Int = 1) throws -> (CanvasManager, VectorCanvas, VectorStroke, LiquifySession, ElementEditProcedure) {
+    private func pendingGesture(inkCopies: Int = 1) throws -> (CanvasManager, VectorCanvas, VectorStroke, LiquifySession, CelContentProcedure) {
         let manager = CanvasFixture.manager(); manager.addVectorLayer()
         let layer = manager.layers[1], canvas = try XCTUnwrap(layer.cels[0].vector)
         let ink = stroke([CGPoint(x: 10, y: 24), CGPoint(x: 50, y: 24)])
@@ -848,7 +848,7 @@ final class LiquifyLogicTests: XCTestCase {
         session.samples = StrokeSamples([VectorSample(x: 32, y: 24), VectorSample(x: 32, y: 48)], channels: .pressureOnly)
         session.window = CGRect(x: 0, y: 0, width: 64, height: 64)
         manager.holdLiquify(&session)
-        let procedure = try XCTUnwrap(manager.liveElementEdit?.procedure)
+        let procedure = try XCTUnwrap(manager.liveCelContentEdit?.procedure)
         manager.commitLiquify(session)
         return (manager, canvas, ink, session, procedure)
     }
@@ -858,12 +858,12 @@ final class LiquifyLogicTests: XCTestCase {
         XCTAssertTrue(procedure.isPending)
         XCTAssertEqual(procedure.resolutionCount, 0, "normal lift must perform no geometry mapping on main")
         XCTAssertTrue(manager.history.undoStack.isEmpty)
-        let picture = try XCTUnwrap(manager.liveElementEdit).picture()
-        _ = try XCTUnwrap(manager.liveElementEdit).picture()
+        let picture = try XCTUnwrap(manager.liveCelContentEdit).picture()
+        _ = try XCTUnwrap(manager.liveCelContentEdit).picture()
         XCTAssertEqual(procedure.resolutionCount, 1, "repeated presentation reads reuse one resolved tick")
         XCTAssertNotEqual(procedure.resolve(session.elementsBefore).first?.id, nil)
         procedure.didPresent()
-        XCTAssertNil(manager.liveElementEdit)
+        XCTAssertNil(manager.liveCelContentEdit)
         XCTAssertEqual(manager.history.undoStack.count, 1)
         XCTAssertEqual(procedure.resolutionCount, 1, "landing and committing reuse the worker value")
         guard case .stroke(let changed) = canvas.elements[0], case .stroke(let shown) = picture.elements[0] else { return XCTFail("expected ink") }
@@ -918,10 +918,10 @@ final class LiquifyLogicTests: XCTestCase {
         procedure.didPresent()
         XCTAssertEqual(canvas.elements.map(\.id), [ink.id, fresh.id])
         XCTAssertTrue(manager.history.undoStack.isEmpty)
-        XCTAssertNil(manager.liveElementEdit)
+        XCTAssertNil(manager.liveCelContentEdit)
     }
 
-    private func startInFlightResolve(_ procedure: ElementEditProcedure, original: [VectorElement]) throws -> DispatchSemaphore {
+    private func startInFlightResolve(_ procedure: CelContentProcedure, original: [VectorElement]) throws -> DispatchSemaphore {
         let finished = DispatchSemaphore(value: 0)
         DispatchQueue.global(qos: .userInitiated).async {
             _ = procedure.resolve(original)
@@ -940,7 +940,7 @@ final class LiquifyLogicTests: XCTestCase {
         XCTAssertEqual(finished.wait(timeout: .now() + 5), .success)
         XCTAssertEqual(procedure.resolutionCount, 1, "the explicit boundary waits for the in-flight value instead of remapping it")
         XCTAssertEqual(manager.history.undoStack.count, 1)
-        XCTAssertNil(manager.liveElementEdit)
+        XCTAssertNil(manager.liveCelContentEdit)
     }
 
     @MainActor
@@ -955,7 +955,7 @@ final class LiquifyLogicTests: XCTestCase {
         XCTAssertEqual(finished.wait(timeout: .now() + 5), .success)
         XCTAssertEqual(procedure.resolutionCount, 1, "snapshot capture shares the already-running geometry producer")
         XCTAssertEqual(manager.history.undoStack.count, 1)
-        XCTAssertNil(manager.liveElementEdit)
+        XCTAssertNil(manager.liveCelContentEdit)
     }
 
     @MainActor
@@ -966,7 +966,7 @@ final class LiquifyLogicTests: XCTestCase {
         let saved = expectation(description: "pending gesture snapshot saved")
         ProjectStore.save(manager, to: url) { saved.fulfill() }
         wait(for: [saved], timeout: 30)
-        XCTAssertNil(manager.liveElementEdit)
+        XCTAssertNil(manager.liveCelContentEdit)
         XCTAssertEqual(manager.history.undoStack.count, 1)
         let reopened = try XCTUnwrap(ProjectStore.load(from: url))
         let savedCanvas = try XCTUnwrap(reopened.layers.first { $0.id == session.layerID }?.cels.first { $0.id == session.celID }?.vector)

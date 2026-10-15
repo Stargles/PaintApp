@@ -62,6 +62,16 @@ signature so preserved preupdate snapshots are also converted.
 
 **(178) Liquify: active ownership and evidence**
 
+Root candidate `tmp/s49-integration` combines material `8b76292` and raster `7d6d4eb`,
+with main at `17b438c`. This is an unqualified integration checkpoint, not a main merge.
+Linked flight records a successful nonempty result 29.05 seconds after lift in Debug; no commit
+refusal or identity mismatch. Root owns current combined Release profiling. Material is finishing
+linked native-fill/geometry lifetime proofs beyond the baseline; raster owns scratch landscape
+and sampling adapters; `raster_sampler` owns the shared bounded Lanczos implementation.
+The latter external Metal prototype has exact full/cropped/window parity; native cost and memory
+qualification remain, with no arbitrary minification cutoff or silent Core Graphics fallback.
+
+
 - **Feature/material — `tmp/s49-liquify`, agent `material_resume`.** Required placement and immutable
   spatial material replace old Distort/rest ownership. Linked frames preserve source links; raster
   scope and fixed exterior vector pixels are ruled. Storage baseline `afef15c` passed 60/60.
@@ -184,7 +194,7 @@ flickers on the iPad; the different two-fill flash is now (190). (178) includes 
 **Liquify raster scope ruled:** *"Move all raster pixels; leave editable objects alone."* This includes
 flattened pictures/text that old raster layers can no longer distinguish from paint. **Vector selection
 edge is also ruled:** *"B — Keep outside ink fixed."* Keep every exterior pixel fixed through spatial
-material deformation while retaining editable strokes. The transformed-raster appearance choice above is now pending; the Liquify scope itself is settled.
+material deformation while retaining editable strokes. The transformed-raster appearance choice C above is accepted subject to compact code and measured cost; the Liquify scope itself is settled.
 
 **After the October 15 install:**
 Once this build has repaired his scenes and they look right: retire the one-shot repairs.

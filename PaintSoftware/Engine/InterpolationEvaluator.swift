@@ -128,7 +128,8 @@ enum InterpolationEvaluator {
                          content: ContentProvider,
                          subject: [VectorElement] = [],
                          guides: [GuideStroke] = [],
-                         options: Options = Options()) -> Evaluation? {
+                         options: Options = Options(),
+                         didApplyDeformation: ((Int, LiquifyField) -> Void)? = nil) -> Evaluation? {
         guard recipe.isWellFormed else { return nil }
 
         let count = recipe.references.count
@@ -174,13 +175,14 @@ enum InterpolationEvaluator {
                 groupID: logicalGroup(edit.groupID, recipe: recipe)))
         }
         // Stream one field through all three collections; no scene-wide retained field cache.
-        for gesture in recipe.deformations {
+        for (index, gesture) in recipe.deformations.enumerated() {
             let field = LiquifyField(gesture)
             let operation = InkMaterialOperation(gesture, supportBounds: field.replacementBounds)
             let resolver = LiquifyDeformation.CaptureResolver(captures: gesture.captures, members: members)
             forward = deformedShown(forward, gesture: gesture, operation: operation, field: field, resolver: resolver, warps: warps, fallback: fallback)
             backward = deformedShown(backward, gesture: gesture, operation: operation, field: field, resolver: resolver, warps: warps, fallback: fallback)
             localInk = deformedShown(localInk, gesture: gesture, operation: operation, field: field, resolver: resolver, warps: warps, fallback: fallback)
+            didApplyDeformation?(index, field)
         }
         return Evaluation(forward: forward.map(\.element), backward: backward.map(\.element),
             localEdits: localInk.map(\.element), forwardWeight: recipe.mode == .reproject ? 1 : 1 - local,
@@ -702,24 +704,46 @@ enum InterpolationEvaluator {
     /// there are edits to draw.
     static func composite(_ evaluation: Evaluation, size: CGSize,
                           quality: RenderQuality = .full) -> UIImage {
+        // The existing full renderer always produces an image. Only the bounded direct draw can
+        // refuse a material tile, and that answer travels through the optional window overload.
+        guard let image = compositeResult(evaluation, size: size, window: nil, quality: quality) else {
+            preconditionFailure("Full interpolation rendering did not produce an image")
+        }
+        return image
+    }
+
+    static func composite(_ evaluation: Evaluation, size: CGSize, window: CGRect,
+                          quality: RenderQuality = .full) -> UIImage? {
+        compositeResult(evaluation, size: size, window: window, quality: quality)
+    }
+
+    private static func compositeResult(_ evaluation: Evaluation, size: CGSize, window requested: CGRect?,
+                                        quality: RenderQuality) -> UIImage? {
         let bounds = CGRect(origin: .zero, size: size)
+        let window = requested?.integral.intersection(bounds) ?? bounds
+        let local = CGRect(origin: .zero, size: window.size)
         let format = PixelOps.transparentFormat()
         format.preferredRange = .standard
-
-        let forward = VectorCanvas(size: size, elements: evaluation.forward).render(quality: quality)
-        let backward = VectorCanvas(size: size, elements: evaluation.backward).render(quality: quality)
-        let blended = UIGraphicsImageRenderer(size: size, format: format).image { _ in
-            forward.draw(in: bounds, blendMode: .normal, alpha: evaluation.forwardWeight)
-            backward.draw(in: bounds, blendMode: .normal, alpha: evaluation.backwardWeight)
+        func render(_ elements: [VectorElement]) -> UIImage? {
+            let canvas = VectorCanvas(size: size, elements: elements)
+            if requested == nil { return canvas.render(quality: quality) }
+            let frozen = canvas.freeze(quality: quality)
+            var completed = false
+            let image = UIGraphicsImageRenderer(size: window.size, format: format).image { ctx in
+                completed = frozen.draw(into: ctx.cgContext,
+                    frameRect: bounds.offsetBy(dx: -window.minX, dy: -window.minY), quality: quality) != nil
+            }
+            return completed ? image : nil
+        }
+        guard let forward = render(evaluation.forward), let backward = render(evaluation.backward) else { return nil }
+        let blended = UIGraphicsImageRenderer(size: window.size, format: format).image { _ in
+            forward.draw(in: local, blendMode: .normal, alpha: evaluation.forwardWeight)
+            backward.draw(in: local, blendMode: .normal, alpha: evaluation.backwardWeight)
         }
         guard !evaluation.localEdits.isEmpty else { return blended }
-
-        let backdrop = VectorImageElement(
-            image: blended,
-            transform: LayerTransform(position: CGPoint(x: size.width / 2, y: size.height / 2),
-                                      scale: 1, rotation: 0))
-        return VectorCanvas(size: size, elements: [.image(backdrop)] + evaluation.localEdits)
-            .render(quality: quality)
+        let backdrop = VectorImageElement(image: blended,
+            transform: LayerTransform(position: CGPoint(x: window.midX, y: window.midY), scale: 1, rotation: 0))
+        return render([.image(backdrop)] + evaluation.localEdits)
     }
 
     // MARK: - Commit

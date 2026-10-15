@@ -42,7 +42,8 @@ final class LayerHostView: CanvasPlaneView {
 
         bakedImageView.isUserInteractionEnabled = false
         bakedImageView.isHidden = true
-        bakedImageView.translatesAutoresizingMaskIntoConstraints = false
+        bakedImageView.layer.anchorPoint = .zero
+        bakedImageView.layer.position = .zero
 
         strokeView.backgroundColor = .clear
         strokeView.isOpaque = false
@@ -83,10 +84,6 @@ final class LayerHostView: CanvasPlaneView {
         addSubview(strokeView)
         addSubview(fillPlane)
         NSLayoutConstraint.activate([
-            bakedImageView.topAnchor.constraint(equalTo: topAnchor),
-            bakedImageView.bottomAnchor.constraint(equalTo: bottomAnchor),
-            bakedImageView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            bakedImageView.trailingAnchor.constraint(equalTo: trailingAnchor),
             strokeView.topAnchor.constraint(equalTo: topAnchor),
             strokeView.bottomAnchor.constraint(equalTo: bottomAnchor),
             strokeView.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -136,17 +133,17 @@ final class LayerHostView: CanvasPlaneView {
         return true
     }
 
-    /// **The pose the canvas shows this layer through** (`CanvasManager.inkPose`), pushed by
-    /// `CanvasView.Coordinator` on every pass — TODO (124). The stroke view takes it for the live
-    /// stroke and a raster layer's pixels; the fill's plane takes it because a fill is worked out in
-    /// the layer's own space and has to be shown where it will land.
-    var shownPose: PoseMap? {
-        get { strokeView.shownPose }
+    /// The accepted ink and backing placements belong to the same installed base. Ordinary cel
+    /// channels move native ink only; stored pixel tiers retain their container placement.
+    var contentPlacement: CelContentPlacement {
+        get { strokeView.contentPlacement }
         set {
-            guard newValue != strokeView.shownPose else { return }
-            strokeView.shownPose = newValue
-            let pose = newValue.flatMap { $0.inverse == nil ? nil : $0 }
-            fillPlane.layer.transform = pose?.layerTransform ?? CATransform3DIdentity
+            guard newValue != strokeView.contentPlacement else { return }
+            strokeView.contentPlacement = newValue
+            let ink = newValue.ink.flatMap { $0.inverse == nil ? nil : $0 }
+            let backing = newValue.backing.flatMap { $0.inverse == nil ? nil : $0 }
+            fillPlane.layer.transform = ink?.layerTransform ?? CATransform3DIdentity
+            bakedImageView.layer.transform = backing?.layerTransform ?? CATransform3DIdentity
             alignContentMasks()
         }
     }
@@ -241,6 +238,13 @@ final class LayerHostView: CanvasPlaneView {
     /// What is masking this host's content right now — held so the many SwiftUI passes that change
     /// nothing are an identity check rather than a Core Animation write.
     private var contentMaskImage: CGImage?
+    private var backingReplacementHole: CGPath?
+
+    func setBackingReplacementHole(_ hole: CGPath?) {
+        if backingReplacementHole == nil, hole == nil { return }
+        backingReplacementHole = hole
+        alignContentMasks()
+    }
 
     /// Clips this layer's own pixels to `image`'s alpha for as long as it is installed — §6.4's live
     /// feedback, and the reason `ResolvedMask.makeMaskImage()` exists.
@@ -261,19 +265,7 @@ final class LayerHostView: CanvasPlaneView {
         guard contentMaskImage !== image else { return }
         contentMaskImage = image
 
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        for (view, mask) in zip(maskedContentViews, contentMasks) {
-            if let image {
-                mask.contents = image
-                mask.frame = maskFrame(for: view)
-                if view.layer.mask !== mask { view.layer.mask = mask }
-            } else {
-                if view.layer.mask === mask { view.layer.mask = nil }
-                mask.contents = nil
-            }
-        }
-        CATransaction.commit()
+        alignContentMasks()
     }
 
     /// Where a canvas-sized mask sits in `view`'s own coordinates: the host's bounds, shifted back by
@@ -284,19 +276,46 @@ final class LayerHostView: CanvasPlaneView {
     }
 
     private func alignContentMasks() {
-        guard contentMaskImage != nil else { return }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        for (view, mask) in zip(maskedContentViews, contentMasks) {
-            let frame = maskFrame(for: view)
-            if mask.frame != frame { mask.frame = frame }
+        defer { CATransaction.commit() }
+        for (index, pair) in zip(maskedContentViews, contentMasks).enumerated() {
+            let (view, mask) = pair
+            let hole = index == 0 ? backingReplacementHole : nil
+            guard contentMaskImage != nil || hole != nil else {
+                if view.layer.mask === mask { view.layer.mask = nil }
+                mask.contents = nil; mask.mask = nil
+                continue
+            }
+            mask.contents = contentMaskImage
+            mask.backgroundColor = contentMaskImage == nil ? UIColor.white.cgColor : nil
+            if index == 0 {
+                mask.anchorPoint = .zero
+                mask.position = .zero
+                mask.bounds = bounds
+                // The layer alpha mask lives in shown canvas space; backing pixels live at rest.
+                mask.transform = contentMaskImage == nil ? CATransform3DIdentity
+                    : (contentPlacement.backing?.inverse?.layerTransform ?? CATransform3DIdentity)
+            } else { mask.frame = maskFrame(for: view) }
+            if let hole {
+                let path = CGMutablePath()
+                path.addRect(bounds)
+                path.addPath(contentMaskImage == nil ? (contentPlacement.backing?.inverse?.mapped(hole) ?? hole) : hole)
+                let clip = (mask.mask as? CAShapeLayer) ?? CAShapeLayer()
+                clip.fillRule = .evenOdd
+                clip.actions = ["path": NSNull(), "bounds": NSNull(), "position": NSNull()]
+                clip.frame = bounds
+                clip.path = path
+                mask.mask = clip
+            } else { mask.mask = nil }
+            if view.layer.mask !== mask { view.layer.mask = mask }
         }
-        CATransaction.commit()
     }
 
     override func layoutSubviews() {
         super.layoutSubviews()
         fillPlane.bounds = bounds
+        bakedImageView.bounds = bounds
         // The mask layers are not in the view hierarchy, so autolayout does not reach them. Canvas
         // size is fixed for a document's life and a stroke cannot outlive it, so this is belt and
         // braces rather than a live resize path — but a mask frozen at the zero frame it was created

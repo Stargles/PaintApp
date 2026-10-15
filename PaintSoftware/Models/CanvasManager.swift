@@ -1928,7 +1928,7 @@ final class CanvasManager: ObservableObject {
         guard canvasEditDepth == 0 else { return }
         canvasEditDepth += 1
         defer { canvasEditDepth -= 1 }
-        settlePendingElementProcedure()
+        settlePendingCelContentProcedure()
         commitInteractiveFill()
         commitInteractiveShape()
         // Last in the list, because the text overlay draws above the shape overlay and committing
@@ -1951,7 +1951,7 @@ final class CanvasManager: ObservableObject {
     /// editor's channel list stays up through a whole keying session, and an autosave held for as long
     /// as it was up would leave that session's keys out of every saved version.
     var hasInteractiveStatePending: Bool {
-        liveElementEdit?.procedure != nil || fillGestureActive || shapeGestureActive || textGestureActive || selectionEdit != nil
+        liveCelContentEdit?.procedure != nil || fillGestureActive || shapeGestureActive || textGestureActive || selectionEdit != nil
             || gradientEdit != nil || floatingPieceHoldsUnsettledEdit || vectorFloat != nil
     }
 
@@ -4651,7 +4651,7 @@ final class CanvasManager: ObservableObject {
     /// one is committed so it becomes a real step the following `undo()` reverts, instead of the
     /// undo silently hitting the previous action while it lingers.
     private func finalizePendingGesturesForHistoryAction() {
-        settlePendingElementProcedure()
+        settlePendingCelContentProcedure()
         // A drag still open on a Move box is dropped, like the fill and the shape under a finger
         // below; `cancelBoxNudge` says why it is not settled instead.
         cancelBoxNudge()

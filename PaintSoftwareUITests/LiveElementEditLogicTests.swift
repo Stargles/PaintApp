@@ -89,14 +89,9 @@ final class LiveElementEditLogicTests: XCTestCase {
         return bytes
     }
 
-    /// The window's picture as the host draws it: `drawEditWindow` into a window-sized bitmap.
-    private func windowPicture(_ vector: VectorCanvas, _ live: LiveElementEdit) -> [UInt8] {
-        let format = PixelOps.transparentFormat()
-        format.preferredRange = .standard
-        let image = UIGraphicsImageRenderer(size: live.window.size, format: format).image { ctx in
-            vector.drawEditWindow(of: live.elements, in: live.window, into: ctx.cgContext, rewriting: live.rewriting)
-        }
-        return rgba(image)
+    /// The shared held renderer, compared with the ordinary committed picture below.
+    private func windowPicture(_ live: LiveCelContentEdit) -> [UInt8] {
+        live.presentation(placement: .identity).map { rgba($0.image) } ?? []
     }
 
     /// **Asserts the whole claim for one held tick**: the window's picture is the written canvas's
@@ -104,8 +99,8 @@ final class LiveElementEditLogicTests: XCTestCase {
     private func assertWindowIsExact(_ manager: CanvasManager, _ vector: VectorCanvas,
                                      file: StaticString = #filePath, line: UInt = #line) throws {
         let standing = rgba(vector.render())
-        let live = try XCTUnwrap(manager.liveElementEdit, "an edit is held", file: file, line: line)
-        let held = windowPicture(vector, live)
+        let live = try XCTUnwrap(manager.liveCelContentEdit, "an edit is held", file: file, line: line)
+        let held = windowPicture(live)
         XCTAssertTrue(manager.commitSelectionEdit(), "the edit changed something", file: file, line: line)
         let written = rgba(vector.render())
         let width = Int(side), window = live.window
@@ -153,14 +148,14 @@ final class LiveElementEditLogicTests: XCTestCase {
             XCTAssertEqual(manager.history.undoStack.count, steps, "tick \(tick) recorded a step")
         }
         XCTAssertEqual(announced - atBegin, 20, "every tick told the canvas")
-        XCTAssertEqual(manager.liveElementEdit?.tick, 20, "and the window counted them")
-        XCTAssertEqual(manager.liveElementEdit?.elements.first?.colours.first?.red ?? -1,
+        XCTAssertEqual(manager.liveCelContentEdit?.tick, 20, "and the window counted them")
+        XCTAssertEqual(manager.liveCelContentEdit?.elements.first?.colours.first?.red ?? -1,
                        1, accuracy: 1e-9, "the newest tick is what the window holds")
         manager.cancelSelectionEdit()
     }
 
     /// **The commit is the one write, and the window goes with it.** One version step, one undo step,
-    /// the document holds the list the last tick held, and `liveElementEdit` is nil with the canvas
+    /// the document holds the list the last tick held, and `liveCelContentEdit` is nil with the canvas
     /// told.
     ///
     /// Mutation caught: `recordElementEdit` not writing (a held list that only ever lived in the
@@ -172,7 +167,7 @@ final class LiveElementEditLogicTests: XCTestCase {
         manager.onHeldPictureMoved = { announced += 1 }
         XCTAssertTrue(manager.beginSelectionEdit(.color))
         for tick in 1...5 { manager.previewSelectionEdit(.color(colour(Double(tick) / 5, 0, 0))) }
-        let heldList = signature(manager.liveElementEdit?.elements ?? [])
+        let heldList = signature(manager.liveCelContentEdit?.elements ?? [])
         XCTAssertFalse(heldList.isEmpty, "fixture: an edit is held")
         let before = announced
 
@@ -180,7 +175,7 @@ final class LiveElementEditLogicTests: XCTestCase {
         XCTAssertEqual(signature(vector.elements), heldList, "the document holds the last tick's list")
         XCTAssertEqual(vector.version, version + 1, "one write")
         XCTAssertEqual(manager.history.undoStack.count, steps + 1, "one step")
-        XCTAssertNil(manager.liveElementEdit, "the window is gone")
+        XCTAssertNil(manager.liveCelContentEdit, "the window is gone")
         XCTAssertGreaterThan(announced, before, "and the canvas was told, so the host takes it down")
         for id in caught {
             XCTAssertEqual(vector.elements.first { $0.id == id }?.colours.first?.red ?? -1, 1, accuracy: 1e-9)
@@ -196,9 +191,9 @@ final class LiveElementEditLogicTests: XCTestCase {
         let before = signature(vector.elements), version = vector.version
         XCTAssertTrue(manager.beginSelectionEdit(.color))
         manager.previewSelectionEdit(.color(colour(0, 1, 0)))
-        XCTAssertNotNil(manager.liveElementEdit)
+        XCTAssertNotNil(manager.liveCelContentEdit)
         manager.cancelSelectionEdit()
-        XCTAssertNil(manager.liveElementEdit)
+        XCTAssertNil(manager.liveCelContentEdit)
         XCTAssertEqual(signature(vector.elements), before)
         XCTAssertEqual(vector.version, version, "nothing was ever written, so nothing needed putting back")
     }
@@ -211,9 +206,9 @@ final class LiveElementEditLogicTests: XCTestCase {
         let (manager, _, vector, _) = scene()
         let version = vector.version, steps = manager.history.undoStack.count
         XCTAssertTrue(manager.beginSelectionEdit(.color))
-        XCTAssertNotNil(manager.liveElementEdit, "the window is up at the open")
+        XCTAssertNotNil(manager.liveCelContentEdit, "the window is up at the open")
         XCTAssertFalse(manager.commitSelectionEdit())
-        XCTAssertNil(manager.liveElementEdit)
+        XCTAssertNil(manager.liveCelContentEdit)
         XCTAssertEqual(vector.version, version)
         XCTAssertEqual(manager.history.undoStack.count, steps)
     }
@@ -242,7 +237,7 @@ final class LiveElementEditLogicTests: XCTestCase {
         let (manager, _, vector, caught) = scene()
         _ = vector.render()
         XCTAssertTrue(manager.beginSelectionEdit(.color))
-        let live = try XCTUnwrap(manager.liveElementEdit)
+        let live = try XCTUnwrap(manager.liveCelContentEdit)
         XCTAssertLessThan(live.window.width * live.window.height, side * side / 2, "a window, not the canvas")
         XCTAssertEqual(live.window, live.window.integral, "whole pixels, so the clip is not antialiased")
         for id in caught {
@@ -280,9 +275,9 @@ final class LiveElementEditLogicTests: XCTestCase {
         let (manager, _, vector, _) = scene()
         _ = vector.render()
         XCTAssertTrue(manager.beginSelectionEdit(.size))
-        let opened = try XCTUnwrap(manager.liveElementEdit).window
+        let opened = try XCTUnwrap(manager.liveCelContentEdit).window
         manager.previewSelectionEdit(.size(CGFloat(SelectionEditKind.sizeRange.upperBound)))
-        XCTAssertEqual(try XCTUnwrap(manager.liveElementEdit).window, opened, "the window does not grow with the drag")
+        XCTAssertEqual(try XCTUnwrap(manager.liveCelContentEdit).window, opened, "the window does not grow with the drag")
         try assertWindowIsExact(manager, vector)
     }
 
@@ -306,7 +301,7 @@ final class LiveElementEditLogicTests: XCTestCase {
         _ = vector.render()
         XCTAssertTrue(manager.beginSelectionEdit(.color))
         manager.previewSelectionEdit(.color(colour(0.9, 0.2, 0.2)))
-        XCTAssertEqual(manager.liveElementEdit?.elements.count, 2, "the held list is the split one")
+        XCTAssertEqual(manager.liveCelContentEdit?.elements.count, 2, "the held list is the split one")
         XCTAssertEqual(vector.elements.count, 1, "the document is not split yet")
         try assertWindowIsExact(manager, vector)
     }
@@ -342,7 +337,7 @@ final class LiveElementEditLogicTests: XCTestCase {
         let steps = manager.history.undoStack.count
 
         XCTAssertTrue(manager.beginSelectionEdit(.color))
-        XCTAssertNil(manager.liveElementEdit, "no window: the pictures would not agree about where the ink is")
+        XCTAssertNil(manager.liveCelContentEdit, "no window: the pictures would not agree about where the ink is")
         XCTAssertNil(manager.notice, "and nothing is said before there is something to say")
         manager.previewSelectionEdit(.color(colour(0.9, 0.9, 0.1)))
         XCTAssertEqual(manager.notice?.kind, .editShownOnRelease, "the first tick says why nothing moves")
@@ -367,7 +362,7 @@ final class LiveElementEditLogicTests: XCTestCase {
         manager.currentFrame = 6
         select(manager, layerIndex, CGRect(x: 0, y: 0, width: side, height: side))
         XCTAssertTrue(manager.beginSelectionEdit(.color))
-        XCTAssertNotNil(manager.liveElementEdit)
+        XCTAssertNotNil(manager.liveCelContentEdit)
         manager.cancelSelectionEdit()
     }
 
@@ -384,7 +379,7 @@ final class LiveElementEditLogicTests: XCTestCase {
         vector.addFill(element)
         let before = signature(vector.elements), version = vector.version, steps = manager.history.undoStack.count
         XCTAssertTrue(manager.beginGradientEdit(elementID: element.id))
-        XCTAssertNotNil(manager.liveElementEdit, "the panel's window is up")
+        XCTAssertNotNil(manager.liveCelContentEdit, "the panel's window is up")
 
         manager.setGradientAngle(.pi / 2)
         manager.setGradientColour(.start, to: .red)
@@ -395,7 +390,7 @@ final class LiveElementEditLogicTests: XCTestCase {
         XCTAssertEqual(manager.history.undoStack.count, steps)
 
         XCTAssertTrue(manager.commitGradientEdit())
-        XCTAssertNil(manager.liveElementEdit)
+        XCTAssertNil(manager.liveCelContentEdit)
         XCTAssertEqual(vector.version, version + 1, "one write")
         XCTAssertEqual(manager.history.undoStack.count, steps + 1, "one step")
         XCTAssertEqual(try XCTUnwrap(vector.elements.first?.fill?.gradient).angle, .pi / 2, accuracy: 1e-6)

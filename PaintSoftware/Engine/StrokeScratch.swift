@@ -76,6 +76,27 @@ final class StrokeScratch: MaterialDabTarget {
     let canvasSize: CGSize
     let role: Role
 
+    /// Captured once at touch-down. Placement and source identity cannot change under this scratch.
+    struct CelContent {
+        let backing: CelPixelSnapshot?
+        let ink: CelContentPicture.Ink
+        let placement: CelContentPlacement
+    }
+    let celContent: CelContent?
+    private var contentPresentation: (version: Int, value: CelContentPicture.RenderedWindow)?
+
+    /// The existing window version also owns the complete shown picture. A recreated window drops
+    /// this memo with its other image memos, so version zero never aliases an earlier texture.
+    var renderedCelContent: CelContentPicture.RenderedWindow? {
+        guard let celContent, let window, let image else { return nil }
+        if let cached = contentPresentation, cached.version == window.version { return cached.value }
+        let picture = CelContentPicture(size: canvasSize, window: windowRect,
+            backing: celContent.backing, patch: nil, ink: celContent.ink, inkPatch: image)
+        guard let rendered = picture.rendered(placement: celContent.placement) else { return nil }
+        contentPresentation = (window.version, rendered)
+        return rendered
+    }
+
     /// **The stroke's own opacity — BRUSH.md §2.11's cap, applied once when the window merges.**
     /// Stored rather than passed to `commit`, because the display needs the same number (`.additive`
     /// shows the window at this alpha, `.subtractive` punches the backdrop with it) and two callers
@@ -126,12 +147,13 @@ final class StrokeScratch: MaterialDabTarget {
     private static let minimumPad: CGFloat = 64
 
     init(canvasSize: CGSize, role: Role, opacity: CGFloat = 1, blendMode: CGBlendMode = .normal,
-         texture: BrushTextureSettings? = nil) {
+         texture: BrushTextureSettings? = nil, celContent: CelContent? = nil) {
         self.canvasSize = canvasSize
         self.role = role
         self.opacity = opacity
         self.blendMode = blendMode
         self.texture = texture
+        self.celContent = celContent
     }
 
     // MARK: - Reading
@@ -355,6 +377,7 @@ final class StrokeScratch: MaterialDabTarget {
                                          canvasOrigin: windowRect.origin)
         punchedImage = nil
         texturedImage = nil
+        contentPresentation = nil
     }
 
     // MARK: - Commit
@@ -446,6 +469,7 @@ final class StrokeScratch: MaterialDabTarget {
         // trusted to notice — see `image` and `windowContents`.
         punchedImage = nil
         texturedImage = nil
+        contentPresentation = nil
         return grown
     }
 

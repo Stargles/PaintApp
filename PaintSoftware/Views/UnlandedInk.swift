@@ -63,7 +63,16 @@ struct UnlandedInk {
         /// Whether the picture *stands in for* the base inside its window rather than sitting over
         /// it — a vector eraser or an element edit. The base is punched out underneath, exactly as it
         /// is for a live one.
-        let replacesBase: Bool
+        enum Mode {
+            case additive
+            case localReplacement
+            case celContent(CGPath)
+        }
+        let mode: Mode
+        var replacesBase: Bool {
+            if case .additive = mode { return false }
+            return true
+        }
         enum Contents {
             case image(UIImage)
             case surface(WindowSurfaceView.FrozenWindow)
@@ -93,8 +102,45 @@ struct UnlandedInk {
             self.version = version
             self.windowRect = windowRect
             self.alpha = alpha
-            self.replacesBase = replacesBase
+            self.mode = replacesBase ? .localReplacement : .additive
             self.contents = contents
+        }
+
+        init(id: Int, version: Int, windowRect: CGRect, replacing footprint: CGPath, contents: Contents) {
+            self.id = id
+            self.version = version
+            self.windowRect = windowRect
+            self.alpha = 1
+            self.mode = .celContent(footprint)
+            self.contents = contents
+        }
+
+        func footprint(placement: CelContentPlacement) -> CGPath {
+            if case .celContent(let path) = mode { return path }
+            let local = CGPath(rect: windowRect, transform: nil)
+            return placement.ink?.mapped(local) ?? local
+        }
+
+        /// The wrapper has no pixel storage. Its mask lives in the common shown space, while old
+        /// additive/eraser textures keep the same origin-anchored local pose they have always used.
+        func makeCanvasView(size: CGSize, placement: CelContentPlacement) -> UIView {
+            let wrapper = UIView(frame: CGRect(origin: .zero, size: size))
+            let image = contents.makeView()
+            image.frame = windowRect
+            image.contentMode = .scaleToFill
+            image.isUserInteractionEnabled = false
+            if case .celContent = mode { wrapper.addSubview(image) }
+            else {
+                let local = UIView(frame: wrapper.bounds)
+                local.layer.anchorPoint = .zero
+                local.layer.position = .zero
+                local.layer.transform = placement.ink?.layerTransform ?? CATransform3DIdentity
+                local.addSubview(image)
+                wrapper.addSubview(local)
+            }
+            wrapper.alpha = alpha
+            wrapper.isUserInteractionEnabled = false
+            return wrapper
         }
 
         init(id: Int, version: Int, windowRect: CGRect, alpha: CGFloat,
@@ -124,8 +170,8 @@ struct UnlandedInk {
                 if view.layer.mask != nil { view.layer.mask = nil }
                 return
             }
-            var local = CGAffineTransform(translationX: -picture.windowRect.minX,
-                                          y: -picture.windowRect.minY)
+            var local = CGAffineTransform(translationX: -view.frame.minX,
+                                          y: -view.frame.minY)
             let mask = (view.layer.mask as? CAShapeLayer) ?? {
                 let created = CAShapeLayer()
                 created.actions = ["path": NSNull(), "bounds": NSNull(), "position": NSNull()]
@@ -147,23 +193,25 @@ struct UnlandedInk {
     /// Core Graphics booleans are shared with selection composition; no pixel buffers are made.
     /// `covering` contains newer live replacement windows, which also cover held pictures.
     func displayPlan(covering: [CGRect] = []) -> DisplayPlan {
+        displayPlan(placement: .identity, coveringPaths: covering.map { CGPath(rect: $0, transform: nil) })
+    }
+
+    func displayPlan(placement: CelContentPlacement, coveringPaths: [CGPath]) -> DisplayPlan {
         var covered: CGPath?
-        func cover(_ rect: CGRect) {
-            guard !rect.isNull, !rect.isEmpty else { return }
-            let path = CGPath(rect: rect, transform: nil)
+        func cover(_ path: CGPath) {
+            guard !path.isEmpty else { return }
             covered = covered.map { $0.union(path, using: .winding) } ?? path
         }
-        for rect in covering { cover(rect) }
+        for path in coveringPaths { cover(path) }
         var visible: [VisiblePicture] = []
         for picture in pictures.reversed() {
+            let footprint = picture.footprint(placement: placement)
             let clip: CGPath?
-            if let covered, picture.windowRect.intersects(covered.boundingBoxOfPath) {
-                clip = CGPath(rect: picture.windowRect, transform: nil).subtracting(covered, using: .winding)
-            } else {
-                clip = nil
-            }
+            if let covered, footprint.boundingBoxOfPath.intersects(covered.boundingBoxOfPath) {
+                clip = footprint.subtracting(covered, using: .winding)
+            } else { clip = nil }
             visible.append(VisiblePicture(picture: picture, clip: clip))
-            if picture.replacesBase { cover(picture.windowRect) }
+            if picture.replacesBase { cover(footprint) }
         }
         return DisplayPlan(pictures: visible.reversed(), baseHole: covered)
     }

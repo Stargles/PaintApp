@@ -2379,39 +2379,50 @@ extension CanvasManager {
     /// the "ghost layer" bug: the eraser only ever stamps `Cel.raster`, so content left in
     /// `bakedImage` becomes permanently uneraseable, and any code that reasons about "the raster
     /// tier" (Move's lift, undo snapshots) silently disagrees with what's on screen.
+    struct CelVectorChange {
+        let canvas: VectorCanvas
+        let before: [VectorElement]
+        let after: [VectorElement]
+        let rewriting: Set<UUID>
+    }
+    struct CelRecipeChange {
+        let before: InterpolationRecipe
+        let after: InterpolationRecipe
+
+        var retainedBytes: Int {
+            let beforeIDs = Set(before.deformations.map(\.id)), afterIDs = Set(after.deformations.map(\.id))
+            let changed = before.deformations.filter { !afterIDs.contains($0.id) }
+                + after.deformations.filter { !beforeIDs.contains($0.id) }
+            return max(before.deformations.count, after.deformations.count) * MemoryLayout<LiquifyDeformation>.stride
+                + changed.reduce(0) { total, field in
+                    total + field.path.bytes.count + (field.selection?.count ?? 0)
+                        + field.captures.reduce(0) { sum, capture in
+                            sum + MemoryLayout<LiquifyDeformation.Capture>.stride
+                                + capture.lattice.vertices.count * MemoryLayout<CGPoint>.stride
+                                + capture.lattice.activeCells.count * MemoryLayout<Int>.stride * 2
+                                + capture.inkIDs.count * MemoryLayout<LiquifyDeformation.InkID>.stride * 2
+                        }
+                }
+        }
+    }
+
     func registerUndoableCelChange(layerID: UUID, celID: UUID,
                                     oldRaster: RasterLayerTexture, oldBaked: UIImage?,
                                     newRaster: RasterLayerTexture, newBaked: UIImage?,
+                                    vector: CelVectorChange? = nil, recipe: CelRecipeChange? = nil,
                                     label: HistoryActionLabel) {
-        applyCelChange(layerID: layerID, celID: celID, raster: newRaster, baked: newBaked)
-        registerCelReversal(layerID: layerID, celID: celID,
-                            undoRaster: oldRaster, undoBaked: oldBaked,
-                            redoRaster: newRaster, redoBaked: newBaked,
-                            label: label)
-    }
-
-    /// Registers one step on the global `history` that reverts to the `undo*` state, or (on redo)
-    /// restores the `redo*` state — `UndoHistory` moves the same action between its two stacks, so
-    /// unlike the old per-layer `UndoManager` idiom this doesn't need to re-register itself.
-    private func registerCelReversal(layerID: UUID, celID: UUID,
-                                     undoRaster: RasterLayerTexture, undoBaked: UIImage?,
-                                     redoRaster: RasterLayerTexture, redoBaked: UIImage?,
-                                     label: HistoryActionLabel) {
-        // **The rasters are the payload, and leaving them out charged a whole-cel step nothing.**
-        // `registerUndoableCelChange`'s doc mandates that every commit path pass its flattened result
-        // as `newRaster` with `newBaked` nil, and all five call sites do — so the two images below
-        // are nil on exactly the steps that retain the most, and Move, Clear, Fill and Add Text each
-        // recorded a cost of 0 while holding two canvas-sized bitmaps. `UndoHistory.trim()` evicts by
-        // cost, so a stack of them could never be trimmed at all: 16 MiB a step at the owner's
-        // 2048x1024, 128 MiB at 4096², against a budget that thought it was empty.
-        // `RasterLayerTexture.approximateCost` is zero for a texture with no bitmap, which is what
-        // keeps a blank before-state from being charged for pixels it does not have.
-        let cost = undoRaster.approximateCost + redoRaster.approximateCost
-                 + Self.approximateImageCost(undoBaked) + Self.approximateImageCost(redoBaked)
+        applyCelChange(layerID: layerID, celID: celID, raster: newRaster, baked: newBaked,
+                       vector: vector.map { ($0.canvas, $0.after, $0.rewriting) }, recipe: recipe?.after)
+        let cost = oldRaster.approximateCost + newRaster.approximateCost
+            + Self.approximateImageCost(oldBaked) + Self.approximateImageCost(newBaked)
+            + (vector.map { VectorUndoCost.bytes(from: $0.before, to: $0.after) } ?? 0)
+            + (recipe?.retainedBytes ?? 0)
         recordUndo(label: label, cost: cost, undo: { [weak self] in
-            self?.applyCelChange(layerID: layerID, celID: celID, raster: undoRaster, baked: undoBaked)
+            self?.applyCelChange(layerID: layerID, celID: celID, raster: oldRaster, baked: oldBaked,
+                                 vector: vector.map { ($0.canvas, $0.before, $0.rewriting) }, recipe: recipe?.before)
         }, redo: { [weak self] in
-            self?.applyCelChange(layerID: layerID, celID: celID, raster: redoRaster, baked: redoBaked)
+            self?.applyCelChange(layerID: layerID, celID: celID, raster: newRaster, baked: newBaked,
+                                 vector: vector.map { ($0.canvas, $0.after, $0.rewriting) }, recipe: recipe?.after)
         })
     }
 
@@ -2425,12 +2436,16 @@ extension CanvasManager {
         RasterLayerTexture(size: existing.size, image: image, strokeCount: max(existing.strokeCount, 1))
     }
 
-    private func applyCelChange(layerID: UUID, celID: UUID, raster: RasterLayerTexture, baked: UIImage?) {
+    private func applyCelChange(layerID: UUID, celID: UUID, raster: RasterLayerTexture, baked: UIImage?,
+                                vector: (VectorCanvas, [VectorElement], Set<UUID>)? = nil,
+                                recipe: InterpolationRecipe? = nil) {
         guard let layerIndex = layers.firstIndex(where: { $0.id == layerID }),
               let celIndex = layers[layerIndex].cels.firstIndex(where: { $0.id == celID }) else { return }
+        if let vector { vector.0.restoreElements(vector.1, changedInk: nil, rewriting: vector.2) }
+        if let recipe { layers[layerIndex].cels[celIndex].interpolation = recipe }
         layers[layerIndex].cels[celIndex].raster = raster
         layers[layerIndex].cels[celIndex].bakedImage = baked
-        scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: celIndex)
+        celContentChangedOutsideStroke(layerID: layerID, celID: celID)
     }
 
     /// Same idea as `registerUndoableCelChange`, but for Duplicate: the undoable unit is the whole

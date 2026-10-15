@@ -436,7 +436,7 @@ enum ProjectStore {
         /// list the same way (PERFORMANCE.md §13.6). `SaveProfile.snapshotSeconds` is its clock.
         @MainActor
         init(_ canvasManager: CanvasManager) {
-            canvasManager.settlePendingElementProcedure()
+            canvasManager.settlePendingCelContentProcedure()
             projectID = canvasManager.projectID
             projectName = canvasManager.projectName
             canvasSize = canvasManager.canvasSize ?? .zero

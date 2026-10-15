@@ -1160,7 +1160,7 @@ extension CanvasManager {
     /// or a folder's float on the glass, a raster Move's source, whose host shows the hole
     /// (`piece.remainderPreview`) the cel does not have, and the layer an adjustable fill lands on,
     /// whose host shows its preview (`liveFill`, TODO (157)), and the layer a live element edit is
-    /// on, whose host shows the edited window over the base (`liveElementEdit`, TODO (173)). A
+    /// on, whose host shows the edited window over the base (`liveCelContentEdit`, TODO (173)). A
     /// Duplicate's copy is drawn by the overlay over everything, and a transformation layer's or an
     /// effect's box holds no pixels — the composite itself moves under those — so none of the three
     /// names a host.

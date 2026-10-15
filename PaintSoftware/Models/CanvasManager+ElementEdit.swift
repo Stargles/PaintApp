@@ -1,6 +1,7 @@
 import Combine
 import CoreGraphics
 import Foundation
+import UIKit
 
 // MARK: - A live edit of one cel's display list, held off the document and settled as one undo step
 //
@@ -60,13 +61,15 @@ struct ElementEditSession {
     var applied: Bool { held != nil }
 }
 
-/// **The picture of a live element edit, as the canvas shows it** — `HeldEdit.elements`:
+/// **The picture of a live element edit, as the canvas shows it** — `HeldEdit.celContent`:
 /// the cel it is on, the rectangle it replaces and the list that rectangle is drawn from. The canvas's
 /// own picture of the cel is the base underneath, with a hole punched where this window is.
-struct LiveElementEdit {
+struct LiveCelContentEdit {
     let layerID: UUID
     let celID: UUID
-    let vectorCanvas: VectorCanvas
+    let vectorCanvas: VectorCanvas?
+    /// Immutable backing underneath the edited display list; replacement windows show the full cel.
+    var pixelSnapshot: CelPixelSnapshot? = nil
     /// **Where the picture is, in canvas points** — the union of what the edit's ids drew before and
     /// everywhere any value of its control can make them draw (`VectorCanvas.editWindow`). Fixed for
     /// the life of the edit, so the window's surfaces are made once; the whole canvas when no smaller
@@ -81,135 +84,187 @@ struct LiveElementEdit {
     var tick = 0
     /// One complete procedural value owns the matching field, selection and shown-space poses.
     /// The window host asks for a picture; it does not interpret brush displacement data.
-    var procedure: ElementEditProcedure? = nil
+    var procedure: CelContentProcedure? = nil
 
-    func picture(from committed: [VectorElement]? = nil) -> (elements: [VectorElement], rewriting: Set<UUID>) {
-        let shown = committed.map { procedure?.shown($0) ?? $0 } ?? procedure?.picture(elements) ?? elements
-        return (shown, procedure?.poses.isEmpty == false ? Set(shown.map(\.id)) : (committed == nil ? rewriting : []))
+    /// A complete cel value shared by the host and composite; each renderer keeps native ink
+    /// separate from sampled backing until the final window draw.
+    func contentPicture() -> CelContentPicture? {
+        if let procedure { return procedure.contentPicture(elements) }
+        let shown = picture()
+        let references = Set(shown.elements.compactMap { $0.stream }.filter(\.rendersInPlace).map(\.id))
+        let frozen = vectorCanvas?.freezeDisplay(quality: .full, referenceIDs: references,
+                                                replacing: shown.elements, rewriting: shown.rewriting)
+        guard let size = vectorCanvas?.size ?? pixelSnapshot?.size else { return nil }
+        return CelContentPicture(size: size, window: window, backing: pixelSnapshot, patch: nil,
+            ink: frozen.map { .ordinary(source: $0, elements: shown.elements, rewriting: shown.rewriting) })
+    }
+
+    func presentation(placement: CelContentPlacement) -> CelContentPicture.RenderedWindow? {
+        if let procedure { return procedure.presentation(elements, placement: placement) }
+        return contentPicture()?.rendered(placement: placement)
+    }
+
+    @discardableResult
+    func drawWindow(into cg: CGContext, placement: CelContentPlacement = .identity) -> CGRect? {
+        guard let picture = presentation(placement: placement) else { return nil }
+        picture.image.draw(at: .zero)
+        return picture.window
+    }
+
+    func replacementFootprint(placement: CelContentPlacement) -> CGPath {
+        CelContentPicture.footprint(inkWindow: vectorCanvas == nil && procedure?.recipeSnapshot == nil ? nil : window, inkPose: procedure?.recipeSnapshot == nil ? placement.ink : nil,
+            backingWindow: pixelSnapshot == nil ? nil : procedure?.backingWindow ?? window,
+            backingPose: placement.backing)
+    }
+
+    func displayedBounds(placement: CelContentPlacement) -> CGRect {
+        replacementFootprint(placement: placement).boundingBoxOfPath
+    }
+
+    func displaySource(placement: CelContentPlacement, canvasSize: CGSize) -> (CGContext, CGRect) -> Void {
+        { cg, content in
+            guard let picture = presentation(placement: placement) else { return }
+            picture.draw(into: cg, content: content, canvasSize: canvasSize)
+        }
+    }
+
+    func picture() -> (elements: [VectorElement], rewriting: Set<UUID>) {
+        let shown = procedure?.picture(elements) ?? elements
+        return (shown, procedure?.poses.isEmpty == false ? Set(shown.map(\.id)) : rewriting)
     }
 }
 
-struct ElementEditProcedure {
+/// Only the references needed by this active recipe segment cross to a held worker.
+struct CelRecipeSnapshot {
+    let recipe: InterpolationRecipe
+    let content: [CelRef: [VectorElement]]
+    let guides: [GuideStroke]
+    let options: InterpolationEvaluator.Options
+    let size: CGSize
+}
+
+struct CelContentProcedure {
     let deformation: LiquifyDeformation
     let selectedIDs: Set<UUID>?
     let poses: [UUID: PoseMap]
-    let sourceVersion: Int
-    private let resolution = Resolution()
+    let pixelSnapshot: CelPixelSnapshot?
+    let window: CGRect
+    let recipeSnapshot: CelRecipeSnapshot?
+    let canvasSize: CGSize?
+    let renderSource: VectorCanvas.Frozen?
+    let placement: CelContentPlacement
+    let pixelBridge: PoseMap?
+    var backingWindow: CGRect? { pixelSnapshot?.replacementRect(in: window, through: pixelBridge) }
+    private let resolution = PresentedProcedure<Resolved>()
 
-    init(deformation: LiquifyDeformation, selectedIDs: Set<UUID>?, poses: [UUID: PoseMap], sourceVersion: Int) {
+    init(deformation: LiquifyDeformation, selectedIDs: Set<UUID>?, poses: [UUID: PoseMap],
+         pixelSnapshot: CelPixelSnapshot? = nil, window: CGRect = .null,
+         recipeSnapshot: CelRecipeSnapshot? = nil, canvasSize: CGSize? = nil,
+         renderSource: VectorCanvas.Frozen? = nil, placement: CelContentPlacement = .identity) {
         self.deformation = deformation
         self.selectedIDs = selectedIDs
         self.poses = poses
-        self.sourceVersion = sourceVersion
+        self.pixelSnapshot = pixelSnapshot
+        self.window = window
+        self.recipeSnapshot = recipeSnapshot
+        self.canvasSize = canvasSize
+        self.renderSource = renderSource
+        self.placement = placement
+        let bridge = (placement.backing ?? .identity).concatenating(placement.ink?.inverse ?? .identity)
+        self.pixelBridge = bridge.isIdentity ? nil : bridge
     }
 
     struct Resolved {
         let elements: [VectorElement]
         let shown: [VectorElement]
         let changed: Set<UUID>
+        let pixels: CelPixelSnapshot.Patch?
+        let computationFailed: Bool
+        var failed: Bool { computationFailed || contentPicture?.hasFailed == true }
+        let presentation: CelContentPicture.RenderedWindow?
+        let contentPicture: CelContentPicture?
+        let fieldIsEmpty: Bool
     }
 
-    /// One tick's worker result and its matching presented picture. A later tick has a different
-    /// memo; an old worker cannot complete its replacement's pending write.
-    private final class Resolution {
-        let lock = NSCondition()
-        var value: Resolved?
-        var presented = false
-        var finish: ((Resolved) -> Void)?
-        var cancelled = false
-        var computations = 0
-        var resolving = false
-    }
-
-    var isPending: Bool {
-        resolution.lock.lock(); defer { resolution.lock.unlock() }
-        return resolution.finish != nil
-    }
-    var isPresented: Bool {
-        resolution.lock.lock(); defer { resolution.lock.unlock() }
-        return resolution.presented
-    }
-    var resolutionCount: Int {
-        resolution.lock.lock(); defer { resolution.lock.unlock() }
-        return resolution.computations
-    }
-    var isResolving: Bool {
-        resolution.lock.lock(); defer { resolution.lock.unlock() }
-        return resolution.resolving
-    }
+    var hasFailed: Bool { resolution.completedValue?.failed == true }
+    var isPending: Bool { resolution.isPending }
+    var isPresented: Bool { resolution.isPresented }
+    var resolutionCount: Int { resolution.resolutionCount }
+    var isResolving: Bool { resolution.isResolving }
 
     func resolve(_ original: [VectorElement]) -> [VectorElement] {
         resolved(original).elements
     }
     private func resolved(_ original: [VectorElement]) -> Resolved {
-        resolution.lock.lock()
-        while resolution.resolving { resolution.lock.wait() }
-        if let cached = resolution.value { resolution.lock.unlock(); return cached }
-        resolution.resolving = true
-        resolution.computations += 1
-        resolution.lock.unlock()
-        let elements = LiquifyField(deformation).mapping(original, selectedIDs: selectedIDs, poses: poses)
-        let changed = Set(zip(original, elements).compactMap { old, new -> UUID? in
-            switch (old, new) {
-            case (.stroke(let a), .stroke(let b)): return a.samples != b.samples || a.lattice != b.lattice ? a.id : nil
-            case (.fill(let a), .fill(let b)): return a.pathData != b.pathData ? a.id : nil
-            default: return nil
+        resolution.resolve {
+            var elements = original
+            var pixels: CelPixelSnapshot.Patch?
+            var fieldIsEmpty = true
+            var failed = false
+            var evaluatedInk: InterpolationEvaluator.Evaluation?
+            if let snapshot = recipeSnapshot {
+                let evaluation = InterpolationEvaluator.evaluate(recipe: snapshot.recipe, at: snapshot.recipe.t,
+                    content: { snapshot.content[$0] ?? [] }, subject: original, guides: snapshot.guides,
+                    options: snapshot.options, didApplyDeformation: { index, field in
+                        guard index == snapshot.recipe.deformations.count - 1 else { return }
+                        fieldIsEmpty = field.isEmpty
+                        pixels = pixelSnapshot?.liquifiedPatch(in: window, using: field, through: pixelBridge)
+                    })
+                evaluatedInk = evaluation
+                if evaluation == nil { failed = true }
+            } else {
+                let field = LiquifyField(deformation)
+                fieldIsEmpty = field.isEmpty
+                elements = field.mapping(original, selectedIDs: selectedIDs, poses: poses)
+                pixels = pixelSnapshot?.liquifiedPatch(in: window, using: field, through: pixelBridge)
             }
-        })
-        let value = Resolved(elements: elements, shown: shown(elements), changed: changed)
-        resolution.lock.lock()
-        resolution.value = value
-        resolution.resolving = false
-        resolution.lock.broadcast()
-        resolution.lock.unlock()
-        return value
+            failed = failed || (pixelSnapshot != nil && pixels == nil)
+            let changed = Set(zip(original, elements).compactMap { old, new in
+                old.hasSameSpatialInk(as: new) ? nil : old.id
+            })
+            let shown = shown(elements)
+            var picture: CelContentPicture?
+            var presentation: CelContentPicture.RenderedWindow?
+            if !window.isNull, !window.isEmpty, let size = pixelSnapshot?.size ?? canvasSize {
+                let ink: CelContentPicture.Ink?
+                if let evaluatedInk { ink = .linked(evaluatedInk) }
+                else if renderSource != nil || !shown.isEmpty {
+                    let source = renderSource ?? VectorCanvas(size: size).freeze(quality: .full)
+                    ink = .ordinary(source: source, elements: shown, rewriting: changed.union(poses.keys))
+                } else { ink = nil }
+                picture = CelContentPicture(size: size, window: window, backing: pixelSnapshot,
+                                            patch: pixels, ink: ink)
+                if !failed { presentation = picture?.rendered(placement: placement) }
+                failed = failed || presentation == nil
+            }
+            return Resolved(elements: elements, shown: shown, changed: changed, pixels: pixels,
+                            computationFailed: failed, presentation: presentation, contentPicture: picture, fieldIsEmpty: fieldIsEmpty)
+        }
     }
     func picture(_ original: [VectorElement]) -> [VectorElement] { resolved(original).shown }
-
-    /// Called on the main thread after this exact tick's surface is presented.
-    func didPresent() {
-        resolution.lock.lock()
-        resolution.presented = true
-        let value = resolution.value
-        let finish = value == nil ? nil : resolution.finish
-        if finish != nil { resolution.finish = nil }
-        resolution.lock.unlock()
-        if let value { finish?(value) }
+    func presentation(_ original: [VectorElement], placement: CelContentPlacement) -> CelContentPicture.RenderedWindow? {
+        guard placement == self.placement else { return nil }
+        let result = resolved(original)
+        return result.failed ? nil : result.presentation
     }
-    func finishWhenPresented(_ finish: @escaping (Resolved) -> Void) {
-        resolution.lock.lock()
-        guard !resolution.cancelled else { resolution.lock.unlock(); return }
-        let ready = resolution.presented ? resolution.value : nil
-        if ready == nil { resolution.finish = finish }
-        resolution.lock.unlock()
-        if let ready { finish(ready) }
+    func contentPicture(_ original: [VectorElement]) -> CelContentPicture? {
+        let result = resolved(original)
+        return result.failed ? nil : result.contentPicture
     }
-    /// A subsequent document operation must settle the completed gesture first. Clear before the
-    /// callback: its commit ends the hold and may itself enter another mutation boundary.
-    func settlePending(_ original: [VectorElement]) {
-        resolution.lock.lock()
-        let finish = resolution.finish
-        resolution.finish = nil
-        resolution.lock.unlock()
-        if let finish { finish(resolved(original)) }
-    }
-    func cancel() {
-        resolution.lock.lock(); defer { resolution.lock.unlock() }
-        resolution.cancelled = true
-        resolution.finish = nil
-    }
+    func didPresent() { resolution.didPresent() }
+    func didReject() { if hasFailed { resolution.didReject() } }
+    func finishWhenPresented(_ finish: @escaping (Resolved) -> Void) { resolution.finishWhenPresented(finish) }
+    func settlePending(_ original: [VectorElement]) { resolution.settlePending { resolved(original) } }
+    func cancel() { resolution.cancel() }
     func shown(_ resolved: [VectorElement]) -> [VectorElement] {
-        guard !poses.isEmpty else { return resolved }
-        return resolved.compactMap { element in
-            poses[element.id].flatMap { VectorCanvas.mapping(element, through: $0) } ?? element
-        }
+        CanvasManager.posed(resolved, by: poses)
     }
 }
 
 extension CanvasManager {
 
-    func settlePendingElementProcedure() {
-        guard let edit = liveElementEdit else { return }
+    func settlePendingCelContentProcedure() {
+        guard let edit = liveCelContentEdit else { return }
         edit.procedure?.settlePending(edit.elements)
     }
 
@@ -237,8 +292,9 @@ extension CanvasManager {
         guard !window.isEmpty, shownThroughOnePose(celID: celID, in: layerID, elements: elementsBefore) else {
             return session
         }
-        beginLiveEdit(.elements(LiveElementEdit(layerID: layerID, celID: celID, vectorCanvas: vectorCanvas,
-                                                window: window, rewriting: rewriting,
+        let backing = layers.first { $0.id == layerID }?.cels.first { $0.id == celID }.flatMap(CelPixelSnapshot.init)
+        beginLiveEdit(.celContent(LiveCelContentEdit(layerID: layerID, celID: celID, vectorCanvas: vectorCanvas,
+                                                pixelSnapshot: backing, window: window, rewriting: rewriting,
                                                 elements: elementsBefore)))
         return session
     }
@@ -249,14 +305,14 @@ extension CanvasManager {
     func holdElementEdit(_ elements: [VectorElement], in edit: inout ElementEditSession) {
         let first = !edit.applied
         edit.held = elements
-        guard var live = liveElementEdit, live.celID == edit.celID else {
+        guard var live = liveCelContentEdit, live.celID == edit.celID else {
             // No window to put it in (`beginElementEdit`): the artist is told once, on the first tick.
             if first { raise(.editShownOnRelease) }
             return
         }
         live.elements = elements
         live.tick += 1
-        holdLiveEdit(.elements(live))
+        holdLiveEdit(.celContent(live))
     }
 
     /// Closes the edit as **one undo step** from the list the artist found to `finalElements`, the list
@@ -277,17 +333,17 @@ extension CanvasManager {
         // The layer-panel thumbnail is a third thing, and `registerVectorElementsUndo` refreshes it
         // on the undo and redo sides but not on the initial apply.
         celContentChangedOutsideStroke(layerID: edit.layerID, celID: edit.celID)
-        endLiveElementEdit()
+        endLiveCelContentEdit()
     }
 
     /// Lets the window go and **records nothing**. The cel was never written, so the picture under the
     /// window is already the one the artist started from.
     func revertElementEdit(_ edit: ElementEditSession) {
-        endLiveElementEdit()
+        endLiveCelContentEdit()
     }
 
-    private func endLiveElementEdit() {
-        guard liveElementEdit != nil else { return }
+    private func endLiveCelContentEdit() {
+        guard liveCelContentEdit != nil else { return }
         endLiveEdit()
     }
 

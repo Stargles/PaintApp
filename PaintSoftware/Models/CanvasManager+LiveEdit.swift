@@ -26,7 +26,7 @@ enum HeldEdit {
     case pose(LivePose)
     /// A live element edit's window — the Select panel's drag and the gradient panel (TODO (173)).
     /// The cel's host draws it over the base, punched out underneath.
-    case elements(LiveElementEdit)
+    case celContent(LiveCelContentEdit)
     /// The adjustable fill's picture (TODO (157)), drawn by the cel's host over its own.
     case fill(CanvasManager.LiveFill)
     /// A grade under the finger — the effect bar's controls, the Duplicate Offset's box, a graph-band
@@ -63,8 +63,8 @@ enum HeldEdit {
         return nil
     }
 
-    var elements: LiveElementEdit? {
-        if case .elements(let edit) = self { return edit }
+    var celContent: LiveCelContentEdit? {
+        if case .celContent(let edit) = self { return edit }
         return nil
     }
 
@@ -146,7 +146,7 @@ enum HeldEdit {
     var hostLayerID: UUID? {
         switch self {
         case .pose, .grade, .mask, .channel, .valueFill: return nil
-        case .elements(let edit): return edit.layerID
+        case .celContent(let edit): return edit.layerID
         case .fill(let fill): return fill.layerID
         case .interpolation(let held): return held.layerID
         case .channelCurves, .groupPose: return nil
@@ -165,7 +165,7 @@ enum HeldEdit {
         case .channel(let held): return canvasEngaged || held.channel != .opacity
         case .channelCurves(let held): return canvasEngaged || held.curves.keys.contains { $0 != TargetChannel.opacity.id }
         case .valueFill, .groupPose: return canvasEngaged
-        case .pose, .elements, .fill, .interpolation: return false
+        case .pose, .celContent, .fill, .interpolation: return false
         }
     }
 }
@@ -280,7 +280,7 @@ struct HeldValueFill: Equatable {
 /// and written once, at the lift, as one undo step.
 struct HeldInterpolation {
     /// Which of the three drags holds it — what each one's lift and tick ask before touching it.
-    enum Drag { case timing, guideHandle, spacing, liquify }
+    enum Drag { case timing, guideHandle, spacing }
     let drag: Drag
     /// The in-between the drag is over — the interpolation target when it began.
     let layerID: UUID
@@ -337,7 +337,7 @@ extension CanvasManager {
     /// The adjustable fill's picture, when that is what is held.
     var liveFill: LiveFill? { liveEdit?.fill }
     /// The live element edit's window, when that is what is held.
-    var liveElementEdit: LiveElementEdit? { liveEdit?.elements }
+    var liveCelContentEdit: LiveCelContentEdit? { liveEdit?.celContent }
 
     /// **Opens a hold the canvas has to cut its live picture around** — a fill's or an element edit's,
     /// whose host must keep drawing (`heldHostLayerIndices`). Publishes once, so the cut is made before
@@ -361,7 +361,7 @@ extension CanvasManager {
     /// which takes the picture down, and publishes once so it re-cuts without the hold's host.
     func endLiveEdit(beforeNotify: () -> Void = {}) {
         guard liveEdit != nil else { return }
-        liveElementEdit?.procedure?.cancel()
+        liveCelContentEdit?.procedure?.cancel()
         liveEdit = nil
         mirrorLiveEdit()
         // Transfer any committed picture after clearing the model hold, before removing its surface.

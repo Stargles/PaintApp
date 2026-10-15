@@ -6022,6 +6022,22 @@ final class VectorCanvas {
         fileprivate let suppressed: Set<UUID>
         fileprivate var known: [UUID: CGRect] = [:]
 
+        /// A held replacement reuses untouched footprints while invalidating only rewritten ink.
+        /// Stream frames cross the worker boundary by value, exactly as live display freezing does.
+        func replacingDisplayElements(_ replacement: [VectorElement], rewriting: Set<UUID>,
+                                      referenceIDs: Set<UUID>) -> Frozen {
+            let captured = replacement.compactMap { element -> VectorElement? in
+                guard case .stream(var stream) = element else { return element }
+                guard referenceIDs.contains(stream.id) else { return nil }
+                stream.picture = StreamPicture(frame: stream.picture.frame, index: stream.picture.index)
+                return .stream(stream)
+            }
+            var bounds = known
+            for id in rewriting { bounds[id] = nil }
+            return Frozen(source: nil, version: version, memoized: nil, size: size, elements: captured,
+                          transform: transform, suppressed: suppressed, known: bounds)
+        }
+
         /// The pixels these frozen values render to, safe to call from any thread.
         ///
         /// Three answers in the order they get cheaper to be wrong about: the memo the canvas already
@@ -6144,17 +6160,14 @@ final class VectorCanvas {
     /// captured by value, so a decoder tick cannot change a recipe already drawing off-main.
     func freezeDisplay(quality: RenderQuality, referenceIDs: Set<UUID>,
                        replacing elements: [VectorElement]? = nil,
+                       rewriting rewritten: Set<UUID>? = nil,
                        unsuppressing shownIDs: Set<UUID> = []) -> Frozen {
         lock.lock(); defer { lock.unlock() }
-        let captured = (elements ?? _elements).compactMap { element -> VectorElement? in
-            guard case .stream(var stream) = element else { return element }
-            guard referenceIDs.contains(stream.id) else { return nil }
-            stream.picture = StreamPicture(frame: stream.picture.frame, index: stream.picture.index)
-            return .stream(stream)
-        }
-        return Frozen(source: nil, version: version, memoized: nil, size: size, elements: captured,
-                      transform: _transform, suppressed: _suppressedElementIDs.subtracting(shownIDs),
-                      known: elements == nil ? paintedBounds : [:])
+        let frozen = Frozen(source: nil, version: version, memoized: nil, size: size, elements: _elements,
+                            transform: _transform, suppressed: _suppressedElementIDs.subtracting(shownIDs),
+                            known: paintedBounds)
+        return frozen.replacingDisplayElements(elements ?? _elements,
+            rewriting: rewritten ?? (elements.map { Set($0.map(\.id)) } ?? []), referenceIDs: referenceIDs)
     }
 
     /// **What one rasterize reads, taken under a single `lock` acquisition** — everything `walk`

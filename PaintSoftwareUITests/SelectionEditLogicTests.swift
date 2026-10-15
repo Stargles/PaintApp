@@ -61,7 +61,7 @@ final class SelectionEditLogicTests: XCTestCase {
     /// document's otherwise. A tick is not a document write (TODO (173)), so mid-drag the document
     /// still says what it said before the finger went down.
     private func shown(_ manager: CanvasManager, _ vector: VectorCanvas) -> [VectorElement] {
-        manager.liveElementEdit?.elements ?? vector.elements
+        manager.liveCelContentEdit?.elements ?? vector.elements
     }
     private func shownSizes(_ manager: CanvasManager, _ vector: VectorCanvas) -> [CGFloat] {
         shown(manager, vector).compactMap { $0.stroke?.size }
@@ -313,7 +313,7 @@ final class SelectionEditLogicTests: XCTestCase {
         manager.cancelSelectionEdit()
         XCTAssertEqual(shownSizes(manager, vector), before, "cancel: the sizes the artist started with")
         XCTAssertEqual(sizes(vector), before, "and the document is what it was")
-        XCTAssertNil(manager.liveElementEdit, "and the window is gone")
+        XCTAssertNil(manager.liveCelContentEdit, "and the window is gone")
         XCTAssertEqual(stepsSince(baseline, manager), 0, "and no step")
         XCTAssertNil(manager.selectionEdit)
 

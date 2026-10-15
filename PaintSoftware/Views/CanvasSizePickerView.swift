@@ -211,6 +211,7 @@ struct CanvasSizePickerView: View {
         // Inert unless an XCUITest passed `-uiTestSeedGuidedIntervals` — two interpolated intervals with
         // an arc on the first, which is what the interpolate bar's Fetch has to offer the second.
         UITestSeeds.seedGuidedIntervalsIfRequested(into: canvasManager)
+        LiquifyRasterUITestSeeds.seedIfRequested(into: canvasManager)
         onCreated()
     }
 }

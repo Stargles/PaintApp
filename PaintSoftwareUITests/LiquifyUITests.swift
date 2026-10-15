@@ -79,12 +79,22 @@ final class LiquifyUITests: PaintUITestCase {
         let region = paperPatch(canvas, paper, x: 0.6...0.85, y: 0.25...0.45)
         let before = readScreenNow(region).map(dark)
         XCTAssertGreaterThan(before.filter { $0 }.count, 10, "PREMISE: the linked black/red L is drawn")
+        attachScreenshot(app, "liquify-linked-before-gesture")
         app.buttons["toolbar.liquifyButton"].tap()
         canvas.coordinate(withNormalizedOffset: hostPoint(paper, 0.75, 0.36))
             .press(forDuration: 0.05,
                    thenDragTo: canvas.coordinate(withNormalizedOffset: hostPoint(paper, 0.58, 0.36)))
         let changed = NSPredicate { _, _ in zip(self.readScreenNow(region).map(self.dark), before).filter { $0 != $1 }.count > 10 }
-        wait(for: [XCTNSPredicateExpectation(predicate: changed, object: nil)], timeout: 15)
+        let changeResult = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: changed, object: nil)], timeout: 15)
+        attachScreenshot(app, "liquify-linked-after-gesture")
+        if changeResult != .completed {
+            let state = XCTAttachment(string: app.debugDescription)
+            state.name = "liquify-linked-unchanged-hierarchy"; state.lifetime = .keepAlways; add(state)
+            app.buttons["toolbar.settingsButton"].tap()
+            let save = app.buttons["recorder.saveFlight"]
+            if save.waitForExistence(timeout: 5) { save.tap() }
+        }
+        XCTAssertEqual(changeResult, .completed, "The linked drawing must visibly change after the Liquify gesture")
         let reshaped = readScreenNow(region).map(dark)
         print("LIQUIFY BEFORE REOPEN frame=\(canvas.frame) paper=\(paper) label=\(canvas.label) dark=\(reshaped.filter { $0 }.count)")
         XCTAssertTrue(app.sliders["interpolate.tSlider"].exists, "Liquify must leave the frame linked and its Timing slider available")

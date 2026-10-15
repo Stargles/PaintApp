@@ -192,12 +192,15 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// layer is drawn where the composite draws it whenever the host is the thing on screen. A
     /// gesture reads the model itself at touch-down instead (`beginGesture(in:at:)`), because a take
     /// moves the playhead in the same turn the pen lands.
-    var shownPose: PoseMap? {
+    var contentPlacement = CelContentPlacement.identity {
         didSet {
-            guard shownPose != oldValue, !gestureIsLive else { return }
+            guard contentPlacement != oldValue, !gestureIsLive else { return }
             applyPose(shownPose)
+            presentHeldEdit()
+            showOverlays(scratch)
         }
     }
+    var shownPose: PoseMap? { contentPlacement.ink }
     /// Whether a gesture holds `poseSpace` — from `beginGesture` to `endGesture`, which `endScratch`
     /// calls on every exit from a stroke.
     private var gestureIsLive = false
@@ -282,7 +285,7 @@ final class StrokeCanvasView: CanvasPlaneView {
             if oldValue !== vectorCanvas {
                 unlandedInk.removeAll()
                 // What a derived picture contains is a version of the canvas it was derived from.
-                interpolationCoverage = nil
+                interpolationPresentation.invalidateCoverage()
                 // The ordering guard for an intermediate frame is about *this* canvas's counter.
                 shownVectorVersion = StrokeCanvasView.nothingDisplayed
                 // A stream surface shows a window of the canvas it was drawn from, at that
@@ -399,7 +402,8 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// to avoid.
     private var heldInkIDsOnScreen: [Int] = []
     /// A live replacement can move without changing any committed picture ID.
-    private var heldInkCoveringRects: [CGRect] = []
+    private var heldInkCoveringPaths: [CGPath] = []
+    private var heldInkPlacement: CelContentPlacement?
     private var heldInkBaseHole: CGPath?
     /// The `RasterLayerTexture.version` last shown — the raster twin of `displayedVectorVersion`.
     /// Both texture types are reference types mutated in place, so a content change alone never
@@ -555,12 +559,12 @@ final class StrokeCanvasView: CanvasPlaneView {
         addSubview(poseSpace)
         // **Above the base and below the live stroke**, which is the z-order the two things mean:
         // held ink is finished ink the base does not have yet, and the stroke under the pen is
-        // newer than all of it. Pinned to `poseSpace`'s edges so its own coordinate space is the
-        // layer's and a held picture's frame is the `windowRect` it was drawn at.
+        // newer than all of it. The common shown space lets complete cel windows keep native ink
+        // and backing placements separate; legacy stroke views carry their local transform inside.
         heldInkView.isUserInteractionEnabled = false
         heldInkView.isHidden = true
         heldInkView.translatesAutoresizingMaskIntoConstraints = false
-        poseSpace.addSubview(heldInkView)
+        insertSubview(heldInkView, belowSubview: poseSpace)
         // `.scaleToFill` with a frame set to the scratch's own window rect — which is integral in
         // the layer's points, and `poseSpace`'s coordinates *are* the layer's points — puts the
         // window on the same sample grid as the layer's pixels, which is what makes "filter each,
@@ -601,10 +605,10 @@ final class StrokeCanvasView: CanvasPlaneView {
             floatView.bottomAnchor.constraint(equalTo: bottomAnchor),
             floatView.leadingAnchor.constraint(equalTo: leadingAnchor),
             floatView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            heldInkView.topAnchor.constraint(equalTo: poseSpace.topAnchor),
-            heldInkView.bottomAnchor.constraint(equalTo: poseSpace.bottomAnchor),
-            heldInkView.leadingAnchor.constraint(equalTo: poseSpace.leadingAnchor),
-            heldInkView.trailingAnchor.constraint(equalTo: poseSpace.trailingAnchor)
+            heldInkView.topAnchor.constraint(equalTo: topAnchor),
+            heldInkView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            heldInkView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            heldInkView.trailingAnchor.constraint(equalTo: trailingAnchor)
         ])
 
         wire(strokeRecognizer)
@@ -774,100 +778,94 @@ final class StrokeCanvasView: CanvasPlaneView {
         streamSurfaces.removeAll()
     }
 
-    // MARK: - A live element edit's window
+    // MARK: - A complete cel-content replacement window
 
-    /// **Where a live element edit reaches the screen** — `CanvasManager.liveElementEdit`, TODO (173).
-    /// One `WindowSurfaceView` the size of the edit's window, in `poseSpace` over the base and under
-    /// every other overlay, drawn off the main thread from the list the edit's newest tick holds.
-    /// The base is punched out under the window (`heldEditHole`), so the picture *replaces* the
-    /// cel's own there — the vector eraser's arrangement — and what is drawn is the cel's whole
-    /// content in the window, in true z-order, which the edited elements are part of.
     private var heldEditSurface: WindowSurfaceView?
-    /// The edit this view is showing — its newest tick, whether or not the surface has drawn it yet.
-    private var heldEdit: LiveElementEdit?
-    /// **The window the base is punched out under, set only once the surface has put a picture in
-    /// it.** A hole punched first would show nothing for the frames it takes the first draw to land.
-    private var heldEditHole: CGRect?
-    /// `VectorCanvas.version` when the edit's first tick arrived — the commit is what moves it, and
-    /// a revert does not, which is how `takeDownHeldEdit` tells the two ends apart.
-    private var heldEditBaseVersion = 0
+    private var heldEdit: LiveCelContentEdit?
+    private var heldEditHole: CGPath?
+    private var heldEditBaseRevision = 0
+    private let contentRevisions = CelContentRevisions()
+    private var celPixelSnapshot: CelPixelSnapshot?
+    var onBaseHoleChanged: ((CGPath?) -> Void)?
 
-    /// **Shows the live edit when it is this cel's, and takes down whatever this view was showing when
-    /// it is not or has ended** — the one writer of the window, called by the canvas whenever a held
-    /// picture moves and on every reconciliation pass. A tick the surface has already been given is
-    /// one comparison. Returns whether the picture changed.
+    /// Observed before a held window is released, including object replacements at version zero.
+    func observeCelContent(_ cel: Cel) {
+        let before = contentRevisions.current
+        contentRevisions.observe(cel)
+        if contentRevisions.current != before { celPixelSnapshot = CelPixelSnapshot(cel: cel) }
+    }
+
     @discardableResult
-    func showHeldEdit(_ edit: LiveElementEdit?) -> Bool {
-        guard let edit, let vectorCanvas, edit.vectorCanvas === vectorCanvas, !hostIsBlanked else {
+    func showHeldEdit(_ edit: LiveCelContentEdit?) -> Bool {
+        guard let edit, edit.celID == contentRevisions.celID,
+              edit.vectorCanvas === vectorCanvas, !hostIsBlanked else {
             return takeDownHeldEdit(landing: edit == nil)
         }
         if heldEditSurface != nil, heldEdit?.tick == edit.tick { return false }
-        if heldEdit == nil { heldEditBaseVersion = vectorCanvas.version }
+        if heldEdit == nil { heldEditBaseRevision = contentRevisions.current }
         heldEdit = edit
         presentHeldEdit()
         return true
     }
 
-    /// Asks the surface for the newest tick — drawn now, or when the draw in flight lands unless a
-    /// newer tick replaces it first, so the edit's last tick is always the picture left up.
     private func presentHeldEdit() {
-        guard let edit = heldEdit, let canvas = vectorCanvas, edit.vectorCanvas === canvas else { return }
+        guard let edit = heldEdit, edit.vectorCanvas === vectorCanvas else { return }
         let surface: WindowSurfaceView
-        if let existing = heldEditSurface {
-            surface = existing
-        } else {
+        if let existing = heldEditSurface { surface = existing }
+        else {
             surface = WindowSurfaceView(queue: Self.renderQueue)
-            // Below the held ink and the live stroke, which are newer than any edit.
-            poseSpace.insertSubview(surface, at: 0)
+            insertSubview(surface, belowSubview: poseSpace)
             heldEditSurface = surface
         }
-        let window = edit.window
+        let placement = contentPlacement
+        let canvas = CGRect(origin: .zero, size: vectorCanvas?.size ?? raster?.size ?? bounds.size)
+        let window = edit.displayedBounds(placement: placement).integral.intersection(canvas)
+        let footprint = edit.replacementFootprint(placement: placement)
         surface.present(window: window, placement: .identity, draw: { cg in
-            let picture = edit.picture()
-            return canvas.drawEditWindow(of: picture.elements, in: window, into: cg, rewriting: picture.rewriting)
+            edit.drawWindow(into: cg, placement: placement)
         }, finished: { [weak self] shown in
-            guard let self, self.heldEditSurface === surface, shown else { return }
-            if self.heldEditHole != window {
-                self.heldEditHole = window
+            guard let self, self.heldEditSurface === surface else { return }
+            guard shown else { edit.procedure?.didReject(); return }
+            if self.heldEditHole != footprint {
+                self.heldEditHole = footprint
                 self.showOverlays(self.scratch)
             }
             edit.procedure?.didPresent()
         })
     }
 
-    /// Takes the window down. **When the edit ended in a write — the canvas has moved past the
-    /// version the edit began over — the final picture goes up as held ink first**, in the same
-    /// main-thread turn, so the base is never on screen with the old colours in it: the render of the
-    /// written list is off the main thread (RENDER.md §2.13) and the held picture stands in for it
-    /// until it lands (`UnlandedInk`). A revert wrote nothing, so the base underneath is already the
-    /// picture the artist started from.
     @discardableResult
     private func takeDownHeldEdit(landing: Bool) -> Bool {
         guard heldEdit != nil || heldEditSurface != nil else { return false }
         let edit = heldEdit
         let surface = heldEditSurface
+        let footprint = heldEditHole
         heldEdit = nil
         heldEditHole = nil
         heldEditSurface?.removeFromSuperview()
         heldEditSurface = nil
-        if landing, let edit, let canvas = vectorCanvas, edit.vectorCanvas === canvas,
-           canvas.version != heldEditBaseVersion {
-            if edit.procedure?.isPresented == true, let frozen = surface?.freezePresented() {
-                unlandedInk.hold(UnlandedInk.Picture(id: nextUnlandedInkID, version: canvas.version,
-                    windowRect: frozen.window, alpha: 1, replacesBase: true, contents: .surface(frozen)))
+        if landing, let edit, edit.celID == contentRevisions.celID,
+           contentRevisions.current > heldEditBaseRevision {
+            let revision = contentRevisions.current
+            if edit.procedure?.isPresented == true, let frozen = surface?.freezePresented(),
+               let footprint {
+                unlandedInk.hold(UnlandedInk.Picture(id: nextUnlandedInkID, version: revision,
+                    windowRect: frozen.window, replacing: footprint, contents: .surface(frozen)))
                 nextUnlandedInkID += 1
-                showOverlays(scratch)
-                return true
+            } else {
+                var final = edit
+                if edit.procedure == nil {
+                    final.elements = vectorCanvas?.elements ?? []
+                    final.pixelSnapshot = celPixelSnapshot
+                }
+                if let rendered = final.presentation(placement: contentPlacement) {
+                    unlandedInk.hold(UnlandedInk.Picture(id: nextUnlandedInkID, version: revision,
+                        windowRect: rendered.window, replacing: rendered.footprint,
+                        contents: .image(rendered.image)))
+                    nextUnlandedInkID += 1
+                }
             }
-            let window = edit.window
-            let format = PixelOps.transparentFormat()
-            format.preferredRange = .standard
-            let image = UIGraphicsImageRenderer(size: window.size, format: format).image { ctx in
-                let picture = edit.picture(from: canvas.elements)
-                canvas.drawEditWindow(of: picture.elements, in: window, into: ctx.cgContext, rewriting: picture.rewriting)
-            }
-            holdUnlandedPicture(image, rect: window, alpha: 1, replacesBase: true,
-                                at: canvas.version)
+            refreshDisplay()
         }
         showOverlays(scratch)
         return true
@@ -876,14 +874,14 @@ final class StrokeCanvasView: CanvasPlaneView {
     // MARK: - A held in-between
 
     /// **Where an in-between under an interpolation drag reaches the screen** — `HeldInterpolation`, TODO
-    /// (179). One canvas-sized `WindowSurfaceView` over the base, in `poseSpace` where a held edit's goes,
+    /// (179). One canvas-sized `WindowSurfaceView` over the base, in shown canvas space,
     /// drawn off the main thread from the derivation as the finger holds it — one evaluation in flight,
     /// the newest tick's minted when it lands — and the base hidden under it once it has a picture. A tick
     /// used to evaluate the in-between on the main thread and hand Core Animation a fresh canvas-sized
     /// image; now it hands it nothing.
     private var heldDerivationSurface: WindowSurfaceView?
     /// The canvas, once the surface has put a picture over it — the hole the base is punched out by.
-    private var heldDerivationHole: CGRect?
+    private var heldDerivationHole: CGPath?
     /// **How many held in-between pictures have landed**, across drags — `heldInbetweens:` on
     /// `canvas.host`.
     private(set) static var heldDerivationCount = 0
@@ -891,7 +889,7 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// **Shows `derived` — the in-between as an interpolation drag holds it — in place of the base, or
     /// takes the held picture down** for nil. Drawn at `.preview` quality, the drag's; the lift's
     /// full-quality render goes into the base (`setInterpolationImage`) on the pass that takes this down.
-    func showHeldDerivation(_ derived: DerivedCelContent?) {
+    func showHeldDerivation(_ derived: DerivedCelContent?, placement: CelContentPlacement = .identity) {
         guard let derived, !hostIsBlanked, let size = vectorCanvas?.size else {
             guard heldDerivationSurface != nil else { return }
             heldDerivationSurface?.removeFromSuperview()
@@ -905,18 +903,21 @@ final class StrokeCanvasView: CanvasPlaneView {
             surface = existing
         } else {
             surface = WindowSurfaceView(queue: Self.renderQueue)
-            poseSpace.insertSubview(surface, at: 0)
+            insertSubview(surface, belowSubview: poseSpace)
             heldDerivationSurface = surface
         }
         let window = CGRect(origin: .zero, size: size)
-        surface.present(window: window, placement: .identity, draw: { _ in
-            derived.render(.preview)?.draw(in: window)
+        let picture = CelContentPicture(size: size, window: window, backing: celPixelSnapshot,
+            patch: nil, ink: .derived(derived, .preview))
+        let footprint = picture.footprint(placement: placement)
+        surface.present(window: window, placement: .identity, draw: { cg in
+            guard picture.draw(into: cg, content: window, placement: placement) else { return nil }
             return window
         }, finished: { [weak self] shown in
             guard shown, let self, self.heldDerivationSurface === surface else { return }
             Self.heldDerivationCount += 1
-            guard self.heldDerivationHole != window else { return }
-            self.heldDerivationHole = window
+            guard self.heldDerivationHole != footprint else { return }
+            self.heldDerivationHole = footprint
             self.showOverlays(self.scratch)
         })
     }
@@ -924,31 +925,52 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// A derived frame to show in place of this cel's own content — an in-between, or the cel's
     /// ink posed. Not stored in `vectorCanvas`: it is derived, never persisted.
     /// `CanvasView.Coordinator` recomputes and pushes it.
-    private(set) var interpolationImage: UIImage?
+    private var interpolationPresentation = DerivedCelPresentation()
+    var interpolationImage: UIImage? { interpolationPresentation.image }
 
-    /// **The `vectorCanvas.version` whose ink `interpolationImage` already contains** — set when the
-    /// picture is a pose of this canvas's own ink, nil for an in-between, which contains none of it.
-    ///
-    /// What `unlandedInk` is retired against when the base is derived, exactly as a committed render
-    /// retires it by the version it was rasterized at. Retiring *everything* held is right for an
-    /// in-between (its edits are `LocalEdit`s, and nothing is held for them) and wrong for a pose:
-    /// the stroke just lifted would go with it while the posed picture standing in the base still
-    /// predates it. That picture is the live pair's middle (`CanvasView.Coordinator
-    /// .LiveActivePicture`), rendered off the main thread, so the stroke stays held until the
-    /// picture that contains it lands — TODO (145).
-    private var interpolationCoverage: Int?
+    /// Captured on main beside the immutable derivation, before rendering or an async hop.
+    func captureContentCoverage(of cel: Cel, placement: CelContentPlacement, derivation: AnyHashable) -> CelContentCoverage {
+        observeCelContent(cel)
+        return CelContentCoverage(celID: cel.id, revision: contentRevisions.current,
+                                  placement: placement, derivation: derivation)
+    }
 
-    /// Replaces the derived frame and repaints if it changed. Repaints from here rather than
-    /// `refreshDisplayIfStale`, because an interpolated cel's own `version` is constant across a
-    /// scrub, so the staleness check would never fire.
-    ///
-    /// `covering` is the canvas and version whose ink the picture contains, when it is a pose of a
-    /// cel's own ink; it counts only if that canvas is this view's.
-    func setInterpolationImage(_ image: UIImage?, covering: (canvas: VectorCanvas, version: Int)? = nil) {
-        guard interpolationImage !== image else { return }
-        interpolationImage = image
-        interpolationCoverage = covering.flatMap { $0.canvas === vectorCanvas ? $0.version : nil }
-        refreshDisplay()
+    func captureDisplayedContentCoverage(of cel: Cel, bakedImage: UIImage?, placement: CelContentPlacement,
+                                         derivation: AnyHashable) -> CelContentCoverage? {
+        let before = contentRevisions.current
+        let coverage = contentRevisions.captureDisplayedCoverage(of: cel, bakedImage: bakedImage,
+            raster: raster, rasterVersion: displayedRasterVersion, placement: placement, derivation: derivation)
+        if contentRevisions.current != before { celPixelSnapshot = CelPixelSnapshot(cel: cel) }
+        return coverage
+    }
+
+    var installedDerivationIdentity: AnyHashable? { interpolationPresentation.coverage?.derivation }
+
+
+    @discardableResult
+    func setInterpolationImage(_ image: UIImage?, covering coverage: CelContentCoverage? = nil,
+                               aimingAt placement: CelContentPlacement? = nil) -> Bool {
+        finishDerivedInstallation(interpolationPresentation.install(image, covering: coverage,
+            on: contentRevisions.celID, aimingAt: placement,
+            preservingPendingThrough: unlandedInk.pictures.map(\.version).max()))
+    }
+
+    @discardableResult
+    func setRenderedInterpolationImage(_ image: UIImage?, covering coverage: CelContentCoverage,
+                                       aimingAt placement: CelContentPlacement) -> Bool {
+        finishDerivedInstallation(interpolationPresentation.installRendered(image, covering: coverage,
+            on: contentRevisions.celID, aimingAt: placement,
+            preservingPendingThrough: unlandedInk.pictures.map(\.version).max()))
+    }
+
+    private func finishDerivedInstallation(_ result: DerivedCelPresentation.Installation) -> Bool {
+        switch result {
+        case .rejected: return false
+        case .unchanged: return true
+        case .changed:
+            refreshDisplay()
+            return true
+        }
     }
 
     /// **One canvas-sized render per refresh, in every role.** What this used to do on the
@@ -998,9 +1020,11 @@ final class StrokeCanvasView: CanvasPlaneView {
             // transparency is 1 GiB at 16383², and Core Animation skips a nil contents outright.
             let base = PlaybackTrace.span(.vectorRasterize) { raster?.renderIfNonEmpty() }
             if imageView.image !== base { imageView.image = base }
+            unlandedInk.retire(upTo: contentRevisions.current)
             showOverlays(scratch)
             return
         }
+        let currentRevision = contentRevisions.committed(vectorCanvas)
         let plan = VectorPreviewPlan.forVectorLayer(role: vectorScratchRole,
                                                     hasScratch: scratch != nil,
                                                     hasInterpolationImage: interpolationImage != nil)
@@ -1009,22 +1033,15 @@ final class StrokeCanvasView: CanvasPlaneView {
         // renders to nil rather than to a transparent sheet. It is already an image, so there is
         // nothing to rasterize and nothing to defer.
         let base: UIImage?
-        /// The `VectorCanvas.version` the base slot ends this refresh holding, or nil when the base
-        /// is not the cel's own render — what `retireUnlandedInk` is asked about at the bottom.
-        var installedVersion: Int?
+        /// Coverage is the actual content frozen for the base, independent of display-only ticks.
+        var installedRevision: Int?
         switch plan.base {
         case .interpolation:
             displayedVectorVersion = vectorCanvas.version
             shownVectorVersion = vectorCanvas.version
             base = interpolationImage
-            // **A posed picture holds the cel's ink up to the version it was posed at**, so it
-            // retires what is held exactly as a committed render does (`interpolationCoverage`).
-            // **A derived in-between replaces the cel's own content outright**, so nothing held
-            // against the cel's version is meaningful there — and `retire(upTo:)`'s arithmetic could
-            // never release it, since an in-between's `version` is constant across a scrub.
-            // Reached when the playhead moves onto an in-between while ink is still un-landed.
-            installedVersion = interpolationCoverage
-            if installedVersion == nil { unlandedInk.removeAll() }
+            installedRevision = interpolationPresentation.coverage?.revision
+            if installedRevision == nil, heldEdit == nil { unlandedInk.removeAll() }
         case .committedRender:
             let cached = vectorCanvas.cachedRender()
             switch DeferredVectorRender.step(for: cached, pending: pendingVectorRenderVersion,
@@ -1052,14 +1069,14 @@ final class StrokeCanvasView: CanvasPlaneView {
                 displayedVectorVersion = version
                 shownVectorVersion = version
                 base = cached.image
-                installedVersion = version
+                installedRevision = currentRevision
             case .rasterize(let version):
                 if waitingForTheRender {
                     pendingVectorRenderVersion = nil
                     displayedVectorVersion = version
                     shownVectorVersion = version
                     base = PlaybackTrace.span(.vectorRasterize) { vectorCanvas.render() }
-                    installedVersion = version
+                    installedRevision = currentRevision
                 } else {
                     pendingVectorRenderVersion = version
                     startVectorRender(of: vectorCanvas, atVersion: version)
@@ -1077,7 +1094,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         // **Before the base is installed and in the same main-thread turn**, so Core Animation
         // commits the new base and the removal of the ink it now contains together — otherwise the
         // artist sees one frame with the stroke drawn twice, once in each.
-        retireUnlandedInk(coveredBy: installedVersion)
+        retireUnlandedInk(coveredByRevision: installedRevision)
         // Identity-checked because the committed render is memoized on the canvas's `version` and an
         // `.overlay` stroke does not touch the canvas until lift: every touch-move of a paint stroke
         // hands back the *same* image, and re-assigning it would put a Core Animation contents
@@ -1098,6 +1115,7 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// first fills `cachedImage` and the other reads it — which is the arrangement the synchronous
     /// code had for free and the one thing this change could quietly have thrown away.
     private func startVectorRender(of canvas: VectorCanvas, atVersion version: Int) {
+        let revision = contentRevisions.committed(canvas)
         Self.renderQueue.async { [weak self] in
             // **Zero on every ordinary launch** — `-uiTestSlowVectorRenderMillis` and nothing else,
             // simulator only. See `UITestSeeds.slowVectorRenderDelay` for why the defect this file's
@@ -1113,13 +1131,13 @@ final class StrokeCanvasView: CanvasPlaneView {
             }
             DispatchQueue.main.async {
                 PlaybackTrace.span(.renderLanded) {
-                    self?.finishVectorRender(image, of: canvas, atVersion: version)
+                    self?.finishVectorRender(image, of: canvas, atVersion: version, covering: revision)
                 }
             }
         }
     }
 
-    private func finishVectorRender(_ image: UIImage?, of canvas: VectorCanvas, atVersion version: Int) {
+    private func finishVectorRender(_ image: UIImage?, of canvas: VectorCanvas, atVersion version: Int, covering revision: Int) {
         // A different canvas is a different layer; this view has moved on and owes it nothing.
         guard canvas === vectorCanvas else { return }
         // Nil is a rasterize that never ran — `render(quality:ifStillAtVersion:)` found the canvas
@@ -1153,7 +1171,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         // with the stroke drawn twice. Right for an intermediate frame too: it is a base rasterized
         // at `version`, so everything held up to `version` is in it and everything held after stays
         // drawn over it.
-        retireUnlandedInk(coveredBy: version)
+        retireUnlandedInk(coveredByRevision: revision)
         if imageView.image !== image { imageView.image = image }
         shownVectorVersion = version
         // **Recorded as displayed only when it is the canvas's own version.** An intermediate frame
@@ -1287,21 +1305,33 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// alternative — punching a canvas-sized copy of the render and showing that instead — is 1 GiB
     /// at 16383² for a stroke a few hundred points long, which is the defect this window closed.
     /// The already drawn scratch, owned by the next display recipe until its composite lands.
-    var displayInk: PixelOps.InkWindow? {
+    var displaySource: (value: PixelOps.CelDisplay, bounds: CGRect)? {
         guard let scratch, let image = scratchView.image, let size = canvasManager?.canvasSize else { return nil }
-        return PixelOps.InkWindow(image: image, rect: scratch.windowRect, canvasSize: size,
-                                 opacity: scratch.replacesBase ? 1 : scratch.opacity,
-                                 replacesBase: scratch.replacesBase)
+        if let shown = scratch.renderedCelContent {
+            var value = PixelOps.CelDisplay()
+            value.drawOverlays = { cg, content in shown.draw(into: cg, content: content, canvasSize: size) }
+            return (value, shown.footprint.boundingBoxOfPath)
+        }
+        guard scratch.celContent == nil else { return nil }
+        let ink = PixelOps.InkWindow(image: image, rect: scratch.windowRect, canvasSize: size,
+            opacity: scratch.replacesBase ? 1 : scratch.opacity, replacesBase: scratch.replacesBase,
+            pose: poseSpacePose)
+        return (PixelOps.CelDisplay(windows: [ink]), ink.displayedBounds)
     }
 
     /// Direct display invalidation, separate from the playback trail and from SwiftUI publishing.
     var onDisplayInkChanged: (() -> Void)?
 
     private func showOverlays(_ scratch: StrokeScratch?) {
+        guard scratch?.completed != false else { return }
+        let shown = scratch?.renderedCelContent
+        guard scratch?.celContent == nil || shown != nil else { return }
         defer { onDisplayInkChanged?() }
-        let liveHole = timingStroke == nil ? scratch.flatMap { $0.replacesBase ? $0.windowRect : nil } : nil
-        var covering: [CGRect] = []
-        if let liveHole { covering.append(liveHole) }
+        var covering: [CGPath] = []
+        if timingStroke == nil, let scratch, scratch.replacesBase {
+            let local = CGPath(rect: scratch.windowRect, transform: nil)
+            covering.append(shown?.footprint ?? poseSpacePose?.mapped(local) ?? local)
+        }
         if let heldEditHole { covering.append(heldEditHole) }
         if let heldDerivationHole { covering.append(heldDerivationHole) }
         let baseHole = showHeldInk(covering: covering)
@@ -1332,7 +1362,10 @@ final class StrokeCanvasView: CanvasPlaneView {
             setBaseHole(baseHole)
             return
         }
-        let image = scratch?.image
+        let image = shown?.image ?? scratch?.image
+        if shown != nil {
+            if scratchView.superview !== self { insertSubview(scratchView, aboveSubview: poseSpace) }
+        } else if scratchView.superview !== poseSpace { poseSpace.addSubview(scratchView) }
         setBaseHole(baseHole)
         // **BRUSH.md §2.11's cap, on the display side.** An `.additive` window holds the stroke's
         // ink at full flow and is shown at the stroke's own opacity, which is exactly what
@@ -1343,7 +1376,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         let alpha = (scratch?.replacesBase ?? true) ? 1 : (scratch?.opacity ?? 1)
         if scratchView.alpha != alpha { scratchView.alpha = alpha }
         guard scratchView.image !== image else { return }
-        if let scratch, image != nil { scratchView.frame = scratch.windowRect }
+        if let scratch, image != nil { scratchView.frame = shown?.window ?? scratch.windowRect }
         scratchView.image = image
         scratchView.isHidden = image == nil
     }
@@ -1362,7 +1395,15 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// records a `LocalEdit` and the base there is a derived frame with a version of its own, so
     /// `retire(upTo:)`'s arithmetic does not apply to it and the picture could never be released.
     private func holdUnlandedInk(from scratch: StrokeScratch?, at version: Int) {
-        guard let scratch, let image = scratch.image, !scratch.windowRect.isNull else { return }
+        guard let scratch, !scratch.windowRect.isNull else { return }
+        if let shown = scratch.renderedCelContent, let canvas = vectorCanvas, canvas.version == version {
+            let revision = contentRevisions.committed(canvas)
+            unlandedInk.hold(.init(id: nextUnlandedInkID, version: revision, windowRect: shown.window,
+                replacing: shown.footprint, contents: .image(shown.image)))
+            nextUnlandedInkID += 1
+            return
+        }
+        guard scratch.celContent == nil, let image = scratch.image else { return }
         // Exactly the three fields `showOverlays` reads off a live scratch, so the picture does
         // not change when it changes hands.
         let alpha = scratch.replacesBase ? 1 : scratch.opacity
@@ -1381,44 +1422,46 @@ final class StrokeCanvasView: CanvasPlaneView {
 
     private func holdUnlandedPicture(_ image: UIImage, rect: CGRect, alpha: CGFloat,
                                     replacesBase: Bool, at version: Int) {
-        unlandedInk.hold(UnlandedInk.Picture(id: nextUnlandedInkID, version: version,
+        guard let canvas = vectorCanvas, canvas.version == version else { return }
+        let revision = contentRevisions.committed(canvas)
+        holdUnlandedPicture(image, rect: rect, alpha: alpha, replacesBase: replacesBase, atRevision: revision)
+    }
+
+    private func holdUnlandedPicture(_ image: UIImage, rect: CGRect, alpha: CGFloat,
+                                    replacesBase: Bool, atRevision revision: Int) {
+        unlandedInk.hold(UnlandedInk.Picture(id: nextUnlandedInkID, version: revision,
                                              windowRect: rect, alpha: alpha,
                                              replacesBase: replacesBase, image: image))
         nextUnlandedInkID += 1
     }
 
-    /// A base rasterized at `version` is on screen, so everything it contains stops being held. Nil
-    /// means the base slot is not the cel's own render, in which case nothing is claimed and nothing
-    /// is retired.
-    private func retireUnlandedInk(coveredBy version: Int?) {
-        guard let version, !unlandedInk.isEmpty else { return }
-        unlandedInk.retire(upTo: version)
+    private func retireUnlandedInk(coveredByRevision revision: Int?) {
+        guard let revision, !unlandedInk.isEmpty else { return }
+        unlandedInk.retire(upTo: revision)
     }
 
     /// Rebuilds views only when pictures change; a moved live replacement updates their clipping
     /// without replacing their image/surface storage. The common empty case allocates no plan.
-    private func showHeldInk(covering: [CGRect]) -> CGPath? {
+    private func showHeldInk(covering: [CGPath]) -> CGPath? {
         if unlandedInk.isEmpty, heldInkIDsOnScreen.isEmpty, covering.isEmpty {
-            heldInkCoveringRects = []
+            heldInkCoveringPaths = []
             heldInkBaseHole = nil
             return nil
         }
         let ids = unlandedInk.pictures.map(\.id)
-        let picturesChanged = ids != heldInkIDsOnScreen
-        guard picturesChanged || covering != heldInkCoveringRects else { return heldInkBaseHole }
-        let plan = unlandedInk.displayPlan(covering: covering)
+        let picturesChanged = ids != heldInkIDsOnScreen || contentPlacement != heldInkPlacement
+        guard picturesChanged || covering != heldInkCoveringPaths else { return heldInkBaseHole }
+        let plan = unlandedInk.displayPlan(placement: contentPlacement, coveringPaths: covering)
         heldInkIDsOnScreen = ids
-        heldInkCoveringRects = covering
+        heldInkCoveringPaths = covering
+        heldInkPlacement = contentPlacement
         heldInkBaseHole = plan.baseHole
         if picturesChanged {
             for subview in heldInkView.subviews { subview.removeFromSuperview() }
             for visible in plan.pictures {
                 let picture = visible.picture
-                let view = picture.contents.makeView()
-                view.contentMode = .scaleToFill
-                view.isUserInteractionEnabled = false
-                view.frame = picture.windowRect
-                view.alpha = picture.alpha
+                let size = vectorCanvas?.size ?? raster?.size ?? bounds.size
+                let view = picture.makeCanvasView(size: size, placement: contentPlacement)
                 heldInkView.addSubview(view)
             }
         }
@@ -1437,6 +1480,8 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// already accept under minification (see `scratchView`), it lives in the growth margin rather
     /// than under the eraser, and it is gone at lift.
     private func setBaseHole(_ hole: CGPath?) {
+        // Both base tiers use the same shown-space hole, mapped back at their own image slot.
+        onBaseHoleChanged?(hole)
         guard let hole else {
             // Guarded because this runs once per layer per SwiftUI pass with nothing to punch, and
             // assigning a layer property is not free even when the value does not change.
@@ -1446,10 +1491,10 @@ final class StrokeCanvasView: CanvasPlaneView {
         let canvas = CGRect(origin: .zero, size: vectorCanvas?.size ?? raster?.size ?? bounds.size)
         let path = CGMutablePath()
         path.addRect(canvas)
-        // The window is in `poseSpace`; a raster base is shown through the same pose and takes it
-        // as it is, and a vector base is the posed picture in canvas points and takes it mapped.
-        let posedBase = vectorCanvas != nil ? poseSpacePose : nil
-        path.addPath(posedBase.flatMap { $0.mapped(hole) } ?? hole)
+        // Vector base images are already in shown space. Raster base images still live at rest,
+        // so their mask reads the same shown hole through the inverse of their actual placement.
+        let inverse = vectorCanvas == nil ? poseSpacePose?.inverse : nil
+        path.addPath(inverse?.mapped(hole) ?? hole)
         let mask = (imageView.layer.mask as? CAShapeLayer) ?? {
             let created = CAShapeLayer()
             created.fillRule = .evenOdd
@@ -2197,6 +2242,13 @@ final class StrokeCanvasView: CanvasPlaneView {
                 // the base slot, which is already in canvas points.
                 let shown = poseSpacePose == nil ? interpolationImage : nil
                 let backdrop = shown ?? vectorCanvas.renderIfNonEmpty()
+                let elements = vectorCanvas.elements
+                let references = Set(elements.compactMap { $0.stream }.filter(\.rendersInPlace).map(\.id))
+                let ink: CelContentPicture.Ink = shown.map(CelContentPicture.Ink.rendered)
+                    ?? .ordinary(source: vectorCanvas.freezeDisplay(quality: .full, referenceIDs: references),
+                                 elements: elements, rewriting: [])
+                let celContent = StrokeScratch.CelContent(backing: celPixelSnapshot, ink: ink,
+                    placement: CelContentPlacement(ink: poseSpacePose, backing: contentPlacement.backing))
                 // **That render was synchronous and it is a picture of everything committed**, so
                 // every held picture's ink is inside it — both in this window and, because
                 // `renderIfNonEmpty` memoizes, in the base the `refreshDisplay` at the end of this
@@ -2211,8 +2263,10 @@ final class StrokeCanvasView: CanvasPlaneView {
                 let isModeOne = (inBetweenCelID != nil ? VectorEraserMode.erase : vectorEraserMode) == .erase
                 return isModeOne
                     ? StrokeScratch(canvasSize: vectorCanvas.size, role: .subtractive(backdrop: backdrop),
-                                    opacity: CGFloat(profile.opacity), texture: profile.preset.texture)
-                    : StrokeScratch(canvasSize: vectorCanvas.size, role: .replacing(backdrop: backdrop))
+                                    opacity: CGFloat(profile.opacity), texture: profile.preset.texture,
+                                    celContent: celContent)
+                    : StrokeScratch(canvasSize: vectorCanvas.size, role: .replacing(backdrop: backdrop),
+                                    celContent: celContent)
             }
             return StrokeScratch(canvasSize: vectorCanvas.size, role: .additive,
                                  opacity: CGFloat(profile.opacity),

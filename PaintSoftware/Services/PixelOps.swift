@@ -222,6 +222,11 @@ enum PixelOps {
         let canvasSize: CGSize
         let opacity: CGFloat
         let replacesBase: Bool
+        var pose: PoseMap? = nil
+
+        var displayedBounds: CGRect {
+            pose?.mapped(CGPath(rect: rect, transform: nil))?.boundingBoxOfPath ?? rect
+        }
     }
 
     struct FrozenCel {
@@ -477,10 +482,10 @@ enum PixelOps {
     /// The caller has already applied the strip window's shift to the CTM, so both the source frame
     /// and the returned destination are in the *frame's* own coordinates.
     private static func warpedPosedTiers(frame: CGRect, through homography: Homography,
-                                         drawing draw: () -> Void) -> (image: UIImage, destination: CGRect)? {
+                                         clippedTo clip: CGRect? = nil, drawing draw: () -> Void) -> (image: UIImage, destination: CGRect)? {
         guard frame.width >= 1, frame.height >= 1,
               let quad = PoseInterpolation.mapped(Quad.rect(frame), through: homography) else { return nil }
-        let destination = quad.boundingBox.integral.intersection(frame.integral)
+        let destination = quad.boundingBox.integral.intersection((clip ?? frame).integral)
         guard destination.width >= 1, destination.height >= 1 else { return nil }
         // Scale 1, which is the format the caller's own renderer uses — the raster tiers are bitmaps
         // that carry their own resolution and `RenderQuality` reaches only the vector tier, so a
@@ -494,7 +499,8 @@ enum PixelOps {
         // way and for the same reason.
         let sourceScale = CGFloat(source.width) / frame.width
         guard let warped = ImageWarp.warpedImage(source: source, sourceScale: sourceScale,
-                                                 boxSize: frame.size, homography: homography,
+                                                 boxSize: frame.size,
+                                                 homography: homography * .translation(x: frame.minX, y: frame.minY),
                                                  destination: destination,
                                                  maximumDestinationTexels: maximumFloatingWarpTexels)
         else { return nil }
@@ -506,16 +512,54 @@ enum PixelOps {
     /// `frame` and warped (`warpedPosedTiers`). `rasterizeUncached` draws a cel's raster tiers through
     /// it and `posed(_:through:)` draws a finished picture, so the two cannot resample differently.
     private static func drawPosed(through pose: PoseMap, in context: CGContext, frame: CGRect,
-                                  drawing draw: () -> Void) {
+                                  clippedTo clip: CGRect? = nil, drawing draw: () -> Void) {
         switch pose {
         case .affine(let transform):
             context.concatenate(transform)
             draw()
         case .projective(let homography):
-            if let warped = warpedPosedTiers(frame: frame, through: homography, drawing: draw) {
+            if let warped = warpedPosedTiers(frame: frame, through: homography, clippedTo: clip, drawing: draw) {
                 warped.image.draw(in: warped.destination)
             }
         }
+    }
+
+    /// A layer-local immutable window drawn in the same pose space as the cel's backing.
+    /// Replacement clears only its mapped footprint; transparent pixels still replace older ink.
+    static func drawWindow(_ image: UIImage, rect: CGRect, canvasSize: CGSize,
+                           through pose: PoseMap?, into cg: CGContext, content: CGRect,
+                           opacity: CGFloat = 1, replacing: Bool) {
+        let local = CGPath(rect: rect, transform: nil)
+        withCelWindow(footprint: pose?.mapped(local) ?? local, canvasSize: canvasSize, into: cg,
+                      content: content, replacing: replacing) {
+            if let pose {
+                drawPosed(through: pose, in: cg, frame: rect,
+                          clippedTo: CGRect(origin: .zero, size: canvasSize).intersection(cg.boundingBoxOfClipPath)) {
+                    image.draw(in: rect, blendMode: .normal, alpha: opacity)
+                }
+            } else { image.draw(in: rect, blendMode: .normal, alpha: opacity) }
+        }
+    }
+
+    /// Shared canvas placement and replacement hole for a complete cel-content picture. Its ink
+    /// renderer chooses native geometry posing; its raster renderer uses the existing pixel warp.
+    static func withCelWindow(footprint: CGPath, canvasSize: CGSize,
+                              into cg: CGContext, content: CGRect, replacing: Bool,
+                              drawing draw: () -> Void) {
+        guard canvasSize.width > 0, canvasSize.height > 0 else { return }
+        let frame = CGRect(origin: .zero, size: canvasSize)
+        cg.saveGState()
+        cg.translateBy(x: content.minX, y: content.minY)
+        cg.scaleBy(x: content.width / canvasSize.width, y: content.height / canvasSize.height)
+        if replacing {
+            cg.saveGState()
+            cg.addPath(footprint)
+            cg.clip()
+            cg.clear(frame)
+            cg.restoreGState()
+        }
+        draw()
+        cg.restoreGState()
     }
 
     /// A canvas-sized `image` carried through `pose` — what the canvas shows of it where `pose` is the
@@ -622,13 +666,9 @@ enum PixelOps {
             }
             cel.display?.drawOverlays?(context.cgContext, content)
             for ink in cel.display?.windows ?? [] {
-                let scaleX = content.width / ink.canvasSize.width
-                let scaleY = content.height / ink.canvasSize.height
-                let rect = CGRect(x: content.minX + ink.rect.minX * scaleX,
-                                  y: content.minY + ink.rect.minY * scaleY,
-                                  width: ink.rect.width * scaleX, height: ink.rect.height * scaleY)
-                if ink.replacesBase { context.cgContext.clear(rect) }
-                ink.image.draw(in: rect, blendMode: .normal, alpha: ink.opacity)
+                drawWindow(ink.image, rect: ink.rect, canvasSize: ink.canvasSize, through: ink.pose,
+                           into: context.cgContext, content: content, opacity: ink.opacity,
+                           replacing: ink.replacesBase)
             }
         }
     }

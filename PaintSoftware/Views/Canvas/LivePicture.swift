@@ -60,10 +60,9 @@ struct LivePicture {
 /// host's picture is never older than the halves either side of it, blanked or not.
 enum LiveActivePicture {
     /// A picture in place of the cel's own ink — a pose or an in-between,
-    /// `LiveCelPreview.derived`. `covering` is the canvas and version of the cel's own ink it
-    /// already contains (`inkCoverage(of:)`).
+    /// `LiveCelPreview.derived`. Coverage is the immutable content revision captured with it.
     case derived(layerID: UUID, content: DerivedCelContent,
-                 covering: (canvas: VectorCanvas, version: Int)?)
+                 covering: CelContentCoverage)
     /// The cel's own committed render, for a blanked host, which is not keeping it current.
     /// Rendered into the canvas's own memo — the one `refreshDisplay` reads — so the edge that
     /// un-blanks the host installs it synchronously instead of showing what it had.

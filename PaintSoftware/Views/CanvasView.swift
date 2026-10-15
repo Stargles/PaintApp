@@ -903,6 +903,9 @@ struct CanvasView: UIViewRepresentable {
                         self.handleStrokeMoved(sample, penTime: penTime, host: host)
                     }
                 }
+                host.strokeView.onBaseHoleChanged = { [weak host] hole in
+                    host?.setBackingReplacementHole(hole)
+                }
                 host.strokeView.onDisplayInkChanged = { [weak self] in self?.requestStreamDisplay() }
                 host.strokeView.onLiveInkChanged = { [weak self] image, rect, alpha in
                     self?.updateTimingInk(image: image, rect: rect, alpha: alpha)
@@ -1057,6 +1060,7 @@ struct CanvasView: UIViewRepresentable {
                 // both in `showAlphaAndFill`, which an Opacity or colour tick runs alone.
                 showAlphaAndFill(on: host, ofLayerAt: index, celIndex: celIdx)
 
+                if let celIdx { host.strokeView.observeCelContent(canvasManager.layers[index].cels[celIdx]) }
                 let displayedBaked = bakedImageToDisplay(layerIndex: index, celIndex: celIdx)
                 if host.bakedImageView.image !== displayedBaked { host.bakedImageView.image = displayedBaked }
                 let bakedHidden = displayedBaked == nil
@@ -1085,7 +1089,7 @@ struct CanvasView: UIViewRepresentable {
                 }
                 let hostCelID = celIdx.map { canvasManager.layers[index].cels[$0].id }
                 showLiveFill(on: host, layerID: layer.id, celID: hostCelID)
-                showLiveElementEdit(on: host, layerID: layer.id, celID: hostCelID)
+                showLiveCelContentEdit(on: host, layerID: layer.id, celID: hostCelID)
                 // Disabling only strokeView.isUserInteractionEnabled isn't enough: each LayerHostView
                 // fully covers the container, so an inactive host still swallows touches via UIView's
                 // default hitTest, blocking an active layer underneath. Disabling the host itself
@@ -2030,9 +2034,9 @@ struct CanvasView: UIViewRepresentable {
             for (layerID, host) in layerHosts {
                 let celID = canvasManager.liveFill?.layerID == layerID ? canvasManager.liveFill?.celID : nil
                 moved = showLiveFill(on: host, layerID: layerID, celID: celID) || moved
-                let editedCelID = canvasManager.liveElementEdit?.layerID == layerID
-                    ? canvasManager.liveElementEdit?.celID : nil
-                moved = showLiveElementEdit(on: host, layerID: layerID, celID: editedCelID) || moved
+                let editedCelID = canvasManager.liveCelContentEdit?.layerID == layerID
+                    ? canvasManager.liveCelContentEdit?.celID : nil
+                moved = showLiveCelContentEdit(on: host, layerID: layerID, celID: editedCelID) || moved
             }
             if moved {
                 liveMoveCount += 1
@@ -2206,19 +2210,17 @@ struct CanvasView: UIViewRepresentable {
             var bounds = CGRect.null
             let size = canvasManager.canvasSize ?? .zero
             for (id, host) in layerHosts {
-                if let ink = host.strokeView.displayInk {
-                    values[id] = PixelOps.CelDisplay(windows: [ink])
-                    bounds = bounds.union(ink.rect)
+                if let source = host.strokeView.displaySource {
+                    values[id] = source.value
+                    bounds = bounds.union(source.bounds)
                 }
             }
-            if let edit = canvasManager.liveElementEdit,
-               let index = canvasManager.layers.firstIndex(where: { $0.id == edit.layerID }),
-               let cel = canvasManager.layers[index].cels.first(where: { $0.id == edit.celID }), let vector = cel.vector {
-                let refs = Set(vector.streams.filter(\.rendersInPlace).map(\.id))
+            if let edit = canvasManager.liveCelContentEdit {
                 var value = values[edit.layerID] ?? PixelOps.CelDisplay()
-                value.vector = vector.freezeDisplay(quality: .full, referenceIDs: refs, replacing: edit.elements)
+                let placement = canvasManager.celContentPlacement(forLayerID: edit.layerID)
+                value.drawOverlays = edit.displaySource(placement: placement, canvasSize: size)
                 values[edit.layerID] = value
-                bounds = bounds.union(edit.window)
+                bounds = bounds.union(edit.displayedBounds(placement: placement))
             }
             if let fill = canvasManager.liveFill, let render = fill.render {
                 var value = values[fill.layerID] ?? PixelOps.CelDisplay()
@@ -2297,16 +2299,18 @@ struct CanvasView: UIViewRepresentable {
             let scale = CGAffineTransform(scaleX: size.width / (display.recipe.window?.frameSize.width ?? size.width),
                                           y: size.height / (display.recipe.window?.frameSize.height ?? size.height))
             let budget = canvasManager.frameBaker.budgetBytes
+            let procedure = canvasManager.liveCelContentEdit?.procedure
             return WindowSurfaceView.Frame(window: display.core, placement: scale, draw: { cg in
-                guard let image = display.recipe.composite(budgetBytes: budget) else { return nil }
+                guard let image = display.recipe.composite(budgetBytes: budget), procedure?.hasFailed != true else { return nil }
                 PaddingCoverView.marginGrey.setFill()
                 cg.fill(CGRect(origin: .zero, size: display.core.size))
                 UIImage(cgImage: image, scale: 1, orientation: .up).draw(in:
                     display.buffer.offsetBy(dx: -display.core.minX, dy: -display.core.minY))
                 return display.core
             }, finished: { [weak self] shown in
-                guard shown else { return }
+                guard shown else { procedure?.didReject(); return }
                 self?.frontStreamDisplay()
+                procedure?.didPresent()
             })
         }
 
@@ -2415,12 +2419,22 @@ struct CanvasView: UIViewRepresentable {
         }
 
         /// Shows on `host` the live element edit's window when it is on `celID` of `layerID`, and
-        /// takes down whatever the host was showing otherwise (`CanvasManager.liveElementEdit`, TODO
+        /// takes down whatever the host was showing otherwise (`CanvasManager.liveCelContentEdit`, TODO
         /// (173)). Returns whether the host's picture changed.
         @discardableResult
-        private func showLiveElementEdit(on host: LayerHostView, layerID: UUID, celID: UUID?) -> Bool {
-            let live = canvasManager.liveElementEdit.flatMap {
+        private func showLiveCelContentEdit(on host: LayerHostView, layerID: UUID, celID: UUID?) -> Bool {
+            let live = canvasManager.liveCelContentEdit.flatMap {
                 $0.layerID == layerID && $0.celID == celID ? $0 : nil
+            }
+            // A lift's notification precedes SwiftUI reconciliation; observe the actual committed
+            // cel before retiring its held window, including changed backing with unchanged ink.
+            if let index = canvasManager.layers.firstIndex(where: { $0.id == layerID }),
+               let at = canvasManager.displayedCelIndex(inLayer: index, atFrame: canvasManager.currentFrame) {
+                let cel = canvasManager.layers[index].cels[at]
+                host.strokeView.observeCelContent(cel)
+                host.bakedImageView.image = cel.bakedImage
+                host.bakedImageView.isHidden = cel.bakedImage == nil
+                if host.strokeView.raster !== cel.raster { host.strokeView.raster = cel.raster }
             }
             return host.strokeView.showHeldEdit(live)
         }
@@ -2639,7 +2653,8 @@ struct CanvasView: UIViewRepresentable {
             guard let host = layerHosts[layer.id], let shown = shownCel(ofLayerAt: index, in: walk)
             else { return nil }
             if case .derived(let content) = shown.preview {
-                return .derived(layerID: layer.id, content: content, covering: Self.inkCoverage(of: shown.cel))
+                return .derived(layerID: layer.id, content: content, covering: host.strokeView.captureContentCoverage(of: shown.cel,
+                    placement: canvasManager.celContentPlacement(ofLayerAt: index, in: walk), derivation: content.identity))
             }
             guard host.isBlanked, let canvas = shown.cel.vector, canvas === host.strokeView.vectorCanvas
             else { return nil }
@@ -2756,10 +2771,14 @@ struct CanvasView: UIViewRepresentable {
                mint.cut == wanted || (mint.key == sandwichKey && mint.cut.isSameKind(as: wanted)) {
                 livePicture = mint.picture(of: bands)
                 for (picture, image) in zip(mint.active, rendered.activeImages) {
-                    guard case .derived(let layerID, let content, let covering) = picture else { continue }
-                    interpolationPreviewKeys[layerID] = InterpolationPreviewKey(identity: content.identity,
-                                                                                preview: false)
-                    layerHosts[layerID]?.strokeView.setInterpolationImage(image, covering: covering)
+                    guard case .derived(let layerID, _, let covering) = picture else { continue }
+                    guard let host = layerHosts[layerID],
+                          host.strokeView.setRenderedInterpolationImage(image, covering: covering,
+                            aimingAt: canvasManager.celContentPlacement(forLayerID: layerID)) else { continue }
+                    host.contentPlacement = covering.placement
+                    if let identity = host.strokeView.installedDerivationIdentity {
+                        interpolationPreviewKeys[layerID] = InterpolationPreviewKey(identity: identity, preview: false)
+                    }
                 }
             }
             // The whole reconciliation rather than only the image swap: this result may be the first
@@ -3064,10 +3083,13 @@ struct CanvasView: UIViewRepresentable {
                   let celIdx = canvasManager.ensureCelAtCurrentFrame(layerIndex: index) else { return }
 
             let cel = canvasManager.layers[index].cels[celIdx]
+            host.strokeView.observeCelContent(cel)
+            host.bakedImageView.image = cel.bakedImage
+            host.bakedImageView.isHidden = cel.bakedImage == nil
             host.strokeView.raster = cel.raster
             host.strokeView.vectorCanvas = cel.vector
             showLiveFill(on: host, layerID: canvasManager.layers[index].id, celID: cel.id)
-            showLiveElementEdit(on: host, layerID: canvasManager.layers[index].id, celID: cel.id)
+            showLiveCelContentEdit(on: host, layerID: canvasManager.layers[index].id, celID: cel.id)
             host.bakedImageView.image = cel.bakedImage
             host.bakedImageView.isHidden = cel.bakedImage == nil
         }
@@ -3483,16 +3505,6 @@ struct CanvasView: UIViewRepresentable {
             return (cel, canvasManager.livePreview(forCel: cel, atFrame: frame, inheriting: walk.poses[index]))
         }
 
-        /// **The cel's own ink a derived picture of it already contains** — all of it, at the
-        /// canvas's version now, when the derivation is a pose of that ink; nil for an in-between,
-        /// which derives from its references and contains no version of it. What lets the stroke
-        /// just finished stay on screen over a posed picture that predates it, until one that
-        /// contains it lands (`StrokeCanvasView.setInterpolationImage`).
-        private static func inkCoverage(of cel: Cel) -> (canvas: VectorCanvas, version: Int)? {
-            guard cel.interpolation == nil, let canvas = cel.vector else { return nil }
-            return (canvas, canvas.version)
-        }
-
         /// Renders each layer's interpolated frame, where it has one at the current frame, and clears
         /// it everywhere else. `.preview` quality while scrubbing, `.full` on release — cached in
         /// separate slots on `VectorCanvas` so switching doesn't throw the other away.
@@ -3503,15 +3515,13 @@ struct CanvasView: UIViewRepresentable {
             // …and §5.5's source frames off the same walk: a host under a Repeat previews the cel
             // of the frame it is showing, derived at that frame.
             let walk = canvasManager.renderTreeAndPoses(atFrame: canvasManager.currentFrame)
-            let poses = walk.poses
             for (layerIndex, layer) in canvasManager.layers.enumerated() {
                 guard let host = layerHosts[layer.id] else { continue }
-                let shownFrame = walk.frames[layerIndex] ?? canvasManager.currentFrame
                 // TODO (124): the pose the layer's own space is shown through, off the same walk, so
                 // the live stroke and a raster layer's pixels sit where the composite puts them.
-                host.shownPose = canvasManager.inkPose(ofLayerAt: layerIndex, showing: shownFrame,
-                                                       inheriting: poses[layerIndex])
+                let placement = canvasManager.celContentPlacement(ofLayerAt: layerIndex, in: walk)
                 guard let shown = shownCel(ofLayerAt: layerIndex, in: walk) else {
+                    host.contentPlacement = placement
                     interpolationPreviewKeys.removeValue(forKey: layer.id)
                     host.strokeView.showHeldDerivation(nil)
                     host.strokeView.setInterpolationImage(nil)
@@ -3570,10 +3580,21 @@ struct CanvasView: UIViewRepresentable {
                     // pose resolves differently at is a different key and a repaint, and holding on
                     // one it resolves equal at is the same key and free.
                     let key = InterpolationPreviewKey(identity: derived.identity, preview: held != nil)
-                    guard interpolationPreviewKeys[layer.id] != key else { continue }
-                    interpolationPreviewKeys[layer.id] = key
+                    if interpolationPreviewKeys[layer.id] == key {
+                        // A linked derivation intentionally ignores its container pose in the key.
+                        // Reuse its ink only once the actual backing slots cover the same content.
+                        if held == nil, let image = host.strokeView.interpolationImage,
+                           let coverage = host.strokeView.captureDisplayedContentCoverage(of: shown.cel,
+                            bakedImage: host.bakedImageView.image, placement: placement, derivation: derived.identity) {
+                            if host.strokeView.setInterpolationImage(image, covering: coverage, aimingAt: placement) {
+                                host.contentPlacement = coverage.placement
+                            }
+                        }
+                        continue
+                    }
                     if held != nil {
-                        host.strokeView.showHeldDerivation(derived)
+                        interpolationPreviewKeys[layer.id] = key
+                        host.strokeView.showHeldDerivation(derived, placement: placement)
                         continue
                     }
                     derivedRenderCount += 1
@@ -3581,11 +3602,18 @@ struct CanvasView: UIViewRepresentable {
                     // which would resolve a second one from the ids. Same pixels — that function is a
                     // thin call through `derivedCelContent` — and one resolve instead of two on the
                     // path that runs every SwiftUI pass.
-                    host.strokeView.setInterpolationImage(derived.render(.full),
-                                                          covering: Self.inkCoverage(of: shown.cel))
+                    let coverage = host.strokeView.captureContentCoverage(of: shown.cel, placement: placement, derivation: derived.identity)
+                    if host.strokeView.setRenderedInterpolationImage(derived.render(.full), covering: coverage, aimingAt: placement) {
+                        host.contentPlacement = coverage.placement
+                        if let identity = host.strokeView.installedDerivationIdentity {
+                            interpolationPreviewKeys[layer.id] = InterpolationPreviewKey(identity: identity, preview: false)
+                        }
+                    }
                 case .motionGroupTint:
+                    host.contentPlacement = placement
                     updateMotionGroupOverlay(layer: layer, cel: shown.cel, host: host)
                 case .cleared:
+                    host.contentPlacement = placement
                     // The seam's contract is that nil means "not yet" rather than "empty" — a recipe
                     // can be malformed while a reference is being re-picked — so the cel falls back
                     // to what it stores rather than keeping a stale in-between on screen.

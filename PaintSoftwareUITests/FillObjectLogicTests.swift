@@ -51,9 +51,9 @@ final class FillObjectLogicTests: XCTestCase {
     /// would draw it. A tick is held off the document (TODO (173)), so mid-session `flattened` still
     /// says what the cel says.
     private func heldFlattened(_ manager: CanvasManager) -> CGImage? {
-        guard let live = manager.liveElementEdit else { return nil }
-        return VectorCanvas(size: live.vectorCanvas.size, elements: live.elements,
-                            transform: live.vectorCanvas.transform).render().cgImage
+        guard let live = manager.liveCelContentEdit, let vector = live.vectorCanvas else { return nil }
+        return VectorCanvas(size: vector.size, elements: live.elements,
+                            transform: vector.transform).render().cgImage
     }
 
     private func pixel(_ image: CGImage, _ x: Int, _ y: Int) -> [Int] {

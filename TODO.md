@@ -58,7 +58,13 @@ their files are repaired. Build `2974b33` broke this rule and lost the owner's k
 
 ## (178) Liquify tool
 
-**Status** — asked 2026-10-12.
+**Status** — asked 2026-10-12. Integration candidate is being assembled outside main.
+Material baseline `8b76292` passed 36 focused methods; raster baseline `7d6d4eb` passed
+the two restored scratch oracles after separate union, stale-window and double-pose faults.
+Linked UI failure is now traced to a successful final producer taking 29.05 seconds in Debug,
+not a refused or empty gesture. Profile the current combined Release path before changing it.
+Accepted C raster sampling is under compact implementation and cost qualification.
+Final combined gates, landscape UI and install remain pending.
 
 *"It should be placed to the left of the brush tool in the top menu. When selected, it acts sort of like
 a brush (you can control the brush type, size, etc), and otherwise it does basically what a normal

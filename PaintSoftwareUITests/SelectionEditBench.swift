@@ -135,7 +135,7 @@ final class SelectionEditBench: XCTestCase {
 
                 XCTAssertTrue(manager.beginSelectionEdit(.size), "n=\(n): the loop caught something")
                 let caught = manager.selectionEdit?.caught.count ?? 0
-                guard let opened = manager.liveElementEdit else {
+                guard let opened = manager.liveCelContentEdit else {
                     return XCTFail("n=\(n): the edit holds a window")
                 }
                 let window = opened.window
@@ -147,7 +147,7 @@ final class SelectionEditBench: XCTestCase {
                     let start = CFAbsoluteTimeGetCurrent()
                     manager.previewSelectionEdit(.size(Self.brushSize + CGFloat(tick) * 0.25))
                     tickCosts.append(CFAbsoluteTimeGetCurrent() - start)
-                    guard let live = manager.liveElementEdit else { return XCTFail("n=\(n): the window is up") }
+                    guard let live = manager.liveCelContentEdit else { return XCTFail("n=\(n): the window is up") }
                     // What the surface's draw runs per tick: the window, off the main thread.
                     let drawStart = CFAbsoluteTimeGetCurrent()
                     autoreleasepool {
