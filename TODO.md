@@ -58,6 +58,15 @@ their files are repaired. Build `2974b33` broke this rule and lost the owner's k
 
 ## (178) Liquify tool
 
+**Settlement refusal review (2026-10-15):** a refused floating-pixel landing currently lets
+Move, Duplicate, Bake, resize, frame/layer changes, eyedropper and saving continue. Fix the shared
+settlement contract (`settleInteractiveState` → `commitEditsInFlight` → `commitAllInteractiveState`)
+to report success and make each mutation boundary respect failure. No pending float is success;
+ordinary between-gesture native boxes remain open when saving. Save must neither write a package
+nor run its successful-close completion after refusal. Preserve autosave retry state and context
+selection on failure. Raster worker owns this coherent change and the recorded pre-fix proofs at
+`fcd35fa`; do not add independent guards to only the first three reported actions.
+
 **Linked Release UI proof (2026-10-15):** `linked-release-2` passed 1/1, no skips: reshape,
 exact cold-reopen picture, and newly drawn green source ink reaching the linked frame. Root and
 material worker inspected the pictures; the existing black/red L remains byte-identical over

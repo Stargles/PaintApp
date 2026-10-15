@@ -62,96 +62,53 @@ signature so preserved preupdate snapshots are also converted.
 
 **(178) Liquify: active ownership and evidence**
 
-Root candidate `tmp/s49-integration` combines material `900331c` and raster `7d6d4eb`,
-with main at `17b438c`. This is an unqualified integration checkpoint, not a main merge.
-The current linked Release UI rerun rebuilds the named-gallery helper fix at `be34826`;
-the preceding run stopped before Liquify because that helper expected Untitled, although the
-correctly named scene was visibly saved. The modes/profile UI has another named save call to fix
-after this build; do not edit its compiled test file during the run. Root owns this fixture.
-Earlier linked flight records a successful nonempty result 29.05 seconds after lift in Debug;
-no commit refusal or identity mismatch. Root owns current combined Release profiling.
-The existing real-window benchmark at app source `7ef3dd7` passed 1/1: hard/pattern respectively
-48,236,266 / 179,020,536 field evaluations and zero unsolved pixels. Profiled, contended warm
-times were 0.93 / 10.35 seconds; they are not isolated performance or device qualification.
-Evidence: `~/PaintWork/s49-liquify-logs/combined/`.
+Main is `17b438c`; Liquify is unmerged. Root candidate `tmp/s49-integration` at `700e1ae`
+combines material `72f686f` and raster `7d6d4eb`, plus the shared named-gallery helper correction.
+The candidate does not yet contain the accepted C sampler or raster refusal adapters. Harvest only
+clean worker commits; apply bounded deltas and preserve current main documentation.
 
-Material has finished restored 54/54 (30 material, nine warp agreement, seven cut preview,
-eight preview plan) at `1ec87b9`, app source `900331c`. Four deliberate fault batches made all
-15 method executions fail as intended, with 28 intended assertion diagnostics; an additional
-faint-alpha premise loss under the opacity fault is excluded, and the separate alpha-only fault
-caught all four actual alpha-1 misses. The new rendered chronology fixture proves Push, cut,
-later Push, nonlinear lattice and Move preserve both retained and discarded sides. Harvest its
-clean test/document delta from `900331c`, not a worker's live files.
+- **Root integration/profiling.** `linked-release-2` passed 1/1 in Release: deformation, exact
+  cold-reopen picture and later green source ink reaching its linked frame. Existing black/red ink
+  is byte-identical across the source edit; a visual suspicion of missing ink was refuted. The saved
+  package and inspected images are in `~/PaintWork/s49-liquify-logs/combined/`. Both named-save UI
+  calls now use the shared helper with their actual scene name; final modes/profile UI remains.
+  The real-window Release benchmark passed 1/1: hard/pattern 48,236,266 / 179,020,536 evaluations,
+  zero failed solves. Profiled contended warm times 0.93 / 10.35 seconds are not isolated/device
+  qualification. Long patterned inverse cost remains open. Exact alpha predecoding, lookup/SIMD
+  and changed-map continuous-flow experiments were rejected; see evidence before repeating them.
+- **Material — `tmp/s49-liquify`, `material_resume`.** Prior restored slice passed 54/54 at app
+  `900331c`, including rendered Push/cut/later-Push/lattice/Move chronology. Four fault batches caught
+  15 intended failed method executions; separate alpha-only faults cover actual alpha-1 query ink.
+  Evidence: `~/PaintWork/s49-liquify-logs/material-native-{handoff.md,evidence-index.json}`.
+  Clean `72f686f` clips coordinate/sampling work to actual visible output while preserving global
+  pixel centres and full native source tiles; root integrated this delta. New full-versus-clipped
+  pixel/count proof, two faults and restored 55-method slice are queued after sampler's quiet run.
+- **Sampler — `tmp/s49-raster-sampler`, `raster_sampler`.** Owner accepted smoother C provided code
+  and cost are proportionate. One shared bounded Lanczos kernel uses global coordinates; no extra
+  cache, Core Graphics fallback or arbitrary scale cutoff. Clean `89440a2` passed native Debug20/20
+  (11 sampling + nine warp agreement). Quiet Release21 includes the cost/retention method and is
+  compiling. Afterwards only a small allocation cleanup in the CPU source-apron scan is planned,
+  followed by focused restoration; final root Release will cover final bytes. Evidence:
+  `~/PaintWork/s49-liquify-logs/raster/sampler/QUALIFICATION.md`.
+- **Raster — `tmp/s49-liquify-raster`, `raster_resume`.** Root has its baseline `7d6d4eb`; later
+  commits integrate sampler/adapters and atomic refusal. Earlier adapter run passed 76/77; the one
+  raw-image mismatch was an invalid oracle comparing pixels outside the clipped held footprint.
+  The actual held-window draw over unchanged base matches the full committed picture exactly.
+  New native pre-fix proofs expose nested rollback, final texture allocation and ignored settlement
+  failure. `6522ba8` addresses rollback/allocation; `63d8cae` removes temporary diagnostic notes.
+  Clean `fcd35fa` adds actual save/resize/frame/layer/tool refusal tests. The worker is preparing
+  central Bool success propagation and all mutating callers; failed save cannot close the scene.
+  Restored/fault batches and all five raster UI methods on iPad 9 landscape remain.
+- **Storage/model completed.** `52eda39` storage: Debug115/115, seven fault groups/nine failed
+  executions/46 diagnostics, restored18/18; genuine prior-format producer `840d68a`, nine unchanged
+  provenance hashes. Model `afef15c`: five fault groups/14 failed executions across13 methods,
+  restored13/13. All source commits are already integrated. Evidence:
+  `~/PaintWork/evidence/s49-liquify-material-{format,model}/`; do not repeat or cherry-pick again.
 
-Raster owns scratch landscape and explicit render-refusal adapters. Clean checkpoint `28abbfa`
-uses sampler `bfe2233`; 77 selected logic methods are running. Review found nested transaction
-rollback and pre-existing pending-crop gaps; fix and prove those before accepting the checkpoint.
-The new sampler source is clean `28f74b0`, with all 11 external production-source Mac tests passing;
-native restoration, large-footprint runtime and retention qualification remain. Ordinary pixels
-keep the scalar path; large footprints share a reduction inside the same kernel. No extra cache,
-arbitrary minification cutoff or silent Core Graphics fallback. Root's Release UI owns native slot1;
-raster owns slot2. Sampler is next for slot1, with a quiet interval required for timing.
-
-
-- **Feature/material — `tmp/s49-liquify`, agent `material_resume`.** Required placement and immutable
-  spatial material replace old Distort/rest ownership. Linked frames preserve source links; raster
-  scope and fixed exterior vector pixels are ruled. Storage baseline `afef15c` passed 60/60.
-  Lattice boxing gives VectorElement 856 B / bridge 80 B. The 100-stroke fixture shares one field,
-  144,000 evaluations, 99 coordinate hits and 11,535,208 peak counted bytes under the unchanged 24 MiB
-  payload cap plus one field. Bounds rejection removes 100 distant full walks; near queries walk once.
-  Supported integer tile indexing uses integer division (`d74e247`), avoiding a negative pointer index.
-  Four preserved pre-fix methods exposed retained-ink hit/outline/erase, invalid map output,
-  fractional gradient quantization and linked paper anchoring. Those first three passed at `3bf3d47`;
-  native paper was narrowed to canvas-anchored gradient dither, not colour-space/layout conversion.
-  Float-format experiments are deleted. `fede254` reuses native geometry mapping/stamping before
-  spatial sampling, shares this with hit/bounds readers, and keeps paper plus opacity in that native
-  pass. The final UIImage draw previously overrode group opacity. Focused 35 now proves exact 2,304
-  linked-paper RGBA samples and all four fractional-opacity tile-seam cases with active interior
-  movement. Two remaining reds: geometry preparation must retain oversized-lattice refusal, and the
-  low-alpha query fixture needs a genuinely visible alpha 1 edge. Nonlinear geometry+active selected
-  Push oracle and a genuine alpha-1 query are now in the 36-method run at `8b76292`, which also
-  reserves geometry preparation through the existing renderer budget. Fault proofs/restoration and
-  final combined gates remain. Agent owns native slot 2.
-- **Storage/model — completed slices.** `tmp/s49-liquify-material-format`, clean `52eda39`:
-  Debug 115/115; seven faults/nine expected failed executions/46 diagnostics, restored 18/18.
-  Twelve owned commits are already integrated at `afef15c`. Genuine producer `840d68a` wrote the
-  prior-format package; nine provenance hashes unchanged. Projects/Backups/Trash/staged restore,
-  retained native bytes, precise cut ancestry, recipes and failed-save rejection are covered.
-  Ordinary nonmaterial damage policy stays intact. Model worktree is exact clean `afef15c`:
-  five fault batches, 14 failed executions across 13 methods, then restored 13/13. Evidence:
-  `~/PaintWork/evidence/s49-liquify-material-{format,model}/`. Their own simulators were deleted;
-  no further cherry-picks. Final combined Release/full/UI remains owed.
-- **Raster/shared presentation — `tmp/s49-liquify-raster`, agent `raster_resume`.** One complete cel
-  picture/held procedure owns atomic raster/vector/recipe history, independent ink/backing poses,
-  exact stream tick certification and immutable version/coverage guards. Required render refusal
-  preserves prior pixels/history. Pending pictures retain only pixels/path. Independent union-window
-  oracles produced four intended reds; `19e0153` redraws both tiers across the union. Focused 41 passed 40,
-  leaving the separately ruled raster sampling mismatch. Both raster portrait UI flows passed in
-  placement-ui-2; linked UI fails its first deformation assertion, before persistence/source checks.
-  Root inspected unchanged pictures and recognizer flight (20 delivered moves); a 21.5-second Settings delay
-  suggests tracing completion/refusal before changing timeout. Root's temporary lift/callback recorder
-  notes are in the next batch; preserve its simulator flight/container before relaunch.
-  Three new cold UI pre-fix methods at `9c36371` fail exactly on stationary backing during host erase,
-  erased-ink placement in a stream and additive stream placement. Source fixes `75c83e3` consolidate
-  scratch through CelContentPicture, captured source/placement and existing-window-version cache,
-  explicit additive window pose and shared contents filters; old local flatten fields are removed.
-  Current scratch+linked batch at `141ef4d` expects 6 methods; native slot 1. Restored proofs, mutations and
-  iPad 9 landscape remain. Native sampler work is external until qualified: direct Accelerate affine
-  Lanczos3 still differs by source extent, so it is not adopted unchanged.
-
-**Raster appearance choice C accepted 2026-10-15, conditional on compact code and measured cost.**
-Core Graphics high sampling depends on full source extent,
-so a cropped preview can differ at lift. A virtual full-extent provider matched but retained about
-230 MiB of scaled-image cache over 100 draws and was rejected. An external bounded Lanczos prototype
-matches full/window output and added about 3.2 MB peak over 100 512-square draws. It visibly smooths
-reduced grain. Root inspected/sent `~/PaintWork/s49-liquify-logs/raster/pose-sampling-A-C-comparison.png`;
-The owner accepts C (smoother), provided its code and runtime cost are proportionate.
-Record and measure the shared implementation before accepting it. All transformed raster backing would
-share preview/committed sampling; native vector ink stays native. Prototype figures are not production/device qualification.
-
-Earlier surface-handoff 30 logic/6 UI with 19 faults, inverse Release 7/7 over 18 byte-identical fixtures,
-and pre-material linked UI 3/3 remain reusable only where the seam is unchanged. No speed-ratio claim.
-New placement and rendering paths need current proof. Preserve evidence before cleaning worktrees.
+**Native queue:** sampler alone owns slot1 through quiet Release cost; all other simulators are
+parked. Material then takes slot2 for its four qualification runs, followed by raster's restoration,
+faults and landscape UI. Root has no native job running. Final combined census/lints, fast tiers,
+touched UI, landscape inspection, full suite and pre-install legacy drives remain.
 
 ## What is next
 
