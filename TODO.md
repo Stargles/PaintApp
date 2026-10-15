@@ -186,6 +186,12 @@ with one field, 99 coordinate-cache hits and 11,535,208 peak counted bytes for 1
 integration gates remain. A separate bounded Lanczos prototype fixes full/window raster sampling
 parity, but visibly changes grain under raster transforms. It stays external pending the owner's
 appearance ruling; both preview and committed backing would need the same shared sampler.
+The shown-space picture integration must also include the existing held derivation: its ordinary
+ink is already posed, so placing it under the host pose applies that pose twice. A backing replacement
+hole cannot be certified by an ink-only surface. Reuse the complete picture for this path too.
+A pose-changing base may install only when it covers the newest complete pending picture; otherwise
+an older base at the new pose would leave newer pending ink at the old pose. Derive that minimum from
+the actual pending pictures and keep same-pose intermediate advances allowed.
 The strict material encoder can reject conflicting operation definitions. `ProjectStore.encodeJSON`
 currently logs an encoding failure and omits that vector/recipe file, allowing staged validation to
 accept an empty cel. Propagate any JSON encoding failure through the existing save tally so the

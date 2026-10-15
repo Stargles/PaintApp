@@ -170,7 +170,11 @@ Never harvest dirty worker files: mutations may be intentional.
     omitted drawing-repair walk: two methods/five assertions). Four groups and restored gate remain.
   - **Posed mixed pictures:** native ordinary ink, linked evaluated ink and raster backing need
     independent placement. The existing backing pose is container-only; native ordinary ink adds
-    the cel pose; linked ink deliberately declines it. `CelContentPicture` reuses native posing and
+    the cel pose; linked ink deliberately declines it. The existing held derivation also needs the
+    complete picture: its already-posed ink must not be posed twice, and an ink-only surface cannot
+    mask away the backing. A pose-changing base must cover the highest complete pending revision
+    before its new placement can replace the old paired base/ink; same-pose advances remain allowed.
+    `CelContentPicture` reuses native posing and
     the shared window/composite seam; its initial four tests pass. The raster branch is integrating
     immutable `f15f52c` and propagating render refusal, then handles held-picture pose changes.
     The cropped high-quality raster mismatch is unresolved. A virtual full-extent provider is rejected
