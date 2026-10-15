@@ -11,6 +11,15 @@ to approximately the stroke's visibility threshold. Save that exact pre-Commit s
 the stored timing/threshold before changing product code or the test's precondition. Evidence:
 `~/PaintWork/s49-final-validation/triage/isolated-interpolation.xcresult` and `interpolation-attachments/`.
 
+## Pad benchmark still has an unconditional wall-clock assertion (2026-10-15)
+
+The full main regression failed `DabCostBench.testWhatThePadsRewalkCostsAtItsStrokeCap` at
+162.9 ms per stroke against 150 ms under four parallel simulators. The test's stricter total-pad
+bound already requires `PAINTAPP_PADCAP`, but its earlier per-stroke bound runs unconditionally.
+The first isolated warm measurement was 48.58 ms per stroke; four opt-in repeats are in progress.
+Use the existing opt-in total-pad bound as the single timing gate, retaining unconditional measured
+output and the structural stroke-count assertion. No product threshold needs changing.
+
 ## A scrub at 4096² with the onion skin on spends ~1.3 s of main thread building the ghost (2026-10-13)
 
 Found by TODO (179)'s `PlaybackProbe -probeMode scrub`/`onion` (PERFORMANCE.md §34.2), iPad 9 simulator,
