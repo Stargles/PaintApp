@@ -63,13 +63,18 @@ but `saveEditorAndReturnToGallery` searches only for Untitled. Earlier used simu
 unrelated Untitled tile, masking the bad precondition. Root Release candidate `7ef3dd7` fails
 before Liquify; the accessibility hierarchy contains its exact saved name. Reuse the shared
 helper with an explicit expected name, retaining Untitled as the default for existing callers.
+The same named-save premise also occurs in the modes/profile UI; update its call after the current
+linked Release build. Root owns both calls. The helper fix is `be34826`; linked rerun is underway.
 
 **Status** — asked 2026-10-12. Integration candidate is being assembled outside main.
-Material baseline `8b76292` passed 36 focused methods; raster baseline `7d6d4eb` passed
-the two restored scratch oracles after separate union, stale-window and double-pose faults.
+Material app source `900331c` passed the restored 54-method slice, including the rendered cut
+chronology test at `1ec87b9`; 15 deliberately faulty method executions were caught. Raster baseline
+`7d6d4eb` passed the two restored scratch oracles after separate union, stale-window and double-pose faults.
 Linked UI failure is now traced to a successful final producer taking 29.05 seconds in Debug,
 not a refused or empty gesture. Profile the current combined Release path before changing it.
 Accepted C raster sampling is under compact implementation and cost qualification.
+Adapters at `28abbfa` now propagate required-source refusal through compositing and mutators;
+review found nested rollback and pre-existing pending-crop gaps, which must be corrected and proved.
 Final combined gates, landscape UI and install remain pending.
 
 *"It should be placed to the left of the brush tool in the top menu. When selected, it acts sort of like

@@ -62,14 +62,35 @@ signature so preserved preupdate snapshots are also converted.
 
 **(178) Liquify: active ownership and evidence**
 
-Root candidate `tmp/s49-integration` combines material `8b76292` and raster `7d6d4eb`,
+Root candidate `tmp/s49-integration` combines material `900331c` and raster `7d6d4eb`,
 with main at `17b438c`. This is an unqualified integration checkpoint, not a main merge.
-Linked flight records a successful nonempty result 29.05 seconds after lift in Debug; no commit
-refusal or identity mismatch. Root owns current combined Release profiling. Material is finishing
-linked native-fill/geometry lifetime proofs beyond the baseline; raster owns scratch landscape
-and sampling adapters; `raster_sampler` owns the shared bounded Lanczos implementation.
-The latter external Metal prototype has exact full/cropped/window parity; native cost and memory
-qualification remain, with no arbitrary minification cutoff or silent Core Graphics fallback.
+The current linked Release UI rerun rebuilds the named-gallery helper fix at `be34826`;
+the preceding run stopped before Liquify because that helper expected Untitled, although the
+correctly named scene was visibly saved. The modes/profile UI has another named save call to fix
+after this build; do not edit its compiled test file during the run. Root owns this fixture.
+Earlier linked flight records a successful nonempty result 29.05 seconds after lift in Debug;
+no commit refusal or identity mismatch. Root owns current combined Release profiling.
+The existing real-window benchmark at app source `7ef3dd7` passed 1/1: hard/pattern respectively
+48,236,266 / 179,020,536 field evaluations and zero unsolved pixels. Profiled, contended warm
+times were 0.93 / 10.35 seconds; they are not isolated performance or device qualification.
+Evidence: `~/PaintWork/s49-liquify-logs/combined/`.
+
+Material has finished restored 54/54 (30 material, nine warp agreement, seven cut preview,
+eight preview plan) at `1ec87b9`, app source `900331c`. Four deliberate fault batches made all
+15 method executions fail as intended, with 28 intended assertion diagnostics; an additional
+faint-alpha premise loss under the opacity fault is excluded, and the separate alpha-only fault
+caught all four actual alpha-1 misses. The new rendered chronology fixture proves Push, cut,
+later Push, nonlinear lattice and Move preserve both retained and discarded sides. Harvest its
+clean test/document delta from `900331c`, not a worker's live files.
+
+Raster owns scratch landscape and explicit render-refusal adapters. Clean checkpoint `28abbfa`
+uses sampler `bfe2233`; 77 selected logic methods are running. Review found nested transaction
+rollback and pre-existing pending-crop gaps; fix and prove those before accepting the checkpoint.
+The new sampler source is clean `28f74b0`, with all 11 external production-source Mac tests passing;
+native restoration, large-footprint runtime and retention qualification remain. Ordinary pixels
+keep the scalar path; large footprints share a reduction inside the same kernel. No extra cache,
+arbitrary minification cutoff or silent Core Graphics fallback. Root's Release UI owns native slot1;
+raster owns slot2. Sampler is next for slot1, with a quiet interval required for timing.
 
 
 - **Feature/material — `tmp/s49-liquify`, agent `material_resume`.** Required placement and immutable
