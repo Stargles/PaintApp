@@ -66,8 +66,9 @@ HANDOFF names current owners and exact evidence; this item remains open until me
 
 **Exact-map batching (2026-10-15):** existing fan-out now shares one immutable prepared field
 across disjoint points/row strips; no new worker framework or cache. Baseline Debug34/34 passed,
-three committed-baseline faults caught132 intended diagnostics, and sources are restored. Current
-native four-method run checks the actual bounded raster producer against unchanged serial pixels.
+three committed-baseline faults caught132 intended diagnostics, and sources are restored. The18-fixture native benchmark and five actual Debug production windows
+match every serial reference byte. The long Debug run was then cancelled (patterned batching202.6s
+versus scalar90.9s); final optimized Release cost decides whether batching stays.
 Four external alternating C++ pairs preserved84,956 source Doubles and179,020,536 evaluations exactly;
 contended batch1.62–2.29seconds versus serial5.39–8.66 is not native/device qualification. Quiet
 Release and physical first-use costs remain open. Evidence:

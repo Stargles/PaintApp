@@ -73,8 +73,11 @@ and exact inverse batching. Harvest only clean worker commits; the next raster d
   charged; the joined raster allocation is exact-sized. Baseline Debug34/34 passed. Three committed-
   baseline faults caught wrong sources/counters, hidden or invented failure, strip offsets and
   underestimated memory (2/3, 2/3, 1/3 methods failed respectively); sources were restored. The first
-  raster fault launch ran zero tests and is explicitly excluded. Restored four-method native run at
-  `149fc7a` is in progress, including the actual bounded raster producer against a serial reference.
+  raster fault launch ran zero tests and is explicitly excluded. The restored opt-in Debug run was
+  cancelled after the18-fixture benchmark passed and four hard/one patterned actual windows matched
+  every reference byte. Debug patterned batches took202.6s versus scalar90.9s; this is a real Debug
+  slowdown, not a shipped-speed claim. Release build-for-testing is active; batching acceptance
+  depends on its optimized actual-producer measurement. The cancelled run is not4/4 qualification.
   Evidence: `~/PaintWork/s49-liquify-logs/combined/batches/`. External matching C++ batches were faster
   in four alternating pairs, but native Release and device costs remain unqualified.
 - **Linked UI.** `linked-release-2` passed 1/1 in Release: deformation, exact cold-reopen picture and
@@ -97,9 +100,10 @@ and exact inverse batching. Harvest only clean worker commits; the next raster d
   reports success through every mutation/save boundary; refused edits retain state and do not close
   the scene. Required source failures propagate, nested rollback is atomic, transformed scratch
   opacity is preserved. Restored109/109 passed; two final adapter faults reproduced eight intended
-  diagnostics. Native iPad9 landscape8/8 UI passed, but app-cropped attachments are malformed; raw
-  simctl captures are being taken before judging the layout. A new pre-fix method failed10 intended
-  assertions: full and fitted `Frozen.render` can still hide material refusal as a transparent pixel.
+  diagnostics. Native iPad9 landscape8/8 UI passed, and a focused3/3 raw simctl recapture is green;
+  root inspected all three correctly oriented1080×810pt pictures. XCTest app-cropped attachments
+  were malformed, not the UI. A new pre-fix method failed19 intended assertions: full/fitted frozen
+  rendering, thumbnails/onions, a posed provider and destructive merge hide required render refusal.
   Worker is removing that non-fallible contract through existing PixelOps callers, preserving prior
   thumbnails/onions and refusing destructive copy operations. Material is checking related derived
   render availability/failure semantics. No duplicate renderer or empty fallback is permitted.
@@ -109,8 +113,9 @@ and exact inverse batching. Harvest only clean worker commits; the next raster d
   restored13/13. Source is integrated. Evidence:
   `~/PaintWork/evidence/s49-liquify-material-{format,model}/`; do not repeat or cherry-pick again.
 
-**Native queue:** root owns slot2, simulator `80BE77F5-9118-4CDD-854D-07C3E9A9009B`, for restored
-batching checks. Raster owns slot1 and its iPad9 simulator. After final raster integration: recount,
+**Native queue:** root owns slot2, simulator `80BE77F5-9118-4CDD-854D-07C3E9A9009B`, for Release
+batching build and then quiet measurement. Raster owns slot1 for optional-API compilation; material
+helps adapt existing test success premises, with production edits owned solely by raster. After final raster integration: recount,
 lints, fast Debug/Release, quiet actual-producer Release measurement, touched UI, full suite and
 pre-install legacy drives. Current static census at `149fc7a`: fast5284 across256 matching classes,
 full5866; recount after the last delta. Obtain fresh saved/unlocked readiness before device work;
