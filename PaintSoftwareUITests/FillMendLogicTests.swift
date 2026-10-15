@@ -115,7 +115,7 @@ final class FillMendLogicTests: XCTestCase {
         let image = manager.layers[1].kind == .vector
             ? try XCTUnwrap(cel.vector).render()
             : cel.raster.renderToUIImage()
-        let cg = try XCTUnwrap(image.cgImage)
+        let cg = try XCTUnwrap(image?.cgImage)
         return Pixels(bytes: try XCTUnwrap(CanvasFixture.rgbaBytes(cg)), width: cg.width)
     }
 
