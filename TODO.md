@@ -163,6 +163,9 @@ rendered; a finite history of display versions can evict that identity before a 
 Frozen previews must retain cached painted bounds for untouched elements.
 Coverage review is also checking delayed derived-image landing across a cel switch: reject a picture
 whose captured cel differs from the current host before assigning it or retiring pending previews.
+For the same cel, distinguish an image stale relative to the model from one older than the image
+already installed: the latter must not replace newer covered ink. Reuse the installed coverage value
+for this ordering, rather than adding another history or cache.
 
 **Validation in progress (2026-10-14):** the first direct-displacement map folds under strong hard
 and patterned brushes; actual raster pictures show stationary streaks and holes. Replace that map

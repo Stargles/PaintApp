@@ -141,6 +141,9 @@ Never harvest dirty worker files: mutations may be intentional.
     Both fixes are implemented at the latest checkpoint, with source checks only. Review is checking
     whether a delayed derived image can be installed after the host switches to a different cel;
     mismatched immutable coverage must reject the image before it can retire the new cel's previews.
+    That rejection is implemented at `9c5032d`; also preserve monotonic installed coverage for the
+    same cel. A picture may trail the model while advancing what is shown, but must not roll back
+    an already newer image and its retired previews.
   - **Still owed:** target material-phase fix, raster completion, feature mutations,
     pending edit/undo/save and rapid overlapping previews,
     native iPad9 UI, final Debug/Release fast tiers, final audit and integrated full UI run.
