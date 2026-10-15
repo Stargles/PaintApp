@@ -172,7 +172,8 @@ Never harvest dirty worker files: mutations may be intentional.
     independent placement. The existing backing pose is container-only; native ordinary ink adds
     the cel pose; linked ink deliberately declines it. The existing held derivation also needs the
     complete picture: its already-posed ink must not be posed twice, and an ink-only surface cannot
-    mask away the backing. A pose-changing base must cover the highest complete pending revision
+    mask away the backing. Derived render callers must also distinguish nil render failure from the
+    explicit clear action, preserving the old image/key and pending coverage when rendering fails. A pose-changing base must cover the highest complete pending revision
     before its new placement can replace the old paired base/ink; same-pose advances remain allowed.
     `CelContentPicture` reuses native posing and
     the shared window/composite seam; its initial four tests pass. The raster branch is integrating

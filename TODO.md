@@ -192,6 +192,9 @@ hole cannot be certified by an ink-only surface. Reuse the complete picture for 
 A pose-changing base may install only when it covers the newest complete pending picture; otherwise
 an older base at the new pose would leave newer pending ink at the old pose. Derive that minimum from
 the actual pending pictures and keep same-pose intermediate advances allowed.
+At derived-image landing, a nil result from rendering is a failed picture, not an intentional clear.
+Both synchronous and asynchronous render callers must preserve the previous image/key and pending
+coverage on refusal; the explicit clear action remains separate. A failed image cannot certify an edit.
 The strict material encoder can reject conflicting operation definitions. `ProjectStore.encodeJSON`
 currently logs an encoding failure and omits that vector/recipe file, allowing staged validation to
 accept an empty cel. Propagate any JSON encoding failure through the existing save tally so the
