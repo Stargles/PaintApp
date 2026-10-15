@@ -24,7 +24,7 @@ final class LiquifyUITests: PaintUITestCase {
     }
 
     private func reopenSavedScene(_ app: XCUIApplication, named name: String) {
-        saveEditorAndReturnToGallery(app)
+        saveEditorAndReturnToGallery(app, named: name)
         app.terminate(); app.launchArguments = []; app.launch()
         let tile = app.staticTexts.matching(NSPredicate(format: "label == %@", name)).firstMatch
         XCTAssertTrue(tile.waitForExistence(timeout: 10), "the saved scene")

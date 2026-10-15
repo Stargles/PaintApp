@@ -1123,12 +1123,12 @@ class PaintUITestCase: XCTestCase {
     /// code they exist to guard. Never reach a control by a glyph name: it is not an identifier the
     /// app promises, and depending on the *absence* of one makes adding one a breaking change.
     @discardableResult
-    func saveEditorAndReturnToGallery(_ app: XCUIApplication) -> XCUIElement {
+    func saveEditorAndReturnToGallery(_ app: XCUIApplication, named name: String = "Untitled") -> XCUIElement {
         let galleryButton = app.buttons["toolbar.galleryButton"]
         XCTAssertTrue(galleryButton.waitForExistence(timeout: 5),
                       "The editor's toolbar should carry the route back to the gallery")
         galleryButton.tap()
-        let tile = app.staticTexts.matching(NSPredicate(format: "label == %@", "Untitled")).firstMatch
+        let tile = app.staticTexts.matching(NSPredicate(format: "label == %@", name)).firstMatch
         XCTAssertTrue(tile.waitForExistence(timeout: 5), "The saved project should show up in the gallery")
         return tile
     }
