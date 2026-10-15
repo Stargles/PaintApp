@@ -58,6 +58,10 @@ their files are repaired. Build `2974b33` broke this rule and lost the owner's k
 
 ## (178) Liquify tool
 
+**Owner availability, 2026-10-15:** the owner is using the Mac and will say when finished.
+Defer performance measurements until that notification; continue source review and correctness
+checks without treating contended timings as qualification.
+
 **Combined checkpoint (2026-10-15):** root `149fc7a` integrates material `72f686f`, raster
 `ccdd286` and sampler `effb239`. Material55/55, raster109/109, sampler native Debug20/20 and
 Release21/21, and raster landscape UI8/8 passed. Linked Release UI1/1 proves exact cold reopen

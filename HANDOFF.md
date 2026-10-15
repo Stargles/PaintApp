@@ -113,8 +113,9 @@ and exact inverse batching. Harvest only clean worker commits; the next raster d
   restored13/13. Source is integrated. Evidence:
   `~/PaintWork/evidence/s49-liquify-material-{format,model}/`; do not repeat or cherry-pick again.
 
-**Native queue:** root owns slot2, simulator `80BE77F5-9118-4CDD-854D-07C3E9A9009B`, for Release
-batching build and then quiet measurement. Raster owns slot1 for optional-API compilation; material
+**Native queue:** the owner is using the Mac and will notify when finished; performance measurement
+is deferred. Root Release build succeeded; slot2, simulator `80BE77F5-9118-4CDD-854D-07C3E9A9009B`,
+will run restored correctness only. No performance timing run has begun. Raster owns slot1 for optional-API compilation; material
 helps adapt existing test success premises, with production edits owned solely by raster. After final raster integration: recount,
 lints, fast Debug/Release, quiet actual-producer Release measurement, touched UI, full suite and
 pre-install legacy drives. Current static census at `149fc7a`: fast5284 across256 matching classes,
