@@ -10,7 +10,7 @@ file, then [CLAUDE.md](CLAUDE.md) (build, test, merge, deploy), then the specifi
 pick up. [TODO.md](TODO.md) is the owner's asks **in queue order — the top is next**; [BUGS.md](BUGS.md)
 is what we find.
 
-## State (session 49 in progress, 2026-10-14)
+## State (session 49 in progress, resumed 2026-10-15)
 
 **Check `git worktree list` and every `tmp/*` branch first** (`git log --oneline origin/main..<branch>`)
 — `origin/main` is a shared ref and a cut-off session's work sits on its branch.
@@ -127,7 +127,7 @@ Never harvest dirty worker files: mutations may be intentional.
     although `PixelOps` poses it. Align its origin-based layout and replacement hole with the shared
     pose, and verify actual translated/scaled/rotated pixels. Its current center anchor cannot simply
     receive the fill plane's origin-based transform.
-    The initial raster draft compiled; the latest source checkpoint is `ecd4aa0`, with its focused
+    The initial raster draft compiled; the latest source checkpoint is `1e684b0`, with its focused
     baseline still owed after the full-run resource hold. The stream-composite landing must
     certify its captured procedural tick too, since a blanked layer host cannot do so. Root is
     reviewing atomic history, complete replacement windows and bounded preparation before integration.
@@ -138,6 +138,9 @@ Never harvest dirty worker files: mutations may be intentional.
     Carry immutable cel/commit coverage with each asynchronous base request and derived image;
     a bounded version-history FIFO can lose that coverage during a long render and must go.
     Preserve frozen painted-bounds entries for untouched elements when replacing edited ink.
+    Both fixes are implemented at the latest checkpoint, with source checks only. Review is checking
+    whether a delayed derived image can be installed after the host switches to a different cel;
+    mismatched immutable coverage must reject the image before it can retire the new cel's previews.
   - **Still owed:** target material-phase fix, raster completion, feature mutations,
     pending edit/undo/save and rapid overlapping previews,
     native iPad9 UI, final Debug/Release fast tiers, final audit and integrated full UI run.
@@ -147,36 +150,37 @@ Never harvest dirty worker files: mutations may be intentional.
 
 The owner permits any useful agent count but prioritises usage conservation and quality over speed.
 Keep delegation focused and report the queue occasionally. It is now after the owner’s 10 a.m. return.
-**Owner saved the scene and unlocked the iPad on 2026-10-14 for probes.** Installed `7cf3245` only supports
+**Owner saved the scene and unlocked the iPad on 2026-10-14 for probes.** That baseline build, `7cf3245`, only supports
 playback/edit/recolour/effect; unknown modes silently fall back to playback. Physical effect baselines
 are complete: 100 ticks produced 9 held pictures at 4096² and 100 at 2048×1024 (PERFORMANCE §30.6).
-Opacity/shape/fill after-measurements require the updated build. Do not mislabel old-build probes.
-The full UI suite is owed on the integrated tree before the next install.
+Opacity/shape/fill after-measurements need the now-installed updated build. Do not mislabel old-build
+probes. Full-suite failure triage and the final artist-operation drive remain owed on current main.
 
 **Build from `~/PaintWork`, not `~/Desktop`** (CLAUDE.md "Build and test", first paragraph).
 `~/PaintWork/deploy` is a detached worktree kept for device builds.
 
-**The owner's iPad has `7cf3245`** (Release, installed 2026-10-13 after an iPad-9-simulator regression
-pass of 210 UI tests — every red was the known 13"-geometry debt or environmental). Its profile expires
-**2026-10-15T04:52Z**; the re-signer (`~/PaintApp/deploy/resign.sh`, syncs to `origin/main`) is armed for
-2026-10-14 23:52 local — **and it installs whatever `origin/main` is then**, so the full UI suite below
-should run before that, or the re-sign ships an unproven build. **The next install runs
-`LegacyToolSettingsRepair` on the owner's scenes** (TODO (176)'s one-shot repair, below) — tell the owner
-when it lands and ask them to open a few scenes.
+**The owner's iPad has `f813346` Release**, installed by the existing automatic re-signer at
+2026-10-15 01:08 Toronto while this session was usage-limited. Profile expiry is
+**2026-10-22T05:08:05Z**. This is current main, with no Liquify. The full regression below completed
+before installation but its failures were not yet triaged; the owner was told on resumption.
+Launch runs the pending one-shot scene repairs, including `LegacyToolSettingsRepair`. Ask the owner
+to open a few scenes before retiring any repair. Updated-build physical probes are now possible
+once the owner saves the scene and leaves the iPad unlocked again.
 
-**Full regression is running** on `e3b487c` (app/test source still `840d68a`), fresh 13-inch M5,
-four clones, normal simlock. Evidence and automatic result archive:
+**Full regression completed** on `e3b487c` (app/test source still `840d68a`), fresh 13-inch M5,
+four clones, normal simlock: **5694 total, 5624 passed, 57 skipped, 13 failed**, 5907 seconds.
+The static census reconciles. Evidence and automatic result archive:
 `~/PaintWork/s49-final-validation/full-main/`; owned simulator `C6A539C3-8499-4BE1-99D5-9FD694C93AF1`.
 This qualifies the existing main before the scheduled profile refresh; Liquify needs its own final
 integrated gates after its remaining work is complete.
-All four clones have started. One early Fog Glow UI failure awaits archived-result triage; no cause is
-assigned. Measured memory pressure prompted pausing other simulator batches. Raster checkpoint
-`ecd4aa0` has source checks only; workers continue source-only work.
+Failure triage is next: twelve UI failures across ten classes and one pad timing assertion. Four UI
+failures report event-synthesis timeouts; no failure is classified from that alone. The archived
+summary and per-class table are intact. Clones cleaned themselves up and no simulator was booted
+on resumption. The prior resource hold is released after isolated warm timing triage.
 
 **Latest integrated fast tier (app/test source `840d68a`)**: Debug and Release each 5124 tests,
-5120 passed, four skipped and zero failures; static full census 5694. The full UI suite has not been run since `38a3dd6`
-(session 47) — every item since ran its own UI classes; **run it (CLAUDE.md "Full run", erased device)
-before the next device install**, since ~70 merges landed without one.
+5120 passed, four skipped and zero failures; static full census 5694. The full run above closes the
+run gap since `38a3dd6`; its thirteen failures still need isolated triage before qualification.
 
 ## What is next
 
@@ -237,15 +241,15 @@ flattened pictures/text that old raster layers can no longer distinguish from pa
 edge is also ruled:** *"B — Keep outside ink fixed."* Keep every exterior pixel fixed through spatial
 material deformation while retaining editable strokes. There is no open Liquify scope question.
 
-**After the next install:**
-Once the next build has repaired his scenes and they look right: retire the one-shot repairs.
+**After the October 15 install:**
+Once this build has repaired his scenes and they look right: retire the one-shot repairs.
    First run a final repair build with a new signature so the preceding build's preserved preupdate
    snapshots are also converted; verify all library packages decode before removing repair code.
    This keeps old snapshots usable without a permanent legacy decoder. Delete `LegacyToolSettingsRepair`
    (and `LegacyPoseTrackRepair`, if the keyed scene from session 47 was restored and animates — still
    unconfirmed: Gallery → scene "1" → Versions… → Oct 9 "Before app update" → Restore).
 
-**To check on the iPad** (`7cf3245`): colour-picker drags, the polygon lasso, a selection kept across
+**To check on the iPad** (`f813346`): colour-picker drags, the polygon lasso, a selection kept across
 layers and frames, the padding veil, a
 long effect-slider drag; and still from session 47: the graph-node drag, the Move box, the gap slider,
 idle with a stream connected. Send the next `flight-…` file after a "Caught a canvas freeze" badge.

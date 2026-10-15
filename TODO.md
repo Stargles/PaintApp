@@ -114,6 +114,9 @@ why: pictures handed to Core Animation faster than the render server frees them)
       unlocked it 2026-10-14. Installed `7cf3245` supports only the effect baseline; the other three
       modes need an updated build (unknown modes in that build silently run playback). Physical effect
       baseline completed at 4096² and 2048×1024, PERFORMANCE §30.6; after-build checks remain.
+      Automatic re-sign installed updated main `f813346` at 01:08 Toronto on 2026-10-15 while the
+      session was usage-limited. Full regression completed 5694 tests with 13 failures awaiting
+      isolated triage. Confirm the current scene is saved and iPad unlocked before restarting probes.
 
 ## (178) Liquify tool
 
@@ -158,6 +161,8 @@ its display version without changing the artwork and must not cancel the gesture
 Asynchronous base requests and derived images must carry immutable coverage of the edit they
 rendered; a finite history of display versions can evict that identity before a delayed base lands.
 Frozen previews must retain cached painted bounds for untouched elements.
+Coverage review is also checking delayed derived-image landing across a cel switch: reject a picture
+whose captured cel differs from the current host before assigning it or retiring pending previews.
 
 **Validation in progress (2026-10-14):** the first direct-displacement map folds under strong hard
 and patterned brushes; actual raster pictures show stationary streaks and holes. Replace that map
