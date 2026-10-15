@@ -878,20 +878,21 @@ final class InterpolationWorkflowUITests: PaintUITestCase {
         // can only be the edit. It is also outside the lattice, which puts the lattice-expansion path
         // under the same test rather than needing its own.
         let editRow = 0.60
-        func inkedColumns() -> [Double] {
-            stride(from: 0.14, through: 0.92, by: 0.02).filter {
-                !isWhitish(rgbaPixel(of: canvas, dx: $0, dy: editRow))
+        func inkedColumns() throws -> [Double] {
+            let pixels = try pixelProbe(canvas)
+            return stride(from: 0.14, through: 0.92, by: 0.02).filter {
+                !isWhitish(pixels($0, editRow))
             }
         }
         func meanColumn(_ columns: [Double]) -> Double {
             columns.reduce(0, +) / Double(max(1, columns.count))
         }
-        XCTAssertTrue(inkedColumns().isEmpty,
+        XCTAssertTrue(try inkedColumns().isEmpty,
                       "Setup: the row the edit is drawn on has to start blank")
 
         drawLine(on: canvas, from: CGVector(dx: 0.42, dy: editRow), to: CGVector(dx: 0.50, dy: editRow))
 
-        let editAtHalf = inkedColumns()
+        let editAtHalf = try inkedColumns()
         if editAtHalf.isEmpty {
             XCTFail("A stroke drawn at the in-between has to appear on it. Either it was committed "
                     + "to the cel's own display list, which nothing renders, or the preview key did "
@@ -903,7 +904,7 @@ final class InterpolationWorkflowUITests: PaintUITestCase {
         // the canvas apart, so half that span is 0.20 — an edit that had been stored at the
         // in-between instead of in keyframe space would not move at all.
         slider.adjust(toNormalizedSliderPosition: 1)
-        let editAtOne = inkedColumns()
+        let editAtOne = try inkedColumns()
         if editAtOne.isEmpty {
             XCTFail("The edit has τ = 0.5, so it must still be there at t = 1. \(inkReport())")
         }
@@ -933,9 +934,10 @@ final class InterpolationWorkflowUITests: PaintUITestCase {
         // The sweep stops at 0.26 on the left, which is what keeps the dashed guide overlay — drawn
         // at 0.20 and pulled to 0.08 — out of every reading. A teal dash is not whitish, so a guide
         // crossing the sweep would read as ink.
-        func guideColumns() -> [Double] {
-            stride(from: 0.26, through: 0.74, by: 0.02).filter {
-                !isWhitish(rgbaPixel(of: canvas, dx: $0, dy: probe.dy))
+        func guideColumns() throws -> [Double] {
+            let pixels = try pixelProbe(canvas)
+            return stride(from: 0.26, through: 0.74, by: 0.02).filter {
+                !isWhitish(pixels($0, probe.dy))
             }
         }
         func guideReport() -> String {
@@ -946,7 +948,7 @@ final class InterpolationWorkflowUITests: PaintUITestCase {
                 + "\(app.buttons["interpolate.guide"].label)"
         }
 
-        let columnsBeforeGuide = guideColumns()
+        let columnsBeforeGuide = try guideColumns()
         XCTAssertFalse(columnsBeforeGuide.isEmpty,
                        "Setup: back at t = 0.5 there is ink to move. \(guideReport())")
 
@@ -987,7 +989,7 @@ final class InterpolationWorkflowUITests: PaintUITestCase {
         // drawing one hands the frame the stylus velocity as its easing (item 4), and at t = 0.5 an
         // eased motion does not sit where a linear one did. Comparing the handle drag against the
         // no-guide state charges it for that shift as well, which cost a run to find out.
-        let columnsWithGuide = guideColumns()
+        let columnsWithGuide = try guideColumns()
         XCTAssertFalse(columnsWithGuide.isEmpty,
                        "Drawing a guide must not blank the in-between. \(guideReport())")
 
@@ -1010,7 +1012,7 @@ final class InterpolationWorkflowUITests: PaintUITestCase {
         // where a tilted chord puts the midpoint — and getting it wrong once already cost a run. What
         // no logic test can reach is the routing: that the overlay claimed the touch instead of the
         // stroke view underneath, which is exactly the bug this found (`bringSubviewToFront`).
-        let columnsAfterGuide = guideColumns()
+        let columnsAfterGuide = try guideColumns()
         XCTAssertNotEqual(columnsAfterGuide, columnsWithGuide,
                           "Dragging a guide handle has to move the in-between. Unchanged means the "
                           + "touch fell through to the stroke view instead of being claimed by the "
@@ -1024,7 +1026,7 @@ final class InterpolationWorkflowUITests: PaintUITestCase {
         undo.tap()
         XCTAssertTrue(guideChip.waitForExistence(timeout: 5),
                       "Undoing the handle drag must not delete the guide")
-        XCTAssertEqual(guideColumns(), columnsWithGuide,
+        XCTAssertEqual(try guideColumns(), columnsWithGuide,
                        "One undo should put the whole handle drag back — and only it, leaving the "
                        + "guide and its timing in place. \(guideReport())")
 
@@ -1036,6 +1038,15 @@ final class InterpolationWorkflowUITests: PaintUITestCase {
         // clears that image to nil; from the next pass on, the same drawing has to be coming out of
         // the cel's **own** display list instead. If the bake wrote anywhere else, the frame goes
         // blank here and nowhere earlier.
+        // A continuous slider's repeated synthetic "0.5" adjustments are not bit-identical.
+        // The captured failing scene had t=0.497413 below the edit's threshold 0.498071, so the
+        // edit was correctly absent before Commit. Commit a visibly present edit at an interior
+        // time beyond that threshold, while still exercising both weighted keyframe sets.
+        slider.adjust(toNormalizedSliderPosition: 0.75)
+        let beforeCommit = try inkedColumns()
+        XCTAssertFalse(beforeCommit.isEmpty, "The local stroke must be visible before testing Commit")
+        attachScreenshot(app, "interpolation-before-commit")
+
         let commit = app.buttons["interpolate.commit"]
         XCTAssertTrue(commit.waitForExistence(timeout: 5), "interpolate.commit exists")
         commit.tap()
@@ -1048,11 +1059,10 @@ final class InterpolationWorkflowUITests: PaintUITestCase {
         // was wrong when it was written, not merely unlucky.
         XCTAssertTrue(slider.waitForNonExistence(timeout: 20),
                       "The timing row is gated on there being a recipe, so it must go with it.")
-        let afterCommit = inkedColumns()
-        if afterCommit.isEmpty {
-            XCTFail("After Commit the frame has to keep its ink, now from the cel's own display "
-                    + "list rather than from the evaluated preview. \(inkReport())")
-        }
+        let afterCommit = try inkedColumns()
+        XCTAssertEqual(afterCommit, beforeCommit,
+                       "Commit must preserve the visible local stroke in the cel's own display list")
+        attachScreenshot(app, "interpolation-after-commit")
     }
 
 }
