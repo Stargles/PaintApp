@@ -877,7 +877,9 @@ nonisolated enum ProjectBackupManager {
     static func validateProjectForRestore(at url: URL) -> Bool {
         guard let data = try? Data(contentsOf: url.appendingPathComponent("manifest.json")),
               (try? JSONDecoder().decode(ProjectManifest.self, from: data)) != nil else { return false }
-        return validateProjectFiles(at: url, manifestData: data) && ProjectRecipeMetadata.validate(in: url, manifestData: data)
+        return validateProjectFiles(at: url, manifestData: data)
+            && ProjectRecipeMetadata.validate(in: url, manifestData: data)
+            && ProjectRecipeMetadata.validateRestoreStreams(in: url, manifestData: data)
     }
 
     private static func validateProjectFiles(at url: URL, manifestData: Data) -> Bool {

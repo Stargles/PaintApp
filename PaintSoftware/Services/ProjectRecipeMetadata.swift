@@ -66,6 +66,39 @@ nonisolated enum ProjectRecipeMetadata {
         } catch { return false }
     }
 
+    /// A saved reference must remain readable before a restore can displace the live scene. This
+    /// reads only stream addresses, preserving ordinary geometry's reported-loss policy.
+    static func validateRestoreStreams(in package: URL, manifestData: Data) -> Bool {
+        do {
+            let manifest = try object(from: manifestData)
+            let reader = try reader(in: package, manifest: manifest)
+            for url in reader.vectorURLs {
+                try autoreleasepool {
+                    let data = try Data(contentsOf: url)
+                    guard data.range(of: Data("\"stream\"".utf8)) != nil else { return }
+                    _ = try reader.decoder.decode(StreamMetadata.self, from: data)
+                }
+            }
+            return true
+        } catch { return false }
+    }
+
+    private struct StreamMetadata: Decodable {
+        private enum Root: String, CodingKey { case elements }
+        private enum Slot: String, CodingKey { case kind, stream }
+
+        init(from decoder: Decoder) throws {
+            let root = try decoder.container(keyedBy: Root.self)
+            guard var elements = try? root.nestedUnkeyedContainer(forKey: .elements) else { return }
+            while !elements.isAtEnd {
+                let decoder = try elements.superDecoder()
+                guard let slot = try? decoder.container(keyedBy: Slot.self),
+                      let kind = try? slot.decode(String.self, forKey: .kind), kind == "stream" else { continue }
+                _ = try slot.decode(VectorCanvasData.StreamRef.self, forKey: .stream)
+            }
+        }
+    }
+
     static func object(at url: URL) throws -> [String: Any] { try object(from: Data(contentsOf: url)) }
 
     static func object(from data: Data) throws -> [String: Any] {

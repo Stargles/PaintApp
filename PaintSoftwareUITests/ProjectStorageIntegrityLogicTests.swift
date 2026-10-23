@@ -195,6 +195,29 @@ final class ProjectStorageIntegrityLogicTests: XCTestCase {
         XCTAssertNil(missing)
     }
 
+    func testMalformedCurrentStreamCannotReplaceHealthyScene() throws {
+        let backup = try package("Backups/stream.paintproj") { manager in
+            let stream = VectorStreamElement(naturalSize: CGSize(width: 20, height: 8), host: "laptop", port: 47301,
+                sourceLabel: "Saved reference", rendersInPlace: true,
+                transform: LayerTransform(position: CGPoint(x: 32, y: 32), scale: 1, rotation: 0))
+            manager.layers[0].cels[0].vector = VectorCanvas(size: CanvasFixture.canvasSize, elements: [.stream(stream)])
+        }
+        XCTAssertTrue(ProjectBackupManager.validateProjectForRestore(at: backup), "a current stream is restorable")
+        let live = try package("Projects/live.paintproj"), liveBefore = try fileBytes(live)
+        try edit(vectorURL(backup)) { json in
+            var elements = json["elements"] as! [[String: Any]]
+            var stream = elements[0]["stream"] as! [String: Any]
+            stream["rendersInPlace"] = "damaged"
+            elements[0]["stream"] = stream; json["elements"] = elements
+        }
+        let sourceBefore = try fileBytes(backup)
+        XCTAssertFalse(ProjectBackupManager.validateProjectForRestore(at: backup))
+        XCTAssertFalse(ProjectBackupManager.restoreBackup(at: backup, toProjectAt: live),
+                       "a malformed current stream cannot replace a healthy scene")
+        XCTAssertEqual(try fileBytes(backup), sourceBefore, "restore validation preserves every source file")
+        XCTAssertEqual(try fileBytes(live), liveBefore, "failed restore leaves live artwork untouched")
+    }
+
     func testMaterialDamageAbortsBothOpenPathsAndStagedRestoreWithoutChangingEitherPackage() async throws {
         let operation = materialOperation()
         let package = try await packageAsync { manager in
