@@ -81,16 +81,13 @@ layer-panel toggles and invalid midflight photo are removed at `0cabd6c`; its va
 capture and every existing assertion remain. Final gates are next. Keep one-shot repairs until the owner confirms real
 scenes after installation.
 
-Final Debug fast attempt stopped partially at1430 tests (1427 passed, one real failure, one cancelled
-test, one skip); it is not a qualified fast tier. The identity fixture repair `621c15d` retains fitted
-lattices and all original assertions/cases; focused baseline/restored2/2 and a fault causing exactly
-the two group/spacing identity failures are verified. Production guard unchanged/file restored
-byte-exact. Rerun the whole final gates; let each configuration finish before stopping on failures.
-The complete second Debug attempt is running and exposed one further malformed identity fixture:
-FrameBakeKeyLogicTests' derived-acquisition row has zero source references. After this configuration
-finishes, give that row two existing resolvable cels, keep all25 rows/assertions unchanged, and prove
-that omitting the derived identity from the digest reproduces the intended acquired/retimed collision.
-The bounded related-fixture scan found no further positive identity cases needing this correction.
+The first final Debug attempt was interrupted1430/5282; its partial result is not qualification.
+The complete fast2 Debug ran5282:5277 passed, one malformed-fixture failure, four skipped. Both fixture
+repairs are now committed: `621c15d` retains fitted group lattices; `b244a46` supplies two genuine
+references for the digest row. All original assertions/cases remain. Each baseline/restored focused
+run passed2/2; deliberate omission of identity groups or derived digest data caught the intended
+assertions/collision. Production guards/encoder restored byte-exact. Final fast3 Debug/Release is next;
+let each configuration finish before stopping on failures.
 
 *"It should be placed to the left of the brush tool in the top menu. When selected, it acts sort of like
 a brush (you can control the brush type, size, etc), and otherwise it does basically what a normal

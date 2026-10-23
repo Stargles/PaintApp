@@ -71,19 +71,14 @@ failures serially as CLAUDE.md specifies.
 
 ## Next
 
-1. Fixture repair `621c15d` keeps fitted lattices and every original identity assertion/case. Focused
-   baseline/restored2/2 each; omitting identity groups fails exactly the two intended group/spacing
-   assertions, with no unwrap failures. Production file restored byte-exact and guard unchanged.
-   Evidence: `~/PaintWork/s50-liquify/identity-fixture-20261023T012438Z/`. The first final Debug attempt
-   was interrupted1430/5282 (1427passed, one genuine fixture failure, one cancelled test, one skip);
-   Release did not start. Rerun complete fast Debug/Release in a fresh evidence directory; never cancel
-   a configuration merely because a test fails, let its result/count finish and stop before the next.
-   Root owns running fast2 session2105 (`~/PaintWork/s50-liquify/fast-2/`). It has a further fixture
-   failure in FrameBakeKeyLogicTests.testEveryDocumentFieldTheKeyCoversMovesTheDigest: acquired and
-   retimed recipes have zero refs, so the new provider rightly refuses both. Arch agent's bounded scan
-   found no more positive identity fixtures. Let Debug finish, then fix this row with two existing
-   resolvable non-probe cels, preserve25 rows/assertions, and fault-prove omission of version.derived.
-   No production guard change and no source edit while the configuration is running.
+1. Identity fixture repairs are complete: `621c15d` retains fitted group lattices; `b244a46` gives the
+   bake-key row two existing non-probe references. Every original assertion/case remains. Each focused
+   baseline/restored gate passed2/2; omitting identity groups caught exactly two named assertions, and
+   omitting derived digest data reproduced the intended23-vs25 three-way collision. Production files
+   are byte-exact restored. Evidence: `~/PaintWork/s50-liquify/{identity-fixture-20261023T012438Z,digest-fixture-20261023T014918Z}/`.
+   Complete fast2 Debug ran5282:5277passed/1invalid-fixture failure/4skipped; Release did not start.
+   Final fast3 will run both configurations in a fresh evidence directory. Let each configuration
+   finish before stopping on any failures; never cancel merely because one test fails.
 2. Run one phase-boundary full suite in Release to qualify the shipped
    configuration. Rules do not mandate a full-suite configuration; simulator test seeds remain enabled
    in Release. This does not relabel the known Debug linked timeout as passing.
