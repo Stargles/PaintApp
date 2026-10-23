@@ -117,6 +117,7 @@ final class LiquifyUITests: PaintUITestCase {
     }
 
     func testThreeModesAndIndependentBrushSizePowerRestoreWithTheScene() throws {
+        XCUIDevice.shared.orientation = .landscapeLeft
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app, size: CGSize(width: 256, height: 256)), "fresh scene")
         let brushSize = app.sliders["sideToolbar.brushSizeSlider"].value as? String
@@ -157,8 +158,6 @@ final class LiquifyUITests: PaintUITestCase {
         liquifyMenu(app)
         XCTAssertTrue(picker.buttons["Twirl"].isSelected, "the saved mode reopens")
         XCTAssertTrue(streaky.isSelected, "the saved patterned brush reopens")
-        attachScreenshot(app, "liquify-controls-reopened")
-        rotateDevice(app, to: .landscapeLeft)
         attachScreenshot(XCUIScreen.main, "liquify-controls-reopened-landscape")
     }
 }
