@@ -139,7 +139,9 @@ final class PointGeometryRepairLogicTests: XCTestCase {
             XCTAssertFalse(reopened.loadDamage.isDamaged, name)
             try assertGeometry(reopened, name: name)
             if name == "ordinary-distort" || name == "retained-exact-bake" {
-                let oldPicture = try XCTUnwrap(UIImage(contentsOfFile: package.appendingPathComponent("thumbnail.png").path)?.cgImage)
+                let oldPictures = try XCTUnwrap(fixture["oldReopenedPictures"] as? [String: String])
+                let oldPNG = try XCTUnwrap(Data(base64Encoded: XCTUnwrap(oldPictures[name])))
+                let oldPicture = try XCTUnwrap(UIImage(data: oldPNG)?.cgImage)
                 let currentPicture = try XCTUnwrap(UIImage(contentsOfFile: reopenedURL.appendingPathComponent("thumbnail.png").path)?.cgImage)
                 XCTAssertEqual(currentPicture.width, oldPicture.width)
                 XCTAssertEqual(currentPicture.height, oldPicture.height)
