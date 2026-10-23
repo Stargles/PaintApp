@@ -95,6 +95,11 @@ pixels with editable vectors and linked frames. Review the Liquify-specific CelC
 ElementEdit and its single-consumer generic PresentedProcedure for clearer ownership and a simpler
 lifecycle before merge; retain synchronization, cancellation and one-producer guarantees. Do not
 change behavior solely because an appropriately scoped field belongs only to Liquify.
+Chosen bounded cleanup: consolidate the sole-consumer generic PresentedProcedure and the
+Liquify-only CelContentProcedure into one clearly owned LiquifyProcedure module. Move its recipe
+snapshot alongside it; remove the old generic module/delegating wrappers and update existing call
+sites/tests/project references. Preserve the existing synchronization, memoization, presentation,
+rejection and cancellation behavior exactly; no new lifecycle framework, flags or renderer.
 
 **Previous parked checkpoint, 2026-10-15.** All work is committed in
 `~/PaintWork/PaintApp-s49-integration` on `tmp/s49-integration`; app/test source checkpoint `9dfd96b`.
