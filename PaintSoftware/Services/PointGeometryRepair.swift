@@ -13,7 +13,20 @@ enum PointGeometryRepair {
         var errorDescription: String? { reason }
     }
     struct Report: Equatable { var converted = 0 }
-    private struct Stage { let original: URL; let converted: URL }
+    private static let prefix = ".point-geometry-"
+    private static let ownerSuffix = ".owner.json"
+    private struct DirectoryIdentity: Codable, Equatable {
+        let volume: Int64
+        let inode: UInt64
+        var isUsable: Bool { volume != 0 && inode != 0 }
+    }
+    private struct Owner: Codable {
+        let originalName: String
+        let original: DirectoryIdentity
+        var staged: DirectoryIdentity?
+    }
+    private struct Stage { let original: URL; let converted: URL; let ownerURL: URL; let owner: Owner }
+    private struct Census { var packages: [URL] = []; var owners: [URL] = []; var stages: [URL] = [] }
 
     static func run() throws -> Report {
         var stages: [Stage] = []
@@ -21,16 +34,17 @@ enum PointGeometryRepair {
         var canRemoveStages = true
         defer {
             if canRemoveStages {
-                for stage in stages { try? FileManager.default.removeItem(at: stage.converted) }
+                for stage in stages { try? removeOwned(stage.converted, record: stage.ownerURL) }
             }
         }
         func prepare(_ package: URL) throws {
             do {
-                if let converted = try stage(package) { stages.append(Stage(original: package, converted: converted)) }
+                if let converted = try stage(package) { stages.append(converted) }
             } catch { throw Failure(reason: package.lastPathComponent + ": " + error.localizedDescription) }
         }
-        let initialPackages = try packages()
-        for package in initialPackages { try autoreleasepool { try prepare(package) } }
+        let initial = try census()
+        for package in initial.packages { try autoreleasepool { try prepare(package) } }
+        try retireInterruptedStages(initial, validated: stages)
         guard !stages.isEmpty else { return Report() }
 
         let signature = ProjectBackupManager.currentAppSignature
@@ -39,17 +53,24 @@ enum PointGeometryRepair {
         do {
             let readable = Set(stages.map { $0.original.standardizedFileURL })
             guard ProjectBackupManager.copyUpdateSnapshots(signature: signature,
-                projects: initialPackages.filter { $0.path.hasPrefix(ProjectBackupManager.projectsDirectory.path + "/") }, validating: {
+                projects: initial.packages.filter { $0.path.hasPrefix(ProjectBackupManager.projectsDirectory.path + "/") }, validating: {
                 readable.contains($0.standardizedFileURL) || ProjectBackupManager.validateProjectForRestore(at: $0)
             }) else { throw Failure(reason: "The before-update copy could not be saved. No scene was replaced.") }
             // Discover the snapshots only after cloning, so even the newest untouched version is
             // converted. Do not use a once-per-build preference that can skip this second census.
             let prepared = Set(stages.map { $0.original.standardizedFileURL })
-            for package in try packages() where !prepared.contains(package.standardizedFileURL) {
+            for package in try census().packages where !prepared.contains(package.standardizedFileURL) {
                 try autoreleasepool { try prepare(package) }
             }
         }
         do {
+            canRemoveStages = false
+            for stage in stages {
+                guard try identity(stage.original) == stage.owner.original else {
+                    throw Failure(reason: "A scene changed while its converted copy was prepared.")
+                }
+            }
+            canRemoveStages = true
             for stage in stages {
                 try exchange(stage.original, stage.converted)
                 exchanged.append(stage)
@@ -63,6 +84,7 @@ enum PointGeometryRepair {
             }
             throw Failure(reason: "The saved-scene format could not be replaced: " + error.localizedDescription)
         }
+        for stage in stages { try removeOwned(stage.converted, record: stage.ownerURL) }
         ProjectBackupManager.settings.lastAppSignature = signature
         ProjectBackupManager.pruneUpdateSnapshots()
         return Report(converted: stages.count)
@@ -70,44 +92,127 @@ enum PointGeometryRepair {
 
     /// A partial census is unsafe: it could advance the build signature or prune versions while
     /// an unreadable folder still contains unconverted work. Never follow a folder/package link.
-    private static func packages() throws -> [URL] {
-        func walk(_ directory: URL) throws -> [URL] {
+    private static func census() throws -> Census {
+        var result = Census()
+        func walk(_ directory: URL) throws {
             let attributes = try directory.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
             guard attributes.isSymbolicLink == false, attributes.isDirectory == true else {
                 throw Failure(reason: "A library folder is unreadable or is a symbolic link: " + directory.lastPathComponent)
             }
-            var found: [URL] = []
             for item in try FileManager.default.contentsOfDirectory(at: directory,
                     includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey]) {
-                if item.lastPathComponent.hasPrefix(".") { continue }
                 let attributes = try item.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
                 guard attributes.isSymbolicLink == false else {
                     throw Failure(reason: "A library entry is a symbolic link: " + item.lastPathComponent)
                 }
-                if item.pathExtension == "paintproj" { found.append(item) }
-                else if attributes.isDirectory == true { found.append(contentsOf: try walk(item)) }
+                if item.pathExtension == "paintproj" { result.packages.append(item) }
+                else if item.lastPathComponent.hasPrefix(prefix) {
+                    let owner = item.lastPathComponent.hasSuffix(ownerSuffix)
+                    let stem = owner ? String(item.lastPathComponent.dropLast(ownerSuffix.count)) : item.lastPathComponent
+                    let token = String(stem.dropFirst(prefix.count))
+                    guard let id = UUID(uuidString: token), stem == prefix + id.uuidString else {
+                        throw Failure(reason: "An unknown format-repair item was preserved: " + item.lastPathComponent)
+                    }
+                    if owner { result.owners.append(item) }
+                    else {
+                        guard attributes.isDirectory == true else { throw Failure(reason: "A format-repair stage is not a directory.") }
+                        result.stages.append(item)
+                    }
+                } else if !item.lastPathComponent.hasPrefix("."), attributes.isDirectory == true { try walk(item) }
             }
-            return found
         }
-        return try [ProjectBackupManager.projectsDirectory, ProjectBackupManager.backupsRootDirectory,
-                    ProjectBackupManager.trashDirectory].flatMap { try walk($0) }.sorted { $0.path < $1.path }
+        for root in [ProjectBackupManager.projectsDirectory, ProjectBackupManager.backupsRootDirectory,
+                     ProjectBackupManager.trashDirectory] { try walk(root) }
+        result.packages.sort { $0.path < $1.path }
+        return result
     }
 
-    private static func stage(_ package: URL) throws -> URL? {
+    /// An interrupted clone never becomes user content. Directory identity survives atomic swap,
+    /// so a record can prove which side is still at the original address without reading pictures.
+    private static func retireInterruptedStages(_ census: Census, validated: [Stage]) throws {
+        let namedStages = Set(census.owners.map { $0.deletingLastPathComponent().appendingPathComponent(
+            String($0.lastPathComponent.dropLast(ownerSuffix.count))).standardizedFileURL })
+        guard census.stages.allSatisfy({ namedStages.contains($0.standardizedFileURL) }) else {
+            throw Failure(reason: "An unowned format-repair copy was preserved for recovery.")
+        }
+        for record in census.owners {
+            let owner = try JSONDecoder().decode(Owner.self, from: Data(contentsOf: record))
+            guard !owner.originalName.contains("/"), !owner.originalName.isEmpty,
+                  URL(fileURLWithPath: owner.originalName).lastPathComponent == owner.originalName,
+                  (owner.originalName as NSString).pathExtension == "paintproj", owner.original.isUsable,
+                  owner.staged?.isUsable != false, owner.staged != owner.original else {
+                throw Failure(reason: "An unreadable format-repair owner was preserved for recovery.")
+            }
+            let original = record.deletingLastPathComponent().appendingPathComponent(owner.originalName)
+            let target = record.deletingLastPathComponent().appendingPathComponent(
+                String(record.lastPathComponent.dropLast(ownerSuffix.count)))
+            let sourceID = try identity(original)
+            let unswapped = sourceID == owner.original
+            guard unswapped || sourceID == owner.staged else {
+                throw Failure(reason: "A format-repair source changed or is missing; its copies were preserved.")
+            }
+            if FileManager.default.fileExists(atPath: target.path) {
+                let targetID = try identity(target)
+                guard unswapped ? owner.staged == nil || targetID == owner.staged : targetID == owner.original else {
+                    throw Failure(reason: "A format-repair copy changed; both copies were preserved.")
+                }
+            }
+            let prepared = validated.contains { $0.original == original && $0.owner.original == sourceID }
+            guard ProjectBackupManager.validateProjectForRestore(at: original) || (unswapped && prepared) else {
+                throw Failure(reason: "A format-repair source could not be validated; its copies were preserved.")
+            }
+            guard try identity(original) == sourceID else { throw Failure(reason: "A format-repair source changed during validation.") }
+            try removeOwned(target, record: record)
+        }
+    }
+
+    private static func removeOwned(_ stage: URL, record: URL) throws {
+        if FileManager.default.fileExists(atPath: stage.path) { try FileManager.default.removeItem(at: stage) }
+        if FileManager.default.fileExists(atPath: record.path) { try FileManager.default.removeItem(at: record) }
+    }
+
+    private static func identity(_ url: URL) throws -> DirectoryIdentity {
+        var value = stat()
+        let status = url.withUnsafeFileSystemRepresentation { lstat($0!, &value) }
+        guard status == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        let id = DirectoryIdentity(volume: Int64(value.st_dev), inode: UInt64(value.st_ino))
+        guard value.st_mode & mode_t(S_IFMT) == mode_t(S_IFDIR), id.isUsable else {
+            throw Failure(reason: "Stable directory identity is unavailable: " + url.lastPathComponent)
+        }
+        return id
+    }
+
+    private static func stage(_ package: URL) throws -> Stage? {
         guard try package.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink == false else {
             throw Failure(reason: "A project package is a symbolic link; its original was left untouched.")
         }
+        let originalID = try identity(package)
         let manifestData = try Data(contentsOf: package.appendingPathComponent("manifest.json"))
-        var manifest = try object(manifestData)
+        let manifest = try object(manifestData)
         if manifest["geometryVersion"] != nil {
             _ = try JSONDecoder().decode(ProjectManifest.GeometryVersion.self, from: manifestData)
             return nil
         }
         let reader = try ProjectRecipeMetadata.reader(in: package, manifest: manifest)
-        let target = package.deletingLastPathComponent().appendingPathComponent(".point-geometry-" + UUID().uuidString)
+        let target = package.deletingLastPathComponent().appendingPathComponent(prefix + UUID().uuidString)
+        let ownerURL = target.appendingPathExtension("owner.json")
+        var owner = Owner(originalName: package.lastPathComponent, original: originalID, staged: nil)
         var copied = false
         var ready = false
-        defer { if !ready { try? FileManager.default.removeItem(at: target) } }
+        defer {
+            if !ready, (try? identity(package)) == originalID { try? removeOwned(target, record: ownerURL) }
+        }
+        func copy() throws {
+            guard !copied else { return }
+            try JSONEncoder().encode(owner).write(to: ownerURL, options: .atomic)
+            guard ProjectBackupManager.cloneItem(at: package, to: target) else {
+                throw Failure(reason: "A staging copy could not be saved.")
+            }
+            copied = true
+            owner.staged = try identity(target)
+            guard owner.staged != originalID else { throw Failure(reason: "The staging copy shares its source identity.") }
+            try JSONEncoder().encode(owner).write(to: ownerURL, options: .atomic)
+        }
         for (urls, recipe) in [(reader.vectorURLs, false), (reader.urls, true)] {
             for url in Set(urls) {
                 try autoreleasepool {
@@ -119,30 +224,24 @@ enum PointGeometryRepair {
                         throw Failure(reason: "A drawing address leaves its package or follows a symbolic link.")
                     }
                     guard let data = try convertedPayload(Data(contentsOf: url), recipe: recipe) else { return }
-                    if !copied {
-                        guard ProjectBackupManager.cloneItem(at: package, to: target) else {
-                            throw Failure(reason: "A staging copy could not be saved.")
-                        }
-                        copied = true
-                    }
+                    try copy()
                     try data.write(to: target.appendingPathComponent(name), options: .atomic)
                 }
             }
         }
-        if !copied {
-            guard ProjectBackupManager.cloneItem(at: package, to: target) else {
-                throw Failure(reason: "A staging copy could not be saved.")
-            }
-            copied = true
+        try copy()
+        // Adding the boundary must not re-serialize unrelated scene values or decimal spellings.
+        var markedManifest = manifestData
+        guard let root = markedManifest.firstIndex(of: UInt8(ascii: "{")) else {
+            throw Failure(reason: "Unreadable project manifest object.")
         }
-        manifest["geometryVersion"] = VectorCanvasData.currentGeometryVersion
-        try JSONSerialization.data(withJSONObject: manifest, options: [.sortedKeys])
-            .write(to: target.appendingPathComponent("manifest.json"), options: .atomic)
+        markedManifest.insert(contentsOf: Data("\"geometryVersion\":\(VectorCanvasData.currentGeometryVersion),".utf8), at: root + 1)
+        try markedManifest.write(to: target.appendingPathComponent("manifest.json"), options: .atomic)
         guard ProjectBackupManager.validateProjectForRestore(at: target) else {
             throw Failure(reason: "The converted copy failed saved-scene validation. Its original was left untouched.")
         }
         ready = true
-        return target
+        return Stage(original: package, converted: target, ownerURL: ownerURL, owner: owner)
     }
 
     /// Nil means an already-current payload, which must never be re-encoded merely to sort JSON.

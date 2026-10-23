@@ -453,6 +453,7 @@ final class ProjectLocationLogicTests: XCTestCase {
         let fm = FileManager.default
         try? fm.createDirectory(at: url.appendingPathComponent("images"), withIntermediateDirectories: true)
         let manifest: [String: Any] = [
+            "geometryVersion": 1,
             "id": UUID().uuidString,
             "layers": [["cels": [["rasterFileName": "a.png", "rasterOmitted": true]]]]
         ]

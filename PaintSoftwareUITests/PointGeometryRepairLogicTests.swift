@@ -1,5 +1,6 @@
 import XCTest
 import SwiftUI
+import Darwin
 
 @MainActor
 final class PointGeometryRepairLogicTests: XCTestCase {
@@ -107,6 +108,138 @@ final class PointGeometryRepairLogicTests: XCTestCase {
                 XCTAssertEqual(try json(fill) as? NSDictionary, old as NSDictionary, file: file, line: line)
             }
         }
+    }
+
+    private func directoryIdentity(_ url: URL) throws -> [String: Any] {
+        var value = stat()
+        guard url.withUnsafeFileSystemRepresentation({ lstat($0!, &value) }) == 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+        return ["volume": Int64(value.st_dev), "inode": UInt64(value.st_ino)]
+    }
+    private func interruptedStage(_ original: URL, clone: Bool = true,
+                                  recordStagedIdentity: Bool = true) throws -> (URL, URL) {
+        let target = original.deletingLastPathComponent().appendingPathComponent(".point-geometry-" + UUID().uuidString)
+        let record = target.appendingPathExtension("owner.json")
+        var owner: [String: Any] = ["originalName": original.lastPathComponent,
+                                  "original": try directoryIdentity(original)]
+        if clone {
+            XCTAssertTrue(ProjectBackupManager.cloneItem(at: original, to: target))
+            if recordStagedIdentity { owner["staged"] = try directoryIdentity(target) }
+        }
+        try data(owner).write(to: record, options: .atomic)
+        return (target, record)
+    }
+    private func assertNoOwnedStages(file: StaticString = #filePath, line: UInt = #line) throws {
+        let files = try XCTUnwrap(FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil), file: file, line: line)
+        for case let fileURL as URL in files {
+            XCTAssertFalse(fileURL.lastPathComponent.hasPrefix(".point-geometry-"), fileURL.path, file: file, line: line)
+        }
+    }
+
+    func testRestartBeforeCloneRetiresOwnerAfterOldSourceValidates() throws {
+        let project = try install("plain")
+        _ = try interruptedStage(project, clone: false)
+        XCTAssertEqual(try PointGeometryRepair.run().converted, 2)
+        XCTAssertTrue(ProjectBackupManager.validateProjectForRestore(at: project))
+        try assertNoOwnedStages()
+    }
+
+    func testRestartDuringPartialCloneRetiresOnlyOwnedStage() throws {
+        let project = try install("material-fills")
+        let (target, _) = try interruptedStage(project, clone: false)
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        try Data("an interrupted clone".utf8).write(to: target.appendingPathComponent("partial"))
+        XCTAssertEqual(try PointGeometryRepair.run().converted, 2)
+        XCTAssertTrue(ProjectBackupManager.validateProjectForRestore(at: project))
+        try assertNoOwnedStages()
+    }
+
+    func testRestartAfterSwapCleansAlreadyCurrentPackageWithoutRewritingIt() throws {
+        let project = try install("plain")
+        _ = try PointGeometryRepair.run()
+        let before = try bytes(project)
+        let (target, record) = try interruptedStage(project)
+        // The source now has the staged directory's identity; the sibling has the displaced source.
+        let displaced = project.deletingLastPathComponent().appendingPathComponent("displaced")
+        try FileManager.default.moveItem(at: project, to: displaced)
+        try FileManager.default.moveItem(at: target, to: project)
+        try FileManager.default.moveItem(at: displaced, to: target)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: record.path))
+        XCTAssertEqual(try PointGeometryRepair.run().converted, 0)
+        XCTAssertEqual(try bytes(project), before)
+        try assertNoOwnedStages()
+    }
+
+    func testMissingOrChangedInterruptedSourcePreservesEveryOwnedCopy() throws {
+        let project = try install("plain")
+        let (target, record) = try interruptedStage(project)
+        try FileManager.default.removeItem(at: project)
+        let missing = try bytes(root)
+        XCTAssertThrowsError(try PointGeometryRepair.run())
+        XCTAssertEqual(try bytes(root), missing, "the stage is now the only complete copy")
+        try FileManager.default.moveItem(at: target, to: root.appendingPathComponent("preserved-missing-source"))
+        try FileManager.default.removeItem(at: record)
+        let source = try install("plain")
+        _ = try interruptedStage(source)
+        let oldID = try directoryIdentity(source)
+        try FileManager.default.moveItem(at: source, to: root.appendingPathComponent("changed-source-original"))
+        let replacement = try install("plain")
+        XCTAssertNotEqual(try directoryIdentity(replacement) as NSDictionary, oldID as NSDictionary)
+        let changed = try bytes(root)
+        XCTAssertThrowsError(try PointGeometryRepair.run())
+        XCTAssertEqual(try bytes(root), changed)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: replacement.path))
+    }
+
+    func testFailedSourceValidationKeepsItsSoundInterruptedCopy() throws {
+        let project = try install("material-strokes")
+        _ = try interruptedStage(project)
+        try editVector(project) { $0["materialOperations"] = [] }
+        let before = try bytes(root)
+        XCTAssertThrowsError(try PointGeometryRepair.run())
+        XCTAssertEqual(try bytes(root), before)
+    }
+
+    func testUnknownStageAndChangedStageIdentityAreNeverDiscarded() throws {
+        let project = try install("plain")
+        let (target, record) = try interruptedStage(project)
+        let displaced = root.appendingPathComponent("original-stage")
+        try FileManager.default.moveItem(at: target, to: displaced)
+        XCTAssertTrue(ProjectBackupManager.cloneItem(at: project, to: target))
+        let changed = try bytes(root)
+        XCTAssertThrowsError(try PointGeometryRepair.run())
+        XCTAssertEqual(try bytes(root), changed)
+        try FileManager.default.removeItem(at: record)
+        let unowned = try bytes(root)
+        XCTAssertThrowsError(try PointGeometryRepair.run())
+        XCTAssertEqual(try bytes(root), unowned)
+    }
+
+    func testInterruptedOwnerCannotTraverseOrFollowLinks() throws {
+        let project = try install("plain")
+        let (target, record) = try interruptedStage(project)
+        var owner = try object(Data(contentsOf: record))
+        for name in ["../outside.paintproj", "/absolute.paintproj"] {
+            owner["originalName"] = name; try data(owner).write(to: record)
+            let before = try bytes(root)
+            XCTAssertThrowsError(try PointGeometryRepair.run())
+            XCTAssertEqual(try bytes(root), before)
+        }
+        let savedRecord = root.appendingPathComponent("owner.json")
+        try FileManager.default.moveItem(at: record, to: savedRecord)
+        try FileManager.default.createSymbolicLink(at: record, withDestinationURL: savedRecord)
+        let linkedRecord = try bytes(root)
+        XCTAssertThrowsError(try PointGeometryRepair.run())
+        XCTAssertEqual(try bytes(root), linkedRecord)
+        try FileManager.default.removeItem(at: record)
+        try FileManager.default.moveItem(at: savedRecord, to: record)
+        owner["originalName"] = project.lastPathComponent; try data(owner).write(to: record)
+        try FileManager.default.removeItem(at: target)
+        try FileManager.default.createSymbolicLink(at: target, withDestinationURL: project)
+        let linkedStage = try bytes(root)
+        XCTAssertThrowsError(try PointGeometryRepair.run())
+        XCTAssertEqual(try bytes(root), linkedStage)
     }
 
     func testPreviousWriterPackagesConvertAndRoundtripThroughCurrentWriter() async throws {

@@ -61,6 +61,7 @@ final class BackupManagerLogicTests: XCTestCase {
         ]
         if let omitRaster { cel["rasterOmitted"] = omitRaster }
         let manifest: [String: Any] = [
+            "geometryVersion": 1,
             "id": id.uuidString,
             "name": name,
             "canvasWidth": 64, "canvasHeight": 64, "fps": 12, "modifiedAt": 0,
