@@ -98,8 +98,10 @@ files are restored byte-exact and all 753 qualified hashes match; no install, la
 measurement. Evidence: `~/PaintWork/s50-liquify/device-build-1/report.txt`.
 
 The owner confirmed on 2026-10-23 that the scene is saved and the iPad unlocked/awake. Resume the physical gates now. Establish actual library location and back up
-current Documents plus any external Projects/Backups/Trash before install/launch; passive preferences
-retrieval timed out, so coverage is unconfirmed. Resume in a fresh evidence directory using the
+current Documents plus any external Projects/Backups/Trash before install/launch. Container Documents
+is copied and hashed (134 files,19,662,670 bytes). The bookmark identifies On My iPad/PaintApp; direct
+developer file access failed. External coverage remains unconfirmed; the owner has been asked for
+a current Mac copy or whether a fresh transfer is needed. Resume in a fresh evidence directory using the
 reviewed safe adapters: one cold/warm sampler C benchmark alone first, five legacy drives, then two
 unseeded vector/raster Push workflows (expected 1/5/2, zero skips). No library/settings resets or preset
 changes. Preserve full pictures and disposable-scene identities; native component cost is separate
