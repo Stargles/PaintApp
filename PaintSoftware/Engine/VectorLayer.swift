@@ -7462,21 +7462,32 @@ final class VectorCanvas {
         cg.restoreGState()
     }
 
-    /// Exact painted footprint from the ordinary brush walk, without allocating a bitmap. Point
+    private final class BoundsDabTarget: DabTarget {
+        private(set) var bounds = CGRect.null
+        func beginStroke() {}
+        func endStroke() {}
+        func beginStrokeGroup(opacity: CGFloat, blendMode: CGBlendMode, texture: BrushTextureSettings?) {}
+        func endStrokeGroup() {}
+        func stampCircle(at point: CGPoint, radius: CGFloat, color: UIColor,
+                         alpha: CGFloat, hardness: CGFloat, blendMode: CGBlendMode) {
+            bounds = bounds.union(dabCircleBounds(at: point, radius: radius))
+        }
+        func stampImage(_ texture: BrushTextureRef, at point: CGPoint, diameter: CGFloat,
+                        angle: CGFloat, color: UIColor, alpha: CGFloat, blendMode: CGBlendMode) {
+            bounds = bounds.union(dabImageBounds(at: point, diameter: diameter, angle: angle))
+        }
+    }
+
+    /// Exact painted footprint from the ordinary brush walk, retaining only its bounds. Point
     /// edits can rephase dabs across a whole stroke, so their preview covers this before/after union.
     static func paintedBounds(of elements: [VectorElement]) -> CGRect {
         var bounds = CGRect.null
         for element in elements {
             switch element {
             case .stroke(let stroke):
-                let collector = BrushStamper.CollectingDabTarget()
-                stamp(stroke: stroke, into: collector, isEraser: stroke.composite == .erase)
-                for dab in collector.dabs {
-                    switch dab.tip {
-                    case .round: bounds = bounds.union(dabCircleBounds(at: dab.center, radius: dab.radius))
-                    case .image(_, let angle): bounds = bounds.union(dabImageBounds(at: dab.center, diameter: dab.radius * 2, angle: angle))
-                    }
-                }
+                let target = BoundsDabTarget()
+                stamp(stroke: stroke, into: target, isEraser: stroke.composite == .erase)
+                bounds = bounds.union(target.bounds)
             case .fill(let fill):
                 if let path = fill.cgPath { bounds = bounds.union(path.boundingBoxOfPath) }
             case .image, .text, .video, .stream: break
