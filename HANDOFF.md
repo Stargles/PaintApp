@@ -27,6 +27,8 @@ preserve owner settings/libraries and verify fresh inventory before closeout.
    spinner then Home Screen**. Treat app-vs-system failure as unresolved; no new named app/Jetsam
    report found in root/Retired/synced logs yet. Saved scene uses To Cross, Vector3/frame2,527strokes,
    no material operations in its six drawings. Latest recording predates failure.
+   Unified device log collection needs root; noninteractive sudo also refused (password required).
+   No privileged archive was collected. Black-screen failure cause remains unknown; no speculative fix.
 
 3. Verify father–grandfather document saving in actual code/tests, implement any missing behavior,
    and reconcile original asks/queue history for other missed tasks. All reports are in TODO before work. Current diagnostic tree `~/PaintWork/PaintApp-s52-erase-crash`,
