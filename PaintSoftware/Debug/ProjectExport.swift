@@ -100,11 +100,9 @@ enum ProjectExport {
         }
 
         for entry in wanted {
-            let destination = exportDirectory.appendingPathComponent(entry.directoryName)
-            try? FileManager.default.removeItem(at: destination)
             do {
-                try FileManager.default.copyItem(at: entry.url, to: destination)
-                lines.append("copied: \(entry.directoryName) (\(entry.bytes) bytes) title=\(entry.title ?? "-")")
+                let destination = try copyPackage(at: entry.url, under: root, to: exportDirectory)
+                lines.append("copied: \(destination.path) (\(entry.bytes) bytes) title=\(entry.title ?? "-")")
             } catch {
                 lines.append("FAILED: \(entry.directoryName): \(error)")
             }
@@ -117,6 +115,26 @@ enum ProjectExport {
         // Same contract as `PlaybackProbe`: the process ending is the signal that the work is done,
         // so the caller never has to poll for a file that may still be half-written.
         exit(0)
+    }
+
+    /// Keep the library hierarchy: different folders may legitimately contain the same package name.
+    /// Only the expendable export tree is written; the chosen library remains unchanged.
+    static func copyPackage(at source: URL, under libraryRoot: URL, to exportRoot: URL) throws -> URL {
+        let sourceParts = source.standardizedFileURL.pathComponents
+        let rootParts = libraryRoot.standardizedFileURL.pathComponents
+        guard sourceParts.starts(with: rootParts), sourceParts.count > rootParts.count,
+              !exportRoot.standardizedFileURL.pathComponents.starts(with: sourceParts) else {
+            throw CocoaError(.fileReadInvalidFileName)
+        }
+        let relativePath = sourceParts.dropFirst(rootParts.count).joined(separator: "/")
+        let destination = exportRoot.appendingPathComponent(relativePath, isDirectory: true)
+        try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(),
+                                               withIntermediateDirectories: true)
+        if FileManager.default.fileExists(atPath: destination.path) {
+            try FileManager.default.removeItem(at: destination)
+        }
+        try FileManager.default.copyItem(at: source, to: destination)
+        return destination
     }
 
     // MARK: - Enumeration

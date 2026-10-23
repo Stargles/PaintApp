@@ -52,6 +52,45 @@ final class ProjectLocationLogicTests: XCTestCase {
         scratch = nil; container = nil; external = nil
     }
 
+    // MARK: - Read-only library export
+
+    func testExportPreservesSameNamedPackagesInDifferentLibraryFolders() throws {
+        let export = container.appendingPathComponent("Export", isDirectory: true)
+        for (relative, text) in [("Projects/A/Untitled.paintproj", "first"),
+                                 ("Projects/B/Untitled.paintproj", "second"),
+                                 ("Backups/A/Untitled.paintproj", "backup")] {
+            let source = external.appendingPathComponent(relative, isDirectory: true)
+            try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+            try Data(text.utf8).write(to: source.appendingPathComponent("manifest.json"))
+            let copied = try ProjectExport.copyPackage(at: source, under: external, to: export)
+            XCTAssertEqual(copied, export.appendingPathComponent(relative, isDirectory: true))
+        }
+        for (relative, text) in [("Projects/A/Untitled.paintproj", "first"),
+                                 ("Projects/B/Untitled.paintproj", "second"),
+                                 ("Backups/A/Untitled.paintproj", "backup")] {
+            XCTAssertEqual(try Data(contentsOf: export.appendingPathComponent(relative + "/manifest.json")),
+                           Data(text.utf8), "later exports must not overwrite an earlier same-named scene")
+            XCTAssertEqual(try Data(contentsOf: external.appendingPathComponent(relative + "/manifest.json")),
+                           Data(text.utf8), "export leaves every source package unchanged")
+        }
+    }
+
+    func testExportRefusesAnOutsidePackageWithASimilarRootName() throws {
+        let outside = scratch.appendingPathComponent("OnMyIPad-other/Untitled.paintproj", isDirectory: true)
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        let export = container.appendingPathComponent("Export", isDirectory: true)
+        XCTAssertThrowsError(try ProjectExport.copyPackage(at: outside, under: external, to: export))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: export.path), "refusal must not create export output")
+    }
+
+    func testExportRefusesToCopyAPackageInsideItself() throws {
+        let source = external.appendingPathComponent("Projects/Untitled.paintproj", isDirectory: true)
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        let nested = source.appendingPathComponent("Export", isDirectory: true)
+        XCTAssertThrowsError(try ProjectExport.copyPackage(at: source, under: external, to: nested))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: nested.path), "refusal must not alter the source package")
+    }
+
     // MARK: - The regression this feature exists for
 
     /// **A reinstall destroys a project saved inside the app, and leaves one in a chosen folder
