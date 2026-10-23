@@ -92,8 +92,9 @@ renderable sources, preserving all assertions and proving them with fault/restor
 Detailed provenance: HANDOFF, PERFORMANCE and `~/PaintWork/s50-liquify/`.
 
 **Still open:** physical qualification, final restored Release install/normal launch, then merge.
-Attempt2 named-device clean passed and compilation is active; the architecture agent owns native/DD,
-with exactly eight temporary test files to restore before handback. No install/launch yet.
+Attempt2 clean/build/signature checks/restoration passed. Frozen products and 1/5/2 future test
+commands are ready in `device-build-2/`; all eight temporary test files restored and all 753 hashes
+match. No install/launch/physical execution yet.
 Staging attempt1 stopped at clean exit 70: Xcode could not prepare the named iPad and requested an
 unlocked device on the same LAN or a cable. Compilation never started. All eight temporary test
 files are restored byte-exact and all 753 qualified hashes match; no install, launch or physical
@@ -102,7 +103,7 @@ measurement. Evidence: `~/PaintWork/s50-liquify/device-build-1/report.txt`.
 The owner confirmed on 2026-10-23 that the scene is saved and the iPad unlocked/awake. Resume the physical gates now. Establish actual library location and back up
 current Documents plus any external Projects/Backups/Trash before install/launch. Container Documents
 is copied and hashed (134 files,19,662,670 bytes). The bookmark identifies On My iPad/PaintApp; direct
-developer file access failed. External coverage remains unconfirmed. Owner, 2026-10-23: "I'm not sure. Also ideally I dont have to do anything; you should be able to access the ipad through tailscale." Check enabled remote/file-access routes before asking the owner to transfer anything. Resume in a fresh evidence directory using the
+developer file access failed. External coverage remains unconfirmed. Owner, 2026-10-23: "I'm not sure. Also ideally I dont have to do anything; you should be able to access the ipad through tailscale." Existing routes have now been checked: Tailscale reaches the iPad, but no SSH/SMB/web file service is enabled, and Apple developer transfer cannot read that File Provider folder. A fresh Files ZIP/AirDrop transfer to Julia’s MacBook Pro is required before installation; instructions have been given. Resume in a fresh evidence directory using the
 reviewed safe adapters: one cold/warm sampler C benchmark alone first, five legacy drives, then two
 unseeded vector/raster Push workflows (expected 1/5/2, zero skips). No library/settings resets or preset
 changes. Preserve full pictures and disposable-scene identities; native component cost is separate

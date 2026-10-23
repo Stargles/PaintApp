@@ -13,11 +13,13 @@ confirmed it opens. Its verified profile expires 2026-10-30. The renewal repair 
 arguments, fails closed on clean errors, verifies signatures and requires five days of profile life.
 Nine isolated scenarios and four mutations passed. See `docs/bug-evidence/auto-resign-2026-10-22.md`.
 
-**Liquify is unmerged and uninstalled. Simulator qualification is complete.** The architecture agent
-owns native/DerivedData for device-build-2 compilation only: named-device clean passed, eight test
-files are temporarily adapted, production/project files unchanged. Do not start another native job.
-The agent must restore all eight files byte-exact and verify all 753 qualified hashes before handback.
-Every owned qualification simulator/clone is deleted. Commits after fast source `2b330c9` are docs only.
+**Liquify is unmerged and uninstalled. Simulator qualification and physical build staging are
+complete.** Device-build-2 clean/build/verification/restoration all passed. Both frozen app/runner
+seals verify, profiles have more than five days of life (UTC expiry October30). All eight temporary
+test files are restored byte-exact and all 753 qualified hashes match; no native jobs remain active.
+Frozen xctestrun: `~/PaintWork/s50-liquify/device-build-2/frozen-products/PaintSoftware_iphoneos26.5-arm64.xctestrun`.
+Use its saved future commands/selections, expected 1/5/2, not a rebuilt runner. No install/launch/tests
+yet. Every owned simulator/clone is deleted. Commits after fast source `2b330c9` are docs only.
 
 - Fast Debug and Release: each 5,282 total = 5,278 passed + 4 skipped, zero failures; 256 selectors.
   Evidence: `~/PaintWork/s50-liquify/fast-3/`.
@@ -37,11 +39,19 @@ cable. Keychain unlock succeeded; build-for-testing was never invoked. No produc
 install, launch, tests or device-data access occurred. All sources restored and native ownership
 returned to root. Report: `~/PaintWork/s50-liquify/device-build-1/report.txt`.
 
-On 2026-10-23 the owner confirmed the scene saved and iPad unlocked/awake. Resume now. Preferences now confirm On My iPad/PaintApp as the external library. Container Documents is backed
-up and hashed (134 files,19,662,670 bytes), but external coverage is unconfirmed; direct developer
-file access failed. The owner is unsure about a Mac copy and wants no manual action; investigate existing Tailscale/file-access routes before requesting a transfer. Named-device clean passed in
-device-build-2 and compilation is active under the architecture agent, build only; no install/launch. Hardware UDID:
-`00008030-000151492EC3C02E`; devicectl ID: `E3B83820-DF74-5042-B52B-0D5BA17E4877`.
+On 2026-10-23 the owner confirmed the scene saved and iPad unlocked/awake. Container Documents is
+backed up and hashed (134 files,19,662,670 bytes) in `device-backup-2/`. The external library is
+On My iPad/PaintApp, outside that container. Apple developer transfer cannot read its File Provider
+group. Tailscale reaches the iPad, but bounded checks found no SSH/SMB/HTTP/WebDAV service; Desktop
+Commander lists only Windows. See `device-backup-2/tailscale-file-route-audit.md`.
+
+Owner is unsure about an existing Mac copy and prefers no manual action. Existing access routes were
+checked; a fresh archive transfer is now the remaining blocker before installation. Instructions given:
+Files → On My iPad → long-press PaintApp → Compress → AirDrop ZIP to Julia’s MacBook Pro. Keep source
+folder untouched. No PaintApp archive was yet present in Downloads at the last check. Validate ZIP,
+structure and hashes before treating external coverage as complete. Do not weaken this into an
+assumption that container Documents or Tailscale alone covers the selected library.
+Hardware UDID `00008030-000151492EC3C02E`; devicectl ID `E3B83820-DF74-5042-B52B-0D5BA17E4877`.
 
 ## Next
 
@@ -49,14 +59,10 @@ device-build-2 and compilation is active under the architecture agent, build onl
    `PaintApp.projectLocation.bookmark`; back up/hash all container Documents and any external
    Projects/Backups/Trash before install/launch. An external root may need owner help; never assume
    Documents covers it. Never reset libraries/settings, edit presets or choose a storage invitation.
-2. In a **fresh evidence directory**, stage the guarded five-file legacy patch, reviewed two-file
-   Liquify patch and separately backed-up sampler benchmark. Reuse instructions/manifests in
-   `~/PaintWork/s50-liquify/device-preparation/README.md` and
-   `~/PaintWork/s49-liquify-logs/combined/final/`. Attempt1 preserves exact backups, candidate files,
-   scripts, complete diff and failure evidence. Do not reuse its backup directories blindly.
-3. One named-device Release build-for-testing, identical clean/build common arguments, fail-closed
-   clean; verify app/runner signatures and five-day profile life. Freeze product/xctestrun provenance,
-   restore all eight sources byte-exact and verify the 753 hashes. No broad suite with adapters active.
+2. Physical compilation is already complete in `device-build-2/`; do not rebuild it merely to resume.
+   Verify frozen products, xctestrun hash `125bd30baf4a3567a173fd9b4b6313ba83b661e6490898db94b386ca8ae28da9`,
+   signatures and current five-day profile life. Reviewed safe adapters/provenance and future commands
+   are archived there; original sources are restored. No broad suite with temporary adapters active.
 4. Run the native cold/warm sampler benchmark FIRST and ALONE, then five legacy drives and two
    unseeded Liquify Push drives separately: expected 1/5/2, zero skips. Inspect six native PNGs and
    full UI screenshots; preserve disposable-scene identities. Native component cost is not app gesture
