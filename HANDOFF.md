@@ -18,8 +18,7 @@ complete.** Device-build-2 clean/build/verification/restoration all passed. Both
 seals verify, profiles have more than five days of life (UTC expiry October30). All eight temporary
 test files are restored byte-exact and all 753 qualified hashes match; no native jobs remain active.
 Frozen xctestrun: `~/PaintWork/s50-liquify/device-build-2/frozen-products/PaintSoftware_iphoneos26.5-arm64.xctestrun`.
-Use its saved future commands/selections, expected 1/5/2, not a rebuilt runner. No install/launch/tests
-yet. Every owned simulator/clone is deleted. Commits after fast source `2b330c9` are docs only.
+Use its saved future commands/selections, expected 1/5/2, not a rebuilt runner. The authorized first physical invocation attempted runner installation/launch, then failed UI-automation initialization; no selected test method or target-app launch by a method occurred. Every owned simulator/clone is deleted. Commits after fast source `2b330c9` are docs only.
 
 - Fast Debug and Release: each 5,282 total = 5,278 passed + 4 skipped, zero failures; 256 selectors.
   Evidence: `~/PaintWork/s50-liquify/fast-3/`.
@@ -49,9 +48,7 @@ The owner AirDropped the current PaintApp folder ZIP. It is preserved under devi
 327,981,935 bytes, matching source/copy SHA; all 3,830 members streamed with CRC/SHA and safe-path checks.
 Actual Projects/Backups/Trash structure is present (Trash empty). The old September9 container Export
 index is not a current external-library inventory; its mismatches are not omissions. coverage.json
-records the verification basis/limits. Backup gate is satisfied; proceed with physical benchmark FIRST,
-then legacy5 and Liquify2 from frozen products. Root hands native/DD to the architecture agent for
-these runs, stopping on any real failure; no source changes or destructive resets.
+records the verification basis/limits. Backup gate is satisfied. Physical benchmark1 failed before the selected method: "Timed out while enabling automation mode." Its xcresult synthetic initialization failure is not a sampler assertion; no timing records/PNGs/scratch scenes. LockState after failure reports passcodeRequired=false, so ask what the iPad actually shows before assuming locked. A screen/prompt question is pending. No retry, legacy or Liquify drive yet; native/DD returned to root. Evidence: physical-benchmark-1/. Fresh-process cold premise remains intact because no method ran.
 Hardware UDID `00008030-000151492EC3C02E`; devicectl ID `E3B83820-DF74-5042-B52B-0D5BA17E4877`.
 
 ## Next

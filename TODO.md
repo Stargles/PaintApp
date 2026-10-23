@@ -94,7 +94,7 @@ Detailed provenance: HANDOFF, PERFORMANCE and `~/PaintWork/s50-liquify/`.
 **Still open:** physical qualification, final restored Release install/normal launch, then merge.
 Attempt2 clean/build/signature checks/restoration passed. Frozen products and 1/5/2 future test
 commands are ready in `device-build-2/`; all eight temporary test files restored and all 753 hashes
-match. No install/launch/physical execution yet.
+match. The first physical benchmark invocation reached runner installation/launch but timed out enabling UI automation before any selected method. No timing records, PNGs or scratch scenes; legacy/Liquify drives not started. Device lockState afterward reports passcodeRequired=false. An actual-screen/prompt question is pending; do not classify this initialization failure as a failed sampler assertion.
 Staging attempt1 stopped at clean exit 70: Xcode could not prepare the named iPad and requested an
 unlocked device on the same LAN or a cable. Compilation never started. All eight temporary test
 files are restored byte-exact and all 753 qualified hashes match; no install, launch or physical
