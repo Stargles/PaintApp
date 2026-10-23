@@ -69,7 +69,10 @@ and fix at the existing eraser/rendering seam, with a reproducing regression and
 Owner clarifies: **Test1**, and **no Liquify had been used on the strokes**. Start with read-only
 logs and the preserved Test1 copy; do not restart/reinstall PaintApp or request device interaction
 until genuinely required. Preserve the real scene and backups. A new named crash report was not
-available in the first root listing; check other diagnostic locations and saved touch records.
+available in the root, Retired or synced Mac logs; no current Jetsam report or touch recording was
+found. Owner describes “the entire ipad crashed and homescreen”; return to Home Screen is confirmed,
+while app termination versus a wider system restart remains unestablished. The preserved Test1 has
+no material operations and was saved with To Cross selected; reproduce this ordinary-ink path first.
 
 ---
 

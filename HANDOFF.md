@@ -18,7 +18,9 @@ preserve owner settings/libraries and verify fresh inventory before closeout.
 
 **New active report:** owner just experienced a crash while erasing strokes on the iPad, after the
 final Release installation below. Owner identifies **Test1**, with **no Liquify used on those strokes**. Actual crashing build/cause
-not established yet. New task tree:
+not established yet. Owner reports return to the iPad Home Screen (“the entire ipad crashed”). No
+current named app crash/Jetsam report was found in root/Retired/synced Mac logs. Preserved Test1 was
+saved with To Cross, Vector3/frame2,527strokes; no material operations in its six drawings. New task tree:
 `~/PaintWork/PaintApp-s52-erase-crash`, tmp/s52-erase-crash from origindf459377. First collect newest
 crash log/read-only diagnostics and correlate its executable UUID; preserve the scene/backups and
 avoid app restart/reinstall or another unlock request until genuinely required. TODO records the
