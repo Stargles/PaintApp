@@ -54,9 +54,6 @@ final class LiquifyRasterUITests: PaintUITestCase {
         let reopenedPoints = paperPatch(canvas, paperRect(in: canvas), x: 0.3...0.7, y: 0.25...0.47)
         restoreEventually(reopenedPoints, after)
         attachScreenshot(app, "liquify-raster-cold-reopen")
-        rotateDevice(app, to: .landscapeLeft)
-        openLayerPanel(app); closeLayerRail(app)
-        attachScreenshot(app, "liquify-raster-cold-reopen-landscape")
     }
 
     func testPosedBackingMatchesPixelOpsAndMovesThroughStreamDisplay() throws {

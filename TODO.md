@@ -64,10 +64,12 @@ Liquify remains unmerged and is not on the iPad. Integration branch `tmp/s49-int
 
 The verified census is 5282 fast tests across 256 selected classes and 5864 full tests, excluding three private static helpers. Quiet Release cost passed2/2 at source `7e780d7`: all8 producer pictures match exactly, all18 inverse fixtures retain native hashes/counts; production medians are19.1%/23.3% of scalar hard/pattern cost. Retain batching. PERFORMANCE records simulator scope; this is no device-latency claim. Still open: remaining raster/vector UI and native9 controls capture, final fast Debug/Release, one full suite in shipped Release configuration, sampler C physical first-use cost and physical iPad qualification. Simulator test seeds are enabled in Release; full-suite configuration is not mandated by repository rules. The five-method device patch and native cold/warm benchmark are prepared but not compiled or run; get fresh saved/unlocked device readiness before physical work. Evidence is indexed in `HANDOFF.md` and `~/PaintWork/s49-liquify-logs/`.
 
-Native iPad9 controls capture correction is committed at `7e780d7`: the existing modes test starts in
-landscape before launch, removes its final midflight rotation, and retains its existing assertions
-plus one final full-screen picture. Its native9 run remains. Keep one-shot repairs until the owner
-confirms real scenes after installation.
+All8 feature UI methods now pass in Release across linked1, raster/vector6 and native9 controls1
+runs, zero failures/skips. Root inspected reshape/cold-reopen pictures and the settled iPad9 controls
+photo: Size/Power, brush and all3 modes fit. Remove the raster cold test's unasserted trailing rotation,
+layer-panel toggles and invalid midflight photo; keep its valid portrait reopen capture and every
+existing assertion. Then run the final gates. Keep one-shot repairs until the owner confirms real
+scenes after installation.
 
 *"It should be placed to the left of the brush tool in the top menu. When selected, it acts sort of like
 a brush (you can control the brush type, size, etc), and otherwise it does basically what a normal

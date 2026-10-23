@@ -24,11 +24,11 @@ cancellation and one-producer behavior. Focused Debug compilation and all 25 lif
 passed at `c78aac8`, zero failures/skips; its owned simulator was deleted. Evidence:
 `~/PaintWork/s50-liquify-producer-check-20261023T004538Z/`. Candidate `7e780d7` starts the existing
 controls workflow in landscape and removes its end rotation; assertions are unchanged. A delegated
-agent owns the native slot through cost-result archival. Release build succeeded and its quiet
+Release build succeeded and its quiet
 actual-producer gate passed2/2, zero skips; all8 picture comparisons are exact and all18 frozen inverse
 fixtures match. Retain batching: hard/pattern producer medians are19.1%/23.3% of scalar reference cost.
 PERFORMANCE records simulator scope and remaining seconds-long worst case. Evidence:
-`~/PaintWork/s50-liquify/producer-release-1/`. Next root takes that simulator for linked Release UI.
+`~/PaintWork/s50-liquify/producer-release-1/`.
 
 The unchanged linked Release workflow passed1/1, zero skips: visible reshape, exact picture after cold
 reopen, then new green ink following an edited source. Root inspected before/after/reopen/source-follow
@@ -36,6 +36,16 @@ images; the archived package retains one deformation on the linked recipe. All41
 copied/hash-verified under `~/PaintWork/s50-liquify/release-ui/linked-1/`. The earlier Debug diagnostic
 remains genuinely late (815 readable probes,3 changed until15.546s; later141 changed); no timeout,
 gesture or predicate changed. Its temporary instrumentation is exactly restored. Owner Mac is idle.
+
+All8 feature UI methods passed in Release across isolated linked1, raster/vector6 and native9
+controls1 runs, zero failures/skips. Root inspected the raster dip after reshape and exact cold reopen;
+native9 controls show the settled landscape toolbar, Size/Power and all3 modes unclipped. Evidence:
+`~/PaintWork/s50-liquify/release-ui/{raster-vector-1,controls9-1}/`. Documents copies89/5 files are
+hash-verified. The controls test itself passed; its post-run archive initially met Xcode's shut-down
+simulator and recovered Documents offline without another launch. Both owned simulators are being deleted.
+Remove the raster cold test's trailing rotation/layer-panel toggles/photo: that unasserted capture
+still catches rotation midflight. Keep the valid portrait reopen picture and settled native9 controls
+proof; preserve every existing test assertion. Then freeze source for final gates.
 
 The verified inventory is 5282 fast tests across 256 selected classes and 5864 full tests, excluding three
 private static helpers. This is a census, not a claim that new final gates have passed. Material, raster
@@ -61,8 +71,7 @@ failures serially as CLAUDE.md specifies.
 
 ## Next
 
-1. A delegated agent owns DD/native for the six remaining raster/vector Release UI methods, then the
-   corrected modes/controls method alone on a fresh native iPad9 simulator. Inspect all saved pictures.
+1. Remove only the invalid raster end-rotation capture steps, then hand DD/native to the fast-tier agent.
 2. Run final fast Debug/Release, then one phase-boundary full suite in Release to qualify the shipped
    configuration. Rules do not mandate a full-suite configuration; simulator test seeds remain enabled
    in Release. This does not relabel the known Debug linked timeout as passing.
