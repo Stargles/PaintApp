@@ -84,25 +84,9 @@ final class LiquifyUITests: PaintUITestCase {
         canvas.coordinate(withNormalizedOffset: hostPoint(paper, 0.75, 0.36))
             .press(forDuration: 0.05,
                    thenDragTo: canvas.coordinate(withNormalizedOffset: hostPoint(paper, 0.58, 0.36)))
-        let sampleClock = ProcessInfo.processInfo.systemUptime
-        var sampleReadings: [String] = []
-        let changed = NSPredicate { _, _ in
-            let started = ProcessInfo.processInfo.systemUptime - sampleClock
-            let pixels = self.readScreenNow(region)
-            let count = zip(pixels.map(self.dark), before).filter { $0 != $1 }.count
-            let finished = ProcessInfo.processInfo.systemUptime - sampleClock
-            sampleReadings.append("start=\(started) end=\(finished) pixels=\(pixels.count) readable=\(pixels.compactMap { $0 }.count) changed=\(count)")
-            return count > 10
-        }
+        let changed = NSPredicate { _, _ in zip(self.readScreenNow(region).map(self.dark), before).filter { $0 != $1 }.count > 10 }
         let changeResult = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: changed, object: nil)], timeout: 15)
-        let waitFinished = ProcessInfo.processInfo.systemUptime - sampleClock
         attachScreenshot(app, "liquify-linked-after-gesture")
-        let sampleReport = "before=\(before.count) ink=\(before.filter { $0 }.count) points=\(region.count) first=\(String(describing: region.first)) last=\(String(describing: region.last)) waitEnded=\(waitFinished) result=\(changeResult.rawValue)\n" + sampleReadings.joined(separator: "\n")
-        print("LINKED_PREDICATE \(sampleReport)")
-        let sampleAttachment = XCTAttachment(string: sampleReport)
-        sampleAttachment.name = "liquify-linked-predicate-samples"
-        sampleAttachment.lifetime = .keepAlways
-        add(sampleAttachment)
         if changeResult != .completed {
             let state = XCTAttachment(string: app.debugDescription)
             state.name = "liquify-linked-unchanged-hierarchy"; state.lifetime = .keepAlways; add(state)
