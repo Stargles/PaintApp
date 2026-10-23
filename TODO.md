@@ -78,6 +78,10 @@ October22. The renewal script's clean step omits the DerivedData path used by bu
 external deploy script to clean that same directory and fail on clean failure, verify the complete
 app signature before installation, and enforce the existing five-day profile-life rule. Rebuild the
 qualified main Release, preserve the app container, and require an actual normal launch to pass.
+The corrected manual clean removed the stale app product but failed deleting its temporary
+CleanBuildFolderInProgress staging tree (user-owned, containing old build artifacts dated July/August).
+No build/install followed the failed clean. Quarantine only that generated staging tree after all
+build jobs have stopped, then retry the same clean/build; do not touch source or app documents.
 
 **Previous parked checkpoint, 2026-10-15.** All work is committed in
 `~/PaintWork/PaintApp-s49-integration` on `tmp/s49-integration`; app/test source checkpoint `9dfd96b`.
