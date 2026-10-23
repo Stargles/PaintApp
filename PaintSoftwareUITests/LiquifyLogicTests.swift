@@ -981,8 +981,8 @@ final class LiquifyLogicTests: XCTestCase {
         defer { release.signal() }
         let shown = expectation(description: "newest complete normal stroke picture")
         var presented: [UUID] = []
-        manager.onHeldPictureMoved = {
-            guard let procedure = manager.liveCelContentEdit?.procedure, procedure.isResolved else { return }
+        manager.onHeldPictureMoved = { [weak manager] in
+            guard let procedure = manager?.liveCelContentEdit?.procedure, procedure.isResolved else { return }
             presented.append(procedure.deformation.id)
             procedure.didPresent()
             shown.fulfill()
@@ -1020,8 +1020,8 @@ final class LiquifyLogicTests: XCTestCase {
         XCTAssertEqual(entered.wait(timeout: .now() + 5), .success)
         defer { release.signal() }
         var readyPictures = 0
-        manager.onHeldPictureMoved = {
-            if manager.liveCelContentEdit?.procedure?.isResolved == true { readyPictures += 1 }
+        manager.onHeldPictureMoved = { [weak manager] in
+            if manager?.liveCelContentEdit?.procedure?.isResolved == true { readyPictures += 1 }
         }
         let profile = ToolProfile(preset: TestBrushes.hardRound, size: 50, opacity: 1)
         var session = try XCTUnwrap(manager.beginLiquify(layerID: layer.id, profile: profile, size: 50, seed: 7))
@@ -1034,6 +1034,7 @@ final class LiquifyLogicTests: XCTestCase {
         manager.liquifyPictures.request { { return { drained.fulfill() } } }
         release.signal()
         wait(for: [drained], timeout: 10)
+        XCTAssertFalse(manager.liquifyPictures.isBusy, "the explicit barrier landing drains pending preparation")
         XCTAssertEqual(abandoned.resolutionCount, 0)
         XCTAssertEqual(readyPictures, 0)
         XCTAssertEqual(canvas.elements.first?.stroke?.samples, original.samples)

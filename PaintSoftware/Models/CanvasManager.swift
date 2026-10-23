@@ -1119,7 +1119,9 @@ final class CanvasManager: ObservableObject {
     /// §24.4, §28 and §29. The vector float's live pose is the same rule
     /// (`CanvasView.Coordinator.liveVectorFloatPose`).
     /// Geometry and its complete preview are prepared together before a held surface is sized.
-    let liquifyPictures = LatestWins(queue: DispatchQueue(label: "com.paintapp.liquify", qos: .userInitiated))
+    lazy var liquifyPictures: LatestWins = MainActor.assumeIsolated {
+        LatestWins(queue: DispatchQueue(label: "com.paintapp.liquify", qos: .userInitiated))
+    }()
     var liveEdit: HeldEdit?
 
     /// The held grade as the docked controls show it — observed by those controls and by nothing
