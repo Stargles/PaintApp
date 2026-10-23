@@ -68,38 +68,43 @@ fix. BUGS.md records findings and the next diagnostic seam; no speculative behav
 
 ## (178) Liquify tool
 
-**Current status — 2026-10-22.** The shipped app is recovered: main Release source `17b438c`, app source `840d68a`; its signature and embedded profile verify, and the owner confirmed it opens. Renewal repair `5e93bf0` shares clean/build settings, fails closed on clean errors, verifies the app seal and requires five days of profile life. The profile expires 2026-10-30. Evidence: [auto-resign report](docs/bug-evidence/auto-resign-2026-10-22.md) and `~/PaintWork/s50-recovery/`.
+**Current status — 2026-10-23.** Implemented in `tmp/s49-integration`, still unmerged and not on
+the iPad. The iPad runs recovered main Release `17b438c` (app source `840d68a`), and the owner
+confirmed it opens. Main renewal repair `5e93bf0` verifies signatures and five-day profile life;
+current profile expires 2026-10-30. See HANDOFF and the [renewal report](docs/bug-evidence/auto-resign-2026-10-22.md).
 
-Liquify remains unmerged and is not on the iPad. Integration branch `tmp/s49-integration` consolidates the old sole-consumer presenter with the Liquify procedure at `c78aac8`; focused Debug compilation and all 25 lifecycle/raster checks passed, zero failures/skips. This cleanup removes the generic wrapper and adds no renderer or cache. The spatial material renderer remains integrated through VectorCanvas, with tile-scoped work. Keep useful feature-scoped state where it serves the workflow, with existing synchronization, cancellation and single-producer behavior. The unchanged linked Release workflow now passes1/1: reshape, exact cold-reopened picture and edited-source following. Root inspected four pictures and preserved41 Documents files with hashes; the linked recipe contains its saved deformation. The earlier Debug15s timeout remains recorded; its temporary diagnostic is restored, and gesture/predicate/timeout are unchanged.
+Simulator qualification is complete:
+- Final fast Debug/Release: each5282 total,5278passed,4skipped,zero failures;256 selected classes.
+- Full Release:5864 total,5799passed,3failed,62skipped;398 classes. All three reds passed together
+  unchanged serially3/3. Four actual workers, no System Failures/restarts,753 source hashes unchanged.
+  Exact parallel causes are unproved; no product/test fix. All8 Liquify UI workflows passed.
+- Root inspected reshape/Undo/reopen/source-follow pictures and settled native iPad9 landscape controls.
+  Every assertion, gesture and deadline remains. The earlier Debug linked15s miss remains recorded.
+- Quiet Release producer cost2/2: all8 exact pictures/all18 inverse fixtures match; hard/pattern
+  producer medians19.1%/23.3% of scalar reference. Retain batching; worst pattern still takes seconds
+  on the simulator. No device speed claim.
 
-The verified census is 5282 fast tests across 256 selected classes and 5864 full tests, excluding three private static helpers. Quiet Release cost passed2/2 at source `7e780d7`: all8 producer pictures match exactly, all18 inverse fixtures retain native hashes/counts; production medians are19.1%/23.3% of scalar hard/pattern cost. Retain batching. PERFORMANCE records simulator scope; this is no device-latency claim. Final fast3 Debug and Release passed at `2b330c9`: each5282 total,5278passed,4skipped,zero failures; source and result counts reconcile. Evidence: `~/PaintWork/s50-liquify/fast-3/`. Still open: one full suite in shipped Release configuration, sampler C physical first-use cost and physical iPad qualification. Simulator test seeds are enabled in Release; full-suite configuration is not mandated by repository rules. The five-method device patch and native cold/warm benchmark are prepared but not compiled or run; get fresh saved/unlocked device readiness before physical work. Evidence is indexed in `HANDOFF.md` and `~/PaintWork/s49-liquify-logs/`.
+The ownership cleanup removes the sole-consumer generic presenter wrapper and keeps the shared
+live-edit, synchronization and cancellation paths. The spatial renderer remains integrated through
+VectorCanvas with tile-scoped work. The two invalid identity fixtures were repaired with genuine
+renderable sources, preserving all assertions and proving them with fault/restoration runs.
+Detailed provenance: HANDOFF, PERFORMANCE and `~/PaintWork/s50-liquify/`.
 
-All8 feature UI methods now pass in Release across linked1, raster/vector6 and native9 controls1
-runs, zero failures/skips. Root inspected reshape/cold-reopen pictures and the settled iPad9 controls
-photo: Size/Power, brush and all3 modes fit. The raster cold test's unasserted trailing rotation,
-layer-panel toggles and invalid midflight photo are removed at `0cabd6c`; its valid portrait reopen
-capture and every existing assertion remain. Final gates are next. Keep one-shot repairs until the owner confirms real
-scenes after installation.
+**Still open:** physical qualification, final restored Release install/normal launch, then merge.
+The architecture agent is staging one named-device Release build-for-testing, with exact backups of
+8 temporary test adaptations and no production/project change. It must verify signatures/profile life
+and restore sources byte-exact before handback. No candidate install/launch yet. Device evidence:
+`~/PaintWork/s50-liquify/device-build-1/`; safe patches and backup-coverage notes in `device-preparation/`.
 
-Full Release regression completed at `8380783`:5864 total,5799passed,3failed,62skipped,398 classes;
-counts reconcile. Two StreamLiveEngaged methods and the LayerPanelControls mover visibility method
-need serial confirmation together before classification. No full rerun; evidence:
-`~/PaintWork/s50-liquify/full-release-1/`. This replaces the pending full-run step above; physical
-qualification remains open.
-
-Physical preparation also includes the two existing unseeded vector/raster Push workflows, alongside
-the five legacy drives. Their temporary adaptation sets landscape and process-only drawing/resolution
-overrides, preserves every assertion, and captures full screens. Reuse the guarded non-destructive
-launch helper; no settings/library reset. Build the sampler benchmark and selected UI drives once,
-then run the cold benchmark alone first and UI drives in separate processes. No physical run yet.
-
-The first final Debug attempt was interrupted1430/5282; its partial result is not qualification.
-The complete fast2 Debug ran5282:5277 passed, one malformed-fixture failure, four skipped. Both fixture
-repairs are now committed: `621c15d` retains fitted group lattices; `b244a46` supplies two genuine
-references for the digest row. All original assertions/cases remain. Each baseline/restored focused
-run passed2/2; deliberate omission of identity groups or derived digest data caught the intended
-assertions/collision. Production guards/encoder restored byte-exact; both fixtures passed final fast3
-in Debug and Release. The full Release regression is next.
+Get fresh saved/unlocked readiness after staging. Establish actual library location from preferences
+and back up current container Documents plus any external Projects/Backups/Trash before install or
+launch. Passive preference retrieval timed out; coverage is unconfirmed. Use frozen products for one
+cold/warm sampler C benchmark alone first, then five legacy drives and two existing unseeded vector/
+raster Push workflows separately (expected1/5/2,zero skips). No library/settings resets or preset
+changes. Preserve full pictures and exact disposable-scene identities. Keep native component cost
+separate from actual app gesture latency. Keep one-shot format repairs until the owner confirms real
+scenes; the final executable repairs older preserved snapshots, excluding its own newest snapshot.
+Remove this item only with the fully qualified merge.
 
 *"It should be placed to the left of the brush tool in the top menu. When selected, it acts sort of like
 a brush (you can control the brush type, size, etc), and otherwise it does basically what a normal
