@@ -66,8 +66,10 @@ Owner: “a crash just happened on the ipad when i was tryiong to erase some str
 Reported immediately after final Releasebcd7a6af was installed and opened. Establish the actual
 crashing executable/build and exception from device diagnostics before inferring a cause. Diagnose
 and fix at the existing eraser/rendering seam, with a reproducing regression and required gates.
-Owner is asleep after the last unlock; start with read-only log collection. Do not restart/reinstall
-PaintApp or request device interaction until genuinely required. Preserve the real scene and backups.
+Owner clarifies: **Test1**, and **no Liquify had been used on the strokes**. Start with read-only
+logs and the preserved Test1 copy; do not restart/reinstall PaintApp or request device interaction
+until genuinely required. Preserve the real scene and backups. A new named crash report was not
+available in the first root listing; check other diagnostic locations and saved touch records.
 
 ---
 

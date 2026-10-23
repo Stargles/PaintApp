@@ -17,14 +17,15 @@ CLAUDE.md requires physical harnesses to record unique owned fixtures, Trash onl
 preserve owner settings/libraries and verify fresh inventory before closeout.
 
 **New active report:** owner just experienced a crash while erasing strokes on the iPad, after the
-final Release installation below. Actual crashing build/cause not established yet. New task tree:
+final Release installation below. Owner identifies **Test1**, with **no Liquify used on those strokes**. Actual crashing build/cause
+not established yet. New task tree:
 `~/PaintWork/PaintApp-s52-erase-crash`, tmp/s52-erase-crash from origindf459377. First collect newest
 crash log/read-only diagnostics and correlate its executable UUID; preserve the scene/backups and
-avoid app restart/reinstall or another unlock request while the owner is asleep. TODO records the
+avoid app restart/reinstall or another unlock request until genuinely required. TODO records the
 report before investigation. The prior cleanup qualification remains evidence, not proof against
 this new crash.
 
-**Complete and parked.** Final normal Release **bcd7a6af** installed: clean/build0, all723 frozen
+**Previous cleanup checkpoint (complete).** Final normal Release **bcd7a6af** installed: clean/build0, all723 frozen
 files exact, strict deep signature verified. Profile expires **2026-10-30T00:18:54Z** (October29
 evening Toronto), over six days at install. First launch was refused solely because iPad locked;
 after owner unlocked, normal launch with **no test arguments** succeeded, **PID53501 observed alive**.
