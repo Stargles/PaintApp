@@ -71,8 +71,12 @@ failures serially as CLAUDE.md specifies.
 
 ## Next
 
-1. Hand DD/native to the fast-tier agent once the UI agent finishes deleting its owned simulators.
-2. Run final fast Debug/Release, then one phase-boundary full suite in Release to qualify the shipped
+1. Repair only the invalid motion-group fixture in CelContentProviderLogicTests: zero lattices for two
+   references now correctly refuses before identity creation. Preserve assertions and prove the group/
+   spacing fault. The first final Debug attempt was interrupted1430/5282 (1427passed, one genuine
+   fixture failure, one cancelled test, one skip); Release did not start. Preserve its partial bundle,
+   then rerun complete fast Debug/Release after the focused restored gate.
+2. Run one phase-boundary full suite in Release to qualify the shipped
    configuration. Rules do not mandate a full-suite configuration; simulator test seeds remain enabled
    in Release. This does not relabel the known Debug linked timeout as passing.
 3. Obtain fresh
@@ -87,3 +91,7 @@ failures serially as CLAUDE.md specifies.
 `~/PaintWork/s49-device-probes/README-after-20261015.md`. The remaining queue is unchanged: (27) laptop
 verification is owner-deferred; (22) and (10) are deprioritised; (37) is dropped; later features need
 a design discussion.
+
+The owner also requested read-only retrieval/dated-build analysis of recent iPad freeze recordings;
+identify each recording's own header rather than assuming the current app build. Interpolation's
+future overhaul is recorded in TODO Later and awaits the owner's brief; do not research it now.

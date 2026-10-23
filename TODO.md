@@ -56,6 +56,13 @@ their files are repaired. Build `2974b33` broke this rule and lost the owner's k
 
 ---
 
+## Recent canvas freeze recordings — 2026-10-22
+
+Owner: "you may want to check out the recent canvas freeze logs on the ipad if that helps you.
+Not sure which version they got picked though, you figure that out." Read the existing recordings
+without restarting the app; identify recording dates/builds and compare the added touch diagnostics
+with BUGS.md's stranded-recognizer evidence. Do not assume the recording's build from today's install.
+
 ## (178) Liquify tool
 
 **Current status — 2026-10-22.** The shipped app is recovered: main Release source `17b438c`, app source `840d68a`; its signature and embedded profile verify, and the owner confirmed it opens. Renewal repair `5e93bf0` shares clean/build settings, fails closed on clean errors, verifies the app seal and requires five days of profile life. The profile expires 2026-10-30. Evidence: [auto-resign report](docs/bug-evidence/auto-resign-2026-10-22.md) and `~/PaintWork/s50-recovery/`.
@@ -70,6 +77,12 @@ photo: Size/Power, brush and all3 modes fit. The raster cold test's unasserted t
 layer-panel toggles and invalid midflight photo are removed at `0cabd6c`; its valid portrait reopen
 capture and every existing assertion remain. Final gates are next. Keep one-shot repairs until the owner confirms real
 scenes after installation.
+
+Final Debug fast attempt stopped partially at1430 tests (1427 passed, one real failure, one cancelled
+test, one skip); it is not a qualified fast tier. The identity test used a binding with no fitted
+lattices for two references; the provider correctly refuses that malformed recipe. Repair the test
+fixture using fitted lattices, preserve every identity assertion/case, prove group/spacing identity
+faults and rerun the whole final gates. Keep the production refusal guard.
 
 *"It should be placed to the left of the brush tool in the top menu. When selected, it acts sort of like
 a brush (you can control the brush type, size, etc), and otherwise it does basically what a normal
@@ -230,6 +243,9 @@ against a transcript this audit does not have.
   counter on the model, delivered by RENDER stage 1, which is exactly the hoist this item said it
   needed. `AVFoundation` is linked (for video), though no audio playback code exists.
 - **(30) Video editor.** Its RENDER dependency is met — (29) shipped in full on 2026-09-06.
+- **Interpolation overhaul.** Owner, 2026-10-22: "Interpolation will probably be overhauled sometime
+  soon so it works better. I'll let you know in the future." Await that design conversation; do not
+  research or implement an overhaul now.
 ---
 
 ## Carried — deliberate, and not an ask

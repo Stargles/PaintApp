@@ -47,6 +47,10 @@ reloads on SwiftUI passes that change nothing about the layers.
 
 ## The canvas's recognizers strand when a touch joins two others, and the repair caught it five times in thirty minutes (2026-10-10)
 
+**Owner follow-up, 2026-10-22:** inspect the recent recordings still on the iPad and establish the build
+from their headers; the owner does not know which version recorded them. Retrieve read-only without
+restarting PaintApp, then compare the diagnostic fields below before selecting a fix.
+
 **What the owner's iPad saved.** Build 55c4fc7 (Release), iPad 9 on iPadOS 26.6.2, landscape: five
 `flight-…` files at 19:11, 19:15, 19:23, 19:34 and 19:40, all with trigger `stranded` — 0.10 s after
 the last touch lifted, `CanvasView.Coordinator.replaceStrandedRecognizers` found `canvas.pan` (all
