@@ -1121,7 +1121,7 @@ final class CanvasManager: ObservableObject {
     /// Geometry and its complete preview are prepared together before a held surface is sized.
     lazy var liquifyPictures: LatestWins = MainActor.assumeIsolated {
         LatestWins(queue: DispatchQueue(label: "com.paintapp.liquify", qos: .userInitiated))
-    }()
+    }
     var liveEdit: HeldEdit?
 
     /// The held grade as the docked controls show it — observed by those controls and by nothing
