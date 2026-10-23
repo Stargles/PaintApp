@@ -94,6 +94,9 @@ failures serially as CLAUDE.md specifies.
 verification is owner-deferred; (22) and (10) are deprioritised; (37) is dropped; later features need
 a design discussion.
 
-The owner also requested read-only retrieval/dated-build analysis of recent iPad freeze recordings;
-identify each recording's own header rather than assuming the current app build. Interpolation's
+The read-only freeze-log request is complete: six October16–18 repairs correlate via exact executable
+stamp to Releasef813346/app840d68a;346 deduplicated sequences/340 controls. New Pencil/cancel cases
+mean the old late-third proposal is incomplete; no proven common cause or behavior fix. BUGS.md has
+the current qualified findings and `~/PaintWork/s50-freeze-logs/` has reproducible evidence. Remove
+the completed log-read TODO entry when merging. Interpolation's
 future overhaul is recorded in TODO Later and awaits the owner's brief; do not research it now.

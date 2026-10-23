@@ -47,17 +47,41 @@ reloads on SwiftUI passes that change nothing about the layers.
 
 ## The canvas's recognizers strand when a touch joins two others, and the repair caught it five times in thirty minutes (2026-10-10)
 
-**Owner follow-up, 2026-10-22:** inspect the recent recordings still on the iPad and establish the build
-from their headers; the owner does not know which version recorded them. Retrieve read-only without
-restarting PaintApp, then compare the diagnostic fields below before selecting a fix.
-
-**Retrieved October22, read-only:** six new stranded flights dated October16–18 have repair counters
+**Owner follow-up completed, 2026-10-22:** six new stranded flights dated October16–18 have repair counters
 1–6, appv1.0.43(1), executable build stamp2026-10-15T04:07:09Z. Headers themselves have no Git SHA;
 the exact stamp matches archived physical-probe and renewal evidence for Releasef813346, app source
 840d68a, predating Liquify. Eleven recordings are preserved under `~/PaintWork/s50-freeze-logs/` with
-device metadata, local hashes and `build-correlation.json`. A causal comparison of the added touch
-diagnostics is active; newer cases include non-third-finger sequences, so the old proposed pan filter
-is not yet justified as a complete fix.
+device metadata, local hashes and `build-correlation.json`. No app launch, reset or install was needed.
+
+The reproducible comparison (`analyze-stranded.py`, `stranded-analysis-20261022.txt` and
+`stranded-sequences.json` there) deduplicates overlapping rings into346 complete pan-bound sequences:
+340 controls and6 associated with repairs. These selected windows are **not a field failure rate**.
+
+| Flight suffix | Final sequence | Census at repair |
+|---|---|---|
+| Oct16-033442 | two fingers together, third20ms later; all moves0 | pan failed, touches2 |
+| Oct16-033555 | same begin pattern; three separate lifts | pan failed, touches2 |
+| Oct16-033556 | three staggered begins, `(1,1,1)`; a distinct second repair | pan failed, touches2 |
+| Oct17-042134 | one of a pair cancels, distinct-uid replacement joins; pan count reaches0 | pan ended, touches0 |
+| Oct17-042612 | late third; no stroke recognizer bound to the sequence | pan failed, touches2 |
+| Oct18-003734 | direct cancellation/reset, then a short Pencil stroke; no third finger | pan failed, touches1 |
+
+Healthy controls disprove separate lifts or a reused touch fingerprint as sufficient causes. All126
+healthy Pencil sequences reset pan/count0 within0–10ms of model count0;210 of214 healthy direct
+sequences have paired observations within0–60ms (four lack a pair). Repair notes follow100–110ms later
+in five cases and260ms in the Pencil case, but are emitted **after replacement**, so that gap is not a
+measurement of the decision time or proof of a main-thread stall. The only external window recognizer
+in a final census is an Oct18 system gate, failed/count0; no active positive-count blocker is observed.
+
+These are six repair-predicate hits, **not six proven user-visible freezes**: replacement happens before
+a later gesture can establish whether UIKit would recover. UIKit's reported touch count does not prove
+which raw end callbacks it received. `uid` is a truncated24-bit identity hash, not a pointer; equality
+is consistent with reuse but cannot exclude collision. Ignoring a third finger cannot explain all six;
+`delaysTouchesEnded` is untested. Keep the current repair, with no speculative behavioral change.
+The next useful evidence is a user-observed loss of input correlated to its flight/counter. If more
+diagnostics are needed, timestamp the existing repair decision **before replacement** and correlate
+canvas/window counts; this would separate delayed checking from replacement work, not explain UIKit
+by itself. The older exclusive-trigger/no-Pencil claims below describe the older sample only.
 
 **What the owner's iPad saved.** Build 55c4fc7 (Release), iPad 9 on iPadOS 26.6.2, landscape: five
 `flight-…` files at 19:11, 19:15, 19:23, 19:34 and 19:40, all with trigger `stranded` — 0.10 s after
@@ -91,18 +115,18 @@ found *"ended touches:0"*. So the stranded pan is usually **failed while still c
 after every touch is up — its touches were never delivered an end or cancel — and once it was `ended`
 with none. Not yet analysed against the touch sequence before each.
 
-**Analysed 2026-10-13** (`~/PaintWork/design/s48-stranded-analysis.md`): `canvas.pan` is in all 8
-strands; the trigger is a third distinct touch joining a pair that landed together — a late third finger
+**Older analysis, 2026-10-13** (`~/PaintWork/design/s48-stranded-analysis.md`): `canvas.pan` is in all 8
+strands; that sample suggested a third distinct touch joining a pair that landed together — a late third finger
 (~20 ms) or a system cancel-and-reissue (1–4 ms) — **8 of the 9** such sequences stranded; the one that
 did not had the pair end in one event. Ruled out by the data: pencil, hierarchy changes, the hold shield
 (the 10-10 build predates it), a touch that never ended. Best hypothesis (INFERRED): UIKit's
 `UIPanGestureRecognizer` (min = max = 2) bookkeeping is not reset after a third touch. **The owner ruled
 the next build carries diagnostics only** (per-touch move counts, each recogniser's `numberOfTouches` in
 the sweep by dispatching phase, a `UITouch` identity per touch line, and a persistent repair counter);
-the candidate fixes (a pan subclass that ignores touches beyond two; `delaysTouchesEnded = false`) wait
-for one or two more strands.
+the candidate fixes (a pan subclass that ignores touches beyond two; `delaysTouchesEnded = false`)
+then awaited one or two more strands. The October22 analysis above supersedes that waiting state.
 
-**Cause: not found.** The recognizers are left out of `.possible` after every touch is up:
+**Cause: still not found.** The recognizers are left out of `.possible` after every touch is up:
 `StrokeGestureRecognizer.reset()` (which writes a line when it runs) never ran, and
 `canvas.touchCounter` read 0. **Not reproduced**: about 1,400 synthesised shapes
 (`XCPointerEventPath`: three fingers with the third landing 10–40 ms late, lifts staggered, drifting
@@ -153,9 +177,9 @@ more fingers down is swept too (`sweep:m`), so *pan failed in the third touch's 
 and *when its count dropped* are read off the file. The Settings menu shows **Canvas freezes caught: N**
 beside Save Last 90 Seconds — the app's lifetime total, kept across launches and over-installs, and in every
 flight and recording header as `canvasFreezesCaught` — so the number read before installing a build and
-after using it is that build's repair rate, and a build that is right stops counting. The candidate fixes
-(a pan that ignores touches beyond two; `delaysTouchesEnded = false`) wait for one or two more strands
-read with these fields. Not covered by any test: that a repair itself counts — it has no simulator
+after using it is that build's repair rate, and a build that is right stops counting. The October22
+comparison above reads those fields and shows neither proposed behavioral fix is established as a
+complete cure. Not covered by any test: that a repair itself counts — it has no simulator
 trigger — which is one line, `CanvasRepairCount.record()`, in `replaceStrandedRecognizers`.
 
 ## An effect layer between two live hosts is left out of the live picture (2026-10-11)

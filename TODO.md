@@ -59,9 +59,12 @@ their files are repaired. Build `2974b33` broke this rule and lost the owner's k
 ## Recent canvas freeze recordings — 2026-10-22
 
 Owner: "you may want to check out the recent canvas freeze logs on the ipad if that helps you.
-Not sure which version they got picked though, you figure that out." Read the existing recordings
-without restarting the app; identify recording dates/builds and compare the added touch diagnostics
-with BUGS.md's stranded-recognizer evidence. Do not assume the recording's build from today's install.
+Not sure which version they got picked though, you figure that out." Read-only analysis is complete:
+six October16–18 repair flights correlate to Releasef813346/app source840d68a, before Liquify and the
+October22 recovery.346 deduplicated sequences include340 controls and6 repair hits, not6 proven
+visible freezes. New Pencil/cancellation cases and healthy controls invalidate a universal late-third
+fix. BUGS.md records findings and the next diagnostic seam; no speculative behavior change. Evidence:
+`~/PaintWork/s50-freeze-logs/`. Remove this completed log-read request with the integration merge.
 
 ## (178) Liquify tool
 
