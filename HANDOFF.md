@@ -16,13 +16,13 @@ relative folders so same-named packages cannot overwrite exported copies; no pro
 CLAUDE.md requires physical harnesses to record unique owned fixtures, Trash only those in teardown,
 preserve owner settings/libraries and verify fresh inventory before closeout.
 
-**Final device build/install remains:** root waits for retirement agent's owner-size gallery screenshot
-and native handback, then merges by absolute-main-path ff-only, pushes, clean/builds normal Release,
-verifies all723 frozen files/signature/five-day profile life, installs and launches with no test args.
-The iPad currently runs intermediate audit788f576 (outgoing repairs retained plus export fixes),
-reopened normally after read-only copying. Its profile expires2026-10-30T00:18:54Z; this is not yet the
-retirement build. Native owner: retire_file_repairs, own simulator1951527B-3A28-46D8-9FDA-E970663EE733.
-Root owns docs/main/deploy. Do not compile concurrently.
+**Final device build/install remains:** all qualification and screenshot review complete. Root owns
+native work; both owned simulators are deleted, no adapter was injected. Merge by absolute-main-path
+ff-only, push, then clean/build normal Release, verify all723 frozen files/signature/five-day profile
+life, install and launch with no test arguments. The iPad currently runs intermediate audit788f576
+(outgoing repairs retained plus export fixes), reopened normally after read-only copying; it is not
+yet the retirement build. Profile expires2026-10-30T00:18:54Z. Prepared final scripts/evidence are under
+`~/PaintWork/s51-cleanup/final-release/`.
 
 ## Completed gates
 
@@ -38,7 +38,8 @@ Root owns docs/main/deploy. Do not compile concurrently.
 - Current restore/storage focused117/117 and25/25; four deliberate validation faults red, restored
   source green. Actual exporter source Mac XCTest4/4 baseline/restored, five faults red.
 - Release UI **3/3**: GalleryRecoveryUITests2 and TransformKeysSurviveUITests1. All three kept
-  keyframe/bake/cold-reopen pictures reviewed. Owner iPad9 landscape gallery capture remains.
+  keyframe/bake/cold-reopen pictures reviewed. Owner iPad9 landscape gallery2160×1620px reviewed;
+  header, actions, scene tile/title/date fully visible. Orientation-only view retains native raw.
 - UI identifier/helper lints85symbols/137helpers clean; PBX plutil clean,1,314unique definitions.
   All723 tracked source/resource/project files frozen for final build, no temporary audit hook.
 - Full UI and physical gestures were not rerun for this cleanup. Prior Liquify/input/rendering

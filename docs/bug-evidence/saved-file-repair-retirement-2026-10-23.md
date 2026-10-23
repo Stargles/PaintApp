@@ -53,7 +53,10 @@ object definitions and passes plutil.
 Release UI **3/3 passed**: `GalleryRecoveryUITests` (automatic backup recovery and Recently Deleted
 restore), plus `TransformKeysSurviveUITests` (Move keys, bake beneath them, save and cold reopen).
 All three retained keyframe screenshots were reviewed: Move box with diamonds, keyed picture after
-bake and the changed picture at the reopened second key. Owner-size gallery capture is pending.
+bake and the changed picture at the reopened second key. Original Release app gallery was also
+reviewed on an owned iPad9 simulator at1080×810pt: header, actions, scene tile/title/date fully visible.
+Native raw and2160×1620 orientation-only view are retained; no test adapter or rebuild was needed.
+Both owned simulators were deleted after qualification.
 
 The full UI suite and physical gestures were not repeated for this cleanup. The prior unchanged
 Liquify/input/rendering qualification remains indexed under `~/PaintWork/s50-liquify/`; this change
