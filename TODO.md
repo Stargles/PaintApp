@@ -103,6 +103,10 @@ pre-save recovery and install bursts. The week-of-real-scene storage-cost measur
 unverified; the bounded Session47–51 audit found no other concrete dropped actionable ask.
 Evidence: `~/PaintWork/s52-saving-audit/audit.md`.
 
+Owner ruling,2026-10-23: use the usual bucket policy. Borg and Restic retain the **newest** backup
+in each clock bucket; implement that policy, retaining the existing age tiers, pre-save copies,
+update protection and global cap. No extra oldest-per-bucket exception.
+
 ---
 
 ## Erasing strokes crashes on iPad — 2026-10-23

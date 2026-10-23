@@ -16,7 +16,7 @@ relative folders so same-named packages cannot overwrite exported copies; no pro
 CLAUDE.md requires physical harnesses to record unique owned fixtures, Trash only those in teardown,
 preserve owner settings/libraries and verify fresh inventory before closeout.
 
-**Two new active owner reports, superseding the parked state:**
+**Three active owner reports, superseding the parked state:**
 1. **Active implementation:** owner says continue, no pause for the recommendation. Remove complex
    vector Liquify and keep normal-rendered point edits, with thorough architecture/dependency cleanup.
    Vector Liquify visibly stretches strokes horizontally. Owner explicitly requires moving stroke
@@ -31,9 +31,10 @@ preserve owner settings/libraries and verify fresh inventory before closeout.
    No privileged archive was collected. Black-screen failure cause remains unknown; no speculative fix.
 
 3. Smart saving audit confirms44slots/age tiers/install protection/4GBcap. Fix actual oldest-vs-newest
-   bucket-policy conflict to originalTODO161 newest instruction; week-of-real-scene storage measurement
-   is still unverified. Audit found no other concrete dropped actionable task.
-   and reconcile original asks/queue history for other missed tasks. All reports are in TODO before work. Current diagnostic tree `~/PaintWork/PaintApp-s52-erase-crash`,
+   bucket-policy conflict. Owner now says use the usual policy: Borg and Restic both choose the newest
+   backup in each bucket, matching originalTODO161. Keep age tiers, pre-save/update protection and cap.
+   Week-of-real-scene storage measurement is still unverified. Audit found no other concrete dropped
+   actionable task. All reports are in TODO before work. Current diagnostic tree `~/PaintWork/PaintApp-s52-erase-crash`,
 branch tmp/s52-erase-crash. Raw read-only diagnostics and preserved-Test1 inventory under
 `~/PaintWork/s52-erase-crash/`. Preserve current device scene/backups; do not restart/reinstall the app
 without a concrete need. Prior cleanup tests do not establish either new report is fixed.
@@ -42,8 +43,9 @@ without a concrete need. Prior cleanup tests do not establish either new report 
 files exact, strict deep signature verified. Profile expires **2026-10-30T00:18:54Z** (October29
 evening Toronto), over six days at install. First launch was refused solely because iPad locked;
 after owner unlocked, normal launch with **no test arguments** succeeded, **PID53501 observed alive**.
-No further device work remains. Owner is now asleep; no further iPad interaction is needed or queued.
-The cleanup item is gone from TODO; all other work is deliberately deferred/owner-side.
+That earlier cleanup needed no further device work. The owner has since reported the active issues
+above; preserve current artwork and request a fresh export only at a concrete final install gate.
+The earlier cleanup item is gone from TODO; deferred features remain owner-side.
 
 Final app/build/signature/install/launch evidence: `~/PaintWork/s51-cleanup/final-release/`,
 including `final-status.json`. Both task worktrees are being removed after final docs merge; native
