@@ -6517,7 +6517,7 @@ The original Core Graphics high draw, measured afterward against the same full s
 medians 8.63 ms/window and 21.91 ms/whole picture. Its retained caches therefore cannot contaminate
 the sampler retention run. The sampler's **first window draw was 523 ms**, including first access to
 the Metal engine and pipeline creation; that cost was not separately profiled. The first whole
-picture was 38.75 ms. Actual app first use remains an integration check. The physical adapter measurement below includes
+picture was 38.75 ms. Actual app use is checked separately below. The physical adapter measurement below includes
 base/patch composition; this earlier simulator sampler benchmark does not.
 
 After warmup, 100 window draws took process footprint from 50,088,216 to 52,250,904 bytes, peak 52,283,672:
@@ -6548,7 +6548,7 @@ The448×448 affected output window took **428.577ms process-cold**, then **17.17
 warm calls (median17.898ms). The cold interval includes lazy engine/pipeline access, normalization,
 upload/readback and private drawing; shader compilation is not isolated. Whole1624×1024 output took
 105.100ms warm; the patched window took17.238ms warm. These are native component costs, not app
-startup, gesture latency or first visible presentation. Actual physical drawing workflows remain separate.
+startup, gesture latency or first visible presentation. Physical app workflows are separately qualified below.
 
 Separate **untimed** callback probes count requested work, not unique source coverage:
 
@@ -6567,3 +6567,10 @@ premultiplication and held/committed composition. All138,804 fully covered windo
 with the whole output (zero differing channels). All six exported PNGs were inspected and independently
 hash-checked; held and committed decoded images are identical. An initially blank batch-tool display
 was resolved by reopening the identical PNG alone, without changing source or repeating the run.
+
+Physical app qualification (`~/PaintWork/s50-liquify/physical-liquify-1/`): **2/2 passed, zero skips**
+from frozen Release build4 with all753 qualified source hashes exact after adapter restoration.
+Unseeded vector and raster Push both moved drawn ink during the held gesture and restored the
+original picture in one Undo; raster Redo/save/cold-reopen preserved the pushed picture. All seven
+full-screen iPad9 pictures were inspected. This qualifies those workflows and the vector test's
+existing editor-pass bound; it does not measure touch-to-display latency or an artwork-size envelope.
