@@ -65,6 +65,8 @@ The recorded profile expired2026-10-22T05:08:05Z. Initial log review shows a ren
 device detection but refused an unavailable iPad; it is now reported available (paired). Confirm
 fresh connectivity and signing expiry before reinstalling. Quiet performance still needs a fresh
 Mac-idle indication; continue correctness independently.
+The owner confirmed on October22 that the Mac is free for reliable measurements. Run timing
+qualification only with the other native/compiler jobs idle; recovery of the shipped app stays first.
 The existing renewal job was restarted after connectivity/unlocked state was confirmed. It reports
 successful main17b438c Release install with expiry2026-10-30T00:18:54Z, but independent codesign
 verification fails (sealed resource missing/invalid), and a normal no-argument launch is denied by

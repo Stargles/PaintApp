@@ -25,7 +25,8 @@ signature/profile lifetime before install; rebuild qualified main and verify act
 
 **Previous parked UI batch.** App/test checkpoint `9dfd96b` is committed in
 `~/PaintWork/PaintApp-s49-integration` (`tmp/s49-integration`). No active jobs or faults remain.
-The owner has resumed; performance still waits for an updated Mac-idle indication.
+The owner has resumed and confirmed October22 that the Mac is free. Timing qualification can run
+once other native/compiler jobs are idle; shipped-app recovery remains first.
 
 Verify `git fetch origin`, `git worktree list` and every `tmp/*` branch before resuming. Worktrees
 live under `~/PaintWork`, outside Desktop. Never harvest a dirty worker tree: deliberate faults may
