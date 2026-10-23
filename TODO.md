@@ -107,6 +107,11 @@ Owner ruling,2026-10-23: use the usual bucket policy. Borg and Restic retain the
 in each clock bucket; implement that policy, retaining the existing age tiers, pre-save copies,
 update protection and global cap. No extra oldest-per-bucket exception.
 
+Working correction4079a1c2: actual standalone VersionRetentionLogicTests14/14 green; reverse-order
+fault8/14 red, exact-source restore14/14. Integrated backup/save tests still pending. Preserved real
+library has228backups/522461597logical bytes; exported copies cannot measure original APFS block
+sharing, so the requested real-scene week cost remains open. Do not substitute this inventory for it.
+
 ---
 
 ## Erasing strokes crashes on iPad — 2026-10-23
