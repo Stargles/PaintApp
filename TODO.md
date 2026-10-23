@@ -105,7 +105,9 @@ between the64×4096 size fields. Grey's static-square test geometry also cannot 
 temporary adapter oracle with actual exposed transform geometry, preserving movement/width thresholds
 and inspecting the full picture. Root reviewed the exact external corrections and authorized guarded build3/restoration, then affected
 four legacy checks and Liquify2 only after preceding gates pass. Expected4/2, zero skips; stop on a real
-failure. No repeat of passed playback/native benchmark. No Liquify invocation followed.
+failure. No repeat of passed playback/native benchmark. Build3 clean/build/seal/profile verification
+and full source restoration passed. Legacy4 is waiting before any method: deviceprep explicitly
+reports the iPad locked. Owner readiness is requested; no retry or Liquify drive until unlocked. No Liquify invocation followed.
 No settings/library reset or preset changes. Preserve disposable scenes and full pictures. Native
 component cost is separate from app gesture latency. Keep one-shot repairs until real scenes are
 confirmed. HANDOFF has the exact next steps and evidence locations. Remove this item only with the

@@ -51,14 +51,22 @@ Root reviewed the final grey delta and all eight original SHA guards and authori
 `device-build-3` now. Architecture agent exclusively owns native/DD through clean/build-for-testing,
 restoration and frozen seal/profile verification, then affected legacy4 (exclude passed playback)
 and Liquify2 only if the previous gate passes. Expected4/2, zero skips; stop on any real failure.
-Root is native-idle. Frozen device-build-2 and accepted benchmark remain untouched.
+Build3 clean/build/verification/restoration passed; all753 qualified hashes match, eight adapters
+restored,114 frozen entries verified, compiled/frozen app+runner strict seals and five-day profiles
+pass. Build2 and the accepted benchmark are untouched. The affected legacy4 invocation is now
+waiting **before any method**: deviceprep -3 explicitly says "Unlock Kevin’s iPad to Continue" and
+cannot launch the runner because the device is locked. Root asked the owner to unlock/keep awake
+and accept any automation prompt. Do not retry while readiness is unknown; preserve any natural
+initialization timeout separately from feature assertions. Architecture agent owns this one active
+bounded invocation; no Liquify run has started. Root is native-idle.
+Build3 frozen xctestrun SHA: `125bd30baf4a3567a173fd9b4b6313ba83b661e6490898db94b386ca8ae28da9`.
 
 ## Next
 
-1. Diagnose the four physical premise failures from actual screenshots and hierarchy. Record and
-   review any minimal test-adapter correction before rebuilding; retain all feature assertions,
-   gestures, counts and deadlines. The original frozen device-build-2 products remain preserved,
-   with every temporary source restored and753 qualified hashes unchanged.
+1. Await fresh owner device readiness. The reviewed temporary physical premise corrections have
+   already compiled in device-build-3; source is fully restored. Use its frozen products after a fresh
+   seal/profile check; do not rebuild again merely to resume. The current legacy4 invocation awaits
+   unlock before any method; let its existing timeout bound it if the owner is unavailable.
 2. Rerun only affected legacy checks with corrected physical premises, then the two safe unseeded
    vector/raster Liquify Push workflows. Preserve full pictures and disposable-scene identities.
    Do not repeat the accepted cold sampler measurement. Hardware UDID
