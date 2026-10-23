@@ -81,6 +81,12 @@ layer-panel toggles and invalid midflight photo are removed at `0cabd6c`; its va
 capture and every existing assertion remain. Final gates are next. Keep one-shot repairs until the owner confirms real
 scenes after installation.
 
+Physical preparation also includes the two existing unseeded vector/raster Push workflows, alongside
+the five legacy drives. Their temporary adaptation sets landscape and process-only drawing/resolution
+overrides, preserves every assertion, and captures full screens. Reuse the guarded non-destructive
+launch helper; no settings/library reset. Build the sampler benchmark and selected UI drives once,
+then run the cold benchmark alone first and UI drives in separate processes. No physical run yet.
+
 The first final Debug attempt was interrupted1430/5282; its partial result is not qualification.
 The complete fast2 Debug ran5282:5277 passed, one malformed-fixture failure, four skipped. Both fixture
 repairs are now committed: `621c15d` retains fitted group lattices; `b244a46` supplies two genuine

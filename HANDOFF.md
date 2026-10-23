@@ -56,9 +56,15 @@ sampler C is integrated. Sampler C physical first-use cost remains open. The ear
 slowdown is separate from the now-qualified optimized simulator result; no device speed claim.
 
 The five-method physical drive patch and native cold/warm sampler benchmark are prepared but not
-compiled or run. Ordinary device helpers reset preferences and libraries; inspect the safe patch before
-use. Get fresh saved/unlocked iPad readiness before physical work. Preserve screenshots and scene
-packages. Existing physical and benchmark material is indexed under `~/PaintWork/s49-liquify-logs/`.
+compiled or run. Also drive the existing unseeded vector/raster Push methods on the iPad, with temporary
+landscape/process-only launch overrides and full-screen captures; preserve every assertion. Ordinary
+device helpers reset preferences and libraries; use only the guarded safe helper. Build these selected
+checks once after regression, then run the cold benchmark alone first and UI drives separately.
+Get fresh saved/unlocked iPad readiness before physical work. Copy preferences to establish library
+location, then back up the actual library and container Documents before any install/launch. The
+read-only preference transfer timed out; coverage is not confirmed. Evidence:
+`~/PaintWork/s50-liquify/device-preparation/`. Preserve screenshots and scene packages. Existing
+physical and benchmark material is indexed under `~/PaintWork/s49-liquify-logs/`.
 
 Keep the one-shot format repairs until the owner confirms real scenes look right. Run the final
 executable's repair signature so preserved preupdate snapshots are converted too; the current
@@ -78,7 +84,9 @@ next; run it once at the phase boundary, then triage failures serially as CLAUDE
    omitting derived digest data reproduced the intended23-vs25 three-way collision. Production files
    are byte-exact restored. Evidence: `~/PaintWork/s50-liquify/{identity-fixture-20261023T012438Z,digest-fixture-20261023T014918Z}/`.
    Both repaired fixtures passed in final fast3 Debug/Release; all original assertions remain.
-2. Run one phase-boundary full suite in Release to qualify the shipped
+2. The one phase-boundary full suite is running in Release from `8380783`, owned by the raster agent,
+   using `~/PaintWork/s50-liquify/run-full-release.sh`; evidence goes to `full-release-1/` beside it.
+   Do not start another native/compiler job until it finishes. This qualifies the shipped
    configuration. Rules do not mandate a full-suite configuration; simulator test seeds remain enabled
    in Release. This does not relabel the known Debug linked timeout as passing.
 3. Obtain fresh
