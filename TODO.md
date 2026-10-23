@@ -68,10 +68,11 @@ fix. On 2026-10-23 the owner confirmed: "I only noticed the repair message." No 
 
 ## (178) Liquify tool
 
-**Current status — 2026-10-23.** Implemented in `tmp/s49-integration`, still unmerged and not on
-the iPad. The iPad runs recovered main Release `17b438c` (app source `840d68a`), and the owner
-confirmed it opens. Main renewal repair `5e93bf0` verifies signatures and five-day profile life;
-current profile expires 2026-10-30. See HANDOFF and the [renewal report](docs/bug-evidence/auto-resign-2026-10-22.md).
+**Current status — 2026-10-23.** Implemented in `tmp/s49-integration`, unmerged. The candidate
+has been installed/launched by authorized physical tests; final restored Release deployment is pending.
+Backup gate is satisfied: container Documents and the owner's current external PaintApp ZIP are
+preserved/hash-verified under `~/PaintWork/s50-liquify/device-backup-2/`. The older fallback Export
+index is not a current external inventory. Main renewal repair is `5e93bf0`.
 
 Simulator qualification is complete:
 
@@ -91,24 +92,17 @@ VectorCanvas with tile-scoped work. The two invalid identity fixtures were repai
 renderable sources, preserving all assertions and proving them with fault/restoration runs.
 Detailed provenance: HANDOFF, PERFORMANCE and `~/PaintWork/s50-liquify/`.
 
-**Still open:** physical qualification, final restored Release install/normal launch, then merge.
-Attempt2 clean/build/signature checks/restoration passed. Frozen products and 1/5/2 future test
-commands are ready in `device-build-2/`; all eight temporary test files restored and all 753 hashes
-match. The first physical benchmark invocation reached runner installation/launch but timed out enabling UI automation before any selected method. No timing records, PNGs or scratch scenes; legacy/Liquify drives not started. Device lockState afterward reports passcodeRequired=false. Owner, 2026-10-23: "try again, when you run something on the ipad sometimes it prompts me to enable automation." Retry the sole benchmark now while the owner can accept that prompt; do not classify this initialization failure as a failed sampler assertion.
-Staging attempt1 stopped at clean exit 70: Xcode could not prepare the named iPad and requested an
-unlocked device on the same LAN or a cable. Compilation never started. All eight temporary test
-files are restored byte-exact and all 753 qualified hashes match; no install, launch or physical
-measurement. Evidence: `~/PaintWork/s50-liquify/device-build-1/report.txt`.
-
-The owner confirmed on 2026-10-23 that the scene is saved and the iPad unlocked/awake. Resume the physical gates now. Establish actual library location and back up
-current Documents plus any external Projects/Backups/Trash before install/launch. Container Documents
-is copied and hashed (134 files,19,662,670 bytes). The bookmark identifies On My iPad/PaintApp; direct
-developer file access failed. External coverage remains unconfirmed. Owner, 2026-10-23: "I'm not sure. Also ideally I dont have to do anything; you should be able to access the ipad through tailscale." Existing routes have now been checked: Tailscale reaches the iPad, but no SSH/SMB/web file service is enabled, and Apple developer transfer cannot read that File Provider folder. The owner AirDropped `/Users/juliapark/Downloads/PaintApp.zip` on 2026-10-23 (327,981,935 bytes); archive copy preserved and all 3,830 members passed streamed SHA/CRC validation. Actual Projects/Backups/Trash structure is present; Trash is empty. The September9 fallback Export index is non-authoritative for this external library. Backup gate is satisfied based on the owner-provided current-folder archive; physical execution can proceed. Resume in a fresh evidence directory using the
-reviewed safe adapters: one cold/warm sampler C benchmark alone first, five legacy drives, then two
-unseeded vector/raster Push workflows (expected 1/5/2, zero skips). No library/settings resets or preset
-changes. Preserve full pictures and disposable-scene identities; native component cost is separate
-from app gesture latency. Keep one-shot repairs until the owner confirms real scenes. Remove this
-item only with the fully qualified merge. HANDOFF has the precise resume sequence.
+**Still open:** physical gesture qualification, final restored Release install/normal launch, then
+merge. Physical native sampler retry2 passed1/1, zero skips: component cold428.577ms, warm17.177–18.066ms;
+six pictures reviewed with exact held/committed parity. Attempt1 never entered a selected method
+because UI automation initialization timed out; the owner authorized retry and noted an enable prompt.
+Legacy attempt1:5 total=1 passed/4 failed/0 skips. Playback passed; four methods stopped on physical
+layout/screenshot/size-field premises. Diagnose those actual frames before any adapter correction;
+no feature assertion, gesture, count or deadline may be weakened. No Liquify invocation followed.
+No settings/library reset or preset changes. Preserve disposable scenes and full pictures. Native
+component cost is separate from app gesture latency. Keep one-shot repairs until real scenes are
+confirmed. HANDOFF has the exact next steps and evidence locations. Remove this item only with the
+fully qualified merge.
 
 *"It should be placed to the left of the brush tool in the top menu. When selected, it acts sort of like
 a brush (you can control the brush type, size, etc), and otherwise it does basically what a normal

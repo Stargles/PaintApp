@@ -8,70 +8,53 @@ Verify origin and every tmp branch. Active worktree: `~/PaintWork/PaintApp-s49-i
 
 ## Checkpoint — 2026-10-23
 
-Main is `5e93bf0`. The iPad still runs recovered Release `17b438c` (app source `840d68a`); the owner
-confirmed it opens. Its verified profile expires 2026-10-30. The renewal repair aligns clean/build
-arguments, fails closed on clean errors, verifies signatures and requires five days of profile life.
-Nine isolated scenarios and four mutations passed. See `docs/bug-evidence/auto-resign-2026-10-22.md`.
+Main is `5e93bf0`; Liquify remains unmerged. The candidate app/runner have now been installed and
+launched by the authorized physical tests. No final restored Release deployment has occurred.
+Container Documents and the owner-supplied current external PaintApp ZIP are preserved and verified
+under `~/PaintWork/s50-liquify/device-backup-2/`; the backup gate is satisfied. The September9
+fallback Export index is not an authoritative inventory of the external library.
 
-**Liquify is unmerged and uninstalled. Simulator qualification and physical build staging are
-complete.** Device-build-2 clean/build/verification/restoration all passed. Both frozen app/runner
-seals verify, profiles have more than five days of life (UTC expiry October30). All eight temporary
-test files are restored byte-exact and all 753 qualified hashes match; no native jobs remain active.
-Frozen xctestrun: `~/PaintWork/s50-liquify/device-build-2/frozen-products/PaintSoftware_iphoneos26.5-arm64.xctestrun`.
-Use its saved future commands/selections, expected 1/5/2, not a rebuilt runner. The authorized first physical invocation attempted runner installation/launch, then failed UI-automation initialization; no selected test method or target-app launch by a method occurred. Every owned simulator/clone is deleted. Commits after fast source `2b330c9` are docs only.
+Simulator qualification is complete and source remains unchanged:
+- Fast Debug and Release: each5,282 =5,278 passed+4 skipped, zero failures;256 classes.
+- Full Release:5,864 =5,799 passed+3 failed+62 skipped;398 classes, exact census match. All three
+  reds passed together unchanged serially3/3. Their parallel causes remain unproved. All eight
+  Liquify UI workflows passed. Zero System Failures/restarts,753 source hashes unchanged.
+- UI linters:85 SF Symbols,137 shared helpers, both clean. Every owned simulator/clone is deleted.
+Evidence: `~/PaintWork/s50-liquify/{fast-3,full-release-closeout.txt,release-ui}/`.
 
-- Fast Debug and Release: each 5,282 total = 5,278 passed + 4 skipped, zero failures; 256 selectors.
-  Evidence: `~/PaintWork/s50-liquify/fast-3/`.
-- Full Release: 5,864 total = 5,799 passed + 3 failed + 62 skipped; 398 classes, exact census match.
-  All three reds passed together unchanged serially: 3/3, zero skips. Two concern StreamLiveEngaged;
-  one concerns LayerPanelControls mover visibility. Exact parallel causes remain unproved; no fix.
-  Four actual workers, zero System Failures/restarts, unchanged source hashes. Command wall 4,751s;
-  summed class time 17,970.666s. See `~/PaintWork/s50-liquify/full-release-closeout.txt` and its indexes.
-- All eight Liquify UI workflows passed in the full run (vector/linked 3, raster 5). Image review covered
-  reshape/Undo/reopen/source-follow images and settled controls at native iPad9 landscape size.
-  Earlier isolated evidence and hashed Documents copies: `~/PaintWork/s50-liquify/release-ui/`.
-- Final UI linters pass: 85 SF Symbols, 137 shared helpers. No assertion, gesture or deadline weakened.
+Physical native sampler C benchmark **passed1/1, zero skips** on retry2. First invocation failed only
+UI-automation initialization before any selected method; the owner then asked to retry and noted the
+device sometimes prompts to enable automation. Retry2 measured native component cold428.577ms,
+four warm17.177–18.066ms. All six PNGs reviewed; held/committed decoded bytes exactly agree. The
+initial blank batch-image display was a presentation artifact, resolved by reopening the identical
+PNG alone. This is component cost, not app gesture latency or a retention test. Evidence:
+`~/PaintWork/s50-liquify/physical-benchmark-2/`.
 
-Physical staging attempt `device-build-1/` stopped at **clean exit 70**, before compilation. Xcode
-could not prepare the named iPad and requested an unlocked device on the same LAN or attached by
-cable. Keychain unlock succeeded; build-for-testing was never invoked. No products/signature checks,
-install, launch, tests or device-data access occurred. All sources restored and native ownership
-returned to root. Report: `~/PaintWork/s50-liquify/device-build-1/report.txt`.
-
-On 2026-10-23 the owner confirmed the scene saved and iPad unlocked/awake. Container Documents is
-backed up and hashed (134 files,19,662,670 bytes) in `device-backup-2/`. The external library is
-On My iPad/PaintApp, outside that container. Apple developer transfer cannot read its File Provider
-group. Tailscale reaches the iPad, but bounded checks found no SSH/SMB/HTTP/WebDAV service; Desktop
-Commander lists only Windows. See `device-backup-2/tailscale-file-route-audit.md`.
-
-The owner AirDropped the current PaintApp folder ZIP. It is preserved under device-backup-2/external-library:
-327,981,935 bytes, matching source/copy SHA; all 3,830 members streamed with CRC/SHA and safe-path checks.
-Actual Projects/Backups/Trash structure is present (Trash empty). The old September9 container Export
-index is not a current external-library inventory; its mismatches are not omissions. coverage.json
-records the verification basis/limits. Backup gate is satisfied. Physical benchmark1 failed before the selected method: "Timed out while enabling automation mode." Its xcresult synthetic initialization failure is not a sampler assertion; no timing records/PNGs/scratch scenes. LockState after failure reports passcodeRequired=false, so ask what the iPad actually shows before assuming locked. The owner now explicitly says retry and reports an automation-enable prompt sometimes appears when a run starts. Retry the benchmark alone now while they can accept it; then legacy5/Liquify2 only on passing gates. No legacy/Liquify drive yet. Native/DD handover goes to the architecture agent for this authorized retry. Evidence: physical-benchmark-1/. Fresh-process cold premise remains intact because no method ran.
-Hardware UDID `00008030-000151492EC3C02E`; devicectl ID `E3B83820-DF74-5042-B52B-0D5BA17E4877`.
+Physical legacy attempt1 ended **5 total=1 passed/4 failed/0 skipped**. Playback passed. InkUnderTransform
+and graph-node methods stopped at the temporary full-screen canvas-bounds premise. Move stopped at
+its existing exposed-row premise (row0.6 versus dock top0.52654). Grey-pan setup could not hit the
+size height field. These are unresolved physical test premises, not qualified feature assertions.
+No Liquify invocation/retry followed. Native/DD ownership returned to root; architecture agent is
+preserving evidence and diagnosing layout/coordinate assumptions read-only. Do not weaken tests,
+reset libraries/settings or change presets to get green.
 
 ## Next
 
-1. Refresh actual availability. Establish library location via the copied preferences key
-   `PaintApp.projectLocation.bookmark`; back up/hash all container Documents and any external
-   Projects/Backups/Trash before install/launch. An external root may need owner help; never assume
-   Documents covers it. Never reset libraries/settings, edit presets or choose a storage invitation.
-2. Physical compilation is already complete in `device-build-2/`; do not rebuild it merely to resume.
-   Verify frozen products, xctestrun hash `125bd30baf4a3567a173fd9b4b6313ba83b661e6490898db94b386ca8ae28da9`,
-   signatures and current five-day profile life. Reviewed safe adapters/provenance and future commands
-   are archived there; original sources are restored. No broad suite with temporary adapters active.
-4. Run the native cold/warm sampler benchmark FIRST and ALONE, then five legacy drives and two
-   unseeded Liquify Push drives separately: expected 1/5/2, zero skips. Inspect six native PNGs and
-   full UI screenshots; preserve disposable-scene identities. Native component cost is not app gesture
-   latency; the fifth legacy drive separately checks actual transformed raster drawing.
-5. Final restored Release: matching clean/build arguments, verify seal/profile again, install and
-   launch normally. Keep one-shot repairs until the owner confirms real scenes. The new executable
-   repair signature converts older preupdate snapshots; its own newest snapshot is intentionally
-   untouched. Prior-writer evidence: `~/PaintWork/evidence/s49-liquify-material-{format,model}/`.
-6. Only after physical qualification, remove TODO(178) whole and the completed freeze-log-read entry,
-   update SESSION_LOG (last five), recheck TODO/HANDOFF, ff-merge via the absolute main worktree path,
-   verify SHA, push and clean up the task worktree. No unqualified Liquify deployment.
+1. Diagnose the four physical premise failures from actual screenshots and hierarchy. Record and
+   review any minimal test-adapter correction before rebuilding; retain all feature assertions,
+   gestures, counts and deadlines. The original frozen device-build-2 products remain preserved,
+   with every temporary source restored and753 qualified hashes unchanged.
+2. Rerun only affected legacy checks with corrected physical premises, then the two safe unseeded
+   vector/raster Liquify Push workflows. Preserve full pictures and disposable-scene identities.
+   Do not repeat the accepted cold sampler measurement. Hardware UDID
+   `00008030-000151492EC3C02E`; devicectl ID `E3B83820-DF74-5042-B52B-0D5BA17E4877`.
+3. Only after physical qualification, clean/build the restored Release with matching arguments,
+   strict seal and current five-day profile verification; install and launch normally. Keep one-shot
+   repairs until the owner confirms real scenes. Prior-writer/fault evidence already exists under
+   `~/PaintWork/evidence/s49-liquify-material-{format,model}/`.
+4. Update physical PERFORMANCE evidence; remove TODO(178) whole and completed freeze-log request
+   in the qualified merge. SESSION_LOG keeps five entries. Fetch/recheck TODO/HANDOFF, ff-merge
+   through the absolute main worktree path, verify SHA, push and clean up owned task artifacts.
 
 ## Evidence and decisions to preserve
 
