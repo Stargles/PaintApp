@@ -76,7 +76,11 @@ Two independent temporary-harness root causes are now evidenced (not app regress
   layerOptionsID only), leaving right rail clear of existing probes; assert Move still exposed before drag.
 Root reviewed those proposals; architecture agent prepares three minimal external hunks and guards for
 review before any build. Keep all distances, gesture steps/stagger/duration, predicates/counts/deadlines
-and40pt/15pt/.002 grey thresholds. No app-source, preset or settings changes; native/DD idle. No retry yet.
+and40pt/15pt/.002 grey thresholds. No app-source, preset or settings changes. Root reviewed the60-line correction delta and all8
+original-source SHA guards. Architecture agent now exclusively owns native/DD for guarded build4,
+restoration/frozen seal/profile checks, then remaining Move+grey2 only, expected2/0skip. If both pass,
+run Liquify2 promptly; stop on any real failure. Do not repeat passed playback, raster stroke, graph,
+or native sampler. The two valid original-source oracles are unaffected. Root stays native-idle.
 Build3 frozen xctestrun SHA: `125bd30baf4a3567a173fd9b4b6313ba83b661e6490898db94b386ca8ae28da9`.
 
 ## Next

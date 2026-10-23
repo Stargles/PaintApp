@@ -113,7 +113,10 @@ its off-paper coordinate premise before pan. No Liquify invocation followed. Dia
 options-close button and reassert Move-active. Grey mixes native touch coordinates with displayed AX
 bounds; use displayed coordinates for its premise and public withOffset-converted native endpoints
 with event-record orientation1. Prepare/review exact external deltas before build; all feature thresholds,
-predicates and deadlines remain. No app-source changes or blind retry.
+predicates and deadlines remain. Root reviewed60-line external delta/all8 original SHA guards and
+authorized guarded build4/restoration, then remaining Move+grey2 and Liquify2 only on preceding success.
+Expected2/2, zero skips. Passed playback/raster-stroke/graph/native sampler are reused; no app-source
+change, preset reset or blind retry.
 No settings/library reset or preset changes. Preserve disposable scenes and full pictures. Native
 component cost is separate from app gesture latency. Keep one-shot repairs until real scenes are
 confirmed. HANDOFF has the exact next steps and evidence locations. Remove this item only with the
