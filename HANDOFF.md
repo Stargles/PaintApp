@@ -65,9 +65,10 @@ executable's repair signature so preserved preupdate snapshots are converted too
 signature's own backup intentionally retains the previous format. Prior-writer package provenance
 and fault/restoration evidence remain under `~/PaintWork/evidence/s49-liquify-material-{format,model}/`.
 Linked timing diagnosis: `~/PaintWork/s50-liquify/linked-ui-diagnosis.md`. Final gate scripts and safe
-physical patch: `~/PaintWork/s49-liquify-logs/combined/final/`. Final fast Debug/Release and full suite
-have not run at the current candidate; run the full suite once at the phase boundary, then triage
-failures serially as CLAUDE.md specifies.
+physical patch: `~/PaintWork/s49-liquify-logs/combined/final/`. Final fast3 Debug and Release both passed
+at `2b330c9`: each5282 total,5278passed,4skipped,zero failures, reconciled against256 selected classes.
+Evidence: `~/PaintWork/s50-liquify/fast-3/`; its owned simulator is deleted. The full Release suite is
+next; run it once at the phase boundary, then triage failures serially as CLAUDE.md specifies.
 
 ## Next
 
@@ -76,9 +77,7 @@ failures serially as CLAUDE.md specifies.
    baseline/restored gate passed2/2; omitting identity groups caught exactly two named assertions, and
    omitting derived digest data reproduced the intended23-vs25 three-way collision. Production files
    are byte-exact restored. Evidence: `~/PaintWork/s50-liquify/{identity-fixture-20261023T012438Z,digest-fixture-20261023T014918Z}/`.
-   Complete fast2 Debug ran5282:5277passed/1invalid-fixture failure/4skipped; Release did not start.
-   Final fast3 will run both configurations in a fresh evidence directory. Let each configuration
-   finish before stopping on any failures; never cancel merely because one test fails.
+   Both repaired fixtures passed in final fast3 Debug/Release; all original assertions remain.
 2. Run one phase-boundary full suite in Release to qualify the shipped
    configuration. Rules do not mandate a full-suite configuration; simulator test seeds remain enabled
    in Release. This does not relabel the known Debug linked timeout as passing.
