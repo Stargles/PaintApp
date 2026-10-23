@@ -71,6 +71,9 @@ nonisolated enum PointGeometryRepair {
     }
 
     private static func stage(_ package: URL) throws -> URL? {
+        guard try package.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink == false else {
+            throw Failure(reason: "A project package is a symbolic link; its original was left untouched.")
+        }
         let reader = try ProjectRecipeMetadata.reader(in: package)
         let target = package.deletingLastPathComponent().appendingPathComponent(".point-geometry-" + UUID().uuidString)
         var copied = false

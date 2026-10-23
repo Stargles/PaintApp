@@ -234,6 +234,62 @@ final class PointGeometryRepairLogicTests: XCTestCase {
         }
     }
 
+    func testDrawingOnlyImportedGestureUsesByValueBrushAndPackageStrokeReferences() throws {
+        let package = try install("material-strokes")
+        let packages = try XCTUnwrap(fixture["packages"] as? [String: [String: String]])
+        let linked = try XCTUnwrap(packages["linked-local-edits"])
+        let recipeData = try XCTUnwrap(linked.first { $0.key.contains("interp") })
+        let recipe = try object(XCTUnwrap(Data(base64Encoded: recipeData.value)))
+        let gestures = try XCTUnwrap(recipe["deformations"] as? [[String: Any]])
+        let brush = try XCTUnwrap(gestures.first?["brush"] as? [String: Any])
+        let imported = linked.filter { $0.key.hasPrefix("brushes/") }
+        XCTAssertEqual(imported.count, 1)
+        for (path, encoded) in imported {
+            let url = package.appendingPathComponent(path)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try XCTUnwrap(Data(base64Encoded: encoded)).write(to: url)
+        }
+        let manifest = try object(Data(contentsOf: package.appendingPathComponent("manifest.json")))
+        let tableURL = package.appendingPathComponent(try XCTUnwrap(manifest["brushTableFileName"] as? String))
+        var table = try object(Data(contentsOf: tableURL))
+        var entries = try XCTUnwrap(table["entries"] as? [[String: Any]])
+        for index in entries.indices { entries[index]["ref"] = (entries[index]["ref"] as! Int) + 500_000 }
+        table["entries"] = entries; try data(table).write(to: tableURL)
+        try editVector(package) { value in
+            var operations = value["materialOperations"] as! [[String: Any]]
+            for index in operations.indices { operations[index]["brush"] = brush }
+            value["materialOperations"] = operations
+            var elements = value["elements"] as! [[String: Any]]
+            for index in elements.indices {
+                var stroke = elements[index]["stroke"] as! [String: Any]
+                stroke["brush"] = (stroke["brush"] as! Int) + 500_000
+                elements[index]["stroke"] = stroke
+            }
+            value["elements"] = elements
+        }
+        XCTAssertTrue(try ProjectRecipeMetadata.reader(in: package).urls.isEmpty)
+        XCTAssertEqual(try PointGeometryRepair.run().converted, 2)
+        let manager = try XCTUnwrap(ProjectStore.load(from: package)); manager.streamCoordinator.startsClients = false
+        XCTAssertFalse(manager.loadDamage.isDamaged)
+        try assertGeometry(manager, name: "material-strokes")
+        for (path, encoded) in imported {
+            XCTAssertEqual(try Data(contentsOf: package.appendingPathComponent(path)), Data(base64Encoded: encoded))
+        }
+    }
+
+    func testMalformedByValueGestureBrushCannotBeDiscardedWithItsOperation() throws {
+        let package = try install("material-strokes")
+        let original = try object(Data(contentsOf: vectorURL(package)))
+        for invalid in [NSNull(), NSNumber(value: 500_000), "missing"] as [Any] {
+            var value = original
+            var operations = value["materialOperations"] as! [[String: Any]]
+            if invalid is String { operations[0].removeValue(forKey: "brush") }
+            else { operations[0]["brush"] = invalid }
+            value["materialOperations"] = operations
+            XCTAssertThrowsError(try PointGeometryRepair.convertedPayload(data(value), recipe: false))
+        }
+    }
+
     func testUnreadableSpatialReferenceRefusesWholeLibraryWithoutMutation() throws {
         _ = try install("plain", at: "Projects/A/plain.paintproj")
         let broken = try install("material-strokes", at: "Projects/Z/broken.paintproj")
@@ -287,6 +343,17 @@ final class PointGeometryRepairLogicTests: XCTestCase {
         let payload = try reader.decoder.decode(VectorCanvasData.self, from: Data(contentsOf: vectorURL(project)))
         XCTAssertEqual(payload.decodeReport.malformedCount, 1)
         XCTAssertEqual(payload.elements.count, 1)
+    }
+
+    func testPackageRootSymbolicLinkCannotBeUsedAsAStagingCopy() throws {
+        let actual = try install("plain", at: "outside/plain.paintproj")
+        let project = root.appendingPathComponent("Projects/link.paintproj")
+        try FileManager.default.createDirectory(at: project.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: project, withDestinationURL: actual)
+        let before = try bytes(root)
+        XCTAssertThrowsError(try PointGeometryRepair.run())
+        XCTAssertEqual(try bytes(root), before)
+        XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: project.path), actual.path)
     }
 
     func testReferencedSymbolicLinkCannotModifyOriginalDuringStaging() throws {
