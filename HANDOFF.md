@@ -132,6 +132,10 @@ worker/root tree. All worker tasks are complete and faults restored; root source
   preupdate snapshots; the current signature's own backup intentionally retains the prior format.
 
 **Remaining qualification:** parked. No active native/compiler jobs or agents; root's owned
+October22 resumption: unchanged isolated linked UI repeated line97 (1 failed/0 skips), with exact
+source815 probes eventually141 changed in saved stills. Raster owns one test-only timestamp/count
+diagnostic run with unchanged predicate/gesture and no added UI reads. Root is repairing the shipped
+main deployment independently; the parked resource statements below are historical, not live status.
 `80BE77F5-9118-4CDD-854D-07C3E9A9009B` simulator was already shut down after the UI batch and is now
 deleted, with its Documents copied and171 file hashes verified. Create a fresh owned simulator on
 resumption; integration DerivedData remains available. The owner is using the Mac and will notify when

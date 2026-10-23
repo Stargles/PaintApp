@@ -105,6 +105,12 @@ product regression or changing a threshold). The modes landscape screenshot caug
 so a settled native iPad9 controls picture remains required. Pictures, exact test-scene copies, hashes,
 counts and inspection notes: `~/PaintWork/s49-liquify-logs/combined/final/liquify-ui-final-1-review.md`.
 The owned simulator was deleted after archival.
+On October22 an unchanged isolated linked method repeated the same line97 timeout (1/1 failed).
+The saved video/stills prove the exact815 screen probes eventually change141 ink flags; in the old
+recording the first changed frame is after the wait ended. A system setup banner in the fresh run
+dismissed before the gesture. Next run adds temporary test-only per-poll timestamp/count logging,
+with the same gesture, fifteen-second wait and >10-pixel assertion; no new UI reads or threshold
+change while polling. Archive and restore the diagnostic source afterward. Production stays frozen.
 
 **Remaining on resumption:** isolate the linked UI failure; obtain a settled owner-sized controls
 capture; build final Release; measure exact batching on a quiet Mac before deciding to keep it; run
