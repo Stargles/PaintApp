@@ -128,6 +128,9 @@ enum ProjectExport {
         }
         let relativePath = sourceParts.dropFirst(rootParts.count).joined(separator: "/")
         let destination = exportRoot.appendingPathComponent(relativePath, isDirectory: true)
+        guard destination.standardizedFileURL != source.standardizedFileURL else {
+            throw CocoaError(.fileReadInvalidFileName)
+        }
         try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(),
                                                withIntermediateDirectories: true)
         if FileManager.default.fileExists(atPath: destination.path) {

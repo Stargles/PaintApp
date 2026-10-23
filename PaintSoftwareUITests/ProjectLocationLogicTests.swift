@@ -91,6 +91,16 @@ final class ProjectLocationLogicTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: nested.path), "refusal must not alter the source package")
     }
 
+    func testExportRefusesToOverwriteItsSource() throws {
+        let source = external.appendingPathComponent("Projects/Untitled.paintproj", isDirectory: true)
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        let manifest = source.appendingPathComponent("manifest.json")
+        let original = Data("keep original".utf8)
+        try original.write(to: manifest)
+        XCTAssertThrowsError(try ProjectExport.copyPackage(at: source, under: external, to: external))
+        XCTAssertEqual(try Data(contentsOf: manifest), original, "refusal must preserve the original package")
+    }
+
     // MARK: - The regression this feature exists for
 
     /// **A reinstall destroys a project saved inside the app, and leaves one in a chosen folder
