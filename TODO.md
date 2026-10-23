@@ -74,6 +74,7 @@ confirmed it opens. Main renewal repair `5e93bf0` verifies signatures and five-d
 current profile expires 2026-10-30. See HANDOFF and the [renewal report](docs/bug-evidence/auto-resign-2026-10-22.md).
 
 Simulator qualification is complete:
+
 - Final fast Debug/Release: each5282 total,5278passed,4skipped,zero failures;256 selected classes.
 - Full Release:5864 total,5799passed,3failed,62skipped;398 classes. All three reds passed together
   unchanged serially3/3. Four actual workers, no System Failures/restarts,753 source hashes unchanged.
@@ -91,20 +92,19 @@ renderable sources, preserving all assertions and proving them with fault/restor
 Detailed provenance: HANDOFF, PERFORMANCE and `~/PaintWork/s50-liquify/`.
 
 **Still open:** physical qualification, final restored Release install/normal launch, then merge.
-The architecture agent is staging one named-device Release build-for-testing, with exact backups of
-8 temporary test adaptations and no production/project change. It must verify signatures/profile life
-and restore sources byte-exact before handback. No candidate install/launch yet. Device evidence:
-`~/PaintWork/s50-liquify/device-build-1/`; safe patches and backup-coverage notes in `device-preparation/`.
+Staging attempt1 stopped at clean exit 70: Xcode could not prepare the named iPad and requested an
+unlocked device on the same LAN or a cable. Compilation never started. All eight temporary test
+files are restored byte-exact and all 753 qualified hashes match; no install, launch or physical
+measurement. Evidence: `~/PaintWork/s50-liquify/device-build-1/report.txt`.
 
-Get fresh saved/unlocked readiness after staging. Establish actual library location from preferences
-and back up current container Documents plus any external Projects/Backups/Trash before install or
-launch. Passive preference retrieval timed out; coverage is unconfirmed. Use frozen products for one
-cold/warm sampler C benchmark alone first, then five legacy drives and two existing unseeded vector/
-raster Push workflows separately (expected1/5/2,zero skips). No library/settings resets or preset
-changes. Preserve full pictures and exact disposable-scene identities. Keep native component cost
-separate from actual app gesture latency. Keep one-shot format repairs until the owner confirms real
-scenes; the final executable repairs older preserved snapshots, excluding its own newest snapshot.
-Remove this item only with the fully qualified merge.
+A fresh saved/unlocked readiness question is pending. Establish actual library location and back up
+current Documents plus any external Projects/Backups/Trash before install/launch; passive preferences
+retrieval timed out, so coverage is unconfirmed. Resume in a fresh evidence directory using the
+reviewed safe adapters: one cold/warm sampler C benchmark alone first, five legacy drives, then two
+unseeded vector/raster Push workflows (expected 1/5/2, zero skips). No library/settings resets or preset
+changes. Preserve full pictures and disposable-scene identities; native component cost is separate
+from app gesture latency. Keep one-shot repairs until the owner confirms real scenes. Remove this
+item only with the fully qualified merge. HANDOFF has the precise resume sequence.
 
 *"It should be placed to the left of the brush tool in the top menu. When selected, it acts sort of like
 a brush (you can control the brush type, size, etc), and otherwise it does basically what a normal
