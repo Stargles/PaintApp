@@ -17,9 +17,8 @@ CLAUDE.md requires physical harnesses to record unique owned fixtures, Trash onl
 preserve owner settings/libraries and verify fresh inventory before closeout.
 
 **Two new active owner reports, superseding the parked state:**
-1. **Await owner design decision before implementation:** root recommends removing complex vector
-   Liquify and retaining only point edits, rather than offering two vector behaviors. Owner asked for
-   this recommendation before work because of sunk-cost concern. No source implementation changes.
+1. **Active implementation:** owner says continue, no pause for the recommendation. Remove complex
+   vector Liquify and keep normal-rendered point edits, with thorough architecture/dependency cleanup.
    Vector Liquify visibly stretches strokes horizontally. Owner explicitly requires moving stroke
    point positions through the normal brush renderer, not deforming brush marks/texture. Owner explicitly
    requires a very thorough architecture/dependency cleanup and independent final review. Audit code
@@ -29,7 +28,8 @@ preserve owner settings/libraries and verify fresh inventory before closeout.
    report found in root/Retired/synced logs yet. Saved scene uses To Cross, Vector3/frame2,527strokes,
    no material operations in its six drawings. Latest recording predates failure.
 
-Both reports are in TODO before work. Current diagnostic tree `~/PaintWork/PaintApp-s52-erase-crash`,
+3. Verify father–grandfather document saving in actual code/tests, implement any missing behavior,
+   and reconcile original asks/queue history for other missed tasks. All reports are in TODO before work. Current diagnostic tree `~/PaintWork/PaintApp-s52-erase-crash`,
 branch tmp/s52-erase-crash. Raw read-only diagnostics and preserved-Test1 inventory under
 `~/PaintWork/s52-erase-crash/`. Preserve current device scene/backups; do not restart/reinstall the app
 without a concrete need. Prior cleanup tests do not establish either new report is fixed.

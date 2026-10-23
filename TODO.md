@@ -62,12 +62,11 @@ their files are repaired. Build `2974b33` broke this rule and lost the owner's k
 
 ## Vector Liquify must move points only — 2026-10-23
 
-**Implementation decision pending:** owner asks whether to keep the complex vector behavior and
-also add a simple version, or remove the complex vector version entirely, prioritizing architecture.
-Recommendation: remove the complex vector Liquify path and keep only point-position editing. Keep
-real shared raster/linked-frame/edit-session code and existing Distort support, with actual consumer
-proof; do not retain inverse-resampled vector brush materials as a second mode. No implementation
-changes have started while the owner weighs this choice.
+**Active — continue implementation.** Owner explicitly rejects treating the architecture question
+as a pause and reiterates that work must continue. Remove complex vector Liquify, keep point-position
+editing through the normal renderer, and perform the thorough cleanup below. Owner also warns that
+the earlier failures have damaged confidence; verify against the actual original instructions and
+actual consumers, not inferred scope. Do not stop at recommendations or mark work done prematurely.
 
 Owner reports that Liquify stretches strokes horizontally on vector layers and rules:
 “All that you had to do was to change the position of the points in the stroke, not apply
@@ -86,6 +85,16 @@ saved-scene conversion/round-trip, focused mutation-backed tests and real workfl
 final architecture review. Do not claim certainty from passing tests alone or retain this path behind
 a compatibility flag. The new point-only vector instruction is authoritative over implementation
 interpretations made earlier. Record any actual behavior conflict with evidence before asking.
+
+---
+
+## Verify smart document saving and reconcile outstanding asks — 2026-10-23
+
+Owner asks whether the father–grandfather saving scheme was implemented; if not, implement it too.
+Trace the actual retention/save behavior and tests before claiming completion. Audit earlier owner
+requests and queue history for other missing or incorrectly completed tasks, and restore actionable
+ones to TODO before working on them. Previous notes claim age-thinned backup generations and a4GB
+cap; those are evidence to verify, not proof. Continue all actionable work without an unnecessary pause.
 
 ---
 
