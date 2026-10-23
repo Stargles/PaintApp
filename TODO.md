@@ -8,6 +8,10 @@ conservation and output quality take priority over speed. Use focused delegation
 for routine work, with occasional queue reports. The owner asked to work independently while asleep
 until 10 a.m. Toronto time. Raster scope and fixed exterior pixels for vector selections are ruled below.
 
+**Checkpoint 2026-10-23:** all currently actionable cleanup is merged and the final Release is installed
+and launched normally. Owner is now asleep; no further iPad interaction is needed or queued. Remaining
+items below retain their existing deferred/owner-side status.
+
 ## How to read and keep this file
 
 Every item is a **status**, a short **description** a future session can pick up cold, and **what is

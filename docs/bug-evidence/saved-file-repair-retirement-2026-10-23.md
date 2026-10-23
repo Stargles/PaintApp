@@ -63,3 +63,15 @@ Liquify/input/rendering qualification remains indexed under `~/PaintWork/s50-liq
 alters saved-file startup/restore validation and the diagnostic copy helper. Every tracked source,
 resource and project file (723) is frozen for final device-build comparison. No temporary audit or
 orientation adapter remains in the source.
+
+## Deployment and checkpoint
+
+Merged/pushed runtime cleanup in `bcd7a6af`. Normal Release clean/build succeeded; all723 frozen files
+match, strict deep signature verifies, profile expires2026-10-30T00:18:54Z (October29 evening Toronto),
+over six days remaining at install. Installed `Starg.PaintSoftware` without uninstall/reset. iOS denied
+the initial launch solely because the device locked; after the owner unlocked, normal launch with
+**no test arguments** succeeded and **PID53501 was observed alive**. Both raw launch attempts remain
+in `~/PaintWork/s51-cleanup/final-release/` with install/signature/status records.
+
+Owner is now asleep; no more device interaction remains. The completed cleanup item was removed whole
+from TODO in the runtime merge. All remaining asks are deferred or await owner participation/briefs.

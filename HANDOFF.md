@@ -16,11 +16,17 @@ relative folders so same-named packages cannot overwrite exported copies; no pro
 CLAUDE.md requires physical harnesses to record unique owned fixtures, Trash only those in teardown,
 preserve owner settings/libraries and verify fresh inventory before closeout.
 
-**Final Release installed:** source headbcd7a6af, clean/build0, strict deep signature and all723
-frozen files exact. Profile expires2026-10-30T00:18:54Z (October29 evening Toronto). Initial normal
-launch was refused by iOS because the iPad locked; owner now confirms “Ready — unlocked and awake.”
-Root retries the normal no-test-arguments launch, then records final status, ff-merges/pushes docs
-and removes the completed worktree. Evidence: `~/PaintWork/s51-cleanup/final-release/`.
+**Complete and parked.** Final normal Release **bcd7a6af** installed: clean/build0, all723 frozen
+files exact, strict deep signature verified. Profile expires **2026-10-30T00:18:54Z** (October29
+evening Toronto), over six days at install. First launch was refused solely because iPad locked;
+after owner unlocked, normal launch with **no test arguments** succeeded, **PID53501 observed alive**.
+No further device work remains. Owner is now asleep; no further iPad interaction is needed or queued.
+The cleanup item is gone from TODO; all other work is deliberately deferred/owner-side.
+
+Final app/build/signature/install/launch evidence: `~/PaintWork/s51-cleanup/final-release/`,
+including `final-status.json`. Both task worktrees are being removed after final docs merge; native
+jobs and owned simulators are already finished/deleted. Reuse the frozen-source qualification; do
+not repeat tests or restart the iPad for this completed work.
 
 ## Completed gates
 
@@ -46,7 +52,7 @@ and removes the completed worktree. Evidence: `~/PaintWork/s51-cleanup/final-rel
 
 Detailed retirement record: docs/bug-evidence/saved-file-repair-retirement-2026-10-23.md.
 Raw current evidence: `~/PaintWork/s51-cleanup/{current-library,repair-qualification,export-qualification}/`.
-Final device build scripts are prepared in `~/PaintWork/s51-cleanup/final-release/` but not run yet.
+Final device build, strict verification, installation and normal launch are complete.
 Prior normal Release/app and evidence: `~/PaintWork/s50-liquify/final-release/`.
 
 ## Preserved data and deferred queue
