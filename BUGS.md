@@ -51,6 +51,14 @@ reloads on SwiftUI passes that change nothing about the layers.
 from their headers; the owner does not know which version recorded them. Retrieve read-only without
 restarting PaintApp, then compare the diagnostic fields below before selecting a fix.
 
+**Retrieved October22, read-only:** six new stranded flights dated October16–18 have repair counters
+1–6, appv1.0.43(1), executable build stamp2026-10-15T04:07:09Z. Headers themselves have no Git SHA;
+the exact stamp matches archived physical-probe and renewal evidence for Releasef813346, app source
+840d68a, predating Liquify. Eleven recordings are preserved under `~/PaintWork/s50-freeze-logs/` with
+device metadata, local hashes and `build-correlation.json`. A causal comparison of the added touch
+diagnostics is active; newer cases include non-third-finger sequences, so the old proposed pan filter
+is not yet justified as a complete fix.
+
 **What the owner's iPad saved.** Build 55c4fc7 (Release), iPad 9 on iPadOS 26.6.2, landscape: five
 `flight-…` files at 19:11, 19:15, 19:23, 19:34 and 19:40, all with trigger `stranded` — 0.10 s after
 the last touch lifted, `CanvasView.Coordinator.replaceStrandedRecognizers` found `canvas.pan` (all

@@ -71,11 +71,13 @@ failures serially as CLAUDE.md specifies.
 
 ## Next
 
-1. Repair only the invalid motion-group fixture in CelContentProviderLogicTests: zero lattices for two
-   references now correctly refuses before identity creation. Preserve assertions and prove the group/
-   spacing fault. The first final Debug attempt was interrupted1430/5282 (1427passed, one genuine
-   fixture failure, one cancelled test, one skip); Release did not start. Preserve its partial bundle,
-   then rerun complete fast Debug/Release after the focused restored gate.
+1. Fixture repair `621c15d` keeps fitted lattices and every original identity assertion/case. Focused
+   baseline/restored2/2 each; omitting identity groups fails exactly the two intended group/spacing
+   assertions, with no unwrap failures. Production file restored byte-exact and guard unchanged.
+   Evidence: `~/PaintWork/s50-liquify/identity-fixture-20261023T012438Z/`. The first final Debug attempt
+   was interrupted1430/5282 (1427passed, one genuine fixture failure, one cancelled test, one skip);
+   Release did not start. Rerun complete fast Debug/Release in a fresh evidence directory; never cancel
+   a configuration merely because a test fails, let its result/count finish and stop before the next.
 2. Run one phase-boundary full suite in Release to qualify the shipped
    configuration. Rules do not mandate a full-suite configuration; simulator test seeds remain enabled
    in Release. This does not relabel the known Debug linked timeout as passing.

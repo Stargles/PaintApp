@@ -79,10 +79,10 @@ capture and every existing assertion remain. Final gates are next. Keep one-shot
 scenes after installation.
 
 Final Debug fast attempt stopped partially at1430 tests (1427 passed, one real failure, one cancelled
-test, one skip); it is not a qualified fast tier. The identity test used a binding with no fitted
-lattices for two references; the provider correctly refuses that malformed recipe. Repair the test
-fixture using fitted lattices, preserve every identity assertion/case, prove group/spacing identity
-faults and rerun the whole final gates. Keep the production refusal guard.
+test, one skip); it is not a qualified fast tier. The identity fixture repair `621c15d` retains fitted
+lattices and all original assertions/cases; focused baseline/restored2/2 and a fault causing exactly
+the two group/spacing identity failures are verified. Production guard unchanged/file restored
+byte-exact. Rerun the whole final gates; let each configuration finish before stopping on failures.
 
 *"It should be placed to the left of the brush tool in the top menu. When selected, it acts sort of like
 a brush (you can control the brush type, size, etc), and otherwise it does basically what a normal
