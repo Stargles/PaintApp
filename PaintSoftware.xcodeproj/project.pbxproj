@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		CCC845F2EB659522BE49431E /* PaintSoftware/Debug/ProjectExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 823BB1F863783AA0FF26DAF3 /* PaintSoftware/Debug/ProjectExport.swift */; };
 		E1E342750E0F4D8FB48E8FD4 /* PaintSoftware/Engine/CelContentPicture.swift in Sources */ = {isa = PBXBuildFile; fileRef = A43D60939A504EDEB69E4D85 /* PaintSoftware/Engine/CelContentPicture.swift */; };
 		EB715D199C9A45858093EE9C /* PaintSoftwareUITests/LiquifyRasterUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90438967736E4BB68AB44096 /* PaintSoftwareUITests/LiquifyRasterUITests.swift */; };
 		F4063D61B50F41A59228B4FD /* PaintSoftwareUITests/LiquifyRasterLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D52B460221794C24B5EDB0E5 /* PaintSoftwareUITests/LiquifyRasterLogicTests.swift */; };
@@ -662,6 +663,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		823BB1F863783AA0FF26DAF3 /* PaintSoftware/Debug/ProjectExport.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Debug/ProjectExport.swift; sourceTree = "<group>"; };
 		A43D60939A504EDEB69E4D85 /* PaintSoftware/Engine/CelContentPicture.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/CelContentPicture.swift; sourceTree = "<group>"; };
 		90438967736E4BB68AB44096 /* PaintSoftwareUITests/LiquifyRasterUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftwareUITests/LiquifyRasterUITests.swift; sourceTree = "<group>"; };
 		D52B460221794C24B5EDB0E5 /* PaintSoftwareUITests/LiquifyRasterLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftwareUITests/LiquifyRasterLogicTests.swift; sourceTree = "<group>"; };
@@ -1749,6 +1751,7 @@
 		C3D4E5F6001122334455A1B2 /* App sources shared with PaintSoftwareUITests */ = {
 			isa = PBXGroup;
 			children = (
+				823BB1F863783AA0FF26DAF3 /* PaintSoftware/Debug/ProjectExport.swift */,
 				90438967736E4BB68AB44096 /* PaintSoftwareUITests/LiquifyRasterUITests.swift */,
 				D52B460221794C24B5EDB0E5 /* PaintSoftwareUITests/LiquifyRasterLogicTests.swift */,
 				92A8C8757E22443F91D33A78 /* PaintSoftware/Views/CelContentRevisions.swift */,
@@ -2144,6 +2147,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CCC845F2EB659522BE49431E /* PaintSoftware/Debug/ProjectExport.swift in Sources */,
 				EB715D199C9A45858093EE9C /* PaintSoftwareUITests/LiquifyRasterUITests.swift in Sources */,
 				F4063D61B50F41A59228B4FD /* PaintSoftwareUITests/LiquifyRasterLogicTests.swift in Sources */,
 				B03B843A1C7147198B6BB79E /* PaintSoftware/Views/CelContentRevisions.swift in Sources */,
