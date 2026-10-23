@@ -139,6 +139,8 @@ backboardd as the recent termination; PaintSoftware has no kill reason. It is co
 system/interface failure but does not establish the reported event's time or the source of that
 process's memory. Inspect existing canvas/CoreAnimation surface ownership without a speculative fix.
 Raw report and summary: `~/PaintWork/s52-erase-crash/device-diagnostics/`.
+Owner cannot recall the time but says this was the only crash today; treating18:47 as the probable
+matching event is reasonable. Exact timing and the source of backboardd's memory remain unproved.
 Two fresh Test1 flights (181634/181822), version1.0.43(1), end27–30minutes before the Jetsam.
 They record stranded-recognizer repairs/counters but no memory telemetry or explicit erase completion;
 Liquify selected in one is not proof it was applied. They do not establish a link to the termination.

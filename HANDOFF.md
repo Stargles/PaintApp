@@ -49,6 +49,8 @@ Preserve current iPad artwork; no physical device launch, restart or install occ
    unchanged from shipped source. Next physical reproduction should temporarily count retained
    UnlandedInk UIImage bytes/versions at lift/base landing, not merely IOSurfaces. See diagnostics
    flight-recordings-review.md and ordinary-eraser-source-audit.md. No speculative fix was made.
+   Owner says this was today's only crash and cannot recall its time;18:47 is now the probable
+   matching event, not a confirmed timestamp. Display-service allocation origin still unresolved.
 
 ## Combined branch and current work
 
