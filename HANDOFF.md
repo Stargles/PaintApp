@@ -19,6 +19,9 @@ then reinstall current qualified main Release with a renewed profile. Liquify re
 Renewal job subsequently reported install OK (profile expiry2026-10-30T00:18:54Z), but independent
 codesign verification finds an invalid sealed resource and normal app launch is Security-denied.
 That concrete signing failure is now the recovery priority; do not declare the iPad restored yet.
+Confirmed: new profile copied but no CodeSign task; executable/seal still October15. Existing external
+resign.sh cleans the wrong DerivedData directory. Correct its clean path, fail closed and verify the
+signature/profile lifetime before install; rebuild qualified main and verify actual launch.
 
 **Previous parked UI batch.** App/test checkpoint `9dfd96b` is committed in
 `~/PaintWork/PaintApp-s49-integration` (`tmp/s49-integration`). No active jobs or faults remain.

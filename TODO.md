@@ -70,6 +70,12 @@ successful main17b438c Release install with expiry2026-10-30T00:18:54Z, but inde
 verification fails (sealed resource missing/invalid), and a normal no-argument launch is denied by
 the iPad's Security service. Resolve the concrete signature/resource failure before declaring recovery
 or asking for developer trust; preserve data and avoid uninstalling the app.
+Root cause confirmed from the latest build log and sealed hashes: profile packaging ran without
+CodeSign; the executable/CodeResources remained October15 while embedded.mobileprovision changed
+October22. The renewal script's clean step omits the DerivedData path used by build. Fix the existing
+external deploy script to clean that same directory and fail on clean failure, verify the complete
+app signature before installation, and enforce the existing five-day profile-life rule. Rebuild the
+qualified main Release, preserve the app container, and require an actual normal launch to pass.
 
 **Previous parked checkpoint, 2026-10-15.** All work is committed in
 `~/PaintWork/PaintApp-s49-integration` on `tmp/s49-integration`; app/test source checkpoint `9dfd96b`.
