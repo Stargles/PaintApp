@@ -884,6 +884,13 @@ the decision logic with no build. Log: `~/.config/paintapp/resign.log`.
 Simulator testing runs locally too — the Tailscale/SSH `deploy/mac/*` scripts are for the Windows
 machine, not this Mac.
 
+**Physical-device UI harnesses own every gallery fixture they create.** Create a uniquely named test
+folder and uniquely named scenes at setup, and record their exact project IDs/paths as owned fixtures.
+In teardown/finally—including after an assertion or test failure—move only those recorded fixtures to
+Trash through the existing gallery UI, then verify a fresh ProjectExport inventory before closeout.
+Never run a reset-heavy simulator-base harness on the owner's iPad; preserve real app settings and brush
+and palette libraries. Do not add a product cleanup hook or delete unowned/general-named scenes.
+
 ## Action recorder — get the bug off the owner's iPad instead of guessing at a simulator
 
 The owner can reproduce a device-only bug in four seconds; an agent poking a simulator cannot
