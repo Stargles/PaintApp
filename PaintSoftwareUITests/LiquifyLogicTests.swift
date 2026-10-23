@@ -892,7 +892,7 @@ final class LiquifyLogicTests: XCTestCase {
         XCTAssertEqual(redone.samples, changed.samples)
     }
 
-    private func pendingGesture(inkCopies: Int = 1) throws -> (CanvasManager, VectorCanvas, VectorStroke, LiquifySession, CelContentProcedure) {
+    private func pendingGesture(inkCopies: Int = 1) throws -> (CanvasManager, VectorCanvas, VectorStroke, LiquifySession, LiquifyProcedure) {
         let manager = CanvasFixture.manager(); manager.addVectorLayer()
         let layer = manager.layers[1], canvas = try XCTUnwrap(layer.cels[0].vector)
         let ink = stroke([CGPoint(x: 10, y: 24), CGPoint(x: 50, y: 24)])
@@ -978,7 +978,7 @@ final class LiquifyLogicTests: XCTestCase {
         XCTAssertNil(manager.liveCelContentEdit)
     }
 
-    private func startInFlightResolve(_ procedure: CelContentProcedure, original: [VectorElement]) throws -> DispatchSemaphore {
+    private func startInFlightResolve(_ procedure: LiquifyProcedure, original: [VectorElement]) throws -> DispatchSemaphore {
         let finished = DispatchSemaphore(value: 0)
         DispatchQueue.global(qos: .userInitiated).async {
             _ = procedure.resolve(original)

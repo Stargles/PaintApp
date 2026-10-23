@@ -84,7 +84,7 @@ struct LiveCelContentEdit {
     var tick = 0
     /// One complete procedural value owns the matching field, selection and shown-space poses.
     /// The window host asks for a picture; it does not interpret brush displacement data.
-    var procedure: CelContentProcedure? = nil
+    var procedure: LiquifyProcedure? = nil
 
     /// A complete cel value shared by the host and composite; each renderer keeps native ink
     /// separate from sampled backing until the final window draw.
@@ -135,139 +135,8 @@ struct LiveCelContentEdit {
     }
 }
 
-/// Only the references needed by this active recipe segment cross to a held worker.
-struct CelRecipeSnapshot {
-    let recipe: InterpolationRecipe
-    let content: [CelRef: [VectorElement]]
-    let guides: [GuideStroke]
-    let options: InterpolationEvaluator.Options
-    let size: CGSize
-}
-
-struct CelContentProcedure {
-    let deformation: LiquifyDeformation
-    let selectedIDs: Set<UUID>?
-    let poses: [UUID: PoseMap]
-    let pixelSnapshot: CelPixelSnapshot?
-    let window: CGRect
-    let recipeSnapshot: CelRecipeSnapshot?
-    let canvasSize: CGSize?
-    let renderSource: VectorCanvas.Frozen?
-    let placement: CelContentPlacement
-    let pixelBridge: PoseMap?
-    var backingWindow: CGRect? { pixelSnapshot?.replacementRect(in: window, through: pixelBridge) }
-    private let resolution = PresentedProcedure<Resolved>()
-
-    init(deformation: LiquifyDeformation, selectedIDs: Set<UUID>?, poses: [UUID: PoseMap],
-         pixelSnapshot: CelPixelSnapshot? = nil, window: CGRect = .null,
-         recipeSnapshot: CelRecipeSnapshot? = nil, canvasSize: CGSize? = nil,
-         renderSource: VectorCanvas.Frozen? = nil, placement: CelContentPlacement = .identity) {
-        self.deformation = deformation
-        self.selectedIDs = selectedIDs
-        self.poses = poses
-        self.pixelSnapshot = pixelSnapshot
-        self.window = window
-        self.recipeSnapshot = recipeSnapshot
-        self.canvasSize = canvasSize
-        self.renderSource = renderSource
-        self.placement = placement
-        let bridge = (placement.backing ?? .identity).concatenating(placement.ink?.inverse ?? .identity)
-        self.pixelBridge = bridge.isIdentity ? nil : bridge
-    }
-
-    struct Resolved {
-        let elements: [VectorElement]
-        let shown: [VectorElement]
-        let changed: Set<UUID>
-        let pixels: CelPixelSnapshot.Patch?
-        let computationFailed: Bool
-        var failed: Bool { computationFailed || contentPicture?.hasFailed == true }
-        let presentation: CelContentPicture.RenderedWindow?
-        let contentPicture: CelContentPicture?
-        let fieldIsEmpty: Bool
-    }
-
-    var hasFailed: Bool { resolution.completedValue?.failed == true }
-    var isPending: Bool { resolution.isPending }
-    var isPresented: Bool { resolution.isPresented }
-    var resolutionCount: Int { resolution.resolutionCount }
-    var isResolving: Bool { resolution.isResolving }
-
-    func resolve(_ original: [VectorElement]) -> [VectorElement] {
-        resolved(original).elements
-    }
-    private func resolved(_ original: [VectorElement]) -> Resolved {
-        resolution.resolve {
-            var elements = original
-            var pixels: CelPixelSnapshot.Patch?
-            var fieldIsEmpty = true
-            var failed = false
-            var evaluatedInk: InterpolationEvaluator.Evaluation?
-            if let snapshot = recipeSnapshot {
-                let evaluation = InterpolationEvaluator.evaluate(recipe: snapshot.recipe, at: snapshot.recipe.t,
-                    content: { snapshot.content[$0] ?? [] }, subject: original, guides: snapshot.guides,
-                    options: snapshot.options, didApplyDeformation: { index, field in
-                        guard index == snapshot.recipe.deformations.count - 1 else { return }
-                        fieldIsEmpty = field.isEmpty
-                        pixels = pixelSnapshot?.liquifiedPatch(in: window, using: field, through: pixelBridge)
-                    })
-                evaluatedInk = evaluation
-                if evaluation == nil { failed = true }
-            } else {
-                let field = LiquifyField(deformation)
-                fieldIsEmpty = field.isEmpty
-                elements = field.mapping(original, selectedIDs: selectedIDs, poses: poses)
-                pixels = pixelSnapshot?.liquifiedPatch(in: window, using: field, through: pixelBridge)
-            }
-            failed = failed || (pixelSnapshot != nil && pixels == nil)
-            let changed = Set(zip(original, elements).compactMap { old, new in
-                old.hasSameSpatialInk(as: new) ? nil : old.id
-            })
-            let shown = shown(elements)
-            var picture: CelContentPicture?
-            var presentation: CelContentPicture.RenderedWindow?
-            if !window.isNull, !window.isEmpty, let size = pixelSnapshot?.size ?? canvasSize {
-                let ink: CelContentPicture.Ink?
-                if let evaluatedInk { ink = .linked(evaluatedInk) }
-                else if renderSource != nil || !shown.isEmpty {
-                    let source = renderSource ?? VectorCanvas(size: size).freeze(quality: .full)
-                    ink = .ordinary(source: source, elements: shown, rewriting: changed.union(poses.keys))
-                } else { ink = nil }
-                picture = CelContentPicture(size: size, window: window, backing: pixelSnapshot,
-                                            patch: pixels, ink: ink)
-                if !failed { presentation = picture?.rendered(placement: placement) }
-                failed = failed || presentation == nil
-            }
-            return Resolved(elements: elements, shown: shown, changed: changed, pixels: pixels,
-                            computationFailed: failed, presentation: presentation, contentPicture: picture, fieldIsEmpty: fieldIsEmpty)
-        }
-    }
-    func picture(_ original: [VectorElement]) -> [VectorElement] { resolved(original).shown }
-    func presentation(_ original: [VectorElement], placement: CelContentPlacement) -> CelContentPicture.RenderedWindow? {
-        guard placement == self.placement else { return nil }
-        let result = resolved(original)
-        return result.failed ? nil : result.presentation
-    }
-    func contentPicture(_ original: [VectorElement]) -> CelContentPicture? {
-        let result = resolved(original)
-        return result.failed ? nil : result.contentPicture
-    }
-    func didPresent() { resolution.didPresent() }
-    func didReject() { if hasFailed { resolution.didReject() } }
-    func finishWhenPresented(_ finish: @escaping (Resolved) -> Void) { resolution.finishWhenPresented(finish) }
-    func settlePending(_ original: [VectorElement]) { resolution.settlePending { resolved(original) } }
-    func cancel() { resolution.cancel() }
-    func shown(_ resolved: [VectorElement]) -> [VectorElement] {
-        CanvasManager.posed(resolved, by: poses)
-    }
-}
 
 extension CanvasManager {
-
-    func settlePendingCelContentProcedure() {
-        guard let edit = liveCelContentEdit else { return }
-        edit.procedure?.settlePending(edit.elements)
-    }
 
     /// **Opens a live edit on `vectorCanvas`'s cel** and lifts its picture into a held window the
     /// canvas draws. Writes nothing; publishes once, so the canvas cuts its live picture around the

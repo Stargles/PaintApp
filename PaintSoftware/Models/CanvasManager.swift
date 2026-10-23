@@ -1931,7 +1931,7 @@ final class CanvasManager: ObservableObject {
         guard canvasEditDepth == 0 else { return }
         canvasEditDepth += 1
         defer { canvasEditDepth -= 1 }
-        settlePendingCelContentProcedure()
+        settlePendingLiquifyProcedure()
         commitInteractiveFill()
         commitInteractiveShape()
         // Last in the list, because the text overlay draws above the shape overlay and committing
@@ -4664,7 +4664,7 @@ final class CanvasManager: ObservableObject {
     /// one is committed so it becomes a real step the following `undo()` reverts, instead of the
     /// undo silently hitting the previous action while it lingers.
     private func finalizePendingGesturesForHistoryAction() {
-        settlePendingCelContentProcedure()
+        settlePendingLiquifyProcedure()
         // A drag still open on a Move box is dropped, like the fill and the shape under a finger
         // below; `cancelBoxNudge` says why it is not settled instead.
         cancelBoxNudge()

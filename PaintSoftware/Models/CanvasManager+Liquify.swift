@@ -12,7 +12,7 @@ struct LiquifySession {
     let oldRaster: RasterLayerTexture
     let oldBaked: UIImage?
     let pixelSnapshot: CelPixelSnapshot?
-    let recipeSnapshot: CelRecipeSnapshot?
+    let recipeSnapshot: LiquifyRecipeSnapshot?
     let elementsBefore: [VectorElement]
     let recipeBefore: InterpolationRecipe?
     let rewriting: Set<UUID>
@@ -34,6 +34,11 @@ struct LiquifySession {
 }
 
 extension CanvasManager {
+    func settlePendingLiquifyProcedure() {
+        guard let edit = liveCelContentEdit else { return }
+        edit.procedure?.settlePending(edit.elements)
+    }
+
     func beginLiquify(layerID: UUID, profile: ToolProfile, size: CGFloat, seed: UInt64) -> LiquifySession? {
         beginCanvasEdit()
         guard let layer = layers.firstIndex(where: { $0.id == layerID }),
@@ -63,7 +68,7 @@ extension CanvasManager {
             gesture.captures = InterpolationEvaluator.liquifyCaptures(recipe: recipe, content: interpolationContentProvider, subject: elements, guides: guideStrokes)
         }
         let pixelSnapshot = CelPixelSnapshot(cel: cel)
-        var recipeSnapshot: CelRecipeSnapshot?
+        var recipeSnapshot: LiquifyRecipeSnapshot?
         if let recipe = cel.interpolation, let canvasSize, recipe.references.count >= 2 {
             let span = CGFloat(recipe.references.count - 1)
             let segment = min(max(Int((recipe.spacing.eased(recipe.t) * span).rounded(.down)), 0), recipe.references.count - 2)
@@ -71,7 +76,7 @@ extension CanvasManager {
             for reference in recipe.references[segment...segment + 1] {
                 for ref in reference.cels { content[ref] = interpolationContentProvider(ref) }
             }
-            recipeSnapshot = CelRecipeSnapshot(recipe: recipe, content: content,
+            recipeSnapshot = LiquifyRecipeSnapshot(recipe: recipe, content: content,
                 guides: guides(driving: recipe), options: interpolationOptions, size: canvasSize)
         }
         return LiquifySession(layerID: layerID, celID: cel.id, vector: cel.vector,
@@ -93,13 +98,13 @@ extension CanvasManager {
         if let old = recipeSnapshot {
             var recipe = old.recipe
             recipe.deformations.append(session.gesture)
-            recipeSnapshot = CelRecipeSnapshot(recipe: recipe, content: old.content, guides: old.guides,
+            recipeSnapshot = LiquifyRecipeSnapshot(recipe: recipe, content: old.content, guides: old.guides,
                                               options: old.options, size: old.size)
         }
         let held = HeldEdit.celContent(LiveCelContentEdit(layerID: session.layerID, celID: session.celID,
             vectorCanvas: session.vector, pixelSnapshot: session.pixelSnapshot,
             window: session.window, rewriting: session.rewriting, elements: session.elementsBefore,
-            tick: session.tick, procedure: CelContentProcedure(deformation: session.gesture,
+            tick: session.tick, procedure: LiquifyProcedure(deformation: session.gesture,
                 selectedIDs: session.selectedIDs, poses: session.poses,
                 pixelSnapshot: session.pixelSnapshot, window: session.window, recipeSnapshot: recipeSnapshot,
                 canvasSize: session.oldRaster.size, renderSource: session.renderSource, placement: session.placement)))
@@ -155,6 +160,6 @@ extension CanvasManager {
         }
         // Normal lift waits for the matching picture. Explicit mutation boundaries and headless
         // callers settle this same producer before their own document write.
-        if onHeldPictureMoved == nil { settlePendingCelContentProcedure() }
+        if onHeldPictureMoved == nil { settlePendingLiquifyProcedure() }
     }
 }

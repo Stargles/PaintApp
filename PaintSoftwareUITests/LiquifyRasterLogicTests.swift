@@ -279,7 +279,7 @@ final class LiquifyRasterLogicTests: XCTestCase {
         let window = CGRect(x: 20, y: 10, width: 12, height: 12)
         let gesture = LiquifyDeformation(brush: TestBrushes.hardRound, size: 16, power: 0,
             mode: .push, seed: 4, samples: StrokeSamples([VectorSample(x: 24, y: 16)], channels: .pressureOnly))
-        let procedure = CelContentProcedure(deformation: gesture, selectedIDs: nil, poses: [:],
+        let procedure = LiquifyProcedure(deformation: gesture, selectedIDs: nil, poses: [:],
             pixelSnapshot: try XCTUnwrap(CelPixelSnapshot(cel: cel)), window: window,
             canvasSize: size, placement: placement)
         let picture = try XCTUnwrap(procedure.contentPicture([]))

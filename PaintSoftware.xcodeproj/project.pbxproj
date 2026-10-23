@@ -13,7 +13,7 @@
 		F4063D61B50F41A59228B4FD /* PaintSoftwareUITests/LiquifyRasterLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D52B460221794C24B5EDB0E5 /* PaintSoftwareUITests/LiquifyRasterLogicTests.swift */; };
 		B03B843A1C7147198B6BB79E /* PaintSoftware/Views/CelContentRevisions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92A8C8757E22443F91D33A78 /* PaintSoftware/Views/CelContentRevisions.swift */; };
 		4E3721F3A00D4B7A9DBEE3DF /* PaintSoftware/Engine/CelPixelSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = B796126777384E0DB8F910F6 /* PaintSoftware/Engine/CelPixelSnapshot.swift */; };
-		DA0D1A4347DD45489C91E1DB /* PaintSoftware/Models/PresentedProcedure.swift in Sources */ = {isa = PBXBuildFile; fileRef = B535D2F9256A4F40A65D9B96 /* PaintSoftware/Models/PresentedProcedure.swift */; };
+		DA0D1A4347DD45489C91E1DB /* PaintSoftware/Models/LiquifyProcedure.swift in Sources */ = {isa = PBXBuildFile; fileRef = B535D2F9256A4F40A65D9B96 /* PaintSoftware/Models/LiquifyProcedure.swift */; };
 		DEC0DEF17800000000000008 /* PaintSoftware/Services/ProjectRecipeMetadata.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DEF17800000000000007 /* PaintSoftware/Services/ProjectRecipeMetadata.swift */; };
 		DEC0DEF17800000000000006 /* PaintSoftwareUITests/Fixtures/liquify-before-deformation.paintproj in Resources */ = {isa = PBXBuildFile; fileRef = DEC0DEF17800000000000005 /* PaintSoftwareUITests/Fixtures/liquify-before-deformation.paintproj */; };
 		482D432E592645E4B96B36C7 /* PaintSoftwareUITests/Fixtures/stream-before-placement.paintproj in Resources */ = {isa = PBXBuildFile; fileRef = 2B60FCE756B2482FAB6119B1 /* PaintSoftwareUITests/Fixtures/stream-before-placement.paintproj */; };
@@ -679,7 +679,7 @@
 		D52B460221794C24B5EDB0E5 /* PaintSoftwareUITests/LiquifyRasterLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftwareUITests/LiquifyRasterLogicTests.swift; sourceTree = "<group>"; };
 		92A8C8757E22443F91D33A78 /* PaintSoftware/Views/CelContentRevisions.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Views/CelContentRevisions.swift; sourceTree = "<group>"; };
 		B796126777384E0DB8F910F6 /* PaintSoftware/Engine/CelPixelSnapshot.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/CelPixelSnapshot.swift; sourceTree = "<group>"; };
-		B535D2F9256A4F40A65D9B96 /* PaintSoftware/Models/PresentedProcedure.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/PresentedProcedure.swift; sourceTree = "<group>"; };
+		B535D2F9256A4F40A65D9B96 /* PaintSoftware/Models/LiquifyProcedure.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/LiquifyProcedure.swift; sourceTree = "<group>"; };
 		DEC0DEF17800000000000007 /* PaintSoftware/Services/ProjectRecipeMetadata.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Services/ProjectRecipeMetadata.swift; sourceTree = "<group>"; };
 		DEC0DEF17800000000000005 /* PaintSoftwareUITests/Fixtures/liquify-before-deformation.paintproj */ = {isa = PBXFileReference; lastKnownFileType = folder; path = "PaintSoftwareUITests/Fixtures/liquify-before-deformation.paintproj"; sourceTree = SOURCE_ROOT; };
 		2B60FCE756B2482FAB6119B1 /* PaintSoftwareUITests/Fixtures/stream-before-placement.paintproj */ = {isa = PBXFileReference; lastKnownFileType = folder; path = "PaintSoftwareUITests/Fixtures/stream-before-placement.paintproj"; sourceTree = SOURCE_ROOT; };
@@ -1781,7 +1781,7 @@
 				92A8C8757E22443F91D33A78 /* PaintSoftware/Views/CelContentRevisions.swift */,
 				A43D60939A504EDEB69E4D85 /* PaintSoftware/Engine/CelContentPicture.swift */,
 				B796126777384E0DB8F910F6 /* PaintSoftware/Engine/CelPixelSnapshot.swift */,
-				B535D2F9256A4F40A65D9B96 /* PaintSoftware/Models/PresentedProcedure.swift */,
+				B535D2F9256A4F40A65D9B96 /* PaintSoftware/Models/LiquifyProcedure.swift */,
 				06ADB8F8EC4D96B1C36DE807 /* PaintSoftware/Engine/BrushTable.swift */,
 				F89D44EB9460EE82F85D8C0E /* PaintSoftware/Engine/BrushTexture.swift */,
 				4B5379F7B114FC84D7AB2328 /* PaintSoftware/Engine/BrushModulation.swift */,
@@ -2185,7 +2185,7 @@
 				B03B843A1C7147198B6BB79E /* PaintSoftware/Views/CelContentRevisions.swift in Sources */,
 				E1E342750E0F4D8FB48E8FD4 /* PaintSoftware/Engine/CelContentPicture.swift in Sources */,
 				4E3721F3A00D4B7A9DBEE3DF /* PaintSoftware/Engine/CelPixelSnapshot.swift in Sources */,
-				DA0D1A4347DD45489C91E1DB /* PaintSoftware/Models/PresentedProcedure.swift in Sources */,
+				DA0D1A4347DD45489C91E1DB /* PaintSoftware/Models/LiquifyProcedure.swift in Sources */,
 				C7D0623F169FBB5B502CDBB4 /* PaintSoftware/Engine/BrushTable.swift in Sources */,
 				A48C7D4BA464392E8689AD01 /* BrushTableLogicTests.swift in Sources */,
 				E83DDD42000B6D7FCD422333 /* PaintSoftware/Engine/BrushTexture.swift in Sources */,
