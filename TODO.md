@@ -106,10 +106,11 @@ temporary adapter oracle with actual exposed transform geometry, preserving move
 and inspecting the full picture. Root reviewed the exact external corrections and authorized guarded build3/restoration, then affected
 four legacy checks and Liquify2 only after preceding gates pass. Expected4/2, zero skips; stop on a real
 failure. No repeat of passed playback/native benchmark. Build3 clean/build/seal/profile verification
-and full source restoration passed. Legacy attempt2 was cancelled before any selected method after deviceprep explicitly reported locked;
-its synthetic cancellation is not a feature failure. The owner now confirms "Ready — unlocked and awake".
-Resume affected legacy4 immediately from build3 frozen products, then Liquify2 only if all four pass;
-use new result paths and fresh seal/profile verification, no rebuild. No Liquify invocation followed.
+and full source restoration passed. Legacy attempt2 was cancelled before any method because the iPad was locked. After fresh owner
+unlock, legacy3 ended4 total=2 passed/2 failed/0 skipped: transformed raster stroke and graph-node drag
+passed unchanged (graph36 updates/2 passes). Move's held-picture predicate failed; grey stopped on
+its off-paper coordinate premise before pan. No Liquify invocation followed. Diagnose actual frames,
+held samples and screen/AX coordinate spaces before any correction/rebuild; no weakening or blind retry.
 No settings/library reset or preset changes. Preserve disposable scenes and full pictures. Native
 component cost is separate from app gesture latency. Keep one-shot repairs until real scenes are
 confirmed. HANDOFF has the exact next steps and evidence locations. Remove this item only with the

@@ -59,22 +59,29 @@ xcresult1 synthetic "Testing was canceled" is not a selected feature failure. No
 no Liquify/retry. Source753 hashes and all8 restorations exact; no owned process remains. Evidence:
 `physical-legacy-2/{report.txt,final-status.json,source-checkpoint.json,cancellation.json}`.
 
-The owner has now replied **"Ready — unlocked and awake"**. Resume immediately from build3 frozen
-products after fresh seal/profile check, in a new physical-legacy-3 evidence directory. Architecture
-agent owns native/DD for affected legacy4 then Liquify2 only if all four pass; root remains native-idle.
-Do not rebuild, rerun accepted playback/native benchmark, or loosen any assertion. Stop/report any
-real failure; preserve pictures and scratch identities where exposed.
+After fresh owner unlock, physical-legacy-3 ended **4 total=2 passed/2 failed/0 skipped**, exit65.
+Transformed raster stroke and graph-node drag passed unchanged; graph exposed36 updates over2 passes.
+Move reached its actual held-pixel oracle and failed (old ink blank AND destination>50ink while held).
+Grey stopped before pan at off-paper premise: finger+travel627pt is not<paperLeft561.6704. No Liquify
+invocation/retry followed. Preserve these real outcomes, not green qualification. Native/DD is idle.
+Architecture agent preserves pictures/sample counts and diagnoses read-only; fresh focused coordinate
+agent independently audits gesture-versus-sampler coordinate conventions. Hypothesis to test first:
+XCUICoordinate.screenPoint and measured AX CGRect differ under physical landscape orientation. With
+AXframe{{56,0},{1024,810}}, a0.22 finger coordinate plus60pt would normally be341pt, not627pt. Do not
+call this a product bug or loosen assertions before inspecting actual frames/coordinates. No edits,
+new build or retry authorized yet. Frozen build3 and accepted native benchmark remain preserved.
 Build3 frozen xctestrun SHA: `125bd30baf4a3567a173fd9b4b6313ba83b661e6490898db94b386ca8ae28da9`.
 
 ## Next
 
-1. Owner readiness is fresh. Run affected legacy4 from already-compiled device-build-3 after fresh
-   seal/profile check, then Liquify2 on success. Use new physical-legacy-3 result paths; attempt2 is
-   a cancelled pre-method lock blocker, not a feature result. No rebuild merely to resume.
-2. Rerun only affected legacy checks with corrected physical premises, then the two safe unseeded
-   vector/raster Liquify Push workflows. Preserve full pictures and disposable-scene identities.
-   Do not repeat the accepted cold sampler measurement. Hardware UDID
-   `00008030-000151492EC3C02E`; devicectl ID `E3B83820-DF74-5042-B52B-0D5BA17E4877`.
+1. Diagnose the two physical-legacy-3 failures from actual frames, coordinate spaces and held sample
+   counts. Seek one shared adapter root cause. Preserve every assertion/threshold/deadline and the
+   original fixture. Review and record any correction before rebuild/retry. Two passing legacy checks
+   and the accepted benchmark need not be repeated if their production source remains unchanged.
+2. After corrected physical legacy qualification, run the two safe unseeded Liquify Push workflows.
+   Preserve full pictures and disposable-scene identities. Build3 frozen products are archived;
+   hardware UDID `00008030-000151492EC3C02E`, devicectl ID
+   `E3B83820-DF74-5042-B52B-0D5BA17E4877`.
 3. Only after physical qualification, clean/build the restored Release with matching arguments,
    strict seal and current five-day profile verification; install and launch normally. Keep one-shot
    repairs until the owner confirms real scenes. Prior-writer/fault evidence already exists under
