@@ -43,9 +43,9 @@ native9 controls show the settled landscape toolbar, Size/Power and all3 modes u
 `~/PaintWork/s50-liquify/release-ui/{raster-vector-1,controls9-1}/`. Documents copies89/5 files are
 hash-verified. The controls test itself passed; its post-run archive initially met Xcode's shut-down
 simulator and recovered Documents offline without another launch. Both owned simulators are being deleted.
-Remove the raster cold test's trailing rotation/layer-panel toggles/photo: that unasserted capture
-still catches rotation midflight. Keep the valid portrait reopen picture and settled native9 controls
-proof; preserve every existing test assertion. Then freeze source for final gates.
+The raster cold test's trailing rotation/layer-panel toggles/photo are removed at `0cabd6c`: that
+unasserted capture caught rotation midflight. The valid portrait reopen picture, settled native9
+controls proof and every existing assertion remain. Source is frozen for final gates.
 
 The verified inventory is 5282 fast tests across 256 selected classes and 5864 full tests, excluding three
 private static helpers. This is a census, not a claim that new final gates have passed. Material, raster
@@ -71,7 +71,7 @@ failures serially as CLAUDE.md specifies.
 
 ## Next
 
-1. Remove only the invalid raster end-rotation capture steps, then hand DD/native to the fast-tier agent.
+1. Hand DD/native to the fast-tier agent once the UI agent finishes deleting its owned simulators.
 2. Run final fast Debug/Release, then one phase-boundary full suite in Release to qualify the shipped
    configuration. Rules do not mandate a full-suite configuration; simulator test seeds remain enabled
    in Release. This does not relabel the known Debug linked timeout as passing.
