@@ -43,11 +43,12 @@ Preserve current iPad artwork; no physical device launch, restart or install occ
 ## Combined branch and current work
 
 - Lead/root combined tree `~/PaintWork/PaintApp-s52-vector-points`, branch tmp/s52-vector-points,
-  currently b7b1ae36 (saving + vector cleanup + initial repair). Read-only pending repair follow-ups.
+  currently60479341 (saving + vector cleanup + initial repair + round-dot UI regression). Its two
+  UI-only commits must be rebased onto the completed repair branch before combined qualification.
 - Active native/build/repair tree `~/PaintWork/PaintApp-s52-vector-repair`, branch tmp/s52-vector-repair,
-  includes follow-ups through4e3d2ad5. Agent retire_file_repairs owns native; simulator
+  includes follow-ups throughb56900d2. Agent retire_file_repairs owns native; simulator
   88DFDBE7-FE41-4533-9E22-E077D56C9A14, serial simlock, DD
-  `~/PaintWork/s52-vector-points/integration/DerivedData`. Focused repair build/test is in progress;
+  `~/PaintWork/s52-vector-points/integration/DerivedData`. Focused repair/backup build is in progress;
   no Debug/Release fast tier yet. Coordinate before any other compiler/simulator job.
 - Saving tree `~/PaintWork/PaintApp-s52-saving-fix`, tmp/s52-saving-fix, clean4079a1c2.
 - Old writer tree `~/PaintWork/PaintApp-s52-format-baseline`, clean1c5c422e. Actual old production
@@ -55,23 +56,31 @@ Preserve current iPad artwork; no physical device launch, restart or install occ
   source/resource/PBX files restored exactly. Evidence under s52-vector-points/baseline/.
 - Root records/diagnostics tree `~/PaintWork/PaintApp-s52-erase-crash`, tmp/s52-erase-crash.
 
-**Temporary saved-format repair is not ready.** Current vector/recipe codecs require geometryVersion1
-and no material fields. Converter stages/validates packages, protects original update copies, converts
-all Projects/Backups/Trash plus newly made snapshots, atomically exchanges paths, rolls back on failure,
-then advances signature/prunes. No old decoder in normal models. Actual previous-writer fixture resource
+**Temporary saved-format repair is not qualified.** Current manifest/vector/recipe codecs require
+geometryVersion1 and no material fields. Converter strictly enumerates all Projects/Backups/Trash,
+protects original update copies and stages/validates packages before atomic exchanges. Sibling owner
+records pair source/stage directory identities; errors preserve both sides for restart. Before swaps
+and destructive cleanup, recheck both identities, owner records and current strict package validation.
+Cleanup precedes signature/pruning, since retention can remove backup addresses. No normal decoder
+reads the old format. Actual previous-writer fixture resource
 includes six packages; ordinary pixel oracles use the previous reader's reopened Distort/bake thumbnails,
 not pre-save in-memory thumbnails (old quantization changes even plain ink). Gesture brushes are full
 Brush values; ordinary stroke brushes are package references. Do not invent a remap for full gestures.
 
-Independent review caught three repair defects now assigned for correction:
-- Tolerant package census follows parent-folder symlinks/loops, permitting conversion outside root.
-- It swallows folder-listing errors, permitting hidden unconverted backups and early signature/prune.
-- Parsing damaged current JSON before startup maintenance can block existing valid-backup recovery.
-Use a strict census and a clean package-format boundary to preserve current recovery; no compatibility
-flags, silent defaults or special corrupted-filename exemptions. Root/lead are reviewing the design.
-Two compile-only issues were fixed (extra assumeIsolated call parentheses, duplicate MainActor attrs).
-Native tests have not established the new implementation is green yet. Root owns PBX edits, done for
-StrokePlacement, repair service/test and fixture; re-check unique ids after integration.
+Independent review caught unsafe census, recovery and error-cleanup paths. Working corrections now
+reject folder/package links, propagate listing failures and preserve ambiguous unreadable manifests
+unchanged for existing recovery. Convert other known-old backups first; current valid backup restores,
+no-backup remains a damaged gallery tile. Same-basename recovery now requires exactly one match.
+No compatibility flag or special corrupted-filename exemption. Independent review ofb56900d2 pending.
+The prior native focused batch executed20 repair methods:19 passed; one failed six unrelated manifest
+number comparisons. Validate then insert the new marker into original manifest bytes, preserving
+unrelated wire values; exact assertions retained. Final focused batch now selects33 repair methods plus
+backup/location classes. Native baseline and committed-source mutations are still outstanding. Root
+owns PBX edits, done for StrokePlacement, repair service/test and fixture; re-check ids after integration.
+
+New round-dot cold UI regression60479341 taps one wide ordinary round dab, Pushes it sideways, then
+requires visible movement with unchanged round diameter/coverage and full uncropped measurement bounds.
+Not run yet. Runtime mutation/selectors plan: `~/PaintWork/s52-vector-points/runtime-qualification-plan.md`.
 
 Next: finish safety fixes/review; focused baseline + committed-source mutation proof; real preserved
 library conversion on a copy; exact fast tiers Debug/Release with static reconciliation/lints; cold UI
