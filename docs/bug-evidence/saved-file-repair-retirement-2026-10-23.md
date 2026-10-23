@@ -45,6 +45,18 @@ validation faults went red, and restored source passed. Actual exporter source a
 methods: Mac baseline/restored 4/4, five deliberate faults red. Raw logs remain under
 `~/PaintWork/s51-cleanup/{repair-qualification,export-qualification}/`.
 
-Final fast Debug passed: **5,251 total = 5,247 passed + 4 skipped**, zero failures, matching the
-254-class static census. Final Release and recovery/keyframe UI are pending. Full-suite static census
-is 5,833; three private static `testBrush` factories are excluded.
+Final fast **Debug and Release each passed 5,251 total = 5,247 passed + 4 skipped**, zero failures,
+matching the 254-class static census. Full-suite static census is 5,833; three private static
+`testBrush` factories are excluded. Both UI lints pass (85 symbols/137 helpers); PBX has 1,314 unique
+object definitions and passes plutil.
+
+Release UI **3/3 passed**: `GalleryRecoveryUITests` (automatic backup recovery and Recently Deleted
+restore), plus `TransformKeysSurviveUITests` (Move keys, bake beneath them, save and cold reopen).
+All three retained keyframe screenshots were reviewed: Move box with diamonds, keyed picture after
+bake and the changed picture at the reopened second key. Owner-size gallery capture is pending.
+
+The full UI suite and physical gestures were not repeated for this cleanup. The prior unchanged
+Liquify/input/rendering qualification remains indexed under `~/PaintWork/s50-liquify/`; this change
+alters saved-file startup/restore validation and the diagnostic copy helper. Every tracked source,
+resource and project file (723) is frozen for final device-build comparison. No temporary audit or
+orientation adapter remains in the source.

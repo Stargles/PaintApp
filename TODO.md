@@ -56,23 +56,6 @@ their files are repaired. Build `2974b33` broke this rule and lost the owner's k
 
 ---
 
-## Clean up the qualification leftovers — 2026-10-23
-
-Owner confirms the existing artwork "looks right", satisfying the saved-format repair retirement gate.
-Remove obsolete one-shot file repair implementations, wiring and repair-only tests cleanly; retain
-current-format validation and update-backup creation. `LibraryRepair` and the five `Legacy*Repair`
-services are the retirement seam. Canvas recognizer repair and project-location migration are live
-features and remain. The pre-update ZIP backup is preserved under
-`~/PaintWork/s50-liquify/device-backup-2/external-library/`.
-
-Owner also reports "there is a lot of test stuff though which didnt delete", specifically in the
-PaintApp scene gallery. Owner chose manual cleanup and now confirms “done, all of them are deleted.”
-No further gallery deletion is needed. Do not infer that an arbitrary Untitled scene is disposable.
-Fix the test lifecycle so physical checks do not leave more gallery scenes behind. Any temporary
-cleanup mechanism must be removed after use, with no permanent debug hook or legacy path.
-
----
-
 ## (27) Stream the computer's screen as a layer
 
 **Status** — briefed 2026-09-13, designed the same day ([STREAM.md](docs/STREAM.md)), and **built through
