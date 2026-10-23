@@ -62,7 +62,11 @@ their files are repaired. Build `2974b33` broke this rule and lost the owner's k
 
 Liquify remains unmerged and is not on the iPad. Integration branch `tmp/s49-integration` is at `c78aac8`, consolidating the old sole-consumer presenter with the Liquify procedure. No new cache, renderer or generic producer remains; keep useful feature-scoped state where it serves the workflow, with existing synchronization, cancellation and single-producer behavior. The focused Debug compile gate is running under a separate agent. The linked-frame diagnostic is complete and exactly restored: all 815 readable probes were sampled each poll; three changed through the 15.546-second timeout, and a later still showed 141 changed. Keep the gesture, predicate and timeout unchanged. Next is the unchanged current Release gate after the compile gate; do not repeat Debug for this symptom.
 
-The verified census is 5282 fast tests across 256 UI classes and 5864 full tests, excluding three private static helpers. The owner confirmed the Mac is idle. Still open: quiet optimized Release batching cost, sampler C physical first-use cost, final regression/feature gates, and physical iPad qualification. The five-method device patch and native cold/warm benchmark are prepared but not compiled or run; get fresh saved/unlocked device readiness before physical work. Evidence is indexed in `HANDOFF.md` and `~/PaintWork/s49-liquify-logs/`.
+The verified census is 5282 fast tests across 256 selected classes and 5864 full tests, excluding three private static helpers. The owner confirmed the Mac is idle. Still open: quiet optimized Release batching cost, sampler C physical first-use cost, final regression/feature gates, and physical iPad qualification. The five-method device patch and native cold/warm benchmark are prepared but not compiled or run; get fresh saved/unlocked device readiness before physical work. Evidence is indexed in `HANDOFF.md` and `~/PaintWork/s49-liquify-logs/`.
+
+Correct the native iPad9 controls capture by starting the existing modes test in landscape before
+launch, removing its final midflight rotation, and retaining its existing assertions plus one final
+full-screen picture. Keep one-shot repairs until the owner confirms real scenes after installation.
 
 *"It should be placed to the left of the brush tool in the top menu. When selected, it acts sort of like
 a brush (you can control the brush type, size, etc), and otherwise it does basically what a normal

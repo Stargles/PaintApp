@@ -28,7 +28,7 @@ later still showed 141 changed. Preserve the gesture, predicate and timeout. The
 unchanged current Release gate after the focused compile gate completes; do not run another Debug
 diagnostic for this symptom. Owner confirmed the Mac is idle.
 
-The verified inventory is 5282 fast tests across 256 UI classes and 5864 full tests, excluding three
+The verified inventory is 5282 fast tests across 256 selected classes and 5864 full tests, excluding three
 private static helpers. This is a census, not a claim that new final gates have passed. Material, raster
 and storage/model evidence is indexed under `~/PaintWork/s49-liquify-logs/`: required-picture refusal
 baseline/restored 4/4 with both fault batches caught; material 55/55; corrected raster refusal 3/3 after
@@ -40,6 +40,15 @@ The five-method physical drive patch and native cold/warm sampler benchmark are 
 compiled or run. Ordinary device helpers reset preferences and libraries; inspect the safe patch before
 use. Get fresh saved/unlocked iPad readiness before physical work. Preserve screenshots and scene
 packages. Existing physical and benchmark material is indexed under `~/PaintWork/s49-liquify-logs/`.
+
+Keep the one-shot format repairs until the owner confirms real scenes look right. Run the final
+executable's repair signature so preserved preupdate snapshots are converted too; the current
+signature's own backup intentionally retains the previous format. Prior-writer package provenance
+and fault/restoration evidence remain under `~/PaintWork/evidence/s49-liquify-material-{format,model}/`.
+Linked timing diagnosis: `~/PaintWork/s50-liquify/linked-ui-diagnosis.md`. Final gate scripts and safe
+physical patch: `~/PaintWork/s49-liquify-logs/combined/final/`. Final fast Debug/Release and full suite
+have not run at the current candidate; run the full suite once at the phase boundary, then triage
+failures serially as CLAUDE.md specifies.
 
 ## Next
 
