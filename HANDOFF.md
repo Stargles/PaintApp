@@ -45,12 +45,13 @@ On My iPad/PaintApp, outside that container. Apple developer transfer cannot rea
 group. Tailscale reaches the iPad, but bounded checks found no SSH/SMB/HTTP/WebDAV service; Desktop
 Commander lists only Windows. See `device-backup-2/tailscale-file-route-audit.md`.
 
-Owner is unsure about an existing Mac copy and prefers no manual action. Existing access routes were
-checked; a fresh archive transfer is now the remaining blocker before installation. Instructions given:
-Files → On My iPad → long-press PaintApp → Compress → AirDrop ZIP to Julia’s MacBook Pro. Keep source
-folder untouched. Owner now confirms the AirDrop; `/Users/juliapark/Downloads/PaintApp.zip` is present (327,981,935 bytes). Validate and preserve ZIP,
-structure and hashes before treating external coverage as complete. Do not weaken this into an
-assumption that container Documents or Tailscale alone covers the selected library.
+The owner AirDropped the current PaintApp folder ZIP. It is preserved under device-backup-2/external-library:
+327,981,935 bytes, matching source/copy SHA; all 3,830 members streamed with CRC/SHA and safe-path checks.
+Actual Projects/Backups/Trash structure is present (Trash empty). The old September9 container Export
+index is not a current external-library inventory; its mismatches are not omissions. coverage.json
+records the verification basis/limits. Backup gate is satisfied; proceed with physical benchmark FIRST,
+then legacy5 and Liquify2 from frozen products. Root hands native/DD to the architecture agent for
+these runs, stopping on any real failure; no source changes or destructive resets.
 Hardware UDID `00008030-000151492EC3C02E`; devicectl ID `E3B83820-DF74-5042-B52B-0D5BA17E4877`.
 
 ## Next
