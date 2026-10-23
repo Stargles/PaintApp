@@ -39,7 +39,7 @@ returned to root. Report: `~/PaintWork/s50-liquify/device-build-1/report.txt`.
 
 On 2026-10-23 the owner confirmed the scene saved and iPad unlocked/awake. Resume now. Preferences now confirm On My iPad/PaintApp as the external library. Container Documents is backed
 up and hashed (134 files,19,662,670 bytes), but external coverage is unconfirmed; direct developer
-file access failed. A Mac-copy/fresh-transfer question is pending. Named-device clean passed in
+file access failed. The owner is unsure about a Mac copy and wants no manual action; investigate existing Tailscale/file-access routes before requesting a transfer. Named-device clean passed in
 device-build-2 and compilation is active under the architecture agent, build only; no install/launch. Hardware UDID:
 `00008030-000151492EC3C02E`; devicectl ID: `E3B83820-DF74-5042-B52B-0D5BA17E4877`.
 
