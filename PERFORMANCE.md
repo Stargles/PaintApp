@@ -6517,8 +6517,8 @@ The original Core Graphics high draw, measured afterward against the same full s
 medians 8.63 ms/window and 21.91 ms/whole picture. Its retained caches therefore cannot contaminate
 the sampler retention run. The sampler's **first window draw was 523 ms**, including first access to
 the Metal engine and pipeline creation; that cost was not separately profiled. The first whole
-picture was 38.75 ms. Actual app first use and physical-device cost remain required integration
-checks; the sampler benchmark does not include the adapter's base/patch composition callback.
+picture was 38.75 ms. Actual app first use remains an integration check. The physical adapter measurement below includes
+base/patch composition; this earlier simulator sampler benchmark does not.
 
 After warmup, 100 window draws took process footprint from 50,088,216 to 52,250,904 bytes, peak 52,283,672:
 **2,162,688 bytes final rise**, including the test runner/driver. A separate production-source Mac
@@ -6534,3 +6534,36 @@ all 11 restored Mac tests pass. The final source delta removes only temporary bo
 exceptional CPU horizon scan, using scalar extrema and `CollectionOfOne`; full native gates on the
 combined app remain the integration owner's responsibility. Evidence and exact run provenance are
 in `~/PaintWork/s49-liquify-logs/raster/sampler/QUALIFICATION.md` and its adjacent xcresults/logs.
+
+### Physical native adapter — MEASURED 2026-10-23
+
+Release on the owner's iPad9 (iPadOS26.6.2): **1/1 passed, zero skips**. A fresh native runner executed
+this method first and alone. The owner had confirmed the Mac free; runtime CPU/thermal quietness was
+not sampled. Build inventory HEAD1739397 and execution HEADd64c7fe differ only in documentation;
+all753 qualified app/test/project hashes matched. Evidence:
+`~/PaintWork/s50-liquify/physical-benchmark-2/{raw-records.txt,summary.json,picture-review.json}`.
+
+The production cel-content adapter draws a2048×1024 fractional-alpha fixture at0.73 scale with rotation.
+The448×448 affected output window took **428.577ms process-cold**, then **17.177–18.066ms** across four
+warm calls (median17.898ms). The cold interval includes lazy engine/pipeline access, normalization,
+upload/readback and private drawing; shader compilation is not isolated. Whole1624×1024 output took
+105.100ms warm; the patched window took17.238ms warm. These are native component costs, not app
+startup, gesture latency or first visible presentation. Actual physical drawing workflows remain separate.
+
+Separate **untimed** callback probes count requested work, not unique source coverage:
+
+| Output | Tiles | Requested source pixels | Peak sampler working bytes | Destination RGBA8 bytes |
+|---|---:|---:|---:|---:|
+|448×448 window|1|553,536|9,050,880|802,816|
+|1624×1024 whole|8|2,859,923|9,716,496|6,651,904|
+|448×448 patched window|1|553,536|9,050,880|802,816|
+
+Charges exclude caller-owned source/render surfaces and test oracles. Process footprint snapshots
+were19,924,328 bytes before cold,25,036,136 after four warm calls, and81,987,000 with fixtures/oracles
+still live. This is **not a retention test**; reuse the earlier dedicated100-draw evidence above.
+
+All exact pixel assertions passed, including cold/warm, local/full footprint edges, fractional-alpha
+premultiplication and held/committed composition. All138,804 fully covered window pixels agreed
+with the whole output (zero differing channels). All six exported PNGs were inspected and independently
+hash-checked; held and committed decoded images are identical. An initially blank batch-tool display
+was resolved by reopening the identical PNG alone, without changing source or repeating the run.
