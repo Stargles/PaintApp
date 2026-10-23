@@ -17,7 +17,8 @@ four mutations passed. Evidence: `docs/bug-evidence/auto-resign-2026-10-22.md` a
 
 Liquify is not merged and is not installed. Its integration source is `tmp/s49-integration`, currently
 at `c78aac8` for the ownership cleanup. That change consolidates the one-consumer presenter with the
-Liquify procedure. No new cache, renderer or generic producer remains. Do not remove useful
+Liquify procedure. The cleanup removes the generic wrapper and adds no renderer or cache. The spatial
+material renderer remains part of the existing VectorCanvas path, with tile-scoped work only. Do not remove useful
 feature-scoped state merely because one feature owns it; keep the existing synchronization,
 cancellation and one-producer behavior. Focused Debug compilation and all 25 lifecycle/raster tests
 passed at `c78aac8`, zero failures/skips; its owned simulator was deleted. Evidence:
