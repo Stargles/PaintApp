@@ -60,6 +60,20 @@ their files are repaired. Build `2974b33` broke this rule and lost the owner's k
 
 ---
 
+## Vector Liquify must move points only — 2026-10-23
+
+Owner reports that Liquify stretches strokes horizontally on vector layers and rules:
+“All that you had to do was to change the position of the points in the stroke, not apply
+transformations to them. I remember EXPLICITLY telling you this.”
+Audit the actual vector path and original brief/history against point-position editing through the
+normal stroke renderer. Identify and remove unnecessary vector-only deformation/material machinery
+rather than adding another mode or patch. No implementation cause is assumed from the observation.
+If prior appearance rulings conflict with point-only behavior, show the concrete difference and ask
+one plain-language decision; do not silently retain the unwanted transformation path. Raster Liquify
+and linked in-between support keep their existing rulings unless the new correction affects them.
+
+---
+
 ## Erasing strokes crashes on iPad — 2026-10-23
 
 Owner: “a crash just happened on the ipad when i was tryiong to erase some strokes.”
@@ -71,7 +85,8 @@ logs and the preserved Test1 copy; do not restart/reinstall PaintApp or request 
 until genuinely required. Preserve the real scene and backups. A new named crash report was not
 available in the root, Retired or synced Mac logs; no current Jetsam report or touch recording was
 found. Owner describes “the entire ipad crashed and homescreen”; return to Home Screen is confirmed,
-while app termination versus a wider system restart remains unestablished. The preserved Test1 has
+with a **black screen and loading spinner** before Home Screen. This may be wider than app
+termination; a system/interface restart is not yet proved. Check system/panic/watchdog/reset evidence. The preserved Test1 has
 no material operations and was saved with To Cross selected; reproduce this ordinary-ink path first.
 
 ---

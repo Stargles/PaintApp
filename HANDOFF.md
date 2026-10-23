@@ -16,16 +16,19 @@ relative folders so same-named packages cannot overwrite exported copies; no pro
 CLAUDE.md requires physical harnesses to record unique owned fixtures, Trash only those in teardown,
 preserve owner settings/libraries and verify fresh inventory before closeout.
 
-**New active report:** owner just experienced a crash while erasing strokes on the iPad, after the
-final Release installation below. Owner identifies **Test1**, with **no Liquify used on those strokes**. Actual crashing build/cause
-not established yet. Owner reports return to the iPad Home Screen (“the entire ipad crashed”). No
-current named app crash/Jetsam report was found in root/Retired/synced Mac logs. Preserved Test1 was
-saved with To Cross, Vector3/frame2,527strokes; no material operations in its six drawings. New task tree:
-`~/PaintWork/PaintApp-s52-erase-crash`, tmp/s52-erase-crash from origindf459377. First collect newest
-crash log/read-only diagnostics and correlate its executable UUID; preserve the scene/backups and
-avoid app restart/reinstall or another unlock request until genuinely required. TODO records the
-report before investigation. The prior cleanup qualification remains evidence, not proof against
-this new crash.
+**Two new active owner reports, superseding the parked state:**
+1. Vector Liquify visibly stretches strokes horizontally. Owner explicitly requires moving stroke
+   point positions through the normal brush renderer, not deforming brush marks/texture. Audit code
+   and original brief before implementation; remove excessive machinery cleanly, no extra mode/flag.
+2. Erasing in **Test1**, with **no Liquify used on those strokes**, led to a **black screen/loading
+   spinner then Home Screen**. Treat app-vs-system failure as unresolved; no new named app/Jetsam
+   report found in root/Retired/synced logs yet. Saved scene uses To Cross, Vector3/frame2,527strokes,
+   no material operations in its six drawings. Latest recording predates failure.
+
+Both reports are in TODO before work. Current diagnostic tree `~/PaintWork/PaintApp-s52-erase-crash`,
+branch tmp/s52-erase-crash. Raw read-only diagnostics and preserved-Test1 inventory under
+`~/PaintWork/s52-erase-crash/`. Preserve current device scene/backups; do not restart/reinstall the app
+without a concrete need. Prior cleanup tests do not establish either new report is fixed.
 
 **Previous cleanup checkpoint (complete).** Final normal Release **bcd7a6af** installed: clean/build0, all723 frozen
 files exact, strict deep signature verified. Profile expires **2026-10-30T00:18:54Z** (October29
