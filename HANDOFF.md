@@ -78,6 +78,12 @@ failures serially as CLAUDE.md specifies.
    was interrupted1430/5282 (1427passed, one genuine fixture failure, one cancelled test, one skip);
    Release did not start. Rerun complete fast Debug/Release in a fresh evidence directory; never cancel
    a configuration merely because a test fails, let its result/count finish and stop before the next.
+   Root owns running fast2 session2105 (`~/PaintWork/s50-liquify/fast-2/`). It has a further fixture
+   failure in FrameBakeKeyLogicTests.testEveryDocumentFieldTheKeyCoversMovesTheDigest: acquired and
+   retimed recipes have zero refs, so the new provider rightly refuses both. Arch agent's bounded scan
+   found no more positive identity fixtures. Let Debug finish, then fix this row with two existing
+   resolvable non-probe cels, preserve25 rows/assertions, and fault-prove omission of version.derived.
+   No production guard change and no source edit while the configuration is running.
 2. Run one phase-boundary full suite in Release to qualify the shipped
    configuration. Rules do not mandate a full-suite configuration; simulator test seeds remain enabled
    in Release. This does not relabel the known Debug linked timeout as passing.

@@ -86,6 +86,11 @@ test, one skip); it is not a qualified fast tier. The identity fixture repair `6
 lattices and all original assertions/cases; focused baseline/restored2/2 and a fault causing exactly
 the two group/spacing identity failures are verified. Production guard unchanged/file restored
 byte-exact. Rerun the whole final gates; let each configuration finish before stopping on failures.
+The complete second Debug attempt is running and exposed one further malformed identity fixture:
+FrameBakeKeyLogicTests' derived-acquisition row has zero source references. After this configuration
+finishes, give that row two existing resolvable cels, keep all25 rows/assertions unchanged, and prove
+that omitting the derived identity from the digest reproduces the intended acquired/retimed collision.
+The bounded related-fixture scan found no further positive identity cases needing this correction.
 
 *"It should be placed to the left of the brush tool in the top menu. When selected, it acts sort of like
 a brush (you can control the brush type, size, etc), and otherwise it does basically what a normal
