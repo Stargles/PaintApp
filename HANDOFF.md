@@ -47,8 +47,11 @@ Grey's temporary paperRect oracle is independently invalid: it always returns a 
 64×4096 document, so cannot report pan. Replace that adapter-only geometry with the actual exposed
 scale/rotation/offset applied to64×4096, preserving40pt/15pt movement and0.002 width assertions;
 label those exposed geometry, and inspect the full screenshot. No app or committed test source changes.
-Prepare guarded device-build-3 using prior build/restoration machinery; root reviews final grey delta
-before native execution. Frozen device-build-2 and accepted benchmark remain untouched.
+Root reviewed the final grey delta and all eight original SHA guards and authorized guarded
+`device-build-3` now. Architecture agent exclusively owns native/DD through clean/build-for-testing,
+restoration and frozen seal/profile verification, then affected legacy4 (exclude passed playback)
+and Liquify2 only if the previous gate passes. Expected4/2, zero skips; stop on any real failure.
+Root is native-idle. Frozen device-build-2 and accepted benchmark remain untouched.
 
 ## Next
 
