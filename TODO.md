@@ -132,6 +132,13 @@ found. Owner describes “the entire ipad crashed and homescreen”; return to H
 with a **black screen and loading spinner** before Home Screen. This may be wider than app
 termination; a system/interface restart is not yet proved. Check system/panic/watchdog/reset evidence. The preserved Test1 has
 no material operations and was saved with To Cross selected; reproduce this ordinary-ink path first.
+Read-only follow-up at19:22 retrieved JetsamEvent2026-10-23-184706. At18:47EDT, backboardd hit
+its per-process limit at1850MiB; PaintSoftware was active at730.4MiB/922.6MiB lifetime peak,
+UUID F6102F9A-6D31-3185-B078-47B4C41981D9, matching installedbcd7a6af. This report names
+backboardd as the recent termination; PaintSoftware has no kill reason. It is consistent with a
+system/interface failure but does not establish the reported event's time or the source of that
+process's memory. Inspect existing canvas/CoreAnimation surface ownership without a speculative fix.
+Raw report and summary: `~/PaintWork/s52-erase-crash/device-diagnostics/`.
 
 ---
 

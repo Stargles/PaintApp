@@ -30,9 +30,13 @@ Preserve current iPad artwork; no physical device launch, restart or install occ
    inventory, not physical shared-block measurement. Bounded Session47–51 audit found no other
    concrete dropped actionable ask. Evidence `~/PaintWork/s52-saving-audit/`.
 3. **Test1 erasing failure.** No Liquify used; black screen/loading spinner then Home Screen.
-   App-vs-system cause unresolved. Two read-only listings found the same40ips records with no matching
-   app/SpringBoard/Jetsam/panic report; privileged unified-log collection requires a password and was
-   not obtained. Preserved pre-failure Test1 has4096²,527strokes on Vector3/frame2, To Cross size7.962,
+   Root cause unresolved. Third read-only listing at19:22 found a new18:47EDT Jetsam report:
+   backboardd reached its per-process limit at1850MiB. Active PaintSoftware730.4MiB/922.6MiB peak,
+   UUID matches installedbcd7a6af, no PaintSoftware kill reason. This supports investigating system
+   display memory, but reported-event timing and allocation origin are unproved. No physical app
+   launch/restart/install. Earlier two listings had40ips and no matching report. Privileged unified
+   logging requires a password and was not obtained. Preserved pre-failure Test1 has4096²,
+   527strokes on Vector3/frame2, To Cross size7.962,
    no material data. Old-code Debug iPad9 simulator diagnostics2/2: cold gallery open/four real erase
    drags/Undo plus107 isolated cuts and107 continuous sites with repeated4096px renders. All isolated
    cuts executed; zero crash. Six pictures inspected; Undo showed “Undid erase”. Screenshot orientation
