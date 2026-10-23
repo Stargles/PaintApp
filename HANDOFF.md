@@ -24,7 +24,11 @@ cancellation and one-producer behavior. Focused Debug compilation and all 25 lif
 passed at `c78aac8`, zero failures/skips; its owned simulator was deleted. Evidence:
 `~/PaintWork/s50-liquify-producer-check-20261023T004538Z/`. Candidate `7e780d7` starts the existing
 controls workflow in landscape and removes its end rotation; assertions are unchanged. A delegated
-agent now owns the sole native/compiler slot for Release build and quiet actual-producer cost.
+agent owns the native slot through cost-result archival. Release build succeeded and its quiet
+actual-producer gate passed2/2, zero skips; all8 picture comparisons are exact and all18 frozen inverse
+fixtures match. Retain batching: hard/pattern producer medians are19.1%/23.3% of scalar reference cost.
+PERFORMANCE records simulator scope and remaining seconds-long worst case. Evidence:
+`~/PaintWork/s50-liquify/producer-release-1/`. Next root takes that simulator for linked Release UI.
 
 The linked-frame diagnostic has finished and its temporary instrumentation is exactly restored. All
 815 readable probes were sampled each poll; three changed before the 15.546-second timeout, and a
@@ -37,8 +41,8 @@ private static helpers. This is a census, not a claim that new final gates have 
 and storage/model evidence is indexed under `~/PaintWork/s49-liquify-logs/`: required-picture refusal
 baseline/restored 4/4 with both fault batches caught; material 55/55; corrected raster refusal 3/3 after
 one invalid fixture in the broader run; storage 115/115 and model restored 13/13. The accepted bounded
-sampler C is integrated. Quiet optimized Release batching cost and sampler C physical first-use cost
-remain open; prior Debug batching was slower than the scalar path, so make no speedup claim.
+sampler C is integrated. Sampler C physical first-use cost remains open. The earlier Debug batching
+slowdown is separate from the now-qualified optimized simulator result; no device speed claim.
 
 The five-method physical drive patch and native cold/warm sampler benchmark are prepared but not
 compiled or run. Ordinary device helpers reset preferences and libraries; inspect the safe patch before
@@ -56,7 +60,7 @@ failures serially as CLAUDE.md specifies.
 
 ## Next
 
-1. Finish the Release build and quiet actual-producer cost run; retain batching only if justified.
+1. Archive the passing Release cost run and hand its owned simulator/native slot to root.
 2. Run the unchanged linked Release workflow, then the corrected modes/controls method alone on a fresh
    native iPad 9 simulator; inspect its final full-screen landscape image.
 3. Continue final fast Debug/Release and phase-boundary full regression gates. Obtain fresh

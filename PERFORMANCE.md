@@ -6442,6 +6442,28 @@ lattice, copied-placement and current/previous-package round-trips. Result:
 `~/PaintWork/s49-liquify-logs/material-combined-1.xcresult`. These are allocation/work counts;
 this gate makes no simulator throughput claim.
 
+### Exact inverse batching — quiet Release qualification, 2026-10-22
+
+Candidate app/test source `7e780d7`, native arm64 iOS26.5 13-inch M5 simulator. The owner confirmed
+the Mac was idle; compilation had finished, with no other native/compiler job before measurement.
+The existing opt-in `LiquifyBench` ran two methods: 2 passed, zero failures/skips. It compares the same
+normalized source and scalar inverse with four actual `CelPixelSnapshot.liquifiedPatch` calls per brush.
+Fixture allocation, source normalization and byte comparisons are outside the production timing.
+
+| Brush | Output pixels | Velocity evaluations | Scalar warm seconds | Production four-take range / median seconds | Window byte charge + field bytes |
+|---|---:|---:|---:|---:|---:|
+| Round Hard | 67,100 | 48,236,266 | 0.9082 | 0.1655–0.1889 / 0.1733 | 1,633,808 + 19,504 |
+| Streaky | 84,956 | 179,020,536 | 8.0287 | 1.8168–2.1038 / 1.8681 | 2,063,952 + 90,928 |
+
+All eight production pictures have zero byte differences from the scalar reference. All18 smaller
+fixtures retain the qualified native RGBA hashes, exact scalar/batched source bits and evaluation
+totals, with no failed solves. The production medians are 19.1%/23.3% of the respective scalar costs,
+which justifies retaining batching. This is optimized simulator producer cost, not iPad gesture
+latency; the real long patterned window still takes seconds. The earlier Debug slowdown remains a
+valid Debug observation and is not substituted for this result. Exact records, source hashes,
+commands, pre-cost process/thermal state and verification:
+`~/PaintWork/s50-liquify/producer-release-1/{verified-cost.json,records.txt,cost.xcresult}`.
+
 ## 36. Bounded transformed raster filter — session 49 qualification
 
 The raster sampler uses the owner's accepted premultiplied Lanczos3 filter in global source/output
