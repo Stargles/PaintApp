@@ -125,7 +125,7 @@ enum PointGeometryRepair {
         guard census.stages.allSatisfy({ namedStages.contains($0.standardizedFileURL) }) else {
             throw Failure(reason: "An unowned format-repair copy was preserved for recovery.")
         }
-        for record in census.owners {
+        func validatedTarget(for record: URL) throws -> URL {
             let owner = try readOwner(record)
             guard !owner.originalName.contains("/"), !owner.originalName.isEmpty,
                   URL(fileURLWithPath: owner.originalName).lastPathComponent == owner.originalName,
@@ -159,8 +159,12 @@ enum PointGeometryRepair {
                   (FileManager.default.fileExists(atPath: target.path) ? try identity(target) : nil) == targetID else {
                 throw Failure(reason: "A format-repair pair changed during validation; its copies were preserved.")
             }
-            try removeOwned(target, record: record)
+            return target
         }
+        // A later malformed owner must not make an otherwise failed pass discard earlier copies.
+        // Validate the entire interrupted set first, then recheck each pair at its removal boundary.
+        for record in census.owners { _ = try validatedTarget(for: record) }
+        for record in census.owners { try removeOwned(try validatedTarget(for: record), record: record) }
     }
 
     private static func readOwner(_ record: URL) throws -> Owner {
