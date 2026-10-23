@@ -832,9 +832,12 @@ end with `tools/stream/stream-client-check.py --host 100.104.85.111` and the iPa
 ```bash
 source ~/.config/paintapp/.env      # KEYCHAIN_PASSWORD, SIGNING_IDENTITY, PROJECT_DIR, PROJECT_FILE, SCHEME
 security unlock-keychain -p "$KEYCHAIN_PASSWORD" ~/Library/Keychains/login.keychain-db
-xcodebuild build -project PaintSoftware.xcodeproj -scheme PaintSoftware -configuration Release \
-  -destination "platform=iOS,id=E3B83820-DF74-5042-B52B-0D5BA17E4877" -allowProvisioningUpdates \
-  -allowProvisioningDeviceRegistration -derivedDataPath build/DerivedData
+BUILD_ARGS=(-project PaintSoftware.xcodeproj -scheme PaintSoftware -configuration Release
+  -destination "platform=iOS,id=E3B83820-DF74-5042-B52B-0D5BA17E4877" -derivedDataPath build/DerivedData)
+xcodebuild clean "${BUILD_ARGS[@]}" || exit 1
+xcodebuild build "${BUILD_ARGS[@]}" -allowProvisioningUpdates \
+  -allowProvisioningDeviceRegistration || exit 1
+codesign --verify --deep --strict <path>.app || exit 1
 EXP=$(security cms -D -i <path>.app/embedded.mobileprovision | plutil -extract ExpirationDate raw - -o -); [[ $(( $(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$EXP" +%s) - $(date +%s) )) -lt $((5*86400)) ]] && echo "REFUSE: profile expires $EXP — under 5 days, do not install" && exit 1
 xcrun devicectl device install app --device E3B83820-DF74-5042-B52B-0D5BA17E4877 <path>.app
 ```
@@ -858,6 +861,13 @@ identifier" — has two causes, and `devicectl list devices` tells them apart. A
   and the install fails anyway. Nothing on this Mac fixes it — the owner has to wake the device. Say
   so rather than retrying; three attempts cost a minute and prove nothing. Never pass the device by
 name (`devicectl`'s columns shift on the space in "Kevin's iPad") — use the UUID above.
+
+**October22 renewal fix:** clean and build must share the exact same DerivedData/configuration
+arguments. Replacing an embedded profile without a new CodeSign task leaves an invalid resource
+seal even when Xcode reports BUILD SUCCEEDED. The local renewal script now refuses clean failures,
+verifies the full signature, and checks five-day life immediately before install. Regression harness:
+`bash tools/test-resign-region.sh ~/PaintApp/deploy/resign.sh`; evidence and the local-script patch:
+[auto-resign-2026-10-22.md](docs/bug-evidence/auto-resign-2026-10-22.md).
 
 Auto-resign for the 7-day free-account cert: `/Library/LaunchDaemons/com.paintapp.resign.plist`
 (hourly, as root; due when the last-installed profile is expired or within 1h of expiring — not a

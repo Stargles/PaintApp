@@ -44,10 +44,19 @@ An intermittent Blend Mode menu failure occurred twice in the Fog Glow drive; di
 and the complete restored run subsequently passed. Cause remains unconfirmed in BUGS; no retry,
 delay or menu workaround was added. No second full suite was run just for these test corrections.
 
-**The iPad has `f813346` Release**, automatically re-signed/installed October 15 at 01:08 Toronto
-while usage was limited. App source is `840d68a`, without Liquify; profile expiry
-`2026-10-22T05:08:05Z`. The owner trusted the developer on October 15; six physical probes then
-completed successfully (PERFORMANCE §30.7). The iPad is released for ordinary use again.
+**The iPad has main17b438c Release, recovered October22.** App source840d68a remains unchanged,
+without Liquify. The expired profile was renewed, but an incremental build copied it without CodeSign;
+actual launch failed. The external renewal script now cleans the same DerivedData tree, verifies the
+signature and requires five days of profile life. A proper clean rebuild verifies, installed without
+removing app data, and the owner confirmed it opens. Profile expires2026-10-30T00:18:54Z (October29
+Toronto). Nine isolated deployment tests and four deliberate faults passed; no new Swift source.
+Evidence: docs/bug-evidence/auto-resign-2026-10-22.md and ~/PaintWork/s50-recovery/.
+
+**Liquify resume source is tmp/s49-integration**, outside Desktop at
+~/PaintWork/PaintApp-s49-integration. Its handoff supersedes the older in-flight detail below; source
+9dfd96b plus producer ownership cleanup is unmerged. October22 isolated Debug linked checks repeated
+the15-second predicate timeout; exact815 readable probes change only after the deadline. Next useful
+gate is the unchanged current Release workflow and quiet producer cost. The owner confirmed Mac idle.
 Keep one-shot repairs until the owner confirms real scenes; first run the final repair
 signature so preserved preupdate snapshots are also converted.
 

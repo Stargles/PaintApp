@@ -1,0 +1,11 @@
+# App renewal copied a new profile without resealing the app
+
+The October22 renewal built and installed main17b438c, but the iPad refused launch. Xcode copied a fresh embedded.mobileprovision without a CodeSign task: the executable and CodeResources still dated October15. Its sealed profile hash differed from the new file. The existing external deploy script cleaned the default DerivedData tree while building in ~/PaintApp/build/DerivedData.
+
+The maintained local script ~/PaintApp/deploy/resign.sh now uses one argument array for clean/build (including the same configuration, device and DerivedData), refuses a failed clean, verifies the complete app signature before installation, and checks at least five days of profile life against a fresh install-time clock. The patch is archived beside this note; the live script remains outside Git under the existing deployment layout.
+
+The first proper clean failed deleting a generated temporary staging folder containing old build artifacts. Only that generated tree was quarantined, with no source or app documents touched. A subsequent clean Release rebuild succeeded, codesign --verify --deep --strict passed, and the sealed profile hash matched. Installation preserved the app container; the owner confirmed PaintApp opens. Installed source17b438c, app source840d68a (no Liquify); profile expires2026-10-30T00:18:54Z, October29 Toronto.
+
+Run `bash tools/test-resign-region.sh ~/PaintApp/deploy/resign.sh` on this Mac. The harness executes the script's real build/verification region against a locally ad-hoc-signed tiny fixture, with no Apple portal, real device, credentials or install. Nine cases cover valid installation, failed clean/build, modified profile, short/aged profile life, invalid clock and existing too-early/stale mint behavior; rejected cases require no installation. Four deliberate mutations caught mismatched clean arguments, missing signature/lifetime guards and reuse of the old script-start clock. All source restored.
+
+External logs, exact source hashes, original/candidate script and device install/launch records live in ~/PaintWork/s50-recovery/. No paint application source changed; earlier main Debug/Release5124 gates and physical probes remain the relevant source qualification. New Swift/full UI suites were not rerun for this deployment-only fix.

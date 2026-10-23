@@ -1,0 +1,61 @@
+--- a/deploy/resign.sh
++++ b/deploy/resign.sh
+@@ -665,9 +665,19 @@
+ STAMP=$(date '+%Y%m%d-%H%M%S') || STAMP="unknown-$$"
+ BUILD_LOG="$BUILD_LOG_DIR/build-$STAMP.log"
+ 
++# Keep clean and build pointed at the same project, device, configuration, and
++# DerivedData tree so a stale product cannot survive an accidentally different clean.
++XCODEBUILD_ARGS=(
++    -project "$PROJECT_DIR/$PROJECT_FILE"
++    -scheme "$SCHEME"
++    -configuration "$CONFIGURATION"
++    -destination "platform=iOS,id=$DEVICE_UUID"
++    -derivedDataPath "$DERIVED_DATA"
++)
+ log "Cleaning..."
+-run_as_user /usr/bin/xcodebuild clean \
+-    -project "$PROJECT_DIR/$PROJECT_FILE" -scheme "$SCHEME" -quiet >>"$BUILD_LOG" 2>&1 || true
++if ! run_as_user /usr/bin/xcodebuild clean "${XCODEBUILD_ARGS[@]}" -quiet >>"$BUILD_LOG" 2>&1; then
++    fail_retry "xcodebuild clean failed; full log at $BUILD_LOG"
++fi
+ 
+ # --- Fresh build ---
+ # Full output to its own file. `set -o pipefail` plus the old `| tail -5` pipeline is
+@@ -676,13 +686,9 @@
+ log "Building ($CONFIGURATION)... full output: $BUILD_LOG"
+ BUILD_RC=0
+ run_as_user /usr/bin/xcodebuild build \
+-    -project "$PROJECT_DIR/$PROJECT_FILE" \
+-    -scheme "$SCHEME" \
+-    -configuration "$CONFIGURATION" \
+-    -destination "platform=iOS,id=$DEVICE_UUID" \
++    "${XCODEBUILD_ARGS[@]}" \
+     -allowProvisioningUpdates \
+     -allowProvisioningDeviceRegistration \
+-    -derivedDataPath "$DERIVED_DATA" \
+     >>"$BUILD_LOG" 2>&1 || BUILD_RC=$?
+ chown "$RUN_USER" "$BUILD_LOG" 2>/dev/null || true
+ 
+@@ -766,6 +772,21 @@
+         ;;
+ esac
+ 
++# --- Verify signature and profile life before install ---
++# A profile copied into an incremental product changes a sealed resource. Refuse to
++# install unless the complete app verifies against its current bundle contents.
++if ! run_as_user /usr/bin/codesign --verify --deep --strict --verbose=2 "$APP_PATH" >>"$BUILD_LOG" 2>&1; then
++    fail_retry "built app signature verification failed; full log at $BUILD_LOG"
++fi
++INSTALL_CHECK_NOW=$(date +%s) || INSTALL_CHECK_NOW=""
++if [[ ! "$INSTALL_CHECK_NOW" =~ ^[0-9]+$ ]]; then
++    fail_retry "could not read current time before install; refusing to install"
++fi
++PROFILE_LIFETIME=$((NEW_EXPIRATION_EPOCH - INSTALL_CHECK_NOW))
++if [[ $PROFILE_LIFETIME -lt $((5 * 86400)) ]]; then
++    fail_retry "new profile expires in ${PROFILE_LIFETIME}s (under 5 days); refusing to install"
++fi
++
+ # --- Install updated build ---
+ log "Installing fresh build..."
+ INSTALL_RC=0
