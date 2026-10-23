@@ -38,7 +38,7 @@ No Liquify invocation/retry followed. Native/DD ownership returned to root. Scre
 confirmed: raw1620×2160 capture has EXIF orientation8 and displays2160×1620; AX canvas is
 {{56,0},{1024,810}}. Both temporary crop and MidGestureSampler ignore orientation, so their pixel
 coordinates are invalid. Prepare one orientation-aware full-screen image seam shared by both readers,
-plus a visible Move row and floating-keyboard-safe64×64 canvas setup. Architecture agent owns the
+plus a visible Move row and floating-keyboard-safe64×4096 canvas setup. Architecture agent owns the
 external temporary candidate only; root reviews before apply/build. No app-source edits, weakened
 assertions, settings/library resets or preset changes. Playback passed unchanged; rerun affected four
 rather than repeating it or the accepted benchmark.
