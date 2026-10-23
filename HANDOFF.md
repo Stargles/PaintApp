@@ -25,6 +25,18 @@ qualification evidence and the preserved pre-test current-folder ZIP; only posit
 tests may go to existing Trash. Never classify arbitrary Untitled scenes as disposable. Investigate
 and repair test cleanup at its lifecycle seam, with no permanent product debug cleanup hook.
 
+Repair retirement implementation is prepared (six services and converter-only tests/wiring removed;
+current storage/restore tests retained/renamed). Current-format census: fast5246/254classes, full5828,
+36 repair-only tests fewer. Audit of the **current device** Projects/Backups/Trash is still a deployment
+gate because historical pre-test ZIP is legitimately old format and newest preupdate snapshots were
+previously left untouched. Do not treat the old archive as current audit evidence.
+
+Retirement agent may commit its WIP and owns simulator/build/test native work for focused current
+storage/restore gates then fast Debug+Release, own simulator/simlock. Root owns docs and read-only
+existing-app export/inventory on physical iPad; no physical UI/test/reinstall while those run. Owner
+has been asked to save before the metadata-export restart; reply pending. Final merge/deploy waits
+for actual library audit and test-artifact cleanup, not just green logic tests.
+
 ## Qualification to reuse
 
 - Fast Debug and Release: each5,282 total=5,278 passed+4 skipped, zero failures;256 selected classes.
