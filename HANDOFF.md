@@ -45,9 +45,11 @@ Preserve current iPad artwork; no physical device launch, restart or install occ
    `~/PaintWork/s52-erase-crash/`, especially test1-diagnostic-status.json.
    Two newly copied Test1 flights181634/181822 end27–30min before the Jetsam; recognizer repairs,
    no erase-completion/memory telemetry or causal link. Selecting Liquify is not applying it. Bounded
-   ordinary-eraser source review found no concrete ownership defect; WindowSurfaceView/UnlandedInk
-   unchanged from shipped source. Next physical reproduction should temporarily count retained
-   UnlandedInk UIImage bytes/versions at lift/base landing, not merely IOSurfaces. See diagnostics
+   initial eraser review generalized the replacement-preview path. Root corrected it: preserved
+   ToCross is Mode3, with no scratch preview; cuts per sample refresh the canvas base. Investigate
+   repeated canvas-sized UIImage/CoreAnimation handoff first (known respring cause in other features).
+   Still a hypothesis. WindowSurfaceView/UnlandedInk are unchanged from shipped source; UnlandedInk
+   image counters concern other eraser modes. See diagnostics
    flight-recordings-review.md and ordinary-eraser-source-audit.md. No speculative fix was made.
    Owner says this was today's only crash and cannot recall its time;18:47 is now the probable
    matching event, not a confirmed timestamp. Display-service allocation origin still unresolved.
@@ -55,15 +57,20 @@ Preserve current iPad artwork; no physical device launch, restart or install occ
 ## Combined branch and current work
 
 - Lead/root combined tree `~/PaintWork/PaintApp-s52-vector-points`, branch tmp/s52-vector-points,
-  currently60479341 (saving + vector cleanup + initial repair + round-dot UI regression). Its two
-  UI-only commits must be rebased onto the completed repair branch before combined qualification.
+  currently942f42a8 (saving + vector cleanup + repair + round-dot UI regression), already rebased
+  onto main1c75fcca; includes repair follow-ups6a32/c4d as cherry-picks. Rebase onto newer doc-only
+  origin/main when native is idle. No production difference from repairc4d; UI test is extra.
 - Active native/build/repair tree `~/PaintWork/PaintApp-s52-vector-repair`, branch tmp/s52-vector-repair,
-  includes follow-ups throughb56900d2. Agent retire_file_repairs owns native; simulator
+  includes follow-ups throughc4d09f03. Agent retire_file_repairs owns native; simulator
   88DFDBE7-FE41-4533-9E22-E077D56C9A14, serial simlock, DD
-  `~/PaintWork/s52-vector-points/integration/DerivedData`. Focused repair/backup build is in progress;
+  `~/PaintWork/s52-vector-points/integration/DerivedData`. Focused baseline75/75 green; thirteen
+  serial deliberate fault checks are in progress, each source restored exactly before the next;
   no Debug/Release fast tier yet. Coordinate before any other compiler/simulator job.
 - Saving tree `~/PaintWork/PaintApp-s52-saving-fix`, tmp/s52-saving-fix, clean4079a1c2.
-- Old writer tree `~/PaintWork/PaintApp-s52-format-baseline`, clean1c5c422e. Actual old production
+- Old writer tree `~/PaintWork/PaintApp-s52-format-baseline`,1c5c422e. A temporary94-line UI method
+  is now injected in existing LiquifyUITests for an old-complex round-dot negative control, not run.
+  No production/PBX change; original bytes/hash proof in `s52-vector-points/round-dot-old-control/`.
+  Restore byte-exact after the control. Actual old production
   writer produced/reopened six tiny packages and six roundtrips; focused producer1/1, all723 tracked
   source/resource/PBX files restored exactly. Evidence under s52-vector-points/baseline/.
 - Root records/diagnostics tree `~/PaintWork/PaintApp-s52-erase-crash`, tmp/s52-erase-crash.
@@ -83,16 +90,19 @@ Independent review caught unsafe census, recovery and error-cleanup paths. Worki
 reject folder/package links, propagate listing failures and preserve ambiguous unreadable manifests
 unchanged for existing recovery. Convert other known-old backups first; current valid backup restores,
 no-backup remains a damaged gallery tile. Same-basename recovery now requires exactly one match.
-No compatibility flag or special corrupted-filename exemption. Independent review ofb56900d2 pending.
+No compatibility flag or special corrupted-filename exemption. Independent review ofb56900d2 found
+the prior P1 defects addressed with no additional concrete defect. A later test caught restart cleanup
+deleting an earlier redundant stage before a later invalid owner; c4d validates all owners first.
 The prior native focused batch executed20 repair methods:19 passed; one failed six unrelated manifest
 number comparisons. Validate then insert the new marker into original manifest bytes, preserving
-unrelated wire values; exact assertions retained. Final focused batch now selects33 repair methods plus
-backup/location classes. Native baseline and committed-source mutations are still outstanding. Root
+unrelated wire values; exact assertions retained. Final focused batch executed35 repair+21backup+
+19location methods,75/75 passing. Committed-source mutation runs are in progress. Root
 owns PBX edits, done for StrokePlacement, repair service/test and fixture; re-check ids after integration.
 
 New round-dot cold UI regression60479341 taps one wide ordinary round dab, Pushes it sideways, then
 requires visible movement with unchanged round diameter/coverage and full uncropped measurement bounds.
 Not run yet. Runtime mutation/selectors plan: `~/PaintWork/s52-vector-points/runtime-qualification-plan.md`.
+Ten runtime mutation recipes in runtime-faults.json are dry-applied only; no runtime fault proof yet.
 
 Next: finish safety fixes/review; focused baseline + committed-source mutation proof; real preserved
 library conversion on a copy; exact fast tiers Debug/Release with static reconciliation/lints; cold UI
