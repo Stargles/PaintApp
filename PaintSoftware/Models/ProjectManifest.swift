@@ -95,8 +95,8 @@ struct ProjectManifest: Codable {
         self.editorState = editorState
     }
 
-    // Custom decoding so projects saved before backgroundColor/isBackgroundVisible or customBrushes
-    // existed — missing those keys entirely — still load instead of failing to decode.
+    // The current package boundary is required. Optional current fields retain their documented
+    // defaults; empty registries may be omitted by the current writer.
     init(from decoder: Decoder) throws {
         _ = try GeometryVersion(from: decoder)
         let container = try decoder.container(keyedBy: CodingKeys.self)

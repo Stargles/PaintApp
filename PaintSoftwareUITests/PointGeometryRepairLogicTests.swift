@@ -161,8 +161,11 @@ final class PointGeometryRepairLogicTests: XCTestCase {
         _ = try install("linked-local-edits", at: "Trash/Folder/linked.paintproj")
         ProjectBackupManager.settings.lastAppSignature = "previous build"
         XCTAssertEqual(try PointGeometryRepair.run().converted, 4)
-        let packages = [ProjectBackupManager.projectsDirectory, ProjectBackupManager.backupsRootDirectory,
-            ProjectBackupManager.trashDirectory].flatMap { ProjectBackupManager.allProjectPackages(in: $0) }
+        let roots: [URL] = [ProjectBackupManager.projectsDirectory, ProjectBackupManager.backupsRootDirectory,
+                            ProjectBackupManager.trashDirectory]
+        let packages: [URL] = roots.flatMap { directory -> [URL] in
+            ProjectBackupManager.allProjectPackages(in: directory)
+        }
         XCTAssertEqual(packages.count, 4)
         XCTAssertTrue(packages.allSatisfy { ProjectBackupManager.validateProjectForRestore(at: $0) })
         let snapshot = try XCTUnwrap(packages.first { $0.lastPathComponent.hasPrefix("preupdate-") })
