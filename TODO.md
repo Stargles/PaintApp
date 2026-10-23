@@ -72,6 +72,14 @@ If prior appearance rulings conflict with point-only behavior, show the concrete
 one plain-language decision; do not silently retain the unwanted transformation path. Raster Liquify
 and linked in-between support keep their existing rulings unless the new correction affects them.
 
+Owner calls this a “significant failure” and makes **very thorough architectural cleanup** an explicit
+requirement. Trace every vector-specific field/module/render/archive/test dependency and its real
+consumers; remove obsolete machinery and redundant abstraction, not just the visible stretch. Verify
+saved-scene conversion/round-trip, focused mutation-backed tests and real workflows, with an independent
+final architecture review. Do not claim certainty from passing tests alone or retain this path behind
+a compatibility flag. The new point-only vector instruction is authoritative over implementation
+interpretations made earlier. Record any actual behavior conflict with evidence before asking.
+
 ---
 
 ## Erasing strokes crashes on iPad — 2026-10-23

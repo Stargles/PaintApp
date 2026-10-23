@@ -18,7 +18,8 @@ preserve owner settings/libraries and verify fresh inventory before closeout.
 
 **Two new active owner reports, superseding the parked state:**
 1. Vector Liquify visibly stretches strokes horizontally. Owner explicitly requires moving stroke
-   point positions through the normal brush renderer, not deforming brush marks/texture. Audit code
+   point positions through the normal brush renderer, not deforming brush marks/texture. Owner explicitly
+   requires a very thorough architecture/dependency cleanup and independent final review. Audit code
    and original brief before implementation; remove excessive machinery cleanly, no extra mode/flag.
 2. Erasing in **Test1**, with **no Liquify used on those strokes**, led to a **black screen/loading
    spinner then Home Screen**. Treat app-vs-system failure as unresolved; no new named app/Jetsam
