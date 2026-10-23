@@ -24,17 +24,26 @@ project-location migration removal. TODO records the scope before work.
 No further deletion is authorized or needed. Future physical checks must track unique owned scenes
 and clean those through existing Trash, verifying fresh inventory before closeout.
 
-Repair retirement implementation is prepared (six services and converter-only tests/wiring removed;
-current storage/restore tests retained/renamed). Current-format census at cf37eab: fast5247/254classes, full5829,
-35 fewer tests after retaining the current malformed-stream restore regression. Audit of the **current device** Projects/Backups/Trash is still a deployment
-gate because historical pre-test ZIP is legitimately old format and newest preupdate snapshots were
-previously left untouched. Do not treat the old archive as current audit evidence.
+Repair retirement commits `b0917a2`/`cf37eab` remove six services and converter-only tests/wiring;
+strict current manifest/material/recipe/stream restore refusal remains. Exporter fixes `e2d86098`/
+`4e3f0e16` preserve relative folders and refuse overwriting their source; PBX test membership fix
+`d9dab5bb` makes the actual four new logic tests available in the UI-test target. Current census:
+fast **5,251 /254classes**, full **5,833** (three private static testBrush factories are not tests).
+Focused retirement tests117/117 and latest stream/storage25/25 pass; four faults red then restored.
+Exporter actual-source Mac XCTest4/4 baseline/restored and five faults red; final native tiers pending.
 
-Retirement focused tests and deliberate faults are complete; native ownership returned to root.
-Root now qualifies the existing exporter hierarchy fix (same-named packages previously collided),
-then exports/audits current Projects/Backups/Trash before final integrated Debug+Release and recovery UI.
-Owner saved before the read-only export restart and has since completed manual test-scene cleanup.
-Final merge/deploy waits for the actual current-library audit and final qualification.
+**Device library copied and checked:**256packages =10Projects+228Backups+18Trash,3,180package files,
+567,855,190B; every package path and byte count matches index, no failed copy. A second device index
+has identical paths/titles/sizes. Temporary568MB app-container export was cleared through index-only
+launch; app reopened normally. Evidence: `~/PaintWork/s51-cleanup/current-library/`. The installed
+intermediate audit app is old-repair-source788f576 plus exporter safety fixes, not the final retirement
+build. Its strict signature/profile pass; expiry remains2026-10-30T00:18:54Z.
+
+Native ownership is with retire_file_repairs: temporary bounded current-library audit using actual
+current decoders, then byte-exact removal and final Debug/Release fast tiers plus Release recovery/key
+UI3. Own simulator1951527B-3A28-46D8-9FDA-E970663EE733, simlock, serial. Root owns docs and final
+merge/normal Release install after all gates. No physical UI fixture creation/deletion remains.
+Audit findings, if any, must be resolved before deleting repair services from the installed app.
 
 ## Qualification to reuse
 
