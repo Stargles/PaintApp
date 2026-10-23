@@ -96,6 +96,13 @@ requests and queue history for other missing or incorrectly completed tasks, and
 ones to TODO before working on them. Previous notes claim age-thinned backup generations and a4GB
 cap; those are evidence to verify, not proof. Continue all actionable work without an unnecessary pause.
 
+Audit confirmed the44-slot3/6/24/7/4 schedule, install-burst protection and4GBcap exist. **Real gap:**
+TODO(161) at18efa1c2 says “newest in each bucket survives”, but `VersionRetention.keep` and its
+burst test keep the oldest. Correct to the recorded newest policy and verify bucket boundaries,
+pre-save recovery and install bursts. The week-of-real-scene storage-cost measurement is still
+unverified; the bounded Session47–51 audit found no other concrete dropped actionable ask.
+Evidence: `~/PaintWork/s52-saving-audit/audit.md`.
+
 ---
 
 ## Erasing strokes crashes on iPad — 2026-10-23

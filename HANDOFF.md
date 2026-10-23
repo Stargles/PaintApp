@@ -30,7 +30,9 @@ preserve owner settings/libraries and verify fresh inventory before closeout.
    Unified device log collection needs root; noninteractive sudo also refused (password required).
    No privileged archive was collected. Black-screen failure cause remains unknown; no speculative fix.
 
-3. Verify father–grandfather document saving in actual code/tests, implement any missing behavior,
+3. Smart saving audit confirms44slots/age tiers/install protection/4GBcap. Fix actual oldest-vs-newest
+   bucket-policy conflict to originalTODO161 newest instruction; week-of-real-scene storage measurement
+   is still unverified. Audit found no other concrete dropped actionable task.
    and reconcile original asks/queue history for other missed tasks. All reports are in TODO before work. Current diagnostic tree `~/PaintWork/PaintApp-s52-erase-crash`,
 branch tmp/s52-erase-crash. Raw read-only diagnostics and preserved-Test1 inventory under
 `~/PaintWork/s52-erase-crash/`. Preserve current device scene/backups; do not restart/reinstall the app
