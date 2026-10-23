@@ -285,6 +285,44 @@ final class PointGeometryRepairLogicTests: XCTestCase {
         XCTAssertEqual(ProjectBackupManager.settings.lastAppSignature, "previous build")
     }
 
+    func testPreparedIndependentReplacementMustMatchRecordedIdentity() throws {
+        let project = try install("plain")
+        let before = try bytes(project)
+        var boundary: [String: Data] = [:]
+        XCTAssertThrowsError(try PointGeometryRepair.run(beforeCommit: {
+            let record = try XCTUnwrap(FileManager.default.contentsOfDirectory(at: project.deletingLastPathComponent(), includingPropertiesForKeys: nil)
+                .first { $0.lastPathComponent.hasSuffix(".owner.json") })
+            let stage = record.deletingLastPathComponent().appendingPathComponent(String(record.lastPathComponent.dropLast(".owner.json".count)))
+            let replacement = root.appendingPathComponent("independent-current-copy")
+            XCTAssertTrue(ProjectBackupManager.cloneItem(at: stage, to: replacement))
+            let recordedID = try directoryIdentity(stage)
+            XCTAssertNotEqual(try directoryIdentity(replacement) as NSDictionary, recordedID as NSDictionary)
+            try FileManager.default.moveItem(at: stage, to: root.appendingPathComponent("saved-prepared-copy"))
+            try FileManager.default.moveItem(at: replacement, to: stage)
+            XCTAssertTrue(ProjectBackupManager.validateProjectForRestore(at: stage), "a valid replacement still cannot impersonate the recorded copy")
+            boundary = try bytes(root)
+        }))
+        XCTAssertEqual(try bytes(project), before)
+        XCTAssertEqual(try bytes(root), boundary)
+    }
+
+    func testChangedSourceIdentityBeforeCommitPreservesEveryCopy() throws {
+        let project = try install("plain")
+        let before = try bytes(project)
+        var boundary: [String: Data] = [:]
+        XCTAssertThrowsError(try PointGeometryRepair.run(beforeCommit: {
+            let replacement = root.appendingPathComponent("independent-source-copy")
+            XCTAssertTrue(ProjectBackupManager.cloneItem(at: project, to: replacement))
+            let originalID = try directoryIdentity(project)
+            try FileManager.default.moveItem(at: project, to: root.appendingPathComponent("saved-source-copy"))
+            try FileManager.default.moveItem(at: replacement, to: project)
+            XCTAssertNotEqual(try directoryIdentity(project) as NSDictionary, originalID as NSDictionary)
+            boundary = try bytes(root)
+        }))
+        XCTAssertEqual(try bytes(project), before)
+        XCTAssertEqual(try bytes(root), boundary)
+    }
+
     func testPreparedCopyEditedInPlaceMustRevalidateBeforeExchange() throws {
         let project = try install("plain")
         let before = try bytes(project)
@@ -454,7 +492,7 @@ final class PointGeometryRepairLogicTests: XCTestCase {
         let before = try bytes(project)
         let report = try PointGeometryRepair.run()
         XCTAssertEqual(report.converted, 0)
-        XCTAssertEqual(report.ambiguous, [project])
+        XCTAssertEqual(report.ambiguous.map(\.path), [project.path])
         XCTAssertEqual(try bytes(project), before)
         ProjectBackupManager.repairCorruptedProjects()
         XCTAssertTrue(ProjectBackupManager.validateProjectForRestore(at: project))
@@ -472,7 +510,7 @@ final class PointGeometryRepairLogicTests: XCTestCase {
         let before = try bytes(project)
         let report = try PointGeometryRepair.run()
         XCTAssertEqual(report.converted, 1)
-        XCTAssertEqual(report.ambiguous, [project])
+        XCTAssertEqual(report.ambiguous.map(\.path), [project.path])
         XCTAssertEqual(try bytes(project), before)
         ProjectBackupManager.repairCorruptedProjects()
         XCTAssertTrue(ProjectBackupManager.validateProjectForRestore(at: project))
@@ -486,7 +524,7 @@ final class PointGeometryRepairLogicTests: XCTestCase {
         let before = try bytes(project)
         let report = try PointGeometryRepair.run()
         XCTAssertEqual(report.converted, 0)
-        XCTAssertEqual(report.ambiguous, [project])
+        XCTAssertEqual(report.ambiguous.map(\.path), [project.path])
         ProjectBackupManager.repairCorruptedProjects()
         XCTAssertTrue(FileManager.default.fileExists(atPath: project.path))
         XCTAssertFalse(ProjectBackupManager.validateProjectForRestore(at: project))
