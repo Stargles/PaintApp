@@ -1019,10 +1019,7 @@ final class LiquifyLogicTests: XCTestCase {
         manager.liquifyPictures.request { { entered.signal(); release.wait(); return {} } }
         XCTAssertEqual(entered.wait(timeout: .now() + 5), .success)
         defer { release.signal() }
-        var readyPictures = 0
-        manager.onHeldPictureMoved = { [weak manager] in
-            if manager?.liveCelContentEdit?.procedure?.isResolved == true { readyPictures += 1 }
-        }
+        manager.onHeldPictureMoved = {}
         let profile = ToolProfile(preset: TestBrushes.hardRound, size: 50, opacity: 1)
         var session = try XCTUnwrap(manager.beginLiquify(layerID: layer.id, profile: profile, size: 50, seed: 7))
         session.samples = StrokeSamples(points: [CGPoint(x: 32, y: 24), CGPoint(x: 32, y: 48)])
@@ -1030,13 +1027,13 @@ final class LiquifyLogicTests: XCTestCase {
         manager.holdLiquify(&session)
         let abandoned = try XCTUnwrap(manager.liveCelContentEdit?.procedure)
         manager.endLiveEdit()
-        let drained = expectation(description: "cancelled preparation queue drained")
-        manager.liquifyPictures.request { { return { drained.fulfill() } } }
+        var latePictures = 0
+        manager.onHeldPictureMoved = { latePictures += 1 }
+        let drained = NSPredicate { _, _ in !manager.liquifyPictures.isBusy }
         release.signal()
-        wait(for: [drained], timeout: 10)
-        XCTAssertFalse(manager.liquifyPictures.isBusy, "the explicit barrier landing drains pending preparation")
+        wait(for: [XCTNSPredicateExpectation(predicate: drained, object: nil)], timeout: 10)
         XCTAssertEqual(abandoned.resolutionCount, 0)
-        XCTAssertEqual(readyPictures, 0)
+        XCTAssertEqual(latePictures, 0, "cancelled work must not notify a later scene")
         XCTAssertEqual(canvas.elements.first?.stroke?.samples, original.samples)
         XCTAssertTrue(manager.history.undoStack.isEmpty)
     }
