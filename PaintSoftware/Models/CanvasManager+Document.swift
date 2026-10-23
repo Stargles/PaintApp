@@ -242,7 +242,7 @@ extension InterpolationRecipe {
             return binding
         }
         // Keep the native brush field and capture vertices untouched. Moving only the rest
-        // grid conjugates the captured field through the resize, preserving grain and selection taper.
+        // grid conjugates the captured point field through the resize, preserving selection taper.
         moved.deformations = deformations.map { deformation in
             var deformation = deformation
             deformation.captures = deformation.captures.map { capture in

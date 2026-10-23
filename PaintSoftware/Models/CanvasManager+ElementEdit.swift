@@ -112,7 +112,7 @@ struct LiveCelContentEdit {
     }
 
     func replacementFootprint(placement: CelContentPlacement) -> CGPath {
-        CelContentPicture.footprint(inkWindow: vectorCanvas == nil && procedure?.recipeSnapshot == nil ? nil : window, inkPose: procedure?.recipeSnapshot == nil ? placement.ink : nil,
+        CelContentPicture.footprint(inkWindow: vectorCanvas == nil && procedure?.recipeSnapshot == nil ? nil : procedure?.resolvedWindow ?? window, inkPose: procedure?.recipeSnapshot == nil ? placement.ink : nil,
             backingWindow: pixelSnapshot == nil ? nil : procedure?.backingWindow ?? window,
             backingPose: placement.backing)
     }

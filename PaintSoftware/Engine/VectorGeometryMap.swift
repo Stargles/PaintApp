@@ -3,33 +3,6 @@ import CoreGraphics
 /// The shared nonlinear mapping seam for vector ink. Channels, parent dab walks and Distort
 /// residues travel together; interpolation owns its fading separately.
 enum VectorGeometryMap {
-    /// Preserve native paint before changing the public edit geometry. Material-only changes
-    /// remain real edits even when a wide dab or a fill interior has no spine/boundary in the field.
-    static func liquified(_ element: VectorElement, region: CGRect, binding: InkMaterialBinding,
-                          by map: ([CGPoint]) -> [CGPoint]) -> VectorElement {
-        switch element {
-        case .stroke(var original):
-            let walk = original.effectiveWalk ?? StrokeRestWalk(samples: original.samples, lattice: original.lattice,
-                size: original.size, pose: BrushStamper.DabPose(Homography.identity))
-            let program = walk.material?.appending(binding) ?? InkMaterialProgram(bindings: [binding])
-            original.placement = StrokePlacement(map: walk.pose.map, restSize: walk.size,
-                source: .retained(samples: walk.samples, lattice: walk.lattice, precise: true),
-                material: program, transport: walk.transport)
-            original.restWalk = nil
-            return .stroke(stroke(original, densify: true, region: region, by: map).markedPrecise())
-        case .fill(var original):
-            if var placement = original.placement {
-                placement.material = placement.material.appending(binding)
-                original.placement = placement
-            } else {
-                original.placement = FillPlacement(pathData: original.pathData,
-                    material: InkMaterialProgram(bindings: [binding]))
-            }
-            return .fill(fill(original, densify: true, region: region, mapPaint: false, by: map))
-        case .image, .text, .video, .stream: return element
-        }
-    }
-
     static func stroke(_ stroke: VectorStroke, densify: Bool = false, region: CGRect? = nil,
                        by map: ([CGPoint]) -> [CGPoint]) -> VectorStroke {
         let divided = densify ? StrokeGeometry.subdivision(stroke.samples, maxSpacing: 1, followingCurve: true, region: region) : nil
@@ -42,15 +15,12 @@ enum VectorGeometryMap {
         var i = -1
         result.samples = samples.replacingPositions({ _ in i += 1; return moved[i] }, angleRotation: 0)
         if let divided {
-            if var placement = result.placement, placement.material != nil {
-                placement.source = placement.source.remapped(onto: divided.parameters)
-                result.placement = placement
-            }
             result.sampleVisibilityThresholds = VectorCanvas.remapped(stroke.sampleVisibilityThresholds, onto: divided.parameters)
         }
         // A nonlinear map cannot keep the old stored rest spine. Keep the Distort residue: clearing
         // it would replace variable keystone widths with the stroke's widest footprint everywhere.
         result.placement = result.placement?.withoutStoredGeometry
+        result.restWalk = nil
         if var lattice = result.lattice {
             let parent = densify ? StrokeGeometry.subdivision(lattice.samples, maxSpacing: 1, followingCurve: true, region: region) : nil
             let parentSamples = parent.map { StrokeSamples($0.samples, channels: lattice.samples.channels) } ?? lattice.samples
@@ -71,11 +41,11 @@ enum VectorGeometryMap {
     }
 
     static func fill(_ fill: VectorFillElement, densify: Bool = false, region: CGRect? = nil,
-                     mapPaint: Bool = true, by map: ([CGPoint]) -> [CGPoint]) -> VectorFillElement {
+                     by map: ([CGPoint]) -> [CGPoint]) -> VectorFillElement {
         guard let path = fill.cgPath else { return fill }
         let moved = densify ? densePath(path, region: region, by: map) : self.path(path, by: map)
         if densify, moved === path { return fill }
-        return fill.reshaped(to: moved, paint: mapPaint ? (fill.paint.mapped(by: { map([$0]).first }) ?? fill.paint) : fill.paint)
+        return fill.reshaped(to: moved, paint: fill.paint.mapped(by: { map([$0]).first }) ?? fill.paint)
     }
 
     /// Local nonlinear mapping keeps untouched path commands, including control points, exact.
@@ -177,4 +147,20 @@ enum VectorGeometryMap {
         }
     }
 
+}
+
+extension VectorElement {
+    /// The geometry a Liquify tick can change; all paint properties remain with the element.
+    func hasSameGeometry(as other: VectorElement) -> Bool {
+        guard id == other.id else { return false }
+        switch (self, other) {
+        case (.stroke(let a), .stroke(let b)):
+            return a.samples == b.samples && a.lattice == b.lattice && a.placement == b.placement
+                && a.sampleVisibilityThresholds == b.sampleVisibilityThresholds
+        case (.fill(let a), .fill(let b)):
+            return a.pathData == b.pathData && a.paint == b.paint
+        case (.image, .image), (.text, .text), (.video, .video), (.stream, .stream): return true
+        default: return false
+        }
+    }
 }

@@ -147,52 +147,6 @@ final class LiquifyRasterLogicTests: XCTestCase {
     }
 
     @MainActor
-    func testRefusedNativeMaterialWindowPreservesShownSurfaceAndSavedCel() throws {
-        for linked in [false, true] {
-            let manager = CanvasFixture.manager(); manager.addVectorLayer()
-            let canvas = try XCTUnwrap(manager.layers[1].cels[0].vector)
-            let samples = StrokeSamples(points: [CGPoint(x: 12, y: 24), CGPoint(x: 45, y: 24)])
-            let gesture = LiquifyDeformation(brush: TestBrushes.hardRound, size: 40, power: 1,
-                mode: .push, seed: 4, samples: samples)
-            let material = InkMaterialProgram(bindings: [InkMaterialBinding(operation: InkMaterialOperation(gesture),
-                bridge: .identity)])
-            let ink = VectorStroke(brush: TestBrushes.hardRound,
-                color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1), size: 4, opacity: 1,
-                samples: samples, placement: StrokePlacement(map: .identity, restSize: 4,
-                    source: .retained(samples: samples, lattice: nil, precise: true), material: material,
-                    transport: .homography(.scale(x: 0, y: 1))))
-            if linked {
-                let refs = (0...1).map { InterpolationReference(layerID: manager.layers[$0].id, celID: manager.layers[$0].cels[0].id) }
-                manager.layers[1].cels[0].interpolation = InterpolationRecipe(references: refs, t: 0.4,
-                    localEdits: [LocalEdit(stroke: ink)])
-            } else { canvas.restoreElements([.stroke(ink)], changedInk: nil) }
-            let original = manager.layers[1].cels[0]
-            let backing = image(); manager.layers[1].cels[0].bakedImage = backing
-            manager.history.removeAll(); manager.onHeldPictureMoved = {}
-            let session = try held(manager, layer: 1)
-            let bad = try XCTUnwrap(manager.liveCelContentEdit)
-            let view = WindowSurfaceView(queue: DispatchQueue(label: "LiquifyRasterLogicTests.materialRefusal"))
-            view.presentFirst(.init(window: bad.window, placement: .identity, draw: { _ in
-                backing.draw(at: .zero); return bad.window
-            }))
-            let prior = try XCTUnwrap(view.layer.contents as? IOSurface)
-            manager.commitLiquify(session)
-            let rejected = expectation(description: "native material draw refused")
-            view.present(window: bad.window, placement: .identity, draw: { bad.drawWindow(into: $0) }, finished: { shown in
-                XCTAssertFalse(shown, "failed native or linked material must never certify a partial picture")
-                bad.procedure?.didReject(); rejected.fulfill()
-            })
-            wait(for: [rejected], timeout: 10)
-            XCTAssertTrue(bad.procedure?.hasFailed == true)
-            XCTAssertTrue((view.layer.contents as? IOSurface) === prior, "the exact previous surface survives refusal")
-            XCTAssertEqual(view.presentedCount, 1)
-            XCTAssertFalse(manager.history.canUndo)
-            XCTAssertTrue(manager.layers[1].cels[0].bakedImage === backing)
-            XCTAssertEqual(manager.layers[1].cels[0].interpolation?.contentFingerprint, original.interpolation?.contentFingerprint)
-            XCTAssertEqual(canvas.elements.count, linked ? 0 : 1)
-            XCTAssertNil(manager.liveCelContentEdit, "rejected lift completes without saving failed native ink")
-        }
-    }
 
     @MainActor
     func testStreamArrivalIsNotACommitButRealInkChangeStillRejectsAStaleGesture() throws {
@@ -583,109 +537,6 @@ final class LiquifyRasterLogicTests: XCTestCase {
     }
 
     @MainActor
-    func testRequiredNativeMaterialRefusalRejectsPartialDisplayAndStripSources() throws {
-        defer { PixelOps.clearRasterizeCache() }
-        let manager = CanvasFixture.manager(layerCount: 0); manager.addVectorLayer()
-        let canvas = try XCTUnwrap(manager.layers[0].cels[0].vector)
-        let samples = StrokeSamples(points: [CGPoint(x: 4, y: 20), CGPoint(x: 60, y: 20)])
-        let operation = InkMaterialOperation(LiquifyDeformation(brush: TestBrushes.hardRound,
-            size: 40, power: 0.8, mode: .push, seed: 17, samples: samples))
-        let rest = Lattice(cols: 64, rows: 64, restOrigin: .zero, restCellSize: 1)
-        var stretched = rest
-        for row in 0...64 { for col in 0...64 {
-            stretched.vertices[row * 65 + col] = CGPoint(x: col.isMultiple(of: 2) ? -1000 : 1000,
-                                                        y: row.isMultiple(of: 2) ? -1000 : 1000)
-        } }
-        XCTAssertGreaterThan(DeformedCellIndex.storageByteUpperBound(lattice: stretched), InkMaterialRenderer.byteBudget,
-            "PREMISE: native material itself exceeds its counted index budget; no whole-compositor budget override")
-        let ink = VectorStroke(brush: TestBrushes.pencil, color: .init(red: 0, green: 0, blue: 0, alpha: 1),
-            size: 8, opacity: 1, samples: samples, seed: 7,
-            placement: StrokePlacement(map: .identity, restSize: 8,
-                source: .retained(samples: samples, lattice: nil, precise: true),
-                material: InkMaterialProgram(bindings: [.init(operation: operation, bridge: .identity)]),
-                transport: .lattice(captured: rest, current: stretched, pose: .identity)))
-        let prefix = VectorFillElement(path: CGPath(rect: CGRect(x: 8, y: 8, width: 16, height: 24), transform: nil),
-            color: .init(red: 1, green: 0, blue: 0, alpha: 1))
-        canvas.restoreElements([.fill(prefix), .stroke(ink)], changedInk: nil)
-        let moveBounds = try XCTUnwrap(MoveBoxInk(of: [.stroke(ink)]).bounds())
-        XCTAssertTrue(moveBounds.minX.isFinite && moveBounds.minY.isFinite
-            && moveBounds.width.isFinite && moveBounds.height.isFinite,
-            "PREMISE: the refused material has ordinary finite Move geometry, so lift bounds cannot preflight its native render")
-        XCTAssertNil(canvas.renderIsolated(ids: [ink.id]),
-            "an existing Move piece propagates required native refusal instead of returning partial or blank success")
-        let isolatedPrefix = try XCTUnwrap(canvas.renderIsolated(ids: [prefix.id]))
-        XCTAssertTrue(try bytes(isolatedPrefix).contains { $0 != 0 },
-            "PREMISE: a valid selected piece may render while the material left in its source hole refuses")
-        canvas.suppressedElementIDs = [prefix.id]
-        XCTAssertNil(canvas.render(), "a refused required hole must prevent a valid isolated piece from latching")
-        canvas.suppressedElementIDs = []
-        let native = canvas.freeze(quality: .full)
-        var completion: Int?
-        let partial = UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { context in
-            completion = native.draw(into: context.cgContext, frameRect: CGRect(origin: .zero, size: size), quality: .full)
-        }
-        XCTAssertNil(completion, "PREMISE: existing native renderer actually refuses this required source")
-        XCTAssertTrue(try bytes(partial).contains { $0 != 0 }, "PREMISE: earlier valid ink already painted before refusal")
-        PixelOps.clearRasterizeCache()
-        let display = PixelOps.CelDisplay(vector: native)
-        let direct = PixelOps.FrozenCel(cel: manager.layers[0].cels[0], derived: nil, quality: .full, display: display)
-        XCTAssertNil(PixelOps.rasterize(direct, canvasSize: size, quality: .full),
-            "a display source may not return the native painter's partial picture")
-        XCTAssertEqual(PixelOps.rasterizeCacheBytes, 0, "failed native display pixels never enter the flatten memo")
-        let recipe = try XCTUnwrap(manager.makeFrameRecipe(atFrame: 0, includeBackground: false))
-        let band = CGRect(x: 0, y: 12, width: size.width, height: 16)
-        let request = recipe.windowed(to: band).resolve()
-        XCTAssertTrue(request.sourceResolutionFailed, "strip resolution propagates required native failure")
-        XCTAssertNil(request.sources[0], "partial native strip pixels cannot become a compositor leaf")
-        XCTAssertNil(Compositor.composite(request, resolving: .coreGraphics), "the existing frame refusal guard rejects partial native strips")
-        XCTAssertEqual(PixelOps.rasterizeCacheBytes, 0, "failed native strips never enter the flatten memo")
-        XCTAssertNil(native.render(quality: .full), "the frozen full renderer must retain native refusal")
-        XCTAssertNil(native.render(quality: .full, fittingInto: CGSize(width: 32, height: 32)),
-            "the fitted frozen renderer must retain native refusal")
-        for sizing: RenderSizing in [.native, .fitting(CGSize(width: 32, height: 32))] {
-            PixelOps.clearRasterizeCache()
-            let whole = try XCTUnwrap(manager.makeFrameRecipe(atFrame: 0, includeBackground: false, sizing: sizing))
-            let fullRequest = whole.resolve()
-            XCTAssertTrue(fullRequest.sourceResolutionFailed, "full and fitted frames must propagate required native failure")
-            XCTAssertNil(fullRequest.sources[0], "a refused native whole source is not transparent success")
-            XCTAssertNil(Compositor.composite(fullRequest, resolving: .coreGraphics))
-            XCTAssertEqual(PixelOps.rasterizeCacheBytes, 0, "refused native whole frames never enter the flatten memo")
-        }
-        let empty = CanvasFixture.manager(layerCount: 0); empty.addVectorLayer()
-        let emptyRecipe = try XCTUnwrap(empty.makeFrameRecipe(atFrame: 0, includeBackground: false))
-        let emptyRequest = emptyRecipe.windowed(to: band).resolve()
-        XCTAssertFalse(emptyRequest.sourceResolutionFailed, "a genuinely empty vector leaf remains valid")
-        XCTAssertNotNil(Compositor.composite(emptyRequest, resolving: .coreGraphics))
-        OnionSkinRasterCache.removeAll()
-        defer { OnionSkinRasterCache.removeAll() }
-        let priorThumbnail = image(.green)
-        manager.layers[0].cels[0].thumbnail = priorThumbnail
-        manager.regenerateThumbnail(layerIndex: 0, celIndex: 0)
-        XCTAssertTrue(manager.layers[0].cels[0].thumbnail === priorThumbnail,
-            "a refused thumbnail keeps the exact previously displayed tile")
-        XCTAssertNil(OnionSkinRasterCache.image(for: manager.layers[0].cels[0], canvasSize: size,
-            at: CGSize(width: 32, height: 32)), "a required onion source refuses without becoming a blank ghost")
-        XCTAssertEqual(OnionSkinRasterCache.residentBytes, 0, "refused onion source cannot enter its reduced cache")
-        manager.addTransformLayer(name: "native refusal pose")
-        manager.layers[1].transform = LayerPose(pose: PoseQuad(box: CGRect(origin: .zero, size: size),
-            mappedBy: CGAffineTransform(translationX: 8, y: 0)), mode: .move)
-        let placement = manager.celContentPlacement(forLayerID: manager.layers[0].id)
-        let derived = try XCTUnwrap(manager.derivedCelContent(for: manager.layers[0].cels[0], atFrame: 0,
-            inheriting: placement.backing), "PREMISE: a posed native drawing has a required derived provider")
-        XCTAssertNil(derived.render(.full), "a present posed provider retains the same native material refusal")
-        PixelOps.clearRasterizeCache()
-        let posedRecipe = try XCTUnwrap(manager.makeFrameRecipe(atFrame: 0, includeBackground: false))
-        XCTAssertTrue(posedRecipe.resolve().sourceResolutionFailed,
-            "a refused present provider cannot fall back to its unposed stored drawing")
-        manager.deleteLayer(at: 1)
-        manager.addLayer()
-        let layerIDs = manager.layers.map(\.id)
-        manager.history.removeAll()
-        XCTAssertFalse(manager.mergeLayers(layerIDs[0], layerIDs[1]), "native refusal prevents a destructive pixel merge")
-        XCTAssertEqual(manager.layers.map(\.id), layerIDs, "refused merge restores both source layers")
-        XCTAssertTrue(manager.layers[0].cels[0].vector === canvas, "refused merge retains the original native drawing")
-        XCTAssertFalse(manager.history.canUndo, "refused merge adds no successful history entry")
-    }
 
     @MainActor
     private func posedRasterRefusalFixture() -> CanvasManager {
@@ -779,7 +630,7 @@ final class LiquifyRasterLogicTests: XCTestCase {
         XCTAssertTrue(manager.layers[1].cels[0].vector === vector, "rollback also restores the native tier that ran before raster refusal")
         let restoredInk = manager.layers[1].cels[0].vector?.elements ?? []
         XCTAssertTrue(restoredInk.count == originalInk.count && zip(restoredInk, originalInk).allSatisfy {
-            $0.id == $1.id && $0.hasSameSpatialInk(as: $1)
+            $0.id == $1.id && $0.hasSameGeometry(as: $1)
         }, "rollback restores the original native drawing")
         XCTAssertTrue(manager.layers[0].cels[0].raster === pixels.raster)
         XCTAssertTrue(manager.layers[0].cels[0].bakedImage === pixels.bakedImage)

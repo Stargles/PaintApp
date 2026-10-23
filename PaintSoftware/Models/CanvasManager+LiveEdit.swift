@@ -361,6 +361,7 @@ extension CanvasManager {
     /// which takes the picture down, and publishes once so it re-cuts without the hold's host.
     func endLiveEdit(beforeNotify: () -> Void = {}) {
         guard liveEdit != nil else { return }
+        liquifyPictures.cancel()
         liveCelContentEdit?.procedure?.cancel()
         liveEdit = nil
         mirrorLiveEdit()

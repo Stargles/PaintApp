@@ -110,6 +110,18 @@ extension CanvasManager {
                 canvasSize: session.oldRaster.size, renderSource: session.renderSource, placement: session.placement)))
         if liveEdit == nil { beginLiveEdit(held) }
         holdLiveEdit(held)
+        guard onHeldPictureMoved != nil, let edit = held.celContent, let procedure = edit.procedure else { return }
+        liquifyPictures.request { [weak self] in
+            guard self?.liveCelContentEdit?.procedure === procedure else { return nil }
+            return {
+                _ = procedure.resolve(edit.elements)
+                return { [weak self] in
+                    guard self?.liveCelContentEdit?.procedure === procedure else { return }
+                    if procedure.hasFailed { procedure.didReject() }
+                    else { self?.onHeldPictureMoved?() }
+                }
+            }
+        }
     }
 
     func commitLiquify(_ session: LiquifySession) {

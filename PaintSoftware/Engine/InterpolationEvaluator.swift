@@ -177,11 +177,10 @@ enum InterpolationEvaluator {
         // Stream one field through all three collections; no scene-wide retained field cache.
         for (index, gesture) in recipe.deformations.enumerated() {
             let field = LiquifyField(gesture)
-            let operation = InkMaterialOperation(gesture, supportBounds: field.replacementBounds)
             let resolver = LiquifyDeformation.CaptureResolver(captures: gesture.captures, members: members)
-            forward = deformedShown(forward, gesture: gesture, operation: operation, field: field, resolver: resolver, warps: warps, fallback: fallback)
-            backward = deformedShown(backward, gesture: gesture, operation: operation, field: field, resolver: resolver, warps: warps, fallback: fallback)
-            localInk = deformedShown(localInk, gesture: gesture, operation: operation, field: field, resolver: resolver, warps: warps, fallback: fallback)
+            forward = deformedShown(forward, gesture: gesture, field: field, resolver: resolver, warps: warps, fallback: fallback)
+            backward = deformedShown(backward, gesture: gesture, field: field, resolver: resolver, warps: warps, fallback: fallback)
+            localInk = deformedShown(localInk, gesture: gesture, field: field, resolver: resolver, warps: warps, fallback: fallback)
             didApplyDeformation?(index, field)
         }
         return Evaluation(forward: forward.map(\.element), backward: backward.map(\.element),
@@ -426,19 +425,6 @@ enum InterpolationEvaluator {
             }
         }
 
-        /// A local edit is stored in rest space (`LocalEdit`), so it embeds in the rest grid and
-        /// warps with whatever the lattice is doing now — which is what makes it follow the motion
-        /// instead of sitting still.
-        func materialTransport(_ direction: Direction) -> InkMaterialBridge {
-            let source: Lattice
-            switch direction {
-            case .forward: source = from
-            case .backward: source = to
-            case .fromRest: source = current.restConfiguration
-            }
-            return .lattice(captured: source, current: current, pose: .identity)
-        }
-
         func mapFromRest(_ points: [CGPoint]) -> [CGPoint] {
             current.warp(current.embedInRest(points))
         }
@@ -482,10 +468,10 @@ enum InterpolationEvaluator {
                 let warp = stroke.motionGroupID.flatMap { warps[$0] } ?? fallback
                 guard let visible = visible(stroke, at: t) else { return nil }
                 return .stroke(warped(visible, weight: weight, options: options,
-                    transport: warp?.materialTransport(direction)) { warp?.map($0, direction) ?? $0 })
+                    by: { warp?.map($0, direction) ?? $0 }))
             case .fill(let fill):
                 guard !hidden(nil) else { return nil }
-                return .fill(warped(fill, transport: fallback?.materialTransport(direction)) { fallback?.map($0, direction) ?? $0 })
+                return .fill(warped(fill) { fallback?.map($0, direction) ?? $0 })
             case .image(let image):
                 guard !hidden(nil) else { return nil }
                 return .image(warped(image) { fallback?.map($0, direction) ?? $0 })
@@ -525,14 +511,14 @@ enum InterpolationEvaluator {
             // Weight 1 and no thickness fade: a local edit is the artist's own content at this
             // frame, not a keyframe's content being faded in or out.
             return .stroke(warped(visible, weight: 1, options: Options(),
-                transport: warp?.materialTransport(.fromRest)) { warp?.mapFromRest($0) ?? $0 })
+                by: { warp?.mapFromRest($0) ?? $0 }))
         }
     }
 
     /// Apply one captured brush field to ink already shown through its current group pose.
     /// Typed objects stay on interpolation's normal path; only ink geometry enters the field.
     private static func deformedShown(_ elements: [Ink], gesture: LiquifyDeformation,
-                                      operation: InkMaterialOperation, field: LiquifyField, resolver: LiquifyDeformation.CaptureResolver,
+                                      field: LiquifyField, resolver: LiquifyDeformation.CaptureResolver,
                                       warps: [UUID: GroupWarp], fallback: GroupWarp?) -> [Ink] {
         elements.map { ink in
             var ink = ink
@@ -553,17 +539,14 @@ enum InterpolationEvaluator {
                     return warp?.mapFromRest([pair.1]).first ?? pair.1
                 }
             }
-            let current = warp?.current ?? capture.lattice.restConfiguration
-            let binding = InkMaterialBinding(operation: operation,
-                bridge: .lattice(captured: capture.lattice, current: current, pose: .identity))
             switch element {
             case .stroke(let stroke):
-                guard VectorCanvas.materialBounds(of: stroke).intersects(region) else { return ink }
+                ink.element = .stroke(VectorGeometryMap.stroke(stroke, densify: true, region: region, by: move))
             case .fill(let fill):
                 guard fill.cgPath?.boundingBoxOfPath.intersects(region) == true else { return ink }
+                ink.element = .fill(VectorGeometryMap.fill(fill, densify: true, region: region, by: move))
             case .image, .video, .stream, .text: return ink
             }
-            ink.element = VectorGeometryMap.liquified(element, region: region, binding: binding, by: move)
             return ink
         }
     }
@@ -619,19 +602,11 @@ enum InterpolationEvaluator {
     // MARK: - Warping one element
 
     private static func warped(_ stroke: VectorStroke, weight: CGFloat, options: Options,
-                               densify: Bool = false, region: CGRect? = nil, transport: InkMaterialBridge? = nil,
+                               densify: Bool = false, region: CGRect? = nil,
                                by map: ([CGPoint]) -> [CGPoint]) -> VectorStroke {
         var result = VectorGeometryMap.stroke(stroke, densify: densify, region: region, by: map)
         let scale = options.thicknessFade.scale(weight: weight)
         result.size *= scale
-        if var native = stroke.effectiveWalk, native.material != nil {
-            if let transport {
-                native.transport = native.transport.followed(by: transport)
-                native.material = native.material?.transported(by: transport)
-            }
-            native.size *= scale
-            result.restWalk = native
-        }
         return result
     }
 
@@ -647,14 +622,9 @@ enum InterpolationEvaluator {
     /// The id is carried across (`reshaped` keeps everything that is not geometry). Nothing in
     /// rendering reads a fill's id, but keeping it stable is what lets a future matcher recognise the
     /// same fill at two keyframes (e.g. to lerp colour between corresponded fills).
-    private static func warped(_ fill: VectorFillElement, transport: InkMaterialBridge? = nil,
+    private static func warped(_ fill: VectorFillElement,
                                by map: ([CGPoint]) -> [CGPoint]) -> VectorFillElement {
-        var result = VectorGeometryMap.fill(fill, mapPaint: fill.placement == nil, by: map)
-        if var placement = result.placement, let transport {
-            placement = placement.transported(by: transport)
-            result.placement = placement
-        }
-        return result
+        VectorGeometryMap.fill(fill, by: map)
     }
 
     static func liquifyCaptures(recipe: InterpolationRecipe, content: ContentProvider = { _ in [] },

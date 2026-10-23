@@ -86,14 +86,6 @@ extension DabTarget {
     func dabSite(at point: CGPoint, travel: CGPoint) {}
 }
 
-/// Pixel sinks resolve native material at the existing stroke-group merge. Geometry collectors
-/// intentionally stay outside this protocol: they must observe the unchanged native walk.
-protocol MaterialDabTarget: DabTarget {
-    var material: InkMaterialPaint? { get set }
-    var completed: Bool { get }
-    func rejectMaterialTransport()
-}
-
 /// The pixels an image dab of `diameter` turned by `angle` about `point` can touch.
 ///
 /// The geometric half-extent on each axis is `(d/2)(|cos θ| + |sin θ|)` — exactly `d/2` unrotated
@@ -492,12 +484,8 @@ final class DabImageCache {
 /// `beginStroke`/`endStroke` are no-ops. They exist on `RasterLayerTexture` to maintain
 /// `strokeCount`, which is display-only bookkeeping for a *persistent* texture; a render-local
 /// context has no such state and nothing reads a stroke count off it.
-final class CGContextDabTarget: MaterialDabTarget {
+final class CGContextDabTarget: DabTarget {
     private let ctx: CGContext
-    var material: InkMaterialPaint?
-    let materialRenderer: InkMaterialRenderer?
-    private(set) var completed = true
-    func rejectMaterialTransport() { completed = false; materialRenderer?.rejectTransport() }
     /// **Where this context's own `(0, 0)` sits in canvas points** — BRUSH.md §2.25's phase, and the
     /// whole of what "canvas-anchored" needs from a target.
     ///
@@ -515,11 +503,10 @@ final class CGContextDabTarget: MaterialDabTarget {
     /// correctly excluded: this counts cost, not calls.
     private(set) var dabCount = 0
 
-    init(_ ctx: CGContext, canvasOrigin: CGPoint = .zero, materialRenderer: InkMaterialRenderer? = nil,
+    init(_ ctx: CGContext, canvasOrigin: CGPoint = .zero,
          gradients: DabGradientCache = DabGradientCache(), images: DabImageCache = DabImageCache()) {
         self.ctx = ctx
         self.canvasOrigin = canvasOrigin
-        self.materialRenderer = materialRenderer
         self.gradients = gradients; self.images = images
     }
 
@@ -568,22 +555,8 @@ final class CGContextDabTarget: MaterialDabTarget {
     /// Shared by CGContext rendering and persistent/scratch pixel targets, preserving one native
     /// group renderer and their existing gradient/tip caches.
     func merge(_ group: StrokeGroupBuffer) {
-        guard completed else { return }
-        lastGroupBounds = material?.bounds(of: group.bounds) ?? group.bounds
+        lastGroupBounds = group.bounds
         guard !group.isEmpty, !group.bounds.isNull else { return }
-        if let material, material.requiresWarp(in: ctx.boundingBoxOfClipPath) {
-            func draw(_ renderer: InkMaterialRenderer) -> Bool {
-                renderer.draw(into: ctx, nativeBounds: group.bounds, program: material.program,
-                    transport: material.transport, geometry: material.geometry, blendMode: group.blendMode) { source, clip in
-                    self.paintNative(group, into: source, over: clip)
-                }
-                return renderer.completed
-            }
-            let finished = materialRenderer.map(draw) ?? InkMaterialRenderer.visitTiles(into: ctx,
-                over: material.bounds(of: group.bounds), draw: draw)
-            completed = completed && finished
-            return
-        }
         ctx.saveGState()
         // **Integral, and that is not tidiness.** A clip on a fractional rectangle is antialiased, so
         // the group's outermost row of pixels would come out at partial coverage — MEASURED at
@@ -614,17 +587,6 @@ final class CGContextDabTarget: MaterialDabTarget {
             images.stamp(into: ctx, texture: texture, at: dab.center, diameter: dab.radius * 2,
                          angle: angle, color: dab.color, alpha: dab.alpha, blendMode: dab.blendMode)
         }
-    }
-
-    private func paintNative(_ group: StrokeGroupBuffer, into context: CGContext, over clip: CGRect) {
-        context.saveGState()
-        context.clip(to: group.bounds.integral)
-        context.setAlpha(group.opacity); context.setBlendMode(.normal)
-        context.beginTransparencyLayer(auxiliaryInfo: nil)
-        for dab in group.dabs { draw(dab, into: context) }
-        BrushTextureMerge.apply(group.texture, into: context, over: clip, canvasOrigin: canvasOrigin)
-        context.endTransparencyLayer()
-        context.restoreGState()
     }
 
     func stampCircle(at point: CGPoint, radius: CGFloat, color: UIColor,
@@ -679,10 +641,7 @@ final class CGContextDabTarget: MaterialDabTarget {
 /// it happens at most once per change, not once per stamp. The public API here (`renderToUIImage`,
 /// `stamp`, `beginStroke`/`endStroke`, `makeCopy`, `flipped`, `reset`/`clear`) is the seam every
 /// other piece of the engine depends on — keep it stable even if the internals move to GPU.
-final class RasterLayerTexture: MaterialDabTarget {
-    var material: InkMaterialPaint?
-    private(set) var completed = true
-    func rejectMaterialTransport() { completed = false }
+final class RasterLayerTexture: DabTarget {
     let size: CGSize
     let pixelWidth: Int
     let pixelHeight: Int
@@ -1073,13 +1032,10 @@ final class RasterLayerTexture: MaterialDabTarget {
         defer { lock.unlock() }
         guard let group else { return }
         self.group = nil
-        guard completed else { return }
         guard !group.isEmpty, !group.bounds.isNull else { return }
-        guard let ctx = ensureContext() else { if material != nil { completed = false }; return }
+        guard let ctx = ensureContext() else { return }
         let target = CGContextDabTarget(ctx, canvasOrigin: canvasOrigin, gradients: dabGradients, images: dabImages)
-        target.material = material
         target.merge(group)
-        completed = completed && target.completed
         cachedImage = nil
         version += 1
     }

@@ -95,7 +95,11 @@ Things that are cheap to break and expensive to relearn.
    in a replacement group. If a replacement group merges multiple histories, newly added ink inherits
    no arbitrary old reshape; its older members retain their individual histories. Local marks participate only in gestures
    that captured their LocalEdit.id: a mark drawn now does not replay gestures made before it existed. Ungrouped ink stores
-   a scoped identity capture, allowing canvas resize to conjugate the map without changing native grain.
+   a scoped identity capture, allowing canvas resize to conjugate the point map.
+   Evaluation applies the captured displacement to point/path geometry and then uses the ordinary
+   brush/fill renderer. It carries no native target-pixel material or texture transport. Target brush
+   settings and source links remain live; exact old dab phase and fixed exterior painted pixels are
+   not promised after a point edit. This follows the owner's 2026-10-23 correction to TODO (178).
 9. **Commit trades exactness for vectors.** No display list can express an in-between at an interior
    *t* — an `.erase` stroke reaches everything beneath it and `VectorElement` has no group case to
    hold a per-set alpha — so Commit concatenates and accepts the drift. One-way by design.

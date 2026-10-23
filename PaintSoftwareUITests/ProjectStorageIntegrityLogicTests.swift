@@ -77,18 +77,12 @@ final class ProjectStorageIntegrityLogicTests: XCTestCase {
             role: .drawing, cel: cel.id, in: package)
     }
 
-    private func materialStroke(_ operation: InkMaterialOperation) -> VectorStroke {
+    private func placedStroke() -> VectorStroke {
         let samples = StrokeSamples(points: [CGPoint(x: 8, y: 12), CGPoint(x: 48, y: 18)])
         return VectorStroke(brush: TestBrushes.pencil,
             color: CodableColor(red: 0.6, green: 0.1, blue: 0.2, alpha: 1), size: 5, opacity: 0.8,
             samples: samples, placement: StrokePlacement(map: .identity, restSize: 5,
-                source: .retained(samples: samples, lattice: nil, precise: true),
-                material: InkMaterialProgram(bindings: [InkMaterialBinding(operation: operation, bridge: .identity)])))
-    }
-
-    private func materialOperation(brush: Brush = TestBrushes.hardRound) -> InkMaterialOperation {
-        InkMaterialOperation(LiquifyDeformation(brush: brush, size: 16, power: 0.4, mode: .push, seed: 43,
-            samples: StrokeSamples(points: [CGPoint(x: 12, y: 12), CGPoint(x: 20, y: 16)])))
+                source: .retained(samples: samples, lattice: nil, precise: true)))
     }
 
     private func fileBytes(_ package: URL) throws -> [String: Data] {
@@ -218,103 +212,67 @@ final class ProjectStorageIntegrityLogicTests: XCTestCase {
         XCTAssertEqual(try fileBytes(live), liveBefore, "failed restore leaves live artwork untouched")
     }
 
-    func testMaterialDamageAbortsBothOpenPathsAndStagedRestoreWithoutChangingEitherPackage() async throws {
-        let operation = materialOperation()
+    func testGeometryVersionDamageAbortsBothOpenPathsAndStagedRestoreWithoutChangingEitherPackage() async throws {
         let package = try await packageAsync { manager in
             manager.layers[0].cels[0].vector = VectorCanvas(size: CanvasFixture.canvasSize,
-                elements: [.stroke(materialStroke(operation))])
-            manager.layers[0].cels[0].interpolation?.localEdits = [LocalEdit(stroke: materialStroke(operation))]
+                elements: [.stroke(placedStroke())])
         }
         let drawing = try vectorURL(package), recipe = try recipeURL(package)
         let goodDrawing = try Data(contentsOf: drawing), goodRecipe = try Data(contentsOf: recipe)
-        XCTAssertTrue(ProjectBackupManager.validateProject(at: package), "PREMISE: valid material opens")
+        XCTAssertTrue(ProjectBackupManager.validateProject(at: package))
         let live = try await packageAsync("Projects/live.paintproj")
         let liveBefore = try fileBytes(live)
-        for fault in ["dangling", "missing placement", "recipe local"] {
+        for file in [drawing, recipe] {
             try goodDrawing.write(to: drawing); try goodRecipe.write(to: recipe)
-            if fault == "recipe local" {
-                try edit(recipe) { $0["materialOperations"] = [] }
-            } else {
-                try edit(drawing) { json in
-                    var elements = json["elements"] as! [[String: Any]]
-                    var stroke = elements[0]["stroke"] as! [String: Any]
-                    if fault == "dangling" { json["materialOperations"] = [] }
-                    else { stroke.removeValue(forKey: "placement") }
-                    // Ordinary lossy damage must not hide unreadable material.
-                    stroke["color"] = "unreadable"
-                    elements[0]["stroke"] = stroke; json["elements"] = elements
-                }
-            }
+            try edit(file) { $0["geometryVersion"] = 2 }
             let before = try fileBytes(package)
-            XCTAssertNil(ProjectStore.load(from: package), fault)
+            XCTAssertNil(ProjectStore.load(from: package))
             let background = await ProjectStore.loadInBackground(from: package)
-            XCTAssertNil(background, fault)
-            XCTAssertFalse(ProjectBackupManager.validateProject(at: package), fault)
-            XCTAssertFalse(ProjectBackupManager.validateProjectForRestore(at: package), fault)
-            XCTAssertFalse(ProjectBackupManager.restoreBackup(at: package, toProjectAt: live), fault)
-            XCTAssertEqual(try fileBytes(package), before, "failed material read must not rewrite its source")
-            XCTAssertEqual(try fileBytes(live), liveBefore, "failed restore must not replace the live scene")
+            XCTAssertNil(background)
+            XCTAssertFalse(ProjectBackupManager.validateProject(at: package))
+            XCTAssertFalse(ProjectBackupManager.validateProjectForRestore(at: package))
+            XCTAssertFalse(ProjectBackupManager.restoreBackup(at: package, toProjectAt: live))
+            XCTAssertEqual(try fileBytes(package), before)
+            XCTAssertEqual(try fileBytes(live), liveBefore)
         }
     }
 
-    func testMaterialOnlyImportedTipsTravelForStrokesFillsAndRecipeLocalEdits() throws {
-        var names: [String] = [], operations: [InkMaterialOperation] = []
-        defer { for name in names { BrushStorage.shared.remove(name) } }
-        for width in [3, 7, 11] {
-            let format = UIGraphicsImageRendererFormat.default(); format.scale = 1
-            let image = UIGraphicsImageRenderer(size: CGSize(width: 16, height: 16), format: format).image { context in
-                context.cgContext.setFillColor(UIColor.black.cgColor)
-                context.cgContext.fill(CGRect(x: 0, y: 0, width: CGFloat(width), height: 16))
-            }
-            let tip = try BrushTipImport.importTip(from: image)
-            names.append(try XCTUnwrap(tip.importedTextureFileName))
-            operations.append(materialOperation(brush: Brush(name: "material-only", tip: tip, size: 16)))
+    func testRecipeGestureImportedTipTravelsWithoutAnyStrokeUsingIt() throws {
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 16, height: 16), format: PixelOps.transparentFormat()).image { context in
+            context.cgContext.setFillColor(UIColor.black.cgColor)
+            context.cgContext.fill(CGRect(x: 0, y: 0, width: 7, height: 16))
         }
-        XCTAssertEqual(Set(names).count, 3, "PREMISE: independent operation-only assets")
-        let package = try package { manager in
-            var fill = VectorFillElement(path: CGPath(rect: CGRect(x: 8, y: 8, width: 40, height: 40), transform: nil),
-                color: CodableColor(red: 0.3, green: 0.6, blue: 0.1, alpha: 1))
-            fill.placement = FillPlacement(pathData: fill.pathData,
-                material: InkMaterialProgram(bindings: [InkMaterialBinding(operation: operations[1], bridge: .identity)]))
-            manager.layers[0].cels[0].vector = VectorCanvas(size: CanvasFixture.canvasSize,
-                elements: [.stroke(materialStroke(operations[0])), .fill(fill)])
-            manager.layers[0].cels[0].interpolation?.localEdits = [LocalEdit(stroke: materialStroke(operations[2]))]
-        }
-        for name in names {
-            XCTAssertTrue(FileManager.default.fileExists(atPath: package.appendingPathComponent("brushes/\(name)").path))
-            BrushStorage.shared.remove(name)
-            XCTAssertFalse(BrushStorage.shared.contains(name))
-        }
+        let tip = try BrushTipImport.importTip(from: image)
+        let name = try XCTUnwrap(tip.importedTextureFileName)
+        defer { BrushStorage.shared.remove(name) }
+        let gesture = LiquifyDeformation(brush: Brush(name: "gesture-only", tip: tip, size: 16),
+            size: 16, power: 0.4, mode: .push, seed: 43,
+            samples: StrokeSamples(points: [CGPoint(x: 12, y: 12), CGPoint(x: 20, y: 16)]))
+        let package = try package { $0.layers[0].cels[0].interpolation?.deformations = [gesture] }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: package.appendingPathComponent("brushes/\(name)").path))
+        BrushStorage.shared.remove(name)
         let loaded = try XCTUnwrap(ProjectStore.load(from: package))
-        for name in names { XCTAssertTrue(BrushStorage.shared.contains(name), "material-only texture must restore") }
-        let programs = loaded.layers[0].cels[0].vector!.elements.compactMap(\.materialProgram)
-            + loaded.layers[0].cels[0].interpolation!.localEdits.compactMap { $0.stroke.placement?.material }
-        XCTAssertEqual(programs.flatMap { $0.bindings.map { $0.operation.deformation } }, operations.map(\.deformation))
+        XCTAssertTrue(BrushStorage.shared.contains(name))
+        XCTAssertEqual(loaded.layers[0].cels[0].interpolation?.deformations, [gesture])
     }
 
     func testFailedJSONEncodingCannotReplaceTheLastGoodSave() throws {
-        let shared = materialOperation()
         let package = try package { manager in
             manager.layers[0].cels[0].vector = VectorCanvas(size: CanvasFixture.canvasSize,
-                elements: [.stroke(materialStroke(shared))])
+                elements: [.stroke(placedStroke())])
         }
         let original = try fileBytes(package)
-        for fault in ["vector conflict", "recipe conflict", "generic encoding error"] {
+        for fault in ["vector placement", "recipe placement", "generic encoding error"] {
             let loaded = try XCTUnwrap(ProjectStore.load(from: package))
-            var conflict = shared.deformation; conflict.power = 0.9
-            let strokes = [materialStroke(shared), materialStroke(InkMaterialOperation(conflict))]
-            if fault == "recipe conflict" {
-                loaded.layers[0].cels[0].interpolation?.localEdits = strokes.map { LocalEdit(stroke: $0) }
-            } else if fault == "generic encoding error" {
-                var invalid = materialStroke(shared)
-                // This optional metadata is not read by an ordinary vector render, but JSON cannot
-                // encode it. Exercise EncodingError as well as the material table's own error type.
-                invalid.visibilityThreshold = .nan
-                loaded.layers[0].cels[0].vector = VectorCanvas(size: CanvasFixture.canvasSize, elements: [.stroke(invalid)])
+            var invalid = placedStroke()
+            if fault == "generic encoding error" { invalid.visibilityThreshold = .nan }
+            else { invalid.placement?.restSize = .nan }
+            if fault == "recipe placement" {
+                loaded.layers[0].cels[0].interpolation?.localEdits = [LocalEdit(stroke: invalid)]
             } else {
-                loaded.layers[0].cels[0].vector = VectorCanvas(size: CanvasFixture.canvasSize, elements: strokes.map(VectorElement.stroke))
+                loaded.layers[0].cels[0].vector = VectorCanvas(size: CanvasFixture.canvasSize, elements: [.stroke(invalid)])
             }
-            let saved = expectation(description: "reject conflicting material")
+            let saved = expectation(description: "reject unreadable geometry")
             ProjectStore.save(loaded, to: package) { saved.fulfill() }
             wait(for: [saved], timeout: 30)
             XCTAssertEqual(try fileBytes(package), original,

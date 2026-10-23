@@ -6423,25 +6423,6 @@ new source/subject ink still inherits surviving or uniquely replaced groups. No 
 or inverse-deformation planner path is needed.
 
 
-### Spatial material window and inline model sizing — 2026-10-15
-
-Native Debug gate `material-native-3` at `f15f52c` passed 26 methods. One stroke and one hundred
-strokes sharing a gesture both performed 144,000 velocity evaluations and prepared one field; the
-hundred-stroke case had 99 exact coordinate-cache hits. Peak counted payload was 11,535,208 bytes,
-including the field. The allocator cap remains 24 MiB plus one streamed field. Source and output
-providers retain counted leases until retirement. An outer autorelease pool previously retained
-outputs across groups and reached the cap; draining UIKit's temporary output image at each merge
-fixes that lifetime without copying pixels or changing the cap.
-
-The first broad Debug tier at `d52950b` measured `VectorElement` stride at 1,080 bytes, making the
-existing 1,000-element undo budget assertion fail. `InkMaterialBridge.lattice` held two complete
-lattices inline. Making that enum case indirect, without a new owner or archive format, reduced
-`VectorElement` stride to 856 bytes and the bridge to 80 bytes. The selected combined gate at
-`afef15c` passed all 60 methods, including the unchanged undo-budget assertion and ordinary,
-lattice, copied-placement and current/previous-package round-trips. Result:
-`~/PaintWork/s49-liquify-logs/material-combined-1.xcresult`. These are allocation/work counts;
-this gate makes no simulator throughput claim.
-
 ### Exact inverse batching — quiet Release qualification, 2026-10-22
 
 Candidate app/test source `7e780d7`, native arm64 iOS26.5 13-inch M5 simulator. The owner confirmed
@@ -6456,7 +6437,7 @@ Fixture allocation, source normalization and byte comparisons are outside the pr
 | Streaky | 84,956 | 179,020,536 | 8.0287 | 1.8168–2.1038 / 1.8681 | 2,063,952 + 90,928 |
 
 All eight production pictures have zero byte differences from the scalar reference. All18 smaller
-fixtures retain the qualified native RGBA hashes, exact scalar/batched source bits and evaluation
+fixtures retain the qualified native RGBA hashes, exact source bits and evaluation
 totals, with no failed solves. The production medians are 19.1%/23.3% of the respective scalar costs,
 which justifies retaining batching. This is optimized simulator producer cost, not iPad gesture
 latency; the real long patterned window still takes seconds. The earlier Debug slowdown remains a

@@ -78,6 +78,13 @@ final class CelContentPicture {
         let path = footprint(placement: placement)
         let output = path.boundingBoxOfPath.integral.intersection(CGRect(origin: .zero, size: size))
         guard !output.isNull, !output.isEmpty else { return nil }
+        // The image/provider and the presenter's two surfaces share this window's lifetime.
+        let workingBytes = CompositorBudget.textureBytes(for: output.size) * 4
+        guard workingBytes <= CompositorBudget.textureBudgetBytes,
+              CompositorBudget.hasHeadroom(for: workingBytes) else {
+            MemoryPressure.signal(.allocationRefused)
+            return nil
+        }
         var completed = true
         let image = UIGraphicsImageRenderer(size: output.size, format: PixelOps.transparentFormat()).image { context in
             completed = draw(into: context.cgContext,

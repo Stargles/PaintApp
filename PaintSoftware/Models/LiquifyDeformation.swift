@@ -139,18 +139,6 @@ struct LiquifyDeformation: Codable, Equatable {
         captures = try c.decode([Capture].self, forKey: .captures)
     }
 
-    /// The compact operation can retain this support without retaining a prepared field. Use the
-    /// already-prepared field's bounds when available; archive decode needs only the native walk.
-    var materialSupportBounds: CGRect {
-        let collector = BrushStamper.CollectingDabTarget()
-        var walk = BrushStamper.LiveWalk(seed: seed)
-        for sample in path.samples {
-            walk.stamp(to: sample, into: collector, brush: brush, color: .white, brushSize: size)
-        }
-        walk.finish(into: collector, brush: brush, color: .white, brushSize: size)
-        return collector.dabs.reduce(CGRect.null) { $0.union(LiquifyField.replacementBounds(of: $1)) }
-    }
-
     var selectionPath: CGPath? {
         guard let selection else { return nil }
         return VectorFillElement.decodePath(selection)
@@ -177,11 +165,6 @@ struct LiquifyDeformation: Codable, Equatable {
             result = result.union(CGRect(origin: origin, size: CGSize(width: lattice.restCellSize, height: lattice.restCellSize)))
         }
         return result
-    }
-
-    func touchesRest(_ points: [CGPoint], capture: Capture, using field: LiquifyField) -> Bool {
-        let captured = capture.lattice.warp(capture.lattice.embedInRest(points))
-        return field.intersects(captured)
     }
 
     func mapRest(_ points: [CGPoint], capture: Capture, using field: LiquifyField) -> [CGPoint] {

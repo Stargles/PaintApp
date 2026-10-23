@@ -342,57 +342,12 @@ final class VectorCanvasDataLogicTests: XCTestCase {
         XCTAssertEqual(decoded.images.map(\.fileName), ["a.png"])
     }
 
-    // MARK: - The legacy path
-
-    /// Builds a pre-display-list payload: three parallel arrays, no `elements` key.
-    private func legacyJSON(strokes: [Any], fills: [Any], images: [Any],
-                            transform: [Double]? = [1, 0, 0, 1, 0, 0]) throws -> Data {
-        var root: [String: Any] = ["strokes": strokes, "fills": fills, "images": images, "materialOperations": []]
-        if let transform { root["transform"] = transform }
-        return try jsonData(root)
-    }
-
-    /// A legacy file carries no z-order, so decoding *reconstructs* the one the old renderer hard-coded
-    /// — fills, then images, then strokes. Per-element tolerance must not disturb that: a dropped
-    /// entry leaves a gap in its own bucket and the buckets are still concatenated in that order.
-    func testALegacyPayloadWithOneBrokenStrokeKeepsTheRestAndTheOrder() throws {
-        let keptStroke = stroke(1)
-        let keptFill = fill(1)
-        var broken = try jsonObject(stroke(0.25))
-        broken.removeValue(forKey: "brush")
-
-        let data = try legacyJSON(strokes: [broken, try jsonObject(keptStroke)],
-                                  fills: [try jsonObject(keptFill)],
-                                  images: [try jsonObject(imageRef("a.png"))])
-
-        let decoded = try JSONDecoder().decode(VectorCanvasData.self, from: data)
-
-        XCTAssertEqual(kinds(decoded.elements), ["fill", "image", "stroke"],
-                       "Fills, then images, then strokes — the reconstruction the old renderer's order depends on")
-        XCTAssertEqual(ids(decoded.elements),
-                       [keptFill.id.uuidString, "a.png", keptStroke.id.uuidString])
-        XCTAssertEqual(decoded.decodeReport.malformedCount, 1)
-        XCTAssertTrue(decoded.decodeReport.unknownKinds.isEmpty,
-                      "A legacy payload predates the discriminator, so it cannot express an unknown kind")
-    }
-
-    /// The reconstruction itself, undamaged — the guard that the tolerance did not change what an
-    /// existing project looks like when it opens.
-    func testAnIntactLegacyPayloadStillDecodesAsFillsThenImagesThenStrokes() throws {
-        let strokes = [stroke(1), stroke(0.5)]
-        let fills = [fill(1), fill(0.5)]
-        let data = try legacyJSON(strokes: try strokes.map { try jsonObject($0) },
-                                  fills: try fills.map { try jsonObject($0) },
-                                  images: [try jsonObject(imageRef("a.png"))])
-
-        let decoded = try JSONDecoder().decode(VectorCanvasData.self, from: data)
-
-        XCTAssertEqual(kinds(decoded.elements), ["fill", "fill", "image", "stroke", "stroke"])
-        XCTAssertEqual(ids(decoded.elements),
-                       [fills[0].id.uuidString, fills[1].id.uuidString, "a.png",
-                        strokes[0].id.uuidString, strokes[1].id.uuidString])
-        XCTAssertTrue(decoded.decodeReport.isClean)
-        XCTAssertTrue(decoded.affineTransform.isIdentity)
+    func testPreviousGeometryVersionMustBeConvertedBeforeCurrentDecode() throws {
+        var payload = try jsonObject(healthyPayload())
+        payload.removeValue(forKey: "geometryVersion")
+        XCTAssertThrowsError(try JSONDecoder().decode(VectorCanvasData.self, from: jsonData(payload)))
+        payload["geometryVersion"] = 2
+        XCTAssertThrowsError(try JSONDecoder().decode(VectorCanvasData.self, from: jsonData(payload)))
     }
 
     // MARK: - The blast radius stays where it is
@@ -403,9 +358,9 @@ final class VectorCanvasDataLogicTests: XCTestCase {
     func testAPayloadThatIsNotAVectorPayloadStillThrows() throws {
         let notAPayload = try jsonData(["something": "else"])
         XCTAssertThrowsError(try JSONDecoder().decode(VectorCanvasData.self, from: notAPayload),
-                             "Neither an ordered nor a legacy payload — there is nothing to salvage, so this must not decode")
+                             "Not a current vector payload — there is nothing to salvage, so this must not decode")
 
-        let elementsNotAnArray = try jsonData(["elements": "nope", "transform": [1, 0, 0, 1, 0, 0]])
+        let elementsNotAnArray = try jsonData(["geometryVersion": 1, "elements": "nope", "transform": [1, 0, 0, 1, 0, 0]])
         XCTAssertThrowsError(try JSONDecoder().decode(VectorCanvasData.self, from: elementsNotAnArray),
                              "A structurally broken elements key is a broken file, not a file with a broken element")
     }

@@ -195,7 +195,7 @@ old accessor did at up to 218% error across a strong keystone.
 | the per-dab width | `BrushStamper.DabPose.scale(at:)`/`rotation(at:)`, which answer per dab exactly when the map is projective. There is no single scalar on this path to be wrong |
 | the live drag, rasterizing nothing | `Homography.catransform3D` on the float's latched bitmap (`CanvasView.showDistortedVectorFloat` → `StrokeCanvasView.updateVectorFloat(projective:)`), with `LiveLayerTransform.viewMap` doing the anchor-point conjugation |
 | one corner, dragged | `ObjectTransformDrag.distorted(to:)` — `TextFrameDrag.distortedFrame`'s three rules again, sharing `Homography.isValidQuad` with it and with `FloatingDistortDrag` and nothing else |
-| the commit | `VectorStroke.placement` — the homography and native width, with a derived source for ordinary Distort. Spatial Liquify material uses the same owner with a retained native walk. See below |
+| the commit | `VectorStroke.placement` — the homography and native width, with a derived source for ordinary Distort; exact animation bakes retain their source walk |
 | Reset | clears the quad with the transform; `canResetFloating` gains it as a fourth term |
 
 **One placement owns native ink.** An ordinary projective float commits its homography and the
@@ -203,13 +203,19 @@ artist's own width in `StrokePlacement`, using the compact `.derived` source. It
 and cut lattice remain posed; `effectiveWalk` pulls them back through the inverse homography when
 rendering. This retains the existing per-dab width and angle without storing an extra walk.
 
-Liquify adds spatial material to that same placement. Its `.retained` source keeps the original native
-walk and, for a cut piece, its ancestor walk and parameter correspondence. Those are necessary because
-nonlinear geometry cannot reconstruct the original spacing, random values or brush texture from an
-inverse homography. The retained walk has its own inherited precision; cuts preserve its ancestor
-parameters instead of choosing a nearby point at a self-crossing. The displayed centreline remains
-editable and continues to govern lasso membership (§5.4). Material drawing, bounds and tap/eraser
-candidacy must additionally account for paint that remains outside the moved centreline.
+An exact animation bake uses `.retained` source geometry so its stored frame keeps the animated
+brush walk across save/reopen. Cuts preserve that source's ancestor parameters, including at a
+self-crossing. The ordinary projective renderer owns this geometry; it has no displacement fields
+or target-pixel sampling.
+
+**Liquify edits points through the normal brush renderer** (owner correction, 2026-10-23). It creates
+no placement or brush-image transformation. Existing Distort placements keep their projective map;
+a point edit derives fresh matching source geometry rather than retaining a stale bake source.
+The Liquify brush's own tip/texture still controls displacement strength. Brush spacing, scatter and
+paper are then evaluated normally along the changed target stroke. A local point edit can therefore
+rephase paint farther along that stroke, and a wide brush mark can cross a selection edge; the held
+preview covers the changed stroke's complete painted footprint. The earlier exact-exterior-pixel
+appearance ruling is superseded by this explicit point-only instruction.
 
 **Re-sampling was the alternative and it is not available.** `VectorStroke` holds one width, and
 per-sample pressure drives alpha and flow as well as radius, so smuggling the width into pressure

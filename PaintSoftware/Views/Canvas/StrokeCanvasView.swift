@@ -805,6 +805,8 @@ final class StrokeCanvasView: CanvasPlaneView {
               edit.vectorCanvas === vectorCanvas, !hostIsBlanked else {
             return takeDownHeldEdit(landing: edit == nil)
         }
+        // Geometry edits prepare their complete stroke footprint before allocating a surface.
+        guard edit.procedure?.isResolved != false else { return false }
         if heldEditSurface != nil, heldEdit?.tick == edit.tick { return false }
         if heldEdit == nil { heldEditBaseRevision = contentRevisions.current }
         heldEdit = edit
@@ -1331,7 +1333,6 @@ final class StrokeCanvasView: CanvasPlaneView {
     var onDisplayInkChanged: (() -> Void)?
 
     private func showOverlays(_ scratch: StrokeScratch?) {
-        guard scratch?.completed != false else { return }
         let shown = scratch?.renderedCelContent
         guard scratch?.celContent == nil || shown != nil else { return }
         defer { onDisplayInkChanged?() }

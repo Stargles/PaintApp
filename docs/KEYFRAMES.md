@@ -1589,9 +1589,8 @@ channel; `PoseBakeLogicTests` and `PoseBakeUITests`. What the build settled, bey
   hand Distort is unchanged — it still pulls back, and an ulp is nothing to it. The stored spine is
   valid only while it is the pre-image of `samples` under the map: `drawn` composes onto the map and
   keeps it, `piece(of:)` carries it as the piece's rest lattice, and the interpolation warp and a
-  local edit's reprojection can derive new native geometry when there is no spatial material
-  (`withoutStoredGeometry`). Material-bearing placement instead retains its native walk and composes
-  the explicit transport, so the existing brush spacing survives nonlinear geometry changes.
+  local edit's reprojection derive new matching source geometry (`withoutStoredGeometry`). Liquify
+  also changes point positions and uses the ordinary renderer; it does not retain target brush pixels.
 - **The cost is disclosed with a number computed from the count and a MEASURED rate**
   (`CanvasManager.measuredSaveMillisecondsPerVectorCel`, from `PerfBaselineTests`' vector-only save
   bench on this Mac), not the 15.2 ms/cel above — that is the raster cel's `pngData()`, and a baked

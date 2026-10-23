@@ -25,7 +25,6 @@ final class LiquifyField {
     private(set) var steps: [Step] = []
     private(set) var bounds: CGRect = .null
     private(set) var replacementBounds: CGRect = .null
-    private(set) var definition: LiquifyDeformation?
     let mode: LiquifyMode
     let power: CGFloat
     let selection: CGPath?
@@ -47,7 +46,6 @@ final class LiquifyField {
     convenience init(_ gesture: LiquifyDeformation) {
         self.init(mode: gesture.mode, power: gesture.power, selection: gesture.selectionPath,
                   texture: gesture.brush.texture)
-        definition = gesture
         let collector = BrushStamper.CollectingDabTarget(tracksTravel: true)
         var walk = BrushStamper.LiveWalk(seed: gesture.seed)
         for sample in gesture.path.samples {
@@ -146,41 +144,8 @@ final class LiquifyField {
     }
     func inverse(_ point: CGPoint) -> CGPoint { inverseSolution(point).point }
 
-    struct InverseBatchWork {
-        var evaluations = 0
-        var failure: InverseResult.Failure?
-    }
+    /// Maximum number of destination points in a raster inverse work strip.
     static let inverseBatchSize = 4096
-    static func inverseBatchScratchBytes(pointCount: Int) -> Int {
-        let batches = (pointCount + inverseBatchSize - 1) / inverseBatchSize
-        // parallelMap briefly owns both its initialized buffer and the returned Array.
-        return batches * MemoryLayout<InverseBatchWork>.stride * 2
-    }
-
-    /// The caller finishes preparing this field before the fan-out, and keeps it unchanged until
-    /// the join. Each point follows the identical scalar solve; only disjoint output ranges run
-    /// together. Counters and failures fold in input order after the workers have finished.
-    func inverseSolutions(_ points: inout [CGPoint]) -> InverseBatchWork {
-        points.withUnsafeMutableBufferPointer { storage in
-            let output = storage
-            let count = (output.count + Self.inverseBatchSize - 1) / Self.inverseBatchSize
-            let batches = PixelOps.parallelMap(count) { batch -> InverseBatchWork in
-                var work = InverseBatchWork()
-                let start = batch * Self.inverseBatchSize
-                for index in start..<min(output.count, start + Self.inverseBatchSize) {
-                    let solution = self.inverseSolution(output[index])
-                    output[index] = solution.point
-                    work.evaluations += solution.evaluations
-                    if work.failure == nil { work.failure = solution.failure }
-                }
-                return work
-            }
-            return batches.reduce(into: InverseBatchWork()) { total, batch in
-                total.evaluations += batch.evaluations
-                if total.failure == nil { total.failure = batch.failure }
-            }
-        }
-    }
 
     /// Production sampling reverses the identical contracting Euler submaps. Its convergence
     /// checks concern the source coordinate; it does not re-forward every destination pixel.
@@ -422,8 +387,7 @@ final class LiquifyField {
 extension LiquifyField {
     func mapping(_ elements: [VectorElement],
                           selectedIDs: Set<UUID>? = nil, poses: [UUID: PoseMap] = [:]) -> [VectorElement] {
-        guard !isEmpty, let definition else { return elements }
-        let operation = InkMaterialOperation(definition, supportBounds: replacementBounds)
+        guard !isEmpty else { return elements }
         let field = self
         return elements.map { element in
             guard selectedIDs?.contains(element.id) ?? true else { return element }
@@ -442,18 +406,12 @@ extension LiquifyField {
             }
             switch element {
             case .stroke(let stroke):
-                guard VectorCanvas.materialBounds(of: stroke).intersects(active) else { return element }
-                return VectorGeometryMap.liquified(element, region: active,
-                    binding: InkMaterialBinding(operation: operation,
-                        bridge: pose?.inverse.map { .homography($0.homography) } ?? .identity), by: move)
+                return .stroke(VectorGeometryMap.stroke(stroke, densify: true, region: active, by: move))
             case .fill(let fill):
                 guard fill.cgPath?.boundingBoxOfPath.intersects(active) == true else { return element }
-                return VectorGeometryMap.liquified(element, region: active,
-                    binding: InkMaterialBinding(operation: operation,
-                        bridge: pose?.inverse.map { .homography($0.homography) } ?? .identity), by: move)
+                return .fill(VectorGeometryMap.fill(fill, densify: true, region: active, by: move))
             case .image, .video, .stream, .text: return element
             }
         }
     }
-
 }

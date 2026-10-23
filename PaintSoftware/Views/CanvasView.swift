@@ -2215,7 +2215,7 @@ struct CanvasView: UIViewRepresentable {
                     bounds = bounds.union(source.bounds)
                 }
             }
-            if let edit = canvasManager.liveCelContentEdit {
+            if let edit = canvasManager.liveCelContentEdit, edit.procedure?.isResolved != false {
                 var value = values[edit.layerID] ?? PixelOps.CelDisplay()
                 let placement = canvasManager.celContentPlacement(forLayerID: edit.layerID)
                 value.drawOverlays = edit.displaySource(placement: placement, canvasSize: size)

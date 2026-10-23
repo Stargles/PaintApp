@@ -151,18 +151,16 @@ struct LocalEdit: Identifiable, Codable {
         self.groupID = groupID
     }
     private enum CodingKeys: String, CodingKey { case id, stroke, groupID }
-    init(from decoder: Decoder) throws { try self.init(from: decoder, materialTable: nil) }
-    init(from decoder: Decoder, materialTable: InkMaterialTable?) throws {
+    init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
-        stroke = try VectorStroke(from: c.superDecoder(forKey: .stroke), materialTable: materialTable)
+        stroke = try VectorStroke(from: c.superDecoder(forKey: .stroke))
         groupID = try c.decodeIfPresent(UUID.self, forKey: .groupID)
     }
-    func encode(to encoder: Encoder) throws { try encode(to: encoder, materialTable: nil) }
-    func encode(to encoder: Encoder, materialTable: InkMaterialTable?) throws {
+    func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(id, forKey: .id); try c.encodeIfPresent(groupID, forKey: .groupID)
-        try stroke.encode(to: c.superEncoder(forKey: .stroke), materialTable: materialTable)
+        try stroke.encode(to: c.superEncoder(forKey: .stroke))
     }
 
 }
@@ -269,14 +267,16 @@ struct InterpolationRecipe: Codable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case references, t, mode, groups, guideIDs, localEdits, spacing, deformations, materialOperations
+        case references, t, mode, groups, guideIDs, localEdits, spacing, deformations, geometryVersion
     }
 
     /// Current packages carry every recipe field; missing or unreadable metadata is damage.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        let table = try InkMaterialCodingError.preserving {
-            try InkMaterialTable(definitions: c.decode([LiquifyDeformation].self, forKey: .materialOperations))
+        try VectorGeometryCodingError.preserving {
+            guard try c.decode(Int.self, forKey: .geometryVersion) == VectorCanvasData.currentGeometryVersion else {
+                throw VectorGeometryCodingError.invalid("unsupported recipe geometry version")
+            }
         }
         references = try c.decode([InterpolationReference].self, forKey: .references)
         t = try c.decode(CGFloat.self, forKey: .t)
@@ -285,21 +285,20 @@ struct InterpolationRecipe: Codable {
         guideIDs = try c.decode([UUID].self, forKey: .guideIDs)
         var edits = try c.nestedUnkeyedContainer(forKey: .localEdits)
         localEdits = []
-        while !edits.isAtEnd { localEdits.append(try LocalEdit(from: edits.superDecoder(), materialTable: table)) }
+        while !edits.isAtEnd { localEdits.append(try LocalEdit(from: edits.superDecoder())) }
         spacing = try c.decode(SpacingCurve.self, forKey: .spacing)
         deformations = try c.decode([LiquifyDeformation].self, forKey: .deformations)
     }
 
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
-        let table = try InkMaterialTable(programs: localEdits.compactMap { $0.stroke.placement?.material })
-        try c.encode(table.definitions, forKey: .materialOperations)
+        try c.encode(VectorCanvasData.currentGeometryVersion, forKey: .geometryVersion)
         try c.encode(references, forKey: .references); try c.encode(t, forKey: .t)
         try c.encode(mode, forKey: .mode); try c.encode(groups, forKey: .groups)
         try c.encode(guideIDs, forKey: .guideIDs); try c.encode(spacing, forKey: .spacing)
         try c.encode(deformations, forKey: .deformations)
         var edits = c.nestedUnkeyedContainer(forKey: .localEdits)
-        for edit in localEdits { try edit.encode(to: edits.superEncoder(), materialTable: table) }
+        for edit in localEdits { try edit.encode(to: edits.superEncoder()) }
     }
 
     /// Every cel any part of this recipe reads, deduplicated. What a "does this keyframe still

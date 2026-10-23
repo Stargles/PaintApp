@@ -172,7 +172,8 @@ final class LiquifyLogicTests: XCTestCase {
         let ink = VectorStroke(brush: brush, color: CodableColor(red: 1, green: 0.2, blue: 0.1, alpha: 1), size: 24, opacity: 1,
             samples: StrokeSamples(points: [CGPoint(x: 32, y: 96), CGPoint(x: 992, y: 96)]))
         let original: [VectorElement] = [.stroke(ink)]
-        let field = LiquifyField(gesture(points: [CGPoint(x: 300, y: 96), CGPoint(x: 300, y: 128)]))
+        let definition = gesture(points: [CGPoint(x: 300, y: 96), CGPoint(x: 300, y: 128)])
+        let field = LiquifyField(definition)
         let moved = field.mapping(original)
         let size = CGSize(width: 1024, height: 256)
         let beforeImage = (try XCTUnwrap(VectorCanvas(size: size, elements: original).render()))
@@ -191,87 +192,91 @@ final class LiquifyLogicTests: XCTestCase {
             let attachment = XCTAttachment(image: image); attachment.name = "liquify-long-patterned-target-" + name
             attachment.lifetime = .keepAlways; add(attachment)
         }
-        XCTAssertEqual(outside, 0, "a local held replacement must agree with the eventual full committed drawing")
+        XCTAssertGreaterThan(outside, 0, "PREMISE: normal brush rewalking changes ink beyond the field window")
+        let procedure = LiquifyProcedure(deformation: definition, selectedIDs: nil, poses: [:],
+            window: field.replacementBounds, canvasSize: size)
+        let preview = try XCTUnwrap(procedure.presentation(original, placement: .identity))
+        XCTAssertGreaterThan(preview.window.width, local.width, "the held window must cover the whole changed stroke")
+        let reconstructed = UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { context in
+            beforeImage.draw(at: .zero)
+            preview.draw(into: context.cgContext, content: CGRect(origin: .zero, size: size), canvasSize: size)
+        }
+        XCTAssertEqual(try CanvasFixture.rgbaBytes(XCTUnwrap(reconstructed.cgImage)), after,
+            "the actually presented replacement must equal the complete normal-rendered committed stroke")
     }
 
-    /// Test-only collection of the existing unscattered site emission, alongside native stamps.
-    /// This does not choose a saved representation or change the production renderer.
-    private final class NativeSiteComparisonTarget: DabTarget {
-        let collected = BrushStamper.CollectingDabTarget()
-        var sites: [CGPoint] = []
-        private var site = CGPoint.zero
-        func dabSite(at point: CGPoint, travel: CGPoint) { site = point }
-        func beginStroke() {}
-        func endStroke() {}
-        func beginStrokeGroup(opacity: CGFloat, blendMode: CGBlendMode, texture: BrushTextureSettings?) {
-            collected.beginStrokeGroup(opacity: opacity, blendMode: blendMode, texture: texture)
-        }
-        func endStrokeGroup() { collected.endStrokeGroup() }
-        func stampCircle(at point: CGPoint, radius: CGFloat, color: UIColor,
-                         alpha: CGFloat, hardness: CGFloat, blendMode: CGBlendMode) {
-            sites.append(site)
-            collected.stampCircle(at: point, radius: radius, color: color, alpha: alpha, hardness: hardness, blendMode: blendMode)
-        }
-        func stampImage(_ texture: BrushTextureRef, at point: CGPoint, diameter: CGFloat,
-                        angle: CGFloat, color: UIColor, alpha: CGFloat, blendMode: CGBlendMode) {
-            sites.append(site)
-            collected.stampImage(texture, at: point, diameter: diameter, angle: angle, color: color, alpha: alpha, blendMode: blendMode)
+    private func rendered(_ stroke: VectorStroke, size: CGSize = CGSize(width: 192, height: 160)) throws -> [UInt8] {
+        let image = try XCTUnwrap(VectorCanvas(size: size, elements: [.stroke(stroke)]).render())
+        return try XCTUnwrap(CanvasFixture.rgbaBytes(XCTUnwrap(image.cgImage)))
+    }
+
+    func testWideTexturedAndScatteredInkUsesTheNormalBrushAtItsNewPoints() throws {
+        var grained = BrushLibrary.streaky
+        grained.texture = BrushTextureSettings(mask: .builtIn(.paperGrain), tileSize: 37, depth: 0.8)
+        var scattered = TestBrushes.hardRound
+        scattered.dab.scatterAcross = 0.6; scattered.dab.scatterAlong = 0.4
+        let field = LiquifyField(gesture(points: [CGPoint(x: 70, y: 72), CGPoint(x: 104, y: 104)]))
+        for brush in [TestBrushes.hardRound, grained, scattered] {
+            let original = VectorStroke(brush: brush, color: black, size: 44, opacity: 0.63,
+                samples: StrokeSamples(points: [CGPoint(x: 20, y: 72), CGPoint(x: 150, y: 72)]), seed: 91)
+            let moved = try XCTUnwrap(field.mapping([.stroke(original)]).first?.stroke)
+            XCTAssertNotEqual(moved.samples, original.samples)
+            XCTAssertEqual(moved.brush, original.brush)
+            XCTAssertEqual(moved.size, original.size)
+            XCTAssertEqual(moved.opacity, original.opacity)
+            XCTAssertEqual(moved.seed, original.seed)
+            XCTAssertNil(moved.placement, "point editing must not create a target-ink transform")
+            XCTAssertNil(moved.restWalk)
+            let ordinary = VectorStroke(brush: brush, color: original.color, size: original.size,
+                opacity: original.opacity, samples: moved.samples, seed: original.seed)
+            XCTAssertEqual(try rendered(moved), try rendered(ordinary),
+                "Liquify must draw exactly like ordinary ink authored along those new points")
         }
     }
 
-    func testOwnerBoundaryComparisonUsesNativeStampsAndExactSelectedPixelWarp() throws {
-        let size = CGSize(width: 192, height: 160)
-        let selection = CGPath(rect: CGRect(x: 64, y: 48, width: 72, height: 48), transform: nil)
-        let field = LiquifyField(gesture(points: [CGPoint(x: 100, y: 75), CGPoint(x: 100, y: 103)], selection: selection))
-        var brush = BrushLibrary.streaky
-        brush.modulations = BrushModulations()
-        let native = NativeSiteComparisonTarget()
-        BrushStamper.stampStroke(into: native, samples: StrokeSamples(points: [CGPoint(x: 20, y: 75), CGPoint(x: 172, y: 75)]),
-            brush: brush, color: UIColor(red: 0.85, green: 0.16, blue: 0.05, alpha: 1), brushSize: 80,
-            brushOpacity: 1, random: DabRandom(seed: 42))
-        XCTAssertEqual(native.sites.count, native.collected.dabs.count)
-        let original = BrushStamper.BakedStroke(dabs: native.collected.dabs, opacity: native.collected.opacity,
-            blendMode: native.collected.blendMode, texture: native.collected.texture)
-        var moved = original
-        moved.dabs = zip(original.dabs, native.sites).map { dab, site in
-            let displaced = field.map(site)
-            var result = dab
-            result.center.x += displaced.x - site.x; result.center.y += displaced.y - site.y
-            return result
-        }
-        func render(_ stroke: BrushStamper.BakedStroke) -> UIImage {
-            UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { ctx in
-                BrushStamper.replay(stroke, into: CGContextDabTarget(ctx.cgContext), through: .identity)
-            }
-        }
-        let sourceImage = render(original), siteImage = render(moved)
-        let source = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(sourceImage.cgImage)))
-        let sites = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(siteImage.cgImage)))
-        let pixels = try XCTUnwrap(ImageWarp.warp(source: source, sourceWidth: 192, sourceHeight: 160,
-            destinationWidth: 192, destinationHeight: 160, inverseTexelMap: field.inverse))
-        let pixelImage = UIImage(cgImage: try XCTUnwrap(CoreGraphicsCompositor.makeImage(fromPremultiplied: pixels, width: 192, height: 160)))
-        var outsideSites = 0, outsidePixels = 0
-        for y in 0..<160 { for x in 0..<192 where !selection.contains(CGPoint(x: CGFloat(x) + 0.5, y: CGFloat(y) + 0.5), using: VectorCanvas.lassoFillRule) {
-            let i = (y * 192 + x) * 4
-            if sites[i + 3] != source[i + 3] { outsideSites += 1 }
-            if pixels[i + 3] != source[i + 3] { outsidePixels += 1 }
-        } }
-        print("LIQUIFY OWNER SELECTION A_outsideChanged=\(outsideSites) B_outsideChanged=\(outsidePixels) nativeDabs=\(original.dabs.count)")
-        XCTAssertGreaterThan(outsideSites, 50, "PREMISE: whole native stamps visibly overhang the selected vector sites")
-        XCTAssertEqual(outsidePixels, 0, "the pixel alternative preserves every exterior alpha byte")
-        for (name, title, image) in [("original", "Before", sourceImage), ("A-line-points", "A: Move line points", siteImage), ("B-selected-pixels", "B: Move selected pixels", pixelImage)] {
-            let format = PixelOps.transparentFormat(); format.opaque = true
-            let paper = UIGraphicsImageRenderer(size: CGSize(width: 576, height: 480), format: format).image { ctx in
-                UIColor.white.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: 576, height: 480))
-                ctx.cgContext.scaleBy(x: 3, y: 3); ctx.cgContext.interpolationQuality = .none
-                image.draw(in: CGRect(origin: .zero, size: size))
-                (title as NSString).draw(at: CGPoint(x: 6, y: 8), withAttributes: [.font: UIFont.systemFont(ofSize: 12, weight: .semibold), .foregroundColor: UIColor.darkGray])
-                ctx.cgContext.setStrokeColor(UIColor.systemBlue.cgColor); ctx.cgContext.setLineWidth(1)
-                ctx.cgContext.setLineDash(phase: 0, lengths: [3, 2]); ctx.cgContext.addPath(selection); ctx.cgContext.strokePath()
-            }
-            let attachment = XCTAttachment(image: paper); attachment.name = "liquify-selection-boundary-" + name
-            attachment.lifetime = .keepAlways; add(attachment)
-        }
+    func testLiquifiedCutPieceUpdatesItsAncestorAndRendersAsOrdinaryInk() throws {
+        let parent = VectorStroke(brush: BrushLibrary.streaky, color: black, size: 20, opacity: 0.8,
+            samples: StrokeSamples(points: [CGPoint(x: 12, y: 72), CGPoint(x: 180, y: 72)]), seed: 19)
+        let canvas = VectorCanvas(size: CGSize(width: 192, height: 160), elements: [.stroke(parent)])
+        XCTAssertTrue(canvas.erase(alongPath: StrokeSamples(points: [CGPoint(x: 155, y: 72)]),
+            brush: TestBrushes.hardRound, size: 12, mode: .cutPoints))
+        let piece = try XCTUnwrap(canvas.elements.compactMap(\.stroke).first { $0.samples.positions.contains { $0.x < 40 } })
+        let field = LiquifyField(gesture(points: [CGPoint(x: 70, y: 72), CGPoint(x: 70, y: 104)]))
+        let moved = try XCTUnwrap(field.mapping([.stroke(piece)]).first?.stroke)
+        XCTAssertNotEqual(moved.lattice?.samples, piece.lattice?.samples,
+            "a cut piece is drawn from its ancestor, which must follow its edited points")
+        XCTAssertNil(moved.placement)
+        let ordinary = VectorStroke(brush: moved.brush, color: moved.color, size: moved.size,
+            opacity: moved.opacity, samples: moved.samples, lattice: moved.lattice, seed: moved.seed)
+        XCTAssertEqual(try rendered(moved), try rendered(ordinary))
+        let restored = try JSONDecoder().decode(VectorStroke.self, from: JSONEncoder().encode(moved))
+        XCTAssertEqual(try rendered(restored), try rendered(moved), "the normal cut walk survives first save")
+    }
+
+    func testPointEditKeepsAnExistingProjectivePlacementAndRefreshesItsBakedSource() throws {
+        let original = stroke([CGPoint(x: 20, y: 64), CGPoint(x: 120, y: 64)])
+        let map = PoseMap(Homography(a: 1, b: 0, c: 0, d: 0, e: 1, f: 0, g: 0.001, h: 0, i: 1))
+        let baked = try XCTUnwrap(VectorCanvas.baking(.stroke(original), through: map)?.stroke)
+        guard case .retained? = baked.placement?.source else { return XCTFail("PREMISE: exact bake retains its original walk") }
+        let field = LiquifyField(gesture(points: [CGPoint(x: 64, y: 64), CGPoint(x: 64, y: 94)]))
+        let moved = try XCTUnwrap(field.mapping([.stroke(baked)]).first?.stroke)
+        XCTAssertEqual(moved.placement?.map, baked.placement?.map, "Liquify introduces no new projective map")
+        XCTAssertEqual(moved.placement?.restSize, baked.placement?.restSize)
+        guard case .derived? = moved.placement?.source else { return XCTFail("the old retained geometry must not hide the new point positions") }
+        XCTAssertNotEqual(moved.effectiveWalk?.samples, baked.effectiveWalk?.samples)
+        let restored = try JSONDecoder().decode(VectorStroke.self, from: JSONEncoder().encode(moved))
+        XCTAssertEqual(try rendered(restored), try rendered(moved))
+    }
+
+    func testExpandedNormalStrokePreviewRefusesBeforeAllocatingBeyondItsBudget() throws {
+        let ink = stroke([CGPoint(x: 20, y: 64), CGPoint(x: 900, y: 64)])
+        let definition = gesture(points: [CGPoint(x: 64, y: 64), CGPoint(x: 64, y: 94)])
+        let procedure = LiquifyProcedure(deformation: definition, selectedIDs: nil, poses: [:],
+            window: CGRect(x: 40, y: 40, width: 60, height: 60), canvasSize: CGSize(width: 1024, height: 256))
+        CompositorBudget.budgetOverrideBytes = 1
+        defer { CompositorBudget.budgetOverrideBytes = nil }
+        XCTAssertNil(procedure.presentation([.stroke(ink)], placement: .identity))
+        XCTAssertTrue(procedure.hasFailed, "a full-stroke rewalk window must not evade the shared picture budget")
     }
 
     func testNonlinearMappingCarriesEverySensorAndParentDabWalk() {
@@ -392,7 +397,6 @@ final class LiquifyLogicTests: XCTestCase {
         }
     }
 
-
     func testSmallBrushDoesNotExpandTheWholeLongSparseLine() throws {
         let line = stroke([CGPoint(x: -5000, y: 64), CGPoint(x: 5000, y: 64)])
         let field = LiquifyField(gesture(points: [CGPoint(x: 64, y: 64), CGPoint(x: 64, y: 94)]))
@@ -442,6 +446,32 @@ final class LiquifyLogicTests: XCTestCase {
         let layer = UUID()
         return InterpolationRecipe(references: [InterpolationReference(layerID: layer, celID: UUID()),
                                                InterpolationReference(layerID: layer, celID: UUID())], t: 0.5, groups: groups)
+    }
+
+    func testLinkedFrameRestampsMappedPointsAndStillReadsItsSource() throws {
+        var ink = VectorStroke(brush: BrushLibrary.streaky, color: black, size: 28, opacity: 0.72,
+            samples: StrokeSamples(points: [CGPoint(x: 20, y: 72), CGPoint(x: 150, y: 72)]), seed: 71)
+        var linked = recipe()
+        var edit = gesture(points: [CGPoint(x: 70, y: 72), CGPoint(x: 70, y: 104)])
+        edit.captures = InterpolationEvaluator.liquifyCaptures(recipe: linked, content: { _ in [.stroke(ink)] })
+        linked.deformations = [edit]
+        let saved = try JSONEncoder().encode(linked)
+        linked = try JSONDecoder().decode(InterpolationRecipe.self, from: saved)
+        let first = try XCTUnwrap(InterpolationEvaluator.evaluate(recipe: linked, at: 0.5,
+            content: { _ in [.stroke(ink)] })?.forward.first?.stroke)
+        XCTAssertNotEqual(first.samples, ink.samples)
+        XCTAssertNil(first.placement)
+        XCTAssertEqual(first.size, ink.size)
+        XCTAssertEqual(first.seed, ink.seed)
+        let ordinary = VectorStroke(brush: first.brush, color: first.color, size: ink.size,
+            opacity: ink.opacity, samples: first.samples, seed: ink.seed)
+        XCTAssertEqual(try rendered(first), try rendered(ordinary))
+        ink.color = CodableColor(red: 0.9, green: 0.1, blue: 0.2, alpha: 1)
+        let later = try XCTUnwrap(InterpolationEvaluator.evaluate(recipe: linked, at: 0.5,
+            content: { _ in [.stroke(ink)] })?.forward.first?.stroke)
+        XCTAssertEqual(later.color, ink.color, "the point-only recipe still reads its current source drawing")
+        XCTAssertEqual(later.samples, first.samples)
+        XCTAssertNotEqual(try rendered(later), try rendered(first))
     }
 
     func testTwoMotionGroupsBothReceiveTheCrossingGesture() throws {
@@ -654,24 +684,6 @@ final class LiquifyLogicTests: XCTestCase {
             XCTAssertThrowsError(try JSONDecoder().decode(LiquifyDeformation.Capture.self,
                 from: JSONSerialization.data(withJSONObject: broken)), "source requires a cel; local ink cannot claim one")
         }
-    }
-
-    func testInverseBatchesKeepExactSourcesCountersAndFailuresAcrossTheTail() {
-        let field = LiquifyField(gesture())
-        var points = (0..<8_205).map { CGPoint(x: CGFloat($0 % 130) + 0.5, y: CGFloat($0 / 130) + 0.5) }
-        points[4_097] = CGPoint(x: CGFloat.nan, y: 64)
-        points[8_204] = CGPoint(x: 72, y: CGFloat.infinity)
-        let scalar = points.map(field.inverseSolution)
-        let work = field.inverseSolutions(&points)
-        XCTAssertEqual(work.failure, .nonFinite, "a failed source in any batch refuses the complete picture")
-        XCTAssertEqual(work.evaluations, scalar.reduce(0) { $0 + $1.evaluations })
-        XCTAssertEqual(points.map { Double($0.x).bitPattern }, scalar.map { Double($0.point.x).bitPattern })
-        XCTAssertEqual(points.map { Double($0.y).bitPattern }, scalar.map { Double($0.point.y).bitPattern })
-        var empty: [CGPoint] = []
-        let noWork = field.inverseSolutions(&empty)
-        XCTAssertEqual(noWork.evaluations, 0)
-        XCTAssertNil(noWork.failure)
-        XCTAssertTrue(empty.isEmpty)
     }
 
     func testRasterInverseStripsMatchSerialPixelsAndRespectTheirWholeWindowBudget() throws {
@@ -913,7 +925,7 @@ final class LiquifyLogicTests: XCTestCase {
     func testLiftWaitsForMatchingPictureAndReusesItsResolvedGeometryOnce() throws {
         let (manager, canvas, ink, session, procedure) = try pendingGesture()
         XCTAssertTrue(procedure.isPending)
-        XCTAssertEqual(procedure.resolutionCount, 0, "normal lift must perform no geometry mapping on main")
+        XCTAssertLessThanOrEqual(procedure.resolutionCount, 1, "the preparing worker may already own the one final value")
         XCTAssertTrue(manager.history.undoStack.isEmpty)
         let picture = try XCTUnwrap(manager.liveCelContentEdit).picture()
         _ = try XCTUnwrap(manager.liveCelContentEdit).picture()
@@ -955,6 +967,77 @@ final class LiquifyLogicTests: XCTestCase {
         procedure.didPresent()
         XCTAssertEqual(canvas.elements.count, 2, "a late first draw cannot replace ink from the following edit")
         XCTAssertEqual(manager.history.undoStack.count, 1)
+    }
+
+    @MainActor
+    func testNewestPreparedTickIsTheOnlyTickThatCanPresentAndCommit() throws {
+        let manager = CanvasFixture.manager(); manager.addVectorLayer()
+        let layer = manager.layers[1], canvas = try XCTUnwrap(layer.cels[0].vector)
+        canvas.addStroke(stroke([CGPoint(x: 10, y: 24), CGPoint(x: 50, y: 24)]))
+        manager.history.removeAll()
+        let entered = DispatchSemaphore(value: 0), release = DispatchSemaphore(value: 0)
+        manager.liquifyPictures.request { { entered.signal(); release.wait(); return {} } }
+        XCTAssertEqual(entered.wait(timeout: .now() + 5), .success)
+        defer { release.signal() }
+        let shown = expectation(description: "newest complete normal stroke picture")
+        var presented: [UUID] = []
+        manager.onHeldPictureMoved = {
+            guard let procedure = manager.liveCelContentEdit?.procedure, procedure.isResolved else { return }
+            presented.append(procedure.deformation.id)
+            procedure.didPresent()
+            shown.fulfill()
+        }
+        let profile = ToolProfile(preset: TestBrushes.hardRound, size: 50, opacity: 1)
+        var session = try XCTUnwrap(manager.beginLiquify(layerID: layer.id, profile: profile, size: 50, seed: 7))
+        session.samples = StrokeSamples(points: [CGPoint(x: 32, y: 24), CGPoint(x: 32, y: 32)])
+        session.window = CGRect(x: 0, y: 0, width: 64, height: 64)
+        manager.holdLiquify(&session)
+        let stale = try XCTUnwrap(manager.liveCelContentEdit?.procedure)
+        session.samples.append(VectorSample(x: 32, y: 48))
+        manager.holdLiquify(&session)
+        let newest = try XCTUnwrap(manager.liveCelContentEdit?.procedure)
+        XCTAssertFalse(newest === stale)
+        manager.commitLiquify(session)
+        XCTAssertTrue(newest.isPending)
+        XCTAssertTrue(presented.isEmpty, "a not-yet-prepared tick must preserve the previous presented picture")
+        release.signal()
+        wait(for: [shown], timeout: 15)
+        XCTAssertEqual(stale.resolutionCount, 0, "superseded queued geometry never allocates a picture")
+        XCTAssertEqual(newest.resolutionCount, 1)
+        XCTAssertEqual(presented, [newest.deformation.id])
+        XCTAssertEqual(manager.history.undoStack.count, 1)
+        XCTAssertNil(manager.liveCelContentEdit)
+    }
+
+    @MainActor
+    func testCancellingTheHeldEditDropsQueuedPreparationBeforeItCanNotifyAnotherScene() throws {
+        let manager = CanvasFixture.manager(); manager.addVectorLayer()
+        let layer = manager.layers[1], canvas = try XCTUnwrap(layer.cels[0].vector)
+        let original = stroke([CGPoint(x: 10, y: 24), CGPoint(x: 50, y: 24)])
+        canvas.addStroke(original); manager.history.removeAll()
+        let entered = DispatchSemaphore(value: 0), release = DispatchSemaphore(value: 0)
+        manager.liquifyPictures.request { { entered.signal(); release.wait(); return {} } }
+        XCTAssertEqual(entered.wait(timeout: .now() + 5), .success)
+        defer { release.signal() }
+        var readyPictures = 0
+        manager.onHeldPictureMoved = {
+            if manager.liveCelContentEdit?.procedure?.isResolved == true { readyPictures += 1 }
+        }
+        let profile = ToolProfile(preset: TestBrushes.hardRound, size: 50, opacity: 1)
+        var session = try XCTUnwrap(manager.beginLiquify(layerID: layer.id, profile: profile, size: 50, seed: 7))
+        session.samples = StrokeSamples(points: [CGPoint(x: 32, y: 24), CGPoint(x: 32, y: 48)])
+        session.window = CGRect(x: 0, y: 0, width: 64, height: 64)
+        manager.holdLiquify(&session)
+        let abandoned = try XCTUnwrap(manager.liveCelContentEdit?.procedure)
+        manager.endLiveEdit()
+        let drained = expectation(description: "cancelled preparation queue drained")
+        manager.liquifyPictures.request { { return { drained.fulfill() } } }
+        release.signal()
+        wait(for: [drained], timeout: 10)
+        XCTAssertEqual(abandoned.resolutionCount, 0)
+        XCTAssertEqual(readyPictures, 0)
+        XCTAssertEqual(canvas.elements.first?.stroke?.samples, original.samples)
+        XCTAssertTrue(manager.history.undoStack.isEmpty)
     }
 
     func testCancellingUnwrittenGestureDropsLatePresentationWithoutHistory() throws {

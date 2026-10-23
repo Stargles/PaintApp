@@ -63,6 +63,8 @@ final class LiquifyProcedure {
         let fieldIsEmpty: Bool
     }
 
+    var isResolved: Bool { locked { value != nil } }
+    var resolvedWindow: CGRect? { locked { value }?.contentPicture?.window }
     var hasFailed: Bool { locked { value }?.failed == true }
     var isPending: Bool { locked { finish != nil } }
     var isPresented: Bool { locked { presented } }
@@ -89,7 +91,13 @@ final class LiquifyProcedure {
         var fieldIsEmpty = true
         var failed = false
         var evaluatedInk: InterpolationEvaluator.Evaluation?
+        var previousInk: InterpolationEvaluator.Evaluation?
         if let snapshot = recipeSnapshot {
+            var before = snapshot.recipe
+            before.deformations.removeLast()
+            previousInk = InterpolationEvaluator.evaluate(recipe: before, at: before.t,
+                content: { snapshot.content[$0] ?? [] }, subject: original, guides: snapshot.guides,
+                options: snapshot.options)
             let evaluation = InterpolationEvaluator.evaluate(recipe: snapshot.recipe, at: snapshot.recipe.t,
                 content: { snapshot.content[$0] ?? [] }, subject: original, guides: snapshot.guides,
                 options: snapshot.options, didApplyDeformation: { index, field in
@@ -107,9 +115,27 @@ final class LiquifyProcedure {
         }
         failed = failed || (pixelSnapshot != nil && pixels == nil)
         let changed = Set(zip(original, elements).compactMap { old, new in
-            old.hasSameSpatialInk(as: new) ? nil : old.id
+            old.hasSameGeometry(as: new) ? nil : old.id
         })
         let shown = shown(elements)
+        var inkWindow = window
+        if let previousInk, let evaluatedInk {
+            let pairs = [(previousInk.forward, evaluatedInk.forward),
+                         (previousInk.backward, evaluatedInk.backward),
+                         (previousInk.localEdits, evaluatedInk.localEdits)]
+            for (old, new) in pairs {
+                let ids = Set(zip(old, new).compactMap { $0.hasSameGeometry(as: $1) ? nil : $0.id })
+                inkWindow = inkWindow.union(VectorCanvas.paintedBounds(of: old.filter { ids.contains($0.id) }))
+                    .union(VectorCanvas.paintedBounds(of: new.filter { ids.contains($0.id) }))
+            }
+        } else {
+            let before = self.shown(original)
+            inkWindow = inkWindow.union(VectorCanvas.paintedBounds(of: before.filter { changed.contains($0.id) }))
+                .union(VectorCanvas.paintedBounds(of: shown.filter { changed.contains($0.id) }))
+        }
+        if let size = pixelSnapshot?.size ?? canvasSize {
+            inkWindow = inkWindow.insetBy(dx: -1, dy: -1).integral.intersection(CGRect(origin: .zero, size: size))
+        }
         var picture: CelContentPicture?
         var presentation: CelContentPicture.RenderedWindow?
         if !window.isNull, !window.isEmpty, let size = pixelSnapshot?.size ?? canvasSize {
@@ -119,7 +145,7 @@ final class LiquifyProcedure {
                 let source = renderSource ?? VectorCanvas(size: size).freeze(quality: .full)
                 ink = .ordinary(source: source, elements: shown, rewriting: changed.union(poses.keys))
             } else { ink = nil }
-            picture = CelContentPicture(size: size, window: window, backing: pixelSnapshot,
+            picture = CelContentPicture(size: size, window: inkWindow, backing: pixelSnapshot,
                                         patch: pixels, ink: ink)
             if !failed { presentation = picture?.rendered(placement: placement) }
             failed = failed || presentation == nil

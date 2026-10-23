@@ -438,9 +438,6 @@
 		DEC0DE0000000000000000B1 /* InterpolationMotionGroupLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE0000000000000000B0 /* InterpolationMotionGroupLogicTests.swift */; };
 		DEC0DE700000000000000004 /* InterpolationGuideLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE700000000000000003 /* InterpolationGuideLogicTests.swift */; };
 		DEC0DE000000000000000048 /* PaintSoftware/Engine/Deform/Lattice.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000047 /* PaintSoftware/Engine/Deform/Lattice.swift */; };
-		F125016DD6194B74BB1B474E /* PaintSoftware/Engine/InkMaterialRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1BAC537DF39460DAED91562 /* PaintSoftware/Engine/InkMaterialRenderer.swift */; };
-		23E275F781CF4E37906E5C59 /* PaintSoftware/Engine/Deform/InkMaterialArchive.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BBF947F586A455BB2E0C01C /* PaintSoftware/Engine/Deform/InkMaterialArchive.swift */; };
-		4574C34411FE44BC99510879 /* PaintSoftware/Engine/Deform/InkMaterial.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E458EF03B0C4183B85786C7 /* PaintSoftware/Engine/Deform/InkMaterial.swift */; };
 		DEC0DE00000000000000004A /* LatticeLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000049 /* LatticeLogicTests.swift */; };
 		DEC0DE2F0000000000000002 /* PaintSoftware/Models/InterpolationRecipe.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE2F0000000000000001 /* PaintSoftware/Models/InterpolationRecipe.swift */; };
 		DEC0DE2F0000000000000004 /* PaintSoftware/Models/MotionGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE2F0000000000000003 /* PaintSoftware/Models/MotionGroup.swift */; };
@@ -474,7 +471,6 @@
 		3B38F7ADDE13F38F4714E3D3 /* EyedropperModeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05332FDCE5269DF6BA015B0D /* EyedropperModeUITests.swift */; };
 		D0B975789B9E997C67ED5D24 /* AnimatedDistortUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51796F104AFC58CC4794DABA /* AnimatedDistortUITests.swift */; };
 		688B5A8A98B9171F59DFDF02 /* DistortLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 688B5A8A98B9171F59DFDF01 /* DistortLogicTests.swift */; };
-		DAA6166B631C4147968CD566 /* InkMaterialLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D445AE70A9914F179512050A /* InkMaterialLogicTests.swift */; };
 		4AD39F72E6111FD987EC2DAD /* InkDistortLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6219B63FB385AF68980160C /* InkDistortLogicTests.swift */; };
 		26A9C3CB17EDDB6D1B679902 /* WarpAgreementCharacterizationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26A9C3CB17EDDB6D1B679901 /* WarpAgreementCharacterizationTests.swift */; };
 		55AD836D577F389E88B68F02 /* PaintSoftware/Engine/TextLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55AD836D577F389E88B68F01 /* PaintSoftware/Engine/TextLayout.swift */; };
@@ -644,6 +640,7 @@
 		9438DE76ADDC619F94525E45 /* PaintSoftware/Models/LiquifyDeformation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70F1ADCA6A700C56312DFD78 /* PaintSoftware/Models/LiquifyDeformation.swift */; };
 		DEC0DEF17800000000000002 /* PaintSoftware/Models/CanvasManager+Liquify.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DEF17800000000000001 /* PaintSoftware/Models/CanvasManager+Liquify.swift */; };
 		DEC0DEF17800000000000004 /* PaintSoftware/Engine/VectorGeometryMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DEF17800000000000003 /* PaintSoftware/Engine/VectorGeometryMap.swift */; };
+		A6C2D411EE8F4B4CAB530002 /* PaintSoftware/Engine/StrokePlacement.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6C2D411EE8F4B4CAB530001 /* PaintSoftware/Engine/StrokePlacement.swift */; };
 		272CF5CA8849A3D5E5825C25 /* ProjectStorageIntegrityLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A8D6B2E100149CF26D6D145 /* ProjectStorageIntegrityLogicTests.swift */; };
 		79DEB415DFE7611A2BE28E09 /* LiquifyLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFA768F451DB7C3308F73DB4 /* LiquifyLogicTests.swift */; };
 		786AF213DEAB41406ABC1781 /* LiquifyUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 786AF213DEAB41406ABC1780 /* LiquifyUITests.swift */; };
@@ -1097,9 +1094,6 @@
 		DEC0DE0000000000000000B0 /* InterpolationMotionGroupLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = InterpolationMotionGroupLogicTests.swift; sourceTree = "<group>"; };
 		DEC0DE700000000000000003 /* InterpolationGuideLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = InterpolationGuideLogicTests.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000047 /* PaintSoftware/Engine/Deform/Lattice.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/Deform/Lattice.swift; sourceTree = "<group>"; };
-		C1BAC537DF39460DAED91562 /* PaintSoftware/Engine/InkMaterialRenderer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/InkMaterialRenderer.swift; sourceTree = "<group>"; };
-		8BBF947F586A455BB2E0C01C /* PaintSoftware/Engine/Deform/InkMaterialArchive.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/Deform/InkMaterialArchive.swift; sourceTree = "<group>"; };
-		9E458EF03B0C4183B85786C7 /* PaintSoftware/Engine/Deform/InkMaterial.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/Deform/InkMaterial.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000049 /* LatticeLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LatticeLogicTests.swift; sourceTree = "<group>"; };
 		DEC0DE2F0000000000000001 /* PaintSoftware/Models/InterpolationRecipe.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/InterpolationRecipe.swift; sourceTree = "<group>"; };
 		DEC0DE2F0000000000000003 /* PaintSoftware/Models/MotionGroup.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/MotionGroup.swift; sourceTree = "<group>"; };
@@ -1133,7 +1127,6 @@
 		05332FDCE5269DF6BA015B0D /* EyedropperModeUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "EyedropperModeUITests.swift"; sourceTree = "<group>"; };
 		51796F104AFC58CC4794DABA /* AnimatedDistortUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AnimatedDistortUITests.swift; sourceTree = "<group>"; };
 		688B5A8A98B9171F59DFDF01 /* DistortLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DistortLogicTests.swift; sourceTree = "<group>"; };
-		D445AE70A9914F179512050A /* InkMaterialLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = InkMaterialLogicTests.swift; sourceTree = "<group>"; };
 		B6219B63FB385AF68980160C /* InkDistortLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = InkDistortLogicTests.swift; sourceTree = "<group>"; };
 		26A9C3CB17EDDB6D1B679901 /* WarpAgreementCharacterizationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WarpAgreementCharacterizationTests.swift; sourceTree = "<group>"; };
 		55AD836D577F389E88B68F01 /* PaintSoftware/Engine/TextLayout.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/TextLayout.swift; sourceTree = "<group>"; };
@@ -1302,6 +1295,7 @@
 		70F1ADCA6A700C56312DFD78 /* PaintSoftware/Models/LiquifyDeformation.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/LiquifyDeformation.swift; sourceTree = "<group>"; };
 		DEC0DEF17800000000000001 /* PaintSoftware/Models/CanvasManager+Liquify.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/CanvasManager+Liquify.swift"; sourceTree = "<group>"; };
 		DEC0DEF17800000000000003 /* PaintSoftware/Engine/VectorGeometryMap.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/VectorGeometryMap.swift; sourceTree = "<group>"; };
+		A6C2D411EE8F4B4CAB530001 /* PaintSoftware/Engine/StrokePlacement.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/StrokePlacement.swift; sourceTree = "<group>"; };
 		4A8D6B2E100149CF26D6D145 /* ProjectStorageIntegrityLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProjectStorageIntegrityLogicTests.swift; sourceTree = "<group>"; };
 		AFA768F451DB7C3308F73DB4 /* LiquifyLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LiquifyLogicTests.swift; sourceTree = "<group>"; };
 		786AF213DEAB41406ABC1780 /* LiquifyUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LiquifyUITests.swift; sourceTree = "<group>"; };
@@ -1427,7 +1421,6 @@
 				05332FDCE5269DF6BA015B0D /* EyedropperModeUITests.swift */,
 				51796F104AFC58CC4794DABA /* AnimatedDistortUITests.swift */,
 				688B5A8A98B9171F59DFDF01 /* DistortLogicTests.swift */,
-				D445AE70A9914F179512050A /* InkMaterialLogicTests.swift */,
 				B6219B63FB385AF68980160C /* InkDistortLogicTests.swift */,
 				EFAC3D959147126CB37A8E35 /* TransformChannelLogicTests.swift */,
 				02EE822138323F2A3396ECDA /* TransformLayerLogicTests.swift */,
@@ -1972,6 +1965,7 @@
 				B022124B25C1CC3E9DA25D64 /* PaintSoftware/Models/AppSettings.swift */,
 				DEC0DEF17800000000000001 /* PaintSoftware/Models/CanvasManager+Liquify.swift */,
 				DEC0DEF17800000000000003 /* PaintSoftware/Engine/VectorGeometryMap.swift */,
+				A6C2D411EE8F4B4CAB530001 /* PaintSoftware/Engine/StrokePlacement.swift */,
 				DEC0DEF17800000000000007 /* PaintSoftware/Services/ProjectRecipeMetadata.swift */,
 				34175AD1407F1F33A5494A43 /* PaintSoftware/Models/ToolProfile.swift */,
 				70F1ADCA6A700C56312DFD78 /* PaintSoftware/Models/LiquifyDeformation.swift */,
@@ -1996,9 +1990,6 @@
 				059ACFD110877300327B5153 /* PaintSoftware/Models/CanvasManager+Eyedropper.swift */,
 				DEC0DE000000000000000043 /* PaintSoftware/Views/OnionSkinSource.swift */,
 				DEC0DE000000000000000047 /* PaintSoftware/Engine/Deform/Lattice.swift */,
-				C1BAC537DF39460DAED91562 /* PaintSoftware/Engine/InkMaterialRenderer.swift */,
-				8BBF947F586A455BB2E0C01C /* PaintSoftware/Engine/Deform/InkMaterialArchive.swift */,
-				9E458EF03B0C4183B85786C7 /* PaintSoftware/Engine/Deform/InkMaterial.swift */,
 				DEC0DEDF0000000000000004 /* PaintSoftware/Engine/Deform/MotionGrouping.swift */,
 				DEC0DEDF0000000000000002 /* PaintSoftware/Engine/Deform/ARAPRegistration.swift */,
 				DEC0DE00000000000000004D /* PaintSoftware/Engine/Deform/ARAPInterpolation.swift */,
@@ -2198,7 +2189,6 @@
 				3B38F7ADDE13F38F4714E3D3 /* EyedropperModeUITests.swift in Sources */,
 				D0B975789B9E997C67ED5D24 /* AnimatedDistortUITests.swift in Sources */,
 				688B5A8A98B9171F59DFDF02 /* DistortLogicTests.swift in Sources */,
-				DAA6166B631C4147968CD566 /* InkMaterialLogicTests.swift in Sources */,
 				4AD39F72E6111FD987EC2DAD /* InkDistortLogicTests.swift in Sources */,
 				A24F83767A3696CF0041096F /* TransformChannelLogicTests.swift in Sources */,
 				B8A5DD0102BDACA3A23BC250 /* TransformLayerLogicTests.swift in Sources */,
@@ -2652,6 +2642,7 @@
 				B7265A8DE6955775A10EF845 /* PaintSoftware/Models/AppSettings.swift in Sources */,
 				DEC0DEF17800000000000002 /* PaintSoftware/Models/CanvasManager+Liquify.swift in Sources */,
 				DEC0DEF17800000000000004 /* PaintSoftware/Engine/VectorGeometryMap.swift in Sources */,
+				A6C2D411EE8F4B4CAB530002 /* PaintSoftware/Engine/StrokePlacement.swift in Sources */,
 				DEC0DEF17800000000000008 /* PaintSoftware/Services/ProjectRecipeMetadata.swift in Sources */,
 				8F189E49ABEBCAC48B277EFF /* PaintSoftware/Models/ToolProfile.swift in Sources */,
 				79DEB415DFE7611A2BE28E09 /* LiquifyLogicTests.swift in Sources */,
@@ -2733,9 +2724,6 @@
 				DEC0DE0000000000000000B1 /* InterpolationMotionGroupLogicTests.swift in Sources */,
 				DEC0DE700000000000000004 /* InterpolationGuideLogicTests.swift in Sources */,
 				DEC0DE000000000000000048 /* PaintSoftware/Engine/Deform/Lattice.swift in Sources */,
-				F125016DD6194B74BB1B474E /* PaintSoftware/Engine/InkMaterialRenderer.swift in Sources */,
-				23E275F781CF4E37906E5C59 /* PaintSoftware/Engine/Deform/InkMaterialArchive.swift in Sources */,
-				4574C34411FE44BC99510879 /* PaintSoftware/Engine/Deform/InkMaterial.swift in Sources */,
 				DEC0DE00000000000000004A /* LatticeLogicTests.swift in Sources */,
 				DEC0DEDF0000000000000005 /* PaintSoftware/Engine/Deform/MotionGrouping.swift in Sources */,
 				DEC0DEDF0000000000000003 /* PaintSoftware/Engine/Deform/ARAPRegistration.swift in Sources */,

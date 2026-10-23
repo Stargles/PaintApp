@@ -523,8 +523,6 @@ final class InkDistortLogicTests: XCTestCase {
         guard case .stroke(let out) = keystoned else { return XCTFail("a stroke maps to a stroke") }
         let placement = try XCTUnwrap(out.placement)
         guard case .derived = placement.source else { return XCTFail("homography-only ink keeps compact derived geometry") }
-        XCTAssertEqual(placement.transport, .identity)
-        XCTAssertNil(placement.material)
         let read = try JSONDecoder().decode(VectorStroke.self, from: JSONEncoder().encode(out))
         XCTAssertEqual(read.placement, placement, "the single owner survives a standalone archive")
     }
@@ -1065,6 +1063,48 @@ final class InkDistortLogicTests: XCTestCase {
         var count = 0
         for y in 0..<grid.height where grid.bytes[y * grid.width + x] > 127 { count += 1 }
         return count > 0 ? count : nil
+    }
+
+
+    func testRetainedBakeAncestorCorrespondenceSurvivesSelfCrossingAndSubdivision() throws {
+        let native = StrokeSamples(points: [CGPoint(x: 0, y: 0), CGPoint(x: 20, y: 20),
+            CGPoint(x: 0, y: 20), CGPoint(x: 20, y: 0)])
+        let parent = DabLattice(samples: native, parameters: [0, 1, 2, 3], precise: true)
+        let source = StrokePlacement.Source.retained(samples: native, lattice: parent, precise: true)
+        let cut = source.remapped(onto: [0.5, 1, 2, 2.5])
+        guard case .retained(let own, let ancestor?, _) = cut else { return XCTFail("cut must retain its native ancestor") }
+        XCTAssertEqual(own.positions.first, own.positions.last, "PREMISE: crossing sites share a position")
+        XCTAssertEqual(ancestor.parameters, [0.5, 1, 2, 2.5], "native site identity uses ancestor parameters, never nearest position")
+        guard case .retained(_, let subdivided?, _) = cut.remapped(onto: [0, 0.5, 1, 2, 2.5, 3]) else { return XCTFail("subdivision must retain correspondence") }
+        XCTAssertEqual(subdivided.parameters, [0.5, 0.75, 1, 2, 2.25, 2.5])
+        XCTAssertEqual(subdivided.samples, native, "parent walk, randomness and spacing keep their original owner")
+        let restored = try JSONDecoder().decode(StrokePlacement.Source.self, from: JSONEncoder().encode(cut))
+        XCTAssertEqual(restored, cut)
+    }
+
+    func testActualCutKeepsPreciseBakedParentThroughSave() throws {
+        var ink = VectorStroke(brush: TestBrushes.pencil, color: CodableColor(red: 0.8, green: 0.15, blue: 0.1, alpha: 1),
+            size: 8, opacity: 0.7, samples: StrokeSamples(points: []), seed: 7)
+        let original = StrokeSamples(points: [CGPoint(x: 4.0625, y: 20.0625), CGPoint(x: 60.0625, y: 20.0625)])
+        ink.samples = original
+        ink.placement = StrokePlacement(map: .identity, restSize: 8,
+            source: .retained(samples: original, lattice: nil, precise: true))
+        ink = ink.markedPrecise()
+        let canvas = VectorCanvas(size: CGSize(width: 80, height: 40), elements: [.stroke(ink)])
+        XCTAssertTrue(canvas.erase(alongPath: StrokeSamples(points: [CGPoint(x: 32.0625, y: 20.0625)]),
+            brush: TestBrushes.hardRound, size: 8, mode: .cutPoints))
+        let pieces = canvas.elements.compactMap(\.stroke).filter { $0.composite == .paint }
+        XCTAssertGreaterThan(pieces.count, 1, "PREMISE: the actual cutter made separate native fragments")
+        XCTAssertTrue(pieces.allSatisfy { $0.precise && $0.lattice?.precise == true },
+                      "a cut inherits the precision of the baked parent's shown lattice")
+        let saved = try JSONEncoder().encode(VectorCanvasData(elements: pieces.map(VectorCanvasData.ElementData.stroke), transform: []))
+        let read = try JSONDecoder().decode(VectorCanvasData.self, from: saved).strokes
+        XCTAssertEqual(read.count, pieces.count)
+        for piece in read {
+            XCTAssertEqual(piece.lattice?.samples, original, "fractional parent geometry survives the real cut/save boundary")
+            guard case .retained(_, let ancestor?, _)? = piece.placement?.source else { return XCTFail("a fragment retains its native ancestor") }
+            XCTAssertEqual(ancestor.samples, original)
+        }
     }
 }
 

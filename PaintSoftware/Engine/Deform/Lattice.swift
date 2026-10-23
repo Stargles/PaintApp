@@ -784,22 +784,6 @@ struct DeformedCellIndex {
         }
     }
 
-    /// The same bucket ranges as construction, counted before allocation. Native material windows
-    /// reserve this scratch explicitly; a warped large grid cannot bypass their tile budget.
-    static func storageByteUpperBound(lattice: Lattice) -> Int {
-        let layout = Layout(lattice)
-        var entries = 0
-        for cell in 0..<lattice.cellCount {
-            guard let (cols, rows) = layout.buckets(for: cell, in: lattice) else { continue }
-            let added = entries.addingReportingOverflow(cols.count * rows.count)
-            guard !added.overflow else { return Int.max }
-            entries = added.partialValue
-        }
-        let bytes = entries.multipliedReportingOverflow(by: 2 * MemoryLayout<Int>.stride)
-        guard !bytes.overflow, bytes.partialValue <= Int.max - layout.cols * layout.rows * 128 - 4096 else { return Int.max }
-        return bytes.partialValue + layout.cols * layout.rows * 128 + 4096
-    }
-
     init(lattice: Lattice) {
         let layout = Layout(lattice)
         var lists = [[Int]](repeating: [], count: layout.cols * layout.rows)
