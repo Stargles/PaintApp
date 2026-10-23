@@ -109,8 +109,11 @@ failure. No repeat of passed playback/native benchmark. Build3 clean/build/seal/
 and full source restoration passed. Legacy attempt2 was cancelled before any method because the iPad was locked. After fresh owner
 unlock, legacy3 ended4 total=2 passed/2 failed/0 skipped: transformed raster stroke and graph-node drag
 passed unchanged (graph36 updates/2 passes). Move's held-picture predicate failed; grey stopped on
-its off-paper coordinate premise before pan. No Liquify invocation followed. Diagnose actual frames,
-held samples and screen/AX coordinate spaces before any correction/rebuild; no weakening or blind retry.
+its off-paper coordinate premise before pan. No Liquify invocation followed. Diagnosis confirms temporary harness errors: Move's added rail-toggle ends Move; use only the existing
+options-close button and reassert Move-active. Grey mixes native touch coordinates with displayed AX
+bounds; use displayed coordinates for its premise and public withOffset-converted native endpoints
+with event-record orientation1. Prepare/review exact external deltas before build; all feature thresholds,
+predicates and deadlines remain. No app-source changes or blind retry.
 No settings/library reset or preset changes. Preserve disposable scenes and full pictures. Native
 component cost is separate from app gesture latency. Keep one-shot repairs until real scenes are
 confirmed. HANDOFF has the exact next steps and evidence locations. Remove this item only with the

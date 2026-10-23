@@ -64,12 +64,19 @@ Transformed raster stroke and graph-node drag passed unchanged; graph exposed36 
 Move reached its actual held-pixel oracle and failed (old ink blank AND destination>50ink while held).
 Grey stopped before pan at off-paper premise: finger+travel627pt is not<paperLeft561.6704. No Liquify
 invocation/retry followed. Preserve these real outcomes, not green qualification. Native/DD is idle.
-Architecture agent preserves pictures/sample counts and diagnoses read-only; fresh focused coordinate
-agent independently audits gesture-versus-sampler coordinate conventions. Hypothesis to test first:
-XCUICoordinate.screenPoint and measured AX CGRect differ under physical landscape orientation. With
-AXframe{{56,0},{1024,810}}, a0.22 finger coordinate plus60pt would normally be341pt, not627pt. Do not
-call this a product bug or loosen assertions before inspecting actual frames/coordinates. No edits,
-new build or retry authorized yet. Frozen build3 and accepted native benchmark remain preserved.
+Two independent temporary-harness root causes are now evidenced (not app regressions):
+- Grey mixes native portrait XCUICoordinate.screenPoint with displayed landscape AX/image coordinates.
+  Here display(x,y) maps to native(810−y,x), explaining567+60=627. Use AX-frame interpolation only
+  for the displayed surround premise; use publiccoordinate.screenPoint and coordinate.withOffset(60,30)
+  .screenPoint for native path endpoints. The private synthesized event record must then use native
+  orientation1 (matching all captured public records), not UIDevice landscapeLeft→3.
+- Move's public drag correctly rotates withOffset. The added closeLayerRail toolbar tap explicitly
+  commitsAllInteractiveState, ending Move. Before PNG confirms no box/bar; video shows no drawing
+  surface toast. Replace only that temporary closure with existing layerOptions.close (callback clears
+  layerOptionsID only), leaving right rail clear of existing probes; assert Move still exposed before drag.
+Root reviewed those proposals; architecture agent prepares three minimal external hunks and guards for
+review before any build. Keep all distances, gesture steps/stagger/duration, predicates/counts/deadlines
+and40pt/15pt/.002 grey thresholds. No app-source, preset or settings changes; native/DD idle. No retry yet.
 Build3 frozen xctestrun SHA: `125bd30baf4a3567a173fd9b4b6313ba83b661e6490898db94b386ca8ae28da9`.
 
 ## Next
