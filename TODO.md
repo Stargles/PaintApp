@@ -101,7 +101,9 @@ layout/screenshot/size-field premises. Diagnose those actual frames before any a
 no feature assertion, gesture, count or deadline may be weakened. Screenshot root cause is the
 raw capture's ignored rotation tag (including the mid-gesture reader); share one orientation-aware
 reader in the temporary physical adapter. Also expose the Move row and dismiss the floating keyboard
-between the64×4096 size fields. Prepare/review before rebuild; rerun affected four only. No Liquify invocation followed.
+between the64×4096 size fields. Grey's static-square test geometry also cannot report a pan of the64×4096 fixture; replace that
+temporary adapter oracle with actual exposed transform geometry, preserving movement/width thresholds
+and inspecting the full picture. Prepare/review before rebuild; rerun affected four only. No Liquify invocation followed.
 No settings/library reset or preset changes. Preserve disposable scenes and full pictures. Native
 component cost is separate from app gesture latency. Keep one-shot repairs until real scenes are
 confirmed. HANDOFF has the exact next steps and evidence locations. Remove this item only with the

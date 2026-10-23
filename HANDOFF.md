@@ -41,7 +41,14 @@ coordinates are invalid. Prepare one orientation-aware full-screen image seam sh
 plus a visible Move row and floating-keyboard-safe64×4096 canvas setup. Architecture agent owns the
 external temporary candidate only; root reviews before apply/build. No app-source edits, weakened
 assertions, settings/library resets or preset changes. Playback passed unchanged; rerun affected four
-rather than repeating it or the accepted benchmark.
+rather than repeating it or the accepted benchmark. Review approved the shared UIImage.draw renderer
+at original scale, exposed PopoverDismissRegion taps, and consistent rowAboveTheDock Move probes.
+Grey's temporary paperRect oracle is independently invalid: it always returns a static square for a
+64×4096 document, so cannot report pan. Replace that adapter-only geometry with the actual exposed
+scale/rotation/offset applied to64×4096, preserving40pt/15pt movement and0.002 width assertions;
+label those exposed geometry, and inspect the full screenshot. No app or committed test source changes.
+Prepare guarded device-build-3 using prior build/restoration machinery; root reviews final grey delta
+before native execution. Frozen device-build-2 and accepted benchmark remain untouched.
 
 ## Next
 
