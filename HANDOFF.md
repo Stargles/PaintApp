@@ -16,6 +16,9 @@ is what we find.
 Recorded signing expiry was2026-10-22T05:08:05Z; a renewal log shows device-unavailable refusal,
 while current discovery says available (paired). Verify fresh connectivity and the renewal service,
 then reinstall current qualified main Release with a renewed profile. Liquify remains unqualified.
+Renewal job subsequently reported install OK (profile expiry2026-10-30T00:18:54Z), but independent
+codesign verification finds an invalid sealed resource and normal app launch is Security-denied.
+That concrete signing failure is now the recovery priority; do not declare the iPad restored yet.
 
 **Previous parked UI batch.** App/test checkpoint `9dfd96b` is committed in
 `~/PaintWork/PaintApp-s49-integration` (`tmp/s49-integration`). No active jobs or faults remain.

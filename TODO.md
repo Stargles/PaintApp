@@ -65,6 +65,11 @@ The recorded profile expired2026-10-22T05:08:05Z. Initial log review shows a ren
 device detection but refused an unavailable iPad; it is now reported available (paired). Confirm
 fresh connectivity and signing expiry before reinstalling. Quiet performance still needs a fresh
 Mac-idle indication; continue correctness independently.
+The existing renewal job was restarted after connectivity/unlocked state was confirmed. It reports
+successful main17b438c Release install with expiry2026-10-30T00:18:54Z, but independent codesign
+verification fails (sealed resource missing/invalid), and a normal no-argument launch is denied by
+the iPad's Security service. Resolve the concrete signature/resource failure before declaring recovery
+or asking for developer trust; preserve data and avoid uninstalling the app.
 
 **Previous parked checkpoint, 2026-10-15.** All work is committed in
 `~/PaintWork/PaintApp-s49-integration` on `tmp/s49-integration`; app/test source checkpoint `9dfd96b`.
