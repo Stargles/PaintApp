@@ -135,7 +135,7 @@ final class LiquifyUITests: PaintUITestCase {
         canvas.coordinate(withNormalizedOffset: hostPoint(paper, 0.40, 0.39))
             .press(forDuration: 0.05,
                    thenDragTo: canvas.coordinate(withNormalizedOffset: hostPoint(paper, 0.61, 0.39)),
-                   withVelocity: XCUIGestureVelocity(70))
+                   withVelocity: XCUIGestureVelocity(70), thenHoldForDuration: 0)
         let moved = NSPredicate { _, _ in
             guard let mark = try? footprint() else { return false }
             return mark.bounds.midX > before.bounds.midX + before.bounds.width * 0.10
