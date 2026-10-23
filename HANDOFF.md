@@ -48,7 +48,7 @@ Commander lists only Windows. See `device-backup-2/tailscale-file-route-audit.md
 Owner is unsure about an existing Mac copy and prefers no manual action. Existing access routes were
 checked; a fresh archive transfer is now the remaining blocker before installation. Instructions given:
 Files → On My iPad → long-press PaintApp → Compress → AirDrop ZIP to Julia’s MacBook Pro. Keep source
-folder untouched. No PaintApp archive was yet present in Downloads at the last check. Validate ZIP,
+folder untouched. Owner now confirms the AirDrop; `/Users/juliapark/Downloads/PaintApp.zip` is present (327,981,935 bytes). Validate and preserve ZIP,
 structure and hashes before treating external coverage as complete. Do not weaken this into an
 assumption that container Documents or Tailscale alone covers the selected library.
 Hardware UDID `00008030-000151492EC3C02E`; devicectl ID `E3B83820-DF74-5042-B52B-0D5BA17E4877`.
