@@ -325,17 +325,22 @@ final class CelContentProviderLogicTests: XCTestCase {
         try assertMoves("the spacing curve") {
             $0.layers[1].cels[1].interpolation?.spacing = SpacingCurve(kind: .easeInOut)
         }
-        try assertMoves("a motion-group binding") {
-            $0.layers[1].cels[1].interpolation?.groups.append(MotionGroupBinding(groupID: UUID()))
+        try assertMoves("a motion-group binding") { manager in
+            let lattices = manager.layers[1].cels[1].interpolation!.groups[0].lattices
+            manager.layers[1].cels[1].interpolation?.groups.append(
+                MotionGroupBinding(groupID: UUID(), lattices: lattices))
         }
         // …and a binding's own fields, not merely its presence. `groups` goes into the identity whole
         // rather than as a list of group ids, which is what makes a per-group easing override — or a
         // refitted lattice, which is the same field one level down — a different frame.
         let group = UUID()
         try assertMoves("a binding's own spacing override",
-                        preparing: { $0.layers[1].cels[1].interpolation?.groups = [MotionGroupBinding(groupID: group)] }) {
-            $0.layers[1].cels[1].interpolation?.groups = [MotionGroupBinding(groupID: group,
-                                                                             spacing: SpacingCurve(kind: .easeIn))]
+                        preparing: { manager in
+                            var binding = manager.layers[1].cels[1].interpolation!.groups[0]
+                            binding.groupID = group
+                            manager.layers[1].cels[1].interpolation?.groups = [binding]
+                        }) {
+            $0.layers[1].cels[1].interpolation?.groups[0].spacing = SpacingCurve(kind: .easeIn)
         }
 
         // The ones the preview key did carry, restated against the identity that replaced it.
