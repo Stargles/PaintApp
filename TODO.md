@@ -106,18 +106,14 @@ temporary adapter oracle with actual exposed transform geometry, preserving move
 and inspecting the full picture. Root reviewed the exact external corrections and authorized guarded build3/restoration, then affected
 four legacy checks and Liquify2 only after preceding gates pass. Expected4/2, zero skips; stop on a real
 failure. No repeat of passed playback/native benchmark. Build3 clean/build/seal/profile verification
-and full source restoration passed. Legacy attempt2 was cancelled before any method because the iPad was locked. After fresh owner
-unlock, legacy3 ended4 total=2 passed/2 failed/0 skipped: transformed raster stroke and graph-node drag
-passed unchanged (graph36 updates/2 passes). Move's held-picture predicate failed; grey stopped on
-its off-paper coordinate premise before pan. No Liquify invocation followed. Diagnosis confirms temporary harness errors: Move's added rail-toggle ends Move; use only the existing
-options-close button and reassert Move-active. Grey mixes native touch coordinates with displayed AX
-bounds; use displayed coordinates for its premise and public withOffset-converted native endpoints
-with event-record orientation1. Prepare/review exact external deltas before build; all feature thresholds,
-predicates and deadlines remain. Root reviewed60-line external delta/all8 original SHA guards and
-authorized guarded build4/restoration, then remaining Move+grey2 and Liquify2 only on preceding success.
-Expected2/2, zero skips. Passed playback/raster-stroke/graph/native sampler are reused; no app-source
-change, preset reset or blind retry.
-No settings/library reset or preset changes. Preserve disposable scenes and full pictures. Native
+and full source restoration passed. Legacy attempt2 was cancelled before methods due lock. Legacy3 passed raster-under-transform
+stroke and graph-node drag (36 updates/2 passes). Legacy4 passed grey pan; Move stopped before its
+gesture because the adapter tapped an options-close control already dismissed by entering Move.
+Remove that one extra temporary tap, retaining Move-active and every feature assertion. Unique passed
+legacy checks: playback, raster stroke, graph, grey. Root authorizes Liquify2 independently now from
+frozen build4 while device awake, then reviewed one-line adapter deletion/build5 and remaining Move1.
+This pre-gesture harness failure does not qualify Move; final deployment/merge require Move1 plus
+Liquify2. No app-source changes, feature weakening or repeated accepted benchmark. No settings/library reset or preset changes. Preserve disposable scenes and full pictures. Native
 component cost is separate from app gesture latency. Keep one-shot repairs until real scenes are
 confirmed. HANDOFF has the exact next steps and evidence locations. Remove this item only with the
 fully qualified merge.
