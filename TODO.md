@@ -111,7 +111,8 @@ stroke and graph-node drag (36 updates/2 passes). Legacy4 passed grey pan; Move 
 gesture because the adapter tapped an options-close control already dismissed by entering Move.
 Remove that one extra temporary tap, retaining Move-active and every feature assertion. Unique passed
 legacy checks: playback, raster stroke, graph, grey. Root authorizes Liquify2 independently now from
-frozen build4 while device awake, then reviewed one-line adapter deletion/build5 and remaining Move1.
+frozen build4 while device awake, then reviewed one-line adapter deletion/build5 and remaining Move1. Liquify2 is now running; root
+reviewed correction3's one-line deletion and guards and authorized serial build5/Move1 only if it passes.
 This pre-gesture harness failure does not qualify Move; final deployment/merge require Move1 plus
 Liquify2. No app-source changes, feature weakening or repeated accepted benchmark. No settings/library reset or preset changes. Preserve disposable scenes and full pictures. Native
 component cost is separate from app gesture latency. Keep one-shot repairs until real scenes are

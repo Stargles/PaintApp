@@ -79,8 +79,12 @@ and grey pan. Only Move's actual gesture oracle remains. No Liquify device metho
 Root authorizes independent Liquify2 now from verified frozen build4 while the iPad is awake: the
 latest Move failure is definitively a pre-gesture adapter lookup, not a product assertion. This does
 not qualify Move or permit final deployment. Coordinate agent retains exclusive native/DD ownership.
-Then prepare the one-line Move adapter deletion with original/candidate guards for root review before
-build5; run only remaining Move1 from that build. No repeat of accepted checks/native benchmark.
+Independent Liquify2 has launched from frozenbuild4 after fresh seals and unlocked lockState, in
+physical-liquify-1. Root reviewed correction3's exact one-line deletion and baseline/candidate SHA:
+no added action/condition, all oracles/fixtures/deadlines byte-identical, pre-drag Move-active retained.
+If Liquify2 passes, coordinate agent may prepare/reuse guarded build5 clean/build/restoration and
+frozen verification, then run only remaining Move1 from it (expected1/0skip). Keep native serial;
+no build while Liquify runs, and stop on any actual feature failure. No repeat of accepted checks/native benchmark.
 Stop/report any actual feature failure; preserve full pictures and source restoration. Source753
 hashes remain exact, all temporary adapters restored. Final normal install/merge still requires Move1
 and Liquify2 qualification. Root stays native-idle.
