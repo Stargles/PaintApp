@@ -126,9 +126,13 @@ final class PointGeometryRepairLogicTests: XCTestCase {
                 + ProjectRecipeMetadata.reader(in: package).urls.map { String($0.path.dropFirst(package.path.count + 1)) })
             let after = try bytes(package)
             XCTAssertEqual(Set(after.keys), Set(try XCTUnwrap(originalFiles[name]).keys))
-            for (path, bytes) in try XCTUnwrap(originalFiles[name]) where !changed.contains(path) {
+            for (path, bytes) in try XCTUnwrap(originalFiles[name]) where !changed.contains(path) && path != "manifest.json" {
                 XCTAssertEqual(after[path], bytes, name + "/" + path)
             }
+            var expectedManifest = try object(XCTUnwrap(originalFiles[name]?["manifest.json"]))
+            expectedManifest["geometryVersion"] = 1
+            XCTAssertEqual(try object(XCTUnwrap(after["manifest.json"])) as NSDictionary,
+                expectedManifest as NSDictionary, "only the required package boundary changes in the manifest")
             let reopenedURL = root.appendingPathComponent("roundtrip/\(name).paintproj")
             try FileManager.default.createDirectory(at: reopenedURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             let done = expectation(description: "current save " + name)
@@ -167,6 +171,98 @@ final class PointGeometryRepairLogicTests: XCTestCase {
         let before = try bytes(root)
         XCTAssertEqual(try PointGeometryRepair.run().converted, 0)
         XCTAssertEqual(try bytes(root), before, "an idempotent repair must not rewrite current JSON or create snapshots")
+    }
+
+    func testCurrentDamagedDrawingAndRecipeStillReachBackupRecovery() throws {
+        for name in ["plain", "linked-local-edits"] {
+            let project = try install(name)
+            _ = try PointGeometryRepair.run()
+            let reader = try ProjectRecipeMetadata.reader(in: project)
+            let damaged = try XCTUnwrap(name == "plain" ? reader.vectorURLs.first : reader.urls.first)
+            try Data("{ truncated current JSON".utf8).write(to: damaged)
+            let before = try bytes(root)
+            XCTAssertEqual(try PointGeometryRepair.run().converted, 0)
+            XCTAssertEqual(try bytes(root), before, "current damage belongs to recovery, never previous-format rewriting")
+            XCTAssertFalse(ProjectBackupManager.validateProjectForRestore(at: project))
+            ProjectBackupManager.repairCorruptedProjects()
+            XCTAssertTrue(ProjectBackupManager.validateProjectForRestore(at: project))
+            let manager = try XCTUnwrap(ProjectStore.load(from: project)); manager.streamCoordinator.startsClients = false
+            XCTAssertFalse(manager.loadDamage.isDamaged)
+            try assertGeometry(manager, name: name)
+            XCTAssertEqual(try PointGeometryRepair.run().converted, 0, "the displaced damaged current copy in Trash is also left to recovery")
+        }
+    }
+
+    func testRasterOnlyPreviousPackageGetsStrictBoundaryAndIdempotence() throws {
+        let package = try install("plain")
+        let drawing = try vectorURL(package)
+        let manifestURL = package.appendingPathComponent("manifest.json")
+        var manifest = try object(Data(contentsOf: manifestURL))
+        var layers = manifest["layers"] as! [[String: Any]]
+        var cels = layers[0]["cels"] as! [[String: Any]]
+        cels[0].removeValue(forKey: "vectorFileName"); layers[0]["cels"] = cels; layers[0]["kind"] = "raster"
+        manifest["layers"] = layers
+        try data(manifest).write(to: manifestURL)
+        try FileManager.default.removeItem(at: drawing)
+        XCTAssertThrowsError(try JSONDecoder().decode(ProjectManifest.self, from: Data(contentsOf: manifestURL)))
+        XCTAssertEqual(try PointGeometryRepair.run().converted, 2)
+        _ = try JSONDecoder().decode(ProjectManifest.self, from: Data(contentsOf: manifestURL))
+        XCTAssertTrue(ProjectBackupManager.validateProjectForRestore(at: package))
+        let before = try bytes(root)
+        XCTAssertEqual(try PointGeometryRepair.run().converted, 0)
+        XCTAssertEqual(try bytes(root), before)
+        var current = try object(Data(contentsOf: manifestURL))
+        for version in [NSNumber(value: 2), NSNumber(value: true)] {
+            current["geometryVersion"] = version
+            try data(current).write(to: manifestURL)
+            XCTAssertThrowsError(try PointGeometryRepair.run())
+            XCTAssertThrowsError(try JSONDecoder().decode(ProjectManifest.self, from: Data(contentsOf: manifestURL)))
+        }
+    }
+
+    func testUnreadableManifestRemainsAmbiguousAndUntouched() throws {
+        let project = try install("plain")
+        try Data("{ truncated manifest".utf8).write(to: project.appendingPathComponent("manifest.json"))
+        ProjectBackupManager.settings.lastAppSignature = "previous build"
+        let before = try bytes(root)
+        XCTAssertThrowsError(try PointGeometryRepair.run())
+        XCTAssertEqual(try bytes(root), before)
+        XCTAssertEqual(ProjectBackupManager.settings.lastAppSignature, "previous build")
+    }
+
+    func testParentFolderLinksCannotEscapeOrLoopTheCensus() throws {
+        let outside = try install("plain", at: "outside/plain.paintproj").deletingLastPathComponent()
+        let projects = ProjectBackupManager.projectsDirectory
+        let link = projects.appendingPathComponent("linked-folder")
+        ProjectBackupManager.settings.lastAppSignature = "previous build"
+        for target in [outside, projects] {
+            try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
+            let before = try bytes(root)
+            XCTAssertThrowsError(try PointGeometryRepair.run())
+            XCTAssertEqual(try bytes(root), before)
+            XCTAssertEqual(ProjectBackupManager.settings.lastAppSignature, "previous build")
+            try FileManager.default.removeItem(at: link)
+        }
+    }
+
+    func testUnreadableTreeAndNonDirectoryRootCannotBecomeAnEmptyCensus() throws {
+        _ = try install("plain", at: "Projects/locked/plain.paintproj")
+        let locked = root.appendingPathComponent("Projects/locked")
+        let before = try bytes(root)
+        ProjectBackupManager.settings.lastAppSignature = "previous build"
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: locked.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: locked.path) }
+        XCTAssertThrowsError(try PointGeometryRepair.run())
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: locked.path)
+        XCTAssertEqual(try bytes(root), before)
+        XCTAssertEqual(ProjectBackupManager.settings.lastAppSignature, "previous build")
+        let trash = root.appendingPathComponent("Trash")
+        if FileManager.default.fileExists(atPath: trash.path) { try FileManager.default.removeItem(at: trash) }
+        try Data("not a directory".utf8).write(to: trash)
+        let blocked = try bytes(root)
+        XCTAssertThrowsError(try PointGeometryRepair.run())
+        XCTAssertEqual(try bytes(root), blocked)
+        XCTAssertEqual(ProjectBackupManager.settings.lastAppSignature, "previous build")
     }
 
     func testMaterialStrokeKeepsDisplayedGeometryAndIndependentProjectiveMap() throws {

@@ -6,7 +6,8 @@ import Darwin
 /// One-shot conversion from the previous writer's spatial ink archive to point geometry. Current
 /// decoders never read the previous format. Every package is staged and validated before any swap;
 /// originals also supply the update snapshot, which is then converted with the other restore points.
-nonisolated enum PointGeometryRepair {
+@MainActor
+enum PointGeometryRepair {
     struct Failure: Error, LocalizedError {
         let reason: String
         var errorDescription: String? { reason }
@@ -28,7 +29,8 @@ nonisolated enum PointGeometryRepair {
                 if let converted = try stage(package) { stages.append(Stage(original: package, converted: converted)) }
             } catch { throw Failure(reason: package.lastPathComponent + ": " + error.localizedDescription) }
         }
-        for package in packages() { try autoreleasepool { try prepare(package) } }
+        let initialPackages = try packages()
+        for package in initialPackages { try autoreleasepool { try prepare(package) } }
         guard !stages.isEmpty else { return Report() }
 
         let signature = ProjectBackupManager.currentAppSignature
@@ -36,13 +38,14 @@ nonisolated enum PointGeometryRepair {
         // this build has launched. Finding old geometry itself requires a protection copy.
         do {
             let readable = Set(stages.map { $0.original.standardizedFileURL })
-            guard ProjectBackupManager.copyUpdateSnapshots(signature: signature, validating: {
+            guard ProjectBackupManager.copyUpdateSnapshots(signature: signature,
+                projects: initialPackages.filter { $0.path.hasPrefix(ProjectBackupManager.projectsDirectory.path + "/") }, validating: {
                 readable.contains($0.standardizedFileURL) || ProjectBackupManager.validateProjectForRestore(at: $0)
             }) else { throw Failure(reason: "The before-update copy could not be saved. No scene was replaced.") }
             // Discover the snapshots only after cloning, so even the newest untouched version is
             // converted. Do not use a once-per-build preference that can skip this second census.
             let prepared = Set(stages.map { $0.original.standardizedFileURL })
-            for package in packages() where !prepared.contains(package.standardizedFileURL) {
+            for package in try packages() where !prepared.contains(package.standardizedFileURL) {
                 try autoreleasepool { try prepare(package) }
             }
         }
@@ -65,17 +68,42 @@ nonisolated enum PointGeometryRepair {
         return Report(converted: stages.count)
     }
 
-    private static func packages() -> [URL] {
-        [ProjectBackupManager.projectsDirectory, ProjectBackupManager.backupsRootDirectory,
-         ProjectBackupManager.trashDirectory].flatMap { ProjectBackupManager.allProjectPackages(in: $0) }
-            .sorted { $0.path < $1.path }
+    /// A partial census is unsafe: it could advance the build signature or prune versions while
+    /// an unreadable folder still contains unconverted work. Never follow a folder/package link.
+    private static func packages() throws -> [URL] {
+        func walk(_ directory: URL) throws -> [URL] {
+            let attributes = try directory.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+            guard attributes.isSymbolicLink == false, attributes.isDirectory == true else {
+                throw Failure(reason: "A library folder is unreadable or is a symbolic link: " + directory.lastPathComponent)
+            }
+            var found: [URL] = []
+            for item in try FileManager.default.contentsOfDirectory(at: directory,
+                    includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey]) {
+                if item.lastPathComponent.hasPrefix(".") { continue }
+                let attributes = try item.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+                guard attributes.isSymbolicLink == false else {
+                    throw Failure(reason: "A library entry is a symbolic link: " + item.lastPathComponent)
+                }
+                if item.pathExtension == "paintproj" { found.append(item) }
+                else if attributes.isDirectory == true { found.append(contentsOf: try walk(item)) }
+            }
+            return found
+        }
+        return try [ProjectBackupManager.projectsDirectory, ProjectBackupManager.backupsRootDirectory,
+                    ProjectBackupManager.trashDirectory].flatMap { try walk($0) }.sorted { $0.path < $1.path }
     }
 
     private static func stage(_ package: URL) throws -> URL? {
         guard try package.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink == false else {
             throw Failure(reason: "A project package is a symbolic link; its original was left untouched.")
         }
-        let reader = try ProjectRecipeMetadata.reader(in: package)
+        let manifestData = try Data(contentsOf: package.appendingPathComponent("manifest.json"))
+        var manifest = try object(manifestData)
+        if manifest["geometryVersion"] != nil {
+            _ = try JSONDecoder().decode(ProjectManifest.GeometryVersion.self, from: manifestData)
+            return nil
+        }
+        let reader = try ProjectRecipeMetadata.reader(in: package, manifest: manifest)
         let target = package.deletingLastPathComponent().appendingPathComponent(".point-geometry-" + UUID().uuidString)
         var copied = false
         var ready = false
@@ -101,7 +129,15 @@ nonisolated enum PointGeometryRepair {
                 }
             }
         }
-        guard copied else { return nil }
+        if !copied {
+            guard ProjectBackupManager.cloneItem(at: package, to: target) else {
+                throw Failure(reason: "A staging copy could not be saved.")
+            }
+            copied = true
+        }
+        manifest["geometryVersion"] = VectorCanvasData.currentGeometryVersion
+        try JSONSerialization.data(withJSONObject: manifest, options: [.sortedKeys])
+            .write(to: target.appendingPathComponent("manifest.json"), options: .atomic)
         guard ProjectBackupManager.validateProjectForRestore(at: target) else {
             throw Failure(reason: "The converted copy failed saved-scene validation. Its original was left untouched.")
         }

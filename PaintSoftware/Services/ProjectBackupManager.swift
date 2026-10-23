@@ -315,16 +315,16 @@ nonisolated enum ProjectBackupManager {
     /// skipped here (the repair pass owns them) so we don't propagate a broken state as a "backup".
     @discardableResult
     static func snapshotAllProjectsForAppUpdate(signature: String) -> Bool {
-        guard copyUpdateSnapshots(signature: signature, validating: { validateProjectForRestore(at: $0) }) else { return false }
+        guard copyUpdateSnapshots(signature: signature, projects: allProjectPackages(), validating: { validateProjectForRestore(at: $0) }) else { return false }
         pruneUpdateSnapshots()
         return true
     }
 
     /// Copying and retention are separate so a format conversion can protect original bytes first,
     /// then validate and replace every version before permitting any retention deletion.
-    static func copyUpdateSnapshots(signature: String, validating validator: (URL) -> Bool) -> Bool {
+    static func copyUpdateSnapshots(signature: String, projects: [URL], validating validator: (URL) -> Bool) -> Bool {
         let sig = sanitizedSignature(signature)
-        for url in allProjectPackages() {
+        for url in projects {
             guard validator(url), let id = manifestID(at: url) else { continue }
             let dir = backupsDirectory(projectID: id)
             writeOriginMarker(directory: dir, projectFileName: url.lastPathComponent)

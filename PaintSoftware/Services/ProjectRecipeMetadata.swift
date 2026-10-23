@@ -48,6 +48,7 @@ nonisolated enum ProjectRecipeMetadata {
 
     static func validate(in package: URL, manifestData: Data) -> Bool {
         do {
+            _ = try JSONDecoder().decode(ProjectManifest.GeometryVersion.self, from: manifestData)
             let manifest = try object(from: manifestData)
             let reader = try reader(in: package, manifest: manifest)
             for url in reader.urls {

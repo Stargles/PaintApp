@@ -1,6 +1,19 @@
 import SwiftUI
 
 struct ProjectManifest: Codable {
+    /// The package boundary is readable without opening its cels. Once current, ordinary damage
+    /// belongs to backup recovery rather than the one-shot previous-format converter.
+    struct GeometryVersion: Decodable {
+        private enum Key: String, CodingKey { case geometryVersion }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: Key.self)
+            guard try c.decode(Int.self, forKey: .geometryVersion) == VectorCanvasData.currentGeometryVersion else {
+                throw DecodingError.dataCorruptedError(forKey: .geometryVersion, in: c,
+                    debugDescription: "Unsupported project geometry version")
+            }
+        }
+    }
+
     var id: UUID
     var name: String
     var canvasWidth: Double
@@ -85,6 +98,7 @@ struct ProjectManifest: Codable {
     // Custom decoding so projects saved before backgroundColor/isBackgroundVisible or customBrushes
     // existed — missing those keys entirely — still load instead of failing to decode.
     init(from decoder: Decoder) throws {
+        _ = try GeometryVersion(from: decoder)
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
         name = try container.decode(String.self, forKey: .name)
@@ -115,6 +129,7 @@ struct ProjectManifest: Codable {
     /// synthesized encoder would write `"motionGroups":[]` into every manifest in the world.
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(VectorCanvasData.currentGeometryVersion, forKey: .geometryVersion)
         try container.encode(id, forKey: .id)
         try container.encode(name, forKey: .name)
         try container.encode(canvasWidth, forKey: .canvasWidth)
@@ -139,7 +154,7 @@ struct ProjectManifest: Codable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, canvasWidth, canvasHeight, canvasPadding, isPaddingOnTop, fps, layers,
+        case geometryVersion, id, name, canvasWidth, canvasHeight, canvasPadding, isPaddingOnTop, fps, layers,
              modifiedAt, backgroundColor, isBackgroundVisible, customBrushes, folders, viewPresets,
              motionGroups, guideStrokes, animationGroups, brushTableFileName, editorState
     }

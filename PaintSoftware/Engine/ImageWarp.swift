@@ -276,18 +276,16 @@ enum ImageWarp {
         return out
     }
 
-    typealias PremultipliedPixel = (UInt8, UInt8, UInt8, UInt8)
+    private typealias PremultipliedPixel = (UInt8, UInt8, UInt8, UInt8)
 
-    /// The tiled sampler's integer domain. A bounded image may treat unsupported points as outside;
-    /// a procedural picture must check this first so unsupported transport refuses the whole draw.
-    static func supportsSampling(at point: CGPoint) -> Bool {
+    /// Source coordinates must fit the integer texel domain before conversion.
+    private static func supportsSampling(at point: CGPoint) -> Bool {
         let u = Double(point.x) - 0.5, v = Double(point.y) - 0.5
         return u.isFinite && v.isFinite && abs(u) < Double(Int.max / 4) && abs(v) < Double(Int.max / 4)
     }
 
-    /// Shared bilinear rule for contiguous images and bounded native-material tiles. Source texels
-    /// are supplied explicitly so a long vector stroke never requires a whole-stroke bitmap.
-    static func samplePremultiplied(at point: CGPoint,
+    /// Bilinear sampling for inverse raster warps. The source supplies transparent exterior texels.
+    private static func samplePremultiplied(at point: CGPoint,
                                    texel: (Int, Int) -> PremultipliedPixel) -> PremultipliedPixel {
         let u = Double(point.x) - 0.5, v = Double(point.y) - 0.5
         guard supportsSampling(at: point) else { return (0, 0, 0, 0) }
