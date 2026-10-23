@@ -1,5 +1,6 @@
 import Foundation
 import CoreFoundation
+import CoreGraphics
 import Darwin
 
 /// One-shot conversion from the previous writer's spatial ink archive to point geometry. Current
