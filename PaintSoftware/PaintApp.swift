@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct PaintApp: App {
+    private let geometryRepairFailure: String?
     init() {
         // Scribble is refused for every text input the app ever shows, by the hook that has to be in
         // place before the first one is created. See `ScribbleRefusal`.
@@ -29,6 +30,15 @@ struct PaintApp: App {
         // container while the artist's real library sat untouched in Files.
         ProjectLocation.resolveOnLaunch()
         AppSettings.standard.forgetIfRequested()
+        // Saved geometry must be current before gallery reads or recovery can reject old metadata.
+        // The repair protects untouched update bytes before committing any staged replacement.
+        do {
+            _ = try PointGeometryRepair.run()
+            geometryRepairFailure = nil
+        } catch {
+            geometryRepairFailure = error.localizedDescription
+            return
+        }
         // Launch-time safety pass (off the main thread): snapshot every project if the app binary
         // changed (update/dev redeploy), auto-repair any damaged project package from its backups,
         // purge expired trash. The gallery re-lists when it finishes.
@@ -42,7 +52,12 @@ struct PaintApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            if let geometryRepairFailure {
+                ContentUnavailableView("Saved scenes need repair", systemImage: "externaldrive.badge.exclamationmark",
+                    description: Text("Saved scenes were kept for recovery. Please reopen the app to try again.\n\n" + geometryRepairFailure))
+            } else {
+                ContentView()
+            }
         }
     }
 }

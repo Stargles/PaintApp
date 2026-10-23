@@ -636,6 +636,9 @@
 		647EE788852F4938A02A0593 /* ColourMaskLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9353CB58C9594CA3A67ED827 /* ColourMaskLogicTests.swift */; };
 		AA24D80703F2448E9A31D8B9 /* ColourMaskUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F135B0971644C92B94CF0B6 /* ColourMaskUITests.swift */; };
 		0F1F0BCBE7324F5E8C1FB3FD /* ProjectRestoreIntegrityLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F86D895B174439EB8F1F993 /* ProjectRestoreIntegrityLogicTests.swift */; };
+		A6C2D411EE8F4B4CAB530004 /* PaintSoftware/Services/PointGeometryRepair.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6C2D411EE8F4B4CAB530003 /* PaintSoftware/Services/PointGeometryRepair.swift */; };
+		A6C2D411EE8F4B4CAB530006 /* PointGeometryRepairLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6C2D411EE8F4B4CAB530005 /* PointGeometryRepairLogicTests.swift */; };
+		A6C2D411EE8F4B4CAB530008 /* PaintSoftwareUITests/Fixtures/point-geometry-previous-writer.json in Resources */ = {isa = PBXBuildFile; fileRef = A6C2D411EE8F4B4CAB530007 /* PaintSoftwareUITests/Fixtures/point-geometry-previous-writer.json */; };
 		5C8A7F036C02D9A466A8B968 /* PaintSoftware/Engine/LiquifyField.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A7F74630F0DA2019C9B4AFA /* PaintSoftware/Engine/LiquifyField.swift */; };
 		9438DE76ADDC619F94525E45 /* PaintSoftware/Models/LiquifyDeformation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70F1ADCA6A700C56312DFD78 /* PaintSoftware/Models/LiquifyDeformation.swift */; };
 		DEC0DEF17800000000000002 /* PaintSoftware/Models/CanvasManager+Liquify.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DEF17800000000000001 /* PaintSoftware/Models/CanvasManager+Liquify.swift */; };
@@ -1291,6 +1294,9 @@
 		9353CB58C9594CA3A67ED827 /* ColourMaskLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ColourMaskLogicTests.swift; sourceTree = "<group>"; };
 		5F135B0971644C92B94CF0B6 /* ColourMaskUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ColourMaskUITests.swift; sourceTree = "<group>"; };
 		4F86D895B174439EB8F1F993 /* ProjectRestoreIntegrityLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProjectRestoreIntegrityLogicTests.swift; sourceTree = "<group>"; };
+		A6C2D411EE8F4B4CAB530003 /* PaintSoftware/Services/PointGeometryRepair.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Services/PointGeometryRepair.swift; sourceTree = "<group>"; };
+		A6C2D411EE8F4B4CAB530005 /* PointGeometryRepairLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PointGeometryRepairLogicTests.swift; sourceTree = "<group>"; };
+		A6C2D411EE8F4B4CAB530007 /* PaintSoftwareUITests/Fixtures/point-geometry-previous-writer.json */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.json; path = PaintSoftwareUITests/Fixtures/point-geometry-previous-writer.json; sourceTree = "<group>"; };
 		4A7F74630F0DA2019C9B4AFA /* PaintSoftware/Engine/LiquifyField.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/LiquifyField.swift; sourceTree = "<group>"; };
 		70F1ADCA6A700C56312DFD78 /* PaintSoftware/Models/LiquifyDeformation.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/LiquifyDeformation.swift; sourceTree = "<group>"; };
 		DEC0DEF17800000000000001 /* PaintSoftware/Models/CanvasManager+Liquify.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/CanvasManager+Liquify.swift"; sourceTree = "<group>"; };
@@ -1735,6 +1741,7 @@
 				9353CB58C9594CA3A67ED827 /* ColourMaskLogicTests.swift */,
 				5F135B0971644C92B94CF0B6 /* ColourMaskUITests.swift */,
 				4F86D895B174439EB8F1F993 /* ProjectRestoreIntegrityLogicTests.swift */,
+				A6C2D411EE8F4B4CAB530005 /* PointGeometryRepairLogicTests.swift */,
 				71D523D4CBFDCEFA9DC75754 /* ModifierHoldLogicTests.swift */,
 				34229C332D4C2E3A15E83EA4 /* AxisLockLogicTests.swift */,
 			);
@@ -1757,6 +1764,8 @@
 				8FA8F181FD0257E986B2CFA5 /* PaintSoftware/Engine/ResponseCurve.swift */,
 				3E93DB9B5948F7F58B083F7D /* PaintSoftware/Resources/brushtip-square.png */,
 				715836E826B12C054559E5FC /* PaintSoftwareUITests/Fixtures/owner-tuned-library-2026-09-05.json */,
+				A6C2D411EE8F4B4CAB530003 /* PaintSoftware/Services/PointGeometryRepair.swift */,
+				A6C2D411EE8F4B4CAB530007 /* PaintSoftwareUITests/Fixtures/point-geometry-previous-writer.json */,
 				B1E1FC25DD8524A33038DCCD /* PaintSoftware/Resources/brushtip-square-bevel-wide.png */,
 				0F4D4F4AF15EFEE4CD3FF408 /* PaintSoftware/Resources/brushtip-flat-messy-ends-dirty.png */,
 				113E5012D241F2F87198201E /* PaintSoftware/Resources/brushtip-pencil-hard.png */,
@@ -2105,6 +2114,7 @@
 			files = (
 				156D4BD6599824D130604FBC /* PaintSoftware/Resources/brushtip-square.png in Resources */,
 				9731E4DA5B5DFE376F4370A4 /* PaintSoftwareUITests/Fixtures/owner-tuned-library-2026-09-05.json in Resources */,
+				A6C2D411EE8F4B4CAB530008 /* PaintSoftwareUITests/Fixtures/point-geometry-previous-writer.json in Resources */,
 				608800FA8E0EEF2A9A6680DB /* PaintSoftwareUITests/Fixtures/stream-testsrc-640x360.h264 in Resources */,
 				A903366A8FF7893CAD8D4F92 /* PaintSoftware/Resources/brushtip-square-bevel-wide.png in Resources */,
 				9D6CE0CE88C71A19D09B6EFA /* PaintSoftware/Resources/brushtip-flat-messy-ends-dirty.png in Resources */,
@@ -2750,6 +2760,8 @@
 				647EE788852F4938A02A0593 /* ColourMaskLogicTests.swift in Sources */,
 				AA24D80703F2448E9A31D8B9 /* ColourMaskUITests.swift in Sources */,
 				0F1F0BCBE7324F5E8C1FB3FD /* ProjectRestoreIntegrityLogicTests.swift in Sources */,
+				A6C2D411EE8F4B4CAB530004 /* PaintSoftware/Services/PointGeometryRepair.swift in Sources */,
+				A6C2D411EE8F4B4CAB530006 /* PointGeometryRepairLogicTests.swift in Sources */,
 				1486ACB5DC9C24C805DCB4A7 /* ModifierHoldLogicTests.swift in Sources */,
 				3999BD4D3D56D0C2E3807574 /* AxisLockLogicTests.swift in Sources */,
 				7CE83813927AD8AFD21510D5 /* PaintSoftware/Models/CanvasTouchSettle.swift in Sources */,

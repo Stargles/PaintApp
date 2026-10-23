@@ -292,7 +292,7 @@ nonisolated enum ProjectBackupManager {
     static func takeUpdateSnapshotIfNeeded() {
         let signature = currentAppSignature
         if settings.lastAppSignature != signature {
-            snapshotAllProjectsForAppUpdate(signature: signature)
+            guard snapshotAllProjectsForAppUpdate(signature: signature) else { return }
             settings.lastAppSignature = signature
         }
     }
@@ -313,13 +313,33 @@ nonisolated enum ProjectBackupManager {
 
     /// Clones every intact project into a `preupdate-<signature>` backup slot. Damaged projects are
     /// skipped here (the repair pass owns them) so we don't propagate a broken state as a "backup".
-    static func snapshotAllProjectsForAppUpdate(signature: String) {
+    @discardableResult
+    static func snapshotAllProjectsForAppUpdate(signature: String) -> Bool {
+        guard copyUpdateSnapshots(signature: signature, validating: { validateProjectForRestore(at: $0) }) else { return false }
+        pruneUpdateSnapshots()
+        return true
+    }
+
+    /// Copying and retention are separate so a format conversion can protect original bytes first,
+    /// then validate and replace every version before permitting any retention deletion.
+    static func copyUpdateSnapshots(signature: String, validating validator: (URL) -> Bool) -> Bool {
         let sig = sanitizedSignature(signature)
         for url in allProjectPackages() {
-            guard validateProjectForRestore(at: url), let id = manifestID(at: url) else { continue }
+            guard validator(url), let id = manifestID(at: url) else { continue }
             let dir = backupsDirectory(projectID: id)
             writeOriginMarker(directory: dir, projectFileName: url.lastPathComponent)
-            _ = cloneItem(at: url, to: uniqueSlotURL(directory: dir, prefix: "preupdate-\(sig)"))
+            let slot = uniqueSlotURL(directory: dir, prefix: "preupdate-\(sig)")
+            guard cloneItem(at: url, to: slot) else {
+                try? FileManager.default.removeItem(at: slot)
+                return false
+            }
+        }
+        return true
+    }
+
+    /// Retention follows a completed update operation, never a partially protected library.
+    static func pruneUpdateSnapshots() {
+        for id in Set(allProjectPackages().compactMap { manifestID(at: $0) }) {
             pruneBackups(forProjectID: id)
         }
     }

@@ -248,19 +248,12 @@ enum ProjectStore {
     /// **paper** as well as its tip — a textured brush whose sheet did not travel is the same defect
     /// this method was written to close, one field along.
     private static func importedTextureFileNames(table: BrushTable, palette: [Brush],
-                                                 vectors: [VectorCanvas?], recipes: [InterpolationRecipe?]) -> Set<String> {
+                                                 recipes: [InterpolationRecipe?]) -> Set<String> {
         var names = palette.reduce(into: table.importedTextureFileNames) { $0.formUnion($1.importedTextureFileNames) }
-        func collect(_ program: InkMaterialProgram?) {
-            for binding in program?.bindings ?? [] {
-                names.formUnion(binding.operation.deformation.brush.importedTextureFileNames)
-            }
-        }
-        for vector in vectors {
-            for element in vector?.elements ?? [] { collect(element.materialProgram) }
-        }
         for recipe in recipes {
-            for deformation in recipe?.deformations ?? [] { names.formUnion(deformation.brush.importedTextureFileNames) }
-            for local in recipe?.localEdits ?? [] { collect(local.stroke.placement?.material) }
+            for deformation in recipe?.deformations ?? [] {
+                names.formUnion(deformation.brush.importedTextureFileNames)
+            }
         }
         return names
     }
@@ -1307,7 +1300,6 @@ enum ProjectStore {
         copyCustomBrushTexturesIntoProject(
             importedTextureFileNames(table: brushTable,
                                      palette: snapshot.editorState.tools.profiles.presets + snapshot.customBrushes,
-                                     vectors: snapshot.layers.flatMap(\.cels).map(\.vector),
                                      recipes: snapshot.layers.flatMap(\.cels).map(\.interpolation)),
             projectURL: url)
 
@@ -2123,8 +2115,8 @@ enum ProjectStore {
                     for _ in 0..<payload.decodeReport.malformedCount {
                         damage.countMalformed(kind: named.next())
                     }
-                } catch let error as InkMaterialCodingError {
-                    log.error("Cannot open material in cel \(celManifest.id, privacy: .public): \(String(describing: error), privacy: .public)")
+                } catch let error as VectorGeometryCodingError {
+                    log.error("Cannot open geometry in cel \(celManifest.id, privacy: .public): \(String(describing: error), privacy: .public)")
                     return nil
                 } catch {
                     // The whole cel's vector content, gone: the file is present (so `validateProject`
@@ -2217,7 +2209,6 @@ enum ProjectStore {
         restoreCustomBrushTexturesFromProject(
             importedTextureFileNames(table: decoded.brushTable,
                                      palette: manifest.editorState.tools.profiles.presets + manifest.customBrushes,
-                                     vectors: decoded.celsByLayer.flatMap { $0 }.map(\.vector),
                                      recipes: decoded.celsByLayer.flatMap { $0 }.map(\.interpolation)),
             projectURL: url)
         manager.customBrushes = manifest.customBrushes

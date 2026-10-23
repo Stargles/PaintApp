@@ -1,7 +1,7 @@
 import Foundation
 
 /// Named ink sidecars and their package brush-number remap. Readers release each drawing before
-/// reading the next; no canvas, image, prepared material field or brush texture is loaded here.
+/// reading the next; no canvas, image or brush texture is loaded here.
 nonisolated enum ProjectRecipeMetadata {
     struct Reader {
         let urls: [URL]
@@ -32,7 +32,7 @@ nonisolated enum ProjectRecipeMetadata {
             }
             let decoder = JSONDecoder()
             // Recipes contain ordinary LocalEdit strokes and need their document brush remap.
-            // Vector material preflight reads only placements, never their ordinary brush fields.
+            // Geometry preflight reads only placements, never ordinary brush fields.
             if !urls.isEmpty {
                 let table: BrushTable
                 if let name = manifest["brushTableFileName"] {
@@ -55,15 +55,39 @@ nonisolated enum ProjectRecipeMetadata {
             }
             for url in reader.vectorURLs {
                 try autoreleasepool {
-                    do { _ = try reader.decoder.decode(VectorCanvasData.MaterialMetadata.self, from: Data(contentsOf: url)) }
-                    catch let error as InkMaterialCodingError { throw error }
-                    // Ordinary damaged vector geometry keeps its existing reported-loss policy.
-                    // Only material integrity is fatal here, just as it is in ProjectStore.
-                    catch { }
+                    _ = try reader.decoder.decode(GeometryMetadata.self, from: Data(contentsOf: url))
                 }
             }
             return true
         } catch { return false }
+    }
+
+    /// Version and projective ownership are payload integrity; ordinary damaged element fields keep
+    /// their existing reported-loss policy. This preflight never allocates ordinary stroke samples.
+    private struct GeometryMetadata: Decodable {
+        private enum Root: String, CodingKey { case geometryVersion, elements }
+        private enum Slot: String, CodingKey { case kind, stroke }
+        private enum Stroke: String, CodingKey { case placement }
+        init(from decoder: Decoder) throws {
+            try VectorGeometryCodingError.preserving {
+                let root = try decoder.container(keyedBy: Root.self)
+                guard try root.decode(Int.self, forKey: .geometryVersion) == VectorCanvasData.currentGeometryVersion else {
+                    throw InvalidMetadata()
+                }
+                var elements = try root.nestedUnkeyedContainer(forKey: .elements)
+                while !elements.isAtEnd {
+                    let decoder = try elements.superDecoder()
+                    guard let slot = try? decoder.container(keyedBy: Slot.self),
+                          let kind = try? slot.decode(String.self, forKey: .kind), kind == "stroke",
+                          slot.contains(.stroke),
+                          let stroke = try? slot.superDecoder(forKey: .stroke).container(keyedBy: Stroke.self) else { continue }
+                    guard stroke.contains(.placement) else { throw InvalidMetadata() }
+                    if try !stroke.decodeNil(forKey: .placement) {
+                        _ = try stroke.decode(StrokePlacement.self, forKey: .placement)
+                    }
+                }
+            }
+        }
     }
 
     /// A saved reference must remain readable before a restore can displace the live scene. This
