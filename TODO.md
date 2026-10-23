@@ -92,6 +92,8 @@ renderable sources, preserving all assertions and proving them with fault/restor
 Detailed provenance: HANDOFF, PERFORMANCE and `~/PaintWork/s50-liquify/`.
 
 **Still open:** physical qualification, final restored Release install/normal launch, then merge.
+Attempt2 named-device clean passed and compilation is active; the architecture agent owns native/DD,
+with exactly eight temporary test files to restore before handback. No install/launch yet.
 Staging attempt1 stopped at clean exit 70: Xcode could not prepare the named iPad and requested an
 unlocked device on the same LAN or a cable. Compilation never started. All eight temporary test
 files are restored byte-exact and all 753 qualified hashes match; no install, launch or physical

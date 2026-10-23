@@ -13,9 +13,11 @@ confirmed it opens. Its verified profile expires 2026-10-30. The renewal repair 
 arguments, fails closed on clean errors, verifies signatures and requires five days of profile life.
 Nine isolated scenarios and four mutations passed. See `docs/bug-evidence/auto-resign-2026-10-22.md`.
 
-**Liquify is unmerged and uninstalled. Simulator qualification is complete; physical work is resuming after fresh saved/unlocked readiness.** No native jobs or agents remain active; every owned qualification simulator
-and clone is deleted. All eight temporary physical test adapters are restored byte-exact; all 753
-qualified app/test/project hashes match. Later commits after fast source `2b330c9` are docs only.
+**Liquify is unmerged and uninstalled. Simulator qualification is complete.** The architecture agent
+owns native/DerivedData for device-build-2 compilation only: named-device clean passed, eight test
+files are temporarily adapted, production/project files unchanged. Do not start another native job.
+The agent must restore all eight files byte-exact and verify all 753 qualified hashes before handback.
+Every owned qualification simulator/clone is deleted. Commits after fast source `2b330c9` are docs only.
 
 - Fast Debug and Release: each 5,282 total = 5,278 passed + 4 skipped, zero failures; 256 selectors.
   Evidence: `~/PaintWork/s50-liquify/fast-3/`.
@@ -41,7 +43,7 @@ file access failed. A Mac-copy/fresh-transfer question is pending. Named-device 
 device-build-2 and compilation is active under the architecture agent, build only; no install/launch. Hardware UDID:
 `00008030-000151492EC3C02E`; devicectl ID: `E3B83820-DF74-5042-B52B-0D5BA17E4877`.
 
-## Resume after the owner makes the iPad available
+## Next
 
 1. Refresh actual availability. Establish library location via the copied preferences key
    `PaintApp.projectLocation.bookmark`; back up/hash all container Documents and any external
