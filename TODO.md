@@ -56,16 +56,21 @@ their files are repaired. Build `2974b33` broke this rule and lost the owner's k
 
 ---
 
-## Saved-scene repair cleanup — waiting for owner confirmation
+## Clean up the qualification leftovers — 2026-10-23
 
-The final Liquify Release is installed and launches normally. All feature/legacy device checks are
-qualified. Before deleting the one-shot file repairs, the owner must confirm existing drawings,
-layers and animation look right, as required by AGENTS.md. The question is pending; no deletion yet.
-Once confirmed, remove the obsolete repair implementations and their wiring/tests cleanly, retaining
+Owner confirms the existing artwork "looks right", satisfying the saved-format repair retirement gate.
+Remove obsolete one-shot file repair implementations, wiring and repair-only tests cleanly; retain
 current-format validation and update-backup creation. `LibraryRepair` and the five `Legacy*Repair`
-services are the retirement seam; canvas recognizer repair and project-location migration are separate
-live features. The verified pre-update current-folder ZIP remains preserved under
+services are the retirement seam. Canvas recognizer repair and project-location migration are live
+features and remain. The pre-update ZIP backup is preserved under
 `~/PaintWork/s50-liquify/device-backup-2/external-library/`.
+
+Owner also reports "there is a lot of test stuff though which didnt delete", specifically in the
+PaintApp scene gallery. Identify test-created packages from actual qualification evidence and the
+pre-test library archive before removing them. Move only positively identified test scenes to the
+existing Trash; do not infer that an arbitrary Untitled scene is a test or bulk-delete gallery data.
+Fix the test lifecycle so physical checks do not leave more gallery scenes behind. Any temporary
+cleanup mechanism must be removed after use, with no permanent debug hook or legacy path.
 
 ---
 

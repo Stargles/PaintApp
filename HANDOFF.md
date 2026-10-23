@@ -14,13 +14,16 @@ all753 source hashes exact, strict deep seal verified, profile expires2026-10-30
 normally with **no test arguments**, PID52717 observed alive. Preserved app and install/launch/signing
 records: `~/PaintWork/s50-liquify/final-release/`. No uninstall, settings/library reset or preset edits.
 
-**Only current required input:** the owner is checking existing scenes before retiring the one-shot
-file repairs. The question is pending. Keep the repairs until confirmation, then remove their whole
-implementations/wiring/tests while retaining current-format validation and update-backup creation.
-TODO has the retirement seam. Do not confuse canvas recognizer repair or location migration with
-obsolete file repairs. The latest executable repair signature converts older preupdate snapshots;
-its own newest snapshot is intentionally untouched. Genuine previous-writer/fault evidence lives in
-`~/PaintWork/evidence/s49-liquify-material-{format,model}/`.
+**Owner confirmation received,2026-10-23:** existing artwork "looks right". The one-shot file
+repairs may now be retired per AGENTS.md. Active cleanup tree:
+`~/PaintWork/PaintApp-s51-cleanup`, branch `tmp/s51-cleanup`, from maina17e69b. Remove repair-only
+code/tests/wiring while retaining current validation and update backups; no canvas recognizer or
+project-location migration removal. TODO records the scope before work.
+
+The owner also reports many test leftovers in the **scene gallery**. Identify test packages against
+qualification evidence and the preserved pre-test current-folder ZIP; only positively identified
+tests may go to existing Trash. Never classify arbitrary Untitled scenes as disposable. Investigate
+and repair test cleanup at its lifecycle seam, with no permanent product debug cleanup hook.
 
 ## Qualification to reuse
 
