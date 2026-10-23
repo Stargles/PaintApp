@@ -112,6 +112,10 @@ fault8/14 red, exact-source restore14/14. Integrated backup/save tests still pen
 library has228backups/522461597logical bytes; exported copies cannot measure original APFS block
 sharing, so the requested real-scene week cost remains open. Do not substitute this inventory for it.
 
+Adjacent safety finding recorded in BUGS: a corrupted manifest falls back to the first backup
+with the same basename, which is ambiguous across folders. Refuse multiple matches and preserve
+the live package; retain ID lookup and unique-name recovery, with a regression before shipping.
+
 ---
 
 ## Erasing strokes crashes on iPad — 2026-10-23

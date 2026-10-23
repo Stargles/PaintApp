@@ -2209,3 +2209,14 @@ menu's keyframe items, and deliberately not fixed there.
 - **A vector cel still carries `fillImage`/`bakedImage`**, so raster features allocate canvas-sized
   bitmaps on a vector layer. The product owner wants vector fully divorced from raster —
   [VECTOR_INTERPOLATION.md](docs/VECTOR_INTERPOLATION.md) §4 item 26 is the full write-up.
+# A damaged manifest can select another same-named scene's backup (2026-10-23)
+
+Source finding during saved-file recovery review, not reproduced on the owner's iPad:
+`ProjectBackupManager.backupDirectory(forProjectAt:)` falls back from an unreadable manifest to
+the first backup folder whose `origin.name` matches the package basename. Scene names are unique
+only within a folder, so two `Rough.paintproj` packages in different folders can match. The first
+match is not proof of ownership and must not auto-restore over the other scene. Refuse ambiguous
+matches and preserve the damaged live package; keep the normal manifest-ID lookup and unique-name
+fallback. Add a regression with two independent backup IDs sharing one basename. The preserved
+device export has no colliding origin markers, so no claim of affected real artwork.
+
