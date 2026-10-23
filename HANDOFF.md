@@ -19,13 +19,16 @@ Liquify is not merged and is not installed. Its integration source is `tmp/s49-i
 at `c78aac8` for the ownership cleanup. That change consolidates the one-consumer presenter with the
 Liquify procedure. No new cache, renderer or generic producer remains. Do not remove useful
 feature-scoped state merely because one feature owns it; keep the existing synchronization,
-cancellation and one-producer behavior. A focused Debug compile gate for `c78aac8` is running under
-the separate agent; do not start overlapping native/compiler work.
+cancellation and one-producer behavior. Focused Debug compilation and all 25 lifecycle/raster tests
+passed at `c78aac8`, zero failures/skips; its owned simulator was deleted. Evidence:
+`~/PaintWork/s50-liquify-producer-check-20261023T004538Z/`. Candidate `7e780d7` starts the existing
+controls workflow in landscape and removes its end rotation; assertions are unchanged. A delegated
+agent now owns the sole native/compiler slot for Release build and quiet actual-producer cost.
 
 The linked-frame diagnostic has finished and its temporary instrumentation is exactly restored. All
 815 readable probes were sampled each poll; three changed before the 15.546-second timeout, and a
 later still showed 141 changed. Preserve the gesture, predicate and timeout. The next test step is the
-unchanged current Release gate after the focused compile gate completes; do not run another Debug
+unchanged current Release gate after the optimized cost run completes; do not run another Debug
 diagnostic for this symptom. Owner confirmed the Mac is idle.
 
 The verified inventory is 5282 fast tests across 256 selected classes and 5864 full tests, excluding three
@@ -52,12 +55,11 @@ failures serially as CLAUDE.md specifies.
 
 ## Next
 
-1. Wait for the focused `c78aac8` Debug compile gate, then run the unchanged current Release workflow.
-2. Correct the existing modes/controls UI method: start in landscape before app launch, remove its
-   end-of-test midflight rotation, preserve its assertions, and capture one final full-screen landscape
-   image. Run it alone on a fresh native iPad 9 simulator so its long workflow settles rotation.
-3. If the Release gate passes, continue final regression gates and measure optimized batching cost on a
-   quiet Mac. Obtain fresh saved/unlocked device readiness before the prepared physical drives and
+1. Finish the Release build and quiet actual-producer cost run; retain batching only if justified.
+2. Run the unchanged linked Release workflow, then the corrected modes/controls method alone on a fresh
+   native iPad 9 simulator; inspect its final full-screen landscape image.
+3. Continue final fast Debug/Release and phase-boundary full regression gates. Obtain fresh
+   saved/unlocked device readiness before the prepared physical drives and
    cold/warm sampler benchmark; keep physical first-use cost separate from app gesture latency.
 4. Keep Liquify out of the shipped app until required feature and regression qualification is done.
    Remove TODO (178) only with its fully qualified merge.
