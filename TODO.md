@@ -8,7 +8,7 @@ conservation and output quality take priority over speed. Use focused delegation
 for routine work, with occasional queue reports. The owner asked to work independently while asleep
 until 10 a.m. Toronto time. Raster scope and fixed exterior pixels for vector selections are ruled below.
 
-**Checkpoint 2026-10-23:** all currently actionable cleanup is merged and the final Release is installed
+**Checkpoint 2026-10-23:** the previous cleanup is merged and the final Release is installed
 and launched normally. Owner is now asleep; no further iPad interaction is needed or queued. Remaining
 items below retain their existing deferred/owner-side status.
 
@@ -57,6 +57,17 @@ their files are repaired. Build `2974b33` broke this rule and lost the owner's k
 
 **The measurement baseline is [PERFORMANCE.md](PERFORMANCE.md) §1, not here**: the owner works at
 2048x1024, and every figure taken before 2026-08-17 was at 4096², eight times the pixels.
+
+---
+
+## Erasing strokes crashes on iPad — 2026-10-23
+
+Owner: “a crash just happened on the ipad when i was tryiong to erase some strokes.”
+Reported immediately after final Releasebcd7a6af was installed and opened. Establish the actual
+crashing executable/build and exception from device diagnostics before inferring a cause. Diagnose
+and fix at the existing eraser/rendering seam, with a reproducing regression and required gates.
+Owner is asleep after the last unlock; start with read-only log collection. Do not restart/reinstall
+PaintApp or request device interaction until genuinely required. Preserve the real scene and backups.
 
 ---
 
