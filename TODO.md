@@ -81,6 +81,12 @@ layer-panel toggles and invalid midflight photo are removed at `0cabd6c`; its va
 capture and every existing assertion remain. Final gates are next. Keep one-shot repairs until the owner confirms real
 scenes after installation.
 
+Full Release regression completed at `8380783`:5864 total,5799passed,3failed,62skipped,398 classes;
+counts reconcile. Two StreamLiveEngaged methods and the LayerPanelControls mover visibility method
+need serial confirmation together before classification. No full rerun; evidence:
+`~/PaintWork/s50-liquify/full-release-1/`. This replaces the pending full-run step above; physical
+qualification remains open.
+
 Physical preparation also includes the two existing unseeded vector/raster Push workflows, alongside
 the five legacy drives. Their temporary adaptation sets landscape and process-only drawing/resolution
 overrides, preserves every assertion, and captures full screens. Reuse the guarded non-destructive

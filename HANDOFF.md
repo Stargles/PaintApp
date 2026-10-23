@@ -84,9 +84,11 @@ next; run it once at the phase boundary, then triage failures serially as CLAUDE
    omitting derived digest data reproduced the intended23-vs25 three-way collision. Production files
    are byte-exact restored. Evidence: `~/PaintWork/s50-liquify/{identity-fixture-20261023T012438Z,digest-fixture-20261023T014918Z}/`.
    Both repaired fixtures passed in final fast3 Debug/Release; all original assertions remain.
-2. The one phase-boundary full suite is running in Release from `8380783`, owned by the raster agent,
-   using `~/PaintWork/s50-liquify/run-full-release.sh`; evidence goes to `full-release-1/` beside it.
-   Do not start another native/compiler job until it finishes. This qualifies the shipped
+2. The one phase-boundary full Release suite finished from `8380783`:5864 total,5799passed,3failed,
+   62skipped,398 classes; counts reconcile. Evidence: `~/PaintWork/s50-liquify/full-release-1/`.
+   Two StreamLiveEngaged methods and the LayerPanelControls mover visibility method failed. Complete
+   runner/source checks, then confirm all three together serially before classifying them; no full
+   rerun. The raster agent retains native ownership and its simulator for triage. This tests the shipped
    configuration. Rules do not mandate a full-suite configuration; simulator test seeds remain enabled
    in Release. This does not relabel the known Debug linked timeout as passing.
 3. Obtain fresh
