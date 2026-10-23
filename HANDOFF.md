@@ -20,23 +20,21 @@ repairs may now be retired per AGENTS.md. Active cleanup tree:
 code/tests/wiring while retaining current validation and update backups; no canvas recognizer or
 project-location migration removal. TODO records the scope before work.
 
-The owner also reports many test leftovers in the **scene gallery**. Identify test packages against
-qualification evidence and the preserved pre-test current-folder ZIP; only positively identified
-tests may go to existing Trash. Never classify arbitrary Untitled scenes as disposable. Investigate
-and repair test cleanup at its lifecycle seam, with no permanent product debug cleanup hook.
+**Gallery cleanup complete:** owner manually deleted all test scenes and confirmed completion.
+No further deletion is authorized or needed. Future physical checks must track unique owned scenes
+and clean those through existing Trash, verifying fresh inventory before closeout.
 
 Repair retirement implementation is prepared (six services and converter-only tests/wiring removed;
-current storage/restore tests retained/renamed). Current-format census: fast5246/254classes, full5828,
-36 repair-only tests fewer. Audit of the **current device** Projects/Backups/Trash is still a deployment
+current storage/restore tests retained/renamed). Current-format census at cf37eab: fast5247/254classes, full5829,
+35 fewer tests after retaining the current malformed-stream restore regression. Audit of the **current device** Projects/Backups/Trash is still a deployment
 gate because historical pre-test ZIP is legitimately old format and newest preupdate snapshots were
 previously left untouched. Do not treat the old archive as current audit evidence.
 
-Retirement agent may commit its WIP and owns simulator/build/test native work for focused current
-storage/restore gates then fast Debug+Release, own simulator/simlock. Root owns docs and read-only
-existing-app export/inventory on physical iPad; no physical UI/test/reinstall while those run. Owner
-has been asked to save before the metadata-export restart; owner replied "Saved — ready to restart". Root now runs existing read-only -exportProject index-only
-against the installed app (no new build, no chosen-library mutations). Final merge/deploy waits
-for actual library audit and test-artifact cleanup, not just green logic tests.
+Retirement focused tests and deliberate faults are complete; native ownership returned to root.
+Root now qualifies the existing exporter hierarchy fix (same-named packages previously collided),
+then exports/audits current Projects/Backups/Trash before final integrated Debug+Release and recovery UI.
+Owner saved before the read-only export restart and has since completed manual test-scene cleanup.
+Final merge/deploy waits for the actual current-library audit and final qualification.
 
 ## Qualification to reuse
 

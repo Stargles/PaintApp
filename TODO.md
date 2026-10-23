@@ -66,9 +66,8 @@ features and remain. The pre-update ZIP backup is preserved under
 `~/PaintWork/s50-liquify/device-backup-2/external-library/`.
 
 Owner also reports "there is a lot of test stuff though which didnt delete", specifically in the
-PaintApp scene gallery. Identify test-created packages from actual qualification evidence and the
-pre-test library archive before removing them. Move only positively identified test scenes to the
-existing Trash; do not infer that an arbitrary Untitled scene is a test or bulk-delete gallery data.
+PaintApp scene gallery. Owner chose manual cleanup and now confirms “done, all of them are deleted.”
+No further gallery deletion is needed. Do not infer that an arbitrary Untitled scene is disposable.
 Fix the test lifecycle so physical checks do not leave more gallery scenes behind. Any temporary
 cleanup mechanism must be removed after use, with no permanent debug hook or legacy path.
 
