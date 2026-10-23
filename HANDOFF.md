@@ -25,7 +25,7 @@ qualified app/test/project hashes match. Later commits after fast source `2b330c
   one concerns LayerPanelControls mover visibility. Exact parallel causes remain unproved; no fix.
   Four actual workers, zero System Failures/restarts, unchanged source hashes. Command wall 4,751s;
   summed class time 17,970.666s. See `~/PaintWork/s50-liquify/full-release-closeout.txt` and its indexes.
-- All eight Liquify UI workflows passed in the full run (vector/linked 3, raster 5). Root inspected
+- All eight Liquify UI workflows passed in the full run (vector/linked 3, raster 5). Image review covered
   reshape/Undo/reopen/source-follow images and settled controls at native iPad9 landscape size.
   Earlier isolated evidence and hashed Documents copies: `~/PaintWork/s50-liquify/release-ui/`.
 - Final UI linters pass: 85 SF Symbols, 137 shared helpers. No assertion, gesture or deadline weakened.

@@ -79,7 +79,7 @@ Simulator qualification is complete:
 - Full Release:5864 total,5799passed,3failed,62skipped;398 classes. All three reds passed together
   unchanged serially3/3. Four actual workers, no System Failures/restarts,753 source hashes unchanged.
   Exact parallel causes are unproved; no product/test fix. All8 Liquify UI workflows passed.
-- Root inspected reshape/Undo/reopen/source-follow pictures and settled native iPad9 landscape controls.
+- Image review covered reshape/Undo/reopen/source-follow pictures and settled native iPad9 landscape controls.
   Every assertion, gesture and deadline remains. The earlier Debug linked15s miss remains recorded.
 - Quiet Release producer cost2/2: all8 exact pictures/all18 inverse fixtures match; hard/pattern
   producer medians19.1%/23.3% of scalar reference. Retain batching; worst pattern still takes seconds
