@@ -96,21 +96,22 @@ Build3 frozen xctestrun SHA: `125bd30baf4a3567a173fd9b4b6313ba83b661e6490898db94
 
 ## Next
 
-1. Diagnose the two physical-legacy-3 failures from actual frames, coordinate spaces and held sample
-   counts. Seek one shared adapter root cause. Preserve every assertion/threshold/deadline and the
-   original fixture. Review and record any correction before rebuild/retry. Two passing legacy checks
-   and the accepted benchmark need not be repeated if their production source remains unchanged.
-2. After corrected physical legacy qualification, run the two safe unseeded Liquify Push workflows.
-   Preserve full pictures and disposable-scene identities. Build3 frozen products are archived;
-   hardware UDID `00008030-000151492EC3C02E`, devicectl ID
-   `E3B83820-DF74-5042-B52B-0D5BA17E4877`.
-3. Only after physical qualification, clean/build the restored Release with matching arguments,
-   strict seal and current five-day profile verification; install and launch normally. Keep one-shot
-   repairs until the owner confirms real scenes. Prior-writer/fault evidence already exists under
-   `~/PaintWork/evidence/s49-liquify-material-{format,model}/`.
-4. Update physical PERFORMANCE evidence; remove TODO(178) whole and completed freeze-log request
-   in the qualified merge. SESSION_LOG keeps five entries. Fetch/recheck TODO/HANDOFF, ff-merge
-   through the absolute main worktree path, verify SHA, push and clean up owned task artifacts.
+**Physical qualification is complete.** Remaining Move1 passed1/1, zero skips/failures, unchanged
+held/settled pixel and one-Undo predicates:37 picture updates over4 editor passes (original<=4 cap).
+All five unique legacy drives now pass across the preserved runs; Liquify2 passed2/2 and native
+sampler1 passed1/1. Historical premise/cancellation failures remain archived, not relabelled green.
+Source753 hashes exact and tree clean after build5 restoration. No agent owns native work now.
+Root owns native/DD for final restored normal Release clean/build with identical argument array,
+then strict signature/fresh five-day profile verification, install and normal launch. Coordinate agent
+only reviews local Move screenshots/writes evidence; no more device/native actions.
+
+1. Finish the already-prepared normal Release build/verification under
+   `~/PaintWork/s50-liquify/final-release/`. Keep one-shot repairs until owner confirms real scenes.
+2. Install and launch normally after verifying device availability; no uninstall/reset/preset changes.
+3. Update final evidence, remove TODO(178) whole and completed freeze-log-read request in the qualified
+   merge, update SESSION_LOG (five entries), fetch/recheck TODO/HANDOFF, ff-merge through the absolute
+   main worktree path, verify SHA, push and clean up the owned integration worktree.
+4. Other queued asks remain explicitly deferred; no interpolation-overhaul research without brief.
 
 ## Evidence and decisions to preserve
 

@@ -92,34 +92,14 @@ VectorCanvas with tile-scoped work. The two invalid identity fixtures were repai
 renderable sources, preserving all assertions and proving them with fault/restoration runs.
 Detailed provenance: HANDOFF, PERFORMANCE and `~/PaintWork/s50-liquify/`.
 
-**Still open:** physical gesture qualification, final restored Release install/normal launch, then
-merge. Physical native sampler retry2 passed1/1, zero skips: component cold428.577ms, warm17.177–18.066ms;
-six pictures reviewed with exact held/committed parity. Attempt1 never entered a selected method
-because UI automation initialization timed out; the owner authorized retry and noted an enable prompt.
-Legacy attempt1:5 total=1 passed/4 failed/0 skips. Playback passed; four methods stopped on physical
-layout/screenshot/size-field premises. Diagnose those actual frames before any adapter correction;
-no feature assertion, gesture, count or deadline may be weakened. Screenshot root cause is the
-raw capture's ignored rotation tag (including the mid-gesture reader); share one orientation-aware
-reader in the temporary physical adapter. Also expose the Move row and dismiss the floating keyboard
-between the64×4096 size fields. Grey's static-square test geometry also cannot report a pan of the64×4096 fixture; replace that
-temporary adapter oracle with actual exposed transform geometry, preserving movement/width thresholds
-and inspecting the full picture. Root reviewed the exact external corrections and authorized guarded build3/restoration, then affected
-four legacy checks and Liquify2 only after preceding gates pass. Expected4/2, zero skips; stop on a real
-failure. No repeat of passed playback/native benchmark. Build3 clean/build/seal/profile verification
-and full source restoration passed. Legacy attempt2 was cancelled before methods due lock. Legacy3 passed raster-under-transform
-stroke and graph-node drag (36 updates/2 passes). Legacy4 passed grey pan; Move stopped before its
-gesture because the adapter tapped an options-close control already dismissed by entering Move.
-Remove that one extra temporary tap, retaining Move-active and every feature assertion. Unique passed
-legacy checks: playback, raster stroke, graph, grey. Root authorizes Liquify2 independently now from
-frozen build4 while device awake, then reviewed one-line adapter deletion/build5 and remaining Move1. Liquify2 passed2/2, zero skips/failures, with7full screenshots exported. Root
-reviewed correction3's one-line deletion and guards; build5 clean/build/verification/restoration passed,753source hashes exact. Pre-launch lockState was
-locked; no test was attempted. Owner has now freshly confirmed unlocked/awake: run remaining Move1
-immediately from frozenbuild5, no rebuild.
-This pre-gesture harness failure does not qualify Move; final deployment/merge require Move1 plus
-Liquify2. No app-source changes, feature weakening or repeated accepted benchmark. No settings/library reset or preset changes. Preserve disposable scenes and full pictures. Native
-component cost is separate from app gesture latency. Keep one-shot repairs until real scenes are
-confirmed. HANDOFF has the exact next steps and evidence locations. Remove this item only with the
-fully qualified merge.
+**Still open:** final restored normal Release build/verified install/launch, then merge. Physical
+qualification is complete: five unique legacy drives passed, including final Move1/1 with37 updates
+and4passes, held/settled picture agreement and one Undo. Liquify2/2 passed, raster cold-reopen preserved;
+native sampler1/1 passed with exact pictures. Historical setup/cancellation failures are separately
+archived. All753 qualified source hashes exact after temporary adapter restoration. Root now owns
+native/DD for final normal Release; the coordinate agent finishes local screenshot/evidence review.
+Backup is verified; keep one-shot repairs until the owner confirms real scenes. Remove this whole
+item only with the fully qualified merge. See HANDOFF and external evidence indexes.
 
 *"It should be placed to the left of the brush tool in the top menu. When selected, it acts sort of like
 a brush (you can control the brush type, size, etc), and otherwise it does basically what a normal
