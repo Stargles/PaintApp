@@ -327,7 +327,10 @@ final class FrameBakeKeyLogicTests: XCTestCase {
         // over. A recipe is what makes a cel show something other than what it stores, and `t` moves
         // that picture while touching no tier object at all.
         row("derived content acquired") { m in
-            m.layers[probe].cels[0].interpolation = InterpolationRecipe(t: 0.25)
+            m.layers[probe].cels[0].interpolation = InterpolationRecipe(
+                references: [InterpolationReference(layerID: m.layers[0].id, celID: m.layers[0].cels[0].id),
+                             InterpolationReference(layerID: m.layers[1].id, celID: m.layers[1].cels[0].id)],
+                t: 0.25)
         }
         row("derived content retimed") { m in
             m.layers[probe].cels[0].interpolation?.t = 0.75
