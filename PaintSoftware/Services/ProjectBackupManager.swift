@@ -27,9 +27,8 @@ extension Notification.Name {
 /// (at most 44 a project, spread over a month), the trash retention window, and a global
 /// `maxTotalBackupBytes` cap — which never deletes a project's last remaining restore point.
 ///
-/// File discovery and damage checks use a Foundation-only manifest skeleton. An explicit restore
-/// also asks `LibraryRepair` to prepare and strictly validate a staged copy before replacement; the
-/// scene’s current decoder owns that validation, without loading its cels.
+/// File discovery and damage checks use a Foundation-only manifest skeleton. Restores also decode
+/// the current manifest strictly before replacement, without loading the scene’s cels.
 nonisolated enum ProjectBackupManager {
 
     // MARK: - Configuration (overridable by logic tests)
@@ -238,13 +237,9 @@ nonisolated enum ProjectBackupManager {
 
         // App updated or redeployed? Snapshot every valid project BEFORE anything else can touch
         // them, so a bad update can never destroy the only copy of pre-update work.
-        let snapshot = takeUpdateSnapshotIfNeeded()
+        takeUpdateSnapshotIfNeeded()
 
         repairCorruptedProjects()
-
-        // Throwaway: rewrites pose tracks that earlier builds wrote into the current format, across the
-        // library, saved versions included. After the snapshot, whose own clone it leaves as it was.
-        LegacyPoseTrackRepair.repairLibrary(leavingUntouched: snapshot)
 
         // TODO (57): move each project's JSON sidecars out from under `images/`. **After the repair**
         // so a damaged package is restored before we look at it, and **before the purges** so nothing
@@ -292,19 +287,14 @@ nonisolated enum ProjectBackupManager {
 
     // MARK: - App-update detection & snapshots
 
-    /// **Takes this build's update snapshot if it has not been taken** — every intact project cloned
-    /// into a `preupdate-` slot before anything can touch it — and answers that snapshot's slot-name
-    /// prefix, which a repair leaves exactly as it was. The launch maintenance takes it, and so does a
-    /// repair that has to rewrite packages before the maintenance runs (`LegacyToolSettingsRepair`), so
-    /// whichever comes first takes it once.
-    @discardableResult
-    static func takeUpdateSnapshotIfNeeded() -> String {
+    /// Takes this build's update snapshot once: every intact project is cloned into a `preupdate-`
+    /// slot before startup maintenance can change it.
+    static func takeUpdateSnapshotIfNeeded() {
         let signature = currentAppSignature
         if settings.lastAppSignature != signature {
             snapshotAllProjectsForAppUpdate(signature: signature)
             settings.lastAppSignature = signature
         }
-        return "preupdate-\(sanitizedSignature(signature))"
     }
 
     /// Version + build + the app binary's modification date. The binary date is what actually
@@ -482,7 +472,7 @@ nonisolated enum ProjectBackupManager {
             }
     }
 
-    /// Repairs a staged clone and validates the current format before replacing the live scene.
+    /// Validates a staged clone in the current format before replacing the live scene.
     /// The original restore point is never rewritten; the displaced live scene remains recoverable
     /// in Trash. Staging uses the save prefix so the existing crash-cleanup sweep also removes an
     /// interrupted restore’s temporary package.
@@ -493,7 +483,7 @@ nonisolated enum ProjectBackupManager {
         let staged = projectURL.deletingLastPathComponent()
             .appendingPathComponent(".saving-restore-\(UUID().uuidString).paintproj")
         defer { try? fm.removeItem(at: staged) }
-        guard cloneItem(at: backupURL, to: staged), LibraryRepair.prepareForCurrentRead(staged) else { return false }
+        guard cloneItem(at: backupURL, to: staged), validateProjectForRestore(at: staged) else { return false }
         var displaced: URL?
         if fm.fileExists(atPath: projectURL.path) {
             guard let trash = moveToTrash(projectURL, tag: trashTag) else { return false }
@@ -882,11 +872,12 @@ nonisolated enum ProjectBackupManager {
         return validateProjectFiles(at: url, manifestData: data) && ProjectRecipeMetadata.validate(in: url, manifestData: data)
     }
 
-    /// Read-only preflight for preserved earlier versions. A staged clone is repaired and strictly
-    /// validated before replacement; the source version and preupdate snapshot keep their bytes.
+    /// Restores require a strictly readable current manifest as well as intact referenced files and
+    /// ink metadata. Validation never rewrites the source version or loads its cel pictures.
     static func validateProjectForRestore(at url: URL) -> Bool {
-        guard let data = try? Data(contentsOf: url.appendingPathComponent("manifest.json")) else { return false }
-        return validateProjectFiles(at: url, manifestData: data) && LegacyLiquifyRepair.inkIsRepairable(in: url, manifestData: data)
+        guard let data = try? Data(contentsOf: url.appendingPathComponent("manifest.json")),
+              (try? JSONDecoder().decode(ProjectManifest.self, from: data)) != nil else { return false }
+        return validateProjectFiles(at: url, manifestData: data) && ProjectRecipeMetadata.validate(in: url, manifestData: data)
     }
 
     private static func validateProjectFiles(at url: URL, manifestData: Data) -> Bool {

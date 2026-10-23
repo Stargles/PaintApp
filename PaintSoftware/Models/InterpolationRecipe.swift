@@ -272,7 +272,7 @@ struct InterpolationRecipe: Codable {
         case references, t, mode, groups, guideIDs, localEdits, spacing, deformations, materialOperations
     }
 
-    /// Current packages carry every recipe field. The launch repair rewrites earlier sidecars.
+    /// Current packages carry every recipe field; missing or unreadable metadata is damage.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let table = try InkMaterialCodingError.preserving {

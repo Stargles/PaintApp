@@ -28,13 +28,6 @@ struct PaintApp: App {
         // maintenance pass in particular would otherwise snapshot and repair inside the app
         // container while the artist's real library sat untouched in Files.
         ProjectLocation.resolveOnLaunch()
-        // THROWAWAY (TODO (176)): every scene gains the tools an earlier build kept app-wide, filled
-        // from the artist's own values, before anything — the gallery's first listing included — reads
-        // a manifest. See `LegacyToolSettingsRepair` for why here and not in the maintenance pass.
-        LegacyToolSettingsRepair.repairLibraryAndRetireKeys()
-        LegacyStreamPlacementRepair.repairLibrary()
-        LegacyMaskRepair.repairLibrary()
-        LegacyLiquifyRepair.repairLibrary()
         AppSettings.standard.forgetIfRequested()
         // Launch-time safety pass (off the main thread): snapshot every project if the app binary
         // changed (update/dev redeploy), auto-repair any damaged project package from its backups,

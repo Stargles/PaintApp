@@ -20,8 +20,7 @@ import CoreGraphics
 /// gesture holds its pose off the document (`livePose`), so it holds no copy of the layer at all.
 ///
 /// **A file whose track this build cannot read is a file it cannot read**, said so and never read as a
-/// track with no keys — the last section. The library repair that rewrites older files is
-/// `LegacyPoseTrackRepairLogicTests`.
+/// track with no keys — the last section.
 ///
 /// Every key here is placed through the artist's own writers — Add Keys, the Move box gesture
 /// (`updateFloatingPose`, then `settleBoxNudge`, which is what the box's touch-up calls), and the graph

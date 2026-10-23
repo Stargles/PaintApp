@@ -16,9 +16,7 @@ import SwiftUI
 // undo history, and a floating Move or Duplicate piece (committed on the way out).
 //
 // **Decoded strictly.** A package this build cannot read is a package it does not open, never a scene
-// whose tools quietly came back at their defaults: the owner's rule, *"if an update causes existing files
-// to be outdated, then they should be automatically repaired"*. `LegacyToolSettingsRepair` is the one
-// place that knows the earlier shapes.
+// whose tools quietly came back at their defaults. Every saved field belongs to the current format.
 
 /// The zoom, rotation and pan the artist left the canvas at — `CanvasView.Coordinator`'s committed
 /// navigation transform, in its own units: `scale` is relative to the fit-to-host scale, `rotation`

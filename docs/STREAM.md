@@ -116,7 +116,7 @@ the laptop.
   per-stream switch requested 2026-10-12 adds **In Place**: that stream and the layers around it use
   their actual masks, blend modes and effects in the live display. The original plain run remains
   the default, named On Top because a graded upper band makes it draw over the rest of the frame.
-- **2.15 Placement is saved per stream**, beside Freeze, and new and repaired streams start On Top.
+- **2.15 Placement is saved per stream**, beside Freeze, and new streams start On Top.
   It is a viewing choice, so it is not an undo step. In Place can present fewer pictures per second
   when upper layers are expensive; newest-frame coalescing bounds its queue. Exports, thumbnails,
   onion skins and playback still exclude the reference (2.13).
@@ -526,11 +526,9 @@ cel's derived picture; `streamBar.pictureNote` says `hiddenByAPose`. Freeze keep
 and the same frame; toggling placement alone dirties no bake. Closing the Add menu’s connection sheet also closes Add, so + immediately opens it again to insert
 another stream. `StreamBar.placementButton` exposes
 `onTop` or `inPlace`; In Place omits the plain-picture note. The viewing choice lives strictly in
-`StreamRef.rendersInPlace`. `LegacyStreamPlacementRepair` adds On Top once to earlier stream records
-under Projects, older Backups and Trash before the gallery lists them. It takes and preserves the
-running build’s pristine before-update snapshot; restoring such a snapshot repairs its staged copy
-before the strict decoder opens it. Delete this repair after the owner confirms the library opens
-correctly. A real baseline `5d73184` package pins repair and strict save/load of its last screen frame.
+`StreamRef.rendersInPlace`; the current decoder requires that choice. Missing placement is reported
+as drawing damage. Saved versions are validated in the current format before a restore replaces the
+live scene.
 
 MEASURED on the simulator (Debug, 2048² canvas, a 1280×720 `testsrc` from the fake streamer,
 2026-09-17): the tick delivers **23–29 frames/s at 0.38–0.48 ms mean, ≤1.5 ms max** on the main

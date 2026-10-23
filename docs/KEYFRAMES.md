@@ -476,10 +476,8 @@ reasoning is what stops a later session reinstating it by rediscovering the argu
     two disjoint: a mark a key lands on goes, so the frame draws as the key it is.
 
     **Superseded by it**: §2.14 and §2.15, and the parts of §2.5 and §11.7 that described a whole-pose
-    key (one shared ease, six rows written through `PoseEdit`, a projective channel declined). A track
-    that stored whole-pose keys is rewritten as the curves it means, its timing spine's handles carried
-    exactly, by a one-shot repair at launch over `Projects/`, `Backups/` and `Trash/`, saved versions
-    included. The decoder reads the current format only and refuses anything else, so a
+    key (one shared ease, six rows written through `PoseEdit`, a projective channel declined).
+    The decoder reads the current component-curve format only and refuses anything else, so a
     file it cannot read is shown as damaged and never as a track with no keys. It decoded empty until
     TODO (153), on a standing permission that had already lapsed: the owner's keyed scene opened with
     no keys, the next autosave wrote the empty track over the file, and no saved version could be read

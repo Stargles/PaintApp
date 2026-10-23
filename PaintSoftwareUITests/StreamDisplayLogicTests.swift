@@ -189,91 +189,7 @@ final class StreamDisplayLogicTests: XCTestCase {
         XCTAssertNotNil(manager.makeStreamDisplayRecipe(), "cancelling restores the reference's window")
     }
 
-    /// Deleted with the throwaway repair: a real baseline 5d73184 save, not JSON made by this build.
-    func testPreviousBuildPackageRepairsEveryLibraryRootAndRoundTripsItsPicture() throws {
-        let source = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "stream-before-placement", withExtension: "paintproj"))
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        let suite = "stream-repair-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        let originalRoot = ProjectBackupManager.rootDirectoryOverride
-        let originalSettings = ProjectBackupManager.settings
-        ProjectBackupManager.rootDirectoryOverride = root
-        ProjectBackupManager.settings = AppSettings(defaults: defaults)
-        defer {
-            ProjectBackupManager.rootDirectoryOverride = originalRoot
-            ProjectBackupManager.settings = originalSettings
-            defaults.removePersistentDomain(forName: suite)
-            try? FileManager.default.removeItem(at: root)
-        }
-        let packages = ["Projects/previous.paintproj", "Backups/previous/older.paintproj", "Trash/previous.paintproj"].map {
-            root.appendingPathComponent($0)
-        }
-        for package in packages {
-            try FileManager.default.createDirectory(at: package.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try FileManager.default.copyItem(at: source, to: package)
-        }
-        let originalDrawing = try XCTUnwrap(FileManager.default.contentsOfDirectory(at: source.appendingPathComponent("drawings"), includingPropertiesForKeys: nil).first)
-        let originalBytes = try Data(contentsOf: originalDrawing)
-        LegacyStreamPlacementRepair.repairLibrary()
-        LegacyMaskRepair.repairLibrary()
-        LegacyLiquifyRepair.repairLibrary()
-        let untouched = ProjectBackupManager.takeUpdateSnapshotIfNeeded()
-        let pristine = try XCTUnwrap(ProjectBackupManager.allProjectPackages(in: root.appendingPathComponent("Backups"))
-            .first { $0.lastPathComponent.hasPrefix(untouched) })
-        let pristineDrawing = pristine.appendingPathComponent("drawings/\(originalDrawing.lastPathComponent)")
-        XCTAssertEqual(try Data(contentsOf: pristineDrawing), originalBytes, "the before-update original is pristine")
-        func fileBytes(in package: URL) throws -> [String: Data] {
-            let files = try XCTUnwrap(FileManager.default.enumerator(at: package,
-                includingPropertiesForKeys: [.isRegularFileKey]))
-            var bytes: [String: Data] = [:]
-            for case let file as URL in files where try file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true {
-                bytes[String(file.path.dropFirst(package.path.count))] = try Data(contentsOf: file)
-            }
-            return bytes
-        }
-        let pristineBytes = try fileBytes(in: pristine)
-        XCTAssertTrue(ProjectBackupManager.restoreBackup(at: pristine, toProjectAt: packages[0]),
-                      "an actual previous-build snapshot is repaired on its staged restore copy")
-        XCTAssertEqual(try fileBytes(in: pristine), pristineBytes,
-                       "restoring preserves every original snapshot file byte for byte")
-        for package in packages {
-            let loaded = try XCTUnwrap(ProjectStore.load(from: package))
-            XCTAssertTrue(!loaded.loadDamage.isDamaged, "strict load after repair has no lost marks in \(package.path)")
-            let vector = try XCTUnwrap(loaded.layers.first(where: { $0.cels.contains { $0.vector?.holdsStream == true } })?.cels.first?.vector)
-            let stream = try XCTUnwrap(vector.streams.first)
-            XCTAssertFalse(stream.rendersInPlace, "old streams retain On Top")
-            let picture = try XCTUnwrap(stream.displayFrame?.cgImage)
-            let pixel = rgba(picture, x: picture.width / 2, y: picture.height / 2)
-            XCTAssertGreaterThan(pixel[0], 240, "the previous build's red last frame survives")
-            XCTAssertLessThan(pixel[1], 50, "the saved red H.264/JPEG frame stays red")
-        }
-        let corrupt = root.appendingPathComponent("Backups/corrupt.paintproj")
-        try FileManager.default.copyItem(at: packages[0], to: corrupt)
-        let corruptDrawing = corrupt.appendingPathComponent("drawings/\(originalDrawing.lastPathComponent)")
-        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: corruptDrawing)) as? [String: Any])
-        var elements = try XCTUnwrap(object["elements"] as? [[String: Any]])
-        let streamIndex = try XCTUnwrap(elements.firstIndex { $0["kind"] as? String == "stream" })
-        var record = try XCTUnwrap(elements[streamIndex]["stream"] as? [String: Any])
-        record["rendersInPlace"] = "damaged"
-        elements[streamIndex]["stream"] = record; object["elements"] = elements
-        try JSONSerialization.data(withJSONObject: object).write(to: corruptDrawing)
-        let liveBefore = try fileBytes(in: packages[0])
-        XCTAssertFalse(ProjectBackupManager.restoreBackup(at: corrupt, toProjectAt: packages[0]),
-                       "a malformed current stream cannot replace a healthy scene")
-        XCTAssertEqual(try fileBytes(in: packages[0]), liveBefore, "failed repair leaves live artwork untouched")
-        let loaded = try XCTUnwrap(ProjectStore.load(from: packages[0]))
-        let rewritten = root.appendingPathComponent("Projects/roundtrip.paintproj")
-        let saved = expectation(description: "strict repaired save")
-        ProjectStore.save(loaded, to: rewritten) { saved.fulfill() }
-        wait(for: [saved], timeout: 30)
-        let reloaded = try XCTUnwrap(ProjectStore.load(from: rewritten))
-        XCTAssertTrue(!reloaded.loadDamage.isDamaged)
-        let streams = reloaded.layers.flatMap { $0.cels.flatMap { $0.vector?.streams ?? [] } }
-        XCTAssertEqual(streams.count, 1)
-        XCTAssertFalse(try XCTUnwrap(streams.first).rendersInPlace)
-    }
-
-    func testPriorStreamRecordNeedsRepairAndRepairPreservesExistingChoice() throws {
+    func testMissingRequiredStreamPlacementIsReportedAsDamage() throws {
         let (_, vector, _) = fixture()
         let data = try JSONEncoder().encode(VectorCanvasData(from: vector, imageFileNames: [:]))
         var object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
@@ -283,18 +199,5 @@ final class StreamDisplayLogicTests: XCTestCase {
         let old = try JSONSerialization.data(withJSONObject: object)
         XCTAssertFalse(try JSONDecoder().decode(VectorCanvasData.self, from: old).decodeReport.isClean,
                        "the current decoder has no legacy default")
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        let drawing = root.appendingPathComponent("drawings/cel.json")
-        try FileManager.default.createDirectory(at: drawing.deletingLastPathComponent(), withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: root) }
-        try old.write(to: drawing)
-        XCTAssertEqual(LegacyStreamPlacementRepair.repair(packageAt: root), .repaired)
-        let repaired = try JSONDecoder().decode(VectorCanvasData.self, from: Data(contentsOf: drawing))
-        XCTAssertTrue(repaired.decodeReport.isClean)
-        XCTAssertFalse(try XCTUnwrap(repaired.streams.first).rendersInPlace)
-        XCTAssertEqual(LegacyStreamPlacementRepair.repair(packageAt: root), .current)
-        try data.write(to: drawing)
-        XCTAssertEqual(LegacyStreamPlacementRepair.repair(packageAt: root), .current)
-        XCTAssertTrue(try XCTUnwrap(JSONDecoder().decode(VectorCanvasData.self, from: Data(contentsOf: drawing)).streams.first).rendersInPlace)
     }
 }

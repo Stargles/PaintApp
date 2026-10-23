@@ -7817,8 +7817,7 @@ struct VectorCanvasData: Codable {
 
     /// The persisted form of a `VectorStreamElement` — STREAM.md §5.1's fields, and nothing runtime.
     ///
-    /// Every key but the two that mean "untagged" and "never written" is non-optional. Earlier
-    /// placement records are rewritten once at launch by `LegacyStreamPlacementRepair`; the decoder
+    /// Every key but the two that mean "untagged" and "never written" is non-optional. The decoder
     /// knows only the current format.
     /// `lastFrameFileName` is optional because nil is a *value* there — stage 2 writes it on freeze,
     /// bake, disconnect and save, and a document stage 1 wrote has never had one.

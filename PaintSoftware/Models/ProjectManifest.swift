@@ -50,8 +50,7 @@ struct ProjectManifest: Codable {
     /// redeem.
     var brushTableFileName: String? = nil
     /// Where the editor was — frame, layer, zoom, onion skin, loop — and the tools in the artist's hand
-    /// in this scene: TODO (77), then TODO (176). Required: a package without it is one an earlier build
-    /// wrote, which `LegacyToolSettingsRepair` rewrote at launch.
+    /// in this scene: TODO (77), then TODO (176). Required by the current saved format.
     var editorState: EditorStateManifest
 
     init(id: UUID, name: String, canvasWidth: Double, canvasHeight: Double, canvasPadding: Double = 0, isPaddingOnTop: Bool = true,

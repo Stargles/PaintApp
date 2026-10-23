@@ -528,9 +528,8 @@ struct OnionSkinSettings: Equatable, Codable {
 
     init() {}
 
-    /// Decoded strictly, as the rest of the scene's editor record is: an earlier build's record was
-    /// rewritten in this shape at launch (`LegacyToolSettingsRepair`), so one this build cannot read is
-    /// damage, never a reason to quietly reset the artist's settings.
+    /// Decoded strictly, as the rest of the scene's editor record is: an unreadable field is damage,
+    /// never a reason to quietly reset the artist's settings.
     private enum CodingKeys: String, CodingKey {
         case neighbourhood, placement, previousCount, nextCount, loops, colouring, resolution,
              previousTint, nextTint, isOpacityLinked, linkedPrevious, linkedNext,

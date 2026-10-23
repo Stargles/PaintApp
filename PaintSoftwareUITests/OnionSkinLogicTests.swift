@@ -375,8 +375,7 @@ final class OnionSkinLogicTests: XCTestCase {
     }
 
     /// The settings are part of the scene's editor state, so what a save wrote has to read back — and,
-    /// like the rest of that record, a record in an earlier shape is not read at the defaults: it was
-    /// rewritten at launch (`LegacyToolSettingsRepair`, whose tests read the earlier shapes).
+    /// like the rest of that record, missing required fields are damage rather than default settings.
     func testTheSettingsRoundTripAndAnEarlierRecordIsNotReadAtTheDefaults() throws {
         var settings = OnionSkinSettings()
         settings.previousCount = 4

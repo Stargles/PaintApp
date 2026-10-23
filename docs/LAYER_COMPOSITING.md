@@ -536,14 +536,12 @@ including hidden sources, without the masked output obscuring the colour it need
 Every slider or picker tick holds the mask in `CanvasManager.liveEdit` (`HeldEdit.mask`) and lane F
 composites the held recipe through the existing `LatestWins` surface pair. The document and bake key
 stay still until lift; lift writes the mask once, inside the existing mask-session undo bracket.
-The scene saves tuning and colours strictly. `LegacyMaskRepair` rewrites previous-build masks in
-Projects, Backups and Trash at launch, preserving source picks and flags; delete it after the owner
-confirms their existing scenes open correctly. Explicit and automatic restores clone the selected
-version into the existing `.saving-` staging area, apply the same one-shot repairs, and strictly
-decode current metadata plus validate its referenced files before replacing the live scene. The
-original saved version is never rewritten; failed repair or validation leaves the live scene in
-place, and automatic recovery tries the next candidate. A successful replacement keeps the displaced
-scene in Trash. No cel pictures are eagerly loaded for this gate.
+The scene saves tuning and colours strictly. Explicit and automatic restores clone the selected
+version into the existing `.saving-` staging area and strictly decode current metadata plus validate
+its referenced files before replacing the live scene. The original saved version is never rewritten;
+failed validation leaves the live scene in place, and automatic recovery tries the next candidate.
+A successful replacement keeps the displaced scene in Trash. No cel pictures are eagerly loaded
+for this gate.
 
 A collision when filing or restoring a package updates its manifest title through the shared
 `ProjectPackageName.move` metadata writer, so the filename, gallery tile and recovery name agree.
@@ -556,17 +554,6 @@ without replacing its occupant. These operations decode no cel pictures. Folder 
 logic tests cover both refusals, identity, recovery and a pending-save move; the cold gallery UI test
 draws, files onto an occupied name, sees both titles and reopens the incoming vector drawing.
 
-Before deleting the one-shot repairs, run a final repair build with a new build signature: the
-previous build’s preserved `preupdate-` snapshot then becomes eligible, while the final build’s new
-snapshot comes from already repaired live scenes. Verify **all** library packages read as current
-before removing the converters. Strict decoders remain current-only.
-
-**Previous-package audit:** a copy of the owner’s 2026-10-09
-`evidence-153/Backups/936C4492-5737-45C8-841A-3ADD65B16A5E/latest.paintproj` passed the existing pose/tool
-repairs and this repair, loaded strictly with 17 layers and two masks (three and one source picks),
-saved in the current format and reopened with the same layer identities and mask values. The original
-was read only; its artwork stays outside git. The repair tests keep its earlier mask record.
-
 The resolver caches the **complete transitive source stacks** and their leaf content versions.
 Folder opacity, grades, nesting and masks on sources are all inputs, including a source mask reading
 a leaf outside its own subtree. This replaces the grade-only census that could serve stale outer
@@ -576,9 +563,9 @@ value during one resolution, capped at 4096 values; no scene cel is eagerly load
 `ColourMaskLogicTests` pins source membership, shared Recolour radii, premultiplied alpha, both
 backends and raster/vector parity, nested dependencies and identical-grade folder nesting, every
 key field, strict persistence, held layer/folder edits and undo, and checked-source picking.
-`LegacyMaskRepairLogicTests` pins repair values and idempotence, the library walk, and staged restores
-that preserve every original byte, retain the displaced live package, reject unreadable current
-metadata, clean staging and try the next recovery candidate. `ColourMaskUITests` reaches the controls
+`ProjectRestoreIntegrityLogicTests` pins restores that preserve every original byte, retain the
+displaced live package, reject unreadable current metadata, clean staging and try the next recovery
+candidate. `ColourMaskUITests` reaches the controls
 from a cold launch, picks through the covering masked layer, asserts kept/excluded ink and the return
 to alpha mode, checks live threshold frames with bounded scene publishes, and exposes the complete
 controls on an iPad9 in landscape. The target is dimmed by the existing source-edit mode while that
