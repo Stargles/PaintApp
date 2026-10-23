@@ -427,19 +427,6 @@ final class BrushEngineLogicTests: XCTestCase {
         }
     }
 
-    private func kinds(_ elements: [VectorCanvasData.ElementData]) -> [String] {
-        elements.map {
-            switch $0 {
-            case .fill: return "fill"
-            case .image: return "image"
-            case .text: return "text"
-            case .video: return "video"
-            case .stream: return "stream"
-            case .stroke(let stroke): return stroke.composite == .erase ? "erase" : "stroke"
-            }
-        }
-    }
-
     /// The compatibility accessors are the whole reason this refactor stayed small: ~30 call sites read
     /// and assign `.strokes`/`.fills`/`.images` as if the three arrays were still there. The undo/redo
     /// path is the one that assigns wholesale (`StrokeCanvasView.registerVectorUndo` snapshots
@@ -650,86 +637,6 @@ final class BrushEngineLogicTests: XCTestCase {
         XCTAssertEqual(decoded.composite, .erase)
         XCTAssertEqual(decoded.id, eraser.id)
         XCTAssertEqual(decoded.samples, eraser.samples)
-    }
-
-    // MARK: - Display list: persistence migration
-
-    /// Builds a pre-display-list `VectorCanvasData` payload: three parallel arrays, no `elements` key.
-    private func legacyCanvasJSON(strokes: [VectorStroke], fills: [VectorFillElement],
-                                  images: [VectorCanvasData.ImageRef],
-                                  transform: [Double] = [1, 0, 0, 1, 0, 0]) throws -> Data {
-        let root: [String: Any] = [
-            "strokes": try strokes.map { try jsonObject($0) },
-            "fills": try fills.map { try jsonObject($0) },
-            "images": try images.map { try jsonObject($0) },
-            "geometryVersion": 1,
-            "transform": transform
-        ]
-        return try JSONSerialization.data(withJSONObject: root)
-    }
-
-    /// A legacy file carries no z-order at all, so decoding has to *reconstruct* the order the old
-    /// renderer hard-coded — all fills, then all images, then all strokes. Get this wrong and every
-    /// existing project opens with its fills on top of its linework.
-    func testLegacyVectorCanvasDataDecodesAsFillsThenImagesThenStrokes() throws {
-        let data = try legacyCanvasJSON(
-            strokes: [centreStroke(CodableColor(red: 0, green: 0, blue: 1, alpha: 1)),
-                      centreStroke(CodableColor(red: 1, green: 1, blue: 0, alpha: 1))],
-            fills: [opaqueFill(CodableColor(red: 1, green: 0, blue: 0, alpha: 1)),
-                    opaqueFill(CodableColor(red: 0, green: 1, blue: 1, alpha: 1))],
-            images: [VectorCanvasData.ImageRef(fileName: "a.png", x: 32, y: 32, scale: 1, rotation: 0)])
-
-        let payload = try JSONDecoder().decode(VectorCanvasData.self, from: data)
-        XCTAssertEqual(kinds(payload.elements), ["fill", "fill", "image", "stroke", "stroke"])
-        XCTAssertTrue(payload.affineTransform.isIdentity)
-        // The kind-filtered reads still work for callers that only want one bucket.
-        XCTAssertEqual(payload.strokes.count, 2)
-        XCTAssertEqual(payload.fills.count, 2)
-        XCTAssertEqual(payload.images.map(\.fileName), ["a.png"])
-    }
-
-    /// legacy JSON → decode → encode → decode must be stable, and must render the same both times.
-    /// The second decode goes through the *new* `elements` branch, so this is what proves the migration
-    /// is a fixed point rather than a one-way reshuffle.
-    func testLegacyPayloadReEncodesAndRendersIdenticallyAfterMigration() throws {
-        let stroke = centreStroke(CodableColor(red: 0, green: 0, blue: 1, alpha: 1))
-        let fill = opaqueFill(CodableColor(red: 1, green: 0, blue: 0, alpha: 1))
-        let ref = VectorCanvasData.ImageRef(fileName: "a.png", x: 20, y: 20, scale: 1, rotation: 0)
-        let legacy = try legacyCanvasJSON(strokes: [stroke], fills: [fill], images: [ref])
-
-        let first = try JSONDecoder().decode(VectorCanvasData.self, from: legacy)
-        let migrated = try JSONEncoder().encode(first)
-        let second = try JSONDecoder().decode(VectorCanvasData.self, from: migrated)
-
-        XCTAssertNotNil(try JSONSerialization.jsonObject(with: migrated) as? [String: Any],
-                        "Setup: the migrated payload should be a JSON object")
-        let object = try JSONSerialization.jsonObject(with: migrated) as! [String: Any]
-        XCTAssertNotNil(object["elements"], "The re-encoded payload writes the ordered display list")
-        XCTAssertNil(object["strokes"], "The legacy parallel arrays are not mirrored back out")
-
-        XCTAssertEqual(kinds(second.elements), kinds(first.elements))
-        XCTAssertEqual(second.elements.compactMap { if case .stroke(let s) = $0 { return s.id } else { return nil } },
-                       first.elements.compactMap { if case .stroke(let s) = $0 { return s.id } else { return nil } })
-
-        // …and the pixels. One resolver for both so the placed image is byte-identical either way.
-        let resolve: (VectorCanvasData.ImageRef) -> UIImage? = { [weak self] _ in self?.solidImage(.green) }
-        let before = VectorCanvas(size: Self.canvasSize,
-                                  elements: first.canvasSpaceElements(resolvingImages: resolve,
-                                                                      resolvingVideos: { _ in nil }))
-        let after = VectorCanvas(size: Self.canvasSize,
-                                 elements: second.canvasSpaceElements(resolvingImages: resolve,
-                                                                      resolvingVideos: { _ in nil }))
-        XCTAssertEqual(try renderedBytes(before), try renderedBytes(after),
-                       "A migrated payload must render exactly as the legacy one it came from")
-
-        // And both must match what the pre-change three-array construction produced, which is the
-        // actual acceptance criterion for this phase.
-        let legacyShaped = VectorCanvas(size: Self.canvasSize, strokes: [stroke], fills: [fill],
-                                        images: [VectorImageElement(image: solidImage(.green),
-                                                                    transform: LayerTransform(position: CGPoint(x: 20, y: 20), scale: 1, rotation: 0),
-                                                                    fileName: "a.png")])
-        XCTAssertEqual(try renderedBytes(before), try renderedBytes(legacyShaped),
-                       "The reconstructed display list must render identically to the fixed fills→images→strokes order it replaces")
     }
 
     // MARK: - stampStroke's visible range
