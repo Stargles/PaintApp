@@ -82,6 +82,19 @@ The corrected manual clean removed the stale app product but failed deleting its
 CleanBuildFolderInProgress staging tree (user-owned, containing old build artifacts dated July/August).
 No build/install followed the failed clean. Quarantine only that generated staging tree after all
 build jobs have stopped, then retry the same clean/build; do not touch source or app documents.
+Recovery completed October22: a full clean Release rebuild of main17b438c verifies its complete
+signature and embedded-profile seal, installed without removing the app container, and the owner
+confirmed PaintApp opens. New profile expires2026-10-30T00:18:54Z (October29 Toronto). The existing
+external renewal script now shares clean/build arguments, fails on clean errors, verifies the seal,
+and checks five-day profile life at install time; nine isolated scenarios and four mutations pass.
+
+**Architecture review requested October22:** the owner wants Liquify to fit the existing system
+without unnecessary one-purpose state or abstractions. Bounded review confirms shared brush,
+selection, live edit, save/undo and picture paths. Substantial material machinery serves fixed outside
+pixels with editable vectors and linked frames. Review the Liquify-specific CelContentProcedure in
+ElementEdit and its single-consumer generic PresentedProcedure for clearer ownership and a simpler
+lifecycle before merge; retain synchronization, cancellation and one-producer guarantees. Do not
+change behavior solely because an appropriately scoped field belongs only to Liquify.
 
 **Previous parked checkpoint, 2026-10-15.** All work is committed in
 `~/PaintWork/PaintApp-s49-integration` on `tmp/s49-integration`; app/test source checkpoint `9dfd96b`.
