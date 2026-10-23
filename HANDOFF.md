@@ -16,13 +16,11 @@ relative folders so same-named packages cannot overwrite exported copies; no pro
 CLAUDE.md requires physical harnesses to record unique owned fixtures, Trash only those in teardown,
 preserve owner settings/libraries and verify fresh inventory before closeout.
 
-**Final device build/install remains:** all qualification and screenshot review complete. Root owns
-native work; both owned simulators are deleted, no adapter was injected. Merge by absolute-main-path
-ff-only, push, then clean/build normal Release, verify all723 frozen files/signature/five-day profile
-life, install and launch with no test arguments. The iPad currently runs intermediate audit788f576
-(outgoing repairs retained plus export fixes), reopened normally after read-only copying; it is not
-yet the retirement build. Profile expires2026-10-30T00:18:54Z. Prepared final scripts/evidence are under
-`~/PaintWork/s51-cleanup/final-release/`.
+**Final Release installed:** source headbcd7a6af, clean/build0, strict deep signature and all723
+frozen files exact. Profile expires2026-10-30T00:18:54Z (October29 evening Toronto). Initial normal
+launch was refused by iOS because the iPad locked; owner now confirms “Ready — unlocked and awake.”
+Root retries the normal no-test-arguments launch, then records final status, ff-merges/pushes docs
+and removes the completed worktree. Evidence: `~/PaintWork/s51-cleanup/final-release/`.
 
 ## Completed gates
 
