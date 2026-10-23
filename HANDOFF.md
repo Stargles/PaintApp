@@ -13,8 +13,7 @@ confirmed it opens. Its verified profile expires 2026-10-30. The renewal repair 
 arguments, fails closed on clean errors, verifies signatures and requires five days of profile life.
 Nine isolated scenarios and four mutations passed. See `docs/bug-evidence/auto-resign-2026-10-22.md`.
 
-**Liquify is unmerged and uninstalled. Simulator qualification is complete; physical work is blocked
-on device availability.** No native jobs or agents remain active; every owned qualification simulator
+**Liquify is unmerged and uninstalled. Simulator qualification is complete; physical work is resuming after fresh saved/unlocked readiness.** No native jobs or agents remain active; every owned qualification simulator
 and clone is deleted. All eight temporary physical test adapters are restored byte-exact; all 753
 qualified app/test/project hashes match. Later commits after fast source `2b330c9` are docs only.
 
@@ -36,7 +35,7 @@ cable. Keychain unlock succeeded; build-for-testing was never invoked. No produc
 install, launch, tests or device-data access occurred. All sources restored and native ownership
 returned to root. Report: `~/PaintWork/s50-liquify/device-build-1/report.txt`.
 
-A required saved/unlocked readiness question is pending with the owner. Earlier passive preferences
+On 2026-10-23 the owner confirmed the scene saved and iPad unlocked/awake. Resume now. Earlier passive preferences
 retrieval also timed out; no backup coverage is confirmed. Do not blindly retry. Hardware UDID:
 `00008030-000151492EC3C02E`; devicectl ID: `E3B83820-DF74-5042-B52B-0D5BA17E4877`.
 
@@ -83,7 +82,7 @@ deadline; Release qualification does not relabel it green. Diagnosis: `linked-ui
 Freeze-log read is complete: six October16–18 repairs correlate to Releasef813346/app840d68a, before
 Liquify. 346 sequences include 340 controls and six repair hits, not six proven visible freezes. New
 Pencil/cancel cases disprove a universal late-third fix; no common cause or behavior change. BUGS.md
-and `~/PaintWork/s50-freeze-logs/` hold findings. The optional visible-freeze question is not blocking.
+and `~/PaintWork/s50-freeze-logs/` hold findings. The owner confirmed on 2026-10-23: "I only noticed the repair message." No visible freeze reported for that period.
 
 Other TODO: laptop streaming(27) owner-deferred; multiple cels(22)/linear light(10) deprioritised;
 importers(37) dropped. Audio(28), video editor(30) and interpolation overhaul await owner briefs; no

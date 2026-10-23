@@ -63,7 +63,7 @@ Not sure which version they got picked though, you figure that out." Read-only a
 six October16–18 repair flights correlate to Releasef813346/app source840d68a, before Liquify and the
 October22 recovery.346 deduplicated sequences include340 controls and6 repair hits, not6 proven
 visible freezes. New Pencil/cancellation cases and healthy controls invalidate a universal late-third
-fix. BUGS.md records findings and the next diagnostic seam; no speculative behavior change. Evidence:
+fix. On 2026-10-23 the owner confirmed: "I only noticed the repair message." No visible loss of input was reported for that period. BUGS.md records findings and the next diagnostic seam; no speculative behavior change. Evidence:
 `~/PaintWork/s50-freeze-logs/`. Remove this completed log-read request with the integration merge.
 
 ## (178) Liquify tool
@@ -97,7 +97,7 @@ unlocked device on the same LAN or a cable. Compilation never started. All eight
 files are restored byte-exact and all 753 qualified hashes match; no install, launch or physical
 measurement. Evidence: `~/PaintWork/s50-liquify/device-build-1/report.txt`.
 
-A fresh saved/unlocked readiness question is pending. Establish actual library location and back up
+The owner confirmed on 2026-10-23 that the scene is saved and the iPad unlocked/awake. Resume the physical gates now. Establish actual library location and back up
 current Documents plus any external Projects/Backups/Trash before install/launch; passive preferences
 retrieval timed out, so coverage is unconfirmed. Resume in a fresh evidence directory using the
 reviewed safe adapters: one cold/warm sampler C benchmark alone first, five legacy drives, then two

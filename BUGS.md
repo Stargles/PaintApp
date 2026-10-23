@@ -53,6 +53,8 @@ the exact stamp matches archived physical-probe and renewal evidence for Release
 840d68a, predating Liquify. Eleven recordings are preserved under `~/PaintWork/s50-freeze-logs/` with
 device metadata, local hashes and `build-correlation.json`. No app launch, reset or install was needed.
 
+**Owner confirmation, 2026-10-23:** "I only noticed the repair message." The owner did not report a visible input freeze around those repairs; retain the repair and do not treat these flights as six observed freezes.
+
 The reproducible comparison (`analyze-stranded.py`, `stranded-analysis-20261022.txt` and
 `stranded-sequences.json` there) deduplicates overlapping rings into346 complete pan-bound sequences:
 340 controls and6 associated with repairs. These selected windows are **not a field failure rate**.
