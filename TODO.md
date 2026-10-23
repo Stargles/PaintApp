@@ -58,11 +58,19 @@ their files are repaired. Build `2974b33` broke this rule and lost the owner's k
 
 ## (178) Liquify tool
 
-**Parked at the owner's request, 2026-10-15.** All work is committed in
+**Resumed at the owner's request, 2026-10-22.** The owner reports the installed iPad app is
+"no longer available" and suspects automatic rebuilding failed. Restore the current shipped
+Release first and inspect automatic renewal; keep unqualified Liquify out of that recovery install.
+The recorded profile expired2026-10-22T05:08:05Z. Initial log review shows a renewal attempt reached
+device detection but refused an unavailable iPad; it is now reported available (paired). Confirm
+fresh connectivity and signing expiry before reinstalling. Quiet performance still needs a fresh
+Mac-idle indication; continue correctness independently.
+
+**Previous parked checkpoint, 2026-10-15.** All work is committed in
 `~/PaintWork/PaintApp-s49-integration` on `tmp/s49-integration`; app/test source checkpoint `9dfd96b`.
 Liquify is **not merged or installed**. No agent, simulator job or deliberate fault remains active.
-The owner is using the Mac and will notify when finished; quiet performance measurements still wait
-for that notice. Obtain fresh saved/unlocked iPad readiness only when the final device checks are ready.
+At parking the owner was using the Mac; quiet measurements still wait for an updated indication.
+Obtain fresh saved/unlocked iPad readiness only when the final device checks are ready.
 
 **Implemented:** material `72f686f`, raster through `f056af7`, bounded sampler `effb239`, exact inverse
 batching, and caller fixes `f66bd95` are integrated. Required render refusal propagates through shared

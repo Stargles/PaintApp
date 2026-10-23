@@ -10,11 +10,16 @@ file, then [CLAUDE.md](CLAUDE.md) (build, test, merge, deploy), then the specifi
 pick up. [TODO.md](TODO.md) is the owner's asks **in queue order — the top is next**; [BUGS.md](BUGS.md)
 is what we find.
 
-## State (session 49 parked at the owner’s request, 2026-10-15)
+## State (session 50 resumed at the owner’s request, 2026-10-22)
 
-**Parked after the requested current UI batch.** App/test checkpoint `9dfd96b` is committed in
+**Immediate priority: restore the shipped iPad app.** The owner reports "no longer available".
+Recorded signing expiry was2026-10-22T05:08:05Z; a renewal log shows device-unavailable refusal,
+while current discovery says available (paired). Verify fresh connectivity and the renewal service,
+then reinstall current qualified main Release with a renewed profile. Liquify remains unqualified.
+
+**Previous parked UI batch.** App/test checkpoint `9dfd96b` is committed in
 `~/PaintWork/PaintApp-s49-integration` (`tmp/s49-integration`). No active jobs or faults remain.
-Resume only when the owner asks; performance still waits for their Mac-idle notice.
+The owner has resumed; performance still waits for an updated Mac-idle indication.
 
 Verify `git fetch origin`, `git worktree list` and every `tmp/*` branch before resuming. Worktrees
 live under `~/PaintWork`, outside Desktop. Never harvest a dirty worker tree: deliberate faults may
