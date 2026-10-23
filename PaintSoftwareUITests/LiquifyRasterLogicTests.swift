@@ -147,8 +147,6 @@ final class LiquifyRasterLogicTests: XCTestCase {
     }
 
     @MainActor
-
-    @MainActor
     func testStreamArrivalIsNotACommitButRealInkChangeStillRejectsAStaleGesture() throws {
         for change in ["display", "pixels", "document"] {
             let manager = CanvasFixture.manager(); manager.addVectorLayer()
@@ -535,8 +533,6 @@ final class LiquifyRasterLogicTests: XCTestCase {
         XCTAssertEqual(zip(try bytes(actual), try bytes(crop)).filter { $0 != $1 }.count, 0,
             "the stream recipe's translated strip retains the same fractional scratch pixels")
     }
-
-    @MainActor
 
     @MainActor
     private func posedRasterRefusalFixture() -> CanvasManager {
