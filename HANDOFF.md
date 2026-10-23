@@ -77,7 +77,11 @@ Two independent temporary-harness root causes are now evidenced (not app regress
 Root reviewed those proposals; architecture agent prepares three minimal external hunks and guards for
 review before any build. Keep all distances, gesture steps/stagger/duration, predicates/counts/deadlines
 and40pt/15pt/.002 grey thresholds. No app-source, preset or settings changes. Root reviewed the60-line correction delta and all8
-original-source SHA guards. Architecture agent now exclusively owns native/DD for guarded build4,
+original-source SHA guards. Guarded build4 is active (clean0, Release UI-test compilation); its existing Python finally block
+owns restoration. The architecture agent hit model capacity, so the focused coordinate agent now
+exclusively owns this same native/DD job and continuation—no duplicate build or source edits. It waits
+for staging-result, validates source/product/signing gates and queries lockState before any tests.
+The coordinate agent owns guarded build4,
 restoration/frozen seal/profile checks, then remaining Move+grey2 only, expected2/0skip. If both pass,
 run Liquify2 promptly; stop on any real failure. Do not repeat passed playback, raster stroke, graph,
 or native sampler. The two valid original-source oracles are unaffected. Root stays native-idle.
