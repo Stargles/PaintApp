@@ -139,6 +139,12 @@ backboardd as the recent termination; PaintSoftware has no kill reason. It is co
 system/interface failure but does not establish the reported event's time or the source of that
 process's memory. Inspect existing canvas/CoreAnimation surface ownership without a speculative fix.
 Raw report and summary: `~/PaintWork/s52-erase-crash/device-diagnostics/`.
+Two fresh Test1 flights (181634/181822), version1.0.43(1), end27–30minutes before the Jetsam.
+They record stranded-recognizer repairs/counters but no memory telemetry or explicit erase completion;
+Liquify selected in one is not proof it was applied. They do not establish a link to the termination.
+Source audit found no concrete ordinary-eraser ownership defect. A physical reproduction would need
+temporary retained UnlandedInk count/bytes/version accounting at lift/base landing, alongside footprint;
+the existing IOSurface counter alone does not measure these UIImage overlays. No speculative fix.
 
 ---
 

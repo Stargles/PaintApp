@@ -43,6 +43,12 @@ Preserve current iPad artwork; no physical device launch, restart or install occ
    metadata inconsistent, so no landscape-layout qualification claimed. Temporary test source restored
    byte-exact and owned simulator deleted. This is **not a fix or device-memory proof**. Evidence:
    `~/PaintWork/s52-erase-crash/`, especially test1-diagnostic-status.json.
+   Two newly copied Test1 flights181634/181822 end27–30min before the Jetsam; recognizer repairs,
+   no erase-completion/memory telemetry or causal link. Selecting Liquify is not applying it. Bounded
+   ordinary-eraser source review found no concrete ownership defect; WindowSurfaceView/UnlandedInk
+   unchanged from shipped source. Next physical reproduction should temporarily count retained
+   UnlandedInk UIImage bytes/versions at lift/base landing, not merely IOSurfaces. See diagnostics
+   flight-recordings-review.md and ordinary-eraser-source-audit.md. No speculative fix was made.
 
 ## Combined branch and current work
 
