@@ -63,6 +63,91 @@ final class LiquifyUITests: PaintUITestCase {
         attachScreenshot(app, "liquify-vector-one-undo")
     }
 
+    func testColdStartPushMovesAWideRoundDotWithoutStretchingItsBrushMark() throws {
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app, size: CGSize(width: 256, height: 256)), "a fresh scene")
+        addVectorLayer(app)
+        openBrushLibrary(app)
+        let round = app.buttons["brushPanel.brush.Round Hard"]
+        XCTAssertTrue(tapWhenHittable(round, "choose the ordinary hard round brush"))
+        XCTAssertTrue(round.isSelected)
+        tapAway(app)
+        setBrushColor(app, hex: "000000")
+        tapAway(app)
+        app.sliders["sideToolbar.brushSizeSlider"].adjust(toNormalizedSliderPosition: 0.92)
+        app.sliders["sideToolbar.brushOpacitySlider"].adjust(toNormalizedSliderPosition: 1)
+
+        let canvas = app.otherElements["canvas.host"], paper = paperRect(in: canvas)
+        // One stationary tap gives the vector renderer one dab, with no path spacing to rephase.
+        canvas.coordinate(withNormalizedOffset: hostPoint(paper, 0.42, 0.34)).tap()
+        commitPendingShape(on: app)
+        _ = try XCTUnwrap(waitForPixel(canvas, at: hostPoint(paper, 0.42, 0.34), timeout: 15) {
+            self.isInk($0)
+        }, "the tapped dot must be visibly painted")
+
+        let patch = CGRect(x: 0.18, y: 0.16, width: 0.68, height: 0.42)
+        XCTAssertLessThan(hostPoint(paper, 0, patch.maxY).dy, dockTop(app, canvas) - 0.02,
+                          "the complete measurement patch must stay above the dock")
+        let side = canvas.frame.width * paper.width
+        let step = 1 / side // One screen point, independent of the device's portrait/landscape fit.
+        struct Footprint: Equatable { let bounds: CGRect; let inkCount: Int }
+        func footprint() throws -> Footprint? {
+            let pixel = try pixelProbe(canvas)
+            var bounds = CGRect.null, count = 0
+            for row in 0...Int(patch.height / step) {
+                let y = patch.minY + CGFloat(row) * step
+                for column in 0...Int(patch.width / step) {
+                    let x = patch.minX + CGFloat(column) * step
+                    let point = hostPoint(paper, x, y)
+                    guard isInk(pixel(point.dx, point.dy)) else { continue }
+                    bounds = bounds.union(CGRect(x: x, y: y, width: step, height: step))
+                    count += 1
+                }
+            }
+            return bounds.isNull ? nil : Footprint(bounds: bounds, inkCount: count)
+        }
+        let before = try XCTUnwrap(settled(timeout: 10) { try footprint() })
+        XCTAssertGreaterThan(before.bounds.width, 0.08, "the dot must be wide enough to measure stretching")
+        XCTAssertEqual(before.bounds.width / before.bounds.height, 1, accuracy: 0.04,
+                       "the ordinary brush must paint a round dot before Liquify")
+        attachScreenshot(app, "liquify-round-dot-before")
+
+        liquifyMenu(app)
+        app.segmentedControls["liquifyPanel.modePicker"].buttons["Push"].tap()
+        let pushBrush = app.buttons["liquifyPanel.brush.Round Hard"]
+        XCTAssertTrue(tapWhenHittable(pushBrush, "use a round displacement field"))
+        XCTAssertTrue(pushBrush.isSelected)
+        tapAway(app)
+        app.sliders["sideToolbar.liquifySizeSlider"].adjust(toNormalizedSliderPosition: 0.92)
+        app.sliders["sideToolbar.liquifyPowerSlider"].adjust(toNormalizedSliderPosition: 1)
+        // Cross below the centre: the field moves the point, while its edge crosses the wide dab.
+        // Transporting the old painted pixels stretches this asymmetric footprint horizontally.
+        canvas.coordinate(withNormalizedOffset: hostPoint(paper, 0.40, 0.39))
+            .press(forDuration: 0.05,
+                   thenDragTo: canvas.coordinate(withNormalizedOffset: hostPoint(paper, 0.61, 0.39)),
+                   withVelocity: XCUIGestureVelocity(70))
+        let moved = NSPredicate { _, _ in
+            guard let mark = try? footprint() else { return false }
+            return mark.bounds.midX > before.bounds.midX + before.bounds.width * 0.10
+        }
+        wait(for: [XCTNSPredicateExpectation(predicate: moved, object: nil)], timeout: 20)
+        let after = try XCTUnwrap(settled(timeout: 10) { try footprint() })
+        attachScreenshot(app, "liquify-round-dot-after-point-move")
+        let tolerance = max(3 * step, before.bounds.width * 0.04)
+        XCTAssertGreaterThan(after.bounds.midX - before.bounds.midX, before.bounds.width * 0.10,
+                             "Push must visibly relocate the dot")
+        XCTAssertEqual(after.bounds.width, before.bounds.width, accuracy: tolerance,
+                       "moving the point must preserve its ordinary painted diameter horizontally")
+        XCTAssertEqual(after.bounds.height, before.bounds.height, accuracy: tolerance,
+                       "moving the point must preserve its ordinary painted diameter vertically")
+        XCTAssertEqual(after.bounds.width / after.bounds.height, 1, accuracy: 0.06,
+                       "the moved brush mark must remain round")
+        XCTAssertEqual(Double(after.inkCount), Double(before.inkCount),
+                       accuracy: Double(before.inkCount) * 0.06,
+                       "the same ordinary dab must keep its painted coverage after relocation")
+    }
+
     func testLinkedFrameKeepsItsReshapeAfterColdReopenAndStillReadsAnEditedSource() throws {
         let app = XCUIApplication()
         app.launchArguments.append("-uiTestSeedGuidedIntervals")
