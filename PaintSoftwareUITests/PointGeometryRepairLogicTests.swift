@@ -368,6 +368,57 @@ final class PointGeometryRepairLogicTests: XCTestCase {
         XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: url.path), actual.path)
     }
 
+    func testDamagedSpatialMappingsAndChronologicalCutsFailLoudly() throws {
+        let strokePackage = try install("material-strokes")
+        let oldStroke = try object(Data(contentsOf: vectorURL(strokePackage)))
+        let identity = try json(Homography.identity)
+        let singular = try json(Homography(a: 0, b: 0, c: 0, d: 0, e: 0, f: 0, g: 0, h: 0, i: 0))
+        let mutations: [(inout [String: Any]) -> Void] = [
+            { $0["source"] = ["kind": "derived"] },
+            { $0["restSize"] = true },
+            { $0["restSize"] = -1 },
+            { $0["map"] = singular },
+            { $0["transport"] = ["kind": "unknown"] },
+            { $0["transport"] = ["kind": "identity", "map": identity] },
+            { $0["transport"] = ["kind": "homography", "map": singular] },
+            { $0["transport"] = ["kind": "sequence", "parts": [["kind": "identity"]]] },
+            { placement in
+                var program = placement["material"] as! [String: Any]
+                program["scope"] = "owned"; placement["material"] = program
+            },
+            { placement in
+                var program = placement["material"] as! [String: Any]
+                program["bindings"] = []; placement["material"] = program
+            },
+            { placement in
+                var program = placement["material"] as! [String: Any]
+                let bindings = program["bindings"] as! [Any]
+                program["bindings"] = bindings + bindings; placement["material"] = program
+            }]
+        for (index, mutate) in mutations.enumerated() {
+            var value = oldStroke
+            var elements = value["elements"] as! [[String: Any]]
+            var stroke = elements[0]["stroke"] as! [String: Any]
+            var placement = stroke["placement"] as! [String: Any]
+            mutate(&placement); stroke["placement"] = placement; elements[0]["stroke"] = stroke; value["elements"] = elements
+            XCTAssertThrowsError(try PointGeometryRepair.convertedPayload(data(value), recipe: false), "damaged stroke ownership \(index)")
+        }
+        let fillPackage = try install("material-fills")
+        let oldFill = try object(Data(contentsOf: vectorURL(fillPackage)))
+        for key in ["afterOperation", "pathData", "bridge", "inverted"] {
+            var value = oldFill
+            var elements = value["elements"] as! [[String: Any]]
+            var fill = elements[1]["fill"] as! [String: Any]
+            var placement = fill["placement"] as! [String: Any]
+            var coverage = placement["coverage"] as! [[String: Any]]
+            XCTAssertFalse(coverage.isEmpty)
+            if key == "afterOperation" { coverage[0][key] = UUID().uuidString }
+            else { coverage[0].removeValue(forKey: key) }
+            placement["coverage"] = coverage; fill["placement"] = placement; elements[1]["fill"] = fill; value["elements"] = elements
+            XCTAssertThrowsError(try PointGeometryRepair.convertedPayload(data(value), recipe: false), "damaged fill cut " + key)
+        }
+    }
+
     func testUnknownVersionAndIncompletePreviousOwnershipFailLoudly() throws {
         let package = try install("material-strokes")
         let original = try object(Data(contentsOf: vectorURL(package)))
