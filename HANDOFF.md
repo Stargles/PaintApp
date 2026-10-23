@@ -30,11 +30,12 @@ fixtures match. Retain batching: hard/pattern producer medians are19.1%/23.3% of
 PERFORMANCE records simulator scope and remaining seconds-long worst case. Evidence:
 `~/PaintWork/s50-liquify/producer-release-1/`. Next root takes that simulator for linked Release UI.
 
-The linked-frame diagnostic has finished and its temporary instrumentation is exactly restored. All
-815 readable probes were sampled each poll; three changed before the 15.546-second timeout, and a
-later still showed 141 changed. Preserve the gesture, predicate and timeout. The next test step is the
-unchanged current Release gate after the optimized cost run completes; do not run another Debug
-diagnostic for this symptom. Owner confirmed the Mac is idle.
+The unchanged linked Release workflow passed1/1, zero skips: visible reshape, exact picture after cold
+reopen, then new green ink following an edited source. Root inspected before/after/reopen/source-follow
+images; the archived package retains one deformation on the linked recipe. All41 Documents files are
+copied/hash-verified under `~/PaintWork/s50-liquify/release-ui/linked-1/`. The earlier Debug diagnostic
+remains genuinely late (815 readable probes,3 changed until15.546s; later141 changed); no timeout,
+gesture or predicate changed. Its temporary instrumentation is exactly restored. Owner Mac is idle.
 
 The verified inventory is 5282 fast tests across 256 selected classes and 5864 full tests, excluding three
 private static helpers. This is a census, not a claim that new final gates have passed. Material, raster
@@ -60,10 +61,12 @@ failures serially as CLAUDE.md specifies.
 
 ## Next
 
-1. Archive the passing Release cost run and hand its owned simulator/native slot to root.
-2. Run the unchanged linked Release workflow, then the corrected modes/controls method alone on a fresh
-   native iPad 9 simulator; inspect its final full-screen landscape image.
-3. Continue final fast Debug/Release and phase-boundary full regression gates. Obtain fresh
+1. A delegated agent owns DD/native for the six remaining raster/vector Release UI methods, then the
+   corrected modes/controls method alone on a fresh native iPad9 simulator. Inspect all saved pictures.
+2. Run final fast Debug/Release, then one phase-boundary full suite in Release to qualify the shipped
+   configuration. Rules do not mandate a full-suite configuration; simulator test seeds remain enabled
+   in Release. This does not relabel the known Debug linked timeout as passing.
+3. Obtain fresh
    saved/unlocked device readiness before the prepared physical drives and
    cold/warm sampler benchmark; keep physical first-use cost separate from app gesture latency.
 4. Keep Liquify out of the shipped app until required feature and regression qualification is done.
