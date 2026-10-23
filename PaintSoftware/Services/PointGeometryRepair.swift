@@ -12,7 +12,12 @@ enum PointGeometryRepair {
         let reason: String
         var errorDescription: String? { reason }
     }
-    struct Report: Equatable { var converted = 0 }
+    struct Report: Equatable {
+        var converted = 0
+        /// Successfully read packages whose manifest is not a JSON object. Their bytes are preserved
+        /// for existing strict backup recovery; this is neither a conversion nor a current marker.
+        var ambiguous: [URL] = []
+    }
     private static let prefix = ".point-geometry-"
     private static let ownerSuffix = ".owner.json"
     private struct DirectoryIdentity: Codable, Equatable {
@@ -20,7 +25,7 @@ enum PointGeometryRepair {
         let inode: UInt64
         var isUsable: Bool { volume != 0 && inode != 0 }
     }
-    private struct Owner: Codable {
+    private struct Owner: Codable, Equatable {
         let originalName: String
         let original: DirectoryIdentity
         var staged: DirectoryIdentity?
@@ -28,24 +33,18 @@ enum PointGeometryRepair {
     private struct Stage { let original: URL; let converted: URL; let ownerURL: URL; let owner: Owner }
     private struct Census { var packages: [URL] = []; var owners: [URL] = []; var stages: [URL] = [] }
 
-    static func run() throws -> Report {
+    static func run(beforeCommit: () throws -> Void = {}) throws -> Report {
         var stages: [Stage] = []
-        var exchanged: [Stage] = []
-        var canRemoveStages = true
-        defer {
-            if canRemoveStages {
-                for stage in stages { try? removeOwned(stage.converted, record: stage.ownerURL) }
-            }
-        }
+        var ambiguous: [URL] = []
         func prepare(_ package: URL) throws {
             do {
-                if let converted = try stage(package) { stages.append(converted) }
+                if let converted = try stage(package, ambiguous: &ambiguous) { stages.append(converted) }
             } catch { throw Failure(reason: package.lastPathComponent + ": " + error.localizedDescription) }
         }
         let initial = try census()
         for package in initial.packages { try autoreleasepool { try prepare(package) } }
         try retireInterruptedStages(initial, validated: stages)
-        guard !stages.isEmpty else { return Report() }
+        guard !stages.isEmpty else { return Report(ambiguous: ambiguous) }
 
         let signature = ProjectBackupManager.currentAppSignature
         // The build signature is app-wide, but an old library can be selected or imported after
@@ -58,36 +57,27 @@ enum PointGeometryRepair {
             }) else { throw Failure(reason: "The before-update copy could not be saved. No scene was replaced.") }
             // Discover the snapshots only after cloning, so even the newest untouched version is
             // converted. Do not use a once-per-build preference that can skip this second census.
-            let prepared = Set(stages.map { $0.original.standardizedFileURL })
+            let prepared = Set(initial.packages.map { $0.standardizedFileURL })
             for package in try census().packages where !prepared.contains(package.standardizedFileURL) {
                 try autoreleasepool { try prepare(package) }
             }
         }
-        do {
-            canRemoveStages = false
-            for stage in stages {
-                guard try identity(stage.original) == stage.owner.original else {
-                    throw Failure(reason: "A scene changed while its converted copy was prepared.")
-                }
-            }
-            canRemoveStages = true
-            for stage in stages {
-                try exchange(stage.original, stage.converted)
-                exchanged.append(stage)
-            }
-        } catch {
-            // Stages now hold original bytes. Roll back completed exchanges without an interval in
-            // which either package is absent. If rollback itself fails, keep both complete copies.
-            for stage in exchanged.reversed() {
-                do { try exchange(stage.original, stage.converted) }
-                catch { canRemoveStages = false }
-            }
-            throw Failure(reason: "The saved-scene format could not be replaced: " + error.localizedDescription)
+        try beforeCommit()
+        // Owned copies survive every error. A later launch can identify either side of a completed
+        // atomic swap; deleting or rolling back on failure could discard the only sound copy.
+        for stage in stages {
+            try validatePair(stage, swapped: false)
+            try exchange(stage.original, stage.converted)
         }
-        for stage in stages { try removeOwned(stage.converted, record: stage.ownerURL) }
+        // Retention may delete original backup addresses. Retire validated pairs first, while both
+        // identities can still prove ownership; signature/pruning never run after partial cleanup.
+        for stage in stages {
+            try validatePair(stage, swapped: true)
+            try removeOwned(stage.converted, record: stage.ownerURL)
+        }
         ProjectBackupManager.settings.lastAppSignature = signature
         ProjectBackupManager.pruneUpdateSnapshots()
-        return Report(converted: stages.count)
+        return Report(converted: stages.count, ambiguous: ambiguous)
     }
 
     /// A partial census is unsafe: it could advance the build signature or prune versions while
@@ -136,7 +126,7 @@ enum PointGeometryRepair {
             throw Failure(reason: "An unowned format-repair copy was preserved for recovery.")
         }
         for record in census.owners {
-            let owner = try JSONDecoder().decode(Owner.self, from: Data(contentsOf: record))
+            let owner = try readOwner(record)
             guard !owner.originalName.contains("/"), !owner.originalName.isEmpty,
                   URL(fileURLWithPath: owner.originalName).lastPathComponent == owner.originalName,
                   (owner.originalName as NSString).pathExtension == "paintproj", owner.original.isUsable,
@@ -151,19 +141,52 @@ enum PointGeometryRepair {
             guard unswapped || sourceID == owner.staged else {
                 throw Failure(reason: "A format-repair source changed or is missing; its copies were preserved.")
             }
-            if FileManager.default.fileExists(atPath: target.path) {
-                let targetID = try identity(target)
+            let targetID = FileManager.default.fileExists(atPath: target.path) ? try identity(target) : nil
+            if let targetID {
                 guard unswapped ? owner.staged == nil || targetID == owner.staged : targetID == owner.original else {
                     throw Failure(reason: "A format-repair copy changed; both copies were preserved.")
                 }
             }
-            let prepared = validated.contains { $0.original == original && $0.owner.original == sourceID }
-            guard ProjectBackupManager.validateProjectForRestore(at: original) || (unswapped && prepared) else {
-                throw Failure(reason: "A format-repair source could not be validated; its copies were preserved.")
+            if !ProjectBackupManager.validateProjectForRestore(at: original) {
+                guard unswapped, let prepared = validated.first(where: {
+                    $0.original == original && $0.owner.original == sourceID
+                }) else {
+                    throw Failure(reason: "A format-repair source could not be validated; its copies were preserved.")
+                }
+                try validatePair(prepared, swapped: false)
             }
-            guard try identity(original) == sourceID else { throw Failure(reason: "A format-repair source changed during validation.") }
+            guard try identity(original) == sourceID, try readOwner(record) == owner,
+                  (FileManager.default.fileExists(atPath: target.path) ? try identity(target) : nil) == targetID else {
+                throw Failure(reason: "A format-repair pair changed during validation; its copies were preserved.")
+            }
             try removeOwned(target, record: record)
         }
+    }
+
+    private static func readOwner(_ record: URL) throws -> Owner {
+        let attributes = try record.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+        guard attributes.isRegularFile == true, attributes.isSymbolicLink == false else {
+            throw Failure(reason: "A format-repair owner changed or is a symbolic link.")
+        }
+        return try JSONDecoder().decode(Owner.self, from: Data(contentsOf: record))
+    }
+
+    /// A directory swap preserves identity but not integrity against an in-place external edit.
+    /// Check both identities and the current copy again at the destructive boundary.
+    private static func validatePair(_ stage: Stage, swapped: Bool) throws {
+        func checkOwnership() throws {
+            guard try readOwner(stage.ownerURL) == stage.owner,
+                  let convertedID = stage.owner.staged,
+                  try identity(stage.original) == (swapped ? convertedID : stage.owner.original),
+                  try identity(stage.converted) == (swapped ? stage.owner.original : convertedID) else {
+                throw Failure(reason: "A format-repair pair changed; both copies were preserved.")
+            }
+        }
+        try checkOwnership()
+        guard ProjectBackupManager.validateProjectForRestore(at: swapped ? stage.original : stage.converted) else {
+            throw Failure(reason: "A converted scene changed or failed validation; both copies were preserved.")
+        }
+        try checkOwnership()
     }
 
     private static func removeOwned(_ stage: URL, record: URL) throws {
@@ -182,13 +205,18 @@ enum PointGeometryRepair {
         return id
     }
 
-    private static func stage(_ package: URL) throws -> Stage? {
+    private static func stage(_ package: URL, ambiguous: inout [URL]) throws -> Stage? {
         guard try package.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink == false else {
             throw Failure(reason: "A project package is a symbolic link; its original was left untouched.")
         }
         let originalID = try identity(package)
         let manifestData = try Data(contentsOf: package.appendingPathComponent("manifest.json"))
-        let manifest = try object(manifestData)
+        let manifest: [String: Any]
+        do { manifest = try object(manifestData) }
+        catch {
+            ambiguous.append(package)
+            return nil
+        }
         if manifest["geometryVersion"] != nil {
             _ = try JSONDecoder().decode(ProjectManifest.GeometryVersion.self, from: manifestData)
             return nil
@@ -198,10 +226,6 @@ enum PointGeometryRepair {
         let ownerURL = target.appendingPathExtension("owner.json")
         var owner = Owner(originalName: package.lastPathComponent, original: originalID, staged: nil)
         var copied = false
-        var ready = false
-        defer {
-            if !ready, (try? identity(package)) == originalID { try? removeOwned(target, record: ownerURL) }
-        }
         func copy() throws {
             guard !copied else { return }
             try JSONEncoder().encode(owner).write(to: ownerURL, options: .atomic)
@@ -240,7 +264,6 @@ enum PointGeometryRepair {
         guard ProjectBackupManager.validateProjectForRestore(at: target) else {
             throw Failure(reason: "The converted copy failed saved-scene validation. Its original was left untouched.")
         }
-        ready = true
         return Stage(original: package, converted: target, ownerURL: ownerURL, owner: owner)
     }
 

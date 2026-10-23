@@ -463,7 +463,7 @@ nonisolated enum ProjectBackupManager {
 
     /// Finds the backup folder belonging to a live project package. Normally keyed by the
     /// manifest's project ID; when the manifest is unreadable (exactly the corruption case), falls
-    /// back to the `origin.name` marker every backup folder carries.
+    /// back to a unique `origin.name` marker. Multiple matching scene names are ambiguous.
     static func backupDirectory(forProjectAt projectURL: URL) -> URL? {
         let fm = FileManager.default
         if let id = manifestID(at: projectURL) {
@@ -471,12 +471,10 @@ nonisolated enum ProjectBackupManager {
             if fm.fileExists(atPath: dir.path) { return dir }
         }
         guard let dirs = try? fm.contentsOfDirectory(at: backupsRootDirectory, includingPropertiesForKeys: nil) else { return nil }
-        for dir in dirs {
-            guard let origin = try? String(contentsOf: dir.appendingPathComponent("origin.name"), encoding: .utf8),
-                  origin == projectURL.lastPathComponent else { continue }
-            return dir
+        let matches = dirs.filter { dir in
+            (try? String(contentsOf: dir.appendingPathComponent("origin.name"), encoding: .utf8)) == projectURL.lastPathComponent
         }
-        return nil
+        return matches.count == 1 ? matches[0] : nil
     }
 
     /// All restore points for a project, `latest` first then newest-to-oldest.

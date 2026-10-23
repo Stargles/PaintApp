@@ -316,6 +316,40 @@ final class BackupManagerLogicTests: XCTestCase {
         XCTAssertFalse(ProjectBackupManager.listBackups(forProjectAt: url).isEmpty)
     }
 
+    func testAmbiguousOriginNameCannotRestoreAnotherScenesBackup() throws {
+        let firstID = UUID(), secondID = UUID()
+        let first = makeProject(name: "First", id: firstID)
+        let second = makeProject(name: "Second", id: secondID)
+        let folderA = ProjectBackupManager.projectsDirectory.appendingPathComponent("Folder A")
+        let folderB = ProjectBackupManager.projectsDirectory.appendingPathComponent("Folder B")
+        try FileManager.default.createDirectory(at: folderA, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: folderB, withIntermediateDirectories: true)
+        let firstScene = folderA.appendingPathComponent("Scene.paintproj")
+        let secondScene = folderB.appendingPathComponent("Scene.paintproj")
+        try FileManager.default.moveItem(at: first, to: firstScene)
+        try FileManager.default.moveItem(at: second, to: secondScene)
+        ProjectBackupManager.refreshLatestSnapshot(projectURL: firstScene, projectID: firstID)
+        ProjectBackupManager.refreshLatestSnapshot(projectURL: secondScene, projectID: secondID)
+        XCTAssertNotNil(ProjectBackupManager.backupDirectory(forProjectAt: firstScene), "a readable manifest remains authoritative")
+        corruptManifest(of: firstScene)
+        func allBytes() throws -> [String: Data] {
+            let files = try XCTUnwrap(FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey]))
+            var result: [String: Data] = [:]
+            for case let file as URL in files where try file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true {
+                result[String(file.path.dropFirst(root.path.count + 1))] = try Data(contentsOf: file)
+            }
+            return result
+        }
+        let before = try allBytes()
+        XCTAssertNil(ProjectBackupManager.backupDirectory(forProjectAt: firstScene))
+        XCTAssertTrue(ProjectBackupManager.listBackups(forProjectAt: firstScene).isEmpty)
+        XCTAssertFalse(ProjectBackupManager.restoreNewestValidBackup(forProjectAt: firstScene))
+        ProjectBackupManager.repairCorruptedProjects()
+        XCTAssertFalse(ProjectBackupManager.validateProject(at: firstScene))
+        XCTAssertEqual(ProjectBackupManager.manifestID(at: secondScene), secondID)
+        XCTAssertEqual(try allBytes(), before, "ambiguous names must not replace either scene or change their backups")
+    }
+
     // MARK: - Trash
 
     func testTrashRestoreRoundTrip() {

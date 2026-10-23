@@ -54,6 +54,30 @@ final class PointGeometryRepairLogicTests: XCTestCase {
         }
         return result
     }
+    /// Failure may add recoverable owned stages, but may never change or remove an input file.
+    /// Every added file must be a canonical owner record or belong to its independently owned copy.
+    private func assertInputsPreserved(_ before: [String: Data], file: StaticString = #filePath, line: UInt = #line) throws {
+        let after = try bytes(root)
+        for (path, data) in before { XCTAssertEqual(after[path], data, path, file: file, line: line) }
+        for path in Set(after.keys).subtracting(before.keys) {
+            let components = path.split(separator: "/").map(String.init)
+            let index = try XCTUnwrap(components.firstIndex(where: { $0.hasPrefix(".point-geometry-") }), path, file: file, line: line)
+            let part = components[index]
+            let stem = part.hasSuffix(".owner.json") ? String(part.dropLast(".owner.json".count)) : part
+            let token = String(stem.dropFirst(".point-geometry-".count))
+            XCTAssertEqual(UUID(uuidString: token)?.uuidString, token, file: file, line: line)
+            let parent = components.prefix(index).joined(separator: "/")
+            let stage = root.appendingPathComponent(parent).appendingPathComponent(stem)
+            let record = stage.appendingPathExtension("owner.json")
+            let owner = try object(Data(contentsOf: record))
+            let originalName = try XCTUnwrap(owner["originalName"] as? String, file: file, line: line)
+            XCTAssertEqual((originalName as NSString).lastPathComponent, originalName, file: file, line: line)
+            XCTAssertEqual((originalName as NSString).pathExtension, "paintproj", file: file, line: line)
+            if let stagedID = owner["staged"] as? NSDictionary {
+                XCTAssertEqual(try directoryIdentity(stage) as NSDictionary, stagedID, file: file, line: line)
+            }
+        }
+    }
     private func vectorURL(_ package: URL) throws -> URL {
         try XCTUnwrap(ProjectRecipeMetadata.reader(in: package).vectorURLs.first)
     }
@@ -177,7 +201,7 @@ final class PointGeometryRepairLogicTests: XCTestCase {
         try FileManager.default.removeItem(at: project)
         let missing = try bytes(root)
         XCTAssertThrowsError(try PointGeometryRepair.run())
-        XCTAssertEqual(try bytes(root), missing, "the stage is now the only complete copy")
+        try assertInputsPreserved(missing)
         try FileManager.default.moveItem(at: target, to: root.appendingPathComponent("preserved-missing-source"))
         try FileManager.default.removeItem(at: record)
         let source = try install("plain")
@@ -188,7 +212,7 @@ final class PointGeometryRepairLogicTests: XCTestCase {
         XCTAssertNotEqual(try directoryIdentity(replacement) as NSDictionary, oldID as NSDictionary)
         let changed = try bytes(root)
         XCTAssertThrowsError(try PointGeometryRepair.run())
-        XCTAssertEqual(try bytes(root), changed)
+        try assertInputsPreserved(changed)
         XCTAssertTrue(FileManager.default.fileExists(atPath: replacement.path))
     }
 
@@ -198,7 +222,7 @@ final class PointGeometryRepairLogicTests: XCTestCase {
         try editVector(project) { $0["materialOperations"] = [] }
         let before = try bytes(root)
         XCTAssertThrowsError(try PointGeometryRepair.run())
-        XCTAssertEqual(try bytes(root), before)
+        try assertInputsPreserved(before)
     }
 
     func testUnknownStageAndChangedStageIdentityAreNeverDiscarded() throws {
@@ -209,11 +233,11 @@ final class PointGeometryRepairLogicTests: XCTestCase {
         XCTAssertTrue(ProjectBackupManager.cloneItem(at: project, to: target))
         let changed = try bytes(root)
         XCTAssertThrowsError(try PointGeometryRepair.run())
-        XCTAssertEqual(try bytes(root), changed)
+        try assertInputsPreserved(changed)
         try FileManager.default.removeItem(at: record)
         let unowned = try bytes(root)
         XCTAssertThrowsError(try PointGeometryRepair.run())
-        XCTAssertEqual(try bytes(root), unowned)
+        try assertInputsPreserved(unowned)
     }
 
     func testInterruptedOwnerCannotTraverseOrFollowLinks() throws {
@@ -224,14 +248,14 @@ final class PointGeometryRepairLogicTests: XCTestCase {
             owner["originalName"] = name; try data(owner).write(to: record)
             let before = try bytes(root)
             XCTAssertThrowsError(try PointGeometryRepair.run())
-            XCTAssertEqual(try bytes(root), before)
+            try assertInputsPreserved(before)
         }
         let savedRecord = root.appendingPathComponent("owner.json")
         try FileManager.default.moveItem(at: record, to: savedRecord)
         try FileManager.default.createSymbolicLink(at: record, withDestinationURL: savedRecord)
         let linkedRecord = try bytes(root)
         XCTAssertThrowsError(try PointGeometryRepair.run())
-        XCTAssertEqual(try bytes(root), linkedRecord)
+        try assertInputsPreserved(linkedRecord)
         try FileManager.default.removeItem(at: record)
         try FileManager.default.moveItem(at: savedRecord, to: record)
         owner["originalName"] = project.lastPathComponent; try data(owner).write(to: record)
@@ -239,7 +263,74 @@ final class PointGeometryRepairLogicTests: XCTestCase {
         try FileManager.default.createSymbolicLink(at: target, withDestinationURL: project)
         let linkedStage = try bytes(root)
         XCTAssertThrowsError(try PointGeometryRepair.run())
-        XCTAssertEqual(try bytes(root), linkedStage)
+        try assertInputsPreserved(linkedStage)
+    }
+
+    func testPreparedStageReplacementCannotBecomeLiveOrDiscardOriginal() throws {
+        let project = try install("plain")
+        let before = try bytes(project)
+        var boundary: [String: Data] = [:]
+        ProjectBackupManager.settings.lastAppSignature = "previous build"
+        XCTAssertThrowsError(try PointGeometryRepair.run(beforeCommit: {
+            let records = try FileManager.default.contentsOfDirectory(at: project.deletingLastPathComponent(), includingPropertiesForKeys: nil)
+                .filter { $0.lastPathComponent.hasSuffix(".owner.json") }
+            let record = try XCTUnwrap(records.first)
+            let stage = record.deletingLastPathComponent().appendingPathComponent(String(record.lastPathComponent.dropLast(".owner.json".count)))
+            try FileManager.default.moveItem(at: stage, to: root.appendingPathComponent("saved-prepared-copy"))
+            try FileManager.default.createSymbolicLink(at: stage, withDestinationURL: project)
+            boundary = try bytes(root)
+        }))
+        XCTAssertEqual(try bytes(project), before)
+        XCTAssertEqual(try bytes(root), boundary, "neither the displaced valid copy nor the replacement link is removed")
+        XCTAssertEqual(ProjectBackupManager.settings.lastAppSignature, "previous build")
+    }
+
+    func testPreparedCopyEditedInPlaceMustRevalidateBeforeExchange() throws {
+        let project = try install("plain")
+        let before = try bytes(project)
+        var boundary: [String: Data] = [:]
+        XCTAssertThrowsError(try PointGeometryRepair.run(beforeCommit: {
+            let record = try XCTUnwrap(FileManager.default.contentsOfDirectory(at: project.deletingLastPathComponent(), includingPropertiesForKeys: nil)
+                .first { $0.lastPathComponent.hasSuffix(".owner.json") })
+            let stage = record.deletingLastPathComponent().appendingPathComponent(String(record.lastPathComponent.dropLast(".owner.json".count)))
+            try Data("truncated".utf8).write(to: vectorURL(stage))
+            boundary = try bytes(root)
+        }))
+        XCTAssertEqual(try bytes(project), before)
+        XCTAssertEqual(try bytes(root), boundary)
+    }
+
+    func testSourceRemovedBeforeCommitKeepsOnlyCompletePreparedCopy() throws {
+        let project = try install("plain")
+        var boundary: [String: Data] = [:]
+        XCTAssertThrowsError(try PointGeometryRepair.run(beforeCommit: {
+            try FileManager.default.removeItem(at: project)
+            boundary = try bytes(root)
+        }))
+        XCTAssertEqual(try bytes(root), boundary)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: project.path))
+        let stages = try FileManager.default.contentsOfDirectory(at: project.deletingLastPathComponent(), includingPropertiesForKeys: nil)
+            .filter { $0.lastPathComponent.hasPrefix(".point-geometry-") && !$0.lastPathComponent.hasSuffix(".owner.json") }
+        XCTAssertEqual(stages.count, 1)
+        XCTAssertTrue(ProjectBackupManager.validateProjectForRestore(at: try XCTUnwrap(stages.first)))
+    }
+
+    func testSuccessfulCleanupPrecedesRetentionOfConvertedOldBackups() throws {
+        let project = try install("plain")
+        let id = try XCTUnwrap(ProjectBackupManager.manifestID(at: project))
+        let directory = ProjectBackupManager.backupsDirectory(projectID: id)
+        for day in 1...20 {
+            _ = try install("plain", at: "Backups/\(id.uuidString)/preupdate-old-200001\(String(format: "%02d", day))-000000.paintproj")
+        }
+        XCTAssertEqual(try PointGeometryRepair.run().converted, 22)
+        try assertNoOwnedStages()
+        let retained = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "paintproj" }
+        XCTAssertLessThan(retained.count, 21, "dated old backups exercise actual retention deletion")
+        XCTAssertTrue(retained.allSatisfy { ProjectBackupManager.validateProjectForRestore(at: $0) })
+        let after = try bytes(root)
+        XCTAssertEqual(try PointGeometryRepair.run().converted, 0)
+        XCTAssertEqual(try bytes(root), after, "retention must not leave missing-source owner records for the next launch")
     }
 
     func testPreviousWriterPackagesConvertAndRoundtripThroughCurrentWriter() async throws {
@@ -356,14 +447,50 @@ final class PointGeometryRepairLogicTests: XCTestCase {
         }
     }
 
-    func testUnreadableManifestRemainsAmbiguousAndUntouched() throws {
+    func testAmbiguousManifestCanRecoverFromCurrentBackup() throws {
+        let project = try install("plain")
+        _ = try PointGeometryRepair.run()
+        try Data("{ truncated manifest".utf8).write(to: project.appendingPathComponent("manifest.json"))
+        let before = try bytes(project)
+        let report = try PointGeometryRepair.run()
+        XCTAssertEqual(report.converted, 0)
+        XCTAssertEqual(report.ambiguous, [project])
+        XCTAssertEqual(try bytes(project), before)
+        ProjectBackupManager.repairCorruptedProjects()
+        XCTAssertTrue(ProjectBackupManager.validateProjectForRestore(at: project))
+        let manager = try XCTUnwrap(ProjectStore.load(from: project)); manager.streamCoordinator.startsClients = false
+        try assertGeometry(manager, name: "plain")
+    }
+
+    func testAmbiguousManifestCanRecoverAfterItsOldBackupConverts() throws {
+        let project = try install("material-strokes")
+        let id = try XCTUnwrap(ProjectBackupManager.manifestID(at: project))
+        let backupDirectory = ProjectBackupManager.backupsDirectory(projectID: id)
+        XCTAssertTrue(ProjectBackupManager.cloneItem(at: project, to: backupDirectory.appendingPathComponent("latest.paintproj")))
+        try Data(project.lastPathComponent.utf8).write(to: backupDirectory.appendingPathComponent("origin.name"))
+        try Data("{ truncated manifest".utf8).write(to: project.appendingPathComponent("manifest.json"))
+        let before = try bytes(project)
+        let report = try PointGeometryRepair.run()
+        XCTAssertEqual(report.converted, 1)
+        XCTAssertEqual(report.ambiguous, [project])
+        XCTAssertEqual(try bytes(project), before)
+        ProjectBackupManager.repairCorruptedProjects()
+        XCTAssertTrue(ProjectBackupManager.validateProjectForRestore(at: project))
+        let manager = try XCTUnwrap(ProjectStore.load(from: project)); manager.streamCoordinator.startsClients = false
+        try assertGeometry(manager, name: "material-strokes")
+    }
+
+    func testAmbiguousManifestWithoutGoodBackupRemainsPresentAndDamaged() throws {
         let project = try install("plain")
         try Data("{ truncated manifest".utf8).write(to: project.appendingPathComponent("manifest.json"))
-        ProjectBackupManager.settings.lastAppSignature = "previous build"
-        let before = try bytes(root)
-        XCTAssertThrowsError(try PointGeometryRepair.run())
-        XCTAssertEqual(try bytes(root), before)
-        XCTAssertEqual(ProjectBackupManager.settings.lastAppSignature, "previous build")
+        let before = try bytes(project)
+        let report = try PointGeometryRepair.run()
+        XCTAssertEqual(report.converted, 0)
+        XCTAssertEqual(report.ambiguous, [project])
+        ProjectBackupManager.repairCorruptedProjects()
+        XCTAssertTrue(FileManager.default.fileExists(atPath: project.path))
+        XCTAssertFalse(ProjectBackupManager.validateProjectForRestore(at: project))
+        XCTAssertEqual(try bytes(project), before)
     }
 
     func testParentFolderLinksCannotEscapeOrLoopTheCensus() throws {
@@ -531,7 +658,7 @@ final class PointGeometryRepairLogicTests: XCTestCase {
         ProjectBackupManager.settings.lastAppSignature = "previous build"
         let before = try bytes(root)
         XCTAssertThrowsError(try PointGeometryRepair.run())
-        XCTAssertEqual(try bytes(root), before)
+        try assertInputsPreserved(before)
         XCTAssertEqual(ProjectBackupManager.settings.lastAppSignature, "previous build")
     }
 
@@ -545,7 +672,7 @@ final class PointGeometryRepairLogicTests: XCTestCase {
         ProjectBackupManager.settings.lastAppSignature = "previous build"
         let before = try bytes(root)
         XCTAssertThrowsError(try PointGeometryRepair.run())
-        XCTAssertEqual(try bytes(root), before)
+        try assertInputsPreserved(before)
         XCTAssertEqual(ProjectBackupManager.settings.lastAppSignature, "previous build")
     }
 
@@ -558,7 +685,7 @@ final class PointGeometryRepairLogicTests: XCTestCase {
         }
         let before = try bytes(root)
         XCTAssertThrowsError(try PointGeometryRepair.run())
-        XCTAssertEqual(try bytes(root), before)
+        try assertInputsPreserved(before)
     }
 
     func testOrdinaryDamagedElementKeepsReportedLossPolicy() throws {

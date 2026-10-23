@@ -1,4 +1,5 @@
 import SwiftUI
+import os
 
 @main
 struct PaintApp: App {
@@ -33,7 +34,11 @@ struct PaintApp: App {
         // Saved geometry must be current before gallery reads or recovery can reject old metadata.
         // The repair protects untouched update bytes before committing any staged replacement.
         do {
-            _ = try PointGeometryRepair.run()
+            let repair = try PointGeometryRepair.run()
+            for package in repair.ambiguous {
+                Logger(subsystem: "Starg.PaintSoftware", category: "PointGeometryRepair").warning(
+                    "Unreadable manifest preserved for existing backup recovery: \(package.lastPathComponent, privacy: .public)")
+            }
             geometryRepairFailure = nil
         } catch {
             geometryRepairFailure = error.localizedDescription

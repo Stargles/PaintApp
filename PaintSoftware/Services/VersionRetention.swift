@@ -16,7 +16,7 @@ import Foundation
 ///
 /// **Slots are fixed stretches of the clock, not windows that slide with `now`.** A sliding window
 /// re-decides every minute who is the survivor, so a stream of saves never lets anything graduate
-/// into the next band; a fixed slot settles the moment its first version arrives and stays settled.
+/// into the next band; a fixed slot settles when its clock window closes; the newest version can replace it while open.
 /// Slot boundaries are multiples of their width since the epoch, which needs no calendar, time zone
 /// or daylight-saving rule, and nobody ever sees them.
 ///
