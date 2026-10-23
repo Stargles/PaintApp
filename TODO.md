@@ -62,6 +62,13 @@ their files are repaired. Build `2974b33` broke this rule and lost the owner's k
 
 ## Vector Liquify must move points only — 2026-10-23
 
+**Implementation decision pending:** owner asks whether to keep the complex vector behavior and
+also add a simple version, or remove the complex vector version entirely, prioritizing architecture.
+Recommendation: remove the complex vector Liquify path and keep only point-position editing. Keep
+real shared raster/linked-frame/edit-session code and existing Distort support, with actual consumer
+proof; do not retain inverse-resampled vector brush materials as a second mode. No implementation
+changes have started while the owner weighs this choice.
+
 Owner reports that Liquify stretches strokes horizontally on vector layers and rules:
 “All that you had to do was to change the position of the points in the stroke, not apply
 transformations to them. I remember EXPLICITLY telling you this.”

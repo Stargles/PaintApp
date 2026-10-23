@@ -17,7 +17,10 @@ CLAUDE.md requires physical harnesses to record unique owned fixtures, Trash onl
 preserve owner settings/libraries and verify fresh inventory before closeout.
 
 **Two new active owner reports, superseding the parked state:**
-1. Vector Liquify visibly stretches strokes horizontally. Owner explicitly requires moving stroke
+1. **Await owner design decision before implementation:** root recommends removing complex vector
+   Liquify and retaining only point edits, rather than offering two vector behaviors. Owner asked for
+   this recommendation before work because of sunk-cost concern. No source implementation changes.
+   Vector Liquify visibly stretches strokes horizontally. Owner explicitly requires moving stroke
    point positions through the normal brush renderer, not deforming brush marks/texture. Owner explicitly
    requires a very thorough architecture/dependency cleanup and independent final review. Audit code
    and original brief before implementation; remove excessive machinery cleanly, no extra mode/flag.
