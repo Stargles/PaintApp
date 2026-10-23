@@ -75,7 +75,8 @@ final class LiquifyUITests: PaintUITestCase {
         tapAway(app)
         setBrushColor(app, hex: "000000")
         tapAway(app)
-        app.sliders["sideToolbar.brushSizeSlider"].adjust(toNormalizedSliderPosition: 0.92)
+        app.sliders["sideToolbar.brushSizeSlider"].adjust(toNormalizedSliderPosition:
+            CGFloat(BrushSizeCurve.sliderPosition(forPercent: 0.18)))
         app.sliders["sideToolbar.brushOpacitySlider"].adjust(toNormalizedSliderPosition: 1)
 
         let canvas = app.otherElements["canvas.host"], paper = paperRect(in: canvas)
@@ -92,6 +93,13 @@ final class LiquifyUITests: PaintUITestCase {
         let side = canvas.frame.width * paper.width
         let step = 1 / side // One screen point, independent of the device's portrait/landscape fit.
         struct Footprint: Equatable { let bounds: CGRect; let inkCount: Int }
+        func assertInsidePatch(_ mark: Footprint, _ when: String) {
+            let margin = max(3 * step, 0.02)
+            XCTAssertGreaterThan(mark.bounds.minX, patch.minX + margin, "\(when): no crop at the left patch edge")
+            XCTAssertLessThan(mark.bounds.maxX, patch.maxX - margin, "\(when): no crop at the right patch edge")
+            XCTAssertGreaterThan(mark.bounds.minY, patch.minY + margin, "\(when): no crop at the top patch edge")
+            XCTAssertLessThan(mark.bounds.maxY, patch.maxY - margin, "\(when): no crop at the bottom patch edge")
+        }
         func footprint() throws -> Footprint? {
             let pixel = try pixelProbe(canvas)
             var bounds = CGRect.null, count = 0
@@ -108,6 +116,7 @@ final class LiquifyUITests: PaintUITestCase {
             return bounds.isNull ? nil : Footprint(bounds: bounds, inkCount: count)
         }
         let before = try XCTUnwrap(settled(timeout: 10) { try footprint() })
+        assertInsidePatch(before, "before Push")
         XCTAssertGreaterThan(before.bounds.width, 0.08, "the dot must be wide enough to measure stretching")
         XCTAssertEqual(before.bounds.width / before.bounds.height, 1, accuracy: 0.04,
                        "the ordinary brush must paint a round dot before Liquify")
@@ -133,6 +142,7 @@ final class LiquifyUITests: PaintUITestCase {
         }
         wait(for: [XCTNSPredicateExpectation(predicate: moved, object: nil)], timeout: 20)
         let after = try XCTUnwrap(settled(timeout: 10) { try footprint() })
+        assertInsidePatch(after, "after Push")
         attachScreenshot(app, "liquify-round-dot-after-point-move")
         let tolerance = max(3 * step, before.bounds.width * 0.04)
         XCTAssertGreaterThan(after.bounds.midX - before.bounds.midX, before.bounds.width * 0.10,
