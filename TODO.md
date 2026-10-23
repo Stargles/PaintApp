@@ -56,93 +56,16 @@ their files are repaired. Build `2974b33` broke this rule and lost the owner's k
 
 ---
 
-## Recent canvas freeze recordings — 2026-10-22
+## Saved-scene repair cleanup — waiting for owner confirmation
 
-Owner: "you may want to check out the recent canvas freeze logs on the ipad if that helps you.
-Not sure which version they got picked though, you figure that out." Read-only analysis is complete:
-six October16–18 repair flights correlate to Releasef813346/app source840d68a, before Liquify and the
-October22 recovery.346 deduplicated sequences include340 controls and6 repair hits, not6 proven
-visible freezes. New Pencil/cancellation cases and healthy controls invalidate a universal late-third
-fix. On 2026-10-23 the owner confirmed: "I only noticed the repair message." No visible loss of input was reported for that period. BUGS.md records findings and the next diagnostic seam; no speculative behavior change. Evidence:
-`~/PaintWork/s50-freeze-logs/`. Remove this completed log-read request with the integration merge.
-
-## (178) Liquify tool
-
-**Current status — 2026-10-23.** Implemented in `tmp/s49-integration`, unmerged. The candidate
-has been installed/launched by authorized physical tests; final restored Release deployment is pending.
-Backup gate is satisfied: container Documents and the owner's current external PaintApp ZIP are
-preserved/hash-verified under `~/PaintWork/s50-liquify/device-backup-2/`. The older fallback Export
-index is not a current external inventory. Main renewal repair is `5e93bf0`.
-
-Simulator qualification is complete:
-
-- Final fast Debug/Release: each5282 total,5278passed,4skipped,zero failures;256 selected classes.
-- Full Release:5864 total,5799passed,3failed,62skipped;398 classes. All three reds passed together
-  unchanged serially3/3. Four actual workers, no System Failures/restarts,753 source hashes unchanged.
-  Exact parallel causes are unproved; no product/test fix. All8 Liquify UI workflows passed.
-- Image review covered reshape/Undo/reopen/source-follow pictures and settled native iPad9 landscape controls.
-  Every assertion, gesture and deadline remains. The earlier Debug linked15s miss remains recorded.
-- Quiet Release producer cost2/2: all8 exact pictures/all18 inverse fixtures match; hard/pattern
-  producer medians19.1%/23.3% of scalar reference. Retain batching; worst pattern still takes seconds
-  on the simulator. No device speed claim.
-
-The ownership cleanup removes the sole-consumer generic presenter wrapper and keeps the shared
-live-edit, synchronization and cancellation paths. The spatial renderer remains integrated through
-VectorCanvas with tile-scoped work. The two invalid identity fixtures were repaired with genuine
-renderable sources, preserving all assertions and proving them with fault/restoration runs.
-Detailed provenance: HANDOFF, PERFORMANCE and `~/PaintWork/s50-liquify/`.
-
-**Still open:** final restored normal Release build/verified install/launch, then merge. Physical
-qualification is complete: five unique legacy drives passed, including final Move1/1 with37 updates
-and4passes, held/settled picture agreement and one Undo. Liquify2/2 passed, raster cold-reopen preserved;
-native sampler1/1 passed with exact pictures. Historical setup/cancellation failures are separately
-archived. All753 qualified source hashes exact after temporary adapter restoration. Root now owns
-native/DD for final normal Release; the coordinate agent finishes local screenshot/evidence review.
-Backup is verified; keep one-shot repairs until the owner confirms real scenes. Remove this whole
-item only with the fully qualified merge. See HANDOFF and external evidence indexes.
-
-*"It should be placed to the left of the brush tool in the top menu. When selected, it acts sort of like
-a brush (you can control the brush type, size, etc), and otherwise it does basically what a normal
-liquify tool does. The opacity slider turns into the liquify power, and the brush type also controls the
-liquify tool's power, so for example if the streaky brush is selected and the liquify tool is applied at
-a line, it sort of liquifies only parts of the line. One thing, All the liquify tool needs to do is
-adjust the position of stuff. It doesnt need to simulate blending, distortions, and all that."*
-
-**Ruled 2026-10-12**: it pushes **raster and vector** layers (vector strokes have their points moved
-and stay vectors; text, images, video and streams are left alone); modes **Push, Pinch/Expand and
-Twirl**, chosen in the tool's panel, all of which only move things; it acts on the **active layer only**,
-and an active selection limits it further. This reverses the 2026-08-22 ruling quoted in
-`TransformMode`'s doc ("Warp will not be a feature (like liquify)").
-
-**Shape** (survey §C): each dab of the unchanged brush walk becomes a displacement, so tip, texture,
-flow and hardness are the strength field for free. Its brush type, size and power are a third
-`ToolProfile` — a `StrokeTool` case and a `ToolProfiles` field, which (176) built for it.
-
-**Ruled 2026-10-14:** *"Include linked in-between frames now."* Liquify must reshape generated frames
-while preserving their links to the source drawings. `VECTOR_INTERPOLATION.md` §3.8 specifies a
-recipe-owned rest-space displacement field, never per-vertex offsets or `localEdits`; build that field
-alongside the editable-drawing tool. The session-48 survey's proposed refusal of derived frames is
-superseded by this ruling.
-
-**Raster scope ruled 2026-10-14:** *"Move all raster pixels; leave editable objects alone."* Old raster
-cels mix imported pictures/text, fills and moved paint in `bakedImage`, without origin/type information.
-Liquify therefore moves every raster pixel in the active layer, including that flattened content;
-separately editable text, picture, video and stream objects remain untouched.
-
-**Raster sampling ruled 2026-10-15:** the owner accepts comparison C's smoother reduced grain,
-"as long as it isnt cery bloaty or expensive for that difference". The shared bounded sampler is
-implemented; its physical first-use cost remains open. Transformed raster paint uses it, while editable
-vector strokes retain their native renderer.
-
-**Vector selection edge ruled 2026-10-14:** *"B — Keep outside ink fixed."* The owner chose after seeing
-the native comparison (48 shipped-spacing Streaky stamps: moving whole marks changes 1,703 exterior
-alpha pixels; spatial deformation changes zero). Liquify must preserve every painted pixel outside
-the selection while allowing texture to stretch inside, and vector strokes must remain editable.
-Use spatial material deformation through the existing rest-walk/stamping seam; moving entire stamps
-by their spine sites is rejected. The raster inverse kernel already fixes exterior pixels.
-Evidence: `~/PaintWork/evidence/s49-liquify-selection-options-native-spacing/`.
-
-- [ ] Liquify on raster and vector, including linked generated in-betweens, three modes, one undo step per stroke.
+The final Liquify Release is installed and launches normally. All feature/legacy device checks are
+qualified. Before deleting the one-shot file repairs, the owner must confirm existing drawings,
+layers and animation look right, as required by AGENTS.md. The question is pending; no deletion yet.
+Once confirmed, remove the obsolete repair implementations and their wiring/tests cleanly, retaining
+current-format validation and update-backup creation. `LibraryRepair` and the five `Legacy*Repair`
+services are the retirement seam; canvas recognizer repair and project-location migration are separate
+live features. The verified pre-update current-folder ZIP remains preserved under
+`~/PaintWork/s50-liquify/device-backup-2/external-library/`.
 
 ---
 

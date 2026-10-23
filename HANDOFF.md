@@ -3,135 +3,74 @@
 <!-- Current state and next step only. Detailed rationale belongs in specs, evidence and history. -->
 
 **Start here:** read AGENTS.md, this file, CLAUDE.md, TODO.md, BUGS.md and the relevant specification.
-Verify origin and every tmp branch. Active worktree: `~/PaintWork/PaintApp-s49-integration`, branch
-`tmp/s49-integration`. Budget already permits useful agents; prioritize usage/quality over speed.
+Verify origin and every tmp branch. Budget permits useful agents; prioritize usage/quality over speed.
 
 ## Checkpoint — 2026-10-23
 
-Main is `5e93bf0`; Liquify remains unmerged. The candidate app/runner have now been installed and
-launched by the authorized physical tests. No final restored Release deployment has occurred.
-Container Documents and the owner-supplied current external PaintApp ZIP are preserved and verified
-under `~/PaintWork/s50-liquify/device-backup-2/`; the backup gate is satisfied. The September9
-fallback Export index is not an authoritative inventory of the external library.
+Liquify is complete and qualified for this integration merge. Final normal Release build `cbd297e`
+uses the unchanged qualified production source (last ownership cleanup `c78aac8`). Clean/build0,
+all753 source hashes exact, strict deep seal verified, profile expires2026-10-30T00:18:54Z
+(October29 evening Toronto), over five days at install. Installed `Starg.PaintSoftware` and launched
+normally with **no test arguments**, PID52717 observed alive. Preserved app and install/launch/signing
+records: `~/PaintWork/s50-liquify/final-release/`. No uninstall, settings/library reset or preset edits.
 
-Simulator qualification is complete and source remains unchanged:
-- Fast Debug and Release: each5,282 =5,278 passed+4 skipped, zero failures;256 classes.
-- Full Release:5,864 =5,799 passed+3 failed+62 skipped;398 classes, exact census match. All three
-  reds passed together unchanged serially3/3. Their parallel causes remain unproved. All eight
-  Liquify UI workflows passed. Zero System Failures/restarts,753 source hashes unchanged.
-- UI linters:85 SF Symbols,137 shared helpers, both clean. Every owned simulator/clone is deleted.
-Evidence: `~/PaintWork/s50-liquify/{fast-3,full-release-closeout.txt,release-ui}/`.
+**Only current required input:** the owner is checking existing scenes before retiring the one-shot
+file repairs. The question is pending. Keep the repairs until confirmation, then remove their whole
+implementations/wiring/tests while retaining current-format validation and update-backup creation.
+TODO has the retirement seam. Do not confuse canvas recognizer repair or location migration with
+obsolete file repairs. The latest executable repair signature converts older preupdate snapshots;
+its own newest snapshot is intentionally untouched. Genuine previous-writer/fault evidence lives in
+`~/PaintWork/evidence/s49-liquify-material-{format,model}/`.
 
-Physical native sampler C benchmark **passed1/1, zero skips** on retry2. First invocation failed only
-UI-automation initialization before any selected method; the owner then asked to retry and noted the
-device sometimes prompts to enable automation. Retry2 measured native component cold428.577ms,
-four warm17.177–18.066ms. All six PNGs reviewed; held/committed decoded bytes exactly agree. The
-initial blank batch-image display was a presentation artifact, resolved by reopening the identical
-PNG alone. This is component cost, not app gesture latency or a retention test. Evidence:
-`~/PaintWork/s50-liquify/physical-benchmark-2/`.
+## Qualification to reuse
 
-Physical legacy attempt1 ended **5 total=1 passed/4 failed/0 skipped**. Playback passed. InkUnderTransform
-and graph-node methods stopped at the temporary full-screen canvas-bounds premise. Move stopped at
-its existing exposed-row premise (row0.6 versus dock top0.52654). Grey-pan setup could not hit the
-size height field. These are unresolved physical test premises, not qualified feature assertions.
-No Liquify invocation/retry followed. Native/DD ownership returned to root. Screenshot diagnosis is
-confirmed: raw1620×2160 capture has EXIF orientation8 and displays2160×1620; AX canvas is
-{{56,0},{1024,810}}. Both temporary crop and MidGestureSampler ignore orientation, so their pixel
-coordinates are invalid. Prepare one orientation-aware full-screen image seam shared by both readers,
-plus a visible Move row and floating-keyboard-safe64×4096 canvas setup. Architecture agent owns the
-external temporary candidate only; root reviews before apply/build. No app-source edits, weakened
-assertions, settings/library resets or preset changes. Playback passed unchanged; rerun affected four
-rather than repeating it or the accepted benchmark. Review approved the shared UIImage.draw renderer
-at original scale, exposed PopoverDismissRegion taps, and consistent rowAboveTheDock Move probes.
-Grey's temporary paperRect oracle is independently invalid: it always returns a static square for a
-64×4096 document, so cannot report pan. Replace that adapter-only geometry with the actual exposed
-scale/rotation/offset applied to64×4096, preserving40pt/15pt movement and0.002 width assertions;
-label those exposed geometry, and inspect the full screenshot. No app or committed test source changes.
-Root reviewed the final grey delta and all eight original SHA guards and authorized guarded
-`device-build-3` now. Architecture agent exclusively owns native/DD through clean/build-for-testing,
-restoration and frozen seal/profile verification, then affected legacy4 (exclude passed playback)
-and Liquify2 only if the previous gate passes. Expected4/2, zero skips; stop on any real failure.
-Build3 clean/build/verification/restoration passed; all753 qualified hashes match, eight adapters
-restored,114 frozen entries verified, compiled/frozen app+runner strict seals and five-day profiles
-pass. Build2 and the accepted benchmark are untouched. Affected legacy attempt2 was cancelled with SIGINT scoped to owned PID12589 after confirming zero
-selected Test Case starts: Xcode explicitly reported the iPad locked. Exit73/TEST EXECUTE INTERRUPTED;
-xcresult1 synthetic "Testing was canceled" is not a selected feature failure. No attachments/scenes,
-no Liquify/retry. Source753 hashes and all8 restorations exact; no owned process remains. Evidence:
-`physical-legacy-2/{report.txt,final-status.json,source-checkpoint.json,cancellation.json}`.
+- Fast Debug and Release: each5,282 total=5,278 passed+4 skipped, zero failures;256 selected classes.
+  `~/PaintWork/s50-liquify/fast-3/`. Source unchanged after source head `2b330c9`.
+- Full Release:5,864 total=5,799 passed+3 failed+62 skipped;398 classes, exact static census.
+  All three reds passed together unchanged serially3/3. Exact parallel causes remain unproved;
+  no product/test fix. Four actual workers, zero System Failures/restarts. All eight Liquify UI
+  workflows passed. `full-release-closeout.txt` indexes source hashes, stills and counts.
+- Physical: native sampler1/1 (`physical-benchmark-2`); five distinct legacy workflows all pass:
+  playback (`physical-legacy-1`), raster-under-transform and graph (`physical-legacy-3`), grey pan
+  (`physical-legacy-4`), Move (`physical-legacy-5`). Graph36 updates/2passes, Move37/4; Move held,
+  settled and oneUndo assertions unchanged. Liquify2/2 (`physical-liquify-1`): vector/raster under
+  finger, oneUndo, raster Redo/save/cold-reopen. All full pictures reviewed at native iPad9 size.
+- UI identifier/helper checks clean:85 SF Symbols/137 helpers; PBX plutil clean, prior1334-ID census
+  has no duplicates. All owned simulators/clones deleted. Full Debug UI was not run; the earlier
+  linked Debug15s miss remains real, separately diagnosed in `linked-ui-diagnosis.md`.
 
-After fresh owner unlock, physical-legacy-3 ended **4 total=2 passed/2 failed/0 skipped**, exit65.
-Transformed raster stroke and graph-node drag passed unchanged; graph exposed36 updates over2 passes.
-Move reached its actual held-pixel oracle and failed (old ink blank AND destination>50ink while held).
-Grey stopped before pan at off-paper premise: finger+travel627pt is not<paperLeft561.6704. No Liquify
-invocation/retry followed. Preserve these real outcomes, not green qualification. Native/DD is idle.
-Physical-legacy-4 ended **2 total=1 passed/1 failed/0 skipped**: grey pan passed its unchanged
-surround/movement/no-zoom assertions. Move stopped before its gesture at the extra
-layerOptions.close tap: runtime had already closed that options card. Failure hierarchy exposes
-Move selected and moveBar.doneButton, so the extra dismissal is unnecessary. Remove that one
-temporary tap entirely, preserving the immediate pre-drag Move-active premise and every existing
-pixel/count/Undo assertion. No app fix, new conditional dismissal or changed threshold.
+Historical physical failures are **not** relabelled green. Corrected temporary harness premises:
+EXIF8 screen orientation, visible Move row, native/displayed grey coordinates and event orientation,
+and an unnecessary dismissal that ended Move or addressed an already-closed card. No feature
+predicate, threshold, gesture timing or deadline weakened. Builds2–5 froze114 entries each, restored
+all8 temporary test files byte-exact, verified753 source hashes and strict app/runner seals/profiles.
+Canceled/locked initialization attempts never entered a selected method. Every raw result remains
+under `~/PaintWork/s50-liquify/`; no native jobs remain active.
 
-Previously evidenced corrections remain: shared orientation-aware screenshot reader; consistent
-visible Move row; native touch endpoints separated from displayed grey bounds, event record orientation1.
-Passed unique legacy checks now: playback, raster-under-transform stroke, graph-node36updates/2passes,
-and grey pan. Only Move's actual gesture oracle remains. No Liquify device method has run yet.
+## Architecture, cost and protected data
 
-Root authorizes independent Liquify2 now from verified frozen build4 while the iPad is awake: the
-latest Move failure is definitively a pre-gesture adapter lookup, not a product assertion. This does
-not qualify Move or permit final deployment. Coordinate agent retains exclusive native/DD ownership.
-Physical Liquify qualification **passed2/2, zero failures/skips**, exact requested methods, in
-physical-liquify-1 from frozenbuild4. Vector/raster moved under the finger, one Undo restored them,
-and raster cold-reopen retained the result. Seven full screenshots and traces are exported for review. Root reviewed correction3's exact one-line deletion and baseline/candidate SHA:
-no added action/condition, all oracles/fixtures/deadlines byte-identical, pre-drag Move-active retained.
-Guarded build5 completed clean/build/verification/restoration0;114 frozen entries and753 original
-source hashes exact, tree clean, app/runner strict seals and>5day profiles pass. Pre-launch read-only
-lockState reported passcodeRequired=true, so no Move invocation/result directory was started.
-The owner has now freshly replied "Ready — unlocked and awake". Coordinate agent should run Move1
-immediately from build5 frozen products in new physical-legacy-5 (expected1/0skip), no rebuild. Keep native serial;
-no build while Liquify runs, and stop on any actual feature failure. No repeat of accepted checks/native benchmark.
-Stop/report any actual feature failure; preserve full pictures and source restoration. Source753
-hashes remain exact, all temporary adapters restored. Final normal install/merge still requires Move1
-and Liquify2 qualification. Root stays native-idle.
-Build3 frozen xctestrun SHA: `125bd30baf4a3567a173fd9b4b6313ba83b661e6490898db94b386ca8ae28da9`.
+The sole-consumer generic presenter/proxies were removed; `LiquifyProcedure` owns its snapshot and
+uses existing live-edit synchronization/cancellation. Spatial material work stays tile-scoped through
+VectorCanvas, with no whole-scene cache. Quiet Release producer2/2:8 exact pictures and18 inverse
+fixtures match; hard/pattern medians19.1%/23.3% of scalar reference. Worst pattern still takes seconds
+on the simulator. Invalid identity fixtures retain all original assertions and baseline/fault proof.
+PERFORMANCE records the qualified native physical adapter: cold428.577ms, warm17.177–18.066ms for
+448² output; exact six pictures, one-tile peak sampler charge9,050,880B. These are component costs,
+not app gesture latency or retention evidence; use the prior dedicated100-draw retention gate.
 
-## Next
+Backup gate is satisfied: container Documents134 files/19,662,670 bytes hashed, plus the owner's
+current external PaintApp folder ZIP327,981,935B, all3,830 members CRC/SHA/safe-path checked and
+source/copy SHA equal. Actual ZIP has18 Projects+99 Backup manifests, empty Trash. It is preserved
+at `device-backup-2/external-library/`; source Downloads/PaintApp.zip is untouched. The September9
+fallback Export index is not a current external inventory. Tailscale reaches iPad but no file service
+is enabled; Apple developer transfer cannot read that File Provider root. Do not re-block on that
+old comparison. Scratch titles include Untitled and `Raster 06F7E064`; exact external package IDs were
+not exposed, so no broad cleanup/deletion was attempted. Container brushes/palettes stayed hash-identical.
 
-**Physical qualification is complete.** Remaining Move1 passed1/1, zero skips/failures, unchanged
-held/settled pixel and one-Undo predicates:37 picture updates over4 editor passes (original<=4 cap).
-All five unique legacy drives now pass across the preserved runs; Liquify2 passed2/2 and native
-sampler1 passed1/1. Historical premise/cancellation failures remain archived, not relabelled green.
-Source753 hashes exact and tree clean after build5 restoration. No agent owns native work now.
-Root owns native/DD for final restored normal Release clean/build with identical argument array,
-then strict signature/fresh five-day profile verification, install and normal launch. Coordinate agent
-only reviews local Move screenshots/writes evidence; no more device/native actions.
+Freeze-log read is complete in BUGS and `~/PaintWork/s50-freeze-logs/`: six October16–18 repair flights
+correlate to Releasef813346/app840d68a, before Liquify;346 deduplicated sequences340 controls/6 repair
+hits are not a failure rate. Owner saw only the repair message, not a visible freeze. Keep the repair;
+no speculative UIKit behavior change. The completed log-read request leaves TODO with this merge.
 
-1. Finish the already-prepared normal Release build/verification under
-   `~/PaintWork/s50-liquify/final-release/`. Keep one-shot repairs until owner confirms real scenes.
-2. Install and launch normally after verifying device availability; no uninstall/reset/preset changes.
-3. Update final evidence, remove TODO(178) whole and completed freeze-log-read request in the qualified
-   merge, update SESSION_LOG (five entries), fetch/recheck TODO/HANDOFF, ff-merge through the absolute
-   main worktree path, verify SHA, push and clean up the owned integration worktree.
-4. Other queued asks remain explicitly deferred; no interpolation-overhaul research without brief.
-
-## Evidence and decisions to preserve
-
-Ownership cleanup `c78aac8` removes the sole-consumer generic presenter wrapper; existing live-edit,
-synchronization and cancellation remain. Spatial material rendering uses VectorCanvas with tile-scoped
-work. Reuse prior material/storage/refusal/model fault proof in `~/PaintWork/s49-liquify-logs/`.
-Two malformed identity fixtures (`621c15d`, `b244a46`) retain all original assertions and have focused
-baseline/fault/restoration proof. The unasserted mid-rotation raster photo tail was removed (`0cabd6c`).
-
-Quiet Release producer gate 2/2: eight exact pictures and 18 frozen inverse fixtures match. Retain
-batching: hard/pattern medians 0.173/1.868s, 19.1%/23.3% of scalar cost. Patterned worst case remains
-seconds on the simulator; physical C first-use cost remains open. See PERFORMANCE and
-`~/PaintWork/s50-liquify/producer-release-1/`. The earlier Debug linked workflow really missed its 15s
-deadline; Release qualification does not relabel it green. Diagnosis: `linked-ui-diagnosis.md` beside it.
-
-Freeze-log read is complete: six October16–18 repairs correlate to Releasef813346/app840d68a, before
-Liquify. 346 sequences include 340 controls and six repair hits, not six proven visible freezes. New
-Pencil/cancel cases disprove a universal late-third fix; no common cause or behavior change. BUGS.md
-and `~/PaintWork/s50-freeze-logs/` hold findings. The owner confirmed on 2026-10-23: "I only noticed the repair message." No visible freeze reported for that period.
-
-Other TODO: laptop streaming(27) owner-deferred; multiple cels(22)/linear light(10) deprioritised;
-importers(37) dropped. Audio(28), video editor(30) and interpolation overhaul await owner briefs; no
-research now. (179) is complete, including six physical probes in PERFORMANCE §30.7.
+Other TODO is explicitly deferred: laptop streaming27; multiple cels22 and linear light10 deprioritised;
+brush importers37 dropped; audio28, video30 and interpolation overhaul await briefs. No research now.
