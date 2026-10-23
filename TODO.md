@@ -112,7 +112,9 @@ gesture because the adapter tapped an options-close control already dismissed by
 Remove that one extra temporary tap, retaining Move-active and every feature assertion. Unique passed
 legacy checks: playback, raster stroke, graph, grey. Root authorizes Liquify2 independently now from
 frozen build4 while device awake, then reviewed one-line adapter deletion/build5 and remaining Move1. Liquify2 passed2/2, zero skips/failures, with7full screenshots exported. Root
-reviewed correction3's one-line deletion and guards; serial guarded build5/remaining Move1 is underway.
+reviewed correction3's one-line deletion and guards; build5 clean/build/verification/restoration passed,753source hashes exact. Pre-launch lockState was
+locked; no test was attempted. Owner has now freshly confirmed unlocked/awake: run remaining Move1
+immediately from frozenbuild5, no rebuild.
 This pre-gesture harness failure does not qualify Move; final deployment/merge require Move1 plus
 Liquify2. No app-source changes, feature weakening or repeated accepted benchmark. No settings/library reset or preset changes. Preserve disposable scenes and full pictures. Native
 component cost is separate from app gesture latency. Keep one-shot repairs until real scenes are

@@ -83,8 +83,11 @@ Physical Liquify qualification **passed2/2, zero failures/skips**, exact request
 physical-liquify-1 from frozenbuild4. Vector/raster moved under the finger, one Undo restored them,
 and raster cold-reopen retained the result. Seven full screenshots and traces are exported for review. Root reviewed correction3's exact one-line deletion and baseline/candidate SHA:
 no added action/condition, all oracles/fixtures/deadlines byte-identical, pre-drag Move-active retained.
-The coordinate agent has started the authorized serial guarded build5 clean/build/restoration and
-frozen verification, then run only remaining Move1 from it (expected1/0skip). Keep native serial;
+Guarded build5 completed clean/build/verification/restoration0;114 frozen entries and753 original
+source hashes exact, tree clean, app/runner strict seals and>5day profiles pass. Pre-launch read-only
+lockState reported passcodeRequired=true, so no Move invocation/result directory was started.
+The owner has now freshly replied "Ready — unlocked and awake". Coordinate agent should run Move1
+immediately from build5 frozen products in new physical-legacy-5 (expected1/0skip), no rebuild. Keep native serial;
 no build while Liquify runs, and stop on any actual feature failure. No repeat of accepted checks/native benchmark.
 Stop/report any actual feature failure; preserve full pictures and source restoration. Source753
 hashes remain exact, all temporary adapters restored. Final normal install/merge still requires Move1
