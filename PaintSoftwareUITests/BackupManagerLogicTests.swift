@@ -177,9 +177,8 @@ final class BackupManagerLogicTests: XCTestCase {
         XCTAssertTrue(ProjectBackupManager.validateProject(at: latest))
     }
 
-    /// Eight sessions' opening states inside one ten-minute stretch: the schedule keeps the newest
-    /// three and the first, and the rest are the thinning.
-    func testRapidSavesKeepTheNewestThreeAndTheFirst() throws {
+    /// Eight sessions' opening states inside one ten-minute stretch: only the newest three survive.
+    func testRapidSavesKeepTheNewestThree() throws {
         let id = UUID()
         let url = makeProject(id: id)
         let started = Date()
@@ -191,8 +190,8 @@ final class BackupManagerLogicTests: XCTestCase {
         try XCTSkipIf(Int(started.timeIntervalSince1970 / 600) != Int(Date().timeIntervalSince1970 / 600),
                       "The run crossed a ten-minute boundary, which keeps one more")
         let names = backupDirFileNames(id)
-        XCTAssertEqual(names.filter { $0.hasPrefix("auto-") }.count, 4, "the first of the stretch and the newest three")
-        XCTAssertTrue(names.contains(first), "the first state of the stretch is the one a run of saves must not rotate out")
+        XCTAssertEqual(names.filter { $0.hasPrefix("auto-") }.count, 3, "only the newest three in the current bucket")
+        XCTAssertFalse(names.contains(first), "an older state in the same bucket is replaced by its newest member")
         XCTAssertTrue(names.contains("latest.paintproj"), "latest must survive rotation")
         XCTAssertTrue(ProjectBackupManager.validateProject(at: url), "the live package must be intact after every cycle")
     }
@@ -214,7 +213,7 @@ final class BackupManagerLogicTests: XCTestCase {
     }
 
     /// **One schedule for every dated kind.** Session starts, update snapshots and saves made aside
-    /// are all versions; the schedule thins them together, and the two fixed slots are not versions.
+    /// are all versions; the newest in each age slot survives, and the fixed slots are not versions.
     func testPruneThinsEveryKindOfDatedSlotAndLeavesTheFixedOnes() {
         let id = UUID()
         let url = makeProject(id: id)
@@ -223,27 +222,27 @@ final class BackupManagerLogicTests: XCTestCase {
         XCTAssertTrue(ProjectBackupManager.cloneItem(at: url, to: dir.appendingPathComponent(ProjectBackupManager.rollingSlotName)))
 
         let newest = [10, 20, 30].map { plant("auto", id, at: ago(TimeInterval($0)), from: url) }
-        let installFirst = plant("preupdate-1-0-43-1-1791438480-0", id, at: ago(150 * 60), from: url)
-        let installSecond = plant("preupdate-1-0-43-2-1791438480-0", id, at: ago(120 * 60), from: url)
-        let asideFirst = plant("unsaved", id, at: ago(26 * 3600), from: url)
-        let asideSecond = plant("unsaved", id, at: ago(25 * 3600), from: url)
+        let installOlder = plant("preupdate-1-0-43-1-1791438480-0", id, at: ago(150 * 60), from: url)
+        let installNewer = plant("preupdate-1-0-43-2-1791438480-0", id, at: ago(120 * 60), from: url)
+        let asideOlder = plant("unsaved", id, at: ago(26 * 3600), from: url)
+        let asideNewer = plant("unsaved", id, at: ago(25 * 3600), from: url)
 
         ProjectBackupManager.pruneBackups(forProjectID: id, now: now)
 
         let names = Set(backupDirFileNames(id))
-        XCTAssertTrue(names.isSuperset(of: newest + [installFirst, asideFirst]),
-                      "the newest three, and the first of the hour and of the day, stay")
-        XCTAssertTrue(names.isDisjoint(with: [installSecond, asideSecond]),
-                      "the second of an hour and the second of a day go")
+        XCTAssertTrue(names.isSuperset(of: newest + [installNewer, asideNewer]),
+                      "the newest three and newest update/unsaved version in each age slot stay")
+        XCTAssertTrue(names.isDisjoint(with: [installOlder, asideOlder]),
+                      "older versions in an hour and day slot are replaced by the newer member")
         XCTAssertTrue(names.isSuperset(of: ["latest.paintproj", ProjectBackupManager.rollingSlotName, "origin.name"]),
                       "the slots that are replaced in place are not versions and are never thinned")
         XCTAssertEqual(ProjectBackupManager.listBackups(forProjectAt: url).filter { $0.label == "Before app update" }.count, 1,
                        "an update snapshot is a version like the rest, and keeps its label while it lasts")
     }
 
-    /// **Installs alone cannot push an earlier snapshot out** — the hourly re-signer reinstalls, and
-    /// a dev loop does it every few minutes. Eight installs in one stretch leave the first of them
-    /// and the newest three, and the snapshot from three hours ago is not among the thinned.
+    /// **Installs alone cannot push an earlier snapshot out of its older hour slot** — the hourly
+    /// re-signer reinstalls, and a dev loop does it every few minutes. The same-slot burst keeps its
+    /// newest three, while the snapshot from three hours ago remains independently recoverable.
     func testAnInstallBurstDoesNotPushOutAnEarlierSnapshot() throws {
         let id = UUID()
         let url = makeProject(id: id)
@@ -257,8 +256,8 @@ final class BackupManagerLogicTests: XCTestCase {
                       "The run crossed a ten-minute boundary, which keeps one more")
 
         XCTAssertTrue(backupDirFileNames(id).contains(earlier), "the snapshot taken before the burst is still there")
-        XCTAssertEqual(ProjectBackupManager.listBackups(forProjectAt: url).filter { $0.label == "Before app update" }.count, 5,
-                       "…beside the first install of the burst and the newest three")
+        XCTAssertEqual(ProjectBackupManager.listBackups(forProjectAt: url).filter { $0.label == "Before app update" }.count, 4,
+                       "the earlier hourly restore point and the newest three snapshots remain")
     }
 
     /// A version's date is read from the end of its name, because it now decides whether the version

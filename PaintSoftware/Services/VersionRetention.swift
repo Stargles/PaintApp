@@ -5,16 +5,14 @@ import Foundation
 /// The schedule is the grandfather–father–son thinning backup tools use: the newest few versions
 /// are always kept, and beyond them the clock is cut into fixed slots — ten minutes wide for the
 /// last hour, an hour wide for the last day, a day wide for the last week, a week wide for the last
-/// month — and the **oldest** version in each slot survives. Everything else goes. A scene that is
+/// month — and the **newest** version in each slot survives. Everything else goes. A scene that is
 /// worked on every day ends up with at most 44 versions (3 + 6 + 24 + 7 + 4) however many saves it
 /// has had, and they are spread over a month instead of piled up in the last few minutes.
 ///
-/// **Why the oldest in a slot, not the newest.** A version here is the state a scene was in *before*
-/// a save, so the oldest version in a slot is the state the slot began with. A run of bad saves
-/// cannot rotate that out: the 2026-10-10 build that read the owner's scene wrong and autosaved
-/// minted five versions in nine minutes, and keeping the newest of those would have thrown away the
-/// one good copy, which is the first of them, as soon as a fourth arrived. The newest versions are
-/// still kept — that is what the first three are for.
+/// **The newest version in a slot survives.** A version here is the state a scene was in *before* a
+/// save; the newest-three rule protects recent saves, while each older clock slot contributes its
+/// most recent restore point. App-update snapshots use the same schedule and are not exempt from
+/// thinning; fixed `latest` and rolling pre-save slots are separate from dated bucket members.
 ///
 /// **Slots are fixed stretches of the clock, not windows that slide with `now`.** A sliding window
 /// re-decides every minute who is the survivor, so a stream of saves never lets anything graduate
@@ -39,7 +37,7 @@ nonisolated enum VersionRetention {
     static let newestKept = 3
 
     /// Finest first. The bands overlap on purpose: a version the ten-minute band lets go of is still
-    /// the oldest of its hour, or its day, or its week, or it is nothing special and goes.
+    /// the newest of its hour, or its day, or its week, or it is nothing special and goes.
     static let bands = [
         Band(width: 10 * 60, count: 6),              // the last hour
         Band(width: 60 * 60, count: 24),             // the last day
@@ -49,7 +47,7 @@ nonisolated enum VersionRetention {
 
     struct Version: Equatable {
         /// Names the version to its caller; also orders versions of the same instant, numerically
-        /// ("…-2" before "…-10"), so a burst inside one second still has an oldest.
+        /// ("…-2" before "…-10"), so a burst inside one second has a deterministic newest member.
         let id: String
         let date: Date
     }
@@ -67,7 +65,7 @@ nonisolated enum VersionRetention {
         for band in bands {
             let current = slot(of: now, width: band.width)
             var filled = Set<Int>()
-            for entry in ordered {
+            for entry in ordered.reversed() {
                 let index = slot(of: entry.date, width: band.width)
                 guard current - index < band.count, filled.insert(index).inserted else { continue }
                 kept.insert(entry.version.id)

@@ -55,65 +55,64 @@ final class VersionRetentionLogicTests: XCTestCase {
 
     // MARK: - The bands, one at a time
 
-    /// Each ten-minute slot of the last hour keeps its first version. Slot 0 began 5½ minutes ago,
+    /// Each ten-minute slot of the last hour keeps its newest version. Slot 0 began 5½ minutes ago,
     /// slot 1 15½, slot 2 25½.
-    func testTheTenMinuteBandKeepsTheFirstVersionOfEachSlot() {
+    func testTheTenMinuteBandKeepsTheNewestVersionOfEachSlot() {
         let versions = newest + [
             version("c-first", ago: 5 * minute), version("c-last", ago: 1 * minute),        // slot 0
             version("b-first", ago: 15 * minute), version("b-last", ago: 14 * minute),      // slot 1
             version("a-first", ago: 25 * minute), version("a-last", ago: 24 * minute),      // slot 2
         ]
-        XCTAssertEqual(kept(versions), ["n1", "n2", "n3", "c-first", "b-first", "a-first"])
+        XCTAssertEqual(kept(versions), ["n1", "n2", "n3", "b-last", "a-last"])
     }
 
     /// Past the hour only the hourly band is left. The current hour began 45½ minutes ago.
-    func testTheHourlyBandKeepsTheFirstVersionOfEachHour() {
+    func testTheHourlyBandKeepsTheNewestVersionOfEachHour() {
         let versions = newest + [
             version("h1-first", ago: 90 * minute), version("h1-last", ago: 60 * minute),
             version("h2-first", ago: 150 * minute), version("h2-last", ago: 120 * minute),
         ]
-        XCTAssertEqual(kept(versions), ["n1", "n2", "n3", "h1-first", "h2-first"])
+        XCTAssertEqual(kept(versions), ["n1", "n2", "n3", "h1-last", "h2-last"])
     }
 
     /// Past the day only the daily band is left. Today began 12¾ hours ago.
-    func testTheDailyBandKeepsTheFirstVersionOfEachDay() {
+    func testTheDailyBandKeepsTheNewestVersionOfEachDay() {
         let versions = newest + [
             version("d1-first", ago: 26 * hour), version("d1-last", ago: 25 * hour),
             version("d2-first", ago: 50 * hour), version("d2-last", ago: 40 * hour),
         ]
-        XCTAssertEqual(kept(versions), ["n1", "n2", "n3", "d1-first", "d2-first"])
+        XCTAssertEqual(kept(versions), ["n1", "n2", "n3", "d1-last", "d2-last"])
     }
 
     /// Past a week only the weekly band is left, and past four weeks nothing is. This week began
     /// 3½ days ago, so the previous one is days 3½ to 10½ back.
-    func testTheWeeklyBandKeepsTheFirstVersionOfEachOfFourWeeksAndNoMore() {
+    func testTheWeeklyBandKeepsTheNewestVersionOfEachOfFourWeeksAndNoMore() {
         let versions = newest + [
             version("w1-first", ago: 9 * day), version("w1-last", ago: 8 * day),
             version("w2-first", ago: 15 * day), version("w2-last", ago: 12 * day),
             version("w3-first", ago: 23 * day), version("w3-last", ago: 20 * day),
             version("beyond", ago: 26 * day),
         ]
-        XCTAssertEqual(kept(versions), ["n1", "n2", "n3", "w1-first", "w2-first", "w3-first"])
+        XCTAssertEqual(kept(versions), ["n1", "n2", "n3", "w1-last", "w2-last", "w3-last"])
     }
 
-    /// A slot starts on its boundary: the boundary second is in the slot it opens, and the second
-    /// before it is in the one it closes. Slot 0 began exactly 5½ minutes ago.
+    /// A boundary second belongs to the slot it opens; the previous second belongs to the slot it
+    /// closes. The newest three already fill the current slot, so the prior-slot representative is
+    /// the version one second before the boundary.
     func testASlotOpensOnItsBoundary() {
         let versions = newest + [
             version("opens-slot-0", ago: 5.5 * minute),
             version("closes-slot-1", ago: 5.5 * minute + 1),
             version("opens-slot-1", ago: 15.5 * minute),
         ]
-        XCTAssertEqual(kept(versions), ["n1", "n2", "n3", "opens-slot-0", "opens-slot-1"])
+        XCTAssertEqual(kept(versions), ["n1", "n2", "n3", "closes-slot-1"])
     }
 
     // MARK: - Bursts
 
-    /// **The shape of 2026-10-10.** A build read the scene wrong and autosaved, and every launch
-    /// stashed the previous, already-broken state: five versions in nine minutes. The first of them
-    /// is the last good copy, and it must outlast the others — keeping the newest of a stretch
-    /// instead would have dropped it on the fourth.
-    func testTheFirstOfABurstOutlastsTheBadSavesAfterIt() {
+    /// Within one ten-minute slot the newest restore point replaces older ones; the newest-three
+    /// rule independently keeps the last three saves in a burst.
+    func testNewestInBurstSlotAndNewestThreeAreKept() {
         var versions = (1...5).map { version("day\($0)", ago: TimeInterval($0) * day + 3 * hour) }
         for step in 0..<6 {
             let date = now.addingTimeInterval(TimeInterval(step) * 108)
@@ -122,17 +121,19 @@ final class VersionRetentionLogicTests: XCTestCase {
             versions = versions.filter { survivors.contains($0.id) }
         }
         XCTAssertEqual(Set(versions.map(\.id)),
-                       ["day1", "day2", "day3", "day4", "day5", "burst0", "burst3", "burst4", "burst5"],
-                       "the good copy (burst0) and the newest three survive, the history before it is untouched, and burst1 and burst2 go")
+                       ["day1", "day2", "day3", "day4", "day5", "burst2", "burst3", "burst4", "burst5"],
+                       "the newest member of each crossed ten-minute slot and the newest three survive")
     }
 
-    /// Versions made in the same second still have an order, so the oldest of them is a definite one:
-    /// collision counters sort numerically, not as text.
-    func testVersionsOfOneInstantAreOrderedByTheirCounters() {
+    /// Versions made in the same second still have an order: both bucket selection and newest-three
+    /// selection use numeric collision-counter order, not text order or input order.
+    func testNewestVersionsOfOneInstantAreOrderedByNumericCounter() {
         let ids = ["auto-X", "auto-X-2", "auto-X-3", "auto-X-4", "auto-X-10"]
         let versions = ids.map { VersionRetention.Version(id: $0, date: ago(60)) }
-        XCTAssertEqual(kept(versions), ["auto-X", "auto-X-3", "auto-X-4", "auto-X-10"],
-                       "the first, and the last three by counter: -3, -4 and -10")
+        XCTAssertEqual(kept(versions), ["auto-X-3", "auto-X-4", "auto-X-10"],
+                       "the newest three by numeric counter survive")
+        XCTAssertEqual(kept(Array(versions.reversed())), kept(versions),
+                       "selection is independent of filesystem enumeration order")
     }
 
     // MARK: - Dates that are wrong
@@ -143,7 +144,7 @@ final class VersionRetentionLogicTests: XCTestCase {
     /// beside them is untouched.
     func testVersionsFromTheFutureCountAsNowAndAreThinnedLikeAnyBurst() {
         let future = (1...20).map { VersionRetention.Version(id: "f\($0)", date: now.addingTimeInterval(TimeInterval($0) * hour)) }
-        XCTAssertEqual(kept(future + [version("genuine", ago: 30 * minute)]), ["f1", "f18", "f19", "f20", "genuine"])
+        XCTAssertEqual(kept(future + [version("genuine", ago: 30 * minute)]), ["f18", "f19", "f20", "genuine"])
     }
 
     // MARK: - The whole schedule
@@ -180,7 +181,9 @@ final class VersionRetentionLogicTests: XCTestCase {
         XCTAssertLessThanOrEqual(most, 44, "3 newest + 6 ten-minute + 24 hourly + 7 daily + 4 weekly")
         XCTAssertGreaterThanOrEqual(live.count, 36, "and a long-worked scene fills nearly all of it")
         let ages = live.map { now.timeIntervalSince($0.date) }
-        XCTAssertGreaterThan(ages.max() ?? 0, 21 * day, "the oldest survivor is weeks back")
+        XCTAssertGreaterThan(ages.max() ?? 0, 14 * day, "the newest save in the oldest represented weekly slot is weeks back")
+        let weekSlots = Set(live.map { Int(($0.date.timeIntervalSince1970 / (7 * day)).rounded(.down)) })
+        XCTAssertEqual(weekSlots.count, 4, "all four weekly slots have a newest representative")
         XCTAssertLessThanOrEqual(ages.filter { $0 < hour }.count, 3 + 6, "the last hour holds the newest three and a version a slot")
     }
 }
