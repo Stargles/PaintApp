@@ -45,5 +45,6 @@ validation faults went red, and restored source passed. Actual exporter source a
 methods: Mac baseline/restored 4/4, five deliberate faults red. Raw logs remain under
 `~/PaintWork/s51-cleanup/{repair-qualification,export-qualification}/`.
 
-Final fast Debug/Release and recovery/keyframe UI are pending. Static census is 5,251 fast tests in
-254 classes and 5,833 full-suite tests; three private static `testBrush` factories are excluded.
+Final fast Debug passed: **5,251 total = 5,247 passed + 4 skipped**, zero failures, matching the
+254-class static census. Final Release and recovery/keyframe UI are pending. Full-suite static census
+is 5,833; three private static `testBrush` factories are excluded.

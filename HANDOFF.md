@@ -42,7 +42,8 @@ build. Its strict signature/profile pass; expiry remains2026-10-30T00:18:54Z.
 **Current-library audit passed1/1:**256packages,2,181cels,95,350strokes,93streams; zero decode
 failures or pending repair findings. Copied-input hashes unchanged, temporary source removed exactly.
 Full723tracked source/PBX files frozen. Native ownership is with retire_file_repairs for final
-Debug/Release fast tiers plus Release recovery/key UI3. Own simulator1951527B-3A28-46D8-9FDA-E970663EE733, simlock, serial. Root owns docs and final
+Release fast tier plus recovery/key UI3. Final Debug is green:5,251 total=5,247passed+4skipped,
+zero failures; exact254class/static census. Release is running with the same frozen source. Own simulator1951527B-3A28-46D8-9FDA-E970663EE733, simlock, serial. Root owns docs and final
 merge/normal Release install after all gates. No physical UI fixture creation/deletion remains.
 Audit findings, if any, must be resolved before deleting repair services from the installed app.
 
