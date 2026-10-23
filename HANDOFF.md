@@ -34,7 +34,8 @@ previously left untouched. Do not treat the old archive as current audit evidenc
 Retirement agent may commit its WIP and owns simulator/build/test native work for focused current
 storage/restore gates then fast Debug+Release, own simulator/simlock. Root owns docs and read-only
 existing-app export/inventory on physical iPad; no physical UI/test/reinstall while those run. Owner
-has been asked to save before the metadata-export restart; reply pending. Final merge/deploy waits
+has been asked to save before the metadata-export restart; owner replied "Saved — ready to restart". Root now runs existing read-only -exportProject index-only
+against the installed app (no new build, no chosen-library mutations). Final merge/deploy waits
 for actual library audit and test-artifact cleanup, not just green logic tests.
 
 ## Qualification to reuse
