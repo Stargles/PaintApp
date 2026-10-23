@@ -98,7 +98,10 @@ six pictures reviewed with exact held/committed parity. Attempt1 never entered a
 because UI automation initialization timed out; the owner authorized retry and noted an enable prompt.
 Legacy attempt1:5 total=1 passed/4 failed/0 skips. Playback passed; four methods stopped on physical
 layout/screenshot/size-field premises. Diagnose those actual frames before any adapter correction;
-no feature assertion, gesture, count or deadline may be weakened. No Liquify invocation followed.
+no feature assertion, gesture, count or deadline may be weakened. Screenshot root cause is the
+raw capture's ignored rotation tag (including the mid-gesture reader); share one orientation-aware
+reader in the temporary physical adapter. Also expose the Move row and dismiss the floating keyboard
+between64×64 size fields. Prepare/review before rebuild; rerun affected four only. No Liquify invocation followed.
 No settings/library reset or preset changes. Preserve disposable scenes and full pictures. Native
 component cost is separate from app gesture latency. Keep one-shot repairs until real scenes are
 confirmed. HANDOFF has the exact next steps and evidence locations. Remove this item only with the
