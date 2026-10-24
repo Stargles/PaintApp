@@ -316,7 +316,7 @@ final class MetalFillSession {
     /// **The optional neighbour set** (TODO (113)): one byte a pixel, non-zero wherever something is
     /// already painted on the cel this fill lands on — the paint the seam branch can join, and anything
     /// else that layer holds. Always allocated, for `pathWallBuf`'s reason (Metal has no unbound
-    /// argument), and zero until `installNeighbours`. Internal ink-gap mending does not use this mask.
+    /// argument), and zero until `installNeighbours`. Internal mending uses it to protect existing paint.
     private let neighbourBuf: MTLBuffer
     /// Whether `installNeighbours` has run, so the caller builds the mask once per session rather than
     /// once per slider tick.

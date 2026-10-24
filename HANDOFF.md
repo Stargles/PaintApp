@@ -47,12 +47,14 @@ Old lead `s52-vector-points` is not authoritative. Root records tree `s52-erase-
 
 **Point qualification finished at47d7079c; integrated production remains frozen for deployment.**
 Corrected classes33/33 before and after2 assertion-red faults; exact Debug/Release each5259 reconcile.
-Root now owns the sole native slot: unchanged old47d `FillGapClosingBench` Release on39E84984,
-session32462, separate week-cost DD after normal source restoration. Evidence `s53-fill-mend/native/old-47d-bench0`.
-The copy-only APFS workload/control continuation finished; all images detached. Core/batch/contour
-source/tests are committed but uncompiled in the fill tree. Root must qualify focused Metal/contour/
-batch logic, mutations, affected cold UI + pictures, old/new distance/mask compatibility, press/tick
-and fragmented peak, then exact Debug/Release. No fill native success or device action is claimed.
+Root owns the sole native slot. Unchanged old47d FillGapClosingBench Release **2/2 passed** on39E84984;
+source restored/normal rebuilt in separate week-cost DD. OldMend0 medians: press98.3/168.7ms,
+tick6.0/4.9ms inside-box/open-page (simulator, wide ranges; not owner-device latency). Evidence
+`s53-fill-mend/native/old-47d-bench0`. Core/batch/compact-contour source and11new logic/1UI tests are
+committed but uncompiled. Static fast5270/full5854; planned focused9classes198. Root's small external
+`native/focused.py` reuses reviewed census/freeze/result readers. Next: focused green, reviewed mutants,
+normal restore, exact old/new reference comparison, cold affectedUI/pictures and required old workflows,
+Mend0/12/40 press/ticks+fragmented peak, exact Debug/Release. No fill native success/device action yet.
 
 Owned simulators: logic/fast M5 **39E84984-3C6F-4A6A-8DC8-D1098F6B623E**; current UI iPad9
 **56CC563F-06D0-42FC-9C18-A2B230DE2D38** and old-control **B0533278-3F74-4944-AC58-3514D87C85D6**
