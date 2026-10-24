@@ -12,13 +12,12 @@ is authorized by an old readiness answer: obtain fresh saved-scene readiness whe
 
 Current consolidated CODE is8bb68907ee135820900906a537c56ce46a76b887, clean in final-integration
 and final-check with all728 source byte/kind/mode entries exact. Main/origin stayafd2030c; no merge,
-push or device install. The new mend-free-caps task starts from that code; source edits are not yet
-authorized. Root owns docs/Git and the single Mac native lease; delegate implementation and review.
+push or device install. The new mend-free-caps task starts from that code; only the recorded test edits are authorized; product edits await proof review. Root owns docs/Git and the single Mac native lease; delegate implementation and review.
 
 Actual ordinary owner9 UI47 CLOSED47passed/0failed/0skipped/0expected, native0/wrapper0 at8bb.
 All8 whole classes and all6 genuine hold callers passed, including point-only wide-dot, raster move/
-undo/cold-reopen, shape, vector content and video. Exports/LOOK and final728/device reconciliation are
-finishing under Raster's existing lease; no next native operation is granted. Actual focusedb8652/2
+undo/cold-reopen, shape, vector content and video. Exports/LOOK and final728/device reconciliation are complete; root accepted all47 identities and
+LOOKed current Rough/new-fill/batch before/after. Raster released the native lease. Actual focusedb8652/2
 and root whole-picture LOOK are preserved. Earlier40 normal422/422 is green; new8bb422 is not run.
 
 IMPORTANT remaining product defect: current8bb new-fill AND Mend All pictures show3 tiny white free-
@@ -59,6 +58,20 @@ rect/demandSession. Keep all current40px full-picture/off-on/cache assertions; a
 full-RGBA body control and one complete12-pixel free-cap footprint assertion. No new method/helper,
 product edit or harness. Commit first, then run this one original method to establish its actual
 cap assertion red on unchanged production. The safe product-proof proposal remains under review.
+
+Actual committed regression5ae8073a reproduced RED on the GPU:1actual method, sole failure at
+FillMendLogicTests250, all12cap RGBA values[0,0,0,0]; body and preserved checks reported no failures.
+Native65/wrapper1 is an expected regression red, not a normal green or a product fix. All728 source
+entries stayed exact/clean; production is byte-identical8bb. Native lease is now released.
+
+Recorded test-fixture correction BEFORE edits: both existing2048x1024 FillMend setups call
+visiblePaperRect→square-only paperRect, so their top outline gesture is off the actual artwork.
+Extend those EXISTING helpers with defaulted canvasSize/aspect-fit arithmetic, preserving square
+callers, and pass each FillMend launch's SAME2048x1024 size. No new helper/framework/test method,
+app ID, product change or xform inversion. This fixes the actual four-sided enclosure proof and
+supports future non-square fixtures. Root grants only the two named test files after this record;
+cap-pixel UI assertions and product proof remain separate pending scopes. Preserve all original
+captured evidence and outside/undo assertions. Native class/owner-picture validation follows commit.
 
 ## Qualification and gates
 

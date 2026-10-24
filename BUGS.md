@@ -2571,3 +2571,11 @@ Root records this on tmp/s54-mend-free-caps before source edits. The existing8bb
 its pass cannot close this product gap. All8bb107/UI13/mask preparations remain offline/historical
 until successor source is committed and qualified. Main staysafd2030c; no device operation.
 
+
+## FillMend wide-canvas fixture assumes square paper — 2026-10-24
+
+Both2048x1024 scene setups use visiblePaperRect, which delegates to square-only paperRect.
+The top drawn outline lies above the artwork; actual pictures touch the artwork top. This is a
+test-geometry defect, separate from actual free-cap mending holes. Reuse aspect-fit geometry in
+the existing helpers with a defaulted explicit canvasSize; preserve every square caller. Record
+and validate the full visible enclosure without adding another screenshot-only test or helper.
