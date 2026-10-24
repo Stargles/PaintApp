@@ -236,6 +236,20 @@ final class FillMendLogicTests: XCTestCase {
                                "on mends all internal ink and preserves the whole outside at (\(x),\(y))")
             }
         }
+        // Reach bounds this stroke's six-pixel width, including its two free caps, not its length.
+        let atWidth = try XCTUnwrap(demandFill(session, reach: 6))
+        let body = (32 * Self.side + 30) * 4
+        XCTAssertEqual(Array(atWidth[body..<(body + 4)]), [255, 0, 0, 255],
+                       "PREMISE: Reach 6 still mends the six-pixel-wide stroke's body")
+        let caps = [20, 43].flatMap { y in (28..<34).map { x in (x: x, y: y) } }
+        let missingCaps = caps.compactMap { point -> String? in
+            let i = (point.y * Self.side + point.x) * 4
+            let rgba = Array(atWidth[i..<(i + 4)])
+            return rgba == [255, 0, 0, 255] ? nil : "(\(point.x),\(point.y)) \(rgba)"
+        }
+        XCTAssertTrue(missingCaps.isEmpty,
+                      "Reach 6 must cover all 12 free-cap pixels of the six-pixel-wide stroke: "
+                      + missingCaps.joined(separator: ", "))
         XCTAssertTrue(try XCTUnwrap(demandFill(session, reach: 0)) == off)
         XCTAssertTrue(session.hasPreparedMendFeatures, "turning off keeps the existing valid map")
         XCTAssertTrue(try XCTUnwrap(demandFill(session, reach: 40)) == on,
