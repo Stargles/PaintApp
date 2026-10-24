@@ -1,192 +1,182 @@
 # Handoff
 
-Start at AGENTS.md, then CLAUDE.md, TODO.md, BUGS.md and the relevant specification. Verify origin and
-all tmp branches before trusting this checkpoint. Kevin permits useful agents; conserve usage,
-prioritize quality over speed, delegate substantive work and continue without recommendation-only
-pauses. Clean architecture is the first priority. Give occasional concise queue updates.
+Start at AGENTS.md, then CLAUDE.md, TODO.md, BUGS.md and the relevant spec/PERFORMANCE.md. Verify origin,
+worktrees and every tmp branch before trusting this file. Kevin authorizes useful agents and a large
+budget, with quality/usage conservation before speed. Continue actionable work without recommendation-
+only pauses; give concise queue reports. Architecture is the top priority. Record before acting.
 
-## Active checkpoint — 2026-10-24
+## Authoritative checkpoint — 2026-10-24 morning
 
-**No new implementation is merged or installed yet.** Installed normal Release is bcd7a6af, executable
-UUID F6102F9A-6D31-3185-B078-47B4C41981D9. Preserve current artwork. This pass only read device file
-inventories/copied diagnostics; no device restart, app launch or install.
+**Nothing new is merged, pushed, installed or physically device-qualified.** Main/origin is afd2030c.
+Installed normal Release remains bcd7a6af, UUID F6102F9A-6D31-3185-B078-47B4C41981D9, provisioning expires
+2026-10-30T00:18:54Z. Current iPad artwork must be preserved; no device restart/launch/install this pass.
 
-1. **Point-only vector Liquify.** Native vector material transport is deleted whole; ordinary brush
-   rendering follows edited points with brush properties unchanged. Genuine Distort/exact-bake
-   placement, raster inverse, linked source following, undo and bounded held pictures remain. No
-   old/simple mode or fallback. Production net899 lines removed, including424-line temporary repair.
-   Independent architecture review found no concrete remaining runtime defect.
-2. **Smart saving.** Newest per fixed clock bucket, existing3/6/24/7/4 tiers, pre-save/latest/update
-   protection and4GB logical cap. Standalone14/14, reverse-loop8/14 assertion-red and restored14/14;
-   integrated retention14+backup21 passed in338. Bounded Session47–51 audit found no other concrete
-   dropped actionable ask. The declared28-save/26-cel copy workload passed;9 versions added12,562,432 allocated bytes under matched-fork/RO controls. No native rerun; all images detached and originals exact.
-3. **Test1 erasing respring.** Unresolved cause, no speculative production fix. Two same-build system
-   reports kill backboardd at1850MiB (October23 at18:47 and23:03 Toronto). Owner recalls one failure,
-   cannot identify time; do not choose either as confirmed match. PaintSoftware active, no app kill
-   reason:730.4/922.6MiB current/peak in first,768.0/1248.6 in second. Existing recorder flights predate
-   the first by27–30minutes and prove no causal link. Separate disk-write warning took no action;
-   dominant captured stacks symbolicate to FrameBakeStore, not byte proportions or crash cause.
-4. **New fill-mending request.** Extend the SAME setting to cover brushstroke footprints inside a
-   fill, including branches attached to the outer outline, while preserving that outline/no side
-   effects. Add one action for all stored fills in all cels of a **vector** layer (owner ruling).
-   Shared per-fill fix still covers raster+vector. No new raster storage/history authorized.
-   Owner also rules: protect uncertain joins instead of inferring hidden edges, and retain quick
-   real-time feedback. Shared exact nearest-feature preparation/internal-mend and vector batch action
-   are implemented in the separate fill tree; native qualification is in progress below.
-   Naive same-fill rays cross U/closed-hole boundaries; the enclosed-components-only restriction was
-   rejected. Review fixes require contiguous digital rays, all tied nearest-open witnesses and bounded
-   picture ownership. No new saved provenance or second mending mode.
-   Worktree `~/PaintWork/PaintApp-s53-fill-mend`; design evidence `~/PaintWork/s53-fill-mend/`.
-5. **Queued repository-wide audit.** Owner authorizes a thorough architecture/cleanliness/bug and
-   performance pass across app and streamer after current fill work, with a large available budget
-   and quality/regression prevention first. Trace consumers, prune dead/duplicated paths, improve
-   module responsibilities and measure real-time memory/latency opportunities. Record concrete
-   evidence before changes; use coherent independently reviewed refactors and normal qualification.
-   TODO carries the complete new ask; deferred product features remain deferred.
+- Integrated point/saving tree: `~/PaintWork/PaintApp-s52-vector-repair`, tmp/s52-vector-repair,
+  clean65b39e01. Qualified production is unchanged from6656a5a8; latest corrections were two stale tests.
+- Active fill tree: `~/PaintWork/PaintApp-s53-fill-mend`, tmp/s53-fill-mend. Production is frozen at
+  d1ff2ad0/265e588e. Later commits change only UI fixtures/readers and records. Resolve current HEAD
+  with Git; latest four-case UI fixture corrections are not yet qualified.
+- Audit library tree: `~/PaintWork/PaintApp-s54-library-ownership`, tmp/s54-library-ownership,
+  clean de28149c. Strict shared file-tree/content identity and UUID Trash ownership; six new logic
+  methods, PBX source registered. Parse/plutil only; no compile/runtime/UI/mutation gate. WIP, do not merge.
+- Audit background tree: `~/PaintWork/PaintApp-s54-background-ownership`, tmp/s54-background-ownership,
+  clean ec46b3e6. Export cancellation, maintenance serialization and bounded/cancelled thumbnails;
+  five new regressions. No native compile/runtime/UI/mutation gate. WIP, do not merge.
+- `tmp/s54-test-safety` is empty at afd2030c. No finding record/code there yet. Subagents hit account
+  usage limits; root preserved their partial work and completed initial tests/registration. Do not
+  assume these snapshots are finished. Do not repeatedly retry limited agents without a changed limit.
 
-## Authoritative source and native ownership
+Root owns the sole native slot. Last completed run: old47d FillMend2 control on owned iPad9 sim56,
+1passed(extension)/1failed(seam OFF control), exact723-source freeze. No native job is active at this
+checkpoint; check external root-status before launching in case a later command started one.
+`~/PaintWork/s52-vector-points/runtime-qualification/root-status.json` records current session/output.
 
-Integrated tree: `~/PaintWork/PaintApp-s52-vector-repair`, `tmp/s52-vector-repair`. Main/origin remains
-**afd2030c**. Integrated point/saving documentation head is65b39e01; fill branch rebases onto it. Source production is unchanged from6656a5a8; final338/17/UI qualified at ee50a570 or identical
-production. Later commits record new asks/diagnostics and correct only two stale test expectations.
-Old lead `s52-vector-points` is not authoritative. Root records tree `s52-erase-crash` is afd2030c.
+Owned simulators: logic M5 **39E84984-3C6F-4A6A-8DC8-D1098F6B623E** shut down; UI iPad9
+**56CC563F-06D0-42FC-9C18-A2B230DE2D38** booted; old-control9
+**B0533278-3F74-4944-AC58-3514D87C85D6** shut down. Confirm inventory; touch only owned devices.
+Fill DD: `~/PaintWork/s53-fill-mend/DerivedData`; old47d DD: `~/PaintWork/s52-saving-audit/week-cost/DerivedData`.
+Native wrappers under `s53-fill-mend/native` reuse the reviewed freeze/census/xcresult tools. The focused
+wrapper now resolves explicit UI/bench classes including multiple classes in one file. It defaults to
+prepare only; --run needs a clean full SHA and fresh output. Capture runner executes by default;
+--prepare creates an output folder, so use a fresh folder for the actual run.
 
-**Point qualification finished at47d7079c; integrated production remains frozen for deployment.**
-Corrected classes33/33 before and after2 assertion-red faults; exact Debug/Release each5259 reconcile.
-Root owns the sole native slot; no native job is currently active. Old47d Mend-Off Release
-FillGapClosingBench2/2 passed (press98.3/168.7ms, tick6.0/4.9ms; simulator, not iPad latency).
-Core/batch/compact-contour source is committed. Normal b84 focused203/203 passed, no failures/skips,
-all723 tracked bytes/modes exact. Its31-fault qualifier was deliberately stopped after18 actual native
-assertion-red faults when default-overlap sampling was independently found wrong; case19 interrupted,
-no fasts reached, exact723 restored. Existing completed faults retain individual evidence only.
+## Qualified point-only Liquify and saving
 
-Default-overlap real bucket regression dc48ff3a reproduces attached and detached failures with six
-outcome/edit/drawn-centre assertions, zero premise failures. Coverage-sampling fix24195818 then passes
-that exact method1/1; ordinary lasso still samples its collar through one shared session preparation.
-No saved provenance/override/mode flag. Reach regression f6ce9b62 fails exactly two positive assertions
-for overlap2/Reach6, with no premise/protection failures; cache normal test passes. Fix d1ff2ad0 measures
-remaining paint-to-paint distance while proving full open/source endpoints and all tied normals.
-Its two targeted methods pass2/2, including fractional/diagonal/small-window/hole/rim controls, exact723
-restored. Cache invalidation f6ce9b62 clears metadata before destructive rebuilding. A temporary
-post-basin refusal at threshold1 then passes1/1, native marker proves the one-basin fault executed and
-all723 source bytes/modes restore exactly. No permanent fault hook. Full focused expected206, static
-fast5278/full5863. Root coordinates the sole native slot; no native job currently active.
+Native vector material transport is removed whole: InkMaterial, archives, renderer branch and obsolete
+controls/tests. Point positions flow through the ordinary renderer with brush properties/seed retained.
+Genuine Distort/exact-bake StrokePlacement (104lines), raster inverse flow, linked recipes, local edit/
+undo and LatestWins remain. Independent source review found no concrete defect. Net899 production lines
+removed includes424 lines of temporary repair ADDED and still present; that service is not retired.
 
-Still pending: final focused baseline/restored gates, remaining reviewed faults, exact old/new EDT
-reference captures, Mend0/12/40 press/tick and fragmented peak measurements, affected coldUI14/pictures,
-required Debug/Release fast tiers. Old capture1/1 uses six fixtures including preserved Test1/527strokes
-crop with exact source/input restoration; new capture not run. Final Release/device readiness/export
-remain pending. No new implementation is merged, installed or device-qualified.
+At47d7079c or proven identical production: runtime338/338 before/after17 assertion-red faults (16auto,
+manual case09 verified actual assertion/source after parser omission); corrected classes33/33 before/
+after2 faults; Debug AND Release5259=5255passed+4known opt-in skipped, all identities/255classes reconcile.
+PBX1317 unique, lints/plutil clean. UI9/9(Liquify4+Raster5), old workflows10/10; pictures inspected. Old
+control widens a round dot1.918×; current retains its round brush mark. Full current UI suite not run.
+Evidence: `s52-vector-points/serial-qualification/results-47d7079c-corrected-fasts/`,
+`runtime-qualification/current-final-ui9-296/`, `round-dot-old-control/final-60a1/`.
 
-Owned simulators: logic/fast M5 **39E84984-3C6F-4A6A-8DC8-D1098F6B623E**; current UI iPad9
-**56CC563F-06D0-42FC-9C18-A2B230DE2D38** and old-control **B0533278-3F74-4944-AC58-3514D87C85D6**
-are shut down. Check/boot only own device as routine setup. Integration DerivedData:
-`~/PaintWork/s52-vector-points/integration/DerivedData`. Never use reset-heavy harness on real iPad.
+Newest-per-clock-bucket retention preserves3/6/24/7/4 tiers, pre-save copies/update protection/4GB logical
+cap. Standalone14/14; reverse-loop fault8/14red/restored14. Integrated retention14+backup21 qualify.
+Session47–51 bounded ask audit found no other concrete dropped actionable request.
 
-## Qualified evidence and remaining gates
+Storage cost: actual28 saves over7 daily reopens on copied real Misc/Test2(26cels,2048×1024) retained9
+versions,182encodes/462reuse. Two matched APFS no-op forks16,207,872 allocated bytes; delete-only-Backups
+fork3,645,440; **delta12,562,432bytes/11.98MiB**, including APFS/delete metadata.24 stable RO samples,
+6 RO checks and all original/live hashes match; images detached. Initial8192-byte remount-control
+failure preserved. This is one declared workload, not actual iPad history or300–1000-cel extrapolation.
+Evidence: `s52-saving-audit/week-cost/storage-forks-47d7079c/review.md`.
 
-- **Runtime338/338**, zero failures/skips/expected, before faults and after exact restoration.
-  **17/17 faults**:16 automatic assertions plus root-manual09, whose explicit XCTFail message/source
-  location was independently verified despite the conservative parser omission. Original inconclusive
-  and owner-interrupted artifacts remain untouched. Composite exact723-file restore proof:
-  `s52-vector-points/serial-qualification/results-ee50-run02/aggregate17-report.json`.
-- Final corrected fasts at47d7079c: **Debug AND Release each5259=5255passed+4known opt-in skips**,
-  zero failures/expected, all5259 method identities/255 classes reconcile. Corrected full classes33/33
-  before and after2 actual assertion-red faults, all723 bytes/modes restored. The two fixes remove
-  stale fill-placement and oldest-plus3 expectations; app328/project4 and earlier338 test sources are
-  byte-identical to their qualified baseline. Evidence:
-  `serial-qualification/results-47d7079c-corrected-fasts/final-qualification-checkpoint.json`.
-  Earlier failed census artifacts remain preserved in `results-ee50-restored-fasts-run02`.
-- Static census: focused338, fast5259 (raw5262 minus3 private static helpers), full5842; PBX **1317**
-  unique objects. Lints/plutil/duplicate check passed. Full current UI suite **not run**.
-- **Final affected UI9/9** (Liquify4+Raster5), zero fail/skip, owner-size landscape images inspected by
-  root+agent: `runtime-qualification/current-final-ui9-296/`. Old final control1 intended width failure:
- 0.2000→0.3835443, **1.918×**; setup/movement/crop passed, later height/aspect assertions not reached.
-  Root inspected both actual pictures: `round-dot-old-control/final-60a1/`. Old source restored723 files
-  and historical720-file baseline; clean1c5c422e in `PaintApp-s52-format-baseline`.
-- **Required old workflows10/10**: literal pan from grey+rotation, Move grip drag/release and stroke,
-  baked playback, graph node+diamond drag/Undo. Root viewed Move/rotation/linked/playback; no explicit
-  graph picture. `runtime-qualification/current-ui10-f34.xcresult` and visual reviews. Test helper brush/
-  eraser prefixes later generalized identically; production unchanged. Failed held-path slider attempt
-  was reverted whole. Final dot uses existing editor Size, explicit field-edge geometry/original oracles.
-- **Repair75/75** (35repair+21backup+19location), before/after13 deliberate repair faults/16 failed
-  executions. Actual prior writer produced six fixture packages including Distort/bake/linked/material.
-  Copy-only real-library gate:256 input packages/3180 files/567855190bytes;266 conversions including10
-  untouched protection copies. Normal retention pruned24 backups; all242 survivors strictly validated
-  AND actual ProjectStore.load opened (2034cels/1459 vector). Second run0/byte-exact, original hashes
-  unchanged. `repair-qualification/README.md`; do not print huge real-library-report.json.
+## Fill implementation and exact qualification
 
-Current codecs require geometryVersion1. One-shot repair strictly enumerates Projects/Backups/Trash,
-protects originals, validates stages and atomic exchanges with directory-identity ownership; validates
-all interrupted owners before any cleanup. Ambiguous unreadable manifests remain for existing backup
-recovery; basename fallback requires exactly one matching ID. No old/default runtime decoder.
-**Retire this temporary service whole only after Kevin confirms real current artwork.**
+Same Mend Gaps setting covers detached AND outline-attached interior stroke gaps, conservatively
+protecting uncertain joins/true holes/outer outline. Shared per-new-fill correction covers raster and
+vector; Mend All Fills is vector-only across owned cels, generated linked cels remain derived. Current
+references/settings at cel.startFrame, serial one-window work, bounded path/undo preflight, atomic
+all-cel commit/one undo and version guards. Exact current fill omitted from its own frozen references;
+render/input failures propagate as atomic refusal. No saved seed/provenance or raster-history redesign.
 
-## Backup-cost experiment and device next steps
+Shared exact EDT replaces JFA whole; two existing8N buffers reused, no per-tick CPU image scan. Fixed
+circle LUT/all tied witnesses, contiguous supercover rays and unknown-rim veto protect boundaries.
+Reach counts remaining paint-to-paint gap AFTER overlap while proving full open/source endpoints;
+proof bound derives existing overlap range. Default-overlap batch sampler uses known coverage through
+shared preparation; ordinary lasso collar semantics unchanged. Structure metadata invalidated BEFORE
+destructive rebuilding. Threshold uses precise RGBA8 division, no epsilon/global fast-math workaround.
+Halo78; saved mendsNeighbourGap wire key and UI identifier remain stable despite internal name cleanup.
+Shared contour tracer replaces old dictionary/outgoing arrays/COW/simplifier, one byte/grid vertex and
+turn-only paths with early point cap; no duplicate batch tracer.
 
-`~/PaintWork/s52-saving-audit/week-cost/` contains reviewed external driver/template. Separate tree
-`PaintApp-s52-week-cost` is clean47d7079c; the native workload passed1/1 and source/input restored exactly.
-Disposable512MiB APFS image; real Misc/Test2 copy (26cels,2048×1024,25files/1713279logical bytes),7 daily
-reopens×4 actual saves with small raster edit. Existing retention replays dated slots; validate/open
-survivors. Stable whole-filesystem allocated-block delta retained-minus-live-only, remount controls,
-Spotlight excluded and untouched source/live hashes. No du/logical/clone-sum substitute. This is a
-small declared workload, NOT historical device cost or a300–1000-cel estimate. Own DerivedData;
-normal rebuild required before any subsequent UI/install from diagnostic build products.
+At265e588e: **206/206** focused before and after **22/22 actual assertion-red continuation faults**,
+exact723 bytes/modes restored after each. Cache compound fault includes native one-basin marker and
+direct assertion failures; green refusal-only control1/1 separately proved the fault path. Preserved
+partial b84 batch18 faults plus current22 overlap5 => **35 distinct qualified recipes**, not40.
+**Debug AND Release5278=5274passed+4known opt-in skips**, zero failures/expected, exact identities/counts.
+Full static5863, PBX1317 unique, UI identifiers/helpers/plutil/diff clean. No full UI/device gate claimed.
+Final report: `s53-fill-mend/native/qualification-265e588e-run02/report.json`.
 
-Initial RW remount-only control changed allocation8192bytes and was rejected. Storage-only matched
-fork controls then qualified: both no-op forks16,207,872 allocated bytes, delete-only-Backups fork
-3,645,440 bytes, **incremental12,562,432 bytes (11.98MiB)** including APFS/delete metadata. All24 stable
-samples,6 strictly RO mounts/remounts and Library hashes matched; original image exact/all forks
-detached. No workload rerun. Evidence `week-cost/storage-forks-47d7079c/review.md`; rawfailure preserved.
+Old/new capture each1/1: six fixtures including preserved Test1 crop(527strokes), five widths each,
+zero changed filled masks. New exact distances/levels match exhaustive five-fixture oracles and33
+real-crop probes; old JFA has11 synthetic distance errors. Real original package/input hashes match.
+`old-vs-exact/comparison-265e.json`; new attachment858872F2-7288-4DC4-B607-EA81B8CC17C9.json.
 
-After clean Debug/Release qualification and cost measurement, build signed clean Release using identical
-clean/build args/DD, deep verify and profile>=5days. Obtain a **fresh saved-scene/unlock readiness and
-verified current-library export before restart/install**; preserved export predates later Liquify.
-Drive normal launch/real scenes, keep repair until confirmation. No fresh readiness yet this pass.
+Release MendOFF bench2/2: new inside/open press medians124.9/57.5ms, cached ticks3.4/1.6; old98.3/168.7,
+ticks6.0/4.9. Wide overlapping press ranges do not establish improvement/no regression; paired repeat
+for the inside difference remains. Reach matrix1/1 covers12 cases (Reach0/12/40), one structure build,
+no tick rebuilds and session buffers+RGBA inside configured budget.32768-island/131072-corner contour
+traces/archives/reopens; path payload2,360,231B, sampled held delta13,123,584B. Full4096 M5 stress peak
+629.99MiB process footprint is not isolated GPU/driver/device RSS. Evidence `old-vs-exact/reach-matrix-265e-run01/`.
 
-Eraser next evidence: standard bounded Activity Monitor trace may expose app+backboardd memory; verify
-actual fields before inference, counted successful To Cross cuts plus same-run flight. Use only unique
-owned copy of Test1, no original changes; cleanup through gallery/fresh export. Prepared plan:
-`s52-erase-crash/device-diagnostics/next-device-memory-capture.md`. No privileged/root bypass.
+UI14 at265e:10passed/4failed. Liquify4, OutsideTheCanvas4, graph-key drag1 and playback1 pass. Two NEW
+FillMend cases stopped on wrong raster-default premise; corrected6bc20170 uses Rasterize layer0 then
+checks actual raster menu. These two now pass2/2 including batch undo/redo and one-fill output. Root
+looked at whole-screen owner-landscape pictures: long attached/detached white gaps close, outside stays
+white; tiny protected end pixels remain visible. `native/new-ui2-6bc-run01/` exact723 freeze.
+Two OLD tests fail pixels in UI14; old47d control reproduces seam OFF failure, extension passes. Their
+Screen duplicated pixel decoding/ignored orientation and hardcoded geometry could hit the dock. Current
+unqualified fixture correction reuses ScreenshotPixels, visiblePaperRect, explicit canvas sizes,
+landscape and measured slider adjustment, retaining all original positive/OFF assertions. Run the full
+four-case FillMend class next and inspect pictures. Full-screen captures are correct owner1080×810;
+app.screenshot PNG metadata/cropping can produce a misleading partial portrait view. Touched screenshots
+now use existing XCUIScreen.main protocol seam. Do not mistake that for a product layout defect.
 
-Preserved Test1 is4096²,527 strokes on Vector3/frame2, no material data. Raw eraser7.962 means canvas
-points, NOT percent/326px. Mode3 capture1:1/1,3 successful cuts/3 full4096RGBA assignments, footprint
-854–985MiB; root viewed2 pictures. Capture2 stopped before gestures at dark-pixel premise. Capture3
-passed1/1 but clone removed before recorder collection: no exact cut/render count. All old source
-restored; simulator memory cannot establish backboardd cause. New read-only report/symbolication:
-`s52-erase-crash/device-diagnostics/resume-2026-10-24/device-evidence-review.md`.
+## Temporary repair / release safety
 
-## Preserved owner data and deferred work
+Repair75/75 and13 repair mutants (16failed executions) qualify. Actual prior writer generated six
+fixtures (material/Distort/bake/linked/plain ink). Copy-only full library:256input packages/3180files/
+567855190bytes,266 conversions incl10 untouched update snapshots; normal retention prunes24 backups,
+all242survivors strictly validate AND load (2034cels/1459vectors). Second run0, original hashes exact.
+Current codecs require geometryVersion1; no old/default decoder. Ambiguous unreadable manifests remain
+for recovery; basename fallback requires exactly one backup ID. Keep repair until owner confirms CURRENT
+real artwork after fresh backup/install, then retire it WHOLE. Evidence `s52-vector-points/repair-qualification/`.
 
-Library `~/PaintWork/s51-cleanup/current-library/Export/`:10Projects+228Backups+18Trash,567855190logical
-bytes. Do not delete recovery copies. Owner manually removed old gallery test scenes; no cleanup needed.
-File Provider storage needs existing read-only ProjectExport hook, then app-container copy/verification;
-Tailscale reachability alone does not expose chosen storage. Historical AirDrop copy:
-`~/PaintWork/s50-liquify/device-backup-2/external-library/`. Prior signed profile expires2026-10-30T00:18:54Z.
+New repair-only timer1/1: **11.013s** around run() on M5,266 conversions; second0/original3180 hashes exact.
+The107s total includes clone/hash/reopen checks. PaintApp.init currently runs @MainActor repair BEFORE
+first screen; resolve responsiveness before install. A detached call to @MainActor run is insufficient.
+No iPad startup/watchdog claim. Prepared genuine old-writer cold harness under
+`s54-architecture-audit/repair-timing/` is NOT run. Root fixed missing plist import/process stopper and
+Study-folder navigation. It builds with temporary test, stops/restores723 source, host seeds an empty
+owned simulator and tests without building. Review before grant; use a fresh owned simulator since56
+contains test projects. No production hook. Timer evidence `capture-02` and `real-library-report.json`.
 
-Prior cleanup retired six saved-file repairs and fixed read-only export relative folders; main df459377,
-installed bcd7a6af. Historical fasts5251 and UI3 predate current source. Renewal evidence:
-`docs/bug-evidence/auto-resign-2026-10-22.md`. Older freeze logs match pre-Liquify f813346; owner noticed
-repair messages only. Keep recognizer repair; no speculative UIKit fix.
+## Audit and crash next
 
-Deferred TODO: Stream27stage5 owner/laptop; multi-cel22 and linear-light10 owner-deprioritized; brush
-importers37 dropped; future audio28/video30/interpolation require briefs. Raster Move undo/freeform-text
-minimum remain deliberately carried. Do not research later features.
+[ARCHITECTURE_AUDIT.md](docs/ARCHITECTURE_AUDIT.md) records19 candidate clusters and qualification gaps.
+Initial read-only review is consolidated; proceed to reproductions/coherent fixes, not endless generic
+research. Full file coverage has inventory-only gaps. Both WIP branches start at origin afd2030c, so
+integrate/rebase deliberately and preserve origin TODO on conflicts; do not resurrect finished items.
 
-## Current native checkpoint — 2026-10-24 morning
+Test1 respring cause remains unresolved. Two installed-build Oct23 Jetsam candidates18:47/23:03Toronto
+name backboardd1850MiB per-process limit; Paint active with no app kill reason, current/peak730.4/922.6
+and768/1248.6MiB, sameF610 UUID/different lifetimes. Owner recalls one spinner incident, not time, so
+neither report is a confirmed match. Disk warning with57/69captured stacks on FrameBakeStore atomic
+writes is sampled stack evidence, not backup byte proportion or cause. No speculative production fix.
 
-At265e588e, fill focused206/206 passed before and after22 actual assertion-red continuation faults; all723 tracked bytes/modes restored after each. Debug AND Release each5278=5274passed+4known opt-in skipped, zero failures, exact identities/counts. Combined with the preserved partial batch this qualifies35 distinct recipes (not40). Final report: `s53-fill-mend/native/qualification-265e588e-run02/report.json`.
+Preserved Test1:4096²,7cels/6vector, Vector3/frame2 has527strokes/12973samples/max118, no Liquify/material.
+Eraser7.962 means CANVAS POINTS, not7.96%/326px. To Cross Mode3 repeatedly updates full base. Simulator
+capture1:3successful cuts/3full4096RGBA assignments, footprint854–985MiB,2pictures inspected. Capture2
+premise failed before gestures; capture3 clone removed before recorder so exact cut count unknown.
+All original source restored; simulator evidence does not prove backboardd origin. Next physical plan:
+standard bounded60s Activity Monitor trace, verify fields first, counted cuts and same-run flight on
+UNIQUE owned Test1 copy, cleanup/fresh export. No privileged/root privacy bypass. Evidence
+`s52-erase-crash/device-diagnostics/resume-2026-10-24/` and `next-device-memory-capture.md`.
 
-New exact capture1/1 passed against the old47d capture: six fixtures (including realTest1 crop), five gap widths each, zero changed filled masks. Exact oracle errors are zero on the five exhaustive synthetic fixtures and33 real-crop probes; old JFA has11 synthetic distance errors. `old-vs-exact/comparison-265e.json`.
+## Device and deferred work
 
-Existing MendOFF Release bench2/2: new inside/open press medians124.9/57.5ms, cached ticks3.4/1.6ms; old98.3/168.7 and6.0/4.9. Broad overlapping press ranges do not establish a latency improvement/no regression; paired repeat remains worthwhile for the slower inside median. Simulator only. Reach matrix1/1 passed12 cases (Reach0/12/40), one geometry build each, no cached-tick rebuild, session buffers+RGBA within configured budget. Fragmented32768-island/131072-corner path traced, archived and reopened. Full4096 stress sampled process peak629.99MiB is M5 process evidence, not owner-device RSS. `old-vs-exact/reach-matrix-265e-run01/`.
+No fresh saved-scene/unlock readiness or current-library export yet. Before any physical restart or
+install: fresh readiness, read-only -exportProject -exportAll, copy Export with devicectl, verify index/
+all paths/counts/bytes/hashes, clear only temporary Export through index-only hook, then normal launch.
+Preserved export predates later Liquify. Build signed clean Release with identical clean/build args/DD,
+deep verify/profile>=5days, matching binary/dSYM UUID, required old workflows before install. External
+final-release plan is STALE at b84; repin final source. No resetGallery/uninstall/normal scene deletion.
+Device UDID00008030-000151492EC3C02E; CoreDevice E3B83820-DF74-5042-B52B-0D5BA17E4877; verify fresh inventory.
+Secrets `~/.config/paintapp/.env`, never print. Beware auto-deploy before pushing unready code.
 
-Repair-only timer1/1:266 conversions,11.013s around run() only; second run0, all original3180 file hashes unchanged. The rest of the107s run is copy/hash/strict reopen validation. Since PaintApp.init invokes @MainActor PointGeometryRepair before first UI, startup responsiveness is a measured pre-install concern; do not assume Task.detached moves an @MainActor method. Genuine old-library cold app check and minimal scheduling solution remain; no iPad watchdog claim. Prepared external cold harness now has root fixes for missing plist import, process stopper, and Study-folder navigation; not executed.
+Preserved library `~/PaintWork/s51-cleanup/current-library/Export/`:10Projects+228Backups+18Trash,
+567855190logical bytes, hashes frozen. Do not delete recovery copies. Owner manually deleted old
+physical test scenes; no gallery cleanup needed. File Provider root requires read-only export; Tailscale
+does not expose it. AirDrop history under s50-liquify/device-backup-2/external-library.
 
-UI14 at265e:10passed/4failed, zero skips, full723 freeze exact. Liquify4, OutsideTheCanvas4, graph-key drag1 and playback1 all pass. The two new FillMend cases stop on a wrong raster-default fixture premise; vector is the real default. This commit corrects it by using Rasterize on layer0, then testing the real raster menu. Two old FillMend pixel tests also fail (extension edge and MendOFF control); preserve and triage with old47d controls, no product cause assumed. Their private Screen bypasses the shared orientation-aware ScreenshotPixels, and old geometry may reach the dock on the9th-gen layout. Root looked at actual extension, seam, round-dot and Move pictures; full-app PNGs have orientation metadata/cropping to investigate, so complete owner-layout visual qualification remains pending. Added whole-screen diagnostic capture to the two new fixture flows. Native output `native/ui14-265e-run01`; no active native process after completion.
-
-Repository audit initial review has19 candidate clusters (external `s54-architecture-audit/findings-index.json`), not proof every file was audited. Subagents hit account usage limits; root preserved unqualified work:
-- `tmp/s54-library-ownership` de28149c: strict bounded tree/content identity + UUID Trash ownership,6 new regressions/PBX registration; parse/plutil only. No compile/runtime/UI/fault gate.
-- `tmp/s54-background-ownership` ec46b3e6: export cancellation, maintenance save-queue serialization, bounded/cancelled thumbnail backfill;5 new regressions. No native compile/runtime/UI/fault gate.
-- `tmp/s54-test-safety` is empty at origin afd2030c, no implementation.
-Do not merge/install these snapshots. All are clean, outside Desktop. Root retains sole native slot. Main/origin remains afd2030c; installed Release bcd7a6af remains untouched. No fresh readiness/export obtained.
+Deferred: Stream27stage5 needs owner/laptop; multi-cel22/linear-light10 owner-deprioritized; importer37
+dropped; future audio28/video30/interpolation require briefs. Raster Move undo/freeform-text minimum
+remain deliberately carried. Older freeze logs were pre-Liquify f813346, owner saw repair message only;
+keep recognizer repair/no speculative UIKit fix. Renewal evidence docs/bug-evidence/auto-resign-2026-10-22.md.

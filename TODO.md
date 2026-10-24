@@ -8,12 +8,13 @@ conservation and output quality take priority over speed. Use focused delegation
 for routine work, with occasional queue reports. The owner asked to work independently while asleep
 until 10 a.m. Toronto time. The later point-only vector ruling below supersedes fixed exterior pixels.
 
-**Checkpoint2026-10-24:** point-only Liquify and newest backup retention are integrated, unmerged
-and not installed. Final338/338,17 runtime mutants, final9/9 affected UI, old-code1.918× stretch control
-and required old workflows10/10 qualify. Corrected classes33/33 and2 mutation faults qualify; exact
-Debug/Release each5259=5255passed+4known skips. The28-save workload and matched-fork physical controls passed:9 retained versions added
-12,562,432 allocated bytes including APFS metadata on the declared26-cel real scene. Erasing cause is unresolved. Fill engine and vector batch action are in implementation.
-Installed normal Release remainsbcd7a6af; device reads only, no restart/launch/install this pass.
+**Checkpoint2026-10-24:** point-only Liquify/newest retention remain unmerged and not installed; their
+logic, affected UI and saving-cost gates qualify. Fill core focused206 and35 distinct fault recipes
+qualify; Debug/Release each5278=5274passed+4known skips. Six old/new fixtures×five widths preserve filled
+masks. New fill/batch UI2/2 and ten old workflows pass; two older fill UI tests need corrected harness
+rechecks. Audit has19 source candidates, two unqualified implementation branches. Startup repair took
+11.013s on M5 before first UI; cold-start/scheduling work remains before install. Erasing cause remains
+unresolved. Installed Release is stillbcd7a6af; no device launch/restart/install this pass.
 
 ## How to read and keep this file
 
@@ -196,27 +197,25 @@ preparation and bound any new work; avoid expensive full-image CPU analysis on e
 are not individually identifiable; no raster storage redesign is authorized. The per-fill mending
 correction still uses the shared raster/vector fill pipeline. Use the same setting/semantics as an
 individual fill; inspect existing batch edit/undo/save patterns.
-Core, vector batch and the shared compact contour replacement are committed. Normal focused203/203
-passed;18 mutation cases are assertion-red before deliberately stopping for a newly found default-
-overlap sampling defect. The real bucket regression confirms that defect with no premise failures;
-covered-area sampling then passes it1/1. Broader final qualification, Reach-after-Overlap correction
-and cache-refusal safety remain in progress. Static counts are provisional until those tests land.
+Core, vector batch and compact shared contours are implemented. Default-Overlap sampling, Reach-after-
+Overlap, refused-rebuild invalidation and exact own-fill reference exclusion are fixed and qualified.
+At265e588e, focused206 passed before/after22 assertion-red faults with exact723-source restoration;
+preserved earlier faults bring distinct qualified recipes to35. Debug AND Release each5278 reconcile.
+Old/new masks match six fixtures×five widths;12 Reach stress cases and fragmented archive gate pass.
+New fill and Mend All Fills cold UI2/2 pass at6bc20170, with owner-size whole-screen pictures inspected.
+Ten other current workflows pass. Old47d control reproduces the stale seam control failure; its
+extension passes. Corrected shared screenshot/visible-paper fixtures still need a complete class run.
 Worktree: `~/PaintWork/PaintApp-s53-fill-mend`, `tmp/s53-fill-mend`.
-- [ ] Reproduce internal ink holes and identify the root cause in the existing mending path.
-- [ ] Cover interior stroke gaps while preserving the original outer edge, using the current setting.
-- [ ] Qualify the compact shared contour replacement, fragmented masks and preflighted point-limit refusal.
-- [ ] Add the layer-wide action for every fill in every cel; use existing mutation/undo ownership.
-- [ ] Reproduce and fix batch reference sampling for fills saved with default Edge Overlap2 (BUGS.md); existing contour-ring sampling mistakes black ink for background.
-- [ ] Keep Mend Reach measured after Edge Overlap for interior gaps, with bounded full-boundary proof and overlap6/5 versus raw10/9 regressions.
-- [ ] Invalidate cached fill geometry before destructive rebuilding so a refused preparation cannot reuse overwritten buffers.
-- [ ] Exclude each repaired fill from its own references and propagate unavailable input failures atomically (independent review; BUGS.md).
-- [ ] Mutation-backed logic tests, cold UI/pictures at iPad9 size and required Debug/Release gates.
+- [ ] Qualify all four FillMend UI cases after fixture/helper corrections; inspect whole-screen pictures.
+- [ ] Resolve the uncertain inside-press timing difference with paired baseline runs; no device extrapolation.
+- [ ] Resolve first-screen repair scheduling/cold launch before deployment (audit item below).
+- [ ] Fresh saved-scene readiness/export, signed clean Release, device checks, owner artwork confirmation and merge.
 
 ---
 
 ## Repository-wide architecture, cleanliness and performance audit — 2026-10-24
 
-**Refactors queued after active fill-mending qualification; read-only inventory can run alongside it.**
+**Active initial review; isolated refactor snapshots remain unqualified.**
 Owner asks for a thorough audit of everything:
 “codebase cleanliness and good architecture as well as performance is a priority”, “refactor things
 that are messy and also find and fix bugs”, “Zombie code or bloat … should be dealt with. Dont be
@@ -231,10 +230,18 @@ Use independent reviews where useful, measure performance claims, and qualify ea
 with meaningful logic/mutation coverage, affected workflows/pictures and required repository gates.
 Preserve real scenes and saved-format repair rules. Deferred product features remain deferred.
 
-- [ ] Inventory modules, ownership and active dependencies; split the audit into bounded areas.
-- [ ] Review all areas and record actionable evidence, including bugs and real-time costs.
-- [ ] Refactor/fix/prune justified findings in coherent changes with independent review.
-- [ ] Prove affected behavior and performance; run regression gates and record limits plainly.
+The current19-candidate queue and evidence are in [ARCHITECTURE_AUDIT.md](docs/ARCHITECTURE_AUDIT.md).
+The two implementation branches are WIP (no native qualification), not finished fixes. Subagents hit
+account usage limits; root continues. The full source inventory is not yet fully reviewed.
+
+- [ ] Data protection: migration identity and Trash backup ownership; qualify library branch.
+- [ ] Background ownership: export cancellation, save-stage cleanup and thumbnail close; qualify branch.
+- [ ] Temporary repair: cold old-library launch, responsive first screen, then retire whole after owner confirmation.
+- [ ] Rendering/storage: derived-frame recovery/close, masked source budgets, editable raster residency, video pressure.
+- [ ] Stream transport: bounded ordered backpressure, framing limits, connection readiness/close ownership.
+- [ ] Editor/brush: preview identity/budget, undo payload accounting, saved palette validation; verify stationary-sample opportunity.
+- [ ] Test hooks/obsolete runners: protect real-device persistent data and prune only verified unused paths.
+- [ ] Complete file-level review gaps, independent reviews and regression/performance gates before closing audit.
 
 ---
 
@@ -362,9 +369,3 @@ against a transcript this audit does not have.
 - **The raster Move's undo half.** `finalizePendingGesturesForHistoryAction` has fill, shape and text
   arms and no raster-float arm.
 - **Freeform text's minimum-size exemption** is still unruled.
-
-### Active validation update — 2026-10-24 morning
-
-Fill core: focused206/206,22 continuation faults, exact Debug/Release5278 each are qualified at265e588e; old/new reference masks match across6 fixtures×5 widths, and12 Reach stress cases passed. UI14 is10green/4red: new2 have a corrected vector-default fixture premise; old2 need picture/old-code triage. Fill remains unfinished/unmerged, as do deployment/real-library confirmation.
-
-Audit implementation snapshots are unqualified: library/Trash identity (6 regressions) and export/save-stage/thumbnail ownership (5 regressions). Remaining review findings and source evidence are indexed in `~/PaintWork/s54-architecture-audit/findings-index.json`; inventory-only files are not reviewed code. A new pre-install audit concern is the one-shot repair's synchronous first-screen delay: measured11.013s for266 conversions on the M5 simulator, original hashes unchanged, zero conversions on second run. Reproduce cold startup and resolve scheduling before installation; do not infer iPad time or a crash cause. Subagents reported account usage limits; root continues gates.

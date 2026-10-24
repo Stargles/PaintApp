@@ -3,6 +3,18 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## One-shot geometry repair delays the first app screen — 2026-10-24
+
+`PaintApp.init` synchronously calls the @MainActor `PointGeometryRepair.run()` before constructing
+the gallery/error view. A copy-only native M5 measurement around run() alone took11.013s for266
+conversions of the preserved256-package library; second run0 and all3180 original file hashes match.
+The107s total test also includes copy/hash/reopen validation and is not the startup duration.
+No iPad watchdog failure or device duration is established. Reproduce a genuine old-library cold
+launch and make this temporary phase responsive before installation, preserving the rule that no
+gallery/recovery read occurs until conversion succeeds. A detached call to an @MainActor method
+does not move its work. Retire scheduling/UI together with the one-shot service after owner confirms
+current artwork. Evidence: `~/PaintWork/s54-architecture-audit/repair-timing/capture-02/`.
+
 ## Interior mending counts ink already covered by Edge Overlap — 2026-10-24
 
 The shared setting promises that Mend Reach counts the gap remaining after Edge Overlap. Source

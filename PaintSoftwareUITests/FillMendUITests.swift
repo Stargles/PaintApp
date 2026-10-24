@@ -234,7 +234,7 @@ final class FillMendUITests: PaintUITestCase {
         XCTAssertTrue(isRed(rgbaPixel(of: scene.canvas, at: scene.seed)), "the original fill is still red")
         XCTAssertTrue(isWhitish(rgbaPixel(of: scene.canvas, at: scene.outline)), "the outer outline footprint stays bare")
         XCTAssertTrue(isWhitish(rgbaPixel(of: scene.canvas, at: scene.outside)), "exterior paper stays bare")
-        attachScreenshot(app, "mend-one-fill-on-line-art-hidden")
+        attachScreenshot(XCUIScreen.main, "mend-one-fill-on-line-art-hidden")
     }
 
     /// Cold launch → saved vector fill with the option off → the vector layer action → one undo.
@@ -246,7 +246,7 @@ final class FillMendUITests: PaintUITestCase {
         let scene = try makeInternalMendScene(app, mendsGaps: false)
         XCTAssertTrue(waitUntil(scene.canvas, scene.attached, isWhitish), "PREMISE: Mend OFF leaves the attached stroke bare")
         XCTAssertTrue(waitUntil(scene.canvas, scene.detached, isWhitish), "PREMISE: Mend OFF also leaves the detached stroke bare")
-        attachScreenshot(app, "mend-all-before-line-art-hidden")
+        attachScreenshot(XCUIScreen.main, "mend-all-before-line-art-hidden")
 
         openLayerPanel(app)
         app.staticTexts["layerPanel.row.1"].tap()
@@ -259,7 +259,7 @@ final class FillMendUITests: PaintUITestCase {
         XCTAssertTrue(waitUntil(scene.canvas, scene.detached, isRed), "the action covers the detached stroke")
         XCTAssertTrue(isWhitish(rgbaPixel(of: scene.canvas, at: scene.outline)), "the outer outline footprint stays bare")
         XCTAssertTrue(isWhitish(rgbaPixel(of: scene.canvas, at: scene.outside)), "the outside edge stays fixed")
-        attachScreenshot(app, "mend-all-after-line-art-hidden")
+        attachScreenshot(XCUIScreen.main, "mend-all-after-line-art-hidden")
         app.buttons["sideToolbar.undoButton"].tap()
         XCTAssertTrue(waitUntil(scene.canvas, scene.attached, isWhitish), "one undo restores the attached gap")
         XCTAssertTrue(waitUntil(scene.canvas, scene.detached, isWhitish), "the same undo restores the detached gap")
