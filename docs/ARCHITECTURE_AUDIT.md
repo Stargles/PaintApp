@@ -160,9 +160,12 @@ Detailed source evidence: `/Users/juliapark/PaintWork/s54-architecture-audit/inf
 
 ### Stored palette validation
 
-Malformed saved hex swatch silently resolves to black instead of existing unreadable-library refusal. Valid normal writes unaffected.
-
-Remaining: verify/reproduce, then fix or reject the premise with evidence.
+`PaletteColor.color` silently mapped unparsable hex to black. `Palette` decoding now validates canonical
+stored swatch hex and sends malformed library data to `AppSettings.readPalettes`' existing refusal;
+`PaletteStore` preserves its bytes and refuses edits, and the Palettes view displays its existing notice.
+Project-value `PaletteColor` decoding and valid palette wire bytes are unchanged. Added malformed-data
+preservation and canonical byte-stability logic tests. No data repair, fallback, migration, or test-only
+corruption hook. Static only; no compiler/native/UI/device qualification.
 
 Detailed source evidence: `/Users/juliapark/PaintWork/s54-architecture-audit/panels-utilities-review.md`.
 

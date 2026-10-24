@@ -427,7 +427,7 @@ account usage limits; root continues. The full source inventory is not yet fully
   AVFoundation pools and RSS are unmeasured. No saved format or new cache/framework/feature flag.
 
 - [ ] Stream transport: bounded ordered backpressure, framing limits, connection readiness/close ownership.
-- [ ] Editor/brush: preview identity/budget, undo payload accounting, saved palette validation; verify stationary-sample opportunity.
+- [ ] Editor/brush: preview identity/budget, undo payload accounting, saved palette validation; verify stationary-sample opportunity. Implemented at the `Palette` decoding boundary: non-canonical/unparsable persisted swatch hex reaches existing unreadable-library refusal, which keeps bytes, prevents edits and is shown in the Palettes tab. `PaletteColor` project-value decoding and the wire schema are unchanged. Added malformed-swatch preservation and canonical valid-byte-stability logic tests; no migration, repair, or test hook. Native/UI qualification remains pending.
   Active source-only `tmp/s54-vector-undo`, exact dependency65a8afd831072dbb43d1aba20c37bceed0966e79:
   proposal-first trace of VectorUndoCost stable-ID heap approximation, remaining count×512 geometry
   consumers, packed/live/rest/placement/lattice sample storage, fill path ownership and UndoHistory

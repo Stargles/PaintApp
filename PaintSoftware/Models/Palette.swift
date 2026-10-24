@@ -20,9 +20,14 @@ struct PaletteColor: Codable, Identifiable, Equatable, Hashable {
         self.hex = color.hexString
     }
 
-    /// The resolved `Color`; falls back to black if a stored string somehow fails to parse (it never
-    /// should, since it's only ever written from `Color.hexString`).
+    /// Palette library decoding checks stored hex before a swatch reaches the view. This fallback is
+    /// for invalid values constructed in memory by other callers, not a way to accept corrupt data.
     var color: Color { Color(hex: hex) ?? .black }
+
+    fileprivate var hasCanonicalStoredHex: Bool {
+        guard let rgba = ColorMath.parseHex(hex) else { return false }
+        return ColorMath.hexString(r: rgba.r, g: rgba.g, b: rgba.b, a: rgba.a) == hex
+    }
 }
 
 /// A named grid of colors — the Procreate-style "palette". Palettes are app-wide (not per-project):
@@ -52,6 +57,24 @@ struct Palette: Codable, Identifiable, Equatable {
             colors: hexes.map { PaletteColor(hex: $0) },
             isBuiltIn: isBuiltIn
         )
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, colors, isBuiltIn
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        colors = try container.decode([PaletteColor].self, forKey: .colors)
+        isBuiltIn = try container.decode(Bool.self, forKey: .isBuiltIn)
+
+        if let index = colors.firstIndex(where: { !$0.hasCanonicalStoredHex }) {
+            throw DecodingError.dataCorruptedError(
+                forKey: .colors, in: container,
+                debugDescription: "Palette \(name) contains a swatch with non-canonical hex at index \(index).")
+        }
     }
 }
 

@@ -427,6 +427,43 @@ final class ColorPickerLogicTests: XCTestCase {
                        "A palette's swatches should persist")
     }
 
+    /// A current-format palette is read without rewriting its stored representation. Opaque and
+    /// translucent swatches use the two canonical forms written by `Color.hexString`.
+    func testCanonicalPaletteHexReadsWithoutChangingStoredBytes() throws {
+        let settings = try isolatedSettings()
+        let expected = [Palette(name: "Saved", hexes: ["123456", "A1B2C380"], isBuiltIn: false)]
+        settings.writePalettes(expected)
+        let bytes = try XCTUnwrap(settings.defaults.data(forKey: AppSettings.Key.palettes))
+
+        let reopened = PaletteStore(settings: settings)
+
+        XCTAssertNil(reopened.unreadable)
+        XCTAssertEqual(reopened.palettes, expected)
+        XCTAssertEqual(settings.defaults.data(forKey: AppSettings.Key.palettes), bytes,
+                       "Reading valid saved palettes does not normalize or rewrite their bytes")
+    }
+
+    /// A structurally valid saved palette with one invalid swatch takes the existing unreadable
+    /// library path, leaves the original bytes untouched, and refuses edits instead of showing black.
+    func testMalformedSavedSwatchRefusesTheLibraryAndPreservesItsBytes() throws {
+        let defaults = try isolatedDefaults()
+        let damaged = [Palette(name: "Saved", hexes: ["123456", "not-a-color"], isBuiltIn: false)]
+        let bytes = try JSONEncoder().encode(damaged)
+        defaults.set(bytes, forKey: AppSettings.Key.palettes)
+
+        XCTAssertThrowsError(try JSONDecoder().decode([Palette].self, from: bytes),
+                             "A saved palette cannot accept a swatch that would resolve to black")
+        let store = PaletteStore(settings: AppSettings(defaults: defaults))
+
+        XCTAssertEqual(store.unreadable,
+                       "Your palettes could not be read, so none are shown and nothing has been changed. "
+                       + "They are still stored.")
+        XCTAssertTrue(store.palettes.isEmpty)
+        XCTAssertNil(store.addPalette(), "The unreadable library is not replaced with a new one")
+        XCTAssertEqual(defaults.data(forKey: AppSettings.Key.palettes), bytes,
+                       "The artist's unreadable library remains available for recovery")
+    }
+
     /// A first launch seeds the built-in presets **and stores them**, so the id a scene's selection
     /// names is the same id on the next launch. They used to be minted afresh every launch until the
     /// artist first edited one, so a selection of an untouched preset could never survive a relaunch.

@@ -49,6 +49,17 @@ history and hard-coded `~/PaintApp` checkout/simulator pool are stale. `deploy/m
 current documented runner. Static verification only; no native, compiler, simulator, device or restart
 action was run.
 
+## Saved palette hex validation — scoped before implementation, 2026-10-24
+
+`PaletteColor.color` formerly resolved invalid hex to black, so a structurally valid saved palette
+with one malformed swatch appeared readable and could silently show the wrong color. The `Palette`
+decoder now rejects non-canonical or unparsable swatch hex and feeds `AppSettings.readPalettes`' existing
+`.unreadable` path; `PaletteStore` keeps stored bytes and prevents edits, and `PaletteColours` displays
+its existing notice with `colorPanel.palettesUnreadable`. `PaletteColor` decoding used by project values
+is unchanged; no wire schema, migration, repair, compatibility path or test hook was added. New logic
+coverage checks malformed refusal/byte preservation and canonical valid byte-stable reads. Static
+source review and `git diff --check` only; no compiler/native/UI/device run.
+
 Start at AGENTS.md, then CLAUDE.md, TODO.md, BUGS.md and the relevant spec/PERFORMANCE.md. Verify origin,
 worktrees and every tmp branch before trusting this file. Kevin authorizes useful agents and a large
 budget, with quality/usage conservation before speed. Continue actionable work without recommendation-
