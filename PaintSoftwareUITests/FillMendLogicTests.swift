@@ -539,7 +539,11 @@ final class FillMendLogicTests: XCTestCase {
             let x = index % width - 70, y = index / width - 34
             return (36...81).contains(x * x + y * y)
         })
-        let ink = frame.union(detached).union(attached).union(holeWall)
+        let diagonal = Set(rectangle(55..<82, 50..<78).filter { index in
+            let x = index % width, y = index / width
+            return (-3...5).contains(x - y) && (118...146).contains(x + y)
+        })
+        let ink = frame.union(detached).union(attached).union(holeWall).union(diagonal)
         var reference = [UInt8](repeating: 0, count: width * height * 4)
         for index in ink { reference[index * 4 + 3] = 255 } // Exact RGBA: black ink, transparent paper.
         let engine = try XCTUnwrap(MetalFillEngine.shared)
@@ -554,12 +558,21 @@ final class FillMendLogicTests: XCTestCase {
         // Compare every pixel outside the two interior strokes with the same overlap-only render.
         // This protects the complete frame, hole and exterior, including boundary ink that overlap
         // itself legitimately covers. At the attached join the frame takes priority.
-        let permitted = detached.union(attached).subtracting(frame)
+        let permitted = detached.union(attached).union(diagonal).subtracting(frame)
         let protected = Set(0..<(width * height)).subtracting(permitted)
-        for (overlap, exactReach, shortReach) in [(2, 6, 5), (0, 10, 9)] {
+        func assertProtected(_ images: [Pixels], baseline: Pixels, _ label: String) {
+            let changed = protected.filter { index in
+                let x = index % width, y = index / width
+                return images.contains { $0.at(x, y) != baseline.at(x, y) }
+            }.sorted()
+            XCTAssertTrue(changed.isEmpty,
+                          "\(label) preserves the complete outline, intentional hole and exterior: \(changed.prefix(6))")
+        }
+        let settings: [(Int, Float, Float)] = [(2, 6, 5), (0, 10, 9), (2, 40, 5.5)]
+        for (overlap, exactReach, shortReach) in settings {
             let off = try render(overlap: Float(overlap), reach: 0)
-            let exact = try render(overlap: Float(overlap), reach: Float(exactReach))
-            let tooShort = try render(overlap: Float(overlap), reach: Float(shortReach))
+            let exact = try render(overlap: Float(overlap), reach: exactReach)
+            let tooShort = try render(overlap: Float(overlap), reach: shortReach)
             let label = "overlap \(overlap), reach \(exactReach)/\(shortReach)"
             XCTAssertTrue(off.isRed(16, 16), "PREMISE: \(label) fills the region around both strokes")
             XCTAssertTrue(off.isBare(70, 34), "PREMISE: \(label) leaves the intentional hole empty")
@@ -573,13 +586,26 @@ final class FillMendLogicTests: XCTestCase {
                 XCTAssertTrue(gap.allSatisfy { tooShort.isBare($0 % width, $0 / width) },
                               "\(label) refuses the too-wide \(name) gap")
             }
-            let changedProtected = protected.filter { index in
-                let x = index % width, y = index / width
-                return exact.at(x, y) != off.at(x, y) || tooShort.at(x, y) != off.at(x, y)
-            }.sorted()
-            XCTAssertTrue(changedProtected.isEmpty,
-                          "\(label) preserves the complete outline, intentional hole and exterior: \(changedProtected.prefix(6))")
+            assertProtected([exact, tooShort], baseline: off, label)
         }
+        let diagonalOff = try render(overlap: 2, reach: 0)
+        let diagonalExact = try render(overlap: 2, reach: 3)
+        let diagonalTooShort = try render(overlap: 2, reach: 2.8)
+        for (x, y) in [(66, 66), (67, 65)] {
+            XCTAssertTrue(diagonalOff.isBare(x, y), "PREMISE: overlap two leaves the diagonal core bare")
+            XCTAssertTrue(diagonalExact.isRed(x, y), "two diagonal steps span 2sqrt(2), within reach three")
+            XCTAssertTrue(diagonalTooShort.isBare(x, y), "2sqrt(2) exceeds fractional reach2.8")
+        }
+        assertProtected([diagonalExact, diagonalTooShort], baseline: diagonalOff, "diagonal overlap")
+
+        let clippedInk = Set((14...16).flatMap { y in (0...20).map { y * 32 + $0 } })
+        var clippedSource = [UInt8](repeating: 255, count: 32 * 32)
+        for index in clippedInk { clippedSource[index] = 0 }
+        let clippedPatch = try mendPatch(width: 32, height: 32, source: clippedSource, ink: clippedInk)
+        XCTAssertEqual(clippedPatch[15 * 32 + 1], 0,
+                       "an omitted rim witness could be nearer than the two filled vertical endpoints")
+        XCTAssertNotEqual(clippedPatch[15 * 32 + 12], 0,
+                          "the same strip away from the unresolved rim remains mendable")
     }
 
     /// The control, and the reason the rest mean anything: with the option off, two fills either side

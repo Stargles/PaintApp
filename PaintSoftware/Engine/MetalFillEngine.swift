@@ -1021,6 +1021,11 @@ final class MetalFillSession {
                             fence: MTLBuffer? = nil, mergeIntoPainted: Bool = true) {
         let p = engine.pipelines
         var reachPixels = reach
+        // Keep the open-to-open proof separate from the uncovered-gap Reach. The supported bucket
+        // overlap can cover both sides of a strip. This finite geometric cap is not historical
+        // provenance for an arbitrarily edited saved fill; unresolved wider geometry stays alone.
+        var proofSpan = reach + 2 * Float(CanvasManager.fillExpandRange.upperBound)
+        var circleRangeCount = UInt32(engine.mendLookup.ranges.length / MemoryLayout<SIMD2<UInt16>>.stride)
         var references = refCount
         var hasFence = UInt32(fence == nil ? 0 : 1)
         enc.setComputePipelineState(p.mendGap)
@@ -1038,6 +1043,8 @@ final class MetalFillSession {
         enc.setBytes(&references, length: MemoryLayout<UInt32>.size, index: 11)
         enc.setBuffer(fence ?? wallBuf, offset: 0, index: 12)
         enc.setBytes(&hasFence, length: MemoryLayout<UInt32>.size, index: 13)
+        enc.setBytes(&proofSpan, length: MemoryLayout<Float>.size, index: 14)
+        enc.setBytes(&circleRangeCount, length: MemoryLayout<UInt32>.size, index: 15)
         engine.dispatch2D(enc, p.mendGap, width: width, height: height)
         if mergeIntoPainted {
             engine.encode2D(enc, p.unionMask, width: width, height: height,

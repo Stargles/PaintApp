@@ -594,13 +594,15 @@ static inline bool mendRaySideIsInk(int2 sample, uint2 origin,
 }
 
 static inline bool mendNormalConnects(uint2 point, int2 offset,
-                                      const device uchar* source, const device uchar* neighbour,
+                                      const device uchar* painted, const device uchar* source,
+                                      const device uchar* neighbour,
                                       const device uchar* wall, const device uchar* wall2,
                                       const device uchar* fence, constant FillParams& params,
-                                      uint refCount, uint hasFence, float reach) {
+                                      uint refCount, uint hasFence, float reach, float proofSpan) {
     int2 direction = offset;
     int major = max(abs(direction.x), abs(direction.y));
-    if (major == 0) return false;
+    int proofSteps = int(ceil(proofSpan));
+    if (major == 0 || major > proofSteps) return false;
     uint2 nearPoint = uint2(int(point.x) + direction.x, int(point.y) + direction.y);
     if (!mendIsOpen(nearPoint, wall, wall2, params, refCount)) return false;
     uint nearIndex = pixelIndex(nearPoint.x, nearPoint.y, params.width);
@@ -609,11 +611,11 @@ static inline bool mendNormalConnects(uint2 point, int2 offset,
         || source[nearIndex] == 0 || neighbour[nearIndex] != 0) return false;
     int2 previous = int2(point);
     float nearLength = 0.0f;
+    float nearPainted = -1.0f;
     for (int k = 1; k < major; k++) {
         int2 sample = mendRayPoint(point, direction, major, k, false);
         if (all(sample == previous)) continue;
         nearLength += distance(float2(previous), float2(sample));
-        if (nearLength > reach) return false;
         if (sample.x != previous.x && sample.y != previous.y) {
             if (!mendRaySideIsInk(int2(sample.x, previous.y), point, neighbour, wall, wall2,
                                   fence, params, refCount, hasFence)
@@ -625,6 +627,7 @@ static inline bool mendNormalConnects(uint2 point, int2 offset,
         if (insideArtworkRect(uint(sample.x), uint(sample.y), params) != insideArtworkRect(point.x, point.y, params)
             || (hasFence != 0u && fence[index] == 0) || !mendIsInk(index, wall, wall2, refCount)
             || neighbour[index] != 0) return false;
+        if (nearPainted < 0.0f && painted[index] != 0) nearPainted = nearLength;
         previous = sample;
     }
     if (nearPoint.x != uint(previous.x) && nearPoint.y != uint(previous.y)) {
@@ -634,11 +637,16 @@ static inline bool mendNormalConnects(uint2 point, int2 offset,
                                  fence, params, refCount, hasFence)) return false;
     }
     nearLength += distance(float2(previous), float2(nearPoint));
-    if (nearLength > reach) return false;
+    if (nearPainted < 0.0f && painted[nearIndex] != 0) nearPainted = nearLength;
+    if (nearPainted < 0.0f) return false;
     float travelled = 0.0f;
+    float farPainted = -1.0f;
+    float farPaintedStep = 0.0f;
     previous = int2(point);
-    int limit = int(ceil(reach)) + 2;
-    for (int k = 1; k <= limit; k++) {
+    // This is a bound on major-axis steps, not digital arc length: a diagonal step can cost
+    // sqrt(2). The two real open endpoints must still be reached through ink, even after paint.
+    for (int k = 1; k <= proofSteps; k++) {
+        if (major + k - 1 > proofSteps) return false;
         int2 sample = mendRayPoint(point, direction, major, k, true);
         if (all(sample == previous)) continue;
         float stepLength = distance(float2(previous), float2(sample));
@@ -654,12 +662,16 @@ static inline bool mendNormalConnects(uint2 point, int2 offset,
         if (insideArtworkRect(farPoint.x, farPoint.y, params) != insideArtworkRect(point.x, point.y, params)) return false;
         uint index = pixelIndex(farPoint.x, farPoint.y, params.width);
         if (neighbour[index] != 0 || (hasFence != 0u && fence[index] == 0)) return false;
+        if (farPainted < 0.0f && painted[index] != 0) {
+            farPainted = travelled;
+            farPaintedStep = stepLength;
+        }
         if (mendIsInk(index, wall, wall2, refCount)) { previous = sample; continue; }
-        // Reach describes the whole ink strip, not just the far half from this candidate. Count
-        // both digital walks and subtract the final ink-to-open step so the far endpoint is not
-        // counted as ink (the axial equivalent is the legacy `a + b - 1` width).
+        // Geometry is proved open-to-open, but Reach counts only the gap left by Edge Overlap.
+        // First painted hits end that interval; subtract the far paint-entry step, just as the
+        // neighboring-fill branch counts `a + b - 1`. Never stop the geometry proof at covered ink.
         return mendIsOpen(farPoint, wall, wall2, params, refCount) && source[index] != 0
-            && nearLength + travelled - stepLength <= reach;
+            && farPainted >= 0.0f && nearPainted + farPainted - farPaintedStep <= reach;
     }
     return false;
 }
@@ -704,6 +716,8 @@ kernel void mendGap(const device uchar* painted   [[buffer(0)]],
                     constant uint&       refCount [[buffer(11)]],
                     const device uchar* fence     [[buffer(12)]],
                     constant uint&       hasFence [[buffer(13)]],
+                    constant float&      proofSpan [[buffer(14)]],
+                    constant uint&       circleRangeCount [[buffer(15)]],
                     uint2 gid [[thread_position_in_grid]]) {
     if (gid.x >= params.width || gid.y >= params.height) return;
     uint i = pixelIndex(gid.x, gid.y, params.width);
@@ -722,9 +736,6 @@ kernel void mendGap(const device uchar* painted   [[buffer(0)]],
         // the steps: a seam of `reach` pixels is mended, which is what the slider's number says.
         if (joins && float(ahead.y + behind.y - 1u) * stride <= reach) { mended[i] = 255; return; }
     }
-    if (gid.x <= uint(ceil(reach)) || gid.y <= uint(ceil(reach))
-        || gid.x + uint(ceil(reach)) >= params.width
-        || gid.y + uint(ceil(reach)) >= params.height) return;
     if (!onPaper) return;
     if (hasFence != 0u && fence[i] == 0) return;
     // Lasso `painted` may already be eroded relative to `source`; do not restore a source pixel the
@@ -734,8 +745,13 @@ kernel void mendGap(const device uchar* painted   [[buffer(0)]],
     if (nearest.x < 0 || nearest.y < 0) return;
     int2 delta = nearest - int2(gid);
     uint d2 = uint(delta.x * delta.x + delta.y * delta.y);
-    uint maxReach = uint(max(0.0f, reach)) + 1u;
-    if (d2 == 0u || 4u * d2 > maxReach * maxReach) return;
+    float diameter = proofSpan + 1.0f;
+    if (d2 == 0u || d2 >= circleRangeCount || 4.0f * float(d2) > diameter * diameter) return;
+    // Rim sites are deliberately absent from the open-feature map. If an omitted rim or outside
+    // site could be nearer or tied, the normal is unresolved. Farther rims cannot change its ties;
+    // the actual ray bounds still reject a proof that later reaches the edge of this window.
+    uint rim = min(min(gid.x, gid.y), min(params.width - 1u - gid.x, params.height - 1u - gid.y));
+    if (rim * rim <= d2) return;
     ushort2 range = circleRanges[d2];
     if (range.y == 0u) return;
     bool found = false;
@@ -744,8 +760,8 @@ kernel void mendGap(const device uchar* painted   [[buffer(0)]],
         uint2 openPoint = uint2(int(gid.x) + int(offset.x), int(gid.y) + int(offset.y));
         if (!mendIsOpen(openPoint, wall, wall2, params, refCount)) continue;
         found = true;
-        if (!mendNormalConnects(gid, int2(offset), source, neighbour, wall, wall2,
-                                fence, params, refCount, hasFence, reach)) return;
+        if (!mendNormalConnects(gid, int2(offset), painted, source, neighbour, wall, wall2,
+                                fence, params, refCount, hasFence, reach, proofSpan)) return;
     }
     if (found) mended[i] = 255;
 }
