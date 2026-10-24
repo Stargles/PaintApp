@@ -81,9 +81,9 @@ final class LiquifyUITests: PaintUITestCase {
                       "the colour wheel must not cover the dot")
         XCTAssertTrue(app.scrollViews["brushPanel.groupList"].waitForNonExistence(timeout: 5),
                       "the brush library must close before painting")
-        app.sliders["sideToolbar.brushSizeSlider"].adjust(toNormalizedSliderPosition:
-            CGFloat(BrushSizeCurve.sliderPosition(forPercent: 0.18)))
-        app.sliders["sideToolbar.brushOpacitySlider"].adjust(toNormalizedSliderPosition: 1)
+        adjustSlider(app.sliders["sideToolbar.brushSizeSlider"],
+                     to: CGFloat(BrushSizeCurve.sliderPosition(forPercent: 0.18)), tolerance: 0.02)
+        adjustSlider(app.sliders["sideToolbar.brushOpacitySlider"], to: 1, tolerance: 0.01)
 
         let canvas = app.otherElements["canvas.host"], paper = paperRect(in: canvas)
         // One stationary tap gives the vector renderer one dab, with no path spacing to rephase.
@@ -138,8 +138,8 @@ final class LiquifyUITests: PaintUITestCase {
                       "the Liquify controls must close before touching ink")
         XCTAssertTrue(app.scrollViews["liquifyPanel.groupList"].waitForNonExistence(timeout: 5),
                       "the Liquify brush library must close before touching ink")
-        app.sliders["sideToolbar.liquifySizeSlider"].adjust(toNormalizedSliderPosition: 0.92)
-        app.sliders["sideToolbar.liquifyPowerSlider"].adjust(toNormalizedSliderPosition: 1)
+        adjustSlider(app.sliders["sideToolbar.liquifySizeSlider"], to: 0.92, tolerance: 0.02)
+        adjustSlider(app.sliders["sideToolbar.liquifyPowerSlider"], to: 1, tolerance: 0.01)
         // Cross below the centre: the field moves the point, while its edge crosses the wide dab.
         // Transporting the old painted pixels stretches this asymmetric footprint horizontally.
         canvas.coordinate(withNormalizedOffset: hostPoint(paper, 0.40, 0.39))

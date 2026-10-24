@@ -764,14 +764,15 @@ class PaintUITestCase: XCTestCase {
     /// near it needs the slider rather than being given a default it cannot always keep.
     func adjustSlider(_ slider: XCUIElement, to position: CGFloat, tolerance: CGFloat, attempts: Int = 4,
                       file: StaticString = #filePath, line: UInt = #line) {
-        // The thumb's centre runs from half its width in from the frame's left to half its width in from
-        // the right; the move is the difference between two such points, which the half-width barely
-        // touches.
+        // The thumb travels between the inset ends of the visible track. The side rail rotates its
+        // sliders -90 degrees, so larger values travel upward; panel sliders still travel rightward.
         let thumbInset: CGFloat = 18
         let frame = slider.frame
         func point(_ p: CGFloat) -> XCUICoordinate {
-            slider.coordinate(withNormalizedOffset: .zero)
-                .withOffset(CGVector(dx: thumbInset + p * (frame.width - 2 * thumbInset), dy: frame.height / 2))
+            let offset = frame.height > frame.width
+                ? CGVector(dx: frame.width / 2, dy: frame.height - thumbInset - p * (frame.height - 2 * thumbInset))
+                : CGVector(dx: thumbInset + p * (frame.width - 2 * thumbInset), dy: frame.height / 2)
+            return slider.coordinate(withNormalizedOffset: .zero).withOffset(offset)
         }
         var reached: [CGFloat] = []
         for _ in 0..<attempts {
@@ -783,7 +784,7 @@ class PaintUITestCase: XCTestCase {
         }
         let last = slider.normalizedSliderPosition
         if abs(last - position) <= tolerance { return }
-        XCTFail("The slider will not stand within \(tolerance) of \(position): it went \(reached) and ended at \(last)",
+        XCTFail("The slider \(frame) will not stand within \(tolerance) of \(position): it went \(reached) and ended at \(last)",
                 file: file, line: line)
     }
 
