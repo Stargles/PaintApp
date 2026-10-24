@@ -633,6 +633,134 @@ final class FillObjectLogicTests: XCTestCase {
         XCTAssertEqual(steps(manager), baseline)
     }
 
+    func testMendAllFillsExcludesItsOwnBlackPaintWhileTheTargetRemainsAReference() async throws {
+        let fixture = try mendFixture()
+        let manager = fixture.manager
+        manager.setFillReference(layerIndex: fixture.layer, isReference: true)
+        for index in 0..<2 {
+            var fill = fixture.fills[index]
+            fill.paint = .solid(CodableColor(red: 0, green: 0, blue: 0, alpha: 1))
+            fill.opacity = 1
+            fixture.vectors[index].restoreElements([.fill(fill)], changedInk: nil)
+        }
+        let before = try fixture.vectors.prefix(2).map { try XCTUnwrap($0.render()?.cgImage) }
+        XCTAssertEqual(pixel(before[0], 40, 33)[3], 0, "PREMISE: the saved black fill has a horizontal gap")
+        XCTAssertEqual(pixel(before[1], 33, 40)[3], 0, "PREMISE: the second fill has a vertical gap")
+        XCTAssertEqual(pixel(before[0], 40, 42), [0, 0, 0, 255], "PREMISE: paint matches the black reference ink")
+
+        let outcome = await manager.mendAllFills(layerIndex: fixture.layer)
+
+        XCTAssertEqual(outcome, .changed(2))
+        let after = try fixture.vectors.prefix(2).map { try XCTUnwrap($0.render()?.cgImage) }
+        XCTAssertEqual(pixel(after[0], 40, 33), [0, 0, 0, 255], "own paint cannot turn the line into passable reference colour")
+        XCTAssertEqual(pixel(after[1], 33, 40), [0, 0, 0, 255], "each cel excludes its own fill")
+        for image in after {
+            XCTAssertEqual(pixel(image, 20, 20)[3], 0, "the intentional hole remains empty")
+            XCTAssertEqual(pixel(image, 55, 42)[3], 0, "the original exterior edge does not grow")
+        }
+        XCTAssertTrue(manager.layers[fixture.layer].isFillReference, "the artist's reference choice stays on")
+    }
+
+    func testReferenceExclusionKeepsOtherFillsStrokesStreamsAndOrdinaryRenderMemos() throws {
+        let (manager, layer, vector) = vectorFixture()
+        let size = CanvasFixture.canvasSize
+        let omitted = VectorFillElement(path: CGPath(rect: CGRect(origin: .zero, size: size), transform: nil),
+                                        color: CodableColor(red: 1, green: 0, blue: 0, alpha: 1))
+        let green = VectorFillElement(path: CGPath(rect: CGRect(x: 8, y: 8, width: 8, height: 8), transform: nil),
+                                      color: CodableColor(red: 0, green: 1, blue: 0, alpha: 1))
+        let blue = VectorStroke(brush: manager.toolProfiles.brush.preset,
+            color: CodableColor(red: 0, green: 0, blue: 1, alpha: 1), size: 8, opacity: 1,
+            samples: [VectorSample(x: 24, y: 12, pressure: 1), VectorSample(x: 32, y: 12, pressure: 1)])
+        let stream = VectorStreamElement(naturalSize: CGSize(width: 8, height: 8), host: "fixture", port: 47301,
+            sourceLabel: "mend reference", rendersInPlace: true,
+            transform: LayerTransform(position: CGPoint(x: 44, y: 12), scale: 1, rotation: 0))
+        vector.restoreElements([.fill(omitted), .fill(green), .stroke(blue), .stream(stream)], changedInk: nil)
+        let frame = UIGraphicsImageRenderer(size: stream.naturalSize, format: PixelOps.transparentFormat()).image { context in
+            UIColor.yellow.setFill()
+            context.fill(CGRect(origin: .zero, size: stream.naturalSize))
+        }
+        XCTAssertTrue(vector.setStreamFrame(id: stream.id, image: frame, index: 1))
+        manager.addVectorLayer()
+        let ordinaryLayer = manager.currentLayerIndex
+        let ordinary = try XCTUnwrap(manager.layers[ordinaryLayer].cels[0].vector)
+        ordinary.addFill(canvasSpacePath: CGPath(rect: CGRect(x: 8, y: 44, width: 8, height: 8), transform: nil),
+                         color: CodableColor(red: 0, green: 1, blue: 1, alpha: 1))
+        XCTAssertFalse(ordinary.hasCachedImage, "PREMISE: the ordinary reference has not rendered")
+        let sources = [(layer: manager.layers[layer], cel: manager.layers[layer].cels[0]),
+                       (layer: manager.layers[ordinaryLayer], cel: manager.layers[ordinaryLayer].cels[0])]
+        let window = FillWindow.fitting(CGRect(origin: .zero, size: size), in: size, pixelBudget: side * side)
+        let excluded = (celID: sources[0].cel.id, elementID: omitted.id)
+        let bytes = try XCTUnwrap(CanvasManager.compositeReferenceRGBA(references: sources, window: window,
+                                                                      excludingElement: excluded))
+        func sample(_ x: Int, _ y: Int) -> [Int] {
+            let offset = (y * window.workingWidth + x) * 4
+            return bytes[offset..<(offset + 4)].map(Int.init)
+        }
+        XCTAssertEqual(sample(4, 4), [0, 0, 0, 0], "only the addressed fill is absent")
+        XCTAssertEqual(sample(12, 12), [0, 255, 0, 255], "another fill remains a reference")
+        XCTAssertEqual(sample(28, 12), [0, 0, 255, 255], "same-cel brush marks remain")
+        XCTAssertEqual(sample(44, 12), [255, 255, 0, 255], "the stream's current frame remains")
+        XCTAssertEqual(sample(12, 48), [0, 255, 255, 255], "the ordinary reference remains")
+        XCTAssertTrue(ordinary.hasCachedImage, "ordinary references still populate their shared render memo")
+        let walks = ordinary.rasterizations
+        XCTAssertEqual(CanvasManager.compositeReferenceRGBA(references: sources, window: window,
+                                                           excludingElement: excluded), bytes)
+        XCTAssertEqual(ordinary.rasterizations, walks, "a repeated ordinary reference reuses its picture")
+    }
+
+    func testMendAllFillsDiscardsEveryPreparedCelWhenReferenceOrNeighbourRenderingRefuses() async throws {
+        defer { VectorRenderCache.removeAll() }
+        for failsInReference in [true, false] {
+            let fixture = try mendFixture()
+            let manager = fixture.manager
+            // The existing bitmap-refusal seam: a 2^31-pixel row is rejected by CoreGraphics
+            // without allocating it. The first cel is valid; the second cannot provide its pixels.
+            let refused = VectorCanvas(size: CGSize(width: 2_147_483_648, height: 1),
+                                       elements: [.fill(fixture.fills[1])])
+            if failsInReference { manager.layers[0].cels[1].vector = refused }
+            else { manager.layers[fixture.layer].cels[1].vector = refused }
+            let baseline = steps(manager)
+
+            let outcome = await manager.mendAllFills(layerIndex: fixture.layer)
+
+            XCTAssertEqual(outcome, .needsMoreMemory, "unavailable pixels are not an empty successful input")
+            for index in fixture.vectors.indices {
+                XCTAssertEqual(fixture.vectors[index].elements.first?.fill?.pathData, fixture.fills[index].pathData,
+                               "even a previously prepared cel stays unchanged")
+            }
+            XCTAssertEqual(refused.elements.first?.fill?.pathData, fixture.fills[1].pathData)
+            XCTAssertEqual(steps(manager), baseline, "a failed whole-layer request records no partial undo")
+            XCTAssertNil(manager.fillMendingLayerID)
+        }
+    }
+
+    func testInteractiveFillRefusesUnavailableNeighbourPixelsAndCommitsNothing() async throws {
+        _ = try XCTUnwrap(MetalFillEngine.shared)
+        defer { VectorRenderCache.removeAll() }
+        let (manager, layer, _) = vectorFixture()
+        manager.setFillReference(layerIndex: layer, isReference: false)
+        let fill = VectorFillElement(path: CGPath(rect: CGRect(x: 4, y: 4, width: 8, height: 8), transform: nil),
+                                     color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1))
+        let refused = VectorCanvas(size: CGSize(width: 2_147_483_648, height: 1), elements: [.fill(fill)])
+        manager.layers[layer].cels[0].vector = refused
+        let baseline = steps(manager)
+        let reported = expectation(description: "the unavailable neighbour reports the existing fill refusal")
+        let observation = manager.$notice.compactMap { $0 }.filter { $0.code == "fillNeedsMoreMemory" }
+            .prefix(1).sink { _ in reported.fulfill() }
+        defer { observation.cancel() }
+
+        manager.beginInteractiveFill(at: CGPoint(x: 32, y: 32))
+        manager.endInteractiveFill()
+        manager.fillQueue.sync {}
+        await fulfillment(of: [reported], timeout: 5)
+        manager.commitInteractiveFill()
+
+        XCTAssertFalse(manager.fillGestureActive, "an unavailable neighbour ends the adjustable gesture")
+        XCTAssertNil(manager.liveFill, "no preview can be mistaken for successful paint")
+        XCTAssertEqual(refused.elements.first?.fill?.pathData, fill.pathData)
+        XCTAssertEqual(steps(manager), baseline, "the failed fill does not commit an undo step")
+    }
+
     func testMendAllFillsLeavesRasterLayersAlone() async throws {
         let fixture = try mendFixture()
         let manager = fixture.manager

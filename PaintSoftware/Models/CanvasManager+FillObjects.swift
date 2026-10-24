@@ -81,7 +81,7 @@ extension CanvasManager {
                 let geometryBytes = max(0, MetalFillEngine.fillBudgetBytes / 2 - 4 * fill.pathData.count)
                 let undoPoints = remainingUndo / Self.fillMendBytesPerPoint
                 let geometryPoints = geometryBytes / Self.fillMendBytesPerPoint
-                let work = FillMendWork(fill: fill, path: path,
+                let work = FillMendWork(celID: cel.id, fill: fill, path: path,
                                         transform: vector.transform, size: size, references: references,
                                         neighbours: neighbours, threshold: threshold, reach: reach, paper: paper,
                                         maximumPointCount: min(undoPoints, geometryPoints),
@@ -219,14 +219,15 @@ extension CanvasManager {
         let width = window.workingWidth, height = window.workingHeight
         guard let source = LassoFillMask.rasterize(path: shown, width: width, height: height,
                                                   transform: window.transform),
-              let rgba = compositeReferenceRGBA(references: work.references, window: window) else { return .unchanged }
+              let rgba = compositeReferenceRGBA(references: work.references, window: window,
+                  excludingElement: (celID: work.celID, elementID: work.fill.id)) else { return .needsMoreMemory }
         let pathWall = StrokeWallMask.mask(of: pathWallSources(work.references), width: width, height: height,
                                            transform: window.transform)
         guard let engine = MetalFillEngine.shared,
               let session = engine.makeSession(referenceRGBA: rgba, width: width, height: height,
                                                 lassoMask: source, pathWall: pathWall,
                                                 gapWidthLimit: 0).session else { return .needsMoreMemory }
-        var neighbours = neighbourMask(of: work.neighbours, in: window)
+        guard var neighbours = neighbourMask(of: work.neighbours, in: window) else { return .needsMoreMemory }
         for index in source.indices where source[index] != 0 { neighbours[index] = 0 }
         session.installNeighbours(neighbours)
         guard let mask = session.mendMask(sourceMask: source, threshold: work.threshold,
@@ -464,6 +465,7 @@ private struct FillMendEdit {
 /// References use the same locked rendering APIs as an interactive fill. Their captured versions
 /// are rechecked on main before anything is installed, so concurrent edits discard this request.
 private struct FillMendWork: @unchecked Sendable {
+    let celID: UUID
     let fill: VectorFillElement
     let path: CGPath
     let transform: CGAffineTransform

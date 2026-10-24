@@ -1048,7 +1048,11 @@ extension CanvasManager {
             // than where the session is made so that switching the mend on over a fill already
             // on screen, and a window grown for a bigger flood, both find it in place.
             if key.mendReach > 0, !session.hasNeighbours {
-                session.installNeighbours(Self.neighbourMask(of: fillGestureNeighbours, in: window))
+                guard let neighbours = Self.neighbourMask(of: fillGestureNeighbours, in: window) else {
+                    reportFillRefusal(context)
+                    return nil
+                }
+                session.installNeighbours(neighbours)
             }
             bytes = Self.runFill(session, in: window, key: key, context: context, seedColor: fillSeedColor)
             guard bytes != nil, !session.isLasso else { break }
@@ -1207,19 +1211,36 @@ extension CanvasManager {
     /// stride, MEASURED (`FillFootprintBench`) at `windowHeight × canvasWidth × 4` — 24 MB for a
     /// 1024-row window on a 6000² canvas, 33 MB on 8192², freed when the draw returns. Cropping the
     /// image to the window first does not avoid it; the crop shares the rows.
-    static func compositeReferenceRGBA(references: [(layer: Layer, cel: Cel)], window: FillWindow) -> [UInt8]? {
+    ///
+    /// A saved fill being mended is absent from its own reference, just as an adjustable fill is.
+    /// The matching cel draws its remaining display list directly into the working window; all
+    /// other vector references keep the ordinary memoized render path.
+    static func compositeReferenceRGBA(references: [(layer: Layer, cel: Cel)], window: FillWindow,
+                                        excludingElement: (celID: UUID, elementID: UUID)? = nil) -> [UInt8]? {
         let width = window.workingWidth, height = window.workingHeight
         guard width > 0, height > 0 else { return nil }
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: width, height: height), format: PixelOps.transparentFormat())
         var completed = true
-        let composited = renderer.image { _ in
+        let composited = renderer.image { context in
             let rect = window.canvasInWorking
             for source in references {
                 source.cel.bakedImage?.draw(in: rect)
                 source.cel.raster.renderToUIImage().draw(in: rect)
                 if let vector = source.cel.vector {
-                    guard let image = vector.render() else { completed = false; return }
-                    image.draw(in: rect)
+                    if let excludingElement, excludingElement.celID == source.cel.id {
+                        let elements = vector.elements.filter { $0.id != excludingElement.elementID }
+                        let referenceIDs = Set(elements.lazy.filter(\.isReference).map(\.id))
+                        let frozen = vector.freezeDisplay(quality: .full, referenceIDs: referenceIDs,
+                                                          replacing: elements,
+                                                          rewriting: [excludingElement.elementID])
+                        guard frozen.draw(into: context.cgContext, frameRect: rect, quality: .full) != nil else {
+                            completed = false
+                            return
+                        }
+                    } else {
+                        guard let image = vector.render() else { completed = false; return }
+                        image.draw(in: rect)
+                    }
                 }
             }
         }
@@ -1243,12 +1264,12 @@ extension CanvasManager {
     /// Where `sources` have any paint at all, in the window's working pixels — the mend's neighbour set
     /// (TODO (113)). The same composite the reference is, of the one cel the fill lands on, so a
     /// vector cel's fills are drawn the way the artist sees them and a raster cel's committed fills
-    /// are in it however they were baked. A composite that cannot be made is an empty set, which
-    /// mends nothing.
-    static func neighbourMask(of sources: [(layer: Layer, cel: Cel)], in window: FillWindow) -> [UInt8] {
+    /// are in it however they were baked. Unavailable pixels are a refusal, never an empty set:
+    /// an empty fallback could let mending paint over content that was not rendered.
+    static func neighbourMask(of sources: [(layer: Layer, cel: Cel)], in window: FillWindow) -> [UInt8]? {
         let count = window.workingWidth * window.workingHeight
         guard let rgba = compositeReferenceRGBA(references: sources, window: window) else {
-            return [UInt8](repeating: 0, count: count)
+            return nil
         }
         return (0..<count).map { rgba[$0 * 4 + 3] != 0 ? 255 : 0 }
     }
