@@ -11,8 +11,8 @@ class PaintUITestCase: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
         // **Every test starts upright, whatever the simulator was left in.** The pixel probes read a
-        // screenshot whose pixels are in the device's portrait frame, so the suite is portrait unless a
-        // test says otherwise — and a test cannot be trusted to put it back itself: with
+        // screenshot's displayed coordinate system. The suite starts portrait unless a test says
+        // otherwise — and a test cannot be trusted to put it back itself: with
         // `continueAfterFailure` off, a failed assertion raises and Swift runs no `defer` through it.
         // A landscape test therefore sets landscape and leaves the restoring to this line.
         XCUIDevice.shared.orientation = .portrait
@@ -425,33 +425,14 @@ class PaintUITestCase: XCTestCase {
     }
 
     /// One pixel as `rgbaPixel` reads it.
-    typealias RGBA = (r: UInt8, g: UInt8, b: UInt8, a: UInt8)
+    typealias RGBA = ScreenshotPixels.RGBA
 
     /// Rasterizes `element`'s own on-screen content (not the whole app screenshot) into a flat RGBA8
     /// buffer, top-left origin, so individual pixels can be inspected by fraction-of-element position.
     /// Goes through an explicit CGContext (rather than trusting the screenshot's native byte order) for
     /// the same reason FloodFillEngine does: it removes any ambiguity about pixel format.
     func rgbaPixel(of element: XCUIElement, dx: Double, dy: Double) -> RGBA? {
-        guard let cgImage = element.screenshot().image.cgImage else { return nil }
-        let width = cgImage.width
-        let height = cgImage.height
-        let bytesPerPixel = 4
-        let bytesPerRow = width * bytesPerPixel
-        var buffer = [UInt8](repeating: 0, count: height * bytesPerRow)
-        guard let context = CGContext(
-            data: &buffer, width: width, height: height, bitsPerComponent: 8, bytesPerRow: bytesPerRow,
-            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return nil }
-        // No flip: drawing the screenshot's (top-down) cgImage into a default bitmap context lands its
-        // top row at buffer row 0, so buffer[dy] reads the pixel that's visually at dy. (The old
-        // translate/scale(-1) here silently read the vertical mirror — undetectable on the centred /
-        // color-only probes every earlier test used, but wrong for off-center position checks.)
-        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
-
-        let x = min(max(Int(dx * Double(width)), 0), width - 1)
-        let y = min(max(Int(dy * Double(height)), 0), height - 1)
-        let offset = y * bytesPerRow + x * bytesPerPixel
-        return (buffer[offset], buffer[offset + 1], buffer[offset + 2], buffer[offset + 3])
+        ScreenshotPixels(element.screenshot().image)?.pixel(normalizedX: dx, normalizedY: dy)
     }
 
     func rgbaPixel(of element: XCUIElement, at point: CGVector) -> RGBA? {
@@ -1411,26 +1392,11 @@ class PaintUITestCase: XCTestCase {
 
     // MARK: - Reading ink off the canvas
 
-    /// One screenshot of the canvas, as a "what colour is at this normalized point" probe.
-    ///
-    /// One screenshot for the whole scan: `rgbaPixel` takes a fresh one per call, and the readings below
-    /// are hundreds of points each. No flip, for `rgbaPixel`'s reason: the screenshot's cgImage is
-    /// top-down, so buffer row 0 is the row the artist sees at the top.
+    /// One screenshot of the canvas, as a colour probe in the element's displayed coordinate system.
+    /// A scan retains one shared raw buffer instead of taking another screenshot per pixel.
     func pixelProbe(_ canvas: XCUIElement) throws -> (Double, Double) -> RGBA {
-        let image = try XCTUnwrap(canvas.screenshot().image.cgImage)
-        let width = image.width, height = image.height
-        var buffer = [UInt8](repeating: 0, count: width * height * 4)
-        let context = try XCTUnwrap(CGContext(data: &buffer, width: width, height: height,
-                                              bitsPerComponent: 8, bytesPerRow: width * 4,
-                                              space: CGColorSpaceCreateDeviceRGB(),
-                                              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
-        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-        return { dx, dy in
-            let x = min(max(Int(dx * Double(width)), 0), width - 1)
-            let y = min(max(Int(dy * Double(height)), 0), height - 1)
-            let offset = y * width * 4 + x * 4
-            return (buffer[offset], buffer[offset + 1], buffer[offset + 2], buffer[offset + 3])
-        }
+        let pixels = try XCTUnwrap(ScreenshotPixels(canvas.screenshot().image))
+        return { pixels.pixel(normalizedX: $0, normalizedY: $1) }
     }
 
     /// One screenshot of the canvas, as an "is there ink at this normalized point" probe.
@@ -2020,22 +1986,10 @@ class PaintUITestCase: XCTestCase {
         }
 
         private static func pixels(in image: UIImage, at points: [CGPoint]) -> [RGBA?] {
-            guard let cg = image.cgImage else { return points.map { _ in nil } }
-            let width = cg.width, height = cg.height
-            var buffer = [UInt8](repeating: 0, count: width * height * 4)
-            guard let context = CGContext(data: &buffer, width: width, height: height, bitsPerComponent: 8,
-                                          bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
-                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
-            else { return points.map { _ in nil } }
-            context.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
-            let scale = image.scale
-            return points.map { point in
-                let x = Int(point.x * scale), y = Int(point.y * scale)
-                guard x >= 0, y >= 0, x < width, y < height else { return nil }
-                let offset = (y * width + x) * 4
-                return (buffer[offset], buffer[offset + 1], buffer[offset + 2], buffer[offset + 3])
-            }
+            guard let pixels = ScreenshotPixels(image) else { return points.map { _ in nil } }
+            return points.map { pixels.pixel(at: $0) }
         }
+
     }
 
     /// Screen points along a row of the paper, `x` and `y` in paper fractions — every point and a half,
@@ -2158,5 +2112,67 @@ private enum SynthesizedTouch {
             throw XCTSkip("\(String(describing: object_getClass(object))) does not answer \(selector)")
         }
         return imp
+    }
+}
+
+/// Screenshot bytes sampled in their displayed coordinate system. UIImage stores orientation
+/// separately from its CGImage; one raw raster supports all readers without another bitmap.
+struct ScreenshotPixels {
+    typealias RGBA = (r: UInt8, g: UInt8, b: UInt8, a: UInt8)
+    let width: Int
+    let height: Int
+    let scale: CGFloat
+    private let rawWidth: Int
+    private let rawHeight: Int
+    private let orientation: UIImage.Orientation
+    private let bytes: [UInt8]
+
+    init?(_ image: UIImage) {
+        guard let source = image.cgImage, source.width > 0, source.height > 0, image.scale > 0 else { return nil }
+        let swapsAxes: Bool
+        switch image.imageOrientation {
+        case .up, .down, .upMirrored, .downMirrored: swapsAxes = false
+        case .left, .right, .leftMirrored, .rightMirrored: swapsAxes = true
+        @unknown default: return nil
+        }
+        var buffer = [UInt8](repeating: 0, count: source.width * source.height * 4)
+        guard let context = CGContext(data: &buffer, width: source.width, height: source.height,
+            bitsPerComponent: 8, bytesPerRow: source.width * 4, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        context.draw(source, in: CGRect(x: 0, y: 0, width: source.width, height: source.height))
+        rawWidth = source.width; rawHeight = source.height
+        width = swapsAxes ? source.height : source.width
+        height = swapsAxes ? source.width : source.height
+        scale = image.scale; orientation = image.imageOrientation; bytes = buffer
+    }
+
+    /// Element-relative callers retain their established edge clamping.
+    func pixel(normalizedX: Double, normalizedY: Double) -> RGBA {
+        read(column: min(max(Int(normalizedX * Double(width)), 0), width - 1),
+             row: min(max(Int(normalizedY * Double(height)), 0), height - 1))
+    }
+
+    /// Whole-screen samples are already in screen points; off-screen probes remain absent.
+    func pixel(at point: CGPoint) -> RGBA? {
+        let column = Int(point.x * scale), row = Int(point.y * scale)
+        guard column >= 0, row >= 0, column < width, row < height else { return nil }
+        return read(column: column, row: row)
+    }
+
+    private func read(column x: Int, row y: Int) -> RGBA {
+        let raw: (x: Int, y: Int)
+        switch orientation {
+        case .up: raw = (x, y)
+        case .down: raw = (rawWidth - 1 - x, rawHeight - 1 - y)
+        case .left: raw = (rawWidth - 1 - y, x)
+        case .right: raw = (y, rawHeight - 1 - x)
+        case .upMirrored: raw = (rawWidth - 1 - x, y)
+        case .downMirrored: raw = (x, rawHeight - 1 - y)
+        case .leftMirrored: raw = (y, x)
+        case .rightMirrored: raw = (rawWidth - 1 - y, rawHeight - 1 - x)
+        @unknown default: preconditionFailure("Orientation was validated at capture")
+        }
+        let offset = (raw.y * rawWidth + raw.x) * 4
+        return (bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3])
     }
 }
