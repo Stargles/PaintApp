@@ -154,9 +154,19 @@ final class PointGeometryRepairLogicTests: XCTestCase {
         let report = try XCTUnwrap(reportBox.withLock { $0 })
         XCTAssertEqual(report.converted, 1, "Only the sound previous-writer backup needs conversion")
         XCTAssertEqual(report.ambiguous.map(\.path), [project.path])
-        XCTAssertTrue(ProjectBackupManager.validateProjectForRestore(at: project))
+        // Full maintenance reconciles the restored previous-writer title after recovering it.
+        // The fixture's manifest says Untitled, while install names its package material-strokes.
+        let restoredProjects = ProjectBackupManager.allProjectPackages().filter {
+            ProjectBackupManager.manifestID(at: $0) == id
+        }
+        XCTAssertEqual(restoredProjects.count, 1, "Recovery must expose exactly one complete gallery scene")
+        let restored = try XCTUnwrap(restoredProjects.first)
+        XCTAssertEqual(restored.lastPathComponent, "Untitled.paintproj")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: project.path),
+                       "Startup tidy must leave no duplicate at the pre-title fixture address")
+        XCTAssertTrue(ProjectBackupManager.validateProjectForRestore(at: restored))
         XCTAssertTrue(ProjectBackupManager.validateProjectForRestore(at: backup))
-        let manager = try XCTUnwrap(ProjectStore.load(from: project))
+        let manager = try XCTUnwrap(ProjectStore.load(from: restored))
         manager.streamCoordinator.startsClients = false
         try assertGeometry(manager, name: "material-strokes")
         let trashed = try XCTUnwrap(ProjectBackupManager.listTrash().first)

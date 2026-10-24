@@ -28,6 +28,15 @@ UI/screenshot inspection and Debug/Release/physical gates are root-owned and pen
 
 # TODO
 
+Recovery fixture correction source-ready: after actual startup maintenance, the test discovers all
+gallery packages with its original UUID and requires exactly1, the expected Untitled.paintproj name
+and no file at the old material-strokes address. The same strict restore check and real
+ProjectStore.load/assertGeometry now read that actual gallery URL. Converted-backup strict validation,
+complete damaged-original Trash bytes and no-owned-stage checks are unchanged. No production source,
+fixture bytes, decoder or test method count changed (PointGeometryRepairLogicTests40). Diff-check
+passes; root's next native rerun is required before claiming green. Only the two owned scope/test
+commits should be integrated; preserve final consolidator's newer records/curve/stream followups.
+
 ## Old-format recovery qualification: renamed fixture address — 2026-10-24
 
 Root's combined f55 native349 compiled app/tests,345 passed/4 failed,0 skips,728 source bytes/modes
