@@ -143,6 +143,14 @@ Normal controls must be green before each controlled assertion fault; preserve e
 bytes/modes. The existing LiquifyRaster cold paint/undo/save/cold-reopen journey is an affected normal
 UI control; external mask/recording/Liquify refusal templates must use the new tuple factory.
 
+Stationary path-fit audit is active on `tmp/s54-stationary-fit` from exactf475bb93599d2fb1b5b5785931bb2a87cc553424.
+Record/trace pending algorithmic work and channel/timing semantics before a minimal proposal; no
+production change is authorized by an unproven equivalence. Root owns all native/compiler activity.
+Current source proof: quadratic pending distance checks, plus a1ULP generic-deltaTime counterexample
+refuting exact naive suffix absorption. Proposal is with root; no production edit. Separate direction-
+reading LiveWalk heading queue can also retain a stationary run, so do not claim the whole live
+stroke is bounded by a fit-only correction.
+
 ## Current combined source qualification — 2026-10-24
 
 Root's normal combined baseline at6b5010d9 passed847/847, zero skips/failures; all724 tracked
@@ -535,3 +543,22 @@ source restore. The Trash regression compares equivalent URLs with a directory s
 compare standardized paths, and assert retained backup existence AFTER purge before its throwing read.
 The new startup-refusal case misuses a current-package preservation helper on origin.name; repair
 agent will correct that test after this commit. No product defect is inferred from these two failures.
+
+
+Stationary fit selected scope, before production edits: root approved the exact smaller win. Reuse
+`pending.last` to bypass only the redundant deviation scan when incoming x/y equal that tail, after
+pressure and spacing checks. Keep every sample/channel and the existing absorption order. Freeze
+initializer thresholds (no caller mutates them), and retain the degenerate-chord rule: at length²
+<=1e-12, skip only when the endpoint itself is within tolerance². A fresh break's singleton pending
+point is then safe too. Use temporary external distance-check instrumentation and bounded committed old-rule comparisons through
+knots, packed payload, seeded dabs, drawn RGBA and timing/interruption boundaries. Pending storage
+remains O(N); the separately recorded direction-reading LiveWalk retention/drain is not fixed here.
+No compiler/native or mutation execution; root owns those gates.
+
+Stationary fit source prepared: exact same-endpoint deviation shortcut and immutable thresholds,
+with six new methods in the existing StrokePathFitLogicTests (now13 total). Bounded old-rule oracle
+checks emitted arrays and actual rounding-sensitive channels, pressure/cap/changed-endpoint and
+degenerate rules, both packing modes, seeded velocity/tilt dabs, nonblank drawn RGBA, and timing
+flush/reset run boundaries. UI identifier/helper lints and diff-check pass. No compiler/native,
+mutants, Debug/Release fast tiers, UI gestures/screenshots or device run by this author; root owns
+qualification. External operation-count instrumentation will be temporary and removed after proof.

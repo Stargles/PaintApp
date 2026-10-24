@@ -468,9 +468,9 @@ struct StrokePathFit {
     /// the escape keeps erase width honest for the same reason.
     static let minimumPressureChange: CGFloat = 0.02
 
-    var tolerance: CGFloat
-    var maximumKnotSpacing: CGFloat
-    var minimumPressureChange: CGFloat
+    let tolerance: CGFloat
+    let maximumKnotSpacing: CGFloat
+    let minimumPressureChange: CGFloat
 
     /// The last knot committed — what every threshold is measured from.
     private var anchor: VectorSample?
@@ -583,6 +583,12 @@ struct StrokePathFit {
         let dx = b.x - a.x, dy = b.y - a.y
         let lengthSquared = dx * dx + dy * dy
         let limit = tolerance * tolerance
+        // Same endpoint, same chord: the previous successful offer validated this run. A break
+        // instead leaves one pending point, the endpoint itself. Keep the point-distance rule for
+        // a degenerate chord with an unusually tight tolerance. All samples remain in order, so
+        // latest readings and the exact cumulative-channel addition order are unchanged.
+        if let trailing = pending.last, trailing.x == b.x, trailing.y == b.y,
+           lengthSquared > 1e-12 || lengthSquared <= limit { return false }
         for sample in pending {
             let px = sample.x - a.x, py = sample.y - a.y
             let distanceSquared: CGFloat

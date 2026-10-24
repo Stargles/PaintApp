@@ -439,6 +439,26 @@ account usage limits; root continues. The full source inventory is not yet fully
 
 - [ ] Stream transport: bounded ordered backpressure, framing limits, connection readiness/close ownership.
 - [ ] Editor/brush: preview identity/budget, undo payload accounting, saved palette validation; verify stationary-sample opportunity. Implemented at the `Palette` decoding boundary: non-canonical/unparsable persisted swatch hex reaches existing unreadable-library refusal, which keeps bytes, prevents edits and is shown in the Palettes tab. `PaletteColor` project-value decoding and the wire schema are unchanged. Added malformed-swatch preservation and canonical valid-byte-stability logic tests; no migration, repair, or test hook. Native/UI qualification remains pending.
+
+- [ ] Editor/brush: preview identity/budget, undo payload accounting, saved palette validation; verify stationary-sample opportunity.
+  Active proposal-first `tmp/s54-stationary-fit`, exact dependencyf475bb93599d2fb1b5b5785931bb2a87cc553424:
+  verify StrokePathFit.pending work/storage for exact stationary samples and trace pressure, tilt,
+  cumulative deltaTime order, seeded arc-length dab/live-final/timing consumers before edits. Prior
+  audit suggested suffix absorption; it is a hypothesis, especially floating-point accumulation.
+  Propose/refute a minimal exact-duplicate optimization only, no epsilon merging, stored flags/cache
+  or parallel fitter. Plan deterministic reference/candidate channels/dabs/pixels and work counts on
+  tiny bounded streams, not a giant quadratic benchmark. Root owns native42 faults; source/static only.
+  Source proves N exact stationary pending offers cause N(N−1)/2 distance checks, not just linear
+  storage. Cheap suffix absorption is not bit-identical for arbitrary deltaTime: [0.001,0.001,0.008]
+  gives trailing-first0.010000000000000002 versus grouped0.01. Real uptime-derived intervals can
+  sum exactly on one binary clock grid within a bounded time horizon, but generic fitter inputs
+  state no such contract. Root proposal sent before production edits; canonical cumulative-time
+  semantics or a narrower exact optimization needs explicit evidence. Live preview is raw input,
+  timing flushes finish(nil)+reset, and velocity is a real replay brush input.
+  Separate finding, not a claim this task fixes it: direction-reading LiveWalk.received/arcs also
+  grow while heading margin waits on a stationary arc; offer is constant work there, finish drains
+  with Array.removeFirst. Record for ownership follow-up rather than claiming a fit-only gesture bound.
+
   Active source-only `tmp/s54-vector-undo`, exact dependency65a8afd831072dbb43d1aba20c37bceed0966e79:
   proposal-first trace of VectorUndoCost stable-ID heap approximation, remaining count×512 geometry
   consumers, packed/live/rest/placement/lattice sample storage, fill path ownership and UndoHistory
@@ -605,3 +625,22 @@ against a transcript this audit does not have.
 - **The raster Move's undo half.** `finalizePendingGesturesForHistoryAction` has fill, shape and text
   arms and no raster-float arm.
 - **Freeform text's minimum-size exemption** is still unruled.
+
+
+Stationary fit selected scope, before production edits: root approved the exact smaller win. Reuse
+`pending.last` to bypass only the redundant deviation scan when incoming x/y equal that tail, after
+pressure and spacing checks. Keep every sample/channel and the existing absorption order. Freeze
+initializer thresholds (no caller mutates them), and retain the degenerate-chord rule: at length²
+<=1e-12, skip only when the endpoint itself is within tolerance². A fresh break's singleton pending
+point is then safe too. Use temporary external distance-check instrumentation and bounded committed old-rule comparisons through
+knots, packed payload, seeded dabs, drawn RGBA and timing/interruption boundaries. Pending storage
+remains O(N); the separately recorded direction-reading LiveWalk retention/drain is not fixed here.
+No compiler/native or mutation execution; root owns those gates.
+
+Stationary fit source prepared: exact same-endpoint deviation shortcut and immutable thresholds,
+with six new methods in the existing StrokePathFitLogicTests (now13 total). Bounded old-rule oracle
+checks emitted arrays and actual rounding-sensitive channels, pressure/cap/changed-endpoint and
+degenerate rules, both packing modes, seeded velocity/tilt dabs, nonblank drawn RGBA, and timing
+flush/reset run boundaries. UI identifier/helper lints and diff-check pass. No compiler/native,
+mutants, Debug/Release fast tiers, UI gestures/screenshots or device run by this author; root owns
+qualification. External operation-count instrumentation will be temporary and removed after proof.

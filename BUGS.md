@@ -2397,3 +2397,33 @@ UndoBudget addingCost/payloadBytes and narrow history sum/extend saturation. A s
 be recomputed after a removal rather than subtracted as if exact, or another oversized action can
 remain admitted. Raster author owns SelectionModels propagation; no preflight or undo/redo mutation
 is authorized here. Tiny scalar + actual history sentinel tests are prepared without large payloads.
+
+
+## Stationary path-fit pending work — 2026-10-24, proposal-first audit
+
+Stroke geometry audit reports an unfinished exact-position/pressure hold can grow StrokePathFit.pending
+without a count/time bound. Verify whether each offer rescans the growing suffix and whether absorption
+can preserve pressure thresholds, latest tilt and cumulative deltaTime rounding/order through later
+break/finish and live/final/timing dabs. Source-only task from exactf475bb93; no performance/appearance
+or device-failure claim, native measurement, epsilon coalescing or production edit yet.
+
+
+Source confirms each same-position/pressure offer scans the entire valid pending prefix; total
+stationary distance checks are N(N−1)/2. Naive newest-absorbs-old aggregation changes floating
+addition order: legal generic intervals0.001/0.001/0.008 produce a1ULP deltaTime change. Chronological
+elapsed time is physically meaningful, but exact generic old-order equivalence is not proved.
+Separate trace finding: for direction-reading brushes, LiveWalk.received/arcs wait for arc-length
+heading margin, which stationary samples never advance; that live queue also grows until finish,
+whose repeated Array.removeFirst is quadratic draining. This is outside the proposed fitter-only
+change and is not a measured latency/RSS or device incident claim.
+
+
+Stationary fit selected scope, before production edits: root approved the exact smaller win. Reuse
+`pending.last` to bypass only the redundant deviation scan when incoming x/y equal that tail, after
+pressure and spacing checks. Keep every sample/channel and the existing absorption order. Freeze
+initializer thresholds (no caller mutates them), and retain the degenerate-chord rule: at length²
+<=1e-12, skip only when the endpoint itself is within tolerance². A fresh break's singleton pending
+point is then safe too. Use temporary external distance-check instrumentation and bounded committed old-rule comparisons through
+knots, packed payload, seeded dabs, drawn RGBA and timing/interruption boundaries. Pending storage
+remains O(N); the separately recorded direction-reading LiveWalk retention/drain is not fixed here.
+No compiler/native or mutation execution; root owns those gates.

@@ -374,4 +374,297 @@ final class StrokePathFitLogicTests: XCTestCase {
                               "\(speed): \(report.diagnostic)")
         }
     }
+
+    // MARK: - Exact stationary-chord shortcut
+
+    /// Bounded old-rule oracle: retained solely to compare this optimization with the prior fit,
+    /// including its cumulative-channel addition order and degenerate-chord rule.
+    struct ReferenceFit {
+
+        static let tolerance: CGFloat = PackedSampleRun.quantum
+
+        static let maximumKnotSpacing: CGFloat = 12
+
+        static let minimumPressureChange: CGFloat = 0.02
+
+        var tolerance: CGFloat
+        var maximumKnotSpacing: CGFloat
+        var minimumPressureChange: CGFloat
+
+        private var anchor: VectorSample?
+        private var pending: [VectorSample] = []
+        private(set) var deviationCheckCount = 0
+
+        init(tolerance: CGFloat = ReferenceFit.tolerance,
+             maximumKnotSpacing: CGFloat = ReferenceFit.maximumKnotSpacing,
+             minimumPressureChange: CGFloat = ReferenceFit.minimumPressureChange) {
+            self.tolerance = tolerance
+            self.maximumKnotSpacing = maximumKnotSpacing
+            self.minimumPressureChange = minimumPressureChange
+        }
+
+        mutating func reset() { anchor = nil; pending = [] }
+
+        mutating func offer(_ sample: VectorSample) -> [VectorSample] {
+            guard let anchor else {
+                self.anchor = sample
+                return [sample]
+            }
+            guard breaks(from: anchor, to: sample) else {
+                pending.append(sample)
+                return []
+            }
+            guard let trailing = pending.last else {
+                self.anchor = sample
+                pending = []
+                return [sample]
+            }
+            let knot = trailing.absorbing(pending.dropLast())
+            self.anchor = knot
+            pending = [sample]
+            return [knot]
+        }
+
+        mutating func finish(_ sample: VectorSample?) -> [VectorSample] {
+            defer { pending = [] }
+            guard let sample else {
+                guard let trailing = pending.last else { return [] }
+                let knot = trailing.absorbing(pending.dropLast())
+                anchor = knot
+                return [knot]
+            }
+            guard let anchor else {
+                self.anchor = sample
+                return [sample]
+            }
+            var committed: [VectorSample] = []
+            if breaks(from: anchor, to: sample), let trailing = pending.last,
+               !ReferenceFit.isSamePoint(trailing, sample) {
+                committed.append(trailing.absorbing(pending.dropLast()))
+            }
+            if !ReferenceFit.isSamePoint(sample, anchor) || !committed.isEmpty {
+                committed.append(committed.isEmpty ? sample.absorbing(pending) : sample)
+            }
+            self.anchor = sample
+            return committed
+        }
+
+        private static func isSamePoint(_ a: VectorSample, _ b: VectorSample) -> Bool {
+            a.x == b.x && a.y == b.y && a.pressure == b.pressure
+        }
+
+        private mutating func breaks(from anchor: VectorSample, to sample: VectorSample) -> Bool {
+            if abs(sample.pressure - anchor.pressure) >= minimumPressureChange { return true }
+            if hypot(sample.x - anchor.x, sample.y - anchor.y) > maximumKnotSpacing { return true }
+            return deviates(from: anchor.point, to: sample.point)
+        }
+
+        private mutating func deviates(from a: CGPoint, to b: CGPoint) -> Bool {
+            guard !pending.isEmpty else { return false }
+            let dx = b.x - a.x, dy = b.y - a.y
+            let lengthSquared = dx * dx + dy * dy
+            let limit = tolerance * tolerance
+            for sample in pending {
+                deviationCheckCount += 1
+                let px = sample.x - a.x, py = sample.y - a.y
+                let distanceSquared: CGFloat
+                if lengthSquared <= 1e-12 {
+                    distanceSquared = px * px + py * py
+                } else {
+                    let t = min(max((px * dx + py * dy) / lengthSquared, 0), 1)
+                    let ex = px - dx * t, ey = py - dy * t
+                    distanceSquared = ex * ex + ey * ey
+                }
+                if distanceSquared > limit { return true }
+            }
+            return false
+        }
+    }
+
+    private func holdFixture(_ count: Int = 16) -> [VectorSample] {
+        var samples = [VectorSample(x: 8, y: 20, pressure: 0.5)]
+        for i in 0..<count {
+            samples.append(VectorSample(x: 12, y: 20, pressure: 0.5,
+                deltaTime: [CGFloat(0.001), 0.001, 0.008][i % 3],
+                tiltAltitude: 0.3 + CGFloat(i % 8) * 0.1,
+                tiltAzimuth: CGFloat(i) * 0.17))
+        }
+        return samples
+    }
+
+    private func referenceStored(_ samples: [VectorSample], lift: Bool = true) -> [VectorSample] {
+        var fit = ReferenceFit()
+        var result: [VectorSample] = []
+        for sample in lift ? Array(samples.dropLast()) : samples {
+            result.append(contentsOf: fit.offer(sample))
+        }
+        result.append(contentsOf: fit.finish(lift ? samples.last : nil))
+        return result
+    }
+
+    func testStationaryOffersKeepTheOldKnotsAndExactChannelAdditionOrder() {
+        for count in [16, 32, 64] {
+            let samples = holdFixture(count)
+            var reference = ReferenceFit()
+            var fit = StrokePathFit()
+            for sample in samples { XCTAssertEqual(fit.offer(sample), reference.offer(sample)) }
+            XCTAssertEqual(reference.deviationCheckCount, count * (count - 1) / 2)
+            let end = fit.finish(nil)
+            XCTAssertEqual(end, reference.finish(nil))
+            XCTAssertEqual(end.count, 1)
+            var expectedTime = samples.last!.deltaTime
+            for sample in samples.dropFirst().dropLast() { expectedTime += sample.deltaTime }
+            XCTAssertEqual(end.first?.deltaTime, expectedTime)
+            XCTAssertEqual(end.first?.tiltAltitude, samples.last?.tiltAltitude)
+            XCTAssertEqual(end.first?.tiltAzimuth, samples.last?.tiltAzimuth)
+        }
+        // This rounding-sensitive three-interval control forbids a "coalescing" substitute.
+        let samples = holdFixture(3)
+        let end = referenceStored(samples, lift: false)
+        XCTAssertEqual(end.last?.deltaTime, (CGFloat(0.008) + 0.001) + 0.001)
+        XCTAssertNotEqual(end.last?.deltaTime, CGFloat(0.008) + (0.001 + 0.001))
+    }
+
+    func testStationaryShortcutPreservesBreaksLiftInterruptionAndPackedBytes() {
+        var variants: [[VectorSample]] = []
+        let held = holdFixture()
+        variants.append(held + [VectorSample(x: 16, y: 20, pressure: 0.5)])
+        variants.append(held + [VectorSample(x: 12, y: 23, pressure: 0.5)])
+        variants.append(held + [VectorSample(x: 12, y: 20, pressure: 0.8),
+                                VectorSample(x: 12, y: 20, pressure: 0.8),
+                                VectorSample(x: 20, y: 20, pressure: 0.8)])
+        variants.append(held + [VectorSample(x: 12, y: 20, pressure: 0.51),
+                                VectorSample(x: 18, y: 20, pressure: 0.51)])
+        // A cap break leaves an untested singleton; its duplicate must still be represented.
+        variants.append([VectorSample(x: 8, y: 20, pressure: 0.5),
+                         VectorSample(x: 12, y: 20, pressure: 0.5),
+                         VectorSample(x: 24, y: 20, pressure: 0.5),
+                         VectorSample(x: 24, y: 20, pressure: 0.5),
+                         VectorSample(x: 26, y: 20, pressure: 0.5)])
+        // A moving prefix is preserved by a stationary chord and must still be checked on resume.
+        variants.append([VectorSample(x: 8, y: 20, pressure: 0.5),
+                         VectorSample(x: 10, y: 20.2, pressure: 0.5)] + Array(held.dropFirst()) +
+                        [VectorSample(x: 12, y: 24, pressure: 0.5)])
+        // The threshold itself, using exactly representable binary readings.
+        variants.append([VectorSample(x: 8, y: 20, pressure: 0.5),
+                         VectorSample(x: 12, y: 20, pressure: 0.5),
+                         VectorSample(x: 12, y: 20, pressure: 0.625)])
+        for samples in variants {
+            for lift in [false, true] {
+                var fit = StrokePathFit()
+                var reference = ReferenceFit()
+                var actual: [VectorSample] = [], expected: [VectorSample] = []
+                for sample in lift ? Array(samples.dropLast()) : samples {
+                    let a = fit.offer(sample), b = reference.offer(sample)
+                    XCTAssertEqual(a, b)
+                    actual += a; expected += b
+                }
+                actual += fit.finish(lift ? samples.last : nil)
+                expected += reference.finish(lift ? samples.last : nil)
+                XCTAssertEqual(actual, expected)
+                for precise in [false, true] {
+                    let a = PackedSampleRun(StrokeSamples(actual, channels: .captured), about: .zero, precise: precise)
+                    let b = PackedSampleRun(StrokeSamples(expected, channels: .captured), about: .zero, precise: precise)
+                    XCTAssertEqual(a.channels, b.channels)
+                    XCTAssertEqual(a.bytes, b.bytes)
+                }
+            }
+        }
+        var fit = StrokePathFit(minimumPressureChange: 0.125)
+        _ = fit.offer(VectorSample(x: 8, y: 20, pressure: 0.5))
+        _ = fit.offer(VectorSample(x: 12, y: 20, pressure: 0.5))
+        XCTAssertEqual(fit.offer(VectorSample(x: 12, y: 20, pressure: 0.625)).count, 1)
+    }
+
+    func testSameEndpointShortcutHonoursTheDegenerateChordPointDistanceRule() {
+        for tolerance in [CGFloat(0), 1e-8, 0.25] {
+            var fit = StrokePathFit(tolerance: tolerance)
+            var reference = ReferenceFit(tolerance: tolerance)
+            let samples = [VectorSample(x: 0, y: 0, pressure: 0.5),
+                           VectorSample(x: 0.0000005, y: 0, pressure: 0.5),
+                           VectorSample(x: 0.0000005, y: 0, pressure: 0.5)]
+            for sample in samples { XCTAssertEqual(fit.offer(sample), reference.offer(sample)) }
+            XCTAssertEqual(fit.finish(nil), reference.finish(nil))
+        }
+    }
+
+    func testAChangedEndpointStillChecksThePendingPrefix() {
+        for end in [CGPoint(x: 12, y: 26), CGPoint(x: 16, y: 22)] {
+            var fit = StrokePathFit()
+            var reference = ReferenceFit()
+            let samples = [VectorSample(x: 8, y: 20, pressure: 0.5),
+                           VectorSample(x: 10, y: 20.8, pressure: 0.5),
+                           VectorSample(x: 12, y: 22, pressure: 0.5)]
+            for sample in samples { XCTAssertEqual(fit.offer(sample), reference.offer(sample)) }
+            let sample = VectorSample(x: end.x, y: end.y, pressure: 0.5)
+            XCTAssertEqual(fit.offer(sample), reference.offer(sample))
+            XCTAssertEqual(fit.finish(nil), reference.finish(nil))
+        }
+    }
+
+    func testStationaryFitMatchesSeededVelocityTiltDabsAndDrawnPixelsExactly() throws {
+        let samples = holdFixture() + (1...8).map {
+            VectorSample(x: 12 + CGFloat($0) * 2, y: 20 + CGFloat($0 % 3), pressure: 0.5,
+                         deltaTime: 0.05, tiltAltitude: 0.5, tiltAzimuth: 0.8)
+        }
+        let actual = StrokeSamples(stored(samples), channels: .captured)
+        let expected = StrokeSamples(referenceStored(samples), channels: .captured)
+        var brush = inkBrush()
+        brush.dab.scatterAcross = 0.1
+        brush.modulations = BrushModulations([
+            BrushModulation(.size, .velocity, amount: -0.5),
+            BrushModulation(.flow, .tiltAngle, amount: -0.5)
+        ])
+        func bake(_ input: StrokeSamples) -> BrushStamper.BakedStroke {
+            BrushStamper.bake(samples: input, brush: brush, color: .black,
+                              brushSize: 8, brushOpacity: 1, random: DabRandom(seed: 1234))
+        }
+        let dabs = bake(actual)
+        XCTAssertFalse(dabs.dabs.isEmpty)
+        XCTAssertEqual(dabs, bake(expected))
+        let neutral = StrokeSamples(expected.map { VectorSample(x: $0.x, y: $0.y, pressure: $0.pressure) },
+                                    channels: .pressureOnly)
+        XCTAssertNotEqual(dabs, bake(neutral), "velocity/tilt channels must affect the actual dabs")
+        let size = CGSize(width: 48, height: 40)
+        func render(_ input: StrokeSamples) throws -> UIImage {
+            let target = RasterLayerTexture.empty(size: size)
+            BrushStamper.stampStroke(into: target, samples: input, brush: brush, color: .black,
+                                    brushSize: 8, brushOpacity: 1, random: DabRandom(seed: 1234))
+            return try XCTUnwrap(target.renderToUIImage())
+        }
+        let image = try render(actual)
+        let report = try XCTUnwrap(RasterVectorParity.report(raster: image, vector: try render(expected), size: size))
+        XCTAssertEqual(report.differingPixelCount, 0)
+        XCTAssertEqual(report.maxChannelDelta, 0)
+        let blank = try XCTUnwrap(RasterLayerTexture.empty(size: size).renderToUIImage())
+        let ink = try XCTUnwrap(RasterVectorParity.report(raster: image, vector: blank, size: size))
+        XCTAssertGreaterThan(ink.differingPixelCount, 0, "equal blank images do not prove drawn parity")
+    }
+
+    func testTimingFlushResetKeepsTheExactSharedBoundaryChannels() {
+        var fit = StrokePathFit(), reference = ReferenceFit()
+        var actual: [VectorSample] = [], expected: [VectorSample] = []
+        for sample in holdFixture() {
+            actual += fit.offer(sample); expected += reference.offer(sample)
+        }
+        actual += fit.finish(nil); expected += reference.finish(nil)
+        let boundary = actual.count - 1
+        XCTAssertEqual(boundary, expected.count - 1)
+        fit.reset(); reference.reset()
+        // The view retains the boundary in its stream, then restarts fitting on the next event.
+        for i in 1...4 {
+            let sample = VectorSample(x: 12 + CGFloat(i), y: 20, pressure: 0.5, deltaTime: 0.01,
+                                      tiltAltitude: 0.4, tiltAzimuth: 1.2)
+            actual += fit.offer(sample); expected += reference.offer(sample)
+        }
+        actual += fit.finish(nil); expected += reference.finish(nil)
+        let a = TimingStrokeCut.split(StrokeSamples(actual, channels: .captured), at: [boundary])
+        let b = TimingStrokeCut.split(StrokeSamples(expected, channels: .captured), at: [boundary])
+        XCTAssertEqual(a.count, 2)
+        XCTAssertEqual(a.map(\.slot), b.map(\.slot))
+        for (left, right) in zip(a, b) { XCTAssertEqual(Array(left.samples), Array(right.samples)) }
+        XCTAssertEqual(a[0].samples.last, a[1].samples.first)
+        XCTAssertEqual(a[0].samples.last?.deltaTime, expected[boundary].deltaTime)
+    }
+
 }
