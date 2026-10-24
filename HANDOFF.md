@@ -15,21 +15,22 @@ Installed normal Release remains bcd7a6af, UUID F6102F9A-6D31-3185-B078-47B4C419
   clean65b39e01. Qualified production is unchanged from6656a5a8; latest corrections were two stale tests.
 - Active fill tree: `~/PaintWork/PaintApp-s53-fill-mend`, tmp/s53-fill-mend. Production is frozen at
   d1ff2ad0/265e588e. Later commits change only UI fixtures/readers and records. Resolve current HEAD
-  with Git; latest four-case UI fixture corrections are not yet qualified.
+  with Git; latest four-case UI fixture run is3/4 green; one extension-buffer driver failure remains.
 - Audit library tree: `~/PaintWork/PaintApp-s54-library-ownership`, tmp/s54-library-ownership,
   clean de28149c. Strict shared file-tree/content identity and UUID Trash ownership; six new logic
   methods, PBX source registered. Parse/plutil only; no compile/runtime/UI/mutation gate. WIP, do not merge.
 - Audit background tree: `~/PaintWork/PaintApp-s54-background-ownership`, tmp/s54-background-ownership,
   clean ec46b3e6. Export cancellation, maintenance serialization and bounded/cancelled thumbnails;
   five new regressions. No native compile/runtime/UI/mutation gate. WIP, do not merge.
-- `tmp/s54-test-safety` is empty at afd2030c. No finding record/code there yet. Subagents hit account
-  usage limits; root preserved their partial work and completed initial tests/registration. Do not
-  assume these snapshots are finished. Do not repeatedly retry limited agents without a changed limit.
+- The empty, unused s54-test-safety worktree/branch was removed; no code/history was lost. Subagents
+  hit account usage limits; root preserved partial implementations and completed initial tests/PBX.
+  Do not assume those snapshots are finished or repeatedly retry limited agents without a changed limit.
 
-Root owns the sole native slot. Last completed run: old47d FillMend2 control on owned iPad9 sim56,
-1passed(extension)/1failed(seam OFF control), exact723-source freeze. No native job is active at this
-checkpoint; check external root-status before launching in case a later command started one.
-`~/PaintWork/s52-vector-points/runtime-qualification/root-status.json` records current session/output.
+Root owns the sole native slot. Last completed test run: `native/fill-ui4-cleaned-run01` at332cc84a,
+**3passed/1failed/0skipped**, all723 source bytes/modes exact. No task-owned native process remains.
+No iPad operation. All production/project/shared-helper bytes remain identical to265e588e; only the FillMend UI
+file and records changed. This is NOT a fully green UI class. External live status:
+`~/PaintWork/s52-vector-points/runtime-qualification/root-status.json`.
 
 Owned simulators: logic M5 **39E84984-3C6F-4A6A-8DC8-D1098F6B623E** shut down; UI iPad9
 **56CC563F-06D0-42FC-9C18-A2B230DE2D38** booted; old-control9
@@ -112,10 +113,16 @@ checks actual raster menu. These two now pass2/2 including batch undo/redo and o
 looked at whole-screen owner-landscape pictures: long attached/detached white gaps close, outside stays
 white; tiny protected end pixels remain visible. `native/new-ui2-6bc-run01/` exact723 freeze.
 Two OLD tests fail pixels in UI14; old47d control reproduces seam OFF failure, extension passes. Their
-Screen duplicated pixel decoding/ignored orientation and hardcoded geometry could hit the dock. Current
-unqualified fixture correction reuses ScreenshotPixels, visiblePaperRect, explicit canvas sizes,
-landscape and measured slider adjustment, retaining all original positive/OFF assertions. Run the full
-four-case FillMend class next and inspect pictures. Full-screen captures are correct owner1080×810;
+Screen duplicated pixel decoding/ignored orientation and hardcoded geometry could hit the dock. Current fixture correction reuses ScreenshotPixels, visiblePaperRect, explicit canvas sizes and
+landscape, retaining the original positive/OFF assertions. Full class at332cc84a is3/4: both new
+workflows and the older neighbouring-fill seam pass. Root looked at the seam picture: first divider
+covered, last OFF-divider visibly white, outside white; frame remains1. Extension fails in the TEST
+DRIVER at PaintUITestCase.adjustSlider:779 after its first drag; the popup/slider disappears before
+value verification. No final picture assertion executes in that case. Native recording
+`fill-ui4-cleaned-run01/attachments/EB25874B-6B80-4439-9279-B811A9915D23.mp4`; inspect around35s.
+Investigate actual gesture/viewport visibility (scrollFillPanel only checks isHittable, not full
+containment), not a speculative fill-engine patch or reopen/retry workaround. This hypothesis is
+not proved. Fix and rerun the selected extension case, then the full four-case class. Full-screen captures are correct owner1080×810;
 app.screenshot PNG metadata/cropping can produce a misleading partial portrait view. Touched screenshots
 now use existing XCUIScreen.main protocol seam. Do not mistake that for a product layout defect.
 

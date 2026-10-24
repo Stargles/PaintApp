@@ -11,8 +11,8 @@ until 10 a.m. Toronto time. The later point-only vector ruling below supersedes 
 **Checkpoint2026-10-24:** point-only Liquify/newest retention remain unmerged and not installed; their
 logic, affected UI and saving-cost gates qualify. Fill core focused206 and35 distinct fault recipes
 qualify; Debug/Release each5278=5274passed+4known skips. Six old/new fixtures×five widths preserve filled
-masks. New fill/batch UI2/2 and ten old workflows pass; two older fill UI tests need corrected harness
-rechecks. Audit has19 source candidates, two unqualified implementation branches. Startup repair took
+masks. New fill/batch UI2/2 and ten old workflows pass; corrected full fill class is3/4, with an extension
+slider-driver failure remaining. Audit has19 source candidates, two unqualified implementation branches. Startup repair took
 11.013s on M5 before first UI; cold-start/scheduling work remains before install. Erasing cause remains
 unresolved. Installed Release is stillbcd7a6af; no device launch/restart/install this pass.
 
@@ -203,8 +203,10 @@ At265e588e, focused206 passed before/after22 assertion-red faults with exact723-
 preserved earlier faults bring distinct qualified recipes to35. Debug AND Release each5278 reconcile.
 Old/new masks match six fixtures×five widths;12 Reach stress cases and fragmented archive gate pass.
 New fill and Mend All Fills cold UI2/2 pass at6bc20170, with owner-size whole-screen pictures inspected.
-Ten other current workflows pass. Old47d control reproduces the stale seam control failure; its
-extension passes. Corrected shared screenshot/visible-paper fixtures still need a complete class run.
+Ten other current workflows pass. Old47d reproduces the stale seam control failure; its extension
+passes. With shared screenshot/visible-paper fixtures the full fill class is3/4: the neighbouring-fill
+seam now passes with its OFF control intact, but the extension slider disappears after the test drag.
+Diagnose that gesture/visibility failure and rerun; no product cause is assumed.
 Worktree: `~/PaintWork/PaintApp-s53-fill-mend`, `tmp/s53-fill-mend`.
 - [ ] Qualify all four FillMend UI cases after fixture/helper corrections; inspect whole-screen pictures.
 - [ ] Resolve the uncertain inside-press timing difference with paired baseline runs; no device extrapolation.
