@@ -403,6 +403,9 @@ final class BackupManagerLogicTests: XCTestCase {
         let kept = try XCTUnwrap(ProjectBackupManager.moveToTrash(recent, tag: "deleted"))
         let latest = ProjectBackupManager.backupsRootDirectory.appendingPathComponent(
             "\(recentID.uuidString)/latest.paintproj/manifest.json")
+        let latestExists = FileManager.default.fileExists(atPath: latest.path)
+        XCTAssertTrue(latestExists, "PREMISE: the retained project's history exists before purge")
+        guard latestExists else { return }
         let before = try Data(contentsOf: latest)
         XCTAssertTrue(ProjectStore.listProjects().isEmpty, "PREMISE: no live names can protect the recent history")
 

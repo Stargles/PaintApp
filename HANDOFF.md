@@ -32,6 +32,11 @@ No product delay/seed hook or permanent framework was added. Follow-up removes t
 maintenance-finished notification/gallery subscriber and updates that ordering's comments: the
 initial gallery listing occurs only after maintenance. Do not merge/deploy as qualified.
 
+Library ownership regression refinement: `testExpiredTrashCannotDeleteANewerSameNamedProjectsHistory`
+now asserts that the retained UUID's backup manifest exists before the throwing read, and returns
+after a failed premise assertion. This gives the exact same-name history-deletion fault a direct,
+non-throwing regression signal. No native test was run; root owns combined qualification.
+
 ## Authoritative checkpoint — 2026-10-24 morning
 
 **Nothing new is merged, pushed, installed or physically device-qualified.** Main/origin is afd2030c.
