@@ -16,6 +16,30 @@ public sealed class FakeFileTransport : IFileTransport
     public bool FailNextSend;
 
     private bool _hasClient;
+    private Connection? _connection;
+    public Func<Frame, CancellationToken, Task>? BeforeSendAsync;
+
+    private sealed class Connection : IFileConnection
+    {
+        private readonly FakeFileTransport _owner;
+        private readonly CancellationTokenSource _closed = new();
+        public Connection(FakeFileTransport owner) { _owner = owner; }
+        public CancellationToken Closed => _closed.Token;
+        public event Action<FileResultMessage>? FileResultReceived;
+        public void Close() => _closed.Cancel();
+        public void Reply(FileResultMessage result) => FileResultReceived?.Invoke(result);
+        public async Task<bool> SendAsync(Frame frame, CancellationToken ct)
+        {
+            if (Closed.IsCancellationRequested) return false;
+            if (_owner.BeforeSendAsync is { } gate) await gate(frame, ct);
+            if (ct.IsCancellationRequested || Closed.IsCancellationRequested) return false;
+            if (_owner.FailNextSend) { _owner.FailNextSend = false; return false; }
+            _owner.Sent.Add(frame);
+            return true;
+        }
+    }
+
+    public IFileConnection? CaptureConnection() => _hasClient ? _connection : null;
     public bool HasClient
     {
         get => _hasClient;
@@ -23,26 +47,18 @@ public sealed class FakeFileTransport : IFileTransport
     }
 
     public event Action? ClientConnected;
-    public event Action<FileResultMessage>? FileResultReceived;
 
     public void SetHasClient(bool value)
     {
         bool wasFalse = !_hasClient;
         _hasClient = value;
-        if (value && wasFalse) ClientConnected?.Invoke();
-    }
-
-    public bool TrySend(Frame frame)
-    {
-        if (FailNextSend) { FailNextSend = false; return false; }
-        if (!_hasClient) return false;
-        Sent.Add(frame);
-        return true;
+        if (!value) { _connection?.Close(); _connection = null; }
+        if (value && wasFalse) { _connection = new Connection(this); ClientConnected?.Invoke(); }
     }
 
     /// <summary>Simulates the iPad answering a FILE_BEGIN/FILE_END with FILE_RESULT.</summary>
     public void Reply(int id, bool ok, string? reason = null) =>
-        FileResultReceived?.Invoke(new FileResultMessage { Id = id, Ok = ok, Reason = reason });
+        _connection?.Reply(new FileResultMessage { Id = id, Ok = ok, Reason = reason });
 
     public FileBeginMessage DecodeBegin(Frame frame) => Json.Decode<FileBeginMessage>(frame.Payload);
     public FileEndMessage DecodeEnd(Frame frame) => Json.Decode<FileEndMessage>(frame.Payload);

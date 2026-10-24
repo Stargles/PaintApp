@@ -39,7 +39,7 @@ public sealed class OutboundFileEventArgs : EventArgs
 /// (≤ <see cref="ChunkSize"/> at a time) straight off disk, never held whole in memory.
 /// References only <see cref="IFileTransport"/>, never WPF or a socket (STREAM.md §4.6).
 /// </summary>
-public sealed class FileOutbox : IDisposable
+public sealed class FileOutbox : IAsyncDisposable
 {
     public const int ChunkSize = Frame.MaximumFileChunkBytes;
     private static readonly TimeSpan DefaultResultTimeout = TimeSpan.FromSeconds(60);
@@ -49,7 +49,6 @@ public sealed class FileOutbox : IDisposable
     private readonly TimeSpan _resultTimeout;
     private readonly Channel<string> _queue = Channel.CreateUnbounded<string>();
     private readonly object _gate = new();
-    private readonly Dictionary<int, TaskCompletionSource<FileResultMessage>> _pending = new();
     private readonly SemaphoreSlim _clientSignal = new(0, 1);
     private int _nextId = 1;
     private readonly CancellationTokenSource _cts = new();
@@ -62,7 +61,6 @@ public sealed class FileOutbox : IDisposable
         _transport = transport;
         _log = log ?? (_ => { });
         _resultTimeout = resultTimeout ?? DefaultResultTimeout;
-        _transport.FileResultReceived += OnFileResultReceived;
         _transport.ClientConnected += OnClientConnected;
         _pump = Task.Run(() => PumpAsync(_cts.Token));
     }
@@ -93,13 +91,7 @@ public sealed class FileOutbox : IDisposable
     private void OnClientConnected()
     {
         try { _clientSignal.Release(); } catch (SemaphoreFullException) { /* already signalled */ }
-    }
-
-    private void OnFileResultReceived(FileResultMessage result)
-    {
-        TaskCompletionSource<FileResultMessage>? tcs;
-        lock (_gate) { _pending.TryGetValue(result.Id, out tcs); }
-        tcs?.TrySetResult(result);
+        catch (ObjectDisposedException) { /* a readiness callback already captured during disposal */ }
     }
 
     private async Task PumpAsync(CancellationToken ct)
@@ -116,7 +108,8 @@ public sealed class FileOutbox : IDisposable
 
     private async Task SendOneAsync(string path, CancellationToken ct)
     {
-        while (!_transport.HasClient)
+        IFileConnection? connection;
+        while ((connection = _transport.CaptureConnection()) == null)
         {
             Raise(path, OutboundFileState.Queued, "Waiting for the iPad…", 0, SafeLength(path));
             await _clientSignal.WaitAsync(ct).ConfigureAwait(false);
@@ -136,7 +129,10 @@ public sealed class FileOutbox : IDisposable
         int id;
         lock (_gate) { id = _nextId++; }
         var tcs = new TaskCompletionSource<FileResultMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
-        lock (_gate) { _pending[id] = tcs; }
+        void OnResult(FileResultMessage result) { if (result.Id == id) tcs.TrySetResult(result); }
+        connection.FileResultReceived += OnResult;
+        using var session = CancellationTokenSource.CreateLinkedTokenSource(ct, connection.Closed);
+        var transferToken = session.Token;
 
         try
         {
@@ -144,8 +140,8 @@ public sealed class FileOutbox : IDisposable
             string name = Path.GetFileName(path);
             Raise(path, OutboundFileState.Sending, null, 0, total);
 
-            if (!_transport.TrySend(Frame.Of(MessageType.FileBegin, Json.Encode(
-                    new FileBeginMessage { Id = id, Name = name, Size = total, Kind = kind }))))
+            if (!await connection.SendAsync(Frame.Of(MessageType.FileBegin, Json.Encode(
+                    new FileBeginMessage { Id = id, Name = name, Size = total, Kind = kind })), transferToken).ConfigureAwait(false))
             {
                 Raise(path, OutboundFileState.Failed, "The iPad disconnected before this could be sent", 0, total);
                 return;
@@ -156,12 +152,12 @@ public sealed class FileOutbox : IDisposable
             {
                 byte[] buffer = new byte[ChunkSize];
                 int n;
-                while ((n = await stream.ReadAsync(buffer, ct).ConfigureAwait(false)) > 0)
+                while ((n = await stream.ReadAsync(buffer, transferToken).ConfigureAwait(false)) > 0)
                 {
                     var chunkPayload = new byte[4 + n];
                     BinaryPrimitives.WriteUInt32BigEndian(chunkPayload.AsSpan(0, 4), (uint)id);
                     Buffer.BlockCopy(buffer, 0, chunkPayload, 4, n);
-                    if (!_transport.TrySend(Frame.Of(MessageType.FileChunk, chunkPayload)))
+                    if (!await connection.SendAsync(Frame.Of(MessageType.FileChunk, chunkPayload), transferToken).ConfigureAwait(false))
                     {
                         Raise(path, OutboundFileState.Failed, "The connection to the iPad was lost mid-transfer", sent, total);
                         return;
@@ -171,7 +167,7 @@ public sealed class FileOutbox : IDisposable
                 }
             }
 
-            if (!_transport.TrySend(Frame.Of(MessageType.FileEnd, Json.Encode(new FileEndMessage { Id = id }))))
+            if (!await connection.SendAsync(Frame.Of(MessageType.FileEnd, Json.Encode(new FileEndMessage { Id = id })), transferToken).ConfigureAwait(false))
             {
                 Raise(path, OutboundFileState.Failed, "The connection to the iPad was lost mid-transfer", sent, total);
                 return;
@@ -180,7 +176,7 @@ public sealed class FileOutbox : IDisposable
             FileResultMessage result;
             try
             {
-                result = await tcs.Task.WaitAsync(_resultTimeout, ct).ConfigureAwait(false);
+                result = await tcs.Task.WaitAsync(_resultTimeout, transferToken).ConfigureAwait(false);
             }
             catch (TimeoutException)
             {
@@ -197,6 +193,10 @@ public sealed class FileOutbox : IDisposable
                 Raise(path, OutboundFileState.Refused, result.Reason ?? "The iPad refused the file", total, total);
             }
         }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            Raise(path, OutboundFileState.Failed, "The connection to the iPad was lost mid-transfer", 0, total);
+        }
         catch (OperationCanceledException) { throw; }
         catch (Exception e)
         {
@@ -204,7 +204,7 @@ public sealed class FileOutbox : IDisposable
         }
         finally
         {
-            lock (_gate) { _pending.Remove(id); }
+            connection.FileResultReceived -= OnResult;
         }
     }
 
@@ -223,12 +223,11 @@ public sealed class FileOutbox : IDisposable
         });
     }
 
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
-        _transport.FileResultReceived -= OnFileResultReceived;
         _transport.ClientConnected -= OnClientConnected;
         _cts.Cancel();
-        try { _pump.Wait(TimeSpan.FromSeconds(2)); } catch { /* best effort on shutdown */ }
+        await _pump.ConfigureAwait(false);
         _cts.Dispose();
         _clientSignal.Dispose();
     }

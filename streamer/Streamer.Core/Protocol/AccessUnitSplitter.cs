@@ -33,12 +33,25 @@ public sealed class AccessUnitSplitter
 
     private readonly List<byte> _buf = new();
     private readonly List<(int NalType, byte[] Bytes)> _pending = new();
+    private readonly int _maximumAccessUnitBytes;
+    private int _pendingBytes;
+    public AccessUnitSplitter() : this(Frame.MaximumPayloadLength - VideoPayload.HeaderLength) { }
+    internal AccessUnitSplitter(int maximumAccessUnitBytes)
+    {
+        if (maximumAccessUnitBytes < 1) throw new ArgumentOutOfRangeException(nameof(maximumAccessUnitBytes));
+        _maximumAccessUnitBytes = maximumAccessUnitBytes;
+    }
+
     private byte[]? _lastSps;
     private byte[]? _lastPps;
 
     /// <summary>Feed more bytes (or, with end:true, signal EOF) and return newly closed AUs.</summary>
     public List<AccessUnit> Feed(ReadOnlySpan<byte> data, bool end = false)
     {
+        // One unfinished AU and one production read block, before making carry/parse copies.
+        int batchBudget = checked(_maximumAccessUnitBytes + 65536);
+        if (data.Length > batchBudget || _buf.Count > batchBudget - data.Length)
+            throw new InvalidDataException("Annex-B carry exceeds the wire access-unit budget.");
         if (!data.IsEmpty)
         {
             _buf.AddRange(data.ToArray());
@@ -52,6 +65,7 @@ public sealed class AccessUnitSplitter
         }
 
         var aus = new List<AccessUnit>();
+        int completedBytes = 0;
         if (positions.Count < 2)
         {
             if (end)
@@ -72,7 +86,7 @@ public sealed class AccessUnitSplitter
             }
             var nalBytes = buf[startIdx..nextStartIdx];
             int nalType = buf[payloadStart] & 0x1F;
-            HandleNal(nalType, nalBytes, aus);
+            HandleNal(nalType, nalBytes, aus, ref completedBytes, batchBudget);
         }
 
         if (end)
@@ -90,8 +104,14 @@ public sealed class AccessUnitSplitter
         return aus;
     }
 
-    private void HandleNal(int nalType, byte[] nalBytes, List<AccessUnit> ausOut)
+    private void HandleNal(int nalType, byte[] nalBytes, List<AccessUnit> ausOut, ref int completedBytes, int batchBudget)
     {
+        if (nalBytes.Length > _maximumAccessUnitBytes - _pendingBytes)
+            throw new InvalidDataException("Annex-B assembly exceeds the wire access-unit budget.");
+        if (nalType == NalSps && nalBytes.Length > _maximumAccessUnitBytes - (_lastPps?.Length ?? 0) ||
+            nalType == NalPps && nalBytes.Length > _maximumAccessUnitBytes - (_lastSps?.Length ?? 0))
+            throw new InvalidDataException("H.264 parameter sets exceed the wire access-unit budget.");
+        _pendingBytes += nalBytes.Length;
         if (nalType == NalSps)
         {
             _lastSps = nalBytes;
@@ -106,6 +126,14 @@ public sealed class AccessUnitSplitter
         {
             var types = _pending.Select(p => p.NalType).ToList();
             bool isIdr = types.Contains(NalIdr);
+            int prefixBytes = isIdr && !(types.Contains(NalSps) && types.Contains(NalPps))
+                ? (_lastSps?.Length ?? 0) + (_lastPps?.Length ?? 0) : 0;
+            if (prefixBytes > _maximumAccessUnitBytes - _pendingBytes)
+                throw new InvalidDataException("H.264 access unit exceeds the wire payload budget.");
+            int bytes = prefixBytes + _pendingBytes;
+            if (bytes > batchBudget - completedBytes)
+                throw new InvalidDataException("Completed access-unit batch exceeds the bounded read/carry allowance.");
+            completedBytes += bytes;
             byte[] auBytes;
             if (isIdr && !(types.Contains(NalSps) && types.Contains(NalPps)))
             {
@@ -118,6 +146,7 @@ public sealed class AccessUnitSplitter
             }
             ausOut.Add(new AccessUnit { Bytes = auBytes, Keyframe = isIdr, NalTypes = types });
             _pending.Clear();
+            _pendingBytes = 0;
         }
     }
 

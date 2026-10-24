@@ -10,8 +10,7 @@ namespace Streamer.Tests;
 /// the laptop's screen moved. The cause was a second capture pipeline that nothing referenced and
 /// nothing could stop — built when a connect and the iPad's `resume` (or a second connection
 /// replacing the first) overlapped inside <c>StreamerSession</c> — whose access units interleaved
-/// with the live pipeline's. These tests raise transitions the way ProtocolServer's events do
-/// (fire-and-forget, back to back) and count the pipelines alive afterwards: it must be one.
+/// with the live pipeline's. These tests raise overlapping transitions back to back and join them and count the pipelines alive afterwards: it must be one.
 /// </summary>
 public class StreamerSessionPipelineTests
 {
@@ -124,8 +123,8 @@ public class StreamerSessionPipelineTests
         await session.OnClientConnectedAsync();
         factory.Created[0].Connect();
 
-        factory.Created[0].Emit(keyframe: true);
-        factory.Created[0].Emit(keyframe: false);
+        await factory.Created[0].EmitAsync(keyframe: true);
+        await factory.Created[0].EmitAsync(keyframe: false);
 
         Assert.Equal(new[] { true, false }, sink.VideoFrames.Select(f => f.Keyframe));
     }
@@ -172,4 +171,29 @@ public class StreamerSessionPipelineTests
 
         Assert.True(factory.Live <= 1, $"{factory.Live} pipelines alive after {factory.Created.Count} were built");
     }
+    [Fact]
+    public async Task RetiredConnectControlAndDisconnectCannotChangeTheCurrentRun()
+    {
+        var (session, factory) = await SessionOnASourceAsync();
+        using var old = new CancellationTokenSource();
+        old.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => session.OnClientConnectedAsync(old.Token));
+        Assert.Empty(factory.Created);
+        using var current = new CancellationTokenSource();
+        await session.OnClientConnectedAsync(current.Token);
+        factory.Created[0].Connect();
+        await session.OnClientDisconnectedAsync(old.Token);
+        await session.HandleControlAsync(Control(ControlMessage.Pause), old.Token);
+        Assert.True(session.IsStreaming);
+        Assert.False(factory.Created[0].Stopped);
+        current.Cancel();
+        await session.OnClientDisconnectedAsync(current.Token);
+        Assert.True(factory.Created[0].Stopped);
+        using var reopened = new CancellationTokenSource();
+        await session.OnClientConnectedAsync(reopened.Token);
+        await session.OnClientDisconnectedAsync(current.Token);
+        Assert.Equal(1, factory.Live);
+        await session.DisposeAsync();
+    }
+
 }

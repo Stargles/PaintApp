@@ -304,10 +304,10 @@ public partial class MainWindow : Window, IFrameSink
         });
     }
 
-    public void OnVideoFrame(bool keyframe, ulong ptsUs, ReadOnlyMemory<byte> accessUnit)
+    public Task OnVideoFrameAsync(bool keyframe, ulong ptsUs, ReadOnlyMemory<byte> accessUnit, CancellationToken ct)
     {
-        // Rate is polled from _session.CurrentRate on the DispatcherTimer instead of
-        // updated per-frame here, so a 30fps stream does not dispatch 30 UI updates/sec.
+        // The rate timer already updates this window; video delivery needs no Dispatcher work.
+        return Task.CompletedTask;
     }
 
     protected override void OnClosing(CancelEventArgs e)

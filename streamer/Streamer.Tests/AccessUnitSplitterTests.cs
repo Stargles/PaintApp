@@ -137,4 +137,23 @@ public class AccessUnitSplitterTests
         Assert.Equal(new[] { 5 }, closed[1].NalTypes); // AU1's own NALs never included SPS/PPS
         Assert.Equal(sps.Concat(pps).Concat(bareIdr).ToArray(), closed[1].Bytes); // but the bytes got them prepended
     }
+    [Fact]
+    public void CarryAssemblyAndRepeatedParameterPrefixCopiesAreBoundedBeforeGrowing()
+    {
+        var carry = new AccessUnitSplitter(32);
+        Assert.Throws<InvalidDataException>(() => carry.Feed(new byte[32 + 65536 + 1]));
+        byte[] Nal(byte type, int padding = 0) => new byte[] { 0, 0, 0, 1, type }
+            .Concat(Enumerable.Repeat((byte)0xAA, padding)).ToArray();
+        var assembly = new AccessUnitSplitter(32);
+        Assert.Throws<InvalidDataException>(() => assembly.Feed(Nal(0x67, 20).Concat(Nal(0x68, 20)).ToArray(), end: true));
+        var prefix = new AccessUnitSplitter(32);
+        var first = prefix.Feed(Nal(0x67, 6).Concat(Nal(0x68, 6)).Concat(Nal(0x41)).ToArray(), end: true);
+        Assert.Single(first);
+        Assert.Throws<InvalidDataException>(() => prefix.Feed(Nal(0x65, 20), end: true));
+        var batch = new AccessUnitSplitter(64);
+        batch.Feed(Nal(0x67, 16).Concat(Nal(0x68, 16)).Concat(Nal(0x41)).ToArray(), end: true);
+        var smallIdrs = Enumerable.Range(0, 1500).SelectMany(_ => Nal(0x65)).ToArray();
+        Assert.Throws<InvalidDataException>(() => batch.Feed(smallIdrs, end: true));
+    }
+
 }

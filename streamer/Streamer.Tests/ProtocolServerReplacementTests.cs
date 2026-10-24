@@ -139,4 +139,81 @@ public sealed class ProtocolServerReplacementTests : IDisposable
         secondTcp.Dispose();
         thirdTcp.Dispose();
     }
+    private sealed class HeldHelloReply : Stream
+    {
+        private readonly Stream _inner;
+        public readonly TaskCompletionSource Header = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public readonly TaskCompletionSource Release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _writes;
+        public HeldHelloReply(Stream inner) { _inner = inner; }
+        public override async ValueTask WriteAsync(ReadOnlyMemory<byte> data, CancellationToken ct = default)
+        {
+            int ordinal = Interlocked.Increment(ref _writes);
+            if (ordinal == 2) await Release.Task.WaitAsync(ct);
+            await _inner.WriteAsync(data, ct);
+            if (ordinal == 1) Header.TrySetResult();
+        }
+        public override ValueTask<int> ReadAsync(Memory<byte> data, CancellationToken ct = default) => _inner.ReadAsync(data, ct);
+        public override void Close() { Release.TrySetCanceled(); _inner.Close(); base.Close(); }
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => true;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() => _inner.Flush();
+        public override int Read(byte[] b, int o, int c) => _inner.Read(b, o, c);
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] b, int o, int c) => _inner.Write(b, o, c);
+    }
+
+    [Fact]
+    public async Task PendingHelloReplacementNeverBecomesReadyAndStopJoinsEveryOldRunBeforeReuse()
+    {
+        HeldHelloReply? held = null;
+        int sockets = 0, connected = 0;
+        var wrapped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var server = new ProtocolServer(0, "PaintStreamer", "test", "host", "machine", _fileInbox,
+            connectionStream: stream =>
+            {
+                if (Interlocked.Increment(ref sockets) != 1) return stream;
+                held = new HeldHelloReply(stream); wrapped.TrySetResult(); return held;
+            }) { SkipAdmissionCheckForTests = true };
+        _server = server;
+        server.ClientConnected += run =>
+        {
+            if (!run.IsCancellationRequested) { Interlocked.Increment(ref connected); ready.TrySetResult(); }
+            return Task.CompletedTask;
+        };
+        await server.StartAsync();
+        using var first = new TcpClient();
+        await first.ConnectAsync(IPAddress.Loopback, server.BoundPort);
+        await wrapped.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        await first.GetStream().WriteAsync(Frame.Of(MessageType.Hello, Json.Encode(new HelloMessage { Proto = 1 })).Encode());
+        await held!.Header.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        Assert.False(server.HasClient);
+        Assert.Null(server.CaptureConnection());
+        using var second = new TcpClient();
+        await second.ConnectAsync(IPAddress.Loopback, server.BoundPort);
+        await second.GetStream().WriteAsync(Frame.Of(MessageType.Hello, Json.Encode(new HelloMessage { Proto = 99 })).Encode());
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var rejection = await new FrameReader(second.GetStream()).ReadFrameAsync(timeout.Token);
+        Assert.Contains("rejected proto", Json.Decode<HelloMessage>(rejection.Payload).Version);
+        held.Release.TrySetResult();
+        await server.StopAsync();
+        Assert.Equal(0, connected);
+        Assert.Equal(0, server.OwnedSessionCount);
+        Assert.False(server.HasClient);
+        Assert.Null(server.CaptureConnection());
+        await server.StartAsync();
+        var (third, _, _) = await ConnectAndHelloAsync(server.BoundPort);
+        await ready.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        Assert.Equal(1, connected);
+        Assert.True(server.HasClient);
+        third.Dispose();
+        await server.StopAsync();
+        Assert.Equal(0, server.OwnedSessionCount);
+    }
+
 }

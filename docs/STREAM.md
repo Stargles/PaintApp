@@ -223,6 +223,45 @@ frames. The iPad 9th gen on Tailscale (WireGuard on an A13) is comfortable there
 change rate is the real cap — a still screen costs **nothing** (above), and stage 3 MEASURED a moving
 desktop at ~3.6 Mbit/s and ~18 fps with `qsvh264enc` at 6.4% CPU for GStreamer and ~1.5% for the app.
 
+### Connection and flow ownership — source qualification pending, 2026-10-24
+
+HELLO completion is the readiness boundary, not TCP accept. Each file sender captures one ready
+connection for BEGIN through RESULT; replacement cancels that sender rather than redirecting chunks.
+The server owns/join-cancels session and owner callback tasks, with at most one current and one
+retiring connection while accepting a replacement. Session transitions carry the original run token.
+Each incoming partial file belongs to its connection receiver, with the existing shared save policy.
+
+One connection writer owns its admitted bulk frame through complete wire write or connection close.
+A cancelled capture producer may stop waiting; it never truncates an admitted frame. Existing capture
+and sink VIDEO delivery now awaits the write credit/completion, without adding an encode queue.
+There is one admitted bulk request (queued OR active). A waiting capture producer retains its raw
+splitter batch, and the file pump retains its256KiB read buffer plus current256KiB+id payload; no next
+chunk is read until send completion. No full VIDEO/frame encode copy is made before admission.
+Control work shares this writer: one coalesced STATUS, PING and PONG slots, at most four pending
+FILE_RESULT replies plus the one active write. Each encoded control is checked against the existing
+64MiB payload cap before it can occupy a slot (four replies + status + terminal: at most six such
+payloads, plus an active control, framing headers and empty ping/pong metadata). Reply overflow closes explicitly. Replacement uses
+one terminal STATUS after the active complete frame and accepted FILE_RESULT replies, discards obsolete
+status/ping work and drains for
+up to the existing2s before closing the actual stream and joining its writer. No second writer.
+
+Splitter carry/assembly/parameter sets use the existing VIDEO payload cap before growing/copying;
+the completed Feed batch is bounded by one maximum AU plus the64KiB production read, including
+repeated SPS/PPS prefixes. A malformed/over-budget encoded source fails its owned pipeline and
+restarts with an IDR; compressed P-frames are never arbitrarily coalesced. Carry copies, parameter
+sets, the returned batch and a previous admitted AU still finishing after a source switch are
+additional counted application payloads, not a total GStreamer/OS TCP/RSS bound. Idle outbox paths
+remain metadata on disk-backed work, not queued file bytes.
+
+Cancelling a connection's convert-shape probe kills/joins only its owned ProcessRunner child tree,
+then joins its two drained readers and preserves cancellation. Timeout remains its distinct result.
+An inherited pipe cannot retain a reader forever after the child exits: the owned reads are cancelled
+and pipe handles closed after a bounded drain, then joined. No global process-name cleanup.
+
+This source phase has not been compiled or run on Windows or iPad. The iPad outgoing pump and decoder
+completion-credit phase is still outstanding; do not claim end-to-end pressure until it is qualified.
+Real-link stage5 and deployment remain waiting for the owner.
+
 ## 4. The Windows streamer — `streamer/` in this repo
 
 ### 4.1 Layout
@@ -805,12 +844,10 @@ outgoing manager's coordinator. No leak found.
    cases — all one numeric address — without ever opening two sockets at all). The post-HELLO
    collapse alone fully closes the reported loop, converging within one HELLO round trip; address
    pre-resolution is a possible follow-up, not required for this fix.
-2. **An evicted client does not fight back.** `ProtocolServer.AcceptLoopAsync` now enqueues a
-   STATUS naming `ReplacedByAnotherConnectionReason` on the client it is about to evict — flushed
-   before the socket actually closes, which needed its own fix: the writer loop was tied to the same
-   cancellation token `DisposeAsync` fired, so `_cts.Cancel()` could (and, before the fix, would)
-   abort the write of an already-queued frame. It now drains the queue (bounded to 2 s, so a
-   genuinely dead peer cannot hang a disposal forever) before cancelling anything.
+2. **An evicted client does not fight back.** `ProtocolServer.AcceptLoopAsync` retires the previous
+   run immediately. Its sole writer completes an already-admitted frame, accepted FILE_RESULT replies
+   and terminal STATUS naming `ReplacedByAnotherConnectionReason` in that order. It then closes;
+   a stalled wire is closed after2s and the writer/session owners are joined (§3 ownership above).
    `ScreenStreamClient` recognizes the exact reason string and moves to a new terminal state,
    `.replaced(reason:)`, instead of running it through `fail(_:)` — no reconnect timer is armed.
    The bar reads this as `StreamBarState.takenByAnother`, "Another connection took the

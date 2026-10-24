@@ -21,6 +21,7 @@ public static class ProcessRunner
 
     public static async Task<Result> RunAsync(ProcessStartInfo psi, TimeSpan? timeout, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
         psi.UseShellExecute = false;
         psi.RedirectStandardOutput = true;
         psi.RedirectStandardError = true;
@@ -29,10 +30,11 @@ public static class ProcessRunner
         using var proc = new Process { StartInfo = psi, EnableRaisingEvents = true };
         proc.Start();
 
+        using var readerLifetime = new CancellationTokenSource();
         var stdOut = new StringBuilder();
         var stdErr = new StringBuilder();
-        var stdOutTask = DrainAsync(proc.StandardOutput, stdOut);
-        var stdErrTask = DrainAsync(proc.StandardError, stdErr);
+        var stdOutTask = DrainAsync(proc.StandardOutput, stdOut, readerLifetime.Token);
+        var stdErrTask = DrainAsync(proc.StandardError, stdErr, readerLifetime.Token);
 
         bool timedOut = false;
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -41,26 +43,37 @@ public static class ProcessRunner
         {
             await proc.WaitForExitAsync(timeoutCts.Token).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        catch (OperationCanceledException)
         {
-            timedOut = true;
-            try { proc.Kill(entireProcessTree: true); } catch { /* already gone */ }
+            timedOut = !ct.IsCancellationRequested;
+            try { proc.Kill(entireProcessTree: true); } catch (InvalidOperationException) { /* exited */ }
+            await proc.WaitForExitAsync().ConfigureAwait(false);
         }
 
-        await Task.WhenAll(stdOutTask, stdErrTask).ConfigureAwait(false);
+        var readers = Task.WhenAll(stdOutTask, stdErrTask);
+        if (await Task.WhenAny(readers, Task.Delay(TimeSpan.FromSeconds(2))).ConfigureAwait(false) != readers)
+        {
+            // An inherited pipe must not outlive the child owner indefinitely. Cancel the two
+            // actual reads, close our pipe handles, and JOIN those readers before returning.
+            readerLifetime.Cancel();
+            proc.StandardOutput.Close();
+            proc.StandardError.Close();
+        }
+        await readers.ConfigureAwait(false);
+        ct.ThrowIfCancellationRequested();
 
         int exitCode = -1;
         try { exitCode = timedOut ? -1 : proc.ExitCode; } catch { /* leave -1 */ }
         return new Result(exitCode, stdOut.ToString(), stdErr.ToString(), timedOut);
     }
 
-    private static async Task DrainAsync(StreamReader reader, StringBuilder into)
+    private static async Task DrainAsync(StreamReader reader, StringBuilder into, CancellationToken ct)
     {
         try
         {
             var buf = new char[4096];
             int n;
-            while ((n = await reader.ReadAsync(buf.AsMemory()).ConfigureAwait(false)) > 0)
+            while ((n = await reader.ReadAsync(buf.AsMemory(), ct).ConfigureAwait(false)) > 0)
             {
                 into.Append(buf, 0, n);
             }

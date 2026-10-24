@@ -140,9 +140,9 @@ public partial class App : System.Windows.Application
         _server = new ProtocolServer(Port, AppName, AppVersion, Environment.MachineName,
             _settings.GetOrCreateMachineId(), _fileInbox, Log);
         _session.AddSink(_server);
-        _server.ClientConnected += () => _ = _session.OnClientConnectedAsync();
-        _server.ClientDisconnected += () => _ = _session.OnClientDisconnectedAsync();
-        _server.ControlReceived += control => _ = _session.HandleControlAsync(control);
+        _server.ClientConnected += run => _session.OnClientConnectedAsync(run);
+        _server.ClientDisconnected += run => _session.OnClientDisconnectedAsync(run);
+        _server.ControlReceived += (control, run) => _session.HandleControlAsync(control, run);
         await _server.StartAsync().ConfigureAwait(true);
 
         // TODO (98): advertise on the LAN so the iPad's connect sheet can offer this laptop under
@@ -293,9 +293,9 @@ public partial class App : System.Windows.Application
         _server = new ProtocolServer(Port, AppName, AppVersion, Environment.MachineName,
             _settings!.GetOrCreateMachineId(), _fileInbox, log);
         _session.AddSink(_server);
-        _server.ClientConnected += () => _ = _session.OnClientConnectedAsync();
-        _server.ClientDisconnected += () => _ = _session.OnClientDisconnectedAsync();
-        _server.ControlReceived += control => _ = _session.HandleControlAsync(control);
+        _server.ClientConnected += run => _session.OnClientConnectedAsync(run);
+        _server.ClientDisconnected += run => _session.OnClientDisconnectedAsync(run);
+        _server.ControlReceived += (control, run) => _session.HandleControlAsync(control, run);
         await _server.StartAsync().ConfigureAwait(true);
         await _session.SetSourceAsync(source).ConfigureAwait(true);
 
@@ -355,7 +355,7 @@ public partial class App : System.Windows.Application
         _trayIcon?.Dispose();
         _lockPoller?.Dispose();
         _outboxWatcher?.Dispose();
-        _fileOutbox?.Dispose();
+        if (_fileOutbox != null) await _fileOutbox.DisposeAsync().ConfigureAwait(false);
         if (_mdns != null) await _mdns.DisposeAsync().ConfigureAwait(false);
         if (_server != null) await _server.StopAsync().ConfigureAwait(false);
         if (_session != null) await _session.DisposeAsync().ConfigureAwait(false);

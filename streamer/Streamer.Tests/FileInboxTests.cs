@@ -28,7 +28,7 @@ public class FileInboxTests : IDisposable
 
     private string SaveFolder => _settings.ResolveSaveFolder();
 
-    private static void SendWhole(FileInbox inbox, int id, string name, byte[] content, int chunkSize = 64 * 1024)
+    private static void SendWhole(FileInbox.Receiver inbox, int id, string name, byte[] content, int chunkSize = 64 * 1024)
     {
         var beginResult = inbox.BeginFile(new FileBeginMessage { Id = id, Name = name, Size = content.Length, Kind = "other" });
         Assert.Null(beginResult); // accepted: no reply until END, per §3
@@ -42,7 +42,7 @@ public class FileInboxTests : IDisposable
     [Fact]
     public void FullReceiveWritesTheExactBytes()
     {
-        var inbox = new FileInbox(_settings);
+        var inbox = new FileInbox(_settings).OpenConnection();
         byte[] content = new byte[50_000];
         new Random(42).NextBytes(content);
 
@@ -60,7 +60,7 @@ public class FileInboxTests : IDisposable
     [Fact]
     public void SecondBeginWhileOneIsActiveIsRefused()
     {
-        var inbox = new FileInbox(_settings);
+        var inbox = new FileInbox(_settings).OpenConnection();
         var first = inbox.BeginFile(new FileBeginMessage { Id = 1, Name = "a.png", Size = 10, Kind = "image" });
         Assert.Null(first);
 
@@ -79,7 +79,7 @@ public class FileInboxTests : IDisposable
     [Fact]
     public void SizeMismatchAtEndIsRefusedAndThePartialIsDeleted()
     {
-        var inbox = new FileInbox(_settings);
+        var inbox = new FileInbox(_settings).OpenConnection();
         inbox.BeginFile(new FileBeginMessage { Id = 1, Name = "short.bin", Size = 100, Kind = "other" });
         inbox.WriteChunk(1, new byte[40]); // fewer bytes than declared
 
@@ -98,7 +98,7 @@ public class FileInboxTests : IDisposable
         string existingPath = Path.Combine(SaveFolder, "dup.png");
         File.WriteAllBytes(existingPath, new byte[] { 1, 2, 3 });
 
-        var inbox = new FileInbox(_settings);
+        var inbox = new FileInbox(_settings).OpenConnection();
         byte[] content = { 9, 9, 9, 9 };
         SendWhole(inbox, id: 1, "dup.png", content);
         var result = inbox.EndFile(new FileEndMessage { Id = 1 });
@@ -121,7 +121,7 @@ public class FileInboxTests : IDisposable
     [Fact]
     public void DisconnectMidTransferDeletesThePartialAndFreesTheSlot()
     {
-        var inbox = new FileInbox(_settings);
+        var inbox = new FileInbox(_settings).OpenConnection();
         inbox.BeginFile(new FileBeginMessage { Id = 1, Name = "abandoned.bin", Size = 1000, Kind = "other" });
         inbox.WriteChunk(1, new byte[200]);
 
@@ -139,7 +139,7 @@ public class FileInboxTests : IDisposable
     [Fact]
     public void AbortWithNoActiveTransferIsANoOp()
     {
-        var inbox = new FileInbox(_settings);
+        var inbox = new FileInbox(_settings).OpenConnection();
         inbox.AbortActiveTransfer(); // must not throw
         SendWhole(inbox, id: 1, "fine.bin", new byte[] { 1 });
         Assert.True(inbox.EndFile(new FileEndMessage { Id = 1 })!.Ok);
@@ -148,7 +148,7 @@ public class FileInboxTests : IDisposable
     [Fact]
     public void UnmatchedChunkAndEndAreIgnoredNotErrors()
     {
-        var inbox = new FileInbox(_settings);
+        var inbox = new FileInbox(_settings).OpenConnection();
         inbox.WriteChunk(99, new byte[10]); // no BEGIN ever sent for id 99 — must not throw
         var result = inbox.EndFile(new FileEndMessage { Id = 99 });
         Assert.Null(result); // nothing to correlate a reply to
@@ -165,7 +165,7 @@ public class FileInboxTests : IDisposable
         Directory.CreateDirectory(SaveFolder);
         Directory.CreateDirectory(Path.Combine(SaveFolder, "blocked.bin"));
 
-        var inbox = new FileInbox(_settings);
+        var inbox = new FileInbox(_settings).OpenConnection();
         var result = inbox.BeginFile(new FileBeginMessage { Id = 1, Name = "blocked.bin", Size = 5, Kind = "other" });
 
         Assert.NotNull(result);
@@ -176,7 +176,7 @@ public class FileInboxTests : IDisposable
     [Fact]
     public void InvalidSizeOrChunkNeverWritesPastTheDeclarationAndRetryKeepsExactBytes()
     {
-        var inbox = new FileInbox(_settings);
+        var inbox = new FileInbox(_settings).OpenConnection();
         var negative = inbox.BeginFile(new FileBeginMessage { Id = 1, Name = "negative.bin", Size = -1 });
         Assert.False(negative!.Ok);
         Assert.False(File.Exists(Path.Combine(SaveFolder, "negative.bin")));
@@ -199,9 +199,10 @@ public class FileInboxTests : IDisposable
     [Fact]
     public void ReceivingAFileRaisesFileReceivedWithTheSavedPath()
     {
-        var inbox = new FileInbox(_settings);
+        var owner = new FileInbox(_settings);
+        var inbox = owner.OpenConnection();
         FileReceivedEventArgs? seen = null;
-        inbox.FileReceived += (_, e) => seen = e;
+        owner.FileReceived += (_, e) => seen = e;
 
         SendWhole(inbox, id: 1, "notify-me.png", new byte[] { 1, 2, 3, 4 });
         inbox.EndFile(new FileEndMessage { Id = 1 });
@@ -215,7 +216,7 @@ public class FileInboxTests : IDisposable
     [Fact]
     public void ChangingTheSaveFolderTakesEffectOnTheNextTransferWithNoRestart()
     {
-        var inbox = new FileInbox(_settings);
+        var inbox = new FileInbox(_settings).OpenConnection();
         SendWhole(inbox, id: 1, "before.bin", new byte[] { 1 });
         inbox.EndFile(new FileEndMessage { Id = 1 });
         Assert.True(File.Exists(Path.Combine(_root, "save", "before.bin")));
@@ -228,4 +229,26 @@ public class FileInboxTests : IDisposable
         inbox.EndFile(new FileEndMessage { Id = 2 });
         Assert.True(File.Exists(Path.Combine(newFolder, "after.bin")));
     }
+    [Fact]
+    public void AClosedReceiversCleanupCannotOccupyOrAbortTheNewConnectionsTransfer()
+    {
+        var owner = new FileInbox(_settings);
+        using var oldRun = new CancellationTokenSource();
+        var old = owner.OpenConnection(oldRun.Token);
+        var current = owner.OpenConnection();
+        int received = 0;
+        owner.FileReceived += (_, _) => received++;
+        Assert.Null(old.BeginFile(new FileBeginMessage { Id = 7, Name = "old.bin", Size = 2 }));
+        old.WriteChunk(7, new byte[] { 1 });
+        oldRun.Cancel();
+        Assert.Null(current.BeginFile(new FileBeginMessage { Id = 7, Name = "new.bin", Size = 2 }));
+        current.WriteChunk(7, new byte[] { 3, 4 });
+        old.AbortActiveTransfer();
+        Assert.Null(old.EndFile(new FileEndMessage { Id = 7 }));
+        Assert.True(current.EndFile(new FileEndMessage { Id = 7 })!.Ok);
+        Assert.Equal(1, received);
+        Assert.False(File.Exists(Path.Combine(SaveFolder, "old.bin")));
+        Assert.Equal(new byte[] { 3, 4 }, File.ReadAllBytes(Path.Combine(SaveFolder, "new.bin")));
+    }
+
 }

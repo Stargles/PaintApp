@@ -12,7 +12,7 @@ namespace Streamer.Core;
 /// hosting this inside the paint app later (rather than a second executable) possible.
 ///
 /// **Every public transition runs one at a time, in the order it was called** (STREAM.md §3).
-/// ProtocolServer raises its events fire-and-forget from whichever thread read the socket, and the
+/// ProtocolServer awaits its owned callbacks from whichever thread read the socket, and the
 /// iPad's `resume` follows its HELLO within milliseconds, so a connect and a control message — or two
 /// connects, when one replaces the other — arrive together. Stopping, building and publishing a
 /// pipeline is not safe against itself: two overlapping would each find no pipeline to stop, each build
@@ -28,7 +28,8 @@ public sealed class StreamerSession : IAsyncDisposable
     private readonly object _gate = new();
 
     private ICapturePipeline? _pipeline;
-    private readonly Func<CaptureSource, Task<ICapturePipeline>> _createPipeline;
+    private readonly Func<CaptureSource, CancellationToken, Task<ICapturePipeline>> _createPipeline;
+    private CancellationToken _clientRun;
     private readonly SemaphoreSlim _transition = new(1, 1);
     private CaptureSource? _currentSource;
     private bool _pausedByClient;
@@ -68,7 +69,7 @@ public sealed class StreamerSession : IAsyncDisposable
     /// <param name="createPipeline">Builds the pipeline for a source. Defaults to the real
     /// GStreamer one; a test passes a fake to count how many a session lets live.</param>
     public StreamerSession(string gstBinDir, Action<string>? log = null,
-        Func<CaptureSource, Task<ICapturePipeline>>? createPipeline = null)
+        Func<CaptureSource, CancellationToken, Task<ICapturePipeline>>? createPipeline = null)
     {
         _gstBinDir = gstBinDir;
         _log = log ?? (_ => { });
@@ -89,9 +90,9 @@ public sealed class StreamerSession : IAsyncDisposable
 
     /// <summary>Runs one transition with the session to itself. <c>WaitAsync</c> is entered when this is
     /// called, not when the caller first awaits, so transitions queue in the order they were raised.</summary>
-    private async Task SerializedAsync(Func<Task> transition)
+    private async Task SerializedAsync(Func<Task> transition, CancellationToken ct = default)
     {
-        await _transition.WaitAsync().ConfigureAwait(false);
+        await _transition.WaitAsync(ct).ConfigureAwait(false);
         try { await transition().ConfigureAwait(false); }
         finally { _transition.Release(); }
     }
@@ -110,28 +111,36 @@ public sealed class StreamerSession : IAsyncDisposable
     /// neither of which reaches OnClientDisconnectedAsync in time or at all — is not in force for
     /// this one. Gives the new client a keyframe (a running pipeline is restarted for it; one still
     /// starting already will) and always sends it a fresh STATUS.</summary>
-    public Task OnClientConnectedAsync() => SerializedAsync(async () =>
+    public Task OnClientConnectedAsync(CancellationToken run = default) => SerializedAsync(async () =>
     {
+        if (run.IsCancellationRequested) return;
         lock (_gate)
         {
+            _clientRun = run;
             _hasClient = true;
             _pausedByClient = false;
         }
         if (_currentSource != null && !PipelineIsStarting)
         {
-            await RestartPipelineAsync().ConfigureAwait(false);
+            await RestartPipelineAsync(_clientRun).ConfigureAwait(false);
         }
         BroadcastStatus();
-    });
+    }, run);
 
-    public Task OnClientDisconnectedAsync() => SerializedAsync(async () =>
+    public Task OnClientDisconnectedAsync(CancellationToken run = default) => SerializedAsync(async () =>
     {
-        lock (_gate) _hasClient = false;
+        lock (_gate)
+        {
+            if (_clientRun != run) return;
+            _hasClient = false;
+        }
         await StopPipelineAsync().ConfigureAwait(false);
     });
 
-    public Task HandleControlAsync(ControlMessage control) => SerializedAsync(async () =>
+    public Task HandleControlAsync(ControlMessage control, CancellationToken run = default) => SerializedAsync(async () =>
     {
+        if (run.IsCancellationRequested) return;
+        lock (_gate) { if (_clientRun != run) return; }
         _log($"StreamerSession: client asked for '{control.Cmd}'");
         switch (control.Cmd)
         {
@@ -144,14 +153,14 @@ public sealed class StreamerSession : IAsyncDisposable
                 // Idempotent: a client states its wish on every connect (STREAM.md §3), and a
                 // pipeline that exists — running, or still starting — has nothing to restart.
                 lock (_gate) _pausedByClient = false;
-                if (_currentSource != null && !PipelineExists) await RestartPipelineAsync().ConfigureAwait(false);
+                if (_currentSource != null && !PipelineExists) await RestartPipelineAsync(_clientRun).ConfigureAwait(false);
                 BroadcastStatus();
                 break;
             case ControlMessage.Keyframe:
                 // Kill+relaunch is the cheapest way to force a fresh IDR (matches
                 // tools/stream/fake-streamer.py's VideoEngine.restart()) — and a pipeline that
                 // is still starting will deliver one by itself.
-                if (PipelineExists && !PipelineIsStarting) await RestartPipelineAsync().ConfigureAwait(false);
+                if (PipelineExists && !PipelineIsStarting) await RestartPipelineAsync(_clientRun).ConfigureAwait(false);
                 BroadcastStatus();
                 break;
             default:
@@ -173,15 +182,16 @@ public sealed class StreamerSession : IAsyncDisposable
         lock (_gate) { _currentSource = source; _pausedByClient = false; hasClient = _hasClient; }
         if (hasClient)
         {
-            await RestartPipelineAsync().ConfigureAwait(false);
+            await RestartPipelineAsync(_clientRun).ConfigureAwait(false);
         }
         BroadcastStatus();
     });
 
     /// <summary>Replaces the pipeline with a fresh one on the current source. Only called inside a
     /// transition: the stop-then-build-then-publish below is not safe against another one.</summary>
-    private async Task RestartPipelineAsync()
+    private async Task RestartPipelineAsync(CancellationToken run)
     {
+        if (run.IsCancellationRequested) return;
         CaptureSource source;
         lock (_gate)
         {
@@ -196,15 +206,22 @@ public sealed class StreamerSession : IAsyncDisposable
         }
         await StopPipelineAsync().ConfigureAwait(false);
 
-        var pipeline = await _createPipeline(source).ConfigureAwait(false);
-        pipeline.AccessUnitReady += (_, e) =>
+        ICapturePipeline pipeline;
+        try { pipeline = await _createPipeline(source, run).ConfigureAwait(false); }
+        catch (OperationCanceledException) when (run.IsCancellationRequested)
+        {
+            lock (_gate) { if (_clientRun == run) _hasClient = false; }
+            return;
+        }
+        if (run.IsCancellationRequested) { await pipeline.DisposeAsync().ConfigureAwait(false); return; }
+        pipeline.AccessUnitReady += async (e, ct) =>
         {
             _rate.Note(e.Unit.Bytes.Length);
-            ulong ptsUs = (ulong)_sessionClock.Elapsed.TotalMicroseconds; // see _sessionClock's doc comment
-            lock (_gate)
-            {
-                foreach (var sink in _sinks) sink.OnVideoFrame(e.Unit.Keyframe, ptsUs, e.Unit.Bytes);
-            }
+            ulong ptsUs = (ulong)_sessionClock.Elapsed.TotalMicroseconds;
+            IFrameSink[] sinks;
+            lock (_gate) sinks = _sinks.ToArray();
+            foreach (var sink in sinks)
+                await sink.OnVideoFrameAsync(e.Unit.Keyframe, ptsUs, e.Unit.Bytes, ct).ConfigureAwait(false);
         };
         pipeline.UnexpectedExit += (_, reason) => BroadcastStatus(reason);
         pipeline.Started += (_, _) => BroadcastStatus();
@@ -219,10 +236,10 @@ public sealed class StreamerSession : IAsyncDisposable
             NativeMethods.ES_CONTINUOUS | NativeMethods.ES_SYSTEM_REQUIRED | NativeMethods.ES_DISPLAY_REQUIRED);
     }
 
-    private async Task<ICapturePipeline> CreateGstPipelineAsync(CaptureSource source)
+    private async Task<ICapturePipeline> CreateGstPipelineAsync(CaptureSource source, CancellationToken ct)
     {
         if (Encoder == null) throw new InvalidOperationException("ProbeEncoderAsync must run before streaming");
-        bool downloadConvert = await ResolveConvertShapeAsync(source).ConfigureAwait(false);
+        bool downloadConvert = await ResolveConvertShapeAsync(source, ct).ConfigureAwait(false);
         return new GstProcess(
             Path.Combine(_gstBinDir, "gst-launch-1.0.exe"),
             port => PipelineBuilder.BuildCaptureArgs(source, Encoder.ElementName, port, downloadAndConvert: downloadConvert),
@@ -238,17 +255,17 @@ public sealed class StreamerSession : IAsyncDisposable
     /// smoke test costs real wall-clock time (a few seconds) that a live stream should not
     /// pay on every source switch.
     /// </summary>
-    private async Task<bool> ResolveConvertShapeAsync(CaptureSource source)
+    private async Task<bool> ResolveConvertShapeAsync(CaptureSource source, CancellationToken ct)
     {
         if (_downloadConvertWorks.HasValue) return _downloadConvertWorks.Value;
-        bool cheapWorks = await RunsCleanAsync(source, downloadAndConvert: false).ConfigureAwait(false);
+        bool cheapWorks = await RunsCleanAsync(source, downloadAndConvert: false, ct).ConfigureAwait(false);
         if (cheapWorks)
         {
             _log("StreamerSession: d3d11convert alone negotiates with the encoder — using the cheap shape");
             _downloadConvertWorks = false;
             return false;
         }
-        bool fallbackWorks = await RunsCleanAsync(source, downloadAndConvert: true).ConfigureAwait(false);
+        bool fallbackWorks = await RunsCleanAsync(source, downloadAndConvert: true, ct).ConfigureAwait(false);
         _log(fallbackWorks
             ? "StreamerSession: d3d11convert alone failed to negotiate; d3d11download ! videoconvert works — using that"
             : "StreamerSession: neither d3d11convert nor d3d11download ! videoconvert negotiated cleanly; " +
@@ -259,7 +276,7 @@ public sealed class StreamerSession : IAsyncDisposable
 
     private static readonly TimeSpan ConvertShapeProbeWindow = TimeSpan.FromSeconds(3);
 
-    private async Task<bool> RunsCleanAsync(CaptureSource source, bool downloadAndConvert)
+    private async Task<bool> RunsCleanAsync(CaptureSource source, bool downloadAndConvert, CancellationToken ct)
     {
         // Unlike EncoderProbe's videotestsrc smoke test (which self-terminates cleanly
         // via num-buffers), this probe captures a LIVE, indefinite source with no
@@ -281,7 +298,7 @@ public sealed class StreamerSession : IAsyncDisposable
                 FileName = Path.Combine(_gstBinDir, "gst-launch-1.0.exe"),
                 Arguments = $"-q {args}",
             };
-            var result = await ProcessRunner.RunAsync(psi, ConvertShapeProbeWindow, CancellationToken.None)
+            var result = await ProcessRunner.RunAsync(psi, ConvertShapeProbeWindow, ct)
                 .ConfigureAwait(false);
             if (result.TimedOut)
             {
@@ -294,6 +311,7 @@ public sealed class StreamerSession : IAsyncDisposable
                  $"({result.ExitCode}) within {ConvertShapeProbeWindow.TotalSeconds:0}s — treating as a negotiation failure: {tail.Trim()}");
             return false;
         }
+        catch (OperationCanceledException) { throw; }
         catch (Exception e)
         {
             _log($"StreamerSession: convert-shape probe failed ({ShapeLabel(downloadAndConvert)}): {e.Message}");
@@ -339,7 +357,7 @@ public sealed class StreamerSession : IAsyncDisposable
             // one call site that did not, until it was checked here).
             if (hasClient && !pausedByClient && source != null)
             {
-                await RestartPipelineAsync().ConfigureAwait(false);
+                await RestartPipelineAsync(_clientRun).ConfigureAwait(false);
             }
             BroadcastStatus();
         }
@@ -397,10 +415,9 @@ public sealed class StreamerSession : IAsyncDisposable
             Reason = streaming ? null : (reason ?? (environmentBlocked ? environmentBlockedReason :
                 (source == null ? "No source selected" : (paused ? "Paused" : "Starting")))),
         };
-        lock (_gate)
-        {
-            foreach (var sink in _sinks) sink.OnStatus(status);
-        }
+        IFrameSink[] sinks;
+        lock (_gate) sinks = _sinks.ToArray();
+        foreach (var sink in sinks) sink.OnStatus(status);
     }
 
     public async ValueTask DisposeAsync()

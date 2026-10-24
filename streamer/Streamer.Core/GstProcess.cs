@@ -35,9 +35,11 @@ public sealed class GstProcess : ICapturePipeline
     private Process? _process;
     private CancellationTokenSource? _cts;
     private Task? _runLoop;
+    private Task _readers = Task.CompletedTask;
+    private CancellationTokenSource? _readerLifetime;
     private volatile bool _wantRunning;
 
-    public event EventHandler<AccessUnitEventArgs>? AccessUnitReady;
+    public event Func<AccessUnitEventArgs, CancellationToken, Task>? AccessUnitReady;
     public event EventHandler<string>? UnexpectedExit;
     // Fired once the pipeline actually connects and starts producing frames — distinct
     // from StartAsync() returning, which happens immediately and before any of that has
@@ -73,7 +75,6 @@ public sealed class GstProcess : ICapturePipeline
         {
             try { await _runLoop.ConfigureAwait(false); } catch (OperationCanceledException) { }
         }
-        KillProcessQuiet();
         _listener?.Stop();
         _listener = null;
         _isRunning = false;
@@ -120,7 +121,7 @@ public sealed class GstProcess : ICapturePipeline
         }
         finally
         {
-            KillProcessQuiet();
+            await StopOwnedProcessAsync().ConfigureAwait(false);
             _listener?.Stop();
             _listener = null;
         }
@@ -153,8 +154,10 @@ public sealed class GstProcess : ICapturePipeline
         _process = new Process { StartInfo = psi, EnableRaisingEvents = true };
         _process.Exited += (_, _) => processExited.TrySetResult();
         _process.Start();
-        _ = DrainStreamAsync(_process.StandardError, isError: true, ct);
-        _ = DrainStreamAsync(_process.StandardOutput, isError: false, ct);
+        _readerLifetime = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        _readers = Task.WhenAll(
+            DrainStreamAsync(_process.StandardError, isError: true, _readerLifetime.Token),
+            DrainStreamAsync(_process.StandardOutput, isError: false, _readerLifetime.Token));
 
         using var acceptCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var acceptTask = _listener.AcceptTcpClientAsync(acceptCts.Token).AsTask();
@@ -163,6 +166,7 @@ public sealed class GstProcess : ICapturePipeline
         if (first == processExited.Task)
         {
             acceptCts.Cancel();
+            try { using var unused = await acceptTask.ConfigureAwait(false); } catch (OperationCanceledException) { }
             throw new InvalidOperationException(
                 $"gst-launch-1.0 exited before connecting (exit code {SafeExitCode(_process)}) — " +
                 "see log for its stderr");
@@ -183,6 +187,8 @@ public sealed class GstProcess : ICapturePipeline
             var done = await Task.WhenAny(readTask, processExited.Task).ConfigureAwait(false);
             if (done == processExited.Task)
             {
+                client.Close();
+                try { await readTask.ConfigureAwait(false); } catch (Exception) { }
                 throw new InvalidOperationException(
                     $"gst-launch-1.0 exited mid-stream (exit code {SafeExitCode(_process)})");
             }
@@ -191,8 +197,11 @@ public sealed class GstProcess : ICapturePipeline
 
             foreach (var au in splitter.Feed(buffer.AsSpan(0, n)))
             {
+                ct.ThrowIfCancellationRequested();
                 ulong ptsUs = (ulong)(DateTime.UtcNow - startedAt).TotalMicroseconds;
-                AccessUnitReady?.Invoke(this, new AccessUnitEventArgs { Unit = au, PtsUs = ptsUs });
+                if (AccessUnitReady is { } deliver)
+                    foreach (Func<AccessUnitEventArgs, CancellationToken, Task> sink in deliver.GetInvocationList())
+                        await sink(new AccessUnitEventArgs { Unit = au, PtsUs = ptsUs }, ct).ConfigureAwait(false);
             }
         }
     }
@@ -221,21 +230,27 @@ public sealed class GstProcess : ICapturePipeline
         }
     }
 
-    private void KillProcessQuiet()
+    private async Task StopOwnedProcessAsync()
     {
-        if (_process == null) return;
+        var process = _process;
+        if (process == null) return;
+        _process = null;
         try
         {
-            if (!_process.HasExited)
+            try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
+            catch (InvalidOperationException) { /* already exited */ }
+            await process.WaitForExitAsync().ConfigureAwait(false);
+            if (await Task.WhenAny(_readers, Task.Delay(TimeSpan.FromSeconds(2))).ConfigureAwait(false) != _readers)
             {
-                _process.Kill(entireProcessTree: true);
+                _readerLifetime?.Cancel();
+                process.StandardOutput.Close(); process.StandardError.Close();
             }
+            await _readers.ConfigureAwait(false);
         }
-        catch { /* already gone */ }
         finally
         {
-            _process.Dispose();
-            _process = null;
+            _readerLifetime?.Dispose(); _readerLifetime = null;
+            process.Dispose();
         }
     }
 

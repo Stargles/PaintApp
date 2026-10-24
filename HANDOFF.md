@@ -210,7 +210,21 @@ limits before payload allocation/collection. Receivers refuse negative declarati
 the declared remaining bytes before writing, delete partials, and preserve retry. Two tiny Swift and
 two C# methods cover header-only allocator rejection, exact/fragmented legal chunks, malformed input,
 no insert/partial and actual retry bytes/pixels. Both UI lints/diff-check pass; no compile/native or
-fault execution. Connection lifecycle/backpressure phases are still outstanding on this branch.
+fault execution.
+
+C# ownership phase source prepared: one per-connection writer admits one bulk payload before encoding,
+completion-paces capture/file delivery, coalesces STATUS/PING/PONG and bounds pending FILE_RESULT to4.
+The admitted frame survives producer cancellation; accepted replies precede terminal replacement STATUS.
+Logical retirement cancels producers immediately; after2s a stalled wire is closed and its writer joined.
+HELLO readiness and callback transitions carry the original run; server owns at most current+retiring
+sessions and Stop joins both. Each file sender/receiver is pinned to its original connection. Splitter
+carry/assembly/parameter-set and returned-batch limits count raw retained copies; this is no whole-RSS
+claim. Outbox disposal is asynchronous, capture/process reader tasks are joined, and ProcessRunner
+caller cancellation kills/joins only its child tree then drains/joins readers while preserving cancellation.
+Added regressions exercise the actual stalled Stream writer plus source switch, retained wire bytes,
+terminal ordering, pending HELLO replacement/reuse, per-connection files, bounded splitting and separate
+Windows timeout/caller-cancel child lifetimes. No compiler/native/Windows/socket/process test execution.
+Swift completion pacing and external fault qualification remain outstanding; stage5 stays owner-waiting.
 
 
 ## Current combined source qualification — 2026-10-24

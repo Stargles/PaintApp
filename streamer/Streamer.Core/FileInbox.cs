@@ -14,31 +14,18 @@ public sealed class FileReceivedEventArgs : EventArgs
 /// a second BEGIN while one is active is refused, never queued (that queueing is the
 /// outbound-direction's job, <see cref="FileOutbox"/>). A BEGIN that is accepted gets NO
 /// reply here: §3 says "the laptop answers after the file is closed in the save folder",
-/// so <see cref="BeginFile"/> only ever returns non-null for a refusal, and the real
-/// answer comes back from <see cref="EndFile"/>. A name already in the folder is never
+/// so <see cref="Receiver.BeginFile"/> only ever returns non-null for a refusal, and the real
+/// answer comes back from <see cref="Receiver.EndFile"/>. A name already in the folder is never
 /// overwritten — "name (2).ext", "name (3).ext", ... A short count (declared size at
 /// BEGIN vs. bytes actually written) at END, any write failure, or the connection
-/// dying mid-transfer (<see cref="AbortActiveTransfer"/>, called by ProtocolServer on
+/// dying mid-transfer (<see cref="Receiver.AbortActiveTransfer"/>, called by ProtocolServer on
 /// disconnect) all delete the partial file — nothing half-written is ever left behind.
 /// </summary>
 public sealed class FileInbox
 {
     private readonly Settings _settings;
     private readonly Action<string> _log;
-    private readonly object _gate = new();
-    private ActiveTransfer? _active;
-
     public event EventHandler<FileReceivedEventArgs>? FileReceived;
-
-    private sealed class ActiveTransfer
-    {
-        public required int Id;
-        public required string Path;
-        public required long DeclaredSize;
-        public required FileStream Stream;
-        public long Received;
-        public string? WriteFailed;
-    }
 
     public FileInbox(Settings settings, Action<string>? log = null)
     {
@@ -46,137 +33,170 @@ public sealed class FileInbox
         _log = log ?? (_ => { });
     }
 
-    /// <summary>Called on FILE_BEGIN. Returns the refusal to send immediately, or null
-    /// if accepted (no reply until the matching FILE_END).</summary>
-    public FileResultMessage? BeginFile(FileBeginMessage begin)
+    private void ReportReceived(FileReceivedEventArgs received) => FileReceived?.Invoke(this, received);
+
+    public Receiver OpenConnection(CancellationToken closed = default) => new(this, closed);
+
+    /// <summary>Only the connection owns its partial file. Retiring another receiver cannot
+    /// abort this one or leave its occupied slot behind.</summary>
+    public sealed class Receiver
     {
-        lock (_gate)
+        private readonly FileInbox _owner;
+        private readonly CancellationToken _closed;
+        private readonly object _gate = new();
+        private ActiveTransfer? _active;
+
+        internal Receiver(FileInbox owner, CancellationToken closed) { _owner = owner; _closed = closed; }
+
+        private sealed class ActiveTransfer
         {
-            if (begin.Size < 0) return Refuse(begin.Id, "The file size is invalid.");
-            if (_active != null)
-            {
-                _log($"FileInbox: FILE_BEGIN id={begin.Id} while id={_active.Id} is active, refusing");
-                return Refuse(begin.Id, "A transfer is already in progress");
-            }
-
-            string folder;
-            try
-            {
-                folder = _settings.ResolveSaveFolder();
-                Directory.CreateDirectory(folder);
-            }
-            catch (Exception e)
-            {
-                _log($"FileInbox: FILE_BEGIN id={begin.Id}: cannot prepare the save folder: {e.Message}");
-                return Refuse(begin.Id, e.Message);
-            }
-
-            string name = SanitizeName(begin.Name);
-            FileStream stream;
-            string path;
-            try
-            {
-                stream = CreateUniqueFile(folder, name, out path);
-            }
-            catch (Exception e)
-            {
-                _log($"FileInbox: FILE_BEGIN id={begin.Id}: cannot open a file for '{name}' in {folder}: {e.Message}");
-                return Refuse(begin.Id, e.Message);
-            }
-
-            _active = new ActiveTransfer { Id = begin.Id, Path = path, DeclaredSize = begin.Size, Stream = stream };
-            _log($"FileInbox: FILE_BEGIN id={begin.Id} name={begin.Name} size={begin.Size} -> {path}");
-            return null;
+            public required int Id;
+            public required string Path;
+            public required long DeclaredSize;
+            public required FileStream Stream;
+            public long Received;
+            public string? WriteFailed;
         }
-    }
 
-    /// <summary>Called on FILE_CHUNK. Bytes for an id with no active transfer (already
-    /// ended, or never began) are ignored — matches tools/stream/fake-streamer.py's
-    /// reference behaviour for the same case.</summary>
-    public FileResultMessage? WriteChunk(int id, ReadOnlyMemory<byte> data)
-    {
-        lock (_gate)
+        /// <summary>Called on FILE_BEGIN. Returns the refusal to send immediately, or null
+        /// if accepted (no reply until the matching FILE_END).</summary>
+        public FileResultMessage? BeginFile(FileBeginMessage begin)
         {
-            if (_active == null || _active.Id != id)
+            lock (_gate)
             {
-                _log($"FileInbox: FILE_CHUNK id={id} with no matching active transfer, ignored");
+                if (_closed.IsCancellationRequested) return null;
+                if (begin.Size < 0) return Refuse(begin.Id, "The file size is invalid.");
+                if (_active != null)
+                {
+                    _owner._log($"FileInbox: FILE_BEGIN id={begin.Id} while id={_active.Id} is active, refusing");
+                    return Refuse(begin.Id, "A transfer is already in progress");
+                }
+
+                string folder;
+                try
+                {
+                    folder = _owner._settings.ResolveSaveFolder();
+                    Directory.CreateDirectory(folder);
+                }
+                catch (Exception e)
+                {
+                    _owner._log($"FileInbox: FILE_BEGIN id={begin.Id}: cannot prepare the save folder: {e.Message}");
+                    return Refuse(begin.Id, e.Message);
+                }
+
+                string name = SanitizeName(begin.Name);
+                FileStream stream;
+                string path;
+                try
+                {
+                    stream = CreateUniqueFile(folder, name, out path);
+                }
+                catch (Exception e)
+                {
+                    _owner._log($"FileInbox: FILE_BEGIN id={begin.Id}: cannot open a file for '{name}' in {folder}: {e.Message}");
+                    return Refuse(begin.Id, e.Message);
+                }
+
+                _active = new ActiveTransfer { Id = begin.Id, Path = path, DeclaredSize = begin.Size, Stream = stream };
+                _owner._log($"FileInbox: FILE_BEGIN id={begin.Id} name={begin.Name} size={begin.Size} -> {path}");
                 return null;
             }
-            if (data.Length > Frame.MaximumFileChunkBytes || data.Length > _active.DeclaredSize - _active.Received)
-            {
-                AbortActiveTransfer();
-                return Refuse(id, "The file exceeds its declared size or chunk limit.");
-            }
-            if (_active.WriteFailed != null) return null; // EndFile reports the write failure once
-            try
-            {
-                _active.Stream.Write(data.Span);
-                _active.Received += data.Length;
-            }
-            catch (Exception e)
-            {
-                _log($"FileInbox: FILE_CHUNK id={id}: write failed: {e.Message}");
-                _active.WriteFailed = e.Message;
-            }
-            return null;
         }
-    }
 
-    /// <summary>Called on FILE_END. Returns the FileResultMessage to send, or null when
-    /// the id matches no active transfer (nothing to correlate a reply to).</summary>
-    public FileResultMessage? EndFile(FileEndMessage end)
-    {
-        ActiveTransfer finished;
-        lock (_gate)
+        /// <summary>Called on FILE_CHUNK. Bytes for an id with no active transfer (already
+        /// ended, or never began) are ignored — matches tools/stream/fake-streamer.py's
+        /// reference behaviour for the same case.</summary>
+        public FileResultMessage? WriteChunk(int id, ReadOnlyMemory<byte> data)
         {
-            if (_active == null || _active.Id != end.Id)
+            lock (_gate)
             {
-                _log($"FileInbox: FILE_END id={end.Id} with no matching active transfer, ignored");
+                if (_closed.IsCancellationRequested || _active == null || _active.Id != id)
+                {
+                    _owner._log($"FileInbox: FILE_CHUNK id={id} with no matching active transfer, ignored");
+                    return null;
+                }
+                if (data.Length > Frame.MaximumFileChunkBytes || data.Length > _active.DeclaredSize - _active.Received)
+                {
+                    AbortActiveTransfer();
+                    return Refuse(id, "The file exceeds its declared size or chunk limit.");
+                }
+                if (_active.WriteFailed != null) return null; // EndFile reports the write failure once
+                try
+                {
+                    _active.Stream.Write(data.Span);
+                    _active.Received += data.Length;
+                }
+                catch (Exception e)
+                {
+                    _owner._log($"FileInbox: FILE_CHUNK id={id}: write failed: {e.Message}");
+                    _active.WriteFailed = e.Message;
+                }
                 return null;
             }
-            finished = _active;
-            _active = null;
         }
 
-        try { finished.Stream.Dispose(); }
-        catch (Exception e) { finished.WriteFailed ??= e.Message; }
-
-        if (finished.WriteFailed != null)
+        /// <summary>Called on FILE_END. Returns the FileResultMessage to send, or null when
+        /// the id matches no active transfer (nothing to correlate a reply to).</summary>
+        public FileResultMessage? EndFile(FileEndMessage end)
         {
-            DeleteQuiet(finished.Path);
-            _log($"FileInbox: FILE_END id={end.Id}: {finished.WriteFailed}; deleted the partial file");
-            return new FileResultMessage { Id = end.Id, Ok = false, Reason = finished.WriteFailed };
+            ActiveTransfer finished;
+            lock (_gate)
+            {
+                if (_active == null || _active.Id != end.Id)
+                {
+                    _owner._log($"FileInbox: FILE_END id={end.Id} with no matching active transfer, ignored");
+                    return null;
+                }
+                finished = _active;
+                _active = null;
+            }
+
+            try { finished.Stream.Dispose(); }
+            catch (Exception e) { finished.WriteFailed ??= e.Message; }
+
+            if (_closed.IsCancellationRequested)
+            {
+                DeleteQuiet(finished.Path);
+                return null;
+            }
+            if (finished.WriteFailed != null)
+            {
+                DeleteQuiet(finished.Path);
+                _owner._log($"FileInbox: FILE_END id={end.Id}: {finished.WriteFailed}; deleted the partial file");
+                return new FileResultMessage { Id = end.Id, Ok = false, Reason = finished.WriteFailed };
+            }
+
+            if (finished.Received != finished.DeclaredSize)
+            {
+                DeleteQuiet(finished.Path);
+                _owner._log($"FileInbox: FILE_END id={end.Id}: received {finished.Received} of {finished.DeclaredSize} " +
+                     "declared bytes; deleted the partial file");
+                return new FileResultMessage { Id = end.Id, Ok = false, Reason = "The file arrived incomplete" };
+            }
+
+            _owner._log($"FileInbox: FILE_END id={end.Id}: saved {finished.Received} bytes -> {finished.Path}");
+            _owner.ReportReceived(new FileReceivedEventArgs
+            {
+                Path = finished.Path,
+                Name = Path.GetFileName(finished.Path),
+                Size = finished.Received,
+            });
+            return new FileResultMessage { Id = end.Id, Ok = true };
         }
 
-        if (finished.Received != finished.DeclaredSize)
+        /// <summary>Called by ProtocolServer when the connection that owned the active
+        /// transfer (if any) drops before FILE_END arrives — deletes the partial file.
+        /// A no-op when nothing is in flight.</summary>
+        public void AbortActiveTransfer()
         {
-            DeleteQuiet(finished.Path);
-            _log($"FileInbox: FILE_END id={end.Id}: received {finished.Received} of {finished.DeclaredSize} " +
-                 "declared bytes; deleted the partial file");
-            return new FileResultMessage { Id = end.Id, Ok = false, Reason = "The file arrived incomplete" };
+            ActiveTransfer? aborted;
+            lock (_gate) { aborted = _active; _active = null; }
+            if (aborted == null) return;
+            try { aborted.Stream.Dispose(); } catch { /* already broken */ }
+            DeleteQuiet(aborted.Path);
+            _owner._log($"FileInbox: connection dropped mid-transfer (id={aborted.Id}); deleted the partial file {aborted.Path}");
         }
 
-        _log($"FileInbox: FILE_END id={end.Id}: saved {finished.Received} bytes -> {finished.Path}");
-        FileReceived?.Invoke(this, new FileReceivedEventArgs
-        {
-            Path = finished.Path,
-            Name = Path.GetFileName(finished.Path),
-            Size = finished.Received,
-        });
-        return new FileResultMessage { Id = end.Id, Ok = true };
-    }
-
-    /// <summary>Called by ProtocolServer when the connection that owned the active
-    /// transfer (if any) drops before FILE_END arrives — deletes the partial file.
-    /// A no-op when nothing is in flight.</summary>
-    public void AbortActiveTransfer()
-    {
-        ActiveTransfer? aborted;
-        lock (_gate) { aborted = _active; _active = null; }
-        if (aborted == null) return;
-        try { aborted.Stream.Dispose(); } catch { /* already broken */ }
-        DeleteQuiet(aborted.Path);
-        _log($"FileInbox: connection dropped mid-transfer (id={aborted.Id}); deleted the partial file {aborted.Path}");
     }
 
     private static FileResultMessage Refuse(int id, string reason) =>

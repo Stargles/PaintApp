@@ -72,7 +72,7 @@ public class FileOutboxTests : IDisposable
         const int oneKb = 1024;
         string path = WriteTempFile("big.bin", 700 * oneKb);
         var transport = new FakeFileTransport { HasClient = true };
-        using var outbox = new FileOutbox(transport, resultTimeout: TimeSpan.FromMilliseconds(500));
+        await using var outbox = new FileOutbox(transport, resultTimeout: TimeSpan.FromMilliseconds(500));
 
         outbox.Enqueue(path);
         await WaitUntil(() => transport.Sent.Any(f => f.Type == (byte)MessageType.FileEnd));
@@ -89,7 +89,7 @@ public class FileOutboxTests : IDisposable
         string b = WriteTempFile("b.bin", 10);
         var transport = new FakeFileTransport { HasClient = true };
         var events = new List<OutboundFileEventArgs>();
-        using var outbox = new FileOutbox(transport, resultTimeout: TimeSpan.FromSeconds(5));
+        await using var outbox = new FileOutbox(transport, resultTimeout: TimeSpan.FromSeconds(5));
         outbox.TransferUpdated += (_, e) => { lock (events) events.Add(e); };
 
         outbox.Enqueue(a);
@@ -130,7 +130,7 @@ public class FileOutboxTests : IDisposable
         string path = WriteTempFile("x.bin", 5);
         var transport = new FakeFileTransport { HasClient = true };
         var events = new List<OutboundFileEventArgs>();
-        using var outbox = new FileOutbox(transport, resultTimeout: TimeSpan.FromSeconds(2));
+        await using var outbox = new FileOutbox(transport, resultTimeout: TimeSpan.FromSeconds(2));
         outbox.TransferUpdated += (_, e) => { lock (events) events.Add(e); };
 
         outbox.Enqueue(path);
@@ -148,7 +148,7 @@ public class FileOutboxTests : IDisposable
         string path = WriteTempFile("y.bin", 5);
         var transport = new FakeFileTransport(); // HasClient starts false
         var events = new List<OutboundFileEventArgs>();
-        using var outbox = new FileOutbox(transport, resultTimeout: TimeSpan.FromSeconds(3));
+        await using var outbox = new FileOutbox(transport, resultTimeout: TimeSpan.FromSeconds(3));
         outbox.TransferUpdated += (_, e) => { lock (events) events.Add(e); };
 
         outbox.Enqueue(path);
@@ -172,7 +172,7 @@ public class FileOutboxTests : IDisposable
         string path = WriteTempFile("z.bin", 5);
         var transport = new FakeFileTransport { HasClient = true };
         var events = new List<OutboundFileEventArgs>();
-        using var outbox = new FileOutbox(transport, resultTimeout: TimeSpan.FromMilliseconds(150));
+        await using var outbox = new FileOutbox(transport, resultTimeout: TimeSpan.FromMilliseconds(150));
         outbox.TransferUpdated += (_, e) => { lock (events) events.Add(e); };
 
         outbox.Enqueue(path); // transport never replies
@@ -186,7 +186,7 @@ public class FileOutboxTests : IDisposable
         string path = WriteTempFile("w.bin", 5);
         var transport = new FakeFileTransport { HasClient = true };
         var events = new List<OutboundFileEventArgs>();
-        using var outbox = new FileOutbox(transport, resultTimeout: TimeSpan.FromSeconds(2));
+        await using var outbox = new FileOutbox(transport, resultTimeout: TimeSpan.FromSeconds(2));
         outbox.TransferUpdated += (_, e) => { lock (events) events.Add(e); };
 
         transport.FailNextSend = true; // the FILE_BEGIN itself fails to send
@@ -195,4 +195,38 @@ public class FileOutboxTests : IDisposable
         Assert.False(string.IsNullOrEmpty(failed.Reason));
         Assert.Empty(transport.Sent);
     }
+    [Fact]
+    public async Task ABlockedChunkWaitsAndReplacementCancelsTheOriginalTransferWithoutSendingItsTailToTheNewPeer()
+    {
+        var transport = new FakeFileTransport { HasClient = true };
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        int chunks = 0;
+        transport.BeforeSendAsync = async (frame, ct) =>
+        {
+            if (frame.Type != (byte)MessageType.FileChunk || Interlocked.Increment(ref chunks) != 1) return;
+            entered.TrySetResult();
+            await release.Task.WaitAsync(ct);
+        };
+        var events = new List<OutboundFileEventArgs>();
+        await using var outbox = new FileOutbox(transport, resultTimeout: TimeSpan.FromSeconds(3));
+        outbox.TransferUpdated += (_, e) => { lock (events) events.Add(e); };
+        outbox.Enqueue(WriteTempFile("blocked.bin", 700 * 1024));
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        Assert.Equal(1, chunks);
+        Assert.Single(transport.Sent);
+        Assert.DoesNotContain(Snapshot(events), e => e.BytesSent > 0);
+        transport.HasClient = false;
+        transport.HasClient = true;
+        await WaitForState(events, OutboundFileState.Failed);
+        Assert.Single(transport.Sent);
+        Assert.DoesNotContain(transport.Sent, f => f.Type == (byte)MessageType.FileChunk || f.Type == (byte)MessageType.FileEnd);
+        outbox.Enqueue(WriteTempFile("retry.bin", 2));
+        await WaitUntil(() => transport.Sent.Count(f => f.Type == (byte)MessageType.FileEnd) == 1);
+        var retry = transport.DecodeBegin(transport.Sent.Last(f => f.Type == (byte)MessageType.FileBegin));
+        Assert.Equal("retry.bin", retry.Name);
+        transport.Reply(retry.Id, true);
+        await WaitForState(events, OutboundFileState.Inserted);
+    }
+
 }

@@ -11,5 +11,5 @@ namespace Streamer.Core;
 public interface IFrameSink
 {
     void OnStatus(StatusMessage status);
-    void OnVideoFrame(bool keyframe, ulong ptsUs, ReadOnlyMemory<byte> accessUnit);
+    Task OnVideoFrameAsync(bool keyframe, ulong ptsUs, ReadOnlyMemory<byte> accessUnit, CancellationToken ct);
 }

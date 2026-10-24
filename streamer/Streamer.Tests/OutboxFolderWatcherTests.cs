@@ -30,7 +30,7 @@ public class OutboxFolderWatcherTests : IDisposable
     public async Task DroppedFileIsQueuedAndMovedToSentOnSuccess()
     {
         var transport = new FakeFileTransport { HasClient = true };
-        using var outbox = new FileOutbox(transport, resultTimeout: TimeSpan.FromSeconds(3));
+        await using var outbox = new FileOutbox(transport, resultTimeout: TimeSpan.FromSeconds(3));
         using var watcher = new OutboxFolderWatcher(_root, outbox);
 
         string dropped = Path.Combine(_root, "photo.png");
@@ -50,7 +50,7 @@ public class OutboxFolderWatcherTests : IDisposable
     public async Task RefusedTransferIsMovedToRefused()
     {
         var transport = new FakeFileTransport { HasClient = true };
-        using var outbox = new FileOutbox(transport, resultTimeout: TimeSpan.FromSeconds(3));
+        await using var outbox = new FileOutbox(transport, resultTimeout: TimeSpan.FromSeconds(3));
         using var watcher = new OutboxFolderWatcher(_root, outbox);
 
         string dropped = Path.Combine(_root, "note.txt");
@@ -72,7 +72,7 @@ public class OutboxFolderWatcherTests : IDisposable
         // refused by the iPad — STREAM.md §7 stage 4 names only sent\/refused\, so
         // Failed is filed under refused\ too (see OutboxFolderWatcher's doc comment).
         var transport = new FakeFileTransport { HasClient = true };
-        using var outbox = new FileOutbox(transport, resultTimeout: TimeSpan.FromMilliseconds(200));
+        await using var outbox = new FileOutbox(transport, resultTimeout: TimeSpan.FromMilliseconds(200));
         using var watcher = new OutboxFolderWatcher(_root, outbox);
 
         string dropped = Path.Combine(_root, "clip.mp4");
@@ -89,7 +89,7 @@ public class OutboxFolderWatcherTests : IDisposable
         File.WriteAllBytes(dropped, new byte[] { 1 });
 
         var transport = new FakeFileTransport { HasClient = true };
-        using var outbox = new FileOutbox(transport, resultTimeout: TimeSpan.FromSeconds(3));
+        await using var outbox = new FileOutbox(transport, resultTimeout: TimeSpan.FromSeconds(3));
         using var watcher = new OutboxFolderWatcher(_root, outbox);
 
         await WaitUntil(() => transport.Sent.Any(f => f.Type == (byte)MessageType.FileBegin));
@@ -100,10 +100,10 @@ public class OutboxFolderWatcherTests : IDisposable
     }
 
     [Fact]
-    public void ConstructorCreatesSentAndRefusedSubfolders()
+    public async Task ConstructorCreatesSentAndRefusedSubfolders()
     {
         var transport = new FakeFileTransport();
-        using var outbox = new FileOutbox(transport);
+        await using var outbox = new FileOutbox(transport);
         using var watcher = new OutboxFolderWatcher(_root, outbox);
         Assert.True(Directory.Exists(watcher.SentFolder));
         Assert.True(Directory.Exists(watcher.RefusedFolder));
@@ -116,7 +116,7 @@ public class OutboxFolderWatcherTests : IDisposable
         // is off, but the startup scan only lists the root's own top-level files, so
         // nothing here should be watched twice.
         var transport = new FakeFileTransport { HasClient = true };
-        using var outbox = new FileOutbox(transport, resultTimeout: TimeSpan.FromSeconds(3));
+        await using var outbox = new FileOutbox(transport, resultTimeout: TimeSpan.FromSeconds(3));
         using var watcher = new OutboxFolderWatcher(_root, outbox);
         File.WriteAllBytes(Path.Combine(watcher.SentFolder, "old.png"), new byte[] { 1 });
 

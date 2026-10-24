@@ -19,6 +19,9 @@ public sealed class FakeFrameSink : IFrameSink
 
     public List<(bool Keyframe, ulong PtsUs)> VideoFrames { get; } = new();
 
-    public void OnVideoFrame(bool keyframe, ulong ptsUs, ReadOnlyMemory<byte> accessUnit) =>
+    public Task OnVideoFrameAsync(bool keyframe, ulong ptsUs, ReadOnlyMemory<byte> accessUnit, CancellationToken ct)
+    {
         VideoFrames.Add((keyframe, ptsUs));
+        return Task.CompletedTask;
+    }
 }

@@ -12,7 +12,7 @@ public interface ICapturePipeline : IAsyncDisposable
     /// yet and its first one will be an IDR.</summary>
     bool IsRunning { get; }
 
-    event EventHandler<AccessUnitEventArgs>? AccessUnitReady;
+    event Func<AccessUnitEventArgs, CancellationToken, Task>? AccessUnitReady;
     event EventHandler<string>? UnexpectedExit;
     event EventHandler? Started;
 
