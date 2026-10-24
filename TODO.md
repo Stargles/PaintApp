@@ -570,3 +570,12 @@ Exclusive-lease run07 ate0a5ce8e stopped on the newly integrated MaskParity play
 UIImage assignment to the Source tier. Capture it explicitly through the existing throwing fixture
 helper; preserve all source pixels and immediate purity assertion ordering. All728 source files/
 modes restored exactly; runtime0. Full baked-assignment inventory found no other raw UIImage RHS.
+
+Run08 at214d1edf compiled/executed32:28pass/4fail,zero skips,728 exact source restore. Two fixtures
+included CanvasFixture's setup addLayer undo entry; clear only setup history before explicit baselines.
+Failed-save ledger intentionally clears its reuse memo in existing ProjectStore stage validation;
+assert its valid pre-save premise and exact cleared state after refusal, retaining all package/live
+pixel checks. Repeated patch undo passed cleared-prepared-handle checks but retained one native
+borrowed drawing temporary until the event pool, exhausting the tiny six-picture cap on later cycles.
+Scope the existing backing-image→owned-context copy in its own autorelease boundary; keep exact3
+resident buffers, cap, both-stack and red/blue assertions unchanged, then rerun the same32 only.

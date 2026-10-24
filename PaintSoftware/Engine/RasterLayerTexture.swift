@@ -740,14 +740,19 @@ final class RasterLayerTexture: DabTarget, RasterResidencyCandidate {
         if let held {
             prepared = held.preparedForWrite(excluding: [residencyID])
         } else if let backing {
-            prepared = backing.resolveImage().flatMap { image in
-                RasterSurface.allocate(width: pixelWidth, height: pixelHeight,
-                    using: residency, excluding: [residencyID]).flatMap { allocated in
-                    allocated.mutate { context in
-                        UIGraphicsPushContext(context)
-                        image.draw(in: CGRect(origin: .zero, size: size))
-                        UIGraphicsPopContext()
-                    }.map { allocated }
+            // UIImage drawing can autorelease a native alias of this borrowed old version. Drain
+            // that alias before returning the new owned context, rather than pinning every prior
+            // undo landing until the surrounding event's pool ends.
+            prepared = autoreleasepool {
+                backing.resolveImage().flatMap { image in
+                    RasterSurface.allocate(width: pixelWidth, height: pixelHeight,
+                        using: residency, excluding: [residencyID]).flatMap { allocated in
+                        allocated.mutate { context in
+                            UIGraphicsPushContext(context)
+                            image.draw(in: CGRect(origin: .zero, size: size))
+                            UIGraphicsPopContext()
+                        }.map { allocated }
+                    }
                 }
             }
         } else {

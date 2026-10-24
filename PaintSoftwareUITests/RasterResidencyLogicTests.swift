@@ -469,6 +469,7 @@ final class RasterResidencyLogicTests: XCTestCase {
                 raster: RasterLayerTexture(size: size, source: source, strokeCount: index + 2), vector: vector))
         }
         manager.layers[0].cels = cels
+        manager.history.removeAll()
         manager.recordUndo(label: .brushStroke, undo: {}, redo: {})
         let identities = cels.map(CelContentIdentity.init)
         let ledgerBefore = manager.packageLedger.landedAt
@@ -671,7 +672,9 @@ final class RasterResidencyLogicTests: XCTestCase {
         let red = RasterSource.snapshot(of: try surface(refusedOwner), size: size)
         manager.layers[0].cels[0].raster = RasterLayerTexture(size: size, source: red, strokeCount: 4)
         let identity = CelContentIdentity(manager.layers[0].cels[0])
-        let ledger = manager.packageLedger.landedAt
+        XCTAssertEqual(manager.packageLedger.landedAt?.standardizedFileURL.path, url.standardizedFileURL.path,
+                       "The first successful save must establish the reuse memo before refusal")
+        XCTAssertNotNil(manager.packageLedger.entry(for: celID))
         let completed = expectation(description: "failed normal save completed")
         var failed = false
         XCTAssertEqual(ProjectStore.save(manager, to: url, onSaveFailed: { failed = true },
@@ -683,7 +686,8 @@ final class RasterResidencyLogicTests: XCTestCase {
         XCTAssertTrue(ProjectBackupManager.validateProject(at: url))
         XCTAssertEqual(CelContentIdentity(manager.layers[0].cels[0]), identity)
         XCTAssertEqual(manager.layers[0].cels[0].raster.strokeCount, 4)
-        XCTAssertEqual(manager.packageLedger.landedAt, ledger)
+        XCTAssertNil(manager.packageLedger.landedAt, "An invalid stage clears the existing reuse memo")
+        XCTAssertNil(manager.packageLedger.entry(for: celID))
         try autoreleasepool {
             XCTAssertEqual(try pixel(XCTUnwrap(manager.layers[0].cels[0].raster.renderToUIImage().get().cgImage)), [255, 0, 0, 255])
         }
@@ -746,6 +750,7 @@ final class RasterResidencyLogicTests: XCTestCase {
             manager?.updateTextString("Z") // UIKit's synchronous final delivery, after admission.
             manager?.textIsFocused = false
         }
+        manager.history.removeAll()
         manager.recordUndo(label: .brushStroke, undo: {}, redo: {})
         let before = CelContentIdentity(manager.layers[0].cels[0])
         let generation = manager.fillGeneration
