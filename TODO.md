@@ -20,6 +20,12 @@ rerunning the fault/remaining41 recipes. Base49 faults remain qualified; no prod
 
 ## Brush exact-scale assertion proof — scope recorded, 2026-10-24
 
+Root approved an additional same-method picture oracle before edits: capture the existing300×60
+request at scale2 in testAnEditedBrushRerendersAndAnUneditedOneDoesNot and require actual600×120
+CGImage dimensions, alongside its existing render-count assertion. This catches rendering at the wrong
+size even if the key and miss count stay correct. No new method/API or production change.
+
+
 Root identified a premise gap in testPreviewRequestIdentityIncludesSizeAndScale: scale2 vs2.5 is not
 proof against the former rounded key, which rounds them to2 vs3. Production already uses exact scale.
 Own tmp/s54-brush-proof begins at origin/main then fast-forwards exact brushbd0a65be6959ad0e9c364aebeeafc19396d23bc2.

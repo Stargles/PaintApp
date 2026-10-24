@@ -706,8 +706,10 @@ final class BrushLibraryLogicTests: XCTestCase {
                           "…and the re-render must actually be a different picture")
 
         // A different size is a different entry: a row and a contact sheet are different pictures.
-        _ = cache.image(for: BrushPreviewKey(brush: brush, size: CGSize(width: 300, height: 60), scale: 2))
+        let resized = cache.image(for: BrushPreviewKey(brush: brush, size: CGSize(width: 300, height: 60), scale: 2))
         XCTAssertEqual(cache.renderCount, 3)
+        XCTAssertEqual(resized.cgImage?.width, 600, "The new request renders its actual pixel width")
+        XCTAssertEqual(resized.cgImage?.height, 120, "The new request renders its actual pixel height")
     }
 
     /// The cache probe never renders, which is what lets a SwiftUI row ask on the main thread before
@@ -750,7 +752,8 @@ final class BrushLibraryLogicTests: XCTestCase {
         XCTAssertNotEqual(original, BrushPreviewKey(brush: brush,
                                                      size: CGSize(width: Self.previewSize.width + 1,
                                                                   height: Self.previewSize.height), scale: 2))
-        XCTAssertNotEqual(original, BrushPreviewKey(brush: brush, size: Self.previewSize, scale: 2.5))
+        // Both values round to2: the former rounded scale key would collide here.
+        XCTAssertNotEqual(original, BrushPreviewKey(brush: brush, size: Self.previewSize, scale: 2.25))
     }
 
     /// The byte-derived number of editor-sized previews crosses the retained ceiling, and the
