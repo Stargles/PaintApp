@@ -1,81 +1,49 @@
 # TODO
 
-The owner's asks; BUGS.md records defects we find. Session49 authorizes continuing actionable work
-without recommendation-only pauses. On2026-10-24 the owner explicitly says not to park for context;
-use automatic compaction. Agents are unrestricted for now, with quality and usage conservation before
-speed. Architecture and preserving real artwork take priority. Record before acting.
-
 ## Current source and qualification — 2026-10-24
 
-The consolidator and independent check tree are clean29cf3d25461032b37f70b07c187f217b8e659922.
-This adds a reviewed four-production-file/seven-line cleanup to40f77: preserve typed raster failures,
-keep the private transform helper's exact throws type, make only two pure undo arithmetic helpers
-nonisolated, and retain the shape layer-existence guard without its unused index. Compiler/native
-qualification of this cleanup is pending. Main/origin remainafd2030c; no merge, push or device install.
+Current consolidated CODE is8bb68907ee135820900906a537c56ce46a76b887, clean in final-integration
+and final-check with all728 source byte/kind/mode entries exact. Main/origin stayafd2030c; no merge,
+push or device install. The new mend-free-caps task starts from that code; source edits are not yet
+authorized. Root owns docs/Git and the single Mac native lease; delegate implementation and review.
 
-Actual normal40f77f1919167d1a284b0c99d312c54c949ed4c9 passed422/422 with zero failures/skips,
-all728 source byte/kind/mode entries exact; root independently reconciled all selectors and device.
-The whole owner9 UI47 at the SAME pin closed45pass/2fail/0skip, all728 exact, native65/wrapper1.
-This is a failing gate. BrushEditor13, raster Liquify5, vector Liquify4, ShapeRecovery5, VectorLayer
-Content5 and VideoBake2 passed; all6 genuine hold callers and shape undo/redo passed. Root inspected
-whole owner-landscape dot, raster before/after/undo/reopen and video before/reopen pictures.
-Evidence: ~/PaintWork/s54-final-qualification/final-repin-offline/prepared-40f77f19/.
+Actual ordinary owner9 UI47 CLOSED47passed/0failed/0skipped/0expected, native0/wrapper0 at8bb.
+All8 whole classes and all6 genuine hold callers passed, including point-only wide-dot, raster move/
+undo/cold-reopen, shape, vector content and video. Exports/LOOK and final728/device reconciliation are
+finishing under Raster's existing lease; no next native operation is granted. Actual focusedb8652/2
+and root whole-picture LOOK are preserved. Earlier40 normal422/422 is green; new8bb422 is not run.
 
-The two failures are test-input/oracle defects supported by actual closed media:
-- RoughInk really has a jagged edge. Forty probes missed all5/8px extrema; all544 interior columns
-  show39 transitions while plain is constant. Live strokes use fresh random seeds. The fixed pixel
-  deviation bar is not a seed/scale invariant. The raw reader is unchanged; ScreenshotPixels was NOT
-  the direct cause. Preserve the real3.416pt preset and nonblank ink; reuse ScreenshotPixels for dense
-  native-column sampling, test actual constant-versus-nonconstant widths, delete duplicate reader/
-  obsolete spread helper, and qualify a flat-dynamics drawn fault before accepting the new oracle.
-- FillMendON's layer was vector. Archived tap landed inside opacity while the rail entered, so no
-  options menu opened; failure preceded overlap and ink. Require actual settled rail geometry before
-  the same named-row tap, independently verify vector marker, retain Rasterize/menu reachability and
-  all existing overlap/drawn/undo assertions. No blind sleep, double tap or product mending change.
+IMPORTANT remaining product defect: current8bb new-fill AND Mend All pictures show3 tiny white free-
+cap patches beneath interior strokes. Both detached ends and the attached stem FREE end are affected;
+each is6 white displayed pixels. They are hundreds of pixels from the outside outline join. The
+owner's protect-uncertain-joins policy does not justify these holes; existing body probes missed them.
+Recorded BEFORE code on tmp/s54-mend-free-caps (initial scopee409378f), in BUGS and this existing fill
+ask. Bake traces/proposes the shared rounded-cap normal/corner proof; Startup independently reviews.
+No source/logic/UI change yet. Preserve all equal-nearest witness checks, original outer edge,
+protected hole/notch/rim/fence cases and uncertain joins. No generic small-hole closer, second fill
+pipeline, persistent setting or appearance-policy change. Add discriminating full-cap coverage using
+existing seams after the concrete cause/proposal is accepted; commit before deliberate faults.
+Evidence: s54-final-qualification/native/ui47-8bb68907-run01/closed-exports/attachments/:
+new-fill2FE209C7-4A28-4B53-95FD-66843D015D46.png, batch-after67F8600F-0225-49C6-831F-BBA4A7E05ABD.png,
+batch-before17A2ADD4-90CE-4370-A006-94A2B45BC073.png. There is no retained ON-before artwork image;
+the batch-before is a separate OFF case. Originalb865 and40 pictures remain preserved.
 
-The two bounded test corrections are implemented on tmp/s54-ui47-input-contracts from29cf.
-Dense sampling reuses ScreenshotPixels; the local fill setup waits for whole-rail containment and
-checks the actual vector marker before tapping the existing row. Removed the duplicate raw reader,
-sparse probe parameter and spread helper. All test methods, later fill/undo oracles and four reviewed
-production cleanup files remain unchanged. Both UI lints, PBX validation and static5398/5987/1327
-checks pass. Compiler and native controls are still pending; root supplies the clean committed pin. Do not reuse the failing47 as a green
-baseline or silently carry the old shape skip. New107 logic faults, UI consumer faults and mask6+11
-remain prepared-only; refresh their exact source/meaningful assertion maps and establish fresh zero-
-skip normal controls before execution. Final fast Debug/Release, whole classes/full phase, paired16,
-old-library cold UI and fresh saved-scene/export/signed-device/erasing gates remain open. Owner
-artwork confirmation still precedes whole retirement of the temporary converter; keep permanent
-startup maintenance. External current coverage records the bounded audit and its real limits.
+All8bb new107 logic/99recipes/66methods/247semantic statement maps, UI13/7methods/33statements
+(10product-consumer+3fixture), mask6controls+11faults/5methods/18statements are OFFLINE ONLY and
+root-independently accepted. Hold their native execution until cap correction and successor source/
+normal gates. Originals are immutable. Source countsfast5398/full5987/PBX1327; no methods added by
+the preceding UI/typed-do corrections. Both UI lints and PBX validation passed. The first9bd attempt
+failed compilation0tests; explicit typed do fixed it andb865 app compiled/passed2. Do not count a
+compiler failure, skip, timeout, crash or unrelated assertion as a qualifying fault.
 
-Actual9bd focused build failed before tests: CanvasManager+Document.prepare line506 erased the
-local typed throw to any Error at its do/catch boundary. Native65,0tests,728sourceexact and clean.
-Recorded bounded successor: make that local error boundary explicit without fallback/default or
-new policy; also retain the existing RoughInk success screenshot for current drawn proof. No new
-test methods/preset/oracle changes. All9bd offline plans remain unrun, not runtime qualification.
-The bounded source correction now makes that local do boundary explicitly throw RasterResidency.Failure
-and keeps the existing RoughInk success screenshot. Exactly2lines/2files change; no new tests or
-architecture layer. Fresh compiler/2coldcontrols and all final gates remain pending.
-
-Actual corrected b865 controls passed2/2,0fail/skip/expected, native0/wrapper0, all728exact and
-clean on owner9. Root independently reconciled selectors/device/freeze and LOOKed Rough, vector
-options and new-fill pictures. Rough is portrait; Mend is owner1080x810 landscape. Before whole47,
-record one remaining test-evidence correction: set existing Rough workflow landscape before launch,
-matching the same-class convention. Keep all paths, assertions, presets and method counts unchanged.
-This avoids a new screenshot-only test/harness. Current2green does not prove that new orientation;
-the upcoming whole47 must actually pass and expose a retained owner-size whole picture. No mutation
-or device grant follows from this record. Original b865 evidence and failed9bd attempt stay exact.
-
-Actual whole-picture review found a remaining interior-mending defect BEFORE final faults. Three
-small white cap patches remain inside the red new fill: both detached stroke free ends and the
-attached stem free end. Each is6 fully white displayed pixels at2160x1620: x881–882/y401–404,
-x1025–1026/y401–404, x1095–1096/y511–514. The outside join is nearx1529; uncertain-outline-join
-protection does not explain these residuals. Actual b865 image17381CA6 and40f77 OFF before image
-agree with fixture positions. Existing tests probe the stroke bodies and missed the caps. Preserve
-all original outlines and uncertain joins; trace the shared mending cause and add discriminating
-rounded-free-cap logic/drawn coverage through existing seams. No generic tiny-hole closer, second
-pipeline, new persistent setting or appearance-policy change. Implementation plan/review is pending.
-Root records this on tmp/s54-mend-free-caps before source edits. The existing8bb47 continues unchanged;
-its pass cannot close this product gap. All8bb107/UI13/mask preparations remain offline/historical
-until successor source is committed and qualified. Main staysafd2030c; no device operation.
+Final fastDebug/Release, whole/full phase, paired16Release ABBA, whole256 previous-writer library cold
+UI and fresh saved-scene/export/signed-device/erasing checks remain open. Full external adapter943a2652
+is independently accepted with20offlinefakefixtures,5987/398classes and61exact opt-in skip guards;
+actual clone ownership and actual skip source/reasons need postreview. No full native run occurred.
+Owner artwork confirmation still precedes whole retirement of the temporary converter and temporary
+UI; permanent startup maintenance must stay. Erasing respring cause remains unproved. Bounded vector
+memo followup found existing byte/LRU/12-owner eviction, not one retained full picture per visited cel.
+No generic raster-capacity figure is aggregate device RSS. No physical operation this pass.
 
 ## How to read and keep this file
 
@@ -263,7 +231,10 @@ hashes are preserved. Evidence: `~/PaintWork/s52-erase-crash/mode3-diagnostic/`.
 
 ## Mend fill gaps beneath interior brushstrokes; apply across a layer — 2026-10-24
 
-**Implemented and previously qualified; final integrated gates pending.** Owner reports: “when I fill
+**Core implemented; actual rounded free-cap holes remain.** Current wholeUI47 passes its body probes,
+but new-fill and Mend All pictures retain3 tiny interior free-end holes. Correct the shared normal/
+corner proof with full-cap regression coverage while protecting the original outline and uncertain
+joins; then finish final integrated gates. Owner reports: “when I fill
 stuff, the fill leaves white in places where brushstrokes were.” An enclosed filled region can contain
 an internal brushstroke whose footprint stays unfilled. Extend the **same Mend Gaps setting** to cover
 those interior stroke-shaped gaps as well as its current behavior. Preserve the actual original outer
