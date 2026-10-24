@@ -1,24 +1,3 @@
-## Fill demand preparation follow-up — 2026-10-24
-
-`tmp/s54-fill-demand-map`, rebased onto bake correction634f5300d43f4803a5203ee0e6c7cf4bba58b73b
-from recorded integration bff9dfa322809f397264c6ff44226b3792685a46.
-Root owns native execution; no simulator/device/tests authorized here. Inspecting shared buffers found
-that buildStructure always computes nearest-open features even when Reach is zero; basin preparation
-overwrites that coordinate buffer as CPU scratch. Plan is optional Structure-owned availability and
-lazy exact EDT in the final GPU command, cached only after completion; clear Structure before other
-entry points overwrite walls/features. Preserve all exact geometry and precision behavior. This is
-provably unused work, not measured attribution. Regressions, failure fault recipes, and later paired
-performance qualification remain required.
-
-Implementation and three new FillMendLogicTests methods are ready for root qualification. New tests
-cover disabled/negative/rounded-zero Reach, complete internal-stroke and boundary output across
-on/off/on, changed-key preparation/refusal recovery, and lasso fill → independent mend → same fill.
-The existing session allocations and budget formula are unchanged. Swift frontend parse, both UI
-lints and git diff --check pass. Reviewed serial-qualification.static_census reports runnable
-fast5313/full5898, FillMend20 (raw5316/5901 includes three private static testBrush helpers, excluded
-from execution). The task adds exactly3 FillMend methods; bake correction634 adds1. These are not native results.
-No build, logic/UI run, mutation, simulator/device operation or paired timing has run on this change.
-
 # Handoff
 
 Start at AGENTS.md, then CLAUDE.md, TODO.md, BUGS.md and the relevant spec/PERFORMANCE.md. Verify origin,
@@ -44,6 +23,26 @@ These latest changes have parse/lints only; **they are not covered by the prior5
 count is125 (56 baker +29 store +24 export +16 LatestWins), not a new native result. Root owns native,
 full-source freezes and graph refresh. Source changes preserve the fixedf69 startup/library/background
 chain; no device operation occurred here.
+
+The fill-demand component is rebased onto final bake follow-up
+f8d1dc2e3f5337565c3636ce5f7a23546d88ed51 in `tmp/s54-fill-demand-map`. Its MetalFillSession and
+FillMendLogicTests are byte-identical to the qualified59d69f12 baseline above: optional Structure-owned
+nearest-open features prepare only on the first enabled Reach, survive off/on ticks, and publish only
+after successful completion. Independent mending drops the owner before overwriting shared buffers.
+Exact shader geometry and session allocations/pricing are unchanged. Three methods cover disabled/
+negative/rounded-zero Reach, the complete drawn internal stroke/boundary, same-structure retry after
+refusal, changed-key recovery and fill → independent mend → fill. Root's500 already covers these
+normal methods; intentional fault controls and paired performance qualification remain pending.
+
+Reviewed serial-qualification.static_census at the final combined source reports runnable
+**fast5314/full5899**, FillMend20 (raw5317/5902 includes three excluded private static testBrush
+helpers). Final bake follow-up adds one runnable method relative to the qualified500, for expected
+combined501; this expected count is not a native result. Source comparison against59d69f12 changes
+only FrameBakeStore and FrameBakeStoreLogicTests. Parse, both UI lints and diff-check pass; no native
+operation was run by this worker. Root owns final-source501, mutations, fast tiers, UI and timings.
+External six-fault/two-control plan: `~/PaintWork/s54-fill-demand-map/fault-plan.json`, refreshed to the
+clean final commit before execution. The removed unconditional open EDT is provably unused at Reach0;
+source inspection alone does not attribute the old/new inside-press timing difference.
 
 The temporary point-geometry startup gate still isolates the one-shot conversion worker before
 library access, preserves the35 old repair methods and the old-writer package fixtures, and keeps

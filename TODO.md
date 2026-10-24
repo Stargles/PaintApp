@@ -251,11 +251,12 @@ Diagnose that gesture/visibility failure and rerun; no product cause is assumed.
 Worktree: `~/PaintWork/PaintApp-s53-fill-mend`, `tmp/s53-fill-mend`.
 - [ ] Qualify all four FillMend UI cases after fixture/helper corrections; inspect whole-screen pictures.
 - [ ] Resolve the uncertain inside-press timing difference with paired baseline runs; no device extrapolation.
-      Targeted follow-up `tmp/s54-fill-demand-map`: exact open-feature preparation currently runs even
-      with Mend Reach off. Defer that shared-buffer work until needed, retain one map per Structure,
-      invalidate before any independent mend preparation, then qualify output/cache/failure recovery.
-      Source inspection identifies unused work, not attribution of the measured press difference.
-      Native tests and paired timings await root's slot grant.
+      Targeted follow-up `tmp/s54-fill-demand-map` now defers unused exact open-feature work until
+      enabled Reach, retains one map per Structure and invalidates before independent mend writes.
+      Its three normal regressions are included in root's500/500 at59d69f12 (724 files unchanged).
+      Rebased final bake follow-up adds one method: final-source501, intentional failure controls,
+      full fast tiers and paired timings remain pending. Source inspection identifies removed unused
+      work, not attribution of the measured press difference.
 - [ ] Resolve first-screen repair scheduling/cold launch before deployment (audit item below).
 - [ ] Fresh saved-scene readiness/export, signed clean Release, device checks, owner artwork confirmation and merge.
 
