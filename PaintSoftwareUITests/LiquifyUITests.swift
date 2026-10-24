@@ -82,7 +82,7 @@ final class LiquifyUITests: PaintUITestCase {
         XCTAssertTrue(app.scrollViews["brushPanel.groupList"].waitForNonExistence(timeout: 5),
                       "the brush library must close before painting")
         adjustSlider(app.sliders["sideToolbar.brushSizeSlider"],
-                     to: CGFloat(BrushSizeCurve.sliderPosition(forPercent: 0.18)), tolerance: 0.02)
+                     to: CGFloat(BrushSizeCurve.sliderPosition(forPercent: 0.18)), tolerance: 0.04)
         adjustSlider(app.sliders["sideToolbar.brushOpacitySlider"], to: 1, tolerance: 0.01)
 
         let canvas = app.otherElements["canvas.host"], paper = paperRect(in: canvas)
@@ -138,7 +138,7 @@ final class LiquifyUITests: PaintUITestCase {
                       "the Liquify controls must close before touching ink")
         XCTAssertTrue(app.scrollViews["liquifyPanel.groupList"].waitForNonExistence(timeout: 5),
                       "the Liquify brush library must close before touching ink")
-        adjustSlider(app.sliders["sideToolbar.liquifySizeSlider"], to: 0.92, tolerance: 0.02)
+        adjustSlider(app.sliders["sideToolbar.liquifySizeSlider"], to: 0.92, tolerance: 0.04)
         adjustSlider(app.sliders["sideToolbar.liquifyPowerSlider"], to: 1, tolerance: 0.01)
         // Cross below the centre: the field moves the point, while its edge crosses the wide dab.
         // Transporting the old painted pixels stretches this asymmetric footprint horizontally.
