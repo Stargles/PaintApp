@@ -1,6 +1,7 @@
 ## Fill demand preparation follow-up — 2026-10-24
 
-`tmp/s54-fill-demand-map`, based on recorded integration bff9dfa322809f397264c6ff44226b3792685a46.
+`tmp/s54-fill-demand-map`, rebased onto bake correction634f5300d43f4803a5203ee0e6c7cf4bba58b73b
+from recorded integration bff9dfa322809f397264c6ff44226b3792685a46.
 Root owns native execution; no simulator/device/tests authorized here. Inspecting shared buffers found
 that buildStructure always computes nearest-open features even when Reach is zero; basin preparation
 overwrites that coordinate buffer as CPU scratch. Plan is optional Structure-owned availability and
@@ -13,7 +14,9 @@ Implementation and three new FillMendLogicTests methods are ready for root quali
 cover disabled/negative/rounded-zero Reach, complete internal-stroke and boundary output across
 on/off/on, changed-key preparation/refusal recovery, and lasso fill → independent mend → same fill.
 The existing session allocations and budget formula are unchanged. Swift frontend parse, both UI
-lints and git diff --check pass; static fast5315/full5900, FillMend20. These are not native results.
+lints and git diff --check pass. Reviewed serial-qualification.static_census reports runnable
+fast5313/full5898, FillMend20 (raw5316/5901 includes three private static testBrush helpers, excluded
+from execution). The task adds exactly3 FillMend methods; bake correction634 adds1. These are not native results.
 No build, logic/UI run, mutation, simulator/device operation or paired timing has run on this change.
 
 # Handoff
