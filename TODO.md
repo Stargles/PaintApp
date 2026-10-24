@@ -72,7 +72,9 @@ their files are repaired. Build `2974b33` broke this rule and lost the owner's k
 found two data-protection defects: `ProjectLibraryMigration.migrateItem` treats a same-named destination
 with equal aggregate file count/bytes as identical and can delete different source artwork;
 `ProjectBackupManager.purgeExpiredTrash` deletes backup directories by basename and can remove a
-recent same-named project's history. Record precedes implementation. Source comparison must be strict,
+recent same-named project's history. Record precedes implementation. The integrated501 baseline passed, but the linked-entry mutation stayed green after four other
+identity mutations failed as intended. Strengthen the shared entry-boundary assertion before continuing;
+a later filesystem rejection must not stand in for the link policy. Source comparison must be strict,
 bounded and independent of the temporary geometry repair; purge must use actual project identity and
 preserve history when ownership cannot be established. Preserve damaged packages and both sides on
 comparison/read failure. Scope excludes raster residency and backup retention policy changes.

@@ -491,6 +491,8 @@ final class ProjectLocationLogicTests: XCTestCase {
         let source = writeProject(named: "Linked")
         let link = scratch.appendingPathComponent("linked-copy")
         try FileManager.default.createSymbolicLink(at: link, withDestinationURL: source)
+        XCTAssertThrowsError(try ProjectFileTree.entry(at: link),
+                             "The shared identity gate must reject a link before following its directory")
         XCTAssertThrowsError(try ProjectLibraryMigration.matches(source: source, destination: link))
         XCTAssertThrowsError(try ProjectLibraryMigration.census(of: link))
         XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))

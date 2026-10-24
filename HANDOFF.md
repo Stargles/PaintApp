@@ -6,6 +6,17 @@ budget, with quality/usage conservation before speed. Continue actionable work w
 only pauses; give concise queue reports. The owner explicitly says not to park for context; automatic
 compaction must preserve continuing work. Architecture is the top priority. Record before acting.
 
+## Native qualification follow-up — 2026-10-24 17:10 UTC
+
+Integration4f5f75 passed501/501 with zero failures/skips and all724 tracked source bytes/modes exact.
+Both expected-green fill refusal controls passed1/1 with their markers and exact restoration. Raster
+primitives f30b656c separately passed13/13; full consumer integration is still WIP on its own branch.
+The49-fault run stopped at library linked-entry case5: cases1–4 were actual assertion-red, case5
+was unexpectedly green, and all source restored exactly. Investigate the direct shared entry boundary
+rather than credit a later filesystem exception as link-policy proof. Source/app behavior is unchanged;
+add a direct assertion and requalify before remaining faults. No UI/device work after compiled mutants
+until committed normal source has been rebuilt. No merge/push/install.
+
 ## Current targeted qualification — 2026-10-24
 
 Root's latest integrated59d69f12 baseline passed **500/500, zero skips**, with all **724 tracked
