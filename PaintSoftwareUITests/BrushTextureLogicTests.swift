@@ -520,7 +520,7 @@ final class BrushTextureLogicTests: XCTestCase {
                 ctx.cgContext.fill(CGRect(origin: .zero, size: Self.canvas))
             }
         func remaining(_ texture: BrushTextureSettings?) throws -> Int {
-            let cel = Self.replayTier(Self.brush(texture), at: CGPoint(x: 48, y: 96),
+            let cel = try Self.replayTier(Self.brush(texture), at: CGPoint(x: 48, y: 96),
                                       isEraser: true, over: filled)
             let p = try Self.pixels(cel)
             // **The core of the eraser's own band and nothing else.** The stroke runs from x 48 to

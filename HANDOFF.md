@@ -42,10 +42,13 @@ clone/atomic replace/rename,1000 sequential transform outputs with bounded resid
 checkpoint package/dirty-pixel preservation, undo/redo refusal and pin release, coexisting draft late
 refusal plus exact queued text, equal-version owner/cache/linked-recipe pixels, staged mask alpha,
 Liquify refusal/retry/generation and normal4096 paint/erase/Move split/Liquify source admission.
-Broad app module compilation succeeds; four isolated builds stopped before tests on now-fixed
+Broad app module compilation succeeds; five isolated builds stopped before tests on now-fixed
 nonoptional localText use, owned Move remainder read, two new fixture types, and the benchmark's
 optional replacement-window image. That existing throwing benchmark now explicitly unwraps it;
-all renderIfNonEmpty().get() consumers retain their intended optional role/assertion contract. Root owns the next
+all renderIfNonEmpty().get() consumers retain their intended optional role/assertion contract. A fifth
+batch found two Liquify comparison Source reads and omitted throws propagation in its posed fixture
+and one BrushTexture replay call; those now explicitly resolve/get/unwrap and propagate try through
+all four fixture callers, preserving pixel comparisons and expected values. Root owns the next
 normal32 run, native faults, affected cold UI/screenshots, fast Debug/Release and device gates. No
 compiler/parser/native/simulator/device operation by this task during root's restriction. UI helper/
 identifier lints and diff-check pass. No total-RSS/hardware claim follows from counted buffers or the

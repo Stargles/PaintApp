@@ -327,9 +327,10 @@ account usage limits; root continues. The full source inventory is not yet fully
   Source currently has32 owned static regression methods, including300/1000 normal package load/
   save-freeze/clone/rename,1000 checkpointed transform outputs, refused undo/redo and transient
   coexistence, staged linked/mask pixels and bounded4096 source/tool admission. Root's isolated f30
-  primitive13/13 is green. Broad app compilation progressed through the app module; the first four
+  primitive13/13 is green. Broad app compilation progressed through the app module; the first five
   isolated consumer builds stopped on now-corrected fixture/API types before execution. The latest
-  benchmark replacement-window read now explicitly unwraps its optional image, without fallback. Consumer
+  benchmark replacement-window read now explicitly unwraps its optional image, without fallback. Liquify
+  source comparisons/posed fixtures and BrushTexture replay now propagate explicit reads/throws. Consumer
   runtime, mutants, affected cold UI/landscape pictures and fast Debug/Release remain root-owned
   pending gates. 2048×1024 arithmetic/counted owned allocations do not prove total RSS, private
   ImageIO/derived compositor memory or the Test1 respring cause. No native/simulator/device actions,

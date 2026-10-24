@@ -180,7 +180,7 @@ final class LiquifyRasterLogicTests: XCTestCase {
             manager.commitLiquify(session)
             if change == "pixels" {
                 XCTAssertTrue(manager.history.canUndo, "a live frame must not reject a genuine pixel edit")
-                XCTAssertNotEqual(try bytes(try XCTUnwrap(manager.layers[1].cels[0].bakedImage)), try bytes(try XCTUnwrap(original.bakedImage)))
+                XCTAssertNotEqual(try bytes(try XCTUnwrap(manager.layers[1].cels[0].bakedImage?.resolveImage().get())), try bytes(try XCTUnwrap(original.bakedImage?.resolveImage().get())))
             } else {
                 XCTAssertFalse(manager.history.canUndo, "untouched or stale input makes no Liquify history entry")
                 XCTAssertTrue(manager.layers[1].cels[0].bakedImage === original.bakedImage)
@@ -539,7 +539,7 @@ final class LiquifyRasterLogicTests: XCTestCase {
     }
 
     @MainActor
-    private func posedRasterRefusalFixture() -> CanvasManager {
+    private func posedRasterRefusalFixture() throws -> CanvasManager {
         let manager = CanvasFixture.manager()
         manager.layers[0].cels[0].bakedImage = try CanvasFixture.rasterSource(image())
         manager.addTransformLayer(name: "Raster pose")
@@ -556,7 +556,7 @@ final class LiquifyRasterLogicTests: XCTestCase {
         defer { CompositorBudget.budgetOverrideBytes = nil; PixelOps.clearRasterizeCache() }
         for duplicate in [false, true] {
             CompositorBudget.budgetOverrideBytes = nil
-            let manager = posedRasterRefusalFixture()
+            let manager = try posedRasterRefusalFixture()
             let original = manager.layers[0].cels[0]
             let loop = CGRect(x: 24, y: 14, width: 24, height: 24)
             manager.selection = Selection(path: CGPath(rect: loop, transform: nil), bounds: loop)
@@ -576,7 +576,7 @@ final class LiquifyRasterLogicTests: XCTestCase {
     @MainActor
     func testPosedRasterRefusalPreservesFloatingPictureAtLanding() throws {
         defer { CompositorBudget.budgetOverrideBytes = nil; PixelOps.clearRasterizeCache() }
-        let manager = posedRasterRefusalFixture()
+        let manager = try posedRasterRefusalFixture()
         let loop = CGRect(x: 24, y: 14, width: 24, height: 24)
         manager.selection = Selection(path: CGPath(rect: loop, transform: nil), bounds: loop)
         manager.beginMove()
@@ -640,7 +640,7 @@ final class LiquifyRasterLogicTests: XCTestCase {
     @MainActor
     func testPosedRasterRefusalRejectsCompositeRatherThanTreatingRequiredLeafAsEmpty() throws {
         defer { CompositorBudget.budgetOverrideBytes = nil; PixelOps.clearRasterizeCache() }
-        let manager = posedRasterRefusalFixture()
+        let manager = try posedRasterRefusalFixture()
         let recipe = try XCTUnwrap(manager.makeFrameRecipe(atFrame: 0, includeBackground: false))
         guard case .cel(let required)? = recipe.leaves[0]?.content else { return XCTFail("PREMISE: the frame actually requires this cel") }
         XCTAssertNotNil(required.pose)
@@ -659,7 +659,7 @@ final class LiquifyRasterLogicTests: XCTestCase {
     @MainActor
     func testPosedRasterRefusalPreservesLiquifyPixelsAndHistory() throws {
         defer { CompositorBudget.budgetOverrideBytes = nil; PixelOps.clearRasterizeCache() }
-        let manager = posedRasterRefusalFixture()
+        let manager = try posedRasterRefusalFixture()
         let original = manager.layers[0].cels[0]
         let session = try held(manager, layer: 0)
         XCTAssertNotNil(session.placement.backing, "PREMISE: the completed Liquify picture needs a posed raster window")
