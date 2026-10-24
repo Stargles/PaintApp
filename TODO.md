@@ -1,247 +1,31 @@
 # TODO
 
-## Final source consolidation — recorded before integration
+The owner's asks; BUGS.md records defects we find. Session49 authorizes continuing actionable work
+without recommendation-only pauses. On2026-10-24 the owner explicitly says not to park for context;
+use automatic compaction. Agents are unrestricted for now, with quality and usage conservation before
+speed. Architecture and preserving real artwork take priority. Record before acting.
 
-Root authorizes one offline consolidator in `tmp/s54-final-integration`, starting from freshly fetched
-origin/main then fast-forwarding exactfb1dd34ce6656314b165000256a690ae7f585932. Add only the recorded owned
-brush-preview, simulator-only test-hook, palette-validation, stationary-fit/livewalk, metadata-repair
-and final stream commits. Preserve current dependency rulings, source ownership and unfinished tasks;
-resolve shared hunks explicitly. No native, main merge, push or device operation. Raster43-fault plan
-is offline-prepared over32 selectors/728 frozen paths; no mutant execution is claimed. Root owns the
-existing native job. Stronger brush scale fixture followup is pending its pin. Exact component SHAs,
-byte inventories and conflict evidence live in `~/PaintWork/s54-architecture-audit/final-integration/`.
+## Current source and qualification — 2026-10-24
 
+`~/PaintWork/PaintApp-s54-final-integration`, `tmp/s54-final-integration`, is the single linear source
+consolidation. It starts from freshly fetched origin/main afd2030c, fast-forwards rasterfb1dd34c,
+and adds only the25 recorded owned commits for brush/proof, test hooks, palette, stationary fit,
+LiveWalk, old-format metadata recovery and stream7c. No main merge/push/install. External full SHAs,
+source byte inventories, commit mapping and hunk review: `~/PaintWork/s54-architecture-audit/final-integration/`.
+Production conflict resolution keeps simulator-only guards plus strict current-manifest validation;
+two added stroke-fit fixture image reads use explicit Result.get() after the raster API change.
+No assertions or fixture pixels changed. Final integrated source has no native gate yet.
 
-Current qualification correction: combined847/847 is green at6b5010d9; the new52-fault run has10
-assertion-red cases, then an unexpected-green playhead-purity fault. Move the existing purity
-assertions before the later control restores the playhead, commit and rebuild normal source before
-rerunning the fault/remaining41 recipes. Base49 faults remain qualified; no production/device change.
-
-
-## Brush exact-scale assertion proof — scope recorded, 2026-10-24
-
-Root approved an additional same-method picture oracle before edits: capture the existing300×60
-request at scale2 in testAnEditedBrushRerendersAndAnUneditedOneDoesNot and require actual600×120
-CGImage dimensions, alongside its existing render-count assertion. This catches rendering at the wrong
-size even if the key and miss count stay correct. No new method/API or production change.
-
-
-Root identified a premise gap in testPreviewRequestIdentityIncludesSizeAndScale: scale2 vs2.5 is not
-proof against the former rounded key, which rounds them to2 vs3. Production already uses exact scale.
-Own tmp/s54-brush-proof begins at origin/main then fast-forwards exact brushbd0a65be6959ad0e9c364aebeeafc19396d23bc2.
-Strengthen only that existing operand to2.25 (both2 and2.25 round to2); keep meaningful identity/render
-assertions and all budgets unchanged. Original brush and final consolidator trees stay untouched.
-Prepare external real assertion mutations with the reviewed runtime-fault-driver-xctfail, offline
---prepare only: completed-key rejection, exact scale and dimensions, cap/deterministic rerender, LRU
-read recency, warning half/normal refill/background clear and pressure registration, reusing existing
-selectors. No new API, flag/counter, fixture overwrite, production edit or native/compiler operation.
-Rater consolidator receives exact owned test-only follow-up commit(s) after its two brush commits.
-
-## Old-geometry typed metadata recovery — scope recorded, 2026-10-24
-
-Implemented the approved narrow preflight: reuse the exact existing geometryVersion byte insertion
-before ProjectRecipeMetadata.reader/payload/copy/owner work; strict-decode that normalized Data with
-current ProjectManifest. Only DecodingError joins existing ambiguous preservation/recovery; file reads,
-geometry conversion, owner checks and final staged validation still throw. Current-marker behavior and
-strict decoder are unchanged. Report comment now includes unreadable typed metadata.
-Two actual previous-writer1c5c422e material-strokes tests corrupt only the raw empty recent-colour array:
-with valid old backup the real startup gate converts only that backup, verifies every damaged original
-file before maintenance, runs permanent maintenance, opens original ink geometry and retains all damaged
-bytes in Trash; without backup it reaches ready through normal recovery while preserving every original
-byte and leaving strict load refused. Existing assertNoOwnedStages checks directories and owners too.
-PointGeometryRepair40 +ProjectStorageIntegrity11 +BackupManager25 +ProjectLocation23 =99 selected methods;
-no new files/PBX. UI lints/diff-check pass; no compiler/native/UI/mutation execution. Permanent startup
-maintenance and truthful gallery refresh remain after eventual whole temporary converter+UI-gate retirement.
-
-
-Root found a connected integration blocker after shared PaletteColor validation: a previous-writer
-manifest with malformed typed colour can enter PointGeometryRepair.stage, create owned copies and
-convert payloads, then fail full current-manifest validation at the end. That aborts the temporary
-startup gate before permanent runStartupMaintenance can recover a valid backup. Current-geometry
-metadata damage already reaches maintenance. Trace before production changes: normalize only the
-existing geometryVersion byte insertion first, strict-decode that exact manifest, and classify typed
-metadata ambiguity before any stage/owner/copy work, preserving all source bytes. Real drawing/payload
-conversion and I/O failures must remain hard errors; no legacy decoder/default/second serializer.
-Work is isolated in tmp/s54-repair-metadata from origin/main then exact Palette9b8f43cc48b16b7faf9403c48478f9901ebc4e37;
-Palette author's tree and frozen stream db20dddd remain unchanged. Prepare a real previous-writer
-package bad-colour+valid-backup logic gate through conversion then normal recovery, with original
-byte preservation and no stale repair stages. Source/static only, no native/compiler/simulator/device.
-
-
-## Shared persisted colour validation — source committed, qualification pending, 2026-10-24
-
-Move saved-hex parseability from the `Palette` container to shared `PaletteColor` decoding, because
-the same type is persisted in palettes, scene `ValueFill`, and recent colours. Preserve every
-parseable prior spelling exactly; reject only strings `ColorMath.parseHex` cannot read. Startup
-repair now checks strict current-manifest decode after the existing lightweight `ManifestSkeleton`
-walk. Logic tests cover valid-backup restore with exact damaged-copy retention and no-backup exact-byte
-preservation; a cold drawn UI test verifies the damaged copy remains in Recently Deleted and ink is
-rendered after restoration. No schema change or migration. Mutation and native qualification remain
-pending root.
-
-## Windows fake transcript race — scope recorded, 2026-10-24
-
-Independent repeat baseline at db20 exposed a real fixture race before any mutant: Debug165/166,
-FileOutboxTests line225 enumerated FakeFileTransport.Sent while SendAsync appended to its public List,
-throwing CollectionModified. Its retry sees real concurrent delivery; assertions must stay intact.
-Root authorizes one private locked fake transcript with snapshot reads, inspect related attempts/
-callbacks and keep all callbacks/awaits outside locks. FakeFrameSink also has actual concurrent STATUS
-writers when test-thread FakePipeline.Connect overlaps worker session transitions; protect its existing
-transcripts at the same fake seam. FakePipelineFactory, GatedStream.Bytes and outbox event snapshots
-already lock. No product/protocol/deployed changes or assertion weakening; static166 cases unchanged.
-Windows agent restored all63 original source files and owns the next new-folder normal Debug+Release
-baseline and assertion faults. This supersedes any inference that one earlier green3a9 pass ruled out
-fixture races. Swift512 source is unchanged. No Mac native/compiler or Windows operations by this agent.
-
-
-## Decoder keyframe notification lifetime — scope recorded, 2026-10-24
-
-Implemented the same existing callback with an epoch argument. Coordinator always wires that client
-lifetime handoff (also when existing startsClients holds sockets); actual client queue rechecks the
-original decoder epoch before admitting any control. Ordinary artist keyframe requests keep their
-normal route; the untagged decoder route is deleted. No extra callback/cache/flag or new owner.
-New deterministic regression uses the actual CanvasFixture coordinator callback, real fixture SPS/PPS
-and a P-frame reference gap, original HELLO→actual replacement status/reset→new HELLO, then releases
-that captured old callback body. Actual admitted CONTROL census must be0; restoring the same real
-callback and feeding the current gap must admit exactly1 keyframe. Existing status/stop completion
-barriers settle the true queues, with no sleeps/fake delays. H264Decoder now8; focused Swift76/6.
-UI lints/diff-check pass; Swift native/compiler/UI/fault gates stay pending root. C#source/fixture63files
-remain byte-identical qualified3a9 Debug/Release166 each. Metadata4b453d97 is accepted separately.
-
-
-Independent review confirmed a final stale callback boundary: reportNeedsKeyframe checks its decode
-epoch, but the untagged coordinator→client queue handoff can land after this same client reconnects
-and send the old request on the replacement run. Buffer publication itself is already atomically
-fenced. Root authorizes the narrow fix: carry the existing decoder epoch through the actual control
-queue landing and recheck it there, before touching current pending controls/writer; remove the old
-untagged decoder callback wiring whole. No new lifetime framework/cache/flag or parallel callback.
-Test with the existing real fixture's SPS/PPS+P-frame gap, hold the notification body, retire through
-actual replacement handler, admit new HELLO, release old notification, assert actual admitted CONTROL
-census0, then forward a normal current notification and require exactly1. Existing completion transport
-and callbacks only; no production delays or native/compiler/simulator action. Metadata repair is in
-separate4b453d97 tree and remains unchanged; Windows C#source stays exact qualified3a9.
-
-
-The owner's asks. [BUGS.md](BUGS.md) is for what *we* find.
-
-**Session 49 (2026-10-14):** the owner asked to continue through every actionable item, stopping only
-for genuinely required input. On October24 the owner explicitly says not to park for context: rely
-on automatic compaction and keep working. Agent count is unrestricted for now; usage
-conservation and output quality take priority over speed. Use focused delegation and cheaper models
-for routine work, with occasional queue reports. The owner asked to work independently while asleep
-until 10 a.m. Toronto time. The later point-only vector ruling below supersedes fixed exterior pixels.
-
-**Checkpoint2026-10-24:** point-only Liquify/newest retention remain unmerged and not installed; their
-logic, affected UI and saving-cost gates qualify. Fill core focused206 and35 distinct fault recipes
-qualify; Debug/Release each5278=5274passed+4known skips. Six old/new fixtures×five widths preserve filled
-masks. New fill/batch UI2/2 and ten old workflows pass; corrected full fill class is4/4 at071c7eb2,
-with all723 source bytes/modes restored and five owner-size whole-screen pictures inspected by root.
-A visibility fault produced an actual assertion failure, then normal4/4 passed; app core remains265e. Audit has19 source candidates, two unqualified implementation branches. Startup repair took
-11.013s on M5 before first UI; cold-start/scheduling work remains before install. Erasing cause remains
-unresolved. Installed Release is stillbcd7a6af; no device launch/restart/install this pass.
-
-## Streaming ownership source audit — 2026-10-24
-
-Swift outgoing source phase prepared: completion-paced single writer/disk pump replaces the synchronous
-whole-file send loop and ignored NW send errors. A transfer captures its original run/sink/FileHandle;
-one max256KiB chunk is read only when idle and advances only after contentProcessed succeeds. One
-admitted encoded frame plus transient chunk copies; no next-chunk queue. Pause/resume/keyframe/ping/pong
-coalesce, HELLO has one slot, FILE_RESULT has at most4<=64MiB payload slots and explicit overflow close.
-Stop closes owned handles/settles caller once; stale completion cannot advance a replacement run.
-Retirement clears prior HELLO/name/status, duplicate greetings are ignored, and unknown-type framing
-continues to skip by length while known application data still requires the current greeting. The
-old boolean send bypass is deleted whole; a completion transport injects the same writer/pump in tests.
-Added actual stalled-write+responsive-control/stop and write-error/no-tail regressions with direct outcome
-counts and actual frame bytes. Exposed test frame handling now serializes on the client queue. Closed-
-document test waits on that real queue before asserting no insertion; decoded-image reset retains the
-same complete CGImage. The old synchronous decoder test-drain API is removed; completion paces fixtures.
-Focused Swift union76 methods/6 classes (Framing15, FileTransfer10, FileSend5, H264Decoder8,
-ConnectFailure16, Bar22); verify census externally before native. Both UI lints/diff-check pass, but Swift
-remains uncompiled/unrun and all assertion faults remain unrun. Windows source remains exact qualified3a9.
-
-
-Root granted isolated Windows-only correctness qualification of committed3a9e9e90ca66f8752668090545f7333f11d4a05a.
-Existing configured BatchMode SSH is reachable; SDK C:\dotnet\dotnet.exe has8.0.425. Stage only committed
-streamer+fixture into a new owned remote folder, hash source/archive before+after, build Debug then unit
-tests, Release only if Debug green, stop on first compiler/test failure. Existing socket tests use dynamic
-loopback ports and single-instance tests use GUID pipe names/own child PIDs; no deployed source/service,
-publish/restart/capture/real-link action. External evidence: s54-stream-ownership/windows-3a9-run01.
-Swift completion work is dirty and excluded from the committed archive. Native Mac slot stays with root.
-
-
-Root selected the connected audit findings: queued encode/write/decode ownership, framing/FILE_CHUNK
-receive limits, and HELLO/current-connection lifecycle. New `tmp/s54-stream-ownership` starts from
-origin/main then exact combined6b5010d94626707c6f6db37850c148d3f045e80d. Record before changes: trace
-both Swift/iPad and streamer/C# production callers and existing tests, refute unsupported premises,
-then send a compact existing-seam ownership/backpressure/bounds proposal and test plan before any
-production edits. No new framework/feature research, no protocol file-size policy invented, no native,
-compiler, Windows deployment, device, socket/network experiment or graph operation. Real-link stage5
-remains owner-waiting. Root separately owns active combined847 qualification; its source/tree is frozen.
-
-Approved proposal before production edits: use the existing connection writer and decoder as
-completion/ownership boundaries; remove unbounded bulk queues and unsafe detached APIs. Share the
-existing64MiB frame and256KiB chunk limits, bind transfers to one run, fence/join handshake callbacks.
-Count waiting producer payloads, keep control work bounded, and prove cancellation after header
-admission preserves the complete frame or closes/joins that connection. Source switching must not
-wait forever for a stalled socket. Swift decode drop/error/no-image/reset must release exactly once;
-old callbacks cannot publish and the last complete image remains. External proposal/test plan:
-`~/PaintWork/s54-stream-ownership/proposal.md`. Root approved connected API propagation; no native,
-compiler, Windows/live-link/device operations. Make coherent commits before any external fault plan.
-
-
-Wire-bound phase prepared: both readers enforce existing64MiB generic /4+256KiB FILE_CHUNK header
-limits before payload allocation/collection. Receivers refuse negative declarations and chunks past
-the declared remaining bytes before writing, delete partials, and preserve retry. Two tiny Swift and
-two C# methods cover header-only allocator rejection, exact/fragmented legal chunks, malformed input,
-no insert/partial and actual retry bytes/pixels. Both UI lints/diff-check pass; no compile/native or
-fault execution.
-
-C# ownership phase source prepared: one per-connection writer admits one bulk payload before encoding,
-completion-paces capture/file delivery, coalesces STATUS/PING/PONG and bounds pending FILE_RESULT to4.
-The admitted frame survives producer cancellation; accepted replies precede terminal replacement STATUS.
-Logical retirement cancels producers immediately; after2s a stalled wire is closed and its writer joined.
-HELLO readiness and callback transitions carry the original run; server owns at most current+retiring
-sessions and Stop joins both. Each file sender/receiver is pinned to its original connection. Splitter
-carry/assembly/parameter-set and returned-batch limits count raw retained copies; this is no whole-RSS
-claim. Outbox disposal is asynchronous, capture/process reader tasks are joined, and ProcessRunner
-caller cancellation kills/joins only its child tree then drains/joins readers while preserving cancellation.
-Added regressions exercise the actual stalled Stream writer plus source switch, retained wire bytes,
-terminal ordering, pending HELLO replacement/reuse, per-connection files, bounded splitting and separate
-Windows timeout/caller-cancel child lifetimes. No compiler/native/Windows/socket/process test execution.
-Swift completion pacing and external fault qualification remain outstanding; stage5 stays owner-waiting.
-
-Windows correctness qualification at committed3a9e9e90ca66f8752668090545f7333f11d4a05a: Debug and Release
-solution builds green,166/166 unit cases each,0 skips/errors. Static130 Fact+8 Theory methods with36
-InlineData cases reconciles166 runtime. All63 staged source files exact before/after and against local
-SHA256 manifest; archive75d7d2992cf49b6f5c44ff0c804be4c8cc5057e978cfb7c8850b30039f81af41. One xUnit2031
-assertion-style warning, no compiler errors. Logs/TRX/manifest: s54-stream-ownership/windows-3a9-run01.
-No deployed app/source/task change, publish/restart/capture/real-link experiment.
-
-Swift decode/read phase source prepared: one AU admission includes queued work and actual VT settlement;
-all early/error/no-image paths finish once, reset immediately retires epoch while preserving the last
-complete image. Network parser pauses per VIDEO and resumes only after completion. A new run may hold
-one first AU while the previous VT submission settles, with one replaceable readiness continuation;
-no compressed latest-wins dropping. Socket drain checks run identity after each handler; pre-HELLO
-application messages fail. Main callbacks carry a locked run lifetime, coordinator callbacks require
-the exact owned client, and old complete-file replies cannot redirect into a replacement connection.
-Added real decoder admission/reset regression and closed-document queued-image insertion refusal.
-Existing fixture decoder tests now completion-pace actual VT work. The queued reset test itself uses
-the real first SPS/PPS+IDR, so bypassing epoch fences reaches VT and can land an actual stale picture. Swift is source-only/uncompiled;
-outgoing iPad send pump and assertion-fault qualification remain outstanding.
-
-
-## Combined source qualification — 2026-10-24
-
-Ready mask f34 +video3227 +vector401/c5e are combined in `tmp/s54-integration`; scope was recorded before
-cherry-picking. Documentation-only conflicts retained current component records and authoritative65
-library/cache/FillUI evidence. No production semantic integration edit, raster WIP or TODO removal.
-Actual selected logic union847/32 classes, with shared MemoryBudget/FillObject counted once. Lints,
-PBX/static census and external52 unchanged assertion-fault preparation only; combined native, mutations,
-Debug/Release fast tiers, UI/drawn owner-size screenshots and device remain pending with root. Root's
-separate exact65 normal501 passed; its serial43 continuation must be checked for its actual final
-result. All new component gates remain open until qualified; external package `~/PaintWork/s54-integration/`.
-Do not merge/push/install. Preserve the raster author's pending overlapping SelectionModels saturation
-and prepared-host admission changes for later coherent integration. No temporary UI controls injected.
+Qualified scopes remain tied to exact pins: f475bb93599d2fb1b5b5785931bb2a87cc553424 normal847/847,
+zero skips/failures,724 files+modes exact; base49 assertion-target cases qualified with ineffective
+attempts excluded. Root's additional52 targets (50 exact recipes) are in progress:21 earlier +26/31
+in the current continuation at this record,47/52 total, not complete. Raster79a1941e passed32/32,
+zero skips/failures,728 exact; cleanfb1 differs only in records. Its43 assertion-target cases over32
+selectors use35 unique exact production edit recipes and are OFFLINE PREPARED ONLY. Windows final7c
+normal166/166 Debug and Release passed;13/16 fault targets qualified, source-located14–16 rerun pending.
+All final Mac/Swift76, new metadata/brush/fit/LiveWalk, final fast Debug/Release, affected cold UI/pictures,
+paired performance, whole-library cold startup and physical-device gates remain open. Root owns the
+sole Mac native slot; never touch its active frozen f475 tree. Live status/details are in HANDOFF.md.
 
 ## How to read and keep this file
 
@@ -293,52 +77,33 @@ their files are repaired. Build `2974b33` broke this rule and lost the owner's k
 
 ## Protect library relocation and Trash backup ownership — 2026-10-24
 
-**Active — bounded audit correction on `tmp/s54-library-ownership`.** Read-only persistence audit
-found two data-protection defects: `ProjectLibraryMigration.migrateItem` treats a same-named destination
-with equal aggregate file count/bytes as identical and can delete different source artwork;
-`ProjectBackupManager.purgeExpiredTrash` deletes backup directories by basename and can remove a
-recent same-named project's history. Record precedes implementation. The integrated501 baseline passed, but the linked-entry mutation stayed green after four other
-identity mutations failed as intended. Strengthen the shared entry-boundary assertion before continuing;
-a later filesystem rejection must not stand in for the link policy. Source comparison must be strict,
-bounded and independent of the temporary geometry repair; purge must use actual project identity and
-preserve history when ownership cannot be established. Preserve damaged packages and both sides on
-comparison/read failure. Scope excludes raster residency and backup retention policy changes.
+Implemented and included in normal847/847/base49 qualification, unmerged. Strict shared file-tree
+and content comparison replaces equal-count/bytes identity; Trash purge uses project UUID ownership.
+Comparison/read/link/ambiguous ownership failures preserve original artwork and history. The direct
+linked-entry assertion is retained; a later unrelated filesystem rejection cannot prove this policy.
 
-- [ ] Focused regressions for equal-census different content/tree, migration preserving both sides
-      after a linked-destination comparison failure, and distinct/same/unreadable live or retained
-      Trash ownership; minimal shared ownership validation.
-- [ ] Commit normal source, review mutation recipes, then qualify under root's explicit native grant.
-      No native run, simulator operation, merge, push or device operation is authorized for this work yet.
-- [ ] Reconcile selected static counts, lints and graph report; hand clean commits to root for integration.
-
+- [ ] Qualify final integrated fast/UI gates, graph/lints and source restoration before merge.
+- [ ] Keep real packages/backups protected; no backup retention policy change is part of this correction.
 
 ---
 
 ## Background lifecycle ownership fixes — 2026-10-24
 
-**Implementation WIP on `tmp/s54-background-ownership`, rebased onto the library-ready checkpoint.**
-The three audited lifetime gaps now have root-cause fixes and five deterministic regression methods:
-export cancellation fences, startup save-stage cleanup serialized through the existing package mutation
-queue, and close-owned thumbnail backfill in batches of eight. Independent focused source review found
-no concrete defect. Synchronous thumbnail installation may finish its current bounded batch if close is
-triggered reentrantly.
+Implemented in the same qualified dependency: export cancellation fences old completions, startup
+stage cleanup uses the existing package serializer, and document close cancels bounded batches of
+eight thumbnail backfills. A synchronous batch may finish if close is triggered reentrantly. Source
+review found no concrete remaining defect; final-source fast/UI/device gates are still pending.
 
-- [ ] Run the clean focused Debug baseline, then the reviewed export, cleanup and backfill assertion
-      mutants one at a time; restore and verify source bytes/modes after each.
-- [ ] Rebuild normal source, run relevant class selectors, then qualify fast Debug/Release, count and
-      lint gates as assigned by root. No native gate has run yet; don't merge/install.
-
-External mutation plan: `~/PaintWork/s54-background-ownership-native-plan-3238a5fe.md`.
+- [ ] Preserve cancellation/refusal and exact-source proof in final qualification; do not claim older
+      component results cover new integrated code automatically.
 
 ---
 
 ## Vector Liquify must move points only — 2026-10-23
 
-**Active — continue implementation.** Owner explicitly rejects treating the architecture question
-as a pause and reiterates that work must continue. Remove complex vector Liquify, keep point-position
-editing through the normal renderer, and perform the thorough cleanup below. Owner also warns that
-the earlier failures have damaged confidence; verify against the actual original instructions and
-actual consumers, not inferred scope. Do not stop at recommendations or mark work done prematurely.
+**Implemented, previously qualified, unmerged.** Continue the remaining preservation/release gates.
+The owner's point-only instruction below is authoritative; no unwanted material path or compatibility
+flag may return during integration. Independent review and passing controls supplement drawn proof.
 
 Owner reports that Liquify stretches strokes horizontally on vector layers and rules:
 “All that you had to do was to change the position of the points in the stroke, not apply
@@ -446,7 +211,7 @@ hashes are preserved. Evidence: `~/PaintWork/s52-erase-crash/mode3-diagnostic/`.
 
 ## Mend fill gaps beneath interior brushstrokes; apply across a layer — 2026-10-24
 
-**Active — shared engine and vector layer action in implementation.** Owner reports: “when I fill
+**Implemented and previously qualified; final integrated gates pending.** Owner reports: “when I fill
 stuff, the fill leaves white in places where brushstrokes were.” An enclosed filled region can contain
 an internal brushstroke whose footprint stays unfilled. Extend the **same Mend Gaps setting** to cover
 those interior stroke-shaped gaps as well as its current behavior. Preserve the actual original outer
@@ -471,196 +236,95 @@ At265e588e, focused206 passed before/after22 assertion-red faults with exact723-
 preserved earlier faults bring distinct qualified recipes to35. Debug AND Release each5278 reconcile.
 Old/new masks match six fixtures×five widths;12 Reach stress cases and fragmented archive gate pass.
 New fill and Mend All Fills cold UI2/2 pass at6bc20170, with owner-size whole-screen pictures inspected.
-Ten other current workflows pass. Old47d reproduces the stale seam control failure; its extension
-passes. With shared screenshot/visible-paper fixtures the full fill class is3/4: the neighbouring-fill
-seam now passes with its OFF control intact, but the extension slider disappears after the test drag.
-Diagnose that gesture/visibility failure and rerun; no product cause is assumed.
-Worktree: `~/PaintWork/PaintApp-s53-fill-mend`, `tmp/s53-fill-mend`.
-- [ ] Qualify all four FillMend UI cases after fixture/helper corrections; inspect whole-screen pictures.
+Ten other current workflows pass. The corrected full FillMend class passed4/4 at071c7eb2, followed
+an actual visibility assertion-red control, then restored normal4/4;723 files+modes exact and five
+owner-size whole-screen pictures inspected by root. The old driver failures are resolved, not product
+layout defects. Worktree `~/PaintWork/PaintApp-s53-fill-mend` retains the exact earlier evidence.
+
+- [ ] Requalify affected fill UI in final source and inspect current owner-size pictures.
 - [ ] Resolve the uncertain inside-press timing difference with paired baseline runs; no device extrapolation.
       Targeted follow-up `tmp/s54-fill-demand-map` now defers unused exact open-feature work until
       enabled Reach, retains one map per Structure and invalidates before independent mend writes.
       Its three normal regressions are included in root's500/500 at59d69f12 (724 files unchanged).
-      Rebased final bake follow-up adds one method: final-source501, intentional failure controls,
-      full fast tiers and paired timings remain pending. Source inspection identifies removed unused
-      work, not attribution of the measured press difference.
-- [ ] Resolve first-screen repair scheduling/cold launch before deployment (audit item below).
+      Lazy-fill normal regressions and base49 controls are qualified in the dependency; final fast
+      tiers and paired old/lazy Release ABBA still remain. Sixteen earlier paired trials passed, with
+      inside paired median delta+5.1ms; this is simulator evidence, not device timing or attribution.
+- [ ] Qualify the implemented startup scheduling with a genuine cold old-library launch before deployment.
 - [ ] Fresh saved-scene readiness/export, signed clean Release, device checks, owner artwork confirmation and merge.
 
 ---
 
 ## Repository-wide architecture, cleanliness and performance audit — 2026-10-24
 
-**Active initial review; isolated refactor snapshots remain unqualified.**
-Owner asks for a thorough audit of everything:
-“codebase cleanliness and good architecture as well as performance is a priority”, “refactor things
-that are messy and also find and fix bugs”, “Zombie code or bloat … should be dealt with. Dont be
-afraid to prune.” Clean architecture should make future additions smoother and less error-prone.
-The owner now permits a large usage budget but prioritizes output quality and regression prevention.
+**Active, source consolidated; final qualification and file-review gaps remain.** Owner asks for a
+thorough audit: “codebase cleanliness and good architecture as well as performance is a priority”,
+“refactor things that are messy and also find and fix bugs”, “Zombie code or bloat … should be dealt
+with. Dont be afraid to prune.” Trace actual consumers before changing them; reuse one existing owner
+or seam, remove superseded paths whole, and measure claims. Real scenes contain300–1000 drawn cels:
+design around a window/byte budget, never load it all. Deferred features stay deferred.
 
-Audit the app and adjacent streamer in bounded areas. Trace actual consumers/ownership before pruning;
-identify duplicated mechanisms, tangled responsibilities, dead paths, correctness defects and avoidable
-memory or latency in real-time actions. Record concrete findings before changing them. Prefer shared
-existing seams and root-cause refactors; do not add parallel frameworks or speculative optimizations.
-Use independent reviews where useful, measure performance claims, and qualify each coherent change
-with meaningful logic/mutation coverage, affected workflows/pictures and required repository gates.
-Preserve real scenes and saved-format repair rules. Deferred product features remain deferred.
+The19 finding clusters and file-level gaps are in docs/ARCHITECTURE_AUDIT.md and external findings-index.json.
+Inventory-only files are not reviewed code. New source is not called complete because it is committed.
 
-The current19-candidate queue and evidence are in [ARCHITECTURE_AUDIT.md](docs/ARCHITECTURE_AUDIT.md).
-The two implementation branches are WIP (no native qualification), not finished fixes. Subagents hit
-account usage limits; root continues. The full source inventory is not yet fully reviewed.
-
-- [ ] Data protection: migration identity and Trash backup ownership; qualify library branch.
-- [ ] Background ownership: export cancellation, save-stage cleanup and thumbnail close; qualify branch.
-- [ ] Temporary repair: cold old-library launch, responsive first screen, then retire whole after owner confirmation.
-  Fixedf69 startup/library/background source is inherited. Root's integrated59d69f12 targeted baseline
-  is500/500, zero skips, with724 tracked app/test/project files unchanged. This supersedes earlier
-  targeted fixture failures/unrun notes, but full fast tiers, UI, mutations and device gates remain.
-  When retiring temporary repair/converter/UI, preserve permanent
-  `ProjectBackupManager.runStartupMaintenance` scheduling and truthful post-maintenance gallery readiness.
-- [ ] Rendering/storage: derived-frame recovery/close, masked source budgets, editable raster residency, video pressure.
-  Editable raster residency is source-prepared on `tmp/s54-raster-residency`, linearly based on
-  exactf475bb93599d2fb1b5b5785931bb2a87cc553424. One app-wide byte owner charges provider-owned
-  native raster buffers and configured working/checkpoint reservations; immutable Source handles
-  serve raster/baked tiers, frozen recipes, undo and saves. Protected compressed current-document
-  resources and dirty version checkpoints reuse ProjectStore's clone/PNG serializer; no format or
-  backup-policy change, eager all-cel hydration, parallel cache/writer or legacy fallback.
-  Staged Liquify→fill→shape→text preparation preserves all drafts/live pixels/history on later
-  refusal. The planned-frame stroke tuple admits hosts/masks with the same affected-cel overrides,
-  settles before recording baseline and begins after playback before cel spawn. Whole-cel and patch
-  undo preflight through the existing Action; failed reads never become blank. Stable owner UUIDs
-  distinguish equal-version source/vector replacements, including interpolation references;
-  snapshots retain original identities. Tag04 changes only disposable .pbk bake digests.
-  Source has32 owned regression methods, all32 native Debug methods green at exact79a1941e4d0b70799538af2dd7e29935c17034d4,
-  withzero failures/skips and728 app/test/project files+modes restored exactly. Coverage includes
-  real300/1000 package cold load/save-freeze/clone/rename,1000 checkpointed transform outputs, refused
-  undo/redo and transient coexistence, staged linked/mask pixels and bounded4096 source/tool admission.
-  A real repeated-undo native drawing pin is fixed at its borrowed-copy lifetime boundary; exact
-  resident3/cap/old-new pixel assertions pass. Three runtime fixture premises were corrected without
-  weakening artwork checks. Root's temporary exclusive native lease is released; check tree frozen79a.
-  Native assertion faults, affected cold UI/landscape pictures, full fast Debug/Release, graph and
-  device gates remain pending/root-owned. Counts do not prove total RSS, private ImageIO/derived
-  compositor memory or Test1 cause. No main merge/push/device action by this task. Evidence and the
-  unexecuted mutation review live under `~/PaintWork/s54-architecture-audit/`; preserve exact source
-  restore and require real assertion failures, never timeout/OOM/build-failure qualification.
-  Mask source scope active on `tmp/s54-mask-residency` from59d69f12: price each indivisible
-  transitive dependency closure in existing chunk/strip source planning; resolve live-mask metadata
-  cache before dependency pixels and omit unrelated leaves. Reuse FrameRecipe/MaskResolver; no
-  second cache, global working-set framework or saved-format change. Raster residency/shared source
-  models belong to the other task. Source/static preparation only; root owns all native gates.
-  Source +4 regressions prepared: source floor prices masked leaves/buffered outputs and retained
-  mix slots; live metadata hit resolves zero leaves, miss resolves only dependency leaves. Existing
-  cycle policy/pixels pinned. Seven affected compositor classes statically total120 methods; Swift
-  parse/UI guards/whitespace pass. Native compile, focused/fast Debug+Release, mutants and visible
-  cold UI remain root-owned pending gates. Keep the minimum-one-row exception; no total RSS claim.
-  Review expanded the scope before follow-up: a source refusal must not become a nil/unmasked live
-  stroke or onion ghost. Preserve neutral absent/deleted-mask behavior separately from typed read
-  refusal. Resolve before stroke mutation/spawn/latches; reuse the existing stroke-start callback
-  as Bool, guard both invocation sites, and retain the prior onion picture/key on refusal. Root
-  approved; raster author delegates these callback hunks and shares one drawingSourceUnavailable
-  notice. Logic target excludes coordinator/stroke UI files, so callback driving needs app/UI proof.
-  Follow-up source prepared with typed refusal, guarded Bool callback and shared notice. +1 real
-  failed-source logic method (7 classes121) and +1 normal cold UI method (ColourMask4); external
-  callback fault/UI template covers refusal without editing/undo/cel creation. Native still unrun.
-  Root requested rebase of only the two mask commits from59d69f12 onto65a8afd8 before qualification;
-  preserve65's authoritative cache/FillUI/link-assertion records and all unrelated source changes.
-  Root native121 compiled119pass/2 old literal-width1 premise failures; correct CPU/Metal tests to
-  prove actual masked floor2/chunks/drawn parity/real calls. Review then found onion wrong-frame
-  ghost retention/stale landing and recording mutation before mask refusal. Record before fixing:
-  use full existing onion blank/cancel/drop on either source or mask refusal; prepare/capture stroke
-  admission before recording changes, then begin take before cel spawn via one two-phase callback.
-  Reuse playbackEntryFrame for predicted rewind metadata. Add external armed/running recording,
-  Liquify and onion-frame refusal controls; raster author delegates only callback/begin hunks.
-  Source follow-up now prepared: single prepareStroke(frame) factory, pure timing entry tuple,
-  full onion cancel/drop including mask contents, strengthened real-call/pixel CPU+Metal tests,
-  +1 planned-frame logic pin (7 classes122). Static parse/guards pass; no native follow-up run.
-  Normal cold ColourMask UI also uses the existing mid-gesture screen sampler for actual drawn
-  blue-inside/paper-outside pixels while held; method/class counts unchanged, no new product hook.
-  Active `tmp/s54-bake-lifecycle`: existing baker/store/read-demand ownership is reused; no extra
-  renderer/cache. Root's500 baseline covers bake634f5300, including shared-root authority, metadata-only
-  readiness, owned read snapshots, typed export refusal, checked headers and1-byte eviction charge release.
-  Review59d69f12 additionally found zero-byte files skipped as candidates and missing final admission
-  after insufficient eviction. Current source corrects both using the same authoritative checked-headroom
-  decision. Existing tiny truncation test now covers0/1 bytes × explicit/direct-write eviction on fresh
-  subroots; a new immutable-file fixture checks real unlink refusal, writable parent, admission refusal,
-  retained drawing and shared counters. Seventeen bake regression methods added in total; static focused
-  count125. Latest correction is parse/lint-only, not covered by prior500. No native/graph/full freeze
-  by this branch; root owns those gates and the external fault plan. Physical bytes freed remain reporting,
-  never the admission/eviction budget decision. No saved-format change or Test1 cause claim.
-
-  Video lifecycle source implementation `tmp/s54-video-lifecycle`, exact dependency4f5f75d6:
-  all imports/render/crop/speed/image-bake reads use per-manager closeable clients of the existing
-  shared source. Last active close clears its64MiB ring/four-reader LRU; another live window survives.
-  Existing MemoryPressure warning trims hottest half and retires pipes; background clears both.
-  Separate short ownership resets fence staged old reads; normal decode/lookup/admission stays serial.
-  Frozen closed-client rendering declines rather than caching a placeholder. Removed unused public
-  purge. Six tiny source/reader logic methods, one actual manager import/close/reopen logic method,
-  and one cold gallery round-trip UI method added, with grey RGBA, decoder/sample/byte counts and
-  controlled decoded-read gates. Parse/UI lints only: native/mutants/full tiers/UI screenshots/device
-  remain root-owned pending. Two app-held samples per reader are separate from copied ring bytes;
-  AVFoundation pools and RSS are unmeasured. No saved format or new cache/framework/feature flag.
-
-- [ ] Stream transport: bounded ordered backpressure, framing limits, connection readiness/close ownership.
-- [ ] Editor/brush: preview identity/budget, undo payload accounting, saved palette validation; verify stationary-sample opportunity. Implemented at the `Palette` decoding boundary: non-canonical/unparsable persisted swatch hex reaches existing unreadable-library refusal, which keeps bytes, prevents edits and is shown in the Palettes tab. `PaletteColor` project-value decoding and the wire schema are unchanged. Added malformed-swatch preservation and canonical valid-byte-stability logic tests; no migration, repair, or test hook. Native/UI qualification remains pending.
-
-- [ ] Editor/brush: preview identity/budget, undo payload accounting, saved palette validation; verify stationary-sample opportunity.
-  Active proposal-first `tmp/s54-stationary-fit`, exact dependencyf475bb93599d2fb1b5b5785931bb2a87cc553424:
-  verify StrokePathFit.pending work/storage for exact stationary samples and trace pressure, tilt,
-  cumulative deltaTime order, seeded arc-length dab/live-final/timing consumers before edits. Prior
-  audit suggested suffix absorption; it is a hypothesis, especially floating-point accumulation.
-  Propose/refute a minimal exact-duplicate optimization only, no epsilon merging, stored flags/cache
-  or parallel fitter. Plan deterministic reference/candidate channels/dabs/pixels and work counts on
-  tiny bounded streams, not a giant quadratic benchmark. Root owns native42 faults; source/static only.
-  Source proves N exact stationary pending offers cause N(N−1)/2 distance checks, not just linear
-  storage. Cheap suffix absorption is not bit-identical for arbitrary deltaTime: [0.001,0.001,0.008]
-  gives trailing-first0.010000000000000002 versus grouped0.01. Real uptime-derived intervals can
-  sum exactly on one binary clock grid within a bounded time horizon, but generic fitter inputs
-  state no such contract. Root proposal sent before production edits; canonical cumulative-time
-  semantics or a narrower exact optimization needs explicit evidence. Live preview is raw input,
-  timing flushes finish(nil)+reset, and velocity is a real replay brush input.
-  Separate finding, not a claim this task fixes it: direction-reading LiveWalk.received/arcs also
-  grow while heading margin waits on a stationary arc; offer is constant work there, finish drains
-  with Array.removeFirst. Record for ownership follow-up rather than claiming a fit-only gesture bound.
-
-  Active source-only `tmp/s54-vector-undo`, exact dependency65a8afd831072dbb43d1aba20c37bceed0966e79:
-  proposal-first trace of VectorUndoCost stable-ID heap approximation, remaining count×512 geometry
-  consumers, packed/live/rest/placement/lattice sample storage, fill path ownership and UndoHistory
-  retention semantics. Count actual borrowed buffer/immutable object identity only while snapshots
-  are retained; never unpack/copy geometry to price it, persist pointers or create an accounting cache.
-  Coordinate VectorLayer/stroke ownership with raster author; avoid its WIP UndoHistory preflight API.
-  Root owns native44 faults; this branch prepares source regressions/fault recipes only.
-  Approved scope: keep measured max-list-stride amortization; charge symmetric-difference of actual
-  retained payload identities, excluding common buffers. This is conservative per-action delta, not
-  whole-history RSS. PackedSampleRun is wire-only; current snapshots own live channel arrays. Borrow
-  keys stay inside the cost call with owners retained; inline Data gets conservative logical bytes,
-  never a temporary stack-address identity. Walk own/rest/placement/lattice buffers without decoding;
-  consolidate precision, nudge, keyframe/interpolation flat costs and fill's ad-hoc path surcharge.
-  Approved nudge cleanup freezes only actual before/after lists and used IDs/canvas, dropping whole
-  part/lifted/prelift captures that closures do not use. Raster author confirms no model-file overlap.
-  Implementation prepared: one VectorUndoCost with action-wide canvas-list batching and no retained
-  accounting state; all remaining flat512 geometry consumers and fill surcharge removed. Inline
-  Data/String/opaque metadata are conservative logical allowances. Added nine tiny logic methods
-  plus precision/fill consumer assertions, including actual blue RGBA, Move/pose undo+redo, trim costs,
-  archive identity and deallocation of an unused pre-lift path after trim/commit. Existing files only;
-  no UndoHistory preflight/Action or StrokeSamples/PackedSampleRun/placement model, saved-format or PBX changes.
-  Parse/UI guards/diff-check only; native controls/mutants/fast tiers/UI pictures/device remain unrun.
-  Root review requires conservative overflow saturation end-to-end. Approved existing UndoBudget
-  addingCost/payloadBytes helpers and narrow UndoHistory currentCost/extendLast arithmetic changes;
-  saturated totals must recompute after removal before normal trim can safely continue. Raster author
-  confirms these sums do not overlap its preflight work and owns the SelectionModels consumer hunk.
-  Add scalar arithmetic and real existing-action/saturated-record+extend history checks without big
-  allocation. No Action/preflight/undo/redo behavior rewrite; final source SHA will follow. Scalar accounting and actual saturated record/extend/trim regressions
-  are prepared; helper/sum/trim propagation is source-parsed only.
-  Brush preview follow-up is active on `tmp/s54-brush-preview` at the integrated fill pin `65a8afd8`.
-  Source review confirms an A→B→A cache hit can keep B in an unkeyed row `@State`, and the singleton
-  retains every completed preview without a byte limit or pressure trim. The fix will key completed
-  row state by brush/dimensions/scale and bound actual cached image bytes; deterministic re-render
-  after eviction replaces the prior “never re-renders” guarantee. Source edits and static checks are
-  underway; no simulator/native qualification yet.
-- [ ] Test hooks/obsolete runners: protect real-device persistent data and prune only verified unused paths.
-
-- [ ] Test hooks/obsolete runners: protect real-device persistent data and prune only verified unused paths. Implemented on `tmp/s54-test-hook-safety`: simulator compile-time guards now cover the synchronous preference reset, palette reset, brush-library reset, and project-corruption launch hooks as well as the existing gallery wipe; `-exportProject`/`-exportAll` and temporary-scene seed hooks remain. Deleted `deploy/mac/parallel_test.sh` after repo/shell/history tracing found no operational caller; `deploy/mac/fast_test.sh` remains. Static-only verification; native/compiler/device checks remain for root's qualification.
-- [ ] Complete file-level review gaps, independent reviews and regression/performance gates before closing audit.
+- [ ] Data protection/background: finish final-source gates for strict migration/Trash ownership,
+      export cancellation, serialized cleanup and close-owned thumbnails; retain the qualified controls.
+- [ ] Temporary geometry repair: cold previous-writer library UI and responsive first screen still
+      need proof. New4b453d97 normalizes the SAME raw geometryVersion bytes before strict current-model
+      metadata validation; only DecodingError goes to existing backup recovery. Drawing/source I/O,
+      conversion/ownership and final validation remain hard failures. Original damaged packages stay
+      exact/visible, including no-backup cases. New99-method affected union is unrun. Retire the converter
+      and temporary UI whole only after owner confirms current artwork; preserve permanent startup
+      maintenance scheduling and truthful post-maintenance gallery readiness.
+- [ ] Bake recovery/close: existing baker/store/read demands share one authoritative source and checked
+      admission; corrupt/missing/zero-byte derived files recover without permanent retry. Keep final
+      headroom refusal and actual unlink failure coverage. Derived cache bytes are separate from source pixels.
+- [ ] Mask budgets/video/vector undo: included in normal847. Mask planning prices transitive indivisible
+      closure and retained mix slots; minimum-one-row exception stays explicit. One MaskResolver checks
+      metadata cache before dependency pixels. Refusal never becomes an unmasked stroke; onion refusal
+      cancels/hides stale frame/clip. Video reads use per-manager closeable clients, pressure trims ring
+      and reader LRU, late work cannot land after close. Two held native samples/reader and private
+      AVFoundation allocations remain separate from copied ring bytes. Vector costs count actual
+      retained payload identity without copying/unpacking or persistent pointer caches; saturated costs
+      propagate through existing UndoBudget/history. Finish remaining52 target cases and consumer UI.
+- [ ] Editable raster: one app-wide RasterResidency charges provider-owned source allocations and
+      configured working/checkpoint reservations; native image aliases and unresolved snapshot leases
+      keep their real charge. Explicit COW admits before mutation. Immutable version/backing handles
+      serve raster/baked tiers, frozen recipes, undo and save; current-document compressed protection
+      and dirty checkpoints use existing ProjectStore clone/PNG serializer, with owned stale-temp cleanup.
+      No schema, backup-policy, parallel writer/cache,1000FD or eager all-cel hydrate. Staged affected
+      cels preserve Liquify→fill→shape→text order, queued text, masks and drafts on later refusal.
+      Planned-frame stroke tuple settles before recording then begins after playback/before spawn;
+      patch/whole-cel undo preflight distinguishes admitted blank from failed reads and drops pins.
+      Resize/flip prepare all outputs serially before fenced atomic install. Owner UUID+version keys
+      include interpolation references; frozen snapshots reuse original owners. Tag04 changes only
+      disposable .pbk digests.32 native methods green;43 cases/35 exact recipes prepared, unexecuted.
+      Full fast/cold drawn UI/landscape and mutation gates remain. Counted ownership is not whole RSS,
+      private ImageIO, derived compositor memory, placed-image/video ownership or Test1 causation.
+- [ ] Stream: one completion-paced writer/run, bounded producer payloads,64MiB frame/256KiB chunk checks,
+      old-connection callback fencing/join and error/stop settlement replace unbounded ownership.
+      Final7c C#166 normal methods pass both configurations; finish16 actual assertion targets and
+      final normal restore. Swift76/6 classes and their assertion recipes remain unrun. Windows fake
+      transcripts now return synchronized snapshots. Real-link stage5 remains owner-waiting; no deploy.
+- [ ] Brush/editor: bounded8MiB actual-image preview LRU and keyed row result replace unbounded/unkeyed
+      retention. Final823e proof distinguishes exact2 vs2.25 scale within one old rounded bucket and
+      checks actual requested600×120 pixels. Shared PaletteColor rejects malformed persisted hex rather
+      than silently displaying black; normal strings are byte-preserved. Qualify brush/palette logic,
+      cold A→B→A drawn row and typed-colour recovery UI; no native result yet for these sources.
+- [ ] Curve editor drag: recorded follow-up on a separate branch from source716. Use the authoritative
+      moved key after clamping; do not re-hit-test raw finger position and leave stale dragFrame or
+      retarget a neighboring key. Integrate the reviewed fix/continuation tests and cold BrushEditor
+      control when ready. Current consolidation intentionally precedes that still-active source fix.
+- [ ] Stroke path/heading: exact redundant stationary chord-scan bypass and LiveWalk prefix draining
+      retain all samples/channels and floating-point timing order. Naive coalescing was refuted by a1ULP
+      counterexample; O(N) input storage remains. Qualify new controls/faults/drawn parity and measure
+      any performance claim. No interpolation overhaul is authorized.
+- [ ] Test hooks/obsolete runner: destructive reset/corruption seeding is simulator-only even in Release;
+      use direct existing platform fact, no policy wrapper. Verified unused parallel_test.sh removed.
+      Ordinary simulator UI/device compile and final static gates remain pending.
+- [ ] Finish file-level/independent review, new affected zero-skip baseline, actual assertion mutants,
+      exact final fast Debug/Release, lints/PBX/graph, cold workflows/pictures and paired performance.
+      Then fresh owner save/unlock/export, signed clean Release/device checks and actual eraser cause.
+      No main merge/push/install is authorized by this consolidation.
 
 ---
 
@@ -788,54 +452,3 @@ against a transcript this audit does not have.
 - **The raster Move's undo half.** `finalizePendingGesturesForHistoryAction` has fill, shape and text
   arms and no raster-float arm.
 - **Freeform text's minimum-size exemption** is still unruled.
-
-
-Stationary fit selected scope, before production edits: root approved the exact smaller win. Reuse
-`pending.last` to bypass only the redundant deviation scan when incoming x/y equal that tail, after
-pressure and spacing checks. Keep every sample/channel and the existing absorption order. Freeze
-initializer thresholds (no caller mutates them), and retain the degenerate-chord rule: at length²
-<=1e-12, skip only when the endpoint itself is within tolerance². A fresh break's singleton pending
-point is then safe too. Use temporary external distance-check instrumentation and bounded committed old-rule comparisons through
-knots, packed payload, seeded dabs, drawn RGBA and timing/interruption boundaries. Pending storage
-remains O(N); the separately recorded direction-reading LiveWalk retention/drain is not fixed here.
-No compiler/native or mutation execution; root owns those gates.
-
-Stationary fit source prepared: exact same-endpoint deviation shortcut and immutable thresholds,
-with six new methods in the existing StrokePathFitLogicTests (now13 total). Bounded old-rule oracle
-checks emitted arrays and actual rounding-sensitive channels, pressure/cap/changed-endpoint and
-degenerate rules, both packing modes, seeded velocity/tilt dabs, nonblank drawn RGBA, and timing
-flush/reset run boundaries. UI identifier/helper lints and diff-check pass. No compiler/native,
-mutants, Debug/Release fast tiers, UI gestures/screenshots or device run by this author; root owns
-qualification. External operation-count instrumentation will be temporary and removed after proof.
-
-
-## LiveWalk queue draining — 2026-10-24, proposal-first follow-up
-
-Root assigned the separately recorded direction-reading LiveWalk received/arcs drain cost. New
-`tmp/s54-livewalk-drain` starts from origin/main then fast-forwards exact stationary-fit
-`f7a7d31516bf7bad1477977a1d11bde9b05af2a3`; the stationary source/evidence tree stays frozen. Trace
-actual removeFirst work and propose exact local consumed-prefix/bulk removal using existing storage.
-Preserve every sample/channel/time/random/dab order, cancellation/new-gesture and timing reset. No
-input coalescing, canonical-time change, generic queue framework, persisted counter or bounded-live-
-gesture-memory claim. Record/propose before production changes; root owns all compiler/native gates.
-
-LiveWalk selected scope before production edits: root approved local consumed-prefix batch draining
-for both stamp and finish, with a defaulted suffix start on the existing ArcTable.locate seam. This
-preserves logical-queue lookup/ties/lead=nil behavior without copying a suffix or duplicating lookup.
-Segment drawing, input sequence, headings, carry and arcWidths arithmetic remain unchanged. Keep
-reference/count tests bounded, operation diagnostics temporary/external, and O(N) input retention
-explicit. Actual cancel drops scratch but its view-held walk is replaced at next gesture; this task
-changes no cancellation/lifetime policy. Native/compiler remain unrun/root-owned.
-
-LiveWalk batch drain is source-ready, not native-qualified: local consumed indices remove each
-queue prefix once per call; segment arithmetic is unchanged. Existing ArcTable owns suffix lookup,
-with default-start/tie regressions. Four new methods in existing StrokeHeadingLogicTests (now24)
-compare old-rule per-offer/finish dabs, travel, arcWidths and nonblank drawn RGBA, tiny old movement
-counts, duplicate arcs/short/tap/nil headings and cancellation/timing replacement with a new seed.
-Selected five-class union61 methods. UI guard/helper lints and diff-check pass; no compiler/native,
-mutants, fast Debug/Release, UI/screenshots or device by this author. Temporary external actual queue
-movement controls and faults follow this coherent commit. O(N) received input retention remains.
-
-Integration API correction recorded before editing: the newly added stationary-fit pixel helper
-uses two pre-raster optional image reads. Adapt exactly those two reads to throwing Result.get(),
-with no fixture/oracle/production behavior change; record this semantic merge exception externally.
