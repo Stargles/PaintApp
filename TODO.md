@@ -8,13 +8,12 @@ conservation and output quality take priority over speed. Use focused delegation
 for routine work, with occasional queue reports. The owner asked to work independently while asleep
 until 10 a.m. Toronto time. Raster scope and fixed exterior pixels for vector selections are ruled below.
 
-**Checkpoint 2026-10-23 evening:** three active asks below remain unfinished. Point-only Liquify
-and newest retention are integrated but unmerged. Repair75/75, runtime302/302 and UI10/10 passed;
-final338,17runtime mutants, fast tiers, final affected UI and physical backup-cost experiment remain.
-The final round-dot fixture reuses the existing editor Size controls; current1/1 passed with verified
-field-edge geometry, matching old-code negative control is pending. Test1 erasing has memory evidence
-but no proven cause/fix. Installed normal Release remainsbcd7a6af; no physical operation this pass.
-See HANDOFF for native ownership and exact evidence.
+**Checkpoint2026-10-24:** point-only Liquify and newest backup retention are integrated, unmerged
+and not installed. Final338/338,17 runtime mutants, final9/9 affected UI, old-code1.918× stretch control
+and required old workflows10/10 qualify. First Debug fast5259 completed with two stale test expectations;
+those are corrected, pending targeted mutation proof and fresh Debug/Release. Physical backup-cost
+experiment remains. Erasing cause is unresolved. New fill-mending task and owner rulings are below.
+Installed normal Release remainsbcd7a6af; device reads only, no restart/launch/install this pass.
 
 ## How to read and keep this file
 
@@ -90,22 +89,19 @@ final architecture review. Do not claim certainty from passing tests alone or re
 a compatibility flag. The new point-only vector instruction is authoritative over implementation
 interpretations made earlier. Record any actual behavior conflict with evidence before asking.
 
-The unmerged implementation removes native vector material transport, retains genuine Distort/exact
-bake and raster Liquify, and includes the one-shot repair. Repair75/75 plus13repair mutants and copy-only
-real-library242-survivor open gate are qualified, original hashes unchanged. Runtime302/302 plus separate
-ScreenshotPixels1/1 passed. Stronger valid-current recovery fixtures await combined338/17faults.
-Static fast5259/full5842, unchanged test-method counts; these final gates are not yet native proof.
+The implementation removes native vector material transport whole and retains genuine Distort/exact
+bake, raster Liquify, linked source following and the temporary saved-file repair. Final independent
+review found no concrete architecture defect;328 app files remain byte-identical since the tested
+production baseline. Repair75/75,13 repair mutants and copy-only242-survivor real-library gate qualify.
+Final runtime338/338 and17 runtime mutants qualify (16automatic+one exact manual native-assertion review).
+Final affected UI9/9 and required old workflows10/10 passed. The final old-code control widens the dot
+1.918×; current code keeps it round. Root inspected the actual pictures. No held-path helper remains.
 
-UI10/10 passed Liquify4, Outside4 (literal pan from grey, Move grip, stroke), Playback1 and Graph1;
-Raster5 also passed in the previous batch. Root inspected current/old round dots and required-workflow
-pictures. A later exact interior-rail setup failure led to reusing the existing editor Size controls;
-a failed held-path helper attempt was reverted whole. Final dot1/1 passed all original visual oracles
-and explicit field-edge geometry premises; matching final old-code control and affected9 UI remain.
-No production precision/pixel-tolerance change or duplicated controls were added.
+First exact Debug fast5259 completed:5253passed,4known skips,2 stale-test failures. One expected deleted
+fill placement; one expected oldest-plus3 retention. Correcting only their current-format/current-policy
+expectations, with focused mutation checks before fresh fast tiers. No production behavior restored.
 
-- [ ] Green combined338 baseline,17 reviewed runtime faults assertion-red, exact restore/normal rebuild.
-- [ ] Exact Debug/Release fast tiers, counts/skips reconciled, final lints/PBX and affected cold UI.
-- [ ] Final old-code negative control with editor-size fixture; inspect new/old pictures.
+- [ ] Qualify corrected test expectations and exact Debug/Release fast tiers; reconcile counts/skips/lints/PBX.
 - [ ] Fresh verified current-library export before signed device install; owner confirms real scenes.
       Keep the one-shot repair until that confirmation, then retire it whole.
 

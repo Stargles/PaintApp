@@ -387,7 +387,7 @@ final class SaveDamageGateLogicTests: XCTestCase {
 
     /// The age schedule thins these slots too, so an artist who keeps backgrounding a damaged project
     /// without ever answering cannot grow its history without bound: a run of saves in one stretch
-    /// of the clock leaves its first and its newest three.
+    /// of the clock keeps its newest three; the bucket's newest member is already among them.
     func testUnsavedChangeSlotsAreThinnedByAge() throws {
         let url = writtenProject()
         try breakFirstStroke(in: url)
@@ -399,7 +399,7 @@ final class SaveDamageGateLogicTests: XCTestCase {
         }
         try XCTSkipIf(Int(started.timeIntervalSince1970 / 600) != Int(Date().timeIntervalSince1970 / 600),
                       "The run crossed a ten-minute boundary, which keeps one more")
-        XCTAssertEqual(ProjectBackupManager.listBackups(forProjectAt: url).filter { $0.label == "Unsaved changes" }.count, 4)
+        XCTAssertEqual(ProjectBackupManager.listBackups(forProjectAt: url).filter { $0.label == "Unsaved changes" }.count, 3)
     }
 
     // MARK: - What the banner says

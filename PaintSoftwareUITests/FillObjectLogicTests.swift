@@ -478,9 +478,8 @@ final class FillObjectLogicTests: XCTestCase {
 
     // MARK: - The document format
 
-    /// **A flat fill's payload is what it always was, a gradient writes `gradient` and no `color`, and
-    /// a document written before gradients decodes unchanged.**
-    func testTheDocumentFormatKeepsAFlatFillByteForByteAndRoundTripsAGradient() throws {
+    /// Flat and gradient fills encode their own paint fields and round-trip in the current format.
+    func testDocumentFormatSeparatesFlatAndGradientPaintAndRoundTripsBoth() throws {
         let path = CGPath(rect: CGRect(x: 1, y: 2, width: 10, height: 10), transform: nil)
         let flat = VectorFillElement(path: path, color: CodableColor(red: 0.1, green: 0.2, blue: 0.3, alpha: 1))
         let flatJSON = try XCTUnwrap(String(data: JSONEncoder().encode(flat), encoding: .utf8))
@@ -498,12 +497,11 @@ final class FillObjectLogicTests: XCTestCase {
         XCTAssertEqual(decoded.id, ramp.id)
         XCTAssertNotNil(decoded.cgPath)
 
-        // Flat paint uses the current nullable placement plus its existing color field, no ramp.
-        let legacy = try XCTUnwrap(try JSONSerialization.jsonObject(with: JSONEncoder().encode(flat)) as? [String: Any])
-        XCTAssertEqual(Set(legacy.keys), ["id", "pathData", "color", "opacity", "evenOddFill", "placement"],
-                       "the flat payload writes no gradient fields")
+        let flatPayload = try XCTUnwrap(try JSONSerialization.jsonObject(with: JSONEncoder().encode(flat)) as? [String: Any])
+        XCTAssertEqual(Set(flatPayload.keys), ["id", "pathData", "color", "opacity", "evenOddFill"],
+                       "the flat payload contains only its current geometry and paint fields")
         let restored = try JSONDecoder().decode(VectorFillElement.self,
-                                                from: JSONSerialization.data(withJSONObject: legacy))
+                                                from: JSONSerialization.data(withJSONObject: flatPayload))
         XCTAssertEqual(restored.solidColor, flat.solidColor)
     }
 
