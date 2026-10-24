@@ -255,6 +255,11 @@ final class FillMendLogicTests: XCTestCase {
             XCTAssertFalse(session.hasPreparedMendFeatures, "failed preparation cannot publish a map")
         }
         let builds = session.structureBuilds
+        let retry = try XCTUnwrap(demandFill(session, threshold: 1, reach: 39))
+        XCTAssertTrue(stride(from: 3, to: retry.count, by: 4).allSatisfy { retry[$0] == 255 },
+                      "retrying the same structure after refusal draws the complete open reference")
+        XCTAssertTrue(session.hasPreparedMendFeatures, "a successful retry publishes the current map")
+        XCTAssertEqual(session.structureBuilds, builds, "lazy-map retry reuses the completed basins")
         let restored = try XCTUnwrap(demandFill(session, reach: 40))
         XCTAssertEqual(session.structureBuilds, builds + 1, "returning to the old key rebuilds overwritten buffers")
         XCTAssertTrue(session.hasPreparedMendFeatures)
