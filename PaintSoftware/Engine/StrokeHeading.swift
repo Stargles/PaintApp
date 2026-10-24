@@ -90,10 +90,12 @@ struct ArcTable {
     /// The segment a point `arc` along the path lies on, and how far along that segment it is,
     /// clamped to the path. A segment with no length is skipped — two coincident vertices have no
     /// direction of their own. Nil where the path has no length at all.
-    func locate(_ arc: CGFloat) -> (segment: Int, offset: CGFloat)? {
-        guard arcs.count > 1, let first = arcs.first, let last = arcs.last, last > first else { return nil }
-        let target = min(max(arc, first), last)
-        for segment in 0..<(arcs.count - 1) where arcs[segment + 1] > arcs[segment] && arcs[segment + 1] >= target {
+    /// `start` excludes an already-consumed prefix without copying/rebasing this table. Returned
+    /// indices still address the original arrays; the default preserves whole-path lookup and ties.
+    func locate(_ arc: CGFloat, startingAt start: Int = 0) -> (segment: Int, offset: CGFloat)? {
+        guard start >= 0, start < arcs.count - 1, let last = arcs.last, last > arcs[start] else { return nil }
+        let target = min(max(arc, arcs[start]), last)
+        for segment in start..<(arcs.count - 1) where arcs[segment + 1] > arcs[segment] && arcs[segment + 1] >= target {
             return (segment, target - arcs[segment])
         }
         return nil

@@ -644,3 +644,31 @@ degenerate rules, both packing modes, seeded velocity/tilt dabs, nonblank drawn 
 flush/reset run boundaries. UI identifier/helper lints and diff-check pass. No compiler/native,
 mutants, Debug/Release fast tiers, UI gestures/screenshots or device run by this author; root owns
 qualification. External operation-count instrumentation will be temporary and removed after proof.
+
+
+## LiveWalk queue draining — 2026-10-24, proposal-first follow-up
+
+Root assigned the separately recorded direction-reading LiveWalk received/arcs drain cost. New
+`tmp/s54-livewalk-drain` starts from origin/main then fast-forwards exact stationary-fit
+`f7a7d31516bf7bad1477977a1d11bde9b05af2a3`; the stationary source/evidence tree stays frozen. Trace
+actual removeFirst work and propose exact local consumed-prefix/bulk removal using existing storage.
+Preserve every sample/channel/time/random/dab order, cancellation/new-gesture and timing reset. No
+input coalescing, canonical-time change, generic queue framework, persisted counter or bounded-live-
+gesture-memory claim. Record/propose before production changes; root owns all compiler/native gates.
+
+LiveWalk selected scope before production edits: root approved local consumed-prefix batch draining
+for both stamp and finish, with a defaulted suffix start on the existing ArcTable.locate seam. This
+preserves logical-queue lookup/ties/lead=nil behavior without copying a suffix or duplicating lookup.
+Segment drawing, input sequence, headings, carry and arcWidths arithmetic remain unchanged. Keep
+reference/count tests bounded, operation diagnostics temporary/external, and O(N) input retention
+explicit. Actual cancel drops scratch but its view-held walk is replaced at next gesture; this task
+changes no cancellation/lifetime policy. Native/compiler remain unrun/root-owned.
+
+LiveWalk batch drain is source-ready, not native-qualified: local consumed indices remove each
+queue prefix once per call; segment arithmetic is unchanged. Existing ArcTable owns suffix lookup,
+with default-start/tie regressions. Four new methods in existing StrokeHeadingLogicTests (now24)
+compare old-rule per-offer/finish dabs, travel, arcWidths and nonblank drawn RGBA, tiny old movement
+counts, duplicate arcs/short/tap/nil headings and cancellation/timing replacement with a new seed.
+Selected five-class union61 methods. UI guard/helper lints and diff-check pass; no compiler/native,
+mutants, fast Debug/Release, UI/screenshots or device by this author. Temporary external actual queue
+movement controls and faults follow this coherent commit. O(N) received input retention remains.

@@ -520,4 +520,275 @@ final class StrokeHeadingLogicTests: XCTestCase {
             }
         }
     }
+
+    // MARK: - Exact batched live queue drains
+
+    /// Frozen pre-drain rule, bounded to tiny inputs. It uses the real path/sensors/dab renderer;
+    /// only queue consumption remains the original one-at-a-time operation for comparison.
+    private struct ReferenceLiveWalk {
+        let random: DabRandom
+        private var received: [VectorSample] = []
+        private var arcs: [CGFloat] = []
+        private var heading = StrokeHeading()
+        private(set) var survivorMoves = 0
+        private var carry: WalkCarry?
+        private(set) var arcWidths: CGFloat = 0
+
+        init(seed: UInt64) {
+            random = DabRandom(seed: seed)
+        }
+
+        mutating func stamp(to sample: VectorSample, into target: DabTarget, brush: Brush,
+                            color: UIColor, brushSize: CGFloat) {
+            arcs.append((arcs.last ?? 0) + (received.last.map { hypot(sample.x - $0.x, sample.y - $0.y) } ?? 0))
+            received.append(sample)
+            guard brush.readsDirection else {
+                while received.count > 1 {
+                    layDownFirstSegment(into: target, brush: brush, color: color, brushSize: brushSize)
+                }
+                return
+            }
+            let margin = StrokeHeading.margin(brushSize: brushSize)
+            let settled = arcs[arcs.count - 1] - margin
+            while received.count > 1, arcs[1] < settled {
+                if heading.lead == nil { heading.lead = anchor(atArc: margin) }
+                layDownFirstSegment(into: target, brush: brush, color: color, brushSize: brushSize)
+            }
+        }
+
+        mutating func finish(into target: DabTarget, brush: Brush, color: UIColor, brushSize: CGFloat) {
+            if brush.readsDirection, received.count > 1 {
+                let read = StrokeHeading.readArcs(length: arcs[arcs.count - 1],
+                                                  margin: StrokeHeading.margin(brushSize: brushSize))
+                if heading.lead == nil { heading.lead = anchor(atArc: read.lead) }
+                heading.tail = read.tail <= (heading.lead?.arc ?? -1) ? heading.lead : anchor(atArc: read.tail)
+            }
+            while received.count > 1 {
+                layDownFirstSegment(into: target, brush: brush, color: color, brushSize: brushSize)
+            }
+            guard carry == nil, let held = received.first else { return }
+            let run = StrokeSamples([held, held], channels: .captured)
+            let path = StrokePath(points: run.positions)
+            let sensors = StrokeSensors(samples: run, path: path, random: random, brushSize: brushSize)
+            let resolved = brush.dabValues { sensors.value(of: $0, at: DabSite(parameter: 0, arcWidths: arcWidths)) }
+            BrushStamper.stampDab(into: target, at: held.point, brush: brush, values: resolved,
+                                  color: color, brushSize: brushSize, random: random, arcWidths: arcWidths,
+                                  tangent: sensors.direction(at: DabSite(parameter: 0, arcWidths: arcWidths)))
+            carry = WalkCarry(spacing: BrushStamper.stampSpacing(brushSize: brushSize, fraction: resolved.spacing))
+        }
+
+        private func anchor(atArc arc: CGFloat) -> StrokeHeading.Anchor? {
+            guard let at = ArcTable(arcs).locate(arc) else { return nil }
+            let a = received[at.segment], b = received[at.segment + 1]
+            let length = hypot(b.x - a.x, b.y - a.y)
+            return StrokeHeading.Anchor(arc: arc, direction: CGPoint(x: (b.x - a.x) / length,
+                                                                    y: (b.y - a.y) / length))
+        }
+
+        private mutating func layDownFirstSegment(into target: DabTarget, brush: Brush, color: UIColor,
+                                                  brushSize: CGFloat) {
+            let previous = received[0], sample = received[1]
+            defer { survivorMoves += received.count - 1; received.removeFirst(); arcs.removeFirst() }
+            let run = StrokeSamples([previous, sample], channels: .captured)
+            let path = StrokePath(points: run.positions)
+            let sensors = StrokeSensors(samples: run, path: path, random: random, brushSize: brushSize,
+                                        heading: heading)
+            func values(at parameter: CGFloat, arcWidths: CGFloat) -> BrushDabValues {
+                brush.dabValues { sensors.value(of: $0, at: DabSite(parameter: parameter, arcWidths: arcWidths)) }
+            }
+
+            var walked = arcWidths
+            var march: WalkCarry
+            if let carry {
+                march = carry
+            } else {
+                let resolved = values(at: 0, arcWidths: walked)
+                BrushStamper.stampDab(into: target, at: previous.point, brush: brush, values: resolved,
+                                      color: color, brushSize: brushSize,
+                                      random: random, arcWidths: walked,
+                                      tangent: sensors.direction(at: DabSite(parameter: 0, arcWidths: walked)))
+                march = WalkCarry(spacing: BrushStamper.stampSpacing(brushSize: brushSize,
+                                                                     fraction: resolved.spacing))
+            }
+            march = path.advance(segment: 0, carry: march) { dab, u, step in
+                walked += brushSize > 0 ? step / brushSize : step
+                let resolved = values(at: u, arcWidths: walked)
+                BrushStamper.stampDab(into: target, at: dab, brush: brush, values: resolved,
+                                      color: color, brushSize: brushSize,
+                                      random: random, arcWidths: walked,
+                                      tangent: sensors.direction(at: DabSite(parameter: u, arcWidths: walked)), travel: step)
+                return BrushStamper.stampSpacing(brushSize: brushSize, fraction: resolved.spacing)
+            }
+            arcWidths = walked
+            carry = march
+        }
+    }
+
+    private func stationaryDrainSamples(count: Int = 16, resume: Bool) -> [VectorSample] {
+        var samples: [VectorSample] = []
+        for i in 0..<count {
+            samples.append(VectorSample(x: 12, y: 20, pressure: 0.3 + CGFloat(i % 5) * 0.1,
+                deltaTime: [CGFloat(0.001), 0.001, 0.008][i % 3],
+                tiltAltitude: 0.3 + CGFloat(i % 7) * 0.12, tiltAzimuth: CGFloat(i) * 0.2))
+        }
+        if resume {
+            samples += [VectorSample(x: 32, y: 20, pressure: 0.8, deltaTime: 0.04, tiltAltitude: 0.4),
+                        VectorSample(x: 34, y: 24, pressure: 0.6, deltaTime: 0.03, tiltAzimuth: 1.2),
+                        VectorSample(x: 34, y: 24, pressure: 0.9, deltaTime: 0.008),
+                        VectorSample(x: 36, y: 29, pressure: 0.5, deltaTime: 0.02)]
+        }
+        return samples
+    }
+
+    private func drainBrush(direction: Bool) -> Brush {
+        var brush = direction ? BrushLibrary.square : BrushLibrary.roundHard
+        brush.size = 12
+        brush.dab.spacing = 0.17
+        brush.dab.scatterAcross = 0.15
+        brush.dab.scatterAlong = 0.1
+        brush.dab.angle.jitter = 0.1
+        brush.modulations = BrushModulations([
+            BrushModulation(.size, .velocity, amount: -0.4),
+            BrushModulation(.flow, .tiltAngle, amount: -0.3)
+        ])
+        return brush
+    }
+
+    private func drainImage(_ dabs: [BrushStamper.BakedDab]) -> UIImage {
+        UIGraphicsImageRenderer(size: CGSize(width: 48, height: 40), format: PixelOps.transparentFormat()).image { context in
+            let stroke = BrushStamper.BakedStroke(dabs: dabs, opacity: 1, blendMode: .normal, texture: nil)
+            BrushStamper.replay(stroke, into: CGContextDabTarget(context.cgContext), through: .identity)
+        }
+    }
+
+    /// Compares what each actual offer/finish emitted, including travel, exact random-field address
+    /// and the nonblank picture drawn from the real dab records. No tolerances hide channel drift.
+    private func assertDrainParity(_ samples: [VectorSample], brush: Brush, seed: UInt64 = 7) throws {
+        var actual = BrushStamper.LiveWalk(seed: seed), reference = ReferenceLiveWalk(seed: seed)
+        let a = BrushStamper.CollectingDabTarget(tracksTravel: true)
+        let b = BrushStamper.CollectingDabTarget(tracksTravel: true)
+        var actualDabs: [BrushStamper.BakedDab] = [], referenceDabs: [BrushStamper.BakedDab] = []
+        func compare() throws {
+            let left = a.drain(), right = b.drain()
+            XCTAssertEqual(left.map { $0.0 }, right.map { $0.0 })
+            XCTAssertEqual(left.map { $0.1 }, right.map { $0.1 })
+            XCTAssertEqual(actual.arcWidths, reference.arcWidths)
+            actualDabs += left.map { $0.0 }; referenceDabs += right.map { $0.0 }
+            let report = try XCTUnwrap(RasterVectorParity.report(raster: drainImage(actualDabs),
+                vector: drainImage(referenceDabs), size: CGSize(width: 48, height: 40)))
+            XCTAssertEqual(report.maxChannelDelta, 0)
+            XCTAssertEqual(report.differingPixelCount, 0)
+        }
+        for sample in samples {
+            actual.stamp(to: sample, into: a, brush: brush, color: .black, brushSize: brush.size)
+            reference.stamp(to: sample, into: b, brush: brush, color: .black, brushSize: brush.size)
+            try compare()
+        }
+        for _ in 0..<2 {
+            actual.finish(into: a, brush: brush, color: .black, brushSize: brush.size)
+            reference.finish(into: b, brush: brush, color: .black, brushSize: brush.size)
+            try compare()
+        }
+        XCTAssertFalse(actualDabs.isEmpty)
+        let blank = drainImage([])
+        let ink = try XCTUnwrap(RasterVectorParity.report(raster: drainImage(actualDabs), vector: blank,
+                                                        size: CGSize(width: 48, height: 40)))
+        XCTAssertGreaterThan(ink.differingPixelCount, 0)
+    }
+
+    func testBatchedLiveDrainsKeepEveryOfferFinishDabTravelAndPixelIdentical() throws {
+        for direction in [false, true] {
+            let brush = drainBrush(direction: direction)
+            XCTAssertEqual(brush.readsDirection, direction)
+            try assertDrainParity(stationaryDrainSamples(resume: false), brush: brush)
+            try assertDrainParity(stationaryDrainSamples(resume: true), brush: brush)
+            try assertDrainParity([VectorSample(x: 12, y: 20)], brush: brush)
+            // Duplicate arcs at the margin and a turn exercise lookup ties, short strokes and nil
+            // lead/tail anchors, not just a long monotone line with a single direction.
+            let points = [CGPoint(x: 12, y: 20), CGPoint(x: 12, y: 20), CGPoint(x: 17, y: 20),
+                          CGPoint(x: 17, y: 20), CGPoint(x: 17, y: 25), CGPoint(x: 22, y: 25)]
+            try assertDrainParity(points.map { VectorSample(x: $0.x, y: $0.y, pressure: 0.5, deltaTime: 0.01) },
+                                  brush: brush)
+        }
+    }
+
+    func testTheOldStationaryDrainReallyMovesAQuadraticPrefix() {
+        let brush = drainBrush(direction: true)
+        for count in [16, 32, 64] {
+            var reference = ReferenceLiveWalk(seed: 7)
+            let target = BrushStamper.CollectingDabTarget()
+            for sample in stationaryDrainSamples(count: count, resume: false) {
+                reference.stamp(to: sample, into: target, brush: brush, color: .black, brushSize: brush.size)
+            }
+            XCTAssertTrue(target.dabs.isEmpty, "the direction margin really retains this whole hold")
+            XCTAssertEqual(reference.survivorMoves, 0)
+            reference.finish(into: target, brush: brush, color: .black, brushSize: brush.size)
+            XCTAssertEqual(reference.survivorMoves, count * (count - 1) / 2, "per queue, not a timing claim")
+            XCTAssertEqual(target.dabs.count, 1)
+        }
+    }
+
+    func testArcLookupSuffixMatchesPhysicalRemovalAndKeepsDefaultTieRules() {
+        for arcs in [[CGFloat(0), 0, 4, 4, 10, 10], [0, 0, 0], [9, 9, 12, 15]] {
+            let table = ArcTable(arcs)
+            for start in 0...arcs.count {
+                let suffix = ArcTable(Array(arcs.dropFirst(start)))
+                for target in [CGFloat(-1), 0, 4, 9, 10, 12, 15, 99] {
+                    let actual = table.locate(target, startingAt: start)
+                    let physical = suffix.locate(target)
+                    XCTAssertEqual(actual?.segment, physical.map { $0.segment + start })
+                    XCTAssertEqual(actual?.offset, physical?.offset)
+                    if start == 0 {
+                        XCTAssertEqual(actual?.segment, table.locate(target)?.segment)
+                        XCTAssertEqual(actual?.offset, table.locate(target)?.offset)
+                    }
+                }
+            }
+            XCTAssertNil(table.locate(1, startingAt: -1))
+            XCTAssertNil(table.locate(1, startingAt: Int.max))
+        }
+        let tied = ArcTable([0, 4, 4, 10])
+        XCTAssertEqual(tied.locate(4)?.segment, 0, "the default still picks the first positive segment ending on a tie")
+        XCTAssertEqual(tied.locate(4, startingAt: 1)?.segment, 2)
+        XCTAssertEqual(tied.locate(4, startingAt: 1)?.offset, 0)
+    }
+
+    func testReplacingACancelledOrTimingBoundaryWalkResetsQueueCarryAndSeed() throws {
+        let brush = drainBrush(direction: true)
+        for consumeBeforeReset in [false, true] {
+            let target = BrushStamper.CollectingDabTarget(tracksTravel: true)
+            let referenceTarget = BrushStamper.CollectingDabTarget(tracksTravel: true)
+            var walk = BrushStamper.LiveWalk(seed: 7), reference = ReferenceLiveWalk(seed: 7)
+            for sample in stationaryDrainSamples(resume: consumeBeforeReset) {
+                walk.stamp(to: sample, into: target, brush: brush, color: .black, brushSize: brush.size)
+                reference.stamp(to: sample, into: referenceTarget, brush: brush, color: .black, brushSize: brush.size)
+            }
+            _ = target.drain(); _ = referenceTarget.drain()
+            // The view replaces the complete walk at pen-down and at a timing boundary. A cancelled
+            // hold is not finished; timing also seeds the incoming walk at its shared sample.
+            walk = BrushStamper.LiveWalk(seed: 91); reference = ReferenceLiveWalk(seed: 91)
+            XCTAssertEqual(walk.arcWidths, 0)
+            XCTAssertEqual(walk.random, DabRandom(seed: 91))
+            let incoming = [VectorSample(x: 20, y: 20), VectorSample(x: 27, y: 20),
+                            VectorSample(x: 31, y: 25), VectorSample(x: 35, y: 25)]
+            for sample in incoming {
+                walk.stamp(to: sample, into: target, brush: brush, color: .black, brushSize: brush.size)
+                reference.stamp(to: sample, into: referenceTarget, brush: brush, color: .black, brushSize: brush.size)
+                XCTAssertEqual(target.dabs, referenceTarget.dabs)
+                XCTAssertEqual(walk.arcWidths, reference.arcWidths)
+            }
+            walk.finish(into: target, brush: brush, color: .black, brushSize: brush.size)
+            reference.finish(into: referenceTarget, brush: brush, color: .black, brushSize: brush.size)
+            let actual = target.drain(), expected = referenceTarget.drain()
+            XCTAssertEqual(actual.map { $0.0 }, expected.map { $0.0 })
+            XCTAssertEqual(actual.map { $0.1 }, expected.map { $0.1 })
+            let oldSeed = liveDabs(incoming, brush: brush)
+            XCTAssertNotEqual(actual.map { $0.0 }, oldSeed, "seed91 must really differ from the old gesture's seed7")
+            let report = try XCTUnwrap(RasterVectorParity.report(raster: drainImage(actual.map { $0.0 }),
+                vector: drainImage(expected.map { $0.0 }), size: CGSize(width: 48, height: 40)))
+            XCTAssertEqual(report.differingPixelCount, 0)
+            XCTAssertFalse(actual.isEmpty)
+        }
+    }
+
 }

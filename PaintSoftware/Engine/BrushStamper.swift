@@ -88,17 +88,28 @@ enum BrushStamper {
                             color: UIColor, brushSize: CGFloat) {
             arcs.append((arcs.last ?? 0) + (received.last.map { hypot(sample.x - $0.x, sample.y - $0.y) } ?? 0))
             received.append(sample)
+            var consumed = 0
+            // Keep indices stable through this batch, then compact each queue only once. Every
+            // original sample and arc is still processed in order, including stationary inputs.
+            defer {
+                if consumed > 0 {
+                    received.removeFirst(consumed)
+                    arcs.removeFirst(consumed)
+                }
+            }
             guard brush.readsDirection else {
-                while received.count > 1 {
-                    layDownFirstSegment(into: target, brush: brush, color: color, brushSize: brushSize)
+                while consumed + 1 < received.count {
+                    layDownSegment(at: consumed, into: target, brush: brush, color: color, brushSize: brushSize)
+                    consumed += 1
                 }
                 return
             }
             let margin = StrokeHeading.margin(brushSize: brushSize)
             let settled = arcs[arcs.count - 1] - margin
-            while received.count > 1, arcs[1] < settled {
-                if heading.lead == nil { heading.lead = anchor(atArc: margin) }
-                layDownFirstSegment(into: target, brush: brush, color: color, brushSize: brushSize)
+            while consumed + 1 < received.count, arcs[consumed + 1] < settled {
+                if heading.lead == nil { heading.lead = anchor(atArc: margin, startingAt: consumed) }
+                layDownSegment(at: consumed, into: target, brush: brush, color: color, brushSize: brushSize)
+                consumed += 1
             }
         }
 
@@ -112,8 +123,13 @@ enum BrushStamper {
                 if heading.lead == nil { heading.lead = anchor(atArc: read.lead) }
                 heading.tail = read.tail <= (heading.lead?.arc ?? -1) ? heading.lead : anchor(atArc: read.tail)
             }
-            while received.count > 1 {
-                layDownFirstSegment(into: target, brush: brush, color: color, brushSize: brushSize)
+            let consumed = max(0, received.count - 1)
+            for index in 0..<consumed {
+                layDownSegment(at: index, into: target, brush: brush, color: color, brushSize: brushSize)
+            }
+            if consumed > 0 {
+                received.removeFirst(consumed)
+                arcs.removeFirst(consumed)
             }
             guard carry == nil, let held = received.first else { return }
             let run = StrokeSamples([held, held], channels: .captured)
@@ -127,19 +143,18 @@ enum BrushStamper {
         }
 
         /// The direction the pen's path is going `arc` along it — the chord it is on there.
-        private func anchor(atArc arc: CGFloat) -> StrokeHeading.Anchor? {
-            guard let at = ArcTable(arcs).locate(arc) else { return nil }
+        private func anchor(atArc arc: CGFloat, startingAt start: Int = 0) -> StrokeHeading.Anchor? {
+            guard let at = ArcTable(arcs).locate(arc, startingAt: start) else { return nil }
             let a = received[at.segment], b = received[at.segment + 1]
             let length = hypot(b.x - a.x, b.y - a.y)
             return StrokeHeading.Anchor(arc: arc, direction: CGPoint(x: (b.x - a.x) / length,
                                                                     y: (b.y - a.y) / length))
         }
 
-        /// Lays down the dabs from `received[0]` up to `received[1]`, and drops `received[0]`.
-        private mutating func layDownFirstSegment(into target: DabTarget, brush: Brush, color: UIColor,
-                                                  brushSize: CGFloat) {
-            let previous = received[0], sample = received[1]
-            defer { received.removeFirst(); arcs.removeFirst() }
+        /// Lays down one original segment. The caller drops the consumed prefix after its batch.
+        private mutating func layDownSegment(at index: Int, into target: DabTarget, brush: Brush, color: UIColor,
+                                              brushSize: CGFloat) {
+            let previous = received[index], sample = received[index + 1]
             // Two samples and the line through them. `.captured` because `StrokeInput` always
             // reports every channel — a finger reports the neutrals, which is what `compacted()`
             // later drops.
