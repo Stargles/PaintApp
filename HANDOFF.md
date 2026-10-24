@@ -56,7 +56,8 @@ No device restart/launch/install. TODO's erasing item records both reports and d
 
 Recorded in TODO before investigation: extend the existing Mend Gaps setting to fill beneath internal
 brushstroke footprints inside the same filled region, preserving the original outside boundary; add
-one layer action to apply it to all fills in every cel of that layer. Read-only source investigation
+one layer action to apply it to all fills in every cel of that layer. Owner explicitly limited the
+layer action to vector layers; per-fill mending still serves raster and vector. Read-only investigation
 may proceed while ee50 Liquify/saving normal rebuild and fast tiers own the native slot. Separate
 worktree `~/PaintWork/PaintApp-s53-fill-mend` contains this record; do not edit the frozen integration.
 

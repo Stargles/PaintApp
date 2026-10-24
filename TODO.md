@@ -186,7 +186,10 @@ edge: a naive expansion that crosses the fill boundary is explicitly rejected. R
 geometry, retained source and mending calculation rather than adding a parallel fill mechanism.
 
 Owner also asks for **a new layer action that applies Mend Gaps to all fills in all cels of that layer**.
-Use the same setting/semantics as an individual fill; inspect existing batch edit/undo/save patterns.
+**Owner ruling2026-10-24: this action is vector layers only.** Raster fills are flattened into paint and
+are not individually identifiable; no raster storage redesign is authorized. The per-fill mending
+correction still uses the shared raster/vector fill pipeline. Use the same setting/semantics as an
+individual fill; inspect existing batch edit/undo/save patterns.
 Determine raster/vector representation and boundary provenance from the code before assuming an
 implementation. Native work waits for current Liquify/saving qualification; read-only investigation
 can proceed in parallel. Worktree: `~/PaintWork/PaintApp-s53-fill-mend`, `tmp/s53-fill-mend`.
