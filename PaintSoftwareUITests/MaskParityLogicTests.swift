@@ -857,14 +857,14 @@ final class MaskParityLogicTests: XCTestCase {
         XCTAssertEqual(prepared.coverage[8 + 32 * prepared.width], 255)
         XCTAssertEqual(prepared.coverage[48 + 32 * prepared.width], 0,
                        "Admission at the playback entry reads its left-hand source, not the parked frame's right-hand source")
+        XCTAssertEqual(manager.currentFrame, 1, "Preparation must not rewind the document to resolve its inputs")
+        XCTAssertFalse(manager.isRecording)
+        XCTAssertFalse(manager.isPlaying)
         let parked = try XCTUnwrap(manager.liveMaskRecipe(atFrame: 1))
         let control = try XCTUnwrap(MaskResolver.coverage(for: masks, of: parked).get())
         XCTAssertEqual(control.coverage[8 + 32 * control.width], 0)
         XCTAssertEqual(control.coverage[48 + 32 * control.width], 255,
                        "Control: the parked frame has visibly different mask pixels")
-        XCTAssertEqual(manager.currentFrame, 1, "Preparation must not rewind the document to resolve its inputs")
-        XCTAssertFalse(manager.isRecording)
-        XCTAssertFalse(manager.isPlaying)
     }
     //
     // §6.4's claim is a strong one — the live stroke and the composite "agree by construction" — and

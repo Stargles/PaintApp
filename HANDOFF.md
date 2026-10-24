@@ -8,6 +8,14 @@ compaction must preserve continuing work. Architecture is the top priority. Reco
 
 ## Current combined source qualification — 2026-10-24
 
+Root's normal combined baseline at6b5010d9 passed847/847, zero skips/failures; all724 tracked
+app/test/project bytes and modes restored exactly. The base49 faults are separately qualified.
+The new52-fault run stopped after10 assertion-red cases: the playhead-purity mutant passed because
+the test checked only after its later parked-frame control undid the forbidden movement. Scope
+recorded before correction: assert purity immediately after preparing playback-entry metadata,
+commit, rebuild normal847, then qualify that fault and continue the41 untouched remaining recipes.
+No production behavior change, device operation, merge or installation is part of this correction.
+
 Continue from `~/PaintWork/PaintApp-s54-integration`, branch `tmp/s54-integration`; resolve its current
 full pin with `git rev-parse HEAD` and the external `~/PaintWork/s54-integration/ready-for-root.md`.
 Do not restore another tree's older HANDOFF/TODO copy or merge/push/install this unqualified source.

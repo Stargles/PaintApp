@@ -1,5 +1,10 @@
 # TODO
 
+Current qualification correction: combined847/847 is green at6b5010d9; the new52-fault run has10
+assertion-red cases, then an unexpected-green playhead-purity fault. Move the existing purity
+assertions before the later control restores the playhead, commit and rebuild normal source before
+rerunning the fault/remaining41 recipes. Base49 faults remain qualified; no production/device change.
+
 The owner's asks. [BUGS.md](BUGS.md) is for what *we* find.
 
 **Session 49 (2026-10-14):** the owner asked to continue through every actionable item, stopping only
