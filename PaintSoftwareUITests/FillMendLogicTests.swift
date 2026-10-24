@@ -276,13 +276,19 @@ final class FillMendLogicTests: XCTestCase {
         openTie[2 * 5 + 1] = 0; openTie[2 * 5 + 3] = 0
         try assertExactDistanceMap(name: "equidistant-open-tie", width: 5, height: 5,
                                    ink: openTie, targetsInk: false)
-        // At row zero, column one becomes better before column zero: the hull activation has a
-        // negative numerator and exercises mathematical floor rather than truncating division.
+        // A hull activation can lie before the buffer's first column.
         var negativeActivation = [UInt8](repeating: 0, count: 5 * 6)
         negativeActivation[5 * 5] = 255
         negativeActivation[1] = 255
         try assertExactDistanceMap(name: "negative-activation", width: 5, height: 6,
                                    ink: negativeActivation)
+        // At row zero, columns one and two intersect at -1/2. Mathematical floor activates
+        // column two at x=0; truncation wrongly waits until x=1 and chooses d²5 instead of d²4.
+        var fractionalNegativeActivation = [UInt8](repeating: 0, count: 3 * 3)
+        fractionalNegativeActivation[2 * 3 + 1] = 255
+        fractionalNegativeActivation[2] = 255
+        try assertExactDistanceMap(name: "fractional-negative-activation", width: 3, height: 3,
+                                   ink: fractionalNegativeActivation)
 
         var state: UInt32 = 0x6D2B79F5
         for caseIndex in 0..<32 {
