@@ -216,7 +216,8 @@ Worktree: `~/PaintWork/PaintApp-s53-fill-mend`, `tmp/s53-fill-mend`.
 
 ## Repository-wide architecture, cleanliness and performance audit — 2026-10-24
 
-**Queued after the active fill-mending qualification.** Owner asks for a thorough audit of everything:
+**Refactors queued after active fill-mending qualification; read-only inventory can run alongside it.**
+Owner asks for a thorough audit of everything:
 “codebase cleanliness and good architecture as well as performance is a priority”, “refactor things
 that are messy and also find and fix bugs”, “Zombie code or bloat … should be dealt with. Dont be
 afraid to prune.” Clean architecture should make future additions smoother and less error-prone.
