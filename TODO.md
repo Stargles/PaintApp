@@ -7,6 +7,12 @@ speed. Architecture and preserving real artwork take priority. Record before act
 
 ## Current source and qualification — 2026-10-24
 
+Second actual partial final40f77 UI47 finding: FillMend ON stopped at line154, the fresh-layer-vector
+premise (`layerOptions.rasterize` absent), BEFORE overlap setup or drawn mending oracles. The preceding
+batch Mend control passed including undo (88.694s run record). Current partial count is22pass/2fail
+of24; the original batch continues without retry. Cause is unassigned until closed pictures/activity
+are inspected. Preserve the exact four-file cleanup and all existing setup/pixel assertions.
+
 Actual final40f77 UI47 is still running under root's exclusive lease. BrushEditor13/13 passed;
 BrushMenu has8passes/1failure: the owner's cold RoughInk drawn check failed line533, spread
 0.26339134382131857 versus required>0.3 (37 sampled columns6px,3 columns7px). The corrected explicit

@@ -17,6 +17,16 @@ before implementation on tmp/s54-response-curve; no native/compiler/device run b
 
 # Known Issues
 
+## FillMend ON cold setup did not expose the vector-layer action in UI47 — 2026-10-24
+
+Recorded before triage: actual frozen40f77 UI47 FillMend ON failed line154 because the fresh-layer-
+vector premise could not find `layerOptions.rasterize`. The method stopped BEFORE overlap setup and
+all drawn mending oracles; this does not establish a fill/mending regression. The preceding batch
+Mend method passed including undo (88.694s run record). Partial count is22pass/2fail of24; the same
+original batch continues without retries. Cause remains unassigned pending closed case pictures and
+recording/activity review. Preserve the existing setup and drawn assertions; no threshold/product
+change is justified by this partial record.
+
 ## Cold RoughInk drawn-width variation failed in the final UI47 run — 2026-10-24
 
 Recorded before triage: actual frozen40f77 UI47 has BrushEditor13/13 green and BrushMenu8pass/1fail.
