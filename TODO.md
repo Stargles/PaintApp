@@ -214,6 +214,29 @@ Worktree: `~/PaintWork/PaintApp-s53-fill-mend`, `tmp/s53-fill-mend`.
 
 ---
 
+## Repository-wide architecture, cleanliness and performance audit — 2026-10-24
+
+**Queued after the active fill-mending qualification.** Owner asks for a thorough audit of everything:
+“codebase cleanliness and good architecture as well as performance is a priority”, “refactor things
+that are messy and also find and fix bugs”, “Zombie code or bloat … should be dealt with. Dont be
+afraid to prune.” Clean architecture should make future additions smoother and less error-prone.
+The owner now permits a large usage budget but prioritizes output quality and regression prevention.
+
+Audit the app and adjacent streamer in bounded areas. Trace actual consumers/ownership before pruning;
+identify duplicated mechanisms, tangled responsibilities, dead paths, correctness defects and avoidable
+memory or latency in real-time actions. Record concrete findings before changing them. Prefer shared
+existing seams and root-cause refactors; do not add parallel frameworks or speculative optimizations.
+Use independent reviews where useful, measure performance claims, and qualify each coherent change
+with meaningful logic/mutation coverage, affected workflows/pictures and required repository gates.
+Preserve real scenes and saved-format repair rules. Deferred product features remain deferred.
+
+- [ ] Inventory modules, ownership and active dependencies; split the audit into bounded areas.
+- [ ] Review all areas and record actionable evidence, including bugs and real-time costs.
+- [ ] Refactor/fix/prune justified findings in coherent changes with independent review.
+- [ ] Prove affected behavior and performance; run regression gates and record limits plainly.
+
+---
+
 ## (27) Stream the computer's screen as a layer
 
 **Status** — briefed 2026-09-13, designed the same day ([STREAM.md](docs/STREAM.md)), and **built through

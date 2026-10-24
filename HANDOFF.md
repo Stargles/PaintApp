@@ -37,6 +37,12 @@ inventories/copied diagnostics; no device restart, app launch or install.
    rejected. Review fixes require contiguous digital rays, all tied nearest-open witnesses and bounded
    picture ownership. No new saved provenance or second mending mode.
    Worktree `~/PaintWork/PaintApp-s53-fill-mend`; design evidence `~/PaintWork/s53-fill-mend/`.
+5. **Queued repository-wide audit.** Owner authorizes a thorough architecture/cleanliness/bug and
+   performance pass across app and streamer after current fill work, with a large available budget
+   and quality/regression prevention first. Trace consumers, prune dead/duplicated paths, improve
+   module responsibilities and measure real-time memory/latency opportunities. Record concrete
+   evidence before changes; use coherent independently reviewed refactors and normal qualification.
+   TODO carries the complete new ask; deferred product features remain deferred.
 
 ## Authoritative source and native ownership
 
