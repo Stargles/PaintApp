@@ -446,22 +446,24 @@ final class ColorPickerLogicTests: XCTestCase {
     /// A structurally valid saved palette with one invalid swatch takes the existing unreadable
     /// library path, leaves the original bytes untouched, and refuses edits instead of showing black.
     func testMalformedSavedSwatchRefusesTheLibraryAndPreservesItsBytes() throws {
-        let defaults = try isolatedDefaults()
-        let damaged = [Palette(name: "Saved", hexes: ["123456", "not-a-color"], isBuiltIn: false)]
-        let bytes = try JSONEncoder().encode(damaged)
-        defaults.set(bytes, forKey: AppSettings.Key.palettes)
+        for malformedHex in ["not-a-color", "#A1B2C3"] {
+            let defaults = try isolatedDefaults()
+            let damaged = [Palette(name: "Saved", hexes: ["123456", malformedHex], isBuiltIn: false)]
+            let bytes = try JSONEncoder().encode(damaged)
+            defaults.set(bytes, forKey: AppSettings.Key.palettes)
 
-        XCTAssertThrowsError(try JSONDecoder().decode([Palette].self, from: bytes),
-                             "A saved palette cannot accept a swatch that would resolve to black")
-        let store = PaletteStore(settings: AppSettings(defaults: defaults))
+            XCTAssertThrowsError(try JSONDecoder().decode([Palette].self, from: bytes),
+                                 "A saved palette cannot accept non-current swatch hex \(malformedHex)")
+            let store = PaletteStore(settings: AppSettings(defaults: defaults))
 
-        XCTAssertEqual(store.unreadable,
-                       "Your palettes could not be read, so none are shown and nothing has been changed. "
-                       + "They are still stored.")
-        XCTAssertTrue(store.palettes.isEmpty)
-        XCTAssertNil(store.addPalette(), "The unreadable library is not replaced with a new one")
-        XCTAssertEqual(defaults.data(forKey: AppSettings.Key.palettes), bytes,
-                       "The artist's unreadable library remains available for recovery")
+            XCTAssertEqual(store.unreadable,
+                           "Your palettes could not be read, so none are shown and nothing has been changed. "
+                           + "They are still stored.")
+            XCTAssertTrue(store.palettes.isEmpty)
+            XCTAssertNil(store.addPalette(), "The unreadable library is not replaced with a new one")
+            XCTAssertEqual(defaults.data(forKey: AppSettings.Key.palettes), bytes,
+                           "The artist's unreadable library remains available for recovery")
+        }
     }
 
     /// A first launch seeds the built-in presets **and stores them**, so the id a scene's selection
