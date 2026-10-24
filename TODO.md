@@ -18,6 +18,17 @@ A visibility fault produced an actual assertion failure, then normal4/4 passed; 
 11.013s on M5 before first UI; cold-start/scheduling work remains before install. Erasing cause remains
 unresolved. Installed Release is stillbcd7a6af; no device launch/restart/install this pass.
 
+## Combined source qualification — 2026-10-24
+
+Root authorized a new `tmp/s54-integration` worktree from origin/main, then exact mask
+f34cbe57bde9e6ea16c62a309d329d9e749c0ec1 and cherry-picks video3227b0b8225543f9172dd4e717f16ee0016fbfda,
+vector4016378999f5c69d521f1048ea1d2f9344aa0968 and c5e0f97e6c47269a7548b3aa341610cc44063cf9.
+Record before acting: combine ready source without raster WIP or semantic production changes;
+preserve all current task records and pending gates. No TODO item removal until main merge.
+Root alone runs native. This worker performs source integration, static census/lints/PBX inspection,
+and external52-fault preparation only; no compiler, native, UI injection, simulator or device action.
+External evidence/package: `~/PaintWork/s54-integration/`; component plans remain authoritative inputs.
+
 ## How to read and keep this file
 
 Every item is a **status**, a short **description** a future session can pick up cold, and **what is
