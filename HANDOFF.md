@@ -185,6 +185,22 @@ stroke is bounded by a fit-only correction.
 
 ## Streaming ownership source audit — 2026-10-24
 
+Swift outgoing source phase prepared: completion-paced single writer/disk pump replaces the synchronous
+whole-file send loop and ignored NW send errors. A transfer captures its original run/sink/FileHandle;
+one max256KiB chunk is read only when idle and advances only after contentProcessed succeeds. One
+admitted encoded frame plus transient chunk copies; no next-chunk queue. Pause/resume/keyframe/ping/pong
+coalesce, HELLO has one slot, FILE_RESULT has at most4<=64MiB payload slots and explicit overflow close.
+Stop closes owned handles/settles caller once; stale completion cannot advance a replacement run. The
+old boolean send bypass is deleted whole; a completion transport injects the same writer/pump in tests.
+Added actual stalled-write+responsive-control/stop and write-error/no-tail regressions with direct outcome
+counts and actual frame bytes. Exposed test frame handling now serializes on the client queue. Closed-
+document test waits on that real queue before asserting no insertion; decoded-image reset retains the
+same complete CGImage. The old synchronous decoder test-drain API is removed; completion paces fixtures.
+Focused Swift union75 methods/6 classes (Framing15, FileTransfer10, FileSend5, H264Decoder7,
+ConnectFailure16, Bar22); verify census externally before native. Both UI lints/diff-check pass, but Swift
+remains uncompiled/unrun and all assertion faults remain unrun. Windows source remains exact qualified3a9.
+
+
 Root granted isolated Windows-only correctness qualification of committed3a9e9e90ca66f8752668090545f7333f11d4a05a.
 Existing configured BatchMode SSH is reachable; SDK C:\dotnet\dotnet.exe has8.0.425. Stage only committed
 streamer+fixture into a new owned remote folder, hash source/archive before+after, build Debug then unit

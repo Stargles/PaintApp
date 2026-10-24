@@ -123,11 +123,8 @@ final class H264StreamDecoderLogicTests: XCTestCase {
         for payload in try wireFrames(from: accessUnits(in: try fixtureBytes())) {
             feed(decoder, payload)
         }
-        decoder.finishPendingDecodes()
         // VideoToolbox's asynchronous path can hand the last frames back a moment after the wait
         // returns; give it up to a second to settle rather than asserting on a race.
-        let deadline = Date().addingTimeInterval(1)
-        while decoder.decodedFrameCount < 60, Date() < deadline { Thread.sleep(forTimeInterval: 0.01) }
 
         XCTAssertGreaterThanOrEqual(decoder.decodedFrameCount, 55,
                                     "decoded \(decoder.decodedFrameCount) of 60; errors: \(decoder.decodeErrorCount)")
@@ -161,9 +158,6 @@ final class H264StreamDecoderLogicTests: XCTestCase {
         for payload in try wireFrames(from: accessUnits(in: try fixtureBytes())) {
             feed(decoder, payload)
         }
-        decoder.finishPendingDecodes()
-        let deadline = Date().addingTimeInterval(1)
-        while decoder.decodedFrameCount < 60, Date() < deadline { Thread.sleep(forTimeInterval: 0.01) }
 
         XCTAssertGreaterThanOrEqual(decoder.decodedFrameCount, 55, "it decoded the clip")
         XCTAssertEqual(decoder.latestFrameIndex, decoder.decodedFrameCount, "and the slot holds the newest")
@@ -177,16 +171,16 @@ final class H264StreamDecoderLogicTests: XCTestCase {
         let decoder = H264StreamDecoder()
         let payloads = try wireFrames(from: accessUnits(in: try fixtureBytes()))
         feed(decoder, payloads[0])
-        decoder.finishPendingDecodes()
-        let deadline = Date().addingTimeInterval(1)
-        while decoder.decodedFrameCount < 1, Date() < deadline { Thread.sleep(forTimeInterval: 0.01) }
         let first = try XCTUnwrap(decoder.latestCGImage())
         XCTAssertTrue(decoder.latestCGImage() === first, "the same frame is the same image")
         for payload in payloads[1 ..< 5] { feed(decoder, payload) }
-        decoder.finishPendingDecodes()
-        let later = Date().addingTimeInterval(1)
-        while decoder.decodedFrameCount < 5, Date() < later { Thread.sleep(forTimeInterval: 0.01) }
         XCTAssertFalse(decoder.latestCGImage() === first, "a newer frame is a new image")
+        let complete = try XCTUnwrap(decoder.latestCGImage())
+        let count = decoder.decodedFrameCount
+        decoder.reset()
+        feed(decoder, StreamVideoPayload(isKeyframe: false, presentationTimeMicroseconds: 0, accessUnit: Data()))
+        XCTAssertTrue(decoder.latestCGImage() === complete, "Reset keeps the last complete displayed image")
+        XCTAssertEqual(decoder.decodedFrameCount, count)
     }
 
     /// **Nothing decodes before a keyframe, and a keyframe is asked for.** Feed the P-frames after
@@ -207,15 +201,11 @@ final class H264StreamDecoderLogicTests: XCTestCase {
         for nal in parameterSets { setsOnly.append(contentsOf: [0, 0, 0, 1]); setsOnly.append(nal) }
         feed(decoder, StreamVideoPayload(isKeyframe: false, presentationTimeMicroseconds: 0, accessUnit: setsOnly))
         for payload in payloads[1 ..< 10] { feed(decoder, payload) }
-        decoder.finishPendingDecodes()
         XCTAssertEqual(decoder.decodedFrameCount, 0, "no IDR yet, nothing may decode")
         lock.lock(); let asked = requests; lock.unlock()
         XCTAssertEqual(asked, 1, "one request per gap, not one per dropped frame")
 
         for payload in payloads[30 ..< 40] { feed(decoder, payload) }
-        decoder.finishPendingDecodes()
-        let deadline = Date().addingTimeInterval(1)
-        while decoder.decodedFrameCount < 10, Date() < deadline { Thread.sleep(forTimeInterval: 0.01) }
         XCTAssertGreaterThanOrEqual(decoder.decodedFrameCount, 8, "the second IDR restarts decoding")
     }
 

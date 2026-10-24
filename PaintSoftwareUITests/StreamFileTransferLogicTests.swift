@@ -311,7 +311,7 @@ final class StreamFileTransferLogicTests: XCTestCase {
         client.handle(StreamFrame(.fileEnd, payload: StreamJSON.encode(StreamFileEnd(id: 301))))
         manager.streamCoordinator.stopAll()
         let drained = expectation(description: "queued delivery checked after close")
-        DispatchQueue.main.async { drained.fulfill() }
+        client.stop { drained.fulfill() }
         wait(for: [drained], timeout: 5)
         XCTAssertEqual(manager.layers.count, layerCount)
         XCTAssertTrue(vector.images.isEmpty, "A closed document connection must not insert a queued picture")

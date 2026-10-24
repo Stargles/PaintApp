@@ -2,12 +2,9 @@ import XCTest
 
 /// Pure-logic tests for STREAM.md §5.8's send path — iPad → laptop — with **no socket anywhere**.
 ///
-/// `sendFile` normally refuses outright with no live `NWConnection`; `requiresLiveConnectionToSend`
-/// is the test seam that lets it proceed anyway, so the chunking arithmetic and the FILE_RESULT
-/// plumbing can be driven directly. `onFrameSent` — queue-confined, fired whether or not a
-/// connection exists — is where these tests read what would have gone out on the wire, and each
-/// test plays the laptop's own FILE_RESULT back in through `ScreenStreamClient.handle`, the same
-/// "expose the frame handler" seam `StreamFileTransferLogicTests` uses for the other direction.
+/// A completion transport drives the real serialized writer/disk pump without a socket. Its
+/// completion can stall or fail, unlike an observer pretending the whole file was sent. Responses
+/// use the same exposed frame handler as the receive tests.
 final class StreamFileSendLogicTests: XCTestCase {
 
     private static let endpoint = StreamEndpoint(host: "laptop", port: 47301)
@@ -20,7 +17,7 @@ final class StreamFileSendLogicTests: XCTestCase {
             .appendingPathComponent("stream-file-send-tests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         client = ScreenStreamClient(endpoint: Self.endpoint, appVersion: "1", deviceName: "test-ipad")
-        client.requiresLiveConnectionToSend = false
+        client.writeFrameOverride = { _, _, completed in completed(nil) }
     }
 
     override func tearDownWithError() throws {
@@ -167,4 +164,66 @@ final class StreamFileSendLogicTests: XCTestCase {
         wait(for: [firstDone], timeout: 5)
         XCTAssertEqual(firstOutcome, .ok, "the refused second attempt did not disturb the first")
     }
+    func testAStalledChunkKeepsOnlyOneWriteAndStopSettlesWithoutReadingTheTail() throws {
+        let url = try makeFile(bytes: 700 * 1024)
+        let stalled = expectation(description: "first actual chunk write stalled")
+        var release: ((Error?) -> Void)?
+        var frames: [(StreamMessageType, Data)] = []
+        client.writeFrameOverride = { type, payload, completed in
+            frames.append((type, payload))
+            if type == .fileChunk {
+                if release == nil { release = completed; stalled.fulfill() }
+            }
+            else { completed(nil) }
+        }
+        var progress: [Int] = [], outcomes: [StreamFileReceiveOutcome] = []
+        client.sendFile(url: url, kind: "video", onProgress: { count, _ in progress.append(count) }) { result in
+            outcomes.append(result)
+        }
+        wait(for: [stalled], timeout: 5)
+        for _ in 0 ..< 100 { client.pause(); client.resume() }
+        client.pause(); client.requestKeyframe()
+        // The refusal is a queue barrier after all controls; none may allocate another wire write.
+        let barrier = expectation(description: "client queue remains responsive")
+        var second: StreamFileReceiveOutcome?
+        client.sendFile(url: url, kind: "video", onProgress: { _, _ in }) { result in
+            second = result; barrier.fulfill()
+        }
+        wait(for: [barrier], timeout: 5)
+        XCTAssertEqual(second, .refused("A transfer is already in progress"))
+        XCTAssertEqual(frames.map { $0.0 }, [.fileBegin, .fileChunk])
+        XCTAssertEqual(frames.last?.1.count, 4 + 256 * 1024)
+        XCTAssertTrue(progress.isEmpty, "Bytes count as sent only after actual completion")
+        let stopped = expectation(description: "stop joined client work")
+        client.stop { stopped.fulfill() }
+        wait(for: [stopped], timeout: 5)
+        XCTAssertEqual(outcomes, [.refused("The connection was lost.")])
+        release?(nil) // A late old-run callback cannot read/send another chunk or finish twice.
+        let drained = expectation(description: "late callback drained")
+        client.stop { drained.fulfill() }
+        wait(for: [drained], timeout: 5)
+        XCTAssertEqual(frames.count, 2)
+        XCTAssertEqual(outcomes.count, 1)
+    }
+
+    func testAnActualWriteErrorRefusesAndStopsBeforeReadingOrSendingTheNextChunk() throws {
+        let url = try makeFile(bytes: 700 * 1024)
+        let stalled = expectation(description: "first chunk admitted")
+        var release: ((Error?) -> Void)?
+        var types: [StreamMessageType] = [], outcomes: [StreamFileReceiveOutcome] = []
+        client.writeFrameOverride = { type, _, completed in
+            types.append(type)
+            if type == .fileChunk, release == nil { release = completed; stalled.fulfill() }
+            else { completed(nil) }
+        }
+        client.sendFile(url: url, kind: "video", onProgress: { _, _ in }) { outcomes.append($0) }
+        wait(for: [stalled], timeout: 5)
+        release?(CocoaError(.fileWriteUnknown))
+        let stopped = expectation(description: "write result processed before explicit stop")
+        client.stop { stopped.fulfill() }
+        wait(for: [stopped], timeout: 5)
+        XCTAssertEqual(types, [.fileBegin, .fileChunk], "A failed write may not advance the disk pump")
+        XCTAssertEqual(outcomes, [.refused("The connection was lost.")])
+    }
+
 }

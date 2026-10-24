@@ -156,14 +156,6 @@ nonisolated final class H264StreamDecoder {
         }
     }
 
-    /// Blocks until every access unit fed so far has been decoded or dropped. **For tests**, which
-    /// feed a whole clip and then ask the slot; the app never waits on the decoder.
-    func finishPendingDecodes() {
-        queue.sync {
-            if let session { VTDecompressionSessionWaitForAsynchronousFrames(session) }
-        }
-    }
-
     // MARK: - Output
 
     /// How many frames have landed in the slot since the decoder was made.

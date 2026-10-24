@@ -245,22 +245,37 @@ nonisolated final class ScreenStreamClient {
     }
     private var incomingTransfer: IncomingTransfer?
 
-    /// One outbound transfer, iPad → laptop.
+    private typealias WireSink = (StreamMessageType, Data, @escaping (Error?) -> Void) -> Void
+    private enum FilePhase { case begin(StreamFileBegin), chunks, awaitingResult }
+    /// One disk-backed transfer, pinned to the run and sink captured at admission.
     private struct OutgoingTransfer {
         let id: Int
+        let run: Run
+        let sink: WireSink
+        let handle: FileHandle
+        let size: Int
+        var phase: FilePhase
+        var sent = 0
         let onProgress: (Int, Int) -> Void
         let completion: (StreamFileReceiveOutcome) -> Void
     }
     private var outgoingTransfer: OutgoingTransfer?
     private var nextOutgoingFileID = 1
-    /// FILE_CHUNK's own cap, §3.
     static let fileChunkSize = StreamFileChunk.maximumBytes
 
-    /// Whether `sendFile` requires a live, `.ready` connection before writing anything — true
-    /// always in the app. `StreamFileSendLogicTests` sets this false to drive the chunking
-    /// arithmetic and the FILE_RESULT plumbing with no socket, feeding the answer back itself
-    /// through `handle` and reading what would have gone out through `onFrameSent`.
-    var requiresLiveConnectionToSend = true
+    // One serialized writer. Controls coalesce here, never in independent waiting tasks.
+    private var activeWrite: UUID?
+    private var pendingHello: Data?
+    private var pendingPause: StreamControlCommand?
+    private var pendingKeyframe = false
+    private var pendingPing = false
+    private var pendingPong = false
+    private var pendingReplies: [Data] = []
+    private static let maximumPendingReplies = 4
+
+    /// Completion transport injection: tests control the SAME disk pump/writer without a socket.
+    /// The production sink is captured NWConnection.send(contentProcessed:), never an observer.
+    var writeFrameOverride: ((StreamMessageType, Data, @escaping (Error?) -> Void) -> Void)?
 
     private(set) var state: State = .stopped {
         didSet {
@@ -324,14 +339,18 @@ nonisolated final class ScreenStreamClient {
         }
     }
 
-    func stop() {
+    func stop(completion: (() -> Void)? = nil) {
         queue.async { [weak self] in
-            guard let self else { return }
+            guard let self else {
+                if let completion { DispatchQueue.main.async(execute: completion) }
+                return
+            }
             self.stopped = true
             self.tearDownConnection()
             self.reconnectTimer?.cancel()
             self.reconnectTimer = nil
             self.state = .stopped
+            if let completion { DispatchQueue.main.async(execute: completion) }
         }
     }
 
@@ -346,6 +365,7 @@ nonisolated final class ScreenStreamClient {
         }
         if let transfer = outgoingTransfer {
             outgoingTransfer = nil
+            try? transfer.handle.close()
             let completion = transfer.completion
             DispatchQueue.main.async { completion(.refused(reason)) }
         }
@@ -444,7 +464,7 @@ nonisolated final class ScreenStreamClient {
                     }
                     return
                 }
-                handle(frame)
+                handleFrame(frame)
                 guard generation == run, self.connection === connection else { return }
             }
         } catch { fail("The computer sent something this app could not read."); return }
@@ -481,6 +501,11 @@ nonisolated final class ScreenStreamClient {
     /// calls this directly, with no `NWConnection` anywhere; production reaches it only through
     /// `receive(on:generation:)`, off a real socket.
     func handle(_ frame: StreamFrame) {
+        queue.async { [weak self] in self?.handleFrame(frame) }
+    }
+
+    private func handleFrame(_ frame: StreamFrame) {
+        guard !stopped else { return }
         guard let type = frame.messageType else { return }   // unknown: skipped by length
         switch type {
         case .hello:
@@ -497,6 +522,7 @@ nonisolated final class ScreenStreamClient {
             remoteName = hello.name
             remoteMachineID = hello.machineID
             state = .connected
+            flushWrites()
         case .status:
             guard let status = StreamJSON.decode(StreamStatus.self, from: frame.payload) else { return }
             // **The ping-pong fix.** The server sends this exact reason, over an ordinary STATUS,
@@ -642,36 +668,27 @@ nonisolated final class ScreenStreamClient {
                   onProgress: @escaping (Int, Int) -> Void,
                   completion: @escaping (StreamFileReceiveOutcome) -> Void) {
         queue.async { [weak self] in
-            guard let self else { return }
-            guard !self.requiresLiveConnectionToSend || self.connection?.state == .ready else {
-                DispatchQueue.main.async { completion(.refused("Not connected to a computer.")) }
-                return
+            guard let self else {
+                DispatchQueue.main.async { completion(.refused("The connection was lost.")) }; return
+            }
+            guard let sink = self.currentSink(), self.helloReceived || self.writeFrameOverride != nil else {
+                DispatchQueue.main.async { completion(.refused("Not connected to a computer.")) }; return
             }
             guard self.outgoingTransfer == nil else {
-                DispatchQueue.main.async { completion(.refused("A transfer is already in progress")) }
-                return
+                DispatchQueue.main.async { completion(.refused("A transfer is already in progress")) }; return
             }
-            guard let handle = try? FileHandle(forReadingFrom: url),
-                  let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
-                  let size = attributes[.size] as? Int else {
+            do {
+                let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+                guard let size = attributes[.size] as? Int, size >= 0 else { throw CocoaError(.fileReadUnknown) }
+                let handle = try FileHandle(forReadingFrom: url)
+                let id = self.nextOutgoingFileID; self.nextOutgoingFileID += 1
+                let begin = StreamFileBegin(id: id, name: url.lastPathComponent, size: size, kind: kind)
+                self.outgoingTransfer = OutgoingTransfer(id: id, run: self.run, sink: sink, handle: handle,
+                    size: size, phase: .begin(begin), onProgress: onProgress, completion: completion)
+                self.flushWrites()
+            } catch {
                 DispatchQueue.main.async { completion(.refused("The file could not be read.")) }
-                return
             }
-            let id = self.nextOutgoingFileID
-            self.nextOutgoingFileID += 1
-            self.outgoingTransfer = OutgoingTransfer(id: id, onProgress: onProgress, completion: completion)
-            self.send(.fileBegin, payload: StreamJSON.encode(
-                StreamFileBegin(id: id, name: url.lastPathComponent, size: size, kind: kind)))
-            var sent = 0
-            while true {
-                let chunk = handle.readData(ofLength: Self.fileChunkSize)
-                if chunk.isEmpty { break }
-                self.send(.fileChunk, payload: StreamFileChunk(id: id, bytes: chunk).encoded)
-                sent += chunk.count
-                DispatchQueue.main.async { onProgress(sent, size) }
-            }
-            try? handle.close()
-            self.send(.fileEnd, payload: StreamJSON.encode(StreamFileEnd(id: id)))
         }
     }
 
@@ -679,22 +696,106 @@ nonisolated final class ScreenStreamClient {
         guard let result = StreamJSON.decode(StreamFileResult.self, from: payload),
               let transfer = outgoingTransfer, transfer.id == result.id else { return }
         outgoingTransfer = nil
+        try? transfer.handle.close()
         let completion = transfer.completion
-        DispatchQueue.main.async {
-            completion(StreamFileReceiveOutcome(ok: result.ok, reason: result.reason))
+        DispatchQueue.main.async { completion(StreamFileReceiveOutcome(ok: result.ok, reason: result.reason)) }
+    }
+
+    private func currentSink() -> WireSink? {
+        guard !stopped else { return nil }
+        if let writeFrameOverride { return writeFrameOverride }
+        guard let connection, connection.state == .ready else { return nil }
+        return { type, payload, completed in
+            connection.send(content: StreamFraming.encode(type, payload: payload),
+                            completion: .contentProcessed { completed($0) })
         }
     }
 
     private func send(_ type: StreamMessageType, payload: Data = Data()) {
-        onFrameSent?(type, payload)
-        guard let connection, connection.state == .ready else { return }
-        connection.send(content: StreamFraming.encode(type, payload: payload),
-                        completion: .contentProcessed { _ in })
+        switch type {
+        case .hello: pendingHello = payload
+        case .control:
+            guard let command = StreamControlCommand(payload: payload) else { return }
+            if command == .keyframe { pendingKeyframe = true } else { pendingPause = command }
+        case .ping: pendingPing = true
+        case .pong: pendingPong = true
+        case .fileResult:
+            guard payload.count <= StreamFraming.maximumPayloadLength(for: type.rawValue) else {
+                fail("The file answer is too large to send."); return
+            }
+            guard pendingReplies.count < Self.maximumPendingReplies else {
+                fail("The computer sent too many file requests."); return
+            }
+            pendingReplies.append(payload)
+        default: preconditionFailure("Bulk file writes belong to the disk pump")
+        }
+        flushWrites()
     }
 
-    /// Every frame this client attempts to write, **whether or not a connection exists** —
-    /// queue-confined, for `StreamFileSendLogicTests`, which drives `sendFile` with no socket and
-    /// reads what it would have put on the wire from here instead.
+    private func flushWrites() {
+        guard activeWrite == nil, let sink = currentSink() else { return }
+        if let hello = pendingHello {
+            pendingHello = nil; write(.hello, payload: hello, sink: sink); return
+        }
+        guard helloReceived || writeFrameOverride != nil else { return }
+        if !pendingReplies.isEmpty {
+            write(.fileResult, payload: pendingReplies.removeFirst(), sink: sink); return
+        }
+        if pendingPong { pendingPong = false; write(.pong, sink: sink); return }
+        if pendingPing { pendingPing = false; write(.ping, sink: sink); return }
+        if let command = pendingPause {
+            pendingPause = nil; write(.control, payload: command.encoded, sink: sink); return
+        }
+        if pendingKeyframe { pendingKeyframe = false; write(.control, payload: StreamControlCommand.keyframe.encoded, sink: sink); return }
+        guard var transfer = outgoingTransfer, transfer.run === run, transfer.run.isLive else { return }
+        switch transfer.phase {
+        case .begin(let begin):
+            transfer.phase = .chunks; outgoingTransfer = transfer
+            write(.fileBegin, payload: StreamJSON.encode(begin), sink: transfer.sink)
+        case .chunks:
+            do {
+                let chunk = try transfer.handle.read(upToCount: Self.fileChunkSize) ?? Data()
+                guard chunk.count <= transfer.size - transfer.sent else { throw CocoaError(.fileReadCorruptFile) }
+                if chunk.isEmpty {
+                    guard transfer.sent == transfer.size else { throw CocoaError(.fileReadCorruptFile) }
+                    try transfer.handle.close()
+                    transfer.phase = .awaitingResult; outgoingTransfer = transfer
+                    write(.fileEnd, payload: StreamJSON.encode(StreamFileEnd(id: transfer.id)), sink: transfer.sink)
+                } else {
+                    let id = transfer.id, count = chunk.count
+                    write(.fileChunk, payload: StreamFileChunk(id: id, bytes: chunk).encoded, sink: transfer.sink) { [weak self] in
+                        guard let self, var current = self.outgoingTransfer, current.id == id else { return }
+                        current.sent += count; self.outgoingTransfer = current
+                        let sent = current.sent, size = current.size, progress = current.onProgress
+                        self.postMain { progress(sent, size) }
+                    }
+                }
+            } catch {
+                // No FILE_ABORT exists. Close this run rather than leave the peer's partial slot
+                // occupied or send FILE_END for bytes that did not match the declared file.
+                fail("The file could not be read completely.")
+            }
+        case .awaitingResult: break
+        }
+    }
+
+    private func write(_ type: StreamMessageType, payload: Data = Data(), sink: WireSink,
+                       completed: (() -> Void)? = nil) {
+        let id = UUID(), run = run
+        activeWrite = id
+        onFrameSent?(type, payload)
+        sink(type, payload) { [weak self] error in
+            self?.queue.async { [weak self] in
+                guard let self, run.isLive, self.activeWrite == id else { return }
+                self.activeWrite = nil
+                if error != nil { self.fail("The connection was lost while sending."); return }
+                completed?()
+                self.flushWrites()
+            }
+        }
+    }
+
+    /// Observes actual admitted frames; completion transport controls their progress.
     var onFrameSent: ((StreamMessageType, Data) -> Void)?
 
     // MARK: - Keepalive (queue-confined)
@@ -772,6 +873,9 @@ nonisolated final class ScreenStreamClient {
         connection = nil
         generation += 1
         pendingVideo = nil
+        activeWrite = nil
+        pendingHello = nil; pendingPause = nil; pendingKeyframe = false
+        pendingPing = false; pendingPong = false; pendingReplies.removeAll()
         parser = StreamFraming.Parser()
         decoder.reset()
         // §3: no session state survives a reconnect, and that includes a transfer mid-flight —

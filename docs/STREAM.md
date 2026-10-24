@@ -258,9 +258,30 @@ then joins its two drained readers and preserves cancellation. Timeout remains i
 An inherited pipe cannot retain a reader forever after the child exits: the owned reads are cancelled
 and pipe handles closed after a bounded drain, then joined. No global process-name cleanup.
 
-This source phase has not been compiled or run on Windows or iPad. The iPad outgoing pump and decoder
-completion-credit phase is still outstanding; do not claim end-to-end pressure until it is qualified.
-Real-link stage5 and deployment remain waiting for the owner.
+Windows checkpoint3a9e9e90 passed Debug/Release solution builds and166/166 unit cases per configuration
+(0 skips), with63 source files exact before/after. This does not qualify the later iPad source phase.
+
+On iPad, the same client queue now owns one admitted write through NWConnection contentProcessed.
+FILE_BEGIN/CHUNK/END use a captured run/sink, read at most256KiB on demand, and never read a second
+chunk until actual completion. The one encoded wire frame and transient raw/chunk encoding copies
+are bounded by that chunk limit; no whole file/next-chunk queue is retained. A write failure closes
+that run, deleting partial receive state and settling the sender. Stop closes the owned FileHandle,
+settles once and invalidates late completions; it does not synchronously wait on the main thread.
+Controls share this writer: at most4 FILE_RESULT payloads (each<=64MiB), one HELLO, one desired
+pause/resume, one keyframe request, PING and PONG; overflow closes explicitly. The former no-socket
+boolean send bypass is removed: tests inject a completion transport into the actual writer/pump.
+
+Decoder admission covers one queued AU and its VT callback/settlement, with one readiness continuation.
+The client pauses its parser/read at VIDEO until completion. A reconnect may hold one first new-run AU
+while the old submission settles; it never coalesces arbitrary compressed P-frames. The parser retains
+at most one legal framed payload plus the current256KiB receive block, alongside the admitted AU and
+VT's sample/reference buffers. These are application ownership bounds, not codec/GPU/OS RSS claims.
+Reset retires the epoch immediately; old callbacks cannot publish, and the last complete image stays.
+Every early return, decode error or no-image completion releases once. Main callbacks carry the run
+lifetime; a removed client cannot insert a queued file or update a replacement document connection.
+The old synchronous test drain API is removed; fixture tests use actual AU completion.
+
+Swift source is not yet compiled/run or fault-qualified. Real-link stage5/deployment remain owner-waiting.
 
 ## 4. The Windows streamer — `streamer/` in this repo
 
