@@ -633,12 +633,20 @@ final class FillObjectLogicTests: XCTestCase {
         XCTAssertEqual(steps(manager), baseline)
     }
 
-    func testMendAllFillsLeavesRasterLayersAlone() async {
-        let manager = CanvasFixture.manager(layerCount: 1)
+    func testMendAllFillsLeavesRasterLayersAlone() async throws {
+        let fixture = try mendFixture()
+        let manager = fixture.manager
+        // Raster cels can carry editable vector objects. Refusing an empty raster cel alone would
+        // also pass if the vector-layer guard were removed, because there would be no fills to mend.
+        manager.layers[fixture.layer].kind = .raster
         let baseline = steps(manager)
-        let outcome = await manager.mendAllFills(layerIndex: 0)
+        let outcome = await manager.mendAllFills(layerIndex: fixture.layer)
         XCTAssertEqual(outcome, .unchanged)
-        XCTAssertEqual(manager.layers[0].kind, .raster)
+        XCTAssertEqual(manager.layers[fixture.layer].kind, .raster)
+        for index in fixture.vectors.indices {
+            XCTAssertEqual(fixture.vectors[index].elements.first?.fill?.pathData, fixture.fills[index].pathData,
+                           "the layer action leaves editable objects on raster cels unchanged")
+        }
         XCTAssertEqual(steps(manager), baseline)
     }
 
