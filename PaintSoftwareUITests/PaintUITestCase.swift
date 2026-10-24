@@ -1225,7 +1225,7 @@ class PaintUITestCase: XCTestCase {
     /// only one if that tool was already active. Probing for the menu itself is what makes this work
     /// from either state.
     func openBrushLibrary(_ app: XCUIApplication, tool: String = "brush") {
-        let prefix = tool == "eraser" ? "eraserPanel" : "brushPanel"
+        let prefix = "\(tool)Panel"
         let library = app.scrollViews["\(prefix).groupList"]
         let button = app.buttons["toolbar.\(tool)Button"]
         XCTAssertTrue(button.waitForExistence(timeout: 5))
@@ -1242,7 +1242,7 @@ class PaintUITestCase: XCTestCase {
     /// opens the editor. The selected row is found by its `.isSelected` trait rather than by name, so
     /// a caller need not know which brush the document happens to have picked.
     func openBrushEditor(_ app: XCUIApplication, tool: String = "brush") {
-        let prefix = tool == "eraser" ? "eraserPanel" : "brushPanel"
+        let prefix = "\(tool)Panel"
         let sizeSlider = app.sliders["\(prefix).sizeSlider"]
         if sizeSlider.exists { return }
         openBrushLibrary(app, tool: tool)
@@ -1266,7 +1266,7 @@ class PaintUITestCase: XCTestCase {
     /// those callers rely on next: the first canvas touch dismisses it (`CanvasManager
     /// .interactionBegan`), which is the behaviour they assert.
     func setBrushSize(_ app: XCUIApplication, tool: String = "brush", normalized: CGFloat) {
-        let prefix = tool == "eraser" ? "eraserPanel" : "brushPanel"
+        let prefix = "\(tool)Panel"
         openBrushEditor(app, tool: tool)
         let slider = app.sliders["\(prefix).sizeSlider"]
         XCTAssertTrue(slider.waitForExistence(timeout: 5))
@@ -1276,7 +1276,7 @@ class PaintUITestCase: XCTestCase {
 
     /// Closes the full-screen editor with its Done chevron, back to the brushes menu.
     func closeBrushEditor(_ app: XCUIApplication, tool: String = "brush") {
-        let prefix = tool == "eraser" ? "eraserPanel" : "brushPanel"
+        let prefix = "\(tool)Panel"
         guard app.sliders["\(prefix).sizeSlider"].exists else { return }
         tapWhenHittable(app.buttons["\(prefix).editorBack"], "The editor's Done chevron")
         XCTAssertTrue(app.sliders["\(prefix).sizeSlider"].waitForNonExistence(timeout: 5),

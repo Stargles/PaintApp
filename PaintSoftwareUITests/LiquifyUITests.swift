@@ -72,6 +72,7 @@ final class LiquifyUITests: PaintUITestCase {
         let round = app.buttons["brushPanel.brush.Round Hard"]
         XCTAssertTrue(tapWhenHittable(round, "choose the ordinary hard round brush"))
         XCTAssertTrue(round.isSelected)
+        setBrushSize(app, normalized: 45.0 / 199)
         app.buttons["toolbar.brushButton"].tap()
         // A fresh scene starts with black; verify the painted ink below without opening a keyboard.
         waitForTheKeyboardToLeave(app)
@@ -81,8 +82,6 @@ final class LiquifyUITests: PaintUITestCase {
                       "the colour wheel must not cover the dot")
         XCTAssertTrue(app.scrollViews["brushPanel.groupList"].waitForNonExistence(timeout: 5),
                       "the brush library must close before painting")
-        adjustSlider(app.sliders["sideToolbar.brushSizeSlider"],
-                     to: CGFloat(BrushSizeCurve.sliderPosition(forPercent: 0.18)), tolerance: 0.04)
         adjustSlider(app.sliders["sideToolbar.brushOpacitySlider"], to: 1, tolerance: 0.01)
 
         let canvas = app.otherElements["canvas.host"], paper = paperRect(in: canvas)
@@ -133,18 +132,32 @@ final class LiquifyUITests: PaintUITestCase {
         let pushBrush = app.buttons["liquifyPanel.brush.Round Hard"]
         XCTAssertTrue(tapWhenHittable(pushBrush, "use a round displacement field"))
         XCTAssertTrue(pushBrush.isSelected)
+        setBrushSize(app, tool: "liquify", normalized: 107.0 / 199)
         app.buttons["toolbar.liquifyButton"].tap()
         XCTAssertTrue(app.segmentedControls["liquifyPanel.modePicker"].waitForNonExistence(timeout: 5),
                       "the Liquify controls must close before touching ink")
         XCTAssertTrue(app.scrollViews["liquifyPanel.groupList"].waitForNonExistence(timeout: 5),
                       "the Liquify brush library must close before touching ink")
-        adjustSlider(app.sliders["sideToolbar.liquifySizeSlider"], to: 0.92, tolerance: 0.06)
         adjustSlider(app.sliders["sideToolbar.liquifyPowerSlider"], to: 1, tolerance: 0.01)
-        // Cross below the centre: the field moves the point, while its edge crosses the wide dab.
-        // Transporting the old painted pixels stretches this asymmetric footprint horizontally.
-        canvas.coordinate(withNormalizedOffset: hostPoint(paper, 0.40, 0.50))
+        let fieldPosition = app.sliders["sideToolbar.liquifySizeSlider"].normalizedSliderPosition
+        let radius = CGFloat(BrushSizeCurve.percent(forSliderPosition: Double(fieldPosition))) * 0.5
+        let gestureY = before.bounds.midY + radius - before.bounds.height * 0.25
+        // Round Hard resolves to its full diameter at a finger's pressure of 1. Keep the point inside
+        // its solid core while the top of the measured painted mark stays outside the field.
+        XCTAssertLessThan(hypot(0.40 - before.bounds.midX, gestureY - before.bounds.midY), radius * 0.95,
+                          "the stroke point must start inside the field's solid core")
+        XCTAssertGreaterThan(gestureY - before.bounds.minY, radius,
+                             "the top of the painted mark must lie outside the field")
+        for x in [0.40, 0.61] {
+            assertAboveTheDock(app, canvas, dy: Double(hostPoint(paper, x, Double(gestureY)).dy),
+                               "the Push gesture")
+        }
+        let geometry = XCTAttachment(string: "before=\(before.bounds) fieldPosition=\(fieldPosition) radius=\(radius) gestureY=\(gestureY)")
+        geometry.name = "liquify-round-dot-field-fixture"; geometry.lifetime = .keepAlways; add(geometry)
+        // Transporting painted pixels across this field edge stretches the old mark horizontally.
+        canvas.coordinate(withNormalizedOffset: hostPoint(paper, 0.40, Double(gestureY)))
             .press(forDuration: 0.05,
-                   thenDragTo: canvas.coordinate(withNormalizedOffset: hostPoint(paper, 0.61, 0.50)),
+                   thenDragTo: canvas.coordinate(withNormalizedOffset: hostPoint(paper, 0.61, Double(gestureY))),
                    withVelocity: XCUIGestureVelocity(70), thenHoldForDuration: 0)
         let moved = NSPredicate { _, _ in
             guard let mark = try? footprint() else { return false }
