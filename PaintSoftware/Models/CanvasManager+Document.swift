@@ -500,7 +500,7 @@ struct CanvasPixelTransformInput {
                         _ = changed.releaseResidentPixels()
                         return changed
                     }
-                    do {
+                    do throws(RasterResidency.Failure) {
                         return .success(CelOutput(layerID: cel.layerID, celID: cel.celID,
                             raster: try transform(cel.raster), baked: try transform(cel.baked), strokeCount: cel.strokeCount))
                     } catch { return .failure(error) }

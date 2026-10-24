@@ -54,7 +54,9 @@ local typed throw to any Error at its do/catch boundary. Native65,0tests,728sour
 Recorded bounded successor: make that local error boundary explicit without fallback/default or
 new policy; also retain the existing RoughInk success screenshot for current drawn proof. No new
 test methods/preset/oracle changes. All9bd offline plans remain unrun, not runtime qualification.
-Root owns docs/Git; source grant follows this record on tmp/s54-typed-transform-boundary.
+The bounded source correction now makes that local do boundary explicitly throw RasterResidency.Failure
+and keeps the existing RoughInk success screenshot. Exactly2lines/2files change; no new tests or
+architecture layer. Fresh compiler/2coldcontrols and all final gates remain pending.
 
 ## Qualification and gates
 

@@ -508,7 +508,7 @@ final class BrushMenuUITests: PaintUITestCase {
         XCTAssertTrue(app.scrollViews["brushPanel.groupList"].waitForNonExistence(timeout: 3))
 
         drawLine(on: canvas, from: CGVector(dx: 0.30, dy: roughY), to: CGVector(dx: 0.70, dy: roughY))
-        attachScreenshot(XCUIScreen.main, "owner-rough-ink", lifetime: .deleteOnSuccess)
+        attachScreenshot(XCUIScreen.main, "owner-rough-ink")
 
         let plain = try inkedRowCounts(of: canvas, band: defaultY, halfBand: 0.03)
         let roughProfile = try inkedRowCounts(of: canvas, band: roughY, halfBand: 0.03)
