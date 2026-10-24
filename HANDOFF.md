@@ -467,3 +467,8 @@ Exclusive-lease run06 at393180d9 stopped during compilation on two omitted throw
 existing benchmarks (PerfBaseline local measure and UndoRepair autoreleasepool). All728 tracked
 app/test/project bytes and modes restored exactly, runtime0. Propagate throws/try at those boundaries
 without changing calculations/oracles, commit in author tree, then fast-forward and retry serially.
+
+Exclusive-lease run07 ate0a5ce8e stopped on the newly integrated MaskParity playback-entry fixture's
+UIImage assignment to the Source tier. Capture it explicitly through the existing throwing fixture
+helper; preserve all source pixels and immediate purity assertion ordering. All728 source files/
+modes restored exactly; runtime0. Full baked-assignment inventory found no other raw UIImage RHS.

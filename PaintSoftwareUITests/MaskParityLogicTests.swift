@@ -845,7 +845,7 @@ final class MaskParityLogicTests: XCTestCase {
         manager.layers[0].cels[0].frameCount = 1
         var later = Cel(id: UUID(), startFrame: 1, frameCount: 1,
                         raster: .empty(size: CanvasFixture.canvasSize))
-        later.bakedImage = CanvasFixture.solidImage(red, rect: CGRect(x: 32, y: 0, width: 32, height: 64))
+        later.bakedImage = try CanvasFixture.rasterSource(CanvasFixture.solidImage(red, rect: CGRect(x: 32, y: 0, width: 32, height: 64)))
         manager.layers[0].cels.append(later)
         manager.layers[1].cels[0].frameCount = 2
         manager.goToFrame(1)
