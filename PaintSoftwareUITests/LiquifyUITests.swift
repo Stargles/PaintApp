@@ -73,8 +73,14 @@ final class LiquifyUITests: PaintUITestCase {
         XCTAssertTrue(tapWhenHittable(round, "choose the ordinary hard round brush"))
         XCTAssertTrue(round.isSelected)
         tapAway(app)
-        setBrushColor(app, hex: "000000")
-        tapAway(app)
+        // A fresh scene starts with black; verify the painted ink below without opening a keyboard.
+        waitForTheKeyboardToLeave(app)
+        XCTAssertTrue(app.textFields["colorPanel.hexField"].waitForNonExistence(timeout: 5),
+                      "the colour card must not cover the dot")
+        XCTAssertTrue(app.otherElements["colorPanel.svSquare"].waitForNonExistence(timeout: 5),
+                      "the colour wheel must not cover the dot")
+        XCTAssertTrue(app.scrollViews["brushPanel.groupList"].waitForNonExistence(timeout: 5),
+                      "the brush library must close before painting")
         app.sliders["sideToolbar.brushSizeSlider"].adjust(toNormalizedSliderPosition:
             CGFloat(BrushSizeCurve.sliderPosition(forPercent: 0.18)))
         app.sliders["sideToolbar.brushOpacitySlider"].adjust(toNormalizedSliderPosition: 1)
