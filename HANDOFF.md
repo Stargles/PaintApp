@@ -189,3 +189,9 @@ Deferred: Stream27stage5 needs owner/laptop; multi-cel22/linear-light10 owner-de
 dropped; future audio28/video30/interpolation require briefs. Raster Move undo/freeform-text minimum
 remain deliberately carried. Older freeze logs were pre-Liquify f813346, owner saw repair message only;
 keep recognizer repair/no speculative UIKit fix. Renewal evidence docs/bug-evidence/auto-resign-2026-10-22.md.
+
+Resume qualification: fd73 selected extension drive keeps the popup open with a fully visible slider,
+but the manually inset shared slider driver stops at0.9813 instead of its requested endpoint. This
+case originally used native normalized adjustment (old47d passes); restore that endpoint gesture,
+retain full-visibility scrolling with an explicit assertion, then run the case and class. No product
+change is attributed to either driver failure.

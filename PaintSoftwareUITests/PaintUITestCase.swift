@@ -194,13 +194,14 @@ class PaintUITestCase: XCTestCase {
     /// the rows move, where a row's frame (the title's, which an earlier version offset from) scrolls
     /// off the top and carries the swipe's start with it — onto a slider, which a drag moves rather
     /// than scrolls. The gutter holds no control at all, so the swipe scrolls whatever is under it.
-    func scrollFillPanel(_ app: XCUIApplication, to control: XCUIElement) {
+    func scrollFillPanel(_ app: XCUIApplication, to control: XCUIElement,
+                         file: StaticString = #filePath, line: UInt = #line) {
         let panel = app.scrollViews.containing(.staticText, identifier: "Fill").firstMatch
         var drags = 0
         // Accessibility can report a clipped row as hittable even when its track is below the
         // viewport. A coordinate drag there dismisses the panel instead of moving the control.
         while panel.exists && drags < 8 {
-            if control.exists && control.isHittable && panel.frame.contains(control.frame) { return }
+            if control.exists && control.isHittable && panel.frame.contains(control.frame) { break }
             let frame = panel.frame
             let origin = app.coordinate(withNormalizedOffset: .zero)
             let from = origin.withOffset(CGVector(dx: frame.minX + 6, dy: frame.midY + frame.height * 0.35))
@@ -208,6 +209,8 @@ class PaintUITestCase: XCTestCase {
             from.press(forDuration: 0.1, thenDragTo: to)
             drags += 1
         }
+        XCTAssertTrue(panel.exists && control.exists && control.isHittable && panel.frame.contains(control.frame),
+                      "The fill control must be wholly inside its panel before a gesture", file: file, line: line)
     }
 
     /// One space-separated field of `canvas.host`'s accessibility label, with its `prefix` removed, or

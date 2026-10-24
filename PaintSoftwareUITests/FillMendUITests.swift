@@ -320,7 +320,7 @@ final class FillMendUITests: PaintUITestCase {
         fillButton.tap()   // opens the panel again, still scrolled to where it was left
         XCTAssertTrue(app.sliders["fillPanel.edgeOverlapSlider"].waitForExistence(timeout: 5), "The fill menu is open")
         scrollFillPanel(app, to: buffer)
-        adjustSlider(buffer, to: 1, tolerance: 0.01)
+        buffer.adjust(toNormalizedSliderPosition: 1)
         fillButton.tap()
         // A wait, never an instant look: moving the paper's edge out is a new structure for the fill
         // (`MetalFillSession.Structure`), and the window grows with it, so the picture lands a press —
