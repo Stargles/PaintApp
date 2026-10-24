@@ -52,6 +52,24 @@ origin/main then ff exactf55cabb8a7e6de56a62a2351719dd58bfce9306d. No production
 relaxation, empty/default decode, other-tree change or native/compiler operation. Native rerun remains
 root-owned; original four-failure triage is running separately before this correction.
 
+## Stream bar fixture queue completion — recorded before edits, 2026-10-24
+
+Root's clean combinedf55cabb8a7e6de56a62a2351719dd58bfce9306d compiled and ran349 methods:
+345passed,4failed,0skips, all728 app/test/project bytes+modes restored. Three failures are the old
+StreamBarStateLogicTests HELLO/status/replacement/coalesced-machine fixtures; the separate metadata
+failure belongs to its original author. New own tree tmp/s54-stream-fixtures starts origin/main then
+fast-forwards exactf55; the frozen root check tree is untouched. No Mac native/compiler/graph run.
+
+Source trace confirms ScreenStreamClient.handle now enqueues onto its existing owning client queue.
+These three fixtures still assert client state or call coordinator.stateChanged inline immediately
+after enqueue, before HELLO has installed remoteMachineID/state. Scope: adapt only these fixture
+transitions to observe existing onStateChange/onStatus main callbacks before asserting, preserving
+connected/replaced and real peer-identity/bar invariants. Completion must accept either actual event
+so a wrong semantic route still reaches the existing assertion instead of timing out. Preserve any
+pre-existing callbacks; no sleeps, longer timeouts, product bypass or synchronous production handle.
+Commit before preparing assertion mutations. Root retains all Mac native, fast/UI and mutation gates.
+
+
 Start at AGENTS.md, then CLAUDE.md, TODO.md, BUGS.md and the relevant spec/PERFORMANCE.md. Verify origin,
 worktrees and every tmp branch before trusting this file. Kevin authorizes useful agents and a large
 budget, with quality/usage conservation before speed. Continue actionable work without recommendation-
