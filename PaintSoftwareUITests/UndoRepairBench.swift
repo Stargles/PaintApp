@@ -1194,7 +1194,7 @@ final class UndoRepairBench: XCTestCase {
     /// an image memoizes it, so the expectation is that it does not.
     func testWhatARasterUndoPressSpendsOnTheMainThread() throws {
         for size in [CGSize(width: 2048, height: 1024), CGSize(width: 4096, height: 4096)] {
-            autoreleasepool {
+            try autoreleasepool {
                 let manager = CanvasManager()
                 manager.brushLibraryOverride = CanvasFixture.isolatedBrushLibrary()
                 manager.canvasSize = size

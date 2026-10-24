@@ -3127,7 +3127,7 @@ final class PerfBaselineTests: XCTestCase {
             return best
         }
 
-        func measure(_ canvas: CGSize, _ label: String) {
+        func measure(_ canvas: CGSize, _ label: String) throws {
             var rows: [(String, String)] = []
             for resolution in OnionSkinSettings.Resolution.allCases {
                 let size = OnionSkinBudget.compositeSize(for: canvas, resolution: resolution)
@@ -3182,8 +3182,8 @@ final class PerfBaselineTests: XCTestCase {
         // "Full" needs a warning in the UI turns on this table, not on the one below it, so it is
         // measured first and the 4K case is kept as the stress case it always was.
         let owner = CGSize(width: 2048, height: 1024)
-        measure(owner, "2048x1024 — the owner's canvas")
-        measure(CGSize(width: 4096, height: 4096), "4096x4096 — the stress case")
+        try measure(owner, "2048x1024 — the owner's canvas")
+        try measure(CGSize(width: 4096, height: 4096), "4096x4096 — the stress case")
 
         // Structural, not a timing threshold: the options have to actually differ, or the control the
         // owner asked for is decoration.

@@ -560,3 +560,8 @@ isolated raster-consumer-check tree and existing focused.py wrapper/DerivedData.
 only in the author tree, committed then fast-forwarded into the frozen check tree. Require728 exact
 tracked app/test/project files restored and32 methods/zero skips. No mutants/UI/full fast/device
 under this grant; release the lease after green32 or a substantive unresolved runtime blocker.
+
+Exclusive-lease run06 at393180d9 stopped during compilation on two omitted throws boundaries in
+existing benchmarks (PerfBaseline local measure and UndoRepair autoreleasepool). All728 tracked
+app/test/project bytes and modes restored exactly, runtime0. Propagate throws/try at those boundaries
+without changing calculations/oracles, commit in author tree, then fast-forward and retry serially.
