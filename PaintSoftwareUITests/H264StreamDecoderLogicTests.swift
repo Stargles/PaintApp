@@ -190,7 +190,7 @@ final class H264StreamDecoderLogicTests: XCTestCase {
         let decoder = H264StreamDecoder()
         var requests = 0
         let lock = NSLock()
-        decoder.onNeedsKeyframe = { lock.lock(); requests += 1; lock.unlock() }
+        decoder.onNeedsKeyframe = { _ in lock.lock(); requests += 1; lock.unlock() }
         let payloads = try wireFrames(from: accessUnits(in: try fixtureBytes()))
 
         // The SPS/PPS ride with the IDR at 0, so give the decoder its parameter sets through a
@@ -242,7 +242,72 @@ final class H264StreamDecoderLogicTests: XCTestCase {
         XCTAssertEqual(decoder.decodedFrameCount, 0)
         XCTAssertNil(decoder.latestCGImage())
         feed(decoder, StreamVideoPayload(isKeyframe: false, presentationTimeMicroseconds: 1, accessUnit: Data()))
-        XCTAssertEqual(decoder.decodeErrorCount, 0, "Retired malformed work must not request a new run's keyframe")
+        XCTAssertEqual(decoder.decodeErrorCount, 0, "Retired work must not request a new run's keyframe")
+    }
+
+    @MainActor
+    func testDelayedKeyframeNotificationCannotSendOnReplacementButCurrentNotificationCan() throws {
+        let payloads = try wireFrames(from: accessUnits(in: fixtureBytes()))
+        let parameterSets = H264StreamDecoder.splitAnnexB(payloads[0].accessUnit)
+            .filter { ($0[$0.startIndex] & 0x1F) == 7 || ($0[$0.startIndex] & 0x1F) == 8 }
+        var setsOnly = Data()
+        for nal in parameterSets { setsOnly.append(contentsOf: [0, 0, 0, 1]); setsOnly.append(nal) }
+        let sets = StreamVideoPayload(isKeyframe: false, presentationTimeMicroseconds: 0, accessUnit: setsOnly)
+        let endpoint = StreamEndpoint(host: "laptop", port: 47301)
+        let manager = CanvasFixture.manager()
+        manager.streamCoordinator.documentEndpointOverride = endpoint
+        manager.streamCoordinator.sync()
+        let client = try XCTUnwrap(manager.streamCoordinator.client(for: endpoint))
+        defer { manager.streamCoordinator.stopAll() }
+        let forward = try XCTUnwrap(client.decoder.onNeedsKeyframe,
+                                    "The actual coordinator must wire the epoch-carrying client handoff")
+        client.writeFrameOverride = { _, _, completed in completed(nil) }
+        let lock = NSLock()
+        var heldEpoch: UInt64?, controls: [StreamControlCommand] = []
+        client.onFrameSent = { type, payload in
+            guard type == .control, let command = StreamControlCommand(payload: payload) else { return }
+            lock.lock(); controls.append(command); lock.unlock()
+        }
+        let firstHello = expectation(description: "original HELLO admitted")
+        client.onStateChange = { state in if state == .connected { firstHello.fulfill() } }
+        client.handle(StreamFrame(.hello, payload: StreamJSON.encode(
+            StreamHello(proto: 1, app: "PaintStreamer", version: "1", name: "original"))))
+        wait(for: [firstHello], timeout: 5)
+        // Hold the body of the existing decoder notification AFTER it validates its old epoch.
+        client.decoder.onNeedsKeyframe = { epoch in lock.lock(); heldEpoch = epoch; lock.unlock() }
+        feed(client.decoder, sets)
+        feed(client.decoder, payloads[1])
+        lock.lock(); let notification = heldEpoch; lock.unlock()
+        let oldEpoch = try XCTUnwrap(notification)
+        let replaced = expectation(description: "actual replacement retired the old run")
+        client.onStateChange = { state in if case .replaced = state { replaced.fulfill() } }
+        var status = StreamStatus(source: .init(kind: "none", name: ""), width: 0, height: 0,
+                                  fps: 30, streaming: false,
+                                  reason: ScreenStreamClient.replacedByAnotherConnectionReason)
+        client.handle(StreamFrame(.status, payload: StreamJSON.encode(status)))
+        wait(for: [replaced], timeout: 5)
+        let connected = expectation(description: "replacement HELLO admitted")
+        client.onStateChange = { state in if state == .connected { connected.fulfill() } }
+        client.handle(StreamFrame(.hello, payload: StreamJSON.encode(
+            StreamHello(proto: 1, app: "PaintStreamer", version: "1", name: "replacement"))))
+        wait(for: [connected], timeout: 5)
+        forward(oldEpoch)
+        let checked = expectation(description: "old notification passed through actual client queue")
+        status.reason = "notification barrier"
+        client.onStatus = { value in if value.reason == "notification barrier" { checked.fulfill() } }
+        client.handle(StreamFrame(.status, payload: StreamJSON.encode(status)))
+        wait(for: [checked], timeout: 5)
+        lock.lock(); let stale = controls; lock.unlock()
+        XCTAssertEqual(stale, [], "The old epoch may not admit any CONTROL on the new run")
+
+        client.decoder.onNeedsKeyframe = forward
+        feed(client.decoder, sets)
+        feed(client.decoder, payloads[1])
+        let stopped = expectation(description: "current request admitted before stop")
+        client.stop { stopped.fulfill() }
+        wait(for: [stopped], timeout: 5)
+        lock.lock(); let current = controls; lock.unlock()
+        XCTAssertEqual(current, [.keyframe], "The current gap still sends exactly one actual keyframe request")
     }
 
 }

@@ -88,8 +88,9 @@ nonisolated final class H264StreamDecoder {
     private var _announcesFrames = true
 
     /// Called on the decode queue when a decode error or a missing reference means the stream
-    /// cannot continue without a keyframe. Fires once per gap, not once per dropped AU.
-    var onNeedsKeyframe: (() -> Void)?
+    /// cannot continue without a keyframe. Carries the epoch through the client's queue landing;
+    /// a notification validated here may otherwise outlive reconnect. Fires once per gap.
+    var onNeedsKeyframe: ((UInt64) -> Void)?
 
     init(queue: DispatchQueue = DispatchQueue(label: "PaintSoftware.ScreenStream.decode", qos: .userInitiated)) {
         self.queue = queue
@@ -136,7 +137,7 @@ nonisolated final class H264StreamDecoder {
         else { slotLock.unlock(); continuation() }
     }
 
-    private func isCurrent(_ candidate: UInt64) -> Bool {
+    func isCurrent(_ candidate: UInt64) -> Bool {
         slotLock.lock(); defer { slotLock.unlock() }
         return epoch == candidate
     }
@@ -311,7 +312,7 @@ nonisolated final class H264StreamDecoder {
     private func reportNeedsKeyframe(epoch: UInt64) {
         guard isCurrent(epoch), !needsKeyframeReported else { return }
         needsKeyframeReported = true
-        onNeedsKeyframe?()
+        onNeedsKeyframe?(epoch)
     }
 
     private func rebuildSession(sps: Data, pps: Data) {

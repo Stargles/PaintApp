@@ -371,13 +371,18 @@ nonisolated final class ScreenStreamClient {
         }
     }
 
-    func send(_ command: StreamControlCommand) {
+    func send(_ command: StreamControlCommand, decoderEpoch: UInt64? = nil) {
         queue.async { [weak self] in
-            self?.send(.control, payload: command.encoded)
+            guard let self else { return }
+            // Run retirement/reset also belongs to this queue, so validation and control admission
+            // cannot straddle a reconnect. A delayed decoder notification keeps its original epoch.
+            if let decoderEpoch, !self.decoder.isCurrent(decoderEpoch) { return }
+            self.send(.control, payload: command.encoded)
         }
     }
 
     func requestKeyframe() { send(.keyframe) }
+    func requestKeyframe(forDecoderEpoch epoch: UInt64) { send(.keyframe, decoderEpoch: epoch) }
     func pause() { send(.pause) }
     func resume() { send(.resume) }
 

@@ -101,6 +101,19 @@ only so far; no compiler/native/UI run or mutation qualification yet.
 
 ## Decoder keyframe notification lifetime — scope recorded, 2026-10-24
 
+Implemented the same existing callback with an epoch argument. Coordinator always wires that client
+lifetime handoff (also when existing startsClients holds sockets); actual client queue rechecks the
+original decoder epoch before admitting any control. Ordinary artist keyframe requests keep their
+normal route; the untagged decoder route is deleted. No extra callback/cache/flag or new owner.
+New deterministic regression uses the actual CanvasFixture coordinator callback, real fixture SPS/PPS
+and a P-frame reference gap, original HELLO→actual replacement status/reset→new HELLO, then releases
+that captured old callback body. Actual admitted CONTROL census must be0; restoring the same real
+callback and feeding the current gap must admit exactly1 keyframe. Existing status/stop completion
+barriers settle the true queues, with no sleeps/fake delays. H264Decoder now8; focused Swift76/6.
+UI lints/diff-check pass; Swift native/compiler/UI/fault gates stay pending root. C#source/fixture63files
+remain byte-identical qualified3a9 Debug/Release166 each. Metadata4b453d97 is accepted separately.
+
+
 Independent review confirmed a final stale callback boundary: reportNeedsKeyframe checks its decode
 epoch, but the untagged coordinator→client queue handoff can land after this same client reconnects
 and send the old request on the replacement run. Buffer publication itself is already atomically
@@ -214,7 +227,7 @@ Added actual stalled-write+responsive-control/stop and write-error/no-tail regre
 counts and actual frame bytes. Exposed test frame handling now serializes on the client queue. Closed-
 document test waits on that real queue before asserting no insertion; decoded-image reset retains the
 same complete CGImage. The old synchronous decoder test-drain API is removed; completion paces fixtures.
-Focused Swift union75 methods/6 classes (Framing15, FileTransfer10, FileSend5, H264Decoder7,
+Focused Swift union76 methods/6 classes (Framing15, FileTransfer10, FileSend5, H264Decoder8,
 ConnectFailure16, Bar22); verify census externally before native. Both UI lints/diff-check pass, but Swift
 remains uncompiled/unrun and all assertion faults remain unrun. Windows source remains exact qualified3a9.
 

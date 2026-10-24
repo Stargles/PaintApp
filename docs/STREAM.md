@@ -277,6 +277,8 @@ while the old submission settles; it never coalesces arbitrary compressed P-fram
 at most one legal framed payload plus the current256KiB receive block, alongside the admitted AU and
 VT's sample/reference buffers. These are application ownership bounds, not codec/GPU/OS RSS claims.
 Reset retires the epoch immediately; old callbacks cannot publish, and the last complete image stays.
+Decoder keyframe notifications also carry that epoch through the coordinator to actual client-queue
+control admission, so a delayed old notification cannot ask on this same client's replacement run.
 Every early return, decode error or no-image completion releases once. Main callbacks carry the run
 lifetime; a removed client cannot insert a queued file or update a replacement document connection.
 The old synchronous test drain API is removed; fixture tests use actual AU completion.

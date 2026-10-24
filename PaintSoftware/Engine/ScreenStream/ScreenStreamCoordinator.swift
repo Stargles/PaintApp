@@ -327,6 +327,10 @@ final class ScreenStreamCoordinator: ObservableObject {
             }
             self.routeReceivedFile(file, reply: reply)
         }
+        // This is the client's decode/control lifetime even when a fixture holds socket startup.
+        client.decoder.onNeedsKeyframe = { [weak client] epoch in
+            client?.requestKeyframe(forDecoderEpoch: epoch)
+        }
         guard startsClients else { return }
         connectionStates[endpoint] = .connecting
         client.onStateChange = { [weak self, weak client] state in
@@ -347,9 +351,6 @@ final class ScreenStreamCoordinator: ObservableObject {
                 guard let self, let client, self.clients.values.contains(where: { $0 === client }) else { return }
                 self.frameArrived()
             }
-        }
-        client.decoder.onNeedsKeyframe = { [weak client] in
-            client?.requestKeyframe()
         }
         client.start()
     }
