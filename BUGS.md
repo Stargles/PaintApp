@@ -3,6 +3,21 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## Library relocation can delete different same-size artwork (2026-10-24)
+
+`ProjectLibraryMigration.migrateItem` adopted an arbitrary existing destination using recursive file
+count and total bytes, then deleted the source. Distinct same-named packages can have equal totals.
+Fresh-copy verification and destination adoption require separate proof: adoption compares exact tree
+names and bounded file contents; unreadable entries preserve both sides. The isolated correction is in
+progress on `tmp/s54-library-ownership`; native qualification remains pending.
+
+## Expiring Trash can delete another project's same-name history (2026-10-24)
+
+`ProjectBackupManager.purgeExpiredTrash` previously removed backup directories by package basename.
+Projects with the same name can have independent UUID histories. Purge now uses package IDs across
+Projects and retained Trash and preserves histories when ownership cannot be established. Native
+qualification remains pending.
+
 ## One-shot geometry repair delays the first app screen — 2026-10-24
 
 `PaintApp.init` synchronously calls the @MainActor `PointGeometryRepair.run()` before constructing

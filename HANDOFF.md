@@ -17,9 +17,12 @@ Installed normal Release remains bcd7a6af, UUID F6102F9A-6D31-3185-B078-47B4C419
 - Active fill tree: `~/PaintWork/PaintApp-s53-fill-mend`, tmp/s53-fill-mend. Production is frozen at
   d1ff2ad0/265e588e. Later commits change only UI fixtures/readers and records. Resolve current HEAD
   with Git; latest four-case UI fixture run is3/4 green; one extension-buffer driver failure remains.
-- Audit library tree: `~/PaintWork/PaintApp-s54-library-ownership`, tmp/s54-library-ownership,
-  clean de28149c. Strict shared file-tree/content identity and UUID Trash ownership; six new logic
-  methods, PBX source registered. Parse/plutil only; no compile/runtime/UI/mutation gate. WIP, do not merge.
+- Audit library tree: `~/PaintWork/PaintApp-s54-library-ownership`, tmp/s54-library-ownership. Strict
+  shared file-tree/content identity and UUID Trash ownership; PBX source registered. Two added logic
+  regressions now cover migration preserving both sides after linked-destination comparison failure and
+  unreadable retained Trash ownership. The recorded task commits are being rebased onto this fill-integrated
+  dependency; see the external mutation plan in `~/PaintWork/s54-architecture-audit/library-ownership/`.
+  No native build/runtime/UI/mutation gate has run. WIP, do not merge.
 - Audit background tree: `~/PaintWork/PaintApp-s54-background-ownership`, tmp/s54-background-ownership,
   clean ec46b3e6. Export cancellation, maintenance serialization and bounded/cancelled thumbnails;
   five new regressions. No native compile/runtime/UI/mutation gate. WIP, do not merge.

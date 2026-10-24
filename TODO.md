@@ -65,6 +65,25 @@ their files are repaired. Build `2974b33` broke this rule and lost the owner's k
 
 ---
 
+## Protect library relocation and Trash backup ownership — 2026-10-24
+
+**Active — bounded audit correction on `tmp/s54-library-ownership`.** Read-only persistence audit
+found two data-protection defects: `ProjectLibraryMigration.migrateItem` treats a same-named destination
+with equal aggregate file count/bytes as identical and can delete different source artwork;
+`ProjectBackupManager.purgeExpiredTrash` deletes backup directories by basename and can remove a
+recent same-named project's history. Record precedes implementation. Source comparison must be strict,
+bounded and independent of the temporary geometry repair; purge must use actual project identity and
+preserve history when ownership cannot be established. Preserve damaged packages and both sides on
+comparison/read failure. Scope excludes raster residency and backup retention policy changes.
+
+- [ ] Focused regressions for equal-census different content/tree, strict comparison failures and
+      distinct/same/unknown Trash ownership; minimal shared ownership validation.
+- [ ] Commit normal source, review mutation recipes, then qualify under root's explicit native grant.
+      No native run, simulator operation, merge, push or device operation is authorized for this work yet.
+- [ ] Reconcile selected static counts, lints and graph report; hand clean commits to root for integration.
+
+---
+
 ## Vector Liquify must move points only — 2026-10-23
 
 **Active — continue implementation.** Owner explicitly rejects treating the architecture question
