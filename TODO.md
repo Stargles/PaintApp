@@ -55,6 +55,15 @@ The bounded source correction now makes that local do boundary explicitly throw 
 and keeps the existing RoughInk success screenshot. Exactly2lines/2files change; no new tests or
 architecture layer. Fresh compiler/2coldcontrols and all final gates remain pending.
 
+Actual corrected b865 controls passed2/2,0fail/skip/expected, native0/wrapper0, all728exact and
+clean on owner9. Root independently reconciled selectors/device/freeze and LOOKed Rough, vector
+options and new-fill pictures. Rough is portrait; Mend is owner1080x810 landscape. Before whole47,
+record one remaining test-evidence correction: set existing Rough workflow landscape before launch,
+matching the same-class convention. Keep all paths, assertions, presets and method counts unchanged.
+This avoids a new screenshot-only test/harness. Current2green does not prove that new orientation;
+the upcoming whole47 must actually pass and expose a retained owner-size whole picture. No mutation
+or device grant follows from this record. Original b865 evidence and failed9bd attempt stay exact.
+
 ## How to read and keep this file
 
 Every item is a **status**, a short **description** a future session can pick up cold, and **what is
