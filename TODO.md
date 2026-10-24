@@ -186,6 +186,10 @@ edge: a naive expansion that crosses the fill boundary is explicitly rejected. R
 geometry, retained source and mending calculation rather than adding a parallel fill mechanism.
 
 Owner also asks for **a new layer action that applies Mend Gaps to all fills in all cels of that layer**.
+**Owner ruling2026-10-24: include interior strokes attached to the outside outline, while preserving
+the outside edge and avoiding side effects.** The fully-enclosed-components-only restriction is
+rejected; do not silently ship it as full coverage. Scope illustration: `~/PaintWork/s53-fill-mend/design/connected-stroke-scope.png`.
+
 **Owner ruling2026-10-24: this action is vector layers only.** Raster fills are flattened into paint and
 are not individually identifiable; no raster storage redesign is authorized. The per-fill mending
 correction still uses the shared raster/vector fill pipeline. Use the same setting/semantics as an
