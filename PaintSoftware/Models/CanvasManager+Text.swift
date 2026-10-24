@@ -449,14 +449,7 @@ extension CanvasManager {
             let before = cel.vector?.elements ?? []
             let prepared = cel.vector?.makeCopy() ?? .empty(size: cel.raster.size)
             let isBlank = drawn.recipe.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            let element: VectorTextElement?
-            if isBlank { element = nil }
-            else {
-                guard let local = prepared.localText(fromCanvas: drawn) else {
-                    raise(.drawingSourceUnavailable); return nil
-                }
-                element = local
-            }
+            let element = isBlank ? nil : prepared.localText(fromCanvas: drawn)
             let changed = prepared.commitTextEdit(editingID: ended.editingID, element: element)
             let elements = prepared.elements
             cel.vector = prepared

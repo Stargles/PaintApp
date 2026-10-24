@@ -2440,10 +2440,33 @@ extension CanvasManager {
                     Self.approximateSourceCost(oldBaked), Self.approximateSourceCost(newBaked),
                     vector.map { VectorUndoCost.bytes(from: $0.before, to: $0.after) } ?? 0,
                     recipe?.retainedBytes ?? 0].reduce(0, UndoBudget.addingCost)
-        recordUndo(label: label, cost: cost, undo: { [weak self] in
+        // Whole-cel undo can target an evicted version. Prepare both tiers before history moves,
+        // then retain their provider images through the immediate metadata/geometry installation.
+        // [] is a prepared blank; nil is an unavailable version and must never reach apply.
+        var preparedPictures: [UIImage]?
+        let prepare: (RasterLayerTexture, RasterSource?) -> Bool = { [weak self] raster, baked in
+            preparedPictures = nil
+            guard let self else { return false }
+            do {
+                let rasterImage = try raster.renderIfNonEmpty().get()
+                let bakedImage = try baked?.resolveImage().get()
+                preparedPictures = [rasterImage, bakedImage].compactMap { $0 }
+                return true
+            } catch {
+                self.raise(.drawingSourceUnavailable)
+                return false
+            }
+        }
+        recordUndo(label: label, cost: cost,
+            prepareUndo: { prepare(oldRaster, oldBaked) }, prepareRedo: { prepare(newRaster, newBaked) },
+            undo: { [weak self] in
+            guard let pictures = preparedPictures else { preconditionFailure("Cel undo requires successful source admission") }
+            defer { preparedPictures = nil; withExtendedLifetime(pictures) {} }
             self?.applyCelChange(layerID: layerID, celID: celID, raster: oldRaster, baked: oldBaked,
                                  vector: vector.map { ($0.canvas, $0.before, $0.rewriting) }, recipe: recipe?.before)
         }, redo: { [weak self] in
+            guard let pictures = preparedPictures else { preconditionFailure("Cel redo requires successful source admission") }
+            defer { preparedPictures = nil; withExtendedLifetime(pictures) {} }
             self?.applyCelChange(layerID: layerID, celID: celID, raster: newRaster, baked: newBaked,
                                  vector: vector.map { ($0.canvas, $0.after, $0.rewriting) }, recipe: recipe?.after)
         })

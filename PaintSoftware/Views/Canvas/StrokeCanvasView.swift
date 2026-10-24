@@ -1986,26 +1986,36 @@ final class StrokeCanvasView: CanvasPlaneView {
                                     fromCount: Int, toCount: Int) {
         let origin = rect.origin
         let cost = CanvasManager.approximateSourceCost(before) + CanvasManager.approximateSourceCost(after)
-        var preparedUndo: RasterSource?
-        var preparedRedo: RasterSource?
+        var preparedUndo: Result<RasterSource?, RasterResidency.Failure>?
+        var preparedRedo: Result<RasterSource?, RasterResidency.Failure>?
         canvasManager?.recordUndo(label: strokeTool == .eraser ? .erase : .brushStroke, cost: cost,
             prepareUndo: { [weak self] in
-                switch raster.replacingPatch(with: before, at: origin) {
-                case .success(let source): preparedUndo = source; return true
+                let result = raster.replacingPatch(with: before, at: origin)
+                preparedUndo = result
+                switch result {
+                case .success: return true
                 case .failure: self?.canvasManager?.raise(.drawingSourceUnavailable); return false
                 }
             }, prepareRedo: { [weak self] in
-                switch raster.replacingPatch(with: after, at: origin) {
-                case .success(let source): preparedRedo = source; return true
+                let result = raster.replacingPatch(with: after, at: origin)
+                preparedRedo = result
+                switch result {
+                case .success: return true
                 case .failure: self?.canvasManager?.raise(.drawingSourceUnavailable); return false
                 }
             }, undo: { [weak self] in
-            raster.reset(toSource: preparedUndo, strokeCount: fromCount)
+            guard case .some(.success(let source)) = preparedUndo else {
+                preconditionFailure("Raster undo requires successful source admission")
+            }
+            raster.reset(toSource: source, strokeCount: fromCount)
             preparedUndo = nil
             self?.refreshDisplay()
             self?.onStrokeEnded?()
         }, redo: { [weak self] in
-            raster.reset(toSource: preparedRedo, strokeCount: toCount)
+            guard case .some(.success(let source)) = preparedRedo else {
+                preconditionFailure("Raster redo requires successful source admission")
+            }
+            raster.reset(toSource: source, strokeCount: toCount)
             preparedRedo = nil
             self?.refreshDisplay()
             self?.onStrokeEnded?()

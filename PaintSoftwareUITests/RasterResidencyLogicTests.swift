@@ -1153,4 +1153,93 @@ final class RasterResidencyLogicTests: XCTestCase {
         }
     }
 
+    @MainActor
+    func testWholeCelUndoAndRedoRefuseBeforeStackOrPixelChangesThenReleasePreparedPinsOnRetry() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("raster-cel-history-\(UUID())")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        var allowed = true
+        let owner = RasterResidency(budgetBytes: pictureBytes * 24, hasHeadroom: { _ in allowed })
+        let size = CGSize(width: width, height: height)
+        func backed(_ color: UIColor, name: String) throws -> RasterSource {
+            let url = root.appendingPathComponent(name + ".png")
+            try XCTUnwrap(CanvasFixture.solidImage(color, rect: CGRect(origin: .zero, size: size), size: size).pngData()).write(to: url)
+            return RasterSource.backed(by: try ProjectStore.RasterBacking.protect(url, using: owner).get(), using: owner)
+        }
+        let red = try backed(.red, name: "red")
+        let green = try backed(.green, name: "green")
+        let blue = try backed(.blue, name: "blue")
+        let oldRaster = RasterLayerTexture(size: size, source: red, strokeCount: 2)
+        let newRaster = RasterLayerTexture(size: size, source: blue, strokeCount: 4)
+        let manager = CanvasFixture.manager()
+        manager.canvasSize = size
+        let layerID = manager.layers[0].id, celID = manager.layers[0].cels[0].id
+        manager.layers[0].cels[0].raster = oldRaster
+        manager.layers[0].cels[0].bakedImage = green
+        manager.history.removeAll()
+        manager.registerUndoableCelChange(layerID: layerID, celID: celID,
+            oldRaster: oldRaster, oldBaked: green, newRaster: newRaster, newBaked: nil, label: .fill)
+        func pixels(_ raster: RasterLayerTexture) throws -> [UInt8] {
+            try autoreleasepool { try pixel(XCTUnwrap(raster.renderToUIImage().get().cgImage)) }
+        }
+        // The first required target is resident; refusal must happen on the second tier and still
+        // preserve the complete current picture and both stacks.
+        XCTAssertEqual(try pixels(oldRaster), [255, 0, 0, 255])
+        XCTAssertEqual(try pixels(newRaster), [0, 0, 255, 255])
+        let newIdentity = CelContentIdentity(manager.layers[0].cels[0])
+        let bytesBeforeUndo = owner.usage.pixelBytes
+        allowed = false
+        XCTAssertNil(manager.history.undo())
+        XCTAssertEqual(manager.history.undoStack.map(\.label), [.fill])
+        XCTAssertTrue(manager.history.redoStack.isEmpty)
+        XCTAssertEqual(CelContentIdentity(manager.layers[0].cels[0]), newIdentity)
+        XCTAssertEqual(manager.layers[0].cels[0].raster.strokeCount, 4)
+        XCTAssertEqual(try pixels(manager.layers[0].cels[0].raster), [0, 0, 255, 255])
+        XCTAssertEqual(owner.usage.pixelBytes, bytesBeforeUndo)
+        XCTAssertEqual(manager.notice?.kind, .drawingSourceUnavailable)
+        allowed = true
+        XCTAssertEqual(manager.history.undo(), .fill)
+        XCTAssertTrue(manager.history.undoStack.isEmpty)
+        XCTAssertEqual(manager.history.redoStack.map(\.label), [.fill])
+        XCTAssertTrue(manager.layers[0].cels[0].raster === oldRaster)
+        XCTAssertTrue(manager.layers[0].cels[0].bakedImage === green)
+        XCTAssertEqual(manager.layers[0].cels[0].raster.strokeCount, 2)
+        XCTAssertEqual(try pixels(manager.layers[0].cels[0].raster), [255, 0, 0, 255])
+        XCTAssertTrue(blue.releaseResidentPixels())
+        let oldIdentity = CelContentIdentity(manager.layers[0].cels[0])
+        let bytesBeforeRedo = owner.usage.pixelBytes
+        allowed = false
+        XCTAssertNil(manager.history.redo())
+        XCTAssertTrue(manager.history.undoStack.isEmpty)
+        XCTAssertEqual(manager.history.redoStack.map(\.label), [.fill])
+        XCTAssertEqual(CelContentIdentity(manager.layers[0].cels[0]), oldIdentity)
+        XCTAssertEqual(manager.layers[0].cels[0].raster.strokeCount, 2)
+        XCTAssertEqual(try pixels(manager.layers[0].cels[0].raster), [255, 0, 0, 255])
+        XCTAssertEqual(owner.usage.pixelBytes, bytesBeforeRedo)
+        allowed = true
+        XCTAssertEqual(manager.history.redo(), .fill)
+        XCTAssertEqual(manager.history.undoStack.map(\.label), [.fill])
+        XCTAssertTrue(manager.history.redoStack.isEmpty)
+        XCTAssertTrue(manager.layers[0].cels[0].raster === newRaster)
+        XCTAssertNil(manager.layers[0].cels[0].bakedImage)
+        XCTAssertEqual(try pixels(manager.layers[0].cels[0].raster), [0, 0, 255, 255])
+        XCTAssertNil(manager.history.redo(), "One successful retry consumes exactly one action")
+        for source in [red, green, blue] { XCTAssertTrue(source.releaseResidentPixels()) }
+        XCTAssertEqual(owner.usage.pixelBufferCount, 0, "Neither successful direction may retain its temporary provider pins")
+        XCTAssertLessThanOrEqual(owner.usage.admittedBytes, owner.budgetBytes)
+
+        // Empty successful preparation must remain different from the nil failure above.
+        manager.history.removeAll()
+        let emptyBefore = RasterLayerTexture(size: size, residency: owner)
+        let emptyAfter = RasterLayerTexture(size: size, strokeCount: 3, residency: owner)
+        manager.registerUndoableCelChange(layerID: layerID, celID: celID,
+            oldRaster: emptyBefore, oldBaked: nil, newRaster: emptyAfter, newBaked: nil, label: .clearFrame)
+        allowed = false
+        XCTAssertEqual(manager.history.undo(), .clearFrame)
+        XCTAssertTrue(manager.layers[0].cels[0].raster === emptyBefore)
+        XCTAssertEqual(manager.history.redo(), .clearFrame)
+        XCTAssertTrue(manager.layers[0].cels[0].raster === emptyAfter)
+        XCTAssertEqual(owner.usage.pixelBufferCount, 0)
+    }
+
 }

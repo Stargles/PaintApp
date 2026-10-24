@@ -561,3 +561,18 @@ against a transcript this audit does not have.
 - **The raster Move's undo half.** `finalizePendingGesturesForHistoryAction` has fill, shape and text
   arms and no raster-float arm.
 - **Freeform text's minimum-size exemption** is still unruled.
+
+Root approved the narrow whole-cel undo admission follow-up: the existing seven-consumer
+registerUndoableCelChange seam must prepare target raster/baked sources via Action preflight,
+retain provider images through immediate apply, then release its temporary pins. Nil means failed
+preparation; an empty image list is successful logical blank. Refused undo/redo must leave stacks,
+metadata and drawn pixels unchanged and retry once. Structural snapshots continue to use the
+existing atomic visible-window presentation path, never eager whole-document hydration.
+
+Root's isolated9bfc consumer compile stopped before tests on one actual source error: localText
+returns a nonoptional VectorTextElement, so its staging call now uses that existing value contract
+instead of conditional binding. No API/fallback added. Whole-cel preflight follow-up and32nd owned
+method are prepared: refusal in both directions preserves stacks/metadata/RGBA/counts; retry lands
+once and releasing source caches proves temporary image pins are gone. Successful blank remains
+valid. Raster patch undo also stores an explicit successful Result before commit, so a nil source
+cannot be mistaken for an absent preflight. Native successor/other gates remain root-owned/unrun.
