@@ -45,6 +45,15 @@ records blank proof without treating unvisited resources as empty; the twelfth p
 transparent content with one painted corner texel. The existing serialization helper now rethrows
 for atomic throwing clients. No native gate has run.
 
+Root's isolated exact e6f0d23d primitive check compiled successfully and ran12 methods:11passed,
+one final COW-release count failed while its temporary UIKit wrapper had no autorelease boundary.
+Old/new RGBA and two-buffer admission assertions passed. Make that release boundary explicit without
+weakening counts/caps. Immutable snapshots now own a read lease before requesting any UIImage;
+CGDataProviders retain the same lease through aliases/escapes. A thirteenth method freezes without
+resolving, edits, then verifies old red/new blue and exact released counts. Native rerun/faults remain
+root-owned and unrun on this revision. Production RasterLayerTexture Result/source migration is WIP
+and is deliberately excluded from this primitive checkpoint; consumers are not yet compile-ready.
+
 ## Current combined source qualification — 2026-10-24
 
 Root's normal combined baseline at6b5010d9 passed847/847, zero skips/failures; all724 tracked

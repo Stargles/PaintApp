@@ -59,21 +59,50 @@ final class RasterResidencyLogicTests: XCTestCase {
     func testEditingAnEscapedVersionCopiesBeforeWritingAndChargesBothExactPictures() throws {
         let owner = RasterResidency(budgetBytes: pictureBytes * 4, hasHeadroom: { _ in true })
         var current = try surface(owner)
-        var old: CGImage? = try current.image().get().cgImage
-        XCTAssertEqual(current.readProviderCount, 1)
-        XCTAssertThrowsError(try paint(current, color: .blue)) { error in
-            XCTAssertEqual(error as? RasterResidency.Failure, .writeRequiresCopy)
+        weak var oldWrapper: UIImage?
+        try autoreleasepool {
+            let oldImage = try current.image().get()
+            oldWrapper = oldImage
+            var old: CGImage? = oldImage.cgImage
+            XCTAssertEqual(current.readLeaseCount, 1)
+            XCTAssertThrowsError(try paint(current, color: .blue)) { error in
+                XCTAssertEqual(error as? RasterResidency.Failure, .writeRequiresCopy)
+            }
+            current = try current.preparedForWrite().get()
+            try paint(current, color: .blue)
+            XCTAssertEqual(owner.usage.pixelBufferCount, 2)
+            XCTAssertEqual(owner.usage.pixelBytes, pictureBytes * 2)
+            XCTAssertEqual(try pixel(XCTUnwrap(old)), [255, 0, 0, 255])
+            let new = try current.image().get()
+            XCTAssertEqual(try pixel(XCTUnwrap(new.cgImage)), [0, 0, 255, 255])
+            old = nil
         }
+        // UIKit can autorelease the temporary wrapper used to extract old.cgImage. A real lifetime
+        // boundary drains it; dropping one Swift variable cannot revoke a still-live native alias.
+        XCTAssertNil(oldWrapper)
+        XCTAssertEqual(owner.usage.pixelBufferCount, 1)
+        XCTAssertEqual(owner.usage.pixelBytes, pictureBytes)
+    }
+
+    func testAnUnresolvedImmutableSourcePinsItsOldPixelsBeforeEditingBegins() throws {
+        let owner = RasterResidency(budgetBytes: pictureBytes * 4, hasHeadroom: { _ in true })
+        var current = try surface(owner)
+        var frozen: RasterSource? = try RasterSource.snapshot(of: current,
+            size: CGSize(width: width, height: height)).get()
+        XCTAssertEqual(current.readLeaseCount, 1,
+                       "Freezing must pin old pixels before any UIImage or CGImage is requested")
+        XCTAssertEqual(owner.usage.allocations, 1)
         current = try current.preparedForWrite().get()
         try paint(current, color: .blue)
         XCTAssertEqual(owner.usage.pixelBufferCount, 2)
-        XCTAssertEqual(owner.usage.pixelBytes, pictureBytes * 2)
-        XCTAssertEqual(try pixel(XCTUnwrap(old)), [255, 0, 0, 255])
-        let new = try current.image().get()
-        XCTAssertEqual(try pixel(XCTUnwrap(new.cgImage)), [0, 0, 255, 255])
-        old = nil
+        try autoreleasepool {
+            XCTAssertEqual(try pixel(XCTUnwrap(frozen?.resolveImage().get().cgImage)), [255, 0, 0, 255])
+            XCTAssertEqual(try pixel(XCTUnwrap(current.image().get().cgImage)), [0, 0, 255, 255])
+        }
+        frozen = nil
         XCTAssertEqual(owner.usage.pixelBufferCount, 1)
         XCTAssertEqual(owner.usage.pixelBytes, pictureBytes)
+        XCTAssertLessThanOrEqual(owner.usage.highWaterBytes, owner.budgetBytes)
     }
 
     func testRefusedCopyPreservesThePreviousDrawnPictureAndItsOnlyAllocation() throws {

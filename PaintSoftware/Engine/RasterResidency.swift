@@ -224,7 +224,7 @@ final class RasterSurface {
             self.address = address
         }
 
-        var readProviderCount: Int {
+        var readLeaseCount: Int {
             lock.lock(); defer { lock.unlock() }
             return readers
         }
@@ -234,11 +234,43 @@ final class RasterSurface {
         deinit { free(address) }
     }
 
-    /// The data-provider release callback owns this, rather than a UIImage wrapper. CGImage aliases
-    /// and CALayer.contents therefore keep both the pixels and their budget charge alive.
-    private final class Reader {
-        let buffer: Buffer
-        init(_ buffer: Buffer) { self.buffer = buffer; buffer.beginReading() }
+    /// Immutable snapshot pin, created before an image is requested. Its eventual data provider
+    /// retains the same pin, so a CGImage escape outlives the source handle without losing its charge.
+    final class ReadLease {
+        private let buffer: Buffer
+        let width: Int
+        let height: Int
+        let bytesPerRow: Int
+        let residency: RasterResidency
+        var allocation: RasterResidency.Allocation { buffer.allocation }
+
+        fileprivate init(_ surface: RasterSurface) {
+            buffer = surface.buffer
+            width = surface.width
+            height = surface.height
+            bytesPerRow = surface.bytesPerRow
+            residency = surface.residency
+            buffer.beginReading()
+        }
+
+        func image() -> Result<UIImage, RasterResidency.Failure> {
+            let reader = Unmanaged.passRetained(self)
+            guard let provider = CGDataProvider(dataInfo: reader.toOpaque(), data: buffer.address,
+                    size: allocation.byteCount, releaseData: { info, _, _ in
+                        if let info { Unmanaged<ReadLease>.fromOpaque(info).release() }
+                    }) else {
+                reader.release()
+                return .failure(.allocationRefused)
+            }
+            guard let image = CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
+                    bytesPerRow: bytesPerRow, space: PixelOps.deviceRGBColorSpace,
+                    bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+                    provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent) else {
+                return .failure(.allocationRefused)
+            }
+            return .success(UIImage(cgImage: image, scale: 1, orientation: .up))
+        }
+
         deinit { buffer.endReading() }
     }
 
@@ -253,7 +285,7 @@ final class RasterSurface {
 
     var byteCount: Int { buffer.allocation.byteCount }
     var allocation: RasterResidency.Allocation { buffer.allocation }
-    var readProviderCount: Int { buffer.readProviderCount }
+    var readLeaseCount: Int { buffer.readLeaseCount }
 
     /// Exact blank proof for a newly decoded, still private source. No downsampling can discard a
     /// single painted pixel; normal nonblank pictures return at their first nonzero alpha.
@@ -305,7 +337,7 @@ final class RasterSurface {
     /// Explicit COW: old providers continue reading the old charged buffer. No write occurs until
     /// admission and allocation both succeed, so a refusal preserves the complete previous version.
     func preparedForWrite(excluding: Set<UUID> = []) -> Result<RasterSurface, RasterResidency.Failure> {
-        guard readProviderCount > 0 else {
+        guard readLeaseCount > 0 else {
             return residency.prepareMutation(of: buffer.allocation, excluding: excluding).map { self }
         }
         return Self.allocate(width: width, height: height, using: residency, excluding: excluding).map { copy in
@@ -317,26 +349,11 @@ final class RasterSurface {
     /// The surface cannot be written while an image provider can still read it. Callers first
     /// replace it with preparedForWrite's admitted result, then enter here under their own lock.
     func mutate<T>(_ body: (CGContext) -> T) -> Result<T, RasterResidency.Failure> {
-        guard readProviderCount == 0 else { return .failure(.writeRequiresCopy) }
+        guard readLeaseCount == 0 else { return .failure(.writeRequiresCopy) }
         guard buffer.allocation.isDirty else { return .failure(.writeNotAdmitted) }
         return .success(body(context))
     }
 
-    func image() -> Result<UIImage, RasterResidency.Failure> {
-        let reader = Unmanaged.passRetained(Reader(buffer))
-        guard let provider = CGDataProvider(dataInfo: reader.toOpaque(), data: buffer.address,
-                size: byteCount, releaseData: { info, _, _ in
-                    if let info { Unmanaged<Reader>.fromOpaque(info).release() }
-                }) else {
-            reader.release()
-            return .failure(.allocationRefused)
-        }
-        guard let image = CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
-                bytesPerRow: bytesPerRow, space: PixelOps.deviceRGBColorSpace,
-                bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
-                provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent) else {
-            return .failure(.allocationRefused)
-        }
-        return .success(UIImage(cgImage: image, scale: 1, orientation: .up))
-    }
+    func readLease() -> ReadLease { ReadLease(self) }
+    func image() -> Result<UIImage, RasterResidency.Failure> { readLease().image() }
 }
