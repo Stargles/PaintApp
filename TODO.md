@@ -17,6 +17,21 @@ assertion-red cases, then an unexpected-green playhead-purity fault. Move the ex
 assertions before the later control restores the playhead, commit and rebuild normal source before
 rerunning the fault/remaining41 recipes. Base49 faults remain qualified; no production/device change.
 
+
+## Brush exact-scale assertion proof — scope recorded, 2026-10-24
+
+Root identified a premise gap in testPreviewRequestIdentityIncludesSizeAndScale: scale2 vs2.5 is not
+proof against the former rounded key, which rounds them to2 vs3. Production already uses exact scale.
+Own tmp/s54-brush-proof begins at origin/main then fast-forwards exact brushbd0a65be6959ad0e9c364aebeeafc19396d23bc2.
+Strengthen only that existing operand to2.25 (both2 and2.25 round to2); keep meaningful identity/render
+assertions and all budgets unchanged. Original brush and final consolidator trees stay untouched.
+Prepare external real assertion mutations with the reviewed runtime-fault-driver-xctfail, offline
+--prepare only: completed-key rejection, exact scale and dimensions, cap/deterministic rerender, LRU
+read recency, warning half/normal refill/background clear and pressure registration, reusing existing
+selectors. No new API, flag/counter, fixture overwrite, production edit or native/compiler operation.
+Rater consolidator receives exact owned test-only follow-up commit(s) after its two brush commits.
+
+
 The owner's asks. [BUGS.md](BUGS.md) is for what *we* find.
 
 **Session 49 (2026-10-14):** the owner asked to continue through every actionable item, stopping only

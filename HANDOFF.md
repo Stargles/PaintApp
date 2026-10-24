@@ -11,6 +11,19 @@ is offline-prepared over32 selectors/728 frozen paths; no mutant execution is cl
 existing native job. Stronger brush scale fixture followup is pending its pin. Exact component SHAs,
 byte inventories and conflict evidence live in `~/PaintWork/s54-architecture-audit/final-integration/`.
 
+## Brush exact-scale assertion proof — scope recorded, 2026-10-24
+
+Root identified a premise gap in testPreviewRequestIdentityIncludesSizeAndScale: scale2 vs2.5 is not
+proof against the former rounded key, which rounds them to2 vs3. Production already uses exact scale.
+Own tmp/s54-brush-proof begins at origin/main then fast-forwards exact brushbd0a65be6959ad0e9c364aebeeafc19396d23bc2.
+Strengthen only that existing operand to2.25 (both2 and2.25 round to2); keep meaningful identity/render
+assertions and all budgets unchanged. Original brush and final consolidator trees stay untouched.
+Prepare external real assertion mutations with the reviewed runtime-fault-driver-xctfail, offline
+--prepare only: completed-key rejection, exact scale and dimensions, cap/deterministic rerender, LRU
+read recency, warning half/normal refill/background clear and pressure registration, reusing existing
+selectors. No new API, flag/counter, fixture overwrite, production edit or native/compiler operation.
+Rater consolidator receives exact owned test-only follow-up commit(s) after its two brush commits.
+
 
 Start at AGENTS.md, then CLAUDE.md, TODO.md, BUGS.md and the relevant spec/PERFORMANCE.md. Verify origin,
 worktrees and every tmp branch before trusting this file. Kevin authorizes useful agents and a large
