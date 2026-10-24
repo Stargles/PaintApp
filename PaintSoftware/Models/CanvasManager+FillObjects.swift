@@ -76,9 +76,12 @@ extension CanvasManager {
                 guard let fill = before[index].fill, let path = fill.cgPath, !path.isEmpty else { continue }
                 // The current archive is shared until replacement. Reserve its old payload now,
                 // then give the future replacement only the remaining allowance.
-                let reservedUndo = retainedCost + VectorUndoCost.bytes(from: before, to: after) + fill.pathData.count
-                let remainingUndo = max(0, history.maxCost - reservedUndo)
-                let geometryBytes = max(0, MetalFillEngine.fillBudgetBytes / 2 - 4 * fill.pathData.count)
+                let reservedUndo = UndoBudget.addingCost(UndoBudget.addingCost(retainedCost,
+                    VectorUndoCost.bytes(from: before, to: after)), fill.pathData.count)
+                let remainingUndo = history.maxCost > reservedUndo ? history.maxCost - reservedUndo : 0
+                let transientBudget = max(0, MetalFillEngine.fillBudgetBytes / 2)
+                let archives = UndoBudget.payloadBytes(count: fill.pathData.count, stride: 4)
+                let geometryBytes = transientBudget > archives ? transientBudget - archives : 0
                 let undoPoints = remainingUndo / Self.fillMendBytesPerPoint
                 let geometryPoints = geometryBytes / Self.fillMendBytesPerPoint
                 let work = FillMendWork(celID: cel.id, fill: fill, path: path,
@@ -100,12 +103,12 @@ extension CanvasManager {
                 case .fill(let mended):
                     after[index] = .fill(mended)
                     rewritten.insert(fill.id)
-                    guard retainedCost + VectorUndoCost.bytes(from: before, to: after)
+                    guard UndoBudget.addingCost(retainedCost, VectorUndoCost.bytes(from: before, to: after))
                             <= history.maxCost else { return .exceedsBudget }
                 }
             }
             guard !rewritten.isEmpty else { continue }
-            retainedCost += VectorUndoCost.bytes(from: before, to: after)
+            retainedCost = UndoBudget.addingCost(retainedCost, VectorUndoCost.bytes(from: before, to: after))
             let originalFills = Dictionary(uniqueKeysWithValues: before.compactMap { element -> (UUID, VectorFillElement)? in
                 guard rewritten.contains(element.id), let fill = element.fill else { return nil }
                 return (element.id, fill)

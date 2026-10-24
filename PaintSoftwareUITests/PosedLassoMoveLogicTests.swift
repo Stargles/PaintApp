@@ -337,7 +337,7 @@ final class PosedLassoMoveLogicTests: XCTestCase {
         XCTAssertTrue(manager.commitVectorFloatIfNeeded())
         let cost = try XCTUnwrap(manager.history.undoStack.last?.cost)
         XCTAssertEqual(cost, VectorUndoCost.bytes(from: moved, to: rest))
-        XCTAssertGreaterThan(cost, 2 * 512, "Two distinct32-point position runs alone exceed the former flat charge.")
+        XCTAssertGreaterThan(cost, 2 * 512, "The actual32-point rewrite and element slots exceed the former flat charge.")
         XCTAssertEqual(vector.strokes[0].samples, samples, "Keying restores the true resting geometry.")
         let cel = manager.layers[layerIndex].cels[0]
         let derived = try XCTUnwrap(manager.derivedCelContent(for: cel, atFrame: 6))

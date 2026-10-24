@@ -2388,5 +2388,12 @@ and opaque metadata are conservative logical allowances. All flat512 geometry co
 fill rewrite surcharge were removed. Future fill output still reserves the old archive before work;
 final actual cost is the shared accountant's. Move closures freeze actual restore lists and used IDs,
 including the correct pre-split list for first-nudge undo, rather than retaining the whole float part.
-Eight tiny logic methods and two existing consumer cost assertions are prepared; parsing/lints only,
+Nine tiny logic methods and two existing consumer cost assertions are prepared; parsing/lints only,
 not native/mutation/UI qualification, allocator capacity accounting or a whole-history/RSS bound.
+
+
+Root review40163789 identified unchecked accounting arithmetic. Approved follow-up uses existing
+UndoBudget addingCost/payloadBytes and narrow history sum/extend saturation. A saturated total must
+be recomputed after a removal rather than subtracted as if exact, or another oversized action can
+remain admitted. Raster author owns SelectionModels propagation; no preflight or undo/redo mutation
+is authorized here. Tiny scalar + actual history sentinel tests are prepared without large payloads.

@@ -112,6 +112,20 @@ enum UndoBudget {
     /// depth grows again as the artist works. A budget left lowered would turn one transient warning
     /// into a permanently shallower history, which is the failure mode this shape exists to avoid.
     static func pressuredMaxCostBytes(_ budget: Int) -> Int { max(0, budget / 2) }
+
+    /// Invalid/overflowed retained-byte arithmetic must refuse/trim conservatively, never wrap into
+    /// a cheap action. These prices are nonnegative payloads, not signed coordinate arithmetic.
+    static func addingCost(_ lhs: Int, _ rhs: Int) -> Int {
+        guard lhs >= 0, rhs >= 0 else { return Int.max }
+        let (bytes, overflow) = lhs.addingReportingOverflow(rhs)
+        return overflow ? Int.max : bytes
+    }
+
+    static func payloadBytes(count: Int, stride: Int) -> Int {
+        guard count >= 0, stride >= 0 else { return Int.max }
+        let (bytes, overflow) = count.multipliedReportingOverflow(by: stride)
+        return overflow ? Int.max : bytes
+    }
 }
 
 /// A single global, byte-budgeted undo/redo stack shared by every mutating action in the app
@@ -149,7 +163,8 @@ final class UndoHistory {
     /// Exposed so the standing question in PERFORMANCE.md §6 ("does undo history ever approach its
     /// cap in real use?") can be answered by sampling rather than by arguing about the divisor.
     var currentCost: Int {
-        undoStack.reduce(0) { $0 + $1.cost } + redoStack.reduce(0) { $0 + $1.cost }
+        UndoBudget.addingCost(undoStack.reduce(0) { UndoBudget.addingCost($0, $1.cost) },
+                              redoStack.reduce(0) { UndoBudget.addingCost($0, $1.cost) })
     }
 
     func record(_ action: Action) {
@@ -181,7 +196,7 @@ final class UndoHistory {
     @discardableResult
     func extendLast(cost: Int = 0, undo: @escaping () -> Void, redo: @escaping () -> Void) -> Bool {
         guard let last = undoStack.popLast() else { return false }
-        undoStack.append(.init(label: last.label, cost: last.cost + cost,
+        undoStack.append(.init(label: last.label, cost: UndoBudget.addingCost(last.cost, cost),
                                undo: { undo(); last.undo() },
                                redo: { last.redo(); redo() }))
         trim()
@@ -242,7 +257,10 @@ final class UndoHistory {
     private func trim() {
         var total = currentCost
         while total > maxCost, !undoStack.isEmpty {
-            total -= undoStack.removeFirst().cost
+            let removed = undoStack.removeFirst().cost
+            // A saturated sum is a lower bound, so subtracting from it could admit another
+            // oversized action. Only this exceptional case needs a fresh total after removal.
+            total = total == Int.max ? currentCost : total - removed
         }
     }
 }

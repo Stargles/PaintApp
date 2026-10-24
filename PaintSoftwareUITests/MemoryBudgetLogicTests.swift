@@ -843,6 +843,42 @@ final class MemoryBudgetLogicTests: XCTestCase {
                        "two identical lists retain slots and no geometry at all")
     }
 
+    func testSaturatedPayloadCostsTrimRealHistoryAndExtensionsWithoutWrappingOrRunningClosures() {
+        XCTAssertEqual(UndoBudget.payloadBytes(count: Int.max / 2 + 1, stride: 2), Int.max)
+        XCTAssertEqual(UndoBudget.addingCost(Int.max - 1, 2), Int.max)
+        XCTAssertEqual(UndoBudget.payloadBytes(count: 3, stride: 8), 24)
+        XCTAssertEqual(UndoBudget.addingCost(3, 8), 11)
+        XCTAssertEqual(UndoBudget.addingCost(-1, 1), Int.max, "Invalid negative byte prices also refuse conservatively.")
+        let history = UndoHistory(maxCost: 64)
+        var runs = 0
+        history.record(.init(label: .move, cost: 32, undo: { runs -= 1 }, redo: { runs += 1 }))
+        XCTAssertEqual(history.currentCost, 32)
+        history.record(.init(label: .move, cost: UndoBudget.payloadBytes(count: Int.max, stride: 2),
+                             undo: { runs -= 10 }, redo: { runs += 10 }))
+        XCTAssertEqual(history.currentCost, 0)
+        XCTAssertFalse(history.canUndo, "A saturated new price trims both actions through the ordinary budget policy.")
+        XCTAssertEqual(runs, 0, "Trimming never executes discarded history closures.")
+        history.record(.init(label: .move, cost: 32, undo: { runs -= 1 }, redo: { runs += 1 }))
+        XCTAssertEqual(history.undo(), .move)
+        XCTAssertEqual(history.currentCost, 32, "Redo keeps the same captured price.")
+        XCTAssertEqual(history.redo(), .move)
+        XCTAssertEqual(runs, 0)
+        XCTAssertTrue(history.extendLast(cost: Int.max, undo: { runs -= 10 }, redo: { runs += 10 }))
+        XCTAssertEqual(history.currentCost, 0)
+        XCTAssertFalse(history.canUndo)
+        XCTAssertEqual(runs, 0)
+        // Three scalar prices, no large geometry: subtracting from a saturated running sum would
+        // stop after the second removal and leave an oversized third action admitted.
+        history.maxCost = Int.max
+        for cost in [2, Int.max, Int.max] {
+            history.record(.init(label: .move, cost: cost, undo: {}, redo: {}))
+        }
+        XCTAssertEqual(history.undoStack.count, 3)
+        history.maxCost = 64
+        XCTAssertEqual(history.trimUnderMemoryPressure(), 3)
+        XCTAssertEqual(history.currentCost, 0)
+    }
+
     private func payloadStroke(_ count: Int, y: CGFloat = 12) -> VectorStroke {
         var samples = StrokeSamples(channels: .captured)
         for n in 0..<count {

@@ -381,11 +381,18 @@ account usage limits; root continues. The full source inventory is not yet fully
   part/lifted/prelift captures that closures do not use. Raster author confirms no model-file overlap.
   Implementation prepared: one VectorUndoCost with action-wide canvas-list batching and no retained
   accounting state; all remaining flat512 geometry consumers and fill surcharge removed. Inline
-  Data/String/opaque metadata are conservative logical allowances. Added eight tiny logic methods
+  Data/String/opaque metadata are conservative logical allowances. Added nine tiny logic methods
   plus precision/fill consumer assertions, including actual blue RGBA, Move/pose undo+redo, trim costs,
   archive identity and deallocation of an unused pre-lift path after trim/commit. Existing files only;
-  no UndoHistory/StrokeSamples/PackedSampleRun/placement model, saved-format or PBX changes.
+  no UndoHistory preflight/Action or StrokeSamples/PackedSampleRun/placement model, saved-format or PBX changes.
   Parse/UI guards/diff-check only; native controls/mutants/fast tiers/UI pictures/device remain unrun.
+  Root review requires conservative overflow saturation end-to-end. Approved existing UndoBudget
+  addingCost/payloadBytes helpers and narrow UndoHistory currentCost/extendLast arithmetic changes;
+  saturated totals must recompute after removal before normal trim can safely continue. Raster author
+  confirms these sums do not overlap its preflight work and owns the SelectionModels consumer hunk.
+  Add scalar arithmetic and real existing-action/saturated-record+extend history checks without big
+  allocation. No Action/preflight/undo/redo behavior rewrite; final source SHA will follow. Scalar accounting and actual saturated record/extend/trim regressions
+  are prepared; helper/sum/trim propagation is source-parsed only.
 - [ ] Test hooks/obsolete runners: protect real-device persistent data and prune only verified unused paths.
 - [ ] Complete file-level review gaps, independent reviews and regression/performance gates before closing audit.
 

@@ -1259,10 +1259,13 @@ enum VectorUndoCost {
         // These keys never leave this call, enter an undo closure, or dereference a borrowed address.
         return withExtendedLifetime((from, to)) {
             let before = Payloads(from), after = Payloads(to)
-            let slots = zip(from, to).reduce(0) { $0 + max($1.0.count, $1.1.count) * MemoryLayout<VectorElement>.stride }
-            let removed = before.owned.reduce(0) { $0 + (after.owned[$1.key] == nil ? $1.value : 0) }
-            let added = after.owned.reduce(0) { $0 + (before.owned[$1.key] == nil ? $1.value : 0) }
-            return slots + removed + added + before.unshared + after.unshared
+            let slots = zip(from, to).reduce(0) {
+                UndoBudget.addingCost($0, UndoBudget.payloadBytes(count: max($1.0.count, $1.1.count),
+                                                                stride: MemoryLayout<VectorElement>.stride))
+            }
+            let removed = before.owned.reduce(0) { UndoBudget.addingCost($0, after.owned[$1.key] == nil ? $1.value : 0) }
+            let added = after.owned.reduce(0) { UndoBudget.addingCost($0, before.owned[$1.key] == nil ? $1.value : 0) }
+            return [slots, removed, added, before.unshared, after.unshared].reduce(0, UndoBudget.addingCost)
         }
     }
 
@@ -1293,11 +1296,11 @@ enum VectorUndoCost {
                             include(lattice)
                         }
                         if let thresholds = stroke.sampleVisibilityThresholds {
-                            unshared += thresholds.count * MemoryLayout<(Int, CGFloat)>.stride
+                            unshared = UndoBudget.addingCost(unshared, UndoBudget.payloadBytes(count: thresholds.count, stride: MemoryLayout<(Int, CGFloat)>.stride))
                         }
                     case .fill(let fill): include(fill.pathData)
                     case .image(let image):
-                        if let cg = image.image.cgImage { owned[.image(ObjectIdentifier(cg))] = cg.bytesPerRow * cg.height }
+                        if let cg = image.image.cgImage { owned[.image(ObjectIdentifier(cg))] = UndoBudget.payloadBytes(count: cg.height, stride: cg.bytesPerRow) }
                     case .text(let text): include(text.recipe.string)
                     case .video, .stream: break // Runtime pictures/files are owned by their source services.
                     }
@@ -1319,25 +1322,25 @@ enum VectorUndoCost {
         private mutating func include<T>(_ array: [T]) {
             guard !array.isEmpty else { return }
             let visited: Void? = array.withContiguousStorageIfAvailable { buffer in
-                include(buffer.baseAddress.map { UnsafeRawPointer($0) }, bytes: buffer.count * MemoryLayout<T>.stride)
+                include(buffer.baseAddress.map { UnsafeRawPointer($0) }, bytes: UndoBudget.payloadBytes(count: buffer.count, stride: MemoryLayout<T>.stride))
             }
-            if visited == nil { unshared += array.count * MemoryLayout<T>.stride }
+            if visited == nil { unshared = UndoBudget.addingCost(unshared, UndoBudget.payloadBytes(count: array.count, stride: MemoryLayout<T>.stride)) }
         }
 
         private mutating func include(_ data: Data) {
             // Any inline representation must fit inside the value itself. Its borrow may point at
             // reused stack scratch, so even byte-identical small values never get an address key.
-            guard data.count > MemoryLayout<Data>.size else { unshared += data.count; return }
+            guard data.count > MemoryLayout<Data>.size else { unshared = UndoBudget.addingCost(unshared, data.count); return }
             data.withUnsafeBytes { buffer in include(buffer.baseAddress, bytes: buffer.count) }
         }
 
         private mutating func include(_ string: String) {
             let count = string.utf8.count
-            guard count > MemoryLayout<String>.size else { unshared += count; return }
+            guard count > MemoryLayout<String>.size else { unshared = UndoBudget.addingCost(unshared, count); return }
             let visited: Void? = string.utf8.withContiguousStorageIfAvailable { buffer in
                 include(buffer.baseAddress.map { UnsafeRawPointer($0) }, bytes: buffer.count)
             }
-            if visited == nil { unshared += count }
+            if visited == nil { unshared = UndoBudget.addingCost(unshared, count) }
         }
 
         private mutating func include(_ address: UnsafeRawPointer?, bytes: Int) {

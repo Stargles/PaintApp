@@ -710,7 +710,7 @@ extension CanvasManager {
         celContentChangedOutsideStroke(layerID: sourceLayerID, celID: sourceCelID)
 
         recordUndo(label: .moveToNewLayer,
-                   cost: VectorUndoCost.bytes(from: elementsBefore, to: remaining) + 4096,
+                   cost: UndoBudget.addingCost(VectorUndoCost.bytes(from: elementsBefore, to: remaining), 4096),
                    undo: { [weak self] in
                        guard let self else { return }
                        if let index = self.layers.firstIndex(where: { $0.id == layerID }) {

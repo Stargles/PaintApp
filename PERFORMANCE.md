@@ -3858,7 +3858,10 @@ accountant; the separate fill rewrite surcharge is removed. Move closures freeze
 before/after lists and used IDs, dropping unused whole-part/lifted/pre-lift captures. These are
 conservative per-action retained-payload deltas: unchanged current geometry is excluded, changed
 old/new buffers are included, and adjacent actions may charge a rewritten payload again. They are
-not a globally unique whole-history allocator bound. Tiny pixel/counter/lifetime regressions and
+not a globally unique whole-history allocator bound. Nonnegative cost arithmetic uses the existing
+UndoBudget saturation seam; currentCost/extendLast preserve Int.max, and trim recomputes a saturated
+sum after removal before deciding what can remain. Tiny scalar and real-history sentinel checks use
+three prices, with no giant payload allocation. Tiny pixel/counter/lifetime regressions and
 intentional fault recipes are prepared; no new native memory/latency or RSS-saving claim.
 
 ### 13.5 Blanked hosts — declined, and this is the measurement that would settle it

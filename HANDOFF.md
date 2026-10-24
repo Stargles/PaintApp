@@ -27,9 +27,13 @@ unpack/copy to count, persisted pointer/cache or UndoHistory rewrite. Raster aut
 files do not overlap.
 One shared payload accountant now batches all affected canvas lists for a single action; no identity
 survives the call. All flat512 geometry consumers and the separate fill rewrite surcharge are gone;
-fill preflight still reserves the current old archive before allowing future output. Eight tiny logic
+fill preflight still reserves the current old archive before allowing future output. Nine tiny logic
 methods plus two existing consumer assertions cover actual RGBA/undo/redo/cost/lifetime boundaries.
 Parsing, UI lints and diff-check are the only gates run here; no native/fault/UI/device claim.
+Root approved final arithmetic follow-up: reuse UndoBudget helpers to saturate nonnegative costs and
+preserve that sentinel in currentCost/extendLast/trim and reservations. Raster author owns the
+SelectionModels added-cost hunk; its preflight semantics remain untouched. Tiny real-history tests
+must prove saturation trims/refuses without trapping, beyond arithmetic alone.
 
 ## Native qualification follow-up — 2026-10-24 17:10 UTC
 
