@@ -455,3 +455,10 @@ source restore. The Trash regression compares equivalent URLs with a directory s
 compare standardized paths, and assert retained backup existence AFTER purge before its throwing read.
 The new startup-refusal case misuses a current-package preservation helper on origin.name; repair
 agent will correct that test after this commit. No product defect is inferred from these two failures.
+
+Root temporarily loans the exclusive Mac native slot for compiler reconciliation and only the32
+RasterResidencyLogicTests, using its explicit simulator39E84984-3C6F-4A6A-8DC8-D1098F6B623E,
+isolated raster-consumer-check tree and existing focused.py wrapper/DerivedData. Source fixes belong
+only in the author tree, committed then fast-forwarded into the frozen check tree. Require728 exact
+tracked app/test/project files restored and32 methods/zero skips. No mutants/UI/full fast/device
+under this grant; release the lease after green32 or a substantive unresolved runtime blocker.
