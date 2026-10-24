@@ -19,15 +19,8 @@ import XCTest
 /// byte for byte, which says it kept the right *shape*. Area alone passes a contour that is wrong in
 /// compensating ways, and a fill's correctness is a picture.
 ///
-/// **And every fixture is swept across 24 offsets rather than traced once**, which is not
-/// belt-and-braces. `IntPoint`'s `Hashable` is Swift's, whose hash seed is randomised per process,
-/// so the defect this file pins corrupted a *different* part of the drawing on every launch —
-/// measured here at 14 of 60 processes tracing the two-square fixture correctly by luck. A
-/// single-fixture assertion would therefore have been a coin flip, green about a quarter of the
-/// time on thoroughly broken code. Sweeping offsets also varies the hash order *within* one
-/// process, which is the only way this suite can see order-dependence at all: two calls with the
-/// same mask in the same process take the same dictionary order and would agree however broken the
-/// code was.
+/// Fixtures sweep across 24 offsets to exercise shared corners at different rows and columns.
+/// Every position must conserve both area and shape, independent of traversal start order.
 final class FillContourLogicTests: XCTestCase {
 
     // MARK: - Reading a traced path back

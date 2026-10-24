@@ -1,11 +1,8 @@
 import UIKit
 import SwiftUI
 
-/// Pixel-level image processing that backs the Select & Move tool. "Select a region and
-/// move/resize/rotate/fill/clear it" is inherently a raster operation (this is how Procreate works
-/// — it's fully raster under the hood), which the whole engine now is end to end. These helpers
-/// are the bridge: whenever a selection-based edit touches a cel, its current content (baked image
-/// + live strokes) gets flattened into a plain `UIImage` — see `Cel.bakedImage`.
+/// Shared pixel processing for raster edits, snapshots and mask-to-vector contours. Vector
+/// selections retain their editable elements; only operations that need pixels use these helpers.
 enum PixelOps {
     static func transparentFormat(scale: CGFloat = 1) -> UIGraphicsImageRendererFormat {
         let format = UIGraphicsImageRendererFormat()
