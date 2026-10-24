@@ -388,9 +388,28 @@ final class FillMendLogicTests: XCTestCase {
         XCTAssertNotEqual(patch[43 * width + 20], 0, "the interior stem remains mendable after joining the wall")
         XCTAssertNotEqual(patch[18 * width + 17], 0, "diagonal internal ink is mended")
         XCTAssertNotEqual(patch[58 * width + 50], 0, "curved internal ink is mended")
-        XCTAssertEqual(patch[30 * width + 6], 0, "the outer frame is not grown across")
-        XCTAssertEqual(patch[center.y * width + center.x + 6], 0, "the donut wall around intentional paper is protected")
-        XCTAssertEqual(patch[40 * width + 52], 0, "the concave U boundary stays open to exterior paper")
+        // An independent drawing-space oracle: the frame, circular hole wall and U rectangles
+        // are all protected contours. It knows nothing about nearest sites, rays or the mend's
+        // implementation. At the attached arm's three frame pixels the protected boundary wins.
+        let protectedBoundary = Set((0..<(width * height)).filter { index in
+            let x = index % width, y = index / width
+            let frame = ((6...65).contains(y) && (x == 6 || x == 65))
+                || ((6...65).contains(x) && (y == 6 || y == 65))
+            let radiusSquared = (x - 52) * (x - 52) + (y - 20) * (y - 20)
+            let donut = (25...36).contains(radiusSquared)
+            let u = ((29..<42).contains(y) && ((42..<45).contains(x) || (59..<62).contains(x)))
+                || ((39..<42).contains(y) && (42..<62).contains(x))
+            return frame || donut || u
+        })
+        XCTAssertEqual(protectedBoundary.count, 400, "PREMISE: 236 frame, 44 donut and 120 U ink pixels")
+        XCTAssertTrue(protectedBoundary.isSubset(of: ink), "PREMISE: every protected contour pixel exists in the reference")
+        let grownBoundary = protectedBoundary.filter { patch[$0] != 0 }.sorted()
+        let grownCoordinates = grownBoundary.prefix(8).map { "(\($0 % width),\($0 / width))" }
+        XCTAssertTrue(grownBoundary.isEmpty, "no protected contour may grow: \(grownCoordinates)")
+        // At (57,17), the nearest site above connects tangentially to filled paper below through
+        // seven ink pixels. The equally near site on the right sees the intentional hole across
+        // the ring. Keeping only the first site would incorrectly accept this boundary pixel.
+        XCTAssertEqual(patch[17 * width + 57], 0, "every tied nearest-open witness must protect the donut tangent")
         XCTAssertTrue(patch.enumerated().allSatisfy { pair in pair.element == 0 || ink.contains(pair.offset) },
                       "the mend adds only missing reference-ink pixels")
     }
