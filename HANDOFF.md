@@ -1,3 +1,18 @@
+## Response-curve drag ownership — scope recorded, 2026-10-24
+
+Read-only coverage closeout at716311c2 found a concrete current brush-editor continuity bug:
+ResponseCurveEditorView moves the selected key through ResponseCurveEditing.moving, then reacquires
+nearestKey at the raw touch or keeps its old frame. Clamping can move the key away from that touch
+and delete the old frame; subsequent ticks freeze, or a nearby neighbor can take over the drag.
+Existing clamp test checks only one tick. Root approves one authoritative movement result carrying
+landed frame+curve, replacing the old return seam at every caller with no duplicate clamp/legacy API.
+Own tmp/s54-response-curve starts from origin/main then ff exact716311c28306e37b17b6a5e0452e8ad5a21c94c6;
+final consolidator/source trees remain untouched. Add actual outside/clamped/return continuation and
+neighbor-ownership logic assertions plus cold BrushEditor artist-path drawn control at landscape
+1080×810. Commit before external assertion-fault preparation. Source/static only; all compiler/native,
+UI/screenshot inspection and Debug/Release/physical gates are root-owned and pending. Coverage report:
+~/PaintWork/s54-architecture-audit/current-coverage.md (source tracing is not final runtime proof).
+
 # Handoff
 
 Start at AGENTS.md, then CLAUDE.md, TODO.md, BUGS.md and the relevant spec/PERFORMANCE.md. Verify origin,

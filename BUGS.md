@@ -1,3 +1,13 @@
+## Brush response-curve drag loses its selected key on clamped ticks — 2026-10-24
+
+Source-confirmed at716311c2, not yet native-reproduced: the view's onChanged applies clamped key
+movement, then hit-tests the unbounded finger location to recover identity. If it finds nothing it
+keeps a removed old frame; if a neighbor is closer it switches ownership. A middle key512 dragged
+past a neighbor can land1023, then freeze on return or start moving the neighbor instead. All
+ordinary modulation bindings use this control. Root approved returning landed frame with the updated
+curve on the existing movement seam, with multi-tick/neighbor and drawn cold controls. Work recorded
+before implementation on tmp/s54-response-curve; no native/compiler/device run by source author.
+
 # Known Issues
 
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
