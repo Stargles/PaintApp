@@ -19,7 +19,7 @@ inventories/copied diagnostics; no device restart, app launch or install.
 2. **Smart saving.** Newest per fixed clock bucket, existing3/6/24/7/4 tiers, pre-save/latest/update
    protection and4GB logical cap. Standalone14/14, reverse-loop8/14 assertion-red and restored14/14;
    integrated retention14+backup21 passed in338. Bounded Session47–51 audit found no other concrete
-   dropped actionable ask. Copy-only APFS physical-cost experiment is prepared, not measured.
+   dropped actionable ask. Copy-only APFS physical-cost experiment is running in its separate tree; no measured result yet.
 3. **Test1 erasing respring.** Unresolved cause, no speculative production fix. Two same-build system
    reports kill backboardd at1850MiB (October23 at18:47 and23:03 Toronto). Owner recalls one failure,
    cannot identify time; do not choose either as confirmed match. PaintSoftware active, no app kill
@@ -30,9 +30,12 @@ inventories/copied diagnostics; no device restart, app launch or install.
    fill, including branches attached to the outer outline, while preserving that outline/no side
    effects. Add one action for all stored fills in all cels of a **vector** layer (owner ruling).
    Shared per-fill fix still covers raster+vector. No new raster storage/history authorized.
-   Only source investigation/prototypes so far; no implementation. Naive same-fill endpoint rays can
-   cross U/closed-hole boundaries. Isolated ink-component classifier is safe but owner rejected its
-   attached-branch limitation. Prototype a concrete safe classifier; no vague topology subsystem.
+   Owner also rules: protect uncertain joins instead of inferring hidden edges, and retain quick
+   real-time feedback. Shared exact nearest-feature preparation/internal-mend and vector batch action
+   are now in source-only implementation in the separate fill tree; native gates have not started.
+   Naive same-fill rays cross U/closed-hole boundaries; the enclosed-components-only restriction was
+   rejected. Review fixes require contiguous digital rays, all tied nearest-open witnesses and bounded
+   picture ownership. No new saved provenance or second mending mode.
    Worktree `~/PaintWork/PaintApp-s53-fill-mend`; design evidence `~/PaintWork/s53-fill-mend/`.
 
 ## Authoritative source and native ownership
@@ -42,11 +45,12 @@ Integrated tree: `~/PaintWork/PaintApp-s52-vector-repair`, `tmp/s52-vector-repai
 production. Later commits record new asks/diagnostics and correct only two stale test expectations.
 Old lead `s52-vector-points` is not authoritative. Root records tree `s52-erase-crash` is afd2030c.
 
-**Native currently handed back to root after the complete first Debug fast.** No active xcodebuild.
-Next: commit test-only corrections, qualify their two selected methods with two deliberate faults,
-restore/rebuild, then exact fast Debug/Release. Do not repeat production-identical338/17 faults.
-Retire_file_repairs owns next native grant. Renewal/erase agents investigate new fill task without
-source/native writes. One native job only; no concurrent integrated source writers while qualified.
+**Point qualification finished at47d7079c; integrated production remains frozen for deployment.**
+Corrected classes33/33 before and after2 assertion-red faults; exact Debug/Release each5259 reconcile.
+Erase_crash_trace now owns the sole native slot for the reviewed APFS experiment at clean47d in
+`PaintApp-s52-week-cost`, output `s52-saving-audit/week-cost/run-47d7079c`. Source/volume restoration
+and explicit handback are required before root's signed clean Release build. Renewal owns core fill
+source; mend_topology owns vector batch/menu/tests in the separate fill tree. No fill native grant.
 
 Owned simulators: logic/fast M5 **39E84984-3C6F-4A6A-8DC8-D1098F6B623E**; current UI iPad9
 **56CC563F-06D0-42FC-9C18-A2B230DE2D38** and old-control **B0533278-3F74-4944-AC58-3514D87C85D6**
@@ -60,11 +64,13 @@ are shut down. Check/boot only own device as routine setup. Integration DerivedD
   location was independently verified despite the conservative parser omission. Original inconclusive
   and owner-interrupted artifacts remain untouched. Composite exact723-file restore proof:
   `s52-vector-points/serial-qualification/results-ee50-run02/aggregate17-report.json`.
-- Restored normal338 and complete first Debug fast:
-  `serial-qualification/results-ee50-restored-fasts-run02/`. Debug **5259=5253passed+4known skips+2failed**,
-  no expected failures; all static identities reconcile. Failures are FillObject flat-fill key set
-  still requiring removed placement, and SaveDamageGate same-slot history still requiring oldest+3.
-  Release did not run. Test fixes remove obsolete expectations/comments; no production change.
+- Final corrected fasts at47d7079c: **Debug AND Release each5259=5255passed+4known opt-in skips**,
+  zero failures/expected, all5259 method identities/255 classes reconcile. Corrected full classes33/33
+  before and after2 actual assertion-red faults, all723 bytes/modes restored. The two fixes remove
+  stale fill-placement and oldest-plus3 expectations; app328/project4 and earlier338 test sources are
+  byte-identical to their qualified baseline. Evidence:
+  `serial-qualification/results-47d7079c-corrected-fasts/final-qualification-checkpoint.json`.
+  Earlier failed census artifacts remain preserved in `results-ee50-restored-fasts-run02`.
 - Static census: focused338, fast5259 (raw5262 minus3 private static helpers), full5842; PBX **1317**
   unique objects. Lints/plutil/duplicate check passed. Full current UI suite **not run**.
 - **Final affected UI9/9** (Liquify4+Raster5), zero fail/skip, owner-size landscape images inspected by
@@ -93,7 +99,7 @@ recovery; basename fallback requires exactly one matching ID. No old/default run
 ## Backup-cost experiment and device next steps
 
 `~/PaintWork/s52-saving-audit/week-cost/` contains reviewed external driver/template. Separate tree
-`PaintApp-s52-week-cost` must FF to final clean source and reprepare. No volume/native measurement yet.
+`PaintApp-s52-week-cost` is clean47d7079c and freshly prepared; the one authorized run is in progress. No physical-cost result yet.
 Disposable512MiB APFS image; real Misc/Test2 copy (26cels,2048×1024,25files/1713279logical bytes),7 daily
 reopens×4 actual saves with small raster edit. Existing retention replays dated slots; validate/open
 survivors. Stable whole-filesystem allocated-block delta retained-minus-live-only, remount controls,

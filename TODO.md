@@ -6,13 +6,13 @@ The owner's asks. [BUGS.md](BUGS.md) is for what *we* find.
 for genuinely required input or context degradation. Agent count is unrestricted for now; usage
 conservation and output quality take priority over speed. Use focused delegation and cheaper models
 for routine work, with occasional queue reports. The owner asked to work independently while asleep
-until 10 a.m. Toronto time. Raster scope and fixed exterior pixels for vector selections are ruled below.
+until 10 a.m. Toronto time. The later point-only vector ruling below supersedes fixed exterior pixels.
 
 **Checkpoint2026-10-24:** point-only Liquify and newest backup retention are integrated, unmerged
 and not installed. Final338/338,17 runtime mutants, final9/9 affected UI, old-code1.918× stretch control
-and required old workflows10/10 qualify. First Debug fast5259 completed with two stale test expectations;
-those are corrected, pending targeted mutation proof and fresh Debug/Release. Physical backup-cost
-experiment remains. Erasing cause is unresolved. New fill-mending task and owner rulings are below.
+and required old workflows10/10 qualify. Corrected classes33/33 and2 mutation faults qualify; exact
+Debug/Release each5259=5255passed+4known skips. Physical backup-cost experiment is running in its
+separate tree. Erasing cause is unresolved. Fill engine and vector batch action are in implementation.
 Installed normal Release remainsbcd7a6af; device reads only, no restart/launch/install this pass.
 
 ## How to read and keep this file
@@ -97,11 +97,11 @@ Final runtime338/338 and17 runtime mutants qualify (16automatic+one exact manual
 Final affected UI9/9 and required old workflows10/10 passed. The final old-code control widens the dot
 1.918×; current code keeps it round. Root inspected the actual pictures. No held-path helper remains.
 
-First exact Debug fast5259 completed:5253passed,4known skips,2 stale-test failures. One expected deleted
-fill placement; one expected oldest-plus3 retention. Correcting only their current-format/current-policy
-expectations, with focused mutation checks before fresh fast tiers. No production behavior restored.
+Final exact Debug AND Release each5259=5255passed+4known skips, zero failures/expected, all method
+identities/255 classes reconcile. Corrected classes33/33 before and after2 assertion-red faults;
+723 bytes/modes restored, lints/plutil/PBX1317 unique clean. The corrections remove obsolete placement
+and oldest-plus3 expectations only; production and earlier338/17/UI proof remain exact.
 
-- [ ] Qualify corrected test expectations and exact Debug/Release fast tiers; reconcile counts/skips/lints/PBX.
 - [ ] Fresh verified current-library export before signed device install; owner confirms real scenes.
       Keep the one-shot repair until that confirmation, then retire it whole.
 
@@ -120,7 +120,7 @@ oldest-per-bucket versus TODO(161)'s newest policy. Owner ruled 2026-10-23 to us
 clock-bucket policy, preserving age tiers, pre-save copies, update protection and cap; no oldest exception.
 The correction is integrated but unmerged. Actual standalone retention 14/14 passed, reverse-order
 mutation 8/14 was assertion-red and exact restore 14/14 passed. Integrated retention 14 and backup 21
-also passed in runtime 302; combined fast tiers remain pending.
+also passed in runtime338; combined Debug/Release each5259 now qualify.
 
 The bounded Session47–51 audit found no other concrete dropped actionable ask. Real-scene week storage
 cost remains unverified: preserved 228 backups/522461597 logical bytes do not measure APFS shared-block
@@ -130,8 +130,7 @@ The adjacent corrupted-manifest recovery guard is implemented: same-basename fal
 one backup ID, preserving the live package on ambiguity. Regression and mutation are qualified in the
 repair gate; this safety change is also unmerged.
 
-- [ ] Complete integrated Debug/Release and workflow gates with the combined branch.
-- [ ] Run prepared bounded APFS experiment on a copy of real Misc/Test2:7 daily reopens×4 real saves,
+- [ ] Finish the running bounded APFS experiment on a copy of real Misc/Test2:7 daily reopens×4 real saves,
       stable allocated-block delta with remount controls, untouched-source/live hashes. Report declared
       workload limits; do not call this historical device cost or substitute logical bytes.
 
@@ -174,7 +173,7 @@ hashes are preserved. Evidence: `~/PaintWork/s52-erase-crash/mode3-diagnostic/`.
 
 ## Mend fill gaps beneath interior brushstrokes; apply across a layer — 2026-10-24
 
-**Queued — inspect the existing fill/mending path before implementing.** Owner reports: “when I fill
+**Active — shared engine and vector layer action in implementation.** Owner reports: “when I fill
 stuff, the fill leaves white in places where brushstrokes were.” An enclosed filled region can contain
 an internal brushstroke whose footprint stays unfilled. Extend the **same Mend Gaps setting** to cover
 those interior stroke-shaped gaps as well as its current behavior. Preserve the actual original outer
@@ -184,7 +183,10 @@ geometry, retained source and mending calculation rather than adding a parallel 
 Owner also asks for **a new layer action that applies Mend Gaps to all fills in all cels of that layer**.
 **Owner ruling2026-10-24: include interior strokes attached to the outside outline, while preserving
 the outside edge and avoiding side effects.** The fully-enclosed-components-only restriction is
-rejected; do not silently ship it as full coverage. Scope illustration: `~/PaintWork/s53-fill-mend/design/connected-stroke-scope.png`.
+rejected; do not silently ship it as full coverage. **Further owner ruling: protect uncertain joins**;
+do not infer the hidden covered outline. Attached stems still mend; ambiguous overlap can remain.
+**Performance requirement:** filling must retain real-time, quick visual feedback. Reuse cached
+preparation and bound any new work; avoid expensive full-image CPU analysis on each interactive tick. Scope illustration: `~/PaintWork/s53-fill-mend/design/connected-stroke-scope.png`.
 
 **Owner ruling2026-10-24: this action is vector layers only.** Raster fills are flattened into paint and
 are not individually identifiable; no raster storage redesign is authorized. The per-fill mending
