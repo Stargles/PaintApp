@@ -15,8 +15,8 @@ nonisolated enum PointGeometryRepair {
     }
     struct Report: Equatable, Sendable {
         var converted = 0
-        /// Successfully read packages whose manifest is not a JSON object. Their bytes are preserved
-        /// for existing strict backup recovery; this is neither a conversion nor a current marker.
+        /// Successfully read manifests whose JSON object or typed current metadata is unreadable.
+        /// Their bytes remain for strict backup recovery; this is neither conversion nor a marker.
         var ambiguous: [URL] = []
     }
     private static let prefix = ".point-geometry-"
@@ -226,6 +226,19 @@ nonisolated enum PointGeometryRepair {
             _ = try JSONDecoder().decode(ProjectManifest.GeometryVersion.self, from: manifestData)
             return nil
         }
+        // Adding the boundary must not re-serialize unrelated scene values or decimal spellings.
+        var markedManifest = manifestData
+        guard let root = markedManifest.firstIndex(of: UInt8(ascii: "{")) else {
+            throw Failure(reason: "Unreadable project manifest object.")
+        }
+        markedManifest.insert(contentsOf: Data("\"geometryVersion\":\(VectorCanvasData.currentGeometryVersion),".utf8), at: root + 1)
+        // Metadata damage belongs to existing backup recovery. Classify it before any payload
+        // read or owned copy; drawing conversion and filesystem failures remain hard errors.
+        do { _ = try JSONDecoder().decode(ProjectManifest.self, from: markedManifest) }
+        catch is DecodingError {
+            ambiguous.append(package)
+            return nil
+        }
         let reader = try ProjectRecipeMetadata.reader(in: package, manifest: manifest)
         let target = package.deletingLastPathComponent().appendingPathComponent(prefix + UUID().uuidString)
         let ownerURL = target.appendingPathExtension("owner.json")
@@ -259,12 +272,6 @@ nonisolated enum PointGeometryRepair {
             }
         }
         try copy()
-        // Adding the boundary must not re-serialize unrelated scene values or decimal spellings.
-        var markedManifest = manifestData
-        guard let root = markedManifest.firstIndex(of: UInt8(ascii: "{")) else {
-            throw Failure(reason: "Unreadable project manifest object.")
-        }
-        markedManifest.insert(contentsOf: Data("\"geometryVersion\":\(VectorCanvasData.currentGeometryVersion),".utf8), at: root + 1)
         try markedManifest.write(to: target.appendingPathComponent("manifest.json"), options: .atomic)
         guard ProjectBackupManager.validateProjectForRestore(at: target) else {
             throw Failure(reason: "The converted copy failed saved-scene validation. Its original was left untouched.")

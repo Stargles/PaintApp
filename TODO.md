@@ -39,6 +39,21 @@ Rater consolidator receives exact owned test-only follow-up commit(s) after its 
 
 ## Old-geometry typed metadata recovery — scope recorded, 2026-10-24
 
+Implemented the approved narrow preflight: reuse the exact existing geometryVersion byte insertion
+before ProjectRecipeMetadata.reader/payload/copy/owner work; strict-decode that normalized Data with
+current ProjectManifest. Only DecodingError joins existing ambiguous preservation/recovery; file reads,
+geometry conversion, owner checks and final staged validation still throw. Current-marker behavior and
+strict decoder are unchanged. Report comment now includes unreadable typed metadata.
+Two actual previous-writer1c5c422e material-strokes tests corrupt only the raw empty recent-colour array:
+with valid old backup the real startup gate converts only that backup, verifies every damaged original
+file before maintenance, runs permanent maintenance, opens original ink geometry and retains all damaged
+bytes in Trash; without backup it reaches ready through normal recovery while preserving every original
+byte and leaving strict load refused. Existing assertNoOwnedStages checks directories and owners too.
+PointGeometryRepair40 +ProjectStorageIntegrity11 +BackupManager25 +ProjectLocation23 =99 selected methods;
+no new files/PBX. UI lints/diff-check pass; no compiler/native/UI/mutation execution. Permanent startup
+maintenance and truthful gallery refresh remain after eventual whole temporary converter+UI-gate retirement.
+
+
 Root found a connected integration blocker after shared PaletteColor validation: a previous-writer
 manifest with malformed typed colour can enter PointGeometryRepair.stage, create owned copies and
 convert payloads, then fail full current-manifest validation at the end. That aborts the temporary

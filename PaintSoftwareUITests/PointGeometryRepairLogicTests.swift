@@ -125,6 +125,70 @@ final class PointGeometryRepairLogicTests: XCTestCase {
         for stage in stages { XCTAssertTrue(ProjectBackupManager.validateProjectForRestore(at: stage)) }
     }
 
+    func testOldTypedColorDamageReachesStartupRecoveryAfterItsGoodOldBackupConverts() async throws {
+        let project = try install("material-strokes")
+        let id = try XCTUnwrap(ProjectBackupManager.manifestID(at: project))
+        let backupDirectory = ProjectBackupManager.backupsDirectory(projectID: id)
+        let backup = backupDirectory.appendingPathComponent("latest.paintproj")
+        XCTAssertTrue(ProjectBackupManager.cloneItem(at: project, to: backup))
+        try Data(project.lastPathComponent.utf8).write(to: backupDirectory.appendingPathComponent("origin.name"))
+        try corruptPreviousRecentColor(in: project)
+        let original = try bytes(project)
+        let reportBox = OSAllocatedUnfairLock<PointGeometryRepair.Report?>(initialState: nil)
+        let maintenanceCalls = OSAllocatedUnfairLock(initialState: 0)
+        let startup = PointGeometryRepairStartup(repair: {
+            let report = try PointGeometryRepair.run()
+            reportBox.withLock { $0 = report }
+            // The malformed package must reach ordinary recovery with every original file intact.
+            for (path, data) in original {
+                XCTAssertEqual(try Data(contentsOf: project.appendingPathComponent(path)), data, path)
+            }
+            return report
+        }, maintenance: {
+            maintenanceCalls.withLock { $0 += 1 }
+            ProjectBackupManager.runStartupMaintenance()
+        })
+        await startup.start()
+        XCTAssertEqual(startup.phase, .ready, "Typed old metadata must not prevent valid-backup recovery")
+        XCTAssertEqual(maintenanceCalls.withLock { $0 }, 1)
+        let report = try XCTUnwrap(reportBox.withLock { $0 })
+        XCTAssertEqual(report.converted, 1, "Only the sound previous-writer backup needs conversion")
+        XCTAssertEqual(report.ambiguous.map(\.path), [project.path])
+        XCTAssertTrue(ProjectBackupManager.validateProjectForRestore(at: project))
+        XCTAssertTrue(ProjectBackupManager.validateProjectForRestore(at: backup))
+        let manager = try XCTUnwrap(ProjectStore.load(from: project))
+        manager.streamCoordinator.startsClients = false
+        try assertGeometry(manager, name: "material-strokes")
+        let trashed = try XCTUnwrap(ProjectBackupManager.listTrash().first)
+        XCTAssertEqual(try bytes(trashed.url), original, "Every damaged original byte must remain recoverable")
+        try assertNoOwnedStages()
+    }
+
+    func testOldTypedColorDamageWithoutBackupReachesReadyWithEveryOriginalBytePreserved() async throws {
+        let project = try install("material-strokes")
+        try corruptPreviousRecentColor(in: project)
+        let original = try bytes(root)
+        let startup = PointGeometryRepairStartup()
+        await startup.start()
+        XCTAssertEqual(startup.phase, .ready, "The existing recovery pass must decide there is no valid backup")
+        XCTAssertEqual(try bytes(root), original, "No stage, owner, rewritten source or invented backup is allowed")
+        XCTAssertFalse(ProjectBackupManager.validateProjectForRestore(at: project))
+        XCTAssertNil(ProjectStore.load(from: project), "Strict decoding must still refuse the unreadable scene")
+        XCTAssertTrue(ProjectBackupManager.allProjectPackages().contains {
+            $0.standardizedFileURL.path == project.standardizedFileURL.path
+        }, "The damaged gallery entry remains")
+        try assertNoOwnedStages()
+    }
+
+    private func corruptPreviousRecentColor(in package: URL) throws {
+        let url = package.appendingPathComponent("manifest.json")
+        var manifest = try Data(contentsOf: url)
+        let range = try XCTUnwrap(manifest.range(of: Data("\"recentColors\":[]".utf8)))
+        manifest.replaceSubrange(range, with: Data(("\"recentColors\":[{\"id\":\"B53679F2-3233-4450-A27A-DA5B828F2774\","
+            + "\"hex\":\"not-a-color\"}]").utf8))
+        try manifest.write(to: url)
+    }
+
     private func install(_ name: String, at relativePath: String? = nil) throws -> URL {
         let packages = try XCTUnwrap(fixture["packages"] as? [String: [String: String]])
         let files = try XCTUnwrap(packages[name])
