@@ -72,7 +72,7 @@ final class LiquifyUITests: PaintUITestCase {
         let round = app.buttons["brushPanel.brush.Round Hard"]
         XCTAssertTrue(tapWhenHittable(round, "choose the ordinary hard round brush"))
         XCTAssertTrue(round.isSelected)
-        tapAway(app)
+        app.buttons["toolbar.brushButton"].tap()
         // A fresh scene starts with black; verify the painted ink below without opening a keyboard.
         waitForTheKeyboardToLeave(app)
         XCTAssertTrue(app.textFields["colorPanel.hexField"].waitForNonExistence(timeout: 5),
@@ -133,7 +133,11 @@ final class LiquifyUITests: PaintUITestCase {
         let pushBrush = app.buttons["liquifyPanel.brush.Round Hard"]
         XCTAssertTrue(tapWhenHittable(pushBrush, "use a round displacement field"))
         XCTAssertTrue(pushBrush.isSelected)
-        tapAway(app)
+        app.buttons["toolbar.liquifyButton"].tap()
+        XCTAssertTrue(app.segmentedControls["liquifyPanel.modePicker"].waitForNonExistence(timeout: 5),
+                      "the Liquify controls must close before touching ink")
+        XCTAssertTrue(app.scrollViews["liquifyPanel.groupList"].waitForNonExistence(timeout: 5),
+                      "the Liquify brush library must close before touching ink")
         app.sliders["sideToolbar.liquifySizeSlider"].adjust(toNormalizedSliderPosition: 0.92)
         app.sliders["sideToolbar.liquifyPowerSlider"].adjust(toNormalizedSliderPosition: 1)
         // Cross below the centre: the field moves the point, while its edge crosses the wide dab.
