@@ -8,9 +8,11 @@ conservation and output quality take priority over speed. Use focused delegation
 for routine work, with occasional queue reports. The owner asked to work independently while asleep
 until 10 a.m. Toronto time. Raster scope and fixed exterior pixels for vector selections are ruled below.
 
-**Checkpoint 2026-10-23:** the previous cleanup is merged and the final Release is installed
-and launched normally. Owner is now asleep; no further iPad interaction is needed or queued. Remaining
-items below retain their existing deferred/owner-side status.
+**Checkpoint 2026-10-23:** three active asks below remain unfinished. Point-only Liquify and newest
+backup retention are integrated on an unmerged branch; repair 75/75 and runtime 302/302 are green,
+but combined 303, runtime 13mutants, fast tiers and current UI remain unqualified. Test1 erasing has
+memory evidence but no proven cause or fix. Previous normal Release bcd7a6af remains the installed
+build; no physical device operation occurred this pass. See HANDOFF for the current native owner.
 
 ## How to read and keep this file
 
@@ -86,12 +88,23 @@ final architecture review. Do not claim certainty from passing tests alone or re
 a compatibility flag. The new point-only vector instruction is authoritative over implementation
 interpretations made earlier. Record any actual behavior conflict with evidence before asking.
 
-Integrated runtime qualificationbeddbf48 executed304methods:301passed. Two obsolete BrushEngine
-parallel-array decoder tests were removed; current-format coverage remains. The cut-stroke first-save
-pixel premise was refuted by an ordinary-stroke control: the same22pixels changed by at most2byte levels
-through the existing Float32 codec. The saved Liquify result exactly matches an independently encoded
-ordinary precise stroke (control4:1/1passing). Keep exact normal-render/codec assertions; no production
-precision extension or pixel tolerance was introduced. Broader Debug/Release and visual gates remain.
+The unmerged implementation at 25fb7618 removes native vector material transport, retains ordinary
+Distort/exact bake and raster Liquify, and includes the one-shot package repair. Repair 75/75 plus 13
+repair mutants are qualified; a copy-only real-library gate opened all 242 surviving packages, with
+original hashes unchanged. Corrected runtime 302/302 is green; ScreenshotPixels separately passed 1/1
+for all 8 orientations and scale. Current combined focused count is 303, fast 5259/full 5842; these combined
+gates and 13 runtime mutants have not run. The cut first-save oracle now uses exact independent ordinary
+Float32 encoding; no production precision or pixel-tolerance change.
+
+Old-code field-edge UI control produced the intended width assertion-red (1.899×) after passing
+setup/movement/crop checks; root inspected the elongated tail. Current Liquify 4 + Raster 5 is running,
+with no result yet. Earlier setup failures and a uniform-field passing control are not appearance proof.
+
+- [ ] Green combined 303 baseline; 13 runtime faults assertion-red, exact restore and normal rebuild.
+- [ ] Exact Debug/Release fast tiers, counts/skips reconciled, static lints/PBX and touched cold UI.
+- [ ] Inspect current/old round-dot pictures at owner iPad9 landscape; drive required old workflows.
+- [ ] Fresh verified current-library export before signed device install; owner confirms real scenes.
+      Keep the one-shot repair until that confirmation, then retire it whole.
 
 ---
 
@@ -103,60 +116,50 @@ requests and queue history for other missing or incorrectly completed tasks, and
 ones to TODO before working on them. Previous notes claim age-thinned backup generations and a4GB
 cap; those are evidence to verify, not proof. Continue all actionable work without an unnecessary pause.
 
-Audit confirmed the44-slot3/6/24/7/4 schedule, install-burst protection and4GBcap exist. **Real gap:**
-TODO(161) at18efa1c2 says “newest in each bucket survives”, but `VersionRetention.keep` and its
-burst test keep the oldest. Correct to the recorded newest policy and verify bucket boundaries,
-pre-save recovery and install bursts. The week-of-real-scene storage-cost measurement is still
-unverified; the bounded Session47–51 audit found no other concrete dropped actionable ask.
-Evidence: `~/PaintWork/s52-saving-audit/audit.md`.
+Audit confirmed the 44-slot 3/6/24/7/4 schedule, install-burst protection and 4GB cap. The mismatch was
+oldest-per-bucket versus TODO(161)'s newest policy. Owner ruled 2026-10-23 to use the usual newest
+clock-bucket policy, preserving age tiers, pre-save copies, update protection and cap; no oldest exception.
+The correction is integrated but unmerged. Actual standalone retention 14/14 passed, reverse-order
+mutation 8/14 was assertion-red and exact restore 14/14 passed. Integrated retention 14 and backup 21
+also passed in runtime 302; combined fast tiers remain pending.
 
-Owner ruling,2026-10-23: use the usual bucket policy. Borg and Restic retain the **newest** backup
-in each clock bucket; implement that policy, retaining the existing age tiers, pre-save copies,
-update protection and global cap. No extra oldest-per-bucket exception.
+The bounded Session47–51 audit found no other concrete dropped actionable ask. Real-scene week storage
+cost remains unverified: preserved 228 backups/522461597 logical bytes do not measure APFS shared-block
+cost. Evidence: `~/PaintWork/s52-saving-audit/audit.md`.
 
-Working correction4079a1c2: actual standalone VersionRetentionLogicTests14/14 green; reverse-order
-fault8/14 red, exact-source restore14/14. Integrated backup/save tests still pending. Preserved real
-library has228backups/522461597logical bytes; exported copies cannot measure original APFS block
-sharing, so the requested real-scene week cost remains open. Do not substitute this inventory for it.
+The adjacent corrupted-manifest recovery guard is implemented: same-basename fallback accepts exactly
+one backup ID, preserving the live package on ambiguity. Regression and mutation are qualified in the
+repair gate; this safety change is also unmerged.
 
-Adjacent safety finding recorded in BUGS: a corrupted manifest falls back to the first backup
-with the same basename, which is ambiguous across folders. Refuse multiple matches and preserve
-the live package; retain ID lookup and unique-name recovery, with a regression before shipping.
+- [ ] Complete integrated Debug/Release and workflow gates with the combined branch.
+- [ ] Measure a real scene's week of physical storage cost without substituting logical export bytes.
 
 ---
 
 ## Erasing strokes crashes on iPad — 2026-10-23
 
-Owner: “a crash just happened on the ipad when i was tryiong to erase some strokes.”
-Reported immediately after final Releasebcd7a6af was installed and opened. Establish the actual
-crashing executable/build and exception from device diagnostics before inferring a cause. Diagnose
-and fix at the existing eraser/rendering seam, with a reproducing regression and required gates.
-Owner clarifies: **Test1**, and **no Liquify had been used on the strokes**. Start with read-only
-logs and the preserved Test1 copy; do not restart/reinstall PaintApp or request device interaction
-until genuinely required. Preserve the real scene and backups. A new named crash report was not
-available in the root, Retired or synced Mac logs; no current Jetsam report or touch recording was
-found. Owner describes “the entire ipad crashed and homescreen”; return to Home Screen is confirmed,
-with a **black screen and loading spinner** before Home Screen. This may be wider than app
-termination; a system/interface restart is not yet proved. Check system/panic/watchdog/reset evidence. The preserved Test1 has
-no material operations and was saved with To Cross selected; reproduce this ordinary-ink path first.
-Read-only follow-up at19:22 retrieved JetsamEvent2026-10-23-184706. At18:47EDT, backboardd hit
-its per-process limit at1850MiB; PaintSoftware was active at730.4MiB/922.6MiB lifetime peak,
-UUID F6102F9A-6D31-3185-B078-47B4C41981D9, matching installedbcd7a6af. This report names
-backboardd as the recent termination; PaintSoftware has no kill reason. It is consistent with a
-system/interface failure but does not establish the reported event's time or the source of that
-process's memory. Inspect existing canvas/CoreAnimation surface ownership without a speculative fix.
-Raw report and summary: `~/PaintWork/s52-erase-crash/device-diagnostics/`.
-Owner cannot recall the time but says this was the only crash today; treating18:47 as the probable
-matching event is reasonable. Exact timing and the source of backboardd's memory remain unproved.
-Two fresh Test1 flights (181634/181822), version1.0.43(1), end27–30minutes before the Jetsam.
-They record stranded-recognizer repairs/counters but no memory telemetry or explicit erase completion;
-Liquify selected in one is not proof it was applied. They do not establish a link to the termination.
-Initial source audit found no retained scratch-owner defect, but generalized the replacement-preview
-path. **Preserved To Cross is Mode3, which has no scratch preview**: it cuts per sample and updates
-the canvas base. Trace successful Mode3 cuts through base-image assignment first; repeated canvas-sized
-UIImage handoff has caused backboardd failures in other features (WindowSurfaceView's documented
-history). This is a concrete hypothesis, not a proven cause. UnlandedInk byte counters apply to other
-eraser modes and are secondary unless current-mode evidence says otherwise. No speculative fix.
+Owner: “a crash just happened on the ipad when i was tryiong to erase some strokes.” Test1, no
+Liquify applied; black screen/loading spinner then Home Screen after normal Release bcd7a6af install.
+Preserve the scene/backups. Diagnose the actual eraser/rendering cause before changing production.
+
+The probable matching 18:47EDT Jetsam names backboardd at its1850MiB limit. PaintSoftware was active
+at 730.4 MiB/922.6 MiB peak, UUID F6102F9A-6D31-3185-B078-47B4C41981D9 (installed bcd7a6af), with
+no app kill reason. Owner says this was today's only crash but cannot recall the time. Allocation origin
+remains unproved; flights ending27–30minutes earlier establish no causal link. No physical launch,
+restart or install this pass. Evidence: `~/PaintWork/s52-erase-crash/device-diagnostics/`.
+
+Preserved Test1 has 4096², 527 strokes and no material data. Its To Cross eraser is Mode3: successful cuts
+update the canvas base without a scratch preview. **Raw size 7.962 means canvas points, not 7.96% or 326px.**
+Repeated canvas-sized UIImage/CoreAnimation handoff is a hypothesis to test, not a proven cause.
+Mode3 capture 1 passed 1/1 with 3 successful cuts and 3 full 4096 RGBA image assignments, footprint 854–985 MiB;
+root inspected 2 pictures. Simulator memory does not prove backboardd behavior. Capture 2 mapped 527 source
+points and selected 20 but stopped before gestures at an added fewer than 100 dark pixels premise;
+no new crash evidence. That premise is under diagnosis. All 3 temporary root source files are restored
+hash-exact. Evidence and calibration detail: `~/PaintWork/s52-erase-crash/mode3-diagnostic/`.
+
+- [ ] Correct the reproduction premise and trace successful Mode3 cut/image ownership with bounded
+      diagnostics; preserve actual geometry and avoid a speculative production fix.
+- [ ] Establish the allocation cause and reproducing regression, then run the required gates.
 
 ---
 
