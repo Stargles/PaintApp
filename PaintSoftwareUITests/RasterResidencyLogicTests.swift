@@ -730,7 +730,7 @@ final class RasterResidencyLogicTests: XCTestCase {
         manager.shapeGestureBrush = TestBrushes.hardRound
         manager.shapeGestureStrokeWidth = 4
         manager.shapeGestureColor = CodableColor(.blue)
-        manager.shapeGestureSamples = StrokeSamples([VectorSample(x: 4, y: 10), VectorSample(x: 18, y: 10)])
+        manager.shapeGestureSamples = [VectorSample(x: 4, y: 10), VectorSample(x: 18, y: 10)]
         manager.textGestureActive = true
         manager.textFingerDown = false
         manager.textIsFocused = true
@@ -1110,7 +1110,7 @@ final class RasterResidencyLogicTests: XCTestCase {
                 try XCTUnwrap(CoreGraphicsCompositor.premultipliedBytes(
                     XCTUnwrap(source.resolveImage().get().cgImage), width: 2, height: 2))
             }
-            let fourRed = Array(repeating: [UInt8(255), 0, 0, 255], count: 4).flatMap { $0 }
+            let fourRed = Array(repeating: [255, 0, 0, 255] as [UInt8], count: 4).flatMap { $0 }
             XCTAssertEqual(try rgba(piece), fourRed)
             XCTAssertEqual(try rgba(hole), Array(repeating: UInt8(0), count: 16))
             XCTAssertEqual(try rgba(kept), fourRed)

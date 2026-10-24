@@ -581,3 +581,8 @@ Root's isolated8bb compile passed the app source phase and reached test compilat
 on InkPoseLogicTests passing its now-owned remainder Source directly to UIImage-only opaque bounds.
 That existing throwing test now explicitly resolves/get()s its source before the actual bounds
 assertion. No compatibility overload or blank fallback. Consumer runtime remains unrun (32 static).
+
+Root's isolateda0aa compile reached the new residency class and stopped on two fixture type errors:
+shapeGestureSamples is an existing [VectorSample], and the local expected red array needs an
+explicit [UInt8] element type. Corrected only those types, preserving samples/pixels/assertions.
+The app module compiled; consumer tests still have not executed (32 static methods).
