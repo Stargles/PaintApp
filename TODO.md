@@ -86,6 +86,13 @@ final architecture review. Do not claim certainty from passing tests alone or re
 a compatibility flag. The new point-only vector instruction is authoritative over implementation
 interpretations made earlier. Record any actual behavior conflict with evidence before asking.
 
+Integrated runtime qualificationbeddbf48 executed304methods:301passed. Two obsolete BrushEngine
+parallel-array decoder tests were removed; current-format coverage remains. The cut-stroke first-save
+pixel premise was refuted by an ordinary-stroke control: the same22pixels changed by at most2byte levels
+through the existing Float32 codec. The saved Liquify result exactly matches an independently encoded
+ordinary precise stroke (control4:1/1passing). Keep exact normal-render/codec assertions; no production
+precision extension or pixel tolerance was introduced. Broader Debug/Release and visual gates remain.
+
 ---
 
 ## Verify smart document saving and reconcile outstanding asks — 2026-10-23
