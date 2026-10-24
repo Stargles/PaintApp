@@ -20,9 +20,10 @@ Installed normal Release remains bcd7a6af, UUID F6102F9A-6D31-3185-B078-47B4C419
 - Audit library tree: `~/PaintWork/PaintApp-s54-library-ownership`, tmp/s54-library-ownership. Strict
   shared file-tree/content identity and UUID Trash ownership; PBX source registered. Two added logic
   regressions now cover migration preserving both sides after linked-destination comparison failure and
-  unreadable retained Trash ownership. The recorded task commits are being rebased onto this fill-integrated
-  dependency; see the external mutation plan in `~/PaintWork/s54-architecture-audit/library-ownership/`.
-  No native build/runtime/UI/mutation gate has run. WIP, do not merge.
+  unreadable retained Trash ownership. Rebased onto fill dependency `071c7eb2`; application production
+  logic remains byte-identical to `265e588e`. The library fixtures carry current `geometryVersion: 1`.
+  See the external mutation plan in `~/PaintWork/s54-architecture-audit/library-ownership/`. No native
+  build/runtime/UI/mutation gate has run. WIP, do not merge.
 - Audit background tree: `~/PaintWork/PaintApp-s54-background-ownership`, tmp/s54-background-ownership,
   clean ec46b3e6. Export cancellation, maintenance serialization and bounded/cancelled thumbnails;
   five new regressions. No native compile/runtime/UI/mutation gate. WIP, do not merge.
