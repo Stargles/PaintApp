@@ -998,4 +998,159 @@ final class RasterResidencyLogicTests: XCTestCase {
         XCTAssertFalse(cancelled.isPending)
     }
 
+    @MainActor
+    func testLiveMaskAdmissionUsesTheSameStagedFillAsTheNewStrokeWithoutLandingItEarly() throws {
+        let size = CGSize(width: 64, height: 64)
+        let owner = RasterResidency(budgetBytes: 64 * 64 * 4 * 16, hasHeadroom: { _ in true })
+        let source = try RasterSource.render(size: size, using: owner) { context in
+            context.setFillColor(UIColor.red.cgColor)
+            context.fill(CGRect(x: 0, y: 0, width: 32, height: 64))
+            return true
+        }.get()
+        let manager = CanvasFixture.manager(layerCount: 2)
+        manager.canvasSize = size
+        manager.layers[0].cels[0].raster = RasterLayerTexture(size: size, source: source, strokeCount: 1)
+        manager.layers[1].alphaMask = AlphaMask(sources: [.layer(manager.layers[0].id)])
+        let masks = try XCTUnwrap(RenderNode.masksClipping(leafAt: 1, in: manager.renderTree(atFrame: 0)))
+        let recipe = try XCTUnwrap(manager.liveMaskRecipe(atFrame: 0))
+        let old = try XCTUnwrap(MaskResolver.coverage(for: masks, of: recipe).get())
+        XCTAssertEqual(old.coverage[32 * old.width + 48], 0)
+        manager.fillGestureActive = true
+        manager.fillFingerDown = false
+        manager.fillGestureLayerID = manager.layers[0].id
+        manager.fillGestureCelID = manager.layers[0].cels[0].id
+        manager.fillGestureFillColor = CodableColor(.green)
+        let fill = CanvasManager.FillRenderResult(generation: manager.fillGeneration,
+            bytes: Array(repeating: [UInt8(0), 255, 0, 255], count: 64 * 64).flatMap { $0 },
+            window: FillWindow.fitting(CGRect(origin: .zero, size: size), in: size, pixelBudget: 64 * 64))
+        manager.fillRenderedRegion = fill
+        let identity = CelContentIdentity(manager.layers[0].cels[0])
+        let history = manager.history.undoStack.count
+        let prepared = try XCTUnwrap(manager.prepareCanvasEdit())
+        let stagedRecipe = try XCTUnwrap(manager.liveMaskRecipe(atFrame: 0, preparing: prepared.cels))
+        let staged = try XCTUnwrap(MaskResolver.coverage(for: masks, of: stagedRecipe).get())
+        XCTAssertEqual(staged.coverage[32 * staged.width + 48], 255,
+                       "The pending fill changes the source alpha used by this admitted stroke")
+        XCTAssertNotEqual(staged.coverage, old.coverage)
+        XCTAssertEqual(CelContentIdentity(manager.layers[0].cels[0]), identity)
+        XCTAssertTrue(manager.fillGestureActive)
+        XCTAssertTrue(manager.fillRenderedRegion === fill)
+        XCTAssertEqual(manager.history.undoStack.count, history)
+        XCTAssertTrue(prepared.commit())
+        let landedRecipe = try XCTUnwrap(manager.liveMaskRecipe(atFrame: 0))
+        let landed = try XCTUnwrap(MaskResolver.coverage(for: masks, of: landedRecipe).get())
+        XCTAssertEqual(landed.coverage, staged.coverage)
+        XCTAssertFalse(manager.fillGestureActive)
+        XCTAssertEqual(manager.history.undoStack.count, history + 1)
+        XCTAssertLessThanOrEqual(owner.usage.admittedBytes, owner.budgetBytes)
+    }
+
+    func testNormal4096PaintAndEraseAdmitTheirWindowAndExactBeforeAfterPatches() throws {
+        let size = CGSize(width: 4096, height: 4096)
+        let budget = CompositorBudget.textureBudgetBytes(physicalMemory: 3 * 1024 * 1024 * 1024) * 2
+        for erasing in [false, true] {
+            try autoreleasepool {
+                let owner = RasterResidency(budgetBytes: budget, hasHeadroom: { _ in true })
+                let red = try RasterSource.render(size: size, using: owner) { context in
+                    context.setFillColor(UIColor.red.cgColor)
+                    context.fill(CGRect(origin: .zero, size: size))
+                    return true
+                }.get()
+                let raster = RasterLayerTexture(size: size, source: red, strokeCount: 1)
+                let backdrop = try red.resolveImage().get()
+                let scratch = StrokeScratch(canvasSize: size,
+                    role: erasing ? .subtractive(backdrop: backdrop) : .additive, residency: owner)
+                scratch.stampCircle(at: CGPoint(x: 32, y: 32), radius: 4, color: .blue,
+                                    alpha: 1, hardness: 1, blendMode: .normal)
+                try scratch.lastMutationResult.get()
+                XCTAssertLessThan(scratch.windowPixelCount, 256 * 256)
+                let rect = try XCTUnwrap(scratch.dirtyRect).integral
+                let before = try XCTUnwrap(raster.copiedPatch(in: rect).get())
+                let after = try scratch.preparedPatch(over: before, in: rect).get()
+                let image = try after.resolveImage().get()
+                try raster.restore(patch: image, at: rect.origin).get()
+                raster.setStrokeCount(2)
+                let current = try XCTUnwrap(raster.snapshot())
+                let spot = try current.cropped(to: CGRect(x: 31, y: 31, width: 2, height: 2)).get()
+                let rgba = try XCTUnwrap(CoreGraphicsCompositor.premultipliedBytes(
+                    XCTUnwrap(spot.resolveImage().get().cgImage), width: 2, height: 2))
+                let expected: [UInt8] = erasing ? [0, 0, 0, 0] : [0, 0, 255, 255]
+                XCTAssertEqual(rgba, Array(repeating: expected, count: 4).flatMap { $0 })
+                let old = try red.cropped(to: CGRect(x: 31, y: 31, width: 2, height: 2)).get()
+                XCTAssertEqual(try CoreGraphicsCompositor.premultipliedBytes(
+                    XCTUnwrap(old.resolveImage().get().cgImage), width: 2, height: 2),
+                    Array(repeating: [UInt8(255), 0, 0, 255], count: 4).flatMap { $0 })
+                XCTAssertEqual(raster.strokeCount, 2)
+                XCTAssertLessThanOrEqual(owner.usage.admittedBytes, budget)
+                XCTAssertLessThanOrEqual(owner.usage.highWaterBytes, budget)
+            }
+        }
+    }
+
+    func testNormal4096MoveSplitAdmitsBothOwnedOutputsTogetherAndKeepsTheirExactPixels() throws {
+        try autoreleasepool {
+            let size = CGSize(width: 4096, height: 4096)
+            let bytes = 4096 * 4096 * 4
+            let budget = CompositorBudget.textureBudgetBytes(physicalMemory: 3 * 1024 * 1024 * 1024) * 2
+            let owner = RasterResidency(budgetBytes: budget, hasHeadroom: { _ in true })
+            let red = try RasterSource.render(size: size, using: owner) { context in
+                context.setFillColor(UIColor.red.cgColor)
+                context.fill(CGRect(x: 20, y: 20, width: 12, height: 12))
+                return true
+            }.get()
+            let path = CGPath(rect: CGRect(x: 20, y: 20, width: 6, height: 12), transform: nil)
+            let split = try PixelOps.maskedPiece(image: red.resolveImage().get(), path: path, using: owner).get()
+            XCTAssertEqual(owner.usage.pixelBufferCount, 3)
+            XCTAssertEqual(owner.usage.pixelBytes, bytes * 3)
+            XCTAssertEqual(owner.usage.reservedCheckpointBytes, bytes * 2)
+            let piece = try split.piece.cropped(to: CGRect(x: 21, y: 21, width: 2, height: 2)).get()
+            let hole = try split.remainder.cropped(to: CGRect(x: 21, y: 21, width: 2, height: 2)).get()
+            let kept = try split.remainder.cropped(to: CGRect(x: 29, y: 21, width: 2, height: 2)).get()
+            func rgba(_ source: RasterSource) throws -> [UInt8] {
+                try XCTUnwrap(CoreGraphicsCompositor.premultipliedBytes(
+                    XCTUnwrap(source.resolveImage().get().cgImage), width: 2, height: 2))
+            }
+            let fourRed = Array(repeating: [UInt8(255), 0, 0, 255], count: 4).flatMap { $0 }
+            XCTAssertEqual(try rgba(piece), fourRed)
+            XCTAssertEqual(try rgba(hole), Array(repeating: UInt8(0), count: 16))
+            XCTAssertEqual(try rgba(kept), fourRed)
+            XCTAssertLessThanOrEqual(owner.usage.admittedBytes, budget)
+            XCTAssertLessThanOrEqual(owner.usage.highWaterBytes, budget)
+        }
+    }
+
+    func testNormal4096LiquifyKeepsWindowWorkAndFinalOwnedPictureWithinTheConfiguredEnvelope() throws {
+        try autoreleasepool {
+            let size = CGSize(width: 4096, height: 4096)
+            let budget = CompositorBudget.textureBudgetBytes(physicalMemory: 3 * 1024 * 1024 * 1024) * 2
+            let owner = RasterResidency(budgetBytes: budget, hasHeadroom: { _ in true })
+            let red = try RasterSource.render(size: size, using: owner) { context in
+                context.setFillColor(UIColor.red.cgColor)
+                context.fill(CGRect(x: 20, y: 18, width: 9, height: 12))
+                return true
+            }.get()
+            let snapshot = CelPixelSnapshot(rasterSource: red, bakedSource: nil, size: size)
+            let deformation = LiquifyDeformation(brush: TestBrushes.hardRound, size: 40, power: 1,
+                mode: .push, seed: 7, samples: StrokeSamples([
+                    VectorSample(x: 24, y: 24), VectorSample(x: 38, y: 24)], channels: .pressureOnly))
+            let window = CGRect(x: 0, y: 0, width: 60, height: 48)
+            let patch = try XCTUnwrap(snapshot.liquifiedPatch(in: window, using: LiquifyField(deformation)))
+            XCTAssertTrue(patch.changed)
+            let final = try XCTUnwrap(snapshot.committing(patch))
+            let before = try red.cropped(to: window).get()
+            let after = try final.cropped(to: window).get()
+            let oldRGBA = try XCTUnwrap(CoreGraphicsCompositor.premultipliedBytes(
+                XCTUnwrap(before.resolveImage().get().cgImage), width: 60, height: 48))
+            let newRGBA = try XCTUnwrap(CoreGraphicsCompositor.premultipliedBytes(
+                XCTUnwrap(after.resolveImage().get().cgImage), width: 60, height: 48))
+            XCTAssertNotEqual(oldRGBA, newRGBA)
+            XCTAssertGreaterThan(stride(from: 3, to: newRGBA.count, by: 4).filter { newRGBA[$0] > 0 }.count, 0)
+            XCTAssertEqual(newRGBA, try CoreGraphicsCompositor.premultipliedBytes(
+                XCTUnwrap(patch.image.cgImage), width: 60, height: 48))
+            XCTAssertLessThanOrEqual(owner.usage.admittedBytes, budget)
+            XCTAssertLessThanOrEqual(owner.usage.highWaterBytes, budget)
+            XCTAssertEqual(owner.usage.workingBytes, 0)
+        }
+    }
+
 }

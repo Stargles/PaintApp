@@ -494,7 +494,7 @@ final class ShapeRecoveryUITests: PaintUITestCase {
     ///
     /// The shape overlay used to sit across the whole canvas with interaction enabled, swallowing
     /// that first touch as a "tap outside". It now only claims the touches that land on its handles,
-    /// so this stroke reaches the stroke view, whose `onStrokeBegan` bakes the shape on the way past.
+    /// so this stroke reaches the stroke view, whose prepared settlement bakes the shape on the way past.
     func testDrawingOverAPendingShapeCommitsItAndDrawsInOneTouch() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))

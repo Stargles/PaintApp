@@ -61,9 +61,11 @@ final class StrokeCanvasView: CanvasPlaneView {
     var onStrokeEnded: (() -> Void)?
 
     /// Prepares required drawing inputs without changing the document. Nil refuses the touch.
-    /// The returned action commits transients/spawns the cel only after an admitted timing take
-    /// has entered playback, so the cel and prepared inputs belong to the same entry frame.
-    var prepareStroke: (Int) -> (() -> Void)? = { _ in {} }
+    /// Settlement precedes the recording baseline; begin runs after playback enters the planned
+    /// frame and may spawn its cel. The retained backdrop was admitted with every other source.
+    var prepareStroke: (Int) -> (settle: () -> Bool, begin: () -> Void, rasterBackdrop: UIImage?)? = {
+        _ in ({ true }, {}, nil)
+    }
     /// Called when a stroke is abandoned *and rolled back* — `StrokeGiveUp.handedOver` only. An
     /// interrupted stroke commits instead and reports through `onStrokeEnded`, so this stays what it
     /// always was: "the layer is back where it started".
@@ -1570,8 +1572,8 @@ final class StrokeCanvasView: CanvasPlaneView {
     }
 
     private func beginLiquifyGesture(_ touch: UITouch) {
-        guard let beginStroke = prepareStroke(canvasManager?.currentFrame ?? 0) else { return }
-        beginStroke()
+        guard let prepared = prepareStroke(canvasManager?.currentFrame ?? 0), prepared.settle() else { return }
+        prepared.begin()
         strokeSeed = DabRandom.freshSeed()
         liveWalk = BrushStamper.LiveWalk(seed: strokeSeed)
         lastSampleTime = nil
@@ -1712,9 +1714,10 @@ final class StrokeCanvasView: CanvasPlaneView {
         // admitted touch starts the take; playback must still precede the begin action's cel spawn
         // so a take rewinding from the end creates its cel on the frame the artist will draw.
         let timing = timingTakeStart()
-        guard let beginStroke = prepareStroke(timing?.frame ?? canvasManager?.currentFrame ?? 0) else { return }
+        guard let prepared = prepareStroke(timing?.frame ?? canvasManager?.currentFrame ?? 0),
+              prepared.settle() else { return }
         let timingCelsBefore = beginTimingTakeIfArmed(timing)
-        beginStroke()
+        prepared.begin()
         // BRUSH.md §4: the field exists from the first dab, so what the pen lays down and what the
         // stored stroke replays are drawn from the same randomness.
         strokeSeed = DabRandom.freshSeed()
@@ -1734,9 +1737,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         if timingCelsBefore != nil { canvasManager?.timingStrokeIsLive = false }
         guard let raster else { return }
         shapeFollowingTouch = false
-        let backdrop: UIImage?
-        do { backdrop = strokeTool == .eraser ? try raster.renderIfNonEmpty().get() : nil }
-        catch { canvasManager?.raise(.drawingSourceUnavailable); onStrokeCancelled?(); return }
+        let backdrop = prepared.rasterBackdrop
         // The eraser's window needs the cel's own pixels to *show* the removal against and to decide
         // whether there is anything to remove; a paint stroke's holds its own ink and nothing else.
         // The backdrop is the already-resident render, never a second one, and **nil** for a tier

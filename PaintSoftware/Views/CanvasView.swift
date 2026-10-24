@@ -828,23 +828,38 @@ struct CanvasView: UIViewRepresentable {
                     guard let self, let host, let layerID = host.strokeView.layerID,
                           let index = self.canvasManager.layers.firstIndex(where: { $0.id == layerID })
                     else { return nil }
+                    guard let settlement = self.canvasManager.prepareCanvasEdit() else { return nil }
+                    let tree = self.canvasManager.renderTree(atFrame: frame)
+                    var exposed = Set(self.canvasManager.layers.filter {
+                        self.layerHosts[$0.id]?.isBlanked == false
+                    }.map(\.id))
+                    exposed.insert(layerID)
+                    if let cut = self.livePicture?.cut.hostLayerIDs { exposed.formUnion(cut) }
+                    if !self.isSandwichEngaged(tree) { exposed.formUnion(self.layerHosts.keys) }
+                    let pictures: [UUID: HostSourcePictures]
+                    switch self.prepareHostPictures(exposed, atFrame: frame, preparing: settlement.cels) {
+                    case .success(let prepared): pictures = prepared
+                    case .failure:
+                        self.canvasManager.raise(.drawingSourceUnavailable)
+                        return nil
+                    }
                     let mask: CGImage?
-                    switch self.resolveLiveMask(forLayerAt: index, atFrame: frame) {
+                    switch self.resolveLiveMask(forLayerAt: index, atFrame: frame, preparing: settlement.cels) {
                     case .success(let prepared): mask = prepared
                     case .failure:
                         self.canvasManager.raise(.drawingSourceUnavailable)
                         return nil
                     }
-                    return { [weak self, weak host] in
+                    let settle: () -> Bool = { [weak self] in
+                        guard let self, settlement.commit() else { return false }
+                        self.installHostPictures(pictures)
+                        self.refreshAfterPreparedCanvasEdit()
+                        return true
+                    }
+                    let begin: () -> Void = { [weak self, weak host] in
                         guard let self, let host else { return }
-                        // The autosave waits for the lift — see `CanvasManager.strokeIsLive`.
+                        // The autosave waits for the lift — see CanvasManager.strokeIsLive.
                         self.canvasManager.strokeIsLive = true
-                        // A stroke is a canvas edit, so any adjustable fill/shape bakes before this one
-                        // changes a pixel: they become older undo steps, and this stroke's undo
-                        // snapshot (taken after this returns) includes the baked content. This is also
-                        // what lets drawing straight over a pending shape work in one touch — the first
-                        // touch bakes the shape and then goes on to draw.
-                        self.commitTransientsAndRefresh()
                         // Drawing on a frame with no block spawns one, right here, before the stroke
                         // reaches for its content tier. `handleBegin` calls this and *then* reads
                         // `vectorCanvas`/`raster`, so attaching the new cel's tiers synchronously is
@@ -869,6 +884,7 @@ struct CanvasView: UIViewRepresentable {
                         self.applySandwichPresentationNow()
                         self.startShapeDetection(host: host)
                     }
+                    return (settle, begin, host.strokeView.strokeTool == .eraser ? pictures[layerID]?.rasterImage : nil)
                 }
                 host.strokeView.onStrokeCancelled = { [weak self] in
                     guard let self else { return }
@@ -1046,13 +1062,10 @@ struct CanvasView: UIViewRepresentable {
             publishCanvasState()
         }
 
-        /// One pass of the per-layer sweep `reconcileLayersNow` makes — visibility, group
-        /// opacity, the value layer's flat colour, which content tier each host shows, and the
-        /// two interaction gates. Extracted from the middle of that function so it is a named
-        /// row rather than part of `reconcile`'s remainder; the body is unchanged.
+        /// Every picture needed for one host, retained together until the complete frame installs.
         private struct HostSourcePictures {
+            let celID: UUID?
             let raster: RasterLayerTexture?
-            let vector: VectorCanvas?
             let baked: RasterSource?
             let bakedImage: UIImage?
             let rasterImage: UIImage?
@@ -1060,7 +1073,8 @@ struct CanvasView: UIViewRepresentable {
 
         /// Admit every source that will be exposed before changing a host. Images in this value
         /// retain their provider leases through the complete install; a failed frame replaces none.
-        private func prepareHostPictures(_ ids: Set<UUID>, atFrame frame: Int? = nil)
+        private func prepareHostPictures(_ ids: Set<UUID>, atFrame frame: Int? = nil,
+                                         preparing cels: [UUID: Cel] = [:])
             -> Result<[UUID: HostSourcePictures], RasterResidency.Failure> {
             let frame = frame ?? canvasManager.currentFrame
             let shownFrames = canvasManager.displayedFrames(atFrame: frame)
@@ -1070,8 +1084,9 @@ struct CanvasView: UIViewRepresentable {
                 where ids.contains(layer.id) && canvasManager.isLayerEffectivelyVisible(index) {
                     let at = canvasManager.activeCelIndex(inLayer: index,
                         atFrame: shownFrames[index] ?? frame)
-                    let cel = at.map { layer.cels[$0] }
-                    let baked = bakedSourceToDisplay(layerIndex: index, celIndex: at)
+                    let cel = at.map { cels[layer.cels[$0].id] ?? layer.cels[$0] }
+                    let baked = isFloatingMoveSource(layerIndex: index, celIndex: at)
+                        ? bakedSourceToDisplay(layerIndex: index, celIndex: at) : cel?.bakedImage
                     let host = layerHosts[layer.id]
                     let bakedImage: UIImage?
                     if let host, host.displayedBakedSource === baked {
@@ -1083,7 +1098,7 @@ struct CanvasView: UIViewRepresentable {
                     } else if let installed = host?.strokeView.retainedRasterPicture(ifCurrent: cel?.raster) {
                         rasterImage = installed.image
                     } else { rasterImage = try cel?.raster.renderIfNonEmpty().get() }
-                    pictures[layer.id] = HostSourcePictures(raster: cel?.raster, vector: cel?.vector,
+                    pictures[layer.id] = HostSourcePictures(celID: cel?.id, raster: cel?.raster,
                         baked: baked, bakedImage: bakedImage, rasterImage: rasterImage)
                 }
                 return .success(pictures)
@@ -1093,10 +1108,17 @@ struct CanvasView: UIViewRepresentable {
         private func installHostPictures(_ pictures: [UUID: HostSourcePictures]) {
             for (id, picture) in pictures {
                 guard let host = layerHosts[id] else { continue }
-                host.installBaked(source: picture.baked, image: picture.bakedImage)
-                host.strokeView.installContent(raster: picture.raster, vector: picture.vector,
-                                              rasterImage: picture.rasterImage)
+                installHostPicture(picture, on: host, layerID: id)
             }
+        }
+
+        /// Staging clones vector geometry privately. After settlement the host must edit the
+        /// actual document owner, while installing the exact source images already admitted.
+        private func installHostPicture(_ picture: HostSourcePictures, on host: LayerHostView, layerID: UUID) {
+            let vector = canvasManager.layers.first(where: { $0.id == layerID })?
+                .cels.first(where: { $0.id == picture.celID })?.vector
+            host.installBaked(source: picture.baked, image: picture.bakedImage)
+            host.strokeView.installContent(raster: picture.raster, vector: vector, rasterImage: picture.rasterImage)
         }
 
         private func reconcileLayerRows(touch: CanvasTouchInputs) {
@@ -1125,9 +1147,7 @@ struct CanvasView: UIViewRepresentable {
                 let celIdx = canvasManager.activeCelIndex(inLayer: index,
                                                           atFrame: shownFrames[index] ?? canvasManager.currentFrame)
                 if let prepared = pictures[layer.id] {
-                    host.installBaked(source: prepared.baked, image: prepared.bakedImage)
-                    host.strokeView.installContent(raster: prepared.raster, vector: prepared.vector,
-                                                  rasterImage: prepared.rasterImage)
+                    installHostPicture(prepared, on: host, layerID: layer.id)
                 } else {
                     host.installBaked(source: nil, image: nil)
                     host.strokeView.bindContent(raster: celIdx.map { layer.cels[$0].raster },
@@ -2571,14 +2591,15 @@ struct CanvasView: UIViewRepresentable {
         ///
         /// The recipe lets the shared mask cache answer before any source pixels are resolved.
         /// A miss resolves only the mask's dependencies; unrelated leaves do no pixel work.
-        private func resolveLiveMask(forLayerAt index: Int, atFrame frame: Int) -> Result<CGImage?, MaskResolver.Failure> {
+        private func resolveLiveMask(forLayerAt index: Int, atFrame frame: Int,
+                                     preparing cels: [UUID: Cel] = [:]) -> Result<CGImage?, MaskResolver.Failure> {
             // The same frame the request below is built at, and it has to be: the two are compared
             // against each other by `MaskResolver`'s cache, so a tree derived at one frame and a
             // request at another would be a cache key describing a document that never existed.
             guard let masks = RenderNode.masksClipping(leafAt: index,
                                                        in: canvasManager.renderTree(atFrame: frame)),
                   !masks.isEmpty else { return .success(nil) }
-            guard let recipe = canvasManager.liveMaskRecipe(atFrame: frame)
+            guard let recipe = canvasManager.liveMaskRecipe(atFrame: frame, preparing: cels)
             else { return .failure(.sourceUnavailable) }
             return MaskResolver.coverage(for: masks, of: recipe).flatMap { resolved in
                 // Deleted sources remain neutral under the existing mask contract.
@@ -3435,36 +3456,18 @@ struct CanvasView: UIViewRepresentable {
         /// The text session's pan, if one has been added — see `followTextBox`.
         private var textFollow = ViewportFollow()
 
-        /// Repaints every layer host whose backing content has drifted from what it last rendered.
-        /// The synchronous form of `reconcileLayers`' per-pass version, needed for the moment a
-        /// transient bakes so the baked pixels don't flicker in a pass later.
-        ///
-        /// **`waitingForTheRender: true` is what keeps that name true after RENDER.md stage 2**, and
-        /// it is the second of the two callers that ask for it (`beginVectorFloat` is the other). The
-        /// whole point here is that the overlay showing the transient comes off in the same turn the
-        /// baked ink goes on; a deferred render would put a frame between the two, which is exactly
-        /// the flicker this function exists to prevent. A shape or fill commit is a discrete gesture
-        /// rather than a per-pass cost, so paying a rasterize for it is a trade this makes knowingly.
-        func syncLayerDisplays() {
+        /// The prepared hosts are installed before the transient overlay comes off. Source
+        /// admission and settlement share the same inputs, so this phase only updates the views.
+        private func refreshAfterPreparedCanvasEdit() {
             for host in layerHosts.values {
                 host.strokeView.refreshDisplayIfStale(waitingForTheRender: true)
             }
-        }
-
-        /// Bakes whatever is transient (shape or fill) and brings the canvas back in sync in the
-        /// same turn — the entry point for every path that ends shape editing.
-        @discardableResult
-        func commitTransientsAndRefresh() -> Bool {
-            guard canvasManager.beginCanvasEdit() else { return false }
-            syncLayerDisplays()
             updateShapeOverlay()
-            // Nothing pending, so the snap has nothing left to constrain.
             if !canvasManager.shapeGestureActive {
                 shapeConstraintTimer?.invalidate()
                 shapeConstraintTimer = nil
                 isShapeConstraintEngaged = false
             }
-            return true
         }
 
         func updateActiveLayerAndTool() {

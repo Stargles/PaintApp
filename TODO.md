@@ -312,6 +312,11 @@ account usage limits; root continues. The full source inventory is not yet fully
   When retiring temporary repair/converter/UI, preserve permanent
   `ProjectBackupManager.runStartupMaintenance` scheduling and truthful post-maintenance gallery readiness.
 - [ ] Rendering/storage: derived-frame recovery/close, masked source budgets, editable raster residency, video pressure.
+  Raster source integration is now linearly rebased onto exactf475bb93599d2fb1b5b5785931bb2a87cc553424.
+  The coherent stroke factory stages/admits before settlement/recording and forwards the same affected
+  cels to mask/host reads, with live vector binding after commit and no late eraser source read.
+  Owned31 static methods include mask alpha/coexistence/refusal plus normal4096 tool admission;
+  broad native compilation, controls/mutants, UI pictures and fast Debug/Release are pending/root-owned.
   Editable raster residency is active on `tmp/s54-raster-residency`, based on recorded integration
   `f69a64ac21c15cefcbe3b79deb5ee035a7793aa4`. Trace actual raster/version/backing ownership before a
   production rewrite; present the compact design to root first. Scope includes load, frozen render/save

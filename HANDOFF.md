@@ -109,6 +109,18 @@ consumer tests and production are NOT compiled/run. Root's f475bb93599d2fb1b5b57
 combined dependency is the next merge; preserve its MaskParity early assertions. Stroke/mask/host
 admission still needs joining to staged overrides before a coherent consumer native gate.
 
+The task commits are now linearly rebased onto exact combined f475bb93599d2fb1b5b5785931bb2a87cc553424.
+Dependency records/MaskParity purity ordering and vector undo saturation are preserved. The shared
+stroke factory now returns immediate settle/begin closures plus a retained eraser backdrop: settlement
+lands before recording baseline, playback before cel spawn. Hosts and the one mask resolver prepare
+against the same affected-cel map at the planned frame, and hosts bind original live vector owners
+after settlement. No stored prepared flag or second source/cache mechanism. Four added methods
+bring the owned class to31 static tests, covering actual staged mask alpha and bounded4096 paint,
+erase, two-output Move split and Liquify window/final-picture admission with exact RGBA/counters.
+These prove only the configured owned allocation/workspace envelope when run, not private ImageIO,
+derived renderer or whole-process RAM. Source diff-check passes; broad app/test compilation, native
+consumer controls, mutations, UI/screenshots and fast Debug/Release remain unrun/root-owned.
+
 ## Current combined source qualification — 2026-10-24
 
 Root's normal combined baseline at6b5010d9 passed847/847, zero skips/failures; all724 tracked

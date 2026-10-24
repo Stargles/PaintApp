@@ -721,8 +721,8 @@ extension CanvasManager {
     /// before resolving any pixels, then flattens only the mask's transitive source dependencies on
     /// a miss. A cold dependency can still cost canvas-sized synchronous work at first touch.
     @MainActor
-    func liveMaskRecipe(atFrame frame: Int) -> FrameRecipe? {
-        makeFrameRecipe(atFrame: frame, includeBackground: false, sizing: .liveComposite)
+    func liveMaskRecipe(atFrame frame: Int, preparing cels: [UUID: Cel] = [:]) -> FrameRecipe? {
+        makeFrameRecipe(atFrame: frame, includeBackground: false, sizing: .liveComposite, preparing: cels)
     }
 
     /// Captures the current stack at `frame` as a `FrameRecipe` — everything the model has to be
