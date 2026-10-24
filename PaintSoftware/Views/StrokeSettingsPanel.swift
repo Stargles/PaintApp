@@ -314,14 +314,14 @@ struct BrushPreviewRow: View {
     let brush: Brush
     var size = CGSize(width: 156, height: 26)
 
-    @State private var image: UIImage?
+    @State private var completed: BrushPreviewRowResult?
 
     private var key: BrushPreviewKey { BrushPreviewKey(brush: brush, size: size, scale: 2) }
 
     var body: some View {
         ZStack(alignment: .leading) {
             Color.clear.frame(width: size.width, height: size.height)
-            if let image = image ?? BrushPreviewCache.shared.cached(key) {
+            if let image = completed?.image(ifRequested: key) ?? BrushPreviewCache.shared.cached(key) {
                 // **No `.accessibilityHidden(true)` here, and that is a fix rather than an
                 // omission.** Marking the preview hidden — the obvious thing to do to a picture whose
                 // meaning the row's own label already carries — made the **entire row unhittable**:
@@ -335,15 +335,14 @@ struct BrushPreviewRow: View {
                     .frame(width: size.width, height: size.height)
             }
         }
-        .task(id: brush) {
-            if BrushPreviewCache.shared.cached(key) != nil { return }
-            let requested = brush
-            let target = size
+        .task(id: key) {
+            let requested = key
+            if BrushPreviewCache.shared.cached(requested) != nil { return }
             let rendered = await Task.detached(priority: .userInitiated) {
-                BrushPreviewCache.shared.image(for: requested, size: target, scale: 2, color: .white)
+                BrushPreviewCache.shared.image(for: requested)
             }.value
-            guard !Task.isCancelled, requested == brush else { return }
-            image = rendered
+            guard !Task.isCancelled, requested == key else { return }
+            completed = BrushPreviewRowResult(key: requested, image: rendered)
         }
     }
 }

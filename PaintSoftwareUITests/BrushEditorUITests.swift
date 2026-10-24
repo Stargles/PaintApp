@@ -592,6 +592,84 @@ final class BrushEditorUITests: PaintUITestCase {
                        + "one arithmetic serve the whole range")
     }
 
+    /// Returning from Square to the original Round brush value must draw the cached Round row image,
+    /// rather than keep the Square image in the same SwiftUI row's state.
+    func testARevertedBrushRowShowsItsOriginalPreviewAgain() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchCold(app))
+        openBrushLibrary(app)
+
+        func selectedRow() throws -> XCUIElement {
+            let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "brushPanel.brush."))
+            return try XCTUnwrap(rows.allElementsBoundByIndex.first(where: { $0.isSelected }))
+        }
+        func previewPixels(_ row: XCUIElement) throws -> [UInt8] {
+            let screenshot = row.screenshot()
+            guard let pixels = ScreenshotPixels(screenshot.image) else {
+                throw NSError(domain: "BrushPreviewUITests", code: 1,
+                              userInfo: [NSLocalizedDescriptionKey: "The brush row screenshot has no pixels"])
+            }
+            // The accessible row contains the title above the 26-point image. Sample the lower row band,
+            // where the actual S-curve preview is drawn, not its text or selected-row highlight.
+            var signature: [UInt8] = []
+            signature.reserveCapacity(32 * 8 * 4)
+            for y in 0..<8 {
+                for x in 0..<32 {
+                    let pixel = pixels.pixel(normalizedX: 0.08 + 0.84 * Double(x) / 31,
+                                             normalizedY: 0.50 + 0.40 * Double(y) / 7)
+                    signature.append(contentsOf: [pixel.r, pixel.g, pixel.b, pixel.a])
+                }
+            }
+            return signature
+        }
+
+        let firstRow = try selectedRow()
+        tapWhenHittable(firstRow, "Open the selected brush editor")
+        let tip = app.buttons["brushPanel.tipPicker"]
+        XCTAssertTrue(tip.waitForExistence(timeout: 5))
+        XCTAssertEqual(tip.value as? String, "Round", "PREMISE: cold launch selects the Round brush")
+        closeBrushEditor(app)
+
+        let initialRow = try selectedRow()
+        let roundPixels = try previewPixels(initialRow)
+        attachScreenshot(initialRow, "Brush row — Round before editing")
+
+        tapWhenHittable(initialRow, "Reopen the selected brush editor")
+        let roundTip = app.buttons["brushPanel.tipPicker"]
+        XCTAssertTrue(roundTip.waitForExistence(timeout: 5))
+        tapWhenHittable(roundTip, "The tip picker")
+        tapWhenHittable(app.buttons["brushPanel.tipOption.square"], "Square")
+        closeBrushEditor(app)
+
+        let squareRow = try selectedRow()
+        var squarePixels = try previewPixels(squareRow)
+        let squareDeadline = Date().addingTimeInterval(5)
+        while worstChannelDifference(roundPixels, squarePixels) <= 5 && Date() < squareDeadline {
+            Thread.sleep(forTimeInterval: 0.1)
+            squarePixels = try previewPixels(squareRow)
+        }
+        XCTAssertGreaterThan(worstChannelDifference(roundPixels, squarePixels), 5,
+                          "The menu row must draw the edited Square preview, not only expose the selected tip")
+        attachScreenshot(squareRow, "Brush row — Square after editing")
+
+        tapWhenHittable(squareRow, "Reopen the selected brush editor")
+        let squareTip = app.buttons["brushPanel.tipPicker"]
+        tapWhenHittable(squareTip, "The tip picker")
+        tapWhenHittable(app.buttons["brushPanel.tipOption.round"], "Round")
+        closeBrushEditor(app)
+
+        let revertedRow = try selectedRow()
+        var revertedPixels = try previewPixels(revertedRow)
+        let revertDeadline = Date().addingTimeInterval(5)
+        while worstChannelDifference(roundPixels, revertedPixels) > 2 && Date() < revertDeadline {
+            Thread.sleep(forTimeInterval: 0.1)
+            revertedPixels = try previewPixels(revertedRow)
+        }
+        XCTAssertLessThanOrEqual(worstChannelDifference(roundPixels, revertedPixels), 2,
+                       "Returning to Round must draw the original deterministic cached preview")
+        attachScreenshot(revertedRow, "Brush row — Round after reverting")
+    }
+
     // MARK: - Helpers
 
     /// One drag across the pad; answers how much ink the finished stroke added.

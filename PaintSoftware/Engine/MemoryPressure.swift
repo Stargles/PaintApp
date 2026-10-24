@@ -60,8 +60,8 @@ enum MemoryPressure {
     }
 
     /// A registration's handle. Dropping it unregisters, so a responder's lifetime is its owner's and
-    /// there is no `removeObserver` to forget. The three caches that register are process-lived and
-    /// hold theirs forever, which is exactly what `NotificationCenter` gave them before.
+    /// there is no `removeObserver` to forget. Long-lived caches hold their tokens for their own
+    /// lifetime, which is exactly what `NotificationCenter` gave them before.
     final class Token {
         private let id: Int
         fileprivate init(id: Int) { self.id = id }

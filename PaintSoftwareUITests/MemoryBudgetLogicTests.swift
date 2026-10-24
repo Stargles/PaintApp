@@ -676,8 +676,8 @@ final class MemoryBudgetLogicTests: XCTestCase {
     /// with no list a non-iOS host could signal. RENDER.md §2.6 rules that portable.
     ///
     /// Asserted by *name* rather than by effect, because the effect is what the two tests below check
-    /// and this one is about the registry existing at all — a seventh cache added without registering
-    /// is what this catches.
+    /// and this one is about the registry existing at all — a cache added without registering is
+    /// what this catches.
     @MainActor
     func testEveryCacheTheAuditNamesRegistersWithTheMemoryPressureSeam() {
         // Touch each cache so its lazy registration has happened. A static cache in Swift is created
@@ -687,6 +687,9 @@ final class MemoryBudgetLogicTests: XCTestCase {
         _ = manager.makeRenderRequest(atFrame: 0, includeBackground: false)
         _ = PixelOps.rasterizeCacheBytes
         _ = MaskResolver.cacheEntryCount
+        _ = BrushPreviewCache.shared.cached(BrushPreviewKey(brush: BrushLibrary.brushPen,
+                                                              size: CGSize(width: 156, height: 26),
+                                                              scale: 2))
         // Through a render, which is the path the app takes — `VectorRenderCache` registers lazily
         // from `noteRendered` because there is no instance whose initialiser could do it, and warming
         // it any other way would assert that a seam nothing reaches is nonetheless wired.
@@ -696,7 +699,7 @@ final class MemoryBudgetLogicTests: XCTestCase {
                                        at: CGSize(width: 16, height: 16))
 
         let names = Set(MemoryPressure.registeredNames)
-        for expected in ["PixelOps.rasterizeCache", "MaskResolver.cache", "VectorRenderCache",
+        for expected in ["PixelOps.rasterizeCache", "MaskResolver.cache", "BrushPreviewCache", "VectorRenderCache",
                          "OnionSkinRasterCache", "UndoHistory"] {
             XCTAssertTrue(names.contains(expected),
                           "\(expected) must answer MemoryPressure — \(names.sorted()) did")

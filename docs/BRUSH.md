@@ -1834,8 +1834,9 @@ reference actually shows, and which of it is a decision rather than decoration:
 - **A brush's row is its name over a rendered stroke of itself.** That preview is the row's whole point
   — a name tells an artist nothing about a brush and a swatch of its tip tells them little more. It is
   a real `BrushStamper` walk over a fixed S-curve with a pressure ramp, which makes it the same
-  contact-sheet render §12 stage 9 chooses the set with, at row size. **Cache it by `BrushRef`**: it is
-  the brush's value-addressed identity, so an edited brush re-renders and an unedited one never does.
+  contact-sheet render §12 stage 9 chooses the set with, at row size. **Cache it by brush value**: it
+  is the brush's value-addressed identity, so an edited brush renders a distinct picture. A retained
+  cache entry is reused; after bounded eviction the same deterministic preview may be rendered again.
   **BUILT, keyed one step earlier — on the `Brush` value itself.** A `BrushRef` *is* `BrushPool`'s index
   for a brush value, so the two are the same cache; the difference is that minting a ref costs an entry
   in an **append-only, process-wide** pool that never releases anything, and a preview is rendered for
@@ -1936,7 +1937,7 @@ Three columns, and the middle one is §2.24's own shape rather than a category l
 
 - **Left — what the brush *is*.** A live `BrushPreviewRow` of the brush's own stroke at 196×56, and a
   sentence naming the tip. Cached by the brush's whole value, so a slider moved in the middle column
-  re-renders it and an untouched brush never re-renders.
+  renders a distinct picture; retained values hit, and an evicted value can be rebuilt identically.
 - **Middle — every output, grouped, each expanding in place** into its base slider, its input, and the
   modules on that input. This is §2.24 read literally: *"a dropdown list of all the outputs … Clicking
   on one of these outputs will expand it down into the controller."* The groups are **Shape** (size,

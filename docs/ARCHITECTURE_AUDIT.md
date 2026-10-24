@@ -176,7 +176,20 @@ Detailed source evidence: `/Users/juliapark/PaintWork/s54-architecture-audit/doc
 
 ### Brush preview identity and budget
 
-Unkeyed preview state can show B after A→B→A cache hit; preview cache has no retained-picture budget.
+Confirmed by source trace at integrated pin `65a8afd8`: `BrushPreviewRow.image` is unkeyed and wins over
+the current-key cache value. After A renders, B renders, and A is restored, the cache-hit task exits
+without replacing row state, leaving B displayed indefinitely. The singleton cache strongly retains
+every unique brush/size/scale image; detached work can finish and insert even after the row task is
+cancelled. At the editor's 196×56 points and scale 2, one RGBA8 picture is 175,616 payload bytes;
+aggregate process RSS is unmeasured.
+
+The correction is scoped to the existing row/cache seam: completed state carries its request key
+(brush value, rounded dimensions and scale), and only a matching result can draw. Cache retention is
+bounded by actual image bytes and follows existing `MemoryPressurePolicy` warning/background trims.
+BRUSH.md changes from “unedited never re-renders” to retained hits plus deterministic rebuild after
+eviction. Qualification needs keyed A→B→A selection and stale completion coverage, byte/LRU/pressure
+logic assertions, and a cold editor UI that samples the rendered preview band at A→B→A. No native
+result yet.
 
 Remaining: verify/reproduce, then fix or reject the premise with evidence.
 

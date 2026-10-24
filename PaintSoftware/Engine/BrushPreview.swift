@@ -127,7 +127,7 @@ struct BrushPreviewKey: Hashable {
     let brush: Brush
     let width: Int
     let height: Int
-    let scale: Int
+    let scale: CGFloat
 
     init(brush: Brush, size: CGSize, scale: CGFloat) {
         self.brush = brush
@@ -135,53 +135,92 @@ struct BrushPreviewKey: Hashable {
         // and not fifty.
         width = Int(size.width.rounded())
         height = Int(size.height.rounded())
-        self.scale = Int(scale.rounded())
+        self.scale = scale
     }
 
     var size: CGSize { CGSize(width: CGFloat(width), height: CGFloat(height)) }
 }
 
-/// **Rendered previews, kept by brush value.**
+/// A completed row request stays associated with the exact pixels it belongs to.
+struct BrushPreviewRowResult {
+    let key: BrushPreviewKey
+    let image: UIImage
+
+    func image(ifRequested request: BrushPreviewKey) -> UIImage? {
+        key == request ? image : nil
+    }
+}
+
+/// Rendered brush previews retained within a small, byte-counted working set.
 ///
-/// An edited brush is a different value, so it misses and re-renders; an unedited one hits forever.
-/// That is the whole caching rule and it needs no invalidation hook, which is the property BRUSH.md
-/// §7.1 asked for by naming `BrushRef`.
+/// A preview is deterministic and cheap to reproduce; the cache saves repeated visible rows without
+/// keeping every intermediate editor value for the process lifetime. Eviction changes only whether
+/// the renderer runs again, never the picture the artist sees.
 ///
 /// `renderCount` is observability with nothing in the app reading it — the same job
-/// `CanvasManager.sizePreviewRaiseCount` does for the size window. "An unedited brush does not
+/// `CanvasManager.sizePreviewRaiseCount` does for the size window. "A retained preview does not
 /// re-render" is only assertable by counting renders: comparing two images cannot tell a hit from a
 /// second identical render, which is exactly the operand mistake CLAUDE.md's
 /// "a green assertion is only as good as its two operands" section describes.
 final class BrushPreviewCache {
     static let shared = BrushPreviewCache()
 
-    private let lock = NSLock()
-    private var images: [BrushPreviewKey: UIImage] = [:]
-    private var renders = 0
+    /// The editor image is about 172 KiB at 196×56 points and scale 2. This working set retains
+    /// roughly forty such edits, or more than a hundred menu rows, while bounding slider churn.
+    static let byteBudget = 8 * 1024 * 1024
 
-    init() {}
+    private let lock = NSLock()
+    private var images: [BrushPreviewKey: (image: UIImage, bytes: Int)] = [:]
+    private var leastToMostRecent: [BrushPreviewKey] = []
+    private var residentBytes = 0
+    private var renders = 0
+    private var pressureToken: MemoryPressure.Token?
+
+    init() {
+        MemoryPressure.startObservingSystemEvents()
+        pressureToken = MemoryPressure.register("BrushPreviewCache") { [weak self] level in
+            self?.trim(toBytes: MemoryPressurePolicy.budget(level, normalBytes: Self.byteBudget))
+        }
+    }
 
     /// A cache probe. Never renders — what a SwiftUI row calls on the main thread before deciding
     /// whether it needs to go off it.
     func cached(_ key: BrushPreviewKey) -> UIImage? {
         lock.lock()
         defer { lock.unlock() }
-        return images[key]
+        guard let entry = images[key] else { return nil }
+        touchLocked(key)
+        return entry.image
     }
 
-    /// The image, rendering it if this brush value has not been seen at this size.
+    /// The white row image, rendering it if the key is not in the retained working set.
     ///
     /// Safe off the main thread: `UIGraphicsImageRenderer` is, and nothing here touches the view
     /// hierarchy. The lock is held across the render deliberately — two rows asking for the same
     /// brush at the same instant should produce one render, and a preview is ~1 ms.
-    func image(for brush: Brush, size: CGSize, scale: CGFloat, color: UIColor) -> UIImage {
-        let key = BrushPreviewKey(brush: brush, size: size, scale: scale)
+    func image(for key: BrushPreviewKey) -> UIImage {
         lock.lock()
         defer { lock.unlock() }
-        if let hit = images[key] { return hit }
-        let image = BrushPreview.render(brush, size: key.size, scale: CGFloat(key.scale), color: color)
-        images[key] = image
+        if let hit = images[key] {
+            touchLocked(key)
+            return hit.image
+        }
+        let image = BrushPreview.render(key.brush, size: key.size, scale: key.scale, color: .white)
         renders += 1
+        let bytes: Int
+        if let cgImage = image.cgImage {
+            let (count, overflow) = cgImage.bytesPerRow.multipliedReportingOverflow(by: cgImage.height)
+            bytes = overflow ? 0 : count
+        } else {
+            bytes = 0
+        }
+        // A too-large picture is still returned to its visible row. It simply cannot consume the
+        // entire cache budget by itself.
+        guard bytes > 0, bytes <= Self.byteBudget else { return image }
+        images[key] = (image, bytes)
+        leastToMostRecent.append(key)
+        residentBytes += bytes
+        trimLocked(toBytes: Self.byteBudget)
         return image
     }
 
@@ -195,7 +234,41 @@ final class BrushPreviewCache {
     func removeAll() {
         lock.lock()
         defer { lock.unlock() }
-        images.removeAll()
+        images.removeAll(keepingCapacity: true)
+        leastToMostRecent.removeAll(keepingCapacity: true)
+        residentBytes = 0
         renders = 0
+    }
+
+    /// Evicts least-recently-used entries until their actual CGImage storage fits the requested cap.
+    func trim(toBytes bytes: Int) {
+        lock.lock()
+        defer { lock.unlock() }
+        trimLocked(toBytes: bytes)
+    }
+
+    var entryCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return images.count
+    }
+
+    var bytesResident: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return residentBytes
+    }
+
+    private func touchLocked(_ key: BrushPreviewKey) {
+        leastToMostRecent.removeAll { $0 == key }
+        leastToMostRecent.append(key)
+    }
+
+    private func trimLocked(toBytes limit: Int) {
+        let cap = max(limit, 0)
+        while residentBytes > cap, !leastToMostRecent.isEmpty {
+            let victim = leastToMostRecent.removeFirst()
+            if let removed = images.removeValue(forKey: victim) { residentBytes -= removed.bytes }
+        }
     }
 }

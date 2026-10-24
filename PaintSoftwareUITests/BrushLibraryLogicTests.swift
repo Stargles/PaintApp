@@ -678,8 +678,8 @@ final class BrushLibraryLogicTests: XCTestCase {
                              nonTransparentPixelCount(BrushPreview.render(thin, size: Self.previewSize, scale: 2, color: .white)))
     }
 
-    /// **The cache is keyed on the brush's identity, not on the object** — §7.1's *"an edited brush
-    /// re-renders and an unedited one never does"*.
+    /// **The cache is keyed on the whole brush value and the render dimensions.** A retained value
+    /// hits; an edited value or a value evicted from the bounded working set is rendered again.
     ///
     /// The second half is asserted by **counting renders**, not by comparing images: two identical
     /// pictures cannot tell a cache hit from a second identical render, so an image comparison would
@@ -688,24 +688,25 @@ final class BrushLibraryLogicTests: XCTestCase {
         let cache = BrushPreviewCache()
         let brush = BrushLibrary.roundHard
 
-        let first = cache.image(for: brush, size: Self.previewSize, scale: 2, color: .white)
+        let key = BrushPreviewKey(brush: brush, size: Self.previewSize, scale: 2)
+        let first = cache.image(for: key)
         XCTAssertEqual(cache.renderCount, 1)
 
-        _ = cache.image(for: brush, size: Self.previewSize, scale: 2, color: .white)
-        _ = cache.image(for: brush, size: Self.previewSize, scale: 2, color: .white)
-        XCTAssertEqual(cache.renderCount, 1, "An unedited brush must never re-render")
+        _ = cache.image(for: key)
+        _ = cache.image(for: key)
+        XCTAssertEqual(cache.renderCount, 1, "A retained brush value reuses its preview")
 
         // Same id, different value — which is what an edit is, and what `BrushPool` addresses by.
         var edited = brush
         edited.dab.hardness = 0.05
         XCTAssertEqual(edited.id, brush.id, "PREMISE: an edit keeps the brush's id")
-        let second = cache.image(for: edited, size: Self.previewSize, scale: 2, color: .white)
+        let second = cache.image(for: BrushPreviewKey(brush: edited, size: Self.previewSize, scale: 2))
         XCTAssertEqual(cache.renderCount, 2, "An edited brush must miss")
         XCTAssertNotEqual(first.pngData(), second.pngData(),
                           "…and the re-render must actually be a different picture")
 
         // A different size is a different entry: a row and a contact sheet are different pictures.
-        _ = cache.image(for: brush, size: CGSize(width: 300, height: 60), scale: 2, color: .white)
+        _ = cache.image(for: BrushPreviewKey(brush: brush, size: CGSize(width: 300, height: 60), scale: 2))
         XCTAssertEqual(cache.renderCount, 3)
     }
 
@@ -717,9 +718,97 @@ final class BrushLibraryLogicTests: XCTestCase {
         XCTAssertNil(cache.cached(key))
         XCTAssertEqual(cache.renderCount, 0)
 
-        _ = cache.image(for: BrushLibrary.brushPen, size: Self.previewSize, scale: 2, color: .white)
+        _ = cache.image(for: key)
         XCTAssertNotNil(cache.cached(key))
         XCTAssertEqual(cache.renderCount, 1)
+    }
+
+    /// The view's completed picture is usable only for the exact brush/size/scale request that made it.
+    func testARevertedBrushSelectsItsCachedPictureInsteadOfThePreviousCompletion() {
+        let cache = BrushPreviewCache()
+        let brushA = BrushLibrary.square
+        var brushB = brushA
+        brushB.dab.angle.base = 0.5
+        let keyA = BrushPreviewKey(brush: brushA, size: Self.previewSize, scale: 2)
+        let keyB = BrushPreviewKey(brush: brushB, size: Self.previewSize, scale: 2)
+        let imageA = cache.image(for: keyA)
+        let imageB = cache.image(for: keyB)
+        let completedB = BrushPreviewRowResult(key: keyB, image: imageB)
+
+        XCTAssertNil(completedB.image(ifRequested: keyA),
+                     "a completed B request cannot be drawn after the row returns to A")
+        let displayedA = completedB.image(ifRequested: keyA) ?? cache.cached(keyA)
+        XCTAssertTrue(displayedA === imageA, "the current-key cache hit supplies A immediately")
+        XCTAssertNotEqual(imageA.pngData(), imageB.pngData(),
+                          "PREMISE: the angle edit changes the actual preview pixels")
+    }
+
+    /// The task identity includes rounded point dimensions and the exact render scale.
+    func testPreviewRequestIdentityIncludesSizeAndScale() {
+        let brush = BrushLibrary.square
+        let original = BrushPreviewKey(brush: brush, size: Self.previewSize, scale: 2)
+        XCTAssertNotEqual(original, BrushPreviewKey(brush: brush,
+                                                     size: CGSize(width: Self.previewSize.width + 1,
+                                                                  height: Self.previewSize.height), scale: 2))
+        XCTAssertNotEqual(original, BrushPreviewKey(brush: brush, size: Self.previewSize, scale: 2.5))
+    }
+
+    /// Many slider values stay below the retained-byte ceiling, but least-recently-used entries
+    /// leave first. Rebuilding an evicted request must draw the same pixels.
+    func testPreviewCacheBoundsBytesAndRebuildsAnEvictedPictureExactly() {
+        let cache = BrushPreviewCache()
+        let base = Brush(name: "preview-0", tip: .round, size: 14)
+        func key(_ index: Int) -> BrushPreviewKey {
+            var brush = base
+            brush.name = "preview-\(index)"
+            return BrushPreviewKey(brush: brush, size: Self.previewSize, scale: 2)
+        }
+
+        var original: UIImage?
+        for index in 0..<45 {
+            let image = cache.image(for: key(index))
+            if index == 1 { original = image }
+        }
+        let keyA = key(0)
+        XCTAssertNotNil(cache.cached(keyA), "a read hit refreshes recency")
+        for index in 45..<49 { _ = cache.image(for: key(index)) }
+
+        XCTAssertLessThanOrEqual(cache.bytesResident, BrushPreviewCache.byteBudget)
+        XCTAssertNotNil(cache.cached(keyA), "the recently read entry survives later insertions")
+        XCTAssertNil(cache.cached(key(1)), "the older untouched entry was evicted")
+        let rendersBeforeRebuild = cache.renderCount
+        let rebuilt = cache.image(for: key(1))
+        XCTAssertEqual(cache.renderCount, rendersBeforeRebuild + 1)
+        XCTAssertEqual(rebuilt.pngData(), original?.pngData(),
+                       "eviction changes work, not the deterministic stroke the artist sees")
+    }
+
+    /// Warning trims the current set to half once; later visible requests can use the normal cap
+    /// again. Backgrounding releases every cached picture.
+    func testPreviewCacheTrimsForPressureAndReturnsToItsNormalBudget() {
+        let cache = BrushPreviewCache()
+        defer { MemoryPressure.signal(.background) }
+        let base = Brush(name: "pressure-0", tip: .round, size: 14)
+        func request(_ index: Int) -> BrushPreviewKey {
+            var brush = base
+            brush.name = "pressure-\(index)"
+            return BrushPreviewKey(brush: brush, size: Self.previewSize, scale: 2)
+        }
+        for index in 0..<25 { _ = cache.image(for: request(index)) }
+        XCTAssertGreaterThan(cache.bytesResident, BrushPreviewCache.byteBudget / 2)
+
+        MemoryPressure.signal(.warning)
+        XCTAssertLessThanOrEqual(cache.bytesResident, BrushPreviewCache.byteBudget / 2)
+        XCTAssertGreaterThan(cache.bytesResident, 0, "warning trims without clearing the visible working set")
+
+        _ = cache.image(for: request(25))
+        XCTAssertGreaterThan(cache.bytesResident, BrushPreviewCache.byteBudget / 2,
+                             "a later request can refill toward the normal budget")
+        XCTAssertLessThanOrEqual(cache.bytesResident, BrushPreviewCache.byteBudget)
+
+        MemoryPressure.signal(.background)
+        XCTAssertEqual(cache.bytesResident, 0)
+        XCTAssertEqual(cache.entryCount, 0)
     }
 
     /// The preview stroke is a curve carrying a pressure ramp, not a flat bar — which is what makes a
