@@ -220,6 +220,10 @@ struct CanvasNotice: Identifiable, Equatable {
         /// smaller or close something else, which the message names.
         case outOfMemoryToDraw
 
+        /// A required raster source or edit allocation is temporarily unavailable. The complete
+        /// previous picture/edit is retained; absence and a refused read never share a blank value.
+        case drawingSourceUnavailable
+
         /// VIDEO.md §8 stage 8: "Bake to Images" refused. In practice this is always an unreadable
         /// asset or a crop with nothing decodable in it — the menu row itself hides `.noVideo`, the
         /// third `VideoBakeRefusal` case, so a real artist never sees that one's sentence, only a
@@ -410,6 +414,7 @@ struct CanvasNotice: Identifiable, Equatable {
         case .noFillGapsToMend: return "No fill gaps could be mended with the current settings and reference layers."
         case .fillMendingExceedsBudget: return "Couldn't mend all fills — this layer is too large for one edit. Nothing was changed."
         case .outOfMemoryToDraw:   return "This iPad ran out of memory drawing a canvas this large — some of the picture was skipped. Work at a smaller size, or close other apps."
+        case .drawingSourceUnavailable: return "This picture couldn't be prepared right now. Your drawing was kept — try again."
         case .videoBakeRefused(let refusal): return "Couldn't bake — \(refusal.phrase)."
         case .streamBakeRefused(let refusal): return refusal.phrase
         case .poseBakeRefused(let refusal): return "Couldn't bake — \(refusal.phrase)."
@@ -536,6 +541,7 @@ struct CanvasNotice: Identifiable, Equatable {
         case .fillNeedsMoreMemory: return nil
         case .fillsMended, .noFillGapsToMend, .fillMendingExceedsBudget: return nil
         case .outOfMemoryToDraw: return nil
+        case .drawingSourceUnavailable: return nil
         // Nor this one. An unreadable file has no fix this app can offer, and a crop with nothing
         // decodable in it is undone from the block's own edge handles or Adjust Speed row, neither
         // of which is a button this banner could press on the artist's behalf.
@@ -605,6 +611,7 @@ struct CanvasNotice: Identifiable, Equatable {
         case .noFillGapsToMend: return "noFillGapsToMend"
         case .fillMendingExceedsBudget: return "fillMendingExceedsBudget"
         case .outOfMemoryToDraw: return "outOfMemoryToDraw"
+        case .drawingSourceUnavailable: return "drawingSourceUnavailable"
         case .videoBakeRefused: return "videoBakeRefused"
         case .streamBakeRefused: return "streamBakeRefused"
         case .poseBakeRefused: return "poseBakeRefused"

@@ -766,7 +766,7 @@ final class MaskParityLogicTests: XCTestCase {
         PixelOps.clearRasterizeCache()
         let recipe = try XCTUnwrap(manager.liveMaskRecipe(atFrame: 0))
         let masks = try XCTUnwrap(RenderNode.masksClipping(leafAt: 3, in: recipe.tree))
-        let cold = try XCTUnwrap(MaskResolver.coverage(for: masks, of: recipe))
+        let cold = try XCTUnwrap(MaskResolver.coverage(for: masks, of: recipe).get())
         XCTAssertEqual([left.rasterizations, top.rasterizations, unrelated.rasterizations], [1, 1, 0],
                        "A cold live mask resolves its transitive sources, including hidden ones, exactly once")
         XCTAssertEqual(cold.coverage[8 + 8 * cold.width], 255)
@@ -781,7 +781,7 @@ final class MaskParityLogicTests: XCTestCase {
         unrelated.addFill(VectorFillElement(path: CGPath(rect: CGRect(x: 2, y: 2, width: 2, height: 2), transform: nil),
                                             color: CodableColor(red: 0, green: 0, blue: 0, alpha: 0)))
         let warm = try XCTUnwrap(manager.liveMaskRecipe(atFrame: 0))
-        XCTAssertTrue(cold === MaskResolver.coverage(for: masks, of: warm))
+        XCTAssertTrue(cold === (try MaskResolver.coverage(for: masks, of: warm).get()))
         XCTAssertEqual([left.rasterizations, top.rasterizations, unrelated.rasterizations], [1, 1, 0],
                        "A mask cache hit must resolve zero source pictures")
 
@@ -802,11 +802,42 @@ final class MaskParityLogicTests: XCTestCase {
         let masks = try XCTUnwrap(RenderNode.masksClipping(leafAt: 1, in: recipe.tree))
         XCTAssertEqual(masks.flatMap(\.sources), [.layer(manager.layers[2].id)],
                        "The cycle edge disappears while the independent source survives")
-        let subset = MaskResolver.coverage(for: masks, of: recipe)?.coverage
+        let subset = try MaskResolver.coverage(for: masks, of: recipe).get()?.coverage
         MaskResolver.clearCache()
         let full = MaskResolver.coverage(for: masks, of: recipe.resolve())?.coverage
         XCTAssertNotNil(full, "The existing cycle rule must leave a drawable mask")
         XCTAssertEqual(subset, full, "Dependency-only pixels must preserve the render tree's cycle policy")
+    }
+
+    func testLiveMaskSourceRefusalIsNotAnAbsentOrDeletedMask() throws {
+        let manager = clippedManager()
+        let original = try XCTUnwrap(manager.liveMaskRecipe(atFrame: 0))
+        let masks = try XCTUnwrap(RenderNode.masksClipping(leafAt: 1, in: original.tree))
+        let cel = manager.layers[0].cels[0]
+        var display = PixelOps.CelDisplay()
+        var sourceReads = 0
+        display.drawOverlays = { _, _ in sourceReads += 1; return false }
+        let refused = PixelOps.FrozenCel(cel: cel, derived: nil, quality: .full, display: display)
+        var leaves = original.leaves
+        leaves[0] = LeafSnapshot(version: try XCTUnwrap(original.leaves[0]).version, content: .cel(refused))
+        let recipe = FrameRecipe(tree: original.tree, leaves: leaves, maskStacks: original.maskStacks,
+                                 frame: original.frame, canvasSize: original.canvasSize,
+                                 background: nil, quality: original.quality)
+        PixelOps.clearRasterizeCache()
+        let refusedSources = FrameRecipe.resolveSources(leaves, canvasSize: recipe.canvasSize,
+                                                        quality: recipe.quality, subset: [0])
+        XCTAssertTrue(refusedSources.failed, "The actual source job declined its overlay, rather than drawing blank")
+        XCTAssertEqual(sourceReads, 1)
+        XCTAssertThrowsError(try MaskResolver.coverage(for: masks, of: recipe).get()) { error in
+            XCTAssertEqual(error as? MaskResolver.Failure, .sourceUnavailable)
+        }
+        XCTAssertEqual(sourceReads, 2, "A failed source is retried, never cached as empty coverage")
+        XCTAssertEqual(MaskResolver.cacheEntryCount, 0)
+        XCTAssertNil(try MaskResolver.coverage(for: [], of: recipe).get(), "No configured mask remains ordinary drawing")
+        let deleted = AlphaMask(sources: [.layer(UUID())])
+        XCTAssertNil(try MaskResolver.coverage(for: [deleted], of: recipe).get(),
+                     "A deleted source remains neutral under the existing mask contract")
+        XCTAssertEqual(sourceReads, 2, "Absent/deleted masks must not read the refused source")
     }
     //
     // §6.4's claim is a strong one — the live stroke and the composite "agree by construction" — and
@@ -875,7 +906,7 @@ final class MaskParityLogicTests: XCTestCase {
     /// took the cap out — the knob is the truth, and a frame too big for the budget is stripped
     /// rather than shrunk — so the knob is now the only thing that separates the two sizes, and it is
     /// what this turns.
-    func testTheLiveMaskResolvesAtTheSizeTheSandwichComposites() {
+    func testTheLiveMaskResolvesAtTheSizeTheSandwichComposites() throws {
         let manager = clippedManager()
         manager.renderResolution = .half
 
@@ -891,7 +922,7 @@ final class MaskParityLogicTests: XCTestCase {
                        "The live mask must be built at the size the composite it clips is built at")
 
         guard let masks = RenderNode.masksClipping(leafAt: 1, in: manager.renderTree(atFrame: 0)),
-              let byLiveStroke = MaskResolver.coverage(for: masks, of: live),
+              let byLiveStroke = try MaskResolver.coverage(for: masks, of: live).get(),
               let byCompositor = MaskResolver.coverage(for: masks, of: sandwich.full),
               let atNative = MaskResolver.coverage(for: masks, of: native) else {
             return XCTFail("All three must resolve")

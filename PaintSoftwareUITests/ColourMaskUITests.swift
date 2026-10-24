@@ -61,6 +61,39 @@ final class ColourMaskUITests: PaintUITestCase {
         try exercise(XCUIApplication())
     }
 
+    func testArtistDrawsANewStrokeThroughAnExistingMaskFromColdStart() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let canvas = app.otherElements["canvas.host"]
+        let paper = paperRect(in: canvas)
+        setBrushSize(app, normalized: 0.2)
+        setBrushColor(app, hex: "FF0000")
+        drawLine(on: canvas, from: onHost(paper, 0.05, 0.35), to: onHost(paper, 0.25, 0.35))
+        openLayerPanel(app)
+        addVectorLayerFromOpenPanel(app)
+        app.staticTexts["layerPanel.row.1"].tap()
+        let source = app.buttons["layerPanel.row.0.maskSource"]
+        XCTAssertTrue(source.waitForExistence(timeout: 5))
+        source.tap()
+        XCTAssertEqual(readVectorMarker(app, layerIndex: 1)?.strokes, 0)
+        closeLayerRail(app)
+        setBrushColor(app, hex: "0000FF")
+        let entries = try XCTUnwrap(Int(readField(app, "entries:")))
+        drawLine(on: canvas, from: onHost(paper, 0.08, 0.35), to: onHost(paper, 0.45, 0.35))
+        XCTAssertEqual(vectorMarkerViaPanel(app, layerIndex: 1)?.strokes, 1,
+                       "An ordinary masked stroke is admitted and reaches its drawing surface")
+        XCTAssertGreaterThan(try XCTUnwrap(Int(readField(app, "entries:"))), entries,
+                             "The masked stroke enters the visible live presentation")
+        XCTAssertNotNil(waitForPixel(canvas, at: onHost(paper, 0.15, 0.35)) { $0.b > 180 && $0.r < 100 },
+                        "The newly drawn stroke is blue inside the source")
+        XCTAssertNotNil(waitForPixel(canvas, at: onHost(paper, 0.40, 0.35)) { isWhitish($0) },
+                        "The same stroke stays clipped outside the source")
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "New masked stroke — whole screen"
+        shot.lifetime = .keepAlways
+        add(shot)
+    }
+
     func testMaskTuningDrawsHeldFramesWhileTheFingerIsStillOnItsSlider() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))

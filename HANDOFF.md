@@ -42,6 +42,30 @@ Swift frontend parsing, both UI guards and whitespace checks pass. Native app/te
 Debug/Release fast tiers, focused/UI driving, screenshots and assertion mutation runs remain unrun;
 root owns those gates. External assertion recipes will be pinned after the coherent source commit.
 
+Review follow-up recorded before implementation: initial2dda8b17 still lets a refused source become
+nil coverage at the live stroke/onion consumers. Root approved typed Result distinguishing refusal
+from neutral absent/deleted masks, Bool existing onStrokeBegan admission before edit/spawn/latches,
+both guarded stroke invocation sites, and prior onion picture/key retention. Raster author delegates
+those StrokeCanvas hunks and shares the drawingSourceUnavailable notice. Logic target excludes the
+two view files: real provider-refusal logic and pixel tests are possible, callback driving requires
+app/UI proof. Do not accept initial2dda alone as completing refusal safety.
+
+Typed-refusal follow-up is prepared: recipe mask coverage returns Result, propagates an actual
+resolveSources failure, and retains neutral absent/deleted-source behavior. Existing onStrokeBegan
+is Bool; callback resolves first and declines before transient commit/spawn/latches, both callers
+guard refusal and the timing flag clears. Onion refuses a new key/picture on failure. One generic
+drawingSourceUnavailable notice is shared with the raster task (identical three-file definitions).
+Added one real pipeline refusal regression via an existing FrozenCel overlay provider returning
+false, and one cold artist-path ColourMask UI method with whole-screen capture, stroke count,
+live-presentation entry and inside/outside drawn pixels. The seven compositing logic classes now
+statically total121; ColourMaskUITests has4 methods. Parsing/guards pass; all native/UI/mutation
+claims remain pending. External callback fault/UI template will assert no ink/cel/undo/frame change.
+
+Root requested dependency refresh before qualification: rebase only the two mask-owned commits from
+recorded59d69f12511672468153132299f4ac926398afab onto65a8afd831072dbb43d1aba20c37bceed0966e79.
+Preserve its authoritative cache f8d/FillUI records and ProjectFileTree link assertion. Keep only
+the mask-owned sections from these records on conflict; root's65 source/tree stays untouched.
+
 ## Current targeted qualification — 2026-10-24
 
 Root's latest integrated59d69f12 baseline passed **500/500, zero skips**, with all **724 tracked

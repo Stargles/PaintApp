@@ -60,8 +60,9 @@ final class StrokeCanvasView: CanvasPlaneView {
     var onStrokeEnded: (() -> Void)?
 
     /// Called at stroke start so a still-adjustable fill commits before this stroke's own undo step
-    /// registers — keeping undo order intuitive (stroke undoes first, fill after).
-    var onStrokeBegan: (() -> Void)?
+    /// registers — keeping undo order intuitive (stroke undoes first, fill after). False refuses
+    /// before any gesture pixels or stroke state are created.
+    var onStrokeBegan: (() -> Bool)?
     /// Called when a stroke is abandoned *and rolled back* — `StrokeGiveUp.handedOver` only. An
     /// interrupted stroke commits instead and reports through `onStrokeEnded`, so this stays what it
     /// always was: "the layer is back where it started".
@@ -1517,7 +1518,7 @@ final class StrokeCanvasView: CanvasPlaneView {
     }
 
     private func beginLiquifyGesture(_ touch: UITouch) {
-        onStrokeBegan?()
+        guard onStrokeBegan?() ?? true else { return }
         strokeSeed = DabRandom.freshSeed()
         liveWalk = BrushStamper.LiveWalk(seed: strokeSeed)
         lastSampleTime = nil
@@ -1660,7 +1661,10 @@ final class StrokeCanvasView: CanvasPlaneView {
         // when the playhead is parked at the end of the scene, so a block spawned first would be
         // spawned on the frame the artist has just left.
         let timingCelsBefore = beginTimingTakeIfArmed()
-        onStrokeBegan?() // commit any still-adjustable fill first
+        guard onStrokeBegan?() ?? true else {
+            if timingCelsBefore != nil { canvasManager?.timingStrokeIsLive = false }
+            return
+        }
         // BRUSH.md §4: the field exists from the first dab, so what the pen lays down and what the
         // stored stroke replays are drawn from the same randomness.
         strokeSeed = DabRandom.freshSeed()

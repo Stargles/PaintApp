@@ -822,7 +822,16 @@ struct CanvasView: UIViewRepresentable {
                     self.updateGuideOverlay()
                 }
                 host.strokeView.onStrokeBegan = { [weak self, weak host] in
-                    guard let self else { return }
+                    guard let self, let host, let layerID = host.strokeView.layerID,
+                          let index = self.canvasManager.layers.firstIndex(where: { $0.id == layerID })
+                    else { return false }
+                    let mask: CGImage?
+                    switch self.resolveLiveMask(forLayerAt: index) {
+                    case .success(let prepared): mask = prepared
+                    case .failure:
+                        self.canvasManager.raise(.drawingSourceUnavailable)
+                        return false
+                    }
                     // The autosave waits for the lift — see `CanvasManager.strokeIsLive`.
                     self.canvasManager.strokeIsLive = true
                     // A stroke is a canvas edit, so any adjustable fill/shape bakes before this one
@@ -847,12 +856,14 @@ struct CanvasView: UIViewRepresentable {
                     // After `sandwichStrokeBegan`, which latches the mid-stroke state this reads,
                     // and after the cel spawn, which is what decides whether there is a stroke at
                     // all. §6.4: resolved here, once, and static until lift.
-                    self.liveMaskStrokeBegan(host: host)
+                    self.liveMaskImage = mask
+                    host.setContentMask(mask)
                     // Last, so it sees both the latch and the resolved mask. Without it the latch
                     // above is a variable nothing reads until some unrelated SwiftUI pass happens
                     // to come along — see `applySandwichPresentationNow`.
                     self.applySandwichPresentationNow()
-                    if let host { self.startShapeDetection(host: host) }
+                    self.startShapeDetection(host: host)
+                    return true
                 }
                 host.strokeView.onStrokeCancelled = { [weak self] in
                     guard let self else { return }
@@ -1653,12 +1664,12 @@ struct CanvasView: UIViewRepresentable {
         /// assertion about the canvas is taken after lift, where `full` has the stroke and
         /// everything looks right.
         ///
-        /// This is the same reasoning `liveMaskStrokeBegan` already gives for resolving the mask at
+        /// This is the same reasoning `onStrokeBegan` already gives for resolving the mask at
         /// touch-down rather than leaving it to the next pass. Blanking needed it too.
         ///
         /// Deriving the tree is off `reconcileLayers`'s per-pass budget, but this is once per
-        /// *stroke*, never per dab, and `liveMaskStrokeBegan` on the same touch already builds a
-        /// whole `RenderRequest`. It schedules no composite: `makeSandwichKey` freezes the active
+        /// *stroke*, never per dab, and `onStrokeBegan` on the same touch already builds a
+        /// metadata recipe. It schedules no composite: `makeSandwichKey` freezes the active
         /// layer's content version for the dab's duration, so the key has not moved and the
         /// compositor stays off the drawing path.
         private func applySandwichPresentationNow() {
@@ -2463,18 +2474,6 @@ struct CanvasView: UIViewRepresentable {
         /// `LayerContentVersion` documents, closed the same way.
         private var liveMaskCache: (mask: ResolvedMask, image: CGImage)?
 
-        /// Resolves the active layer's mask and installs it, from `onStrokeBegan`.
-        ///
-        /// Installed here rather than left to the next `updateSandwich` because there may not be one:
-        /// a dab publishes nothing, so the pass that would install it is the pass this stroke is
-        /// deliberately not causing. `updateSandwich` maintains it from here on.
-        private func liveMaskStrokeBegan(host: LayerHostView?) {
-            guard let host, let layerID = host.strokeView.layerID,
-                  let index = canvasManager.layers.firstIndex(where: { $0.id == layerID }) else { return }
-            liveMaskImage = resolveLiveMask(forLayerAt: index)
-            host.setContentMask(liveMaskImage)
-        }
-
         /// The coverage clipping one layer, as an image `CALayer.mask` can apply.
         ///
         /// **`makeFrameRecipe` is what makes this agree with the compositor rather than merely
@@ -2493,19 +2492,23 @@ struct CanvasView: UIViewRepresentable {
         ///
         /// The recipe lets the shared mask cache answer before any source pixels are resolved.
         /// A miss resolves only the mask's dependencies; unrelated leaves do no pixel work.
-        private func resolveLiveMask(forLayerAt index: Int) -> CGImage? {
+        private func resolveLiveMask(forLayerAt index: Int) -> Result<CGImage?, MaskResolver.Failure> {
             // The same frame the request below is built at, and it has to be: the two are compared
             // against each other by `MaskResolver`'s cache, so a tree derived at one frame and a
             // request at another would be a cache key describing a document that never existed.
             guard let masks = RenderNode.masksClipping(leafAt: index,
                                                        in: canvasManager.renderTree(atFrame: canvasManager.currentFrame)),
-                  !masks.isEmpty,
-                  let recipe = canvasManager.liveMaskRecipe(atFrame: canvasManager.currentFrame),
-                  let resolved = MaskResolver.coverage(for: masks, of: recipe) else { return nil }
-            if let cached = liveMaskCache, cached.mask === resolved { return cached.image }
-            guard let image = resolved.makeMaskImage() else { return nil }
-            liveMaskCache = (mask: resolved, image: image)
-            return image
+                  !masks.isEmpty else { return .success(nil) }
+            guard let recipe = canvasManager.liveMaskRecipe(atFrame: canvasManager.currentFrame)
+            else { return .failure(.sourceUnavailable) }
+            return MaskResolver.coverage(for: masks, of: recipe).flatMap { resolved in
+                // Deleted sources remain neutral under the existing mask contract.
+                guard let resolved else { return .success(nil) }
+                if let cached = liveMaskCache, cached.mask === resolved { return .success(cached.image) }
+                guard let image = resolved.makeMaskImage() else { return .failure(.sourceUnavailable) }
+                liveMaskCache = (mask: resolved, image: image)
+                return .success(image)
+            }
         }
 
         // MARK: The cache key
@@ -3890,11 +3893,16 @@ struct CanvasView: UIViewRepresentable {
             // The whole skin takes the current layer's mask because every skin comes from the current
             // layer. Interpolate mode's references can span layers, so it is left unclipped — a
             // reference is not the current drawing and has no single mask to inherit.
-            let mask: CGImage? = canvasManager.isInterpolateMode
-                ? nil
-                : PlaybackTrace.span(.onionMask) {
+            let mask: CGImage?
+            if canvasManager.isInterpolateMode { mask = nil }
+            else {
+                switch PlaybackTrace.span(.onionMask, {
                     resolveLiveMask(forLayerAt: canvasManager.currentLayerIndex)
+                }) {
+                case .success(let prepared): mask = prepared
+                case .failure: return // Keep the complete previous ghost and its key.
                 }
+            }
 
             // The artist's resolution setting, applied here and carried into the cache key below —
             // so changing it rebuilds rather than reusing a composite at the old resolution.

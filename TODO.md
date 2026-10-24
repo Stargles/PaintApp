@@ -304,6 +304,17 @@ account usage limits; root continues. The full source inventory is not yet fully
   cycle policy/pixels pinned. Seven affected compositor classes statically total120 methods; Swift
   parse/UI guards/whitespace pass. Native compile, focused/fast Debug+Release, mutants and visible
   cold UI remain root-owned pending gates. Keep the minimum-one-row exception; no total RSS claim.
+  Review expanded the scope before follow-up: a source refusal must not become a nil/unmasked live
+  stroke or onion ghost. Preserve neutral absent/deleted-mask behavior separately from typed read
+  refusal. Resolve before stroke mutation/spawn/latches; reuse the existing stroke-start callback
+  as Bool, guard both invocation sites, and retain the prior onion picture/key on refusal. Root
+  approved; raster author delegates these callback hunks and shares one drawingSourceUnavailable
+  notice. Logic target excludes coordinator/stroke UI files, so callback driving needs app/UI proof.
+  Follow-up source prepared with typed refusal, guarded Bool callback and shared notice. +1 real
+  failed-source logic method (7 classes121) and +1 normal cold UI method (ColourMask4); external
+  callback fault/UI template covers refusal without editing/undo/cel creation. Native still unrun.
+  Root requested rebase of only the two mask commits from59d69f12 onto65a8afd8 before qualification;
+  preserve65's authoritative cache/FillUI/link-assertion records and all unrelated source changes.
   Active `tmp/s54-bake-lifecycle`: existing baker/store/read-demand ownership is reused; no extra
   renderer/cache. Root's500 baseline covers bake634f5300, including shared-root authority, metadata-only
   readiness, owned read snapshots, typed export refusal, checked headers and1-byte eviction charge release.

@@ -93,6 +93,12 @@ budget arithmetic. Mix assembly reserves earlier slot pictures while resolving l
 on a miss. Nested-mask pixel/count and planner regressions are prepared. Native and mutation gates
 remain pending; this bounds planned picture costs, not total process residency, and retains the
 minimum-one-row exception when even that row cannot fit.
+Live coverage now carries typed source refusal separately from neutral absent/deleted masks. The
+existing stroke-start callback returns Bool and resolves clipping before any transient commit, cel
+spawn or stroke latch; refusal retains the prior picture and raises the shared drawing-read notice.
+The onion consumer retains its prior complete ghost/key rather than producing an unclipped one.
+One actual declined FrozenCel-overlay source job and a cold artist-path UI test are prepared;
+the callback refusal needs external app-fault/UI qualification because views are absent from logic.
 
 Detailed source evidence: `/Users/juliapark/PaintWork/s54-architecture-audit/render-review.md`.
 

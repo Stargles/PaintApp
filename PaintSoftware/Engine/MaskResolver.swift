@@ -70,6 +70,8 @@ extension ResolvedMask: Equatable {
 
 enum MaskResolver {
 
+    enum Failure: Error, Equatable { case sourceUnavailable }
+
     /// The coverage `masks` resolve to together, or nil when they clip nothing.
     ///
     /// **Cached once per distinct mask and shared by every layer using it** (§6.1) — the key is the
@@ -87,28 +89,33 @@ enum MaskResolver {
 
     /// Live feedback asks with frozen identities first. A hit touches no source pixels; a miss
     /// resolves only the transitive stacks already included in the shared cache key.
-    static func coverage(for masks: [AlphaMask], of recipe: FrameRecipe) -> ResolvedMask? {
+    static func coverage(for masks: [AlphaMask], of recipe: FrameRecipe) -> Result<ResolvedMask?, Failure> {
         let metadata = RenderRequest(tree: recipe.tree, sources: [],
                                      contentVersions: recipe.leaves.map { $0?.version },
                                      maskStacks: recipe.maskStacks, frame: recipe.frame,
                                      canvasSize: recipe.canvasSize, background: recipe.background,
                                      quality: recipe.quality, window: recipe.window)
-        return coverage(for: masks, metadata: metadata) { stacks in
-            let subset = Set(stacks.flatMap(\.leafLayerIndices))
-            let resolved = FrameRecipe.resolveSources(recipe.leaves, canvasSize: recipe.canvasSize,
-                                                     quality: recipe.quality, subset: subset,
-                                                     window: recipe.window)
-            guard !resolved.failed else { return nil }
-            return RenderRequest(tree: recipe.tree, sources: resolved.sources,
-                                 contentVersions: resolved.versions, maskStacks: recipe.maskStacks,
-                                 frame: recipe.frame, canvasSize: recipe.canvasSize,
-                                 background: recipe.background, quality: recipe.quality,
-                                 window: recipe.window)
+        do {
+            let mask = try coverage(for: masks, metadata: metadata) { stacks in
+                let subset = Set(stacks.flatMap(\.leafLayerIndices))
+                let resolved = FrameRecipe.resolveSources(recipe.leaves, canvasSize: recipe.canvasSize,
+                                                         quality: recipe.quality, subset: subset,
+                                                         window: recipe.window)
+                guard !resolved.failed else { throw Failure.sourceUnavailable }
+                return RenderRequest(tree: recipe.tree, sources: resolved.sources,
+                                     contentVersions: resolved.versions, maskStacks: recipe.maskStacks,
+                                     frame: recipe.frame, canvasSize: recipe.canvasSize,
+                                     background: recipe.background, quality: recipe.quality,
+                                     window: recipe.window)
+            }
+            return .success(mask)
+        } catch {
+            return .failure(.sourceUnavailable)
         }
     }
 
     private static func coverage(for masks: [AlphaMask], metadata request: RenderRequest,
-                                 resolving: ([[RenderNode]]) -> RenderRequest?) -> ResolvedMask? {
+                                 resolving: ([[RenderNode]]) throws -> RenderRequest) rethrows -> ResolvedMask? {
         guard !masks.isEmpty else { return nil }
         let width = Int(request.canvasSize.width.rounded())
         let height = Int(request.canvasSize.height.rounded())
@@ -120,8 +127,8 @@ enum MaskResolver {
                            versions: contentVersions(in: sourceStacks, of: request),
                            sourceStacks: sourceStacks)
         if let hit = cache.value(for: key) { return hit }
-        guard let pixels = resolving(sourceStacks),
-              let resolved = resolveUncached(masks, of: pixels, width: width, height: height) else { return nil }
+        let pixels = try resolving(sourceStacks)
+        guard let resolved = resolveUncached(masks, of: pixels, width: width, height: height) else { return nil }
         cache.store(resolved, for: key)
         return resolved
     }
