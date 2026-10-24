@@ -486,6 +486,7 @@ final class BrushMenuUITests: PaintUITestCase {
     /// every pixel column inside the two strokes' end caps: the plain nib's profile is constant,
     /// while the owner's nib draws multiple nonzero widths at its own size with per-stroke randomness.
     func testTheOwnersRoughInkIsReachableFromAColdStartAndDrawsRough() throws {
+        XCUIDevice.shared.orientation = .landscapeLeft
         let app = XCUIApplication()
         XCTAssertTrue(launchCold(app))
         let canvas = app.otherElements["canvas.host"]
