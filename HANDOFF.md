@@ -10,6 +10,17 @@ is authorized by an old readiness answer: obtain fresh saved-scene readiness whe
 
 ## Current source and next action — 2026-10-24
 
+Root-authorized bounded cleanup recorded before edits on tmp/s54-typed-failure-cleanup, from exact
+40f77f1919167d1a284b0c99d312c54c949ed4c9. Preserve the frozen qualification trees and canonical owner
+queue. Remove two redundant RasterResidency.Failure casts/fallbacks, mark only UndoBudget.addingCost
+and payloadBytes nonisolated argument-only arithmetic, and retain the shape layer-existence guard
+using contains instead of an unused index. The private local canvas transform helper may use typed
+throws plus direct error: its only throws are resized/flipped/prepareForSave Results of that same
+failure type. No other warning cleanup, actor/default/shared-owner change, Sendable suppression,
+new tests or behavior mode. Existing semantic/fault gates remain; source-only checks cannot establish
+compiler/native qualification. After integration, fresh final pin/baseline and external repin required.
+Evidence: ~/PaintWork/s54-final-qualification/typed-failure-cleanup-40f77f19/.
+
 The reviewed final UI corrections are assembled in `~/PaintWork/PaintApp-s54-final-integration`
 on `tmp/s54-final-integration`, from cleandb544db02a2edeacbdd5d0362787353d60d442ad. Only the final
 nets from touch18a5d297, fixturebaa84c19 and responsive/capture2270b07b were applied: nine existing
