@@ -744,19 +744,20 @@ final class FillObjectLogicTests: XCTestCase {
         let refused = VectorCanvas(size: CGSize(width: 2_147_483_648, height: 1), elements: [.fill(fill)])
         manager.layers[layer].cels[0].vector = refused
         let baseline = steps(manager)
-        let reported = expectation(description: "the unavailable neighbour reports the existing fill refusal")
-        let observation = manager.$notice.compactMap { $0 }.filter { $0.code == "fillNeedsMoreMemory" }
-            .prefix(1).sink { _ in reported.fulfill() }
-        defer { observation.cancel() }
 
         manager.beginInteractiveFill(at: CGPoint(x: 32, y: 32))
         manager.endInteractiveFill()
         manager.fillQueue.sync {}
-        await fulfillment(of: [reported], timeout: 5)
-        manager.commitInteractiveFill()
+        // The worker enqueues its refusal before returning. This barrier observes that callback
+        // without waiting for the behavior under test, so a missing notice fails by assertion.
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            DispatchQueue.main.async { continuation.resume() }
+        }
 
+        XCTAssertEqual(manager.notice?.code, "fillNeedsMoreMemory", "unavailable neighbours must report the refusal")
         XCTAssertFalse(manager.fillGestureActive, "an unavailable neighbour ends the adjustable gesture")
         XCTAssertNil(manager.liveFill, "no preview can be mistaken for successful paint")
+        manager.commitInteractiveFill()
         XCTAssertEqual(refused.elements.first?.fill?.pathData, fill.pathData)
         XCTAssertEqual(steps(manager), baseline, "the failed fill does not commit an undo step")
     }
