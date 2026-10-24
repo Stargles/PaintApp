@@ -291,8 +291,8 @@ nonisolated enum ProjectPackageLayout {
     ///
     /// **Runs from `ProjectBackupManager.runStartupMaintenance`, after `repairCorruptedProjects` and
     /// before the purges** — after, so a damaged package is restored before we look at it; before, so
-    /// nothing is name-matched against a half-reconciled tree. That pass already posts
-    /// `.projectBackupMaintenanceDidFinish`, which the gallery re-lists on.
+    /// nothing is name-matched against a half-reconciled tree. The startup gate keeps the gallery
+    /// unopened until this pass finishes, so its initial listing sees the reconciled tree.
     ///
     /// **`Backups/` and `Trash/` are history and are never walked.** That is also why the legacy
     /// resolver above is permanent rather than transitional.

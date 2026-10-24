@@ -214,10 +214,6 @@ struct GalleryView: View {
         // for the New Canvas button and the toolbar as well as for the tiles.
         .disabled(openState.isBusy)
         .onAppear { refresh() }
-        // Launch-time maintenance may have auto-restored a damaged project — re-list when it ends.
-        .onReceive(NotificationCenter.default.publisher(for: .projectBackupMaintenanceDidFinish)) { _ in
-            refresh()
-        }
         .onReceive(NotificationCenter.default.publisher(for: .projectLocationDidChange)) { _ in
             path = []
             refresh()

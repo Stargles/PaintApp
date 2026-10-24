@@ -1,12 +1,6 @@
 import Foundation
 import os
 
-extension Notification.Name {
-    /// Posted on the main thread when the launch-time backup maintenance pass finishes, so the
-    /// gallery can re-list projects (a damaged project may have been auto-restored meanwhile).
-    static let projectBackupMaintenanceDidFinish = Notification.Name("PaintApp.ProjectBackupMaintenanceDidFinish")
-}
-
 /// Foolproof, space-bounded protection against losing artwork to app updates, crashes, and
 /// corruption. Everything is layered so that no single failure can destroy the last copy:
 ///
@@ -188,7 +182,7 @@ nonisolated enum ProjectBackupManager {
     /// owner's library from a Release build on their own iPad.
     static func honoursGalleryReset(isSimulator: Bool) -> Bool { isSimulator }
 
-    /// Runs once per launch (detached from `PaintApp.init`). Order matters: wipe for tests →
+    /// Runs once per launch behind the startup gate, after geometry conversion. Order matters: wipe for tests →
     /// test-corruption hook → stale temp cleanup → update snapshots → repair → purge. Every step
     /// is individually failure-proof (all `try?`); this pass must never crash the app it protects.
     static func runStartupMaintenance() {

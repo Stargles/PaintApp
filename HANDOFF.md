@@ -24,7 +24,9 @@ lints, plutil and diff-check pass. Native compiler/isolation, focused38+21+19, D
 census, committed-baseline faults and cold old-library drawn screen/readiness remain unrun. Root can
 enhance the prepared external host-seeded cold harness to observe startup.preparing/progress before
 gallery and rotate while repair is in flight; seed the full copied library for a real visible phase.
-No product delay/seed hook or permanent framework was added. Do not merge/deploy as qualified.
+No product delay/seed hook or permanent framework was added. Follow-up removes the now-unused
+maintenance-finished notification/gallery subscriber and updates that ordering's comments: the
+initial gallery listing occurs only after maintenance. Do not merge/deploy as qualified.
 
 ## Authoritative checkpoint — 2026-10-24 morning
 
