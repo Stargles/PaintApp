@@ -465,8 +465,11 @@ final class FrameBakeStore {
     @discardableResult
     private func evictLocked(toFree bytes: Int, playhead: Int,
                              frames: [String: Set<Int>], keeping: FrameBakeKey?) -> Int {
-        let overshoot = owner.totalBytes + bytes - byteCeiling
-        guard overshoot > 0 else { return 0 }
+        func needsSpace() -> Bool {
+            let projected = owner.totalBytes.addingReportingOverflow(bytes)
+            return projected.overflow || projected.partialValue > byteCeiling
+        }
+        guard needsSpace() else { return 0 }
 
         let fm = FileManager.default
         let keptName = keeping?.fileName
@@ -488,7 +491,10 @@ final class FrameBakeStore {
         }
 
         var freed = 0
-        for candidate in candidates where freed < overshoot {
+        for candidate in candidates {
+            // Releasing a truncated file drops its formerly charged size, which can exceed the
+            // physical bytes just removed. Headroom follows inventory; the return value follows I/O.
+            guard needsSpace() else { break }
             guard (try? fm.removeItem(at: candidate.url)) != nil else { continue }
             freed += candidate.size
             owner.record(Self.fileID(candidate.url), size: nil)

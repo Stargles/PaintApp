@@ -302,6 +302,11 @@ account usage limits; root continues. The full source inventory is not yet fully
   snapshots, checked untrusted header arithmetic and terminal typed export allocation refusal.
   Add real two-wrapper cap/accounting and old-read/new-write regressions; no native work.
 
+  Review bff9dfa3 accepted the four ownership/readiness fixes; root's native290 passed unchanged.
+  Remaining P2: eviction compared current truncated-file bytes freed against old charged overshoot,
+  deleting a good sibling after enough authoritative headroom existed. Correct the stop condition
+  against updated shared total; add a tiny actual-size sibling/drawn/accounting regression.
+
 - [ ] Stream transport: bounded ordered backpressure, framing limits, connection readiness/close ownership.
 - [ ] Editor/brush: preview identity/budget, undo payload accounting, saved palette validation; verify stationary-sample opportunity.
 - [ ] Test hooks/obsolete runners: protect real-device persistent data and prune only verified unused paths.

@@ -395,6 +395,34 @@ final class FrameBakeStoreLogicTests: XCTestCase {
     /// **§3.5's eviction policy: farthest from the playhead goes first.** Four frames, a ceiling
     /// that holds three, and the one 40 frames away is the one that dies — not the oldest, not the
     /// largest.
+    func testEvictingATruncatedFarFilePreservesTheNearDrawnSibling() throws {
+        let image = noiseImage(16)
+        let far = syntheticKey(51), near = syntheticKey(52), incoming = syntheticKey(53)
+        let measuring = store()
+        guard case .success(let each) = measuring.store(image, for: far) else {
+            return XCTFail("The fixture must measure its actual encoded size.")
+        }
+        let bounded = FrameBakeStore(root: root, byteCeiling: 2 * each)
+        XCTAssertTrue(bounded.store(image, for: near).isSuccess)
+        XCTAssertEqual(bounded.totalBytes, 2 * each)
+        let frames = [far.fileName: Set([100]), near.fileName: Set([0])]
+        try Data([0x50]).write(to: bounded.url(for: far))
+        XCTAssertEqual(bounded.evict(toFree: each, playhead: 0, frames: frames), 1,
+                       "The return value counts the one physical byte actually removed.")
+        XCTAssertFalse(bounded.contains(far))
+        XCTAssertTrue(bounded.contains(near), "Releasing the far file's old charge already makes enough headroom.")
+        XCTAssertEqual(bounded.totalBytes, each)
+        XCTAssertEqual(measuring.totalBytes, each, "Both facades share the updated authoritative counter.")
+        XCTAssertTrue(bounded.store(image, for: incoming, playhead: 0, frames: frames).isSuccess)
+        XCTAssertTrue(bounded.contains(near))
+        XCTAssertTrue(bounded.contains(incoming))
+        XCTAssertEqual(bounded.totalBytes, 2 * each)
+        XCTAssertEqual(measuring.totalBytes, 2 * each)
+        let retained = try XCTUnwrap(bounded.loadDecoded(near)?.makeImage())
+        XCTAssertEqual(CanvasFixture.rgbaBytes(retained), CanvasFixture.rgbaBytes(image),
+                       "The nearer sibling retains its exact drawn picture after the truncated-file eviction.")
+    }
+
     func testEvictionDropsTheFrameFarthestFromThePlayhead() {
         let image = flatColourImage(64)
         guard case .success(let each) = FrameBakeStore(root: root).store(image, for: syntheticKey(0xFF)) else {
