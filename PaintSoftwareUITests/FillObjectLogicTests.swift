@@ -625,7 +625,7 @@ final class FillObjectLogicTests: XCTestCase {
         manager.history.maxCost = 1
         let baseline = steps(manager)
         let outcome = await manager.mendAllFills(layerIndex: fixture.layer)
-        XCTAssertEqual(outcome, .exceedsUndoBudget)
+        XCTAssertEqual(outcome, .exceedsBudget)
         for index in 0..<3 {
             XCTAssertEqual(fixture.vectors[index].elements.first?.fill?.pathData, fixture.fills[index].pathData,
                            "a capacity refusal leaves every cel untouched")

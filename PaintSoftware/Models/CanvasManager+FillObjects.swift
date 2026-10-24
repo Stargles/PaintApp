@@ -26,7 +26,7 @@ extension CanvasManager {
         case changed(Int)
         case unchanged
         case needsMoreMemory
-        case exceedsUndoBudget
+        case exceedsBudget
         /// Another edit overtook this request while its window was being prepared.
         case superseded
     }
@@ -85,7 +85,6 @@ extension CanvasManager {
                                         transform: vector.transform, size: size, references: references,
                                         neighbours: neighbours, threshold: threshold, reach: reach, paper: paper,
                                         maximumPointCount: min(undoPoints, geometryPoints),
-                                        pointLimitIsUndoBudget: undoPoints <= geometryPoints,
                                         maximumPathDataBytes: fill.pathData.count + remainingUndo)
                 let patch = await withCheckedContinuation { continuation in
                     fillQueue.async {
@@ -97,14 +96,14 @@ extension CanvasManager {
                 switch patch {
                 case .unchanged: continue
                 case .needsMoreMemory: return .needsMoreMemory
-                case .exceedsUndoBudget: return .exceedsUndoBudget
+                case .exceedsBudget: return .exceedsBudget
                 case .fill(let mended):
                     after[index] = .fill(mended)
                     rewritten.insert(fill.id)
                     // Same-id path rewrites share their element slots, so include their retained
                     // path payloads explicitly beside the standard vector-list cost.
                     guard retainedCost + Self.fillMendUndoCost(before: before, after: after, rewritten: rewritten)
-                            <= history.maxCost else { return .exceedsUndoBudget }
+                            <= history.maxCost else { return .exceedsBudget }
                 }
             }
             guard !rewritten.isEmpty else { continue }
@@ -127,7 +126,7 @@ extension CanvasManager {
               layers.filter(\.isFillReference).map(\.id) == referenceIDs,
               (targets + reads).allSatisfy({ $0.matches(self) }) else { return .superseded }
         guard !edits.isEmpty else { return .unchanged }
-        guard retainedCost <= history.maxCost else { return .exceedsUndoBudget }
+        guard retainedCost <= history.maxCost else { return .exceedsBudget }
 
         // No await after preflight: every prepared revision lands in one main-thread turn.
         restoreFillMends(edits, layerID: layerID, elements: \.after)
@@ -205,14 +204,14 @@ extension CanvasManager {
                                                 maximumPointCount: work.maximumPointCount) else {
             // fillMendMask only returns a nonempty mask. A refused contour must not masquerade as
             // "no gaps", and the entire atomic plan is discarded by the caller on either refusal.
-            return work.pointLimitIsUndoBudget ? .exceedsUndoBudget : .needsMoreMemory
+            return .exceedsBudget
         }
         var toLocal = window.transform.inverted().concatenating(work.transform.inverted())
         guard let local = traced.copy(using: &toLocal) else { return .needsMoreMemory }
         let combined = work.path.normalized(using: rule).union(local, using: .winding)
         let updated = work.fill.reshaped(to: combined)
         guard !updated.pathData.isEmpty else { return .needsMoreMemory }
-        guard updated.pathData.count <= work.maximumPathDataBytes else { return .exceedsUndoBudget }
+        guard updated.pathData.count <= work.maximumPathDataBytes else { return .exceedsBudget }
         return .fill(updated)
     }
 
@@ -475,7 +474,6 @@ private struct FillMendWork: @unchecked Sendable {
     let reach: CGFloat
     let paper: CGRect?
     let maximumPointCount: Int
-    let pointLimitIsUndoBudget: Bool
     let maximumPathDataBytes: Int
 }
 
@@ -483,7 +481,7 @@ private enum FillMendPatch: @unchecked Sendable {
     case fill(VectorFillElement)
     case unchanged
     case needsMoreMemory
-    case exceedsUndoBudget
+    case exceedsBudget
 }
 
 private enum FillMendMask {

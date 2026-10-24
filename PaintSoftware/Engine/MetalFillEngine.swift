@@ -73,7 +73,7 @@ final class MetalFillEngine {
         let ranges: MTLBuffer
         let offsets: MTLBuffer
     }
-    private let mendLookup: MendLookup
+    fileprivate let mendLookup: MendLookup
 
     private static func makeMendLookup(device: MTLDevice) -> MendLookup? {
         let radius = Int(ceil(CanvasManager.fillMendReachRange.upperBound))

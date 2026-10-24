@@ -437,7 +437,7 @@ struct LayerOptionsPanel: View {
                     case .changed(let count): canvasManager.raise(.fillsMended(count))
                     case .unchanged: canvasManager.raise(.noFillGapsToMend)
                     case .needsMoreMemory: canvasManager.raise(.fillNeedsMoreMemory)
-                    case .exceedsUndoBudget: canvasManager.raise(.fillMendingExceedsUndoBudget)
+                    case .exceedsBudget: canvasManager.raise(.fillMendingExceedsBudget)
                     case .superseded: break
                     }
                 }
