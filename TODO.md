@@ -168,6 +168,28 @@ hash-exact. Evidence and calibration detail: `~/PaintWork/s52-erase-crash/mode3-
 
 ---
 
+## Mend fill gaps beneath interior brushstrokes; apply across a layer — 2026-10-24
+
+**Queued — inspect the existing fill/mending path before implementing.** Owner reports: “when I fill
+stuff, the fill leaves white in places where brushstrokes were.” An enclosed filled region can contain
+an internal brushstroke whose footprint stays unfilled. Extend the **same Mend Gaps setting** to cover
+those interior stroke-shaped gaps as well as its current behavior. Preserve the actual original outer
+edge: a naive expansion that crosses the fill boundary is explicitly rejected. Reuse the existing fill
+geometry, retained source and mending calculation rather than adding a parallel fill mechanism.
+
+Owner also asks for **a new layer action that applies Mend Gaps to all fills in all cels of that layer**.
+Use the same setting/semantics as an individual fill; inspect existing batch edit/undo/save patterns.
+Determine raster/vector representation and boundary provenance from the code before assuming an
+implementation. Native work waits for current Liquify/saving qualification; read-only investigation
+can proceed in parallel. Worktree: `~/PaintWork/PaintApp-s53-fill-mend`, `tmp/s53-fill-mend`.
+
+- [ ] Reproduce internal ink holes and identify the root cause in the existing mending path.
+- [ ] Cover interior stroke gaps while preserving the original outer edge, using the current setting.
+- [ ] Add the layer-wide action for every fill in every cel; use existing mutation/undo ownership.
+- [ ] Mutation-backed logic tests, cold UI/pictures at iPad9 size and required Debug/Release gates.
+
+---
+
 ## (27) Stream the computer's screen as a layer
 
 **Status** — briefed 2026-09-13, designed the same day ([STREAM.md](docs/STREAM.md)), and **built through

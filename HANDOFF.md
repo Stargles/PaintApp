@@ -38,6 +38,14 @@ Preserve current iPad artwork; no physical device launch, restart or install occ
    Flights ending27–30minutes before Jetsam establish no causal link. Evidence:
    `~/PaintWork/s52-erase-crash/{mode3-diagnostic,device-diagnostics}/`.
 
+## New owner request — 2026-10-24
+
+Recorded in TODO before investigation: extend the existing Mend Gaps setting to fill beneath internal
+brushstroke footprints inside the same filled region, preserving the original outside boundary; add
+one layer action to apply it to all fills in every cel of that layer. Read-only source investigation
+may proceed while ee50 Liquify/saving normal rebuild and fast tiers own the native slot. Separate
+worktree `~/PaintWork/PaintApp-s53-fill-mend` contains this record; do not edit the frozen integration.
+
 ## Authoritative source and native ownership
 
 - Integrated tree `~/PaintWork/PaintApp-s52-vector-repair`, `tmp/s52-vector-repair`, source60a1ce37
