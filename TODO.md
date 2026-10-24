@@ -8,11 +8,13 @@ conservation and output quality take priority over speed. Use focused delegation
 for routine work, with occasional queue reports. The owner asked to work independently while asleep
 until 10 a.m. Toronto time. Raster scope and fixed exterior pixels for vector selections are ruled below.
 
-**Checkpoint 2026-10-23:** three active asks below remain unfinished. Point-only Liquify and newest
-backup retention are integrated on an unmerged branch; repair 75/75 and runtime 302/302 are green,
-but combined 303, runtime 13mutants, fast tiers and current UI remain unqualified. Test1 erasing has
-memory evidence but no proven cause or fix. Previous normal Release bcd7a6af remains the installed
-build; no physical device operation occurred this pass. See HANDOFF for the current native owner.
+**Checkpoint 2026-10-23 evening:** three active asks below remain unfinished. Point-only Liquify
+and newest retention are integrated but unmerged. Repair75/75, runtime302/302 and UI10/10 passed;
+final338,17runtime mutants, fast tiers, final affected UI and physical backup-cost experiment remain.
+The final round-dot fixture reuses the existing editor Size controls; current1/1 passed with verified
+field-edge geometry, matching old-code negative control is pending. Test1 erasing has memory evidence
+but no proven cause/fix. Installed normal Release remainsbcd7a6af; no physical operation this pass.
+See HANDOFF for native ownership and exact evidence.
 
 ## How to read and keep this file
 
@@ -88,21 +90,22 @@ final architecture review. Do not claim certainty from passing tests alone or re
 a compatibility flag. The new point-only vector instruction is authoritative over implementation
 interpretations made earlier. Record any actual behavior conflict with evidence before asking.
 
-The unmerged implementation at 25fb7618 removes native vector material transport, retains ordinary
-Distort/exact bake and raster Liquify, and includes the one-shot package repair. Repair 75/75 plus 13
-repair mutants are qualified; a copy-only real-library gate opened all 242 surviving packages, with
-original hashes unchanged. Corrected runtime 302/302 is green; ScreenshotPixels separately passed 1/1
-for all 8 orientations and scale. Current combined focused count is 303, fast 5259/full 5842; these combined
-gates and 13 runtime mutants have not run. The cut first-save oracle now uses exact independent ordinary
-Float32 encoding; no production precision or pixel-tolerance change.
+The unmerged implementation removes native vector material transport, retains genuine Distort/exact
+bake and raster Liquify, and includes the one-shot repair. Repair75/75 plus13repair mutants and copy-only
+real-library242-survivor open gate are qualified, original hashes unchanged. Runtime302/302 plus separate
+ScreenshotPixels1/1 passed. Stronger valid-current recovery fixtures await combined338/17faults.
+Static fast5259/full5842, unchanged test-method counts; these final gates are not yet native proof.
 
-Old-code field-edge UI control produced the intended width assertion-red (1.899×) after passing
-setup/movement/crop checks; root inspected the elongated tail. Current Liquify 4 + Raster 5 is running,
-with no result yet. Earlier setup failures and a uniform-field passing control are not appearance proof.
+UI10/10 passed Liquify4, Outside4 (literal pan from grey, Move grip, stroke), Playback1 and Graph1;
+Raster5 also passed in the previous batch. Root inspected current/old round dots and required-workflow
+pictures. A later exact interior-rail setup failure led to reusing the existing editor Size controls;
+a failed held-path helper attempt was reverted whole. Final dot1/1 passed all original visual oracles
+and explicit field-edge geometry premises; matching final old-code control and affected9 UI remain.
+No production precision/pixel-tolerance change or duplicated controls were added.
 
-- [ ] Green combined 303 baseline; 13 runtime faults assertion-red, exact restore and normal rebuild.
-- [ ] Exact Debug/Release fast tiers, counts/skips reconciled, static lints/PBX and touched cold UI.
-- [ ] Inspect current/old round-dot pictures at owner iPad9 landscape; drive required old workflows.
+- [ ] Green combined338 baseline,17 reviewed runtime faults assertion-red, exact restore/normal rebuild.
+- [ ] Exact Debug/Release fast tiers, counts/skips reconciled, final lints/PBX and affected cold UI.
+- [ ] Final old-code negative control with editor-size fixture; inspect new/old pictures.
 - [ ] Fresh verified current-library export before signed device install; owner confirms real scenes.
       Keep the one-shot repair until that confirmation, then retire it whole.
 
@@ -132,7 +135,9 @@ one backup ID, preserving the live package on ambiguity. Regression and mutation
 repair gate; this safety change is also unmerged.
 
 - [ ] Complete integrated Debug/Release and workflow gates with the combined branch.
-- [ ] Measure a real scene's week of physical storage cost without substituting logical export bytes.
+- [ ] Run prepared bounded APFS experiment on a copy of real Misc/Test2:7 daily reopens×4 real saves,
+      stable allocated-block delta with remount controls, untouched-source/live hashes. Report declared
+      workload limits; do not call this historical device cost or substitute logical bytes.
 
 ---
 

@@ -2,121 +2,136 @@
 
 Start at AGENTS.md, then CLAUDE.md, TODO.md, BUGS.md and the relevant specification. Verify origin
 and every tmp branch before trusting this checkpoint. Kevin permits useful agents; conserve usage,
-prioritize quality over speed, delegate substantive work, and continue without recommendation-only
+prioritize quality over speed, delegate substantive work and continue without recommendation-only
 pauses. Clean architecture is the first priority. Give occasional concise queue updates.
 
 ## Active session — 2026-10-23 evening
 
-Main contains records/rulings only for the three new tasks. **No new feature fix is merged, installed
-or fully qualified yet.** Previous installed normal Release is bcd7a6af, executable UUID
-F6102F9A-6D31-3185-B078-47B4C41981D9. Do not reuse prior green counts as proof of current changes.
+**No new feature fix is merged, installed or fully qualified yet.** Main contains records/rulings only.
+Previous installed normal Release is bcd7a6af, executable UUID F6102F9A-6D31-3185-B078-47B4C41981D9.
 Preserve current iPad artwork; no physical device launch, restart or install occurred in this pass.
 
-1. **Point-only vector Liquify cleanup.** The combined implementation removes native vector pixel
-   transport and moves stroke points through the ordinary brush renderer, preserving brush properties.
-   Genuine Distort/exact-bake placement, raster inverse Liquify, linked recipes, edit/undo, LatestWins
-   and bounded preview ownership remain. Independent source review found no concrete runtime
-   architecture defect. Repair 75/75 and corrected runtime 302/302 are green; combined 303, runtime
-   faults, fast tiers and current UI are still pending. Evidence: `~/PaintWork/s52-vector-points/`.
-2. **Smart saving.** The correction keeps the newest backup in each clock bucket, retaining the
-   3/6/24/7/4 schedule, pre-save copies, install protection and4GB logical cap. Standalone retention
-   14/14, reverse-loop mutation 8/14 assertion-red and restored14/14; integrated retention 14 and backup 21
-   also passed within runtime 302. Week-of-real-scene APFS storage cost remains unverified; logical
-   inventory does not measure shared physical blocks. The bounded Session47–51 audit found no other
-   concrete dropped actionable ask. Evidence: `~/PaintWork/s52-saving-audit/`.
-3. **Test1 erasing failure.** Root cause remains unresolved. Kevin used no Liquify and saw a black
-   screen/loading spinner before Home Screen. The probable matching 18:47EDT Jetsam names backboardd
-   at its1850MiB limit; active PaintSoftware was730.4MiB/922.6MiB peak, with the installed bcd7a6af
-   executable UUID and no app kill reason. Kevin says this was today's only crash but cannot recall
-   its time. Display-service allocation origin is unproved; no speculative fix or physical operation.
-   Preserved Test1 is 4096² with 527 strokes on Vector3/frame2, no material data, and To Cross selected.
-   **Raw eraser size 7.962 is canvas points, not 7.96% or 326px.** To Cross is Mode3: cuts per sample
-   update the canvas base without a scratch preview. Repeated full-image handoff is the current
-   hypothesis. Mode3 capture 1 passed 1/1 with 3 successful cuts and 3 full 4096 RGBA image assignments,
-   footprint 854–985 MiB; root inspected 2 pictures. This is simulator evidence, not backboardd proof.
-   Capture 2 mapped 527 source points and selected 20, but stopped before gestures at an added
-   RGB-below-100 pixel premise; it adds no crash evidence. Renewal is diagnosing that premise.
-   Earlier old-code stress diagnostics also did not crash. Flights ending27–30minutes before Jetsam
-   establish no causal link. All 3 temporary root source files are restored hash-exact. Evidence:
-   `~/PaintWork/s52-erase-crash/mode3-diagnostic/` and `device-diagnostics/`.
+1. **Point-only vector Liquify cleanup.** Remove native vector pixel transport whole; move points
+   through the ordinary brush renderer with brush properties unchanged. Genuine Distort/exact-bake
+   placement, raster inverse Liquify, linked recipes, edit/undo, LatestWins and bounded preview
+   ownership remain. Independent source review found no concrete runtime architecture defect.
+   Repair75/75 and corrected runtime302/302 are green; final338,17 runtime faults, fast tiers and
+   final affected UI remain pending. Evidence: `~/PaintWork/s52-vector-points/`.
+2. **Smart saving.** Keep newest per clock bucket, retaining3/6/24/7/4 tiers, pre-save copies,
+   update protection and4GB logical cap. Standalone retention14/14, reverse-loop mutation8/14
+   assertion-red, exact restore14/14; integrated retention14+backup21 also passed in runtime302.
+   A physical-cost experiment is prepared on a disposable real-scene copy; no cost is measured yet.
+   Logical export bytes cannot establish APFS shared-block cost. Bounded Session47–51 queue audit
+   found no other concrete dropped actionable ask. Evidence: `~/PaintWork/s52-saving-audit/`.
+3. **Test1 erasing failure.** Root cause unresolved; no speculative production fix. Kevin used no
+   Liquify and saw a black screen/loading spinner then Home Screen. Probable matching18:47EDT
+   Jetsam names backboardd at1850MiB; active PaintSoftware730.4MiB/peak922.6, installed bcd7a6af UUID,
+   no app kill reason. Kevin says this was the only crash that day but cannot recall its time.
+   Display-service allocation origin is unproved. Raw eraser size7.962 is **canvas points**, not
+   percent/326px. Preserved4096² Test1 has527 strokes on Vector3/frame2, no material data, To Cross
+   selected. Mode3 cuts per sample and updates the base without scratch preview. Repeated full-image
+   handoff is the current hypothesis. Capture1:1/1,3 real cuts and3 full4096 RGBA assignments,
+   footprint854–985MiB; root inspected2 pictures. Capture2 stopped before gestures at an added
+   RGB<100 premise. Capture3:1/1 but Xcode removed its temporary clone before its recorder could be
+   collected; exact cut/render/footprint totals are unavailable. No simulator crash proves no physical
+   cause. Original scene preserved; all720 source/test/PBX hashes restored and root records tree clean.
+   Flights ending27–30minutes before Jetsam establish no causal link. Evidence:
+   `~/PaintWork/s52-erase-crash/{mode3-diagnostic,device-diagnostics}/`.
 
-## Combined branch and current work
+## Authoritative source and native ownership
 
-- Active integrated tree `~/PaintWork/PaintApp-s52-vector-repair`, tmp/s52-vector-repair,
-  clean **25fb7618**. App production source is unchanged from b70d3065; later commits correct UI
-  screenshot orientation, slider-axis setup and the field-edge round-dot probe. No new code is merged.
-  Root records tree is `~/PaintWork/PaintApp-s52-erase-crash`.
-- **Root owns the sole native slot.** Current iPad9 UI run is session 21395 on
-  **56CC563F-06D0-42FC-9C18-A2B230DE2D38** at 25fb7618: LiquifyUITests 4 + LiquifyRasterUITests 5, results pending. Primary simulator
-  **39E84984-3C6F-4A6A-8DC8-D1098F6B623E** is shut down. Old-control iPad9 is
-  **B0533278-3F74-4944-AC58-3514D87C85D6**. Integration DD:
-  `~/PaintWork/s52-vector-points/integration/DerivedData`. No physical operation this turn.
-- Old writer tree `~/PaintWork/PaintApp-s52-format-baseline`,1c5c422e, preserves shipped production
-  source. Actual old ProjectStore writer produced/reopened six tiny packages and six roundtrips
-  (producer 1/1); all 723 tracked files restored after capture. Latest old UI control also restored both
-  temporary UI/helper files: all 720 tracked hashes, including 329 production/PBX files, match and git
-  is clean. Evidence: `s52-vector-points/baseline/` and `round-dot-old-control/`. Preserve this baseline.
+- Integrated tree `~/PaintWork/PaintApp-s52-vector-repair`, `tmp/s52-vector-repair`, source60a1ce37
+  before this documentation checkpoint. App production unchanged from6656a5a8 (rebased b70d3065);
+  later commits strengthen test fixtures/helpers only. Old lead tree `s52-vector-points` is not the
+  authoritative checkout. Root records tree is `~/PaintWork/PaintApp-s52-erase-crash` atafd2030c.
+- **erase_crash_trace owns the sole native slot** for ONE final old-code negative control, injecting
+  only final test/helper into `~/PaintWork/PaintApp-s52-format-baseline`,1c5c422e. All old production/PBX
+  must remain original, then all720 hashes/git clean restored. No physical activity.
+- Current-format iPad9: **56CC563F-06D0-42FC-9C18-A2B230DE2D38**. Old-control iPad9:
+  **B0533278-3F74-4944-AC58-3514D87C85D6**. Logic/fast M5:
+  **39E84984-3C6F-4A6A-8DC8-D1098F6B623E** (shut down). Integration DD:
+  `~/PaintWork/s52-vector-points/integration/DerivedData`. Do not mix old/current scene data.
+- After old control: root reviews, then grant final LiquifyUITests4+LiquifyRasterUITests5. Afterwards
+  freeze clean committed SHA and hand native to retire_file_repairs for338 baseline →17faults →
+  normal338 rebuild → exact Debug/Release fast tiers. Stop on unexpected green or infrastructure;
+  never count static preparation as proof. No concurrent native jobs.
 
-**Saved-format repair safety gate is qualified; the whole feature is not.** On committed c4d09f03
-(before equivalent integration/rebase), 35 repair + 21 backup + 19 location methods passed **75/75**, both
-before and after **13 intentional repair mutants, all assertion-red** (16 failed method executions,
-no compiler/crash substitution). Every mutant was restored byte-exact. Actual previous-writer fixture
-packages cover material strokes/fills, linked recipe/local edits/imported brush, plain ink, genuine
-Distort and retained exact bake. Ordinary Distort/bake pixel oracles are the old reader's reopened
-pictures; removed material stretching claims geometry/brush preservation, not old pixel parity.
+## What is qualified, and what remains
 
-The real-library gate ran on a temporary clone only: 256 input packages/3180 files/567855190bytes,
-**266 conversions including 10 untouched protection snapshots**. Normal dated retention removed 24
-inventoried backup packages; all **242 survivors (10 Projects / 214 Backups / 18 Trash)** passed current
-normal/restore validation and actual ProjectStore.load (2034 cels / 1459 clean vector decodes). No
-failures or stale stages; second run 0 and byte-exact idempotent. Original 3180 frozen file hashes
-remained unchanged. All 722 tracked app/test/project files matched the pre/post temporary-audit freeze;
-test injection removed exactly and M5 simulator 88DF deleted. This preserved export has no recipes
-or animation sidecars; previous-writer fixtures cover recipes. Evidence summary:
-`~/PaintWork/s52-vector-points/repair-qualification/README.md`; native results `restored-75.xcresult`
-and `real-library.xcresult`, `fault-summary.json`, `real-library-report.json`, and full freeze JSONs.
-Do not print the large real-library report wholesale.
+**Saved-format repair safety:** on equivalent committed c4d09f03,35repair+21backup+19location passed
+**75/75** before/after13 intentional repair mutants (16 assertion-red method executions, no compiler/
+crash substitution). Real previous-writer fixture covers material strokes/fills, linked/local edits,
+imported brushes, plain ink, genuine Distort and retained exact bake; old ordinary Distort/bake reopened
+pictures are exact oracles. Removed material stretching is not promised old pixel parity.
 
-Current manifest/vector/recipe codecs require geometryVersion 1. The one-shot converter enumerates
-all Projects/Backups/Trash strictly, protects untouched update copies, converts newly made snapshots,
-and validates staged packages before atomic exchanges. Directory-identity owner records preserve
-copies on errors; both sides and current validity are rechecked before swaps/cleanup. Cleanup precedes
-signature/retention. No old decoder/default/compatibility flag. Ambiguous unreadable manifests remain
-intact for existing backup recovery; same-basename fallback requires exactly one backup ID. Gesture
-brushes are full Brush values; ordinary stroke brushes use package references. Keep this temporary
-repair until Kevin confirms real current artwork, then retire it whole.
+Copy-only real-library gate:256 inputs/3180 files/567855190bytes;266 conversions including10 untouched
+protection snapshots. Normal retention removed24 inventoried backups. All242 survivors
+(10Projects/214Backups/18Trash) strictly validated and actually ProjectStore.load opened
+(2034cels/1459 clean vector decodes). Second run0/byte-exact; original3180 file hashes unchanged.
+All722 tracked source/test/PBX hashes restored, audit injection removed and audit simulator deleted.
+Evidence: `repair-qualification/README.md`, restored-75.xcresult, real-library.xcresult and summaries.
+Do not print huge real-library-report.json wholesale.
 
-**Corrected runtime baseline is green:** b70d3065 Debug **302/302**, zero failures/skips, across
-11 classes. Full 722-file source/test/PBX freeze matched before/after and git remained clean. Two obsolete
-parallel-array codec tests are removed. The cut first-save oracle now compares independent ordinary
-Float32 encoding exactly; control proved the earlier raw-to-first-save pixel premise wrong, without
-changing production precision or adding pixel tolerance. Evidence:
-`runtime-qualification/focused-Debug-final-b70d3065.xcresult` and `b70d3065-native-boundary.md`.
+Current codecs require geometryVersion1. One-shot converter strictly enumerates Projects/Backups/Trash,
+protects untouched update copies, validates stages and uses atomic exchanges with directory-identity
+owner records. Recheck before swap/removal; validate all interrupted owners before deleting any copy;
+cleanup precedes retention/signature. Ambiguous unreadable manifests remain intact for backup recovery;
+same-basename fallback accepts exactly one backup ID. No old/default decoder or compatibility flag.
+Keep temporary repair until Kevin confirms real current artwork, then retire it whole. Commitd81d8c16
+strengthens2 existing recovery tests with valid-current replacements so later decoding cannot mask
+identity faults; these stronger fixtures await338/17 proof, without production change.
 
-The new ScreenshotPixelsLogicTests separately passed **1/1** at a628a6ad, covering all 8 image orientations
-and screen scale. Shared screenshot reading now follows displayed orientation; UI slider setup uses
-the actual horizontal/vertical control axis. **Combined focused count 303 has not run.** Static counts
-are **fast 5259 / full 5842**, PBX **1316 unique objects**; these counts are not native qualification.
+**Runtime baseline:** equivalent b70d3065 Debug302/302, zero failures/skips across11 classes; all722
+source/test/PBX hashes matched. Obsolete parallel-array codec tests removed. Cut first-save comparison
+uses independent ordinary Float32 encoding exactly; a control disproved the raw-to-first-save pixel
+premise without production precision change or tolerance. ScreenshotPixels separately1/1 at a628a6ad
+covers all8 orientations and scale. Final focused **338 =302+1+35repair** has not run. Static fast5259 /
+full5842; PBX1316 unique objects. These static counts are not native qualification.
 
-**Runtime 13 mutants have NOT run.** The reviewed external driver/plan under
-`s52-vector-points/runtime-fault-driver/` includes orientation and scale faults. It requires a clean
-committed SHA, green baseline, exactly-once edits, full source/test/PBX restoration and actual selected
-native assertion-red; compiler/crash/unexpected-green stops without qualification. Refresh preparation
-against the final committed baseline, run under root's native grant, then rebuild normal source before
-UI or install. Static validation is not mutation proof.
+**UI:** current-ui9-25fb was8/9:5Raster+3Liquify passed; linked source-follow failed because its probe
+was behind Timing dock, not because ink was absent or wrong cel selected. Test-only relocation above
+panel passed in **current-ui10-f34:10/10**, including Liquify4, Outside4 (literal pan from grey+rotation,
+Move grip+stroke), Playback1 and Graph-node drag1. Root viewed linked, rotation, Move and playback
+pictures; graph asserts exposed node/diamond/Undo but has no explicit picture. UI identifier/helper
+checks and PBX lint clean. These gates predate the final dot setup correction below.
 
-**Round-dot appearance:** old controls 1–7 failed setup; control 8 passed 1/1 but placed the whole circle
-inside a uniform field, so it did not discriminate stretching. Control 9 crossed the field edge and
-produced the intended width assertion-red: width 0.2000→0.3797468354 (**1.899×**); setup, movement and crop
-assertions passed. Root inspected both pictures and saw the elongated tail. Old source is restored
-exactly. Current Liquify 4 + Raster 5 is running; no success count or current appearance qualification yet.
+Old field-edge control9 intentionally failed width0.2000→0.37975 (1.899×), after setup/movement/crop;
+root viewed the tail. Current normal dot had passed twice but exact interior rail setup later flaked.
+Historical vertical-axis fault produced actual helper assertion-red; source restored723 hashes. A
+three-waypoint helper attemptf32529f7 also failed and was **reverted whole** byc51baaff; no held-path
+code remains. Do not repeat a calibration loop or widen setup tolerance.
 
-Next: finish current UI and inspect owner-size landscape captures; run combined 303 and all 13 runtime
-faults, restore exact source and rebuild normally; then exact CLAUDE fast tiers **Debug and Release**,
-reconcile 5259 including skips, lints/PBX, touched UI classes and required old workflows. **Fast tiers
-are NOT run; the feature is not complete.** Before physical install, obtain/verify a **fresh** current
-library export (the preserved export predates later Liquify), drive required old workflows, build signed
-clean Release and launch normally without arguments. Preserve the owner’s current scenes meanwhile.
+**Final dot fixture60a1ce37 reuses existing editor Size sliders**, via existing helpers extended to
+liquifyPanel naming. No new production control/test seam. It removes exact interior-rail target
+premises and derives field-edge gesture from actual size+painted mark, asserting centre in95%core,
+paint beyond field and unobscured input. Actual current **1/1passed**, radius.22228, gestureY.51171;
+agent inspected round before/after. Existing width/height/aspect/coverage/movement/crop oracles unchanged.
+The old negative proof cannot simply transfer after input changed: final old-code control is running.
+Final affected Liquify4+Raster5 still pending. Evidence: runtime-qualification/, round-dot-old-control/,
+runtime-fault-driver/editor-size-dot-60a1* and vertical-slider-ui-f34/.
+
+**Runtime17 mutants NOT run.** `runtime-fault-driver/reviewed-plan-17.json` copies reviewed13 plus3
+interrupted-recovery identity faults and1 right-orientation mapping fault.21 edits dry-match once.
+Changed-source fault compounds both independent identity guards; either alone legitimately protects.
+Reviewed generic driver requires explicit clean SHA, actual338 zero-skip green same M5, every selector
+passed, full source freeze/restoration and actual native assertion-red. Prepare again after final
+freeze. Restore then rebuild committed normal source; restored files do not restore compiled objects.
+Saving's already-qualified standalone reverse-loop8/14 mutation is not missing proof.
+
+**Week physical-cost experiment prepared only:** separate clean `~/PaintWork/PaintApp-s52-week-cost`
+and external `s52-saving-audit/week-cost/` driver/template. Disposable512MiB APFS image, preserved
+Misc/Test2 (26cels/2048×1024/1713279logical bytes),7 daily reopens×4 real saves with a small raster edit.
+Reopen matters: first write rebuilds all pixel tiers; later writes can reuse unchanged tiers. Replay
+retention dates after capture, validate/open survivors; compare stable whole-volume allocated blocks
+before/after removing only experiment Backups, with remount-only controls and untouched live hashes.
+.metadata_never_index prevents unrelated indexing. No native/volume/measurement yet. This is a declared
+small-real-scene workload, not historical device cost or a300–1000-cel estimate. Grant separately after
+fast tiers; no production clocks or persistent diagnostic code.
+
+Next: finish old/current UI,338+17faults+normal rebuild, Debug/Release fasts/counts/lints; physical cost
+experiment. Then obtain/verify a **fresh** current-library export before signed clean Release install
+and normal launch. Preserved export predates later Liquify. Owner's current saved-scene/unlock readiness
+is not yet freshly confirmed. No final install/merge/retirement claim is warranted meanwhile.
 
 ## Previous completed work and preserved data
 
