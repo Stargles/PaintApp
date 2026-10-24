@@ -225,6 +225,33 @@ public class FrameTests
         await Assert.ThrowsAsync<EndOfStreamException>(() => reader.ReadFrameAsync());
     }
 
+    [Fact]
+    public async Task HeaderLimitsRejectBeforeAllocationAndExactBoundariesRemainLegal()
+    {
+        foreach (var (type, limit) in new[] { ((byte)MessageType.Video, Frame.MaximumPayloadLength),
+                                             ((byte)MessageType.FileChunk, 4 + Frame.MaximumFileChunkBytes) })
+        {
+            foreach (uint claimed in new[] { (uint)limit + 1, uint.MaxValue })
+            {
+                var bytes = new byte[5]; bytes[0] = type;
+                System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(bytes.AsSpan(1), claimed);
+                using var stream = new MemoryStream(bytes);
+                int allocations = 0;
+                var reader = new FrameReader(stream, _ => { allocations++; throw new InvalidOperationException("allocated"); });
+                await Assert.ThrowsAsync<InvalidDataException>(() => reader.ReadFrameAsync());
+                Assert.Equal(0, allocations);
+                Assert.Equal(5, stream.Position);
+            }
+            Frame.ValidatePayloadLength(type, (uint)limit);
+        }
+        var payload = new byte[4 + Frame.MaximumFileChunkBytes];
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(payload, 7);
+        Array.Fill(payload, (byte)0x9B, 4, payload.Length - 4);
+        var frame = await RoundTripAsync(Frame.Of(MessageType.FileChunk, payload));
+        Assert.Equal(payload, frame.Payload.ToArray());
+    }
+
+
     private static async Task<Frame> RoundTripAsync(Frame frame)
     {
         var ms = new MemoryStream(frame.Encode());

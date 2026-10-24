@@ -53,6 +53,11 @@ nonisolated enum StreamFraming {
     /// margin over the largest FILE_CHUNK (256 KiB) and any conceivable video frame.
     static let maximumPayloadLength = 64 << 20
 
+    static func maximumPayloadLength(for type: UInt8) -> Int {
+        type == StreamMessageType.fileChunk.rawValue
+            ? StreamFileChunk.headerLength + StreamFileChunk.maximumBytes : maximumPayloadLength
+    }
+
     static func encode(_ frame: StreamFrame) -> Data {
         var out = Data(capacity: headerLength + frame.payload.count)
         out.append(frame.type)
@@ -92,7 +97,7 @@ nonisolated enum StreamFraming {
             let type = buffer[buffer.startIndex]
             let lengthBytes = buffer[buffer.startIndex + 1 ..< buffer.startIndex + 5]
             let length = lengthBytes.reduce(0) { ($0 << 8) | Int($1) }
-            guard length <= StreamFraming.maximumPayloadLength else {
+            guard length <= StreamFraming.maximumPayloadLength(for: type) else {
                 buffer.removeAll()
                 throw Failure.oversizedPayload(claimed: length)
             }
@@ -254,6 +259,7 @@ nonisolated struct StreamFileBegin: Codable, Equatable {
 /// `StreamVideoPayload`'s hand-rolled header for the same reason.
 nonisolated struct StreamFileChunk: Equatable {
     static let headerLength = 4
+    static let maximumBytes = 256 << 10
 
     var id: Int
     var bytes: Data
@@ -263,9 +269,10 @@ nonisolated struct StreamFileChunk: Equatable {
         self.bytes = bytes
     }
 
-    /// Nil for a payload shorter than its own header.
+    /// Nil for a payload outside the chunk bounds.
     init?(payload: Data) {
-        guard payload.count >= Self.headerLength else { return nil }
+        guard payload.count >= Self.headerLength,
+              payload.count <= Self.headerLength + Self.maximumBytes else { return nil }
         var value: UInt32 = 0
         for offset in 0 ..< 4 { value = (value << 8) | UInt32(payload[payload.startIndex + offset]) }
         id = Int(value)

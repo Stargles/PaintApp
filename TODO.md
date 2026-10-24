@@ -108,6 +108,25 @@ production edits. No new framework/feature research, no protocol file-size polic
 compiler, Windows deployment, device, socket/network experiment or graph operation. Real-link stage5
 remains owner-waiting. Root separately owns active combined847 qualification; its source/tree is frozen.
 
+Approved proposal before production edits: use the existing connection writer and decoder as
+completion/ownership boundaries; remove unbounded bulk queues and unsafe detached APIs. Share the
+existing64MiB frame and256KiB chunk limits, bind transfers to one run, fence/join handshake callbacks.
+Count waiting producer payloads, keep control work bounded, and prove cancellation after header
+admission preserves the complete frame or closes/joins that connection. Source switching must not
+wait forever for a stalled socket. Swift decode drop/error/no-image/reset must release exactly once;
+old callbacks cannot publish and the last complete image remains. External proposal/test plan:
+`~/PaintWork/s54-stream-ownership/proposal.md`. Root approved connected API propagation; no native,
+compiler, Windows/live-link/device operations. Make coherent commits before any external fault plan.
+
+
+Wire-bound phase prepared: both readers enforce existing64MiB generic /4+256KiB FILE_CHUNK header
+limits before payload allocation/collection. Receivers refuse negative declarations and chunks past
+the declared remaining bytes before writing, delete partials, and preserve retry. Two tiny Swift and
+two C# methods cover header-only allocator rejection, exact/fragmented legal chunks, malformed input,
+no insert/partial and actual retry bytes/pixels. Both UI lints/diff-check pass; no compile/native or
+fault execution. Connection lifecycle/backpressure phases are still outstanding on this branch.
+
+
 ## Combined source qualification — 2026-10-24
 
 Ready mask f34 +video3227 +vector401/c5e are combined in `tmp/s54-integration`; scope was recorded before

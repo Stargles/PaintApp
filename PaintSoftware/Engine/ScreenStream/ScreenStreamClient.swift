@@ -239,7 +239,7 @@ nonisolated final class ScreenStreamClient {
     private var outgoingTransfer: OutgoingTransfer?
     private var nextOutgoingFileID = 1
     /// FILE_CHUNK's own cap, §3.
-    static let fileChunkSize = 256 << 10
+    static let fileChunkSize = StreamFileChunk.maximumBytes
 
     /// Whether `sendFile` requires a live, `.ready` connection before writing anything — true
     /// always in the app. `StreamFileSendLogicTests` sets this false to drive the chunking
@@ -488,6 +488,10 @@ nonisolated final class ScreenStreamClient {
 
     private func handleFileBegin(_ payload: Data) {
         guard let begin = StreamJSON.decode(StreamFileBegin.self, from: payload) else { return }
+        guard begin.size >= 0 else {
+            answerFileTransfer(StreamFileResult(id: begin.id, ok: false, reason: "The file size is invalid."))
+            return
+        }
         guard incomingTransfer == nil else {
             answerFileTransfer(StreamFileResult(id: begin.id, ok: false,
                                                 reason: "A transfer is already in progress"))
@@ -510,11 +514,29 @@ nonisolated final class ScreenStreamClient {
     }
 
     private func handleFileChunk(_ payload: Data) {
-        guard let chunk = StreamFileChunk(payload: payload),
-              var transfer = incomingTransfer, chunk.id == transfer.id else { return }
-        transfer.handle.write(chunk.bytes)
-        transfer.bytesReceived += chunk.bytes.count
-        incomingTransfer = transfer
+        guard payload.count >= StreamFileChunk.headerLength,
+              let header = StreamFileChunk(payload: Data(payload.prefix(StreamFileChunk.headerLength))),
+              var transfer = incomingTransfer, header.id == transfer.id else { return }
+        let byteCount = payload.count - StreamFileChunk.headerLength
+        guard byteCount <= StreamFileChunk.maximumBytes,
+              byteCount <= transfer.size - transfer.bytesReceived else {
+            refuseIncoming(transfer, reason: "The file exceeds its declared size or chunk limit.")
+            return
+        }
+        do {
+            try transfer.handle.write(contentsOf: payload.dropFirst(StreamFileChunk.headerLength))
+            transfer.bytesReceived += byteCount
+            incomingTransfer = transfer
+        } catch {
+            refuseIncoming(transfer, reason: "The file could not be received.")
+        }
+    }
+
+    private func refuseIncoming(_ transfer: IncomingTransfer, reason: String) {
+        incomingTransfer = nil
+        try? transfer.handle.close()
+        try? FileManager.default.removeItem(at: transfer.url)
+        answerFileTransfer(StreamFileResult(id: transfer.id, ok: false, reason: reason))
     }
 
     private func handleFileEnd(_ payload: Data) {

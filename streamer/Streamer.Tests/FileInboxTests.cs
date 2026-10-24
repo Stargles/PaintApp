@@ -174,6 +174,29 @@ public class FileInboxTests : IDisposable
     }
 
     [Fact]
+    public void InvalidSizeOrChunkNeverWritesPastTheDeclarationAndRetryKeepsExactBytes()
+    {
+        var inbox = new FileInbox(_settings);
+        var negative = inbox.BeginFile(new FileBeginMessage { Id = 1, Name = "negative.bin", Size = -1 });
+        Assert.False(negative!.Ok);
+        Assert.False(File.Exists(Path.Combine(SaveFolder, "negative.bin")));
+        foreach (var (count, declared) in new[] { (4, 3), (Frame.MaximumFileChunkBytes + 1, Frame.MaximumFileChunkBytes + 1) })
+        {
+            Assert.Null(inbox.BeginFile(new FileBeginMessage { Id = 2, Name = "invalid.bin", Size = declared }));
+            var refusal = inbox.WriteChunk(2, new byte[count]);
+            Assert.False(refusal!.Ok);
+            Assert.Equal("The file exceeds its declared size or chunk limit.", refusal.Reason);
+            Assert.False(File.Exists(Path.Combine(SaveFolder, "invalid.bin")));
+            Assert.Null(inbox.EndFile(new FileEndMessage { Id = 2 }));
+        }
+        var exact = Enumerable.Repeat((byte)0x9B, Frame.MaximumFileChunkBytes).ToArray();
+        SendWhole(inbox, 3, "exact.bin", exact, chunkSize: Frame.MaximumFileChunkBytes);
+        Assert.True(inbox.EndFile(new FileEndMessage { Id = 3 })!.Ok);
+        Assert.Equal(exact, File.ReadAllBytes(Path.Combine(SaveFolder, "exact.bin")));
+    }
+
+
+    [Fact]
     public void ReceivingAFileRaisesFileReceivedWithTheSavedPath()
     {
         var inbox = new FileInbox(_settings);

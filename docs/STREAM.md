@@ -132,6 +132,10 @@ u32 length   (big-endian, payload bytes)
 ```
 
 Payloads marked JSON are UTF-8 JSON objects. Unknown types are skipped by length, never fatal.
+Every payload is at most64MiB (the existing iPad framing limit); FILE_CHUNK payloads are at most
+4+256KiB, including their id. Both readers reject larger declared lengths from the header before
+allocating/collecting the payload. FILE_BEGIN sizes are nonnegative, and a receiver refuses a chunk
+before writing bytes beyond its declared file size. No additional whole-file size ceiling is set.
 
 | type | name | dir | payload |
 |---|---|---|---|

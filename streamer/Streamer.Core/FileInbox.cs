@@ -52,6 +52,7 @@ public sealed class FileInbox
     {
         lock (_gate)
         {
+            if (begin.Size < 0) return Refuse(begin.Id, "The file size is invalid.");
             if (_active != null)
             {
                 _log($"FileInbox: FILE_BEGIN id={begin.Id} while id={_active.Id} is active, refusing");
@@ -92,16 +93,21 @@ public sealed class FileInbox
     /// <summary>Called on FILE_CHUNK. Bytes for an id with no active transfer (already
     /// ended, or never began) are ignored — matches tools/stream/fake-streamer.py's
     /// reference behaviour for the same case.</summary>
-    public void WriteChunk(int id, ReadOnlyMemory<byte> data)
+    public FileResultMessage? WriteChunk(int id, ReadOnlyMemory<byte> data)
     {
         lock (_gate)
         {
             if (_active == null || _active.Id != id)
             {
                 _log($"FileInbox: FILE_CHUNK id={id} with no matching active transfer, ignored");
-                return;
+                return null;
             }
-            if (_active.WriteFailed != null) return; // already broken; EndFile will report it once
+            if (data.Length > Frame.MaximumFileChunkBytes || data.Length > _active.DeclaredSize - _active.Received)
+            {
+                AbortActiveTransfer();
+                return Refuse(id, "The file exceeds its declared size or chunk limit.");
+            }
+            if (_active.WriteFailed != null) return null; // EndFile reports the write failure once
             try
             {
                 _active.Stream.Write(data.Span);
@@ -112,6 +118,7 @@ public sealed class FileInbox
                 _log($"FileInbox: FILE_CHUNK id={id}: write failed: {e.Message}");
                 _active.WriteFailed = e.Message;
             }
+            return null;
         }
     }
 

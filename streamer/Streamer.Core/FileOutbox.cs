@@ -41,7 +41,7 @@ public sealed class OutboundFileEventArgs : EventArgs
 /// </summary>
 public sealed class FileOutbox : IDisposable
 {
-    public const int ChunkSize = 256 * 1024;
+    public const int ChunkSize = Frame.MaximumFileChunkBytes;
     private static readonly TimeSpan DefaultResultTimeout = TimeSpan.FromSeconds(60);
 
     private readonly IFileTransport _transport;

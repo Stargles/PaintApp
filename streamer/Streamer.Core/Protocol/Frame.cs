@@ -10,6 +10,18 @@ namespace Streamer.Core.Protocol;
 /// </summary>
 public readonly struct Frame
 {
+    public const int MaximumPayloadLength = 64 * 1024 * 1024;
+    public const int MaximumFileChunkBytes = 256 * 1024;
+
+    public static int MaximumPayloadFor(byte type) => type == (byte)MessageType.FileChunk
+        ? 4 + MaximumFileChunkBytes : MaximumPayloadLength;
+
+    public static void ValidatePayloadLength(byte type, uint length)
+    {
+        if (length > MaximumPayloadFor(type))
+            throw new InvalidDataException($"Payload length {length} exceeds the limit for type 0x{type:x2}.");
+    }
+
     public byte Type { get; }
     public ReadOnlyMemory<byte> Payload { get; }
 
@@ -36,6 +48,7 @@ public readonly struct Frame
 
     public byte[] Encode()
     {
+        ValidatePayloadLength(Type, (uint)Payload.Length);
         var buf = new byte[5 + Payload.Length];
         buf[0] = Type;
         BinaryPrimitives.WriteUInt32BigEndian(buf.AsSpan(1, 4), (uint)Payload.Length);

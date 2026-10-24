@@ -111,6 +111,37 @@ final class StreamFramingLogicTests: XCTestCase {
         XCTAssertEqual(parser.pendingByteCount, 0, "the buffer is dropped with the connection")
     }
 
+    func testPayloadCapsAreCheckedFromTheHeaderAndLegalChunkBoundariesStillFragment() throws {
+        func header(_ type: StreamMessageType, _ count: Int) -> Data {
+            var bytes = Data([type.rawValue])
+            var big = UInt32(count).bigEndian
+            withUnsafeBytes(of: &big) { bytes.append(contentsOf: $0) }
+            return bytes
+        }
+        for (type, limit) in [(StreamMessageType.video, 64 << 20),
+                              (.fileChunk, 4 + (256 << 10))] {
+            var parser = StreamFraming.Parser()
+            parser.append(header(type, limit))
+            XCTAssertNil(try parser.next(), "The exact legal boundary waits for fragmented payload, without making a frame.")
+            XCTAssertEqual(parser.pendingByteCount, 5)
+            parser = StreamFraming.Parser()
+            parser.append(header(type, limit + 1))
+            XCTAssertThrowsError(try parser.next()) { error in
+                XCTAssertEqual(error as? StreamFraming.Parser.Failure, .oversizedPayload(claimed: limit + 1))
+            }
+            XCTAssertEqual(parser.pendingByteCount, 0)
+        }
+        let chunk = StreamFileChunk(id: 7, bytes: Data(repeating: 0x9B, count: 256 << 10))
+        let wire = StreamFraming.encode(.fileChunk, payload: chunk.encoded)
+        var parser = StreamFraming.Parser()
+        parser.append(wire.prefix(wire.count - 1))
+        XCTAssertNil(try parser.next())
+        parser.append(wire.suffix(1))
+        XCTAssertEqual(StreamFileChunk(payload: try XCTUnwrap(parser.next()).payload), chunk)
+        XCTAssertEqual(parser.pendingByteCount, 0)
+        XCTAssertNil(StreamFileChunk(payload: Data(repeating: 0, count: 5 + (256 << 10))))
+    }
+
     // MARK: - Payloads
 
     func testHelloRoundTripsAndCarriesTheProtocolVersion() {

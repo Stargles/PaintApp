@@ -345,7 +345,9 @@ public sealed class ProtocolServer : IFrameSink, IFileTransport, IAsyncDisposabl
                         break;
                     }
                     uint id = BinaryPrimitives.ReadUInt32BigEndian(frame.Payload.Span[..4]);
-                    fileInbox.WriteChunk((int)id, frame.Payload[4..]);
+                    var refusal = fileInbox.WriteChunk((int)id, frame.Payload[4..]);
+                    if (refusal != null)
+                        EnqueueRaw(Frame.Of(MessageType.FileResult, Json.Encode(refusal)).Encode());
                     break;
                 }
                 case MessageType.FileEnd:

@@ -14,9 +14,12 @@ public sealed class FrameReader
     private readonly Stream _stream;
     private readonly byte[] _headerBuf = new byte[5];
 
-    public FrameReader(Stream stream)
+    private readonly Func<int, byte[]> _allocatePayload;
+
+    public FrameReader(Stream stream, Func<int, byte[]>? allocatePayload = null)
     {
         _stream = stream;
+        _allocatePayload = allocatePayload ?? (length => new byte[length]);
     }
 
     public async Task<Frame> ReadFrameAsync(CancellationToken ct = default)
@@ -24,11 +27,12 @@ public sealed class FrameReader
         await ReadExactAsync(_headerBuf, 5, ct).ConfigureAwait(false);
         byte type = _headerBuf[0];
         uint length = BinaryPrimitives.ReadUInt32BigEndian(_headerBuf.AsSpan(1, 4));
+        Frame.ValidatePayloadLength(type, length);
         if (length == 0)
         {
             return new Frame(type, ReadOnlyMemory<byte>.Empty);
         }
-        var payload = new byte[length];
+        var payload = _allocatePayload((int)length);
         await ReadExactAsync(payload, (int)length, ct).ConfigureAwait(false);
         return new Frame(type, payload);
     }

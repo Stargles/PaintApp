@@ -259,6 +259,30 @@ final class StreamFileTransferLogicTests: XCTestCase {
         XCTAssertEqual(manager.layers.count, layerCountBefore, "nothing inserted")
     }
 
+    func testInvalidSizesRefuseBeforeWritingOrInsertingAndTheNextTransferWorks() throws {
+        let (manager, client) = connectedManager()
+        let layers = manager.layers.count
+        let image = solidPNGData(.blue)
+        for (bytes, size, reason) in [(Data(), -1, "The file size is invalid."),
+                                     (image, 1, "The file exceeds its declared size or chunk limit."),
+                                     (Data(repeating: 7, count: (256 << 10) + 1), (256 << 10) + 1,
+                                      "The file exceeds its declared size or chunk limit.")] {
+            let result = try send(bytes, id: 7, name: "invalid.png", kind: "image", declaredSize: size, through: client)
+            XCTAssertFalse(result.ok)
+            XCTAssertEqual(result.reason, reason)
+            XCTAssertEqual(manager.layers.count, layers)
+            let incoming = try XCTUnwrap(StreamTransferStore.directoryOverride)
+            let files = (try? FileManager.default.contentsOfDirectory(atPath: incoming.path)) ?? []
+            XCTAssertTrue(files.isEmpty, "A refused input leaves no partial file or retained receiver slot.")
+        }
+        let result = try send(image, id: 8, name: "valid.png", kind: "image", through: client)
+        XCTAssertTrue(result.ok)
+        XCTAssertEqual(manager.layers.count, layers + 1)
+        let cg = try XCTUnwrap(manager.layers.last?.cels.first?.vector?.images.first?.image.cgImage)
+        XCTAssertGreaterThan(pixel(cg, 0, 0).b, 200, "Retry installs the actual blue picture.")
+    }
+
+
     /// **No document open answers the sentence** — simulated by letting the manager the coordinator
     /// weakly holds go away while the coordinator (and the client it started) live on, exactly the
     /// shape `closeFrameBaker` leaves nothing: nobody kept a strong reference beyond this scope.
