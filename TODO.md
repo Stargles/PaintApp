@@ -76,8 +76,9 @@ bounded and independent of the temporary geometry repair; purge must use actual 
 preserve history when ownership cannot be established. Preserve damaged packages and both sides on
 comparison/read failure. Scope excludes raster residency and backup retention policy changes.
 
-- [ ] Focused regressions for equal-census different content/tree, strict comparison failures and
-      distinct/same/unknown Trash ownership; minimal shared ownership validation.
+- [ ] Focused regressions for equal-census different content/tree, migration preserving both sides
+      after a linked-destination comparison failure, and distinct/same/unreadable live or retained
+      Trash ownership; minimal shared ownership validation.
 - [ ] Commit normal source, review mutation recipes, then qualify under root's explicit native grant.
       No native run, simulator operation, merge, push or device operation is authorized for this work yet.
 - [ ] Reconcile selected static counts, lints and graph report; hand clean commits to root for integration.

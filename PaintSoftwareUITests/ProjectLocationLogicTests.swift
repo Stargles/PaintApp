@@ -496,6 +496,24 @@ final class ProjectLocationLogicTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
     }
 
+    func testMigrationPreservesSourceAndLinkedDestinationWhenComparisonFails() throws {
+        let fm = FileManager.default
+        let source = writeProject(named: "Linked")
+        let sourceManifest = try Data(contentsOf: source.appendingPathComponent("manifest.json"))
+        let folder = external.appendingPathComponent("Projects", isDirectory: true)
+        try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+        let destination = folder.appendingPathComponent("Linked.paintproj", isDirectory: true)
+        try fm.createSymbolicLink(at: destination, withDestinationURL: source)
+
+        let report = ProjectLibraryMigration.migrate(from: container, to: external)
+
+        XCTAssertEqual(report.failed, ["Projects/Linked.paintproj"])
+        XCTAssertTrue(fm.fileExists(atPath: source.path), "A failed comparison must leave the source package")
+        XCTAssertEqual(try Data(contentsOf: source.appendingPathComponent("manifest.json")), sourceManifest)
+        XCTAssertEqual(try fm.destinationOfSymbolicLink(atPath: destination.path), source.path,
+                       "A failed comparison must leave the existing destination entry")
+    }
+
     // MARK: - Fixtures
 
     /// A minimal package that `ProjectBackupManager.validateProject` accepts: a manifest naming one

@@ -454,6 +454,29 @@ final class BackupManagerLogicTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: unreadable.appendingPathComponent("manifest.json"), encoding: .utf8), "corrupted")
     }
 
+    func testUnreadableRetainedTrashOwnershipPreservesRecoveryHistories() throws {
+        let now = Date(), id = UUID()
+        let old = makeProject(name: "Expired", id: id)
+        ProjectBackupManager.refreshLatestSnapshot(projectURL: old, projectID: id)
+        let expiredTrash = try XCTUnwrap(ProjectBackupManager.moveToTrash(old, tag: "deleted"))
+        let expired = expiredTrash.deletingLastPathComponent().appendingPathComponent(
+            "Expired__deleted__\(ProjectBackupManager.timestampString(now.addingTimeInterval(-8 * 24 * 60 * 60))).paintproj")
+        try FileManager.default.moveItem(at: expiredTrash, to: expired)
+
+        let unknown = makeProject(name: "Unknown")
+        let retained = try XCTUnwrap(ProjectBackupManager.moveToTrash(unknown, tag: "deleted"))
+        corruptManifest(of: retained)
+
+        ProjectBackupManager.purgeExpiredTrash(now: now)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: expired.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: retained.path), "The unexpired package remains")
+        XCTAssertTrue(backupDirFileNames(id).contains("latest.paintproj"),
+                      "An unreadable retained Trash owner cannot prove this history is orphaned")
+        XCTAssertEqual(try String(contentsOf: retained.appendingPathComponent("manifest.json"), encoding: .utf8),
+                       "corrupted", "Ownership inspection must preserve the damaged package")
+    }
+
     // MARK: - App-update snapshots
 
     func testAppUpdateSnapshotsEveryProjectOncePerSignature() {
