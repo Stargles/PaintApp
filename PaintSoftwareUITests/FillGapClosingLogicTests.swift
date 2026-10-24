@@ -313,7 +313,9 @@ final class FillGapClosingLogicTests: XCTestCase {
         XCTAssertFalse(restored.isFilled(16, 40), "the original frame stays bare")
         XCTAssertFalse(restored.isFilled(4, 4), "the restored fill cannot leak onto exterior paper")
         XCTAssertTrue(restored.bytes == first.bytes, "the full original picture is restored")
-        add(XCTAttachment(string: "threshold1Refused=\(changed == nil); buildsBeforeReturning=\(buildsBeforeReturning); finalBuilds=\(session.structureBuilds)"))
+        let preparation = XCTAttachment(string: "threshold1Refused=\(changed == nil); buildsBeforeReturning=\(buildsBeforeReturning); finalBuilds=\(session.structureBuilds)")
+        preparation.lifetime = .keepAlways
+        add(preparation)
     }
 
     /// The cut is exact against a fresh build: a tick on a reused session paints what a press at that
