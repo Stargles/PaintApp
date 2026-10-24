@@ -3,6 +3,18 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## Fill colour comparison treats identical opaque paper as a wall at threshold zero — 2026-10-24
+
+The committed core fixtures reached real Metal and produced no patches. A scoped test-only diagnostic
+proved both reference colours and parameter blocks correct, but opaque white pixels were marked as
+walls even against an opaque-white reference at threshold0; every nearest-open coordinate was absent.
+The same session at1e-6 restored open paper and all four required patches while preserving the tied
+hole-edge veto. Do not relax the permanent threshold or fixtures. Fix normalization/comparison in the
+shared shader classifier, and assert byte-identity plus adjacent-byte distinction with actual kernels.
+Fast-math residuals are the leading explanation, pending the precision-controlled native comparison.
+Evidence: `~/PaintWork/s53-fill-mend/mutations/core-diagnostic-95b7457b-run01/`;1 expected-red method,
+all723 source bytes/modes restored. No diagnostic API or temporary trace remains in source.
+
 ## Batch mending must exclude its own paint and refuse unavailable inputs — 2026-10-24
 
 Independent source review of the pending layer action found two gaps before qualification. A saved
