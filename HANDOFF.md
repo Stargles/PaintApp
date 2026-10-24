@@ -207,5 +207,5 @@ change is attributed to either driver failure.
 
 The library-ready dependency's TODO/HANDOFF/BUGS records remain authoritative; this branch's focused
 review found no concrete production defect. Current-format fixture scan found no legacy-format
-assumptions. Native qualification remains pending. The refreshed external mutation plan is pinned to
-3238a5fec226279fbe5edc8a89890d39800b583b.
+assumptions. Native qualification remains pending. The reviewed external mutation plan is under
+~/PaintWork and will be pinned to the final native source SHA there.
