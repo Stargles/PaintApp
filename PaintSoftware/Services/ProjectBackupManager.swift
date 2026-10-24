@@ -257,7 +257,9 @@ nonisolated enum ProjectBackupManager {
     /// staging and swapping leaves one behind. It's not user data (the live package was never
     /// touched), so it's just clutter to remove.
     static func cleanupStaleSaveDirectories() {
-        cleanupStaleSaveDirectories(in: projectsDirectory)
+        ProjectStore.serializingPackageMutation {
+            cleanupStaleSaveDirectories(in: projectsDirectory)
+        }
     }
 
     /// Recursive since TODO (36): a project saved inside `Projects/Scene 3/` stages its package

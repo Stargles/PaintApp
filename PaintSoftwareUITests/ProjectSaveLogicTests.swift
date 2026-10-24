@@ -1,4 +1,5 @@
 import XCTest
+import Combine
 import UIKit
 import SwiftUI
 
@@ -1268,6 +1269,51 @@ final class ProjectSaveLogicTests: XCTestCase {
     }
 
     // MARK: - The deferred thumbnail pass (PERFORMANCE.md item 9(c))
+
+    func testClosingADocumentCancelsQueuedThumbnailBackfill() async throws {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        let held = expectation(description: "thumbnail worker queue is held")
+        let release = DispatchSemaphore(value: 0)
+        defer { release.signal() }
+        CanvasManager.thumbnailBackfillQueue.async(flags: .barrier) {
+            held.fulfill()
+            _ = release.wait(timeout: .now() + 30)
+        }
+        await fulfillment(of: [held], timeout: 30)
+        manager.startThumbnailBackfill()
+        let owed = try XCTUnwrap(manager.thumbnailBackfillTask)
+        await Task.yield()
+        manager.closeFrameBaker()
+        XCTAssertTrue(owed.isCancelled, "The close path must cancel the pass it owns")
+        XCTAssertNil(manager.thumbnailBackfillTask)
+        release.signal()
+        await owed.value
+        XCTAssertTrue(manager.layers[0].cels.allSatisfy { $0.thumbnail == nil },
+                      "A cancelled queued batch must not install after the document closes")
+    }
+
+    func testThumbnailBackfillClosesAfterOneBoundedBatch() async throws {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, (0..<25).map { (start: $0, length: 1) })
+        var closed = false
+        let observer = manager.thumbnailInstalled.sink { _ in
+            guard !closed else { return }
+            closed = true
+            manager.closeFrameBaker()
+        }
+        defer { observer.cancel(); manager.closeFrameBaker() }
+        manager.startThumbnailBackfill()
+        let owed = try XCTUnwrap(manager.thumbnailBackfillTask)
+        await owed.value
+        XCTAssertTrue(closed, "PREMISE: a real rendered thumbnail reached installation")
+        XCTAssertTrue(owed.isCancelled)
+        XCTAssertEqual(manager.thumbnailRegenerationCount, CanvasManager.thumbnailBackfillBatchSize,
+                       "Closing must leave only one bounded batch of paid render work")
+        XCTAssertLessThan(manager.thumbnailRegenerationCount, manager.layers[0].cels.count)
+        XCTAssertNotNil(manager.layers[0].cels[0].thumbnail)
+        XCTAssertTrue(manager.layers[0].cels.dropFirst(CanvasManager.thumbnailBackfillBatchSize)
+            .allSatisfy { $0.thumbnail == nil })
+    }
 
     /// The gallery's open does not walk every cel a second time to make thumbnails, and the pass that
     /// replaces it fills in every one.

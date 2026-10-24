@@ -347,6 +347,80 @@ final class FrameExportSessionLogicTests: XCTestCase {
         XCTAssertNil(baker.exportFocus)
     }
 
+    /// Owed PNG I/O from a dismissed sheet must not release the reopened sheet's cold-frame focus.
+    func testCancelledIOCannotPublishOrClearAReplacementExportsFocus() async throws {
+        let manager = greyDocument(frames: 2)
+        await warm(manager)
+        let baker = manager.frameBaker
+        baker.isSuspended = true
+        defer { baker.isSuspended = false }
+        let coldKey = try XCTUnwrap(baker.currentKey(atFrame: 1))
+        try FileManager.default.removeItem(at: baker.store.url(for: coldKey))
+
+        let old = FrameExportSession(manager: manager)
+        let replacement = FrameExportSession(manager: manager)
+        defer { old.cancel(); replacement.cancel() }
+        let queue = old.workQueue
+        let release = DispatchSemaphore(value: 0)
+        defer { release.signal() }
+        let held = expectation(description: "old PNG queue is held before its write")
+        var didHold = false
+        var afterCancel = false
+        var latePhases: [FrameExportSession.Phase] = []
+        old.$phase.sink { phase in
+            if afterCancel { latePhases.append(phase) }
+            guard phase == .writing(done: 0, total: 1), !didHold else { return }
+            didHold = true
+            queue.async {
+                held.fulfill()
+                _ = release.wait(timeout: .now() + 30)
+            }
+        }.store(in: &cancellables)
+        old.exportFrame(0)
+        await fulfillment(of: [held], timeout: 30)
+        let owed = try XCTUnwrap(old.task)
+        XCTAssertTrue(old.phase.isRunning, "PREMISE: cancellation interrupts an actual export")
+        old.cancel()
+        afterCancel = true
+        XCTAssertEqual(old.phase, .idle)
+
+        replacement.exportFrame(1)
+        let planted = await settle(until: { baker.exportFocus?.frame == 1 })
+        XCTAssertTrue(planted, "PREMISE: the replacement is waiting for its missing frame")
+        XCTAssertEqual(baker.exportFocus?.range, 1...1)
+        XCTAssertTrue(replacement.phase.isRunning)
+        release.signal()
+        await owed.value
+
+        XCTAssertTrue(latePhases.isEmpty, "Cancelled I/O published \(latePhases)")
+        XCTAssertEqual(baker.exportFocus?.frame, 1, "The old unwind released the new sheet's focus")
+        XCTAssertEqual(baker.exportFocus?.range, 1...1)
+        XCTAssertTrue(replacement.phase.isRunning)
+        baker.isSuspended = false
+        baker.kick()
+        let phase = await settle(replacement)
+        guard case .finished(let url) = phase else { return XCTFail("Replacement stopped at \(phase)") }
+        let source = try XCTUnwrap(CGImageSourceCreateWithURL(url as CFURL, nil))
+        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        let grey = try XCTUnwrap(Self.firstGrey(image))
+        XCTAssertEqual(Double(grey), Double(Self.greyLevel(1)), accuracy: 2,
+                       "The replacement must deliver its requested drawing")
+        XCTAssertNil(baker.exportFocus)
+    }
+
+    func testAVanishedDocumentEndsAnUncancelledExportAsIdle() async throws {
+        var manager: CanvasManager? = greyDocument(frames: 1)
+        weak var document = manager
+        let session = FrameExportSession(manager: try XCTUnwrap(manager))
+        session.exportFrame()
+        let owed = try XCTUnwrap(session.task)
+        manager = nil
+        await owed.value
+        XCTAssertNil(document, "PREMISE: the export did not retain its document")
+        XCTAssertFalse(owed.isCancelled, "A vanished weak document is distinct from cancelling the Task")
+        XCTAssertEqual(session.phase, .idle)
+    }
+
     /// **An export that outlives its document stops, rather than taking the process with it.**
     ///
     /// This is not a fixture-lifetime nicety. `ExportSheet.onDisappear` calls `cancel()`, and

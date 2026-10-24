@@ -1051,8 +1051,11 @@ extension CanvasManager {
     /// whatever thread it lands on; `.utility`, because nothing waits for this — by the time it runs
     /// the artist is looking at their canvas, and it should lose to the touch path rather than
     /// compete with it.
-    private static let thumbnailBackfillQueue = DispatchQueue(
+    static let thumbnailBackfillQueue = DispatchQueue(
         label: "com.paintapp.CanvasManager.thumbnailBackfill", qos: .utility, attributes: .concurrent)
+
+    /// Bound captured cels, returned pictures and the work a cancelled document still owes.
+    static let thumbnailBackfillBatchSize = 8
 
     /// Starts filling in every missing cel thumbnail and returns immediately.
     ///
@@ -1065,19 +1068,11 @@ extension CanvasManager {
         }
     }
 
-    /// Renders the missing thumbnails **a layer at a time**, off the main actor, installing each
-    /// layer's batch in one main-actor turn.
-    ///
-    /// **Batched by layer rather than by cel**, which was a judgement about publishing when it was
-    /// written and is now one about latency alone. A tile assignment used to republish the document
-    /// and move `TimelineLayoutKey`, so installing thirty-two individually meant thirty-two relayouts
-    /// of the track; since PERFORMANCE.md §18.6 it means thirty-two `UIImageView` writes and one
-    /// coalesced rail reload, and the batching survives because it is still the right shape — a
-    /// layer at a time gives the timeline something to show while the rest arrives, and each batch is
-    /// one suspension rather than one per cel.
+    /// Renders missing thumbnails in bounded batches off the main actor. A layer may own a thousand
+    /// cels; only ids survive between batches, and close can discard at most one batch's owed work.
     ///
     /// **The loop walks layer *ids*, not indices, and that is not fastidiousness.** It suspends once
-    /// per layer, and `layers` is a `@Published` array the artist can add to, delete from or reorder
+    /// per batch, and `layers` is a `@Published` array the artist can add to, delete from or reorder
     /// across any of those suspensions. An index loop would then silently skip a layer — leaving it on
     /// its placeholder until something else happened to repaint it, which is a bug nobody could trace
     /// back to here.
@@ -1087,36 +1082,42 @@ extension CanvasManager {
         for layerID in layers.map(\.id) {
             if Task.isCancelled { return }
             guard let layerIndex = layers.firstIndex(where: { $0.id == layerID }) else { continue }
-            // The version is captured **here, before the render**, and that placement is the whole
-            // guard. `Cel.raster` is a class, so a `LayerContentVersion` built from a captured `Cel`
-            // at install time would read the *live* counter through the same object and compare equal
-            // to itself no matter what the artist drew in between.
-            let jobs = ThumbnailBatch(entries: layers[layerIndex].cels
-                .filter { $0.thumbnail == nil }
-                .map { cel in
-                    let derived = derivedCelContent(for: cel, atFrame: cel.startFrame)
-                    return ThumbnailBatch.Entry(
-                        cel: cel,
-                        version: LayerContentVersion(cel: cel, derived: derived?.identity),
-                        derived: derived)
-                })
-            guard !jobs.entries.isEmpty else { continue }
+            let celIDs = layers[layerIndex].cels.filter { $0.thumbnail == nil }.map(\.id)
+            for start in stride(from: 0, to: celIDs.count, by: Self.thumbnailBackfillBatchSize) {
+                if Task.isCancelled { return }
+                guard let layerIndex = layers.firstIndex(where: { $0.id == layerID }) else { break }
+                // The version is captured **here, before the render**, and that placement is the whole
+                // guard. `Cel.raster` is a class, so a `LayerContentVersion` built from a captured `Cel`
+                // at install time would read the *live* counter through the same object and compare equal
+                // to itself no matter what the artist drew in between.
+                let end = min(start + Self.thumbnailBackfillBatchSize, celIDs.count)
+                let jobs = ThumbnailBatch(entries: celIDs[start..<end].compactMap { id in
+                        guard let cel = layers[layerIndex].cels.first(where: { $0.id == id }),
+                              cel.thumbnail == nil else { return nil }
+                        let derived = derivedCelContent(for: cel, atFrame: cel.startFrame)
+                        return ThumbnailBatch.Entry(
+                            cel: cel,
+                            version: LayerContentVersion(cel: cel, derived: derived?.identity),
+                            derived: derived)
+                    })
+                guard !jobs.entries.isEmpty else { continue }
 
-            let rendered: ThumbnailImages = await withCheckedContinuation { continuation in
-                Self.thumbnailBackfillQueue.async {
-                    let images = PixelOps.parallelMap(jobs.entries.count) {
-                        CanvasManager.celThumbnailImage(for: jobs.entries[$0].cel, canvasSize: canvasSize,
-                                                        derived: jobs.entries[$0].derived)
+                let rendered: ThumbnailImages = await withCheckedContinuation { continuation in
+                    Self.thumbnailBackfillQueue.async {
+                        let images = PixelOps.parallelMap(jobs.entries.count) {
+                            CanvasManager.celThumbnailImage(for: jobs.entries[$0].cel, canvasSize: canvasSize,
+                                                            derived: jobs.entries[$0].derived)
+                        }
+                        continuation.resume(returning: ThumbnailImages(images: images))
                     }
-                    continuation.resume(returning: ThumbnailImages(images: images))
                 }
+                // Counted where the renders were paid for, not where they land: a batch whose layer
+                // vanished mid-flight still cost the rasterizes, and `thumbnailRegenerationCount` means
+                // cost rather than effect (see `CanvasManager.recordThumbnailRenders`).
+                recordThumbnailRenders(rendered.images.count)
+                if Task.isCancelled { return }
+                install(rendered.images, from: jobs, layerID: layerID)
             }
-            // Counted where the renders were paid for, not where they land: a batch whose layer
-            // vanished mid-flight still cost the rasterizes, and `thumbnailRegenerationCount` means
-            // cost rather than effect (see `CanvasManager.recordThumbnailRenders`).
-            recordThumbnailRenders(rendered.images.count)
-            if Task.isCancelled { return }
-            install(rendered.images, from: jobs, layerID: layerID)
         }
     }
 

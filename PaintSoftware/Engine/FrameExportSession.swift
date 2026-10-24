@@ -168,8 +168,8 @@ final class FrameExportSession: ObservableObject {
     /// is built on: `FrameBaker.manager` is weak, and says so, *"because `CanvasManager` owns this"*.
     private weak var manager: CanvasManager?
 
-    private let workQueue = DispatchQueue(label: "com.paintapp.FrameExportSession", qos: .userInitiated)
-    private var task: Task<Void, Never>?
+    let workQueue = DispatchQueue(label: "com.paintapp.FrameExportSession", qos: .userInitiated)
+    private(set) var task: Task<Void, Never>?
 
     /// How long one wait for the baker may go with **no frame anywhere** finishing before the export
     /// gives up. Generous on purpose: one frame of a hundred-layer document at 4096² is seconds of
@@ -306,21 +306,19 @@ final class FrameExportSession: ObservableObject {
     private func run(_ product: Product, _ range: ClosedRange<Int>) async {
         do {
             let url = try await produce(product, range)
+            guard !Task.isCancelled else { return }
             endFocus()
-            guard !Task.isCancelled else { phase = .idle; return }
             phase = .finished(url)
-        } catch is CancellationError {
-            endFocus()
-            phase = .idle
-        } catch let failure as VideoFrameWriter.Failure {
-            endFocus()
-            phase = .failed(Self.sentence(for: failure))
-        } catch let failure as Failure {
-            endFocus()
-            phase = .failed(failure.sentence)
         } catch {
+            // cancel() already released this run's wait and focus. A replacement may own them now.
+            guard !Task.isCancelled else { return }
             endFocus()
-            phase = .failed(error.localizedDescription)
+            switch error {
+            case is CancellationError: phase = .idle // The weak document vanished without cancel().
+            case let failure as VideoFrameWriter.Failure: phase = .failed(Self.sentence(for: failure))
+            case let failure as Failure: phase = .failed(failure.sentence)
+            default: phase = .failed(error.localizedDescription)
+            }
         }
     }
 
@@ -482,12 +480,15 @@ final class FrameExportSession: ObservableObject {
     /// several hundred times over.
     @discardableResult
     private nonisolated func offMain<T>(_ body: @escaping () throws -> T) async throws -> T {
-        try await withCheckedThrowingContinuation { continuation in
+        let result: T = try await withCheckedThrowingContinuation { continuation in
             workQueue.async {
                 do { continuation.resume(returning: try body()) }
                 catch { continuation.resume(throwing: error) }
             }
         }
+        // A continuation waits for owed I/O even after cancellation. Fence its later publications.
+        try Task.checkCancellation()
+        return result
     }
 
     // MARK: - Failures

@@ -3426,6 +3426,8 @@ final class CanvasManager: ObservableObject {
     /// and showing that view is what makes `syncFrameBake` — and so `frameBaker` — run at least once.
     @MainActor
     func closeFrameBaker() {
+        thumbnailBackfillTask?.cancel()
+        thumbnailBackfillTask = nil
         frameBaker.reset()
         // The document is leaving the screen, and its stream clients must not go on reconnecting
         // to a laptop for a canvas nobody is looking at.
