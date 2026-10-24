@@ -661,6 +661,74 @@ final class FillObjectLogicTests: XCTestCase {
         XCTAssertTrue(manager.layers[fixture.layer].isFillReference, "the artist's reference choice stays on")
     }
 
+    func testMendAllFillsRepairsRealBucketFillsAtDefaultOverlapWithoutChangingTheirOutsideEdges() async throws {
+        _ = try XCTUnwrap(MetalFillEngine.shared)
+        let size = CGSize(width: 128, height: 128)
+        let width = Int(size.width), height = Int(size.height)
+        for attached in [true, false] {
+            let manager = CanvasFixture.manager(layerCount: 1)
+            manager.canvasSize = size
+            manager.layers[0].cels[0].raster = RasterLayerTexture(size: size)
+            let stroke = attached ? CGRect(x: 16, y: 59, width: 49, height: 10)
+                                  : CGRect(x: 54, y: 44, width: 10, height: 40)
+            let interiorStroke = attached ? CGRect(x: 26, y: 59, width: 39, height: 10) : stroke
+            let art = UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { context in
+                context.cgContext.setShouldAntialias(false)
+                UIColor.black.setFill()
+                context.cgContext.addRect(CGRect(x: 16, y: 16, width: 96, height: 96))
+                context.cgContext.addRect(CGRect(x: 26, y: 26, width: 76, height: 76))
+                context.cgContext.fillPath(using: .evenOdd)
+                context.cgContext.fill(stroke)
+            }
+            CanvasFixture.setBakedContent(manager, layerIndex: 0, art)
+            manager.addVectorLayer()
+            let layer = manager.currentLayerIndex
+            let vector = try XCTUnwrap(manager.layers[layer].cels[0].vector)
+            XCTAssertTrue(manager.layers[layer].isFillReference, "PREMISE: the target keeps its visible reference default")
+            XCTAssertEqual(manager.fillSettings.bucketEdgeOverlap, 2, "PREMISE: this is the ordinary bucket overlap")
+            manager.setFillMendsGaps(false)
+            manager.brushColor = .red
+            manager.beginInteractiveFill(at: CGPoint(x: 40, y: 40))
+            manager.endInteractiveFill()
+            manager.fillQueue.sync {}
+            manager.commitInteractiveFill()
+            manager.fillQueue.sync {}
+
+            let saved = try XCTUnwrap(vector.elements.first?.fill, "a real bucket commit creates the saved fill")
+            XCTAssertEqual(vector.elements.count, 1)
+            let beforeImage = try XCTUnwrap(vector.render()?.cgImage)
+            let before = try XCTUnwrap(CanvasFixture.rgbaBytes(beforeImage))
+            XCTAssertEqual(pixel(beforeImage, 40, 40), [255, 0, 0, 255], "PREMISE: the bucket painted ordinary red")
+            for position in 0..<10 {
+                let x = attached ? 45 : 54 + position
+                let y = attached ? 59 + position : 64
+                XCTAssertEqual(pixel(beforeImage, x, y)[3], (2..<8).contains(position) ? 0 : 255,
+                               "PREMISE: overlap2 covers both sides of the10px stroke, leaving its centre6px bare")
+            }
+            let baseline = steps(manager)
+
+            let outcome = await manager.mendAllFills(layerIndex: layer)
+
+            XCTAssertEqual(outcome, .changed(1), "the saved default-overlap fill must be mendable")
+            XCTAssertEqual(steps(manager) - baseline, 1, "the layer action records one edit")
+            let afterImage = try XCTUnwrap(vector.render()?.cgImage)
+            let after = try XCTUnwrap(CanvasFixture.rgbaBytes(afterImage))
+            XCTAssertEqual(pixel(afterImage, attached ? 45 : 59, 64), [255, 0, 0, 255],
+                           "the real saved fill covers the attached or detached stroke's remaining centre")
+            let outsideChanges = (0..<(width * height)).filter { index in
+                let x = index % width, y = index / width
+                guard !interiorStroke.contains(CGPoint(x: CGFloat(x) + 0.5, y: CGFloat(y) + 0.5)) else { return false }
+                return (0..<4).contains { before[index * 4 + $0] != after[index * 4 + $0] }
+            }
+            XCTAssertTrue(outsideChanges.isEmpty,
+                          "every pixel outside the known interior stroke, including the original outline, stays exact: \(outsideChanges.prefix(6))")
+            manager.undo()
+            XCTAssertEqual(vector.elements.first?.fill?.pathData, saved.pathData, "one undo restores the actual bucket contour")
+            XCTAssertEqual(CanvasFixture.rgbaBytes(try XCTUnwrap(vector.render()?.cgImage)), before,
+                           "one undo restores the complete original bucket picture")
+        }
+    }
+
     func testReferenceExclusionKeepsOtherFillsStrokesStreamsAndOrdinaryRenderMemos() throws {
         let (manager, layer, vector) = vectorFixture()
         let size = CanvasFixture.canvasSize
