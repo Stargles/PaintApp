@@ -312,6 +312,14 @@ account usage limits; root continues. The full source inventory is not yet fully
   When retiring temporary repair/converter/UI, preserve permanent
   `ProjectBackupManager.runStartupMaintenance` scheduling and truthful post-maintenance gallery readiness.
 - [ ] Rendering/storage: derived-frame recovery/close, masked source budgets, editable raster residency, video pressure.
+  Editable raster residency is active on `tmp/s54-raster-residency`, based on recorded integration
+  `f69a64ac21c15cefcbe3b79deb5ee035a7793aa4`. Trace actual raster/version/backing ownership before a
+  production rewrite; present the compact design to root first. Scope includes load, frozen render/save
+  snapshots, dirty/undo/baked-image ownership and admission refusal, preserving the current saved format.
+  Use one document source-byte owner and existing persistence/render seams, not a parallel cache or
+  legacy fallback. 300/1000-cel tiny fixtures will count actual resident pictures/bytes and exact output;
+  2048×1024 full-RGBA arithmetic is not measured RSS or the Test1 respring cause. No native jobs,
+  simulators, device actions, main merges or pushes until root grants them.
   Mask source scope active on `tmp/s54-mask-residency` from59d69f12: price each indivisible
   transitive dependency closure in existing chunk/strip source planning; resolve live-mask metadata
   cache before dependency pixels and omit unrelated leaves. Reuse FrameRecipe/MaskResolver; no

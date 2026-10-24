@@ -6,6 +6,15 @@ budget, with quality/usage conservation before speed. Continue actionable work w
 only pauses; give concise queue reports. The owner explicitly says not to park for context; automatic
 compaction must preserve continuing work. Architecture is the top priority. Record before acting.
 
+## Raster residency design work — 2026-10-24
+
+`tmp/s54-raster-residency` at `~/PaintWork/PaintApp-s54-raster-residency` starts from origin/main and
+fast-forwards exact integration `f69a64ac21c15cefcbe3b79deb5ee035a7793aa4`. Root assigned the queued
+editable-raster architecture item, including save/frozen reads and retained versions. Record precedes
+source work. First deliverable is an actual-consumer ownership trace and compact proposal for root;
+then coherent implementation and bounded fixtures. Native/test/simulator/device operations remain
+paused while the sole native slot is occupied. No new product feature or saved-format change.
+
 ## Current combined source qualification — 2026-10-24
 
 Root's normal combined baseline at6b5010d9 passed847/847, zero skips/failures; all724 tracked
