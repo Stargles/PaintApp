@@ -367,7 +367,7 @@ final class MetalFillSession {
     private let regionBuf: MTLBuffer
     private let regionTmpBuf: MTLBuffer
     /// The transform workspace and coordinate output. During basin construction the output is scratch;
-    /// after all reference passes it holds the cached nearest-open map, while the workspace is mend output.
+    /// on the first mend it becomes the cached nearest-open map, while the workspace is mend output.
     private let featureWorkspace: MTLBuffer
     private let featureCoordinates: MTLBuffer
     /// Each pixel's basin, from `FillBasins` — what the slider's cut is a table over. One per flood
@@ -638,6 +638,9 @@ final class MetalFillSession {
     func mendMask(sourceMask: [UInt8], threshold: Float, artworkRect: CGRect?, reach: Float) -> [UInt8]? {
         guard isLasso, sourceMask.count >= count, reach >= 1,
               reach <= Float(ceil(CanvasManager.fillMendReachRange.upperBound)) else { return nil }
+        // This independent preparation rewrites the walls and feature buffers shared with fill.
+        // Drop their old owner before any write, including a preparation that later refuses.
+        structure = nil
         sourceMask.withUnsafeBytes { memcpy(regionBuf.contents(), $0.baseAddress!, count) }
         var params = MetalFillEngine.FillParams()
         params.width = UInt32(width); params.height = UInt32(height)
@@ -661,11 +664,7 @@ final class MetalFillSession {
             engine.encode2D(enc, p.walls, width: width, height: height,
                             buffers: [(refBuf, 0), (wall2Buf, 1), (params2Buf, 2), (pathWallBuf, 3)])
         }
-        engine.encodeNearestFeatures(enc, width: width, height: height,
-                                     wall: wallBuf, wall2: wall2Buf ?? wallBuf, params: paramsBuf,
-                                     refCount: referenceColours.1 == nil ? 1 : 2,
-                                     targetsInk: 0,
-                                     workspace: featureWorkspace, result: featureCoordinates)
+        encodeNearestOpenFeatures(enc)
         encodeMend(enc, painted: regionBuf, source: regionBuf, reach: reach,
                    refCount: referenceColours.1 == nil ? 1 : 2,
                    nearestOpen: featureCoordinates, fence: nil, mergeIntoPainted: false)
@@ -786,6 +785,20 @@ final class MetalFillSession {
             blit.endEncoding()
         }
         guard let enc3 = cb3.makeComputeCommandEncoder() else { return nil }
+        // The basin transform spent these coordinates as watershed scratch. Only mending needs
+        // open features; prepare them on its first enabled tick, then retain them across off/on.
+        // Availability is published after completion, so a failed command cannot cache partial data.
+        let nearestOpen: MTLBuffer?
+        if mends {
+            if let kept = structure.nearestOpenFeatures {
+                nearestOpen = kept
+            } else {
+                encodeNearestOpenFeatures(enc3)
+                nearestOpen = featureCoordinates
+            }
+        } else {
+            nearestOpen = nil
+        }
         // One table a pass, cut for this slider value, and the region rewritten from the labels — the
         // whole of a Gap Closing tick.
         for (pass, gap) in zip(passes, structure.passes) {
@@ -835,18 +848,18 @@ final class MetalFillSession {
             // **After the erosion and the count, not before**: the mend adds colour outside the fence
             // on purpose and must not change what the §6 step 5 empty check saw — a fill that was
             // eroded away is still an empty fill, whatever a neighbour would have lent it.
-            if mends { encodeMend(enc3, painted: regionTmpBuf, source: alphaBuf, reach: mendReach,
-                                  refCount: referenceColours.1 == nil ? 1 : 2,
-                                  nearestOpen: structure.nearestOpenFeatures, fence: lassoBuf) }
+            if let nearestOpen { encodeMend(enc3, painted: regionTmpBuf, source: alphaBuf, reach: mendReach,
+                                            refCount: referenceColours.1 == nil ? 1 : 2,
+                                            nearestOpen: nearestOpen, fence: lassoBuf) }
             engine.encode2D(enc3, p.paintAlpha, width: width, height: height,
                             buffers: [(regionTmpBuf, 0), (outBuf, 1), (paramsBuf, 2)])
         } else {
             // Into `regionTmpBuf` at every radius — 0 is a copy — so the mend never writes the cut.
             engine.encode2D(enc3, p.edgeDilate, width: width, height: height,
                             buffers: [(regionBuf, 0), (regionTmpBuf, 1), (paramsBuf, 2)])
-            if mends { encodeMend(enc3, painted: regionTmpBuf, source: regionBuf, reach: mendReach,
-                                  refCount: 1, nearestOpen: structure.nearestOpenFeatures,
-                                  fence: lassoBuf) }
+            if let nearestOpen { encodeMend(enc3, painted: regionTmpBuf, source: regionBuf, reach: mendReach,
+                                            refCount: 1, nearestOpen: nearestOpen,
+                                            fence: lassoBuf) }
             engine.encode2D(enc3, p.paint, width: width, height: height,
                             buffers: [(regionTmpBuf, 0), (outBuf, 1), (paramsBuf, 2)])
         }
@@ -854,6 +867,7 @@ final class MetalFillSession {
         cb3.commit()
         cb3.waitUntilCompleted()
         guard cb3.status == .completed else { return nil }
+        if let nearestOpen { self.structure?.nearestOpenFeatures = nearestOpen }
 
         if let filledBuf {
             // `lassoEdgeErode`'s count, and nothing else's — one slot, one writer, and it runs on
@@ -880,7 +894,8 @@ final class MetalFillSession {
         let key: Key
         /// One per pass, in `passes`' order.
         let passes: [Basins]
-        let nearestOpenFeatures: MTLBuffer
+        /// Nil until the first enabled mend finishes; shares the session's coordinate allocation.
+        var nearestOpenFeatures: MTLBuffer?
         /// The level the distance map was capped at: every cut whose `FillBasins.ceiling` is no higher
         /// is exact on these basins.
         let ceiling: Int
@@ -894,6 +909,10 @@ final class MetalFillSession {
     }
 
     private var structure: Structure?
+
+    /// Whether the current structure owns a completed nearest-open map. Derived from that owner,
+    /// rather than a second validity flag, since the coordinate allocation is reused during rebuilds.
+    var hasPreparedMendFeatures: Bool { structure?.nearestOpenFeatures != nil }
 
     /// How many times this session has built its `Structure` — once per press, and again only when
     /// the threshold, the paper or the seed moves. A slider tick that rebuilt would show here;
@@ -971,17 +990,7 @@ final class MetalFillSession {
                                                        options: .storageModeShared) else { return nil }
             built.append(Basins(basins: basins, seeds: seeds, table: table))
         }
-        guard let cb = engine.makeCommandBuffer(), let enc = cb.makeComputeCommandEncoder() else { return nil }
-        engine.encodeNearestFeatures(enc, width: width, height: height,
-                                     wall: wallBuf, wall2: wall2Buf ?? wallBuf, params: paramsBuf,
-                                     refCount: referenceColours.1 == nil ? 1 : 2,
-                                     targetsInk: 0,
-                                     workspace: featureWorkspace, result: featureCoordinates)
-        enc.endEncoding()
-        cb.commit()
-        cb.waitUntilCompleted()
-        guard cb.status == .completed else { return nil }
-        return Structure(key: key, passes: built, nearestOpenFeatures: featureCoordinates, ceiling: ceiling)
+        return Structure(key: key, passes: built, nearestOpenFeatures: nil, ceiling: ceiling)
     }
 
     /// Which of `sides` the **last** `fill(...)` painted within `band` pixels of — the question
@@ -1008,6 +1017,14 @@ final class MetalFillSession {
     }
 
     // MARK: - The mend
+
+    private func encodeNearestOpenFeatures(_ enc: MTLComputeCommandEncoder) {
+        engine.encodeNearestFeatures(enc, width: width, height: height,
+                                     wall: wallBuf, wall2: wall2Buf ?? wallBuf, params: paramsBuf,
+                                     refCount: referenceColours.1 == nil ? 1 : 2,
+                                     targetsInk: 0,
+                                     workspace: featureWorkspace, result: featureCoordinates)
+    }
 
     /// Grows `painted` (a flag buffer or a coverage buffer, in place) into the ink between it and the
     /// neighbour set — `mendGap` in Fill.metal. `reach` is in working pixels.

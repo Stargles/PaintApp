@@ -177,6 +177,118 @@ final class FillMendLogicTests: XCTestCase {
         return try XCTUnwrap(session.mendMask(sourceMask: source, threshold: 0, artworkRect: nil, reach: reach))
     }
 
+    // MARK: - Demand preparation and shared-buffer ownership
+
+    private func demandSession(lasso: Bool = false) throws -> MetalFillSession {
+        let side = Self.side
+        var rgba = [UInt8](repeating: 0, count: side * side * 4)
+        var mask = [UInt8](repeating: 0, count: side * side)
+        for y in 0..<side {
+            for x in 0..<side {
+                let frame = (4..<60).contains(x) && (4..<60).contains(y)
+                    && (!(6..<58).contains(x) || !(6..<58).contains(y))
+                let stroke = lasso
+                    ? (29..<35).contains(x) && (4..<60).contains(y)
+                    : (28..<34).contains(x) && (20..<44).contains(y)
+                if frame || stroke { rgba[(y * side + x) * 4 + 3] = 255 }
+                if (2..<32).contains(x) && (2..<62).contains(y) { mask[y * side + x] = 255 }
+            }
+        }
+        let engine = try XCTUnwrap(MetalFillEngine.shared)
+        let session = try XCTUnwrap(engine.makeSession(referenceRGBA: rgba, width: side, height: side,
+                                                        lassoMask: lasso ? mask : nil, gapWidthLimit: 0).session)
+        if lasso {
+            var neighbours = [UInt8](repeating: 0, count: side * side)
+            for y in 6..<58 { for x in 35..<58 { neighbours[y * side + x] = 255 } }
+            session.installNeighbours(neighbours)
+        }
+        return session
+    }
+
+    private func demandFill(_ session: MetalFillSession, threshold: Float = 0,
+                            reach: Float) -> [UInt8]? {
+        session.fill(seedX: 12, seedY: 32, seedColor: .zero, threshold: threshold,
+                     gapWidth: 0, edgeOverlap: 0, mendReach: reach, fillColor: SIMD4(1, 0, 0, 1))
+    }
+
+    func testMendFeaturesWaitForEnabledReachAndSurviveOffOnTicks() throws {
+        let session = try demandSession()
+        let off = try XCTUnwrap(demandFill(session, reach: 0))
+        XCTAssertFalse(session.hasPreparedMendFeatures, "an off press must not prepare unused open features")
+        for reach in [Float(-1), 0.49] {
+            XCTAssertTrue(try XCTUnwrap(demandFill(session, reach: reach)) == off,
+                          "disabled effective Reach preserves the complete off picture")
+            XCTAssertFalse(session.hasPreparedMendFeatures, "rounding to disabled Reach needs no map")
+        }
+        let on = try XCTUnwrap(demandFill(session, reach: 40))
+        XCTAssertTrue(session.hasPreparedMendFeatures, "first enabled Reach owns a completed map")
+        for y in 0..<Self.side {
+            for x in 0..<Self.side {
+                let i = (y * Self.side + x) * 4
+                let interior = (6..<58).contains(x) && (6..<58).contains(y)
+                let stroke = (28..<34).contains(x) && (20..<44).contains(y)
+                XCTAssertEqual(off[i + 3], interior && !stroke ? 255 : 0,
+                               "off has exactly the interior with the internal ink left bare at (\(x),\(y))")
+                XCTAssertEqual(on[i + 3], interior ? 255 : 0,
+                               "on mends all internal ink and preserves the whole outside at (\(x),\(y))")
+            }
+        }
+        XCTAssertTrue(try XCTUnwrap(demandFill(session, reach: 0)) == off)
+        XCTAssertTrue(session.hasPreparedMendFeatures, "turning off keeps the existing valid map")
+        XCTAssertTrue(try XCTUnwrap(demandFill(session, reach: 40)) == on,
+                      "a second enabled tick restores the complete mended picture")
+        XCTAssertEqual(session.structureBuilds, 1, "Reach changes never rebuild the basins")
+    }
+
+    func testChangedStructureDropsMendFeaturesAndRecoversAfterPreparationRefusal() throws {
+        let session = try demandSession()
+        let original = try XCTUnwrap(demandFill(session, reach: 40))
+        XCTAssertTrue(session.hasPreparedMendFeatures)
+        // Threshold 1 opens all binary ink. A temporary native failure control can refuse this
+        // final command after writing its shared feature buffers; the returning picture must recover.
+        let changed = demandFill(session, threshold: 1, reach: 40)
+        if let changed {
+            XCTAssertTrue(stride(from: 3, to: changed.count, by: 4).allSatisfy { changed[$0] == 255 },
+                          "PREMISE: the new threshold reaches the entire reference")
+            XCTAssertTrue(session.hasPreparedMendFeatures)
+        } else {
+            XCTAssertFalse(session.hasPreparedMendFeatures, "failed preparation cannot publish a map")
+        }
+        let builds = session.structureBuilds
+        let restored = try XCTUnwrap(demandFill(session, reach: 40))
+        XCTAssertEqual(session.structureBuilds, builds + 1, "returning to the old key rebuilds overwritten buffers")
+        XCTAssertTrue(session.hasPreparedMendFeatures)
+        XCTAssertTrue(restored == original, "all original mended pixels and every protected edge return")
+        _ = try XCTUnwrap(demandFill(session, threshold: 1, reach: 0))
+        XCTAssertFalse(session.hasPreparedMendFeatures, "a new off structure cannot inherit the old map")
+        let offBuilds = session.structureBuilds
+        let afterOff = try XCTUnwrap(demandFill(session, threshold: 1, reach: 40))
+        XCTAssertTrue(stride(from: 3, to: afterOff.count, by: 4).allSatisfy { afterOff[$0] == 255 })
+        XCTAssertTrue(session.hasPreparedMendFeatures, "later Reach prepares the current structure")
+        XCTAssertEqual(session.structureBuilds, offBuilds)
+    }
+
+    func testIndependentMendPreparationInvalidatesTheFillOwnerBeforeSharedWrites() throws {
+        let session = try demandSession(lasso: true)
+        let original = try XCTUnwrap(demandFill(session, reach: 40))
+        let pixels = Pixels(bytes: original, width: Self.side)
+        XCTAssertTrue(pixels.isRed(12, 32), "PREMISE: the lasso fills the left cell")
+        XCTAssertTrue(pixels.isRed(33, 32), "PREMISE: mending crosses the remaining divider to the neighbour")
+        XCTAssertTrue(pixels.isBare(3, 32), "PREMISE: paper outside the frame remains bare")
+        XCTAssertTrue(session.hasPreparedMendFeatures)
+        let source = stride(from: 3, to: original.count, by: 4).map { original[$0] }
+        let independent = session.mendMask(sourceMask: source, threshold: 1, artworkRect: nil, reach: 40)
+        if let independent {
+            XCTAssertTrue(independent.allSatisfy { $0 == 0 }, "all-open walls admit no ink additions")
+        }
+        XCTAssertFalse(session.hasPreparedMendFeatures, "independent wall/feature writes drop the old owner even on refusal")
+        let builds = session.structureBuilds
+        XCTAssertTrue(try XCTUnwrap(demandFill(session, reach: 40)) == original,
+                      "returning through fill rebuilds its walls/map and draws the whole original picture")
+        XCTAssertEqual(session.structureBuilds, builds + 1)
+        XCTAssertTrue(session.hasPreparedMendFeatures)
+    }
+
     /// Exact byte equality is the Threshold 0 contract. Exercise both RGB and alpha, through the
     /// reference and vector path-wall inputs, without deriving the expected answer from GPU math.
     func testColourWallsPreserveEveryByteIdentityAndRejectAdjacentBytesAtZeroThreshold() throws {

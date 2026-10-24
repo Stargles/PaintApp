@@ -246,8 +246,11 @@ is mended. The original lasso fence, artwork boundary and unresolved window rim 
 same-fill behavior. Only the existing neighboring-fill corridor may extend outside the lasso fence.
 
 Filling must retain quick, real-time feedback. Prepare reference geometry once per structural change
-and reuse it for Gap Closing, Edge Overlap, Mend Reach and color changes. Do not scan the full image
-on the CPU on every interactive update. Native correctness, cold-press latency, cached-update work
+and reuse it for Gap Closing, Edge Overlap, Mend Reach and color changes. The exact nearest-open
+feature map is needed only by mending: prepare it on the first enabled Mend Reach, retain it across
+off/on ticks, and publish it only after its GPU command completes. Basin rebuilds and independent
+saved-fill preparation invalidate the owner before overwriting shared buffers. Do not scan the full
+image on the CPU on every interactive update. Native correctness, cold-press latency, cached-update work
 and retained memory must be qualified before declaring the new implementation ready.
 
 **Mend All Fills** is a new edit on a **vector layer**, applied to its stored fills across all owned

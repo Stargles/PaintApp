@@ -1,3 +1,21 @@
+## Fill demand preparation follow-up — 2026-10-24
+
+`tmp/s54-fill-demand-map`, based on recorded integration bff9dfa322809f397264c6ff44226b3792685a46.
+Root owns native execution; no simulator/device/tests authorized here. Inspecting shared buffers found
+that buildStructure always computes nearest-open features even when Reach is zero; basin preparation
+overwrites that coordinate buffer as CPU scratch. Plan is optional Structure-owned availability and
+lazy exact EDT in the final GPU command, cached only after completion; clear Structure before other
+entry points overwrite walls/features. Preserve all exact geometry and precision behavior. This is
+provably unused work, not measured attribution. Regressions, failure fault recipes, and later paired
+performance qualification remain required.
+
+Implementation and three new FillMendLogicTests methods are ready for root qualification. New tests
+cover disabled/negative/rounded-zero Reach, complete internal-stroke and boundary output across
+on/off/on, changed-key preparation/refusal recovery, and lasso fill → independent mend → same fill.
+The existing session allocations and budget formula are unchanged. Swift frontend parse, both UI
+lints and git diff --check pass; static fast5315/full5900, FillMend20. These are not native results.
+No build, logic/UI run, mutation, simulator/device operation or paired timing has run on this change.
+
 # Handoff
 
 Start at AGENTS.md, then CLAUDE.md, TODO.md, BUGS.md and the relevant spec/PERFORMANCE.md. Verify origin,
