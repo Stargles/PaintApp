@@ -5,7 +5,7 @@ import UIKit
 enum LiquifyRasterUITestSeeds {
     @MainActor
     static func seedIfRequested(into manager: CanvasManager) {
-        guard ProjectBackupManager.honoursGalleryReset(isSimulator: ProjectBackupManager.isSimulator),
+        guard ProjectBackupManager.honoursSimulatorOnlyTestHooks(isSimulator: ProjectBackupManager.isSimulator),
               (ProcessInfo.processInfo.arguments.contains("-uiTestSeedLiquifyBacking") ||
                ProcessInfo.processInfo.arguments.contains("-uiTestSeedEraserBacking")),
               let size = manager.canvasSize, !manager.layers.isEmpty else { return }

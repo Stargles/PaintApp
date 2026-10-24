@@ -153,7 +153,7 @@ nonisolated enum ProjectBackupManager {
     /// **This was `ProcessInfo.environment["SIMULATOR_DEVICE_NAME"] != nil` for one commit and the
     /// compile-time form is still the right one**, because a guard on a destructive path has to be
     /// *right* before it is testable and `targetEnvironment(simulator)` cannot be wrong. What a test
-    /// can still reach is `honoursGalleryReset(isSimulator:)` below, which holds the *policy* — the
+    /// can still reach is `honoursSimulatorOnlyTestHooks(isSimulator:)` below, which holds the *policy* — the
     /// part worth pinning — while this property holds only the fact.
     ///
     /// **What this rewrite did not do is fix the three red tests it was written to explain**, and the
@@ -176,11 +176,11 @@ nonisolated enum ProjectBackupManager {
         #endif
     }
 
-    /// **The policy `-resetGallery` is gated on, separated from the platform fact so it can be
-    /// tested.** A destructive test hook runs only in a simulator: on a physical device the three
-    /// directories it clears hold work nobody can regenerate, and on 2026-09-07 it destroyed the
+    /// **The policy for simulator-only test hooks, separated from the platform fact so it can be
+    /// tested.** Persistent reset and corruption hooks run only in a simulator: on a physical device
+    /// the data they touch may be the artist's only copy, and `-resetGallery` already destroyed the
     /// owner's library from a Release build on their own iPad.
-    static func honoursGalleryReset(isSimulator: Bool) -> Bool { isSimulator }
+    static func honoursSimulatorOnlyTestHooks(isSimulator: Bool) -> Bool { isSimulator }
 
     /// Runs once per launch behind the startup gate, after geometry conversion. Order matters: wipe for tests →
     /// test-corruption hook → stale temp cleanup → update snapshots → repair → purge. Every step
@@ -207,7 +207,7 @@ nonisolated enum ProjectBackupManager {
         // because the build that did the damage was Release, and a device UI test that genuinely
         // needs a clean gallery can delete and reinstall the app instead, which is both narrower and
         // reversible.
-        if args.contains("-resetGallery") && Self.honoursGalleryReset(isSimulator: Self.isSimulator) {
+        if args.contains("-resetGallery") && Self.honoursSimulatorOnlyTestHooks(isSimulator: Self.isSimulator) {
             // **Put the library back inside the app before wiping anything** — TODO (36). The three
             // directories below are resolved through `ProjectLocation`, so on a device that had
             // adopted a folder in Files this flag would reach *outside* the container and delete the
@@ -223,7 +223,7 @@ nonisolated enum ProjectBackupManager {
             }
             settings.lastAppSignature = nil
         }
-        if args.contains("-simulateProjectCorruption") {
+        if args.contains("-simulateProjectCorruption") && Self.honoursSimulatorOnlyTestHooks(isSimulator: Self.isSimulator) {
             simulateNewestProjectCorruption()
         }
 

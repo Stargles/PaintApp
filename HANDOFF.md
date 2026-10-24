@@ -31,6 +31,24 @@ selectors. No new API, flag/counter, fixture overwrite, production edit or nativ
 Rater consolidator receives exact owned test-only follow-up commit(s) after its two brush commits.
 
 
+## Destructive launch hooks and stale runner — scoped before edits, 2026-10-24
+
+The audit finding in `docs/ARCHITECTURE_AUDIT.md` is concrete: `-resetGallery` protects the
+Projects/Backups/Trash wipe in `ProjectBackupManager`, but its `AppSettings` preference deletion is
+unprotected; `-resetEditorPreferences`, `-resetPalettes`, `-resetBrushLibrary`, and
+`-simulateProjectCorruption` also mutate persistent state without the same compile-time simulator
+guard. Extend the existing simulator-only rule to these destructive hooks, keeping Release simulator
+tests supported. Preserve `-exportProject` and `-exportAll`: they read the chosen library and write
+only the disposable `Documents/Export` backup container. `UITestSeeds` create fixtures in newly
+created scenes and are not part of this destructive-hook change.
+
+The persistent reset/corruption launch hooks now share the compile-time simulator boundary;
+`-exportProject`/`-exportAll` and temporary-scene seed hooks remain. Deleted
+`deploy/mac/parallel_test.sh`: it has no active repository or shell alias references, and its own git
+history and hard-coded `~/PaintApp` checkout/simulator pool are stale. `deploy/mac/fast_test.sh` is the
+current documented runner. Static verification only; no native, compiler, simulator, device or restart
+action was run.
+
 Start at AGENTS.md, then CLAUDE.md, TODO.md, BUGS.md and the relevant spec/PERFORMANCE.md. Verify origin,
 worktrees and every tmp branch before trusting this file. Kevin authorizes useful agents and a large
 budget, with quality/usage conservation before speed. Continue actionable work without recommendation-

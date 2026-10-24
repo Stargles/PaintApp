@@ -464,6 +464,8 @@ account usage limits; root continues. The full source inventory is not yet fully
   after eviction replaces the prior “never re-renders” guarantee. Source edits and static checks are
   underway; no simulator/native qualification yet.
 - [ ] Test hooks/obsolete runners: protect real-device persistent data and prune only verified unused paths.
+
+- [ ] Test hooks/obsolete runners: protect real-device persistent data and prune only verified unused paths. Implemented on `tmp/s54-test-hook-safety`: simulator compile-time guards now cover the synchronous preference reset, palette reset, brush-library reset, and project-corruption launch hooks as well as the existing gallery wipe; `-exportProject`/`-exportAll` and temporary-scene seed hooks remain. Deleted `deploy/mac/parallel_test.sh` after repo/shell/history tracing found no operational caller; `deploy/mac/fast_test.sh` remains. Static-only verification; native/compiler/device checks remain for root's qualification.
 - [ ] Complete file-level review gaps, independent reviews and regression/performance gates before closing audit.
 
 ---

@@ -51,13 +51,14 @@ final class BrushLibraryStore: ObservableObject {
          arguments: [String] = ProcessInfo.processInfo.arguments) {
         self.storage = storage
 
-        // UI tests pass this so a run starts from the seeded library rather than inheriting groups a
-        // previous run added — the same job `-resetPalettes` does for `PaletteStore`, and the same
-        // reason: an assertion about "the library on a fresh device" is otherwise a lie the second
-        // time it runs. No effect on an ordinary launch.
+        // UI tests pass this so a simulator run starts from the seeded library rather than inheriting
+        // groups a previous run added — the same job `-resetPalettes` does for `PaletteStore`. It is
+        // compiled out on physical devices, where this file may hold the artist's only copy.
+        #if targetEnvironment(simulator)
         if arguments.contains("-resetBrushLibrary") {
             storage.remove(Self.fileName)
         }
+        #endif
 
         groups = Self.loadGroups(from: storage)
         isLoaded = true

@@ -184,6 +184,7 @@ nonisolated struct AppSettings: @unchecked Sendable {
     /// library it wipes and only in a simulator. Synchronous, in `PaintApp.init`, because the first
     /// document reads these as it opens.
     func forgetIfRequested(arguments: [String] = ProcessInfo.processInfo.arguments) {
+        #if targetEnvironment(simulator)
         if arguments.contains("-resetEditorPreferences") || arguments.contains("-resetGallery") {
             for key in [Key.pencilOnlyDrawing, Key.renderResolution, Key.lastStreamHost, Key.lastStreamPort,
                         Key.galleryFolder, Key.canvasRepairCount] {
@@ -193,6 +194,7 @@ nonisolated struct AppSettings: @unchecked Sendable {
         if arguments.contains("-resetPalettes") {
             defaults.removeObject(forKey: Key.palettes)
         }
+        #endif
     }
 
     /// `-resetGallery`'s half: the library is going back inside the app, so the folder it pointed at

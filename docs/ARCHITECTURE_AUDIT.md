@@ -144,7 +144,15 @@ Detailed source evidence: `/Users/juliapark/PaintWork/s54-architecture-audit/str
 
 ### Destructive test hooks
 
-Used persistent corruption/reset test hooks lack existing simulator-only protection; no actual device damage claimed.
+The existing compile-time simulator guard originally covered only the Projects/Backups/Trash part of
+`-resetGallery`. Its synchronous `AppSettings` half also deletes preferences, and
+`-resetEditorPreferences`, `-resetPalettes`, `-resetBrushLibrary`, and
+`-simulateProjectCorruption` mutate persistent state. Those hooks now run only in simulator builds;
+the app's library-export hooks and temporary-scene seeds remain. Deleted
+`deploy/mac/parallel_test.sh` after source, shell-alias and history tracing found no operational
+caller; it depended on the retired `~/PaintApp` checkout and old simulator IDs. `fast_test.sh` remains
+the documented runner. No actual device damage is claimed. Verification is static only; physical
+exclusion follows from the compile-time target branch and is not claimed as simulator XCTest evidence.
 
 Remaining: verify/reproduce, then fix or reject the premise with evidence.
 
