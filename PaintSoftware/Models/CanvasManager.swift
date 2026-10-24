@@ -689,7 +689,7 @@ final class CanvasManager: ObservableObject {
     func insertVideo(at pickedURL: URL, consumingSource: Bool = false,
                      placement: (centre: CGPoint, width: CGFloat)? = nil) -> Bool {
         guard let canvasSize, canvasSize.width > 0, canvasSize.height > 0,
-              let info = VideoFrameSource.shared.info(for: pickedURL),
+              let info = videoFrames.info(for: pickedURL),
               info.decodedSize.width > 0, info.decodedSize.height > 0,
               info.displaySize.width > 0, info.displaySize.height > 0,
               info.duration.seconds > 0 else { return false }
@@ -3337,6 +3337,10 @@ final class CanvasManager: ObservableObject {
     /// (`syncFrameBake`), which is exactly when a document is on screen.
     @MainActor private(set) lazy var frameBaker: FrameBaker = makeFrameBaker()
 
+    /// A lightweight lease, activated on first video access. Frozen recipes retain the lease so a
+    /// closed document cannot restart decoding; other open documents keep their shared residency.
+    private(set) var videoFrames = VideoFrameSource.shared.makeClient()
+
     /// The decoded ring's ceiling, in bytes.
     ///
     /// A number rather than a fraction of the device, for `FrameBakeStore.defaultByteCeiling`'s
@@ -3429,6 +3433,7 @@ final class CanvasManager: ObservableObject {
         thumbnailBackfillTask?.cancel()
         thumbnailBackfillTask = nil
         frameBaker.close()
+        videoFrames.close()
         // The document is leaving the screen, and its stream clients must not go on reconnecting
         // to a laptop for a canvas nobody is looking at.
         streamCoordinator.stopAll()
@@ -3473,6 +3478,7 @@ final class CanvasManager: ObservableObject {
     /// that clears it is the one that kicks the bake of the result.
     @MainActor
     func syncFrameBake(suspended: Bool) {
+        if videoFrames.isClosed { videoFrames = VideoFrameSource.shared.makeClient() }
         // Re-rooted rather than reset when the store's directory moves — a different document, or
         // the artist moving the Render Resolution knob, which `defaultRoot` puts in the path. The
         // read of `frameBaker` on this line is what instantiates it, against the *current* values,

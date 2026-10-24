@@ -1446,10 +1446,9 @@ extension CanvasManager {
     ///
     /// ## A frame that has not arrived is the placeholder, not a failure
     ///
-    /// `VideoFrameSource.frame` answers nil for an asset that will not open or has no frame at that
-    /// instant, and the element then draws stage 2's placeholder rectangle in the identical rect.
-    /// That is RENDER §2.10's rule applied to a source file: the artist sees where the video is
-    /// rather than a hole where it was.
+    /// An asset that will not open or has no frame draws stage 2's placeholder in the identical
+    /// rect. A closed client or a read retired by pressure instead declines the whole render, so a
+    /// temporary lifecycle refusal cannot become a successfully cached placeholder.
     ///
     /// ## What it deliberately does not cover
     ///
@@ -1498,15 +1497,22 @@ extension CanvasManager {
             canvasWidth: Int(canvasSize.width.rounded()),
             canvasHeight: Int(canvasSize.height.rounded()))
 
-        let source = VideoFrameSource.shared
+        let source = videoFrames
         return DerivedCelContent(identity: AnyHashable(identity)) { quality in
-            let resolved = elements.withoutReference.map { element -> VectorElement in
-                guard case .video(var video) = element, let time = times[video.id] else { return element }
-                if let decoded = source.frame(assetURL: video.assetURL, at: time),
-                   let image = decoded.makeImage() {
-                    video.displayFrame = UIImage(cgImage: image)
+            var resolved: [VectorElement] = []
+            for element in elements.withoutReference {
+                guard case .video(var video) = element, let time = times[video.id] else {
+                    resolved.append(element)
+                    continue
                 }
-                return .video(video)
+                switch source.read(assetURL: video.assetURL, at: time) {
+                case .decoded(let decoded):
+                    guard let image = decoded.makeImage() else { return nil }
+                    video.displayFrame = UIImage(cgImage: image)
+                case .missing: break
+                case .unavailable: return nil
+                }
+                resolved.append(.video(video))
             }
             return VectorCanvas(size: canvasSize,
                                 elements: Self.posed(resolved, through: mappings,

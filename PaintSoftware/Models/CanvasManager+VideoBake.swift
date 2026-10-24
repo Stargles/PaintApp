@@ -28,7 +28,7 @@ extension CanvasManager {
         /// The row should never be reachable in this state — the menu hides it — but a direct
         /// caller or a test gets a named reason instead of a trap.
         case noVideo
-        /// `VideoFrameSource.info(for:)` could not open the file at all.
+        /// `VideoFrameSource.Client.info(for:)` could not open the file at all.
         case unreadableAsset
         /// The file opens, but nothing in the block's own span decoded — a crop naming a range the
         /// asset has nothing in.
@@ -91,7 +91,7 @@ extension CanvasManager {
     /// **What refuses, and why each is a sentence rather than a silent no-op** (the brief names all
     /// three by example). No video here: the row should never be reachable in this state, but a
     /// direct caller — or a test — gets a named reason instead of a trap. An asset that will not
-    /// open: checked with `VideoFrameSource.info(for:)` *before any mutation*, so a bad clip leaves
+    /// open: checked with `VideoFrameSource.Client.info(for:)` *before any mutation*, so a bad clip leaves
     /// the document exactly as it was rather than a half-cut block. Nothing decodes anywhere in the
     /// block's own span: the same idea extended across every frame the bake would touch, because a
     /// file that opens but answers nothing for its own stored crop is the same failure to the artist
@@ -111,7 +111,7 @@ extension CanvasManager {
         guard let vector = cel.vector, vector.holdsVideo, let video = vector.videos.first else {
             return .refused(.noVideo)
         }
-        guard VideoFrameSource.shared.info(for: video.assetURL) != nil else {
+        guard videoFrames.info(for: video.assetURL) != nil else {
             return .refused(.unreadableAsset)
         }
 
@@ -127,7 +127,7 @@ extension CanvasManager {
             // `VectorVideoElement.mappedFrameRate`.
             let time = VideoFrameMap.sourceTime(of: video, atDocumentFrame: frame,
                                                 celStartFrame: startFrame, documentFPS: video.resolvedFrameRate)
-            if VideoFrameSource.shared.frame(assetURL: video.assetURL, at: time) != nil {
+            if videoFrames.frame(assetURL: video.assetURL, at: time) != nil {
                 anyDecodes = true
                 break
             }
@@ -180,7 +180,7 @@ extension CanvasManager {
                     let time = VideoFrameMap.sourceTime(of: posedVideo, atDocumentFrame: frame,
                                                         celStartFrame: bakedCel.startFrame,
                                                         documentFPS: posedVideo.resolvedFrameRate)
-                    guard let decoded = VideoFrameSource.shared.frame(assetURL: posedVideo.assetURL, at: time),
+                    guard let decoded = videoFrames.frame(assetURL: posedVideo.assetURL, at: time),
                           let cgImage = decoded.makeImage() else {
                         return element // Left showing the video — see the doc comment above.
                     }

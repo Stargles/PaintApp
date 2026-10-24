@@ -93,7 +93,7 @@ final class VideoFrameReaderLogicTests: XCTestCase {
         let notAVideo = directory.appendingPathComponent("prose.mov")
         try Data("not a video, and stage 3 does ask".utf8).write(to: notAVideo)
         XCTAssertNil(VideoFrameReader(url: notAVideo))
-        XCTAssertNil(VideoFrameSource().frame(assetURL: notAVideo, at: .zero),
+        XCTAssertNil(VideoFrameSource().makeClient().frame(assetURL: notAVideo, at: .zero),
                      "A source that will not open answers nil, and the caller draws the placeholder.")
     }
 
@@ -211,6 +211,7 @@ final class VideoFrameReaderLogicTests: XCTestCase {
         let url = try clip()
         let stamps = CanvasFixture.clipTimestamps(url)
         let source = VideoFrameSource()
+        let client = source.makeClient()
 
         let span = CMTimeSubtract(stamps[3], stamps[2])
         let a = try XCTUnwrap(SourceTime(CMTimeAdd(stamps[2],
@@ -218,8 +219,8 @@ final class VideoFrameReaderLogicTests: XCTestCase {
         let b = try XCTUnwrap(SourceTime(CMTimeAdd(stamps[2],
                                                    CMTimeMultiplyByRatio(span, multiplier: 3, divisor: 8))))
 
-        let first = try XCTUnwrap(source.frame(assetURL: url, at: a))
-        let second = try XCTUnwrap(source.frame(assetURL: url, at: b))
+        let first = try XCTUnwrap(client.frame(assetURL: url, at: a))
+        let second = try XCTUnwrap(client.frame(assetURL: url, at: b))
         XCTAssertEqual(index(of: first, in: Self.levels), 2)
         XCTAssertEqual(index(of: second, in: Self.levels), 2)
         XCTAssertEqual(source.residentBytes, 64 * 64 * 4,
@@ -231,20 +232,164 @@ final class VideoFrameReaderLogicTests: XCTestCase {
     func testOneAssetIsOnePipeHoweverManyTimesItIsAsked() throws {
         let url = try clip()
         let source = VideoFrameSource()
-        for _ in 0..<4 { _ = source.frame(assetURL: url, at: .zero) }
+        let client = source.makeClient()
+        for _ in 0..<4 { _ = client.frame(assetURL: url, at: .zero) }
         XCTAssertEqual(source.openReaderCount, 1)
-        XCTAssertNotNil(source.info(for: url))
+        XCTAssertNotNil(client.info(for: url))
     }
 
-    /// A purge drops the pipes and the decoded frames both — a document closing must not leave a
-    /// file handle or 64 MB of source frames behind.
-    func testPurgeReleasesEveryPipeAndEveryFrame() throws {
+    /// Closing the actual last active lease drops both tiers; no caller needs a separate purge.
+    func testLastClientCloseReleasesEveryPipeAndEveryFrame() throws {
         let url = try clip()
         let source = VideoFrameSource()
-        XCTAssertNotNil(source.frame(assetURL: url, at: .zero))
+        let client = source.makeClient()
+        XCTAssertNotNil(client.frame(assetURL: url, at: .zero))
         XCTAssertGreaterThan(source.residentBytes, 0)
-        source.purge()
+        client.close()
         XCTAssertEqual(source.openReaderCount, 0)
         XCTAssertEqual(source.residentBytes, 0)
     }
+
+    // MARK: - Residency belongs to active documents, not retained render closures
+
+    func testTheLocatedSampleAliasesTheTwoBoundedCandidates() throws {
+        let reader = try XCTUnwrap(VideoFrameReader(url: try clip()))
+        let time = CMTime(value: 2, timescale: 6)
+        XCTAssertNotNil(reader.locate(time))
+        XCTAssertEqual(reader.retainedSampleCount, 2)
+        XCTAssertGreaterThanOrEqual(reader.retainedSampleBytes, 2 * 64 * 64 * 4,
+                                    "Sample payload includes any decoder row padding, separately from the tight ring.")
+        XCTAssertEqual(index(of: try XCTUnwrap(reader.currentFrame()), in: Self.levels), 2)
+        XCTAssertLessThanOrEqual(reader.retainedSampleCount, 2,
+                                 "The located frame aliases a candidate rather than retaining a third sample.")
+    }
+
+    func testClosingOneClientPreservesAnotherWindowsSharedPicture() throws {
+        let url = try clip()
+        let source = VideoFrameSource()
+        let first = source.makeClient(), second = source.makeClient(), idle = source.makeClient()
+        defer { idle.close() }
+        XCTAssertEqual(index(of: try XCTUnwrap(first.frame(assetURL: url, at: .zero)), in: Self.levels), 0)
+        XCTAssertEqual(index(of: try XCTUnwrap(second.frame(assetURL: url, at: .zero)), in: Self.levels), 0)
+        XCTAssertEqual(source.decodedCount, 1, "Two windows share the same source timestamp and decode.")
+        let late = first.decode(assetURL: url, at: SourceTime(value: 2, timescale: 6))
+        XCTAssertEqual(index(of: try XCTUnwrap(late.decodedFrame), in: Self.levels), 2,
+                       "The closing window has actually decoded a different picture before close.")
+        first.close()
+        guard case .unavailable = first.finish(late) else { return XCTFail("A closed client cannot install a late read.") }
+        XCTAssertNil(first.info(for: url))
+        XCTAssertNil(first.frame(assetURL: url, at: .zero))
+        XCTAssertEqual(source.openReaderCount, 1)
+        XCTAssertEqual(source.residentBytes, 64 * 64 * 4, "The late picture was never admitted.")
+        let decodes = source.decodedCount
+        XCTAssertEqual(index(of: try XCTUnwrap(second.frame(assetURL: url, at: .zero)), in: Self.levels), 0)
+        XCTAssertEqual(source.decodedCount, decodes, "Closing another window must preserve this cached picture.")
+        second.close()
+        XCTAssertEqual(source.openReaderCount, 0)
+        XCTAssertEqual(source.residentBytes, 0)
+        XCTAssertEqual(source.retainedSampleCount, 0)
+        XCTAssertEqual(source.retainedSampleBytes, 0, "An idle gallery client does not retain source residency.")
+    }
+
+    func testPressureTrimsTheExistingRingRetiresPipesAndAllowsCurrentClientToRetry() throws {
+        let url = try clip()
+        let bytes = 64 * 64 * 4
+        let source = VideoFrameSource(byteBudget: 4 * bytes)
+        let client = source.makeClient()
+        for n in 0..<4 {
+            XCTAssertEqual(index(of: try XCTUnwrap(client.frame(assetURL: url, at: SourceTime(value: Int64(n), timescale: 6))),
+                                 in: Self.levels), n)
+        }
+        XCTAssertEqual(source.residentBytes, 4 * bytes)
+        XCTAssertEqual(source.openReaderCount, 1)
+        let before = source.decodedCount
+        MemoryPressure.signal(.warning)
+        XCTAssertEqual(source.openReaderCount, 0)
+        XCTAssertEqual(source.retainedSampleCount, 0)
+        XCTAssertEqual(source.residentBytes, 2 * bytes, "Warning preserves the hottest half, under the existing policy.")
+        XCTAssertEqual(index(of: try XCTUnwrap(client.frame(assetURL: url, at: SourceTime(value: 3, timescale: 6))),
+                             in: Self.levels), 3)
+        XCTAssertEqual(source.decodedCount, before, "The hottest decoded frame survives pipe retirement.")
+        MemoryPressure.signal(.background)
+        XCTAssertEqual(source.openReaderCount, 0)
+        XCTAssertEqual(source.residentBytes, 0)
+        XCTAssertEqual(source.retainedSampleBytes, 0)
+        XCTAssertFalse(client.isClosed, "Pressure retires residency, not the open document's lease.")
+        XCTAssertEqual(index(of: try XCTUnwrap(client.frame(assetURL: url, at: SourceTime(value: 3, timescale: 6))),
+                             in: Self.levels), 3)
+        XCTAssertEqual(source.decodedCount, before + 1)
+    }
+
+    func testHeldDecodedReadCannotLandAfterPressureOrLastClientClose() throws {
+        let url = try clip()
+        for closing in [false, true] {
+            let source = VideoFrameSource()
+            let client = source.makeClient()
+            let queue = DispatchQueue(label: "VideoFrameReaderLogicTests.held-read")
+            let gate = DispatchSemaphore(value: 0)
+            let decoded = expectation(description: "real pixels decoded before retirement")
+            let finished = expectation(description: "retired read settled")
+            let time = SourceTime(value: 2, timescale: 6)
+            queue.async {
+                let read = client.decode(assetURL: url, at: time)
+                XCTAssertEqual(read.decodedFrame?.width, 64)
+                XCTAssertEqual(read.decodedFrame?.pixels[3], 255)
+                decoded.fulfill()
+                gate.wait()
+                guard case .unavailable = client.finish(read) else {
+                    XCTFail("A read held across retirement must decline, even though its pixels were decoded.")
+                    finished.fulfill()
+                    return
+                }
+                finished.fulfill()
+            }
+            wait(for: [decoded], timeout: 10)
+            // A real decoded value is held outside the owner. These calls must not wait for it.
+            if closing { client.close() } else { MemoryPressure.signal(.background) }
+            for _ in 0..<3 { MemoryPressure.signal(.warning) }
+            XCTAssertEqual(source.openReaderCount, 0)
+            XCTAssertEqual(source.residentBytes, 0)
+            gate.signal()
+            wait(for: [finished], timeout: 10)
+            XCTAssertEqual(source.openReaderCount, 0)
+            XCTAssertEqual(source.residentBytes, 0, "An old landing cannot repopulate reset residency.")
+            XCTAssertEqual(source.decodedCount, 1, "One real decode occurred before retirement.")
+            if closing {
+                XCTAssertNil(client.frame(assetURL: url, at: time))
+                XCTAssertEqual(source.decodedCount, 1)
+            } else {
+                XCTAssertEqual(index(of: try XCTUnwrap(client.frame(assetURL: url, at: time)), in: Self.levels), 2)
+                XCTAssertEqual(source.decodedCount, 2, "A current client can retry through the same serial decoder.")
+            }
+        }
+    }
+
+    func testARetiredForwardWalkStopsPullingAndACurrentRetryStillDrawsTheTail() throws {
+        let url = try clip()
+        let stamps = CanvasFixture.clipTimestamps(url)
+        let reader = try XCTUnwrap(VideoFrameReader(url: url))
+        XCTAssertNotNil(reader.locate(stamps[0]))
+        var checks = 0
+        XCTAssertNil(reader.locate(stamps[5], whileCurrent: { checks += 1; return checks <= 2 }))
+        XCTAssertLessThan(reader.sampleCount, stamps.count,
+                         "A retired forward walk stops before decoding the whole remaining clip.")
+        XCTAssertEqual(reader.locate(stamps[5]), stamps[5])
+        XCTAssertEqual(index(of: try XCTUnwrap(reader.currentFrame()), in: Self.levels), 5)
+        XCTAssertEqual(reader.seekCount, 1, "A current retry continues the same bounded pipe.")
+    }
+
+    func testReaderAndDecodedByteCeilingsRemainIndependent() throws {
+        let source = VideoFrameSource(byteBudget: 2 * 64 * 64 * 4)
+        let client = source.makeClient()
+        for n in 0..<6 {
+            let url = try clip(levels: [Self.levels[n]], named: "bounded-\(n).mp4")
+            XCTAssertEqual(index(of: try XCTUnwrap(client.frame(assetURL: url, at: .zero)), in: Self.levels), n)
+            XCTAssertEqual(source.openReaderCount, min(n + 1, VideoFrameSource.defaultReaderLimit))
+            XCTAssertLessThanOrEqual(source.residentBytes, 2 * 64 * 64 * 4)
+            XCTAssertLessThanOrEqual(source.retainedSampleCount, 2 * VideoFrameSource.defaultReaderLimit)
+        }
+        XCTAssertEqual(source.openReaderCount, 4)
+        XCTAssertEqual(source.residentBytes, 2 * 64 * 64 * 4)
+    }
+
 }

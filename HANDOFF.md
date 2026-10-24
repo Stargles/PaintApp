@@ -103,6 +103,18 @@ recorded59d69f12511672468153132299f4ac926398afab onto65a8afd831072dbb43d1aba20c3
 Preserve its authoritative cache f8d/FillUI records and ProjectFileTree link assertion. Keep only
 the mask-owned sections from these records on conflict; root's65 source/tree stays untouched.
 
+Video lifecycle source implementation is prepared on `tmp/s54-video-lifecycle` from exact4f5f75d6.
+Root approved the traced per-manager client/shared-source ownership and owns native qualification.
+All production source callers now use an idle-until-read client; gallery close is final for frozen
+recipes, last active close clears residency, and another live window preserves its shared picture.
+Existing MemoryPressure trims/releases the same ring and retires pipes without waiting for serial
+seek; staged old reads cannot land. Normal lookup/decode/admission remains one serial turn. Removed
+unused public purge. Added seven tiny logic methods and one cold gallery round-trip UI/pixel method.
+Parse, both UI lints and diff-check pass; native, mutants, Debug/Release fast tiers, screenshots at
+owner size and device remain unrun here. Ring64MiB is not total video RAM: two app-held samples per
+cached reader are separately counted; one retiring in-flight reader and AVFoundation internal pools
+remain additional, with pools/RSS unmeasured. No project-format change.
+
 ## Current targeted qualification — 2026-10-24
 
 Root's latest integrated59d69f12 baseline passed **500/500, zero skips**, with all **724 tracked

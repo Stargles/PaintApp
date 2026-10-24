@@ -796,7 +796,7 @@ extension CanvasManager {
                                                             elapsedDocumentFrames: length,
                                                             speed: video.speed,
                                                             documentFPS: video.resolvedFrameRate)
-                if let duration = VideoFrameSource.shared.info(for: video.assetURL)?.duration,
+                if let duration = videoFrames.info(for: video.assetURL)?.duration,
                    duration < end {
                     end = duration
                 }
@@ -861,7 +861,7 @@ extension CanvasManager {
     func frameForFrameVideoSpeed(layerIndex: Int, celIndex: Int) -> Double? {
         guard celHoldsVideo(layerIndex: layerIndex, celIndex: celIndex),
               let video = layers[layerIndex].cels[celIndex].vector?.videos.first,
-              let info = VideoFrameSource.shared.info(for: video.assetURL),
+              let info = videoFrames.info(for: video.assetURL),
               info.nominalFrameRate > 0 else { return nil }
         // TODO (105): the rate this element is mapped at, not the document's live fps — see
         // `writeVideoCrop`'s identical note. A speed computed against the wrong rate would not

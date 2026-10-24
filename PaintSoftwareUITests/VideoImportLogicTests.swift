@@ -32,6 +32,7 @@ final class VideoImportLogicTests: XCTestCase {
 
     override func tearDownWithError() throws {
         VideoImportStore.directoryOverride = nil
+        FrameBakeStore.cachesDirectoryOverride = nil
         try? FileManager.default.removeItem(at: directory)
         directory = nil
     }
@@ -127,6 +128,31 @@ final class VideoImportLogicTests: XCTestCase {
         }
     }
 
+    func testGalleryCloseRetiresFrozenVideoRecipesAndReopenDrawsTheClipAgain() throws {
+        FrameBakeStore.cachesDirectoryOverride = directory.appendingPathComponent("bakes", isDirectory: true)
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.fps = 24
+        XCTAssertTrue(manager.insertVideo(at: try shortClip()))
+        let cel = try XCTUnwrap(manager.layers.last?.cels.first)
+        let retiredClient = manager.videoFrames
+        let frozen = try XCTUnwrap(manager.videoCelContent(for: cel, atFrame: 2))
+        let image = try XCTUnwrap(frozen.render(.full))
+        XCTAssertEqual(CanvasFixture.nearestLevelIndex(try XCTUnwrap(CanvasFixture.greyAt(image, x: 32, y: 32)),
+                                                       in: Self.levels), 2)
+        manager.closeFrameBaker()
+        XCTAssertTrue(retiredClient.isClosed)
+        XCTAssertNil(frozen.render(.full), "A retained old recipe must decline rather than cache a placeholder after close.")
+        manager.syncFrameBake(suspended: true)
+        defer { manager.closeFrameBaker() }
+        XCTAssertFalse(manager.videoFrames === retiredClient)
+        XCTAssertFalse(manager.videoFrames.isClosed)
+        let reopened = try XCTUnwrap(manager.videoCelContent(for: cel, atFrame: 2))
+        let drawn = try XCTUnwrap(reopened.render(.full))
+        XCTAssertEqual(CanvasFixture.nearestLevelIndex(try XCTUnwrap(CanvasFixture.greyAt(drawn, x: 32, y: 32)),
+                                                       in: Self.levels), 2)
+        XCTAssertNil(frozen.render(.full), "Reopening must not revive a closed recipe's lease.")
+    }
+
     // MARK: - The bytes
 
     /// **The import copies the picked file, and that is not tidiness.** `PhotosPicker` hands over a
@@ -145,7 +171,7 @@ final class VideoImportLogicTests: XCTestCase {
         XCTAssertEqual(video.assetURL.lastPathComponent, video.assetFileName,
                        "The staged copy is named the same as the name the package will hold, so a "
                        + "save's `copyAsset` and a load's resolve are looking for one string.")
-        XCTAssertNotNil(VideoFrameSource().frame(assetURL: video.assetURL, at: .zero),
+        XCTAssertNotNil(VideoFrameSource().makeClient().frame(assetURL: video.assetURL, at: .zero),
                         "And the copy still decodes with the picked file gone.")
     }
 

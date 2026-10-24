@@ -107,9 +107,14 @@ Detailed source evidence: `/Users/juliapark/PaintWork/s54-architecture-audit/ren
 
 ### Video decoder residency
 
-Shared video ring/readers have no production purge/pressure lifecycle; reader sample buffers need separate bounded accounting measurement.
+Source-confirmed lifecycle gap: the shared64MiB ring/four readers had no production close/pressure
+owner. `tmp/s54-video-lifecycle` wires per-document closeable clients into the existing source, ring
+and MemoryPressure seam; short ownership resets fence old serial reads. Sample diagnostics count
+up to two distinct app-held buffers per cached reader separately from ring bytes; AVFoundation
+internal pools and RSS remain unmeasured.
 
-Remaining: verify/reproduce, then fix or reject the premise with evidence.
+Remaining: native tiny regressions/mutants, cold UI/picture at owner size, fast tiers and device
+qualification. Source parsing and UI lints alone do not qualify the implementation.
 
 Detailed source evidence: `/Users/juliapark/PaintWork/s54-architecture-audit/animation-media-review.md`.
 

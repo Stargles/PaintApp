@@ -132,9 +132,8 @@ enum VideoImportStore {
 
 /// **A single video file, decoded around a playhead.**
 ///
-/// Not thread-safe on its own and deliberately: `VideoFrameSource` owns every instance behind one
-/// lock, and a playhead that two threads could advance independently is not a playhead. Everything
-/// public here is called with that lock held.
+/// Not thread-safe on its own: `VideoFrameSource` advances and inspects readers under its serial
+/// decode lock. Its separate ownership lock may retire a reader, but never advances its playhead.
 final class VideoFrameReader {
 
     let url: URL
@@ -206,8 +205,10 @@ final class VideoFrameReader {
     /// to a whole source frame. Nearest costs one extra sample held, which the pipe was going to
     /// deliver next anyway.
     @discardableResult
-    func locate(_ time: CMTime) -> CMTime? {
-        if let found = position(time) { return found }
+    func locate(_ time: CMTime, whileCurrent: () -> Bool = { true }) -> CMTime? {
+        guard whileCurrent() else { return nil }
+        if let found = position(time, whileCurrent: whileCurrent) { return found }
+        guard whileCurrent() else { return nil }
         // **Nothing in the pipe at all**, which has exactly one cause: the pipe was opened past the
         // end of the clip, so `AVAssetReader` delivered no sample and there is neither a candidate
         // behind nor one ahead. Re-open at the head and walk to the tail, which holds the last
@@ -215,16 +216,17 @@ final class VideoFrameReader {
         // the clip's own duration resolves to. It costs a walk of the clip, once.
         guard rangeStart > .zero else { located = nil; return nil }
         restart(at: .zero)
-        return position(time)
+        return position(time, whileCurrent: whileCurrent)
     }
 
-    private func position(_ time: CMTime) -> CMTime? {
+    private func position(_ time: CMTime, whileCurrent: () -> Bool) -> CMTime? {
         if reader == nil || time < rangeStart || (behind.map { time < $0.time } ?? false) {
             restart(at: time)
         }
         // Walk the pipe forward until the sample in hand is past the instant wanted. Everything
         // passed becomes `behind`, which is the newest candidate at or before `time`.
         while let next = ahead, next.time <= time {
+            guard whileCurrent() else { return nil }
             behind = next
             ahead = pull()
         }
@@ -255,6 +257,15 @@ final class VideoFrameReader {
     func currentFrame() -> DecodedFrame? {
         guard let located else { return nil }
         return Self.decode(located.sample)
+    }
+
+    /// `located` aliases either candidate; it does not own a third distinct sample. This counts
+    /// app-held buffers only, not AVFoundation's internal reader/decoder pools.
+    var retainedSampleCount: Int { (ahead == nil ? 0 : 1) + (behind == nil ? 0 : 1) }
+    var retainedSampleBytes: Int {
+        [ahead?.sample, behind?.sample].compactMap { $0 }.reduce(0) { bytes, sample in
+            bytes + (CMSampleBufferGetImageBuffer(sample).map { CVPixelBufferGetDataSize($0) } ?? 0)
+        }
     }
 
     // MARK: The pipe
@@ -356,104 +367,231 @@ final class VideoFrameReader {
 /// that now carries `VideoCelIdentity.cuts`. There is deliberately no second on-disk store of
 /// decoded source frames: the source file *is* that store, and re-decoding it is what a seek costs.
 ///
-/// ## One lock over the whole operation, decode included
-///
-/// A reader is a playhead and two threads cannot share one, so the coarse lock is not a shortcut —
-/// it is the invariant. Every worker asking for a video frame at one instant wants the same reader,
-/// so serialising them costs nothing that finer locking would recover; what it does cost is that a
-/// backward seek blocks the other workers behind it, which is `PERFORMANCE.md`'s kind of question
-/// and VIDEO.md §9's open one.
+/// Decode stays serial. A separate short ownership lock lets close/pressure retire residency
+/// without waiting for an AVFoundation seek; an old read can finish but cannot warm its replacement.
 final class VideoFrameSource {
-
-    /// The one every document shares. Readers are keyed by path and ring entries by path plus
-    /// presentation timestamp, so two documents holding the same clip share the decode rather than
-    /// racing for it — and a document that closes leaves nothing behind but an LRU entry.
     static let shared = VideoFrameSource()
-
-    /// Sized to hold roughly a second of 1080p either side of the playhead (8.3 MB a frame). Small
-    /// on purpose: this is the tier in front of a file that can be re-read, not in front of a
-    /// composite that would have to be recomputed.
+    /// Tight copied pixels only. Reader samples and AVFoundation's internal pools are separate.
     static let defaultByteBudget = 64 * 1024 * 1024
-
-    /// How many assets keep an open pipe. A document with more videos than this on one frame pays a
-    /// seek per extra asset per frame, which is the honest cost of holding fewer decoders than the
-    /// artist is showing.
+    /// More simultaneous assets pay a seek per evicted pipe rather than retaining every decoder.
     static let defaultReaderLimit = 4
 
-    private let lock = NSLock()
-    private let ring: DecodedFrameRing
+    /// A document's access, activated by its first read. Idle gallery managers keep no residency
+    /// alive. Frozen render closures retain this client, not the mutable document; close is final.
+    final class Client {
+        private let source: VideoFrameSource
+        fileprivate let id: UUID
+        fileprivate init(source: VideoFrameSource, id: UUID) { self.source = source; self.id = id }
+        deinit { close() }
+        var isClosed: Bool { source.isClosed(id) }
+        func close() { source.close(id) }
+        func info(for url: URL) -> VideoAssetInfo? { source.info(client: id, for: url) }
+        func read(assetURL url: URL, at time: SourceTime) -> ReadResult {
+            source.read(client: id, assetURL: url, at: time)
+        }
+        func frame(assetURL url: URL, at time: SourceTime) -> DecodedFrame? { read(assetURL: url, at: time).frame }
+
+        /// The real decode/landing seam: only finish can admit decoded pixels to current residency.
+        func decode(assetURL url: URL, at time: SourceTime) -> Read {
+            source.decode(client: id, assetURL: url, at: time)
+        }
+        func finish(_ read: Read) -> ReadResult { source.finish(read, client: id) }
+    }
+
+    enum ReadResult {
+        case decoded(DecodedFrame)
+        case missing
+        /// Close/pressure retired the operation. A renderer must decline, never cache a placeholder.
+        case unavailable
+        var frame: DecodedFrame? {
+            if case .decoded(let frame) = self { return frame }
+            return nil
+        }
+    }
+
+    struct Read {
+        fileprivate let owner: Residency?
+        fileprivate let client: UUID
+        fileprivate let key: String?
+        fileprivate let result: ReadResult
+        fileprivate let needsInsertion: Bool
+        var decodedFrame: DecodedFrame? { result.frame }
+    }
+
+    fileprivate final class Residency {
+        let ring: DecodedFrameRing
+        var readers: [String: VideoFrameReader] = [:]
+        var recency: [String] = []
+        init(ring: DecodedFrameRing) { self.ring = ring }
+    }
+
+    private let ownership = NSLock()
+    private let decoding = NSLock()
+    private var residency: Residency
+    private var clients: [UUID: Bool] = [:] // false = idle, true = has read; absence = closed
+    private let byteBudget: Int
     private let readerLimit: Int
-    private var readers: [String: VideoFrameReader] = [:]
-    /// Least recently used first, mirroring `DecodedFrameRing`'s own array-as-LRU and for its reason:
-    /// the list is single digits long.
-    private var recency: [String] = []
+    private var pressureToken: MemoryPressure.Token?
+    private var decodes = 0
 
     init(byteBudget: Int = VideoFrameSource.defaultByteBudget,
          readerLimit: Int = VideoFrameSource.defaultReaderLimit) {
-        ring = DecodedFrameRing(byteBudget: byteBudget)
-        self.readerLimit = max(readerLimit, 1)
+        self.byteBudget = max(0, byteBudget)
+        self.readerLimit = max(1, readerLimit)
+        residency = Residency(ring: DecodedFrameRing(byteBudget: byteBudget))
+        pressureToken = MemoryPressure.register("VideoFrameSource") { [weak self] level in self?.respond(to: level) }
+        MemoryPressure.startObservingSystemEvents()
     }
 
-    /// What the asset says about itself, or nil when it will not open.
-    func info(for url: URL) -> VideoAssetInfo? {
-        lock.lock()
-        defer { lock.unlock() }
-        return reader(for: url)?.info
+    func makeClient() -> Client {
+        let id = UUID()
+        ownership.lock(); clients[id] = false; ownership.unlock()
+        return Client(source: self, id: id)
     }
 
-    /// **The source frame nearest `time`.** Nil when the asset will not open or holds no frame
-    /// there, which is not an error — the caller draws the placeholder, exactly as RENDER §2.10
-    /// keeps the previous picture up rather than showing a failure.
-    func frame(assetURL url: URL, at time: SourceTime) -> DecodedFrame? {
-        lock.lock()
-        defer { lock.unlock() }
-        guard let reader = reader(for: url), let stamp = reader.locate(time.cmTime) else { return nil }
-        // **Keyed by the timestamp the file carries, not by the instant that was asked for.** A clip
-        // played at half speed asks for two instants per source frame; this is what makes those one
-        // decode. It is also why `locate` and `currentFrame` are two calls: the cache is consulted
-        // between them, so a hit converts no pixels at all.
+    private func isClosed(_ id: UUID) -> Bool {
+        ownership.lock(); defer { ownership.unlock() }
+        return clients[id] == nil
+    }
+
+    private func close(_ id: UUID) {
+        ownership.lock()
+        guard clients.removeValue(forKey: id) != nil else { ownership.unlock(); return }
+        let retired = clients.values.contains(true) ? nil : retireLocked(keepingRing: false)
+        ownership.unlock()
+        withExtendedLifetime(retired) {}
+    }
+
+    /// Existing memory-pressure policy: warning keeps the hottest half of decoded pixels and
+    /// closes pipes; background releases both. The ring's normal admission ceiling stays unchanged.
+    private func respond(to level: MemoryPressure.Level) {
+        ownership.lock()
+        let retired = retireLocked(keepingRing: level.trims != .background)
+        ownership.unlock()
+        withExtendedLifetime(retired) {}
+    }
+
+    /// Returns reader references for destruction outside the ownership lock. A running decode
+    /// keeps only its own reader alive; repeated resets cannot accumulate full old reader pools.
+    private func retireLocked(keepingRing: Bool) -> [String: VideoFrameReader] {
+        let old = residency
+        let retired = old.readers
+        old.readers = [:]
+        old.recency = []
+        let ring: DecodedFrameRing
+        if keepingRing {
+            ring = old.ring
+            ring.byteBudget = MemoryPressurePolicy.budget(.warning, normalBytes: byteBudget)
+            ring.byteBudget = byteBudget
+        } else {
+            old.ring.removeAll()
+            ring = DecodedFrameRing(byteBudget: byteBudget)
+        }
+        residency = Residency(ring: ring)
+        return retired
+    }
+
+    private func begin(_ id: UUID) -> Residency? {
+        ownership.lock(); defer { ownership.unlock() }
+        guard clients[id] != nil else { return nil }
+        clients[id] = true
+        return residency
+    }
+
+    private func isCurrent(_ owner: Residency, client id: UUID) -> Bool {
+        ownership.lock(); defer { ownership.unlock() }
+        return residency === owner && clients[id] == true
+    }
+
+    private func info(client id: UUID, for url: URL) -> VideoAssetInfo? {
+        guard let owner = begin(id) else { return nil }
+        decoding.lock(); defer { decoding.unlock() }
+        guard isCurrent(owner, client: id), let reader = reader(for: url, owner: owner, client: id),
+              isCurrent(owner, client: id) else { return nil }
+        return reader.info
+    }
+
+    /// Keep a normal read's lookup, conversion and admission in the same serial turn. Another
+    /// worker cannot decode the same timestamp between conversion and admission.
+    private func read(client id: UUID, assetURL url: URL, at time: SourceTime) -> ReadResult {
+        decoding.lock(); defer { decoding.unlock() }
+        return finish(decodeLocked(client: id, assetURL: url, at: time), client: id)
+    }
+
+    private func decode(client id: UUID, assetURL url: URL, at time: SourceTime) -> Read {
+        decoding.lock(); defer { decoding.unlock() }
+        return decodeLocked(client: id, assetURL: url, at: time)
+    }
+
+    private func decodeLocked(client id: UUID, assetURL url: URL, at time: SourceTime) -> Read {
+        func result(_ value: ReadResult, owner: Residency? = nil, key: String? = nil,
+                    insertion: Bool = false) -> Read {
+            Read(owner: owner, client: id, key: key, result: value, needsInsertion: insertion)
+        }
+        guard let owner = begin(id) else { return result(.unavailable) }
+        guard isCurrent(owner, client: id) else { return result(.unavailable) }
+        guard let reader = reader(for: url, owner: owner, client: id),
+              let stamp = reader.locate(time.cmTime, whileCurrent: { self.isCurrent(owner, client: id) }) else {
+            return result(isCurrent(owner, client: id) ? .missing : .unavailable, owner: owner)
+        }
         let key = "\(url.path)#\(stamp.value)/\(stamp.timescale)"
-        if let hit = ring.frame(for: key) { return hit }
-        guard let frame = reader.currentFrame() else { return nil }
-        ring.insert(frame, for: key)
-        return frame
+        if let hit = owner.ring.frame(for: key) { return result(.decoded(hit), owner: owner, key: key) }
+        guard isCurrent(owner, client: id) else { return result(.unavailable) }
+        guard let frame = reader.currentFrame() else { return result(.missing, owner: owner) }
+        ownership.lock(); decodes += 1; ownership.unlock()
+        return result(.decoded(frame), owner: owner, key: key, insertion: true)
     }
 
-    /// Drops every decoded frame and closes every pipe. The gallery closing a document, or a memory
-    /// warning.
-    func purge() {
-        lock.lock()
-        defer { lock.unlock() }
-        ring.removeAll()
-        readers.removeAll()
-        recency.removeAll()
+    private func finish(_ read: Read, client id: UUID) -> ReadResult {
+        ownership.lock(); defer { ownership.unlock() }
+        guard read.client == id, clients[id] == true, let owner = read.owner,
+              residency === owner else { return .unavailable }
+        if read.needsInsertion, let frame = read.result.frame, let key = read.key { owner.ring.insert(frame, for: key) }
+        return read.result
     }
 
-    /// Diagnostics and tests: how many pipes are open, and how many bytes of source frames are held.
-    var openReaderCount: Int { lock.lock(); defer { lock.unlock() }; return readers.count }
-    var residentBytes: Int { ring.byteCount }
-
-    // MARK: - Under the lock
-
-    private func reader(for url: URL) -> VideoFrameReader? {
-        let key = url.path
-        if let existing = readers[key] {
-            touch(key)
+    /// Called under the serial decode lock. No AVFoundation work or reader destruction holds the
+    /// ownership lock, so lifecycle changes cannot queue behind a seek or decoder teardown.
+    private func reader(for url: URL, owner: Residency, client id: UUID) -> VideoFrameReader? {
+        ownership.lock()
+        guard residency === owner, clients[id] == true else { ownership.unlock(); return nil }
+        if let existing = owner.readers[url.path] {
+            touch(url.path, in: owner)
+            ownership.unlock()
             return existing
         }
+        ownership.unlock()
         guard let made = VideoFrameReader(url: url) else { return nil }
-        readers[key] = made
-        recency.append(key)
-        while readers.count > readerLimit, let oldest = recency.first {
-            recency.removeFirst()
-            readers.removeValue(forKey: oldest)
+        var retired: [VideoFrameReader] = []
+        ownership.lock()
+        guard residency === owner, clients[id] == true else { ownership.unlock(); return nil }
+        owner.readers[url.path] = made
+        owner.recency.append(url.path)
+        while owner.readers.count > readerLimit, let oldest = owner.recency.first {
+            owner.recency.removeFirst()
+            if let reader = owner.readers.removeValue(forKey: oldest) { retired.append(reader) }
         }
+        ownership.unlock()
+        withExtendedLifetime(retired) {}
         return made
     }
 
-    private func touch(_ key: String) {
-        guard let index = recency.firstIndex(of: key), index != recency.count - 1 else { return }
-        recency.remove(at: index)
-        recency.append(key)
+    private func touch(_ key: String, in owner: Residency) {
+        guard let index = owner.recency.firstIndex(of: key), index != owner.recency.count - 1 else { return }
+        owner.recency.remove(at: index)
+        owner.recency.append(key)
+    }
+
+    var openReaderCount: Int { ownership.lock(); defer { ownership.unlock() }; return residency.readers.count }
+    var residentBytes: Int { ownership.lock(); defer { ownership.unlock() }; return residency.ring.byteCount }
+    var decodedCount: Int { ownership.lock(); defer { ownership.unlock() }; return decodes }
+    /// Cached app-held sample payload only. This blocks behind decode for a consistent diagnostic;
+    /// lifecycle/readiness does not. AVFoundation's internal decoder pools remain unmeasured.
+    var retainedSampleCount: Int { sampleOwnership().count }
+    var retainedSampleBytes: Int { sampleOwnership().bytes }
+    private func sampleOwnership() -> (count: Int, bytes: Int) {
+        decoding.lock(); defer { decoding.unlock() }
+        ownership.lock(); let readers = Array(residency.readers.values); ownership.unlock()
+        return readers.reduce((0, 0)) { ($0.0 + $1.retainedSampleCount, $0.1 + $1.retainedSampleBytes) }
     }
 }

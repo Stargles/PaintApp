@@ -2337,3 +2337,23 @@ Current follow-up includes zero-byte candidates and uses the same checked author
 eviction and final write admission. Tiny0/1-byte explicit/direct eviction fixtures and an immutable-file
 refusal fixture check physical freed bytes, preserved drawing and shared cap counters. Latest source is
 parse/lint-only; root still owns new native/mutation, full fast-tier, UI/picture and device qualification.
+
+
+## Global video decoder residency — 2026-10-24, source implementation prepared
+
+Source trace confirmed VideoFrameSource.shared retained its64MiB copied ring/four reader pipes
+across close with no production pressure/close owner. Existing source/ring/MemoryPressure now share
+per-document clients: idle managers do not keep residency alive, frozen closed recipes cannot
+reactivate, last active close releases both tiers, and another live window preserves its picture.
+Short ownership resets retire old read landings independently of serial AVFoundation decode;
+normal lookup/conversion/admission stays serial. Warning keeps hottest half and retires cached pipes;
+background clears both. Removed the now-unneeded public purge API.
+
+Six tiny source/reader methods plus an actual import→frozen render→close→reopen logic method assert
+known grey pixels, shared decode counts, sample/reader/byte bounds and controlled stale-read refusal.
+A normal seeded gallery round-trip UI method asserts drawn grey40 and attaches screenshots. All are
+prepared, not native-qualified here; root owns native/mutants/UI pictures/full tiers/device.
+Located aliases ahead/behind, so each cached reader owns at most two distinct app-held samples.
+Their CVPixelBuffer payload diagnostics exclude AVFoundation internal pools; ring bytes exclude
+samples, one retiring in-flight reader and returned render images. No RSS reduction/device-memory
+cause or saved-format change claim.

@@ -350,6 +350,18 @@ account usage limits; root continues. The full source inventory is not yet fully
   by this branch; root owns those gates and the external fault plan. Physical bytes freed remain reporting,
   never the admission/eviction budget decision. No saved-format change or Test1 cause claim.
 
+  Video lifecycle source implementation `tmp/s54-video-lifecycle`, exact dependency4f5f75d6:
+  all imports/render/crop/speed/image-bake reads use per-manager closeable clients of the existing
+  shared source. Last active close clears its64MiB ring/four-reader LRU; another live window survives.
+  Existing MemoryPressure warning trims hottest half and retires pipes; background clears both.
+  Separate short ownership resets fence staged old reads; normal decode/lookup/admission stays serial.
+  Frozen closed-client rendering declines rather than caching a placeholder. Removed unused public
+  purge. Six tiny source/reader logic methods, one actual manager import/close/reopen logic method,
+  and one cold gallery round-trip UI method added, with grey RGBA, decoder/sample/byte counts and
+  controlled decoded-read gates. Parse/UI lints only: native/mutants/full tiers/UI screenshots/device
+  remain root-owned pending. Two app-held samples per reader are separate from copied ring bytes;
+  AVFoundation pools and RSS are unmeasured. No saved format or new cache/framework/feature flag.
+
 - [ ] Stream transport: bounded ordered backpressure, framing limits, connection readiness/close ownership.
 - [ ] Editor/brush: preview identity/budget, undo payload accounting, saved palette validation; verify stationary-sample opportunity.
 - [ ] Test hooks/obsolete runners: protect real-device persistent data and prune only verified unused paths.

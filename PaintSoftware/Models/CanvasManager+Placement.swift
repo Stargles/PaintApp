@@ -161,7 +161,7 @@ extension CanvasManager {
     /// document has no canvas.
     @discardableResult
     func primeVideo(at pickedURL: URL) -> Bool {
-        guard let info = VideoFrameSource.shared.info(for: pickedURL),
+        guard let info = videoFrames.info(for: pickedURL),
               info.displaySize.width > 0, info.displaySize.height > 0 else { return false }
         primeObject(.media(PrimedMedia(source: .video(pickedURL), displaySize: info.displaySize)))
         return primedObject?.mediaFileURL == pickedURL

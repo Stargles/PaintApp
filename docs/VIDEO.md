@@ -282,6 +282,28 @@ pipe however many frames it holds, and a backward step is **one** rebuild and no
 The only unbounded case is an instant past the end of the clip on a fresh reader, which re-opens at the
 head and walks to the tail once, because a pipe opened past the end delivers nothing at all.
 
+**Source residency follows active document clients.** Each `CanvasManager` owns a lightweight
+`VideoFrameSource.Client`, activated by its first import/info/frame read. Frozen video recipes capture
+that client. Gallery close retires it permanently; reopening uses a new client. Closing one of multiple
+active windows preserves the shared source ring and reader LRU; closing the last active client clears
+both, even if idle gallery managers or closed frozen recipes remain retained. There is no separate
+public purge call to forget.
+
+`MemoryPressure` warning/allocation refusal trims the same ring to the hottest half and retires all
+cached pipes; background clears both. Decode still runs serially, including normal lookup/conversion/
+admission, while a separate short ownership lock retires residency without waiting behind a seek.
+A running reader checks ownership between forward pulls; a decoded read can settle only into its
+current residency for an open client. Repeated pressure cannot retain successive full reader pools:
+the old inventory is detached, leaving at most the one running reader beyond the current cache.
+A retired read declines the derived render, rather than producing a cacheable missing-clip placeholder.
+
+The **64 MiB is tight copied BGRA ring pixels only**. Each of the four cached readers may separately
+hold up to two distinct CMSampleBuffers (`located` aliases a candidate); byte diagnostics sum their
+CVPixelBuffer payload sizes including decoder stride where supplied. One retiring in-flight reader,
+the currently returned decoded/rendered images and AVFoundation's internal pools are additional;
+internal pools and process RSS are unmeasured. Tiny source regressions and a gallery round-trip UI
+check are prepared for this lifecycle change; native/mutation/device qualification is pending.
+
 **The ring is keyed by the timestamp the *file* carries, not by the instant the map asked for.** That is
 what makes a clip at half speed one decode per source frame rather than two, and it is why `locate` and
 `currentFrame` are two calls: the ring is consulted between them, so a hit converts no pixels.
@@ -478,8 +500,8 @@ Nothing decodes or plays audio. What is built now is that **nothing makes it har
 - **Backwards scrubbing cost** (§5) is now counted rather than timed: one pipe rebuild per backward step,
   zero for any forward walk. What is still unmeasured is what a rebuild costs in *milliseconds* on the
   iPad, which depends on the clip's keyframe interval and is the number PERFORMANCE.md would want. Also
-  unmeasured: `VideoFrameSource` holds one lock across the decode, so a backward seek blocks the other
-  render workers behind it.
+  unmeasured: `VideoFrameSource` keeps decode serial, so a backward seek blocks other decode workers.
+  Close/pressure use a separate ownership lock and do not wait behind that seek.
 - **A quarter-turn clip stands up through its placement, and nothing has tested that it does.** Stage 4
   folds `VideoFrameReader.info.rotation` into `LayerTransform.rotation` and the transform's sign into
   `mirrored`, so no pixel is resampled — but `VideoFrameWriter` writes no `preferredTransform`, so the
