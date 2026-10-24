@@ -9,32 +9,8 @@ import XCTest
 /// really about, and the half a model-level test has twice let ship unusable.
 final class FillMendUITests: PaintUITestCase {
 
-    /// Brightness of one pixel of a screenshot, 0...765.
-    private struct Screen {
-        let bytes: [UInt8]
-        let width: Int
-        let height: Int
-        func light(_ dx: Double, _ dy: Double) -> Bool {
-            let x = min(max(Int(dx * Double(width)), 0), width - 1)
-            let y = min(max(Int(dy * Double(height)), 0), height - 1)
-            let o = (y * width + x) * 4
-            return bytes[o] > 150 && bytes[o + 1] > 150 && bytes[o + 2] > 150
-        }
-        /// How many of `steps` samples across `x0...x1` on row `dy` are paper.
-        func lightPixels(row dy: Double, from x0: Double, to x1: Double, steps: Int = 400) -> Int {
-            (0...steps).filter { light(x0 + (x1 - x0) * Double($0) / Double(steps), dy) }.count
-        }
-    }
-
-    private func screen(of element: XCUIElement) throws -> Screen {
-        let image = try XCTUnwrap(element.screenshot().image.cgImage)
-        let width = image.width, height = image.height
-        var buffer = [UInt8](repeating: 0, count: width * height * 4)
-        let context = try XCTUnwrap(CGContext(data: &buffer, width: width, height: height, bitsPerComponent: 8,
-                                              bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
-                                              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
-        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-        return Screen(bytes: buffer, width: width, height: height)
+    private func screen(of element: XCUIElement) throws -> ScreenshotPixels {
+        try XCTUnwrap(ScreenshotPixels(element.screenshot().image))
     }
 
     // MARK: - Mend Gaps between neighbouring fills
@@ -49,8 +25,10 @@ final class FillMendUITests: PaintUITestCase {
     /// Edge Overlap is dragged to the bottom, and each divider is drawn three times, so the seam is several
     /// screen pixels wide rather than the sliver the default tucks under a single thin line.
     func testTheMendOptionIsOnFromAFreshDocumentAndClosesTheSeamBetweenTwoFills() throws {
+        XCUIDevice.shared.orientation = .landscapeLeft
+        defer { XCUIDevice.shared.orientation = .portrait }
         let app = XCUIApplication()
-        XCTAssertTrue(launchIntoEditor(app))
+        XCTAssertTrue(launchIntoEditor(app, size: CGSize(width: 2048, height: 1024)))
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
@@ -58,8 +36,14 @@ final class FillMendUITests: PaintUITestCase {
         openLayerPanel(app)
         addVectorLayerFromOpenPanel(app)
         closeLayerRail(app)
-        let left = 0.25, right = 0.75, top = 0.3, bottom = 0.7
-        let dividers = [0.4167, 0.5833]
+        let paper = visiblePaperRect(app, in: canvas)
+        let left = Double(paper.minX + paper.width * 0.25)
+        let right = Double(paper.minX + paper.width * 0.75)
+        let top = Double(paper.minY + paper.height * 0.2)
+        let bottom = Double(paper.minY + paper.height * 0.8)
+        let middle = (top + bottom) / 2
+        let dividers = [left + (right - left) / 3, left + (right - left) * 2 / 3]
+        let seeds = [left + (right - left) / 6, (left + right) / 2, right - (right - left) / 6]
         drawLine(on: canvas, from: CGVector(dx: left, dy: top), to: CGVector(dx: right, dy: top))
         drawLine(on: canvas, from: CGVector(dx: right, dy: top), to: CGVector(dx: right, dy: bottom))
         drawLine(on: canvas, from: CGVector(dx: right, dy: bottom), to: CGVector(dx: left, dy: bottom))
@@ -96,10 +80,10 @@ final class FillMendUITests: PaintUITestCase {
         fillButton.tap()   // shut, so the canvas takes the taps
 
         // Nobody has touched the option: the second fill meets the first under the line on the default.
-        canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.333, dy: 0.5)).tap()
-        XCTAssertTrue(waitUntilFilled(canvas, dx: 0.333, dy: 0.5), "The first cell fills")
-        canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-        XCTAssertTrue(waitUntilFilled(canvas, dx: 0.5, dy: 0.5), "The second cell fills")
+        canvas.coordinate(withNormalizedOffset: CGVector(dx: seeds[0], dy: middle)).tap()
+        XCTAssertTrue(waitUntilFilled(canvas, dx: seeds[0], dy: middle), "The first cell fills")
+        canvas.coordinate(withNormalizedOffset: CGVector(dx: seeds[1], dy: middle)).tap()
+        XCTAssertTrue(waitUntilFilled(canvas, dx: seeds[1], dy: middle), "The second cell fills")
 
         // Cold start, so the fill menu is the only place the option is reached: it reads on there, and
         // switching it off is what leaves the seam for the third fill. Another tool first, so the second
@@ -124,8 +108,8 @@ final class FillMendUITests: PaintUITestCase {
         XCTAssertFalse(reach.isEnabled, "…and Mend Reach does nothing while it is")
         fillButton.tap()
 
-        canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.667, dy: 0.5)).tap()
-        XCTAssertTrue(waitUntilFilled(canvas, dx: 0.667, dy: 0.5), "The third cell fills")
+        canvas.coordinate(withNormalizedOffset: CGVector(dx: seeds[2], dy: middle)).tap()
+        XCTAssertTrue(waitUntilFilled(canvas, dx: seeds[2], dy: middle), "The third cell fills")
 
         // Hide the line art: what is left is the colour layer, and a pixel that is still paper is one
         // no fill covers.
@@ -137,9 +121,9 @@ final class FillMendUITests: PaintUITestCase {
         Thread.sleep(forTimeInterval: 1.0)   // the canvas re-composites without the line layer
 
         let picture = try screen(of: canvas)
-        let mended = picture.lightPixels(row: 0.5, from: dividers[0] - 0.007, to: dividers[0] + 0.0095)
-        let unmended = picture.lightPixels(row: 0.5, from: dividers[1] - 0.007, to: dividers[1] + 0.0095)
-        attachScreenshot(app, "mend-seams-line-art-hidden")
+        let mended = picture.lightPixels(row: middle, from: dividers[0] - 0.007, to: dividers[0] + 0.0095)
+        let unmended = picture.lightPixels(row: middle, from: dividers[1] - 0.007, to: dividers[1] + 0.0095)
+        attachScreenshot(XCUIScreen.main, "mend-seams-line-art-hidden")
         XCTAssertGreaterThan(unmended, 0, "Control: with the option switched off the third fill leaves paper under the line")
         XCTAssertEqual(mended, 0, "On the default the second fill meets the first under the line — no paper left across the seam")
     }
@@ -293,8 +277,10 @@ final class FillMendUITests: PaintUITestCase {
     /// screen and the fill is black, so the band just inside the canvas's outer edge reads as one or
     /// the other.
     func testTheExtensionBufferSliderCarriesTheFillBoundaryIntoThePadding() throws {
+        XCUIDevice.shared.orientation = .landscapeLeft
+        defer { XCUIDevice.shared.orientation = .portrait }
         let app = XCUIApplication()
-        XCTAssertTrue(launchIntoEditor(app))
+        XCTAssertTrue(launchIntoEditor(app, size: CGSize(width: 2048, height: 2048)))
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
@@ -334,7 +320,7 @@ final class FillMendUITests: PaintUITestCase {
         fillButton.tap()   // opens the panel again, still scrolled to where it was left
         XCTAssertTrue(app.sliders["fillPanel.edgeOverlapSlider"].waitForExistence(timeout: 5), "The fill menu is open")
         scrollFillPanel(app, to: buffer)
-        buffer.adjust(toNormalizedSliderPosition: 1)
+        adjustSlider(buffer, to: 1, tolerance: 0.01)
         fillButton.tap()
         // A wait, never an instant look: moving the paper's edge out is a new structure for the fill
         // (`MetalFillSession.Structure`), and the window grows with it, so the picture lands a press —
@@ -345,8 +331,19 @@ final class FillMendUITests: PaintUITestCase {
             Thread.sleep(forTimeInterval: 0.25)
             after = try screen(of: canvas)
         }
-        attachScreenshot(app, "extension-buffer-at-the-padding")
+        attachScreenshot(XCUIScreen.main, "extension-buffer-at-the-padding")
         XCTAssertFalse(after.light(inPadding.dx, inPadding.dy),
                        "With the buffer at the padding's width the fill reaches out to the padded canvas's edge")
+    }
+}
+
+private extension ScreenshotPixels {
+    func light(_ dx: Double, _ dy: Double) -> Bool {
+        let p = pixel(normalizedX: dx, normalizedY: dy)
+        return p.r > 150 && p.g > 150 && p.b > 150
+    }
+
+    func lightPixels(row dy: Double, from x0: Double, to x1: Double, steps: Int = 400) -> Int {
+        (0...steps).filter { light(x0 + (x1 - x0) * Double($0) / Double(steps), dy) }.count
     }
 }
