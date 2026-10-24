@@ -122,6 +122,50 @@ final class BrushEditorUITests: PaintUITestCase {
                        "…and the other node must not move at all, which is what a fixed axis means")
     }
 
+    /// The touch stays down while crossing a neighbor, leaving the graph and returning. The chosen
+    /// dot must return with it, while the neighbor and endpoints remain where the artist put them.
+    func testACurveDragKeepsItsNodeAcrossANeighborAndOutsideTheGraph() throws {
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication()
+        XCTAssertTrue(launchCold(app))
+        openEditor(app)
+        expand(app, "size")
+
+        let prefix = "brushPanel.curve.size.0.0"
+        let graph = app.otherElements["\(prefix).graph"]
+        XCTAssertTrue(graph.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.windows.firstMatch.frame.contains(graph.frame),
+                      "The complete graph must be visible before driving its edge")
+        func node(_ index: Int) -> XCUIElement { app.otherElements["\(prefix).key.\(index)"] }
+        graph.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertTrue(node(2).waitForExistence(timeout: 5), "The first tap adds a middle node")
+        graph.coordinate(withNormalizedOffset: CGVector(dx: 0.625, dy: 0.25)).tap()
+        XCTAssertTrue(node(3).waitForExistence(timeout: 5), "The second tap adds its neighbor")
+
+        let selected = CGPoint(x: node(1).frame.midX, y: node(1).frame.midY)
+        let neighbor = node(2).frame
+        let endpoints = [node(0).frame, node(3).frame]
+        let overNeighbor = CGPoint(x: neighbor.midX, y: neighbor.midY)
+        let outside = CGPoint(x: graph.frame.maxX + 60, y: neighbor.midY)
+        let returned = CGPoint(x: graph.frame.minX + graph.frame.width * 0.35,
+                               y: graph.frame.minY + graph.frame.height * 0.65)
+        attachScreenshot(XCUIScreen.main, "Curve nodes before a clamped continuous drag — landscape")
+        try fingerStroke(through: [selected, selected, overNeighbor, outside, outside, returned, returned],
+                         interval: 0.12)
+
+        XCTAssertEqual(node(1).frame.midX, returned.x, accuracy: 2,
+                       "The original chosen dot follows the same finger back into the graph")
+        XCTAssertEqual(node(1).frame.midY, returned.y, accuracy: 2)
+        XCTAssertEqual(node(2).frame.midX, neighbor.midX, accuracy: 1.5,
+                       "Passing over a neighbor must never grab it")
+        XCTAssertEqual(node(2).frame.midY, neighbor.midY, accuracy: 1.5)
+        XCTAssertEqual([node(0).frame, node(3).frame], endpoints)
+        let drawnNode = try XCTUnwrap(rgbaPixel(of: graph, dx: 0.35, dy: 0.65))
+        XCTAssertGreaterThan(min(drawnNode.r, drawnNode.g, drawnNode.b), 180,
+                             "The returned dot must be visibly drawn at the final touch, not only stored")
+        attachScreenshot(XCUIScreen.main, "Chosen curve node returned; neighbor unchanged — landscape")
+    }
+
     // MARK: - 3. §2.28's chain — add, remove, reorder
 
     /// **A module can be added, reordered and removed by tapping, and each of the three changes the

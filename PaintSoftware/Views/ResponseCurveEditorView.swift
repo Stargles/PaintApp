@@ -150,12 +150,10 @@ struct ResponseCurveEditorView: View {
                 guard hypot(value.translation.width, value.translation.height) > ResponseCurveEditing.tapSlop,
                       let frame = dragFrame else { return }
                 didMove = true
-                let moved = ResponseCurveEditing.moving(frame: frame, to: value.location, in: curve.curve)
-                // The key's frame is what identifies it to the next `onChanged`, so it has to travel
-                // with the finger — otherwise the second tick of a sideways drag grabs nothing and
-                // the key stops after one frame of movement.
-                dragFrame = ResponseCurveEditing.nearestKey(to: value.location, in: moved) ?? frame
-                curve = ResponseCurve(moved)
+                guard let moved = ResponseCurveEditing.moving(frame: frame, to: value.location,
+                                                              in: curve.curve) else { return }
+                dragFrame = moved.frame
+                curve = ResponseCurve(moved.curve)
             }
             .onEnded { value in
                 defer { dragFrame = nil; didMove = false }

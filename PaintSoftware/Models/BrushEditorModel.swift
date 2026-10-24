@@ -743,18 +743,19 @@ enum ResponseCurveEditing {
         return ResponseCurve.ramp(from: 0, to: 1).curve
     }
 
-    /// A key moved to where the finger is.
+    /// A key moved to where the finger is, together with the frame that now owns that key.
     ///
     /// Its frame is clamped between its neighbours and its value into `axis`. The value clamp is
     /// this control's own — `ResponseCurve` deliberately does not clamp its *output* (§6.1) and an
     /// overshooting handle is legitimate, but a **key** the artist cannot see is a key they cannot
     /// get back, which is the unreachable state `TimelineGraphBand.reachableY` exists to undo one
-    /// surface over. Here the graph is a fixed square and clamping the key is the simpler answer.
+    /// surface over. The raw touch may be outside the graph or directly on a neighbour, so the
+    /// gesture must retain this landed frame rather than hit-test again after moving the key.
     static func moving(frame: Int, to location: CGPoint, in curve: AnimationCurve,
-                       side: CGFloat = side) -> AnimationCurve {
-        guard let key = curve.key(atFrame: frame) else { return curve }
+                       side: CGFloat = side) -> (curve: AnimationCurve, frame: Int)? {
+        guard let key = curve.key(atFrame: frame) else { return nil }
         let ordered = curve.keys.map(\.frame).sorted()
-        guard let index = ordered.firstIndex(of: frame) else { return curve }
+        guard let index = ordered.firstIndex(of: frame) else { return nil }
         let lower = index == 0 ? 0 : ordered[index - 1] + minimumFrameGap
         let upper = index == ordered.count - 1 ? Int(ResponseCurve.scale)
                                               : ordered[index + 1] - minimumFrameGap
@@ -768,7 +769,7 @@ enum ResponseCurveEditing {
         moved.frame = destination
         moved.value = value
         updated.setKey(moved)
-        return updated
+        return (updated, destination)
     }
 
     /// A key added where the finger tapped. Refused where one already sits within the gap, which is

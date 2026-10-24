@@ -1,3 +1,7 @@
+Response-curve correction prepared: landed frame travels with the moved curve, replacing post-move
+nearest-key reacquisition. Two continuation/ownership logic methods plus one cold drawn control
+are committed/prepared for root qualification; source/static checks only, no native closure claim.
+
 ## Brush response-curve drag loses its selected key on clamped ticks — 2026-10-24
 
 Source-confirmed at716311c2, not yet native-reproduced: the view's onChanged applies clamped key

@@ -61,7 +61,7 @@ final class BrushEditorLogicTests: XCTestCase {
     /// the drag changed and the dot lands back under the finger. This asserts the two halves that
     /// together tell a fixed axis from a fitted one — the dragged key moves, and the *other* key does
     /// not.
-    func testDraggingAKeyMovesItAndLeavesTheOtherKeyWhereItWas() {
+    func testDraggingAKeyMovesItAndLeavesTheOtherKeyWhereItWas() throws {
         let curve = ResponseCurve.ramp(from: 0.2, to: 1).curve
         let side = ResponseCurveEditing.side
 
@@ -70,7 +70,8 @@ final class BrushEditorLogicTests: XCTestCase {
 
         // Drag the top key down to about 0.5 — the middle of the fixed axis.
         let target = CGPoint(x: highBefore.x, y: ResponseCurveEditing.y(ofValue: 0.5))
-        let moved = ResponseCurveEditing.moving(frame: Int(ResponseCurve.scale), to: target, in: curve)
+        let moved = try XCTUnwrap(ResponseCurveEditing.moving(frame: Int(ResponseCurve.scale),
+                                                             to: target, in: curve)).curve
 
         let draggedAfter = ResponseCurveEditing.point(ofKey: moved.key(atFrame: Int(ResponseCurve.scale))!)
         XCTAssertEqual(draggedAfter.y, target.y, accuracy: 0.01, "The dragged key must land under the finger")
@@ -99,17 +100,72 @@ final class BrushEditorLogicTests: XCTestCase {
     /// **A key is stopped by its neighbour rather than allowed to eat it.** `AnimationCurve.setKey`
     /// replaces on collision, so a drag that could travel onto another key's frame would silently
     /// destroy it — a destructive edit made by a continuous gesture.
-    func testAKeyCannotBeDraggedOntoItsNeighbour() {
+    func testAKeyCannotBeDraggedOntoItsNeighbour() throws {
         var curve = ResponseCurve.ramp(from: 0, to: 1).curve
         curve.setKey(AnimationCurve.Key(frame: 512, value: 0.5))
         XCTAssertEqual(curve.keys.count, 3)
 
         // Drag the middle key hard to the right, well past the last one.
-        let moved = ResponseCurveEditing.moving(frame: 512,
+        let moved = try XCTUnwrap(ResponseCurveEditing.moving(frame: 512,
                                                 to: CGPoint(x: ResponseCurveEditing.side * 4, y: 10),
-                                                in: curve)
-        XCTAssertEqual(moved.keys.count, 3, "No key may be consumed by a drag")
-        XCTAssertEqual(moved.keys.map(\.frame).sorted(), [0, Int(ResponseCurve.scale) - 1, Int(ResponseCurve.scale)])
+                                                in: curve))
+        XCTAssertEqual(moved.curve.keys.count, 3, "No key may be consumed by a drag")
+        XCTAssertEqual(moved.curve.keys.map(\.frame).sorted(), [0, Int(ResponseCurve.scale) - 1, Int(ResponseCurve.scale)])
+        XCTAssertEqual(moved.frame, 1023, "The gesture follows the key's actual clamped frame")
+    }
+
+    func testAClampedCurveDragContinuesThroughOutsideTicksAndReturnsToTheGraph() throws {
+        var curve = ResponseCurve.ramp(from: 0, to: 1).curve
+        curve.setKey(AnimationCurve.Key(frame: 512, value: 0.5))
+        let endpoints = [curve.key(atFrame: 0), curve.key(atFrame: 1024)]
+        let side = ResponseCurveEditing.side
+
+        let outside = CGPoint(x: side * 4, y: -40)
+        let first = try XCTUnwrap(ResponseCurveEditing.moving(frame: 512, to: outside, in: curve))
+        XCTAssertNil(ResponseCurveEditing.nearestKey(to: outside, in: first.curve),
+                     "The old raw-touch lookup cannot find this clamped key")
+        XCTAssertEqual(first.frame, 1023)
+        XCTAssertNil(first.curve.key(atFrame: 512), "The original frame no longer identifies the key")
+        XCTAssertEqual(first.curve.key(atFrame: first.frame)?.value, 1)
+
+        let second = try XCTUnwrap(ResponseCurveEditing.moving(frame: first.frame,
+                                    to: CGPoint(x: side * 4, y: side / 2), in: first.curve))
+        XCTAssertEqual(second.frame, 1023)
+        XCTAssertEqual(second.curve.key(atFrame: second.frame)?.value, 0.5)
+        let returned = try XCTUnwrap(ResponseCurveEditing.moving(frame: second.frame,
+                                    to: CGPoint(x: side * 0.75, y: ResponseCurveEditing.y(ofValue: 0.25)),
+                                    in: second.curve))
+        XCTAssertEqual(returned.frame, 768)
+        let landed = try XCTUnwrap(returned.curve.key(atFrame: returned.frame))
+        XCTAssertEqual(landed.value, 0.25, accuracy: 1e-12,
+                       "The same held key must follow the finger back into the graph")
+        XCTAssertEqual(returned.curve.keys.count, 3)
+        XCTAssertEqual([returned.curve.key(atFrame: 0), returned.curve.key(atFrame: 1024)], endpoints)
+    }
+
+    func testACurveDragNeverHandsItsKeyToTheNeighborUnderTheFinger() throws {
+        var curve = ResponseCurve.ramp(from: 0, to: 1).curve
+        curve.setKey(AnimationCurve.Key(frame: 512, value: 0.5))
+        let neighbor = AnimationCurve.Key(frame: 640, value: 0.8)
+        curve.setKey(neighbor)
+        let touch = ResponseCurveEditing.point(ofKey: neighbor)
+
+        let collided = try XCTUnwrap(ResponseCurveEditing.moving(frame: 512, to: touch, in: curve))
+        XCTAssertEqual(ResponseCurveEditing.nearestKey(to: touch, in: collided.curve), 640,
+                       "The old raw-touch lookup would incorrectly acquire the neighbor")
+        XCTAssertEqual(collided.frame, 639)
+        XCTAssertEqual(collided.curve.key(atFrame: 640), neighbor)
+
+        let returned = try XCTUnwrap(ResponseCurveEditing.moving(frame: collided.frame,
+                                    to: CGPoint(x: ResponseCurveEditing.side * 0.25,
+                                                y: ResponseCurveEditing.y(ofValue: 0.2)),
+                                    in: collided.curve))
+        XCTAssertEqual(returned.frame, 256)
+        XCTAssertEqual(returned.curve.key(atFrame: 640), neighbor,
+                       "A continued drag must never modify a different key")
+        XCTAssertEqual(returned.curve.key(atFrame: returned.frame)?.value ?? -1, 0.2, accuracy: 1e-12)
+        XCTAssertNil(returned.curve.key(atFrame: 639))
+        XCTAssertEqual(returned.curve.keys.count, 4)
     }
 
     /// **An empty curve materialises into the identity, bit-exactly.**

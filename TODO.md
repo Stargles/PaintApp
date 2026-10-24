@@ -1,3 +1,16 @@
+Response-curve source ready: the existing movement seam returns an optional named tuple containing
+the updated AnimationCurve and its authoritative landed frame. The view preserves that identity
+through every tick; raw-touch hit testing now occurs only at gesture acquisition. Both existing
+logic callers are adapted, two new methods exercise clamped/outside/return continuation and a
+neighbor under the touch with retained endpoints/neighbor values. The cold BrushEditor UI adds
+artist-created nodes, uses existing fingerStroke for one held neighbor→outside→return path, checks
+actual dot frames and final bright pixels, and retains main-screen landscape pictures. No new
+product flag/counter/framework, duplicate clamp or compatibility overload. BrushEditorLogic30 +
+BrushModulationLogic43 =73 focused methods; BrushEditorUITests13 includes the new cold control.
+Identifier/helper lints and diff-check pass. Compiler/native, intentional faults, UI/picture review,
+Debug/Release fast tiers and device remain unrun/root-owned. Exact owned commits will be sent to
+final consolidator; do not replace its authoritative docs with this inherited716 snapshot.
+
 ## Response-curve drag ownership — scope recorded, 2026-10-24
 
 Read-only coverage closeout at716311c2 found a concrete current brush-editor continuity bug:
