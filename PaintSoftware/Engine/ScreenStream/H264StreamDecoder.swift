@@ -7,8 +7,8 @@ import UIKit
 /// **Annex-B H.264 in, the newest decoded picture out** — STREAM.md §5.2's decoder.
 ///
 /// One instance per `ScreenStreamClient`. Access units arrive through `feed(_:)` on whatever queue
-/// the client reads its socket on; everything after that runs on this decoder's own serial queue,
-/// so a slow decode never holds up the socket and nothing here ever touches the main thread. The
+/// the client reads its socket on. One admission covers queued work AND the VideoToolbox callback;
+/// the client pauses socket delivery until completion. Nothing waits on the main thread. The
 /// output is a **latest-frame slot**: one `CVPixelBuffer` behind a lock, newest wins, so a consumer
 /// that reads at 30 Hz while frames arrive at 60 sees the current picture and never a queue.
 ///
@@ -49,7 +49,11 @@ nonisolated final class H264StreamDecoder {
         case aud = 9
     }
 
-    private let queue = DispatchQueue(label: "PaintSoftware.ScreenStream.decode", qos: .userInitiated)
+    private let queue: DispatchQueue
+    // Admission and epoch share the existing slot lock. No queue of compressed access units.
+    private var inputBusy = false
+    private var epoch: UInt64 = 0
+    private var ready: (() -> Void)?
 
     // Decoder state — queue-confined.
     private var sps: Data?
@@ -87,7 +91,9 @@ nonisolated final class H264StreamDecoder {
     /// cannot continue without a keyframe. Fires once per gap, not once per dropped AU.
     var onNeedsKeyframe: (() -> Void)?
 
-    init() {}
+    init(queue: DispatchQueue = DispatchQueue(label: "PaintSoftware.ScreenStream.decode", qos: .userInitiated)) {
+        self.queue = queue
+    }
 
     deinit {
         if let session {
@@ -97,19 +103,48 @@ nonisolated final class H264StreamDecoder {
 
     // MARK: - Input
 
-    /// One access unit, Annex-B, exactly as the VIDEO payload carries it. Returns immediately; the
-    /// work runs on the decode queue.
-    func feed(_ video: StreamVideoPayload) {
-        queue.async { [weak self] in
-            self?.decode(accessUnit: video.accessUnit,
-                         presentationTime: CMTime(value: CMTimeValue(video.presentationTimeMicroseconds),
-                                                  timescale: 1_000_000))
+    /// Admits one AU before retaining a work closure. A refused caller keeps its own AU and waits
+    /// for readiness; it must not skip compressed P-frames. Completion means VT has settled too.
+    @discardableResult
+    func feed(_ video: StreamVideoPayload, completion: @escaping () -> Void) -> Bool {
+        slotLock.lock()
+        guard !inputBusy else { slotLock.unlock(); return false }
+        inputBusy = true
+        let admittedEpoch = epoch
+        slotLock.unlock()
+        queue.async { [self] in
+            defer {
+                slotLock.lock()
+                inputBusy = false
+                let notify = ready; ready = nil
+                slotLock.unlock()
+                completion()
+                notify?()
+            }
+            guard isCurrent(admittedEpoch) else { return }
+            decode(accessUnit: video.accessUnit,
+                   presentationTime: CMTime(value: CMTimeValue(video.presentationTimeMicroseconds),
+                                            timescale: 1_000_000), epoch: admittedEpoch)
         }
+        return true
+    }
+
+    /// One readiness continuation, owned by the latest connection run. It retains no AU here.
+    func whenReady(_ continuation: @escaping () -> Void) {
+        slotLock.lock()
+        if inputBusy { ready = continuation; slotLock.unlock() }
+        else { slotLock.unlock(); continuation() }
+    }
+
+    private func isCurrent(_ candidate: UInt64) -> Bool {
+        slotLock.lock(); defer { slotLock.unlock() }
+        return epoch == candidate
     }
 
     /// Forgets the parameter sets and the session, and waits for the next IDR. Called by the client
     /// on every reconnect — no session state survives one (§3).
     func reset() {
+        slotLock.lock(); epoch &+= 1; ready = nil; slotLock.unlock()
         queue.async { [weak self] in
             guard let self else { return }
             self.tearDownSession()
@@ -179,9 +214,22 @@ nonisolated final class H264StreamDecoder {
         return (latestIndex, image)
     }
 
+    /// VT may both return an error and call its callback. Own that outcome once, including
+    /// a successful submission that settles without an image callback.
+    private final class DecodeResult {
+        private let lock = NSLock()
+        private var reported = false
+        func take() -> Bool {
+            lock.lock(); defer { lock.unlock() }
+            guard !reported else { return false }
+            reported = true
+            return true
+        }
+    }
+
     // MARK: - Decoding (queue-confined)
 
-    private func decode(accessUnit: Data, presentationTime: CMTime) {
+    private func decode(accessUnit: Data, presentationTime: CMTime, epoch: UInt64) {
         let nals = Self.splitAnnexB(accessUnit)
         guard !nals.isEmpty else { return }
 
@@ -215,7 +263,7 @@ nonisolated final class H264StreamDecoder {
             awaitingKeyframe = false
             needsKeyframeReported = false
         } else if awaitingKeyframe {
-            reportNeedsKeyframe()
+            reportNeedsKeyframe(epoch: epoch)
             return
         }
 
@@ -224,26 +272,28 @@ nonisolated final class H264StreamDecoder {
             return
         }
         var infoFlags = VTDecodeInfoFlags()
+        let result = DecodeResult()
         let status = VTDecompressionSessionDecodeFrame(
             session, sampleBuffer: sample,
             flags: [._EnableAsynchronousDecompression],
             infoFlagsOut: &infoFlags
         ) { [weak self] status, _, imageBuffer, _, _ in
-            guard let self else { return }
+            guard let self, result.take() else { return }
             if status == noErr, let imageBuffer {
-                self.publish(imageBuffer)
+                self.publish(imageBuffer, epoch: epoch)
             } else {
-                self.noteDecodeError()
+                self.noteDecodeError(epoch: epoch)
             }
         }
-        if status != noErr {
-            noteDecodeError()
-        }
+        if status != noErr, result.take() { noteDecodeError(epoch: epoch) }
+        VTDecompressionSessionWaitForAsynchronousFrames(session)
+        if result.take() { noteDecodeError(epoch: epoch) }
     }
 
     /// Runs on VideoToolbox's callback thread: put the frame in the slot and say so.
-    private func publish(_ buffer: CVPixelBuffer) {
+    private func publish(_ buffer: CVPixelBuffer, epoch: UInt64) {
         slotLock.lock()
+        guard self.epoch == epoch else { slotLock.unlock(); return }
         latestBuffer = buffer
         latestIndex += 1
         decodedCount += 1
@@ -252,20 +302,22 @@ nonisolated final class H264StreamDecoder {
         if announces { onFrame?() }
     }
 
-    private func noteDecodeError() {
+    private func noteDecodeError(epoch: UInt64) {
         slotLock.lock()
+        guard self.epoch == epoch else { slotLock.unlock(); return }
         errorCount += 1
         slotLock.unlock()
         // Back onto the queue: the callback thread must not touch queue-confined state.
         queue.async { [weak self] in
             guard let self else { return }
+            guard self.isCurrent(epoch) else { return }
             self.awaitingKeyframe = true
-            self.reportNeedsKeyframe()
+            self.reportNeedsKeyframe(epoch: epoch)
         }
     }
 
-    private func reportNeedsKeyframe() {
-        guard !needsKeyframeReported else { return }
+    private func reportNeedsKeyframe(epoch: UInt64) {
+        guard isCurrent(epoch), !needsKeyframeReported else { return }
         needsKeyframeReported = true
         onNeedsKeyframe?()
     }

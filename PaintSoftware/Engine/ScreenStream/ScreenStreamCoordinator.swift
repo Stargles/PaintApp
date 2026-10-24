@@ -321,23 +321,32 @@ final class ScreenStreamCoordinator: ObservableObject {
         // `.fileChunk`/`.fileEnd` directly (`ScreenStreamClient.handle`) and need the real routing
         // to run, exactly the way `stateChanged`/`statusArrived` being reachable with no socket lets
         // `StreamInsertLogicTests` and `StreamBarStateLogicTests` drive the bar.
-        client.onFileReceived = { [weak self] file, reply in
-            self?.routeReceivedFile(file, reply: reply)
+        client.onFileReceived = { [weak self, weak client] file, reply in
+            guard let self, let client, self.clients.values.contains(where: { $0 === client }) else {
+                reply(.refused("The connection was lost.")); return
+            }
+            self.routeReceivedFile(file, reply: reply)
         }
         guard startsClients else { return }
         connectionStates[endpoint] = .connecting
-        client.onStateChange = { [weak self] state in
-            self?.stateChanged(state, at: endpoint)
+        client.onStateChange = { [weak self, weak client] state in
+            guard let self, let client, self.clients.values.contains(where: { $0 === client }) else { return }
+            self.stateChanged(state, at: endpoint)
         }
-        client.onStatus = { [weak self] status in
-            self?.statusArrived(status, from: endpoint)
+        client.onStatus = { [weak self, weak client] status in
+            guard let self, let client, self.clients.values.contains(where: { $0 === client }) else { return }
+            self.statusArrived(status, from: endpoint)
         }
-        client.onFailure = { [weak self] reason in
-            self?.failureArrived(reason, from: endpoint)
+        client.onFailure = { [weak self, weak client] reason in
+            guard let self, let client, self.clients.values.contains(where: { $0 === client }) else { return }
+            self.failureArrived(reason, from: endpoint)
         }
-        client.decoder.onFrame = { [weak self] in
-            // Decode queue. Hop once; the tick coalesces from there.
-            DispatchQueue.main.async { self?.frameArrived() }
+        client.decoder.onFrame = { [weak self, weak client] in
+            // Decode callback. Hop once; retired clients cannot wake a new document connection.
+            DispatchQueue.main.async { [weak self, weak client] in
+                guard let self, let client, self.clients.values.contains(where: { $0 === client }) else { return }
+                self.frameArrived()
+            }
         }
         client.decoder.onNeedsKeyframe = { [weak client] in
             client?.requestKeyframe()

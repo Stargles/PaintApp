@@ -299,4 +299,24 @@ final class StreamFileTransferLogicTests: XCTestCase {
         XCTAssertFalse(result.ok)
         XCTAssertEqual(result.reason, "No document is open on the iPad")
     }
+    func testClosingTheDocumentRejectsItsAlreadyQueuedCompleteFileWithoutInsertingIt() throws {
+        let (manager, client) = connectedManager()
+        manager.addVectorLayer()
+        let layerCount = manager.layers.count
+        let vector = try XCTUnwrap(manager.layers[manager.currentLayerIndex].cels.first?.vector)
+        let bytes = solidPNGData(.red)
+        client.handle(StreamFrame(.fileBegin, payload: StreamJSON.encode(
+            StreamFileBegin(id: 301, name: "late.png", size: bytes.count, kind: "image"))))
+        client.handle(StreamFrame(.fileChunk, payload: StreamFileChunk(id: 301, bytes: bytes).encoded))
+        client.handle(StreamFrame(.fileEnd, payload: StreamJSON.encode(StreamFileEnd(id: 301))))
+        manager.streamCoordinator.stopAll()
+        let drained = expectation(description: "queued delivery checked after close")
+        DispatchQueue.main.async { drained.fulfill() }
+        wait(for: [drained], timeout: 5)
+        XCTAssertEqual(manager.layers.count, layerCount)
+        XCTAssertTrue(vector.images.isEmpty, "A closed document connection must not insert a queued picture")
+        XCTAssertFalse(manager.isAnyPieceFloating)
+        XCTAssertNil(manager.streamCoordinator.client(for: Self.endpoint))
+    }
+
 }

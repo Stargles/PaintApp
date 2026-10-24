@@ -99,6 +99,15 @@ unresolved. Installed Release is stillbcd7a6af; no device launch/restart/install
 
 ## Streaming ownership source audit — 2026-10-24
 
+Root granted isolated Windows-only correctness qualification of committed3a9e9e90ca66f8752668090545f7333f11d4a05a.
+Existing configured BatchMode SSH is reachable; SDK C:\dotnet\dotnet.exe has8.0.425. Stage only committed
+streamer+fixture into a new owned remote folder, hash source/archive before+after, build Debug then unit
+tests, Release only if Debug green, stop on first compiler/test failure. Existing socket tests use dynamic
+loopback ports and single-instance tests use GUID pipe names/own child PIDs; no deployed source/service,
+publish/restart/capture/real-link action. External evidence: s54-stream-ownership/windows-3a9-run01.
+Swift completion work is dirty and excluded from the committed archive. Native Mac slot stays with root.
+
+
 Root selected the connected audit findings: queued encode/write/decode ownership, framing/FILE_CHUNK
 receive limits, and HELLO/current-connection lifecycle. New `tmp/s54-stream-ownership` starts from
 origin/main then exact combined6b5010d94626707c6f6db37850c148d3f045e80d. Record before changes: trace
@@ -139,6 +148,24 @@ Added regressions exercise the actual stalled Stream writer plus source switch, 
 terminal ordering, pending HELLO replacement/reuse, per-connection files, bounded splitting and separate
 Windows timeout/caller-cancel child lifetimes. No compiler/native/Windows/socket/process test execution.
 Swift completion pacing and external fault qualification remain outstanding; stage5 stays owner-waiting.
+
+Windows correctness qualification at committed3a9e9e90ca66f8752668090545f7333f11d4a05a: Debug and Release
+solution builds green,166/166 unit cases each,0 skips/errors. Static130 Fact+8 Theory methods with36
+InlineData cases reconciles166 runtime. All63 staged source files exact before/after and against local
+SHA256 manifest; archive75d7d2992cf49b6f5c44ff0c804be4c8cc5057e978cfb7c8850b30039f81af41. One xUnit2031
+assertion-style warning, no compiler errors. Logs/TRX/manifest: s54-stream-ownership/windows-3a9-run01.
+No deployed app/source/task change, publish/restart/capture/real-link experiment.
+
+Swift decode/read phase source prepared: one AU admission includes queued work and actual VT settlement;
+all early/error/no-image paths finish once, reset immediately retires epoch while preserving the last
+complete image. Network parser pauses per VIDEO and resumes only after completion. A new run may hold
+one first AU while the previous VT submission settles, with one replaceable readiness continuation;
+no compressed latest-wins dropping. Socket drain checks run identity after each handler; pre-HELLO
+application messages fail. Main callbacks carry a locked run lifetime, coordinator callbacks require
+the exact owned client, and old complete-file replies cannot redirect into a replacement connection.
+Added real decoder admission/reset regression and closed-document queued-image insertion refusal.
+Existing fixture decoder tests now completion-pace actual VT work. Swift is source-only/uncompiled;
+outgoing iPad send pump and assertion-fault qualification remain outstanding.
 
 
 ## Combined source qualification — 2026-10-24

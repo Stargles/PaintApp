@@ -216,7 +216,22 @@ nonisolated final class ScreenStreamClient {
     private var attempt = 0
     private var stopped = false
     private var helloReceived = false
+    /// The queue owns run replacement; queued main work reads only this small locked lifetime.
+    private final class Run {
+        private let lock = NSLock()
+        private var live = true
+        var isLive: Bool { lock.lock(); defer { lock.unlock() }; return live }
+        func retire() { lock.lock(); live = false; lock.unlock() }
+    }
+    private var run = Run()
+
+    private func postMain(_ body: @escaping () -> Void) {
+        let run = run
+        DispatchQueue.main.async { if run.isLive { body() } }
+    }
+
     private var generation = 0
+    private var pendingVideo: (payload: StreamVideoPayload, completed: () -> Void, generation: Int)?
 
     /// One inbound transfer, laptop → iPad — queue-confined, like everything else FILE_* touches.
     private struct IncomingTransfer {
@@ -251,7 +266,7 @@ nonisolated final class ScreenStreamClient {
         didSet {
             guard state != oldValue else { return }
             let state = state
-            DispatchQueue.main.async { [weak self] in self?.onStateChange?(state) }
+            postMain { [weak self] in self?.onStateChange?(state) }
         }
     }
 
@@ -408,22 +423,55 @@ nonisolated final class ScreenStreamClient {
                 self.lastReceived = .now()
                 self.missedPings = 0
                 self.parser.append(data)
-                do {
-                    while let frame = try self.parser.next() { self.handle(frame) }
-                } catch {
-                    self.fail("The computer sent something this app could not read.")
+            }
+            self.drainReceived(on: connection, generation: thisGeneration, isComplete: isComplete, error: error)
+        }
+    }
+
+    /// Consume one VIDEO, then let actual decode completion admit the next frame/read. One legal
+    /// framed payload plus the current256KiB receive block can remain in the parser while paused.
+    private func drainReceived(on connection: NWConnection, generation run: Int,
+                               isComplete: Bool, error: NWError?) {
+        guard generation == run, self.connection === connection else { return }
+        do {
+            while let frame = try parser.next() {
+                guard helloReceived || frame.messageType == .hello else {
+                    fail("The computer did not greet this connection first."); return
+                }
+                if frame.messageType == .video, let video = StreamVideoPayload(payload: frame.payload) {
+                    deliverVideo(video) { [weak self] in
+                        self?.drainReceived(on: connection, generation: run, isComplete: isComplete, error: error)
+                    }
                     return
                 }
+                handle(frame)
+                guard generation == run, self.connection === connection else { return }
             }
-            if let error {
-                self.fail(StreamConnectFailure.classify(error))
-                return
+        } catch { fail("The computer sent something this app could not read."); return }
+        if let error { fail(StreamConnectFailure.classify(error)); return }
+        if isComplete { fail("The computer closed the connection."); return }
+        receive(on: connection, generation: run)
+    }
+
+    private func deliverVideo(_ video: StreamVideoPayload, completed: @escaping () -> Void) {
+        let run = generation
+        let settled: () -> Void = { [weak self] in
+            self?.queue.async { [weak self] in
+                guard let self, self.generation == run else { return }
+                completed()
             }
-            if isComplete {
-                self.fail("The computer closed the connection.")
-                return
+        }
+        if decoder.feed(video, completion: settled) { return }
+        // A previous connection's VT submission can still be settling. Keep only this new run's
+        // first AU, without queueing it in the decoder or dropping its compressed dependencies.
+        pendingVideo = (video, completed, run)
+        decoder.whenReady { [weak self] in
+            self?.queue.async { [weak self] in
+                guard let self, let pending = self.pendingVideo,
+                      pending.generation == self.generation else { return }
+                self.pendingVideo = nil
+                self.deliverVideo(pending.payload, completed: pending.completed)
             }
-            self.receive(on: connection, generation: thisGeneration)
         }
     }
 
@@ -462,10 +510,10 @@ nonisolated final class ScreenStreamClient {
                 return
             }
             lastStatus = status
-            DispatchQueue.main.async { [weak self] in self?.onStatus?(status) }
+            postMain { [weak self] in self?.onStatus?(status) }
         case .video:
             guard let video = StreamVideoPayload(payload: frame.payload) else { return }
-            decoder.feed(video)
+            deliverVideo(video, completed: {})
         case .ping:
             send(.pong)
         case .pong:
@@ -552,30 +600,35 @@ nonisolated final class ScreenStreamClient {
         }
         let incoming = StreamIncomingFile(id: transfer.id, name: transfer.name,
                                           kind: transfer.kind, url: transfer.url)
+        let run = run
         DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
+            guard let self, run.isLive else {
+                try? FileManager.default.removeItem(at: incoming.url)
+                return
+            }
             guard let onFileReceived = self.onFileReceived else {
                 // Unreachable in the app — the coordinator installs this on every client it makes,
                 // started or not. Refuse rather than leave the laptop waiting.
                 self.queue.async { self.finishIncoming(incoming, outcome: .refused(
-                    "PaintApp can insert images and videos only")) }
+                    "PaintApp can insert images and videos only"), run: run) }
                 return
             }
             onFileReceived(incoming) { outcome in
-                self.queue.async { self.finishIncoming(incoming, outcome: outcome) }
+                self.queue.async { self.finishIncoming(incoming, outcome: outcome, run: run) }
             }
         }
     }
 
     /// Deletes the temp file whether it was inserted or refused, and sends the answer.
-    private func finishIncoming(_ file: StreamIncomingFile, outcome: StreamFileReceiveOutcome) {
+    private func finishIncoming(_ file: StreamIncomingFile, outcome: StreamFileReceiveOutcome, run: Run) {
         try? FileManager.default.removeItem(at: file.url)
+        guard run.isLive else { return }
         answerFileTransfer(StreamFileResult(id: file.id, ok: outcome.ok, reason: outcome.reason))
     }
 
     private func answerFileTransfer(_ result: StreamFileResult) {
         send(.fileResult, payload: StreamJSON.encode(result))
-        DispatchQueue.main.async { [weak self] in self?.onFileResultSent?(result) }
+        postMain { [weak self] in self?.onFileResultSent?(result) }
     }
 
     // MARK: - Files, iPad → laptop (queue-confined) — STREAM.md §5.8
@@ -691,7 +744,7 @@ nonisolated final class ScreenStreamClient {
     private func fail(_ reason: StreamConnectFailure) {
         guard !stopped else { return }
         tearDownConnection()
-        DispatchQueue.main.async { [weak self] in self?.onFailure?(reason) }
+        postMain { [weak self] in self?.onFailure?(reason) }
         state = .reconnecting(lastFailure: reason)
         let delay = Self.reconnectBackoff[min(attempt, Self.reconnectBackoff.count - 1)]
         attempt += 1
@@ -708,6 +761,8 @@ nonisolated final class ScreenStreamClient {
     }
 
     private func tearDownConnection() {
+        run.retire()
+        run = Run()
         pingTimer?.cancel()
         pingTimer = nil
         if let connection {
@@ -716,6 +771,9 @@ nonisolated final class ScreenStreamClient {
         }
         connection = nil
         generation += 1
+        pendingVideo = nil
+        parser = StreamFraming.Parser()
+        decoder.reset()
         // §3: no session state survives a reconnect, and that includes a transfer mid-flight —
         // nobody on the other end of a torn-down socket is still writing or reading it.
         abandonTransfers(reason: "The connection was lost.")

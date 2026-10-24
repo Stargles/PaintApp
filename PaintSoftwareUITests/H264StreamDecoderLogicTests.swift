@@ -16,6 +16,14 @@ final class H264StreamDecoderLogicTests: XCTestCase {
 
     // MARK: - The fixture
 
+    /// Tests pace real VT work through the same completion as the socket reader.
+    private func feed(_ decoder: H264StreamDecoder, _ payload: StreamVideoPayload,
+                      file: StaticString = #filePath, line: UInt = #line) {
+        let settled = expectation(description: "AU settled")
+        XCTAssertTrue(decoder.feed(payload) { settled.fulfill() }, file: file, line: line)
+        wait(for: [settled], timeout: 5)
+    }
+
     private func fixtureBytes() throws -> Data {
         let url = try XCTUnwrap(Bundle(for: H264StreamDecoderLogicTests.self)
             .url(forResource: "stream-testsrc-640x360", withExtension: "h264"),
@@ -113,7 +121,7 @@ final class H264StreamDecoderLogicTests: XCTestCase {
         decoder.onFrame = { arrivalsLock.lock(); arrivals += 1; arrivalsLock.unlock() }
 
         for payload in try wireFrames(from: accessUnits(in: try fixtureBytes())) {
-            decoder.feed(payload)
+            feed(decoder, payload)
         }
         decoder.finishPendingDecodes()
         // VideoToolbox's asynchronous path can hand the last frames back a moment after the wait
@@ -151,7 +159,7 @@ final class H264StreamDecoderLogicTests: XCTestCase {
         decoder.announcesFrames = false
 
         for payload in try wireFrames(from: accessUnits(in: try fixtureBytes())) {
-            decoder.feed(payload)
+            feed(decoder, payload)
         }
         decoder.finishPendingDecodes()
         let deadline = Date().addingTimeInterval(1)
@@ -168,13 +176,13 @@ final class H264StreamDecoderLogicTests: XCTestCase {
     func testTheSlotMemoizesTheImagePerFrame() throws {
         let decoder = H264StreamDecoder()
         let payloads = try wireFrames(from: accessUnits(in: try fixtureBytes()))
-        decoder.feed(payloads[0])
+        feed(decoder, payloads[0])
         decoder.finishPendingDecodes()
         let deadline = Date().addingTimeInterval(1)
         while decoder.decodedFrameCount < 1, Date() < deadline { Thread.sleep(forTimeInterval: 0.01) }
         let first = try XCTUnwrap(decoder.latestCGImage())
         XCTAssertTrue(decoder.latestCGImage() === first, "the same frame is the same image")
-        for payload in payloads[1 ..< 5] { decoder.feed(payload) }
+        for payload in payloads[1 ..< 5] { feed(decoder, payload) }
         decoder.finishPendingDecodes()
         let later = Date().addingTimeInterval(1)
         while decoder.decodedFrameCount < 5, Date() < later { Thread.sleep(forTimeInterval: 0.01) }
@@ -197,14 +205,14 @@ final class H264StreamDecoderLogicTests: XCTestCase {
             .filter { ($0[$0.startIndex] & 0x1F) == 7 || ($0[$0.startIndex] & 0x1F) == 8 }
         var setsOnly = Data()
         for nal in parameterSets { setsOnly.append(contentsOf: [0, 0, 0, 1]); setsOnly.append(nal) }
-        decoder.feed(StreamVideoPayload(isKeyframe: false, presentationTimeMicroseconds: 0, accessUnit: setsOnly))
-        for payload in payloads[1 ..< 10] { decoder.feed(payload) }
+        feed(decoder, StreamVideoPayload(isKeyframe: false, presentationTimeMicroseconds: 0, accessUnit: setsOnly))
+        for payload in payloads[1 ..< 10] { feed(decoder, payload) }
         decoder.finishPendingDecodes()
         XCTAssertEqual(decoder.decodedFrameCount, 0, "no IDR yet, nothing may decode")
         lock.lock(); let asked = requests; lock.unlock()
         XCTAssertEqual(asked, 1, "one request per gap, not one per dropped frame")
 
-        for payload in payloads[30 ..< 40] { decoder.feed(payload) }
+        for payload in payloads[30 ..< 40] { feed(decoder, payload) }
         decoder.finishPendingDecodes()
         let deadline = Date().addingTimeInterval(1)
         while decoder.decodedFrameCount < 10, Date() < deadline { Thread.sleep(forTimeInterval: 0.01) }
@@ -223,4 +231,28 @@ final class H264StreamDecoderLogicTests: XCTestCase {
         XCTAssertEqual(avcc, [0, 0, 0, 4, 0x65, 0x01, 0x02, 0x03])
         XCTAssertEqual(H264StreamDecoder.splitAnnexB(Data([1, 2, 3])), [], "no start code, no NAL")
     }
+    func testAdmissionCoversQueuedWorkAndResetRetiresItBeforeAnyOldPictureCanLand() {
+        let queue = DispatchQueue(label: "test.stream.decode.admission")
+        queue.suspend()
+        let decoder = H264StreamDecoder(queue: queue)
+        let payload = StreamVideoPayload(isKeyframe: true, presentationTimeMicroseconds: 0,
+                                         accessUnit: Data([0, 0, 0, 1, 0x65]))
+        let settled = expectation(description: "admitted work settled once")
+        var completions = 0
+        XCTAssertTrue(decoder.feed(payload) { completions += 1; settled.fulfill() })
+        XCTAssertFalse(decoder.feed(payload) { XCTFail("Refused work must not become queued work") })
+        decoder.reset()
+        XCTAssertFalse(decoder.feed(payload) { XCTFail("Reset must not release credit before owned work settles") })
+        let ready = expectation(description: "latest readiness only")
+        decoder.whenReady { XCTFail("Superseded readiness must not run") }
+        decoder.whenReady { ready.fulfill() }
+        queue.resume()
+        wait(for: [settled, ready], timeout: 5)
+        XCTAssertEqual(completions, 1)
+        XCTAssertEqual(decoder.decodedFrameCount, 0)
+        XCTAssertNil(decoder.latestCGImage())
+        feed(decoder, StreamVideoPayload(isKeyframe: false, presentationTimeMicroseconds: 1, accessUnit: Data()))
+        XCTAssertEqual(decoder.decodeErrorCount, 0, "Retired malformed work must not request a new run's keyframe")
+    }
+
 }
