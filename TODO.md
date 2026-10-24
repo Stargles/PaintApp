@@ -204,6 +204,7 @@ gates follow the old47d benchmark; prototypes/static checks are not app qualific
 - [ ] Cover interior stroke gaps while preserving the original outer edge, using the current setting.
 - [ ] Qualify the compact shared contour replacement, fragmented masks and preflighted point-limit refusal.
 - [ ] Add the layer-wide action for every fill in every cel; use existing mutation/undo ownership.
+- [ ] Reproduce and fix batch reference sampling for fills saved with default Edge Overlap2 (BUGS.md); existing contour-ring sampling mistakes black ink for background.
 - [ ] Exclude each repaired fill from its own references and propagate unavailable input failures atomically (independent review; BUGS.md).
 - [ ] Mutation-backed logic tests, cold UI/pictures at iPad9 size and required Debug/Release gates.
 

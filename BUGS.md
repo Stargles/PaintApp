@@ -3,6 +3,23 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## Saved-fill contour sampling misses normal Edge Overlap gaps — 2026-10-24
+
+Independent analytic replay of the actual ring/modal rules confirms another pending batch defect.
+A128² closed10px outline with a10px attached or detached stroke remains one bucket region. Default
+Edge Overlap2 dilates its source into the outline;394/394 (attached) or404/404 (detached) contour-ring
+samples are black. Even with the repaired fill omitted from references, black becomes passable and
+mending sees no ink, leaving the6px central gap. At overlap0 the ring is paper. Actual paint/commit
+traces preserve the dilated region, so default fills can reach this premise. Evidence is analytic,
+not yet a native reproduction: `~/PaintWork/s53-fill-mend/design/default-overlap-audit/`.
+
+Add a real bucket-fill/commit regression at default overlap before changing production. Existing
+coverage is different from a lasso gesture's collar: choose current reference colours from its
+covered area without saved seed/provenance or changing interactive lasso semantics. Reuse the shared
+session/classifier and keep output/undo bounded. Root stopped the31-fault qualifier deliberately:
+18 native assertion-red cases qualify individually,19 interrupted; source restored723 exactly, no
+fast tiers reached. Normal-source rebuild is required before UI/install. No whole-batch claim.
+
 ## Fill colour comparison treats identical opaque paper as a wall at threshold zero — 2026-10-24
 
 The committed core fixtures reached real Metal and produced no patches. A scoped test-only diagnostic
