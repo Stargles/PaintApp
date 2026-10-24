@@ -15,6 +15,18 @@ source work. First deliverable is an actual-consumer ownership trace and compact
 then coherent implementation and bounded fixtures. Native/test/simulator/device operations remain
 paused while the sole native slot is occupied. No new product feature or saved-format change.
 
+First primitives are prepared: `RasterResidency` admits/counts source allocations and operation
+working reservations; `RasterSurface` owns RGBA8 memory through context/provider release callbacks,
+explicitly copies before a write with readers, and refuses an unprepared mutation. `RasterSource`
+retains an immutable version handle and checkpoints through the existing ProjectStore queue/PNG
+serializer. ProjectStore-owned resource handles clone only current-document compressed resources and
+remove their own temporary files. Six `RasterResidencyLogicTests` exercise extracted CGImage lifetime,
+UIImage rendering-mode alias lifetime, exact old/new COW pixels, admission refusal, escaped-image
+charge after cache eviction, and headroom/overflow. All new files registered by hand with unique PBX
+ids. These primitives are NOT yet connected to Cel/load/save/edit consumers and establish no runtime
+residency bound. No native compilation/tests/mutants/UI/fast tiers have run. Before broad consumers,
+finish encoder-headroom admission and review the allocation/source API with root.
+
 ## Current combined source qualification — 2026-10-24
 
 Root's normal combined baseline at6b5010d9 passed847/847, zero skips/failures; all724 tracked

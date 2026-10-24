@@ -7,6 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		F8A6E200A499A50028393691 /* PaintSoftware/Services/ProjectStore+RasterBacking.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6815809A8C5C2CD0814FF3F3 /* PaintSoftware/Services/ProjectStore+RasterBacking.swift */; };
+		6401F14A965B83D66916DF99 /* PaintSoftware/Engine/RasterSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58A4A7FCCDFB61204E0027E6 /* PaintSoftware/Engine/RasterSource.swift */; };
+		36A461ABC706F5D17268285F /* RasterResidencyLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4F38094FCC8E64305588F07 /* RasterResidencyLogicTests.swift */; };
+		28B2A653638FFE0447938DD8 /* PaintSoftware/Engine/RasterResidency.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC13BB925D9D1BFA22318A3B /* PaintSoftware/Engine/RasterResidency.swift */; };
 		CCC845F2EB659522BE49431E /* PaintSoftware/Debug/ProjectExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 823BB1F863783AA0FF26DAF3 /* PaintSoftware/Debug/ProjectExport.swift */; };
 		E1E342750E0F4D8FB48E8FD4 /* PaintSoftware/Engine/CelContentPicture.swift in Sources */ = {isa = PBXBuildFile; fileRef = A43D60939A504EDEB69E4D85 /* PaintSoftware/Engine/CelContentPicture.swift */; };
 		EB715D199C9A45858093EE9C /* PaintSoftwareUITests/LiquifyRasterUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90438967736E4BB68AB44096 /* PaintSoftwareUITests/LiquifyRasterUITests.swift */; };
@@ -665,6 +669,10 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		6815809A8C5C2CD0814FF3F3 /* PaintSoftware/Services/ProjectStore+RasterBacking.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Services/ProjectStore+RasterBacking.swift"; sourceTree = "<group>"; };
+		58A4A7FCCDFB61204E0027E6 /* PaintSoftware/Engine/RasterSource.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/RasterSource.swift; sourceTree = "<group>"; };
+		B4F38094FCC8E64305588F07 /* RasterResidencyLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RasterResidencyLogicTests.swift; sourceTree = "<group>"; };
+		FC13BB925D9D1BFA22318A3B /* PaintSoftware/Engine/RasterResidency.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/RasterResidency.swift; sourceTree = "<group>"; };
 		823BB1F863783AA0FF26DAF3 /* PaintSoftware/Debug/ProjectExport.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Debug/ProjectExport.swift; sourceTree = "<group>"; };
 		A43D60939A504EDEB69E4D85 /* PaintSoftware/Engine/CelContentPicture.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/CelContentPicture.swift; sourceTree = "<group>"; };
 		90438967736E4BB68AB44096 /* PaintSoftwareUITests/LiquifyRasterUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftwareUITests/LiquifyRasterUITests.swift; sourceTree = "<group>"; };
@@ -1580,6 +1588,7 @@
 				6ECCCE7505BC846AA447145A /* FolderGraphBandUITests.swift */,
 				C33AFF1E0000000000000001 /* EffectParameterTrackLogicTests.swift */,
 				7C0400946A49A2883CBAEF2F /* MemoryBudgetLogicTests.swift */,
+				B4F38094FCC8E64305588F07 /* RasterResidencyLogicTests.swift */,
 				B87AF22B470D6379F6E590B9 /* PlaybackEngagementLogicTests.swift */,
 				C70989B34DF5634378495B7A /* PlaybackBudgetBench.swift */,
 				B15594D42CD2BEE2DF454CD2 /* PlaybackBakeUITests.swift */,
@@ -1886,6 +1895,9 @@
 				344AB6EF738BCF9D5FD1580E /* PaintSoftware/Models/BrushColorState.swift */,
 				0571EF8FDE440FCB2D862719 /* PaintSoftware/Engine/FillWindow.swift */,
 				DEC0DE00000000000000000F /* PaintSoftware/Engine/RasterLayerTexture.swift */,
+				6815809A8C5C2CD0814FF3F3 /* PaintSoftware/Services/ProjectStore+RasterBacking.swift */,
+				58A4A7FCCDFB61204E0027E6 /* PaintSoftware/Engine/RasterSource.swift */,
+				FC13BB925D9D1BFA22318A3B /* PaintSoftware/Engine/RasterResidency.swift */,
 				10E06D42DAEB5E1219F94B87 /* PaintSoftware/Engine/StrokeScratch.swift */,
 				DEC0DE000000000000000011 /* PaintSoftware/Engine/StrokeInput.swift */,
 				DEC0DE000000000000000013 /* PaintSoftware/Engine/VectorLayer.swift */,
@@ -2368,6 +2380,7 @@
 				A11CE0DE0000000000000002 /* AnimationCurveLogicTests.swift in Sources */,
 				C33AFF1E0000000000000002 /* EffectParameterTrackLogicTests.swift in Sources */,
 				194F7F121F6B015E2AF2248A /* MemoryBudgetLogicTests.swift in Sources */,
+				36A461ABC706F5D17268285F /* RasterResidencyLogicTests.swift in Sources */,
 				16D31DA4BD1FC7197121E9D5 /* PlaybackEngagementLogicTests.swift in Sources */,
 				E60BB146B0C2EB78139BC7ED /* PlaybackBudgetBench.swift in Sources */,
 				348A6846E7C59368E7B805A4 /* PlaybackBakeUITests.swift in Sources */,
@@ -2557,6 +2570,9 @@
 				DEC0DE00000000000000000C /* PaintSoftware/Engine/BrushStamper.swift in Sources */,
 				DEC0DE00000000000000000E /* PaintSoftware/Engine/MetalFillEngine.swift in Sources */,
 				DEC0DE000000000000000010 /* PaintSoftware/Engine/RasterLayerTexture.swift in Sources */,
+				F8A6E200A499A50028393691 /* PaintSoftware/Services/ProjectStore+RasterBacking.swift in Sources */,
+				6401F14A965B83D66916DF99 /* PaintSoftware/Engine/RasterSource.swift in Sources */,
+				28B2A653638FFE0447938DD8 /* PaintSoftware/Engine/RasterResidency.swift in Sources */,
 				F0E93626C7BE622D801362A5 /* PaintSoftware/Engine/StrokeScratch.swift in Sources */,
 				DEC0DE000000000000000012 /* PaintSoftware/Engine/StrokeInput.swift in Sources */,
 				DEC0DE000000000000000014 /* PaintSoftware/Engine/VectorLayer.swift in Sources */,

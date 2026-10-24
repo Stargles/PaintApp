@@ -1518,7 +1518,7 @@ enum ProjectStore {
         var files: [String] = []
         func png(_ image: UIImage) -> Data? {
             let started = CFAbsoluteTimeGetCurrent()
-            let data = image.pngData()
+            let data = encodeRasterPNG(image)
             cost.encodeSeconds += CFAbsoluteTimeGetCurrent() - started
             cost.encoded += 1
             return data
@@ -1668,13 +1668,7 @@ enum ProjectStore {
             let src = ProjectPackageLayout.resolve(path, in: source)
             let dst = ProjectPackageLayout.resolve(path, in: stage)
             if fm.fileExists(atPath: dst.path) { continue }
-            let status: Int32 = src.withUnsafeFileSystemRepresentation { s in
-                dst.withUnsafeFileSystemRepresentation { d in
-                    guard let s, let d else { return -1 }
-                    return clonefile(s, d, 0)
-                }
-            }
-            if status == 0 || fm.fileExists(atPath: dst.path) || (try? fm.copyItem(at: src, to: dst)) != nil {
+            if cloneRasterResource(from: src, to: dst) || fm.fileExists(atPath: dst.path) {
                 cloned.append(dst)
                 continue
             }
@@ -1682,6 +1676,22 @@ enum ProjectStore {
             return false
         }
         return true
+    }
+
+    /// The same PNG serializer serves normal project saves and immutable source checkpoints.
+    static func encodeRasterPNG(_ image: UIImage) -> Data? { image.pngData() }
+
+    /// Resource copies stay file based on non-APFS volumes; no complete PNG passes through Data.
+    static func cloneRasterResource(from source: URL, to destination: URL) -> Bool {
+        let status: Int32 = source.withUnsafeFileSystemRepresentation { sourcePath in
+            destination.withUnsafeFileSystemRepresentation { destinationPath in
+                guard let sourcePath, let destinationPath else { return -1 }
+                return clonefile(sourcePath, destinationPath, 0)
+            }
+        }
+        if status == 0 { return true }
+        do { try FileManager.default.copyItem(at: source, to: destination); return true }
+        catch { return false }
     }
 
     // MARK: - Loading
