@@ -100,7 +100,7 @@ triggered reentrantly.
 - [ ] Rebuild normal source, run relevant class selectors, then qualify fast Debug/Release, count and
       lint gates as assigned by root. No native gate has run yet; don't merge/install.
 
-External mutation plan: `~/PaintWork/s54-background-ownership-native-plan-19ac3106.md`.
+External mutation plan: `~/PaintWork/s54-background-ownership-native-plan-3238a5fe.md`.
 
 ---
 

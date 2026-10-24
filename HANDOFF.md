@@ -25,9 +25,10 @@ Installed normal Release remains bcd7a6af, UUID F6102F9A-6D31-3185-B078-47B4C419
   See the external mutation plan in `~/PaintWork/s54-architecture-audit/library-ownership/`. No native
   build/runtime/UI/mutation gate has run. WIP, do not merge.
 - Audit background tree: `~/PaintWork/PaintApp-s54-background-ownership`, tmp/s54-background-ownership.
-  Rebased from fd73d821 onto library-ready `9d3ff76e`; export cancellation, maintenance serialization,
-  and bounded/cancelled thumbnails with five regressions. No native compile/runtime/UI/mutation gate.
-  Current full SHA is set after the rebase finishes. WIP, do not merge.
+  Rebased from fd73d821 onto library-ready 9d3ff76e; current full HEAD
+  3238a5fec226279fbe5edc8a89890d39800b583b. Export cancellation, maintenance serialization and
+  bounded/cancelled thumbnails; five regressions. No native compile/runtime/UI/mutation gate. WIP,
+  do not merge.
 - The empty, unused s54-test-safety worktree/branch was removed; no code/history was lost. Subagents
   hit account usage limits; root preserved partial implementations and completed initial tests/PBX.
   Do not assume those snapshots are finished or repeatedly retry limited agents without a changed limit.
@@ -204,8 +205,7 @@ change is attributed to either driver failure.
 
 ## Background lifecycle WIP — rebased on library-ready
 
-The three production fixes and five new regression methods are unchanged atop the library-ready tree.
-The dependency's current TODO/HANDOFF/BUGS records remain authoritative; this branch's focused review
-found no concrete production defect. Current-format fixture scan found no legacy-format assumptions.
-Native qualification remains pending, and the external plan is pinned to the former source SHA until
-this rebase completes.
+The library-ready dependency's TODO/HANDOFF/BUGS records remain authoritative; this branch's focused
+review found no concrete production defect. Current-format fixture scan found no legacy-format
+assumptions. Native qualification remains pending. The refreshed external mutation plan is pinned to
+3238a5fec226279fbe5edc8a89890d39800b583b.
