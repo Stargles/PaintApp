@@ -91,6 +91,52 @@ final class ProjectFolderLogicTests: XCTestCase {
                       "and the folder itself survived the sweep")
     }
 
+    func testStartupCleanupWaitsForAnOwnedSaveStageToLand() async throws {
+        let fm = FileManager.default
+        let folder = try ProjectStore.createFolder(named: "Sequence 1", in: ProjectStore.projectsDirectory)
+        let stage = folder.appendingPathComponent(".saving-\(UUID().uuidString)", isDirectory: true)
+        let landed = folder.appendingPathComponent("Saved.paintproj", isDirectory: true)
+        let stale = folder.appendingPathComponent(".saving-abandoned", isDirectory: true)
+        try fm.createDirectory(at: stage, withIntermediateDirectories: true)
+        try fm.createDirectory(at: stale, withIntermediateDirectories: true)
+        let payload = Data("the active save's new artwork".utf8)
+        try payload.write(to: stage.appendingPathComponent("drawing"))
+        let ownsStage = expectation(description: "the save owns its stage on the mutation queue")
+        let saveFinished = expectation(description: "the owned stage landed")
+        let cleanupStarted = expectation(description: "startup maintenance attempted cleanup")
+        let cleanupFinished = expectation(description: "startup maintenance completed")
+        let release = DispatchSemaphore(value: 0)
+        let completed = DispatchSemaphore(value: 0)
+        defer { release.signal() }
+        DispatchQueue.global().async {
+            ProjectStore.serializingPackageMutation {
+                ownsStage.fulfill()
+                guard release.wait(timeout: .now() + 30) == .success else {
+                    XCTFail("The test did not release its held save transaction")
+                    return
+                }
+                do { try fm.moveItem(at: stage, to: landed) }
+                catch { XCTFail("The active stage disappeared before its save could land: \(error)") }
+            }
+            saveFinished.fulfill()
+        }
+        await fulfillment(of: [ownsStage], timeout: 30)
+        DispatchQueue.global().async {
+            cleanupStarted.fulfill()
+            ProjectBackupManager.cleanupStaleSaveDirectories()
+            completed.signal()
+            cleanupFinished.fulfill()
+        }
+        await fulfillment(of: [cleanupStarted], timeout: 30)
+        XCTAssertEqual(completed.wait(timeout: .now() + 0.2), .timedOut,
+                       "Cleanup must wait behind a live package transaction")
+        XCTAssertEqual(try Data(contentsOf: stage.appendingPathComponent("drawing")), payload)
+        release.signal()
+        await fulfillment(of: [saveFinished, cleanupFinished], timeout: 30)
+        XCTAssertEqual(try Data(contentsOf: landed.appendingPathComponent("drawing")), payload)
+        XCTAssertFalse(fm.fileExists(atPath: stale.path), "Abandoned stages are still swept afterward")
+    }
+
     /// **Deleting a folder trashes every project inside it individually.** Not `removeItem` on the
     /// directory, which is the obvious implementation and would be this storage layer's first
     /// unrecoverable delete. Each package lands in Recently Deleted under its own name, so the
