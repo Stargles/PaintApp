@@ -54,6 +54,11 @@ Both corrections are test-only; no production/fixture bytes/policy changed. Seri
 atf55 ran1pass/3fail,0skip,728 exact, supporting the callback trace; no successor normal run yet.
 The curve source fix adds2 logic and1 drawn landscape UI method; it is source-reviewed, unrun.
 
+Owner-size brush UI gap recorded before edit: the A→B→A preview test inherits portrait and only
+attaches cropped row pictures. Root authorizes test-only landscapeLeft before launchCold and three
+XCUIScreen.main attachments. Keep row.screenshot sampling, all oracles and counts unchanged; no
+hardcoded device-size assertion/helper/API. Root will use actual iPad9 and inspect whole captures.
+
 ## Qualification that actually exists
 
 Normal combined f475bb93599d2fb1b5b5785931bb2a87cc553424 passed847/847, zero failures/skips, all724

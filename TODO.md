@@ -34,6 +34,11 @@ Final source normal/mutants, fast Debug/Release, affected cold UI/pictures,
 paired performance, whole-library cold startup and physical-device gates remain open. Root owns the
 sole Mac native slot; never edit its independent frozen1cf check tree. Live status/details are in HANDOFF.md.
 
+Owner-size brush UI gap recorded before edit: the A→B→A preview test inherits portrait and only
+attaches cropped row pictures. Root authorizes test-only landscapeLeft before launchCold and three
+XCUIScreen.main attachments. Keep row.screenshot sampling, all oracles and counts unchanged; no
+hardcoded device-size assertion/helper/API. Root will use actual iPad9 and inspect whole captures.
+
 ## How to read and keep this file
 
 Every item is a **status**, a short **description** a future session can pick up cold, and **what is

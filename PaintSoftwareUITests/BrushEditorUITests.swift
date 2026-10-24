@@ -640,6 +640,7 @@ final class BrushEditorUITests: PaintUITestCase {
     /// rather than keep the Square image in the same SwiftUI row's state.
     func testARevertedBrushRowShowsItsOriginalPreviewAgain() throws {
         let app = XCUIApplication()
+        XCUIDevice.shared.orientation = .landscapeLeft
         XCTAssertTrue(launchCold(app))
         openBrushLibrary(app)
 
@@ -676,7 +677,7 @@ final class BrushEditorUITests: PaintUITestCase {
 
         let initialRow = try selectedRow()
         let roundPixels = try previewPixels(initialRow)
-        attachScreenshot(initialRow, "Brush row — Round before editing")
+        attachScreenshot(XCUIScreen.main, "Brush row — Round before editing")
 
         tapWhenHittable(initialRow, "Reopen the selected brush editor")
         let roundTip = app.buttons["brushPanel.tipPicker"]
@@ -694,7 +695,7 @@ final class BrushEditorUITests: PaintUITestCase {
         }
         XCTAssertGreaterThan(worstChannelDifference(roundPixels, squarePixels), 5,
                           "The menu row must draw the edited Square preview, not only expose the selected tip")
-        attachScreenshot(squareRow, "Brush row — Square after editing")
+        attachScreenshot(XCUIScreen.main, "Brush row — Square after editing")
 
         tapWhenHittable(squareRow, "Reopen the selected brush editor")
         let squareTip = app.buttons["brushPanel.tipPicker"]
@@ -711,7 +712,7 @@ final class BrushEditorUITests: PaintUITestCase {
         }
         XCTAssertLessThanOrEqual(worstChannelDifference(roundPixels, revertedPixels), 2,
                        "Returning to Round must draw the original deterministic cached preview")
-        attachScreenshot(revertedRow, "Brush row — Round after reverting")
+        attachScreenshot(XCUIScreen.main, "Brush row — Round after reverting")
     }
 
     // MARK: - Helpers
