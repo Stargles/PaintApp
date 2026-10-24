@@ -785,8 +785,8 @@ final class StripedCompositeLogicTests: XCTestCase {
 
     /// **A strip that still does not fit is chunked, by the existing formula and with no special
     /// case.** This is the composition claim stated as an assertion rather than as prose: at the
-    /// height the planner picks, `chunkSources` answers exactly 1 — so every strip of an oversized
-    /// frame is *also* cut node by node, and the picture still has to be the same one.
+    /// height the planner picks, `chunkSources` affords the indivisible two-source masked leaf,
+    /// while the rest of the tree still requires several chunks. Both cuts must execute.
     ///
     /// The zoo is the fixture because it holds a buffered folder, a mask reaching across the stack
     /// and two `.ink` effects: all three are chunk-boundary hazards, and here they are met inside a
@@ -802,16 +802,24 @@ final class StripedCompositeLogicTests: XCTestCase {
         XCTAssertGreaterThan(plan.count, 1, "Premise: the frame must be cut in space")
 
         let tallest = plan.map(\.buffer.size).max { $0.height < $1.height } ?? .zero
-        XCTAssertEqual(ChunkedCompositor.chunkSources(for: recipe.tree, canvasSize: tallest,
-                                                      budgetBytes: budget), 1,
-                       "The planner takes the tallest strip that affords one leaf, so the node cut is "
-                       + "at its tightest inside it — both cuts are live in this test")
-        let chunks = ChunkedCompositor.plan(recipe.tree, maskStacks: recipe.maskStacks, maxSources: 1)
+        XCTAssertEqual(ChunkedCompositor.minimumSources(for: recipe.tree, maskStacks: recipe.maskStacks), 2,
+                       "The zoo's indivisible masked leaf needs itself and its external source")
+        let width = ChunkedCompositor.chunkSources(for: recipe.tree, canvasSize: tallest, budgetBytes: budget)
+        XCTAssertEqual(width, 2, "The tallest strip affords exactly the masked source floor")
+        let chunks = ChunkedCompositor.plan(recipe.tree, maskStacks: recipe.maskStacks, maxSources: width)
         XCTAssertGreaterThan(chunks.count, 1, "and it really does cut the tree as well")
 
-        assertStrippedMatchesWhole(manager, stripBufferRows: rows,
-                                   "Strips outside, chunks inside: a buffered folder, a mask reaching "
-                                   + "across the stack and two ink effects all cut both ways at once")
+        MaskResolver.clearCache()
+        let whole = Compositor.composite(recipe.resolve())
+        MaskResolver.clearCache()
+        PixelOps.clearRasterizeCache()
+        CompositeProbe.begin()
+        let stripped = recipe.composite(budgetBytes: budget)
+        let draws = CompositeProbe.end()
+        XCTAssertGreaterThan(draws.count, plan.count, "Real execution must composite multiple chunks inside strips")
+        XCTAssertTrue(draws.allSatisfy { size in plan.contains { $0.buffer.size == size } },
+                      "Every executed chunk must draw into an actual planned strip buffer")
+        assertPixelsIdentical(stripped, whole, "The real nested cuts preserve every drawn byte")
     }
 
     /// **An `.ink` effect at a strip boundary needs nothing but the apron**, which is the one place

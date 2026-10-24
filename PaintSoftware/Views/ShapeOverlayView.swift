@@ -22,7 +22,7 @@ import UIKit
 /// In both modes this view only ever claims the touches that land on a handle **or on the shape's
 /// own outline** — see `hitTest`. Everything else falls through to the stroke view underneath, which
 /// is what lets the user start the next stroke straight over a pending shape: the touch that begins
-/// that stroke commits the shape on its way past (`onStrokeBegan` → `commitTransientsAndRefresh`) and
+/// that stroke commits the shape on its way past (the prepared stroke begin action → `commitTransientsAndRefresh`) and
 /// then draws, instead of being swallowed as a "dismiss" that has to be followed by a second,
 /// separate touch.
 ///

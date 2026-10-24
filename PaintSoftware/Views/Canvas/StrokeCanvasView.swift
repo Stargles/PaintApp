@@ -59,10 +59,10 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// `CanvasManager.strokeEnded` for thumbnail regen / undo-button refresh.
     var onStrokeEnded: (() -> Void)?
 
-    /// Called at stroke start so a still-adjustable fill commits before this stroke's own undo step
-    /// registers — keeping undo order intuitive (stroke undoes first, fill after). False refuses
-    /// before any gesture pixels or stroke state are created.
-    var onStrokeBegan: (() -> Bool)?
+    /// Prepares required drawing inputs without changing the document. Nil refuses the touch.
+    /// The returned action commits transients/spawns the cel only after an admitted timing take
+    /// has entered playback, so the cel and prepared inputs belong to the same entry frame.
+    var prepareStroke: (Int) -> (() -> Void)? = { _ in {} }
     /// Called when a stroke is abandoned *and rolled back* — `StrokeGiveUp.handedOver` only. An
     /// interrupted stroke commits instead and reports through `onStrokeEnded`, so this stays what it
     /// always was: "the layer is back where it started".
@@ -1518,7 +1518,8 @@ final class StrokeCanvasView: CanvasPlaneView {
     }
 
     private func beginLiquifyGesture(_ touch: UITouch) {
-        guard onStrokeBegan?() ?? true else { return }
+        guard let beginStroke = prepareStroke(canvasManager?.currentFrame ?? 0) else { return }
+        beginStroke()
         strokeSeed = DabRandom.freshSeed()
         liveWalk = BrushStamper.LiveWalk(seed: strokeSeed)
         lastSampleTime = nil
@@ -1631,9 +1632,9 @@ final class StrokeCanvasView: CanvasPlaneView {
         guideOverlayNeedsUpdate?([])
     }
 
-    /// **Why the two interpolate-mode gates run before `onStrokeBegan` and still work.**
+    /// **Why the two interpolate-mode gates run before the prepared begin action and still work.**
     ///
-    /// `onStrokeBegan` is where the coordinator spawns a block on a frame that has none and hands
+    /// The prepared begin action spawns a block on a frame that has none and hands
     /// this view the new cel's tiers (`attachSpawnedCelIfFrameIsEmpty`), so before it returns
     /// `vectorCanvas` is nil on exactly the frames that have no block yet. Both gates used to ask
     /// `vectorCanvas != nil` as their "is this a vector layer?" test, which is true for a vector layer
@@ -1643,28 +1644,25 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// same shape of mistake as the blank-frame drawing bug, one layer up.
     ///
     /// The fix is in the gates, not in this ordering: they now ask `LayerKind`, which does not depend
-    /// on whether a cel exists yet. Moving `onStrokeBegan?()` above them instead — the obvious reading
+    /// on whether a cel exists yet. Moving the prepared begin action above them instead — the obvious reading
     /// of "fix the ordering" — was rejected, and would have been a worse bug than the one it closed.
-    /// `onStrokeBegan` latches `isSandwichStrokeLive` and arms the shape-detection timer, and neither
+    /// The begin action latches `isSandwichStrokeLive` and arms the shape-detection timer, and neither
     /// gate's exit path reaches `onStrokeEnded` (`handleEnd` returns at its own guide/retag checks).
     /// Running it first would therefore strand both latches past lift on every guide stroke and every
     /// retag tap, leaving the canvas parked in its mid-stroke approximation while idle — precisely the
-    /// failure `CanvasView`'s `onStrokeBegan` comment orders `sandwichStrokeBegan` after the cel spawn
+    /// failure the coordinator avoids by calling `sandwichStrokeBegan` after the cel spawn
     /// to avoid. It would also spawn a block for a guide stroke, which is not a drawing at all.
     private func handleBegin(_ touch: UITouch) {
         if strokeTool == .liquify { beginLiquifyGesture(touch); return }
         if beginGuideStrokeIfArmed(touch) { return }
         if consumeAsMotionGroupTap(touch) { return }
-        // **Before `onStrokeBegan`, and that ordering is load-bearing** — KEYFRAMES.md §7 stage 10.
-        // §5.1's rule is "on touch-down, before the surface opens its own undo bracket", and here it
-        // is also before the *cel spawn*: starting a take calls `play()`, which replays from the top
-        // when the playhead is parked at the end of the scene, so a block spawned first would be
-        // spawned on the frame the artist has just left.
-        let timingCelsBefore = beginTimingTakeIfArmed()
-        guard onStrokeBegan?() ?? true else {
-            if timingCelsBefore != nil { canvasManager?.timingStrokeIsLive = false }
-            return
-        }
+        // Prepare against the frame playback will enter, without changing the recorder. Only an
+        // admitted touch starts the take; playback must still precede the begin action's cel spawn
+        // so a take rewinding from the end creates its cel on the frame the artist will draw.
+        let timing = timingTakeStart()
+        guard let beginStroke = prepareStroke(timing?.frame ?? canvasManager?.currentFrame ?? 0) else { return }
+        let timingCelsBefore = beginTimingTakeIfArmed(timing)
+        beginStroke()
         // BRUSH.md §4: the field exists from the first dab, so what the pen lays down and what the
         // stored stroke replays are drawn from the same randomness.
         strokeSeed = DabRandom.freshSeed()
@@ -1677,7 +1675,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         if vectorCanvas != nil { beginVectorStroke(touch, timingCelsBefore: timingCelsBefore); return }
         // **A take was started and this gesture cannot contribute to it**, which is reachable only
         // when the cel spawn above failed on a vector layer. The flag is set at the arm because
-        // `onStrokeBegan` reads it — `startShapeDetection` declines while a timing stroke is live —
+        // the prepared begin action reads it — `startShapeDetection` declines while a timing stroke is live —
         // so it is set before there is a `TimingStroke` to prove it, and it must not outlive the one
         // touch that could have made one. A latch nobody clears is the failure `endTimingStroke`
         // exists to describe, reached before the state it clears was ever built.
@@ -1959,7 +1957,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         let layerID: UUID
         let target: KeyframeTarget
         /// The layer's blocks as the pen landed, so one undo press takes back the blocks the take
-        /// had to make as well as the ink. Captured *before* `onStrokeBegan` spawns one.
+        /// had to make as well as the ink. Captured *before* the prepared begin action spawns one.
         let celsBefore: [Cel]
         /// Ascending indices into `currentVectorSamples`; each is shared by the run it ends and the
         /// run it begins. `TimingStrokeCut.split` is what spends them.
@@ -2003,7 +2001,11 @@ final class StrokeCanvasView: CanvasPlaneView {
     ///
     /// - Returns: the active layer's blocks as they are right now when a take is running on this
     ///   layer, or nil when this is an ordinary stroke.
-    private func beginTimingTakeIfArmed() -> [Cel]? {
+    private typealias TimingTakeStart = (target: KeyframeTarget, isRecordable: Bool, frame: Int)
+
+    /// Plan the frame before any arm, clock, undo bracket or ink-touch mutation. The same playback
+    /// entry rule used by `startRecording` chooses which frozen mask the admitted stroke needs.
+    private func timingTakeStart() -> TimingTakeStart? {
         guard let manager = canvasManager, let layerID,
               manager.isRecordingArmed || manager.isRecording,
               manager.layers.indices.contains(manager.currentLayerIndex) else { return nil }
@@ -2017,14 +2019,22 @@ final class StrokeCanvasView: CanvasPlaneView {
         // cel's own canvas — neither is a cut this feature knows how to make.
         let canRecord = manager.layers[index].kind == .vector && strokeTool != .eraser
             && manager.inBetweenCelID(inLayer: layerID) == nil
-        guard manager.beginArmedTake(on: target, isRecordable: canRecord) else { return nil }
+        let entersPlayback = manager.isRecordingArmed && !manager.isRecording && !manager.isPlaying
+            && canRecord && manager.playbackEndFrame > manager.playbackStartFrame
+        return (target, canRecord, entersPlayback ? manager.playbackEntryFrame() : manager.currentFrame)
+    }
+
+    private func beginTimingTakeIfArmed(_ start: TimingTakeStart?) -> [Cel]? {
+        guard let start, let manager = canvasManager,
+              manager.layers.indices.contains(manager.currentLayerIndex),
+              manager.beginArmedTake(on: start.target, isRecordable: start.isRecordable) else { return nil }
         // At pen-down rather than at the commit, because a take ends at the end of the scene — very
         // often while the pen is still down — and the take that ended would then have reported
         // `.nothingCaptured` over a canvas the artist had just drawn across. Putting the pen on the
         // canvas during a take *is* touching a control, which is the question that refusal asks.
-        manager.noteRecordedInk(on: target)
+        manager.noteRecordedInk(on: start.target)
         manager.timingStrokeIsLive = true
-        return manager.layers[index].cels
+        return manager.layers[manager.currentLayerIndex].cels
     }
 
     /// **The playhead has moved under a live timing stroke — cut here.** Called synchronously from

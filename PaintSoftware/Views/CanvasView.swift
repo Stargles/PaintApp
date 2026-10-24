@@ -821,49 +821,51 @@ struct CanvasView: UIViewRepresentable {
                     self.liveGuidePoints = samples.map(\.point)
                     self.updateGuideOverlay()
                 }
-                host.strokeView.onStrokeBegan = { [weak self, weak host] in
+                host.strokeView.prepareStroke = { [weak self, weak host] frame in
                     guard let self, let host, let layerID = host.strokeView.layerID,
                           let index = self.canvasManager.layers.firstIndex(where: { $0.id == layerID })
-                    else { return false }
+                    else { return nil }
                     let mask: CGImage?
-                    switch self.resolveLiveMask(forLayerAt: index) {
+                    switch self.resolveLiveMask(forLayerAt: index, atFrame: frame) {
                     case .success(let prepared): mask = prepared
                     case .failure:
                         self.canvasManager.raise(.drawingSourceUnavailable)
-                        return false
+                        return nil
                     }
-                    // The autosave waits for the lift — see `CanvasManager.strokeIsLive`.
-                    self.canvasManager.strokeIsLive = true
-                    // A stroke is a canvas edit, so any adjustable fill/shape bakes before this one
-                    // changes a pixel: they become older undo steps, and this stroke's undo
-                    // snapshot (taken after this returns) includes the baked content. This is also
-                    // what lets drawing straight over a pending shape work in one touch — the first
-                    // touch bakes the shape and then goes on to draw.
-                    self.commitTransientsAndRefresh()
-                    // Drawing on a frame with no block spawns one, right here, before the stroke
-                    // reaches for its content tier. `handleBegin` calls this and *then* reads
-                    // `vectorCanvas`/`raster`, so attaching the new cel's tiers synchronously is
-                    // what lets the very touch that created the block also draw into it — a
-                    // deferred refresh would drop the first stroke on the floor.
-                    self.attachSpawnedCelIfFrameIsEmpty(host: host)
-                    // After the cel spawn, and conditional on there being a tier to stamp into:
-                    // `StrokeCanvasView.handleBegin` returns without ever reaching `onStrokeEnded`
-                    // when both tiers are nil (the eraser on a frame with no block is the reachable
-                    // case, since `attachSpawnedCelIfFrameIsEmpty` excludes it), and a latch set
-                    // before that check would never be cleared — leaving the canvas showing the
-                    // mid-stroke approximation while idle.
-                    self.sandwichStrokeBegan(host: host)
-                    // After `sandwichStrokeBegan`, which latches the mid-stroke state this reads,
-                    // and after the cel spawn, which is what decides whether there is a stroke at
-                    // all. §6.4: resolved here, once, and static until lift.
-                    self.liveMaskImage = mask
-                    host.setContentMask(mask)
-                    // Last, so it sees both the latch and the resolved mask. Without it the latch
-                    // above is a variable nothing reads until some unrelated SwiftUI pass happens
-                    // to come along — see `applySandwichPresentationNow`.
-                    self.applySandwichPresentationNow()
-                    self.startShapeDetection(host: host)
-                    return true
+                    return { [weak self, weak host] in
+                        guard let self, let host else { return }
+                        // The autosave waits for the lift — see `CanvasManager.strokeIsLive`.
+                        self.canvasManager.strokeIsLive = true
+                        // A stroke is a canvas edit, so any adjustable fill/shape bakes before this one
+                        // changes a pixel: they become older undo steps, and this stroke's undo
+                        // snapshot (taken after this returns) includes the baked content. This is also
+                        // what lets drawing straight over a pending shape work in one touch — the first
+                        // touch bakes the shape and then goes on to draw.
+                        self.commitTransientsAndRefresh()
+                        // Drawing on a frame with no block spawns one, right here, before the stroke
+                        // reaches for its content tier. `handleBegin` calls this and *then* reads
+                        // `vectorCanvas`/`raster`, so attaching the new cel's tiers synchronously is
+                        // what lets the very touch that created the block also draw into it — a
+                        // deferred refresh would drop the first stroke on the floor.
+                        self.attachSpawnedCelIfFrameIsEmpty(host: host)
+                        // After the cel spawn, and conditional on there being a tier to stamp into:
+                        // `StrokeCanvasView.handleBegin` returns without ever reaching `onStrokeEnded`
+                        // when both tiers are nil (the eraser on a frame with no block is the reachable
+                        // case, since `attachSpawnedCelIfFrameIsEmpty` excludes it), and a latch set
+                        // before that check would never be cleared — leaving the canvas showing the
+                        // mid-stroke approximation while idle.
+                        self.sandwichStrokeBegan(host: host)
+                        // After `sandwichStrokeBegan`, which latches the mid-stroke state this reads,
+                        // and after the cel spawn, which is what decides whether there is a stroke at
+                        // all. §6.4: resolved here, once, and static until lift.
+                        self.liveMaskImage = mask
+                        host.setContentMask(mask)
+                        // Last, so it sees both the latch and the resolved mask. Without it the latch
+                        // above is a variable nothing reads until some unrelated SwiftUI pass happens
+                        // to come along — see `applySandwichPresentationNow`.
+                        self.applySandwichPresentationNow()
+                        self.startShapeDetection(host: host)
+                    }
                 }
                 host.strokeView.onStrokeCancelled = { [weak self] in
                     guard let self else { return }
@@ -1629,7 +1631,7 @@ struct CanvasView: UIViewRepresentable {
             layerHosts[canvasManager.layers[index].id]?.strokeView.timingStrokeFrameAdvanced()
         }
 
-        /// Latches the mid-stroke state. Called from `onStrokeBegan` *after* the cel spawn — see the
+        /// Latches the mid-stroke state. Called from the prepared begin action *after* the cel spawn — see the
         /// comment there for why the condition is load-bearing rather than defensive.
         /// **A timing stroke is not a mid-stroke, and latching it as one freezes the animation** —
         /// KEYFRAMES.md §7.2, stage 10.
@@ -1664,11 +1666,11 @@ struct CanvasView: UIViewRepresentable {
         /// assertion about the canvas is taken after lift, where `full` has the stroke and
         /// everything looks right.
         ///
-        /// This is the same reasoning `onStrokeBegan` already gives for resolving the mask at
+        /// This is the same reasoning the prepared begin action already gives for resolving the mask at
         /// touch-down rather than leaving it to the next pass. Blanking needed it too.
         ///
         /// Deriving the tree is off `reconcileLayers`'s per-pass budget, but this is once per
-        /// *stroke*, never per dab, and `onStrokeBegan` on the same touch already builds a
+        /// *stroke*, never per dab, and the prepared begin action on the same touch already builds a
         /// metadata recipe. It schedules no composite: `makeSandwichKey` freezes the active
         /// layer's content version for the dab's duration, so the key has not moved and the
         /// compositor stays off the drawing path.
@@ -2492,14 +2494,14 @@ struct CanvasView: UIViewRepresentable {
         ///
         /// The recipe lets the shared mask cache answer before any source pixels are resolved.
         /// A miss resolves only the mask's dependencies; unrelated leaves do no pixel work.
-        private func resolveLiveMask(forLayerAt index: Int) -> Result<CGImage?, MaskResolver.Failure> {
+        private func resolveLiveMask(forLayerAt index: Int, atFrame frame: Int) -> Result<CGImage?, MaskResolver.Failure> {
             // The same frame the request below is built at, and it has to be: the two are compared
             // against each other by `MaskResolver`'s cache, so a tree derived at one frame and a
             // request at another would be a cache key describing a document that never existed.
             guard let masks = RenderNode.masksClipping(leafAt: index,
-                                                       in: canvasManager.renderTree(atFrame: canvasManager.currentFrame)),
+                                                       in: canvasManager.renderTree(atFrame: frame)),
                   !masks.isEmpty else { return .success(nil) }
-            guard let recipe = canvasManager.liveMaskRecipe(atFrame: canvasManager.currentFrame)
+            guard let recipe = canvasManager.liveMaskRecipe(atFrame: frame)
             else { return .failure(.sourceUnavailable) }
             return MaskResolver.coverage(for: masks, of: recipe).flatMap { resolved in
                 // Deleted sources remain neutral under the existing mask contract.
@@ -3070,7 +3072,7 @@ struct CanvasView: UIViewRepresentable {
         /// Spawns a block on the active layer when the stroke that is *just now beginning* landed on
         /// a frame no block covers, and hands its content tiers straight to the stroke view.
         ///
-        /// Called from `onStrokeBegan`, which `StrokeCanvasView.handleBegin` invokes before it reads
+        /// Called from the prepared begin action, which `StrokeCanvasView.handleBegin` invokes before it reads
         /// `vectorCanvas`/`raster` — so the tiers assigned here are the ones this very stroke stamps
         /// into. Going through `reconcileLayers` instead would not do: it runs on the next SwiftUI
         /// render, by which time `handleBegin` has already given up on a nil raster and the stroke
@@ -3849,8 +3851,7 @@ struct CanvasView: UIViewRepresentable {
                 // budget parked where nobody can see it.
                 if !view.isHidden { view.isHidden = true }
                 if view.image != nil { view.image = nil }
-                if view.layer.mask != nil { view.layer.mask = nil }
-                onionSkinMaskImage = nil
+                applyOnionSkinMask(nil, to: view, canvasSize: canvasManager.canvasSize ?? .zero)
                 onionSkinKeyImages = []
                 onionSkinKeyMask = nil
                 onionRequestedKey = nil
@@ -3869,11 +3870,8 @@ struct CanvasView: UIViewRepresentable {
             // during playback"*) are decided once, on the protocol, so a source cannot forget one.
             // An empty answer falls into the `blank()` below, which hides the view *and* drops the
             // skin-sized images, so a playing animation neither draws ghosts nor holds their pixels.
-            guard let frames = PlaybackTrace.span(.onionFrames, { source.visibleFrames(for: canvasManager) }) else {
-                onionRequestedKey = nil
-                onionRebuilds.cancel()
-                return
-            }
+            guard let frames = PlaybackTrace.span(.onionFrames, { source.visibleFrames(for: canvasManager) })
+            else { return blank() }
             guard !frames.isEmpty, let canvasSize = canvasManager.canvasSize else { return blank() }
 
             // **§6.4's mask, applied to the ghost as well as to the artwork.** BUGS.md's
@@ -3897,10 +3895,10 @@ struct CanvasView: UIViewRepresentable {
             if canvasManager.isInterpolateMode { mask = nil }
             else {
                 switch PlaybackTrace.span(.onionMask, {
-                    resolveLiveMask(forLayerAt: canvasManager.currentLayerIndex)
+                    resolveLiveMask(forLayerAt: canvasManager.currentLayerIndex, atFrame: canvasManager.currentFrame)
                 }) {
                 case .success(let prepared): mask = prepared
-                case .failure: return // Keep the complete previous ghost and its key.
+                case .failure: return blank()
                 }
             }
 

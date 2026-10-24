@@ -94,11 +94,14 @@ on a miss. Nested-mask pixel/count and planner regressions are prepared. Native 
 remain pending; this bounds planned picture costs, not total process residency, and retains the
 minimum-one-row exception when even that row cannot fit.
 Live coverage now carries typed source refusal separately from neutral absent/deleted masks. The
-existing stroke-start callback returns Bool and resolves clipping before any transient commit, cel
-spawn or stroke latch; refusal retains the prior picture and raises the shared drawing-read notice.
-The onion consumer retains its prior complete ghost/key rather than producing an unclipped one.
-One actual declined FrozenCel-overlay source job and a cold artist-path UI test are prepared;
-the callback refusal needs external app-fault/UI qualification because views are absent from logic.
+stroke factory resolves clipping before any recorder or document mutation and returns an immediate
+begin action only on success. The planned playback entry uses the existing rewind rule; take begin
+still precedes cel spawn. Refusal raises the shared drawing-read notice. Onion mask/source refusal
+uses the existing full blank/cancel/drop path, preventing wrong-frame ghosts and stale landings.
+Real declined-provider and planned-frame source tests plus a cold artist-path UI test are prepared;
+callback, recording, Liquify and onion refusal need external app-fault/UI qualification because views
+are absent from logic. Root's initial focused121 compiled119pass/2 stale one-source premises; their
+CPU/Metal replacements now require the true floor2, real nested calls and complete pixel parity.
 
 Detailed source evidence: `/Users/juliapark/PaintWork/s54-architecture-audit/render-review.md`.
 

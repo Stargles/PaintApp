@@ -19,6 +19,32 @@ until committed normal source has been rebuilt. No merge/push/install.
 
 ## Mask source planning work — 2026-10-24
 
+Root's native121 on afae9b2a compiled app/tests and ran119pass/2fail; the only failures were the old
+CPU/Metal two-cut tests' literal source-width1 premises (the masked zoo now correctly requires2).
+All724 tracked app/test/project bytes were restored. This is not a passing focused gate.
+
+Follow-up scope recorded before acting: strengthen both tests around the real masked two-source
+floor, planned chunks, actual composite calls and pixel parity. Review found two remaining real
+blockers: retaining an onion ghost/key on a different frame after source/mask refusal allows stale
+drawn state and async landings; beginning a timing take before Bool mask admission consumes the arm,
+starts playback/brackets and records an ink touch even when refused. Root approved a complete fix:
+full existing onion blank/cancel/drop on refusal; one two-phase prepared stroke callback resolving
+before recording mutation, then timing begin before cel spawn. Plan the entry frame with existing
+playbackEntryFrame so rewind uses correct mask metadata. No extra feature flag/cache. Raster author
+delegates callback/begin hunks; their later raster admission/commit edits stay separate. Extend the
+external consumer control with armed/already-recording, Liquify and onion frame-switch refusal.
+Source/static only; root owns all native operations on another tree while this work continues.
+Implemented: one prepareStroke(frame) factory returns the immediate begin closure; a pure timing
+tuple chooses the actual playback entry before preparation, then the existing take mutation and
+captured begin action run in order. Both UIKit entry points use it; the Bool callback is gone whole.
+Both onion failures use full blank/cancel/drop, including the detached mask layer's contents via
+the existing mask installer. CPU/Metal two-cut tests now require floor2, actual returned-width
+chunking, more recorded draws than strips, valid strip buffer sizes and byte parity. Added one
+planned-entry source-pixel regression without moving the playhead. Seven classes now statically122
+(MaskParity51); no new file/PBX item. Parsing, UI guards and whitespace pass; native remains pending.
+The committed normal ColourMask method now also reuses existing samplesDuring to assert blue inside
+and paper outside the live mask while the stroke is still held; no new product instrument/hook.
+
 `~/PaintWork/PaintApp-s54-mask-residency`, `tmp/s54-mask-residency`, starts from origin/main then
 fast-forwards exact59d69f12511672468153132299f4ac926398afab. Scope recorded before implementation:
 make existing source/strip planning account for transitive indivisible mask dependencies; place

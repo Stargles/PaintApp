@@ -1607,7 +1607,7 @@ final class CanvasManager: ObservableObject {
     /// cels the playhead crosses.
     ///
     /// Not `@Published`, and that is deliberate rather than an oversight: it changes at pen-down and
-    /// pen-up, and both of those already raise a SwiftUI pass through `onStrokeBegan`/`onStrokeEnded`
+    /// pen-up, and both of those already raise a SwiftUI pass through the prepared stroke begin action or `onStrokeEnded`
     /// (`CanvasView` calls `applySandwichPresentationNow` on each). Publishing it would add a second
     /// pass for a value the first one already carries. `isSandwichStrokeLive` on the coordinator is
     /// the shipped precedent for exactly this shape, and this flag is here rather than beside it

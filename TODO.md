@@ -315,6 +315,18 @@ account usage limits; root continues. The full source inventory is not yet fully
   callback fault/UI template covers refusal without editing/undo/cel creation. Native still unrun.
   Root requested rebase of only the two mask commits from59d69f12 onto65a8afd8 before qualification;
   preserve65's authoritative cache/FillUI/link-assertion records and all unrelated source changes.
+  Root native121 compiled119pass/2 old literal-width1 premise failures; correct CPU/Metal tests to
+  prove actual masked floor2/chunks/drawn parity/real calls. Review then found onion wrong-frame
+  ghost retention/stale landing and recording mutation before mask refusal. Record before fixing:
+  use full existing onion blank/cancel/drop on either source or mask refusal; prepare/capture stroke
+  admission before recording changes, then begin take before cel spawn via one two-phase callback.
+  Reuse playbackEntryFrame for predicted rewind metadata. Add external armed/running recording,
+  Liquify and onion-frame refusal controls; raster author delegates only callback/begin hunks.
+  Source follow-up now prepared: single prepareStroke(frame) factory, pure timing entry tuple,
+  full onion cancel/drop including mask contents, strengthened real-call/pixel CPU+Metal tests,
+  +1 planned-frame logic pin (7 classes122). Static parse/guards pass; no native follow-up run.
+  Normal cold ColourMask UI also uses the existing mid-gesture screen sampler for actual drawn
+  blue-inside/paper-outside pixels while held; method/class counts unchanged, no new product hook.
   Active `tmp/s54-bake-lifecycle`: existing baker/store/read-demand ownership is reused; no extra
   renderer/cache. Root's500 baseline covers bake634f5300, including shared-root authority, metadata-only
   readiness, owned read snapshots, typed export refusal, checked headers and1-byte eviction charge release.

@@ -129,7 +129,7 @@ extension CanvasManager {
             }
         }
         // Cel/block spawn. Worth a line of its own because it usually happens *implicitly* — drawing
-        // on an empty frame spawns a block from inside `onStrokeBegan` (see
+        // on an empty frame spawns a block from the prepared stroke begin action (see
         // `Coordinator.attachSpawnedCelIfFrameIsEmpty`), so a recording showing a stroke followed by
         // a cel appearing is showing something the artist never asked for by name.
         recordLayerStackChange("added cel on layer \(layerIndex) at frame \(startFrame), length \(frameCount)")

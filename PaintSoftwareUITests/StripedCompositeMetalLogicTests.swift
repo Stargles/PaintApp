@@ -324,7 +324,7 @@ final class StripedCompositeMetalLogicTests: XCTestCase {
     // MARK: - Rules 1 to 4, met inside a strip
 
     /// **Strips outside, chunks inside, on the GPU.** At the height the planner picks, `chunkSources`
-    /// answers 1, so every strip of the zoo is also cut node by node — and on this backend that means
+    /// affords the masked leaf's two-source floor, while the zoo still needs multiple chunks — on this backend that means
     /// a continuation clearing an inherited pool texture, an assembled atom read back and re-uploaded,
     /// and rule 3's substitution, all inside a windowed buffer.
     func testAMetalStripIsChunkedWhenOneStripStillDoesNotFit() throws {
@@ -338,14 +338,26 @@ final class StripedCompositeMetalLogicTests: XCTestCase {
         let plan = StripedCompositor.plan(for: recipe, budgetBytes: budget)
         XCTAssertGreaterThan(plan.count, 1, "Premise: the frame must be cut in space")
         let tallest = plan.map(\.buffer.size).max { $0.height < $1.height } ?? .zero
-        XCTAssertEqual(ChunkedCompositor.chunkSources(for: recipe.tree, canvasSize: tallest,
-                                                      budgetBytes: budget), 1,
-                       "Premise: the node cut must be at its tightest inside the strip, or only one "
-                       + "of the two cuts is under test")
-
-        assertStrippedMatchesWholeOnGPU(manager, stripBufferRows: rows,
-                                        "Both cuts at once: a continuation's texture clear and rule 3's "
-                                        + "substitution have to hold inside a windowed buffer")
+        XCTAssertEqual(ChunkedCompositor.minimumSources(for: recipe.tree, maskStacks: recipe.maskStacks), 2,
+                       "The masked zoo leaf and its external mask source must fit together")
+        let width = ChunkedCompositor.chunkSources(for: recipe.tree, canvasSize: tallest, budgetBytes: budget)
+        XCTAssertEqual(width, 2, "The tallest strip affords exactly the masked source floor")
+        XCTAssertEqual(ChunkedCompositor.resolvedBackend(for: recipe.tree), .metal)
+        XCTAssertGreaterThan(ChunkedCompositor.plan(recipe.tree, maskStacks: recipe.maskStacks,
+                                                   maxSources: width).count, 1,
+                             "The real returned width must still split this tree")
+        MaskResolver.clearCache()
+        guard case .image(let whole) = MetalCompositor.attempt(recipe.resolve())
+        else { return XCTFail("The GPU must draw the uncut reference") }
+        MaskResolver.clearCache()
+        PixelOps.clearRasterizeCache()
+        CompositeProbe.begin()
+        let stripped = recipe.composite(budgetBytes: budget)
+        let draws = CompositeProbe.end()
+        XCTAssertGreaterThan(draws.count, plan.count, "Actual GPU work must include multiple chunks inside strips")
+        XCTAssertTrue(draws.allSatisfy { size in plan.contains { $0.buffer.size == size } },
+                      "Each executed chunk belongs to a planned strip buffer")
+        assertPixelsIdentical(stripped, whole, "Both real GPU cuts preserve every drawn byte")
     }
 
     /// **Rule 3 at a strip boundary on the GPU.** The `.ink` re-walk is a whole sub-composite in the

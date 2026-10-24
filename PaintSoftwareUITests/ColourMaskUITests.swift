@@ -79,7 +79,22 @@ final class ColourMaskUITests: PaintUITestCase {
         closeLayerRail(app)
         setBrushColor(app, hex: "0000FF")
         let entries = try XCTUnwrap(Int(readField(app, "entries:")))
-        drawLine(on: canvas, from: onHost(paper, 0.08, 0.35), to: onHost(paper, 0.45, 0.35))
+        let inside = onHost(paper, 0.15, 0.35), outside = onHost(paper, 0.40, 0.35)
+        let points = [inside, outside].map { point in
+            CGPoint(x: canvas.frame.minX + canvas.frame.width * point.dx,
+                    y: canvas.frame.minY + canvas.frame.height * point.dy)
+        }
+        let held = samplesDuring(points, "New masked stroke held on screen") {
+            canvas.coordinate(withNormalizedOffset: onHost(paper, 0.08, 0.35))
+                .press(forDuration: 0.05,
+                       thenDragTo: canvas.coordinate(withNormalizedOffset: onHost(paper, 0.45, 0.35)),
+                       withVelocity: .slow, thenHoldForDuration: 6)
+        }
+        XCTAssertTrue(held.contains { sample in
+            guard sample.pixels.count == 2, let inner = sample.pixels[0], let outer = sample.pixels[1]
+            else { return false }
+            return inner.b > 180 && inner.r < 100 && isWhitish(outer)
+        }, "The drawn live stroke must already be blue inside and clipped outside while the touch is still down")
         XCTAssertEqual(vectorMarkerViaPanel(app, layerIndex: 1)?.strokes, 1,
                        "An ordinary masked stroke is admitted and reaches its drawing surface")
         XCTAssertGreaterThan(try XCTUnwrap(Int(readField(app, "entries:"))), entries,

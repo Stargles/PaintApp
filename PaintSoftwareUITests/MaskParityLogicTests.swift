@@ -839,6 +839,33 @@ final class MaskParityLogicTests: XCTestCase {
                      "A deleted source remains neutral under the existing mask contract")
         XCTAssertEqual(sourceReads, 2, "Absent/deleted masks must not read the refused source")
     }
+
+    func testLiveMaskPreparationAtPlaybackEntryReadsThatFrameWithoutMovingThePlayhead() throws {
+        let manager = clippedManager()
+        manager.layers[0].cels[0].frameCount = 1
+        var later = Cel(id: UUID(), startFrame: 1, frameCount: 1,
+                        raster: .empty(size: CanvasFixture.canvasSize))
+        later.bakedImage = CanvasFixture.solidImage(red, rect: CGRect(x: 32, y: 0, width: 32, height: 64))
+        manager.layers[0].cels.append(later)
+        manager.layers[1].cels[0].frameCount = 2
+        manager.goToFrame(1)
+        let entry = manager.playbackEntryFrame()
+        XCTAssertEqual(entry, 0, "The parked end will rewind only after successful admission")
+        let recipe = try XCTUnwrap(manager.liveMaskRecipe(atFrame: entry))
+        let masks = try XCTUnwrap(RenderNode.masksClipping(leafAt: 1, in: recipe.tree))
+        let prepared = try XCTUnwrap(MaskResolver.coverage(for: masks, of: recipe).get())
+        XCTAssertEqual(prepared.coverage[8 + 32 * prepared.width], 255)
+        XCTAssertEqual(prepared.coverage[48 + 32 * prepared.width], 0,
+                       "Admission at the playback entry reads its left-hand source, not the parked frame's right-hand source")
+        let parked = try XCTUnwrap(manager.liveMaskRecipe(atFrame: 1))
+        let control = try XCTUnwrap(MaskResolver.coverage(for: masks, of: parked).get())
+        XCTAssertEqual(control.coverage[8 + 32 * control.width], 0)
+        XCTAssertEqual(control.coverage[48 + 32 * control.width], 255,
+                       "Control: the parked frame has visibly different mask pixels")
+        XCTAssertEqual(manager.currentFrame, 1, "Preparation must not rewind the document to resolve its inputs")
+        XCTAssertFalse(manager.isRecording)
+        XCTAssertFalse(manager.isPlaying)
+    }
     //
     // §6.4's claim is a strong one — the live stroke and the composite "agree by construction" — and
     // it rests on two things this section pins separately. The mask Core Animation applies has to be

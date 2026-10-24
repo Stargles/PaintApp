@@ -52,7 +52,7 @@ struct LivePicture {
 /// nothing current: `updateInterpolationPreviews` skips it, which is TODO (53)'s whole fix,
 /// and `refreshDisplay` declines a rasterize nobody can see. So what it holds is the picture
 /// from the last time it drew itself, any number of edits ago — and the edges that un-blank
-/// it are not SwiftUI passes: `onStrokeBegan` latches a stroke and applies it on the spot,
+/// it are not SwiftUI passes: the prepared stroke begin action latches a stroke and applies it on the spot,
 /// and a rebuild or a bake landing reconciles from its own callback. A host refreshed only
 /// by a later pass comes back on screen showing that old picture until the pass arrives,
 /// which is the owner's *"The first stroke briefly appears"*: draw, undo, draw again, and
