@@ -589,7 +589,7 @@ final class StrokePathFitLogicTests: XCTestCase {
     }
 
     func testAChangedEndpointStillChecksThePendingPrefix() {
-        for end in [CGPoint(x: 12, y: 26), CGPoint(x: 16, y: 22)] {
+        for end in [CGPoint(x: 12, y: 26), CGPoint(x: 16, y: 22), CGPoint(x: 12, y: 22.2)] {
             var fit = StrokePathFit()
             var reference = ReferenceFit()
             let samples = [VectorSample(x: 8, y: 20, pressure: 0.5),
@@ -660,7 +660,9 @@ final class StrokePathFitLogicTests: XCTestCase {
         actual += fit.finish(nil); expected += reference.finish(nil)
         let a = TimingStrokeCut.split(StrokeSamples(actual, channels: .captured), at: [boundary])
         let b = TimingStrokeCut.split(StrokeSamples(expected, channels: .captured), at: [boundary])
-        XCTAssertEqual(a.count, 2)
+        guard a.count == 2, b.count == 2 else {
+            return XCTFail("the actual and reference timing streams must each retain two drawn runs")
+        }
         XCTAssertEqual(a.map(\.slot), b.map(\.slot))
         for (left, right) in zip(a, b) { XCTAssertEqual(Array(left.samples), Array(right.samples)) }
         XCTAssertEqual(a[0].samples.last, a[1].samples.first)
