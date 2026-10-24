@@ -64,6 +64,19 @@ This avoids a new screenshot-only test/harness. Current2green does not prove tha
 the upcoming whole47 must actually pass and expose a retained owner-size whole picture. No mutation
 or device grant follows from this record. Original b865 evidence and failed9bd attempt stay exact.
 
+Actual whole-picture review found a remaining interior-mending defect BEFORE final faults. Three
+small white cap patches remain inside the red new fill: both detached stroke free ends and the
+attached stem free end. Each is6 fully white displayed pixels at2160x1620: x881–882/y401–404,
+x1025–1026/y401–404, x1095–1096/y511–514. The outside join is nearx1529; uncertain-outline-join
+protection does not explain these residuals. Actual b865 image17381CA6 and40f77 OFF before image
+agree with fixture positions. Existing tests probe the stroke bodies and missed the caps. Preserve
+all original outlines and uncertain joins; trace the shared mending cause and add discriminating
+rounded-free-cap logic/drawn coverage through existing seams. No generic tiny-hole closer, second
+pipeline, new persistent setting or appearance-policy change. Implementation plan/review is pending.
+Root records this on tmp/s54-mend-free-caps before source edits. The existing8bb47 continues unchanged;
+its pass cannot close this product gap. All8bb107/UI13/mask preparations remain offline/historical
+until successor source is committed and qualified. Main staysafd2030c; no device operation.
+
 ## How to read and keep this file
 
 Every item is a **status**, a short **description** a future session can pick up cold, and **what is
