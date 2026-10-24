@@ -552,7 +552,7 @@ extension CanvasManager {
 
         let identity = PosedCelIdentity(
             celID: cel.id,
-            canvas: ObjectIdentifier(vector),
+            canvas: vector.residencyID,
             vectorVersion: version,
             suppressed: suppressed.map(\.uuidString).sorted(),
             carried: [carried.a, carried.b, carried.c, carried.d, carried.tx, carried.ty],
@@ -596,7 +596,7 @@ extension CanvasManager {
 /// look.
 private struct PosedCelIdentity: Hashable {
     let celID: UUID
-    let canvas: ObjectIdentifier
+    let canvas: UUID
     let vectorVersion: Int
     let suppressed: [String]
     let carried: [CGFloat]

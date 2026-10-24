@@ -82,6 +82,32 @@ final raster preparation succeeds, propagate settlement refusal before the next 
 admission to the mask's pure stroke factory. The current consumer checkpoint records this known
 remaining boundary; it is not runtime-qualified. Root owns native/fast/UI/mutation gates. The test
 adaptation author does not stage/commit; the raster author stages only reviewed owned paths.
+Root approved the required transient-refusal follow-up: one local prepareCanvasEdit tuple stages
+only affected cels in Liquify→fill→shape→text order, reusing each tool's drawing/undo seams, with no
+second durable edit model. All preparations must succeed before any draft/cel/history/timing write.
+Existing beginCanvasEdit becomes Bool and callers guard before their own writes. Mask/host admission
+must consume those same cel overrides at the planned frame; derived references must see them too.
+Text may read the current editor string through its existing view bridge without resigning or
+flushing a draft first; commit alone resigns. Liquify's existing finish owner supplies the same
+preparation for presentation/settlement, retains its callback/window on refusal, and must reject a
+cancelled/stale prepared landing. Add coexistence/later-tool refusal, queued keystroke/focus and
+Liquify refusal/retry/one-undo proofs before qualification. Root is assembling a newer combined
+mask/video/vector-undo dependency; do not rebase or merge while shared test adaptations are WIP.
+
+The staged settlement implementation now prepares only affected cels in Liquify→fill→shape→text
+order and guards every production beginCanvasEdit/beginStructureGesture caller before its own write.
+A shared Liquify finish generation retains refused final output/callback state for retry and rejects
+cancelled prepared landings; unchanged gestures still finish. Text admission reads the queued editor
+string through its existing bridge without resigning it. Owner UUIDs replace source/vector object
+addresses in cache/read identities, including referenced owners in actual interpolation derivation;
+freeze retains the original owner identity. Canonical bake-key tag04 changes disposable .pbk digests
+only, with existing cache maintenance reclaiming old files; Projects/Backups/Trash formats are unchanged.
+Five further methods bring RasterResidencyLogicTests to27 static methods: coexisting draft late refusal,
+queued text pixels/order, deterministic released/distinct-owner cache pixels and actual staged linked
+recipe derivation, Liquify refusal/retry/one undo, and unchanged/cancelled finish lifetime. These new
+consumer tests and production are NOT compiled/run. Root's f475bb93599d2fb1b5b5785931bb2a87cc553424
+combined dependency is the next merge; preserve its MaskParity early assertions. Stroke/mask/host
+admission still needs joining to staged overrides before a coherent consumer native gate.
 
 ## Current combined source qualification — 2026-10-24
 

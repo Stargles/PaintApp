@@ -34,13 +34,14 @@ struct LiquifySession {
 }
 
 extension CanvasManager {
-    func settlePendingLiquifyProcedure() {
-        guard let edit = liveCelContentEdit else { return }
-        edit.procedure?.settlePending(edit.elements)
+    @discardableResult
+    func settlePendingLiquifyProcedure() -> Bool {
+        guard let edit = liveCelContentEdit, let procedure = edit.procedure else { return true }
+        return procedure.settlePending(edit.elements)
     }
 
     func beginLiquify(layerID: UUID, profile: ToolProfile, size: CGFloat, seed: UInt64) -> LiquifySession? {
-        beginCanvasEdit()
+        guard beginCanvasEdit() else { return nil }
         guard let layer = layers.firstIndex(where: { $0.id == layerID }),
               let index = displayedCelIndex(inLayer: layer, atFrame: currentFrame),
               layers[layer].kind.holdsPixels else { return nil }
@@ -132,26 +133,40 @@ extension CanvasManager {
         }
         guard let held = liveCelContentEdit, let procedure = held.procedure,
               procedure.deformation == session.gesture else { endLiveEdit(); return }
-        procedure.finishWhenPresented { [weak self] resolved in
-            guard let self,
+        procedure.finishWhenPresented { [weak self, weak procedure] resolved, staging in
+            guard let self, let procedure,
+                  self.liveCelContentEdit?.procedure === procedure,
                   let layer = self.layers.firstIndex(where: { $0.id == session.layerID }),
-                  let index = self.layers[layer].cels.firstIndex(where: { $0.id == session.celID }) else { return }
+                  let index = self.layers[layer].cels.firstIndex(where: { $0.id == session.celID }) else { return nil }
             let current = self.layers[layer].cels[index]
-            guard !resolved.failed,
-                  CelContentIdentity(current) == session.sourceIdentity else {
-                self.endLiveEdit(); return
+            guard CelContentIdentity(current) == session.sourceIdentity else {
+                return { [weak self] in
+                    if self?.liveCelContentEdit?.procedure === procedure { self?.endLiveEdit() }
+                }
+            }
+            guard !resolved.failed else {
+                return { [weak self] in
+                    guard self?.liveCelContentEdit?.procedure === procedure else { return }
+                    self?.raise(.drawingSourceUnavailable)
+                    self?.endLiveEdit()
+                }
             }
             let pixelsChanged = resolved.pixels?.changed == true
             let recipeChanged = session.recipeBefore != nil && !resolved.fieldIsEmpty
-            guard pixelsChanged || !resolved.changed.isEmpty || recipeChanged else { self.endLiveEdit(); return }
-            var raster = session.oldRaster
-            var baked = session.oldBaked
+            guard pixelsChanged || !resolved.changed.isEmpty || recipeChanged else {
+                return { [weak self] in
+                    if self?.liveCelContentEdit?.procedure === procedure { self?.endLiveEdit() }
+                }
+            }
+            var cel = staging[session.celID] ?? current
+            var raster = cel.raster
+            var baked = cel.bakedImage
             if pixelsChanged, let snapshot = session.pixelSnapshot, let patch = resolved.pixels {
                 guard let source = snapshot.committing(patch) else {
-                    self.raise(.drawingSourceUnavailable); self.endLiveEdit(); return
+                    self.raise(.drawingSourceUnavailable); return nil
                 }
                 if session.vector != nil {
-                    raster = RasterLayerTexture(size: session.oldRaster.size)
+                    raster = RasterLayerTexture(size: session.oldRaster.size, residency: session.oldRaster.residency)
                     baked = source
                 } else {
                     raster = RasterLayerTexture(size: session.oldRaster.size, source: source,
@@ -167,10 +182,26 @@ extension CanvasManager {
             let recipe = session.recipeBefore.flatMap { before in
                 procedure.recipeSnapshot.map { CelRecipeChange(before: before, after: $0.recipe) }
             }
-            self.registerUndoableCelChange(layerID: session.layerID, celID: session.celID,
-                oldRaster: session.oldRaster, oldBaked: session.oldBaked, newRaster: raster, newBaked: baked,
-                vector: vector, recipe: recipe, label: .liquify)
-            self.endLiveEdit()
+            cel.raster = raster
+            cel.bakedImage = baked
+            if let vector {
+                let prepared = vector.canvas.makeCopy()
+                prepared.restoreElements(vector.after, changedInk: nil, rewriting: vector.rewriting)
+                cel.vector = prepared
+            }
+            if let recipe { cel.interpolation = recipe.after }
+            staging[session.celID] = cel
+            return { [weak self] in
+                guard let self,
+                      self.liveCelContentEdit?.procedure === procedure,
+                      let layer = self.layers.firstIndex(where: { $0.id == session.layerID }),
+                      let at = self.layers[layer].cels.firstIndex(where: { $0.id == session.celID }),
+                      CelContentIdentity(self.layers[layer].cels[at]) == session.sourceIdentity else { return }
+                self.registerUndoableCelChange(layerID: session.layerID, celID: session.celID,
+                    oldRaster: session.oldRaster, oldBaked: session.oldBaked, newRaster: raster, newBaked: baked,
+                    vector: vector, recipe: recipe, label: .liquify)
+                self.endLiveEdit()
+            }
         }
         // Normal lift waits for the matching picture. Explicit mutation boundaries and headless
         // callers settle this same producer before their own document write.

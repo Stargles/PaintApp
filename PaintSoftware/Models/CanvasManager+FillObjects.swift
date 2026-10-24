@@ -298,7 +298,7 @@ extension CanvasManager {
     /// `vectorOnly` is for the gradient and the picture, which exist only as vector elements; a shape
     /// also lands on a raster layer, through the fill tool's raster arm.
     func drawingSurfaceForNewObject(vectorOnly: Bool) -> (layerIndex: Int, celIndex: Int)? {
-        beginCanvasEdit()
+        guard beginCanvasEdit() else { return nil }
         guard canvasSize != nil else { return nil }
         let usable = vectorOnly ? activeLayerKind == .vector : (activeLayerKind?.holdsPixels ?? false)
         if !usable { addVectorLayer() }
@@ -490,32 +490,32 @@ private struct FillMendRead {
     let celID: UUID
     let startFrame: Int
     let frameCount: Int
-    let rasterID: ObjectIdentifier
+    let rasterID: UUID
     let rasterVersion: Int
-    let vectorID: ObjectIdentifier?
+    let vectorID: UUID?
     let vectorVersion: Int?
     let transform: CGAffineTransform?
-    let bakedID: ObjectIdentifier?
+    let bakedID: UUID?
 
     init(layerID: UUID, cel: Cel) {
         self.layerID = layerID
         celID = cel.id
         startFrame = cel.startFrame
         frameCount = cel.frameCount
-        rasterID = ObjectIdentifier(cel.raster)
+        rasterID = cel.raster.residencyID
         rasterVersion = cel.raster.version
-        vectorID = cel.vector.map(ObjectIdentifier.init)
+        vectorID = cel.vector?.residencyID
         vectorVersion = cel.vector?.version
         transform = cel.vector?.transform
-        bakedID = cel.bakedImage.map(ObjectIdentifier.init)
+        bakedID = cel.bakedImage?.residencyID
     }
 
     func matches(_ manager: CanvasManager) -> Bool {
         guard let layer = manager.layers.first(where: { $0.id == layerID }),
               let cel = layer.cels.first(where: { $0.id == celID }) else { return false }
         return cel.startFrame == startFrame && cel.frameCount == frameCount
-            && ObjectIdentifier(cel.raster) == rasterID && cel.raster.version == rasterVersion
-            && cel.vector.map(ObjectIdentifier.init) == vectorID && cel.vector?.version == vectorVersion
-            && cel.vector?.transform == transform && cel.bakedImage.map(ObjectIdentifier.init) == bakedID
+            && cel.raster.residencyID == rasterID && cel.raster.version == rasterVersion
+            && cel.vector?.residencyID == vectorID && cel.vector?.version == vectorVersion
+            && cel.vector?.transform == transform && cel.bakedImage?.residencyID == bakedID
     }
 }

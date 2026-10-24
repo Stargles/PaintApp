@@ -690,4 +690,312 @@ final class RasterResidencyLogicTests: XCTestCase {
         XCTAssertLessThanOrEqual(refusedOwner.usage.admittedBytes, refusedOwner.budgetBytes)
     }
 
+    @MainActor
+    func testALaterTextRefusalKeepsCoexistingFillShapeAndQueuedTextThenOneSettlementPreservesTheirDrawnOrder() throws {
+        let size = CGSize(width: 64, height: 32)
+        let bytes = 64 * 32 * 4
+        var counting = false
+        var outputs = 0
+        var refuseThird = true
+        let owner = RasterResidency(budgetBytes: bytes * 12, hasHeadroom: { requested in
+            if counting, requested == bytes {
+                outputs += 1
+                if refuseThird, outputs == 3 { return false }
+            }
+            return true
+        })
+        let red = try RasterSource.render(size: size, using: owner) { context in
+            context.setFillColor(UIColor.red.cgColor); context.fill(CGRect(origin: .zero, size: size)); return true
+        }.get()
+        let manager = CanvasFixture.manager()
+        manager.canvasSize = size
+        manager.layers[0].cels[0].raster = RasterLayerTexture(size: size, source: red, strokeCount: 2)
+        let layerID = manager.layers[0].id
+        let celID = manager.layers[0].cels[0].id
+        manager.fillGestureActive = true
+        manager.fillFingerDown = false
+        manager.fillGestureLayerID = layerID
+        manager.fillGestureCelID = celID
+        manager.fillGestureFillColor = CodableColor(.green)
+        let fill = CanvasManager.FillRenderResult(generation: manager.fillGeneration,
+            bytes: Array(repeating: [UInt8(0), 255, 0, 255], count: 64 * 32).flatMap { $0 },
+            window: FillWindow.fitting(CGRect(origin: .zero, size: size), in: size, pixelBudget: 64 * 32))
+        manager.fillRenderedRegion = fill
+        manager.shapeGestureActive = true
+        manager.shapeFingerDown = false
+        manager.shapeGestureLayerID = layerID
+        manager.shapeGestureCelID = celID
+        manager.shapeGeometry = ShapeGeometry(kind: .line,
+            startPoint: CGPoint(x: 4, y: 10), endPoint: CGPoint(x: 18, y: 10))
+        manager.shapeGestureBrush = TestBrushes.hardRound
+        manager.shapeGestureStrokeWidth = 4
+        manager.shapeGestureColor = CodableColor(.blue)
+        manager.shapeGestureSamples = StrokeSamples([VectorSample(x: 4, y: 10), VectorSample(x: 18, y: 10)])
+        manager.textGestureActive = true
+        manager.textFingerDown = false
+        manager.textIsFocused = true
+        manager.textGestureLayerID = layerID
+        manager.textGestureCelID = celID
+        manager.textRecipe = TextRecipe(string: "A", typography: Typography(pointSize: 12))
+        manager.textFrame = TextFrame(origin: CGPoint(x: 30, y: 5), size: CGSize(width: 20, height: 22), autoSize: false)
+        var reads = 0
+        var resigns = 0
+        manager.textDraftReader = { reads += 1; return "Z" }
+        manager.textFocusResigner = { [weak manager] in
+            resigns += 1
+            manager?.updateTextString("Z") // UIKit's synchronous final delivery, after admission.
+            manager?.textIsFocused = false
+        }
+        manager.recordUndo(label: .brushStroke, undo: {}, redo: {})
+        let before = CelContentIdentity(manager.layers[0].cels[0])
+        let generation = manager.fillGeneration
+        counting = true
+        autoreleasepool { XCTAssertNil(manager.prepareCanvasEdit()) }
+        XCTAssertEqual(outputs, 3, "Refuse the final tool after fill and shape have prepared their private outputs")
+        XCTAssertEqual(reads, 1)
+        XCTAssertEqual(resigns, 0)
+        XCTAssertEqual(CelContentIdentity(manager.layers[0].cels[0]), before)
+        XCTAssertEqual(manager.layers[0].cels[0].raster.strokeCount, 2)
+        XCTAssertTrue(manager.fillGestureActive && manager.shapeGestureActive && manager.textGestureActive)
+        XCTAssertTrue(manager.textIsFocused)
+        XCTAssertEqual(manager.textRecipe.string, "A", "Preparation must not flush or replace the draft")
+        XCTAssertTrue(manager.fillRenderedRegion === fill)
+        XCTAssertEqual(manager.fillGeneration, generation)
+        XCTAssertEqual(manager.history.undoStack.count, 1)
+        XCTAssertTrue(manager.history.redoStack.isEmpty)
+        XCTAssertEqual(manager.notice?.kind, .drawingSourceUnavailable)
+        XCTAssertEqual(owner.usage.pixelBufferCount, 1)
+        try autoreleasepool {
+            XCTAssertEqual(try pixel(XCTUnwrap(manager.layers[0].cels[0].raster.renderToUIImage().get().cgImage)), [255, 0, 0, 255])
+        }
+
+        refuseThird = false
+        outputs = 0
+        let prepared = try XCTUnwrap(manager.prepareCanvasEdit())
+        XCTAssertEqual(prepared.cels.count, 1, "Only the affected cel may be staged")
+        XCTAssertEqual(CelContentIdentity(manager.layers[0].cels[0]), before)
+        XCTAssertEqual(resigns, 0)
+        XCTAssertTrue(prepared.commit())
+        XCTAssertFalse(manager.fillGestureActive || manager.shapeGestureActive || manager.textGestureActive)
+        XCTAssertFalse(manager.textIsFocused)
+        XCTAssertEqual(resigns, 1)
+        XCTAssertEqual(manager.textRecipe.string, "Z")
+        XCTAssertEqual(manager.layers[0].cels[0].raster.strokeCount, 3)
+        XCTAssertEqual(manager.history.undoStack.map(\.label), [.brushStroke, .fill, .shape, .addText])
+        let drawn = try manager.layers[0].cels[0].raster.renderToUIImage().get()
+        let rgba = try XCTUnwrap(CoreGraphicsCompositor.premultipliedBytes(XCTUnwrap(drawn.cgImage), width: 64, height: 32))
+        let colors = stride(from: 0, to: rgba.count, by: 4).map { Array(rgba[$0..<($0 + 4)]) }
+        XCTAssertTrue(colors.contains([0, 255, 0, 255]), "Fill must remain underneath the later tools")
+        XCTAssertTrue(colors.contains([0, 0, 255, 255]), "Shape must survive the text's flatten")
+        XCTAssertFalse(colors.contains([255, 0, 0, 255]), "Text must prepare against the staged fill/shape, not the old red cel")
+        let glyphs = try XCTUnwrap(TextLayout.render(recipe: manager.textRecipe, frame: manager.textFrame, canvasSize: size))
+        let expected = UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { context in
+            UIColor.green.setFill(); context.fill(CGRect(origin: .zero, size: size)); glyphs.draw(at: .zero)
+        }
+        let expectedBytes = try XCTUnwrap(CoreGraphicsCompositor.premultipliedBytes(XCTUnwrap(expected.cgImage), width: 64, height: 32))
+        for row in 0..<32 {
+            let range = ((row * 64 + 24) * 4)..<((row + 1) * 64 * 4)
+            XCTAssertEqual(Array(rgba[range]), Array(expectedBytes[range]), "The queued final Z must be the glyph actually drawn")
+        }
+        XCTAssertEqual(manager.history.undo(), .addText)
+        XCTAssertEqual(manager.history.undo(), .shape)
+        XCTAssertEqual(manager.history.undo(), .fill)
+        try autoreleasepool {
+            XCTAssertEqual(try pixel(XCTUnwrap(manager.layers[0].cels[0].raster.renderToUIImage().get().cgImage)), [255, 0, 0, 255])
+        }
+        XCTAssertLessThanOrEqual(owner.usage.admittedBytes, owner.budgetBytes)
+    }
+
+    @MainActor
+    func testStableOwnerKeysReuseOneOwnerButKeepReleasedAndNewEqualVersionVectorPicturesDistinct() throws {
+        let size = CGSize(width: width, height: height)
+        let manager = CanvasFixture.manager()
+        manager.canvasSize = size
+        manager.addVectorLayer()
+        let index = manager.layers.count - 1
+        manager.layers[index].cels[0].raster = RasterLayerTexture(size: size)
+        weak var oldOwner: VectorCanvas?
+        let first: (version: LayerContentVersion, frozen: PixelOps.FrozenCel.Identity, bake: FrameBakeKey) = try autoreleasepool {
+            let vector = VectorCanvas(size: size, elements: [.fill(VectorFillElement(
+                path: CGPath(rect: CGRect(origin: .zero, size: size), transform: nil), color: CodableColor(.red)))])
+            oldOwner = vector
+            manager.layers[index].cels[0].vector = vector
+            let cel = manager.layers[index].cels[0]
+            let frozen = PixelOps.FrozenCel.Identity(cel: cel, derived: nil)
+            XCTAssertEqual(frozen.vector, vector.residencyID)
+            XCTAssertEqual(frozen, PixelOps.FrozenCel(cel: cel, derived: nil, quality: .full).identity)
+            let version = LayerContentVersion(cel: cel)
+            let same = LayerContentVersion(cel: cel)
+            XCTAssertEqual(version, same)
+            XCTAssertEqual(version.vector, vector.residencyID)
+            XCTAssertEqual(version.raster, cel.raster.residencyID)
+            let recipe = try XCTUnwrap(manager.makeFrameRecipe(atFrame: 0, includeBackground: false))
+            let bake = FrameBakeKey(recipe: recipe, renderResolution: .full, backend: .coreGraphics)
+            XCTAssertEqual(bake, FrameBakeKey(recipe: recipe, renderResolution: .full, backend: .coreGraphics))
+            let image = try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: size))
+            XCTAssertEqual(try pixel(XCTUnwrap(image.cgImage)), [255, 0, 0, 255])
+            return (version, frozen, bake)
+        }
+        manager.layers[index].cels[0].vector = nil
+        XCTAssertNil(oldOwner, "Keeping keys and cached pixels must not retain the released owner's geometry")
+        let blue = VectorCanvas(size: size, elements: [.fill(VectorFillElement(
+            path: CGPath(rect: CGRect(origin: .zero, size: size), transform: nil), color: CodableColor(.blue)))])
+        manager.layers[index].cels[0].vector = blue
+        let cel = manager.layers[index].cels[0]
+        let version = LayerContentVersion(cel: cel)
+        XCTAssertEqual(version.vectorVersion, first.version.vectorVersion)
+        XCTAssertNotEqual(version.vector, first.version.vector)
+        XCTAssertNotEqual(version, first.version)
+        XCTAssertNotEqual(PixelOps.FrozenCel.Identity(cel: cel, derived: nil), first.frozen)
+        let recipe = try XCTUnwrap(manager.makeFrameRecipe(atFrame: 0, includeBackground: false))
+        XCTAssertNotEqual(FrameBakeKey(recipe: recipe, renderResolution: .full, backend: .coreGraphics), first.bake)
+        let image = try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: size))
+        XCTAssertEqual(try pixel(XCTUnwrap(image.cgImage)), [0, 0, 255, 255])
+    }
+
+    @MainActor
+    func testAStagedReferencedOwnerAtTheSameVersionChangesActualDerivedRecipePixelsWithoutTouchingTheDocument() throws {
+        let size = CGSize(width: 64, height: 64)
+        let manager = CanvasFixture.manager()
+        manager.canvasSize = size
+        manager.addVectorLayer()
+        let layer = manager.layers.count - 1
+        let layerID = manager.layers[layer].id
+        let cels = (0..<3).map { offset in
+            Cel(id: UUID(), startFrame: offset * 4, frameCount: 4,
+                raster: RasterLayerTexture(size: size), vector: VectorCanvas.empty(size: size))
+        }
+        manager.layers[layer].cels = cels
+        let stroke = VectorStroke(brush: TestBrushes.hardRound, color: CodableColor(.red), size: 6, opacity: 1,
+                                  samples: [VectorSample(x: 10, y: 20), VectorSample(x: 30, y: 20), VectorSample(x: 30, y: 40)])
+        cels[0].vector?.addStroke(stroke)
+        cels[2].vector?.addStroke(stroke)
+        manager.enterInterpolateMode()
+        for cel in [cels[0], cels[2]] { manager.toggleInterpolationReference(celID: cel.id, inLayer: layerID) }
+        XCTAssertNil(manager.interpolate(mode: .generate, layerIndex: layer, celIndex: 1))
+        manager.layers[layer].cels[1].interpolation?.t = 0
+        manager.exitInterpolateMode()
+        let beforeIdentity = manager.layers[layer].cels.map(CelContentIdentity.init)
+        let generated = manager.layers[layer].cels[1]
+        let original = try XCTUnwrap(manager.celContentProvider(atFrame: 4).content(for: generated))
+        let oldRecipe = try XCTUnwrap(manager.makeFrameRecipe(atFrame: 4, includeBackground: false))
+        let previousBackend = Compositor.backend
+        Compositor.backend = .coreGraphics
+        defer { Compositor.backend = previousBackend }
+        let before = try XCTUnwrap(oldRecipe.composite(budgetBytes: 1024 * 1024))
+        var blueStroke = stroke
+        blueStroke.color = CodableColor(.blue)
+        let replacement = VectorCanvas.empty(size: size)
+        replacement.addStroke(blueStroke)
+        XCTAssertEqual(replacement.version, cels[0].vector?.version,
+                       "Owner identity, not a bumped counter, must distinguish this staged replacement")
+        var staged = manager.layers[layer].cels[0]
+        staged.vector = replacement
+        let overrides = [staged.id: staged]
+        let derived = try XCTUnwrap(manager.celContentProvider(atFrame: 4, preparing: overrides).content(for: generated))
+        XCTAssertNotEqual(derived.identity, original.identity)
+        let recipe = try XCTUnwrap(manager.makeFrameRecipe(atFrame: 4, includeBackground: false, preparing: overrides))
+        let after = try XCTUnwrap(recipe.composite(budgetBytes: 1024 * 1024))
+        let red = try XCTUnwrap(CoreGraphicsCompositor.premultipliedBytes(before, width: 64, height: 64))
+        let blue = try XCTUnwrap(CoreGraphicsCompositor.premultipliedBytes(after, width: 64, height: 64))
+        XCTAssertNotEqual(red, blue)
+        XCTAssertGreaterThan(stride(from: 0, to: red.count, by: 4).reduce(0) { $0 + Int(red[$1]) }, 0)
+        XCTAssertEqual(stride(from: 0, to: red.count, by: 4).reduce(0) { $0 + Int(red[$1 + 2]) }, 0)
+        XCTAssertGreaterThan(stride(from: 0, to: blue.count, by: 4).reduce(0) { $0 + Int(blue[$1 + 2]) }, 0)
+        XCTAssertEqual(stride(from: 0, to: blue.count, by: 4).reduce(0) { $0 + Int(blue[$1]) }, 0)
+        XCTAssertEqual(manager.layers[layer].cels.map(CelContentIdentity.init), beforeIdentity)
+    }
+
+    @MainActor
+    func testRefusedLiquifyFinalSourceKeepsItsFinishAndPictureUntilOneSuccessfulRetry() throws {
+        let size = CGSize(width: 64, height: 64)
+        let bytes = 64 * 64 * 4
+        var refusing = false
+        let owner = RasterResidency(budgetBytes: bytes * 32, hasHeadroom: { _ in !refusing })
+        let source = try RasterSource.render(size: size, using: owner) { context in
+            context.setFillColor(UIColor.red.cgColor)
+            context.fill(CGRect(x: 20, y: 18, width: 9, height: 12))
+            return true
+        }.get()
+        let manager = CanvasFixture.manager()
+        manager.canvasSize = size
+        manager.layers[0].cels[0].raster = RasterLayerTexture(size: size, source: source, strokeCount: 1)
+        manager.history.removeAll()
+        let original = CelContentIdentity(manager.layers[0].cels[0])
+        let before = try XCTUnwrap(CoreGraphicsCompositor.premultipliedBytes(
+            XCTUnwrap(source.resolveImage().get().cgImage), width: 64, height: 64))
+        let profile = ToolProfile(preset: TestBrushes.hardRound, size: 40, opacity: 1)
+        var session = try XCTUnwrap(manager.beginLiquify(layerID: manager.layers[0].id,
+            profile: profile, size: 40, seed: 7))
+        session.samples = StrokeSamples([VectorSample(x: 24, y: 24), VectorSample(x: 38, y: 24)], channels: .pressureOnly)
+        session.window = CGRect(x: 0, y: 0, width: 60, height: 48)
+        manager.holdLiquify(&session)
+        let procedure = try XCTUnwrap(manager.liveCelContentEdit?.procedure)
+        _ = procedure.resolve(session.elementsBefore)
+        XCTAssertFalse(procedure.hasFailed)
+        refusing = true
+        manager.commitLiquify(session)
+        XCTAssertTrue(procedure.isPending)
+        let refusedBytes = owner.usage.chargedBytes
+        for _ in 0..<3 {
+            XCTAssertFalse(manager.beginCanvasEdit())
+            XCTAssertTrue(procedure.isPending)
+            XCTAssertTrue(manager.liveCelContentEdit?.procedure === procedure)
+            XCTAssertEqual(CelContentIdentity(manager.layers[0].cels[0]), original)
+            XCTAssertTrue(manager.history.undoStack.isEmpty && manager.history.redoStack.isEmpty)
+            XCTAssertEqual(owner.usage.chargedBytes, refusedBytes)
+        }
+        XCTAssertEqual(procedure.resolutionCount, 1, "Refusal must retain the same completed picture")
+        XCTAssertEqual(manager.notice?.kind, .drawingSourceUnavailable)
+        refusing = false
+        let prepared = try XCTUnwrap(manager.prepareCanvasEdit())
+        XCTAssertEqual(CelContentIdentity(manager.layers[0].cels[0]), original)
+        XCTAssertTrue(procedure.isPending)
+        XCTAssertTrue(prepared.commit())
+        XCTAssertFalse(procedure.isPending)
+        XCTAssertNil(manager.liveCelContentEdit)
+        XCTAssertEqual(manager.history.undoStack.map(\.label), [.liquify])
+        let after = try XCTUnwrap(CoreGraphicsCompositor.premultipliedBytes(
+            XCTUnwrap(manager.layers[0].cels[0].raster.renderToUIImage().get().cgImage), width: 64, height: 64))
+        XCTAssertNotEqual(after, before, "The successful retry must land the actual moved red picture")
+        procedure.didPresent()
+        procedure.didPresent()
+        XCTAssertEqual(manager.history.undoStack.count, 1)
+        XCTAssertEqual(manager.history.undo(), .liquify)
+        XCTAssertEqual(try CoreGraphicsCompositor.premultipliedBytes(
+            XCTUnwrap(manager.layers[0].cels[0].raster.renderToUIImage().get().cgImage), width: 64, height: 64), before)
+        XCTAssertEqual(manager.history.redo(), .liquify)
+        XCTAssertEqual(try CoreGraphicsCompositor.premultipliedBytes(
+            XCTUnwrap(manager.layers[0].cels[0].raster.renderToUIImage().get().cgImage), width: 64, height: 64), after)
+        XCTAssertLessThanOrEqual(owner.usage.admittedBytes, owner.budgetBytes)
+    }
+
+    func testUnchangedLiquifyFinishesOnceAndCancelledPreparedGenerationCannotLand() throws {
+        let deformation = LiquifyDeformation(brush: TestBrushes.hardRound, size: 16, power: 0,
+            mode: .push, seed: 1, samples: StrokeSamples(channels: .captured))
+        let procedure = LiquifyProcedure(deformation: deformation, selectedIDs: nil, poses: [:])
+        var finishes = 0
+        procedure.finishWhenPresented { resolved, _ in
+            XCTAssertTrue(resolved.changed.isEmpty)
+            XCTAssertTrue(resolved.fieldIsEmpty)
+            return { finishes += 1 }
+        }
+        XCTAssertTrue(procedure.settlePending([]))
+        XCTAssertFalse(procedure.isPending, "An unchanged gesture still releases its finish owner")
+        XCTAssertEqual(finishes, 1)
+        procedure.didPresent()
+        XCTAssertEqual(finishes, 1)
+        let cancelled = LiquifyProcedure(deformation: deformation, selectedIDs: nil, poses: [:])
+        cancelled.finishWhenPresented { _, _ in { finishes += 10 } }
+        var staged: [UUID: Cel] = [:]
+        let prepared = try XCTUnwrap(cancelled.preparePending([], staging: &staged))
+        XCTAssertTrue(prepared.isCurrent())
+        cancelled.cancel()
+        XCTAssertFalse(prepared.isCurrent())
+        prepared.commit()
+        cancelled.didPresent()
+        XCTAssertEqual(finishes, 1, "A prepared finish cannot land after cancellation changes its generation")
+        XCTAssertFalse(cancelled.isPending)
+    }
+
 }

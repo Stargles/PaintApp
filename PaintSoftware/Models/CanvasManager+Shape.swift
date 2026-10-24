@@ -49,7 +49,7 @@ extension CanvasManager {
         guard !shapeFingerDown else { return }
         // Laying down a new shape is a canvas edit: whatever was still pending bakes first, so the
         // two never share the transient tier (only one shape's geometry is tracked at a time).
-        beginCanvasEdit()
+        guard beginCanvasEdit() else { return }
         guard layers.indices.contains(currentLayerIndex) else { return }
         let layerIndex = currentLayerIndex
         guard let celIndex = activeCelIndex(inLayer: layerIndex, atFrame: currentFrame) else { return }
@@ -109,101 +109,89 @@ extension CanvasManager {
     /// added as a `VectorStroke` on a vector layer (so the eraser cuts into it like any other stroke)
     /// or stamped into the cel's raster on a raster layer (so the eraser punches through it there).
     /// Either way what lands is a real brush stroke, not a separate shape object.
-    func commitInteractiveShape() {
-        guard shapeGestureActive, let ink = shapeInk else { return }
-        shapeGestureActive = false
-        shapeFingerDown = false
-        let savedBrush = shapeGestureBrush
-        let collapsed = ink.collapsedSamples
-        let layerID = shapeGestureLayerID
-        let celID = shapeGestureCelID
-        let drawnUnder = shapeGestureInkPose
-        defer {
-            shapeGestureLayerID = nil
-            shapeGestureCelID = nil
-            shapeGestureInkPose = nil
-            shapeGestureSamples = []
-            objectWillChange.send()
-            refreshUndoRedoState()
-        }
-        guard !collapsed.isEmpty, let layerID, let celID,
-              let layerIndex = layers.firstIndex(where: { $0.id == layerID }),
-              let celIndex = layers[layerIndex].cels.firstIndex(where: { $0.id == celID }) else { return }
-
-        // The outline is in canvas points (it was dragged there), pulled into the layer's own space
-        // through the pose it was drawn under — so a shape drawn on a posed layer lands where the
-        // preview showed it. Both tiers take the same pull-back: a raster cel's pixels are the
-        // layer's own too.
-        guard case .stroke(let stroke)? = Self.inLayerSpace(.stroke(drawnShape(collapsed, brush: savedBrush)),
-                                                            shownThrough: drawnUnder) else { return }
-
-        if layers[layerIndex].kind == .vector {
-            // A vector layer's cel should always have a VectorCanvas, but stamping into the cel's
-            // raster if it somehow doesn't would paint into a buffer a vector layer never displays —
-            // i.e. the shape would silently vanish. Materialise one instead.
-            if layers[layerIndex].cels[celIndex].vector == nil, let canvasSize {
-                layers[layerIndex].cels[celIndex].vector = .empty(size: canvasSize)
-            }
-            if let vectorCanvas = layers[layerIndex].cels[celIndex].vector {
-                let elementsBefore = vectorCanvas.elements
-                vectorCanvas.addStroke(canvasSpaceStroke: stroke)
-                // **The whole display list, not the `strokes` bucket**, which is
-                // `registerVectorElementsUndo`'s own argument: `addFill` and `upsertText` append, so
-                // the list is not kind-sorted and a bucket-shaped undo has to invent a z-position for
-                // the stroke it puts back. That was already true of a shape baked onto a cel holding
-                // a fill; what makes it worth changing now is that the whole-list seam is also the
-                // one that can bound itself.
-                //
-                // It re-prices the step, and deliberately: `registerVectorStrokeUndo` charged the
-                // history 2,048 bytes a stroke where every other whole-array swap charges 512 an
-                // element. Both are the rough estimates `UndoHistory.trim` asks for, and a shape's
-                // snapshot is the same array a brush stroke's is, so one number for the two of them
-                // is the honest one.
-                registerVectorElementsUndo(vectorCanvas: vectorCanvas, oldElements: elementsBefore,
-                                           newElements: vectorCanvas.elements,
-                                           layerID: layerID, celID: celID, label: .shape,
-                                           // One stroke appended and nothing rewritten, and no
-                                           // rectangle needed in either direction: the undo measures
-                                           // what leaves, and the redo is bounded by what the undo
-                                           // remembered it painted. Same as a drawn stroke, because
-                                           // it is one.
-                                           swap: .addsAndRemoves(ink: nil))
-                // Baking a shape never goes through `strokeEnded` (the stroke that produced it was
-                // reverted when detection fired), so the thumbnail has to be refreshed here or the
-                // layer panel keeps showing the cel as it was before the shape landed.
-                scheduleThumbnailRegen(layerID: layerID, celID: celID)
-                return
-            }
-        }
-
-        stampShapeIntoRaster(stroke, raster: layers[layerIndex].cels[celIndex].raster,
-                             layerID: layerID, celID: celID)
-        scheduleThumbnailRegen(layerID: layerID, celID: celID)
+    @discardableResult
+    func commitInteractiveShape() -> Bool {
+        var staged: [UUID: Cel] = [:]
+        guard let commit = prepareInteractiveShape(staging: &staged) else { return false }
+        commit()
+        return true
     }
 
-    /// The collapsed outline as the stroke the artist's settings at detection make of it, in canvas
-    /// points.
+    /// Earlier tools supply staged immutable tiers for this affected cel. Preparation changes no
+    /// live canvas, draft or undo stack; the returned action lands immediately after every admission.
+    func prepareInteractiveShape(staging: inout [UUID: Cel]) -> (() -> Void)? {
+        guard shapeGestureActive else { return {} }
+        guard let ink = shapeInk,
+              let layerID = shapeGestureLayerID, let celID = shapeGestureCelID,
+              let layerIndex = layers.firstIndex(where: { $0.id == layerID }),
+              let celIndex = layers[layerIndex].cels.firstIndex(where: { $0.id == celID }) else {
+            raise(.drawingSourceUnavailable); return nil
+        }
+        let collapsed = ink.collapsedSamples
+        guard !collapsed.isEmpty else { return { [weak self] in self?.finishInteractiveShape() } }
+        guard case .stroke(let stroke)? = Self.inLayerSpace(.stroke(drawnShape(collapsed, brush: shapeGestureBrush)),
+                                                            shownThrough: shapeGestureInkPose) else {
+            raise(.drawingSourceUnavailable); return nil
+        }
+        var cel = staging[celID] ?? layers[layerIndex].cels[celIndex]
+        if layers[layerIndex].kind == .vector {
+            let before = cel.vector?.elements ?? []
+            let prepared = cel.vector?.makeCopy() ?? .empty(size: cel.raster.size)
+            prepared.addStroke(canvasSpaceStroke: stroke)
+            cel.vector = prepared
+            staging[celID] = cel
+            let elements = prepared.elements
+            let size = cel.raster.size
+            return { [weak self] in
+                guard let self,
+                      let layer = self.layers.firstIndex(where: { $0.id == layerID }),
+                      let at = self.layers[layer].cels.firstIndex(where: { $0.id == celID }) else { return }
+                if self.layers[layer].cels[at].vector == nil {
+                    self.layers[layer].cels[at].vector = .empty(size: size)
+                }
+                guard let vector = self.layers[layer].cels[at].vector else { return }
+                vector.restoreElements(elements, changedInk: nil, rewriting: [])
+                self.registerVectorElementsUndo(vectorCanvas: vector, oldElements: before,
+                    newElements: elements, layerID: layerID, celID: celID, label: .shape,
+                    swap: .addsAndRemoves(ink: nil))
+                self.scheduleThumbnailRegen(layerID: layerID, celID: celID)
+                self.finishInteractiveShape()
+            }
+        }
+        let before = cel
+        let prepared = cel.raster.makeCopy()
+        BrushStamper.stampStroke(into: prepared, samples: stroke.samples,
+            brush: stroke.brush, color: shapeGestureColor.uiColor,
+            brushSize: stroke.size, brushOpacity: shapeGestureOpacity,
+            random: DabRandom(seed: shapeGestureSeed))
+        guard case .success = prepared.lastMutationResult else { raise(.drawingSourceUnavailable); return nil }
+        cel.raster = prepared
+        staging[celID] = cel
+        return { [weak self] in
+            guard let self else { return }
+            self.registerUndoableCelChange(layerID: layerID, celID: celID,
+                oldRaster: before.raster, oldBaked: before.bakedImage,
+                newRaster: prepared, newBaked: before.bakedImage, label: .shape)
+            self.scheduleThumbnailRegen(layerID: layerID, celID: celID)
+            self.finishInteractiveShape()
+        }
+    }
+
+    /// The collapsed outline in canvas points, shared by preview and persistent preparation.
     private func drawnShape(_ samples: StrokeSamples, brush: Brush) -> VectorStroke {
         VectorStroke(brush: brush, color: shapeGestureColor, size: shapeGestureStrokeWidth,
                      opacity: shapeGestureOpacity, samples: samples, seed: shapeGestureSeed)
     }
 
-    /// Stamps a collapsed shape stroke into a raster cel and registers its undo step. Kept separate
-    /// so the vector and raster commit paths share one collapse and one set of brush settings.
-    private func stampShapeIntoRaster(_ stroke: VectorStroke, raster: RasterLayerTexture,
-                                      layerID: UUID, celID: UUID) {
-        guard let layer = layers.firstIndex(where: { $0.id == layerID }),
-              let cel = layers[layer].cels.first(where: { $0.id == celID }) else { return }
-        let prepared = raster.makeCopy()
-        BrushStamper.stampStroke(into: prepared, samples: stroke.samples,
-                                 brush: stroke.brush, color: shapeGestureColor.uiColor,
-                                 brushSize: stroke.size, brushOpacity: shapeGestureOpacity,
-                                 random: DabRandom(seed: shapeGestureSeed))
-        guard case .success = prepared.lastMutationResult else { raise(.drawingSourceUnavailable); return }
-        registerUndoableCelChange(layerID: layerID, celID: celID,
-                                  oldRaster: raster, oldBaked: cel.bakedImage,
-                                  newRaster: prepared, newBaked: cel.bakedImage, label: .shape)
-
+    private func finishInteractiveShape() {
+        shapeGestureActive = false
+        shapeFingerDown = false
+        shapeGestureLayerID = nil
+        shapeGestureCelID = nil
+        shapeGestureInkPose = nil
+        shapeGestureSamples = []
+        objectWillChange.send()
+        refreshUndoRedoState()
     }
 
     func cancelInteractiveShape() {

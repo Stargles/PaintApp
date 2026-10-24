@@ -281,7 +281,7 @@ extension CanvasManager {
         // A fill is a canvas edit like any other: an earlier adjustable fill (or a pending shape)
         // bakes first, so this fill reads it as a real boundary/recolour target instead of flooding
         // against content that is about to change.
-        beginCanvasEdit()
+        guard beginCanvasEdit() else { return }
         guard let canvasSize else { return }
         guard layers.indices.contains(currentLayerIndex) else { return }
         let layerIndex = currentLayerIndex
@@ -665,121 +665,102 @@ extension CanvasManager {
     ///   the only thing such a layer draws.
     /// - **raster layer** → flattened straight into `Cel.raster`, the tier the eraser stamps, so the
     ///   fill can be erased afterwards (see `registerUndoableCelChange`'s doc comment).
-    func commitInteractiveFill() {
-        guard fillGestureActive else { return }
-        fillGestureActive = false
-        fillFingerDown = false
-        let label: HistoryActionLabel = fillGestureIsLasso ? .lassoFill : .fill
-        fillGestureIsLasso = false
-        // Let the queue finish this gesture if it has not started publishing yet, *then* retire it
-        // and take back whatever it rendered. The order is load-bearing both ways round: waiting
-        // after the retirement would wait for a worker that has already thrown its result away.
-        //
-        // **The two of these together are the owner's bug, and they are two different windows.**
-        // `fillLastRender` is written by the render's landing, and this method is called
-        // from `beginCanvasEdit` at the top of the *next* `begin*Fill` — so a second gesture arrives
-        // here either with the first fill rendered but its landing not yet run (`endFillGeneration`
-        // hands back the bytes off the queue's side of `fillLock`), or with it not rendered at all
-        // (`awaitFillRenderIfNothingProduced` waits for them to exist). Reading only the
-        // main-thread copy dropped the fill in both.
+    @discardableResult
+    func commitInteractiveFill() -> Bool {
+        var staged: [UUID: Cel] = [:]
+        guard let commit = prepareInteractiveFill(staging: &staged) else { return false }
+        commit()
+        return true
+    }
+
+    /// Capture the latest produced render without retiring its generation. A failed admission
+    /// keeps that render, the adjustable draft and its live picture available for another attempt.
+    func prepareInteractiveFill(staging: inout [UUID: Cel]) -> (() -> Void)? {
+        guard fillGestureActive else { return {} }
         awaitFillRenderIfNothingProduced()
-        let queuedRender = endFillGeneration()
-        let render = fillLastRender ?? queuedRender
-        fillQueue.async { [weak self] in self?.endFillSession() }
-        let fillColor = fillGestureFillColor
-        let coverageCut = fillHalfCoverageAlpha
-        defer { fillGestureBaseBaked = nil; fillGestureLayerID = nil; fillGestureCelID = nil; refreshUndoRedoState() }
+        fillLock.lock()
+        let queued = fillRenderedRegion?.generation == fillGeneration ? fillRenderedRegion : nil
+        fillLock.unlock()
+        let render = fillLastRender ?? queued
         guard let layerID = fillGestureLayerID, let celID = fillGestureCelID,
               let layerIndex = layers.firstIndex(where: { $0.id == layerID }),
               let celIndex = layers[layerIndex].cels.firstIndex(where: { $0.id == celID }) else {
-            endLiveFill()
-            return
+            raise(.drawingSourceUnavailable); return nil
         }
-        // The render may be produced but not yet shown (see `endFillGeneration` above), so the picture
-        // is built from whichever bytes are newest, clipped as the host clips them, and the guard
-        // below asks *"was anything filled?"* rather than *"did the main thread get there in time?"*.
-        // An empty lasso result stores no bytes at all, so §7.1's "no undo entry for a loop that
-        // enclosed nothing" still falls out of that same guard.
-        let shown = render?.preview(clippedTo: fillSelectionClip(layerIndex: layerIndex, celIndex: celIndex))
-        guard let preview = shown else {
-            endLiveFill()
-            return
-        }  // nothing was previewed
-
+        guard let render, !render.bytes.isEmpty else {
+            return { [weak self] in self?.finishInteractiveFill() }
+        }
+        guard let preview = render.preview(clippedTo: fillSelectionClip(layerIndex: layerIndex, celIndex: celIndex)) else {
+            raise(.drawingSourceUnavailable); return nil
+        }
+        let label: HistoryActionLabel = fillGestureIsLasso ? .lassoFill : .fill
+        var cel = staging[celID] ?? layers[layerIndex].cels[celIndex]
         if layers[layerIndex].kind == .vector {
-            // --- Vector layer: the fill becomes a VectorFillElement, never raster pixels ---
-            // A vector layer's on-screen content is `VectorCanvas.render()` alone (see
-            // `StrokeCanvasView.refreshDisplay`), so this must NOT fall through to the raster branch
-            // below when the contour can't be extracted: `PixelOps.rasterize` *does* read the raster
-            // tier, so a fill left there would vanish from the canvas while still showing up in
-            // thumbnails, fill references, Move lifts and merges — the vector twin of the raster
-            // "ghost layer" bug. An unextractable mask means an empty fill, so dropping the preview
-            // is the correct outcome; nothing is recorded.
-            // `minimumAlpha` because a vector fill is a *path*: it has no coverage ramp to inherit, so
-            // the lasso's antialiased fringe (LASSO_FILL.md §6 step 6) has to be rounded to one side
-            // or the other. Half the gesture's own opacity puts the contour where the artwork's line
-            // is half covered, which is the same place the raster tier's ramp crosses 50% — without
-            // it the traced path would run right out to the full threshold band and the two tiers
-            // would disagree about the shape of the same gesture.
-            //
-            // Traced in the window's working pixels and mapped back through the window, so a fill
-            // worked below scale 1 lands as a path at canvas scale — coarser along its edge by the
-            // window's factor, and nowhere else.
-            guard let render,
-                  let traced = PixelOps.pathFromAlphaMask(bytes: render.bytes, width: render.window.workingWidth,
-                                                          height: render.window.workingHeight,
-                                                          minimumAlpha: coverageCut) else {
-                endLiveFill()
-                return
+            guard let traced = PixelOps.pathFromAlphaMask(bytes: render.bytes,
+                width: render.window.workingWidth, height: render.window.workingHeight,
+                minimumAlpha: fillHalfCoverageAlpha) else {
+                return { [weak self] in self?.finishInteractiveFill() }
             }
             var toCanvas = render.window.transform.inverted()
-            guard let path = traced.copy(using: &toCanvas),
-                  placeVectorFill(path, paint: .solid(fillColor), layerIndex: layerIndex, celIndex: celIndex,
-                                  label: label) != nil else {
-                endLiveFill()
-                return
+            guard let path = traced.copy(using: &toCanvas) else { raise(.drawingSourceUnavailable); return nil }
+            let before = cel.vector?.elements ?? []
+            let prepared = cel.vector?.makeCopy() ?? .empty(size: cel.raster.size)
+            let added = prepared.addFill(canvasSpacePath: path, paint: .solid(fillGestureFillColor))
+            cel.vector = prepared
+            staging[celID] = cel
+            let elements = prepared.elements
+            let size = cel.raster.size
+            return { [weak self] in
+                guard let self,
+                      let layer = self.layers.firstIndex(where: { $0.id == layerID }),
+                      let at = self.layers[layer].cels.firstIndex(where: { $0.id == celID }) else { return }
+                if self.layers[layer].cels[at].vector == nil { self.layers[layer].cels[at].vector = .empty(size: size) }
+                guard let vector = self.layers[layer].cels[at].vector else { return }
+                vector.restoreElements(elements, changedInk: nil, rewriting: [])
+                self.registerVectorElementsUndo(vectorCanvas: vector, oldElements: before,
+                    newElements: elements, layerID: layerID, celID: celID, label: label,
+                    swap: .addsAndRemoves(ink: added.ink))
+                self.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
+                self.finishInteractiveFill(landing: preview)
             }
-            endLiveFill(landing: preview)
-        } else {
-            let cel = layers[layerIndex].cels[celIndex]
-            // --- Raster path: flatten into `raster` directly, with the fill on top ---
-            // `fillGestureBaseBaked` is only the pre-gesture `bakedImage` tier (see where it's
-            // captured in `beginInteractiveFill`), so the cel's existing content is that tier with
-            // the live raster strokes composited over it. Both are rebuilt here rather than carried
-            // over via `newRaster: cel.raster`, or the fill's own pixels would be stuck underneath a
-            // `raster` tier the eraser stamps into but the fill itself never touched.
-            //
-            // **The preview goes on last — LASSO_FILL.md §2a, and it is the owner's bug.** It used to
-            // be composited *under* the raster tier, and a committed fill is itself folded into that
-            // tier by this same line (`newRaster:` below, `newBaked: nil`), so a second fill over the
-            // first went underneath it and was invisible: *"I cannot fill over things that already
-            // have been filled."* The same ordering also kept the layer's own line art on top of the
-            // fill, which the owner overruled in the same breath — *"Cover everything."* One order,
-            // both symptoms, one fix. `PixelOps.rasterizeUncached` draws the live preview last for
-            // the same reason, so the picture does not rearrange itself when the pencil lifts.
-            //
-            // **`hasContent` first, because `compositeOver` takes its bounds from the overlay.** A
-            // blank tier renders to a shared 1×1 (see `RasterLayerTexture.renderToUIImage`), so
-            // handing it over as the overlay would size the whole composite to one pixel — and a
-            // first fill on a fresh raster cel is exactly that case.
-            let canvas = CGRect(origin: .zero, size: cel.raster.size)
-            let final: RasterSource
-            do {
-                let baked = try fillGestureBaseBaked?.resolveImage().get()
-                let strokes = try cel.raster.renderIfNonEmpty().get()
-                final = try RasterSource.render(size: cel.raster.size, using: cel.raster.residency) { _ in
-                    baked?.draw(in: canvas)
-                    strokes?.draw(in: canvas)
-                    preview.draw()
-                    return true
-                }.get()
-            } catch { raise(.drawingSourceUnavailable); endLiveFill(); return }
-            registerUndoableCelChange(layerID: layerID, celID: celID,
-                                      oldRaster: cel.raster, oldBaked: fillGestureBaseBaked,
-                                      newRaster: preparedRasterTexture(source: final, likeExisting: cel.raster),
-                                      newBaked: nil, label: label)
-            endLiveFill(landing: preview)
         }
+        let before = cel
+        let final: RasterSource
+        do {
+            let baked = try cel.bakedImage?.resolveImage().get()
+            let strokes = try cel.raster.renderIfNonEmpty().get()
+            let canvas = CGRect(origin: .zero, size: cel.raster.size)
+            final = try RasterSource.render(size: cel.raster.size, using: cel.raster.residency) { _ in
+                baked?.draw(in: canvas)
+                strokes?.draw(in: canvas)
+                preview.draw()
+                return true
+            }.get()
+        } catch { raise(.drawingSourceUnavailable); return nil }
+        let raster = preparedRasterTexture(source: final, likeExisting: cel.raster)
+        cel.raster = raster
+        cel.bakedImage = nil
+        staging[celID] = cel
+        return { [weak self] in
+            guard let self else { return }
+            self.registerUndoableCelChange(layerID: layerID, celID: celID,
+                oldRaster: before.raster, oldBaked: before.bakedImage,
+                newRaster: raster, newBaked: nil, label: label)
+            self.finishInteractiveFill(landing: preview)
+        }
+    }
+
+    private func finishInteractiveFill(landing: FillPreview? = nil) {
+        fillGestureActive = false
+        fillFingerDown = false
+        fillGestureIsLasso = false
+        _ = endFillGeneration()
+        fillQueue.async { [weak self] in self?.endFillSession() }
+        endLiveFill(landing: landing)
+        fillGestureBaseBaked = nil
+        fillGestureLayerID = nil
+        fillGestureCelID = nil
+        refreshUndoRedoState()
     }
 
     // MARK: - A path that is already known
@@ -918,7 +899,7 @@ extension CanvasManager {
     /// near-miss without redrawing the loop.
     func beginInteractiveLassoFill(path drawnPath: CGPath) {
         guard !fillFingerDown else { return }
-        beginCanvasEdit()
+        guard beginCanvasEdit() else { return }
         guard let canvasSize else { return }
         guard layers.indices.contains(currentLayerIndex) else { return }
         let layerIndex = currentLayerIndex

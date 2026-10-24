@@ -39,7 +39,7 @@ import CryptoKit
 //    keys can concatenate to the same byte string. Without them `["ab"] + ["c"]` and `["a"] + ["bc"]`
 //    are one encoding.
 // 3. **Fixed-width, fixed-endian scalars.** Floats go in as their `bitPattern` little-endian;
-//    `UUID` as its 16 bytes; `ObjectIdentifier` as its pointer bit pattern.
+//    owner `UUID` values as their 16 bytes (never a reusable object address).
 
 /// A type that can name itself to the bake key — the seam for `LayerContentVersion.derived`, which
 /// is an `AnyHashable` this file cannot switch over.
@@ -90,14 +90,6 @@ struct BakeKeyEncoder {
     }
 
     mutating func uuid(_ value: UUID) { withUnsafeBytes(of: value.uuid) { bytes.append(contentsOf: $0) } }
-
-    /// **The pointer, which is what makes the default store process-lifetime only.**
-    /// `LayerContentVersion` names a cel's tiers by `ObjectIdentifier` — a live address — so the same
-    /// document reopened in a new process mints entirely different keys for pixels that have not
-    /// changed. That is exactly right for the `Library/Caches` store, which RENDER §2.11 dumps at
-    /// launch anyway. A bake the artist *keeps* beside the project needs a stamp the document
-    /// persists instead; RENDER §3.5 scopes that to stage 6 and it is deliberately not built here.
-    mutating func objectID(_ value: ObjectIdentifier) { u64(UInt64(UInt(bitPattern: value))) }
 
     // MARK: Structure
 
@@ -215,7 +207,7 @@ struct FrameBakeKey: Hashable {
         var e = BakeKeyEncoder()
         // A version byte for the *encoding*, distinct from the store's file format version: changing
         // how a field is written must invalidate every digest even if the file layout is unchanged.
-        e.tag(0x03)
+        e.tag(0x04)
         e.u16(formatVersion)
 
         // The buffer. `FrameRecipe.canvasSize` is a `RenderSizing` already applied and rounded to
@@ -352,11 +344,11 @@ private extension BakeKeyEncoder {
     /// redundancy is the only thing standing between that and a wrong picture on disk.
     mutating func encode(version: LayerContentVersion) {
         uuid(version.celID)
-        objectID(version.raster)
+        uuid(version.raster)
         int(version.rasterVersion)
-        optional(version.vector) { e, v in e.objectID(v) }
+        optional(version.vector) { e, v in e.uuid(v) }
         int(version.vectorVersion)
-        optional(version.bakedImage) { e, v in e.objectID(v) }
+        optional(version.bakedImage) { e, v in e.uuid(v) }
         optional(version.valueFill) { e, fill in
             e.uuid(fill.color.id)
             e.string(fill.color.hex)

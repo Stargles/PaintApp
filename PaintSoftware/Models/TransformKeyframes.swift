@@ -371,7 +371,7 @@ extension CanvasManager {
         guard let at = celIndices(forCel: celID, inLayer: layerID),
               let vector = layers[at.layer].cels[at.cel].vector else { return }
         let movedElements = vector.elements
-        beginCanvasEdit()
+        guard beginCanvasEdit() else { return }
         // **A same-id rewrite, declared as one** — TODO (41)'s last box. The moved elements go back
         // to rest under their own ids (a piece a Cut minted is an id difference and is bounded by
         // that half), so the seam bounds the swap by where each was and where it will be, in the
@@ -646,7 +646,7 @@ extension CanvasManager {
     /// channel edit.
     private func commitCelPoseState(_ state: CelPoseState, from before: CelPoseState,
                                     layerID: UUID, celID: UUID, label: HistoryActionLabel) {
-        beginCanvasEdit()
+        guard beginCanvasEdit() else { return }
         let marks = applyCelPoseStateDroppingKeyedMarks(state, layerID: layerID, celID: celID)
         celContentChangedOutsideStroke(layerID: layerID, celID: celID)
 
@@ -832,7 +832,7 @@ extension CanvasManager {
                             label: HistoryActionLabel = .effectKeys) {
         guard targetExists(target) else { return }
         let marksBefore = keyframeState(of: target).marks
-        beginCanvasEdit()
+        guard beginCanvasEdit() else { return }
 
         // Both halves of `marks(_:droppingKeyed:)`: the "before" set is what makes a key dragged off
         // a marked frame take the mark with it, the "after" set is what stops a mark being written

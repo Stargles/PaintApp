@@ -1434,6 +1434,8 @@ enum RenderQuality {
 /// nearest-neighbor magnification, so it stays pixelated when zoomed even though the source is
 /// resolution-independent.
 final class VectorCanvas {
+    /// Stable owner identity for cache keys after an ephemeral staged owner has been released.
+    let residencyID = UUID()
     let size: CGSize
 
     /// Guards `_elements`/`_transform` and `cachedImage`. Live drawing mutates this canvas on the main

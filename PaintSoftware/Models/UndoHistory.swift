@@ -36,11 +36,11 @@ import Foundation
 ///  * **It is five ceilings added together, not an observation.** PERFORMANCE.md item 12 makes the
 ///    same point about its own ~384 MiB. Nothing has ever measured all five full at once, and §6
 ///    still lists "what is the real cache occupancy at background time?" as open.
-///  * **It is also not the app's memory story.** The document itself has no budget of any kind: a
-///    drawn raster cel is **6.6 MiB resident at 2048x1024** (MEASURED 2026-08-20,
-///    `PerfBaselineTests.testWhatOneDrawnRasterCelCostsResidentAtTheOwnersCanvas`), so a 120-cel
-///    scene is ~787 MB — more than all five budgets together, and unbounded. That is item 14, and
-///    the reconciliation's real finding is that the budgeted half of the app is the smaller half.
+///  * **It is not a process-memory bound.** Raster/baked versions now share RasterResidency's
+///    provider-owned source allocation/window budget and immutable compressed backings. Undo still
+///    charges logical retained payload, so eviction to disk cannot turn an expensive action into a
+///    zero-cost history entry. Derived compositor/brush/decoder internals remain separate costs;
+///    these ceilings cannot establish a whole-process peak or a device jetsam threshold.
 ///
 /// ### What `physical / 16` costs the iPad 9, stated rather than glossed
 ///

@@ -166,7 +166,7 @@ extension CanvasManager {
         // swallowed into this one (or re-baking afterwards on top of it). This one call is what
         // covers add/delete/merge/duplicate/group/restack/rasterize/clear and every cel-timeline
         // operation: they all funnel through here. See `beginCanvasEdit`.
-        if records { beginCanvasEdit() }
+        if records, !beginCanvasEdit() { return false }
         // A fallible nested edit restores its entry, preserving any earlier enclosing gesture work.
         let before = captureStructure()
         let cropBefore = pendingKeyframeCrop
@@ -233,13 +233,15 @@ extension CanvasManager {
     /// outermost scope captures a baseline, so one user action is one undo step even when a bracket
     /// spans another — a mask-edit session (§6.6) is open for as long as a layer's options menu is,
     /// and the rows under it can start an opacity drag inside it.
-    func beginStructureGesture() {
-        structureGestureDepth += 1
-        guard structureGestureDepth == 1 else { return }
+    @discardableResult
+    func beginStructureGesture() -> Bool {
+        if structureGestureDepth > 0 { structureGestureDepth += 1; return true }
         // Same rule as `withStructureUndo`: bake transients before the baseline snapshot, so the
         // drag about to start doesn't span a shape/fill that wasn't committed when it began.
-        beginCanvasEdit()
+        guard beginCanvasEdit() else { return false }
+        structureGestureDepth = 1
         gestureSnapshot = captureStructure()
+        return true
     }
 
     /// Closes a bracket, recording the step only when the outermost one closes. An inner `label` is

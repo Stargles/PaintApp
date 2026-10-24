@@ -851,7 +851,7 @@ extension CanvasManager {
         // A still-adjustable fill or shape can't follow the user to another cel — bake both here so
         // they land as committed steps on the global history, against the cel they were drawn on,
         // before the active context moves off it.
-        beginCanvasEdit()
+        guard beginCanvasEdit() else { return false }
         let activeLayerID = layers.indices.contains(currentLayerIndex) ? layers[currentLayerIndex].id : nil
         let activeCelID = self.activeCelID(inLayer: currentLayerIndex, atFrame: currentFrame)
         if let piece = floatingPiece {
@@ -985,7 +985,7 @@ extension CanvasManager {
         // more concretely: the selection immediately clips subsequent painting, so a shape/fill
         // still hanging over the cel has to be part of its content by now rather than arriving on
         // top of the selection afterwards.
-        beginCanvasEdit()
+        guard beginCanvasEdit() else { return }
         guard let canvasSize else { return }
         let canvasRect = CGRect(origin: .zero, size: canvasSize)
         if let existing = selection, existing.isRegion {
@@ -1030,7 +1030,7 @@ extension CanvasManager {
         // Bake before sampling: the magic wand reads the cel's flattened pixels below, which include
         // a pending fill's preview — selecting against content that isn't committed yet would produce
         // a selection the layer no longer matches once that fill bakes (or is undone).
-        beginCanvasEdit()
+        guard beginCanvasEdit() else { return }
         guard let canvasSize, layers.indices.contains(currentLayerIndex),
               let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame) else { return }
         // Through the `ContentProvider` seam: the wand samples what the artist can see, and on a

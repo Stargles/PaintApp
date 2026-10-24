@@ -130,6 +130,8 @@ extension CanvasManager {
         /// land on a different slider — or a different layer — and they must not have to guess
         /// whether they are still armed.
         case notRecordable
+        /// Required draft pixels could not be prepared; the existing drawing notice is raised.
+        case pictureUnavailable
 
         /// **What the artist reads, and each one names what to do next.** A refusal that says only
         /// that something did not happen is worth very little — §2.29/§2.30's two notices are apart
@@ -150,6 +152,8 @@ extension CanvasManager {
                 return "That take was shorter than one frame — let it play for a moment before stopping."
             case .notRecordable:
                 return "That can't be recorded — a take needs a slider that moves smoothly, or a vector layer to draw on with the brush. Still armed, so try another."
+            case .pictureUnavailable:
+                return CanvasNotice(.drawingSourceUnavailable).message
             }
         }
     }
@@ -417,7 +421,7 @@ extension CanvasManager {
         // many sliders it touched. `commitStructureGesture`'s own rule: "an inner label is discarded
         // rather than winning: the step belongs to the action that spans the others." A gesture of
         // another kind still open when the take ends is `CanvasManager.pendingGestureLabel`'s case.
-        beginStructureGesture()
+        guard beginStructureGesture() else { return .pictureUnavailable }
 
         if !isPlaying { play() }
         recordingTake = RecordingTake(target: target,

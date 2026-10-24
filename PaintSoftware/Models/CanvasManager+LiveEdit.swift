@@ -423,7 +423,7 @@ extension CanvasManager {
         if let held = liveEdit?.grade, held.target == target {
             grade = held
         } else {
-            beginCanvasEdit()
+            guard beginCanvasEdit() else { return }
             grade = HeldGrade(target: target, frame: frame)
         }
         change(&grade)
@@ -489,7 +489,7 @@ extension CanvasManager {
             endLiveEdit()
             return nil
         }
-        beginStructureGesture()
+        guard beginStructureGesture() else { return nil }
         var changed = false
         if let stored = grade.stored, stored != storedEffect(of: grade.target) {
             setStoredEffect(of: grade.target, to: stored)
@@ -572,9 +572,9 @@ extension CanvasManager {
     func holdTargetChannel(_ target: KeyframeTarget, channel: TargetChannel, value: Double,
                            parallaxPoser: KeyframeTarget? = nil) {
         let value = channel.clamped(value)
-        let recorded = recordParameterSample(target, parameterID: channel.id, value: value)
         let open = liveEdit?.channel?.holding(channel, of: target)
-        if open == nil { beginCanvasEdit() }
+        if open == nil, !beginCanvasEdit() { return }
+        let recorded = recordParameterSample(target, parameterID: channel.id, value: value)
         let frame = open?.frame ?? currentFrame
         // Only Rotate's speed is read at frames other than the edit's — summed over the bar — so only it
         // needs the curve the lift will leave; every other channel is read at the frame shown.
@@ -629,7 +629,7 @@ extension CanvasManager {
             endLiveEdit()
             return nil
         }
-        beginStructureGesture()
+        guard beginStructureGesture() else { return nil }
         let route: KeyframeControl.Write
         if held.channel == .parallaxShare, let poser = held.parallaxPoser {
             route = setParallaxShare(of: held.target, beneath: poser, to: held.value, atFrame: held.frame)
@@ -664,7 +664,7 @@ extension CanvasManager {
     func holdValueFill(ofLayer index: Int, _ fill: ValueFill) {
         guard layers.indices.contains(index), layers[index].valueFill != nil else { return }
         let id = layers[index].id
-        if liveEdit?.valueFill?.layerID != id { beginCanvasEdit() }
+        if liveEdit?.valueFill?.layerID != id, !beginCanvasEdit() { return }
         holdLiveEdit(.valueFill(HeldValueFill(layerID: id, fill: fill)))
     }
 
@@ -708,7 +708,7 @@ extension CanvasManager {
         if let open = liveEdit?.channelCurves, open.target == target {
             held = open
         } else {
-            beginCanvasEdit()
+            guard beginCanvasEdit() else { return }
             held = HeldChannelCurves(target: target, curves: [:])
         }
         held.curves.merge(curves) { $1 }
@@ -724,7 +724,7 @@ extension CanvasManager {
         if let open = liveEdit?.groupPose, open.layerID == layerID {
             all = open.curves.merging(curves) { $1 }
         } else {
-            beginCanvasEdit()
+            guard beginCanvasEdit() else { return }
         }
         guard let folded = poseDelta(replacing: all, of: target) else { return }
         holdLiveEdit(.groupPose(LivePose(layerID: layerID, curves: all, pose: folded.poses)))
@@ -745,7 +745,7 @@ extension CanvasManager {
         } else {
             return false
         }
-        beginStructureGesture()
+        guard beginStructureGesture() else { return false }
         var changed = false
         for (id, curve) in held.curves.sorted(by: { $0.key < $1.key })
         where writeGraphNodeCurve(target: held.target, parameterID: id, to: curve) {
@@ -778,7 +778,7 @@ extension CanvasManager {
     }
 
     func holdMask(_ mask: AlphaMask, for target: MaskSource) {
-        if liveEdit?.mask == nil { beginCanvasEdit() }
+        if liveEdit?.mask == nil, !beginCanvasEdit() { return }
         holdLiveEdit(.mask(HeldMask(target: target, value: mask)))
     }
 

@@ -1051,7 +1051,7 @@ final class CanvasManager: ObservableObject {
     /// finger. The pose's own write settled them at the lift before; settling them at the touch-down
     /// lands the same steps in the same order.
     func beginLiveTransformEdit(_ edit: LiveTransformEdit) {
-        beginCanvasEdit()
+        guard beginCanvasEdit() else { return }
         if liveTransformEdit != edit { liveTransformEdit = edit }
     }
 
@@ -1940,22 +1940,65 @@ final class CanvasManager: ObservableObject {
     /// A floating Move/Duplicate piece is deliberately *not* settled here — Move stays engaged
     /// across its own nudges and mode changes, which are canvas edits in their own right. Use
     /// `commitAllInteractiveState()` where the tool itself is changing out from under the user.
-    func beginCanvasEdit() {
-        guard canvasEditDepth == 0 else { return }
-        canvasEditDepth += 1
-        defer { canvasEditDepth -= 1 }
-        settlePendingLiquifyProcedure()
-        commitInteractiveFill()
-        commitInteractiveShape()
-        // Last in the list, because the text overlay draws above the shape overlay and committing
-        // last preserves what the user was looking at. `ADD_TEXT.md` §1 "The bake trigger is one
-        // line" — every existing caller of this method inherits the text bake with no per-tool
-        // retrofit, which is the whole reason the chokepoint exists.
-        commitInteractiveText()
-        // An open gradient is settled before any other edit lands on its canvas: its undo step swaps
-        // the whole display list between two snapshots, so a stroke committed while it was still open
-        // would be swept out by it.
-        commitGradientEdit()
+    @discardableResult
+    func beginCanvasEdit() -> Bool {
+        guard let prepared = prepareCanvasEdit() else { return false }
+        return prepared.commit()
+    }
+
+    /// Affected cels only, in the existing settlement order. The staged values are local inputs
+    /// for the next tool and for stroke/mask admission; they are never another document model.
+    func prepareCanvasEdit(cancellingFingerDrafts: Bool = false) -> (commit: () -> Bool, cels: [UUID: Cel])? {
+        guard canvasEditDepth == 0 else { return ({ true }, [:]) }
+        var cels: [UUID: Cel] = [:]
+        var actions: [() -> Void] = []
+        var liquifyIsCurrent: () -> Bool = { true }
+        let procedure = liveCelContentEdit?.procedure
+        if let edit = liveCelContentEdit, let procedure {
+            guard let prepared = procedure.preparePending(edit.elements, staging: &cels) else {
+                raise(.drawingSourceUnavailable); return nil
+            }
+            actions.append(prepared.commit)
+            liquifyIsCurrent = prepared.isCurrent
+        }
+        let fill: (() -> Void)?
+        if cancellingFingerDrafts && fillFingerDown { fill = { [weak self] in self?.cancelInteractiveFill() } }
+        else { fill = prepareInteractiveFill(staging: &cels) }
+        guard let fill else { return nil }
+        let shape: (() -> Void)?
+        if cancellingFingerDrafts && shapeFingerDown { shape = { [weak self] in self?.cancelInteractiveShape() } }
+        else { shape = prepareInteractiveShape(staging: &cels) }
+        guard let shape else { return nil }
+        let text: (() -> Void)?
+        if cancellingFingerDrafts && textFingerDown { text = { [weak self] in self?.cancelInteractiveText() } }
+        else { text = prepareInteractiveText(staging: &cels) }
+        guard let text else { return nil }
+        actions.append(contentsOf: [fill, shape, text])
+        let project = projectID
+        let fillState = (fillGestureActive, fillGeneration)
+        let shapeState = (shapeGestureActive, shapeGestureLayerID, shapeGestureCelID)
+        let textState = (textGestureActive, textGestureLayerID, textGestureCelID)
+        let identities = Dictionary(uniqueKeysWithValues: cels.keys.compactMap { id in
+            layers.lazy.flatMap(\.cels).first(where: { $0.id == id }).map { (id, CelContentIdentity($0)) }
+        })
+        let commit: () -> Bool = { [weak self] in
+            guard let self, self.projectID == project, liquifyIsCurrent(),
+                  self.fillGestureActive == fillState.0, self.fillGeneration == fillState.1,
+                  self.shapeGestureActive == shapeState.0, self.shapeGestureLayerID == shapeState.1,
+                  self.shapeGestureCelID == shapeState.2,
+                  self.textGestureActive == textState.0, self.textGestureLayerID == textState.1,
+                  self.textGestureCelID == textState.2,
+                  self.liveCelContentEdit?.procedure === procedure,
+                  identities.allSatisfy({ id, identity in
+                      self.layers.lazy.flatMap(\.cels).first(where: { $0.id == id }).map(CelContentIdentity.init) == identity
+                  }) else { return false }
+            self.canvasEditDepth += 1
+            defer { self.canvasEditDepth -= 1 }
+            actions.forEach { $0() }
+            self.commitGradientEdit()
+            return true
+        }
+        return (commit, cels)
     }
 
     /// Whether `settleInteractiveState()` would settle anything. The autosave's hold — TODO (76):
@@ -1976,7 +2019,7 @@ final class CanvasManager: ObservableObject {
     /// lacks is left where the artist put it, so an autosave does not take it away from under them.
     @discardableResult
     func settleInteractiveState() -> Bool {
-        beginCanvasEdit()
+        guard beginCanvasEdit() else { return false }
         // A selection edit still open when the tool changes out from under the artist is committed
         // as the one step it was going to be (TODO (42)) — the lifted-but-adjustable fill's rule. A
         // drag with nothing applied yet commits to nothing and records nothing.
@@ -2644,7 +2687,7 @@ final class CanvasManager: ObservableObject {
         // Every document edit is a canvas edit: a pending shape/fill/text transient bakes first, as
         // its own earlier step, rather than being swallowed into this one. Re-entrant-safe, so calling
         // it inside an enclosing bracket that already did is free.
-        beginCanvasEdit()
+        guard beginCanvasEdit() else { return false }
         writeEffectParameterTrack(after, marks: marksAfter, parameterID: parameterID, layerID: layerID)
 
         guard structureUndoDepth == 0, gestureSnapshot == nil else { return true }
@@ -2844,7 +2887,7 @@ final class CanvasManager: ObservableObject {
                                         .union(keyedFrames(of: target, in: stateAfter)))
         }
 
-        beginCanvasEdit()
+        guard beginCanvasEdit() else { return false }
         writeFolderEffectParameterTrack(after, marks: marksAfter,
                                         parameterID: parameterID, folderID: folderID)
 
@@ -4188,8 +4231,8 @@ final class CanvasManager: ObservableObject {
     /// a mask off every node whose menu was ever opened.
     func withMaskSessionUndo(_ body: () -> Void) {
         if maskEditTarget != nil, !maskSessionIsRecording {
+            guard beginStructureGesture() else { return }
             maskSessionIsRecording = true
-            beginStructureGesture()
         }
         body()
     }
@@ -4613,6 +4656,10 @@ final class CanvasManager: ObservableObject {
     /// naming it.
     var textFocusResigner: (() -> Void)?
 
+    /// Current editor contents for a side-effect-free preparation. Reading it preserves queued
+    /// keystrokes without resigning focus before the complete canvas edit has been admitted.
+    var textDraftReader: (() -> String?)?
+
     /// Installed by the same overlay. Asked *before* undo/redo does anything: returns true when the
     /// caret is live and the keyboard's own undo stack consumed the action.
     ///
@@ -4659,7 +4706,7 @@ final class CanvasManager: ObservableObject {
             cancelVectorFloat()
             return
         }
-        finalizePendingGesturesForHistoryAction()
+        guard finalizePendingGesturesForHistoryAction() else { return }
         // `history.undo()` returns nil (and does nothing) on an empty stack — that is the "silent
         // when nothing happened" case `raise` must not be called for. `finalizePendingGesturesFor-
         // HistoryAction` above may itself have just pushed a step (a lifted fill/shape gesture
@@ -4681,7 +4728,7 @@ final class CanvasManager: ObservableObject {
         if textEditUndoHandler?(true) == true { return }
         // And an open lasso has nothing to redo, which is why the button is dim while one is up.
         if openLasso != nil { return }
-        finalizePendingGesturesForHistoryAction()
+        guard finalizePendingGesturesForHistoryAction() else { return }
         if let label = history.redo() {
             raise(.historyRedo(label))
             documentEdited.send()
@@ -4693,39 +4740,11 @@ final class CanvasManager: ObservableObject {
     /// both are resolved first: one still under the finger is discarded; a lifted, still-adjustable
     /// one is committed so it becomes a real step the following `undo()` reverts, instead of the
     /// undo silently hitting the previous action while it lingers.
-    private func finalizePendingGesturesForHistoryAction() {
-        settlePendingLiquifyProcedure()
-        // A drag still open on a Move box is dropped, like the fill and the shape under a finger
-        // below; `cancelBoxNudge` says why it is not settled instead.
+    private func finalizePendingGesturesForHistoryAction() -> Bool {
+        // A history press cancels finger-held drafts and commits lifted ones. Both are deferred
+        // until all lifted pixel admissions succeed, so refusal changes neither drafts nor stacks.
+        guard let prepared = prepareCanvasEdit(cancellingFingerDrafts: true), prepared.commit() else { return false }
         cancelBoxNudge()
-        if fillFingerDown {
-            cancelInteractiveFill()
-        } else if fillGestureActive {
-            commitInteractiveFill()
-        }
-        if shapeFingerDown {
-            cancelInteractiveShape()
-        } else if shapeGestureActive {
-            commitInteractiveShape()
-        }
-        // Text's own three-way branch (`ADD_TEXT.md` §1, "The bake trigger is one line"). The first
-        // two arms are the fill's and the shape's: a box under the finger is discarded, a
-        // lifted-but-adjustable one commits so the following undo has a real step to revert.
-        //
-        // The third is the case neither of them has. **Keyboard focused with no finger down resigns
-        // first responder and then commits**: undo mid-typing must not strand a floating editor over
-        // a baked bitmap, and must not silently throw away what was typed. It is reachable only when
-        // `textEditUndoHandler` above declined — i.e. the keyboard's own undo stack is empty — so an
-        // artist who undoes past the start of their typing gets the object itself back, which is
-        // exactly §5.1's "only once you tap away".
-        if textFingerDown {
-            cancelInteractiveText()
-        } else if textIsFocused {
-            textFocusResigner?()
-            commitInteractiveText()
-        } else if textGestureActive {
-            commitInteractiveText()
-        }
         // The lasso move's version of the same three-way rule — see
         // `finalizeVectorFloatForHistoryAction`, where the zero-nudge case is the one that has to be
         // un-happened rather than stepped back from.
@@ -4745,6 +4764,7 @@ final class CanvasManager: ObservableObject {
         // layer's colour picker is the gradient's case.
         commitGradientEdit()
         commitHeldValueFill()
+        return true
     }
 
     func refreshUndoRedoState() {

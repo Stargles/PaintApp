@@ -1132,11 +1132,11 @@ enum OnionSkinRasterCache {
     /// two, which is the whole reason it is this type and not a copy of it.
     struct Key: Hashable {
         let celID: UUID
-        let raster: ObjectIdentifier
+        let raster: UUID
         let rasterVersion: Int
-        let vector: ObjectIdentifier?
+        let vector: UUID?
         let vectorVersion: Int
-        let bakedImage: ObjectIdentifier?
+        let bakedImage: UUID?
         let width: Int
         let height: Int
         /// The `ContentProvider` seam's half of this key — see `PixelOps.RasterizeKey.derived`. This
@@ -1150,11 +1150,11 @@ enum OnionSkinRasterCache {
             // version alone is monotonic only within one object's lifetime, and reopening a project
             // rebuilds every texture with its counter back at 0 under the same cel id.
             celID = cel.id
-            raster = ObjectIdentifier(cel.raster)
+            raster = cel.raster.residencyID
             rasterVersion = cel.raster.version
-            vector = cel.vector.map(ObjectIdentifier.init)
+            vector = cel.vector?.residencyID
             vectorVersion = cel.vector?.version ?? -1
-            bakedImage = cel.bakedImage.map(ObjectIdentifier.init)
+            bakedImage = cel.bakedImage?.residencyID
             width = Int(size.width.rounded())
             height = Int(size.height.rounded())
         }

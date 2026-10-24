@@ -181,10 +181,13 @@ struct CanvasView: UIViewRepresentable {
             // that would only take effect on whatever unrelated SwiftUI pass happened next.
             coordinator?.updateTextOverlay()
         }
-        // The two hooks the model holds so it can drop the keyboard and route undo without knowing
+        // The hooks the model holds to read a draft, drop the keyboard and route undo without knowing
         // what a first responder is. Weak on both sides: the manager outlives the view.
         context.coordinator.canvasManager.textFocusResigner = { [weak textOverlay] in
             textOverlay?.resignEditor()
+        }
+        context.coordinator.canvasManager.textDraftReader = { [weak textOverlay] in
+            textOverlay?.currentDraftString()
         }
         context.coordinator.canvasManager.textEditUndoHandler = { [weak textOverlay] isRedo in
             textOverlay?.handleEditUndo(isRedo: isRedo) ?? false
@@ -3450,8 +3453,9 @@ struct CanvasView: UIViewRepresentable {
 
         /// Bakes whatever is transient (shape or fill) and brings the canvas back in sync in the
         /// same turn — the entry point for every path that ends shape editing.
-        func commitTransientsAndRefresh() {
-            canvasManager.beginCanvasEdit()
+        @discardableResult
+        func commitTransientsAndRefresh() -> Bool {
+            guard canvasManager.beginCanvasEdit() else { return false }
             syncLayerDisplays()
             updateShapeOverlay()
             // Nothing pending, so the snap has nothing left to constrain.
@@ -3460,6 +3464,7 @@ struct CanvasView: UIViewRepresentable {
                 shapeConstraintTimer = nil
                 isShapeConstraintEngaged = false
             }
+            return true
         }
 
         func updateActiveLayerAndTool() {

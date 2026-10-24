@@ -208,16 +208,15 @@ enum PixelOps {
 
         /// Identity of a flatten, drawn entirely from model state.
         ///
-        /// The `UIImage` tier is compared by object identity rather than content because that is how
-        /// it changes: a bake *replaces* `bakedImage` wholesale rather than drawing into it, so a new
-        /// object is exactly the signal that the pixels are new.
+        /// Owner UUIDs outlive any reusable object address in a cache key. A snapshot of one owner
+        /// shares its identity/version; replacing an owner creates a fresh identity even at version0.
         struct Identity: Hashable {
             let celID: UUID
-            let raster: ObjectIdentifier
+            let raster: UUID
             let rasterVersion: Int
-            let vector: ObjectIdentifier?
+            let vector: UUID?
             let vectorVersion: Int
-            let bakedImage: ObjectIdentifier?
+            let bakedImage: UUID?
             /// **The seam's half of the key.** Nil for a cel that shows what it stores, which is
             /// every cel in a document using neither animation system — so an untouched document's
             /// keys are exactly the keys it had before `DerivedCelContent` existed. Type-erased
@@ -253,12 +252,12 @@ enum PixelOps {
                 // object the same way. Keying on the object as well makes a fresh buffer a fresh key
                 // by construction, which is cheaper to guarantee than to remember to clear the cache
                 // at every point one can be replaced.
-                raster = ObjectIdentifier(cel.raster)
+                raster = cel.raster.residencyID
                 rasterVersion = cel.raster.version
-                vector = cel.vector.map(ObjectIdentifier.init)
+                vector = cel.vector?.residencyID
                 // -1 rather than 0 for "no vector tier at all", so acquiring an empty one is a change.
                 vectorVersion = cel.vector?.version ?? -1
-                bakedImage = cel.bakedImage.map(ObjectIdentifier.init)
+                bakedImage = cel.bakedImage?.residencyID
             }
         }
 

@@ -1039,7 +1039,7 @@ struct TimelineTrackView: UIViewRepresentable {
                 // per tick — collapse into the single step `commitStructureGesture` records. A held drag
                 // needs none: it writes once, at the lift, as one step of its own.
                 if drag.holding == nil, !drag.carried.isEmpty || drag.handle != nil {
-                    canvasManager.beginStructureGesture()
+                    guard canvasManager.beginStructureGesture() else { return }
                 }
             }
             graphBandDrag = drag
@@ -1569,7 +1569,7 @@ struct TimelineTrackView: UIViewRepresentable {
                 return
             }
             guard drag.targetStartFrame != drag.originStartFrame else { return }
-            canvasManager.beginStructureGesture()
+            guard canvasManager.beginStructureGesture() else { return }
             canvasManager.moveCel(layerIndex: layerIndex, celIndex: celIndex, newStartFrame: drag.targetStartFrame)
             canvasManager.commitStructureGesture(label: .moveFrame)
         }
@@ -2773,7 +2773,7 @@ private final class TimelineRowView: UIView {
             activeZone = pendingZone
             switch activeZone {
             case .leftHandle, .rightHandle:
-                coordinator.canvasManager.beginStructureGesture()
+                guard coordinator.canvasManager.beginStructureGesture() else { activeZone = nil; return }
             case .body, .gap, .none:
                 break
             }

@@ -63,7 +63,7 @@ extension CanvasManager {
     func selectObject(at point: CGPoint) -> EditableKind? {
         // The same settling every selection makes: a fill or a shape still hanging over the cel has
         // to be part of its content before something is selected out of it.
-        beginCanvasEdit()
+        guard beginCanvasEdit() else { return nil }
         switch tapComposition {
         case .single:
             guard let hit = topmostObject(at: point), selectTapped(.single, hit) else {

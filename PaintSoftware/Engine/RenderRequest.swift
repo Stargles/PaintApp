@@ -169,11 +169,11 @@ extension LayerRenderSource {
 /// therefore land in one bucket and are then told apart correctly, which is the contract.
 struct LayerContentVersion: Hashable {
     let celID: UUID
-    let raster: ObjectIdentifier
+    let raster: UUID
     let rasterVersion: Int
-    let vector: ObjectIdentifier?
+    let vector: UUID?
     let vectorVersion: Int
-    let bakedImage: ObjectIdentifier?
+    let bakedImage: UUID?
     let valueFill: ValueFill?
     let effect: Effect?
     /// **The `ContentProvider` seam's half of this key** — the identity of whatever the cel *shows*
@@ -206,15 +206,15 @@ struct LayerContentVersion: Hashable {
         self.effect = effect
         self.derived = derived
         self.pose = pose.map(\.encoded)
-        raster = ObjectIdentifier(cel.raster)
+        raster = cel.raster.residencyID
         rasterVersion = cel.raster.version
-        vector = cel.vector.map(ObjectIdentifier.init)
+        vector = cel.vector?.residencyID
         // -1 rather than 0 for "no vector tier at all", so acquiring an empty one is a change.
         // `documentVersion`, not `version`: this key reaches `FrameBakeKey` and `FrameBaker`'s cel
         // stamps, and a live stream frame must not re-bake a cel's span per tick — see
         // `VectorCanvas.documentVersion`.
         vectorVersion = cel.vector?.documentVersion ?? -1
-        bakedImage = cel.bakedImage.map(ObjectIdentifier.init)
+        bakedImage = cel.bakedImage?.residencyID
     }
 
     func hash(into hasher: inout Hasher) {
@@ -746,7 +746,8 @@ extension CanvasManager {
                          includeBackground: Bool,
                          sizing: RenderSizing = .native,
                          holding held: HeldEdit? = nil,
-                         liveDisplay: [UUID: PixelOps.CelDisplay] = [:]) -> FrameRecipe? {
+                         liveDisplay: [UUID: PixelOps.CelDisplay] = [:],
+                         preparing cels: [UUID: Cel] = [:]) -> FrameRecipe? {
         guard let canvasSize, canvasSize.width > 0, canvasSize.height > 0 else { return nil }
 
         let walk = renderTreeAndPoses(atFrame: frame, holding: held)
@@ -777,7 +778,7 @@ extension CanvasManager {
             tree: tree,
             leaves: leafSnapshots(atFrame: frame, quality: quality, poses: poses, frames: frames,
                                   alsoIncluding: maskedLayerIndices(in: maskStacks), holding: held,
-                                  liveDisplay: liveDisplay),
+                                  liveDisplay: liveDisplay, celOverrides: cels),
             maskStacks: maskStacks,
             frame: frame,
             canvasSize: renderSize,
@@ -1380,14 +1381,15 @@ extension CanvasManager {
                                frames: [Int: Int] = [:],
                                alsoIncluding maskSourceLayers: Set<Int> = [],
                                holding held: HeldEdit? = nil,
-                               liveDisplay: [UUID: PixelOps.CelDisplay] = [:]) -> [LeafSnapshot?] {
+                               liveDisplay: [UUID: PixelOps.CelDisplay] = [:],
+                               celOverrides: [UUID: Cel] = [:]) -> [LeafSnapshot?] {
         var leaves = [LeafSnapshot?](repeating: nil, count: layers.count)
         // **`derived` is resolved here rather than in `resolve()`, and that placement is
         // load-bearing.** Resolving a `CelContentProvider` reads the document (`layers`, the guide
         // registry, the mode flags) and `resolve()` runs on a background queue and on
         // `PixelOps.parallelMap`'s workers. What crosses the seam is a `DerivedCelContent` whose
         // closure captures only values — its own doc comment states that contract.
-        let provider = celContentProvider(atFrame: frame, holding: held)
+        let provider = celContentProvider(atFrame: frame, holding: held, preparing: celOverrides)
         for index in layers.indices {
             let layer = layers[index]
             let leafFrame = frames[index] ?? frame
@@ -1437,6 +1439,7 @@ extension CanvasManager {
             guard layer.isVisible || maskSourceLayers.contains(index),
                   let celIndex = activeCelIndex(inLayer: index, atFrame: leafFrame)
             else { continue }
+            let cel = celOverrides[layer.cels[celIndex].id] ?? layer.cels[celIndex]
             // §4.4's container pose for this leaf, resolved by `renderNodes` and handed in. It
             // reaches the derivation (which re-poses vector objects) *and* the frozen cel (which
             // resamples the raster tiers) *and* the version — §2.12's two currencies and §4.5's two
@@ -1446,13 +1449,11 @@ extension CanvasManager {
             // under a Repeat they ride for free (§5.5), and §3.4.1's group compensation is read at
             // the source frame (§7).
             let derived = (leafFrame == frame ? provider : provider.at(leafFrame))
-                .content(for: layer.cels[celIndex], inheriting: pose)
+                .content(for: cel, inheriting: pose)
             let display = liveDisplay[layer.id]
-            let version = display.map {
-                LayerContentVersion(cel: layer.cels[celIndex], effect: layer.layerEffect(atFrame: leafFrame),
-                                    derived: AnyHashable($0.identity), pose: pose)
-            } ?? Self.contentVersion(of: layer, celIndex: celIndex, atFrame: leafFrame,
-                                     derived: derived, pose: pose)
+            let version = LayerContentVersion(cel: cel, valueFill: layer.valueFill,
+                effect: layer.layerEffect(atFrame: leafFrame),
+                derived: display.map { AnyHashable($0.identity) } ?? derived?.identity, pose: pose)
             // **A transformation layer is elided exactly as a grading one is**, and for the identical
             // reason: §4.4's transform mode holds no pixels, so rasterizing its blank cel would mint
             // a canvas-sized transparent image per frame for a leaf whose whole contribution is
@@ -1498,7 +1499,7 @@ extension CanvasManager {
             }
             leaves[index] = LeafSnapshot(
                 version: version,
-                content: .cel(PixelOps.FrozenCel(cel: layer.cels[celIndex], derived: derived,
+                content: .cel(PixelOps.FrozenCel(cel: cel, derived: derived,
                                                  pose: pose, quality: quality, display: display)))
         }
         return leaves

@@ -1047,7 +1047,7 @@ extension CanvasManager {
         var state = state
         // Every document edit is a canvas edit: a pending shape/fill/text transient bakes first, as its
         // own earlier step. Re-entrant-safe, so calling it inside a bracket that already did is free.
-        beginCanvasEdit()
+        guard beginCanvasEdit() else { return }
         // **Taken before the write as well as after, and free when there is no mark to prune** —
         // `marks(_:droppingKeyed:)` carries the argument for both halves. This is the funnel every
         // writer in this file reaches, so `addKeys`'s own mark is dropped by the same keys that

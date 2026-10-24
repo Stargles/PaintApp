@@ -28,7 +28,8 @@ final class LiquifyProcedure {
     private var value: Resolved?
     private var presented = false
     private var rejected = false
-    private var finish: ((Resolved) -> Void)?
+    private var finish: ((Resolved, inout [UUID: Cel]) -> (() -> Void)?)?
+    private var finishGeneration: UInt64 = 0
     private var cancelled = false
     private var computations = 0
     private var resolving = false
@@ -172,46 +173,85 @@ final class LiquifyProcedure {
         lock.lock()
         presented = true
         let result = value
-        let callback = result == nil ? nil : finish
-        if callback != nil { finish = nil }
         lock.unlock()
-        if let result { callback?(result) }
+        if let result {
+            var staged: [UUID: Cel] = [:]
+            prepareFinish(result, staging: &staged)?.commit()
+        }
     }
 
-    /// A completed draw that failed validation is an outcome too, but never a shown picture.
-    /// Called by the presenter's main-thread completion, not by the producer.
+    /// A failed validation completes the producer too. Its sole finish owner decides whether to
+    /// discard an unchanged/invalid gesture or retain a refused final source for another attempt.
     func didReject() {
         guard hasFailed else { return }
         lock.lock()
         rejected = true
         let result = value
-        let callback = result == nil ? nil : finish
-        if callback != nil { finish = nil }
         lock.unlock()
-        if let result { callback?(result) }
+        if let result {
+            var staged: [UUID: Cel] = [:]
+            prepareFinish(result, staging: &staged)?.commit()
+        }
     }
 
-    func finishWhenPresented(_ callback: @escaping (Resolved) -> Void) {
+    func finishWhenPresented(_ callback: @escaping (Resolved, inout [UUID: Cel]) -> (() -> Void)?) {
         lock.lock()
         guard !cancelled else { lock.unlock(); return }
+        finish = callback
+        finishGeneration &+= 1
         let ready = (presented || rejected) ? value : nil
-        if ready == nil { finish = callback }
         lock.unlock()
-        if let ready { callback(ready) }
+        if let ready {
+            var staged: [UUID: Cel] = [:]
+            prepareFinish(ready, staging: &staged)?.commit()
+        }
     }
 
-    func settlePending(_ original: [VectorElement]) {
+    /// The same finish preparation serves the normal presenter and an explicit edit boundary.
+    /// It does not consume the callback or its window; a later tool may still refuse admission.
+    func preparePending(_ original: [VectorElement], staging: inout [UUID: Cel])
+        -> (commit: () -> Void, isCurrent: () -> Bool)? {
+        prepareFinish(resolved(original), staging: &staging)
+    }
+
+    private func prepareFinish(_ result: Resolved, staging: inout [UUID: Cel])
+        -> (commit: () -> Void, isCurrent: () -> Bool)? {
         lock.lock()
-        let callback = finish
-        finish = nil
+        let callback = cancelled ? nil : finish
+        let generation = finishGeneration
         lock.unlock()
-        if let callback { callback(resolved(original)) }
+        guard let callback, let commit = callback(result, &staging) else { return nil }
+        let isCurrent = { [weak self] in
+            guard let self else { return false }
+            self.lock.lock(); defer { self.lock.unlock() }
+            return !self.cancelled && self.finishGeneration == generation && self.finish != nil
+        }
+        let landing = { [weak self] in
+            guard let self, isCurrent() else { return }
+            commit()
+            self.lock.lock()
+            if self.finishGeneration == generation {
+                self.finish = nil
+                self.finishGeneration &+= 1
+            }
+            self.lock.unlock()
+        }
+        return (landing, isCurrent)
+    }
+
+    @discardableResult
+    func settlePending(_ original: [VectorElement]) -> Bool {
+        var staged: [UUID: Cel] = [:]
+        guard let prepared = preparePending(original, staging: &staged) else { return false }
+        prepared.commit()
+        return true
     }
 
     func cancel() {
         lock.lock(); defer { lock.unlock() }
         cancelled = true
         finish = nil
+        finishGeneration &+= 1
     }
     func shown(_ resolved: [VectorElement]) -> [VectorElement] {
         CanvasManager.posed(resolved, by: poses)

@@ -4,19 +4,19 @@ import UIKit
 /// Saved content identity excludes display-only video/stream arrivals.
 struct CelContentIdentity: Equatable {
     let celID: UUID
-    let raster: ObjectIdentifier
+    let raster: UUID
     let rasterVersion: Int
-    let baked: ObjectIdentifier?
-    let vector: ObjectIdentifier?
+    let baked: UUID?
+    let vector: UUID?
     let vectorDocumentVersion: Int
     let recipe: InterpolationRecipe.ContentFingerprint?
 
     init(_ cel: Cel) {
         celID = cel.id
-        raster = ObjectIdentifier(cel.raster)
+        raster = cel.raster.residencyID
         rasterVersion = cel.raster.version
-        baked = cel.bakedImage.map(ObjectIdentifier.init)
-        vector = cel.vector.map(ObjectIdentifier.init)
+        baked = cel.bakedImage?.residencyID
+        vector = cel.vector?.residencyID
         vectorDocumentVersion = cel.vector?.documentVersion ?? -1
         recipe = cel.interpolation?.contentFingerprint
     }
@@ -78,7 +78,7 @@ struct DerivedCelPresentation {
 /// Render requests capture one revision directly; no display-version history is retained.
 final class CelContentRevisions {
     private var identity: CelContentIdentity?
-    private var document: (object: ObjectIdentifier, version: Int, revision: Int)?
+    private var document: (object: UUID, version: Int, revision: Int)?
     private(set) var current = 0
     var celID: UUID? { identity?.celID }
 
@@ -102,21 +102,21 @@ final class CelContentRevisions {
                 && $0.baked == next.baked && $0.vector == next.vector && $0.recipe == next.recipe
         } == true
         if onlyVectorMoved, let canvas = cel.vector, let known = document,
-           known.object == ObjectIdentifier(canvas), known.version == canvas.documentVersion {
+           known.object == canvas.residencyID, known.version == canvas.documentVersion {
             current = max(current, known.revision)
         } else { current += 1 }
         identity = next
-        document = cel.vector.map { (ObjectIdentifier($0), $0.documentVersion, current) }
+        document = cel.vector.map { ($0.residencyID, $0.documentVersion, current) }
         return current
     }
 
     /// The canvas has just committed, or is being frozen for a base request on the main thread.
     func committed(_ canvas: VectorCanvas) -> Int {
-        if let known = document, known.object == ObjectIdentifier(canvas), known.version == canvas.documentVersion {
+        if let known = document, known.object == canvas.residencyID, known.version == canvas.documentVersion {
             return known.revision
         }
         current += 1
-        document = (ObjectIdentifier(canvas), canvas.documentVersion, current)
+        document = (canvas.residencyID, canvas.documentVersion, current)
         return current
     }
 }

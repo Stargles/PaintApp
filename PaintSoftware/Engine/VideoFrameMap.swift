@@ -285,7 +285,7 @@ enum VideoCropAnchor {
 /// adding `frame` to the key, which is what keeps every ordinary hold at one file on disk.
 struct VideoCelIdentity: Hashable, BakeKeyEncodable {
     let celID: UUID
-    let canvas: ObjectIdentifier
+    let canvas: UUID
     let vectorVersion: Int
     let suppressed: [String]
     let carried: [CGFloat]
@@ -303,7 +303,7 @@ struct VideoCelIdentity: Hashable, BakeKeyEncodable {
     /// a dictionary in per-process hash order.
     func encodeForBakeKey(into e: inout BakeKeyEncoder) {
         e.uuid(celID)
-        e.objectID(canvas)
+        e.uuid(canvas)
         e.int(vectorVersion)
         e.array(suppressed) { e, id in e.string(id) }
         e.array(carried) { e, value in e.cgFloat(value) }

@@ -267,7 +267,7 @@ extension CanvasManager {
         // still-transient fill preview, which `pasteCel` would then plant in the new cel as
         // permanent content while the original fill bakes separately into the source. Bake first so
         // what's copied is what's actually committed.
-        beginCanvasEdit()
+        guard beginCanvasEdit() else { return }
         guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
         let source = layers[layerIndex].cels[celIndex]
         guard let tiers = copyTiers(of: source) else { return }

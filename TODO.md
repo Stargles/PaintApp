@@ -330,6 +330,15 @@ account usage limits; root continues. The full source inventory is not yet fully
   Preserve pending fill/shape/text artwork through final allocation refusal before any next edit,
   and combine that prepared settlement with the mask's pure stroke factory before qualification. All wider
   native/build/UI/fault gates remain root-owned and unrun; owned-byte sums do not prove process RSS.
+  Root approved affected-cel-only local preparation in Liquify→fill→shape→text order, same staged
+  overrides for planned-frame mask/host reads, Bool beginCanvasEdit guards before caller writes,
+  read-only current text bridge, and existing Liquify finish-owner retry without consuming a refused
+  draft/window. Add coexistence/late-refusal + queued-text focus + exact-one-Liquify-undo retry proofs.
+Raster-residency follow-up checkpoint: staged transient settlement, queued editor text and stable
+owner/cache/reference identities are source-prepared with27 static owned methods; no consumer native
+qualification or RAM/device claim. Merge exact combined f475bb93599d2fb1b5b5785931bb2a87cc553424 next,
+then join its pure stroke factory to staged mask/host/raster admission before timing/cel mutation.
+
   Mask source scope active on `tmp/s54-mask-residency` from59d69f12: price each indivisible
   transitive dependency closure in existing chunk/strip source planning; resolve live-mask metadata
   cache before dependency pixels and omit unrelated leaves. Reuse FrameRecipe/MaskResolver; no

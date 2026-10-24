@@ -77,7 +77,7 @@ extension CanvasManager {
     /// centre on, and growing rightward-and-downward from the point touched is what the caret
     /// appearing under the finger looks like.
     func beginTextSession(at canvasPoint: CGPoint) {
-        beginCanvasEdit()
+        guard beginCanvasEdit() else { return }
         guard layers.indices.contains(currentLayerIndex) else { return }
         guard Tool.textUnavailableReason(onLayerOfKind: activeLayerKind) == nil else { return }
         let layerIndex = currentLayerIndex
@@ -127,7 +127,7 @@ extension CanvasManager {
     ///   this layer — the caller then has nothing to open a panel for.
     @discardableResult
     func beginEditingText(elementID: UUID) -> Bool {
-        beginCanvasEdit()
+        guard beginCanvasEdit() else { return false }
         guard layers.indices.contains(currentLayerIndex),
               Tool.textUnavailableReason(onLayerOfKind: activeLayerKind) == nil,
               layers[currentLayerIndex].kind == .vector,
@@ -405,7 +405,7 @@ extension CanvasManager {
     ///
     /// **Landing the pixels is `registerUndoableCelChange`, not a private stamp helper.** That
     /// primitive is already tool-agnostic across Fill, Shape, Move, Duplicate and both selection
-    /// operations; it wraps the result via `preparedRasterTexture(image:likeExisting:)` into
+    /// operations; it wraps the result via `preparedRasterTexture(source:likeExisting:)` into
     /// `Cel.raster` and never `bakedImage` — the ghost-layer bug its own doc comment records —
     /// applies by resolved layer/cel *ID* rather than index, and registers one atomic step.
     ///
@@ -416,106 +416,91 @@ extension CanvasManager {
     /// An empty box commits nothing and leaves no undo step. Placing a box and tapping away without
     /// typing has changed nothing about the drawing, so an "Undo add text" that removes nothing
     /// would be a step the artist has to press through to get back to real work.
-    func commitInteractiveText() {
-        guard textGestureActive else { return }
-        endTextSession(settling: bakeText)
+    @discardableResult
+    func commitInteractiveText() -> Bool {
+        var staged: [UUID: Cel] = [:]
+        guard let commit = prepareInteractiveText(staging: &staged) else { return false }
+        commit()
+        return true
     }
 
-    /// `commitInteractiveText`'s body, run once the session is over: lands the draft where its kind of
-    /// layer keeps text.
-    private func bakeText(_ ended: EndedTextSession) {
-        let shown = VectorTextElement(id: ended.editingID ?? UUID(), recipe: ended.recipe, frame: ended.frame)
-        // The session's box and type in the layer's own space, so the layer's render puts them back
-        // where the artist set them.
-        guard let drawn = Self.inLayerSpace(.text(shown), shownThrough: ended.inkPose)?.text else { return }
-        let recipe = drawn.recipe
-        let frame = drawn.frame
-        guard let layerID = ended.layerID, let celID = ended.celID, let canvasSize,
+    /// Read the editor's current text without resigning it. The usual coalesced model delivery may
+    /// still be pending, and a later tool's refusal must leave the keyboard and every draft intact.
+    func prepareInteractiveText(staging: inout [UUID: Cel]) -> (() -> Void)? {
+        guard textGestureActive else { return {} }
+        var recipe = textRecipe
+        if textIsFocused, let current = textDraftReader?() { recipe.string = current }
+        let frame = textFrame.autoSize
+            ? textFrame.resized(to: TextLayout.autoSize(for: recipe, font: TextLayout.resolvedFont(for: recipe).font))
+            : textFrame
+        let ended = EndedTextSession(layerID: textGestureLayerID, celID: textGestureCelID,
+            editingID: textEditingElementID, inkPose: textGestureInkPose, recipe: recipe, frame: frame)
+        guard let layerID = ended.layerID, let celID = ended.celID,
               let layerIndex = layers.firstIndex(where: { $0.id == layerID }),
-              let celIndex = layers[layerIndex].cels.firstIndex(where: { $0.id == celID }) else { return }
-
-        // **The layer's kind decides the destination outright**, exactly as `commitInteractiveFill`'s
-        // does and for the same reason: the two tiers are invisible to each other's renderer, so
-        // there is no fallback between them. A vector layer keeps a real element; a raster layer
-        // gets pixels.
+              let celIndex = layers[layerIndex].cels.firstIndex(where: { $0.id == celID }),
+              let canvasSize else { raise(.drawingSourceUnavailable); return nil }
+        let shown = VectorTextElement(id: ended.editingID ?? UUID(), recipe: ended.recipe, frame: ended.frame)
+        guard let drawn = Self.inLayerSpace(.text(shown), shownThrough: ended.inkPose)?.text else {
+            raise(.drawingSourceUnavailable); return nil
+        }
+        var cel = staging[celID] ?? layers[layerIndex].cels[celIndex]
+        let bake: () -> Void
         if layers[layerIndex].kind == .vector {
-            commitTextToVector(recipe: recipe, frame: frame, editingID: ended.editingID,
-                               layerIndex: layerIndex, celIndex: celIndex, layerID: layerID, celID: celID)
-            return
+            let before = cel.vector?.elements ?? []
+            let prepared = cel.vector?.makeCopy() ?? .empty(size: cel.raster.size)
+            let isBlank = drawn.recipe.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            let element: VectorTextElement?
+            if isBlank { element = nil }
+            else {
+                guard let local = prepared.localText(fromCanvas: drawn) else {
+                    raise(.drawingSourceUnavailable); return nil
+                }
+                element = local
+            }
+            let changed = prepared.commitTextEdit(editingID: ended.editingID, element: element)
+            let elements = prepared.elements
+            cel.vector = prepared
+            staging[celID] = cel
+            bake = { [weak self] in
+                guard changed, let self,
+                      let layer = self.layers.firstIndex(where: { $0.id == layerID }),
+                      let at = self.layers[layer].cels.firstIndex(where: { $0.id == celID }) else { return }
+                if self.layers[layer].cels[at].vector == nil { self.layers[layer].cels[at].vector = .empty(size: canvasSize) }
+                guard let vector = self.layers[layer].cels[at].vector else { return }
+                vector.restoreElements(elements, changedInk: nil, rewriting: [])
+                self.registerVectorElementsUndo(vectorCanvas: vector, oldElements: before,
+                    newElements: elements, layerID: layerID, celID: celID,
+                    label: ended.editingID == nil ? .addText : .editText,
+                    swap: ended.editingID.map { element == nil ? .addsAndRemoves(ink: nil) : .rewritesInPlace([$0]) }
+                        ?? .addsAndRemoves(ink: nil))
+                self.scheduleThumbnailRegen(layerID: layerID, celID: celID)
+            }
+        } else if drawn.recipe.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            bake = {}
+        } else {
+            guard let glyphs = TextLayout.render(recipe: drawn.recipe, frame: drawn.frame, canvasSize: canvasSize),
+                  let base = PixelOps.rasterize(cel: cel, canvasSize: canvasSize) else {
+                raise(.drawingSourceUnavailable); return nil
+            }
+            let source: RasterSource
+            switch PixelOps.compositeOver(base: base, overlay: glyphs, using: cel.raster.residency) {
+            case .success(let prepared): source = prepared
+            case .failure: raise(.drawingSourceUnavailable); return nil
+            }
+            let before = cel
+            let raster = preparedRasterTexture(source: source, likeExisting: cel.raster)
+            cel.raster = raster
+            cel.bakedImage = nil
+            staging[celID] = cel
+            bake = { [weak self] in
+                guard let self else { return }
+                self.registerUndoableCelChange(layerID: layerID, celID: celID,
+                    oldRaster: before.raster, oldBaked: before.bakedImage,
+                    newRaster: raster, newBaked: nil, label: .addText)
+                self.scheduleThumbnailRegen(layerID: layerID, celID: celID)
+            }
         }
-
-        guard !recipe.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        guard let glyphs = TextLayout.render(recipe: recipe, frame: frame, canvasSize: canvasSize) else { return }
-
-        let cel = layers[layerIndex].cels[celIndex]
-        // One canvas-sized flatten, one composite, once — `ADD_TEXT.md` §4 rule 7, and the same
-        // shape and cost as a fill commit, which is already accepted.
-        guard let base = PixelOps.rasterize(cel: cel, canvasSize: canvasSize) else { return }
-        guard case .success(let source) = PixelOps.compositeOver(base: base, overlay: glyphs,
-            using: cel.raster.residency) else { raise(.drawingSourceUnavailable); return }
-        let raster = preparedRasterTexture(source: source, likeExisting: cel.raster)
-        registerUndoableCelChange(layerID: layerID, celID: celID,
-                                  oldRaster: cel.raster, oldBaked: cel.bakedImage,
-                                  newRaster: raster,
-                                  newBaked: nil, label: .addText)
-        // The bake never goes through `strokeEnded`, so the layer panel keeps showing the cel as it
-        // was unless the thumbnail is refreshed here — `commitInteractiveShape`'s reason, verbatim.
-        scheduleThumbnailRegen(layerID: layerID, celID: celID)
-    }
-
-    /// The vector arm of the commit: the draft becomes a real element in the cel's display list,
-    /// upserted **at its own index** so a re-edit cannot change what the object is in front of.
-    ///
-    /// One undo step for the whole session, whatever happened inside it — retyping, restyling,
-    /// dragging the box, or deleting every character (which removes the object). Not one per
-    /// keystroke: `UndoHistory`'s `cost` accounting was never sized for 200 entries out of one
-    /// sentence, and `UITextView` supplies within-session undo for free (`ADD_TEXT.md` §2, §5.1).
-    ///
-    /// A session that placed a box and typed nothing registers nothing at all — the same rule the
-    /// raster bake follows, and for the same reason: an "undo add text" that removes nothing is a
-    /// step the artist has to press through to reach real work.
-    private func commitTextToVector(recipe: TextRecipe, frame: TextFrame, editingID: UUID?,
-                                    layerIndex: Int, celIndex: Int, layerID: UUID, celID: UUID) {
-        // A vector layer's cel should always have a `VectorCanvas`, but a text object landing in the
-        // cel's raster would paint into a buffer a vector layer never displays — i.e. it would
-        // silently vanish. Materialise one instead. `commitInteractiveShape`'s reasoning, verbatim.
-        if layers[layerIndex].cels[celIndex].vector == nil, let canvasSize {
-            layers[layerIndex].cels[celIndex].vector = .empty(size: canvasSize)
-        }
-        guard let vectorCanvas = layers[layerIndex].cels[celIndex].vector else { return }
-
-        let before = vectorCanvas.elements
-        let isBlank = recipe.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        let element: VectorTextElement? = isBlank ? nil
-            : vectorCanvas.localText(fromCanvas: VectorTextElement(id: editingID ?? UUID(),
-                                                                   recipe: recipe, frame: frame))
-        // One call, so un-suppressing and applying are one invalidation — the session's second and
-        // last (`ADD_TEXT.md` §4 rule 4).
-        let changed = vectorCanvas.commitTextEdit(editingID: editingID, element: element)
-        guard changed else { return }
-
-        registerVectorElementsUndo(vectorCanvas: vectorCanvas, oldElements: before,
-                                   newElements: vectorCanvas.elements, layerID: layerID, celID: celID,
-                                   label: editingID == nil ? .addText : .editText,
-                                   // **A re-edit that keeps the object is a same-id rewrite; a new
-                                   // object and a deletion are not.** `upsertTextLocked` replaces
-                                   // `_elements[index]` under the id the artist is editing, which is
-                                   // exactly the question `ElementSwap` asks — but a session that
-                                   // emptied the box *removed* that id (`removeTextLocked`), and an
-                                   // id that is in one list and not the other is what
-                                   // `restoreElements` bounds by difference. All three arms are
-                                   // bounded whether or not the box clips, since TODO (41):
-                                   // `derivedFootprint(of:lowestResolution:)` measures a pristine
-                                   // box's glyph ink and reads a sized one's clip, in both the old
-                                   // value and the new. (The forward retype itself is bracketed by
-                                   // two suppression changes and stays `.everything`; it is the
-                                   // undo and the redo that this bounds.)
-                                   swap: editingID.map { element == nil ? .addsAndRemoves(ink: nil)
-                                                                        : .rewritesInPlace([$0]) }
-                                       ?? .addsAndRemoves(ink: nil))
-        // Committing never goes through `strokeEnded`, so the layer panel keeps showing the cel as
-        // it was unless the thumbnail is refreshed here — `commitInteractiveShape`'s reason, verbatim.
-        scheduleThumbnailRegen(layerID: layerID, celID: celID)
+        return { [weak self] in self?.endTextSession { _ in bake() } }
     }
 
     /// One undo step that swaps a vector canvas's **whole `elements` array** between two snapshots.

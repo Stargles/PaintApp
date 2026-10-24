@@ -22,7 +22,7 @@ extension CanvasManager {
             return
         }
         // Bake a pending shape/fill first, so it lands as its own earlier step.
-        beginCanvasEdit()
+        guard beginCanvasEdit() else { return }
 
         let groupsBefore = motionGroups
         let guidesBefore = guideStrokes
@@ -452,7 +452,7 @@ extension CanvasManager {
     /// lands on the canvas does (`beginCanvasEdit`), and publishing once, which is what stands the
     /// compositor down for the drag (`isScrubbingInterpolation`).
     private func beginInterpolationHold(_ held: HeldInterpolation) {
-        beginCanvasEdit()
+        guard beginCanvasEdit() else { return }
         beginLiveEdit(.interpolation(held))
     }
 
@@ -1288,9 +1288,11 @@ extension CanvasManager {
 
     /// This document's derivations, bound to `frame` — what a caller hands `PixelOps.rasterize` so
     /// that a derived cel stops flattening blank. See `CelContentProvider`.
-    func celContentProvider(atFrame frame: Int, holding held: HeldEdit? = nil) -> CelContentProvider {
+    func celContentProvider(atFrame frame: Int, holding held: HeldEdit? = nil,
+                            preparing cels: [UUID: Cel] = [:]) -> CelContentProvider {
         CelContentProvider(frame: frame) { [weak self] cel, frame, inherited in
-            self?.derivedCelContent(for: cel, atFrame: frame, inheriting: inherited, holding: held)
+            self?.derivedCelContent(for: cels[cel.id] ?? cel, atFrame: frame,
+                inheriting: inherited, holding: held, preparing: cels)
         }
     }
 
@@ -1345,7 +1347,8 @@ extension CanvasManager {
     func derivedCelContent(for cel: Cel, atFrame frame: Int,
                            inheriting inherited: PoseMap? = nil,
                            overridingT overrideT: CGFloat? = nil,
-                           holding held: HeldEdit? = nil) -> DerivedCelContent? {
+                           holding held: HeldEdit? = nil,
+                           preparing cels: [UUID: Cel] = [:]) -> DerivedCelContent? {
         // **Two derivation sources, and they are alternatives rather than a composition** —
         // KEYFRAMES.md §2.18. *"A derived in-between carries no object channels"*: its display list is
         // computed, so it has no stable elements to key, and Move is already refused outright on one
@@ -1384,16 +1387,16 @@ extension CanvasManager {
 
         let references = recipe.referencedCels
         var resolved: [CelRef: [VectorElement]] = [:]
-        var referenceVersions: [Int] = []
+        var referenceVersions: [VectorOwnerVersion] = []
         referenceVersions.reserveCapacity(references.count)
         for ref in references {
             guard let at = celIndices(forCel: ref.celID, inLayer: ref.layerID) else {
-                referenceVersions.append(-1)
+                referenceVersions.append(VectorOwnerVersion(nil))
                 continue
             }
-            let source = layers[at.layer].cels[at.cel].vector
+            let source = (cels[ref.celID] ?? layers[at.layer].cels[at.cel]).vector
             resolved[ref] = source?.elements ?? []
-            referenceVersions.append(source?.version ?? -1)
+            referenceVersions.append(VectorOwnerVersion(source))
         }
         let content: InterpolationEvaluator.ContentProvider = { resolved[$0] ?? [] }
 
@@ -1413,7 +1416,7 @@ extension CanvasManager {
             hiddenGroups: options.hiddenGroups,
             // `documentVersion`, not `version`: a live stream frame must not mint a new pose
             // identity per tick — see `VectorCanvas.documentVersion`.
-            subjectVersion: cel.vector?.documentVersion ?? -1,
+            subjectVersion: VectorOwnerVersion(cel.vector, version: cel.vector?.documentVersion),
             canvasWidth: Int(canvasSize.width.rounded()),
             canvasHeight: Int(canvasSize.height.rounded()))
 
@@ -1487,7 +1490,7 @@ extension CanvasManager {
 
         let identity = VideoCelIdentity(
             celID: cel.id,
-            canvas: ObjectIdentifier(vector),
+            canvas: vector.residencyID,
             vectorVersion: vector.documentVersion,
             suppressed: suppressed.map(\.uuidString).sorted(),
             carried: [carried.a, carried.b, carried.c, carried.d, carried.tx, carried.ty],
@@ -1952,6 +1955,16 @@ extension CanvasManager {
 /// `InterpolationEvaluator.Options.arap` is knowingly absent: `interpolationOptions` builds it fresh
 /// from defaults on every call and nothing in the app varies it. A UI that ever does must add it
 /// here — and to the preview key.
+private struct VectorOwnerVersion: Hashable {
+    let owner: UUID?
+    let version: Int
+
+    init(_ canvas: VectorCanvas?, version: Int? = nil) {
+        owner = canvas?.residencyID
+        self.version = version ?? canvas?.version ?? -1
+    }
+}
+
 private struct InterpolatedCelIdentity: Hashable {
     let celID: UUID
     /// The *effective* `t` — a live scrub's override, not necessarily the one on the recipe.
@@ -1968,7 +1981,7 @@ private struct InterpolatedCelIdentity: Hashable {
     /// *Which* cels are read, beside what version they were at: re-pointing a reference at another
     /// cel of the same version is a different picture.
     let references: [CelRef]
-    let referenceVersions: [Int]
+    let referenceVersions: [VectorOwnerVersion]
     /// Compared by value: `updateGuideStroke` replaces a guide **keeping its id**, so no id list and
     /// no version number anywhere moves when one is edited.
     let guides: [GuideStroke]
@@ -1977,7 +1990,7 @@ private struct InterpolatedCelIdentity: Hashable {
     /// `.reproject` evaluates the cel's *own* display list. `PixelOps.RasterizeKey` carries this
     /// too, but this value has to stand alone — the onion skin's store keys on it at a size the
     /// shared memo never sees.
-    let subjectVersion: Int
+    let subjectVersion: VectorOwnerVersion
     let canvasWidth: Int
     let canvasHeight: Int
 

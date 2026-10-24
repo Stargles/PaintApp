@@ -234,6 +234,8 @@ final class TextOverlayView: CanvasPlaneView, UITextViewDelegate {
         textView.resignFirstResponder()
     }
 
+    func currentDraftString() -> String { textView.text ?? "" }
+
     /// Installed on `CanvasManager.textEditUndoHandler`. Returns true when the keyboard's own undo
     /// stack took the action — ADD_TEXT.md §5.1, the owner's decision that undo while you are typing
     /// undoes the typing.
