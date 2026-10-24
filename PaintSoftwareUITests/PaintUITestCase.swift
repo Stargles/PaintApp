@@ -759,9 +759,9 @@ class PaintUITestCase: XCTestCase {
     /// clones — a yellow where the test wanted a red, in two consecutive full runs — and asked again it
     /// stood where it was. Either end of a track clamps it and cannot miss; any position between can.
     /// A thumb the finger holds goes where the finger goes, so each try measures the error and moves the
-    /// thumb from where it reports itself. A short new drag on a vertical rail can leave its value
-    /// unchanged, so that finger first travels to the farther track end and returns to the target
-    /// without lifting. The final correction then belongs to an active gesture.
+    /// thumb that far from where it reports itself. **It converges to a few hundredths and then stops
+    /// answering a correction that small** (a 0.06 one moved it nowhere), which is why the caller says how
+    /// near it needs the slider rather than being given a default it cannot always keep.
     func adjustSlider(_ slider: XCUIElement, to position: CGFloat, tolerance: CGFloat, attempts: Int = 4,
                       file: StaticString = #filePath, line: UInt = #line) {
         // The thumb travels between the inset ends of the visible track. The side rail rotates its
@@ -779,19 +779,8 @@ class PaintUITestCase: XCTestCase {
             let current = slider.normalizedSliderPosition
             if abs(current - position) <= tolerance { return }
             reached.append(current)
-            if frame.height > frame.width {
-                do {
-                    try fingerStroke(through: [point(current).screenPoint,
-                                               point(current < 0.5 ? 1 : 0).screenPoint,
-                                               point(position).screenPoint], interval: 0.2)
-                } catch {
-                    XCTFail("Unable to move the slider through its held path: \(error)", file: file, line: line)
-                    return
-                }
-            } else {
-                point(current).press(forDuration: 0.1, thenDragTo: point(position), withVelocity: .slow,
-                                     thenHoldForDuration: 0.1)
-            }
+            point(current).press(forDuration: 0.1, thenDragTo: point(position), withVelocity: .slow,
+                                 thenHoldForDuration: 0.1)
         }
         let last = slider.normalizedSliderPosition
         if abs(last - position) <= tolerance { return }
