@@ -37,6 +37,10 @@ inventories/copied diagnostics; no device restart, app launch or install.
    rejected. Review fixes require contiguous digital rays, all tied nearest-open witnesses and bounded
    picture ownership. No new saved provenance or second mending mode.
    Worktree `~/PaintWork/PaintApp-s53-fill-mend`; design evidence `~/PaintWork/s53-fill-mend/`.
+   **Further owner ruling: protect uncertain joins; attached stems remain in scope.** Preserve
+   real-time quick fill feedback; no expensive full-image CPU analysis per interactive tick.
+   Exact nearest-distance + lattice-circle tie lookup is validated offline against3920 random masks;
+   Metal implementation/performance remain unqualified. See design reports before app edits.
 
 ## Authoritative source and native ownership
 
