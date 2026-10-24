@@ -147,27 +147,8 @@ nonisolated enum ProjectBackupManager {
 
     // MARK: - Launch-time maintenance
 
-    /// Whether this build is running in a simulator, which is the only place `-resetGallery` is
-    /// honoured.
-    ///
-    /// **This was `ProcessInfo.environment["SIMULATOR_DEVICE_NAME"] != nil` for one commit and the
-    /// compile-time form is still the right one**, because a guard on a destructive path has to be
-    /// *right* before it is testable and `targetEnvironment(simulator)` cannot be wrong. What a test
-    /// can still reach is `honoursSimulatorOnlyTestHooks(isSimulator:)` below, which holds the *policy* — the
-    /// part worth pinning — while this property holds only the fact.
-    ///
-    /// **What this rewrite did not do is fix the three red tests it was written to explain**, and the
-    /// claim that it did stood here until 2026-09-07. This comment asserted that the environment read
-    /// made the guard read `false` inside every UI test, so `-resetGallery` stopped clearing the
-    /// gallery, so `GalleryRecoveryUITests`' backup-restore and trash-restore and
-    /// `EraserAndPersistenceUITests.testSaveAndReloadPersistsStrokesAcrossAppRelaunch` went red
-    /// together. All three still failed after the rewrite, and `ProjectStorageUITests` — which uses
-    /// the same flag — was passing throughout, which was already enough to refute it. The actual
-    /// cause was in the test target and nowhere near this file: `ed7c8f4` gave the gallery button an
-    /// explicit accessibility identifier, which replaced the implicit one two helpers were reaching
-    /// it by. The lesson is CLAUDE.md's, reached by yet another door — **a story that explains the
-    /// symptom is not evidence that it is the cause**, and this one was plausible enough to be
-    /// written into the source as settled fact before anything tested it.
+    /// Compile-time platform fact used to keep persistent test resets and corruption off physical
+    /// devices, including Release builds.
     static var isSimulator: Bool {
         #if targetEnvironment(simulator)
         return true
@@ -175,12 +156,6 @@ nonisolated enum ProjectBackupManager {
         return false
         #endif
     }
-
-    /// **The policy for simulator-only test hooks, separated from the platform fact so it can be
-    /// tested.** Persistent reset and corruption hooks run only in a simulator: on a physical device
-    /// the data they touch may be the artist's only copy, and `-resetGallery` already destroyed the
-    /// owner's library from a Release build on their own iPad.
-    static func honoursSimulatorOnlyTestHooks(isSimulator: Bool) -> Bool { isSimulator }
 
     /// Runs once per launch behind the startup gate, after geometry conversion. Order matters: wipe for tests →
     /// test-corruption hook → stale temp cleanup → update snapshots → repair → purge. Every step
@@ -195,19 +170,9 @@ nonisolated enum ProjectBackupManager {
         //   -simulateProjectCorruption  overwrite the newest project's manifest.json with garbage,
         //                               simulating an update/crash-damaged package, so the repair
         //                               pass below can be observed fixing it end-to-end.
-        // **`-resetGallery` is refused off the simulator, and that guard is not paranoia.** On
-        // 2026-09-07 a measurement pass passed it to a *Release build on the owner's own iPad* for
-        // run-to-run isolation and destroyed every saved project, backup and trashed item on the
-        // device. The flag reads as a test hook and behaves as one everywhere it is normally seen,
-        // which is exactly why nothing stopped it: a physical device is the one place where the
-        // directories it wipes hold work nobody can regenerate. Brushes and recordings survived only
-        // because they live outside the three directories it clears.
-        //
-        // The simulator check is the whole guard, deliberately: `#if DEBUG` would not have helped,
-        // because the build that did the damage was Release, and a device UI test that genuinely
-        // needs a clean gallery can delete and reinstall the app instead, which is both narrower and
-        // reversible.
-        if args.contains("-resetGallery") && Self.honoursSimulatorOnlyTestHooks(isSimulator: Self.isSimulator) {
+        // These test flags mutate persistent data. A compile-time simulator guard is required even in
+        // Release: `-resetGallery` previously erased the owner's saved library from a physical iPad.
+        if args.contains("-resetGallery") && Self.isSimulator {
             // **Put the library back inside the app before wiping anything** — TODO (36). The three
             // directories below are resolved through `ProjectLocation`, so on a device that had
             // adopted a folder in Files this flag would reach *outside* the container and delete the
@@ -223,7 +188,7 @@ nonisolated enum ProjectBackupManager {
             }
             settings.lastAppSignature = nil
         }
-        if args.contains("-simulateProjectCorruption") && Self.honoursSimulatorOnlyTestHooks(isSimulator: Self.isSimulator) {
+        if args.contains("-simulateProjectCorruption") && Self.isSimulator {
             simulateNewestProjectCorruption()
         }
 

@@ -26,11 +26,12 @@ enum UITestSeeds {
     /// iPad 9 is `CompositorBudget.textureBytes(for: canvas) * 2` — 183.7 MB against 67.1 MB a render
     /// at 4096² is two entries, and two entries is what the test wants whatever size it draws at.
     ///
-    /// Simulator-only, on `honoursSimulatorOnlyTestHooks`'s rule and for a milder version of its reason: this
-    /// one destroys nothing, but a flag that silently made a *device* build composite under a
-    /// pretend budget would be a performance report about a machine that does not exist.
+    /// Simulator-only, on `ProjectBackupManager.isSimulator`'s compile-time rule and for a milder
+    /// version of its reason: this one destroys nothing, but a flag that silently made a *device*
+    /// build composite under a pretend budget would be a performance report about a machine that
+    /// does not exist.
     static func applyTextureBudgetOverrideIfRequested() {
-        guard ProjectBackupManager.honoursSimulatorOnlyTestHooks(isSimulator: ProjectBackupManager.isSimulator)
+        guard ProjectBackupManager.isSimulator
         else { return }
         let args = ProcessInfo.processInfo.arguments
         guard let flag = args.firstIndex(of: "-uiTestTextureBudgetBytes"),
@@ -61,7 +62,7 @@ enum UITestSeeds {
     /// that silently made a *device* build draw slower would be a report about a machine that does
     /// not exist.
     static let slowVectorRenderDelay: TimeInterval = {
-        guard ProjectBackupManager.honoursSimulatorOnlyTestHooks(isSimulator: ProjectBackupManager.isSimulator)
+        guard ProjectBackupManager.isSimulator
         else { return 0 }
         let args = ProcessInfo.processInfo.arguments
         guard let flag = args.firstIndex(of: "-uiTestSlowVectorRenderMillis"),
@@ -81,7 +82,7 @@ enum UITestSeeds {
     ///
     /// Simulator-only, on `slowVectorRenderDelay`'s rule and for its reason.
     static func applyBakeDelayIfRequested() {
-        guard ProjectBackupManager.honoursSimulatorOnlyTestHooks(isSimulator: ProjectBackupManager.isSimulator)
+        guard ProjectBackupManager.isSimulator
         else { return }
         let args = ProcessInfo.processInfo.arguments
         guard let flag = args.firstIndex(of: "-uiTestSlowBakeMillis"),
@@ -101,7 +102,7 @@ enum UITestSeeds {
     ///
     /// Simulator-only, on `slowVectorRenderDelay`'s rule and for its reason.
     static func applyWindowDrawDelayIfRequested() {
-        guard ProjectBackupManager.honoursSimulatorOnlyTestHooks(isSimulator: ProjectBackupManager.isSimulator)
+        guard ProjectBackupManager.isSimulator
         else { return }
         let args = ProcessInfo.processInfo.arguments
         guard let flag = args.firstIndex(of: "-uiTestSlowWindowDrawMillis"),
@@ -125,7 +126,7 @@ enum UITestSeeds {
     /// for its reason: a flag that silently made a *device* build hold its banners would be a report
     /// about an app nobody ships.
     static let noticeDurationOverride: TimeInterval? = {
-        guard ProjectBackupManager.honoursSimulatorOnlyTestHooks(isSimulator: ProjectBackupManager.isSimulator)
+        guard ProjectBackupManager.isSimulator
         else { return nil }
         let args = ProcessInfo.processInfo.arguments
         guard let flag = args.firstIndex(of: "-uiTestNoticeSeconds"),
@@ -155,7 +156,7 @@ enum UITestSeeds {
     /// the rule — that the string is the slider's percentage, resolved at the playhead — is
     /// `OpacityChannelLogicTests`' and runs in the fast tier.
     static let opacityReadoutLingerOverride: TimeInterval? = {
-        guard ProjectBackupManager.honoursSimulatorOnlyTestHooks(isSimulator: ProjectBackupManager.isSimulator)
+        guard ProjectBackupManager.isSimulator
         else { return nil }
         let args = ProcessInfo.processInfo.arguments
         guard let flag = args.firstIndex(of: "-uiTestOpacityReadoutSeconds"),
