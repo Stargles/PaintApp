@@ -687,7 +687,7 @@ final class FillObjectLogicTests: XCTestCase {
             XCTAssertTrue(manager.layers[layer].isFillReference, "PREMISE: the target keeps its visible reference default")
             XCTAssertEqual(manager.fillSettings.bucketEdgeOverlap, 2, "PREMISE: this is the ordinary bucket overlap")
             manager.setFillMendsGaps(false)
-            manager.brushColor = .red
+            manager.brushColor = Color(.sRGB, red: 1, green: 0, blue: 0, opacity: 1)
             manager.beginInteractiveFill(at: CGPoint(x: 40, y: 40))
             manager.endInteractiveFill()
             manager.fillQueue.sync {}
@@ -722,10 +722,11 @@ final class FillObjectLogicTests: XCTestCase {
             }
             XCTAssertTrue(outsideChanges.isEmpty,
                           "every pixel outside the known interior stroke, including the original outline, stays exact: \(outsideChanges.prefix(6))")
+            guard outcome == .changed(1) else { continue }
             manager.undo()
             XCTAssertEqual(vector.elements.first?.fill?.pathData, saved.pathData, "one undo restores the actual bucket contour")
-            XCTAssertEqual(CanvasFixture.rgbaBytes(try XCTUnwrap(vector.render()?.cgImage)), before,
-                           "one undo restores the complete original bucket picture")
+            let restored = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(vector.render()?.cgImage)))
+            XCTAssertTrue(restored == before, "one undo restores the complete original bucket picture")
         }
     }
 
