@@ -83,6 +83,25 @@ comparison/read failure. Scope excludes raster residency and backup retention po
       No native run, simulator operation, merge, push or device operation is authorized for this work yet.
 - [ ] Reconcile selected static counts, lints and graph report; hand clean commits to root for integration.
 
+
+---
+
+## Background lifecycle ownership fixes — 2026-10-24
+
+**Implementation WIP on `tmp/s54-background-ownership`, rebased onto the library-ready checkpoint.**
+The three audited lifetime gaps now have root-cause fixes and five deterministic regression methods:
+export cancellation fences, startup save-stage cleanup serialized through the existing package mutation
+queue, and close-owned thumbnail backfill in batches of eight. Independent focused source review found
+no concrete defect. Synchronous thumbnail installation may finish its current bounded batch if close is
+triggered reentrantly.
+
+- [ ] Run the clean focused Debug baseline, then the reviewed export, cleanup and backfill assertion
+      mutants one at a time; restore and verify source bytes/modes after each.
+- [ ] Rebuild normal source, run relevant class selectors, then qualify fast Debug/Release, count and
+      lint gates as assigned by root. No native gate has run yet; don't merge/install.
+
+External mutation plan: `~/PaintWork/s54-background-ownership-native-plan-19ac3106.md`.
+
 ---
 
 ## Vector Liquify must move points only — 2026-10-23

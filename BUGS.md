@@ -2301,3 +2301,18 @@ menu's keyframe items, and deliberately not fixed there.
 - **A vector cel still carries `fillImage`/`bakedImage`**, so raster features allocate canvas-sized
   bitmaps on a vector layer. The product owner wants vector fully divorced from raster —
   [VECTOR_INTERPOLATION.md](docs/VECTOR_INTERPOLATION.md) §4 item 26 is the full write-up.
+
+## Background tasks can outlive the operation that owns them (2026-10-24)
+
+Read-only audit found three concrete lifecycle gaps; implementation is assigned on
+`tmp/s54-background-ownership`, with native qualification still pending:
+
+- `FrameExportSession.offMain` resumes cancelled runs without rechecking cancellation. The old run can
+  publish progress and its unconditional `endFocus` can clear a replacement export's focus.
+- `ProjectBackupManager.cleanupStaleSaveDirectories` removes every `.saving-*` directory outside
+  `ProjectStore`'s save queue while startup maintenance and a new save may overlap.
+- `CanvasManager.startThumbnailBackfill` starts a weak Task whose awaited instance method retains the
+  document through whole-layer render batches; `closeFrameBaker` does not cancel it.
+
+Deterministic regressions and a focused source review are in this worktree; no native qualification
+or measured device-memory cause is claimed. External review: `~/PaintWork/s54-architecture-audit/`.
