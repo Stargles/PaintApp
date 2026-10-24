@@ -753,55 +753,72 @@ final class BrushLibraryLogicTests: XCTestCase {
         XCTAssertNotEqual(original, BrushPreviewKey(brush: brush, size: Self.previewSize, scale: 2.5))
     }
 
-    /// Many slider values stay below the retained-byte ceiling, but least-recently-used entries
-    /// leave first. Rebuilding an evicted request must draw the same pixels.
-    func testPreviewCacheBoundsBytesAndRebuildsAnEvictedPictureExactly() {
+    /// The byte-derived number of editor-sized previews crosses the retained ceiling, and the
+    /// least-recently-used entry leaves first. Rebuilding it must draw the same pixels.
+    func testPreviewCacheBoundsBytesAndRebuildsAnEvictedPictureExactly() throws {
         let cache = BrushPreviewCache()
         let base = Brush(name: "preview-0", tip: .round, size: 14)
+        let previewSize = CGSize(width: 196, height: 56)
         func key(_ index: Int) -> BrushPreviewKey {
             var brush = base
             brush.name = "preview-\(index)"
-            return BrushPreviewKey(brush: brush, size: Self.previewSize, scale: 2)
+            return BrushPreviewKey(brush: brush, size: previewSize, scale: 2)
         }
 
-        var original: UIImage?
-        for index in 0..<45 {
-            let image = cache.image(for: key(index))
-            if index == 1 { original = image }
+        _ = cache.image(for: key(0))
+        let original = cache.image(for: key(1))
+        let cgImage = try XCTUnwrap(original.cgImage)
+        let bytesPerImage = cgImage.bytesPerRow * cgImage.height
+        let retainedCapacity = BrushPreviewCache.byteBudget / bytesPerImage
+        guard retainedCapacity > 2 else {
+            XCTFail("the 196×56 fixture must fit multiple previews")
+            return
         }
+        for index in 2..<retainedCapacity { _ = cache.image(for: key(index)) }
+
         let keyA = key(0)
         XCTAssertNotNil(cache.cached(keyA), "a read hit refreshes recency")
-        for index in 45..<49 { _ = cache.image(for: key(index)) }
+        _ = cache.image(for: key(retainedCapacity))
 
         XCTAssertLessThanOrEqual(cache.bytesResident, BrushPreviewCache.byteBudget)
+        XCTAssertEqual(cache.entryCount, retainedCapacity, "the incoming image replaces one LRU entry")
         XCTAssertNotNil(cache.cached(keyA), "the recently read entry survives later insertions")
         XCTAssertNil(cache.cached(key(1)), "the older untouched entry was evicted")
         let rendersBeforeRebuild = cache.renderCount
         let rebuilt = cache.image(for: key(1))
         XCTAssertEqual(cache.renderCount, rendersBeforeRebuild + 1)
-        XCTAssertEqual(rebuilt.pngData(), original?.pngData(),
+        XCTAssertEqual(rebuilt.pngData(), original.pngData(),
                        "eviction changes work, not the deterministic stroke the artist sees")
     }
 
     /// Warning trims the current set to half once; later visible requests can use the normal cap
     /// again. Backgrounding releases every cached picture.
-    func testPreviewCacheTrimsForPressureAndReturnsToItsNormalBudget() {
+    func testPreviewCacheTrimsForPressureAndReturnsToItsNormalBudget() throws {
         let cache = BrushPreviewCache()
         defer { MemoryPressure.signal(.background) }
         let base = Brush(name: "pressure-0", tip: .round, size: 14)
+        let previewSize = CGSize(width: 196, height: 56)
         func request(_ index: Int) -> BrushPreviewKey {
             var brush = base
             brush.name = "pressure-\(index)"
-            return BrushPreviewKey(brush: brush, size: Self.previewSize, scale: 2)
+            return BrushPreviewKey(brush: brush, size: previewSize, scale: 2)
         }
-        for index in 0..<25 { _ = cache.image(for: request(index)) }
+        let first = cache.image(for: request(0))
+        let cgImage = try XCTUnwrap(first.cgImage)
+        let bytesPerImage = cgImage.bytesPerRow * cgImage.height
+        let warningCapacity = (BrushPreviewCache.byteBudget / 2) / bytesPerImage
+        guard warningCapacity > 0 else {
+            XCTFail("the 196×56 fixture must leave a retained picture under pressure")
+            return
+        }
+        for index in 1..<(warningCapacity + 2) { _ = cache.image(for: request(index)) }
         XCTAssertGreaterThan(cache.bytesResident, BrushPreviewCache.byteBudget / 2)
 
         MemoryPressure.signal(.warning)
         XCTAssertLessThanOrEqual(cache.bytesResident, BrushPreviewCache.byteBudget / 2)
         XCTAssertGreaterThan(cache.bytesResident, 0, "warning trims without clearing the visible working set")
 
-        _ = cache.image(for: request(25))
+        _ = cache.image(for: request(warningCapacity + 2))
         XCTAssertGreaterThan(cache.bytesResident, BrushPreviewCache.byteBudget / 2,
                              "a later request can refill toward the normal budget")
         XCTAssertLessThanOrEqual(cache.bytesResident, BrushPreviewCache.byteBudget)
