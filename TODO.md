@@ -1,79 +1,4 @@
-Response-curve source ready: the existing movement seam returns an optional named tuple containing
-the updated AnimationCurve and its authoritative landed frame. The view preserves that identity
-through every tick; raw-touch hit testing now occurs only at gesture acquisition. Both existing
-logic callers are adapted, two new methods exercise clamped/outside/return continuation and a
-neighbor under the touch with retained endpoints/neighbor values. The cold BrushEditor UI adds
-artist-created nodes, uses existing fingerStroke for one held neighbor→outside→return path, checks
-actual dot frames and final bright pixels, and retains main-screen landscape pictures. No new
-product flag/counter/framework, duplicate clamp or compatibility overload. BrushEditorLogic30 +
-BrushModulationLogic43 =73 focused methods; BrushEditorUITests13 includes the new cold control.
-Identifier/helper lints and diff-check pass. Compiler/native, intentional faults, UI/picture review,
-Debug/Release fast tiers and device remain unrun/root-owned. Exact owned commits will be sent to
-final consolidator; do not replace its authoritative docs with this inherited716 snapshot.
-
-## Response-curve drag ownership — scope recorded, 2026-10-24
-
-Read-only coverage closeout at716311c2 found a concrete current brush-editor continuity bug:
-ResponseCurveEditorView moves the selected key through ResponseCurveEditing.moving, then reacquires
-nearestKey at the raw touch or keeps its old frame. Clamping can move the key away from that touch
-and delete the old frame; subsequent ticks freeze, or a nearby neighbor can take over the drag.
-Existing clamp test checks only one tick. Root approves one authoritative movement result carrying
-landed frame+curve, replacing the old return seam at every caller with no duplicate clamp/legacy API.
-Own tmp/s54-response-curve starts from origin/main then ff exact716311c28306e37b17b6a5e0452e8ad5a21c94c6;
-final consolidator/source trees remain untouched. Add actual outside/clamped/return continuation and
-neighbor-ownership logic assertions plus cold BrushEditor artist-path drawn control at landscape
-1080×810. Commit before external assertion-fault preparation. Source/static only; all compiler/native,
-UI/screenshot inspection and Debug/Release/physical gates are root-owned and pending. Coverage report:
-~/PaintWork/s54-architecture-audit/current-coverage.md (source tracing is not final runtime proof).
-
 # TODO
-
-Recovery fixture correction source-ready: after actual startup maintenance, the test discovers all
-gallery packages with its original UUID and requires exactly1, the expected Untitled.paintproj name
-and no file at the old material-strokes address. The same strict restore check and real
-ProjectStore.load/assertGeometry now read that actual gallery URL. Converted-backup strict validation,
-complete damaged-original Trash bytes and no-owned-stage checks are unchanged. No production source,
-fixture bytes, decoder or test method count changed (PointGeometryRepairLogicTests40). Diff-check
-passes; root's next native rerun is required before claiming green. Only the two owned scope/test
-commits should be integrated; preserve final consolidator's newer records/curve/stream followups.
-
-## Old-format recovery qualification: renamed fixture address — 2026-10-24
-
-Root's combined f55 native349 compiled app/tests,345 passed/4 failed,0 skips,728 source bytes/modes
-exact. The old typed-colour recovery test passes startup readiness, report counts, maintenance and
-converted-backup strict validation. Its original material-strokes.paintproj URL then fails validation
-and load. The real previous-writer manifest name is Untitled; native.log6531 records permanent
-ProjectPackageLayout.tidyEveryProject renaming1 package after recovery. Source trace confirms this
-normal ordering, not a converter/strict-decoder/backup defect. Root accepts only a fixture address
-correction: locate exactly one real gallery package by the original UUID, require Untitled.paintproj
-and the old path absent, then keep strict recovered+backup validation, actual ink geometry, every
-damaged Trash byte and no-stage assertions. New own tmp/s54-repair-recovery-proof starts from
-origin/main then ff exactf55cabb8a7e6de56a62a2351719dd58bfce9306d. No production edit, assertion
-relaxation, empty/default decode, other-tree change or native/compiler operation. Native rerun remains
-root-owned; original four-failure triage is running separately before this correction.
-
-## Stream bar fixture queue completion — recorded before edits, 2026-10-24
-
-Root's clean combinedf55cabb8a7e6de56a62a2351719dd58bfce9306d compiled and ran349 methods:
-345passed,4failed,0skips, all728 app/test/project bytes+modes restored. Three failures are the old
-StreamBarStateLogicTests HELLO/status/replacement/coalesced-machine fixtures; the separate metadata
-failure belongs to its original author. New own tree tmp/s54-stream-fixtures starts origin/main then
-fast-forwards exactf55; the frozen root check tree is untouched. No Mac native/compiler/graph run.
-
-Source trace confirms ScreenStreamClient.handle now enqueues onto its existing owning client queue.
-These three fixtures still assert client state or call coordinator.stateChanged inline immediately
-after enqueue, before HELLO has installed remoteMachineID/state. Implemented only these fixture
-transitions with one local helper observing existing onStateChange/onStatus main callbacks before
-asserting or forwarding the actual coordinator transition. Both callback routes complete, so wrong
-semantic routing reaches the existing connected/replaced assertion rather than timing out. Prior
-callbacks are forwarded and restored; all clients here are unstarted (CanvasFixture startsClientsfalse
-or directly initialized), with no earlier connecting event pending. Same peer-identity/bar assertions
-remain. No product source/API, sleeps, longer timeout, native bypass or test-count change. Both UI
-lints and diff-check pass;22 StreamBar methods remain. Root's serial failed4 triage at samef55 was
-1passed/3failed: ordinary STATUS happened to pass, confirming this old scheduling assumption was
-racy. Metadata's separate live-URL fixture correction is6f9c8d6d and not included here. Compiler,
-native normal/fast/UI and assertion mutations remain unrun by this author; root owns those gates.
-
 
 The owner's asks; BUGS.md records defects we find. Session49 authorizes continuing actionable work
 without recommendation-only pauses. On2026-10-24 the owner explicitly says not to park for context;
@@ -84,23 +9,30 @@ speed. Architecture and preserving real artwork take priority. Record before act
 
 `~/PaintWork/PaintApp-s54-final-integration`, `tmp/s54-final-integration`, is the single linear source
 consolidation. It starts from freshly fetched origin/main afd2030c, fast-forwards rasterfb1dd34c,
-and adds only the25 recorded owned commits for brush/proof, test hooks, palette, stationary fit,
+and adds only the31 recorded owned commits for brush/proof, test hooks, palette, stationary fit,
 LiveWalk, old-format metadata recovery and stream7c. No main merge/push/install. External full SHAs,
 source byte inventories, commit mapping and hunk review: `~/PaintWork/s54-architecture-audit/final-integration/`.
 Production conflict resolution keeps simulator-only guards plus strict current-manifest validation;
 two added stroke-fit fixture image reads use explicit Result.get() after the raster API change.
-No assertions or fixture pixels changed. Final integrated source has no native gate yet.
+No assertions or fixture pixels changed. Current successor includes curvecf184033 plus fixture-only
+recovery6f9c8d6d and stream callbackcaab86d3; these have no new normal run yet.
 
 Qualified scopes remain tied to exact pins: f475bb93599d2fb1b5b5785931bb2a87cc553424 normal847/847,
-zero skips/failures,724 files+modes exact; base49 assertion-target cases qualified with ineffective
-attempts excluded. Root's additional52 targets (50 exact recipes) are in progress:21 earlier +26/31
-in the current continuation at this record,47/52 total, not complete. Raster79a1941e passed32/32,
+zero skips/failures,724 files+modes exact; base49 and all52 additional assertion-target cases now
+qualify, the latter50 exact recipes, with ineffective/inconclusive attempts excluded. Exact ledger:
+`~/PaintWork/s54-final-qualification/qualified-52-ledger.json`. Raster79a1941e passed32/32,
 zero skips/failures,728 exact; cleanfb1 differs only in records. Its43 assertion-target cases over32
 selectors use35 unique exact production edit recipes and are OFFLINE PREPARED ONLY. Windows final7c
-normal166/166 Debug and Release passed;13/16 fault targets qualified, source-located14–16 rerun pending.
-All final Mac/Swift76, new metadata/brush/fit/LiveWalk, final fast Debug/Release, affected cold UI/pictures,
+normal166/166 Debug and Release passed; root owns remaining16-target proof/final control.
+
+Currentf55 normal349 compiled345pass/4fail,0skip,728 exact: Swift76 executed73pass/3StreamBar fixture
+failures and metadata99 had one stale post-maintenance URL premise. Serial4-case triage ran1pass/3fail,
+728 exact. Integrated callback completion and actual sameUUID renamed-path fixture followups preserve
+all oracles and production bytes; root must rerun the coherent successor. Next normal selection422
+adds full BrushEditor30 and BrushModulation43 for the new curve key ownership fix.
+Final source normal/mutants, fast Debug/Release, affected cold UI/pictures,
 paired performance, whole-library cold startup and physical-device gates remain open. Root owns the
-sole Mac native slot; never touch its active frozen f475 tree. Live status/details are in HANDOFF.md.
+sole Mac native slot; never edit its independent frozen1cf check tree. Live status/details are in HANDOFF.md.
 
 ## How to read and keep this file
 
@@ -199,15 +131,16 @@ a compatibility flag. The new point-only vector instruction is authoritative ove
 interpretations made earlier. Record any actual behavior conflict with evidence before asking.
 
 The implementation removes native vector material transport whole and retains genuine Distort/exact
-bake, raster Liquify, linked source following and the temporary saved-file repair. Final independent
-review found no concrete architecture defect;328 app files remain byte-identical since the tested
-production baseline. Repair75/75,13 repair mutants and copy-only242-survivor real-library gate qualify.
-Final runtime338/338 and17 runtime mutants qualify (16automatic+one exact manual native-assertion review).
-Final affected UI9/9 and required old workflows10/10 passed. The final old-code control widens the dot
+bake, raster Liquify, linked source following and the temporary saved-file repair. At earlier point-only
+checkpoint47d7079c, independent review found no concrete architecture defect and328 app files were
+byte-identical to that tested point-only baseline. This is historical proof, not a current-head claim.
+Repair75/75,13 repair mutants and copy-only242-survivor real-library gate qualify at their recorded pins.
+That earlier point-only runtime338/338 and17 runtime mutants qualify (16automatic+one exact manual native-assertion review).
+At that earlier point-only source, affected UI9/9 and required old workflows10/10 passed. The final old-code control widens the dot
 1.918×; current code keeps it round. Root inspected the actual pictures. No held-path helper remains.
 
-Final exact Debug AND Release each5259=5255passed+4known skips, zero failures/expected, all method
-identities/255 classes reconcile. Corrected classes33/33 before and after2 assertion-red faults;
+At that earlier point-only checkpoint47d7079c, Debug AND Release each5259=5255passed+4known skips,
+zero failures/expected, all method identities/255 classes reconcile. Corrected classes33/33 before and after2 assertion-red faults;
 723 bytes/modes restored, lints/plutil/PBX1317 unique clean. The corrections remove obsolete placement
 and oldest-plus3 expectations only; production and earlier338/17/UI proof remain exact.
 
@@ -229,7 +162,8 @@ oldest-per-bucket versus TODO(161)'s newest policy. Owner ruled 2026-10-23 to us
 clock-bucket policy, preserving age tiers, pre-save copies, update protection and cap; no oldest exception.
 The correction is integrated but unmerged. Actual standalone retention 14/14 passed, reverse-order
 mutation 8/14 was assertion-red and exact restore 14/14 passed. Integrated retention 14 and backup 21
-also passed in runtime338; combined Debug/Release each5259 now qualify.
+also passed in runtime338 at earlier point-only checkpoint47d7079c; Debug/Release each5259
+qualified at that source, not the broader current integration.
 
 The bounded Session47–51 audit found no other concrete dropped actionable ask. The controlled copy-only
 week storage measurement below is qualified; preserved228 backups/522461597 logical bytes alone do not
@@ -347,7 +281,8 @@ Inventory-only files are not reviewed code. New source is not called complete be
       need proof. New4b453d97 normalizes the SAME raw geometryVersion bytes before strict current-model
       metadata validation; only DecodingError goes to existing backup recovery. Drawing/source I/O,
       conversion/ownership and final validation remain hard failures. Original damaged packages stay
-      exact/visible, including no-backup cases. New99-method affected union is unrun. Retire the converter
+      exact/visible, including no-backup cases. The99-method affected union ran atf55;98passed and one stale gallery-URL fixture failed.
+      The exact title/UUID/old-address absence proof is now integrated; rerun pending. Retire the converter
       and temporary UI whole only after owner confirms current artwork; preserve permanent startup
       maintenance scheduling and truthful post-maintenance gallery readiness.
 - [ ] Bake recovery/close: existing baker/store/read demands share one authoritative source and checked
@@ -360,7 +295,7 @@ Inventory-only files are not reviewed code. New source is not called complete be
       and reader LRU, late work cannot land after close. Two held native samples/reader and private
       AVFoundation allocations remain separate from copied ring bytes. Vector costs count actual
       retained payload identity without copying/unpacking or persistent pointer caches; saturated costs
-      propagate through existing UndoBudget/history. Finish remaining52 target cases and consumer UI.
+      propagate through existing UndoBudget/history. Preserve the qualified52-target ledger; finish final consumer UI/gates.
 - [ ] Editable raster: one app-wide RasterResidency charges provider-owned source allocations and
       configured working/checkpoint reservations; native image aliases and unresolved snapshot leases
       keep their real charge. Explicit COW admits before mutation. Immutable version/backing handles
@@ -378,17 +313,18 @@ Inventory-only files are not reviewed code. New source is not called complete be
 - [ ] Stream: one completion-paced writer/run, bounded producer payloads,64MiB frame/256KiB chunk checks,
       old-connection callback fencing/join and error/stop settlement replace unbounded ownership.
       Final7c C#166 normal methods pass both configurations; finish16 actual assertion targets and
-      final normal restore. Swift76/6 classes and their assertion recipes remain unrun. Windows fake
+      final normal restore. Swift76/6 ran73pass/3 async fixture failures atf55; callback completion correction is
+      integrated, awaiting normal rerun and its assertion recipes. Windows fake
       transcripts now return synchronized snapshots. Real-link stage5 remains owner-waiting; no deploy.
 - [ ] Brush/editor: bounded8MiB actual-image preview LRU and keyed row result replace unbounded/unkeyed
       retention. Final823e proof distinguishes exact2 vs2.25 scale within one old rounded bucket and
       checks actual requested600×120 pixels. Shared PaletteColor rejects malformed persisted hex rather
-      than silently displaying black; normal strings are byte-preserved. Qualify brush/palette logic,
-      cold A→B→A drawn row and typed-colour recovery UI; no native result yet for these sources.
-- [ ] Curve editor drag: recorded follow-up on a separate branch from source716. Use the authoritative
-      moved key after clamping; do not re-hit-test raw finger position and leave stale dragFrame or
-      retarget a neighboring key. Integrate the reviewed fix/continuation tests and cold BrushEditor
-      control when ready. Current consolidation intentionally precedes that still-active source fix.
+      than silently displaying black; normal strings are byte-preserved. Brush/palette logic ran in349;
+      cold A→B→A drawn row, typed-colour recovery UI and new assertion mutants remain pending.
+- [ ] Curve editor drag: sourcecf184033 is integrated. Existing moving returns the authoritative
+      landed frame with the updated curve, so clamped continuation cannot freeze or retarget a neighbor.
+      Two logic and one drawn landscape UI method added; root must run the new full class controls
+      and actual assertion faults, preserving brush response/channel behavior.
 - [ ] Stroke path/heading: exact redundant stationary chord-scan bypass and LiveWalk prefix draining
       retain all samples/channels and floating-point timing order. Naive coalescing was refuted by a1ULP
       counterexample; O(N) input storage remains. Qualify new controls/faults/drawn parity and measure
