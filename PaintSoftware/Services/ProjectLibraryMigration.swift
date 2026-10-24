@@ -38,8 +38,9 @@ import Foundation
 ///
 /// ## Verification: the copy must be **as good as the source**, not good in itself
 ///
-/// A copy is accepted when the destination holds the same number of files as the source and the same
-/// total bytes. On top of that, a `.paintproj` **whose source validates** must validate as a copy —
+/// A fresh staged copy is accepted after a strict file/byte census. An arbitrary existing destination
+/// must instead match every relative name and byte before it can make the source expendable. On top
+/// of that, a `.paintproj` **whose source validates** must validate as a copy —
 /// that catches a PNG whose header was truncated in a way the byte total would not.
 ///
 /// **The validator is deliberately not a gate on a source that was already damaged**, and getting
@@ -112,7 +113,9 @@ nonisolated enum ProjectLibraryMigration {
             let destinationDir = destination.appendingPathComponent(sub, isDirectory: true)
             try? fm.createDirectory(at: destinationDir, withIntermediateDirectories: true)
             sweepStaging(in: destinationDir)
-            guard let items = try? fm.contentsOfDirectory(at: sourceDir, includingPropertiesForKeys: nil) else { continue }
+            let items: [URL]
+            do { items = try ProjectFileTree.children(of: sourceDir) }
+            catch { report.failed.append(sub + "/"); continue }
             for item in items {
                 migrateItem(item, into: destinationDir, sub: sub, report: &report)
             }
@@ -136,10 +139,14 @@ nonisolated enum ProjectLibraryMigration {
         var target = destinationDir.appendingPathComponent(name)
         var wasRenamed = false
         if fm.fileExists(atPath: target.path) {
-            if matches(source: item, destination: target) {
-                // A previous run copied this and died before removing the source. Finish its job.
-                if (try? fm.removeItem(at: item)) != nil { report.alreadyThere.append(label) }
-                else { report.failed.append(label) }
+            do {
+                if try matches(source: item, destination: target) {
+                    if (try? fm.removeItem(at: item)) != nil { report.alreadyThere.append(label) }
+                    else { report.failed.append(label) }
+                    return
+                }
+            } catch {
+                report.failed.append(label)
                 return
             }
             target = uniqueURL(in: destinationDir, basedOn: name)
@@ -156,8 +163,14 @@ nonisolated enum ProjectLibraryMigration {
         // "As good as the source": census always, and the package validator only where the source
         // passed it too. See the type's note for why a damaged package must still be carried.
         let sourceWasValid = isPackage(item) && ProjectBackupManager.validateProject(at: item)
-        guard matches(source: item, destination: staged),
-              !sourceWasValid || ProjectBackupManager.validateProject(at: staged) else {
+        do {
+            guard try census(of: item) == census(of: staged),
+                  !sourceWasValid || ProjectBackupManager.validateProject(at: staged) else {
+                try? fm.removeItem(at: staged)
+                report.failed.append(label)
+                return
+            }
+        } catch {
             try? fm.removeItem(at: staged)
             report.failed.append(label)
             return
@@ -195,38 +208,25 @@ nonisolated enum ProjectLibraryMigration {
         var bytes: UInt64 = 0
     }
 
-    static func census(of url: URL) -> Census {
-        let fm = FileManager.default
-        var out = Census()
-        var isDirectory: ObjCBool = false
-        guard fm.fileExists(atPath: url.path, isDirectory: &isDirectory) else { return out }
-        if !isDirectory.boolValue {
-            let size = (try? fm.attributesOfItem(atPath: url.path)[.size] as? UInt64) ?? nil
-            out.files = 1
-            out.bytes = size ?? 0
+    static func census(of url: URL) throws -> Census {
+        switch try ProjectFileTree.entry(at: url) {
+        case .file(let bytes):
+            return Census(files: 1, bytes: bytes)
+        case .directory:
+            var out = Census()
+            for item in try ProjectFileTree.children(of: url) {
+                let sub = try census(of: item)
+                out.files += sub.files
+                out.bytes += sub.bytes
+            }
             return out
         }
-        guard let items = try? fm.contentsOfDirectory(at: url, includingPropertiesForKeys: nil) else { return out }
-        for item in items {
-            let sub = census(of: item)
-            out.files += sub.files
-            out.bytes += sub.bytes
-        }
-        return out
     }
 
-    /// Whether `destination` is a faithful copy of `source`. Same file count and same total bytes.
-    ///
-    /// **Not a byte-for-byte content compare, and that is a measured trade rather than a shortcut**:
-    /// a real library is hundreds of megabytes of PNG, and hashing it doubles a migration the artist
-    /// is watching. What this catches is the failure that actually happens — a copy cut short by a
-    /// kill or a full disk, which loses whole files or truncates the one in flight, and moves the
-    /// total. What it would miss is a copy that silently altered a byte in place, which APFS does not
-    /// do. `validateProject` runs on top of this for packages, which re-reads every PNG header.
-    static func matches(source: URL, destination: URL) -> Bool {
-        let a = census(of: source)
-        guard a.files > 0 else { return census(of: destination).files == 0 }
-        return a == census(of: destination)
+    /// Used only to adopt a preexisting destination, where copy provenance is unknown. Fresh staged
+    /// copies use the strict metadata census above; only this collision path reads every file byte.
+    static func matches(source: URL, destination: URL) throws -> Bool {
+        try ProjectFileTree.matches(source: source, destination: destination)
     }
 
     private static func uniqueURL(in directory: URL, basedOn name: String) -> URL {

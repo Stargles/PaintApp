@@ -611,16 +611,18 @@ nonisolated enum ProjectBackupManager {
     /// Every trash entry, however deep the folder it was deleted from was. The same walker the
     /// project tree uses, pointed at the other tree — see `allProjectPackages`.
     static func listTrash() -> [TrashItem] {
-        allProjectPackages(in: trashDirectory).map { url in
-            let parsed = parseTrashName(url.deletingPathExtension().lastPathComponent)
-            let origin = folderComponents(of: url.deletingLastPathComponent(), under: trashDirectory) ?? []
-            return TrashItem(url: url,
-                             id: (origin + [url.lastPathComponent]).joined(separator: "/"),
-                             displayName: parsed?.base ?? url.deletingPathExtension().lastPathComponent,
-                             originComponents: origin,
-                             deletedAt: parsed?.date ?? fileDate(url),
-                             sizeBytes: directorySize(url))
-        }.sorted { $0.deletedAt > $1.deletedAt }
+        allProjectPackages(in: trashDirectory).map(trashItem).sorted { $0.deletedAt > $1.deletedAt }
+    }
+
+    private static func trashItem(at url: URL) -> TrashItem {
+        let parsed = parseTrashName(url.deletingPathExtension().lastPathComponent)
+        let origin = folderComponents(of: url.deletingLastPathComponent(), under: trashDirectory) ?? []
+        return TrashItem(url: url,
+                         id: (origin + [url.lastPathComponent]).joined(separator: "/"),
+                         displayName: parsed?.base ?? url.deletingPathExtension().lastPathComponent,
+                         originComponents: origin,
+                         deletedAt: parsed?.date ?? fileDate(url),
+                         sizeBytes: directorySize(url))
     }
 
     /// **What a restore did**, so the gallery can say it instead of the artist finding out later.
@@ -719,33 +721,61 @@ nonisolated enum ProjectBackupManager {
         }
     }
 
-    /// Permanently destroys trash items older than `trashRetentionInterval`. When a trashed project
-    /// is destroyed, its per-project backup history goes too — but only if no *live* project uses
-    /// the same package name (the user may have created a new project with the same name meanwhile).
+    /// Removes expired Trash entries. History belongs to a project UUID, and survives while any
+    /// live or retained Trash package owns that UUID. Unknown ownership preserves all histories.
     static func purgeExpiredTrash(now: Date = Date()) {
-        for item in listTrash() where now.timeIntervalSince(item.deletedAt) > trashRetentionInterval {
-            let parsed = parseTrashName(item.url.deletingPathExtension().lastPathComponent)
-            // Tree-wide since TODO (36): a one-level check would call a project filed inside
-            // `Projects/Scene 3/` non-existent and destroy its whole backup history the moment a
-            // same-named trash item expired.
-            let liveExists = parsed.map { p in
-                allProjectPackages().contains { $0.lastPathComponent == "\(p.base).paintproj" }
-            } ?? true // parse failure -> assume live exists -> keep the backups (safe direction)
-            if !liveExists, let base = parsed?.base {
-                deleteBackupDirectories(whoseOriginIs: "\(base).paintproj")
+        let fm = FileManager.default
+        guard let packages = try? projectPackages(in: trashDirectory) else { return }
+        var removedProjectIDs: Set<UUID> = []
+        for item in packages.map(trashItem) where now.timeIntervalSince(item.deletedAt) > trashRetentionInterval {
+            let id = try? projectID(at: item.url)
+            do {
+                try fm.removeItem(at: item.url)
+                if let id { removedProjectIDs.insert(id) }
+            } catch {
+                // A package that could not be removed still owns its recovery history.
             }
-            try? FileManager.default.removeItem(at: item.url)
+        }
+        if !removedProjectIDs.isEmpty,
+           let liveIDs = try? projectIDs(in: projectsDirectory),
+           let trashIDs = try? projectIDs(in: trashDirectory),
+           (try? ProjectFileTree.entry(at: backupsRootDirectory)) == .directory {
+            for id in removedProjectIDs.subtracting(liveIDs.union(trashIDs)) {
+                let directory = backupsRootDirectory.appendingPathComponent(id.uuidString, isDirectory: true)
+                guard (try? ProjectFileTree.entry(at: directory)) == .directory else { continue }
+                try? fm.removeItem(at: directory)
+            }
         }
         pruneEmptyTrashFolders()
     }
 
-    private static func deleteBackupDirectories(whoseOriginIs projectFileName: String) {
-        guard let dirs = try? FileManager.default.contentsOfDirectory(at: backupsRootDirectory, includingPropertiesForKeys: nil) else { return }
-        for dir in dirs {
-            guard let origin = try? String(contentsOf: dir.appendingPathComponent("origin.name"), encoding: .utf8),
-                  origin == projectFileName else { continue }
-            try? FileManager.default.removeItem(at: dir)
+    /// Unlike the gallery's tolerant listing, deletion needs a complete ownership census. A failed
+    /// listing, linked entry or unreadable manifest cannot establish that a history has no owner.
+    private static func projectIDs(in directory: URL) throws -> Set<UUID> {
+        try Set(projectPackages(in: directory).map { try projectID(at: $0) })
+    }
+
+    private static func projectPackages(in directory: URL) throws -> [URL] {
+        var packages: [URL] = []
+        for item in try ProjectFileTree.children(of: directory) where !item.lastPathComponent.hasPrefix(".") {
+            let entry = try ProjectFileTree.entry(at: item)
+            if item.pathExtension == "paintproj" {
+                guard entry == .directory else { throw CocoaError(.fileReadCorruptFile) }
+                packages.append(item)
+            } else if entry == .directory {
+                packages.append(contentsOf: try projectPackages(in: item))
+            }
         }
+        return packages
+    }
+
+    private static func projectID(at package: URL) throws -> UUID {
+        guard try ProjectFileTree.entry(at: package) == .directory,
+              case .file = try ProjectFileTree.entry(at: package.appendingPathComponent("manifest.json")),
+              let id = manifestID(at: package) else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        return id
     }
 
     /// A free package name for `baseName` **inside `directory`**. Per-folder, for
