@@ -150,8 +150,20 @@ final class FillMendUITests: PaintUITestCase {
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
         openLayerPanel(app)
-        app.staticTexts["layerPanel.row.0"].tap()
-        XCTAssertTrue(app.buttons["layerOptions.rasterize"].waitForExistence(timeout: 5), "a fresh layer is vector")
+        let layerList = app.tables["layerPanel.list"]
+        let railIsVisible = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            guard layerList.exists else { return false }
+            let frame = layerList.frame
+            let viewport = app.frame
+            return !frame.isEmpty && viewport.contains(frame)
+        }, object: layerList)
+        XCTAssertEqual(XCTWaiter.wait(for: [railIsVisible], timeout: 5), .completed,
+                       "PREMISE: the entire layer rail has entered the app before its row is tapped")
+        XCTAssertEqual(readVectorMarker(app, layerIndex: 0)?.isVector, true, "a fresh layer is vector")
+        tapWhenHittable(app.staticTexts["layerPanel.row.0"], "The fresh vector layer's options row")
+        XCTAssertTrue(app.buttons["layerOptions.rasterize"].waitForExistence(timeout: 5),
+                      "the fresh vector layer's options offer Rasterize")
+        attachScreenshot(XCUIScreen.main, "internal-mend-fresh-vector-options-owner-screen")
         app.buttons["layerOptions.rasterize"].tap()
         XCTAssertEqual(readVectorMarker(app, layerIndex: 0)?.isVector, false)
         app.staticTexts["layerPanel.row.0"].tap() // Rasterize closes its menu.

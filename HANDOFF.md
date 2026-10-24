@@ -36,9 +36,12 @@ The two failures are test-input/oracle defects supported by actual closed media:
   the same named-row tap, independently verify vector marker, retain Rasterize/menu reachability and
   all existing overlap/drawn/undo assertions. No blind sleep, double tap or product mending change.
 
-These bounded corrections are recorded BEFORE implementation on tmp/s54-ui47-input-contracts,
-from29cf. Root owns docs/index/commit; assigned agents may edit only their named disjoint test file.
-No native grant exists until root supplies a fresh clean pin. Do not reuse the failing47 as a green
+The two bounded test corrections are implemented on tmp/s54-ui47-input-contracts from29cf.
+Dense sampling reuses ScreenshotPixels; the local fill setup waits for whole-rail containment and
+checks the actual vector marker before tapping the existing row. Removed the duplicate raw reader,
+sparse probe parameter and spread helper. All test methods, later fill/undo oracles and four reviewed
+production cleanup files remain unchanged. Both UI lints, PBX validation and static5398/5987/1327
+checks pass. Compiler and native controls are still pending; root supplies the clean committed pin. Do not reuse the failing47 as a green
 baseline or silently carry the old shape skip. New107 logic faults, UI consumer faults and mask6+11
 remain prepared-only; refresh their exact source/meaningful assertion maps and establish fresh zero-
 skip normal controls before execution. Final fast Debug/Release, whole classes/full phase, paired16,
