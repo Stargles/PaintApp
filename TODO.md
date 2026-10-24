@@ -79,6 +79,22 @@ preservation; a cold drawn UI test verifies the damaged copy remains in Recently
 rendered after restoration. No schema change or migration. Mutation and native qualification remain
 pending root.
 
+
+## Decoder keyframe notification lifetime — scope recorded, 2026-10-24
+
+Independent review confirmed a final stale callback boundary: reportNeedsKeyframe checks its decode
+epoch, but the untagged coordinator→client queue handoff can land after this same client reconnects
+and send the old request on the replacement run. Buffer publication itself is already atomically
+fenced. Root authorizes the narrow fix: carry the existing decoder epoch through the actual control
+queue landing and recheck it there, before touching current pending controls/writer; remove the old
+untagged decoder callback wiring whole. No new lifetime framework/cache/flag or parallel callback.
+Test with the existing real fixture's SPS/PPS+P-frame gap, hold the notification body, retire through
+actual replacement handler, admit new HELLO, release old notification, assert actual admitted CONTROL
+census0, then forward a normal current notification and require exactly1. Existing completion transport
+and callbacks only; no production delays or native/compiler/simulator action. Metadata repair is in
+separate4b453d97 tree and remains unchanged; Windows C#source stays exact qualified3a9.
+
+
 The owner's asks. [BUGS.md](BUGS.md) is for what *we* find.
 
 **Session 49 (2026-10-14):** the owner asked to continue through every actionable item, stopping only
