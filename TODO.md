@@ -205,6 +205,8 @@ gates follow the old47d benchmark; prototypes/static checks are not app qualific
 - [ ] Qualify the compact shared contour replacement, fragmented masks and preflighted point-limit refusal.
 - [ ] Add the layer-wide action for every fill in every cel; use existing mutation/undo ownership.
 - [ ] Reproduce and fix batch reference sampling for fills saved with default Edge Overlap2 (BUGS.md); existing contour-ring sampling mistakes black ink for background.
+- [ ] Keep Mend Reach measured after Edge Overlap for interior gaps, with bounded full-boundary proof and overlap6/5 versus raw10/9 regressions.
+- [ ] Invalidate cached fill geometry before destructive rebuilding so a refused preparation cannot reuse overwritten buffers.
 - [ ] Exclude each repaired fill from its own references and propagate unavailable input failures atomically (independent review; BUGS.md).
 - [ ] Mutation-backed logic tests, cold UI/pictures at iPad9 size and required Debug/Release gates.
 

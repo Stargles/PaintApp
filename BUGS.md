@@ -3,6 +3,23 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## Interior mending counts ink already covered by Edge Overlap — 2026-10-24
+
+The shared setting promises that Mend Reach counts the gap remaining after Edge Overlap. Source
+inspection finds the new same-fill normal proof measures the entire ink strip instead: a10px stroke
+with2px overlap on each side leaves6px, but Reach6 fails the nearest-distance shortcut and the whole
+strip check. Preserve the full open-paper/source endpoint proof and all tied witnesses, while
+measuring only the uncovered span. Bound proof traversal separately and protect unknown window rims.
+Add real drawn-pixel overlap6/5 and zero-overlap10/9 regressions before changing the shader.
+
+## Failed fill preparation can leave a stale cache over overwritten buffers — 2026-10-24
+
+On a cache miss, `MetalFillSession.fill` retains its previous Structure while `buildStructure`
+overwrites shared walls, labels and nearest-feature buffers. A later command/allocation refusal can
+return nil with old cache metadata still installed; retrying its old key could reuse corrupted data.
+Invalidate before destructive rebuilding. No actual device failure is attributed to this finding;
+do not force memory exhaustion or introduce a permanent test-only fault seam to demonstrate it.
+
 ## Saved-fill contour sampling misses normal Edge Overlap gaps — 2026-10-24
 
 Independent analytic replay of the actual ring/modal rules confirms another pending batch defect.
@@ -10,8 +27,11 @@ A128² closed10px outline with a10px attached or detached stroke remains one buc
 Edge Overlap2 dilates its source into the outline;394/394 (attached) or404/404 (detached) contour-ring
 samples are black. Even with the repaired fill omitted from references, black becomes passable and
 mending sees no ink, leaving the6px central gap. At overlap0 the ring is paper. Actual paint/commit
-traces preserve the dilated region, so default fills can reach this premise. Evidence is analytic,
-not yet a native reproduction: `~/PaintWork/s53-fill-mend/design/default-overlap-audit/`.
+traces preserve the dilated region, so default fills can reach this premise. Native regression dc48ff3a
+confirms both cases: exactly six direct outcome/edit/drawn-pixel assertions fail, no premise failures.
+Known-coverage sampling24195818 passes that same native method1/1 with exact723-source restoration;
+the broader focused rerun remains pending. Analytic evidence:
+`~/PaintWork/s53-fill-mend/design/default-overlap-audit/`.
 
 Add a real bucket-fill/commit regression at default overlap before changing production. Existing
 coverage is different from a lasso gesture's collar: choose current reference colours from its

@@ -47,14 +47,27 @@ Old lead `s52-vector-points` is not authoritative. Root records tree `s52-erase-
 
 **Point qualification finished at47d7079c; integrated production remains frozen for deployment.**
 Corrected classes33/33 before and after2 assertion-red faults; exact Debug/Release each5259 reconcile.
-Root owns the sole native slot. Unchanged old47d FillGapClosingBench Release **2/2 passed** on39E84984;
-source restored/normal rebuilt in separate week-cost DD. OldMend0 medians: press98.3/168.7ms,
-tick6.0/4.9ms inside-box/open-page (simulator, wide ranges; not owner-device latency). Evidence
-`s53-fill-mend/native/old-47d-bench0`. Core/batch/compact-contour source and11new logic/1UI tests are
-committed. Three attempted focused builds executed0 tests: missing new notice cases in banner/action switches and same-file session access to the immutable lookup. Root corrected these integration errors; no failed build is test qualification. Static fast5270/full5855; focused9classes198. Cold FillMendUI now has4 methods, including a new Mend-ON one-fill path with attached and detached ink; its shared private setup also drives the batch/undo test. Full protected frame/donut/U sets and the exact(57,17) tied-edge veto are asserted in the core fixture. Root's small external
-`native/focused.py` reuses reviewed census/freeze/result readers. Actual aa33 focused result198=193passed/5failed (9 assertion records): new core positive patches absent in2 methods, stale38px halo assertions in3 methods. The window tests now use the78px operator halo; diagnosis and batch fixes below are committed but need normal qualification. Batch fixes95b7457b/d7098d65 exclude only the addressed fill through existing Frozen.draw, preserve other objects/cached references, and refuse unavailable source/reference/neighbour pixels;4 new logic methods. Native diagnostic1 expected-red method proved opaque-white threshold0 classification wrong;1e-6 diagnostic only restored all4 patches and kept the hole veto. Exact723 restored. Precision fix3905cc4d shares precise RGBA8 conversion at3 reads and adds1024 direct exact/adjacent byte cases in1 GPU command buffer; no epsilon/global flags. Static now focused203/fast5275/full5860. Corrected old capture1/1 passed with ordinary threshold.15:6 fixtures including preservedTest1/527strokes/256²crop, all723 restored; root verified actual selector and unchanged source hash maps. The attachment revision is unset; external provenance pins47d. Normal203/203 passed, zero fail/skip, exact723. The following31-fault batch was deliberately stopped after18 assertion-red cases when independent review confirmed the default-overlap sampling defect (BUGS.md);19 interrupted, no fasts reached. Full source restored723 exactly; DD still requires a normal rebuild. Source work reopens for a real default-overlap bucket regression and covered-area reference selection, preserving ordinary lasso semantics. Root owns native orchestration. Next: focused green, reviewed mutants,
-normal restore, exact old/new reference comparison, cold affectedUI/pictures and required old workflows,
-Mend0/12/40 press/ticks+fragmented peak, exact Debug/Release. No fill native success/device action yet.
+Root owns the sole native slot; no native job is currently active. Old47d Mend-Off Release
+FillGapClosingBench2/2 passed (press98.3/168.7ms, tick6.0/4.9ms; simulator, not iPad latency).
+Core/batch/compact-contour source is committed. Normal b84 focused203/203 passed, no failures/skips,
+all723 tracked bytes/modes exact. Its31-fault qualifier was deliberately stopped after18 actual native
+assertion-red faults when default-overlap sampling was independently found wrong; case19 interrupted,
+no fasts reached, exact723 restored. Existing completed faults retain individual evidence only.
+
+Default-overlap real bucket regression dc48ff3a reproduces attached and detached failures with six
+outcome/edit/drawn-centre assertions, zero premise failures. Coverage-sampling fix24195818 then passes
+that exact method1/1; ordinary lasso still samples its collar through one shared session preparation.
+No saved provenance/override/mode flag. Full focused expected204, static fast5276/full5861. New source
+findings are recorded in BUGS/TODO before changes: Reach incorrectly charges already-overlapped ink;
+destructive preparation may retain stale cache metadata after refusal. Implement bounded remaining-gap
+measurement without weakening full open/source endpoint or all-tie boundary proofs, and invalidate
+before rebuild. Root coordinates agent ownership and native runs.
+
+Still pending: final focused baseline/restored gates, remaining reviewed faults, exact old/new EDT
+reference captures, Mend0/12/40 press/tick and fragmented peak measurements, affected coldUI14/pictures,
+required Debug/Release fast tiers. Old capture1/1 uses six fixtures including preserved Test1/527strokes
+crop with exact source/input restoration; new capture not run. Final Release/device readiness/export
+remain pending. No new implementation is merged, installed or device-qualified.
 
 Owned simulators: logic/fast M5 **39E84984-3C6F-4A6A-8DC8-D1098F6B623E**; current UI iPad9
 **56CC563F-06D0-42FC-9C18-A2B230DE2D38** and old-control **B0533278-3F74-4944-AC58-3514D87C85D6**
