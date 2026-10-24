@@ -34,12 +34,17 @@ fast-forwards exactf55; the frozen root check tree is untouched. No Mac native/c
 
 Source trace confirms ScreenStreamClient.handle now enqueues onto its existing owning client queue.
 These three fixtures still assert client state or call coordinator.stateChanged inline immediately
-after enqueue, before HELLO has installed remoteMachineID/state. Scope: adapt only these fixture
-transitions to observe existing onStateChange/onStatus main callbacks before asserting, preserving
-connected/replaced and real peer-identity/bar invariants. Completion must accept either actual event
-so a wrong semantic route still reaches the existing assertion instead of timing out. Preserve any
-pre-existing callbacks; no sleeps, longer timeouts, product bypass or synchronous production handle.
-Commit before preparing assertion mutations. Root retains all Mac native, fast/UI and mutation gates.
+after enqueue, before HELLO has installed remoteMachineID/state. Implemented only these fixture
+transitions with one local helper observing existing onStateChange/onStatus main callbacks before
+asserting or forwarding the actual coordinator transition. Both callback routes complete, so wrong
+semantic routing reaches the existing connected/replaced assertion rather than timing out. Prior
+callbacks are forwarded and restored; all clients here are unstarted (CanvasFixture startsClientsfalse
+or directly initialized), with no earlier connecting event pending. Same peer-identity/bar assertions
+remain. No product source/API, sleeps, longer timeout, native bypass or test-count change. Both UI
+lints and diff-check pass;22 StreamBar methods remain. Root's serial failed4 triage at samef55 was
+1passed/3failed: ordinary STATUS happened to pass, confirming this old scheduling assumption was
+racy. Metadata's separate live-URL fixture correction is6f9c8d6d and not included here. Compiler,
+native normal/fast/UI and assertion mutations remain unrun by this author; root owns those gates.
 
 
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.

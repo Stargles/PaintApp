@@ -62,6 +62,30 @@ final class StreamBarStateLogicTests: XCTestCase {
                      width: 1920, height: 1080, fps: 30, streaming: streaming, reason: reason)
     }
 
+    /// The exposed frame handler owns a serial queue. Wait for its actual main callback before
+    /// reading state or forwarding a transition to the coordinator. These clients never start a
+    /// socket, so no earlier connecting event is pending. Either handled route completes: a
+    /// wrongly parked ordinary STATUS must reach the state assertion rather than time out.
+    private func handle(_ frame: StreamFrame, on client: ScreenStreamClient) {
+        let handled = expectation(description: "the client publishes the handled frame")
+        let previousState = client.onStateChange
+        let previousStatus = client.onStatus
+        var settled = false
+        func completed() {
+            guard !settled else { return }
+            settled = true
+            handled.fulfill()
+        }
+        client.onStateChange = { state in previousState?(state); completed() }
+        client.onStatus = { status in previousStatus?(status); completed() }
+        defer {
+            client.onStateChange = previousState
+            client.onStatus = previousStatus
+        }
+        client.handle(frame)
+        wait(for: [handled], timeout: 5)
+    }
+
     /// A manager standing on frame 0 with one committed stream layer active.
     private func streaming() -> (manager: CanvasManager, element: VectorStreamElement) {
         let manager = CanvasFixture.manager(layerCount: 1)
@@ -674,12 +698,12 @@ final class StreamBarStateLogicTests: XCTestCase {
                 StreamHello(proto: StreamHello.protocolVersion, app: "PaintStreamer", version: "1.0",
                            name: "desktop-cbr0fl6", machineID: machineID)))
         }
-        ambientClient.handle(hello())
+        handle(hello(), on: ambientClient)
         coordinator.stateChanged(.connected, at: ambient)
         XCTAssertFalse(try XCTUnwrap(coordinator.client(for: spelled)) === ambientClient,
                       "Setup: the other spelling has not connected yet — nothing to collapse onto it")
 
-        spelledClient.handle(hello())
+        handle(hello(), on: spelledClient)
         coordinator.stateChanged(.connected, at: spelled)
 
         let survivor = try XCTUnwrap(coordinator.client(for: spelled))
@@ -705,13 +729,13 @@ final class StreamBarStateLogicTests: XCTestCase {
     func testAReplacedStatusParksTheClientRatherThanReconnecting() {
         let client = ScreenStreamClient(endpoint: StreamEndpoint(host: "laptop", port: 47301),
                                         appVersion: "1.0", deviceName: "iPad")
-        client.handle(StreamFrame(.hello, payload: StreamJSON.encode(
-            StreamHello(proto: StreamHello.protocolVersion, app: "PaintStreamer", version: "1.0", name: "desktop"))))
+        handle(StreamFrame(.hello, payload: StreamJSON.encode(
+            StreamHello(proto: StreamHello.protocolVersion, app: "PaintStreamer", version: "1.0", name: "desktop"))), on: client)
         XCTAssertEqual(client.state, .connected, "Setup")
 
-        client.handle(StreamFrame(.status, payload: StreamJSON.encode(
+        handle(StreamFrame(.status, payload: StreamJSON.encode(
             StreamStatus(source: StreamStatus.Source(kind: "none", name: ""), width: 0, height: 0, fps: 0,
-                        streaming: false, reason: ScreenStreamClient.replacedByAnotherConnectionReason))))
+                        streaming: false, reason: ScreenStreamClient.replacedByAnotherConnectionReason))), on: client)
 
         XCTAssertEqual(client.state, .replaced(reason: ScreenStreamClient.replacedByAnotherConnectionReason))
     }
@@ -721,12 +745,13 @@ final class StreamBarStateLogicTests: XCTestCase {
     func testAnUnrelatedStatusReasonDoesNotParkTheClient() {
         let client = ScreenStreamClient(endpoint: StreamEndpoint(host: "laptop", port: 47301),
                                         appVersion: "1.0", deviceName: "iPad")
-        client.handle(StreamFrame(.hello, payload: StreamJSON.encode(
-            StreamHello(proto: StreamHello.protocolVersion, app: "PaintStreamer", version: "1.0", name: "desktop"))))
+        handle(StreamFrame(.hello, payload: StreamJSON.encode(
+            StreamHello(proto: StreamHello.protocolVersion, app: "PaintStreamer", version: "1.0", name: "desktop"))), on: client)
+        XCTAssertEqual(client.state, .connected, "Setup")
 
-        client.handle(StreamFrame(.status, payload: StreamJSON.encode(
+        handle(StreamFrame(.status, payload: StreamJSON.encode(
             StreamStatus(source: StreamStatus.Source(kind: "none", name: ""), width: 0, height: 0, fps: 0,
-                        streaming: false, reason: "The window was closed"))))
+                        streaming: false, reason: "The window was closed"))), on: client)
 
         XCTAssertEqual(client.state, .connected, "an ordinary STATUS never moves the connection state")
     }
