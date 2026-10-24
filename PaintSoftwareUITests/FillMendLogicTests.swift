@@ -525,6 +525,63 @@ final class FillMendLogicTests: XCTestCase {
                           "the asymmetric diagonal strip is accepted at reach six")
     }
 
+    /// The shared bucket pipeline must charge Reach for the gap remaining after its real Edge
+    /// Overlap pass. Both strokes are ten pixels thick; overlap two leaves six pixels to mend.
+    func testInternalMendReachCountsOnlyWhatProductionEdgeOverlapLeaves() throws {
+        let width = 96, height = 96
+        func rectangle(_ xs: Range<Int>, _ ys: Range<Int>) -> Set<Int> {
+            Set(ys.flatMap { y in xs.map { y * width + $0 } })
+        }
+        let frame = rectangle(8..<88, 8..<88).subtracting(rectangle(12..<84, 12..<84))
+        let detached = rectangle(28..<38, 23..<45)
+        let attached = rectangle(8..<48, 60..<70)
+        let holeWall = Set((0..<(width * height)).filter { index in
+            let x = index % width - 70, y = index / width - 34
+            return (36...81).contains(x * x + y * y)
+        })
+        let ink = frame.union(detached).union(attached).union(holeWall)
+        var reference = [UInt8](repeating: 0, count: width * height * 4)
+        for index in ink { reference[index * 4 + 3] = 255 } // Exact RGBA: black ink, transparent paper.
+        let engine = try XCTUnwrap(MetalFillEngine.shared)
+        let session = try XCTUnwrap(engine.makeSession(referenceRGBA: reference, width: width,
+                                                        height: height, gapWidthLimit: 0).session)
+        func render(overlap: Float, reach: Float) throws -> Pixels {
+            let bytes = try XCTUnwrap(session.fill(seedX: 16, seedY: 16, seedColor: .zero,
+                                                   threshold: 0, gapWidth: 0, edgeOverlap: overlap,
+                                                   mendReach: reach, fillColor: SIMD4(1, 0, 0, 1)))
+            return Pixels(bytes: bytes, width: width)
+        }
+        // Compare every pixel outside the two interior strokes with the same overlap-only render.
+        // This protects the complete frame, hole and exterior, including boundary ink that overlap
+        // itself legitimately covers. At the attached join the frame takes priority.
+        let permitted = detached.union(attached).subtracting(frame)
+        let protected = Set(0..<(width * height)).subtracting(permitted)
+        for (overlap, exactReach, shortReach) in [(2, 6, 5), (0, 10, 9)] {
+            let off = try render(overlap: Float(overlap), reach: 0)
+            let exact = try render(overlap: Float(overlap), reach: Float(exactReach))
+            let tooShort = try render(overlap: Float(overlap), reach: Float(shortReach))
+            let label = "overlap \(overlap), reach \(exactReach)/\(shortReach)"
+            XCTAssertTrue(off.isRed(16, 16), "PREMISE: \(label) fills the region around both strokes")
+            XCTAssertTrue(off.isBare(70, 34), "PREMISE: \(label) leaves the intentional hole empty")
+            let detachedGap = rectangle((28 + overlap)..<(38 - overlap), 28..<40)
+            let attachedGap = rectangle(20..<40, (60 + overlap)..<(70 - overlap))
+            for (name, gap) in [("detached", detachedGap), ("attached", attachedGap)] {
+                XCTAssertTrue(gap.allSatisfy { off.isBare($0 % width, $0 / width) },
+                              "PREMISE: \(label) leaves the complete \(name) gap bare")
+                XCTAssertTrue(gap.allSatisfy { exact.isRed($0 % width, $0 / width) },
+                              "\(label) mends every remaining pixel of the \(name) gap")
+                XCTAssertTrue(gap.allSatisfy { tooShort.isBare($0 % width, $0 / width) },
+                              "\(label) refuses the too-wide \(name) gap")
+            }
+            let changedProtected = protected.filter { index in
+                let x = index % width, y = index / width
+                return exact.at(x, y) != off.at(x, y) || tooShort.at(x, y) != off.at(x, y)
+            }.sorted()
+            XCTAssertTrue(changedProtected.isEmpty,
+                          "\(label) preserves the complete outline, intentional hole and exterior: \(changedProtected.prefix(6))")
+        }
+    }
+
     /// The control, and the reason the rest mean anything: with the option off, two fills either side
     /// of the divider leave its whole width bare. This is the owner's seam, reproduced.
     func testWithTheOptionOffTwoFloodFillsLeaveTheDividerBare() throws {
