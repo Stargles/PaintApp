@@ -98,6 +98,20 @@ triggers a typed recent-color error, sees the displaced copy in Recently Deleted
 ink is rendered. No schema change, normalization, migration, or new recovery framework. Static checks
 only so far; no compiler/native/UI run or mutation qualification yet.
 
+## Windows fake transcript race — scope recorded, 2026-10-24
+
+Independent repeat baseline at db20 exposed a real fixture race before any mutant: Debug165/166,
+FileOutboxTests line225 enumerated FakeFileTransport.Sent while SendAsync appended to its public List,
+throwing CollectionModified. Its retry sees real concurrent delivery; assertions must stay intact.
+Root authorizes one private locked fake transcript with snapshot reads, inspect related attempts/
+callbacks and keep all callbacks/awaits outside locks. FakeFrameSink also has actual concurrent STATUS
+writers when test-thread FakePipeline.Connect overlaps worker session transitions; protect its existing
+transcripts at the same fake seam. FakePipelineFactory, GatedStream.Bytes and outbox event snapshots
+already lock. No product/protocol/deployed changes or assertion weakening; static166 cases unchanged.
+Windows agent restored all63 original source files and owns the next new-folder normal Debug+Release
+baseline and assertion faults. This supersedes any inference that one earlier green3a9 pass ruled out
+fixture races. Swift512 source is unchanged. No Mac native/compiler or Windows operations by this agent.
+
 
 ## Decoder keyframe notification lifetime — scope recorded, 2026-10-24
 

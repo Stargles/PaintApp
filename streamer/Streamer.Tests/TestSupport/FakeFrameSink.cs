@@ -11,17 +11,17 @@ namespace Streamer.Tests.TestSupport;
 /// </summary>
 public sealed class FakeFrameSink : IFrameSink
 {
-    public List<StatusMessage> StatusMessages { get; } = new();
-
-    public StatusMessage? LastStatus => StatusMessages.Count == 0 ? null : StatusMessages[^1];
-
-    public void OnStatus(StatusMessage status) => StatusMessages.Add(status);
-
-    public List<(bool Keyframe, ulong PtsUs)> VideoFrames { get; } = new();
+    private readonly object _gate = new();
+    private readonly List<StatusMessage> _statusMessages = new();
+    private readonly List<(bool Keyframe, ulong PtsUs)> _videoFrames = new();
+    public IReadOnlyList<StatusMessage> StatusMessages { get { lock (_gate) return _statusMessages.ToArray(); } }
+    public StatusMessage? LastStatus { get { lock (_gate) return _statusMessages.Count == 0 ? null : _statusMessages[^1]; } }
+    public void OnStatus(StatusMessage status) { lock (_gate) _statusMessages.Add(status); }
+    public IReadOnlyList<(bool Keyframe, ulong PtsUs)> VideoFrames { get { lock (_gate) return _videoFrames.ToArray(); } }
 
     public Task OnVideoFrameAsync(bool keyframe, ulong ptsUs, ReadOnlyMemory<byte> accessUnit, CancellationToken ct)
     {
-        VideoFrames.Add((keyframe, ptsUs));
+        lock (_gate) _videoFrames.Add((keyframe, ptsUs));
         return Task.CompletedTask;
     }
 }
