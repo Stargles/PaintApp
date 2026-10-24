@@ -147,20 +147,28 @@ Owner: “a crash just happened on the ipad when i was tryiong to erase some str
 Liquify applied; black screen/loading spinner then Home Screen after normal Release bcd7a6af install.
 Preserve the scene/backups. Diagnose the actual eraser/rendering cause before changing production.
 
-The probable matching 18:47EDT Jetsam names backboardd at its1850MiB limit. PaintSoftware was active
-at 730.4 MiB/922.6 MiB peak, UUID F6102F9A-6D31-3185-B078-47B4C41981D9 (installed bcd7a6af), with
-no app kill reason. Owner says this was today's only crash but cannot recall the time. Allocation origin
-remains unproved; flights ending27–30minutes earlier establish no causal link. No physical launch,
-restart or install this pass. Evidence: `~/PaintWork/s52-erase-crash/device-diagnostics/`.
+Two matching-build system reports are now preserved: October23 at18:47 and23:03 Toronto time.
+Both kill backboardd at1850MiB, with PaintSoftware active and no app kill reason. App memory/peak is
+730.4/922.6MiB in the first and768.0/1248.6MiB in the second; both use installedF6102F9A UUID.
+The owner recalls only one observed failure and cannot identify its time, so neither report is chosen
+as its confirmed match. Allocation origin remains unproved. Existing flights end27–30minutes before
+the earlier event and establish no causal link. New read-only device inventory/copies did not restart,
+launch or install the app. Evidence: `~/PaintWork/s52-erase-crash/device-diagnostics/`.
+
+A separate October24 disk-write diagnostic for the same build reports1.074GB dirtied over8h09,
+**action taken:none**. Matching binary/dSYM symbolication points the dominant captured stack samples
+to FrameBaker/FrameBakeStore; ordinary saves also appear.505samples were lost and sampling covers only
+part of the interval: these are not byte shares, backup physical-storage cost or crash causation.
+Preserve this evidence for measured follow-up; do not speculate a cache/backup fix from it.
 
 Preserved Test1 has 4096², 527 strokes and no material data. Its To Cross eraser is Mode3: successful cuts
 update the canvas base without a scratch preview. **Raw size 7.962 means canvas points, not 7.96% or 326px.**
 Repeated canvas-sized UIImage/CoreAnimation handoff is a hypothesis to test, not a proven cause.
-Mode3 capture 1 passed 1/1 with 3 successful cuts and 3 full 4096 RGBA image assignments, footprint 854–985 MiB;
-root inspected 2 pictures. Simulator memory does not prove backboardd behavior. Capture 2 mapped 527 source
-points and selected 20 but stopped before gestures at an added fewer than 100 dark pixels premise;
-no new crash evidence. That premise is under diagnosis. All 3 temporary root source files are restored
-hash-exact. Evidence and calibration detail: `~/PaintWork/s52-erase-crash/mode3-diagnostic/`.
+Mode3 capture1 passed1/1 with3 successful cuts and3 full4096RGBA assignments, footprint854–985MiB;
+root inspected2 pictures. Capture2 stopped before gestures at an added dark-pixel premise. Capture3
+passed1/1 but its temporary clone disappeared before recorder collection, so exact cut/render counts
+are unavailable. Simulator footprint does not prove backboardd behavior. Original scene and source
+hashes are preserved. Evidence: `~/PaintWork/s52-erase-crash/mode3-diagnostic/`.
 
 - [ ] Correct the reproduction premise and trace successful Mode3 cut/image ownership with bounded
       diagnostics; preserve actual geometry and avoid a speculative production fix.

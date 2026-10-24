@@ -38,6 +38,20 @@ Preserve current iPad artwork; no physical device launch, restart or install occ
    Flights ending27–30minutes before Jetsam establish no causal link. Evidence:
    `~/PaintWork/s52-erase-crash/{mode3-diagnostic,device-diagnostics}/`.
 
+## Resume evidence update — 2026-10-24
+
+Owner resumed after an explicit safe pause. All17 runtime faults now qualify (16automatic plus exact
+root-manual09); original inconclusive/interrupted records are preserved. Normal restored Debug338/338
+passed with no failures/skips; exact fast Debug/Release remain active in the frozen ee50 integration.
+Root status: `~/PaintWork/s52-vector-points/runtime-qualification/root-status.json`; aggregate and
+normal/fast evidence: `serial-qualification/results-ee50-run02/` and `results-ee50-restored-fasts-run02/`.
+
+Read-only device inventory found another matching-build backboardd kill at23:03 October23;18:47 is no
+longer the unique candidate and the observed erasing failure time is unresolved. Separate disk-write
+warning took no action; dominant captured stacks symbolicate to FrameBakeStore, not proof of byte
+shares or crash cause. See `s52-erase-crash/device-diagnostics/resume-2026-10-24/device-evidence-review.md`.
+No device restart/launch/install. TODO's erasing item records both reports and diagnostic limits.
+
 ## New owner request — 2026-10-24
 
 Recorded in TODO before investigation: extend the existing Mend Gaps setting to fill beneath internal
