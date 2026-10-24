@@ -1,9 +1,8 @@
 import SwiftUI
-import os
 
 @main
 struct PaintApp: App {
-    private let geometryRepairFailure: String?
+    @StateObject private var geometryRepair = PointGeometryRepairStartup()
     init() {
         // Scribble is refused for every text input the app ever shows, by the hook that has to be in
         // place before the first one is created. See `ScribbleRefusal`.
@@ -31,38 +30,33 @@ struct PaintApp: App {
         // container while the artist's real library sat untouched in Files.
         ProjectLocation.resolveOnLaunch()
         AppSettings.standard.forgetIfRequested()
-        // Saved geometry must be current before gallery reads or recovery can reject old metadata.
-        // The repair protects untouched update bytes before committing any staged replacement.
-        do {
-            let repair = try PointGeometryRepair.run()
-            for package in repair.ambiguous {
-                Logger(subsystem: "Starg.PaintSoftware", category: "PointGeometryRepair").warning(
-                    "Unreadable manifest preserved for existing backup recovery: \(package.lastPathComponent, privacy: .public)")
-            }
-            geometryRepairFailure = nil
-        } catch {
-            geometryRepairFailure = error.localizedDescription
-            return
-        }
-        // Launch-time safety pass (off the main thread): snapshot every project if the app binary
-        // changed (update/dev redeploy), auto-repair any damaged project package from its backups,
-        // purge expired trash. The gallery re-lists when it finishes.
-        Task.detached(priority: .utility) {
-            ProjectBackupManager.runStartupMaintenance()
-            await MainActor.run {
-                NotificationCenter.default.post(name: .projectBackupMaintenanceDidFinish, object: nil)
-            }
-        }
     }
 
     var body: some Scene {
         WindowGroup {
-            if let geometryRepairFailure {
-                ContentUnavailableView("Saved scenes need repair", systemImage: "externaldrive.badge.exclamationmark",
-                    description: Text("Saved scenes were kept for recovery. Please reopen the app to try again.\n\n" + geometryRepairFailure))
-            } else {
-                ContentView()
+            Group {
+                switch geometryRepair.phase {
+                case .preparing:
+                    VStack(spacing: 16) {
+                        ProgressView()
+                            .accessibilityIdentifier("startup.progress")
+                        Text("Preparing saved scenes")
+                            .font(.headline)
+                            .accessibilityIdentifier("startup.preparing")
+                        Text("Your scenes are being checked and kept safe. Please keep PaintApp open.")
+                            .multilineTextAlignment(.center)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(32)
+                case .failed(let reason):
+                    ContentUnavailableView("Saved scenes need repair", systemImage: "externaldrive.badge.exclamationmark",
+                        description: Text("Saved scenes were kept for recovery. Please reopen the app to try again.\n\n" + reason))
+                        .accessibilityIdentifier("startup.failed")
+                case .ready:
+                    ContentView()
+                }
             }
+            .task { await geometryRepair.start() }
         }
     }
 }

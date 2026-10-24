@@ -279,6 +279,11 @@ account usage limits; root continues. The full source inventory is not yet fully
 - [ ] Data protection: migration identity and Trash backup ownership; qualify library branch.
 - [ ] Background ownership: export cancellation, save-stage cleanup and thumbnail close; qualify branch.
 - [ ] Temporary repair: cold old-library launch, responsive first screen, then retire whole after owner confirmation.
+  Active `tmp/s54-repair-startup` inherits frozen fill `fd73d821`. Remove pre-screen synchronous
+  repair, keep library access gated until complete/error, retain strict conversion/recovery and all
+  old-writer fixtures. StateObject gate + nonisolated worker +3 focused regression methods prepared;
+  native compile/focused/fast/mutation/cold visible UI gates remain. Native slot belongs to root;
+  this task prepares code/tests without native runs.
 - [ ] Rendering/storage: derived-frame recovery/close, masked source budgets, editable raster residency, video pressure.
 - [ ] Stream transport: bounded ordered backpressure, framing limits, connection readiness/close ownership.
 - [ ] Editor/brush: preview identity/budget, undo payload accounting, saved palette validation; verify stationary-sample opportunity.

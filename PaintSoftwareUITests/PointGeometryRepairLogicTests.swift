@@ -26,6 +26,75 @@ final class PointGeometryRepairLogicTests: XCTestCase {
         try? FileManager.default.removeItem(at: root)
     }
 
+    func testStartupRepairsOnWorkerAndKeepsLibraryGatedUntilMaintenance() async throws {
+        let package = try install("material-strokes")
+        let repairEntered = expectation(description: "repair worker entered")
+        repairEntered.assertForOverFulfill = true
+        let maintenanceFinished = expectation(description: "maintenance sees current package")
+        let releaseRepair = DispatchSemaphore(value: 0)
+        defer { releaseRepair.signal() }
+        let startup = PointGeometryRepairStartup(repair: {
+            XCTAssertFalse(Thread.isMainThread, "File conversion must leave the main thread available for the first screen")
+            repairEntered.fulfill()
+            XCTAssertEqual(releaseRepair.wait(timeout: .now() + 5), .success)
+            return try PointGeometryRepair.run()
+        }, maintenance: {
+            XCTAssertFalse(Thread.isMainThread)
+            XCTAssertTrue(ProjectBackupManager.validateProjectForRestore(at: package),
+                          "Ordinary recovery cannot see previous-format geometry")
+            maintenanceFinished.fulfill()
+        })
+        let launch = Task { await startup.start() }
+        await fulfillment(of: [repairEntered], timeout: 2)
+        XCTAssertEqual(startup.phase, .preparing, "A main-actor turn must still run while repair waits")
+        // Another window/view appearance must share the in-flight pass, never start another swap.
+        await startup.start()
+        XCTAssertEqual(startup.phase, .preparing)
+        releaseRepair.signal()
+        await launch.value
+        await fulfillment(of: [maintenanceFinished], timeout: 2)
+        XCTAssertEqual(startup.phase, .ready)
+        await startup.start()
+    }
+
+    func testStartupKeepsLibraryGatedWhileOrdinaryRecoveryFinishes() async {
+        let maintenanceEntered = expectation(description: "maintenance entered")
+        let releaseMaintenance = DispatchSemaphore(value: 0)
+        defer { releaseMaintenance.signal() }
+        let startup = PointGeometryRepairStartup(repair: { PointGeometryRepair.Report() }, maintenance: {
+            maintenanceEntered.fulfill()
+            XCTAssertEqual(releaseMaintenance.wait(timeout: .now() + 5), .success)
+        })
+        let launch = Task { await startup.start() }
+        await fulfillment(of: [maintenanceEntered], timeout: 2)
+        XCTAssertEqual(startup.phase, .preparing,
+                       "The gallery cannot race restore/retention after conversion has finished")
+        releaseMaintenance.signal()
+        await launch.value
+        XCTAssertEqual(startup.phase, .ready)
+    }
+
+    func testStartupFailurePreservesSourcesAndNeverRunsRecoveryOrOpensLibrary() async throws {
+        _ = try install("material-strokes")
+        let before = try bytes(root)
+        let repairEntered = expectation(description: "single repair attempt")
+        repairEntered.assertForOverFulfill = true
+        let maintenance = expectation(description: "no maintenance after conversion refusal")
+        maintenance.isInverted = true
+        let startup = PointGeometryRepairStartup(repair: {
+            repairEntered.fulfill()
+            return try PointGeometryRepair.run(beforeCommit: {
+                throw PointGeometryRepair.Failure(reason: "Conversion refused before replacement")
+            })
+        }, maintenance: { maintenance.fulfill() })
+        await startup.start()
+        XCTAssertEqual(startup.phase, .failed("Conversion refused before replacement"))
+        try assertInputsPreserved(before)
+        await startup.start()
+        await fulfillment(of: [repairEntered, maintenance], timeout: 0.1)
+        XCTAssertEqual(startup.phase, .failed("Conversion refused before replacement"))
+    }
+
     private func install(_ name: String, at relativePath: String? = nil) throws -> URL {
         let packages = try XCTUnwrap(fixture["packages"] as? [String: [String: String]])
         let files = try XCTUnwrap(packages[name])

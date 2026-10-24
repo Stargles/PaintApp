@@ -2,17 +2,18 @@ import Foundation
 import CoreFoundation
 import CoreGraphics
 import Darwin
+import Combine
+import os
 
 /// One-shot conversion from the previous writer's spatial ink archive to point geometry. Current
 /// decoders never read the previous format. Every package is staged and validated before any swap;
 /// originals also supply the update snapshot, which is then converted with the other restore points.
-@MainActor
-enum PointGeometryRepair {
+nonisolated enum PointGeometryRepair {
     struct Failure: Error, LocalizedError {
         let reason: String
         var errorDescription: String? { reason }
     }
-    struct Report: Equatable {
+    struct Report: Equatable, Sendable {
         var converted = 0
         /// Successfully read packages whose manifest is not a JSON object. Their bytes are preserved
         /// for existing strict backup recovery; this is neither a conversion nor a current marker.
@@ -420,5 +421,53 @@ enum PointGeometryRepair {
             }
         }
         guard result == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+    }
+}
+
+
+/// Temporary launch owner for the one-shot repair. Every window shares this gate, and no gallery,
+/// editor or automatic save exists until both conversion and ordinary recovery have finished.
+/// Delete with PointGeometryRepair after the owner confirms the converted real library.
+@MainActor
+final class PointGeometryRepairStartup: ObservableObject {
+    enum Phase: Equatable {
+        case preparing
+        case ready
+        case failed(String)
+    }
+
+    @Published private(set) var phase: Phase = .preparing
+    private var started = false
+    private let repair: @Sendable () throws -> PointGeometryRepair.Report
+    private let maintenance: @Sendable () -> Void
+
+    init(repair: @escaping @Sendable () throws -> PointGeometryRepair.Report = { try PointGeometryRepair.run() },
+         maintenance: @escaping @Sendable () -> Void = { ProjectBackupManager.runStartupMaintenance() }) {
+        self.repair = repair
+        self.maintenance = maintenance
+    }
+
+    func start() async {
+        guard !started else { return }
+        started = true
+        do {
+            // The synchronous repair is explicitly nonisolated. A detached task calling an
+            // @MainActor repair would still block the first frame and the progress animation.
+            // It owns its complete file/JSON working set; only a Sendable report crosses back.
+            let report = try await Task.detached(priority: .userInitiated) { [repair, maintenance] in
+                let report = try repair()
+                maintenance()
+                return report
+            }.value
+            for package in report.ambiguous {
+                Logger(subsystem: "Starg.PaintSoftware", category: "PointGeometryRepair").warning(
+                    "Unreadable manifest preserved for existing backup recovery: \(package.lastPathComponent, privacy: .public)")
+            }
+            phase = .ready
+        } catch {
+            // Recovery/retention must never run over a partly converted library. Its original and
+            // owned staging copies stay on disk; relaunch retries the same strict repair.
+            phase = .failed(error.localizedDescription)
+        }
     }
 }

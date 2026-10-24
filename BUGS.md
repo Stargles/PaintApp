@@ -28,7 +28,10 @@ No iPad watchdog failure or device duration is established. Reproduce a genuine 
 launch and make this temporary phase responsive before installation, preserving the rule that no
 gallery/recovery read occurs until conversion succeeds. A detached call to an @MainActor method
 does not move its work. Retire scheduling/UI together with the one-shot service after owner confirms
-current artwork. Evidence: `~/PaintWork/s54-architecture-audit/repair-timing/capture-02/`.
+current artwork. WIP `tmp/s54-repair-startup` removes the synchronous init call, gives the repair
+an explicitly nonisolated worker, and gates ContentView until repair+maintenance complete. Three
+new startup logic methods prepared; native compile/runtime/cold UI qualification remains unrun.
+Evidence: `~/PaintWork/s54-architecture-audit/repair-timing/capture-02/`.
 
 ## Interior mending counts ink already covered by Edge Overlap — 2026-10-24
 
