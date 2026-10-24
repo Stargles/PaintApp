@@ -170,7 +170,8 @@ final class FillMendLogicTests: XCTestCase {
         for y in 2..<(height - 2) {
             for x in 2..<(width - 2) { referenceContour[y * width + x] = 255 }
         }
-        let session = try XCTUnwrap(MetalFillEngine.shared.makeSession(
+        let engine = try XCTUnwrap(MetalFillEngine.shared, "the shared Metal fill engine is required")
+        let session = try XCTUnwrap(engine.makeSession(
             referenceRGBA: rgba, width: width, height: height, lassoMask: referenceContour,
             gapWidthLimit: 0).session)
         return try XCTUnwrap(session.mendMask(sourceMask: source, threshold: 0, artworkRect: nil, reach: reach))
