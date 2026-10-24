@@ -212,10 +212,15 @@ final class LiquifyUITests: PaintUITestCase {
         app.otherElements["timeline.cel.0.2"].tap()
         app.buttons["toolbar.brushButton"].tap()
         setBrushColor(app, hex: "00C000")
-        drawLine(on: canvas, from: hostPoint(reopenedPaper, 0.45, 0.60), to: hostPoint(reopenedPaper, 0.65, 0.60))
+        // Keep the new source ink above the linked frame's taller dock and outside the Liquify field.
+        drawLine(on: canvas, from: hostPoint(reopenedPaper, 0.45, 0.12), to: hostPoint(reopenedPaper, 0.65, 0.12))
         commitPendingShape(on: app)
         app.otherElements["timeline.cel.0.3"].tap()
-        let newSourceInk = paperPatch(canvas, reopenedPaper, x: 0.60...0.80, y: 0.58...0.62)
+        XCTAssertTrue(app.sliders["interpolate.tSlider"].waitForExistence(timeout: 5),
+                      "return to the linked drawing before checking its source ink")
+        assertAboveTheDock(app, canvas, dy: Double(hostPoint(reopenedPaper, 0, 0.14).dy),
+                           "the linked source-ink probe")
+        let newSourceInk = paperPatch(canvas, reopenedPaper, x: 0.60...0.80, y: 0.10...0.14)
         let followed = NSPredicate { _, _ in self.readScreenNow(newSourceInk).contains { self.green($0) } }
         wait(for: [XCTNSPredicateExpectation(predicate: followed, object: nil)], timeout: 15)
         attachScreenshot(app, "liquify-linked-source-edit-follows")
