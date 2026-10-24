@@ -197,7 +197,7 @@ are not individually identifiable; no raster storage redesign is authorized. The
 correction still uses the shared raster/vector fill pipeline. Use the same setting/semantics as an
 individual fill; inspect existing batch edit/undo/save patterns.
 Determine raster/vector representation and boundary provenance from the code before assuming an
-implementation. Core, batch and compact shared contour source/tests are committed. First actual focused run executed198 methods:193passed/5failed (9 assertion records): two new core methods return no patches, and three window methods retain the old38px halo expectation. These remain open until corrected and normally rerun. Native fill
+implementation. Core, batch and compact shared contour source/tests are committed. First actual focused run executed198 methods:193passed/5failed (9 assertion records): two new core methods return no patches, and three window methods retain the old38px halo expectation. The window expectations are corrected to the78px halo. A real GPU diagnostic confirmed exact-zero colour classification as the cause of absent core patches; a scoped precise conversion plus direct256-level oracle is committed and pending normal rerun. Four new batch/reference/refusal regressions bring focused203/fast5275/full5860; independent batch fixes are committed but unqualified. Native fill
 gates follow the old47d benchmark; prototypes/static checks are not app qualification. Worktree: `~/PaintWork/PaintApp-s53-fill-mend`, `tmp/s53-fill-mend`.
 
 - [ ] Reproduce internal ink holes and identify the root cause in the existing mending path.
