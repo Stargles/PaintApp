@@ -172,3 +172,21 @@ repair messages only. Keep recognizer repair; no speculative UIKit fix.
 Deferred TODO: Stream27stage5 owner/laptop; multi-cel22 and linear-light10 owner-deprioritized; brush
 importers37 dropped; future audio28/video30/interpolation require briefs. Raster Move undo/freeform-text
 minimum remain deliberately carried. Do not research later features.
+
+## Current native checkpoint — 2026-10-24 morning
+
+At265e588e, fill focused206/206 passed before and after22 actual assertion-red continuation faults; all723 tracked bytes/modes restored after each. Debug AND Release each5278=5274passed+4known opt-in skipped, zero failures, exact identities/counts. Combined with the preserved partial batch this qualifies35 distinct recipes (not40). Final report: `s53-fill-mend/native/qualification-265e588e-run02/report.json`.
+
+New exact capture1/1 passed against the old47d capture: six fixtures (including realTest1 crop), five gap widths each, zero changed filled masks. Exact oracle errors are zero on the five exhaustive synthetic fixtures and33 real-crop probes; old JFA has11 synthetic distance errors. `old-vs-exact/comparison-265e.json`.
+
+Existing MendOFF Release bench2/2: new inside/open press medians124.9/57.5ms, cached ticks3.4/1.6ms; old98.3/168.7 and6.0/4.9. Broad overlapping press ranges do not establish a latency improvement/no regression; paired repeat remains worthwhile for the slower inside median. Simulator only. Reach matrix1/1 passed12 cases (Reach0/12/40), one geometry build each, no cached-tick rebuild, session buffers+RGBA within configured budget. Fragmented32768-island/131072-corner path traced, archived and reopened. Full4096 stress sampled process peak629.99MiB is M5 process evidence, not owner-device RSS. `old-vs-exact/reach-matrix-265e-run01/`.
+
+Repair-only timer1/1:266 conversions,11.013s around run() only; second run0, all original3180 file hashes unchanged. The rest of the107s run is copy/hash/strict reopen validation. Since PaintApp.init invokes @MainActor PointGeometryRepair before first UI, startup responsiveness is a measured pre-install concern; do not assume Task.detached moves an @MainActor method. Genuine old-library cold app check and minimal scheduling solution remain; no iPad watchdog claim. Prepared external cold harness now has root fixes for missing plist import, process stopper, and Study-folder navigation; not executed.
+
+UI14 at265e:10passed/4failed, zero skips, full723 freeze exact. Liquify4, OutsideTheCanvas4, graph-key drag1 and playback1 all pass. The two new FillMend cases stop on a wrong raster-default fixture premise; vector is the real default. This commit corrects it by using Rasterize on layer0, then testing the real raster menu. Two old FillMend pixel tests also fail (extension edge and MendOFF control); preserve and triage with old47d controls, no product cause assumed. Their private Screen bypasses the shared orientation-aware ScreenshotPixels, and old geometry may reach the dock on the9th-gen layout. Root looked at actual extension, seam, round-dot and Move pictures; full-app PNGs have orientation metadata/cropping to investigate, so complete owner-layout visual qualification remains pending. Added whole-screen diagnostic capture to the two new fixture flows. Native output `native/ui14-265e-run01`; no active native process after completion.
+
+Repository audit initial review has19 candidate clusters (external `s54-architecture-audit/findings-index.json`), not proof every file was audited. Subagents hit account usage limits; root preserved unqualified work:
+- `tmp/s54-library-ownership` de28149c: strict bounded tree/content identity + UUID Trash ownership,6 new regressions/PBX registration; parse/plutil only. No compile/runtime/UI/fault gate.
+- `tmp/s54-background-ownership` ec46b3e6: export cancellation, maintenance save-queue serialization, bounded/cancelled thumbnail backfill;5 new regressions. No native compile/runtime/UI/fault gate.
+- `tmp/s54-test-safety` is empty at origin afd2030c, no implementation.
+Do not merge/install these snapshots. All are clean, outside Desktop. Root retains sole native slot. Main/origin remains afd2030c; installed Release bcd7a6af remains untouched. No fresh readiness/export obtained.

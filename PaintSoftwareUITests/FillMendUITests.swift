@@ -161,6 +161,10 @@ final class FillMendUITests: PaintUITestCase {
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
         openLayerPanel(app)
         app.staticTexts["layerPanel.row.0"].tap()
+        XCTAssertTrue(app.buttons["layerOptions.rasterize"].waitForExistence(timeout: 5), "a fresh layer is vector")
+        app.buttons["layerOptions.rasterize"].tap()
+        XCTAssertEqual(readVectorMarker(app, layerIndex: 0)?.isVector, false)
+        app.staticTexts["layerPanel.row.0"].tap() // Rasterize closes its menu.
         XCTAssertTrue(app.buttons["layerOptions.rename"].waitForExistence(timeout: 5), "the raster layer's menu is open")
         XCTAssertTrue(app.buttons["layerOptions.rasterize"].waitForNonExistence(timeout: 2))
         XCTAssertFalse(app.buttons["layerOptions.mendAllFills"].exists, "this edit is offered only on vector layers")
@@ -230,6 +234,7 @@ final class FillMendUITests: PaintUITestCase {
                               ("outer outline", scene.outline), ("exterior paper", scene.outside)] {
             assertAboveTheDock(app, canvas, dy: probe.dy, "the \(name) probe")
         }
+        attachScreenshot(XCUIScreen.main, "internal-mend-owner-screen")
         return scene
     }
 

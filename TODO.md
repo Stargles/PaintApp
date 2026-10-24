@@ -362,3 +362,9 @@ against a transcript this audit does not have.
 - **The raster Move's undo half.** `finalizePendingGesturesForHistoryAction` has fill, shape and text
   arms and no raster-float arm.
 - **Freeform text's minimum-size exemption** is still unruled.
+
+### Active validation update — 2026-10-24 morning
+
+Fill core: focused206/206,22 continuation faults, exact Debug/Release5278 each are qualified at265e588e; old/new reference masks match across6 fixtures×5 widths, and12 Reach stress cases passed. UI14 is10green/4red: new2 have a corrected vector-default fixture premise; old2 need picture/old-code triage. Fill remains unfinished/unmerged, as do deployment/real-library confirmation.
+
+Audit implementation snapshots are unqualified: library/Trash identity (6 regressions) and export/save-stage/thumbnail ownership (5 regressions). Remaining review findings and source evidence are indexed in `~/PaintWork/s54-architecture-audit/findings-index.json`; inventory-only files are not reviewed code. A new pre-install audit concern is the one-shot repair's synchronous first-screen delay: measured11.013s for266 conversions on the M5 simulator, original hashes unchanged, zero conversions on second run. Reproduce cold startup and resolve scheduling before installation; do not infer iPad time or a crash cause. Subagents reported account usage limits; root continues gates.
