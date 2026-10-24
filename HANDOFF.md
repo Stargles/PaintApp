@@ -53,6 +53,11 @@ CGDataProviders retain the same lease through aliases/escapes. A thirteenth meth
 resolving, edits, then verifies old red/new blue and exact released counts. Native rerun/faults remain
 root-owned and unrun on this revision. Production RasterLayerTexture Result/source migration is WIP
 and is deliberately excluded from this primitive checkpoint; consumers are not yet compile-ready.
+Root's isolated2ef rerun compiled13methods:12passed; unresolved-source pin and COW pool regression
+passed. Dirty checkpoint's first wrapper moved outside the fixture pool after the ReadLease change,
+so UIKit could legitimately retain that autoreleased wrapper after cache eviction and block reload.
+Provider wrapper construction now establishes its own pool and returns a retained Result across it;
+the zero-buffer and exact reload assertions stay unchanged. Native rerun remains pending/root-owned.
 
 ## Current combined source qualification — 2026-10-24
 

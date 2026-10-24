@@ -254,21 +254,25 @@ final class RasterSurface {
         }
 
         func image() -> Result<UIImage, RasterResidency.Failure> {
-            let reader = Unmanaged.passRetained(self)
-            guard let provider = CGDataProvider(dataInfo: reader.toOpaque(), data: buffer.address,
-                    size: allocation.byteCount, releaseData: { info, _, _ in
-                        if let info { Unmanaged<ReadLease>.fromOpaque(info).release() }
-                    }) else {
-                reader.release()
-                return .failure(.allocationRefused)
+            // The returned Result owns its wrapper across this boundary. UIKit's temporary native
+            // ownership must not postpone a checkpoint eviction until the caller's event loop drains.
+            autoreleasepool {
+                let reader = Unmanaged.passRetained(self)
+                guard let provider = CGDataProvider(dataInfo: reader.toOpaque(), data: buffer.address,
+                        size: allocation.byteCount, releaseData: { info, _, _ in
+                            if let info { Unmanaged<ReadLease>.fromOpaque(info).release() }
+                        }) else {
+                    reader.release()
+                    return .failure(.allocationRefused)
+                }
+                guard let image = CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
+                        bytesPerRow: bytesPerRow, space: PixelOps.deviceRGBColorSpace,
+                        bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+                        provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent) else {
+                    return .failure(.allocationRefused)
+                }
+                return .success(UIImage(cgImage: image, scale: 1, orientation: .up))
             }
-            guard let image = CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
-                    bytesPerRow: bytesPerRow, space: PixelOps.deviceRGBColorSpace,
-                    bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
-                    provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent) else {
-                return .failure(.allocationRefused)
-            }
-            return .success(UIImage(cgImage: image, scale: 1, orientation: .up))
         }
 
         deinit { buffer.endReading() }
