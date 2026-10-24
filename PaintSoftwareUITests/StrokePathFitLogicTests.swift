@@ -630,13 +630,13 @@ final class StrokePathFitLogicTests: XCTestCase {
             let target = RasterLayerTexture.empty(size: size)
             BrushStamper.stampStroke(into: target, samples: input, brush: brush, color: .black,
                                     brushSize: 8, brushOpacity: 1, random: DabRandom(seed: 1234))
-            return try XCTUnwrap(target.renderToUIImage())
+            return try target.renderToUIImage().get()
         }
         let image = try render(actual)
         let report = try XCTUnwrap(RasterVectorParity.report(raster: image, vector: try render(expected), size: size))
         XCTAssertEqual(report.differingPixelCount, 0)
         XCTAssertEqual(report.maxChannelDelta, 0)
-        let blank = try XCTUnwrap(RasterLayerTexture.empty(size: size).renderToUIImage())
+        let blank = try RasterLayerTexture.empty(size: size).renderToUIImage().get()
         let ink = try XCTUnwrap(RasterVectorParity.report(raster: image, vector: blank, size: size))
         XCTAssertGreaterThan(ink.differingPixelCount, 0, "equal blank images do not prove drawn parity")
     }

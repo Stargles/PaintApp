@@ -835,3 +835,7 @@ counts, duplicate arcs/short/tap/nil headings and cancellation/timing replacemen
 Selected five-class union61 methods. UI guard/helper lints and diff-check pass; no compiler/native,
 mutants, fast Debug/Release, UI/screenshots or device by this author. Temporary external actual queue
 movement controls and faults follow this coherent commit. O(N) received input retention remains.
+
+Integration API correction recorded before editing: the newly added stationary-fit pixel helper
+uses two pre-raster optional image reads. Adapt exactly those two reads to throwing Result.get(),
+with no fixture/oracle/production behavior change; record this semantic merge exception externally.
