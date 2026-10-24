@@ -58,10 +58,13 @@ nonisolated enum ProjectFileTree {
             let second = try FileHandle(forReadingFrom: destination)
             defer { try? second.close() }
             while true {
-                let a = try first.read(upToCount: 64 * 1024) ?? Data()
-                let b = try second.read(upToCount: 64 * 1024) ?? Data()
-                guard a == b else { return false }
-                if a.isEmpty { return true }
+                let chunk = try autoreleasepool {
+                    let a = try first.read(upToCount: 64 * 1024) ?? Data()
+                    let b = try second.read(upToCount: 64 * 1024) ?? Data()
+                    return (equal: a == b, end: a.isEmpty)
+                }
+                guard chunk.equal else { return false }
+                if chunk.end { return true }
             }
         }
     }

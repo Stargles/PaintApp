@@ -424,17 +424,76 @@ final class ProjectLocationLogicTests: XCTestCase {
     /// package rather than counting it as one item.
     func testTheCensusWalksIntoAPackageRatherThanCountingItAsOneItem() throws {
         let project = writeProject(named: "Counted")
-        let census = ProjectLibraryMigration.census(of: project)
+        let census = try ProjectLibraryMigration.census(of: project)
         XCTAssertGreaterThan(census.files, 1, "a package is a directory of files, and all of them count")
         XCTAssertGreaterThan(census.bytes, 0)
 
         let copy = scratch.appendingPathComponent("copy.paintproj")
         try FileManager.default.copyItem(at: project, to: copy)
-        XCTAssertTrue(ProjectLibraryMigration.matches(source: project, destination: copy))
+        XCTAssertTrue(try ProjectLibraryMigration.matches(source: project, destination: copy))
 
         try FileManager.default.removeItem(at: copy.appendingPathComponent("manifest.json"))
-        XCTAssertFalse(ProjectLibraryMigration.matches(source: project, destination: copy),
+        XCTAssertFalse(try ProjectLibraryMigration.matches(source: project, destination: copy),
                        "a copy missing one file does not verify")
+    }
+
+    func testEqualSizeIndependentArtworkIsKeptBesideTheIncomingProject() throws {
+        let fm = FileManager.default
+        let source = writeProject(named: "Clash")
+        let incoming = try Data(contentsOf: source.appendingPathComponent("manifest.json"))
+        let sourceID = try XCTUnwrap(ProjectBackupManager.manifestID(at: source))
+        let folder = external.appendingPathComponent("Projects", isDirectory: true)
+        try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+        let existing = folder.appendingPathComponent("Clash.paintproj")
+        try fm.copyItem(at: source, to: existing)
+        let different = Data(String(decoding: incoming, as: UTF8.self)
+            .replacingOccurrences(of: sourceID.uuidString, with: UUID().uuidString).utf8)
+        XCTAssertNotEqual(incoming, different, "PREMISE: two independent project identities")
+        XCTAssertEqual(incoming.count, different.count, "PREMISE: sizes cannot distinguish the artwork")
+        try different.write(to: existing.appendingPathComponent("manifest.json"))
+        XCTAssertTrue(ProjectBackupManager.validateProject(at: existing))
+        XCTAssertEqual(try ProjectLibraryMigration.census(of: source),
+                       try ProjectLibraryMigration.census(of: existing))
+
+        let report = ProjectLibraryMigration.migrate(from: container, to: external)
+
+        XCTAssertEqual(report.alreadyThere, [])
+        XCTAssertEqual(report.renamed, ["Projects/Clash.paintproj"])
+        XCTAssertEqual(try Data(contentsOf: existing.appendingPathComponent("manifest.json")), different)
+        XCTAssertEqual(try Data(contentsOf: folder.appendingPathComponent("Clash 2.paintproj/manifest.json")), incoming)
+        XCTAssertFalse(fm.fileExists(atPath: source.path), "The verified incoming copy completed its move")
+    }
+
+    func testTreeIdentityIncludesNamesEmptyDirectoriesAndEveryFileChunk() throws {
+        let fm = FileManager.default
+        let a = scratch.appendingPathComponent("tree-a", isDirectory: true)
+        let b = scratch.appendingPathComponent("tree-b", isDirectory: true)
+        try fm.createDirectory(at: a, withIntermediateDirectories: true)
+        try fm.createDirectory(at: b, withIntermediateDirectories: true)
+        var payload = Data(repeating: 7, count: 2 * 64 * 1024 + 1)
+        try payload.write(to: a.appendingPathComponent("drawing"))
+        try payload.write(to: b.appendingPathComponent("other"))
+        XCTAssertFalse(try ProjectLibraryMigration.matches(source: a, destination: b), "Names are part of identity")
+        try fm.moveItem(at: b.appendingPathComponent("other"), to: b.appendingPathComponent("drawing"))
+        XCTAssertTrue(try ProjectLibraryMigration.matches(source: a, destination: b))
+        payload[payload.count - 1] = 8
+        try payload.write(to: b.appendingPathComponent("drawing"))
+        XCTAssertFalse(try ProjectLibraryMigration.matches(source: a, destination: b), "The final partial chunk is compared")
+        payload[payload.count - 1] = 7
+        try payload.write(to: b.appendingPathComponent("drawing"))
+        try fm.createDirectory(at: a.appendingPathComponent("empty"), withIntermediateDirectories: true)
+        XCTAssertFalse(try ProjectLibraryMigration.matches(source: a, destination: b), "Empty folders cannot disappear")
+    }
+
+    func testUnknownOrLinkedTreesCannotAuthorizeDeletingTheSource() throws {
+        let missing = scratch.appendingPathComponent("missing")
+        XCTAssertThrowsError(try ProjectLibraryMigration.census(of: missing))
+        let source = writeProject(named: "Linked")
+        let link = scratch.appendingPathComponent("linked-copy")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: source)
+        XCTAssertThrowsError(try ProjectLibraryMigration.matches(source: source, destination: link))
+        XCTAssertThrowsError(try ProjectLibraryMigration.census(of: link))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
     }
 
     // MARK: - Fixtures

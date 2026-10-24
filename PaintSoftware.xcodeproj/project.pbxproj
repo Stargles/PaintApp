@@ -126,6 +126,7 @@
 		C9D0E1F2A3B4C5D6E7F80104 /* PaintSoftware/Services/ProjectBackupManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9D0E1F2A3B4C5D6E7F80103 /* PaintSoftware/Services/ProjectBackupManager.swift */; };
 		EDBA1BE13604DF94F6CD22A6 /* PaintSoftware/Services/VersionRetention.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B923D864862C44458B5E437 /* PaintSoftware/Services/VersionRetention.swift */; };
 		601037081B1ADF05E27131D9 /* PaintSoftware/Services/ProjectLibraryMigration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 852F0F19F2B96DFC95C8834A /* PaintSoftware/Services/ProjectLibraryMigration.swift */; };
+		54F11E540000000000000002 /* PaintSoftware/Services/ProjectFileTree.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54F11E540000000000000001 /* PaintSoftware/Services/ProjectFileTree.swift */; };
 		EF822BFDE6E45CFEB32898CD /* PaintSoftware/Services/ProjectPackageLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6086245D66A63521879B8F2B /* PaintSoftware/Services/ProjectPackageLayout.swift */; };
 		457EFCD43C4EEA56737E1BC1 /* PaintSoftware/Services/ProjectLocation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E9800615B19B2393FE22597 /* PaintSoftware/Services/ProjectLocation.swift */; };
 		B2C3D4E5F6001122334455A2 /* PaintSoftware/Engine/Brush.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6001122334455A1 /* PaintSoftware/Engine/Brush.swift */; };
@@ -785,6 +786,7 @@
 		C9D0E1F2A3B4C5D6E7F80103 /* PaintSoftware/Services/ProjectBackupManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Services/ProjectBackupManager.swift; sourceTree = "<group>"; };
 		3B923D864862C44458B5E437 /* PaintSoftware/Services/VersionRetention.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Services/VersionRetention.swift; sourceTree = "<group>"; };
 		852F0F19F2B96DFC95C8834A /* PaintSoftware/Services/ProjectLibraryMigration.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Services/ProjectLibraryMigration.swift; sourceTree = "<group>"; };
+		54F11E540000000000000001 /* PaintSoftware/Services/ProjectFileTree.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Services/ProjectFileTree.swift; sourceTree = "<group>"; };
 		6086245D66A63521879B8F2B /* PaintSoftware/Services/ProjectPackageLayout.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Services/ProjectPackageLayout.swift; sourceTree = "<group>"; };
 		6E9800615B19B2393FE22597 /* PaintSoftware/Services/ProjectLocation.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Services/ProjectLocation.swift; sourceTree = "<group>"; };
 		B2C3D4E5F6001122334455A1 /* PaintSoftware/Engine/Brush.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/Brush.swift; sourceTree = "<group>"; };
@@ -1866,6 +1868,7 @@
 				56AB9E23E1C44DD0828CFA00 /* PaintSoftware/Models/CanvasManager+StreamDisplay.swift */,
 				3B923D864862C44458B5E437 /* PaintSoftware/Services/VersionRetention.swift */,
 				852F0F19F2B96DFC95C8834A /* PaintSoftware/Services/ProjectLibraryMigration.swift */,
+				54F11E540000000000000001 /* PaintSoftware/Services/ProjectFileTree.swift */,
 				6086245D66A63521879B8F2B /* PaintSoftware/Services/ProjectPackageLayout.swift */,
 				6E9800615B19B2393FE22597 /* PaintSoftware/Services/ProjectLocation.swift */,
 				DEC0DE000000000000000009 /* PaintSoftware/Engine/BrushLibrary.swift */,
@@ -2507,6 +2510,7 @@
 				226F63DF26774ECB8E6EC7B5 /* PaintSoftware/Models/CanvasManager+StreamDisplay.swift in Sources */,
 				EDBA1BE13604DF94F6CD22A6 /* PaintSoftware/Services/VersionRetention.swift in Sources */,
 				601037081B1ADF05E27131D9 /* PaintSoftware/Services/ProjectLibraryMigration.swift in Sources */,
+				54F11E540000000000000002 /* PaintSoftware/Services/ProjectFileTree.swift in Sources */,
 				EF822BFDE6E45CFEB32898CD /* PaintSoftware/Services/ProjectPackageLayout.swift in Sources */,
 				457EFCD43C4EEA56737E1BC1 /* PaintSoftware/Services/ProjectLocation.swift in Sources */,
 				DEC0DE000000000000000002 /* CanvasManagerTestSupport.swift in Sources */,

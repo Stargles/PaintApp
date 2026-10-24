@@ -389,6 +389,71 @@ final class BackupManagerLogicTests: XCTestCase {
         XCTAssertFalse(remainingBackupDirs.contains(oldID.uuidString))
     }
 
+    func testExpiredTrashCannotDeleteANewerSameNamedProjectsHistory() throws {
+        let now = Date()
+        let oldID = UUID(), recentID = UUID()
+        let old = makeProject(name: "Rough", id: oldID)
+        ProjectBackupManager.refreshLatestSnapshot(projectURL: old, projectID: oldID)
+        let oldTrash = try XCTUnwrap(ProjectBackupManager.moveToTrash(old, tag: "deleted"))
+        let expired = oldTrash.deletingLastPathComponent().appendingPathComponent(
+            "Rough__deleted__\(ProjectBackupManager.timestampString(now.addingTimeInterval(-8 * 24 * 60 * 60))).paintproj")
+        try FileManager.default.moveItem(at: oldTrash, to: expired)
+        let recent = makeProject(name: "Rough", id: recentID)
+        ProjectBackupManager.refreshLatestSnapshot(projectURL: recent, projectID: recentID)
+        let kept = try XCTUnwrap(ProjectBackupManager.moveToTrash(recent, tag: "deleted"))
+        let latest = ProjectBackupManager.backupsRootDirectory.appendingPathComponent(
+            "\(recentID.uuidString)/latest.paintproj/manifest.json")
+        let before = try Data(contentsOf: latest)
+        XCTAssertTrue(ProjectStore.listProjects().isEmpty, "PREMISE: no live names can protect the recent history")
+
+        ProjectBackupManager.purgeExpiredTrash(now: now)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: expired.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: kept.path))
+        XCTAssertEqual(try Data(contentsOf: latest), before, "History belongs to the recent project's UUID")
+        XCTAssertTrue(backupDirFileNames(oldID).isEmpty, "The expired independent project's own history is purged")
+        XCTAssertEqual(ProjectBackupManager.listTrash().map(\.url), [kept])
+    }
+
+    func testRetainedTrashWithTheSameProjectIDKeepsItsHistory() throws {
+        let now = Date(), id = UUID()
+        let first = makeProject(name: "Rough", id: id)
+        ProjectBackupManager.refreshLatestSnapshot(projectURL: first, projectID: id)
+        let firstTrash = try XCTUnwrap(ProjectBackupManager.moveToTrash(first, tag: "deleted"))
+        let expired = firstTrash.deletingLastPathComponent().appendingPathComponent(
+            "Rough__deleted__\(ProjectBackupManager.timestampString(now.addingTimeInterval(-8 * 24 * 60 * 60))).paintproj")
+        try FileManager.default.moveItem(at: firstTrash, to: expired)
+        let anotherVersion = makeProject(name: "Rough", id: id)
+        let retained = try XCTUnwrap(ProjectBackupManager.moveToTrash(anotherVersion, tag: "deleted"))
+
+        ProjectBackupManager.purgeExpiredTrash(now: now)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: expired.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: retained.path))
+        XCTAssertTrue(backupDirFileNames(id).contains("latest.paintproj"))
+        ProjectBackupManager.purgeExpiredTrash(now: now.addingTimeInterval(8 * 24 * 60 * 60))
+        XCTAssertTrue(backupDirFileNames(id).isEmpty, "History expires after the last actual owner is gone")
+    }
+
+    func testUnreadableLiveOwnershipPreservesRecoveryHistories() throws {
+        let now = Date(), id = UUID()
+        let old = makeProject(name: "Expired", id: id)
+        ProjectBackupManager.refreshLatestSnapshot(projectURL: old, projectID: id)
+        let trash = try XCTUnwrap(ProjectBackupManager.moveToTrash(old, tag: "deleted"))
+        let expired = trash.deletingLastPathComponent().appendingPathComponent(
+            "Expired__deleted__\(ProjectBackupManager.timestampString(now.addingTimeInterval(-8 * 24 * 60 * 60))).paintproj")
+        try FileManager.default.moveItem(at: trash, to: expired)
+        let unreadable = makeProject(name: "Unresolved")
+        corruptManifest(of: unreadable)
+
+        ProjectBackupManager.purgeExpiredTrash(now: now)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: expired.path))
+        XCTAssertTrue(backupDirFileNames(id).contains("latest.paintproj"),
+                      "An unreadable live manifest cannot establish that no project owns this history")
+        XCTAssertEqual(try String(contentsOf: unreadable.appendingPathComponent("manifest.json"), encoding: .utf8), "corrupted")
+    }
+
     // MARK: - App-update snapshots
 
     func testAppUpdateSnapshotsEveryProjectOncePerSignature() {
