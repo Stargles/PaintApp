@@ -122,9 +122,9 @@ The correction is integrated but unmerged. Actual standalone retention 14/14 pas
 mutation 8/14 was assertion-red and exact restore 14/14 passed. Integrated retention 14 and backup 21
 also passed in runtime338; combined Debug/Release each5259 now qualify.
 
-The bounded Session47–51 audit found no other concrete dropped actionable ask. Real-scene week storage
-cost remains unverified: preserved 228 backups/522461597 logical bytes do not measure APFS shared-block
-cost. Evidence: `~/PaintWork/s52-saving-audit/audit.md`.
+The bounded Session47–51 audit found no other concrete dropped actionable ask. The controlled copy-only
+week storage measurement below is qualified; preserved228 backups/522461597 logical bytes alone do not
+measure APFS shared-block cost. Evidence: `~/PaintWork/s52-saving-audit/audit.md`.
 
 The adjacent corrupted-manifest recovery guard is implemented: same-basename fallback accepts exactly
 one backup ID, preserving the live package on ambiguity. Regression and mutation are qualified in the
@@ -197,13 +197,14 @@ are not individually identifiable; no raster storage redesign is authorized. The
 correction still uses the shared raster/vector fill pipeline. Use the same setting/semantics as an
 individual fill; inspect existing batch edit/undo/save patterns.
 Determine raster/vector representation and boundary provenance from the code before assuming an
-implementation. Core, batch and compact shared contour source/tests are committed but uncompiled. Native fill
+implementation. Core, batch and compact shared contour source/tests are committed. First actual focused run executed198 methods:193passed/5failed (9 assertion records): two new core methods return no patches, and three window methods retain the old38px halo expectation. These remain open until corrected and normally rerun. Native fill
 gates follow the old47d benchmark; prototypes/static checks are not app qualification. Worktree: `~/PaintWork/PaintApp-s53-fill-mend`, `tmp/s53-fill-mend`.
 
 - [ ] Reproduce internal ink holes and identify the root cause in the existing mending path.
 - [ ] Cover interior stroke gaps while preserving the original outer edge, using the current setting.
 - [ ] Qualify the compact shared contour replacement, fragmented masks and preflighted point-limit refusal.
 - [ ] Add the layer-wide action for every fill in every cel; use existing mutation/undo ownership.
+- [ ] Exclude each repaired fill from its own references and propagate unavailable input failures atomically (independent review; BUGS.md).
 - [ ] Mutation-backed logic tests, cold UI/pictures at iPad9 size and required Debug/Release gates.
 
 ---

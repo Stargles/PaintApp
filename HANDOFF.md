@@ -52,7 +52,7 @@ source restored/normal rebuilt in separate week-cost DD. OldMend0 medians: press
 tick6.0/4.9ms inside-box/open-page (simulator, wide ranges; not owner-device latency). Evidence
 `s53-fill-mend/native/old-47d-bench0`. Core/batch/compact-contour source and11new logic/1UI tests are
 committed. Three attempted focused builds executed0 tests: missing new notice cases in banner/action switches and same-file session access to the immutable lookup. Root corrected these integration errors; no failed build is test qualification. Static fast5270/full5855; focused9classes198. Cold FillMendUI now has4 methods, including a new Mend-ON one-fill path with attached and detached ink; its shared private setup also drives the batch/undo test. Full protected frame/donut/U sets and the exact(57,17) tied-edge veto are asserted in the core fixture. Root's small external
-`native/focused.py` reuses reviewed census/freeze/result readers. Next: focused green, reviewed mutants,
+`native/focused.py` reuses reviewed census/freeze/result readers. Actual aa33 focused result198=193passed/5failed (9 assertion records): new core positive patches absent in2 methods, stale38px halo assertions in3 methods. Root owns window tests/docs; mend_topology owns core diagnosis; erase_crash_trace owns batch self-reference and failure-propagation findings recorded inBUGS. No source freeze/native job currently. Next: focused green, reviewed mutants,
 normal restore, exact old/new reference comparison, cold affectedUI/pictures and required old workflows,
 Mend0/12/40 press/ticks+fragmented peak, exact Debug/Release. No fill native success/device action yet.
 

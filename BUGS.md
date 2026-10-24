@@ -3,6 +3,20 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## Batch mending must exclude its own paint and refuse unavailable inputs — 2026-10-24
+
+Independent source review of the pending layer action found two gaps before qualification. A saved
+fill participates in its default-visible layer's reference composite; opaque black paint can make
+black line art passable under the lasso modal-reference rule. Unlike a new live fill, the existing
+paint must be omitted from its own reference, retaining other fills and strokes. Reuse frozen
+geometry/direct-window rendering rather than another canvas-sized render or cache.
+
+Unavailable source/reference rendering currently becomes `.unchanged`, and the shared neighbour-mask
+helper turns unavailable rendering into an empty mask. A whole-layer edit must instead refuse and
+leave every cel unchanged. Propagate the existing memory-refusal outcome through batch and interactive
+callers. Regressions must use the visible default target reference and a real allocation-refusal seam.
+This is source evidence; no native reproduction yet. Root recorded before implementation.
+
 ## Shared contour tracing can exceed a bounded mask budget on fragmented inputs — 2026-10-24
 
 Source review of `PixelOps.contourPath` found one hash entry and outgoing array per boundary vertex,
@@ -2223,14 +2237,3 @@ menu's keyframe items, and deliberately not fixed there.
 - **A vector cel still carries `fillImage`/`bakedImage`**, so raster features allocate canvas-sized
   bitmaps on a vector layer. The product owner wants vector fully divorced from raster —
   [VECTOR_INTERPOLATION.md](docs/VECTOR_INTERPOLATION.md) §4 item 26 is the full write-up.
-# A damaged manifest can select another same-named scene's backup (2026-10-23)
-
-Source finding during saved-file recovery review, not reproduced on the owner's iPad:
-`ProjectBackupManager.backupDirectory(forProjectAt:)` falls back from an unreadable manifest to
-the first backup folder whose `origin.name` matches the package basename. Scene names are unique
-only within a folder, so two `Rough.paintproj` packages in different folders can match. The first
-match is not proof of ownership and must not auto-restore over the other scene. Refuse ambiguous
-matches and preserve the damaged live package; keep the normal manifest-ID lookup and unique-name
-fallback. Add a regression with two independent backup IDs sharing one basename. The preserved
-device export has no colliding origin markers, so no claim of affected real artwork.
-
