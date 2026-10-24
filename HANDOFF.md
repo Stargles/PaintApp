@@ -190,7 +190,9 @@ whole-file send loop and ignored NW send errors. A transfer captures its origina
 one max256KiB chunk is read only when idle and advances only after contentProcessed succeeds. One
 admitted encoded frame plus transient chunk copies; no next-chunk queue. Pause/resume/keyframe/ping/pong
 coalesce, HELLO has one slot, FILE_RESULT has at most4<=64MiB payload slots and explicit overflow close.
-Stop closes owned handles/settles caller once; stale completion cannot advance a replacement run. The
+Stop closes owned handles/settles caller once; stale completion cannot advance a replacement run.
+Retirement clears prior HELLO/name/status, duplicate greetings are ignored, and unknown-type framing
+continues to skip by length while known application data still requires the current greeting. The
 old boolean send bypass is deleted whole; a completion transport injects the same writer/pump in tests.
 Added actual stalled-write+responsive-control/stop and write-error/no-tail regressions with direct outcome
 counts and actual frame bytes. Exposed test frame handling now serializes on the client queue. Closed-

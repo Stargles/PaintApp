@@ -455,7 +455,7 @@ nonisolated final class ScreenStreamClient {
         guard generation == run, self.connection === connection else { return }
         do {
             while let frame = try parser.next() {
-                guard helloReceived || frame.messageType == .hello else {
+                guard frame.messageType == nil || helloReceived || frame.messageType == .hello else {
                     fail("The computer did not greet this connection first."); return
                 }
                 if frame.messageType == .video, let video = StreamVideoPayload(payload: frame.payload) {
@@ -509,6 +509,7 @@ nonisolated final class ScreenStreamClient {
         guard let type = frame.messageType else { return }   // unknown: skipped by length
         switch type {
         case .hello:
+            guard !helloReceived else { return }
             guard let hello = StreamJSON.decode(StreamHello.self, from: frame.payload) else {
                 fail("The computer's greeting could not be read.")
                 return
@@ -873,6 +874,8 @@ nonisolated final class ScreenStreamClient {
         connection = nil
         generation += 1
         pendingVideo = nil
+        helloReceived = false
+        remoteName = nil; remoteMachineID = nil; lastStatus = nil
         activeWrite = nil
         pendingHello = nil; pendingPause = nil; pendingKeyframe = false
         pendingPing = false; pendingPong = false; pendingReplies.removeAll()
