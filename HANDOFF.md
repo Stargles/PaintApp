@@ -10,81 +10,41 @@ is authorized by an old readiness answer: obtain fresh saved-scene readiness whe
 
 ## Current source and next action — 2026-10-24
 
-Second actual partial final40f77 UI47 finding: FillMend ON stopped at line154, the fresh-layer-vector
-premise (`layerOptions.rasterize` absent), BEFORE overlap setup or drawn mending oracles. The preceding
-batch Mend control passed including undo (88.694s run record). Current partial count is22pass/2fail
-of24; the original batch continues without retry. Cause is unassigned until closed pictures/activity
-are inspected. Preserve the exact four-file cleanup and all existing setup/pixel assertions.
+The consolidator and independent check tree are clean29cf3d25461032b37f70b07c187f217b8e659922.
+This adds a reviewed four-production-file/seven-line cleanup to40f77: preserve typed raster failures,
+keep the private transform helper's exact throws type, make only two pure undo arithmetic helpers
+nonisolated, and retain the shape layer-existence guard without its unused index. Compiler/native
+qualification of this cleanup is pending. Main/origin remainafd2030c; no merge, push or device install.
 
-Actual final40f77 UI47 is still running under root's exclusive lease. BrushEditor13/13 passed;
-BrushMenu has8passes/1failure: the owner's cold RoughInk drawn check failed line533, spread
-0.26339134382131857 versus required>0.3 (37 sampled columns6px,3 columns7px). The corrected explicit
-22pt width comparison passed. No retry, threshold waiver or cause claim: await the closed bundle's
-actual pictures. The shared ScreenshotPixels orientation reader now also serves this rough profile;
-prior676 RoughInk passed, so reader geometry, seed and pixel-resolution premises need source/evidence
-review before any change. This is a recorded unresolved UI result, not permission to edit fixtures.
+Actual normal40f77f1919167d1a284b0c99d312c54c949ed4c9 passed422/422 with zero failures/skips,
+all728 source byte/kind/mode entries exact; root independently reconciled all selectors and device.
+The whole owner9 UI47 at the SAME pin closed45pass/2fail/0skip, all728 exact, native65/wrapper1.
+This is a failing gate. BrushEditor13, raster Liquify5, vector Liquify4, ShapeRecovery5, VectorLayer
+Content5 and VideoBake2 passed; all6 genuine hold callers and shape undo/redo passed. Root inspected
+whole owner-landscape dot, raster before/after/undo/reopen and video before/reopen pictures.
+Evidence: ~/PaintWork/s54-final-qualification/final-repin-offline/prepared-40f77f19/.
 
-Root-authorized bounded cleanup recorded before edits on tmp/s54-typed-failure-cleanup, from exact
-40f77f1919167d1a284b0c99d312c54c949ed4c9. Preserve the frozen qualification trees and canonical owner
-queue. Remove two redundant RasterResidency.Failure casts/fallbacks, mark only UndoBudget.addingCost
-and payloadBytes nonisolated argument-only arithmetic, and retain the shape layer-existence guard
-using contains instead of an unused index. The private local canvas transform helper may use typed
-throws plus direct error: its only throws are resized/flipped/prepareForSave Results of that same
-failure type. No other warning cleanup, actor/default/shared-owner change, Sendable suppression,
-new tests or behavior mode. Existing semantic/fault gates remain; source-only checks cannot establish
-compiler/native qualification. After integration, fresh final pin/baseline and external repin required.
-Evidence: ~/PaintWork/s54-final-qualification/typed-failure-cleanup-40f77f19/.
+The two failures are test-input/oracle defects supported by actual closed media:
+- RoughInk really has a jagged edge. Forty probes missed all5/8px extrema; all544 interior columns
+  show39 transitions while plain is constant. Live strokes use fresh random seeds. The fixed pixel
+  deviation bar is not a seed/scale invariant. The raw reader is unchanged; ScreenshotPixels was NOT
+  the direct cause. Preserve the real3.416pt preset and nonblank ink; reuse ScreenshotPixels for dense
+  native-column sampling, test actual constant-versus-nonconstant widths, delete duplicate reader/
+  obsolete spread helper, and qualify a flat-dynamics drawn fault before accepting the new oracle.
+- FillMendON's layer was vector. Archived tap landed inside opacity while the rail entered, so no
+  options menu opened; failure preceded overlap and ink. Require actual settled rail geometry before
+  the same named-row tap, independently verify vector marker, retain Rasterize/menu reachability and
+  all existing overlap/drawn/undo assertions. No blind sleep, double tap or product mending change.
 
-Bounded cleanup implemented in this isolated branch: the three typed raster failure catches now
-preserve the original error, including the private transform helper whose throws are explicitly the
-same RasterResidency.Failure. Only the two argument-only UndoBudget arithmetic helpers are nonisolated;
-shape detection retains the same layer-existence guard through contains. Four production files, no
-test/method/line-count changes, no other actor or owner edits. UI identifier/helper lints, plist and
-diff checks pass; compiler/native/fault qualification is unrun. Root must review before integration,
-then establish the successor final pin/baseline. Frozen final-check/integration remain untouched.
-
-The reviewed final UI corrections are assembled in `~/PaintWork/PaintApp-s54-final-integration`
-on `tmp/s54-final-integration`, from cleandb544db02a2edeacbdd5d0362787353d60d442ad. Only the final
-nets from touch18a5d297, fixturebaa84c19 and responsive/capture2270b07b were applied: nine existing
-source paths, production only ResponseCurveEditorView. No temporary diagnostic methods remain.
-Independent composition hashes match all nine paths. Component ledger and architecture are preserved;
-no main merge, push or physical install. Assembly evidence:
-`~/PaintWork/s54-architecture-audit/final-integration/final-ui-assembly-db544/`.
-
-Actual normal1cf51be4758dc47aaab49fae48c1079441cbef0f passed422/422, zero failures/skips, all728
-source entries exact. This includes the repaired StreamBar callback and sameUUID recovery fixtures,
-BrushEditor30 and BrushModulation43. It is earlier-source proof, not the assembled-source baseline.
-Windows7c is complete:166 Debug and166 Release,16 assertion targets/15 distinct recipes,4 arrangement
-controls and63 source/fixture entries restored exactly. Real-link stage5 remains separate.
-
-The earlier owner iPad9 UI73 at676 finished67pass/5fail/1 known hold skip,728 entries exact. Actual
-recordings separated portrait graph clipping, wrong custom-touch geometry, stale22pt brush setup,
-percent-vs-pixel overlap setup and a second shape drag on the dock. Final corrections reuse existing
-geometry, slider and touch seams; no gesture-priority change or guessed offset was made. The obsolete
-hold skip is removed and all six hold callers require actual shape:adjustable.
-
-Separate exact-source controls passed, with zero failures/skips and728 entries exact each:
-
-- Touch18a5d297: unchanged cold landscape curve continuation1/1; returned node, neighbour and drawn
-  pixels passed. Actual XCUIScreen UIImage.size is1080x810 points (scale2); runner UIScreen dimensions
-  were768x1024. Both temporary diagnostic methods were removed whole from final source.
-- Fixturebaa84c19: BrushMenu drawn widths, FillMend strict0px/drawn probes and ShapeRecovery start
-  handle3/3. Earlier ccfec255 genuine pending-shape first-touch control1/1 also passed. These do not
-  prove every fill footprint pixel or the other hold/undo callers.
-- Responsive2270b07b: original portrait curve control1/1; whole graph visible, moved endpoint and
-  anchored neighbour passed. Its three settled-landscape workflow captures still need final runs.
-
-Whole before/after pictures were opened and inspected. Evidence is under
-`~/PaintWork/s54-final-qualification/native/`: curve-helper-18a5-control-run01,
-ui-fixtures-three-baa84c-run01, ui-fixture-shape-ccfec-control-run01 and
-responsive-curve-2270-control-run01. These controls do not replace final-source whole-class gates.
-
-Root owns the sole Mac native lease; check root-status.json before any native/simulator operation.
-Next: fresh exact assembled-source422 zero-skip baseline, repinned new assertion faults, fast Debug
-and Release, touched whole UI classes and required old workflows. The107 Swift faults and mask6+11
-UI configurations remain prepared only. Paired fill performance, genuine previous-writer cold
-startup, fresh saved-scene export/signed device release, erasing diagnosis and owner artwork
-confirmation remain open. No owner ask below is removed by this consolidation.
+These bounded corrections are recorded BEFORE implementation on tmp/s54-ui47-input-contracts,
+from29cf. Root owns docs/index/commit; assigned agents may edit only their named disjoint test file.
+No native grant exists until root supplies a fresh clean pin. Do not reuse the failing47 as a green
+baseline or silently carry the old shape skip. New107 logic faults, UI consumer faults and mask6+11
+remain prepared-only; refresh their exact source/meaningful assertion maps and establish fresh zero-
+skip normal controls before execution. Final fast Debug/Release, whole classes/full phase, paired16,
+old-library cold UI and fresh saved-scene/export/signed-device/erasing gates remain open. Owner
+artwork confirmation still precedes whole retirement of the temporary converter; keep permanent
+startup maintenance. External current coverage records the bounded audit and its real limits.
 
 ## Qualification and gates
 

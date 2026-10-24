@@ -17,28 +17,26 @@ before implementation on tmp/s54-response-curve; no native/compiler/device run b
 
 # Known Issues
 
-## FillMend ON cold setup did not expose the vector-layer action in UI47 — 2026-10-24
+## FillMend ON cold setup taps a moving opacity control — 2026-10-24
 
-Recorded before triage: actual frozen40f77 UI47 FillMend ON failed line154 because the fresh-layer-
-vector premise could not find `layerOptions.rasterize`. The method stopped BEFORE overlap setup and
-all drawn mending oracles; this does not establish a fill/mending regression. The preceding batch
-Mend method passed including undo (88.694s run record). Partial count is22pass/2fail of24; the same
-original batch continues without retries. Cause remains unassigned pending closed case pictures and
-recording/activity review. Preserve the existing setup and drawn assertions; no threshold/product
-change is justified by this partial record.
+Actual40f77 UI47 closed45pass/2fail/0skip,728exact. ON failed before overlap/ink at its options
+reachability assertion. Closed hierarchy proves row0.vector=1,0,0/current. Archived event lands
+at display1003.59,130.5 inside opacity950...1040, while the name has settled to742...790.5.
+The readout100% corroborates the delivered action. Require settled rail geometry and the existing
+named-row/hittable helper; retain an independent vector marker and every later rasterize/overlap/
+drawn/undo oracle. No product regression is established. Recorded before implementation on
+s54-ui47-input-contracts; source correction and current-source qualification remain pending.
 
-## Cold RoughInk drawn-width variation failed in the final UI47 run — 2026-10-24
+## RoughInk cold drawing uses a sparse seed-dependent threshold — 2026-10-24
 
-Recorded before triage: actual frozen40f77 UI47 has BrushEditor13/13 green and BrushMenu8pass/1fail.
-The owner's RoughInk cold drawn check failed line533: spread0.26339134382131857, required>0.3;
-37 sampled columns were6px and3 were7px. The explicit22pt brush-width comparison passed. Other
-classes are still running, so this is not a closed47 gate. No retry or threshold waiver.
-
-Cause remains unknown until actual case pictures/activity are exported from the closed bundle.
-The shared ScreenshotPixels orientation reader also applies to this profile; the earlier676 RoughInk
-case passed. Reader geometry, seed and physical pixel resolution are hypotheses to check, not a
-production/fixture defect inferred from one value. Preserve drawn oracles and owner asks; no source
-triage change is authorized by this record. Root assigns independent source/evidence review.
+Actual40f77 lossless picture visibly has rough edges. Forty columns report37x6px+3x7px, deviation
+0.26339 below0.3, but dense544 columns include5/8px extremes and39 width transitions; plain544
+columns are constant4px. Real strokes have fresh random seeds, so the scalar bar calibrated from
+one profile is not an invariant. ScreenshotPixels was NOT the direct cause: this reader was raw
+CGImage and unchanged. Preserve the original3.416pt preset and ink assertions; use the shared pixel
+reader and dense native-column flat-versus-nonconstant silhouette oracle, remove obsolete private
+reader/spread code, and require a flat-dynamics native drawn assertion fault. Recorded before source
+change on s54-ui47-input-contracts; correction/control/fault proof remain pending.
 
 ## Recovery regression holds the pre-tidy fixture URL — 2026-10-24
 
