@@ -3,7 +3,8 @@
 Start at AGENTS.md, then CLAUDE.md, TODO.md, BUGS.md and the relevant spec/PERFORMANCE.md. Verify origin,
 worktrees and every tmp branch before trusting this file. Kevin authorizes useful agents and a large
 budget, with quality/usage conservation before speed. Continue actionable work without recommendation-
-only pauses; give concise queue reports. Architecture is the top priority. Record before acting.
+only pauses; give concise queue reports. The owner explicitly says not to park for context; automatic
+compaction must preserve continuing work. Architecture is the top priority. Record before acting.
 
 ## Authoritative checkpoint — 2026-10-24 morning
 
@@ -120,9 +121,10 @@ covered, last OFF-divider visibly white, outside white; frame remains1. Extensio
 DRIVER at PaintUITestCase.adjustSlider:779 after its first drag; the popup/slider disappears before
 value verification. No final picture assertion executes in that case. Native recording
 `fill-ui4-cleaned-run01/attachments/EB25874B-6B80-4439-9279-B811A9915D23.mp4`; inspect around35s.
-Investigate actual gesture/viewport visibility (scrollFillPanel only checks isHittable, not full
-containment), not a speculative fill-engine patch or reopen/retry workaround. This hypothesis is
-not proved. Fix and rerun the selected extension case, then the full four-case class. Full-screen captures are correct owner1080×810;
+Root inspected native video at34s: the panel ends after the boundary description; the Extension
+Buffer slider is below its clipped viewport, yet isHittable stops scrolling. The35.4s manual drag
+lands outside and dismisses it. Fix shared scrollFillPanel to require full control-frame containment
+before driving, preserving the outcome assertions. Rerun the selected extension case, then the full four-case class. Full-screen captures are correct owner1080×810;
 app.screenshot PNG metadata/cropping can produce a misleading partial portrait view. Touched screenshots
 now use existing XCUIScreen.main protocol seam. Do not mistake that for a product layout defect.
 

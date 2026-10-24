@@ -197,7 +197,10 @@ class PaintUITestCase: XCTestCase {
     func scrollFillPanel(_ app: XCUIApplication, to control: XCUIElement) {
         let panel = app.scrollViews.containing(.staticText, identifier: "Fill").firstMatch
         var drags = 0
-        while !(control.exists && control.isHittable) && drags < 8, panel.exists {
+        // Accessibility can report a clipped row as hittable even when its track is below the
+        // viewport. A coordinate drag there dismisses the panel instead of moving the control.
+        while panel.exists && drags < 8 {
+            if control.exists && control.isHittable && panel.frame.contains(control.frame) { return }
             let frame = panel.frame
             let origin = app.coordinate(withNormalizedOffset: .zero)
             let from = origin.withOffset(CGVector(dx: frame.minX + 6, dy: frame.midY + frame.height * 0.35))

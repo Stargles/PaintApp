@@ -3,7 +3,8 @@
 The owner's asks. [BUGS.md](BUGS.md) is for what *we* find.
 
 **Session 49 (2026-10-14):** the owner asked to continue through every actionable item, stopping only
-for genuinely required input or context degradation. Agent count is unrestricted for now; usage
+for genuinely required input. On October24 the owner explicitly says not to park for context: rely
+on automatic compaction and keep working. Agent count is unrestricted for now; usage
 conservation and output quality take priority over speed. Use focused delegation and cheaper models
 for routine work, with occasional queue reports. The owner asked to work independently while asleep
 until 10 a.m. Toronto time. The later point-only vector ruling below supersedes fixed exterior pixels.
