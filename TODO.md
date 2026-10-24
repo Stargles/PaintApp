@@ -182,7 +182,8 @@ no compressed latest-wins dropping. Socket drain checks run identity after each 
 application messages fail. Main callbacks carry a locked run lifetime, coordinator callbacks require
 the exact owned client, and old complete-file replies cannot redirect into a replacement connection.
 Added real decoder admission/reset regression and closed-document queued-image insertion refusal.
-Existing fixture decoder tests now completion-pace actual VT work. Swift is source-only/uncompiled;
+Existing fixture decoder tests now completion-pace actual VT work. The queued reset test itself uses
+the real first SPS/PPS+IDR, so bypassing epoch fences reaches VT and can land an actual stale picture. Swift is source-only/uncompiled;
 outgoing iPad send pump and assertion-fault qualification remain outstanding.
 
 

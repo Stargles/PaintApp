@@ -221,12 +221,12 @@ final class H264StreamDecoderLogicTests: XCTestCase {
         XCTAssertEqual(avcc, [0, 0, 0, 4, 0x65, 0x01, 0x02, 0x03])
         XCTAssertEqual(H264StreamDecoder.splitAnnexB(Data([1, 2, 3])), [], "no start code, no NAL")
     }
-    func testAdmissionCoversQueuedWorkAndResetRetiresItBeforeAnyOldPictureCanLand() {
+    func testAdmissionCoversQueuedWorkAndResetRetiresItBeforeAnyOldPictureCanLand() throws {
+        let payload = try XCTUnwrap(wireFrames(from: accessUnits(in: fixtureBytes())).first)
+        XCTAssertTrue(payload.isKeyframe, "The retired work could really decode SPS/PPS+IDR if admitted")
         let queue = DispatchQueue(label: "test.stream.decode.admission")
         queue.suspend()
         let decoder = H264StreamDecoder(queue: queue)
-        let payload = StreamVideoPayload(isKeyframe: true, presentationTimeMicroseconds: 0,
-                                         accessUnit: Data([0, 0, 0, 1, 0x65]))
         let settled = expectation(description: "admitted work settled once")
         var completions = 0
         XCTAssertTrue(decoder.feed(payload) { completions += 1; settled.fulfill() })
