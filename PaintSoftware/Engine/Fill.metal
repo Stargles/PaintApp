@@ -32,6 +32,13 @@ struct FillParams {
 
 static inline uint pixelIndex(uint x, uint y, uint w) { return y * w + x; }
 
+// Reference colours are normalized on the CPU. The precise conversion keeps an identical RGBA8
+// sample identical at Threshold 0; fast-math division can leave a residual and turn clean paper
+// into a wall. Share it with lasso coverage so classification and the coverage ramp agree.
+static inline float4 colourFromRGBA8(uchar4 rgba) {
+    return precise::divide(float4(rgba), float4(255.0f));
+}
+
 // Normalized RGBA distance in 0..1 (max possible distance is sqrt(4) = 2, so halve).
 static inline float colourDistance(float4 a, float4 b) {
     float4 d = a - b;
@@ -74,8 +81,8 @@ kernel void computeWalls(const device uchar4* reference [[buffer(0)]],
                          uint2 gid [[thread_position_in_grid]]) {
     if (gid.x >= params.width || gid.y >= params.height) return;
     uint i = pixelIndex(gid.x, gid.y, params.width);
-    float4 c = float4(reference[i]) / 255.0;
-    float4 p = float4(pathWall[i]) / 255.0;
+    float4 c = colourFromRGBA8(reference[i]);
+    float4 p = colourFromRGBA8(pathWall[i]);
     bool pathIsWall = p.w > 0.0 && colourDistance(p, params.seedColor) > params.threshold;
     wall[i] = (pathIsWall || colourDistance(c, params.seedColor) > params.threshold) ? 1 : 0;
 }
@@ -397,7 +404,7 @@ kernel void lassoInvert(const device uchar4* reference  [[buffer(0)]],
     bool reached = (reachedA[i] != 0) || (refCount > 1u && reachedB[i] != 0);
     if (!reached) { alphaOut[i] = 255; return; }
 
-    float4 c = float4(reference[i]) / 255.0;
+    float4 c = colourFromRGBA8(reference[i]);
     float d = colourDistance(c, params.seedColor);
     if (refCount > 1u) d = min(d, colourDistance(c, reference2));
     float t  = params.threshold;

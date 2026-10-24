@@ -177,6 +177,70 @@ final class FillMendLogicTests: XCTestCase {
         return try XCTUnwrap(session.mendMask(sourceMask: source, threshold: 0, artworkRect: nil, reach: reach))
     }
 
+    /// Exact byte equality is the Threshold 0 contract. Exercise both RGB and alpha, through the
+    /// reference and vector path-wall inputs, without deriving the expected answer from GPU math.
+    func testColourWallsPreserveEveryByteIdentityAndRejectAdjacentBytesAtZeroThreshold() throws {
+        let engine = try XCTUnwrap(MetalFillEngine.shared)
+        let device = engine.device
+        let library = try XCTUnwrap(try? device.makeDefaultLibrary(bundle: Bundle(for: MetalFillEngine.self)))
+        let function = try XCTUnwrap(library.makeFunction(name: "computeWalls"))
+        let pipeline = try device.makeComputePipelineState(function: function)
+        let queue = try XCTUnwrap(device.makeCommandQueue())
+        var references: [UInt8] = [], paths: [UInt8] = []
+        var seeds: [SIMD4<Float>] = []
+        var labels: [String] = []
+        func colour(_ byte: UInt8, alphaOnly: Bool) -> [UInt8] {
+            alphaOnly ? [0, 0, 0, byte] : [byte, byte, byte, 255]
+        }
+        for alphaOnly in [false, true] {
+            for value in 0...255 {
+                let same = colour(UInt8(value), alphaOnly: alphaOnly)
+                let adjacent = colour(UInt8(value == 255 ? 254 : value + 1), alphaOnly: alphaOnly)
+                for throughPath in [false, true] {
+                    references += same + (throughPath ? same : adjacent)
+                    paths += (throughPath ? same + adjacent : [UInt8](repeating: 0, count: 8))
+                    seeds.append(SIMD4(Float(same[0]), Float(same[1]), Float(same[2]), Float(same[3])) / 255.0)
+                    labels.append("\(alphaOnly ? "alpha" : "RGB") \(throughPath ? "path" : "reference") byte \(value)")
+                }
+            }
+        }
+        let referenceBuffer = try XCTUnwrap(references.withUnsafeBytes {
+            device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: .storageModeShared)
+        })
+        let pathBuffer = try XCTUnwrap(paths.withUnsafeBytes {
+            device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: .storageModeShared)
+        })
+        // Each dispatch reads two pixels. Four output bytes per case keep every buffer offset
+        // aligned; the two padding bytes are irrelevant. All 1024 small dispatches share one CB.
+        let output = try XCTUnwrap(device.makeBuffer(length: seeds.count * 4, options: .storageModeShared))
+        memset(output.contents(), 255, output.length)
+        let command = try XCTUnwrap(queue.makeCommandBuffer())
+        let encoder = try XCTUnwrap(command.makeComputeCommandEncoder())
+        encoder.setComputePipelineState(pipeline)
+        for index in seeds.indices {
+            var params = MetalFillEngine.FillParams()
+            params.width = 2; params.height = 1; params.threshold = 0; params.seedColor = seeds[index]
+            encoder.setBuffer(referenceBuffer, offset: index * 8, index: 0)
+            encoder.setBuffer(output, offset: index * 4, index: 1)
+            encoder.setBytes(&params, length: MemoryLayout<MetalFillEngine.FillParams>.stride, index: 2)
+            encoder.setBuffer(pathBuffer, offset: index * 8, index: 3)
+            encoder.dispatchThreads(MTLSize(width: 2, height: 1, depth: 1),
+                                    threadsPerThreadgroup: MTLSize(width: 2, height: 1, depth: 1))
+        }
+        encoder.endEncoding()
+        command.commit()
+        command.waitUntilCompleted()
+        XCTAssertEqual(command.status, .completed, "the byte-classifier command completed")
+        guard command.status == .completed else { return }
+        let actual = output.contents().bindMemory(to: UInt8.self, capacity: output.length)
+        var wrong: [String] = []
+        for index in labels.indices {
+            if actual[index * 4] != 0 { wrong.append("\(labels[index]): exact match became a wall") }
+            if actual[index * 4 + 1] != 1 { wrong.append("\(labels[index]): adjacent byte became passable") }
+        }
+        XCTAssertTrue(wrong.isEmpty, "byte identity/adjacency: \(wrong.count) wrong, first \(wrong.prefix(8))")
+    }
+
     private func assertExactDistanceMap(name: String, width: Int, height: Int, ink: [UInt8],
                                         targetsInk: Bool = true,
                                         file: StaticString = #filePath, line: UInt = #line) throws {
