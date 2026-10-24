@@ -28,6 +28,21 @@ UI/screenshot inspection and Debug/Release/physical gates are root-owned and pen
 
 # TODO
 
+## Old-format recovery qualification: renamed fixture address — 2026-10-24
+
+Root's combined f55 native349 compiled app/tests,345 passed/4 failed,0 skips,728 source bytes/modes
+exact. The old typed-colour recovery test passes startup readiness, report counts, maintenance and
+converted-backup strict validation. Its original material-strokes.paintproj URL then fails validation
+and load. The real previous-writer manifest name is Untitled; native.log6531 records permanent
+ProjectPackageLayout.tidyEveryProject renaming1 package after recovery. Source trace confirms this
+normal ordering, not a converter/strict-decoder/backup defect. Root accepts only a fixture address
+correction: locate exactly one real gallery package by the original UUID, require Untitled.paintproj
+and the old path absent, then keep strict recovered+backup validation, actual ink geometry, every
+damaged Trash byte and no-stage assertions. New own tmp/s54-repair-recovery-proof starts from
+origin/main then ff exactf55cabb8a7e6de56a62a2351719dd58bfce9306d. No production edit, assertion
+relaxation, empty/default decode, other-tree change or native/compiler operation. Native rerun remains
+root-owned; original four-failure triage is running separately before this correction.
+
 The owner's asks; BUGS.md records defects we find. Session49 authorizes continuing actionable work
 without recommendation-only pauses. On2026-10-24 the owner explicitly says not to park for context;
 use automatic compaction. Agents are unrestricted for now, with quality and usage conservation before

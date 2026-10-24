@@ -14,6 +14,16 @@ before implementation on tmp/s54-response-curve; no native/compiler/device run b
 
 # Known Issues
 
+## Recovery regression holds the pre-tidy fixture URL — 2026-10-24
+
+Native f55 proof found the newly added testOldTypedColorDamageReachesStartupRecoveryAfterItsGoodOldBackupConverts
+checking Projects/material-strokes.paintproj after permanent startup tidy correctly renamed the recovered
+fixture to its actual manifest title Untitled.paintproj. The backup validation passed; the stale URL
+caused strict project validation/load to fail. Record before correction: resolve exactly one actual
+gallery package with the original UUID, assert the normal landing and old path absence, preserve all
+strict geometry/recovery/backup/Trash byte/stage oracles. This is a test-premise defect; no production
+change or artwork loss is inferred. Root owns rerun; source-only correction is not a native green.
+
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
