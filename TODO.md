@@ -576,3 +576,8 @@ method are prepared: refusal in both directions preserves stacks/metadata/RGBA/c
 once and releasing source caches proves temporary image pins are gone. Successful blank remains
 valid. Raster patch undo also stores an explicit successful Result before commit, so a nil source
 cannot be mistaken for an absent preflight. Native successor/other gates remain root-owned/unrun.
+
+Root's isolated8bb compile passed the app source phase and reached test compilation, then stopped
+on InkPoseLogicTests passing its now-owned remainder Source directly to UIImage-only opaque bounds.
+That existing throwing test now explicitly resolves/get()s its source before the actual bounds
+assertion. No compatibility overload or blank fallback. Consumer runtime remains unrun (32 static).

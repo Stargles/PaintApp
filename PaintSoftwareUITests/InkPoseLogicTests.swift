@@ -338,7 +338,7 @@ final class InkPoseLogicTests: XCTestCase {
         XCTAssertNotNil(PixelOps.opaqueContentBounds(piece.pieceImage),
                         "the loop is round the shown ink and the piece it lifted is empty")
         let hole = try XCTUnwrap(piece.remainderPreview)
-        XCTAssertEqual(PixelOps.opaqueContentBounds(hole), CGRect(x: 100, y: 20, width: 30, height: 30),
+        XCTAssertEqual(PixelOps.opaqueContentBounds(try hole.resolveImage().get()), CGRect(x: 100, y: 20, width: 30, height: 30),
                        "the hole is not the lifted ink and nothing else: the cel should keep only the bystander, where it is stored")
 
         try nudgeFloat(manager, dx: 30)
