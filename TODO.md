@@ -324,18 +324,18 @@ account usage limits; root continues. The full source inventory is not yet fully
   undo preflight through the existing Action; failed reads never become blank. Stable owner UUIDs
   distinguish equal-version source/vector replacements, including interpolation references;
   snapshots retain original identities. Tag04 changes only disposable .pbk bake digests.
-  Source currently has32 owned static regression methods, including300/1000 normal package load/
-  save-freeze/clone/rename,1000 checkpointed transform outputs, refused undo/redo and transient
-  coexistence, staged linked/mask pixels and bounded4096 source/tool admission. Root's isolated f30
-  primitive13/13 is green. Broad app compilation progressed through the app module; the first five
-  isolated consumer builds stopped on now-corrected fixture/API types before execution. The latest
-  benchmark replacement-window read now explicitly unwraps its optional image, without fallback. Liquify
-  source comparisons/posed fixtures and BrushTexture replay now propagate explicit reads/throws. Consumer
-  runtime, mutants, affected cold UI/landscape pictures and fast Debug/Release remain root-owned
-  pending gates. 2048×1024 arithmetic/counted owned allocations do not prove total RSS, private
-  ImageIO/derived compositor memory or the Test1 respring cause. No native/simulator/device actions,
-  main merge or push by this task. External readiness and unexecuted mutation review live under
-  `~/PaintWork/s54-architecture-audit/`; qualify clean source before faults, preserve exact restore.
+  Source has32 owned regression methods, all32 native Debug methods green at exact79a1941e4d0b70799538af2dd7e29935c17034d4,
+  withzero failures/skips and728 app/test/project files+modes restored exactly. Coverage includes
+  real300/1000 package cold load/save-freeze/clone/rename,1000 checkpointed transform outputs, refused
+  undo/redo and transient coexistence, staged linked/mask pixels and bounded4096 source/tool admission.
+  A real repeated-undo native drawing pin is fixed at its borrowed-copy lifetime boundary; exact
+  resident3/cap/old-new pixel assertions pass. Three runtime fixture premises were corrected without
+  weakening artwork checks. Root's temporary exclusive native lease is released; check tree frozen79a.
+  Native assertion faults, affected cold UI/landscape pictures, full fast Debug/Release, graph and
+  device gates remain pending/root-owned. Counts do not prove total RSS, private ImageIO/derived
+  compositor memory or Test1 cause. No main merge/push/device action by this task. Evidence and the
+  unexecuted mutation review live under `~/PaintWork/s54-architecture-audit/`; preserve exact source
+  restore and require real assertion failures, never timeout/OOM/build-failure qualification.
   Mask source scope active on `tmp/s54-mask-residency` from59d69f12: price each indivisible
   transitive dependency closure in existing chunk/strip source planning; resolve live-mask metadata
   cache before dependency pixels and omit unrelated leaves. Reuse FrameRecipe/MaskResolver; no
@@ -553,29 +553,3 @@ against a transcript this audit does not have.
 - **The raster Move's undo half.** `finalizePendingGesturesForHistoryAction` has fill, shape and text
   arms and no raster-float arm.
 - **Freeform text's minimum-size exemption** is still unruled.
-
-Root temporarily loans the exclusive Mac native slot for compiler reconciliation and only the32
-RasterResidencyLogicTests, using its explicit simulator39E84984-3C6F-4A6A-8DC8-D1098F6B623E,
-isolated raster-consumer-check tree and existing focused.py wrapper/DerivedData. Source fixes belong
-only in the author tree, committed then fast-forwarded into the frozen check tree. Require728 exact
-tracked app/test/project files restored and32 methods/zero skips. No mutants/UI/full fast/device
-under this grant; release the lease after green32 or a substantive unresolved runtime blocker.
-
-Exclusive-lease run06 at393180d9 stopped during compilation on two omitted throws boundaries in
-existing benchmarks (PerfBaseline local measure and UndoRepair autoreleasepool). All728 tracked
-app/test/project bytes and modes restored exactly, runtime0. Propagate throws/try at those boundaries
-without changing calculations/oracles, commit in author tree, then fast-forward and retry serially.
-
-Exclusive-lease run07 ate0a5ce8e stopped on the newly integrated MaskParity playback-entry fixture's
-UIImage assignment to the Source tier. Capture it explicitly through the existing throwing fixture
-helper; preserve all source pixels and immediate purity assertion ordering. All728 source files/
-modes restored exactly; runtime0. Full baked-assignment inventory found no other raw UIImage RHS.
-
-Run08 at214d1edf compiled/executed32:28pass/4fail,zero skips,728 exact source restore. Two fixtures
-included CanvasFixture's setup addLayer undo entry; clear only setup history before explicit baselines.
-Failed-save ledger intentionally clears its reuse memo in existing ProjectStore stage validation;
-assert its valid pre-save premise and exact cleared state after refusal, retaining all package/live
-pixel checks. Repeated patch undo passed cleared-prepared-handle checks but retained one native
-borrowed drawing temporary until the event pool, exhausting the tiny six-picture cap on later cycles.
-Scope the existing backing-image→owned-context copy in its own autorelease boundary; keep exact3
-resident buffers, cap, both-stack and red/blue assertions unchanged, then rerun the same32 only.

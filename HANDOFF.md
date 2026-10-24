@@ -36,25 +36,28 @@ all-cel installation. Owner UUID+version keys include interpolation references a
 identity across freeze; canonical tag04 changes only disposable .pbk cache digests, reclaimed by the
 existing cache maintenance. Projects/Backups/Trash formats are unchanged.
 
-Root exact f30 primitive run compiled13/13 green. The current source has32 static residency methods;
-19 consumer methods remain unrun. They cover real300/1000 package cold load/save freeze/exact PNG
-clone/atomic replace/rename,1000 sequential transform outputs with bounded resident buffers, failed
-checkpoint package/dirty-pixel preservation, undo/redo refusal and pin release, coexisting draft late
-refusal plus exact queued text, equal-version owner/cache/linked-recipe pixels, staged mask alpha,
-Liquify refusal/retry/generation and normal4096 paint/erase/Move split/Liquify source admission.
-Broad app module compilation succeeds; five isolated builds stopped before tests on now-fixed
-nonoptional localText use, owned Move remainder read, two new fixture types, and the benchmark's
-optional replacement-window image. That existing throwing benchmark now explicitly unwraps it;
-all renderIfNonEmpty().get() consumers retain their intended optional role/assertion contract. A fifth
-batch found two Liquify comparison Source reads and omitted throws propagation in its posed fixture
-and one BrushTexture replay call; those now explicitly resolve/get/unwrap and propagate try through
-all four fixture callers, preserving pixel comparisons and expected values. Root owns the next
-normal32 run, native faults, affected cold UI/screenshots, fast Debug/Release and device gates. No
-compiler/parser/native/simulator/device operation by this task during root's restriction. UI helper/
-identifier lints and diff-check pass. No total-RSS/hardware claim follows from counted buffers or the
-two-picture encoder workspace estimate; private ImageIO, placed-image/video and derived renderer
-buffers retain separate existing scopes. Structural/composite presentation still uses the existing
-atomic visible-window path; undo never eagerly hydrates every cel in a structural snapshot.
+Root exact f30 primitive run compiled13/13 green. Current exact79a1941e4d0b70799538af2dd7e29935c17034d4
+compiled app/tests and passed32/32 residency methods,zero failures/skips/expected failures, on the
+explicitly loaned root simulator39E84984-3C6F-4A6A-8DC8-D1098F6B623E. The exclusive native lease is
+RELEASED; no more native work without root's grant. The isolated check tree is clean/frozen79a and
+all728 tracked app/test/project bytes+modes restored exactly. Evidence:
+`~/PaintWork/s54-architecture-audit/native/raster-consumer-79a-run09/` report/summary/tests/restoration
+JSON and native.log. Earlier compile batches corrected only fixture/API types/throws. First runtime
+was28/32: two setup-history premises and the existing failed-save ledger-clear oracle were corrected;
+the real repeated-undo fourth-buffer pin was fixed by draining native borrowed drawing temporaries
+inside the backing-image→owned-context copy. Exact3/cap/oldred-newblue assertions remain and pass.
+
+The32 methods cover real300/1000 package cold load/save freeze/exact PNG clone/atomic replace/rename,
+1000 sequential transform outputs with bounded resident buffers, failed-checkpoint package/dirty-pixel
+preservation, undo/redo refusal and pin release, coexisting draft late refusal plus exact queued text,
+equal-version owner/cache/linked-recipe pixels, staged mask alpha, Liquify refusal/retry/generation
+and normal4096 paint/erase/Move split/Liquify source admission. This is focused Debug source/runtime
+qualification only. Native assertion faults, affected cold UI/screenshots, full fast Debug/Release,
+graph and device gates remain unrun/root-owned. UI helper/identifier lints and diff-check pass. No
+total-RSS/hardware claim follows from counted buffers or the two-picture encoder workspace estimate;
+private ImageIO, placed-image/video and derived renderer buffers retain separate existing scopes.
+Structural/composite presentation still uses the existing atomic visible-window path; undo never
+eagerly hydrates every cel in a structural snapshot.
 
 External current readiness: `~/PaintWork/s54-architecture-audit/raster-consumer-ready-9bfc.md` (updated
 successors therein). Unexecuted fault review: `raster-mutation-review-8bb.md`. Existing-test mechanical
@@ -455,29 +458,3 @@ source restore. The Trash regression compares equivalent URLs with a directory s
 compare standardized paths, and assert retained backup existence AFTER purge before its throwing read.
 The new startup-refusal case misuses a current-package preservation helper on origin.name; repair
 agent will correct that test after this commit. No product defect is inferred from these two failures.
-
-Root temporarily loans the exclusive Mac native slot for compiler reconciliation and only the32
-RasterResidencyLogicTests, using its explicit simulator39E84984-3C6F-4A6A-8DC8-D1098F6B623E,
-isolated raster-consumer-check tree and existing focused.py wrapper/DerivedData. Source fixes belong
-only in the author tree, committed then fast-forwarded into the frozen check tree. Require728 exact
-tracked app/test/project files restored and32 methods/zero skips. No mutants/UI/full fast/device
-under this grant; release the lease after green32 or a substantive unresolved runtime blocker.
-
-Exclusive-lease run06 at393180d9 stopped during compilation on two omitted throws boundaries in
-existing benchmarks (PerfBaseline local measure and UndoRepair autoreleasepool). All728 tracked
-app/test/project bytes and modes restored exactly, runtime0. Propagate throws/try at those boundaries
-without changing calculations/oracles, commit in author tree, then fast-forward and retry serially.
-
-Exclusive-lease run07 ate0a5ce8e stopped on the newly integrated MaskParity playback-entry fixture's
-UIImage assignment to the Source tier. Capture it explicitly through the existing throwing fixture
-helper; preserve all source pixels and immediate purity assertion ordering. All728 source files/
-modes restored exactly; runtime0. Full baked-assignment inventory found no other raw UIImage RHS.
-
-Run08 at214d1edf compiled/executed32:28pass/4fail,zero skips,728 exact source restore. Two fixtures
-included CanvasFixture's setup addLayer undo entry; clear only setup history before explicit baselines.
-Failed-save ledger intentionally clears its reuse memo in existing ProjectStore stage validation;
-assert its valid pre-save premise and exact cleared state after refusal, retaining all package/live
-pixel checks. Repeated patch undo passed cleared-prepared-handle checks but retained one native
-borrowed drawing temporary until the event pool, exhausting the tiny six-picture cap on later cycles.
-Scope the existing backing-image→owned-context copy in its own autorelease boundary; keep exact3
-resident buffers, cap, both-stack and red/blue assertions unchanged, then rerun the same32 only.
