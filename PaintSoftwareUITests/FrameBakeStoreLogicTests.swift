@@ -396,31 +396,75 @@ final class FrameBakeStoreLogicTests: XCTestCase {
     /// that holds three, and the one 40 frames away is the one that dies — not the oldest, not the
     /// largest.
     func testEvictingATruncatedFarFilePreservesTheNearDrawnSibling() throws {
-        let image = noiseImage(16)
-        let far = syntheticKey(51), near = syntheticKey(52), incoming = syntheticKey(53)
-        let measuring = store()
-        guard case .success(let each) = measuring.store(image, for: far) else {
-            return XCTFail("The fixture must measure its actual encoded size.")
+        for byteCount in 0...1 {
+            for explicit in [false, true] {
+                let subroot = root.appendingPathComponent("truncated-\(byteCount)-explicit-\(explicit)", isDirectory: true)
+                let image = noiseImage(16)
+                let far = syntheticKey(51), near = syntheticKey(52), incoming = syntheticKey(53)
+                let measuring = FrameBakeStore(root: subroot)
+                guard case .success(let each) = measuring.store(image, for: far) else {
+                    return XCTFail("The fixture must measure its actual encoded size.")
+                }
+                let bounded = FrameBakeStore(root: subroot, byteCeiling: 2 * each)
+                XCTAssertTrue(bounded.store(image, for: near).isSuccess)
+                XCTAssertEqual(bounded.totalBytes, 2 * each)
+                let frames = [far.fileName: Set([100]), near.fileName: Set([0])]
+                try Data(repeating: 0x50, count: byteCount).write(to: bounded.url(for: far))
+                if explicit {
+                    XCTAssertEqual(bounded.evict(toFree: each, playhead: 0, frames: frames), byteCount,
+                                   "Report actual removed bytes even when the charged size was larger.")
+                    XCTAssertFalse(bounded.contains(far))
+                    XCTAssertTrue(bounded.contains(near), "Releasing the far charge already restores headroom.")
+                    XCTAssertEqual(bounded.totalBytes, each)
+                    XCTAssertEqual(measuring.totalBytes, each)
+                }
+                // The other path exercises the write's own eviction directly, without pre-evicting.
+                XCTAssertTrue(bounded.store(image, for: incoming, playhead: 0, frames: frames).isSuccess)
+                XCTAssertFalse(bounded.contains(far))
+                XCTAssertTrue(bounded.contains(near))
+                XCTAssertTrue(bounded.contains(incoming))
+                XCTAssertEqual(bounded.totalBytes, 2 * each)
+                XCTAssertEqual(measuring.totalBytes, 2 * each)
+                XCTAssertLessThanOrEqual(bounded.totalBytes, bounded.byteCeiling)
+                let retained = try XCTUnwrap(bounded.loadDecoded(near)?.makeImage())
+                XCTAssertEqual(CanvasFixture.rgbaBytes(retained), CanvasFixture.rgbaBytes(image),
+                               "Near drawing survives \(byteCount)-byte truncation, explicit eviction \(explicit).")
+            }
         }
-        let bounded = FrameBakeStore(root: root, byteCeiling: 2 * each)
-        XCTAssertTrue(bounded.store(image, for: near).isSuccess)
-        XCTAssertEqual(bounded.totalBytes, 2 * each)
-        let frames = [far.fileName: Set([100]), near.fileName: Set([0])]
-        try Data([0x50]).write(to: bounded.url(for: far))
-        XCTAssertEqual(bounded.evict(toFree: each, playhead: 0, frames: frames), 1,
-                       "The return value counts the one physical byte actually removed.")
-        XCTAssertFalse(bounded.contains(far))
-        XCTAssertTrue(bounded.contains(near), "Releasing the far file's old charge already makes enough headroom.")
+    }
+
+    func testAWriteRefusesAdmissionWhenAProtectedFilePreventsEviction() throws {
+        let image = noiseImage(16), retained = syntheticKey(54), incoming = syntheticKey(55)
+        let measuring = store()
+        guard case .success(let each) = measuring.store(image, for: retained) else {
+            return XCTFail("The tiny fixture must measure its actual encoded size.")
+        }
+        let bounded = FrameBakeStore(root: root, byteCeiling: each)
+        let protected = bounded.url(for: retained)
+        let fm = FileManager.default
+        try fm.setAttributes([.immutable: true], ofItemAtPath: protected.path)
+        defer {
+            do { try fm.setAttributes([.immutable: false], ofItemAtPath: protected.path) }
+            catch { XCTFail("Could not release the owned fixture's immutable flag: \(error)") }
+        }
+        XCTAssertEqual(try fm.attributesOfItem(atPath: protected.path)[.immutable] as? NSNumber, NSNumber(value: true))
+        XCTAssertThrowsError(try fm.removeItem(at: protected), "Premise: this owned file cannot be evicted.")
+        guard fm.fileExists(atPath: protected.path) else { return XCTFail("Protected-file premise failed.") }
+        let probe = root.appendingPathComponent("writable-parent-probe")
+        try Data([0x50]).write(to: probe, options: .atomic)
+        XCTAssertEqual(try Data(contentsOf: probe), Data([0x50]), "The parent still permits a new atomic file.")
+        try fm.removeItem(at: probe)
+
+        let result = bounded.store(image, for: incoming)
+        XCTAssertFalse(result.isSuccess, "Failed eviction cannot admit another frame above the requested cap.")
+        if case .failure(let failure) = result { XCTAssertEqual(failure, .couldNotWrite) }
+        XCTAssertFalse(fm.fileExists(atPath: bounded.url(for: incoming).path))
+        XCTAssertTrue(bounded.contains(retained))
         XCTAssertEqual(bounded.totalBytes, each)
-        XCTAssertEqual(measuring.totalBytes, each, "Both facades share the updated authoritative counter.")
-        XCTAssertTrue(bounded.store(image, for: incoming, playhead: 0, frames: frames).isSuccess)
-        XCTAssertTrue(bounded.contains(near))
-        XCTAssertTrue(bounded.contains(incoming))
-        XCTAssertEqual(bounded.totalBytes, 2 * each)
-        XCTAssertEqual(measuring.totalBytes, 2 * each)
-        let retained = try XCTUnwrap(bounded.loadDecoded(near)?.makeImage())
-        XCTAssertEqual(CanvasFixture.rgbaBytes(retained), CanvasFixture.rgbaBytes(image),
-                       "The nearer sibling retains its exact drawn picture after the truncated-file eviction.")
+        XCTAssertEqual(measuring.totalBytes, each)
+        XCTAssertLessThanOrEqual(bounded.totalBytes, bounded.byteCeiling)
+        let surviving = try XCTUnwrap(bounded.loadDecoded(retained)?.makeImage())
+        XCTAssertEqual(CanvasFixture.rgbaBytes(surviving), CanvasFixture.rgbaBytes(image))
     }
 
     func testEvictionDropsTheFrameFarthestFromThePlayhead() {

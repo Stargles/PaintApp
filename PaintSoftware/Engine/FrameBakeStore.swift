@@ -280,7 +280,9 @@ final class FrameBakeStore {
         defer { owner.io.unlock() }
         let destination = url(for: key)
         let existing = owner.entry(.bake(key))?.size ?? 0
-        evictLocked(toFree: size - existing, playhead: playhead, frames: frames, keeping: key)
+        let delta = size - existing
+        evictLocked(toFree: delta, playhead: playhead, frames: frames, keeping: key)
+        guard !needsSpace(adding: delta) else { return .failure(.couldNotWrite) }
 
         do {
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -465,11 +467,7 @@ final class FrameBakeStore {
     @discardableResult
     private func evictLocked(toFree bytes: Int, playhead: Int,
                              frames: [String: Set<Int>], keeping: FrameBakeKey?) -> Int {
-        func needsSpace() -> Bool {
-            let projected = owner.totalBytes.addingReportingOverflow(bytes)
-            return projected.overflow || projected.partialValue > byteCeiling
-        }
-        guard needsSpace() else { return 0 }
+        guard needsSpace(adding: bytes) else { return 0 }
 
         let fm = FileManager.default
         let keptName = keeping?.fileName
@@ -478,7 +476,7 @@ final class FrameBakeStore {
             let name = url.deletingPathExtension().lastPathComponent
             guard name != keptName else { continue }
             let size = Self.size(of: url)
-            guard size > 0 else { continue }
+            // Zero-byte files can still carry their old inventory charge after external truncation.
             // A file no live frame names is unreachable from this document and goes first.
             let distance = frames[name]?.map { abs($0 - playhead) }.min() ?? Int.max
             candidates.append((url, size, distance))
@@ -494,12 +492,19 @@ final class FrameBakeStore {
         for candidate in candidates {
             // Releasing a truncated file drops its formerly charged size, which can exceed the
             // physical bytes just removed. Headroom follows inventory; the return value follows I/O.
-            guard needsSpace() else { break }
+            guard needsSpace(adding: bytes) else { break }
             guard (try? fm.removeItem(at: candidate.url)) != nil else { continue }
             freed += candidate.size
             owner.record(Self.fileID(candidate.url), size: nil)
         }
         return freed
+    }
+
+    /// Used under the root's I/O ownership, both while evicting and before admitting the write.
+    /// Physical bytes removed are reporting only; authoritative inventory decides headroom.
+    private func needsSpace(adding bytes: Int) -> Bool {
+        let projected = owner.totalBytes.addingReportingOverflow(bytes)
+        return projected.overflow || projected.partialValue > byteCeiling
     }
 
     // MARK: - Pixels

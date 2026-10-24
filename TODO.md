@@ -280,32 +280,23 @@ account usage limits; root continues. The full source inventory is not yet fully
 - [ ] Data protection: migration identity and Trash backup ownership; qualify library branch.
 - [ ] Background ownership: export cancellation, save-stage cleanup and thumbnail close; qualify branch.
 - [ ] Temporary repair: cold old-library launch, responsive first screen, then retire whole after owner confirmation.
-  Active `tmp/s54-repair-startup` inherits frozen fill `fd73d821`. Remove pre-screen synchronous
-  repair, keep library access gated until complete/error, retain strict conversion/recovery and all
-  old-writer fixtures. StateObject gate + nonisolated worker +3 focused regression methods prepared;
-  native app+test compilation passes with no actor-boundary errors. Root focused189 ran187passed/
-  2fixture failures; startup failure test incorrectly applied the pre-snapshot extras helper after
-  protection snapshots existed. Refine only this new test to compare original bytes directly and
-  separately verify untouched protection snapshots/current owned stages; preserve all35 older tests.
-  Focused rerun/fast/mutation/cold visible UI gates remain. Native slot belongs to root;
-  this task prepares code/tests without native runs.
+  Fixedf69 startup/library/background source is inherited. Root's integrated59d69f12 targeted baseline
+  is500/500, zero skips, with724 tracked app/test/project files unchanged. This supersedes earlier
+  targeted fixture failures/unrun notes, but full fast tiers, UI, mutations and device gates remain.
+  When retiring temporary repair/converter/UI, preserve permanent
+  `ProjectBackupManager.runStartupMaintenance` scheduling and truthful post-maintenance gallery readiness.
 - [ ] Rendering/storage: derived-frame recovery/close, masked source budgets, editable raster residency, video pressure.
-  Active `tmp/s54-bake-lifecycle` from startup63b5abe3: reproduce corrupt disposable bake,
-  missing clean-key playback and retained-close landing with tiny drawn/count regressions. Reuse
-  store rejection/accounting, baker dirty/forget/top-up and one worker ownership; preserve ring
-  budget refusal and allocation refusal as distinct from invalid files. No native slot in this
-  branch. Fifteen drawn/count/readiness/queued-worker regression methods are prepared across existing
-  store/baker/export classes; parse and identifier/helper lints pass. Native gates remain unrun;
-  external exact-replacement mutation driver is prepared for root qualification.
-  Review77278642 rejected per-frame filesystem readiness and per-instance same-root I/O/accounting.
-  Correct with one weakly shared root owner, short metadata-only readiness, bounded owned read
-  snapshots, checked untrusted header arithmetic and terminal typed export allocation refusal.
-  Add real two-wrapper cap/accounting and old-read/new-write regressions; no native work.
-
-  Review bff9dfa3 accepted the four ownership/readiness fixes; root's native290 passed unchanged.
-  Remaining P2: eviction compared current truncated-file bytes freed against old charged overshoot,
-  deleting a good sibling after enough authoritative headroom existed. Correct the stop condition
-  against updated shared total; add a tiny actual-size sibling/drawn/accounting regression.
+  Active `tmp/s54-bake-lifecycle`: existing baker/store/read-demand ownership is reused; no extra
+  renderer/cache. Root's500 baseline covers bake634f5300, including shared-root authority, metadata-only
+  readiness, owned read snapshots, typed export refusal, checked headers and1-byte eviction charge release.
+  Review59d69f12 additionally found zero-byte files skipped as candidates and missing final admission
+  after insufficient eviction. Current source corrects both using the same authoritative checked-headroom
+  decision. Existing tiny truncation test now covers0/1 bytes × explicit/direct-write eviction on fresh
+  subroots; a new immutable-file fixture checks real unlink refusal, writable parent, admission refusal,
+  retained drawing and shared counters. Seventeen bake regression methods added in total; static focused
+  count125. Latest correction is parse/lint-only, not covered by prior500. No native/graph/full freeze
+  by this branch; root owns those gates and the external fault plan. Physical bytes freed remain reporting,
+  never the admission/eviction budget decision. No saved-format change or Test1 cause claim.
 
 - [ ] Stream transport: bounded ordered backpressure, framing limits, connection readiness/close ownership.
 - [ ] Editor/brush: preview identity/budget, undo payload accounting, saved palette validation; verify stationary-sample opportunity.

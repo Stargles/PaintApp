@@ -6,49 +6,31 @@ budget, with quality/usage conservation before speed. Continue actionable work w
 only pauses; give concise queue reports. The owner explicitly says not to park for context; automatic
 compaction must preserve continuing work. Architecture is the top priority. Record before acting.
 
-Bake review77278642 requires shared-root I/O/accounting, metadata-only readiness, checked header
-arithmetic and typed terminal export refusal; follow-up source/tests active, no native slot.
+## Current targeted qualification — 2026-10-24
 
-Bake recovery/close source task is active on `tmp/s54-bake-lifecycle` (startup dependency63b5abe3).
-No native jobs here; root owns qualification. Fifteen regression methods are prepared across existing
-baker/store/export classes. Current static focused count is123 (56 baker +27 store +24 export +16
-LatestWins); no native count is claimed. No benchmark-time full source freeze or graph rebuild;
-refresh the graph when root releases that CPU work. TODO records the hypotheses and ownership scope.
+Root's latest integrated59d69f12 baseline passed **500/500, zero skips**, with all **724 tracked
+app/test/project files unchanged**. That result covers the combined source through bake634f5300 and
+the recorded fill-demand integration; prior unrun/fixture-failure notes below are historical, not the
+current targeted result. Full Debug/Release fast tiers, current UI/pictures and intentional mutation
+qualification remain separate pending gates; do not call the feature installed or complete.
 
-## Repair startup work — 2026-10-24
+This branch's new bake follow-up addresses review59d69f12: evict zero-byte files to release old
+inventory charges, then check authoritative headroom again before admitting a write. The existing
+truncation test now covers0/1-byte files on fresh subroots for both explicit eviction and actual
+write-C eviction. One new tiny immutable-file fixture asserts real unlink refusal while the directory
+still permits atomic writes, then checks refused admission, shared cap accounting and retained pixels.
+These latest changes have parse/lints only; **they are not covered by the prior500**. Static focused
+count is125 (56 baker +29 store +24 export +16 LatestWins), not a new native result. Root owns native,
+full-source freezes and graph refresh. Source changes preserve the fixedf69 startup/library/background
+chain; no device operation occurred here.
 
-`tmp/s54-repair-startup` at `~/PaintWork/PaintApp-s54-repair-startup` starts from origin/main and
-fast-forwards recorded fill dependency `fd73d8213075896d77de89b3ea6bc2129feea9a9`, then rebases its
-startup-only commits onto combined library/background `770e9bf3e2a806bafb860cee17f71d7e69e9a83b`.
-Inherited library/background source and authoritative records are preserved. Scope: show responsive
-startup UI while temporary geometry conversion runs, gate gallery/read/write until success/error,
-preserve strict format and staged recovery. The repair is now explicitly nonisolated, retaining its
-synchronous run()/old-writer API and staged-swap body. App-owned PointGeometryRepairStartup detaches
-one repair+maintenance pass and gates every window until ready/error. Temporary first screen exposes
-startup.preparing/startup.progress; failure exposes startup.failed. No ContentView exists while work
-runs, so gallery/project/settings reads and autosaves cannot race conversion or ordinary recovery.
-Three added PointGeometryRepairLogicTests cover worker/main-loop responsiveness, duplicate start,
-maintenance-before-readiness and failure preserving originals/no maintenance. Class now38 methods;
-all35 old repair methods remain intact; integrated backup25/location23 and five background
-regressions are inherited unchanged. Startup assertions include lock-protected direct repair and
-maintenance counts, with expectations only arranging the held-worker observations.
-No native build/test/simulator/device operation by this task; root owns qualification. Static UI
-lints, plutil and diff-check pass. Root app+test compilation succeeded with no actor-boundary errors.
-Combined189 at63b5abe3 ran187passed/2test-fixture failures. Startup's new failure test misused the
-pre-snapshot extras helper after protection snapshots existed: refine only this test to compare every
-original byte, separately check untouched protection snapshots/current owned stages, and consume its
-expectations before throwing file assertions. All35 older tests/helpers remain intact. Focused rerun,
-Debug/Release full fast census, faults and cold old-library drawn screen/readiness remain pending. Root can
-enhance the prepared external host-seeded cold harness to observe startup.preparing/progress before
-gallery and rotate while repair is in flight; seed the full copied library for a real visible phase.
-No product delay/seed hook or permanent framework was added. Follow-up removes the now-unused
-maintenance-finished notification/gallery subscriber and updates that ordering's comments: the
-initial gallery listing occurs only after maintenance. Do not merge/deploy as qualified.
-
-Library ownership regression refinement: `testExpiredTrashCannotDeleteANewerSameNamedProjectsHistory`
-now asserts that the retained UUID's backup manifest exists before the throwing read, and returns
-after a failed premise assertion. This gives the exact same-name history-deletion fault a direct,
-non-throwing regression signal. No native test was run; root owns combined qualification.
+The temporary point-geometry startup gate still isolates the one-shot conversion worker before
+library access, preserves the35 old repair methods and the old-writer package fixtures, and keeps
+repair failures visible. Retire the temporary converter/UI whole only after owner confirmation.
+**Preserve permanent `ProjectBackupManager.runStartupMaintenance` scheduling and truthful gallery
+readiness when retiring repair**: cleanup/retention still must complete in their owned order before
+the gallery claims its maintained listing is ready. Do not delete permanent maintenance with the
+one-shot gate. The targeted500 result does not replace cold old-library visible UI/device gates.
 
 ## Authoritative checkpoint — 2026-10-24 morning
 

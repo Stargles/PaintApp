@@ -2321,14 +2321,18 @@ Deterministic regressions and a focused source review are in this worktree; no n
 or measured device-memory cause is claimed. External review: `~/PaintWork/s54-architecture-audit/`.
 
 
-## Disposable bake recovery and retained-close landing — 2026-10-24, native gates pending
+## Disposable bake recovery and retained-close landing — 2026-10-24, latest gates pending
 
-Source trace: a current-key unreadable derived file could dedupe by existence after decode failed;
-a missing/evicted clean key was not requeued by resident top-up; reset did not cancel old ring/map
-landings. No new-project stale output or saved-project damage is established. Prepared on
-`tmp/s54-bake-lifecycle`: reject/account disposable invalid files at actual reads, requeue missing
-clean keys through existing scheduler, and reuse LatestWins landing cancellation for reset/close.
-Fifteen tiny drawn/count/readiness/ownership regressions are prepared in existing classes. Review
-77278642's per-frame filesystem polling, same-root ownership, overflowing header arithmetic and typed
-export refusal blockers are corrected in source. Parse and
-UI lints pass; native baseline/mutations, affected UI/pictures and Debug/Release fast tiers are unrun.
+Root's integrated59d69f12 targeted baseline is500/500, zero skips, with724 tracked app/test/project
+files unchanged. It covers source through bake634f5300: invalid/missing derived reads recover through
+the shared store/scheduler; LatestWins owns closed/reset landings; one same-root authority owns
+inventory/I/O; timeline readiness is metadata-only; headers use checked arithmetic; export treats
+decode allocation refusal as terminal. No saved-project damage, new-project stale image or Test1 cause
+is established. Actual allocator refusal is not forced by the value-level regression.
+
+Review59d69f12 found two remaining cache-admission gaps: zero-byte truncations were skipped despite
+old inventory charge, and a write was admitted without rechecking headroom after insufficient eviction.
+Current follow-up includes zero-byte candidates and uses the same checked authoritative decision during
+eviction and final write admission. Tiny0/1-byte explicit/direct eviction fixtures and an immutable-file
+refusal fixture check physical freed bytes, preserved drawing and shared cap counters. Latest source is
+parse/lint-only; root still owns new native/mutation, full fast-tier, UI/picture and device qualification.
