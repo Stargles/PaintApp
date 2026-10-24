@@ -1,8 +1,11 @@
 Response-curve correction prepared: landed frame travels with the moved curve, replacing post-move
 nearest-key reacquisition. Two continuation/ownership logic methods plus one cold drawn control
-are committed/prepared for root qualification; source/static checks only, no native closure claim.
+are integrated; logic passed in normal1cf422 and separate cold continuation/portrait controls each
+passed1/1. Final assembled-source whole classes and assertion faults remain pending.
 
 ## Brush response-curve drag loses its selected key on clamped ticks — 2026-10-24
+
+Current: cf184033 movement ownership is integrated and logic passed in normal1cf422. Final touch18a5d297 cold continuation and responsive2270b07b portrait controls each passed1/1 with inspected whole pictures; assembled-source whole classes and faults remain pending.
 
 Source-confirmed at716311c2, not yet native-reproduced: the view's onChanged applies clamped key
 movement, then hit-tests the unbounded finger location to recover identity. If it finds nothing it
@@ -16,6 +19,8 @@ before implementation on tmp/s54-response-curve; no native/compiler/device run b
 
 ## Recovery regression holds the pre-tidy fixture URL — 2026-10-24
 
+Current:6f9c8d6d resolves the live sameUUID package and preserves strict recovery oracles; all99 affected methods passed within normal1cf422/422. Final assembled-source and whole-library cold gates remain pending.
+
 Native f55 proof found the newly added testOldTypedColorDamageReachesStartupRecoveryAfterItsGoodOldBackupConverts
 checking Projects/material-strokes.paintproj after permanent startup tidy correctly renamed the recovered
 fixture to its actual manifest title Untitled.paintproj. The backup validation passed; the stale URL
@@ -25,6 +30,8 @@ strict geometry/recovery/backup/Trash byte/stage oracles. This is a test-premise
 change or artwork loss is inferred. Root owns rerun; source-only correction is not a native green.
 
 ## Stream bar fixture queue completion — recorded before edits, 2026-10-24
+
+Current: the test-only callback completion correction is integrated; all22 StreamBar methods and the full Swift76 passed within normal1cf422/422. Its three semantic assertion recipes and final-source gates remain pending.
 
 Root's clean combinedf55cabb8a7e6de56a62a2351719dd58bfce9306d compiled and ran349 methods:
 345passed,4failed,0skips, all728 app/test/project bytes+modes restored. Three failures are the old
@@ -52,6 +59,8 @@ One section per bug, newest first.
 
 ## Library relocation can delete different same-size artwork (2026-10-24)
 
+Current: strict tree/content ownership correction9d3 is integrated and included in earlier normal847/base49 qualification. Final assembled-source fast/UI gates remain pending.
+
 `ProjectLibraryMigration.migrateItem` adopted an arbitrary existing destination using recursive file
 count and total bytes, then deleted the source. Distinct same-named packages can have equal totals.
 Fresh-copy verification and destination adoption require separate proof: adoption compares exact tree
@@ -60,12 +69,16 @@ progress on `tmp/s54-library-ownership`; native qualification remains pending.
 
 ## Expiring Trash can delete another project's same-name history (2026-10-24)
 
+Current: the UUID ownership correction is integrated and included in earlier normal847/base49 qualification. Final assembled-source gates remain pending.
+
 `ProjectBackupManager.purgeExpiredTrash` previously removed backup directories by package basename.
 Projects with the same name can have independent UUID histories. Purge now uses package IDs across
 Projects and retained Trash and preserves histories when ownership cannot be established. Native
 qualification remains pending.
 
 ## One-shot geometry repair delays the first app screen — 2026-10-24
+
+Current: f69 worker/gated startup and permanent maintenance scheduling are integrated; startup/recovery logic including the corrected99-method union passed within normal1cf422. Genuine previous-writer whole-library cold UI remains pending; the repair-only11.013s is not a launch duration.
 
 `PaintApp.init` synchronously calls the @MainActor `PointGeometryRepair.run()` before constructing
 the gallery/error view. A copy-only native M5 measurement around run() alone took11.013s for266
@@ -82,6 +95,10 @@ Evidence: `~/PaintWork/s54-architecture-audit/repair-timing/capture-02/`.
 
 ## Interior mending counts ink already covered by Edge Overlap — 2026-10-24
 
+Current: the shared fill/contour correction is integrated in the fill265e component. Earlier focused
+normal and assertion-fault qualification is retained at its recorded pins; final assembled-source
+fast/UI, paired performance and device gates remain pending.
+
 The shared setting promises that Mend Reach counts the gap remaining after Edge Overlap. Source
 inspection finds the new same-fill normal proof measures the entire ink strip instead: a10px stroke
 with2px overlap on each side leaves6px, but Reach6 fails the nearest-distance shortcut and the whole
@@ -91,6 +108,10 @@ Add real drawn-pixel overlap6/5 and zero-overlap10/9 regressions before changing
 
 ## Failed fill preparation can leave a stale cache over overwritten buffers — 2026-10-24
 
+Current: the shared fill/contour correction is integrated in the fill265e component. Earlier focused
+normal and assertion-fault qualification is retained at its recorded pins; final assembled-source
+fast/UI, paired performance and device gates remain pending.
+
 On a cache miss, `MetalFillSession.fill` retains its previous Structure while `buildStructure`
 overwrites shared walls, labels and nearest-feature buffers. A later command/allocation refusal can
 return nil with old cache metadata still installed; retrying its old key could reuse corrupted data.
@@ -98,6 +119,10 @@ Invalidate before destructive rebuilding. No actual device failure is attributed
 do not force memory exhaustion or introduce a permanent test-only fault seam to demonstrate it.
 
 ## Saved-fill contour sampling misses normal Edge Overlap gaps — 2026-10-24
+
+Current: the shared fill/contour correction is integrated in the fill265e component. Earlier focused
+normal and assertion-fault qualification is retained at its recorded pins; final assembled-source
+fast/UI, paired performance and device gates remain pending.
 
 Independent analytic replay of the actual ring/modal rules confirms another pending batch defect.
 A128² closed10px outline with a10px attached or detached stroke remains one bucket region. Default
@@ -119,6 +144,10 @@ fast tiers reached. Normal-source rebuild is required before UI/install. No whol
 
 ## Batch mending must exclude its own paint and refuse unavailable inputs — 2026-10-24
 
+Current: the shared fill/contour correction is integrated in the fill265e component. Earlier focused
+normal and assertion-fault qualification is retained at its recorded pins; final assembled-source
+fast/UI, paired performance and device gates remain pending.
+
 Independent source review of the pending layer action found two gaps before qualification. A saved
 fill participates in its default-visible layer's reference composite; opaque black paint can make
 black line art passable under the lasso modal-reference rule. Unlike a new live fill, the existing
@@ -132,6 +161,10 @@ callers. Regressions must use the visible default target reference and a real al
 This is source evidence; no native reproduction yet. Root recorded before implementation.
 
 ## Shared contour tracing can exceed a bounded mask budget on fragmented inputs — 2026-10-24
+
+Current: the shared fill/contour correction is integrated in the fill265e component. Earlier focused
+normal and assertion-fault qualification is retained at its recorded pins; final assembled-source
+fast/UI, paired performance and device gates remain pending.
 
 Source review of `PixelOps.contourPath` found one hash entry and outgoing array per boundary vertex,
 a starts array, then a copy-on-write dictionary duplicate during traversal. A grid of isolated

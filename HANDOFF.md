@@ -10,70 +10,48 @@ is authorized by an old readiness answer: obtain fresh saved-scene readiness whe
 
 ## Current source and next action — 2026-10-24
 
-Assembly recorded before source edits: root grants this consolidator sole-writer ownership from
-cleandb544db02a2edeacbdd5d0362787353d60d442ad. Apply ONLY reviewed final source nets: touch18a5d297,
-fixturebaa84c19 and responsive/capture2270b07b; no temporary diagnostic code or component doc histories.
-Expected9 existing source paths, prod only ResponseCurveEditorView. Keep owner asks/component ledger/
-architecture intact; refresh current proof statements and run static/lints/plutil only. Root owns all
-native/simulator gates; final coherent422 baseline and final-source qualification remain pending.
-Assembly artifacts: ~/PaintWork/s54-architecture-audit/final-integration/final-ui-assembly-db544/.
+The reviewed final UI corrections are assembled in `~/PaintWork/PaintApp-s54-final-integration`
+on `tmp/s54-final-integration`, from cleandb544db02a2edeacbdd5d0362787353d60d442ad. Only the final
+nets from touch18a5d297, fixturebaa84c19 and responsive/capture2270b07b were applied: nine existing
+source paths, production only ResponseCurveEditorView. No temporary diagnostic methods remain.
+Independent composition hashes match all nine paths. Component ledger and architecture are preserved;
+no main merge, push or physical install. Assembly evidence:
+`~/PaintWork/s54-architecture-audit/final-integration/final-ui-assembly-db544/`.
 
-The single consolidator is `~/PaintWork/PaintApp-s54-final-integration`, `tmp/s54-final-integration`.
-This is a documentation successor of clean67641c5b78423fcce7d8ce2d59a733ff13870515; app/test/project
-bytes are unchanged. Main/origin remain afd2030c831db7a746271fe306e8b5a5b9b02df6. No main merge,
-push or physical install has happened. The consolidator contains the linear raster/mask/video/vector,
-library/background/bake, brush/palette, exact stroke-fit/LiveWalk, stream, point-only Liquify, saving
-and fill work. Component mapping and preservation evidence live in
-`~/PaintWork/s54-architecture-audit/final-integration/`.
+Actual normal1cf51be4758dc47aaab49fae48c1079441cbef0f passed422/422, zero failures/skips, all728
+source entries exact. This includes the repaired StreamBar callback and sameUUID recovery fixtures,
+BrushEditor30 and BrushModulation43. It is earlier-source proof, not the assembled-source baseline.
+Windows7c is complete:166 Debug and166 Release,16 assertion targets/15 distinct recipes,4 arrangement
+controls and63 source/fixture entries restored exactly. Real-link stage5 remains separate.
 
-The actual normal1cf51be4758dc47aaab49fae48c1079441cbef0f gate passed422/422, zero failures/skips,
-all728 source byte/kind/mode entries exact. It includes all349 earlier methods plus full BrushEditor
-logic30 and BrushModulation43. The earlier f55 gate's four failures were corrected test fixtures:
-three StreamBar callbacks asserted before asynchronous completion, and old-format recovery used the
-obsolete URL after permanent title tidy renamed the sameUUID package. No production policy changed.
-676 adds only landscape whole-screen preview capture setup after that normal gate.
+The earlier owner iPad9 UI73 at676 finished67pass/5fail/1 known hold skip,728 entries exact. Actual
+recordings separated portrait graph clipping, wrong custom-touch geometry, stale22pt brush setup,
+percent-vs-pixel overlap setup and a second shape drag on the dock. Final corrections reuse existing
+geometry, slider and touch seams; no gesture-priority change or guessed offset was made. The obsolete
+hold skip is removed and all six hold callers require actual shape:adjustable.
 
-The actual owner iPad9 simulator UI73 at676 finished **67 pass,5 assertion failures,1 exact known
-stationary-hold skip**. All73 selector/device identities and728 source entries reconcile; cleanHEAD
-restored. Both video cases, scene playback, grey-space pan, Move/graph release, GalleryRecovery2,
-RasterLiquify5, vectorLiquify4 and VectorLayerContent5 passed. This is an honestly failing gate.
-Root inspected actual Round/Square/Round whole-owner captures and Mend All before/after pictures.
-Full results, selected recordings/pictures and actual orientation metadata:
-`~/PaintWork/s54-final-qualification/native/owner9-ui73-676-run01/completion.md`.
+Separate exact-source controls passed, with zero failures/skips and728 entries exact each:
 
-The five UI failures are being resolved on isolated branches; none of these candidates is integrated:
+- Touch18a5d297: unchanged cold landscape curve continuation1/1; returned node, neighbour and drawn
+  pixels passed. Actual XCUIScreen UIImage.size is1080x810 points (scale2); runner UIScreen dimensions
+  were768x1024. Both temporary diagnostic methods were removed whole from final source.
+- Fixturebaa84c19: BrushMenu drawn widths, FillMend strict0px/drawn probes and ShapeRecovery start
+  handle3/3. Earlier ccfec255 genuine pending-shape first-touch control1/1 also passed. These do not
+  prove every fill footprint pixel or the other hold/undo callers.
+- Responsive2270b07b: original portrait curve control1/1; whole graph visible, moved endpoint and
+  anchored neighbour passed. Its three settled-landscape workflow captures still need final runs.
 
-- Curve: old portrait test's fixed210pt graph is clipped by its center column; its public drag lands
-  in the scratchpad. Startup's1fa129f604db460bb78cee8169fe0ab11cd8c55b candidate makes the existing
-  graph responsive with one measured square side capped210 and no new state/API/gesture priority.
-  The same branch includes73f3d2d1653b259c4d2718e4421ed42b39304859, three existing workflows'
-  settled-landscape/whole-screen capture corrections. Root source reviews accept both; native pending.
-- Curve delivery: helper-only8d642af0 compiled but the unchanged cold continuation still failed.
-  Temporary diagnostic9a33b2d8 ran2 methods: public interior drag PASSED all position/neighbor/pixel
-  oracles; custom drag failed. The runner UIScreen reports768x1024 while the actual app window is
-  1080x810. Do not fix product gesture priority or add guessed offsets. Bake is measuring actual
-  XCUIScreen image units; metadata-only3671d3a5 is prepared for one public control, unrun. Temporary
-  diagnostic methods must be removed whole before final source. The6abc attempt compiled no tests
-  and is inconclusive, never an assertion-red proof.
-- BrushMenu: a new scene retains5pt, while the test assumed22pt. Select the actual22pt library preset;
-  keep drawn width oracles and use the shared orientation-correct screenshot reader.
-- FillMend ON: setup stopped at AX5 percent, mistaken for pixels; recording caption is0px. Establish
-  actual normalized zero via existing shared adjustSlider's frame-edge clamp, preserve drawn oracles.
-- Pending-shape stroke: its second dragy720.8 hits the timeline below paper/docktop689. Use existing
-  visible-paper/dock helpers. The old hold helper never proved an adjustable shape; replace it once
-  with the existing multi-segment touch primitive and require exposed shape:adjustable for all6 callers.
-  Raster's candidateccfec25520f4b41e6ab0560bb35866de980f8f97 has these three fixture corrections,
-  shared endpoint handling and genuine-hold helper; app/project bytes unchanged. Its genuine pending-
-  shape control passed1/1: exposed adjustable state, first-touch ink, retained shape and2 strokes;728
-  entries exact. It does not select undo or qualify owner-landscape captures. Verify the old handle
-  test next; the newly proven hold capability may make its skip obsolete.
+Whole before/after pictures were opened and inspected. Evidence is under
+`~/PaintWork/s54-final-qualification/native/`: curve-helper-18a5-control-run01,
+ui-fixtures-three-baa84c-run01, ui-fixture-shape-ccfec-control-run01 and
+responsive-curve-2270-control-run01. These controls do not replace final-source whole-class gates.
 
-Check live lease/results before native work:
-`~/PaintWork/s52-vector-points/runtime-qualification/root-status.json`, field current_native_lease.
-Root alone grants; agents must explicitly release. No overlapping compiler/test/simulator operations.
-Next: finish these bounded controls, integrate only final clean corrections, run a fresh zero-skip422
-baseline at the final exact source, then prepared new faults and final Debug/Release/whole-class UI.
-Do not count offline plans, compiler failure, timeouts or screenshots nobody opened as qualification.
+Root owns the sole Mac native lease; check root-status.json before any native/simulator operation.
+Next: fresh exact assembled-source422 zero-skip baseline, repinned new assertion faults, fast Debug
+and Release, touched whole UI classes and required old workflows. The107 Swift faults and mask6+11
+UI configurations remain prepared only. Paired fill performance, genuine previous-writer cold
+startup, fresh saved-scene export/signed device release, erasing diagnosis and owner artwork
+confirmation remain open. No owner ask below is removed by this consolidation.
 
 ## Qualification and gates
 

@@ -18,8 +18,6 @@ struct ResponseCurveEditorView: View {
     /// Prefix for this control's accessibility identifiers.
     let idPrefix: String
 
-    private var side: CGFloat { ResponseCurveEditing.side }
-
     /// Which key the live gesture grabbed (by frame), and whether it has travelled far enough to be a
     /// drag. `CurveEditor`'s pair, and cleared together in `onEnded`.
     @State private var dragFrame: Int?
@@ -27,29 +25,34 @@ struct ResponseCurveEditorView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            ZStack(alignment: .topLeading) {
-                // The identifier rides this rectangle rather than the `ZStack`: an identifier on a
-                // SwiftUI container is inherited by its descendants and beats their own, which
-                // CLAUDE.md records and which the brushes menu was bitten by in exactly this shape.
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(Color.white.opacity(0.06))
-                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white.opacity(0.18), lineWidth: 1))
-                    .frame(width: side, height: side)
-                    .accessibilityIdentifier("\(idPrefix).graph")
-                    .accessibilityValue(encoded)
+            GeometryReader { geometry in
+                let side = min(max(geometry.size.width, 0), ResponseCurveEditing.side)
+                ZStack(alignment: .topLeading) {
+                    // The identifier rides this rectangle rather than the `ZStack`: an identifier on a
+                    // SwiftUI container is inherited by its descendants and beats their own, which
+                    // CLAUDE.md records and which the brushes menu was bitten by in exactly this shape.
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color.white.opacity(0.06))
+                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white.opacity(0.18), lineWidth: 1))
+                        .frame(width: side, height: side)
+                        .accessibilityIdentifier("\(idPrefix).graph")
+                        .accessibilityValue(encoded)
 
-                grid
-                identityLine
-                curvePath
-                handles
+                    grid(side: side)
+                    identityLine(side: side)
+                    curvePath(side: side)
+                    handles(side: side)
+                }
+                .frame(width: side, height: side)
+                .contentShape(Rectangle())
+                .gesture(dragGesture(side: side))
+                // The curve is drawn over its own fixed 0…1 output range, so a value outside it is cut
+                // rather than admitted — `TimelineGraphBand`'s decision 3, which is the same decision as
+                // "the axis does not move".
+                .clipShape(RoundedRectangle(cornerRadius: 6))
             }
-            .frame(width: side, height: side)
-            .contentShape(Rectangle())
-            .gesture(dragGesture)
-            // The curve is drawn over its own fixed 0…1 output range, so a value outside it is cut
-            // rather than admitted — `TimelineGraphBand`'s decision 3, which is the same decision as
-            // "the axis does not move".
-            .clipShape(RoundedRectangle(cornerRadius: 6))
+            // Supply a square height before entering the enclosing vertical scroll view.
+            .aspectRatio(1, contentMode: .fit)
 
             HStack(spacing: 8) {
                 Text("\(inputName) 0 → 1")
@@ -63,8 +66,8 @@ struct ResponseCurveEditorView: View {
                 .foregroundColor(.white.opacity(0.8))
                 .accessibilityIdentifier("\(idPrefix).reset")
             }
-            .frame(width: side)
         }
+        .frame(maxWidth: ResponseCurveEditing.side, alignment: .leading)
     }
 
     /// `frame:value` pairs, so a test can read the curve back without parsing a drawing — the probe
@@ -77,7 +80,7 @@ struct ResponseCurveEditorView: View {
 
     // MARK: Drawing
 
-    private var grid: some View {
+    private func grid(side: CGFloat) -> some View {
         Path { path in
             for step in 1..<4 {
                 let offset = side * CGFloat(step) / 4
@@ -92,18 +95,18 @@ struct ResponseCurveEditorView: View {
 
     /// y = x, so "how far from doing nothing" reads without remembering what flat looked like — and
     /// so the *identity* an empty curve evaluates to is visible rather than implied.
-    private var identityLine: some View {
+    private func identityLine(side: CGFloat) -> some View {
         Path { path in
-            path.move(to: CGPoint(x: 0, y: ResponseCurveEditing.y(ofValue: 0)))
-            path.addLine(to: CGPoint(x: side, y: ResponseCurveEditing.y(ofValue: 1)))
+            path.move(to: CGPoint(x: 0, y: ResponseCurveEditing.y(ofValue: 0, side: side)))
+            path.addLine(to: CGPoint(x: side, y: ResponseCurveEditing.y(ofValue: 1, side: side)))
         }
         .stroke(Color.white.opacity(0.16), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
         .frame(width: side, height: side)
         .accessibilityHidden(true)
     }
 
-    private var curvePath: some View {
-        let points = ResponseCurveEditing.samples(of: curve)
+    private func curvePath(side: CGFloat) -> some View {
+        let points = ResponseCurveEditing.samples(of: curve, side: side)
         return Path { path in
             for (index, point) in points.enumerated() {
                 if index == 0 { path.move(to: point) } else { path.addLine(to: point) }
@@ -115,10 +118,10 @@ struct ResponseCurveEditorView: View {
         .accessibilityHidden(true)
     }
 
-    private var handles: some View {
+    private func handles(side: CGFloat) -> some View {
         ZStack {
             ForEach(Array(curve.curve.keys.enumerated()), id: \.element.frame) { index, key in
-                let at = ResponseCurveEditing.point(ofKey: key)
+                let at = ResponseCurveEditing.point(ofKey: key, side: side)
                 Circle()
                     .fill(dragFrame == key.frame ? Color.blue : Color.white)
                     .frame(width: ResponseCurveEditing.keyRadius * 2,
@@ -139,19 +142,20 @@ struct ResponseCurveEditorView: View {
 
     /// `CurveEditor`'s grammar, which `TimelineGraphBand` took in turn: drag moves the nearest key,
     /// a tap on a key removes it, a tap on empty graph adds one.
-    private var dragGesture: some Gesture {
+    private func dragGesture(side: CGFloat) -> some Gesture {
         // `minimumDistance: 0` so a plain tap arrives here at all — a `TapGesture` beside this one
         // would race it for the same touch.
         DragGesture(minimumDistance: 0)
             .onChanged { value in
                 if dragFrame == nil, !didMove {
-                    dragFrame = ResponseCurveEditing.nearestKey(to: value.startLocation, in: curve.curve)
+                    dragFrame = ResponseCurveEditing.nearestKey(to: value.startLocation, in: curve.curve,
+                                                               side: side)
                 }
                 guard hypot(value.translation.width, value.translation.height) > ResponseCurveEditing.tapSlop,
                       let frame = dragFrame else { return }
                 didMove = true
                 guard let moved = ResponseCurveEditing.moving(frame: frame, to: value.location,
-                                                              in: curve.curve) else { return }
+                                                              in: curve.curve, side: side) else { return }
                 dragFrame = moved.frame
                 curve = ResponseCurve(moved.curve)
             }
@@ -163,7 +167,8 @@ struct ResponseCurveEditorView: View {
                 if let frame = dragFrame {
                     curve = ResponseCurve(ResponseCurveEditing.removing(frame: frame, from: curve.curve))
                 } else {
-                    curve = ResponseCurve(ResponseCurveEditing.adding(at: value.location, to: curve.curve))
+                    curve = ResponseCurve(ResponseCurveEditing.adding(at: value.location, to: curve.curve,
+                                                                     side: side))
                 }
             }
     }

@@ -67,6 +67,8 @@ final class LiquifyUITests: PaintUITestCase {
         XCUIDevice.shared.orientation = .landscapeLeft
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app, size: CGSize(width: 256, height: 256)), "a fresh scene")
+        let window = rotateDevice(app, to: .landscapeLeft)
+        XCTAssertGreaterThan(window.width, window.height, "the owner-size evidence must settle in landscape")
         addVectorLayer(app)
         openBrushLibrary(app)
         let round = app.buttons["brushPanel.brush.Round Hard"]
@@ -125,7 +127,7 @@ final class LiquifyUITests: PaintUITestCase {
         XCTAssertGreaterThan(before.bounds.width, 0.08, "the dot must be wide enough to measure stretching")
         XCTAssertEqual(before.bounds.width / before.bounds.height, 1, accuracy: 0.04,
                        "the ordinary brush must paint a round dot before Liquify")
-        attachScreenshot(app, "liquify-round-dot-before")
+        attachScreenshot(XCUIScreen.main, "liquify-round-dot-before")
 
         liquifyMenu(app)
         app.segmentedControls["liquifyPanel.modePicker"].buttons["Push"].tap()
@@ -166,7 +168,7 @@ final class LiquifyUITests: PaintUITestCase {
         wait(for: [XCTNSPredicateExpectation(predicate: moved, object: nil)], timeout: 20)
         let after = try XCTUnwrap(settled(timeout: 10) { try footprint() })
         assertInsidePatch(after, "after Push")
-        attachScreenshot(app, "liquify-round-dot-after-point-move")
+        attachScreenshot(XCUIScreen.main, "liquify-round-dot-after-point-move")
         let tolerance = max(3 * step, before.bounds.width * 0.04)
         XCTAssertGreaterThan(after.bounds.midX - before.bounds.midX, before.bounds.width * 0.10,
                              "Push must visibly relocate the dot")

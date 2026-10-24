@@ -7,46 +7,48 @@ speed. Architecture and preserving real artwork take priority. Record before act
 
 ## Current source and qualification — 2026-10-24
 
-Assembly recorded before source edits: root grants this consolidator sole-writer ownership from
-cleandb544db02a2edeacbdd5d0362787353d60d442ad. Apply ONLY reviewed final source nets: touch18a5d297,
-fixturebaa84c19 and responsive/capture2270b07b; no temporary diagnostic code or component doc histories.
-Expected9 existing source paths, prod only ResponseCurveEditorView. Keep owner asks/component ledger/
-architecture intact; refresh current proof statements and run static/lints/plutil only. Root owns all
-native/simulator gates; final coherent422 baseline and final-source qualification remain pending.
-Assembly artifacts: ~/PaintWork/s54-architecture-audit/final-integration/final-ui-assembly-db544/.
+The reviewed final UI corrections are assembled in `~/PaintWork/PaintApp-s54-final-integration`
+on `tmp/s54-final-integration`, from cleandb544db02a2edeacbdd5d0362787353d60d442ad. Only the final
+nets from touch18a5d297, fixturebaa84c19 and responsive/capture2270b07b were applied: nine existing
+source paths, production only ResponseCurveEditorView. No temporary diagnostic methods remain.
+Independent composition hashes match all nine paths. Component ledger and architecture are preserved;
+no main merge, push or physical install. Assembly evidence:
+`~/PaintWork/s54-architecture-audit/final-integration/final-ui-assembly-db544/`.
 
-The single linear consolidator remains `~/PaintWork/PaintApp-s54-final-integration` on
-`tmp/s54-final-integration`, a documentation successor of67641c5b78423fcce7d8ce2d59a733ff13870515.
-No main merge/push/physical install. Component preservation and exact mappings are external under
-`~/PaintWork/s54-architecture-audit/final-integration/`. All owner asks below remain in this queue
-until the final gates and merge actually complete.
+Actual normal1cf51be4758dc47aaab49fae48c1079441cbef0f passed422/422, zero failures/skips, all728
+source entries exact. This includes the repaired StreamBar callback and sameUUID recovery fixtures,
+BrushEditor30 and BrushModulation43. It is earlier-source proof, not the assembled-source baseline.
+Windows7c is complete:166 Debug and166 Release,16 assertion targets/15 distinct recipes,4 arrangement
+controls and63 source/fixture entries restored exactly. Real-link stage5 remains separate.
 
-Actual normal1cf passed422/422,0 failures/skips, all728 source entries exact. It includes corrected
-StreamBar asynchronous callback and sameUUID renamed-recovery fixtures plus BrushEditor30 and
-BrushModulation43. Windows7c is complete:166 Debug+166 Release,16 assertion targets/15 recipes and
-all63 source/fixture hashes restored; root verified those63 bytes identical in676. Real-link stage5
-remains separate. Earlier base49/mask-video-vector52 faults and raster32 controls retain exact-pin
-qualification; new Swift107 faults and mask6+11 UI configurations remain PREPARED ONLY.
+The earlier owner iPad9 UI73 at676 finished67pass/5fail/1 known hold skip,728 entries exact. Actual
+recordings separated portrait graph clipping, wrong custom-touch geometry, stale22pt brush setup,
+percent-vs-pixel overlap setup and a second shape drag on the dock. Final corrections reuse existing
+geometry, slider and touch seams; no gesture-priority change or guessed offset was made. The obsolete
+hold skip is removed and all six hold callers require actual shape:adjustable.
 
-The owner-size simulator UI73 at676 finished67pass/5fail/1 exact known hold skip, all728 entries
-restored, cleanHEAD. Actual recordings identify stale22pt brush setup, AX percent-vs-pixel overlap
-setup, and a pending-shape test's second drag on the dock. The old hold helper never proved a pending
-shape. Raster candidateccfec255 corrects those fixtures, reuses shared slider endpoint geometry and
-requires actual shape:adjustable; its first genuine-hold control passed1/1 with original first-touch
-ink/retained-shape/two-stroke assertions and728 entries exact. Remaining callers/undo/old skip are open.
-Curve portrait fixed-width clipping has a minimal responsive candidate1fa129f6. A public interior
-curve drag passed actual position/neighbour/pixel checks; the custom driver used runner UIScreen's
-wrong768x1024 dimensions against the actual1080x810 window. Bake is measuring proper screen units;
-no product gesture-priority change or guessed offset is justified. Temporary diagnostics must leave
-final source whole. Three old cropped capture methods have a source-reviewed owner-landscape
-candidate73f3d2d, native pending. None of these candidates is integrated yet.
+Separate exact-source controls passed, with zero failures/skips and728 entries exact each:
 
-Root owns integration and grants the sole Mac native lease; check root-status.json's
-current_native_lease before any build/test/simulator action. Next: finish bounded real controls,
-consolidate final clean corrections, fresh exact-source422 zero-skip baseline, actual new faults,
-fast Debug/Release and final UI/graph/lints. Paired fill performance, genuine previous-writer cold
+- Touch18a5d297: unchanged cold landscape curve continuation1/1; returned node, neighbour and drawn
+  pixels passed. Actual XCUIScreen UIImage.size is1080x810 points (scale2); runner UIScreen dimensions
+  were768x1024. Both temporary diagnostic methods were removed whole from final source.
+- Fixturebaa84c19: BrushMenu drawn widths, FillMend strict0px/drawn probes and ShapeRecovery start
+  handle3/3. Earlier ccfec255 genuine pending-shape first-touch control1/1 also passed. These do not
+  prove every fill footprint pixel or the other hold/undo callers.
+- Responsive2270b07b: original portrait curve control1/1; whole graph visible, moved endpoint and
+  anchored neighbour passed. Its three settled-landscape workflow captures still need final runs.
+
+Whole before/after pictures were opened and inspected. Evidence is under
+`~/PaintWork/s54-final-qualification/native/`: curve-helper-18a5-control-run01,
+ui-fixtures-three-baa84c-run01, ui-fixture-shape-ccfec-control-run01 and
+responsive-curve-2270-control-run01. These controls do not replace final-source whole-class gates.
+
+Root owns the sole Mac native lease; check root-status.json before any native/simulator operation.
+Next: fresh exact assembled-source422 zero-skip baseline, repinned new assertion faults, fast Debug
+and Release, touched whole UI classes and required old workflows. The107 Swift faults and mask6+11
+UI configurations remain prepared only. Paired fill performance, genuine previous-writer cold
 startup, fresh saved-scene export/signed device release, erasing diagnosis and owner artwork
-confirmation remain open. HANDOFF.md holds exact evidence/paths and the current handoff.
+confirmation remain open. No owner ask below is removed by this consolidation.
 
 ## How to read and keep this file
 
@@ -295,8 +297,9 @@ Inventory-only files are not reviewed code. New source is not called complete be
       need proof. New4b453d97 normalizes the SAME raw geometryVersion bytes before strict current-model
       metadata validation; only DecodingError goes to existing backup recovery. Drawing/source I/O,
       conversion/ownership and final validation remain hard failures. Original damaged packages stay
-      exact/visible, including no-backup cases. The99-method affected union ran atf55;98passed and one stale gallery-URL fixture failed.
-      The exact title/UUID/old-address absence proof is now integrated; rerun pending. Retire the converter
+      exact/visible, including no-backup cases. The corrected sameUUID/title/old-address fixture and
+      all99 affected methods passed within normal1cf422/422, zero skips. Final-source qualification
+      and genuine whole-library cold UI remain pending. Retire the converter
       and temporary UI whole only after owner confirms current artwork; preserve permanent startup
       maintenance scheduling and truthful post-maintenance gallery readiness.
 - [ ] Bake recovery/close: existing baker/store/read demands share one authoritative source and checked
@@ -326,15 +329,16 @@ Inventory-only files are not reviewed code. New source is not called complete be
       private ImageIO, derived compositor memory, placed-image/video ownership or Test1 causation.
 - [ ] Stream: one completion-paced writer/run, bounded producer payloads,64MiB frame/256KiB chunk checks,
       old-connection callback fencing/join and error/stop settlement replace unbounded ownership.
-      Final7c C#166 normal methods pass both configurations; finish16 actual assertion targets and
-      final normal restore. Swift76/6 ran73pass/3 async fixture failures atf55; callback completion correction is
-      integrated, awaiting normal rerun and its assertion recipes. Windows fake
-      transcripts now return synchronized snapshots. Real-link stage5 remains owner-waiting; no deploy.
+      Final7c C#166 normal methods pass both configurations;16 assertion targets/15 recipes and4
+      arrangement controls qualify, with63 source/fixture entries exact. Swift76 and the callback
+      completion correction passed within normal1cf422/422, zero skips; its three semantic faults and
+      final-source gates remain pending. Windows fake transcripts return synchronized snapshots. Real-link stage5 remains owner-waiting; no deploy.
 - [ ] Brush/editor: bounded8MiB actual-image preview LRU and keyed row result replace unbounded/unkeyed
       retention. Final823e proof distinguishes exact2 vs2.25 scale within one old rounded bucket and
       checks actual requested600×120 pixels. Shared PaletteColor rejects malformed persisted hex rather
-      than silently displaying black; normal strings are byte-preserved. Brush/palette logic ran in349;
-      cold A→B→A drawn row, typed-colour recovery UI and new assertion mutants remain pending.
+      than silently displaying black; normal strings are byte-preserved. Brush/palette logic passed within normal1cf422. Cold A→B→A drawn row and typed-colour
+      recovery UI passed in the earlier676 UI73 gate. Final-source whole classes and new assertion
+      mutants remain pending.
 - [ ] Curve editor drag: sourcecf184033 is integrated. Existing moving returns the authoritative
       landed frame with the updated curve, so clamped continuation cannot freeze or retarget a neighbor.
       Two logic and one drawn landscape UI method added; root must run the new full class controls

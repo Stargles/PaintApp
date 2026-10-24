@@ -13,6 +13,17 @@ final class FillMendUITests: PaintUITestCase {
         try XCTUnwrap(ScreenshotPixels(element.screenshot().image))
     }
 
+    /// The native slider reports percent, while the caption reports truncated canvas pixels.
+    /// Reach the physical clamp and require both normalized zero and the zero-pixel caption.
+    private func setEdgeOverlapToZero(_ slider: XCUIElement, in app: XCUIApplication) {
+        scrollFillPanel(app, to: slider)
+        adjustSlider(slider, to: 0, tolerance: 0)
+        XCTAssertEqual(slider.normalizedSliderPosition, 0,
+                       "PREMISE: Edge Overlap is exactly 0% of its 0...6 px range, not a truncated subpixel value")
+        XCTAssertTrue(app.staticTexts["Edge Overlap: 0 px"].exists,
+                      "PREMISE: the panel exposes zero canvas pixels of Edge Overlap")
+    }
+
     // MARK: - Mend Gaps between neighbouring fills
 
     /// A box with two dividers, line art on its own layer above the colour. The left cell is filled
@@ -71,12 +82,7 @@ final class FillMendUITests: PaintUITestCase {
         fillButton.tap()   // opens it
         let overlap = app.sliders["fillPanel.edgeOverlapSlider"]
         XCTAssertTrue(overlap.waitForExistence(timeout: 5))
-        // `adjust` leaves a thumb-width of travel unreached, so the first pass stops short of 0.
-        for _ in 0..<5 where sliderNumericValue(overlap) > 0.5 {
-            overlap.adjust(toNormalizedSliderPosition: 0)
-            Thread.sleep(forTimeInterval: 0.3)
-        }
-        XCTAssertLessThanOrEqual(sliderNumericValue(overlap), 1, "Edge Overlap is down at the bottom, so the seam is most of the line")
+        setEdgeOverlapToZero(overlap, in: app)
         fillButton.tap()   // shut, so the canvas takes the taps
 
         // Nobody has touched the option: the second fill meets the first under the line on the default.
@@ -180,10 +186,7 @@ final class FillMendUITests: PaintUITestCase {
         setBrushColor(app, hex: "FF0000")
         XCTAssertTrue(openFillPanel(app))
         let overlap = app.sliders["fillPanel.edgeOverlapSlider"]
-        for _ in 0..<5 where sliderNumericValue(overlap) > 0.5 {
-            overlap.adjust(toNormalizedSliderPosition: 0)
-        }
-        XCTAssertLessThanOrEqual(sliderNumericValue(overlap), 1, "Edge Overlap leaves the stroke footprint to the mend")
+        setEdgeOverlapToZero(overlap, in: app)
         let mend = app.switches["fillPanel.mendGapToggle"]
         scrollFillPanel(app, to: mend)
         XCTAssertTrue(mend.waitForExistence(timeout: 5))

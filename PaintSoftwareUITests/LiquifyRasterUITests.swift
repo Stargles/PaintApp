@@ -16,17 +16,24 @@ final class LiquifyRasterUITests: PaintUITestCase {
     }
 
     func testColdRasterPaintMovesUnderFingerOneUndoAndColdReopenPreserveThePicture() throws {
+        XCUIDevice.shared.orientation = .landscapeLeft
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app, size: CGSize(width: 256, height: 256)))
+        let window = rotateDevice(app, to: .landscapeLeft)
+        XCTAssertGreaterThan(window.width, window.height, "the owner-size evidence must settle in landscape")
         addRasterLayer(app)
         let canvas = app.otherElements["canvas.host"], paper = paperRect(in: canvas)
+        assertAboveTheDock(app, canvas, dy: Double(onHost(paper, 0, 0.47).dy),
+                           "the complete raster stroke and measurement patch")
         drawLine(on: canvas, from: onHost(paper, 0.2, 0.30), to: onHost(paper, 0.8, 0.30))
         commitPendingShape(on: app)
         let points = paperPatch(canvas, paper, x: 0.3...0.7, y: 0.25...0.47)
         let before = readScreenNow(points).map(dark)
         XCTAssertGreaterThan(before.filter { $0 }.count, 10, "PREMISE: ordinary raster pixels were drawn")
-        attachScreenshot(app, "liquify-raster-before")
+        attachScreenshot(XCUIScreen.main, "liquify-raster-before")
         app.buttons["toolbar.liquifyButton"].tap()
+        assertAboveTheDock(app, canvas, dy: Double(onHost(paper, 0, 0.47).dy),
+                           "the held raster Push and measurement patch")
         let held = samplesDuring(points, "raster Liquify") {
             canvas.coordinate(withNormalizedOffset: onHost(paper, 0.5, 0.30))
                 .press(forDuration: 0.05, thenDragTo: canvas.coordinate(withNormalizedOffset: onHost(paper, 0.5, 0.46)),
@@ -36,10 +43,10 @@ final class LiquifyRasterUITests: PaintUITestCase {
         let moved = NSPredicate { _, _ in zip(self.readScreenNow(points).map(self.dark), before).filter { $0 != $1 }.count > 10 }
         wait(for: [XCTNSPredicateExpectation(predicate: moved, object: nil)], timeout: 20)
         let after = readScreenNow(points).map(dark)
-        attachScreenshot(app, "liquify-raster-after")
+        attachScreenshot(XCUIScreen.main, "liquify-raster-after")
         app.buttons["sideToolbar.undoButton"].tap()
         restoreEventually(points, before)
-        attachScreenshot(app, "liquify-raster-one-undo")
+        attachScreenshot(XCUIScreen.main, "liquify-raster-one-undo")
         app.buttons["sideToolbar.redoButton"].tap()
         restoreEventually(points, after)
         let name = "Raster " + UUID().uuidString.prefix(8)
@@ -51,9 +58,13 @@ final class LiquifyRasterUITests: PaintUITestCase {
         let tile = app.staticTexts.matching(NSPredicate(format: "label == %@", name)).firstMatch
         XCTAssertTrue(tile.waitForExistence(timeout: 15)); tile.tap()
         XCTAssertTrue(canvas.waitForExistence(timeout: 20))
+        let reopenedWindow = rotateDevice(app, to: .landscapeLeft)
+        XCTAssertGreaterThan(reopenedWindow.width, reopenedWindow.height, "the reopened evidence must remain landscape")
+        assertAboveTheDock(app, canvas, dy: Double(onHost(paperRect(in: canvas), 0, 0.47).dy),
+                           "the reopened raster measurement patch")
         let reopenedPoints = paperPatch(canvas, paperRect(in: canvas), x: 0.3...0.7, y: 0.25...0.47)
         restoreEventually(reopenedPoints, after)
-        attachScreenshot(app, "liquify-raster-cold-reopen")
+        attachScreenshot(XCUIScreen.main, "liquify-raster-cold-reopen")
     }
 
     func testPosedBackingMatchesPixelOpsAndMovesThroughStreamDisplay() throws {

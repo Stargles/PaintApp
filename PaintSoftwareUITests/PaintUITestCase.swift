@@ -768,6 +768,8 @@ class PaintUITestCase: XCTestCase {
     /// thumb that far from where it reports itself. **It converges to a few hundredths and then stops
     /// answering a correction that small** (a 0.06 one moved it nowhere), which is why the caller says how
     /// near it needs the slider rather than being given a default it cannot always keep.
+    /// Endpoint requests travel to the slider's frame edge, beyond the inset thumb-centre position,
+    /// so the control actually clamps. Use tolerance zero when the exact endpoint is the premise.
     func adjustSlider(_ slider: XCUIElement, to position: CGFloat, tolerance: CGFloat, attempts: Int = 4,
                       file: StaticString = #filePath, line: UInt = #line) {
         // The thumb travels between the inset ends of the visible track. The side rail rotates its
@@ -785,7 +787,14 @@ class PaintUITestCase: XCTestCase {
             let current = slider.normalizedSliderPosition
             if abs(current - position) <= tolerance { return }
             reached.append(current)
-            point(current).press(forDuration: 0.1, thenDragTo: point(position), withVelocity: .slow,
+            var destination = point(position)
+            if position == 0 || position == 1 {
+                let toEdge = frame.height > frame.width
+                    ? CGVector(dx: 0, dy: position == 0 ? thumbInset : -thumbInset)
+                    : CGVector(dx: position == 0 ? -thumbInset : thumbInset, dy: 0)
+                destination = destination.withOffset(toEdge)
+            }
+            point(current).press(forDuration: 0.1, thenDragTo: destination, withVelocity: .slow,
                                  thenHoldForDuration: 0.1)
         }
         let last = slider.normalizedSliderPosition
@@ -1158,33 +1167,33 @@ class PaintUITestCase: XCTestCase {
                    withVelocity: .slow, thenHoldForDuration: 0.6)
     }
 
-    /// Draws a stroke and keeps the finger down at the end of it, which is the smart-shape gesture.
-    ///
-    /// **This no longer produces a shape, and cannot be made to.** `ShapeHoldClock` decides the hold
-    /// from `UITouch.timestamp` — newest sample minus newest *moving* sample — so it needs a pen that
-    /// keeps reporting while stationary. A real pencil does (measured on the owner's iPad: ~59
-    /// events/second through a 4.4 s stationary hold). **XCUITest's synthetic touch does not, and the
-    /// `thenHoldForDuration` below contributes nothing whatsoever**: the same gesture with the hold
-    /// set to 0.0 s, 1.5 s and 3.0 s delivered 134 / 136 / 136 samples spanning 2.218 / 2.217 /
-    /// 2.217 s of pen time — identical, i.e. the drag and only the drag. A 3.0 s *leading* press is
-    /// event-free the same way. Across all of them the clock's greatest accumulated stillness was
-    /// 0.000 s.
-    ///
-    /// It is not a velocity or a threshold that can be tuned around, either. XCUITest emits a move
-    /// only when the interpolated position changes (~0.5 pt quantum), so within one gesture the
-    /// spacing between samples is uniform — there is no way to say "travel, *then* be still" in a
-    /// single touch, and the public API has no multi-segment single-touch gesture. A drag slow enough
-    /// to read as still reads as still from its first sample, and fires the hold on a two-point
-    /// stroke that detects as nothing.
-    ///
-    /// So callers get a freehand stroke, not a shape. Every test using this helper that still passes
-    /// passes because it asserts something a freehand stroke satisfies too (ink present, one stroke
-    /// recorded); the two that genuinely needed the pending shape are skipped and named in BUGS.md.
-    /// **Do not "fix" this by weakening the clock** — the device data says the clock is right.
-    func drawAndHoldShape(on canvas: XCUIElement, from: CGVector, to: CGVector) {
-        let start = canvas.coordinate(withNormalizedOffset: from)
-        let end = canvas.coordinate(withNormalizedOffset: to)
-        start.press(forDuration: 0.1, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 1.5)
+    /// Draws a line, then keeps reporting subthreshold samples for 1.5 seconds before lifting.
+    /// A public thenHoldForDuration emits no stationary moves, so it cannot advance ShapeHoldClock.
+    /// The existing multi-segment synthesizer expresses both parts of this single touch. Its 0.5 pt
+    /// screen jitter stays below the production 2 canvas-point movement threshold at the asserted
+    /// scale, while 50 ms samples span the 0.8 s hold and its 0.1 s timer ticks. Ink alone is not proof
+    /// that this worked: every caller must actually reach the exposed adjustable-shape state.
+    func drawAndHoldShape(on canvas: XCUIElement, from: CGVector, to: CGVector) throws {
+        let transform = canvas.label.split(separator: " ").first { $0.hasPrefix("xform:") }
+        let scaleText = transform?.dropFirst("xform:".count).split(separator: ",").first
+        let scale = try XCTUnwrap(scaleText.flatMap { Double($0) })
+        XCTAssertGreaterThan(scale, 0.25, "PREMISE: 0.5 screen-point hold samples stay below 2 canvas points")
+        let start = canvas.coordinate(withNormalizedOffset: from).screenPoint
+        let end = canvas.coordinate(withNormalizedOffset: to).screenPoint
+        var points = (0...20).map { index in
+            let fraction = CGFloat(index) / 20
+            return CGPoint(x: start.x + (end.x - start.x) * fraction,
+                           y: start.y + (end.y - start.y) * fraction)
+        }
+        for index in 1...30 {
+            points.append(CGPoint(x: end.x + (index.isMultiple(of: 2) ? 0 : 0.5), y: end.y))
+        }
+        try fingerStroke(through: points, interval: 0.05)
+        let adjustable = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            canvas.label.split(separator: " ").contains("shape:adjustable")
+        }, object: canvas)
+        XCTAssertEqual(XCTWaiter.wait(for: [adjustable], timeout: 5), .completed,
+                       "PREMISE: the held line is an actual adjustable shape, not freehand ink: \(canvas.label)")
     }
 
     /// Bakes a shape sitting in the adjustable state, without drawing anything.
@@ -1689,14 +1698,15 @@ class PaintUITestCase: XCTestCase {
     func twoFingerGesture(from: (a: CGPoint, b: CGPoint), to: (a: CGPoint, b: CGPoint),
                           stagger: TimeInterval = 0.02, duration: TimeInterval = 0.6,
                           steps: Int = 12) throws {
+        let screenToPortrait = SynthesizedTouch.screenToPortrait()
         var paths: [AnyObject] = []
         for (origin, destination, down) in [(from.a, to.a, 0.0), (from.b, to.b, stagger)] {
-            let path = try SynthesizedTouch.path(at: origin, offset: down)
+            let path = try SynthesizedTouch.path(at: origin.applying(screenToPortrait), offset: down)
             for step in 1...steps {
                 let t = Double(step) / Double(steps)
                 try SynthesizedTouch.move(path, to: CGPoint(x: origin.x + (destination.x - origin.x) * t,
-                                                            y: origin.y + (destination.y - origin.y) * t),
-                                          at: stagger + duration * t)
+                                                            y: origin.y + (destination.y - origin.y) * t)
+                                            .applying(screenToPortrait), at: stagger + duration * t)
             }
             try SynthesizedTouch.lift(path, at: stagger + duration + 0.02)
             paths.append(path)
@@ -1759,12 +1769,13 @@ class PaintUITestCase: XCTestCase {
                                    holding: CGVector?, holdDrift: CGVector = .zero,
                                    holdLandsAt: TimeInterval = 0.1, travel: TimeInterval = 1.0) throws {
         let begin = 0.3, steps = 20
+        let screenToPortrait = SynthesizedTouch.screenToPortrait()
         let origin = element.coordinate(withNormalizedOffset: from).screenPoint
-        let dragging = try SynthesizedTouch.path(at: origin, offset: 0)
+        let dragging = try SynthesizedTouch.path(at: origin.applying(screenToPortrait), offset: 0)
         for step in 1...steps {
             let t = Double(step) / Double(steps)
-            try SynthesizedTouch.move(dragging, to: CGPoint(x: origin.x + delta.dx * t, y: origin.y + delta.dy * t),
-                                      at: begin + travel * t)
+            try SynthesizedTouch.move(dragging, to: CGPoint(x: origin.x + delta.dx * t, y: origin.y + delta.dy * t)
+                                        .applying(screenToPortrait), at: begin + travel * t)
         }
         let heldLifts = begin + travel + 0.05
         guard let holding else {
@@ -1773,13 +1784,13 @@ class PaintUITestCase: XCTestCase {
             return
         }
         let rest = element.coordinate(withNormalizedOffset: holding).screenPoint
-        let held = try SynthesizedTouch.path(at: rest, offset: holdLandsAt)
+        let held = try SynthesizedTouch.path(at: rest.applying(screenToPortrait), offset: holdLandsAt)
         for step in 1...steps {
             let t = Double(step) / Double(steps)
             // A finger that lands during the travel moves only after it lands: the synthesiser refuses a
             // path whose offsets go backwards.
-            try SynthesizedTouch.move(held, to: CGPoint(x: rest.x + holdDrift.dx * t, y: rest.y + holdDrift.dy * t),
-                                      at: max(begin + travel * t, holdLandsAt + 0.001 * Double(step)))
+            try SynthesizedTouch.move(held, to: CGPoint(x: rest.x + holdDrift.dx * t, y: rest.y + holdDrift.dy * t)
+                                        .applying(screenToPortrait), at: max(begin + travel * t, holdLandsAt + 0.001 * Double(step)))
         }
         try SynthesizedTouch.lift(held, at: heldLifts)
         try SynthesizedTouch.lift(dragging, at: heldLifts + 0.2)
@@ -1792,9 +1803,10 @@ class PaintUITestCase: XCTestCase {
     /// and the call returns once the finger has lifted.
     func fingerStroke(through points: [CGPoint], interval: TimeInterval = 0.02) throws {
         guard let first = points.first else { return }
-        let path = try SynthesizedTouch.path(at: first, offset: 0)
+        let screenToPortrait = SynthesizedTouch.screenToPortrait()
+        let path = try SynthesizedTouch.path(at: first.applying(screenToPortrait), offset: 0)
         for (index, point) in points.enumerated().dropFirst() {
-            try SynthesizedTouch.move(path, to: point, at: Double(index) * interval)
+            try SynthesizedTouch.move(path, to: point.applying(screenToPortrait), at: Double(index) * interval)
         }
         try SynthesizedTouch.lift(path, at: Double(points.count) * interval)
         try SynthesizedTouch.synthesize([path], named: "one-finger stroke")
@@ -2058,6 +2070,26 @@ class PaintUITestCase: XCTestCase {
 /// `alloc`/`init…` read off the runtime and handed back `Unmanaged` so ARC makes no assumption about
 /// ownership it cannot see; the few objects it leaks per gesture are a test process's to lose.
 private enum SynthesizedTouch {
+    /// Public XCUI gestures archive portrait events. XCUIScreen owns the actual display's logical
+    /// point size; the test runner's UIScreen can describe a different-sized window. Capture that
+    /// geometry once per rotated gesture, before constructing its paths.
+    static func screenToPortrait() -> CGAffineTransform {
+        let orientation = XCUIDevice.shared.orientation
+        guard orientation.isLandscape || orientation == .portraitUpsideDown else { return .identity }
+        let screen = XCUIScreen.main.screenshot().image.size
+        let width = min(screen.width, screen.height), height = max(screen.width, screen.height)
+        switch orientation {
+        case .landscapeLeft:
+            return CGAffineTransform(a: 0, b: 1, c: -1, d: 0, tx: width, ty: 0)
+        case .landscapeRight:
+            return CGAffineTransform(a: 0, b: -1, c: 1, d: 0, tx: 0, ty: height)
+        case .portraitUpsideDown:
+            return CGAffineTransform(a: -1, b: 0, c: 0, d: -1, tx: width, ty: height)
+        default:
+            return .identity
+        }
+    }
+
     static func path(at point: CGPoint, offset: Double) throws -> AnyObject {
         let object = try allocate("XCPointerEventPath")
         let selector = NSSelectorFromString("initForTouchAtPoint:offset:")
@@ -2084,10 +2116,8 @@ private enum SynthesizedTouch {
         let record = try allocate("XCSynthesizedEventRecord")
         let initSelector = NSSelectorFromString("initWithName:interfaceOrientation:")
         typealias Init = @convention(c) (AnyObject, Selector, NSString, Int) -> Unmanaged<AnyObject>
-        let orientation = XCUIDevice.shared.orientation.isLandscape
-            ? (XCUIDevice.shared.orientation == .landscapeLeft ? 3 : 4) : 1
         let made = unsafeBitCast(try implementation(record, initSelector), to: Init.self)(
-            record, initSelector, name as NSString, orientation).takeUnretainedValue()
+            record, initSelector, name as NSString, 1).takeUnretainedValue()
 
         let addSelector = NSSelectorFromString("addPointerEventPath:")
         typealias Add = @convention(c) (AnyObject, Selector, AnyObject) -> Void

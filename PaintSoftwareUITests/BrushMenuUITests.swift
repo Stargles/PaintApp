@@ -97,14 +97,32 @@ final class BrushMenuUITests: PaintUITestCase {
     /// Measured on the canvas rather than on `selectedBrush`, because a menu that wrote the right
     /// value into a manager nothing consulted would satisfy every model assertion in the suite.
     func testPickingABrushChangesTheInkTheNextStrokeLaysDown() throws {
+        XCUIDevice.shared.orientation = .landscapeLeft
         let app = XCUIApplication()
         XCTAssertTrue(launchCold(app))
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
-        // Round Soft is the default: 22 pt against the technical pen's 4.
-        let wideY = 0.30, thinY = 0.55
-        drawLine(on: canvas, from: CGVector(dx: 0.35, dy: wideY), to: CGVector(dx: 0.65, dy: wideY))
+        // A new scene keeps its own 5 pt size. Select the library's 22 pt preset explicitly;
+        // tapping the already-selected Soft row would open its editor instead of selecting it.
+        openBrushMenu(app)
+        tapWhenHittable(app.buttons["brushPanel.group.Basics"], "The Basics group row")
+        tapWhenHittable(app.buttons["brushPanel.brush.Round Hard"], "The other Basics brush")
+        let soft = app.buttons["brushPanel.brush.Round Soft"]
+        tapWhenHittable(soft, "The 22 pt Round Soft preset")
+        XCTAssertTrue(soft.isSelected)
+        app.buttons["toolbar.brushButton"].tap()
+        XCTAssertTrue(app.scrollViews["brushPanel.groupList"].waitForNonExistence(timeout: 3))
+
+        let paper = visiblePaperRect(app, in: canvas)
+        let left = Double(paper.minX + paper.width * 0.35)
+        let right = Double(paper.minX + paper.width * 0.65)
+        let middle = (left + right) / 2
+        let wideY = Double(paper.minY + paper.height * 0.25)
+        let thinY = Double(paper.minY + paper.height * 0.60)
+        assertAboveTheDock(app, canvas, dy: wideY, "the 22 pt brush stroke and width probe")
+        assertAboveTheDock(app, canvas, dy: thinY, "the technical pen stroke and width probe")
+        drawLine(on: canvas, from: CGVector(dx: left, dy: wideY), to: CGVector(dx: right, dy: wideY))
 
         openBrushMenu(app)
         tapWhenHittable(app.buttons["brushPanel.group.Inking"], "The Inking group row")
@@ -117,7 +135,7 @@ final class BrushMenuUITests: PaintUITestCase {
         app.buttons["toolbar.brushButton"].tap()
         XCTAssertTrue(app.scrollViews["brushPanel.groupList"].waitForNonExistence(timeout: 3))
 
-        drawLine(on: canvas, from: CGVector(dx: 0.35, dy: thinY), to: CGVector(dx: 0.65, dy: thinY))
+        drawLine(on: canvas, from: CGVector(dx: left, dy: thinY), to: CGVector(dx: right, dy: thinY))
 
         // **Both strokes measured off one screenshot, in pixels.**
         //
@@ -126,33 +144,26 @@ final class BrushMenuUITests: PaintUITestCase {
         // 21 screenshot pixels wide and a 4 pt one about 4 — a real, large difference that is *under
         // one sample step* when the step is a fraction of the host's height. Counting the inked rows
         // of one column measures the thing directly and needs no threshold to be guessed.
-        let widths = inkedColumnHeights(of: canvas, dx: 0.50, bands: [wideY, thinY], halfBand: 0.03)
-        XCTAssertGreaterThan(widths[0], 4, "PREMISE: the 22 pt default brush marks the paper and has width")
+        let widths = try inkedColumnHeights(of: canvas, dx: middle, bands: [wideY, thinY], halfBand: 0.03)
+        attachScreenshot(XCUIScreen.main, "selected-22pt-soft-and-4pt-pen-owner-screen")
+        XCTAssertGreaterThan(widths[0], 4, "PREMISE: the selected 22 pt brush marks the paper and has width")
         XCTAssertGreaterThan(widths[1], 0, "The technical pen should still draw a line")
         XCTAssertLessThan(widths[1], widths[0],
-                          "Picking the technical pen must reach the ink — its stroke is visibly narrower than the 22 pt brush the document opened with")
+                          "Picking the technical pen must reach the ink — its stroke is visibly narrower than the selected 22 pt brush")
     }
 
     /// How many rows of one pixel column are inked, inside each of several horizontal bands, from a
     /// **single** screenshot. `halfBand` is the half-height of each band in normalized coordinates.
     private func inkedColumnHeights(of element: XCUIElement, dx: Double,
-                                    bands: [Double], halfBand: Double) -> [Int] {
-        guard let cg = element.screenshot().image.cgImage else { return bands.map { _ in -1 } }
-        let width = cg.width, height = cg.height
-        var buffer = [UInt8](repeating: 0, count: height * width * 4)
-        guard let context = CGContext(data: &buffer, width: width, height: height, bitsPerComponent: 8,
-                                      bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
-                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
-            return bands.map { _ in -1 }
-        }
-        context.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
-        let x = min(max(Int(dx * Double(width)), 0), width - 1)
+                                    bands: [Double], halfBand: Double) throws -> [Int] {
+        let picture = try XCTUnwrap(ScreenshotPixels(element.screenshot().image))
+        let height = picture.height
         return bands.map { centre in
             let low = max(Int((centre - halfBand) * Double(height)), 0)
             let high = min(Int((centre + halfBand) * Double(height)), height - 1)
             return (low...high).count { row in
-                let offset = row * width * 4 + x * 4
-                return !(buffer[offset] > 240 && buffer[offset + 1] > 240 && buffer[offset + 2] > 240)
+                let pixel = picture.pixel(normalizedX: dx, normalizedY: (Double(row) + 0.5) / Double(height))
+                return !(pixel.r > 240 && pixel.g > 240 && pixel.b > 240)
             }
         }
     }

@@ -16,24 +16,31 @@ final class VideoBakeUITests: PaintUITestCase {
     /// The normal close/reopen route, with decoded footage distinguished from the neutral missing
     /// asset placeholder by its actual grey pixels. The picker seed is the same as the bake test.
     func testVideoDrawsItsDecodedPictureAfterAGalleryRoundTrip() throws {
+        XCUIDevice.shared.orientation = .landscapeLeft
         let app = XCUIApplication()
         app.launchArguments = ["-resetGallery", "-uiTestSeedVideo"]
         XCTAssertTrue(launchIntoEditor(app))
+        let window = rotateDevice(app, to: .landscapeLeft)
+        XCTAssertGreaterThan(window.width, window.height, "the owner-size evidence must settle in landscape")
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
         let point = CGVector(dx: 0.5, dy: 0.4)
+        assertAboveTheDock(app, canvas, dy: Double(point.dy), "the decoded-video probe")
         func isFirstFrame(_ pixel: RGBA) -> Bool {
             abs(Int(pixel.r) - 40) <= 18 && abs(Int(pixel.g) - 40) <= 18 && abs(Int(pixel.b) - 40) <= 18
         }
         XCTAssertNotNil(waitForPixel(canvas, at: point, matches: isFirstFrame),
                         "The seeded clip's first decoded frame is grey40, not paper or the placeholder.")
-        attachScreenshot(app, "video-before-gallery-close")
+        attachScreenshot(XCUIScreen.main, "video-before-gallery-close")
         saveEditorAndReturnToGallery(app).tap()
         XCTAssertTrue(app.staticTexts["timeline.frameLabel"].waitForExistence(timeout: 15))
+        let reopenedWindow = rotateDevice(app, to: .landscapeLeft)
+        XCTAssertGreaterThan(reopenedWindow.width, reopenedWindow.height, "the reopened evidence must remain landscape")
+        assertAboveTheDock(app, canvas, dy: Double(point.dy), "the reopened decoded-video probe")
         XCTAssertNotNil(waitForPixel(canvas, at: point, matches: isFirstFrame),
                         "The reopened document must draw its saved footage again.")
         XCTAssertNotNil(readCel(app, layerIndex: 1, celIndex: 0))
-        attachScreenshot(app, "video-after-gallery-reopen")
+        attachScreenshot(XCUIScreen.main, "video-after-gallery-reopen")
     }
 
     /// Two-stage tap: the first only selects the block/frame, the second (landing on what is

@@ -89,8 +89,11 @@ final class BrushEditorUITests: PaintUITestCase {
     /// dragged and *both* dots stay where they were. So: the dragged dot must move, **and** the other
     /// dot must not. Either alone is satisfiable by the defect.
     func testDraggingACurveNodeMovesItAndLeavesTheOtherNodeStill() throws {
+        XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
         XCTAssertTrue(launchCold(app))
+        let window = rotateDevice(app, to: .portrait)
+        XCTAssertGreaterThan(window.height, window.width, "the narrow-column control must settle in portrait")
         openEditor(app)
         expand(app, "size")
 
@@ -100,6 +103,10 @@ final class BrushEditorUITests: PaintUITestCase {
         let graph = app.otherElements["brushPanel.curve.size.0.0.graph"]
         XCTAssertTrue(graph.waitForExistence(timeout: 5),
                       "An input's chain must show the curve ramp module — §2.24")
+        let viewport = app.scrollViews["brushPanel.outputList"]
+        XCTAssertTrue(viewport.waitForExistence(timeout: 5))
+        XCTAssertTrue(viewport.frame.contains(graph.frame),
+                      "The complete response graph must fit inside its output-column viewport")
         let anchored = app.otherElements["brushPanel.curve.size.0.0.key.0"]
         let dragged = app.otherElements["brushPanel.curve.size.0.0.key.1"]
         XCTAssertTrue(dragged.waitForExistence(timeout: 5), "A two-key ramp draws two nodes")
@@ -107,11 +114,17 @@ final class BrushEditorUITests: PaintUITestCase {
         let curveBefore = graph.value as? String
         let anchoredBefore = anchored.frame.midY
         let draggedBefore = dragged.frame.midY
+        let visibleHandle = dragged.frame.intersection(graph.frame).intersection(viewport.frame)
+        XCTAssertFalse(visibleHandle.isNull || visibleHandle.isEmpty,
+                       "The chosen endpoint must have a visible touch target inside the graph")
+        attachScreenshot(XCUIScreen.main, "Portrait response graph before moving its visible endpoint")
 
         // Down the graph by a third of its height: more y is less value.
-        dragged.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        graph.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+            dx: visibleHandle.midX - graph.frame.minX, dy: visibleHandle.midY - graph.frame.minY))
             .press(forDuration: 0.1,
                    thenDragTo: graph.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.6)))
+        attachScreenshot(XCUIScreen.main, "Portrait response graph after moving its endpoint; other endpoint anchored")
 
         XCTAssertNotEqual(graph.value as? String, curveBefore, "The drag must reach the curve")
         XCTAssertGreaterThan(app.otherElements["brushPanel.curve.size.0.0.key.1"].frame.midY,

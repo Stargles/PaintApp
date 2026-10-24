@@ -314,7 +314,7 @@ final class VectorLayerContentUITests: PaintUITestCase {
 
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
-        drawAndHoldShape(on: canvas, from: CGVector(dx: 0.25, dy: 0.5), to: CGVector(dx: 0.75, dy: 0.5))
+        try drawAndHoldShape(on: canvas, from: CGVector(dx: 0.25, dy: 0.5), to: CGVector(dx: 0.75, dy: 0.5))
         commitPendingShape(on: app)
 
         app.buttons["toolbar.layersButton"].tap()
@@ -423,7 +423,7 @@ final class ShapeRecoveryUITests: PaintUITestCase {
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
         // A horizontal line across the middle of the canvas, held at the end so it snaps to a shape.
-        drawAndHoldShape(on: canvas, from: CGVector(dx: 0.25, dy: 0.5), to: CGVector(dx: 0.75, dy: 0.5))
+        try drawAndHoldShape(on: canvas, from: CGVector(dx: 0.25, dy: 0.5), to: CGVector(dx: 0.75, dy: 0.5))
         XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.5, dy: 0.5)),
                        "The shape should be visible while it sits in the adjustable state")
 
@@ -466,7 +466,7 @@ final class ShapeRecoveryUITests: PaintUITestCase {
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
-        drawAndHoldShape(on: canvas, from: CGVector(dx: 0.25, dy: 0.5), to: CGVector(dx: 0.75, dy: 0.5))
+        try drawAndHoldShape(on: canvas, from: CGVector(dx: 0.25, dy: 0.5), to: CGVector(dx: 0.75, dy: 0.5))
         XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.5, dy: 0.5)),
                        "The shape should be visible while it sits in the adjustable state")
 
@@ -487,7 +487,7 @@ final class ShapeRecoveryUITests: PaintUITestCase {
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
-        drawAndHoldShape(on: canvas, from: CGVector(dx: 0.25, dy: 0.5), to: CGVector(dx: 0.75, dy: 0.5))
+        try drawAndHoldShape(on: canvas, from: CGVector(dx: 0.25, dy: 0.5), to: CGVector(dx: 0.75, dy: 0.5))
         commitPendingShape(on: app)
         XCTAssertTrue(waitUntilFilled(canvas, dx: 0.5, dy: 0.5, timeout: 5),
                       "The baked shape should be on screen before undoing it")
@@ -515,17 +515,27 @@ final class ShapeRecoveryUITests: PaintUITestCase {
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
-        drawAndHoldShape(on: canvas, from: CGVector(dx: 0.25, dy: 0.38), to: CGVector(dx: 0.75, dy: 0.38))
-        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.5, dy: 0.38)),
+        let paper = visiblePaperRect(app, in: canvas)
+        let left = Double(paper.minX + paper.width * 0.25)
+        let right = Double(paper.minX + paper.width * 0.75)
+        let middle = (left + right) / 2
+        let shapeY = Double(paper.minY + paper.height * 0.30)
+        let strokeY = Double(paper.minY + paper.height * 0.70)
+        assertAboveTheDock(app, canvas, dy: shapeY, "the held shape and its ink probe")
+        assertAboveTheDock(app, canvas, dy: strokeY, "the first stroke over the pending shape and its ink probe")
+        try drawAndHoldShape(on: canvas, from: CGVector(dx: left, dy: shapeY), to: CGVector(dx: right, dy: shapeY))
+        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: middle, dy: shapeY)),
                        "the shape should be sitting in the adjustable state")
 
         // One touch, well clear of the shape's endpoint handles.
-        drawLine(on: canvas, from: CGVector(dx: 0.25, dy: 0.68), to: CGVector(dx: 0.75, dy: 0.68))
+        drawLine(on: canvas, from: CGVector(dx: left, dy: strokeY), to: CGVector(dx: right, dy: strokeY))
 
-        XCTAssertTrue(waitUntilFilled(canvas, dx: 0.5, dy: 0.68, timeout: 5),
+        let firstTouchLanded = waitUntilFilled(canvas, dx: middle, dy: strokeY, timeout: 5)
+        attachScreenshot(XCUIScreen.main, "pending-shape-and-first-stroke-owner-screen")
+        XCTAssertTrue(firstTouchLanded,
                       "the stroke drawn over a pending shape must land on the first touch, "
                       + "not be swallowed as a dismissal of the shape")
-        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.5, dy: 0.38)),
+        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: middle, dy: shapeY)),
                        "committing the shape must keep its ink, not discard it")
 
         app.buttons["toolbar.layersButton"].tap()
@@ -538,45 +548,45 @@ final class ShapeRecoveryUITests: PaintUITestCase {
     /// Grabbing a line's *start* handle has to move that end. Both handles reported through one
     /// callback that unconditionally wrote `endPoint`, so dragging the start handle silently
     /// dragged the far end instead and the line collapsed toward the handle being held.
-    ///
-    /// **Skipped for the same reason as `CanvasTransformFreezeUITests`' pinch-with-a-pending-shape
-    /// test, and it is worth saying which reason it is *not*.** This one fails on a handle-drag
-    /// assertion, so it reads like a bug in the new anchor maths or in the enlarged handle hit
-    /// target — and it is neither. A line's handles are `.start`/`.end`/`.rotation`; `anchor(for:)`
-    /// returns nil for all three and `report` sends them straight to `onEndpointDragged`, so
-    /// `ShapeGeometry.canvasAnchor` is not on this path at all. What actually happens is that
-    /// `drawAndHoldShape` never produces a shape (`shape:none`, measured), so the "handle drag" is
-    /// just a second freehand stroke and the first one is still sitting on the original path when
-    /// the assertion looks. See BUGS.md.
     func testDraggingALinesStartHandleMovesThatEndAndLeavesTheOther() throws {
-        throw XCTSkip("XCUITest cannot synthesise a stationary hold — see BUGS.md")
-
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
 
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
-        // A horizontal line; its start handle sits at dx 0.25, its end handle at dx 0.75.
-        drawAndHoldShape(on: canvas, from: CGVector(dx: 0.25, dy: 0.5), to: CGVector(dx: 0.75, dy: 0.5))
-        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.5, dy: 0.5)),
+        // Keep the same geometry inside the measured visible paper; host y0.75 can be the dock.
+        let paper = visiblePaperRect(app, in: canvas)
+        let start = onHost(paper, 0.25, 0.50)
+        let end = onHost(paper, 0.75, 0.50)
+        let movedStart = onHost(paper, 0.30, 0.75)
+        let originalMidpoint = onHost(paper, 0.50, 0.50)
+        let movedMidpoint = onHost(paper, 0.525, 0.625)
+        for (name, point) in [("start handle", start), ("fixed far end", end),
+                              ("drag destination", movedStart), ("original midpoint", originalMidpoint),
+                              ("moved midpoint", movedMidpoint)] {
+            assertAboveTheDock(app, canvas, dy: point.dy, "the \(name)")
+        }
+        try drawAndHoldShape(on: canvas, from: start, to: end)
+        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, at: originalMidpoint)),
                        "the line should be sitting in the adjustable state")
 
         // Drag the start handle down and to the right, far enough that the two possible outcomes
-        // don't overlap anywhere:
+        // don't overlap anywhere (these are fractions of the visible paper):
         //   fixed  — the line runs (0.30, 0.75) → (0.75, 0.50), through (0.525, 0.625)
         //   broken — the *end* follows the finger instead, collapsing the line into the short
         //            stub (0.25, 0.50) → (0.30, 0.75), which never comes near that midpoint.
-        let startHandle = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5))
+        let startHandle = canvas.coordinate(withNormalizedOffset: start)
         startHandle.press(forDuration: 0.3,
-                          thenDragTo: canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.30, dy: 0.75)),
+                          thenDragTo: canvas.coordinate(withNormalizedOffset: movedStart),
                           withVelocity: .slow,
                           thenHoldForDuration: 0.3)
         commitPendingShape(on: app)
+        attachScreenshot(XCUIScreen.main, "moved-start-handle-and-fixed-far-end")
 
-        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: 0.5, dy: 0.5)),
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, at: originalMidpoint)),
                       "the line should have moved off its original path")
-        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.525, dy: 0.625)),
+        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, at: movedMidpoint)),
                        "the line should run from the dragged start handle to the end that was left "
                        + "alone — an empty midpoint here means the far end followed the finger instead")
     }
