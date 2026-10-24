@@ -25,7 +25,7 @@ Installed normal Release remains bcd7a6af, UUID F6102F9A-6D31-3185-B078-47B4C419
   See the external mutation plan in `~/PaintWork/s54-architecture-audit/library-ownership/`. No native
   build/runtime/UI/mutation gate has run. WIP, do not merge.
 - Audit background tree: `~/PaintWork/PaintApp-s54-background-ownership`, tmp/s54-background-ownership.
-  Rebased from fd73d821 onto library-ready 9d3ff76e; current full HEAD
+  Rebased from fd73d821 onto library-ready 9d3ff76e; implementation commit
   3238a5fec226279fbe5edc8a89890d39800b583b. Export cancellation, maintenance serialization and
   bounded/cancelled thumbnails; five regressions. No native compile/runtime/UI/mutation gate. WIP,
   do not merge.
