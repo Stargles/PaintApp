@@ -503,7 +503,7 @@ final class StrokePathFitLogicTests: XCTestCase {
     }
 
     func testStationaryOffersKeepTheOldKnotsAndExactChannelAdditionOrder() {
-        for count in [16, 32, 64] {
+        for count in [3, 16, 32, 64] {
             let samples = holdFixture(count)
             var reference = ReferenceFit()
             var fit = StrokePathFit()
