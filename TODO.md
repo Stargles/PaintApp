@@ -1,5 +1,17 @@
 # TODO
 
+## Final source consolidation — recorded before integration
+
+Root authorizes one offline consolidator in `tmp/s54-final-integration`, starting from freshly fetched
+origin/main then fast-forwarding exactfb1dd34ce6656314b165000256a690ae7f585932. Add only the recorded owned
+brush-preview, simulator-only test-hook, palette-validation, stationary-fit/livewalk, metadata-repair
+and final stream commits. Preserve current dependency rulings, source ownership and unfinished tasks;
+resolve shared hunks explicitly. No native, main merge, push or device operation. Raster43-fault plan
+is offline-prepared over32 selectors/728 frozen paths; no mutant execution is claimed. Root owns the
+existing native job. Stronger brush scale fixture followup is pending its pin. Exact component SHAs,
+byte inventories and conflict evidence live in `~/PaintWork/s54-architecture-audit/final-integration/`.
+
+
 Current qualification correction: combined847/847 is green at6b5010d9; the new52-fault run has10
 assertion-red cases, then an unexpected-green playhead-purity fault. Move the existing purity
 assertions before the later control restores the playhead, commit and rebuild normal source before
