@@ -250,7 +250,23 @@ final class LiquifyLogicTests: XCTestCase {
             opacity: moved.opacity, samples: moved.samples, lattice: moved.lattice, seed: moved.seed)
         XCTAssertEqual(try rendered(moved), try rendered(ordinary))
         let restored = try JSONDecoder().decode(VectorStroke.self, from: JSONEncoder().encode(moved))
-        XCTAssertEqual(try rendered(restored), try rendered(moved), "the normal cut walk survives first save")
+        let ordinaryForCodec = VectorStroke(id: moved.id, brush: moved.brush, color: moved.color,
+            size: moved.size, opacity: moved.opacity, samples: moved.samples, precise: moved.precise,
+            composite: moved.composite, lattice: moved.lattice, seed: moved.seed)
+        // Float32 coordinates can be quantized on first save; use an ordinary stroke
+        // through the same codec as the exact reference for reopened ink.
+        let ordinaryReopened = try JSONDecoder().decode(VectorStroke.self,
+            from: JSONEncoder().encode(ordinaryForCodec))
+        XCTAssertTrue(restored.samples == ordinaryReopened.samples,
+                      "the moved centreline must match an independent precise codec round trip")
+        XCTAssertTrue(restored.lattice == ordinaryReopened.lattice,
+                      "the moved parent dab walk must match an independent precise codec round trip")
+        XCTAssertEqual(restored.seed, moved.seed, "the parent dab random field must survive save")
+        XCTAssertEqual(restored.precise, ordinaryReopened.precise)
+        XCTAssertEqual(restored.lattice?.precise, ordinaryReopened.lattice?.precise)
+        XCTAssertEqual(restored.lattice?.parameters, ordinaryReopened.lattice?.parameters)
+        XCTAssertTrue(try rendered(restored) == rendered(ordinaryReopened),
+                      "a reopened cut piece renders like an independently saved ordinary stroke")
     }
 
     func testPointEditKeepsAnExistingProjectivePlacementAndRefreshesItsBakedSource() throws {
