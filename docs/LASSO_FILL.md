@@ -252,8 +252,10 @@ and retained memory must be qualified before declaring the new implementation re
 
 **Mend All Fills** is a new edit on a **vector layer**, applied to its stored fills across all owned
 cels. It uses the current fill settings and reference layers at each cel's start frame, with the
-existing lasso reference-color rule sampled from that fill's contour. Saved fills have no historical
-bucket seed or reference provenance; the action does not reconstruct those. Generated linked cels
+existing paper/modal reference-color rule sampled from that fill's known covered area. Edge Overlap
+can place its contour inside ink, so the contour is not a safe background sample. Ordinary lasso
+gestures still sample their collar. Saved fills have no historical bucket seed or reference provenance;
+the action does not reconstruct those. Generated linked cels
 remain derived from their source drawings. Process bounded windows in sequence, preserve each fill's
 paint, opacity, animation membership and empty regions, and make the whole edit one undo step.
 Raster layers have flattened paint rather than identifiable saved fills and do not offer this action.

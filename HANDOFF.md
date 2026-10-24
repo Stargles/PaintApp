@@ -32,7 +32,7 @@ inventories/copied diagnostics; no device restart, app launch or install.
    Shared per-fill fix still covers raster+vector. No new raster storage/history authorized.
    Owner also rules: protect uncertain joins instead of inferring hidden edges, and retain quick
    real-time feedback. Shared exact nearest-feature preparation/internal-mend and vector batch action
-   are now in source-only implementation in the separate fill tree; native gates have not started.
+   are implemented in the separate fill tree; native qualification is in progress below.
    Naive same-fill rays cross U/closed-hole boundaries; the enclosed-components-only restriction was
    rejected. Review fixes require contiguous digital rays, all tied nearest-open witnesses and bounded
    picture ownership. No new saved provenance or second mending mode.

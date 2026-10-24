@@ -196,10 +196,12 @@ preparation and bound any new work; avoid expensive full-image CPU analysis on e
 are not individually identifiable; no raster storage redesign is authorized. The per-fill mending
 correction still uses the shared raster/vector fill pipeline. Use the same setting/semantics as an
 individual fill; inspect existing batch edit/undo/save patterns.
-Determine raster/vector representation and boundary provenance from the code before assuming an
-implementation. Core, batch and compact shared contour source/tests are committed. First actual focused run executed198 methods:193passed/5failed (9 assertion records): two new core methods return no patches, and three window methods retain the old38px halo expectation. The window expectations are corrected to the78px halo. A real GPU diagnostic confirmed exact-zero colour classification as the cause of absent core patches; a scoped precise conversion plus direct256-level oracle is committed and pending normal rerun. Four new batch/reference/refusal regressions bring focused203/fast5275/full5860; independent batch fixes are committed but unqualified. Native fill
-gates follow the old47d benchmark; prototypes/static checks are not app qualification. Worktree: `~/PaintWork/PaintApp-s53-fill-mend`, `tmp/s53-fill-mend`.
-
+Core, vector batch and the shared compact contour replacement are committed. Normal focused203/203
+passed;18 mutation cases are assertion-red before deliberately stopping for a newly found default-
+overlap sampling defect. The real bucket regression confirms that defect with no premise failures;
+covered-area sampling then passes it1/1. Broader final qualification, Reach-after-Overlap correction
+and cache-refusal safety remain in progress. Static counts are provisional until those tests land.
+Worktree: `~/PaintWork/PaintApp-s53-fill-mend`, `tmp/s53-fill-mend`.
 - [ ] Reproduce internal ink holes and identify the root cause in the existing mending path.
 - [ ] Cover interior stroke gaps while preserving the original outer edge, using the current setting.
 - [ ] Qualify the compact shared contour replacement, fragmented masks and preflighted point-limit refusal.
