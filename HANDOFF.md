@@ -24,8 +24,12 @@ all35 old repair methods remain intact; integrated backup25/location23 and five 
 regressions are inherited unchanged. Startup assertions include lock-protected direct repair and
 maintenance counts, with expectations only arranging the held-worker observations.
 No native build/test/simulator/device operation by this task; root owns qualification. Static UI
-lints, plutil and diff-check pass. Native compiler/isolation, focused38+25+23 plus inherited background classes, Debug/Release full fast
-census, committed-baseline faults and cold old-library drawn screen/readiness remain unrun. Root can
+lints, plutil and diff-check pass. Root app+test compilation succeeded with no actor-boundary errors.
+Combined189 at63b5abe3 ran187passed/2test-fixture failures. Startup's new failure test misused the
+pre-snapshot extras helper after protection snapshots existed: refine only this test to compare every
+original byte, separately check untouched protection snapshots/current owned stages, and consume its
+expectations before throwing file assertions. All35 older tests/helpers remain intact. Focused rerun,
+Debug/Release full fast census, faults and cold old-library drawn screen/readiness remain pending. Root can
 enhance the prepared external host-seeded cold harness to observe startup.preparing/progress before
 gallery and rotate while repair is in flight; seed the full copied library for a real visible phase.
 No product delay/seed hook or permanent framework was added. Follow-up removes the now-unused
@@ -47,7 +51,8 @@ Installed normal Release remains bcd7a6af, UUID F6102F9A-6D31-3185-B078-47B4C419
   clean65b39e01. Qualified production is unchanged from6656a5a8; latest corrections were two stale tests.
 - Active fill tree: `~/PaintWork/PaintApp-s53-fill-mend`, tmp/s53-fill-mend. Production is frozen at
   d1ff2ad0/265e588e. Later commits change only UI fixtures/readers and records. Resolve current HEAD
-  with Git; latest four-case UI fixture run is3/4 green; one extension-buffer driver failure remains.
+  with Git; full four-case UI fixture class is4/4 at071c7eb2 after an assertion-red visibility fault;
+  all723 source bytes/modes restored and five owner-size whole-screen pictures inspected by root.
 - Audit library tree: `~/PaintWork/PaintApp-s54-library-ownership`, tmp/s54-library-ownership. Strict
   shared file-tree/content identity and UUID Trash ownership; PBX source registered. Two added logic
   regressions now cover migration preserving both sides after linked-destination comparison failure and
@@ -64,10 +69,13 @@ Installed normal Release remains bcd7a6af, UUID F6102F9A-6D31-3185-B078-47B4C419
   hit account usage limits; root preserved partial implementations and completed initial tests/PBX.
   Do not assume those snapshots are finished or repeatedly retry limited agents without a changed limit.
 
-Root owns the sole native slot. Last completed test run: `native/fill-ui4-cleaned-run01` at332cc84a,
-**3passed/1failed/0skipped**, all723 source bytes/modes exact. No task-owned native process remains.
-No iPad operation. All production/project/shared-helper bytes remain identical to265e588e; only the FillMend UI
-file and records changed. This is NOT a fully green UI class. External live status:
+Root owns the sole native slot. Fill class `native/fill-ui4-071-restored-run01` at071c7eb2:
+**4passed/0failed/0skipped**, all723 source bytes/modes exact; five whole-screen owner-size pictures
+inspected by root. The full-containment visibility fault produced1/1 actual assertion-red, then the
+normal four-case class passed4/4. This fixes the test driver; app core remains identical to265e588e.
+No iPad operation. Combined native189 at63b5abe3 compiled app+tests with no actor-boundary errors,
+187passed/2test-fixture failures (Backup URL premise and startup failure helper misuse). Both have
+scoped assertion refinements; root must rerun before claiming the integrated classes green. External live status:
 `~/PaintWork/s52-vector-points/runtime-qualification/root-status.json`.
 
 Owned simulators: logic M5 **39E84984-3C6F-4A6A-8DC8-D1098F6B623E** shut down; UI iPad9

@@ -12,8 +12,9 @@ until 10 a.m. Toronto time. The later point-only vector ruling below supersedes 
 **Checkpoint2026-10-24:** point-only Liquify/newest retention remain unmerged and not installed; their
 logic, affected UI and saving-cost gates qualify. Fill core focused206 and35 distinct fault recipes
 qualify; Debug/Release each5278=5274passed+4known skips. Six old/new fixtures×five widths preserve filled
-masks. New fill/batch UI2/2 and ten old workflows pass; corrected full fill class is3/4, with an extension
-slider-driver failure remaining. Audit has19 source candidates, two unqualified implementation branches. Startup repair took
+masks. New fill/batch UI2/2 and ten old workflows pass; corrected full fill class is4/4 at071c7eb2,
+with all723 source bytes/modes restored and five owner-size whole-screen pictures inspected by root.
+A visibility fault produced an actual assertion failure, then normal4/4 passed; app core remains265e. Audit has19 source candidates, two unqualified implementation branches. Startup repair took
 11.013s on M5 before first UI; cold-start/scheduling work remains before install. Erasing cause remains
 unresolved. Installed Release is stillbcd7a6af; no device launch/restart/install this pass.
 
@@ -282,7 +283,11 @@ account usage limits; root continues. The full source inventory is not yet fully
   Active `tmp/s54-repair-startup` inherits frozen fill `fd73d821`. Remove pre-screen synchronous
   repair, keep library access gated until complete/error, retain strict conversion/recovery and all
   old-writer fixtures. StateObject gate + nonisolated worker +3 focused regression methods prepared;
-  native compile/focused/fast/mutation/cold visible UI gates remain. Native slot belongs to root;
+  native app+test compilation passes with no actor-boundary errors. Root focused189 ran187passed/
+  2fixture failures; startup failure test incorrectly applied the pre-snapshot extras helper after
+  protection snapshots existed. Refine only this new test to compare original bytes directly and
+  separately verify untouched protection snapshots/current owned stages; preserve all35 older tests.
+  Focused rerun/fast/mutation/cold visible UI gates remain. Native slot belongs to root;
   this task prepares code/tests without native runs.
 - [ ] Rendering/storage: derived-frame recovery/close, masked source budgets, editable raster residency, video pressure.
 - [ ] Stream transport: bounded ordered backpressure, framing limits, connection readiness/close ownership.

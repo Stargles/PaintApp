@@ -84,7 +84,7 @@ final class PointGeometryRepairLogicTests: XCTestCase {
     }
 
     func testStartupFailurePreservesSourcesAndNeverRunsRecoveryOrOpensLibrary() async throws {
-        _ = try install("material-strokes")
+        let package = try install("material-strokes")
         let before = try bytes(root)
         let repairEntered = expectation(description: "single repair attempt")
         repairEntered.assertForOverFulfill = true
@@ -104,12 +104,25 @@ final class PointGeometryRepairLogicTests: XCTestCase {
         })
         await startup.start()
         XCTAssertEqual(startup.phase, .failed("Conversion refused before replacement"))
-        try assertInputsPreserved(before)
         await startup.start()
         XCTAssertEqual(repairCalls.withLock { $0 }, 1, "Failure must wait for an explicit relaunch retry")
         XCTAssertEqual(maintenanceCalls.withLock { $0 }, 0, "Recovery cannot run after conversion refusal")
         await fulfillment(of: [repairEntered, maintenance], timeout: 0.1)
         XCTAssertEqual(startup.phase, .failed("Conversion refused before replacement"))
+        let after = try bytes(root)
+        for (path, data) in before { XCTAssertEqual(after[path], data, "Original bytes must survive refusal: " + path) }
+        // This refusal is after protection copies, unlike the earlier pre-snapshot failure tests.
+        // Update snapshots retain the previous writer's exact bytes; only owned stages are current.
+        let snapshots = ProjectBackupManager.allProjectPackages(in: ProjectBackupManager.backupsRootDirectory)
+        XCTAssertEqual(snapshots.count, 1)
+        for snapshot in snapshots { XCTAssertEqual(try bytes(snapshot), try bytes(package)) }
+        let entries = try XCTUnwrap(FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isDirectoryKey]))
+        var stages: [URL] = []
+        for case let entry as URL in entries where entry.lastPathComponent.hasPrefix(".point-geometry-") {
+            if try entry.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true { stages.append(entry) }
+        }
+        XCTAssertEqual(stages.count, 2, "Both live and untouched protection-copy conversions remain recoverable")
+        for stage in stages { XCTAssertTrue(ProjectBackupManager.validateProjectForRestore(at: stage)) }
     }
 
     private func install(_ name: String, at relativePath: String? = nil) throws -> URL {
