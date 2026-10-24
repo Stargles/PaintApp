@@ -488,7 +488,7 @@ struct CanvasPixelTransformInput {
             var outputs: [CelOutput] = []
             for cel in cels {
                 let result: Result<CelOutput, RasterResidency.Failure> = autoreleasepool {
-                    func transform(_ source: RasterSource?) throws -> RasterSource? {
+                    func transform(_ source: RasterSource?) throws(RasterResidency.Failure) -> RasterSource? {
                         guard let source else { return nil }
                         let changed: RasterSource
                         switch operation {
@@ -503,7 +503,7 @@ struct CanvasPixelTransformInput {
                     do {
                         return .success(CelOutput(layerID: cel.layerID, celID: cel.celID,
                             raster: try transform(cel.raster), baked: try transform(cel.baked), strokeCount: cel.strokeCount))
-                    } catch { return .failure(error as? RasterResidency.Failure ?? .unreadableBacking) }
+                    } catch { return .failure(error) }
                 }
                 switch result {
                 case .success(let output): outputs.append(output)

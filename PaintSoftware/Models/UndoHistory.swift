@@ -115,13 +115,13 @@ enum UndoBudget {
 
     /// Invalid/overflowed retained-byte arithmetic must refuse/trim conservatively, never wrap into
     /// a cheap action. These prices are nonnegative payloads, not signed coordinate arithmetic.
-    static func addingCost(_ lhs: Int, _ rhs: Int) -> Int {
+    nonisolated static func addingCost(_ lhs: Int, _ rhs: Int) -> Int {
         guard lhs >= 0, rhs >= 0 else { return Int.max }
         let (bytes, overflow) = lhs.addingReportingOverflow(rhs)
         return overflow ? Int.max : bytes
     }
 
-    static func payloadBytes(count: Int, stride: Int) -> Int {
+    nonisolated static func payloadBytes(count: Int, stride: Int) -> Int {
         guard count >= 0, stride >= 0 else { return Int.max }
         let (bytes, overflow) = count.multipliedReportingOverflow(by: stride)
         return overflow ? Int.max : bytes

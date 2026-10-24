@@ -478,7 +478,7 @@ final class StrokeScratch: DabTarget {
         // has just moved has to know where it now is or the texture would slide under the ink.
         let previous: UIImage?
         do { previous = try window?.renderToUIImage().get() }
-        catch { failure = error as? RasterResidency.Failure ?? .unreadableBacking; return nil }
+        catch { failure = error; return nil }
         let prepared = RasterLayerTexture.rendered(size: next.size, canvasOrigin: next.origin, using: residency) { _ in
             backdrop?.draw(at: CGPoint(x: -next.minX, y: -next.minY))
             if let previous, !windowRect.isNull {

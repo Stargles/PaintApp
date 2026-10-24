@@ -18,6 +18,14 @@ new tests or behavior mode. Existing semantic/fault gates remain; source-only ch
 compiler/native qualification. After integration, fresh final pin/baseline and external repin required.
 Evidence: ~/PaintWork/s54-final-qualification/typed-failure-cleanup-40f77f19/.
 
+Bounded cleanup implemented in this isolated branch: the three typed raster failure catches now
+preserve the original error, including the private transform helper whose throws are explicitly the
+same RasterResidency.Failure. Only the two argument-only UndoBudget arithmetic helpers are nonisolated;
+shape detection retains the same layer-existence guard through contains. Four production files, no
+test/method/line-count changes, no other actor or owner edits. UI identifier/helper lints, plist and
+diff checks pass; compiler/native/fault qualification is unrun. Root must review before integration,
+then establish the successor final pin/baseline. Frozen final-check/integration remain untouched.
+
 The reviewed final UI corrections are assembled in `~/PaintWork/PaintApp-s54-final-integration`
 on `tmp/s54-final-integration`, from cleandb544db02a2edeacbdd5d0362787353d60d442ad. Only the final
 nets from touch18a5d297, fixturebaa84c19 and responsive/capture2270b07b were applied: nine existing

@@ -1102,7 +1102,7 @@ struct CanvasView: UIViewRepresentable {
                         baked: baked, bakedImage: bakedImage, rasterImage: rasterImage)
                 }
                 return .success(pictures)
-            } catch { return .failure(error as? RasterResidency.Failure ?? .unreadableBacking) }
+            } catch { return .failure(error) }
         }
 
         private func installHostPictures(_ pictures: [UUID: HostSourcePictures]) {
@@ -4228,7 +4228,7 @@ struct CanvasView: UIViewRepresentable {
             guard samples.count >= 3,
                   let host = shapeDetectionHost,
                   let layerID = host.strokeView.layerID,
-                  let layerIndex = canvasManager.layers.firstIndex(where: { $0.id == layerID }) else {
+                  canvasManager.layers.contains(where: { $0.id == layerID }) else {
                 shapeDetectionHost = nil
                 return
             }
