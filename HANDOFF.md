@@ -63,11 +63,14 @@ no fasts reached, exact723 restored. Existing completed faults retain individual
 Default-overlap real bucket regression dc48ff3a reproduces attached and detached failures with six
 outcome/edit/drawn-centre assertions, zero premise failures. Coverage-sampling fix24195818 then passes
 that exact method1/1; ordinary lasso still samples its collar through one shared session preparation.
-No saved provenance/override/mode flag. Full focused expected204, static fast5276/full5861. New source
-findings are recorded in BUGS/TODO before changes: Reach incorrectly charges already-overlapped ink;
-destructive preparation may retain stale cache metadata after refusal. Implement bounded remaining-gap
-measurement without weakening full open/source endpoint or all-tie boundary proofs, and invalidate
-before rebuild. Root coordinates agent ownership and native runs.
+No saved provenance/override/mode flag. Reach regression f6ce9b62 fails exactly two positive assertions
+for overlap2/Reach6, with no premise/protection failures; cache normal test passes. Fix d1ff2ad0 measures
+remaining paint-to-paint distance while proving full open/source endpoints and all tied normals.
+Its two targeted methods pass2/2, including fractional/diagonal/small-window/hole/rim controls, exact723
+restored. Cache invalidation f6ce9b62 clears metadata before destructive rebuilding. A temporary
+post-basin refusal at threshold1 then passes1/1, native marker proves the one-basin fault executed and
+all723 source bytes/modes restore exactly. No permanent fault hook. Full focused expected206, static
+fast5278/full5863. Root coordinates the sole native slot; no native job currently active.
 
 Still pending: final focused baseline/restored gates, remaining reviewed faults, exact old/new EDT
 reference captures, Mend0/12/40 press/tick and fragmented peak measurements, affected coldUI14/pictures,
