@@ -183,6 +183,17 @@ refuting exact naive suffix absorption. Proposal is with root; no production edi
 reading LiveWalk heading queue can also retain a stationary run, so do not claim the whole live
 stroke is bounded by a fit-only correction.
 
+## Streaming ownership source audit — 2026-10-24
+
+Root selected the connected audit findings: queued encode/write/decode ownership, framing/FILE_CHUNK
+receive limits, and HELLO/current-connection lifecycle. New `tmp/s54-stream-ownership` starts from
+origin/main then exact combined6b5010d94626707c6f6db37850c148d3f045e80d. Record before changes: trace
+both Swift/iPad and streamer/C# production callers and existing tests, refute unsupported premises,
+then send a compact existing-seam ownership/backpressure/bounds proposal and test plan before any
+production edits. No new framework/feature research, no protocol file-size policy invented, no native,
+compiler, Windows deployment, device, socket/network experiment or graph operation. Real-link stage5
+remains owner-waiting. Root separately owns active combined847 qualification; its source/tree is frozen.
+
 ## Current combined source qualification — 2026-10-24
 
 Root's normal combined baseline at6b5010d9 passed847/847, zero skips/failures; all724 tracked

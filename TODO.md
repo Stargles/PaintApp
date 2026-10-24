@@ -97,6 +97,17 @@ A visibility fault produced an actual assertion failure, then normal4/4 passed; 
 11.013s on M5 before first UI; cold-start/scheduling work remains before install. Erasing cause remains
 unresolved. Installed Release is stillbcd7a6af; no device launch/restart/install this pass.
 
+## Streaming ownership source audit — 2026-10-24
+
+Root selected the connected audit findings: queued encode/write/decode ownership, framing/FILE_CHUNK
+receive limits, and HELLO/current-connection lifecycle. New `tmp/s54-stream-ownership` starts from
+origin/main then exact combined6b5010d94626707c6f6db37850c148d3f045e80d. Record before changes: trace
+both Swift/iPad and streamer/C# production callers and existing tests, refute unsupported premises,
+then send a compact existing-seam ownership/backpressure/bounds proposal and test plan before any
+production edits. No new framework/feature research, no protocol file-size policy invented, no native,
+compiler, Windows deployment, device, socket/network experiment or graph operation. Real-link stage5
+remains owner-waiting. Root separately owns active combined847 qualification; its source/tree is frozen.
+
 ## Combined source qualification — 2026-10-24
 
 Ready mask f34 +video3227 +vector401/c5e are combined in `tmp/s54-integration`; scope was recorded before
