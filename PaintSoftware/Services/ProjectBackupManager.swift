@@ -167,9 +167,8 @@ nonisolated enum ProjectBackupManager {
         //   -resetGallery               wipe Projects/Backups/Trash, the projects-folder choice and the
         //                               update signature (and, synchronously in `PaintApp.init`, the
         //                               artist's app-wide preferences — see `AppSettings.forgetIfRequested`)
-        //   -simulateProjectCorruption  overwrite the newest project's manifest.json with garbage,
-        //                               simulating an update/crash-damaged package, so the repair
-        //                               pass below can be observed fixing it end-to-end.
+        //   -simulateProjectCorruption  make the newest project's persisted recent colour unreadable,
+        //                               so strict model decoding and backup repair can be observed.
         // These test flags mutate persistent data. A compile-time simulator guard is required even in
         // Release: `-resetGallery` previously erased the owner's saved library from a physical iPad.
         if args.contains("-resetGallery") && Self.isSimulator {
@@ -242,9 +241,23 @@ nonisolated enum ProjectBackupManager {
     /// with no backups is left in place — the gallery surfaces it as damaged instead of dropping it.
     static func repairCorruptedProjects() {
         for url in allProjectPackages() {
-            guard !validateProject(at: url) else { continue }
+            // `validateProject` first checks the light package skeleton and linked files. It does
+            // not decode every editor-state value, so finish the current-format manifest check
+            // before deciding that a package is safe to leave in Projects.
+            guard !validateProject(at: url) || !currentManifestIsReadable(at: url) else { continue }
             _ = restoreNewestValidBackup(forProjectAt: url, trashTag: "corrupt")
         }
+    }
+
+    private static func currentManifestIsReadable(at projectURL: URL) -> Bool {
+        guard let data = try? Data(contentsOf: projectURL.appendingPathComponent("manifest.json")) else {
+            return false
+        }
+        return currentManifestIsReadable(data)
+    }
+
+    private static func currentManifestIsReadable(_ data: Data) -> Bool {
+        (try? JSONDecoder().decode(ProjectManifest.self, from: data)) != nil
     }
 
     // MARK: - App-update detection & snapshots
@@ -886,7 +899,7 @@ nonisolated enum ProjectBackupManager {
     /// ink metadata. Validation never rewrites the source version or loads its cel pictures.
     static func validateProjectForRestore(at url: URL) -> Bool {
         guard let data = try? Data(contentsOf: url.appendingPathComponent("manifest.json")),
-              (try? JSONDecoder().decode(ProjectManifest.self, from: data)) != nil else { return false }
+              currentManifestIsReadable(data) else { return false }
         return validateProjectFiles(at: url, manifestData: data)
             && ProjectRecipeMetadata.validate(in: url, manifestData: data)
             && ProjectRecipeMetadata.validateRestoreStreams(in: url, manifestData: data)
@@ -1096,6 +1109,20 @@ nonisolated enum ProjectBackupManager {
         guard let urls = try? fm.contentsOfDirectory(at: projectsDirectory, includingPropertiesForKeys: nil) else { return }
         let projects = urls.filter { $0.pathExtension == "paintproj" }.sorted { fileDate($0) < fileDate($1) }
         guard let newest = projects.last else { return }
-        try? Data("corrupted".utf8).write(to: newest.appendingPathComponent("manifest.json"))
+        let manifestURL = newest.appendingPathComponent("manifest.json")
+        guard let data = try? Data(contentsOf: manifestURL),
+              var manifest = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              var editorState = manifest["editorState"] as? [String: Any],
+              var tools = editorState["tools"] as? [String: Any],
+              var panel = tools["colorPanel"] as? [String: Any],
+              var recent = panel["recentColors"] as? [[String: Any]],
+              !recent.isEmpty else { return }
+        recent[0]["hex"] = "not-a-color"
+        panel["recentColors"] = recent
+        tools["colorPanel"] = panel
+        editorState["tools"] = tools
+        manifest["editorState"] = editorState
+        guard let damaged = try? JSONSerialization.data(withJSONObject: manifest) else { return }
+        try? damaged.write(to: manifestURL, options: .atomic)
     }
 }

@@ -160,12 +160,18 @@ Detailed source evidence: `/Users/juliapark/PaintWork/s54-architecture-audit/inf
 
 ### Stored palette validation
 
-`PaletteColor.color` silently mapped unparsable hex to black. `Palette` decoding now validates canonical
-stored swatch hex and sends malformed library data to `AppSettings.readPalettes`' existing refusal;
-`PaletteStore` preserves its bytes and refuses edits, and the Palettes view displays its existing notice.
-Project-value `PaletteColor` decoding and valid palette wire bytes are unchanged. Added malformed-data
-preservation and canonical byte-stability logic tests. No data repair, fallback, migration, or test-only
-corruption hook. Static only; no compiler/native/UI/device qualification.
+`PaletteColor.color` previously mapped unparsable hex to black. Parseability is now enforced at the
+shared immutable `PaletteColor` value, covering palette swatches, scene `ValueFill`, and recent colours;
+all parseable saved strings, including lowercase, `#`-prefixed, and opaque 8-digit forms, retain their
+exact spelling. The black fallback and palette-specific decoder are removed. Startup repair now adds
+strict current-manifest decode after its light package walk, so typed damage uses the existing backup
+restore and Trash path; when no valid backup exists, original bytes remain. Added
+`ColorPickerLogicTests.testParseablePaletteHexKeepsItsOriginalSpelling`,
+`ProjectStorageIntegrityLogicTests.testTypedColorDamageRestoresValidBackupAndPreservesDamagedPackageInTrash`,
+`ProjectStorageIntegrityLogicTests.testTypedColorDamageWithoutBackupLeavesOriginalBytesAndGalleryEntry`,
+and a cold drawn test in `GalleryRecoveryUITests` for retained Trash entry and rendered restored ink.
+No schema, normalization, migration, or new recovery framework. `git diff --check` only; compiler,
+native/UI run, screenshot inspection, and mutation qualification pending root.
 
 Detailed source evidence: `/Users/juliapark/PaintWork/s54-architecture-audit/panels-utilities-review.md`.
 

@@ -443,17 +443,41 @@ final class ColorPickerLogicTests: XCTestCase {
                        "Reading valid saved palettes does not normalize or rewrite their bytes")
     }
 
+    /// Existing parseable spellings are values, not an invitation to normalize the artist's data.
+    func testParseablePaletteHexKeepsItsOriginalSpelling() throws {
+        let defaults = try isolatedDefaults()
+        let valid = [Palette(name: "Saved", hexes: ["123456", "654321", "111111", "222222"], isBuiltIn: false)]
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(valid)) as? [[String: Any]])
+        var colors = try XCTUnwrap(json[0]["colors"] as? [[String: Any]])
+        let spellings = ["a1b2c3", "#A1B2C3", "A1B2C3FF", "#1234"]
+        for (index, spelling) in spellings.enumerated() { colors[index]["hex"] = spelling }
+        json[0]["colors"] = colors
+        let bytes = try JSONSerialization.data(withJSONObject: json)
+        defaults.set(bytes, forKey: AppSettings.Key.palettes)
+
+        let reopened = PaletteStore(settings: AppSettings(defaults: defaults))
+
+        XCTAssertNil(reopened.unreadable)
+        XCTAssertEqual(reopened.palettes.first?.colors.map(\.hex), spellings)
+        XCTAssertEqual(defaults.data(forKey: AppSettings.Key.palettes), bytes,
+                       "A read preserves parseable saved hex bytes and spelling")
+    }
+
     /// A structurally valid saved palette with one invalid swatch takes the existing unreadable
     /// library path, leaves the original bytes untouched, and refuses edits instead of showing black.
     func testMalformedSavedSwatchRefusesTheLibraryAndPreservesItsBytes() throws {
-        for malformedHex in ["not-a-color", "#A1B2C3"] {
+        for malformedHex in ["not-a-color", "#A1B2CG"] {
             let defaults = try isolatedDefaults()
-            let damaged = [Palette(name: "Saved", hexes: ["123456", malformedHex], isBuiltIn: false)]
-            let bytes = try JSONEncoder().encode(damaged)
+            let valid = [Palette(name: "Saved", hexes: ["123456", "654321"], isBuiltIn: false)]
+            var json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(valid)) as? [[String: Any]])
+            var colors = try XCTUnwrap(json[0]["colors"] as? [[String: Any]])
+            colors[1]["hex"] = malformedHex
+            json[0]["colors"] = colors
+            let bytes = try JSONSerialization.data(withJSONObject: json)
             defaults.set(bytes, forKey: AppSettings.Key.palettes)
 
             XCTAssertThrowsError(try JSONDecoder().decode([Palette].self, from: bytes),
-                                 "A saved palette cannot accept non-current swatch hex \(malformedHex)")
+                                 "A saved palette cannot accept unparsable swatch hex \(malformedHex)")
             let store = PaletteStore(settings: AppSettings(defaults: defaults))
 
             XCTAssertEqual(store.unreadable,

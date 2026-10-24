@@ -7,10 +7,13 @@ import Combine
 /// carried in the 8-digit `RRGGBBAA` form when a color isn't fully opaque.
 struct PaletteColor: Codable, Identifiable, Equatable, Hashable {
     var id: UUID
-    /// Uppercase hex, no leading '#'. `RRGGBB` when opaque, `RRGGBBAA` otherwise.
-    var hex: String
+    /// The spelling written by its original owner. Parsing validates it, never normalizes it.
+    let hex: String
+
+    private enum CodingKeys: String, CodingKey { case id, hex }
 
     init(id: UUID = UUID(), hex: String) {
+        precondition(ColorMath.parseHex(hex) != nil, "PaletteColor requires parseable hex")
         self.id = id
         self.hex = hex
     }
@@ -20,13 +23,21 @@ struct PaletteColor: Codable, Identifiable, Equatable, Hashable {
         self.hex = color.hexString
     }
 
-    /// Palette library decoding checks stored hex before a swatch reaches the view. This fallback is
-    /// for invalid values constructed in memory by other callers, not a way to accept corrupt data.
-    var color: Color { Color(hex: hex) ?? .black }
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        hex = try container.decode(String.self, forKey: .hex)
+        guard ColorMath.parseHex(hex) != nil else {
+            throw DecodingError.dataCorruptedError(forKey: .hex, in: container,
+                debugDescription: "PaletteColor contains hex that cannot be parsed.")
+        }
+    }
 
-    fileprivate var hasCanonicalStoredHex: Bool {
-        guard let rgba = ColorMath.parseHex(hex) else { return false }
-        return ColorMath.hexString(r: rgba.r, g: rgba.g, b: rgba.b, a: rgba.a) == hex
+    var color: Color {
+        guard let color = Color(hex: hex) else {
+            preconditionFailure("PaletteColor hex invariant was violated after decoding")
+        }
+        return color
     }
 }
 
@@ -57,24 +68,6 @@ struct Palette: Codable, Identifiable, Equatable {
             colors: hexes.map { PaletteColor(hex: $0) },
             isBuiltIn: isBuiltIn
         )
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case id, name, colors, isBuiltIn
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decode(UUID.self, forKey: .id)
-        name = try container.decode(String.self, forKey: .name)
-        colors = try container.decode([PaletteColor].self, forKey: .colors)
-        isBuiltIn = try container.decode(Bool.self, forKey: .isBuiltIn)
-
-        if let index = colors.firstIndex(where: { !$0.hasCanonicalStoredHex }) {
-            throw DecodingError.dataCorruptedError(
-                forKey: .colors, in: container,
-                debugDescription: "Palette \(name) contains a swatch with non-canonical hex at index \(index).")
-        }
     }
 }
 

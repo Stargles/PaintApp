@@ -51,14 +51,20 @@ action was run.
 
 ## Saved palette hex validation — scoped before implementation, 2026-10-24
 
-`PaletteColor.color` formerly resolved invalid hex to black, so a structurally valid saved palette
-with one malformed swatch appeared readable and could silently show the wrong color. The `Palette`
-decoder now rejects non-canonical or unparsable swatch hex and feeds `AppSettings.readPalettes`' existing
-`.unreadable` path; `PaletteStore` keeps stored bytes and prevents edits, and `PaletteColours` displays
-its existing notice with `colorPanel.palettesUnreadable`. `PaletteColor` decoding used by project values
-is unchanged; no wire schema, migration, repair, compatibility path or test hook was added. New logic
-coverage checks malformed refusal/byte preservation and canonical valid byte-stable reads. Static
-source review and `git diff --check` only; no compiler/native/UI/device run.
+## Shared persisted colour validation — scope and implementation, 2026-10-24
+
+The earlier palette-only validation left `ValueFill.color` and
+`EditorStateManifest.tools.colorPanel.recentColors` permissive. Validation now belongs to shared
+`PaletteColor`: immutable hex and its initializer/decoder require `ColorMath.parseHex` success, while
+every parseable spelling is preserved verbatim and the silent black fallback is removed. `Palette`
+returns to synthesized Codable. Startup repair now checks strict current-manifest decoding after the
+existing lightweight package validation; typed corruption restores a valid backup to Projects and
+moves the exact malformed package to Trash. With no valid backup it leaves the package bytes intact.
+Added parseable spelling/byte-preservation coverage, two typed-color storage recovery tests, and
+`GalleryRecoveryUITests.testCorruptedProjectIsAutoRestoredFromBackupOnLaunch`, which draws ink,
+triggers a typed recent-color error, sees the displaced copy in Recently Deleted, and asserts recovered
+ink is rendered. No schema change, normalization, migration, or new recovery framework. Static checks
+only so far; no compiler/native/UI run or mutation qualification yet.
 
 Start at AGENTS.md, then CLAUDE.md, TODO.md, BUGS.md and the relevant spec/PERFORMANCE.md. Verify origin,
 worktrees and every tmp branch before trusting this file. Kevin authorizes useful agents and a large

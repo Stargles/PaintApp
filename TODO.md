@@ -38,6 +38,17 @@ selectors. No new API, flag/counter, fixture overwrite, production edit or nativ
 Rater consolidator receives exact owned test-only follow-up commit(s) after its two brush commits.
 
 
+## Shared persisted colour validation — source committed, qualification pending, 2026-10-24
+
+Move saved-hex parseability from the `Palette` container to shared `PaletteColor` decoding, because
+the same type is persisted in palettes, scene `ValueFill`, and recent colours. Preserve every
+parseable prior spelling exactly; reject only strings `ColorMath.parseHex` cannot read. Startup
+repair now checks strict current-manifest decode after the existing lightweight `ManifestSkeleton`
+walk. Logic tests cover valid-backup restore with exact damaged-copy retention and no-backup exact-byte
+preservation; a cold drawn UI test verifies the damaged copy remains in Recently Deleted and ink is
+rendered after restoration. No schema change or migration. Mutation and native qualification remain
+pending root.
+
 The owner's asks. [BUGS.md](BUGS.md) is for what *we* find.
 
 **Session 49 (2026-10-14):** the owner asked to continue through every actionable item, stopping only

@@ -18,11 +18,10 @@ import XCTest
 final class GalleryRecoveryUITests: PaintUITestCase {
 
     /// The critical safety net: a project damaged by an update/crash must come back on its own.
-    /// Saves a project, then relaunches with `-simulateProjectCorruption` — the app's launch hook
-    /// overwrites the newest project's manifest.json with garbage and the normal startup
-    /// maintenance pass then runs. Asserts the project is NOT left in the damaged state, is still
-    /// listed normally, and still opens with the drawn stroke intact (i.e. it was auto-restored
-    /// from its backup, not just hidden or deleted).
+    /// Saves a project with drawn ink, then relaunches with `-simulateProjectCorruption` — the launch
+    /// hook corrupts a real saved recent-colour field while leaving the JSON shape intact. This
+    /// exercises shared `PaletteColor` decoding and startup backup repair, including the damaged
+    /// original remaining visible in Recently Deleted.
     func testCorruptedProjectIsAutoRestoredFromBackupOnLaunch() throws {
         let app = XCUIApplication()
         app.launchArguments = ["-resetGallery"]
@@ -54,6 +53,15 @@ final class GalleryRecoveryUITests: PaintUITestCase {
         XCTAssertTrue(damagedLabel.waitForNonExistence(timeout: 10),
                       "Startup maintenance should auto-restore the damaged project from its backup")
 
+        app.buttons["gallery.recentlyDeletedButton"].tap()
+        XCTAssertTrue(app.staticTexts["Untitled"].waitForExistence(timeout: 5),
+                      "The displaced malformed original remains in Recently Deleted")
+        let preservedOrigin = app.staticTexts.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "gallery.trashOrigin.")).firstMatch
+        XCTAssertTrue(preservedOrigin.waitForExistence(timeout: 5),
+                      "The damaged copy remains a complete, recoverable gallery entry")
+        app.buttons["Done"].tap()
+
         let restoredTile = app.staticTexts.matching(NSPredicate(format: "label == %@", "Untitled")).firstMatch
         XCTAssertTrue(restoredTile.waitForExistence(timeout: 10), "The restored project should be listed normally")
         restoredTile.tap()
@@ -67,6 +75,11 @@ final class GalleryRecoveryUITests: PaintUITestCase {
         // editor before the save too, so the raster assertion could never have passed here.
         XCTAssertEqual(readVectorMarker(app, layerIndex: 0)?.strokes, 1,
                        "The stroke saved before the corruption should survive the restore")
+        app.buttons["toolbar.layersButton"].tap()
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let recoveredInk = try XCTUnwrap(rgbaPixel(of: canvas, dx: 0.4, dy: 0.3))
+        XCTAssertTrue(isInk(recoveredInk), "The saved ink is visibly rendered after typed-colour repair")
     }
 
     /// Deleting a project must never destroy it outright: it moves to Recently Deleted (Trash) and

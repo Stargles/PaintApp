@@ -61,6 +61,24 @@ final class ProjectStorageIntegrityLogicTests: XCTestCase {
         try JSONSerialization.data(withJSONObject: json).write(to: url, options: .atomic)
     }
 
+    private func corruptFirstRecentColor(in package: URL) throws -> Data {
+        let manifestURL = package.appendingPathComponent("manifest.json")
+        var json = try object(manifestURL)
+        var editorState = try XCTUnwrap(json["editorState"] as? [String: Any])
+        var tools = try XCTUnwrap(editorState["tools"] as? [String: Any])
+        var panel = try XCTUnwrap(tools["colorPanel"] as? [String: Any])
+        var recent = try XCTUnwrap(panel["recentColors"] as? [[String: Any]])
+        XCTAssertFalse(recent.isEmpty, "The fixture must persist an actual recent swatch")
+        recent[0]["hex"] = "not-a-color"
+        panel["recentColors"] = recent
+        tools["colorPanel"] = panel
+        editorState["tools"] = tools
+        json["editorState"] = editorState
+        let damaged = try JSONSerialization.data(withJSONObject: json)
+        try damaged.write(to: manifestURL, options: .atomic)
+        return damaged
+    }
+
     private func recipeURL(_ package: URL) throws -> URL {
         let manifest = try JSONDecoder().decode(ProjectManifest.self,
             from: Data(contentsOf: package.appendingPathComponent("manifest.json")))
@@ -125,6 +143,49 @@ final class ProjectStorageIntegrityLogicTests: XCTestCase {
         XCTAssertTrue(ProjectBackupManager.validateProjectForRestore(at: package))
         let loaded = try XCTUnwrap(ProjectStore.load(from: package))
         XCTAssertEqual(loaded.layers[0].cels[0].interpolation?.localEdits.first?.stroke.brush, TestBrushes.hardRound)
+    }
+
+    func testTypedColorDamageRestoresValidBackupAndPreservesDamagedPackageInTrash() throws {
+        let package = try package { $0.colorPanel.recordPainted(.red) }
+        let manifestURL = package.appendingPathComponent("manifest.json")
+        let validBytes = try Data(contentsOf: manifestURL)
+        let manifest = try JSONDecoder().decode(ProjectManifest.self, from: validBytes)
+        let latest = ProjectBackupManager.latestSnapshotURL(
+            directory: ProjectBackupManager.backupsDirectory(projectID: manifest.id))
+        XCTAssertEqual(try Data(contentsOf: latest.appendingPathComponent("manifest.json")), validBytes,
+                       "The setup has an exact valid latest backup")
+
+        let damagedBytes = try corruptFirstRecentColor(in: package)
+        XCTAssertTrue(ProjectBackupManager.validateProject(at: package),
+                      "The lightweight file check alone does not inspect typed editor-state values")
+        XCTAssertFalse(ProjectBackupManager.validateProjectForRestore(at: package),
+                       "Strict current-format decoding rejects the malformed shared value")
+
+        ProjectBackupManager.repairCorruptedProjects()
+
+        XCTAssertEqual(try Data(contentsOf: manifestURL), validBytes,
+                       "The valid backup becomes the live scene without normalizing its bytes")
+        XCTAssertNotNil(ProjectStore.load(from: package), "The restored current-format scene opens")
+        let trashed = try XCTUnwrap(ProjectBackupManager.listTrash().first)
+        XCTAssertEqual(try Data(contentsOf: trashed.url.appendingPathComponent("manifest.json")), damagedBytes,
+                       "The malformed original is retained exactly in Trash")
+    }
+
+    func testTypedColorDamageWithoutBackupLeavesOriginalBytesAndGalleryEntry() throws {
+        let package = try package { $0.colorPanel.recordPainted(.red) }
+        let manifest = try JSONDecoder().decode(ProjectManifest.self,
+            from: Data(contentsOf: package.appendingPathComponent("manifest.json")))
+        try FileManager.default.removeItem(at: ProjectBackupManager.backupsDirectory(projectID: manifest.id))
+        let damagedBytes = try corruptFirstRecentColor(in: package)
+
+        ProjectBackupManager.repairCorruptedProjects()
+
+        XCTAssertEqual(try Data(contentsOf: package.appendingPathComponent("manifest.json")), damagedBytes,
+                       "With no valid backup, repair leaves the original package untouched")
+        XCTAssertNil(ProjectStore.load(from: package))
+        XCTAssertTrue(ProjectStore.listProjects(in: package.deletingLastPathComponent()).first?.isCorrupted == true,
+                       "The unreadable package remains surfaced as damaged instead of vanishing")
+        XCTAssertTrue(ProjectBackupManager.listTrash().isEmpty)
     }
 
     func testPresentMalformedLiquifySelectionFailsCurrentReadsWithoutChangingBytes() throws {
