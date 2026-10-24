@@ -769,6 +769,9 @@ final class MetalFillSession {
         if let kept = self.structure, kept.key == key, kept.ceiling >= ceiling {
             structure = kept
         } else {
+            // The rebuild overwrites shared labels and feature buffers. A refusal cannot leave
+            // the previous key pointing at those new or partially prepared contents.
+            self.structure = nil
             guard let built = buildStructure(key, ceiling: ceiling) else { return nil }
             self.structure = built
             structureBuilds += 1

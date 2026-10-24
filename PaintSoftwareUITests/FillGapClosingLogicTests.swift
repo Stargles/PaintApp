@@ -285,6 +285,37 @@ final class FillGapClosingLogicTests: XCTestCase {
         XCTAssertEqual(session.structureBuilds, 2, "a new threshold is new walls")
     }
 
+    func testReturningToAnEarlierThresholdRebuildsItsFillAfterAnotherPreparation() throws {
+        let session = try session(box())
+        let first = try fill(session, seed: (40, 40), gap: 0)
+        XCTAssertEqual(first.count, Self.interior, "PREMISE: threshold0.15 fills the closed box's58² interior")
+        XCTAssertTrue(first.isFilled(19, 19), "the first fill reaches the inside corner")
+        XCTAssertFalse(first.isFilled(16, 40), "the frame is not filled")
+        XCTAssertFalse(first.isFilled(4, 4), "exterior paper is not filled")
+
+        // At threshold1 every binary black pixel becomes passable. The distance field is one
+        // uniform plateau and one basin (label0), so even a stale old table remains in bounds.
+        // This preparation may refuse; returning to the first threshold must still rebuild it.
+        let changed = session.fill(seedX: 40, seedY: 40, seedColor: session.seedColor(atX: 40, y: 40),
+                                   threshold: 1, gapWidth: 0, edgeOverlap: 0,
+                                   fillColor: SIMD4<Float>(1, 0, 0, 1))
+        if let changed {
+            let open = Region(bytes: changed, width: session.width)
+            XCTAssertEqual(open.count, Self.side * Self.side, "PREMISE: threshold1 opens the whole binary reference")
+            XCTAssertTrue(open.isFilled(16, 40) && open.isFilled(4, 4), "the second preparation differs from the first")
+        }
+        let buildsBeforeReturning = session.structureBuilds
+        let restored = try fill(session, seed: (40, 40), gap: 0)
+        XCTAssertEqual(session.structureBuilds, buildsBeforeReturning + 1,
+                       "another preparation invalidates the old key even when it refuses after writing shared buffers")
+        XCTAssertEqual(restored.count, Self.interior, "returning to0.15 fills only the58² interior")
+        XCTAssertTrue(restored.isFilled(19, 19) && restored.isFilled(40, 40), "the complete interior returns")
+        XCTAssertFalse(restored.isFilled(16, 40), "the original frame stays bare")
+        XCTAssertFalse(restored.isFilled(4, 4), "the restored fill cannot leak onto exterior paper")
+        XCTAssertTrue(restored.bytes == first.bytes, "the full original picture is restored")
+        add(XCTAttachment(string: "threshold1Refused=\(changed == nil); buildsBeforeReturning=\(buildsBeforeReturning); finalBuilds=\(session.structureBuilds)"))
+    }
+
     /// The cut is exact against a fresh build: a tick on a reused session paints what a press at that
     /// setting paints.
     func testATickPaintsWhatAPressAtThatSettingPaints() throws {
