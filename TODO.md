@@ -7,37 +7,38 @@ speed. Architecture and preserving real artwork take priority. Record before act
 
 ## Current source and qualification — 2026-10-24
 
-`~/PaintWork/PaintApp-s54-final-integration`, `tmp/s54-final-integration`, is the single linear source
-consolidation. It starts from freshly fetched origin/main afd2030c, fast-forwards rasterfb1dd34c,
-and adds only the31 recorded owned commits for brush/proof, test hooks, palette, stationary fit,
-LiveWalk, old-format metadata recovery and stream7c. No main merge/push/install. External full SHAs,
-source byte inventories, commit mapping and hunk review: `~/PaintWork/s54-architecture-audit/final-integration/`.
-Production conflict resolution keeps simulator-only guards plus strict current-manifest validation;
-two added stroke-fit fixture image reads use explicit Result.get() after the raster API change.
-No assertions or fixture pixels changed. Current successor includes curvecf184033 plus fixture-only
-recovery6f9c8d6d and stream callbackcaab86d3; these have no new normal run yet.
+The single linear consolidator remains `~/PaintWork/PaintApp-s54-final-integration` on
+`tmp/s54-final-integration`, a documentation successor of67641c5b78423fcce7d8ce2d59a733ff13870515.
+No main merge/push/physical install. Component preservation and exact mappings are external under
+`~/PaintWork/s54-architecture-audit/final-integration/`. All owner asks below remain in this queue
+until the final gates and merge actually complete.
 
-Qualified scopes remain tied to exact pins: f475bb93599d2fb1b5b5785931bb2a87cc553424 normal847/847,
-zero skips/failures,724 files+modes exact; base49 and all52 additional assertion-target cases now
-qualify, the latter50 exact recipes, with ineffective/inconclusive attempts excluded. Exact ledger:
-`~/PaintWork/s54-final-qualification/qualified-52-ledger.json`. Raster79a1941e passed32/32,
-zero skips/failures,728 exact; cleanfb1 differs only in records. Its43 assertion-target cases over32
-selectors use35 unique exact production edit recipes and are OFFLINE PREPARED ONLY. Windows final7c
-normal166/166 Debug and Release passed; root owns remaining16-target proof/final control.
+Actual normal1cf passed422/422,0 failures/skips, all728 source entries exact. It includes corrected
+StreamBar asynchronous callback and sameUUID renamed-recovery fixtures plus BrushEditor30 and
+BrushModulation43. Windows7c is complete:166 Debug+166 Release,16 assertion targets/15 recipes and
+all63 source/fixture hashes restored; root verified those63 bytes identical in676. Real-link stage5
+remains separate. Earlier base49/mask-video-vector52 faults and raster32 controls retain exact-pin
+qualification; new Swift107 faults and mask6+11 UI configurations remain PREPARED ONLY.
 
-Currentf55 normal349 compiled345pass/4fail,0skip,728 exact: Swift76 executed73pass/3StreamBar fixture
-failures and metadata99 had one stale post-maintenance URL premise. Serial4-case triage ran1pass/3fail,
-728 exact. Integrated callback completion and actual sameUUID renamed-path fixture followups preserve
-all oracles and production bytes; root must rerun the coherent successor. Next normal selection422
-adds full BrushEditor30 and BrushModulation43 for the new curve key ownership fix.
-Final source normal/mutants, fast Debug/Release, affected cold UI/pictures,
-paired performance, whole-library cold startup and physical-device gates remain open. Root owns the
-sole Mac native slot; never edit its independent frozen1cf check tree. Live status/details are in HANDOFF.md.
+The owner-size simulator UI73 at676 finished67pass/5fail/1 exact known hold skip, all728 entries
+restored, cleanHEAD. Actual recordings identify stale22pt brush setup, AX percent-vs-pixel overlap
+setup, and a pending-shape test's second drag on the dock. The old hold helper never proved a pending
+shape. Raster candidateccfec255 corrects those fixtures, reuses shared slider endpoint geometry and
+requires actual shape:adjustable; its first genuine-hold control passed1/1 with original first-touch
+ink/retained-shape/two-stroke assertions and728 entries exact. Remaining callers/undo/old skip are open.
+Curve portrait fixed-width clipping has a minimal responsive candidate1fa129f6. A public interior
+curve drag passed actual position/neighbour/pixel checks; the custom driver used runner UIScreen's
+wrong768x1024 dimensions against the actual1080x810 window. Bake is measuring proper screen units;
+no product gesture-priority change or guessed offset is justified. Temporary diagnostics must leave
+final source whole. Three old cropped capture methods have a source-reviewed owner-landscape
+candidate73f3d2d, native pending. None of these candidates is integrated yet.
 
-Owner-size brush UI gap recorded before edit: the A→B→A preview test inherits portrait and only
-attaches cropped row pictures. Root authorizes test-only landscapeLeft before launchCold and three
-XCUIScreen.main attachments. Keep row.screenshot sampling, all oracles and counts unchanged; no
-hardcoded device-size assertion/helper/API. Root will use actual iPad9 and inspect whole captures.
+Root owns integration and grants the sole Mac native lease; check root-status.json's
+current_native_lease before any build/test/simulator action. Next: finish bounded real controls,
+consolidate final clean corrections, fresh exact-source422 zero-skip baseline, actual new faults,
+fast Debug/Release and final UI/graph/lints. Paired fill performance, genuine previous-writer cold
+startup, fresh saved-scene export/signed device release, erasing diagnosis and owner artwork
+confirmation remain open. HANDOFF.md holds exact evidence/paths and the current handoff.
 
 ## How to read and keep this file
 

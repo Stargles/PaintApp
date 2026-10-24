@@ -1,106 +1,101 @@
 # Handoff
 
-Start at AGENTS.md, then CLAUDE.md, TODO.md, BUGS.md and the relevant spec/PERFORMANCE.md. Verify origin,
-worktrees and every tmp branch before trusting this file. Kevin authorizes useful agents and a large
-budget, with quality/usage conservation before speed. Continue actionable work without recommendation-
-only pauses; give concise queue reports. The owner explicitly says not to park for context; automatic
-compaction must preserve continuing work. Architecture is the top priority. Record before acting.
+Start at AGENTS.md, then CLAUDE.md, TODO.md, BUGS.md and the relevant spec/PERFORMANCE.md. Verify
+origin, worktrees and every tmp branch before trusting this file. Kevin authorizes useful agents and
+has a large budget; quality and usage conservation matter more than speed. Delegate implementation
+and independent review; root owns integration, evidence review and the one Mac native lease.
+Continue actionable work, do not park for context, and give concise status reports. Architecture and
+preserving real artwork are the top priorities. Record before acting. No physical-device operation
+is authorized by an old readiness answer: obtain fresh saved-scene readiness when actually ready.
 
 ## Current source and next action — 2026-10-24
 
-Single consolidator: `~/PaintWork/PaintApp-s54-final-integration`, `tmp/s54-final-integration`.
-Freshly fetched origin/main is afd2030c831db7a746271fe306e8b5a5b9b02df6; the new branch fast-forwarded
-exact rasterfb1dd34ce6656314b165000256a690ae7f585932, then cherry-picked only31 owned component commits.
-Current source1cf51be4758dc47aaab49fae48c1079441cbef0f includes the exact curve fix plus two
-fixture-only followups after the349 gate. Successor5f120848 previously adapted exactly two added
-stroke-fit image reads to Result.get(), preserving all assertions/pixels. Later records do not imply
-new native proof. Root owns the next422-method normal check; consolidator runs no native work.
-No main merge, push, installation, physical app restart or owner-file operation this pass.
+The single consolidator is `~/PaintWork/PaintApp-s54-final-integration`, `tmp/s54-final-integration`.
+This is a documentation successor of clean67641c5b78423fcce7d8ce2d59a733ff13870515; app/test/project
+bytes are unchanged. Main/origin remain afd2030c831db7a746271fe306e8b5a5b9b02df6. No main merge,
+push or physical install has happened. The consolidator contains the linear raster/mask/video/vector,
+library/background/bake, brush/palette, exact stroke-fit/LiveWalk, stream, point-only Liquify, saving
+and fill work. Component mapping and preservation evidence live in
+`~/PaintWork/s54-architecture-audit/final-integration/`.
 
-Integrated component tips (their original commits, mapped to linear successors externally):
+The actual normal1cf51be4758dc47aaab49fae48c1079441cbef0f gate passed422/422, zero failures/skips,
+all728 source byte/kind/mode entries exact. It includes all349 earlier methods plus full BrushEditor
+logic30 and BrushModulation43. The earlier f55 gate's four failures were corrected test fixtures:
+three StreamBar callbacks asserted before asynchronous completion, and old-format recovery used the
+obsolete URL after permanent title tidy renamed the sameUUID package. No production policy changed.
+676 adds only landscape whole-screen preview capture setup after that normal gate.
 
-- Raster: fb1dd34ce6656314b165000256a690ae7f585932, based linearly on combinedf475.
-- Brush: bd0a65be6959ad0e9c364aebeeafc19396d23bc2; proof823e5bc92252409d777a4a44bdbbe80cc3cbcf93.
-- Simulator-only hooks:1a5e4bc197d9f8b794d317ed80d3907d0879d960.
-- Palette:9b8f43cc48b16b7faf9403c48478f9901ebc4e37.
-- Exact stationary fit:f7a7d31516bf7bad1477977a1d11bde9b05af2a3; LiveWalk4924456500eae855fc294234ccaec6ad7e34af8a.
-- Old-format typed metadata recovery:4b453d971ca3b56f1d0630ce7011bead188f4bdc, only its two owned commits after palette.
-- Stream:7c177be032e5a625cdad75c2ab73a60c97d524de, including accepted512e queue-callback fix and synchronized C# fakes.
-- Curve drag:cf18403317cd75b4741a0caf68b3f8cc12df024a, authoritative moved-key result after clamp; no raw-finger re-hit.
-- Recovery fixture proof:6f9c8d6de464e5df203f1fb6bcac3ecfab2ddcff, actual sameUUID renamed gallery package.
-- Stream callback fixture:caab86d35f75dd0bbe82662d7b0369a8b89f7097, await actual frame completion and forward/restore callbacks.
+The actual owner iPad9 simulator UI73 at676 finished **67 pass,5 assertion failures,1 exact known
+stationary-hold skip**. All73 selector/device identities and728 source entries reconcile; cleanHEAD
+restored. Both video cases, scene playback, grey-space pan, Move/graph release, GalleryRecovery2,
+RasterLiquify5, vectorLiquify4 and VectorLayerContent5 passed. This is an honestly failing gate.
+Root inspected actual Round/Square/Round whole-owner captures and Mend All before/after pictures.
+Full results, selected recordings/pictures and actual orientation metadata:
+`~/PaintWork/s54-final-qualification/native/owner9-ui73-676-run01/completion.md`.
 
-Exact ranges/mappings, pre/post source blob+mode inventories, component preservation and shared-hunk
-review are under `~/PaintWork/s54-architecture-audit/final-integration/`. Component non-documentation
-paths preserve their component bytes/disjoint raster hunks, with the two explicit test API adaptations
-recorded separately. The only manual production conflict was ProjectBackupManager: preserve direct
-Self.isSimulator from hooks plus palette strict current-manifest validation and typed corruption fixture.
-No obsolete honoursGalleryReset wrapper returned. All other source merges composed disjoint hunks.
-Documentation conflicts retained current rulings/tasks; stale chronological status is consolidated here.
+The five UI failures are being resolved on isolated branches; none of these candidates is integrated:
 
-Next: root freezes this coherent successor and runs422 normal methods (previous349 plus complete
-BrushEditor30 and BrushModulation43), then new component actual assertion mutants, final fast Debug/
-Release, cold drawn UI/landscape and old workflows. Follow with paired lazy-fill Release ABBA,
-genuine previous-writer library cold UI and fresh device preservation/release gates. Root alone owns
-native operations. Its independent final-check tree is pinned to1cf for that422 check; never edit it from this branch.
+- Curve: old portrait test's fixed210pt graph is clipped by its center column; its public drag lands
+  in the scratchpad. Startup's1fa129f604db460bb78cee8169fe0ab11cd8c55b candidate makes the existing
+  graph responsive with one measured square side capped210 and no new state/API/gesture priority.
+  The same branch includes73f3d2d1653b259c4d2718e4421ed42b39304859, three existing workflows'
+  settled-landscape/whole-screen capture corrections. Root source reviews accept both; native pending.
+- Curve delivery: helper-only8d642af0 compiled but the unchanged cold continuation still failed.
+  Temporary diagnostic9a33b2d8 ran2 methods: public interior drag PASSED all position/neighbor/pixel
+  oracles; custom drag failed. The runner UIScreen reports768x1024 while the actual app window is
+  1080x810. Do not fix product gesture priority or add guessed offsets. Bake is measuring actual
+  XCUIScreen image units; metadata-only3671d3a5 is prepared for one public control, unrun. Temporary
+  diagnostic methods must be removed whole before final source. The6abc attempt compiled no tests
+  and is inconclusive, never an assertion-red proof.
+- BrushMenu: a new scene retains5pt, while the test assumed22pt. Select the actual22pt library preset;
+  keep drawn width oracles and use the shared orientation-correct screenshot reader.
+- FillMend ON: setup stopped at AX5 percent, mistaken for pixels; recording caption is0px. Establish
+  actual normalized zero via existing shared adjustSlider's frame-edge clamp, preserve drawn oracles.
+- Pending-shape stroke: its second dragy720.8 hits the timeline below paper/docktop689. Use existing
+  visible-paper/dock helpers. The old hold helper never proved an adjustable shape; replace it once
+  with the existing multi-segment touch primitive and require exposed shape:adjustable for all6 callers.
+  Raster's candidateccfec25520f4b41e6ab0560bb35866de980f8f97 has these three fixture corrections,
+  shared endpoint handling and genuine-hold helper; app/project bytes unchanged. Its genuine pending-
+  shape control passed1/1: exposed adjustable state, first-touch ink, retained shape and2 strokes;728
+  entries exact. It does not select undo or qualify owner-landscape captures. Verify the old handle
+  test next; the newly proven hold capability may make its skip obsolete.
 
-The349 f55 gate compiled and executed345pass/4fail,0skip,728 exact restoration. Three StreamBar
-connection/HELLO fixtures asserted before decoder→client callback completion. The shared helper now
-waits actual callback, preserving/forwarding/restoring originals, with all22 methods/assertions intact.
-The one old-format metadata test used the obsolete package URL after permanent startup title tidy
-correctly renamed it. It now finds exactly one sameUUID gallery package, requires Untitled.paintproj
-and absence of the old address, then retains strict load/geometry/Trash bytes/stage assertions.
-Both corrections are test-only; no production/fixture bytes/policy changed. Serial four-case triage
-atf55 ran1pass/3fail,0skip,728 exact, supporting the callback trace; no successor normal run yet.
-The curve source fix adds2 logic and1 drawn landscape UI method; it is source-reviewed, unrun.
+Check live lease/results before native work:
+`~/PaintWork/s52-vector-points/runtime-qualification/root-status.json`, field current_native_lease.
+Root alone grants; agents must explicitly release. No overlapping compiler/test/simulator operations.
+Next: finish these bounded controls, integrate only final clean corrections, run a fresh zero-skip422
+baseline at the final exact source, then prepared new faults and final Debug/Release/whole-class UI.
+Do not count offline plans, compiler failure, timeouts or screenshots nobody opened as qualification.
 
-Owner-size brush UI gap recorded before edit: the A→B→A preview test inherits portrait and only
-attaches cropped row pictures. Root authorizes test-only landscapeLeft before launchCold and three
-XCUIScreen.main attachments. Keep row.screenshot sampling, all oracles and counts unchanged; no
-hardcoded device-size assertion/helper/API. Root will use actual iPad9 and inspect whole captures.
+## Qualification and gates
 
-## Qualification that actually exists
+- Earlier normalf475 passed847/847 and base49 plus all52 mask/video/vector assertion-target cases
+  qualify at their named pins, with ineffective/inconclusive attempts excluded. Ledger:
+  `~/PaintWork/s54-final-qualification/qualified-52-ledger.json`. Raster79a passed32/32; all32 also
+  passed in normal422. These are earlier slices, not blanket final-source proof.
+- Windows7c177be0 is complete: Debug AND Release166/166, zero skips/failures,16 assertion targets
+  (15 distinct recipes),4 arrangement controls, all63 source/fixture hashes restored. Root verified
+  all63 bytes identical in676. Evidence: `windows-16-qualified-7c177be0.json` under s54-stream-ownership
+  and `s54-final-qualification/windows63-current-676-identity.json`. Real-link stage5 remains owner work.
+- New Swift107 assertion targets /99 recipes /66 methods are OFFLINE PREPARED ONLY at1cf. All66
+  targets passed normal422. Repin once to final clean source and its actual422 result before running.
+  Inputs/results: `s54-final-qualification/new-faults-1cf-offline/`. UI consumer faults remain separate.
+- Mask6 controls+11 faults /5 selectors are OFFLINE PREPARED ONLY at676. External two-phase executor
+  SHA70527efe has independent acceptance: build child finishes, all728 source entries restored before
+  test-without-building, meaningful source-located assertions required. Repin final source; root must
+  LOOK at positive pictures before granting faults. It is not a natural in-flight timing proof.
+- Current static census: fast5398/full5987, PBX1327 unique. Both UI lints and PBX plutil passed676.
+  Final fast Debug/Release, graph, actual full/class UI and required old workflows remain pending.
+- Paired fill16 Release ABBA and whole256-package previous-writer cold UI are prepared, not run.
+  Read-only current API readiness found no blocker; explicitly repin NEW path/SHA/DD at final source.
+  Preserve old071 Release products, benchmark fixture/order/control and untouched original export.
+- Device preservation/signature/install, actual erasing all-process measurement and owner artwork
+  confirmation remain open. Raster allocation corrections do not establish the respring's cause.
 
-Normal combined f475bb93599d2fb1b5b5785931bb2a87cc553424 passed847/847, zero failures/skips, all724
-tracked app/test/project bytes+modes restored exactly. Base49 assertion-target cases are qualified;
-original ineffective/expected-green attempts are excluded. All additional52 assertion-target cases
-(50 unique exact recipes) are now assertion-red with exact source restoration; the earlier unexpected-
-green playhead and inconclusive XCTFail attempts are excluded. Authoritative ledger:
-`~/PaintWork/s54-final-qualification/qualified-52-ledger.json`.
-
-
-Raster normal79a1941e4d0b70799538af2dd7e29935c17034d4 compiled app/tests and passed32/32 Debug,
-zero failures/skips/expected failures, all728 tracked app/test/project bytes+modes exact. Cleanfb1
-changes records only. Exclusive native loan was released; check tree stays clean79a. Evidence:
-`~/PaintWork/s54-architecture-audit/native/raster-consumer-79a-run09/`. Earlier primitive f30 passed13/13.
-The first full runtime was28/32: two setup-history premises and the existing failed-save ledger-clear
-oracle were corrected; the real repeated-undo fourth-buffer defect was fixed by draining native
-borrowed draw temporaries inside the backing-image→owned-context copy. Exact3/cap/oldred-newblue
-assertions remain. All32 raster methods also passed inside the f55 run; its four failures were separate fixtures above.
-No raster mutant/native UI qualification is implied.
-
-Raster external `raster-faults-fb1/plan.json` and prepared.json contain43 assertion-target cases,
-35 unique exact production edit recipes over all32 selectors,49 per-case edits, zero oracle edits.
-Reviewed driver --prepare passed with728 paths frozen at exactfb1; actual assertions were located
-inside selected methods or their real shared fixtures. No mutant compiled/executed. Crashes, compiler
-refusal, OOM, timeouts, skips and arbitrary thrown errors cannot qualify; only exact selected-method
-assertion-red counts. Current Source counters/encoder workspace estimates are not total process RSS.
-
-Windows final stream7c normal166/166 passed Debug AND Release, zero skips, isolated committed sources
-hash-preserved. Root owns the16 assertion targets;13 were qualified at last reported Windows checkpoint,
-with source-located14–16 rerun/final restored control pending. No deployed streamer changed. Swift76
-methods executed atf55:73passed/3StreamBar failures; new metadata affected99 had one stale-URL fixture
-failure. Those exact test-only followups are integrated but unrun. Brush/colour/fit/heading/raster
-methods in349 ran; final curve/modulation controls and new native mutation gates remain pending.
-Brush has14 prepared faults; repin final source/census before execution. Mask external6 controls/11
-faults are tuple-adapted and uniquely prepared; independent review requires explicit landscape setup
-and distinguishes nil refusal from an unproven separate settle-false runtime case.
-
-
-Status sources: `~/PaintWork/s52-vector-points/runtime-qualification/root-status.json` and audit
-`findings-index.json`; individual fields may be older than the current root update. Evidence is tied
-to exact source/method identity and restore ledger, never a text-only pass word. Full source corpus,
-current Debug/Release fast counts, graph, final cold UI/screenshots and device are still pending.
+Root erased ONLY its shutdown M5 test simulator39E84984-3C6F-4A6A-8DC8-D1098F6B623E after UI lease
+release; all results, originals and device binaries preserved. Owner9 simulator56CC563F remains the
+active target. Disk around7.7GiB; clean only owned inactive rebuildable products if needed, never
+user artwork/exports or active jobs. Always rebuild clean normal source after compiled fault probes.
 
 ## Architecture and refusal boundaries to preserve
 
