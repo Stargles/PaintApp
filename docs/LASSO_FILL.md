@@ -232,7 +232,31 @@ Gap Closing reads in the bucket's direction: **up seals wider gaps**. The two mo
 
 **Step 8 — composite, on top.** `fillAlpha × fillColor` onto the active layer with the tool's blend mode, **over everything already on that cel** — earlier fills and the layer's own line art alike (§2a). One undo entry per fill. The live preview stacks the same way, or the picture would change on lift.
 
-**Step 9 — the mend, on by default (TODO (113), (174)).** Two lassos either side of one line leave the strip of line between their fences, and two floods leave the strip the flood could not enter; the fill menu's *Mend Gap to Neighbouring Fill* closes it, in both fill types, by the same rule. After step 8's coverage is final, a pixel is added at full coverage when it is **ink under every reference, in neither this fill nor anything already on the cel being filled, and a straight line through it runs through ink alone from this fill to that paint, across a strip no wider than Mend Reach** (its own slider in the fill menu, 12 px by default and counted from the fill as step 7's Edge Overlap leaves it, so the two add; `mendGap` in Fill.metal; `FillMendLogicTests`). That is the one place a lasso paints outside its fence, and only in that corridor: paper is not ink, so nothing the loop did not enclose is touched unless it is a line between two fills. "Anything already on the cel" is a decision rather than a limit — a raster layer flattens a committed fill into the tier its strokes live in, so a fill is not recoverable as such, and the safe reading is *grow toward paint that is there, never over it*. A plain distance to the nearest fill would do worse: it paints the outline of any shape within reach of a fill that is on the far side of paper from it, which is not a seam.
+**Step 9 — the mend, on by default (TODO (113), (174)).** Two lassos either side of one line leave the strip of line between their fences, and two floods leave the strip the flood could not enter; the fill menu's *Mend Gaps* closes it, in both fill types, by the same rule. After step 8's coverage is final, a pixel is added at full coverage when it is **ink under every reference, in neither this fill nor anything already on the cel being filled, and a straight line through it runs through ink alone from this fill to that paint, across a strip no wider than Mend Reach** (its own slider in the fill menu, 12 px by default and counted from the fill as step 7's Edge Overlap leaves it, so the two add; `mendGap` in Fill.metal; `FillMendLogicTests`). That is the one place a lasso paints outside its fence, and only in that corridor: paper is not ink, so nothing the loop did not enclose is touched unless it is a line between two fills. "Anything already on the cel" is a decision rather than a limit — a raster layer flattens a committed fill into the tier its strokes live in, so a fill is not recoverable as such, and the safe reading is *grow toward paint that is there, never over it*. A plain distance to the nearest fill would do worse: it paints the outline of any shape within reach of a fill that is on the far side of paper from it, which is not a seam.
+
+### Interior brushstrokes and the layer action — owner rulings, 2026-10-24
+
+The same **Mend Gaps** toggle and **Mend Reach** also cover ink inside one filled region, including
+interior branches attached to the enclosing outline. This is additional to the neighboring-fill rule
+above. It must preserve the true outer boundary and intentional empty regions: opposing samples from
+the same fill alone are insufficient, because they also occur across an inward notch or around a hole.
+Where an opaque join hides which edge belongs to the outline, **leave the uncertain patch alone**;
+do not infer a covered edge. A short ambiguous patch may remain at the join while the interior stem
+is mended. The original lasso fence, artwork boundary and unresolved window rim constrain this new
+same-fill behavior. Only the existing neighboring-fill corridor may extend outside the lasso fence.
+
+Filling must retain quick, real-time feedback. Prepare reference geometry once per structural change
+and reuse it for Gap Closing, Edge Overlap, Mend Reach and color changes. Do not scan the full image
+on the CPU on every interactive update. Native correctness, cold-press latency, cached-update work
+and retained memory must be qualified before declaring the new implementation ready.
+
+**Mend All Fills** is a new edit on a **vector layer**, applied to its stored fills across all owned
+cels. It uses the current fill settings and reference layers at each cel's start frame, with the
+existing lasso reference-color rule sampled from that fill's contour. Saved fills have no historical
+bucket seed or reference provenance; the action does not reconstruct those. Generated linked cels
+remain derived from their source drawings. Process bounded windows in sequence, preserve each fill's
+paint, opacity, animation membership and empty regions, and make the whole edit one undo step.
+Raster layers have flattened paint rather than identifiable saved fills and do not offer this action.
 
 ## 7. When there is nothing to fill
 

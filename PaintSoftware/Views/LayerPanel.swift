@@ -427,6 +427,27 @@ struct LayerOptionsPanel: View {
             }
         }
         if canvasManager.layers[index].kind == .vector {
+            optionsAction(canvasManager.fillMendingLayerID == nil ? "Mend All Fills" : "Mending Fills…",
+                          systemImage: "paintbrush.pointed", identifier: "layerOptions.mendAllFills") {
+                let id = canvasManager.layers[index].id
+                canvasManager.endMaskEdit()
+                Task { @MainActor in
+                    guard let at = canvasManager.layerIndex(ofID: id) else { return }
+                    switch await canvasManager.mendAllFills(layerIndex: at) {
+                    case .changed(let count): canvasManager.raise(.fillsMended(count))
+                    case .unchanged: canvasManager.raise(.noFillGapsToMend)
+                    case .needsMoreMemory: canvasManager.raise(.fillNeedsMoreMemory)
+                    case .exceedsUndoBudget: canvasManager.raise(.fillMendingExceedsUndoBudget)
+                    case .superseded: break
+                    }
+                }
+            }
+            .disabled(canvasManager.fillMendingLayerID != nil)
+            .overlay(alignment: .trailing) {
+                if canvasManager.fillMendingLayerID != nil {
+                    ProgressView().tint(.white).padding(.trailing, 14)
+                }
+            }
             optionsAction("Rasterize", systemImage: "square.on.square", identifier: "layerOptions.rasterize") {
                 leavingMaskEdit { canvasManager.rasterizeLayer(layerIndex: index) }
             }

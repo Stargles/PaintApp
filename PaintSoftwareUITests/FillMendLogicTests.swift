@@ -2,10 +2,10 @@ import XCTest
 import SwiftUI
 import UIKit
 import CoreGraphics
+import Metal
 
-/// **Mend Gap to Neighbouring Fill** (TODO (113)) — the owner's *"fill selection A, and then selection
-/// B, separated by a line. Currently when fill A and B are filled independently, it leaves a tiny
-/// unfilled region between these two regions directly under the line."*
+/// **Mend Gaps** (TODO (113)) — close narrow reference-ink gaps inside a fill and the seams between
+/// separately painted regions, without crossing into unfilled paper or changing the outside edge.
 ///
 /// The scene is a closed box of line art with a divider down the middle, on one layer, and the fills
 /// go on a layer of their own on top of it — the way an artist keeps colour and line apart. Every
@@ -60,7 +60,7 @@ final class FillMendLogicTests: XCTestCase {
         if kind == .vector { manager.addVectorLayer() } else { manager.addLayer() }
         manager.fillSettings.bucketEdgeOverlap = 0
         manager.fillSettings.gapClosing = gapClosing
-        manager.setFillMendsNeighbourGap(mend)
+        manager.setFillMendsGaps(mend)
         return manager
     }
 
@@ -160,6 +160,149 @@ final class FillMendLogicTests: XCTestCase {
                       file: file, line: line)
     }
 
+    private func mendPatch(width: Int, height: Int, source: [UInt8], ink: Set<Int>, reach: Float = 8) throws -> [UInt8] {
+        var rgba = [UInt8](repeating: 255, count: width * height * 4)
+        for index in ink {
+            let pixel = index * 4
+            rgba[pixel] = 0; rgba[pixel + 1] = 0; rgba[pixel + 2] = 0
+        }
+        var referenceContour = [UInt8](repeating: 0, count: width * height)
+        for y in 2..<(height - 2) {
+            for x in 2..<(width - 2) { referenceContour[y * width + x] = 255 }
+        }
+        let session = try XCTUnwrap(MetalFillEngine.shared.makeSession(
+            referenceRGBA: rgba, width: width, height: height, lassoMask: referenceContour,
+            gapWidthLimit: 0).session)
+        return try XCTUnwrap(session.mendMask(sourceMask: source, threshold: 0, artworkRect: nil, reach: reach))
+    }
+
+    private func assertExactDistanceMap(name: String, width: Int, height: Int, ink: [UInt8],
+                                        targetsInk: Bool = true,
+                                        file: StaticString = #filePath, line: UInt = #line) throws {
+        let count = width * height
+        let device = try XCTUnwrap(MTLCreateSystemDefaultDevice(), "Metal device for \(name)", file: file, line: line)
+        let library = try XCTUnwrap(try? device.makeDefaultLibrary(bundle: Bundle(for: MetalFillEngine.self)),
+                                    "Fill.metal library for \(name)", file: file, line: line)
+        let vertical = try XCTUnwrap(library.makeFunction(name: "edtVerticalSeeds"), file: file, line: line)
+        let horizontal = try XCTUnwrap(library.makeFunction(name: "edtHorizontalEnvelope"), file: file, line: line)
+        let verticalPipeline = try device.makeComputePipelineState(function: vertical)
+        let horizontalPipeline = try device.makeComputePipelineState(function: horizontal)
+        let queue = try XCTUnwrap(device.makeCommandQueue(), file: file, line: line)
+        let wall = try XCTUnwrap(ink.withUnsafeBytes {
+            device.makeBuffer(bytes: $0.baseAddress!, length: count, options: .storageModeShared)
+        }, file: file, line: line)
+        let wall2 = wall
+        let workspace = try XCTUnwrap(device.makeBuffer(length: count * 8, options: .storageModeShared), file: file, line: line)
+        let result = try XCTUnwrap(device.makeBuffer(length: count * 8, options: .storageModeShared), file: file, line: line)
+        var params = MetalFillEngine.FillParams()
+        params.width = UInt32(width); params.height = UInt32(height)
+        params.artworkMaxX = Float(width); params.artworkMaxY = Float(height)
+        var references: UInt32 = 1
+        var targetsInkValue: UInt32 = targetsInk ? 1 : 0
+        let command = try XCTUnwrap(queue.makeCommandBuffer(), file: file, line: line)
+        let encoder = try XCTUnwrap(command.makeComputeCommandEncoder(), file: file, line: line)
+        encoder.setComputePipelineState(verticalPipeline)
+        encoder.setBuffer(wall, offset: 0, index: 0)
+        encoder.setBuffer(wall2, offset: 0, index: 1)
+        encoder.setBytes(&params, length: MemoryLayout<MetalFillEngine.FillParams>.stride, index: 2)
+        encoder.setBytes(&references, length: MemoryLayout<UInt32>.stride, index: 3)
+        encoder.setBytes(&targetsInkValue, length: MemoryLayout<UInt32>.stride, index: 4)
+        encoder.setBuffer(workspace, offset: 0, index: 5)
+        let verticalWidth = min(64, verticalPipeline.maxTotalThreadsPerThreadgroup)
+        encoder.dispatchThreads(MTLSize(width: width, height: 1, depth: 1),
+                                threadsPerThreadgroup: MTLSize(width: verticalWidth, height: 1, depth: 1))
+        encoder.setComputePipelineState(horizontalPipeline)
+        encoder.setBuffer(workspace, offset: 0, index: 0)
+        encoder.setBuffer(workspace, offset: count * MemoryLayout<Int32>.stride, index: 1)
+        encoder.setBuffer(result, offset: 0, index: 2)
+        encoder.setBytes(&params, length: MemoryLayout<MetalFillEngine.FillParams>.stride, index: 3)
+        let horizontalHeight = min(64, horizontalPipeline.maxTotalThreadsPerThreadgroup)
+        encoder.dispatchThreads(MTLSize(width: 1, height: height, depth: 1),
+                                threadsPerThreadgroup: MTLSize(width: 1, height: horizontalHeight, depth: 1))
+        encoder.endEncoding()
+        command.commit()
+        command.waitUntilCompleted()
+        XCTAssertEqual(command.status, .completed, "distance transform command failed for \(name)", file: file, line: line)
+
+        let actual = result.contents().bindMemory(to: SIMD2<Int32>.self, capacity: count)
+        let targets = ink.indices.filter { index in
+            let isInk = ink[index] != 0
+            if targetsInk { return isInk }
+            let x = index % width, y = index / width
+            return x > 0 && x + 1 < width && y > 0 && y + 1 < height && !isInk
+        }
+        for y in 0..<height {
+            for x in 0..<width {
+                let index = y * width + x
+                if targets.isEmpty {
+                    XCTAssertEqual(actual[index], SIMD2(-1, -1), "\(name) pixel (\(x),\(y)): no-target sentinel", file: file, line: line)
+                    continue
+                }
+                let bestDistance = targets.map { target -> Int in
+                    let dx = x - target % width, dy = y - target / width
+                    return dx * dx + dy * dy
+                }.min()!
+                let nearest = actual[index]
+                let dx = x - Int(nearest.x), dy = y - Int(nearest.y)
+                let actualDistance = nearest.x < 0 || nearest.y < 0 ? Int.max : dx * dx + dy * dy
+                let targetIndex = nearest.y >= 0 && nearest.x >= 0
+                    ? Int(nearest.y) * width + Int(nearest.x) : -1
+                let targetExists = targetIndex >= 0 && targets.contains(targetIndex)
+                XCTAssertTrue(targetExists && actualDistance == bestDistance,
+                              "\(name) pixel (\(x),\(y)): got \(nearest), d²=\(actualDistance), expected \(bestDistance)",
+                              file: file, line: line)
+            }
+        }
+    }
+
+    func testExactDistanceTransformMatchesBruteForceOnTinyAndDeterministicMasks() throws {
+        for bits in 0..<(1 << 6) {
+            let ink = (0..<6).map { (bits & (1 << $0)) == 0 ? UInt8(0) : UInt8(255) }
+            try assertExactDistanceMap(name: "exhaustive-3x2-mask-\(bits)", width: 3, height: 2, ink: ink)
+        }
+
+        try assertExactDistanceMap(name: "no-seeds", width: 4, height: 3,
+                                   ink: [UInt8](repeating: 0, count: 12))
+        try assertExactDistanceMap(name: "single-row", width: 7, height: 1,
+                                   ink: [0, 0, 255, 0, 0, 0, 255])
+        try assertExactDistanceMap(name: "single-column", width: 1, height: 7,
+                                   ink: [0, 0, 255, 0, 0, 0, 255])
+        try assertExactDistanceMap(name: "equidistant-tie", width: 5, height: 1,
+                                   ink: [255, 0, 0, 0, 255])
+        try assertExactDistanceMap(name: "open-no-seeds-at-buffer-rim", width: 1, height: 5,
+                                   ink: [UInt8](repeating: 0, count: 5), targetsInk: false)
+        var openTie = [UInt8](repeating: 255, count: 25)
+        openTie[2 * 5 + 1] = 0; openTie[2 * 5 + 3] = 0
+        try assertExactDistanceMap(name: "equidistant-open-tie", width: 5, height: 5,
+                                   ink: openTie, targetsInk: false)
+        // At row zero, column one becomes better before column zero: the hull activation has a
+        // negative numerator and exercises mathematical floor rather than truncating division.
+        var negativeActivation = [UInt8](repeating: 0, count: 5 * 6)
+        negativeActivation[5 * 5] = 255
+        negativeActivation[1] = 255
+        try assertExactDistanceMap(name: "negative-activation", width: 5, height: 6,
+                                   ink: negativeActivation)
+
+        var state: UInt32 = 0x6D2B79F5
+        for caseIndex in 0..<32 {
+            state = state &* 1_664_525 &+ 1_013_904_223
+            let width = 1 + Int(state % 6)
+            state = state &* 1_664_525 &+ 1_013_904_223
+            let height = 1 + Int(state % 6)
+            var ink = [UInt8](repeating: 0, count: width * height)
+            for index in ink.indices {
+                state = state &* 1_664_525 &+ 1_013_904_223
+                if state & 3 == 0 { ink[index] = 255 }
+            }
+            try assertExactDistanceMap(name: "lcg-mask-\(caseIndex)-\(width)x\(height)",
+                                       width: width, height: height, ink: ink)
+            if width >= 3 && height >= 3 {
+                try assertExactDistanceMap(name: "lcg-open-mask-\(caseIndex)-\(width)x\(height)",
+                                           width: width, height: height, ink: ink, targetsInk: false)
+            }
+        }
+    }
+
     /// Both fills laid down in the scene, and the layer read back.
     private func twoFloodFills(fillLayer kind: LayerKind = .raster, dividerWidth: Int = 6, mend: Bool,
                                gapClosing: CGFloat = 8) throws -> Pixels {
@@ -170,6 +313,127 @@ final class FillMendLogicTests: XCTestCase {
     }
 
     // MARK: - Flood fills
+
+    /// A single stored fill can surround an internal line, or run up to an outer wall. The same
+    /// reach closes an isolated stroke and an attached stem, while the nearest-open witnesses on
+    /// the exterior and inside an intentional loop keep those boundaries untouched.
+    func testMendingCoversInternalAndAttachedInkWithoutGrowingOuterEdgesOrHoles() throws {
+        let width = 72, height = 72
+        var source = [UInt8](repeating: 0, count: width * height)
+        for y in 7..<65 { for x in 7..<65 { source[y * width + x] = 255 } }
+        var ink = Set<Int>()
+        func markInk(_ x: Int, _ y: Int) { ink.insert(y * width + x) }
+
+        // A detached internal stroke leaves source fill on both sides.
+        for y in 18..<30 {
+            for x in 34..<37 {
+                source[y * width + x] = 0
+                markInk(x, y)
+            }
+        }
+        // A second stroke is joined to the outer wall; its interior arm should still mend.
+        for y in 42..<45 {
+            for x in 6..<34 {
+                source[y * width + x] = 0
+                markInk(x, y)
+            }
+        }
+        // An intentional donut hole has source only outside the black contour.
+        let center = (x: 52, y: 20)
+        for y in 13...27 {
+            for x in 45...59 {
+                let dx = x - center.x, dy = y - center.y
+                let distanceSquared = dx * dx + dy * dy
+                if (25...36).contains(distanceSquared) {
+                    source[y * width + x] = 0
+                    markInk(x, y)
+                } else if distanceSquared < 25 {
+                    source[y * width + x] = 0
+                }
+            }
+        }
+        // A concave U-shaped outer contour opens onto unpainted paper. Its bottom must not be
+        // mistaken for an internal stroke simply because the interior endpoint is filled.
+        for y in 28..<44 { for x in 40..<64 { source[y * width + x] = 0 } }
+        for y in 31..<39 { for x in 44..<59 { source[y * width + x] = 255 } }
+        for y in 29..<42 {
+            for x in 42..<45 { markInk(x, y) }
+            for x in 59..<62 { markInk(x, y) }
+        }
+        for y in 39..<42 { for x in 42..<62 { markInk(x, y) } }
+
+        // A diagonal straight stroke and a curved stroke exercise normals that are not axis-aligned.
+        for step in 0...15 {
+            let x = 10 + step, y = 25 - step
+            for dy in -1...1 { for dx in -1...1 {
+                source[(y + dy) * width + x + dx] = 0
+                markInk(x + dx, y + dy)
+            } }
+        }
+        for step in 0...90 {
+            let angle = Double(step) * .pi / 120 + .pi / 4
+            let x = 50 + Int((8 * cos(angle)).rounded())
+            let y = 50 + Int((8 * sin(angle)).rounded())
+            for dy in -1...1 { for dx in -1...1 {
+                source[(y + dy) * width + x + dx] = 0
+                markInk(x + dx, y + dy)
+            } }
+        }
+        // The original frame is another ink barrier with unpainted paper beyond it.
+        for y in 6...65 { markInk(6, y); markInk(65, y) }
+        for x in 6...65 { markInk(x, 6); markInk(x, 65) }
+
+        let patch = try mendPatch(width: width, height: height, source: source, ink: ink)
+        XCTAssertNotEqual(patch[24 * width + 35], 0, "isolated internal stroke is mended")
+        XCTAssertNotEqual(patch[43 * width + 20], 0, "the interior stem remains mendable after joining the wall")
+        XCTAssertNotEqual(patch[18 * width + 17], 0, "diagonal internal ink is mended")
+        XCTAssertNotEqual(patch[58 * width + 50], 0, "curved internal ink is mended")
+        XCTAssertEqual(patch[30 * width + 6], 0, "the outer frame is not grown across")
+        XCTAssertEqual(patch[center.y * width + center.x + 6], 0, "the donut wall around intentional paper is protected")
+        XCTAssertEqual(patch[40 * width + 52], 0, "the concave U boundary stays open to exterior paper")
+        XCTAssertTrue(patch.enumerated().allSatisfy { pair in pair.element == 0 || ink.contains(pair.offset) },
+                      "the mend adds only missing reference-ink pixels")
+    }
+
+    func testMendReachCountsTheWholeAsymmetricAxialAndDiagonalCrossSection() throws {
+        let width = 72, height = 72
+
+        var axialSource = [UInt8](repeating: 0, count: width * height)
+        for y in 4..<68 { for x in 4..<68 { axialSource[y * width + x] = 255 } }
+        var axialInk = Set<Int>()
+        for y in 20..<30 {
+            for x in 20..<52 {
+                axialSource[y * width + x] = 0
+                axialInk.insert(y * width + x)
+            }
+        }
+        let axialTooShort = try mendPatch(width: width, height: height, source: axialSource,
+                                          ink: axialInk, reach: 9)
+        let axialExact = try mendPatch(width: width, height: height, source: axialSource,
+                                       ink: axialInk, reach: 10)
+        XCTAssertEqual(axialTooShort[22 * width + 36], 0,
+                       "near three plus far eight minus the exit pixel is ten, so reach nine refuses")
+        XCTAssertNotEqual(axialExact[22 * width + 36], 0,
+                          "the same asymmetric axial strip is accepted at its exact ten-pixel reach")
+
+        var diagonalSource = [UInt8](repeating: 0, count: width * height)
+        for y in 4..<68 { for x in 4..<68 { diagonalSource[y * width + x] = 255 } }
+        var diagonalInk = Set<Int>()
+        for y in 8..<64 {
+            for x in 8..<64 where (-3...5).contains(x - y) && (24...108).contains(x + y) {
+                diagonalSource[y * width + x] = 0
+                diagonalInk.insert(y * width + x)
+            }
+        }
+        let diagonalTooShort = try mendPatch(width: width, height: height, source: diagonalSource,
+                                             ink: diagonalInk, reach: 5)
+        let diagonalExact = try mendPatch(width: width, height: height, source: diagonalSource,
+                                          ink: diagonalInk, reach: 6)
+        XCTAssertEqual(diagonalTooShort[35 * width + 35], 0,
+                       "two near and three far diagonal steps span four sqrt(2) pixels, beyond reach five")
+        XCTAssertNotEqual(diagonalExact[35 * width + 35], 0,
+                          "the asymmetric diagonal strip is accepted at reach six")
+    }
 
     /// The control, and the reason the rest mean anything: with the option off, two fills either side
     /// of the divider leave its whole width bare. This is the owner's seam, reproduced.
@@ -263,7 +527,7 @@ final class FillMendLogicTests: XCTestCase {
             CanvasFixture.setBakedContent(manager, layerIndex: 0, art)
             manager.addLayer()
             manager.fillSettings.bucketEdgeOverlap = 0
-            manager.setFillMendsNeighbourGap(mend)
+            manager.setFillMendsGaps(mend)
             bucket(manager, at: CGPoint(x: 16, y: 32), colour: Self.red)
             bucket(manager, at: CGPoint(x: 48, y: 32), colour: Self.blue)
             return try fillLayerPixels(manager)
@@ -350,7 +614,7 @@ final class FillMendLogicTests: XCTestCase {
             XCTAssertEqual(manager.fillSettings.gapClosing, 8, "Fixture check: Gap Closing is at its default")
             XCTAssertEqual(manager.fillSettings.bucketEdgeOverlap, 2, "…and Edge Overlap")
             XCTAssertEqual(manager.fillSettings.mendReach, 12, "…and Mend Reach")
-            manager.setFillMendsNeighbourGap(mend)
+            manager.setFillMendsGaps(mend)
             bucket(manager, at: leftSeed, colour: Self.red)
             bucket(manager, at: rightSeed, colour: Self.blue)
             return try fillLayerPixels(manager)
@@ -390,7 +654,7 @@ final class FillMendLogicTests: XCTestCase {
         manager.beginInteractiveFill(at: rightSeed)
         manager.endInteractiveFill()
         settle()
-        manager.setFillMendsNeighbourGap(true)
+        manager.setFillMendsGaps(true)
         settle()
         manager.commitInteractiveFill()
 
@@ -403,14 +667,14 @@ final class FillMendLogicTests: XCTestCase {
     /// slider's value once it is on.
     func testTheMendReachIsPartOfTheKeyTheFillRendersWith() {
         let manager = CanvasFixture.manager()
-        XCTAssertTrue(manager.fillSettings.mendsNeighbourGap, "On from a fresh document (owner, 2026-10-12)")
+        XCTAssertTrue(manager.fillSettings.mendsGaps, "On from a fresh document (owner, 2026-10-12)")
         XCTAssertEqual(manager.fillSettings.mendReach, 12, "Mend Reach defaults to 12 px")
         XCTAssertEqual(manager.currentFillKey().mendReach, 12, "…and the key a fresh document renders with carries it")
-        manager.setFillMendsNeighbourGap(false)
+        manager.setFillMendsGaps(false)
         XCTAssertEqual(manager.currentFillKey().mendReach, 0)
         manager.setFillMendReach(30)
         XCTAssertEqual(manager.currentFillKey().mendReach, 0, "A slider moved with the option off changes nothing the render reads")
-        manager.setFillMendsNeighbourGap(true)
+        manager.setFillMendsGaps(true)
         XCTAssertEqual(manager.currentFillKey().mendReach, 30, "The render must see it, or the live re-run is a no-op")
         manager.setFillMendReach(5.4)
         XCTAssertEqual(manager.currentFillKey().mendReach, 5, "Whole pixels")

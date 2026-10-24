@@ -45,12 +45,13 @@ final class FillSettings: ObservableObject {
     /// front of the artist.
     @Published var lassoEdgeOverlap: CGFloat = CanvasManager.fillExpandRange.upperBound
 
-    /// **Mend Reach**, in canvas pixels: the widest strip of ink between a fill and its neighbour that
-    /// the mend will close, counted from the fill's edge *after* Edge Overlap has tucked it under the
-    /// line — so the two add, and a mend that Edge Overlap already covered has nothing left to do
+    /// **Mend Reach**, in canvas pixels: the widest strip of ink the mend will close, either inside
+    /// one fill or between it and neighbouring paint, counted from the fill's edge *after* Edge
+    /// Overlap has tucked it under the line — so the two add, and a mend that Edge Overlap already
+    /// covered has nothing to do
     /// rather than hiding behind it. The owner's *"its own slider … with a default set to 12px"*
     /// (TODO (113)): it was twice Gap Closing, which left the mend with no reach at all for an artist
-    /// who keeps Gap Closing low. Only read while `mendsNeighbourGap` is on.
+    /// who keeps Gap Closing low. Only read while `mendsGaps` is on.
     @Published var mendReach: CGFloat = 12
 
     /// How far the canvas edge's boundary sits **outside the paper, into the padding**, in canvas
@@ -90,13 +91,9 @@ final class FillSettings: ObservableObject {
     /// the wall mask.
     @Published var canvasEdgeIsBoundary = true
 
-    /// Whether a fill grows into the gap between itself and paint already on its layer — the owner's
-    /// *"have fill B smartly detect its edge is near fill A, and mend the gap"* (TODO (113)). On by
-    /// default (owner, 2026-10-12): a fill that ends short of the one beside it is a defect the artist
-    /// would otherwise have to remember to switch off, and the switch is still in the fill menu.
-    ///
-    /// How far it reaches is `mendReach`, its own setting. Both fill types honour it.
-    @Published var mendsNeighbourGap = true
+    /// Whether a fill mends nearby ink gaps, including internal stroke-shaped holes and seams to
+    /// neighboring paint. How far it reaches is `mendReach`.
+    @Published var mendsGaps = true
 }
 
 /// **The fill tool's settings in the scene's manifest** — Fill Type (`CanvasManager.fillMode`) and
@@ -107,10 +104,16 @@ struct FillToolManifest: Codable, Equatable {
     var threshold: CGFloat
     var bucketEdgeOverlap: CGFloat
     var lassoEdgeOverlap: CGFloat
-    var mendsNeighbourGap: Bool
+    var mendsGaps: Bool
     var mendReach: CGFloat
     var canvasEdgeIsBoundary: Bool
     var canvasEdgeExtension: CGFloat
+
+    private enum CodingKeys: String, CodingKey {
+        case mode, gapClosing, threshold, bucketEdgeOverlap, lassoEdgeOverlap
+        case mendsGaps = "mendsNeighbourGap"
+        case mendReach, canvasEdgeIsBoundary, canvasEdgeExtension
+    }
 
     /// A new scene's: Flood, and `FillSettings`' own defaults.
     init() {
@@ -123,7 +126,7 @@ struct FillToolManifest: Codable, Equatable {
         threshold = settings.threshold
         bucketEdgeOverlap = settings.bucketEdgeOverlap
         lassoEdgeOverlap = settings.lassoEdgeOverlap
-        mendsNeighbourGap = settings.mendsNeighbourGap
+        mendsGaps = settings.mendsGaps
         mendReach = settings.mendReach
         canvasEdgeIsBoundary = settings.canvasEdgeIsBoundary
         canvasEdgeExtension = settings.canvasEdgeExtension
@@ -134,7 +137,7 @@ struct FillToolManifest: Codable, Equatable {
         settings.threshold = threshold
         settings.bucketEdgeOverlap = bucketEdgeOverlap
         settings.lassoEdgeOverlap = lassoEdgeOverlap
-        settings.mendsNeighbourGap = mendsNeighbourGap
+        settings.mendsGaps = mendsGaps
         settings.mendReach = mendReach
         settings.canvasEdgeIsBoundary = canvasEdgeIsBoundary
         settings.canvasEdgeExtension = canvasEdgeExtension

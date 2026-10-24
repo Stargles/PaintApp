@@ -207,6 +207,11 @@ struct CanvasNotice: Identifiable, Equatable {
         /// tells a debugger whether it was the valve or Metal itself.
         case fillNeedsMoreMemory
 
+        /// Results of the vector layer's single, undoable Mend All Fills edit.
+        case fillsMended(Int)
+        case noFillGapsToMend
+        case fillMendingExceedsUndoBudget
+
         /// **A canvas-sized picture could not be drawn because the host refused the memory for it** —
         /// `MemoryPressure.Level.allocationRefused`, raised by `VectorCanvas.renderLocalContent` when
         /// CoreGraphics will not make a bitmap the size of the canvas. Before TODO (86) this trapped
@@ -401,6 +406,9 @@ struct CanvasNotice: Identifiable, Equatable {
         case .resizeResampled:  return "Resized. Undo puts it back — drawn strokes exactly, painted layers approximately."
         case .mergedAsPixels:   return "Merged as pixels — the upper layer's blend mode, opacity, mask or eraser marks can't be carried as strokes."
         case .fillNeedsMoreMemory: return "Not enough memory to fill right now — close other apps and try again."
+        case .fillsMended(let count): return "Mended \(count) \(count == 1 ? "fill" : "fills")."
+        case .noFillGapsToMend: return "No fill gaps could be mended with the current settings and reference layers."
+        case .fillMendingExceedsUndoBudget: return "Couldn't mend all fills — this layer is too large for one undo step. Nothing was changed."
         case .outOfMemoryToDraw:   return "This iPad ran out of memory drawing a canvas this large — some of the picture was skipped. Work at a smaller size, or close other apps."
         case .videoBakeRefused(let refusal): return "Couldn't bake — \(refusal.phrase)."
         case .streamBakeRefused(let refusal): return refusal.phrase
@@ -526,6 +534,7 @@ struct CanvasNotice: Identifiable, Equatable {
         // decision about the document the artist has to make with it in front of them, and "close
         // other apps" is not this app's to do.
         case .fillNeedsMoreMemory: return nil
+        case .fillsMended, .noFillGapsToMend, .fillMendingExceedsUndoBudget: return nil
         case .outOfMemoryToDraw: return nil
         // Nor this one. An unreadable file has no fix this app can offer, and a crop with nothing
         // decodable in it is undone from the block's own edge handles or Adjust Speed row, neither
@@ -592,6 +601,9 @@ struct CanvasNotice: Identifiable, Equatable {
         case .resizeResampled:  return "resizeResampled"
         case .mergedAsPixels:   return "mergedAsPixels"
         case .fillNeedsMoreMemory: return "fillNeedsMoreMemory"
+        case .fillsMended: return "fillsMended"
+        case .noFillGapsToMend: return "noFillGapsToMend"
+        case .fillMendingExceedsUndoBudget: return "fillMendingExceedsUndoBudget"
         case .outOfMemoryToDraw: return "outOfMemoryToDraw"
         case .videoBakeRefused: return "videoBakeRefused"
         case .streamBakeRefused: return "streamBakeRefused"

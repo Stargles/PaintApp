@@ -22,6 +22,220 @@ import UIKit
 
 extension CanvasManager {
 
+    enum FillMendOutcome: Equatable {
+        case changed(Int)
+        case unchanged
+        case needsMoreMemory
+        case exceedsUndoBudget
+        /// Another edit overtook this request while its window was being prepared.
+        case superseded
+    }
+
+    /// A new edit using the current references/settings at each owned cel's start frame. Stored
+    /// fills carry no original flood seed: their complete contour uses the lasso's existing paper
+    /// and modal-contour reference rule. Only accepted patches are added to the original geometry.
+    @MainActor
+    func mendAllFills(layerIndex: Int) async -> FillMendOutcome {
+        guard fillMendingLayerID == nil else { return .superseded }
+        guard layers.indices.contains(layerIndex), layers[layerIndex].kind == .vector,
+              let size = canvasSize, commitAllInteractiveState() else { return .unchanged }
+        let layerID = layers[layerIndex].id
+        fillMendingLayerID = layerID
+        defer { fillMendingLayerID = nil }
+        let targets = layers[layerIndex].cels
+            .filter { $0.interpolation?.mode != .generate && $0.vector != nil }
+            .map { FillMendRead(layerID: layerID, cel: $0) }
+        let referenceIDs = layers.filter(\.isFillReference).map(\.id)
+        let threshold = Float((fillSettings.threshold * 1000).rounded() / 1000)
+        let reach = fillSettings.mendReach.rounded()
+        let inset = max(0, canvasPadding - fillSettings.canvasEdgeExtension).rounded()
+        let paper = fillSettings.canvasEdgeIsBoundary
+            ? CGRect(origin: .zero, size: size).insetBy(dx: inset, dy: inset) : nil
+        let validity = FillMendValidity()
+        // Local to this request. Any ordinary edit, undo or document replacement invalidates the
+        // prepared result; live content changes are also checked by canvas/raster versions below.
+        let edited = documentEdited.sink { validity.superseded = true }
+        defer { edited.cancel() }
+        var reads: [FillMendRead] = []
+        var edits: [FillMendEdit] = []
+        var retainedCost = 0
+        var changedCount = 0
+
+        for target in targets {
+            guard !validity.superseded, let at = self.layerIndex(ofID: layerID),
+                  let cel = layers[at].cels.first(where: { $0.id == target.celID }),
+                  let vector = cel.vector else { return .superseded }
+            let before = vector.elements
+            guard before.contains(where: { $0.fill != nil }) else { continue }
+            let references = Self.fillMendSources(fillReferenceSources(atFrame: cel.startFrame))
+            let neighbours = Self.fillMendSources([(layers[at], cel)])
+            reads.append(contentsOf: references.map { FillMendRead(layerID: $0.layer.id, cel: $0.cel) })
+            var after = before
+            var rewritten = Set<UUID>()
+            for index in before.indices {
+                guard let fill = before[index].fill, let path = fill.cgPath, !path.isEmpty else { continue }
+                let reserving = rewritten.union([fill.id])
+                let reservedUndo = retainedCost + Self.fillMendUndoCost(before: before, after: after,
+                                                                       rewritten: reserving)
+                let remainingUndo = max(0, history.maxCost - reservedUndo)
+                let geometryBytes = max(0, MetalFillEngine.fillBudgetBytes / 2 - 4 * fill.pathData.count)
+                let undoPoints = remainingUndo / Self.fillMendBytesPerPoint
+                let geometryPoints = geometryBytes / Self.fillMendBytesPerPoint
+                let work = FillMendWork(fill: fill, path: path,
+                                        transform: vector.transform, size: size, references: references,
+                                        neighbours: neighbours, threshold: threshold, reach: reach, paper: paper,
+                                        maximumPointCount: min(undoPoints, geometryPoints),
+                                        pointLimitIsUndoBudget: undoPoints <= geometryPoints,
+                                        maximumPathDataBytes: fill.pathData.count + remainingUndo)
+                let patch = await withCheckedContinuation { continuation in
+                    fillQueue.async {
+                        let result = autoreleasepool { Self.prepareFillMend(work) }
+                        continuation.resume(returning: result)
+                    }
+                }
+                guard !validity.superseded else { return .superseded }
+                switch patch {
+                case .unchanged: continue
+                case .needsMoreMemory: return .needsMoreMemory
+                case .exceedsUndoBudget: return .exceedsUndoBudget
+                case .fill(let mended):
+                    after[index] = .fill(mended)
+                    rewritten.insert(fill.id)
+                    // Same-id path rewrites share their element slots, so include their retained
+                    // path payloads explicitly beside the standard vector-list cost.
+                    guard retainedCost + Self.fillMendUndoCost(before: before, after: after, rewritten: rewritten)
+                            <= history.maxCost else { return .exceedsUndoBudget }
+                }
+            }
+            guard !rewritten.isEmpty else { continue }
+            retainedCost += Self.fillMendUndoCost(before: before, after: after, rewritten: rewritten)
+            let originalFills = Dictionary(uniqueKeysWithValues: before.compactMap { element -> (UUID, VectorFillElement)? in
+                guard rewritten.contains(element.id), let fill = element.fill else { return nil }
+                return (element.id, fill)
+            })
+            let changedFills = Dictionary(uniqueKeysWithValues: after.compactMap { element -> (UUID, VectorFillElement)? in
+                guard rewritten.contains(element.id), let fill = element.fill else { return nil }
+                return (element.id, fill)
+            })
+            edits.append(FillMendEdit(celID: cel.id, before: originalFills,
+                                      after: changedFills, rewritten: rewritten))
+            changedCount += rewritten.count
+        }
+
+        guard !validity.superseded, canvasSize == size,
+              let current = self.layerIndex(ofID: layerID), layers[current].kind == .vector,
+              layers.filter(\.isFillReference).map(\.id) == referenceIDs,
+              (targets + reads).allSatisfy({ $0.matches(self) }) else { return .superseded }
+        guard !edits.isEmpty else { return .unchanged }
+        guard retainedCost <= history.maxCost else { return .exceedsUndoBudget }
+
+        // No await after preflight: every prepared revision lands in one main-thread turn.
+        restoreFillMends(edits, layerID: layerID, elements: \.after)
+        recordUndo(label: .mendAllFills, cost: retainedCost, undo: { [weak self] in
+            self?.restoreFillMends(edits, layerID: layerID, elements: \.before)
+        }, redo: { [weak self] in
+            self?.restoreFillMends(edits, layerID: layerID, elements: \.after)
+        })
+        return .changed(changedCount)
+    }
+
+    private func restoreFillMends(_ edits: [FillMendEdit], layerID: UUID,
+                                  elements: KeyPath<FillMendEdit, [UUID: VectorFillElement]>) {
+        for edit in edits {
+            guard let layer = layers.first(where: { $0.id == layerID }),
+                  let canvas = layer.cels.first(where: { $0.id == edit.celID })?.vector else { continue }
+            let replacements = edit[keyPath: elements]
+            let restored = canvas.elements.map { element in
+                replacements[element.id].map(VectorElement.fill) ?? element
+            }
+            canvas.restoreElements(restored, changedInk: nil, rewriting: edit.rewritten)
+            celContentChangedOutsideStroke(layerID: layerID, celID: edit.celID)
+        }
+        refreshUndoRedoState()
+    }
+
+    /// A window needs one cel from each reference, not the other cached cels that happen to share
+    /// its layer. The layer metadata supplies kind/reference semantics to the existing helpers.
+    private static func fillMendSources(_ sources: [(layer: Layer, cel: Cel)]) -> [(layer: Layer, cel: Cel)] {
+        sources.map { source in
+            var layer = source.layer
+            layer.cels = []
+            return (layer, source.cel)
+        }
+    }
+
+    private static func fillMendUndoCost(before: [VectorElement], after: [VectorElement],
+                                         rewritten: Set<UUID>) -> Int {
+        VectorUndoCost.bytes(from: before, to: after)
+            + before.reduce(0) { $0 + (rewritten.contains($1.id) ? ($1.fill?.pathData.count ?? 0) : 0) }
+            + after.reduce(0) { $0 + (rewritten.contains($1.id) ? ($1.fill?.pathData.count ?? 0) : 0) }
+    }
+
+    /// A new contour point has a 16-byte CGPoint payload. Reserve eight payloads for the traced,
+    /// mapped and Boolean paths plus UIBezierPath/NSKeyedArchiver scratch. This is a conservative
+    /// complexity allowance, not an exact RAM claim: those system allocations and their codec are
+    /// opaque. Half the transient budget is left for masks/edges and other overhead, four original
+    /// archive payloads are reserved beside it, and actual archive bytes still gate the undo plan.
+    private static var fillMendBytesPerPoint: Int { 8 * MemoryLayout<CGPoint>.stride }
+
+    /// Runs on the existing serial fill queue. Every mask, session and contour here dies with this
+    /// one window; only the archived replacement reaches the bounded atomic edit plan. Union and
+    /// archiving stay here too, so fragmented geometry cannot block the main actor between yields.
+    private static func prepareFillMend(_ work: FillMendWork) -> FillMendPatch {
+        let determinant = work.transform.a * work.transform.d - work.transform.b * work.transform.c
+        guard determinant.isFinite, abs(determinant) > .ulpOfOne else { return .unchanged }
+        var toCanvas = work.transform
+        let rule: CGPathFillRule = work.fill.evenOddFill ? .evenOdd : .winding
+        guard let shown = work.path.normalized(using: rule).copy(using: &toCanvas) else { return .unchanged }
+        // Peak mask production also holds source N, CPU path wall 4N, and the neighbour composite's
+        // image/bytes/mask up to 9N. These die before the accepted mask is traced below.
+        let price = MetalFillSession.bytesPerPixel(isLasso: true, twoReferenceColours: true) + 14
+        let window = FillWindow.lasso(around: shown.boundingBoxOfPath, halo: work.reach + 2,
+                                      in: work.size, pixelBudget: max(1, MetalFillEngine.fillBudgetBytes / price))
+        let width = window.workingWidth, height = window.workingHeight
+        guard work.reach * window.scale >= 1 else { return .unchanged }
+        let prepared = autoreleasepool { fillMendMask(work, shown: shown, window: window) }
+        let mask: [UInt8]
+        switch prepared {
+        case .mask(let accepted): mask = accepted
+        case .unchanged: return .unchanged
+        case .needsMoreMemory: return .needsMoreMemory
+        }
+        guard let traced = PixelOps.contourPath(selected: mask.map { $0 != 0 }, width: width, height: height,
+                                                maximumPointCount: work.maximumPointCount) else {
+            // fillMendMask only returns a nonempty mask. A refused contour must not masquerade as
+            // "no gaps", and the entire atomic plan is discarded by the caller on either refusal.
+            return work.pointLimitIsUndoBudget ? .exceedsUndoBudget : .needsMoreMemory
+        }
+        var toLocal = window.transform.inverted().concatenating(work.transform.inverted())
+        guard let local = traced.copy(using: &toLocal) else { return .needsMoreMemory }
+        let combined = work.path.normalized(using: rule).union(local, using: .winding)
+        let updated = work.fill.reshaped(to: combined)
+        guard !updated.pathData.isEmpty else { return .needsMoreMemory }
+        guard updated.pathData.count <= work.maximumPathDataBytes else { return .exceedsUndoBudget }
+        return .fill(updated)
+    }
+
+    private static func fillMendMask(_ work: FillMendWork, shown: CGPath, window: FillWindow) -> FillMendMask {
+        let width = window.workingWidth, height = window.workingHeight
+        guard let source = LassoFillMask.rasterize(path: shown, width: width, height: height,
+                                                  transform: window.transform),
+              let rgba = compositeReferenceRGBA(references: work.references, window: window) else { return .unchanged }
+        let pathWall = StrokeWallMask.mask(of: pathWallSources(work.references), width: width, height: height,
+                                           transform: window.transform)
+        guard let engine = MetalFillEngine.shared,
+              let session = engine.makeSession(referenceRGBA: rgba, width: width, height: height,
+                                                lassoMask: source, pathWall: pathWall,
+                                                gapWidthLimit: 0).session else { return .needsMoreMemory }
+        var neighbours = neighbourMask(of: work.neighbours, in: window)
+        for index in source.indices where source[index] != 0 { neighbours[index] = 0 }
+        session.installNeighbours(neighbours)
+        guard let mask = session.mendMask(sourceMask: source, threshold: work.threshold,
+                                          artworkRect: work.paper?.applying(window.transform),
+                                          reach: Float(work.reach * window.scale)) else { return .needsMoreMemory }
+        return mask.contains(where: { $0 != 0 }) ? .mask(mask) : .unchanged
+    }
+
     // MARK: - Solid shapes
 
     /// **Add → Rectangle and Add → Ellipse, at the geometry the pen dragged out.** A solid shape in the
@@ -235,4 +449,80 @@ extension CanvasManager {
 struct GradientEditSession {
     let elementID: UUID
     var edit: ElementEditSession
+}
+
+private final class FillMendValidity {
+    var superseded = false
+}
+
+private struct FillMendEdit {
+    let celID: UUID
+    let before: [UUID: VectorFillElement]
+    let after: [UUID: VectorFillElement]
+    let rewritten: Set<UUID>
+}
+
+/// References use the same locked rendering APIs as an interactive fill. Their captured versions
+/// are rechecked on main before anything is installed, so concurrent edits discard this request.
+private struct FillMendWork: @unchecked Sendable {
+    let fill: VectorFillElement
+    let path: CGPath
+    let transform: CGAffineTransform
+    let size: CGSize
+    let references: [(layer: Layer, cel: Cel)]
+    let neighbours: [(layer: Layer, cel: Cel)]
+    let threshold: Float
+    let reach: CGFloat
+    let paper: CGRect?
+    let maximumPointCount: Int
+    let pointLimitIsUndoBudget: Bool
+    let maximumPathDataBytes: Int
+}
+
+private enum FillMendPatch: @unchecked Sendable {
+    case fill(VectorFillElement)
+    case unchanged
+    case needsMoreMemory
+    case exceedsUndoBudget
+}
+
+private enum FillMendMask {
+    case mask([UInt8])
+    case unchanged
+    case needsMoreMemory
+}
+
+private struct FillMendRead {
+    let layerID: UUID
+    let celID: UUID
+    let startFrame: Int
+    let frameCount: Int
+    let rasterID: ObjectIdentifier
+    let rasterVersion: Int
+    let vectorID: ObjectIdentifier?
+    let vectorVersion: Int?
+    let transform: CGAffineTransform?
+    let bakedID: ObjectIdentifier?
+
+    init(layerID: UUID, cel: Cel) {
+        self.layerID = layerID
+        celID = cel.id
+        startFrame = cel.startFrame
+        frameCount = cel.frameCount
+        rasterID = ObjectIdentifier(cel.raster)
+        rasterVersion = cel.raster.version
+        vectorID = cel.vector.map(ObjectIdentifier.init)
+        vectorVersion = cel.vector?.version
+        transform = cel.vector?.transform
+        bakedID = cel.bakedImage.map(ObjectIdentifier.init)
+    }
+
+    func matches(_ manager: CanvasManager) -> Bool {
+        guard let layer = manager.layers.first(where: { $0.id == layerID }),
+              let cel = layer.cels.first(where: { $0.id == celID }) else { return false }
+        return cel.startFrame == startFrame && cel.frameCount == frameCount
+            && ObjectIdentifier(cel.raster) == rasterID && cel.raster.version == rasterVersion
+            && cel.vector.map(ObjectIdentifier.init) == vectorID && cel.vector?.version == vectorVersion
+            && cel.vector?.transform == transform && cel.bakedImage.map(ObjectIdentifier.init) == bakedID
+    }
 }

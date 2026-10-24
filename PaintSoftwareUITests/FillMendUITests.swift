@@ -37,7 +37,7 @@ final class FillMendUITests: PaintUITestCase {
         return Screen(bytes: buffer, width: width, height: height)
     }
 
-    // MARK: - (113) Mend Gap to Neighbouring Fill
+    // MARK: - Mend Gaps between neighbouring fills
 
     /// A box with two dividers, line art on its own layer above the colour. The left cell is filled
     /// first and the middle one second, both with the option as the document starts it — **on** — and
@@ -142,6 +142,93 @@ final class FillMendUITests: PaintUITestCase {
         attachScreenshot(app, "mend-seams-line-art-hidden")
         XCTAssertGreaterThan(unmended, 0, "Control: with the option switched off the third fill leaves paper under the line")
         XCTAssertEqual(mended, 0, "On the default the second fill meets the first under the line — no paper left across the seam")
+    }
+
+    /// Cold launch → saved vector fill with the option off → the vector layer action → one undo.
+    /// The hidden line art remains an explicit reference, so the picture reads the fill itself.
+    func testMendAllFillsIsVectorOnlyRepairsAnAttachedStemAndUndoesAsOneStep() throws {
+        XCUIDevice.shared.orientation = .landscapeLeft
+        defer { XCUIDevice.shared.orientation = .portrait }
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app, size: CGSize(width: 2048, height: 1024)))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        openLayerPanel(app)
+        app.staticTexts["layerPanel.row.0"].tap()
+        XCTAssertTrue(app.buttons["layerOptions.rename"].waitForExistence(timeout: 5), "the raster layer's menu is open")
+        XCTAssertTrue(app.buttons["layerOptions.rasterize"].waitForNonExistence(timeout: 2))
+        XCTAssertFalse(app.buttons["layerOptions.mendAllFills"].exists, "raster layers have no stored fills to edit")
+        app.buttons["layerOptions.close"].tap()
+        addVectorLayerFromOpenPanel(app) // colour at 1
+        addVectorLayerFromOpenPanel(app) // line art at 2
+        closeLayerRail(app)
+        setBrushSize(app, normalized: 0.025)
+        app.buttons["toolbar.brushButton"].tap() // close the brushes menu left open by the size helper
+        let paper = visiblePaperRect(app, in: canvas)
+        let left = Double(paper.minX + paper.width * 0.25)
+        let right = Double(paper.minX + paper.width * 0.75)
+        let top = Double(paper.minY + paper.height * 0.2)
+        let bottom = Double(paper.minY + paper.height * 0.8)
+        let middle = (top + bottom) / 2
+        let branchStart = left + (right - left) * 0.45
+        drawLine(on: canvas, from: CGVector(dx: left, dy: top), to: CGVector(dx: right, dy: top))
+        drawLine(on: canvas, from: CGVector(dx: right, dy: top), to: CGVector(dx: right, dy: bottom))
+        drawLine(on: canvas, from: CGVector(dx: right, dy: bottom), to: CGVector(dx: left, dy: bottom))
+        drawLine(on: canvas, from: CGVector(dx: left, dy: bottom), to: CGVector(dx: left, dy: top))
+        drawLine(on: canvas, from: CGVector(dx: branchStart, dy: middle), to: CGVector(dx: right, dy: middle))
+        openLayerPanel(app)
+        app.staticTexts["layerPanel.row.1"].tap()
+        closeLayerRail(app)
+        setBrushColor(app, hex: "FF0000")
+        XCTAssertTrue(openFillPanel(app))
+        let overlap = app.sliders["fillPanel.edgeOverlapSlider"]
+        for _ in 0..<5 where sliderNumericValue(overlap) > 0.5 {
+            overlap.adjust(toNormalizedSliderPosition: 0)
+        }
+        XCTAssertLessThanOrEqual(sliderNumericValue(overlap), 1, "the control leaves the stroke footprint bare")
+        let mend = app.switches["fillPanel.mendGapToggle"]
+        scrollFillPanel(app, to: mend)
+        XCTAssertTrue(mend.waitForExistence(timeout: 5))
+        if mend.value as? String == "1" { mend.tap() }
+        app.buttons["toolbar.fillButton"].tap()
+        let seed = CGVector(dx: left + (right - left) * 0.2, dy: top + (bottom - top) * 0.25)
+        canvas.coordinate(withNormalizedOffset: seed).tap()
+        XCTAssertTrue(waitUntil(canvas, seed, isRed), "the original fill landed")
+        app.buttons["toolbar.brushButton"].tap()
+
+        openLayerPanel(app)
+        app.staticTexts["layerPanel.row.1"].tap() // selected row opens its options and reference picker
+        let lineReference = app.buttons["layerPanel.row.2.fillRefButton"]
+        XCTAssertTrue(lineReference.waitForExistence(timeout: 5))
+        lineReference.tap()
+        lineReference.tap() // explicitly on, so hiding its eye will not remove it as a reference
+        XCTAssertEqual(lineReference.value as? String, "1")
+        let colourReference = app.buttons["layerPanel.row.1.fillRefButton"]
+        if colourReference.value as? String == "1" { colourReference.tap() }
+        app.buttons["layerPanel.row.2.visibility"].tap()
+        app.buttons["layerOptions.close"].tap()
+        closeLayerRail(app)
+        let probe = CGVector(dx: branchStart + (right - branchStart) * 0.4, dy: middle)
+        assertAboveTheDock(app, canvas, dy: probe.dy, "the attached-stroke probe")
+        XCTAssertTrue(waitUntil(canvas, probe, isWhitish), "PREMISE: the saved fill leaves paper under the attached stroke")
+        attachScreenshot(app, "mend-all-before-line-art-hidden")
+
+        openLayerPanel(app)
+        app.staticTexts["layerPanel.row.1"].tap()
+        let action = app.buttons["layerOptions.mendAllFills"]
+        XCTAssertTrue(action.waitForExistence(timeout: 5), "the vector layer offers Mend All Fills beside Rasterize")
+        XCTAssertTrue(action.isHittable)
+        action.tap()
+        closeLayerRail(app)
+        XCTAssertTrue(waitUntil(canvas, probe, isRed, timeout: 20), "the action covers the attached stem")
+        let outside = CGVector(dx: right + (right - left) * 0.04, dy: middle)
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, at: outside)), "the outside edge stays fixed")
+        attachScreenshot(app, "mend-all-after-line-art-hidden")
+        app.buttons["sideToolbar.undoButton"].tap()
+        XCTAssertTrue(waitUntil(canvas, probe, isWhitish), "one undo restores the saved gap")
+        XCTAssertTrue(isRed(rgbaPixel(of: canvas, at: seed)), "undo kept the original fill")
+        app.buttons["sideToolbar.redoButton"].tap()
+        XCTAssertTrue(waitUntil(canvas, probe, isRed), "redo restores the repaired stem")
     }
 
     // MARK: - (114) The extension buffer

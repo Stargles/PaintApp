@@ -80,44 +80,98 @@ kernel void computeWalls(const device uchar4* reference [[buffer(0)]],
     wall[i] = (pathIsWall || colourDistance(c, params.seedColor) > params.threshold) ? 1 : 0;
 }
 
-// MARK: - Jump Flooding Algorithm (approximate Euclidean distance transform)
+// MARK: - Exact separable Euclidean distance transform
 
-// Seed every wall pixel with its own coordinate; everything else gets a far-away sentinel. The
-// jump flood then carries each pixel the coordinate of its nearest wall, which `gapLevels` turns into
-// the distance map gap closing is cut from.
-kernel void jfaInit(const device uchar*  wall   [[buffer(0)]],
-                    device float2*        coord  [[buffer(1)]],
-                    constant FillParams&  params [[buffer(2)]],
-                    uint2 gid [[thread_position_in_grid]]) {
-    if (gid.x >= params.width || gid.y >= params.height) return;
-    uint i = pixelIndex(gid.x, gid.y, params.width);
-    coord[i] = wall[i] != 0 ? float2(gid) : float2(1e20);
+static inline bool insideArtworkRect(uint x, uint y, constant FillParams& params);
+
+// `targetsInk == 0` seeds open geometry for mending; the basin distance seeds exact wall pixels.
+// Exterior paper remains a nearest-open witness for rejecting artwork-edge crossings.
+static inline bool edtTarget(uint x, uint y, const device uchar* wall,
+                             const device uchar* wall2, constant FillParams& params,
+                             uint refCount, uint targetsInk) {
+    uint i = pixelIndex(x, y, params.width);
+    bool ink = wall[i] != 0 && (refCount < 2u || wall2[i] != 0);
+    if (targetsInk != 0u) return ink;
+    // Keep exterior paper as a nearest-open witness: it vetoes a proposed normal that could cross
+    // the artwork edge. The buffer rim itself is unknown; mendGap protects candidates near it.
+    if (x == 0u || y == 0u || x + 1u == params.width || y + 1u == params.height) return false;
+    return !ink;
 }
 
-// One JFA pass at the given step: adopt the nearest seed coordinate among the 8 neighbours at
-// distance `step`. Repeated with step = W/2, W/4, ... 1 this converges to (near-)exact nearest-seed.
-kernel void jfaStep(const device float2* inCoord  [[buffer(0)]],
-                    device float2*        outCoord [[buffer(1)]],
-                    constant FillParams&  params   [[buffer(2)]],
-                    constant uint&        step     [[buffer(3)]],
-                    uint2 gid [[thread_position_in_grid]]) {
-    if (gid.x >= params.width || gid.y >= params.height) return;
-    uint i = pixelIndex(gid.x, gid.y, params.width);
-    float2 pos = float2(gid);
-    float2 best = inCoord[i];
-    float bestD = distance_squared(pos, best);
-    int s = int(step);
-    for (int dy = -1; dy <= 1; dy++) {
-        for (int dx = -1; dx <= 1; dx++) {
-            int nx = int(gid.x) + dx * s;
-            int ny = int(gid.y) + dy * s;
-            if (nx < 0 || ny < 0 || nx >= int(params.width) || ny >= int(params.height)) continue;
-            float2 cand = inCoord[pixelIndex(uint(nx), uint(ny), params.width)];
-            float d = distance_squared(pos, cand);
-            if (d < bestD) { bestD = d; best = cand; }
-        }
+// One thread owns a column. The forward/backward scans find the nearest target row at every pixel;
+// -1 means this column has no target. This is the immutable first half of the workspace.
+kernel void edtVerticalSeeds(const device uchar* wall    [[buffer(0)]],
+                             const device uchar* wall2   [[buffer(1)]],
+                             constant FillParams& params [[buffer(2)]],
+                             constant uint& refCount    [[buffer(3)]],
+                             constant uint& targetsInk  [[buffer(4)]],
+                             device int* seedY          [[buffer(5)]],
+                             uint2 gid [[thread_position_in_grid]]) {
+    if (gid.y != 0u || gid.x >= params.width) return;
+    uint x = gid.x;
+    int last = -1;
+    for (uint y = 0; y < params.height; y++) {
+        if (edtTarget(x, y, wall, wall2, params, refCount, targetsInk)) last = int(y);
+        seedY[pixelIndex(x, y, params.width)] = last;
     }
-    outCoord[i] = best;
+    last = -1;
+    for (int y = int(params.height) - 1; y >= 0; y--) {
+        if (edtTarget(x, uint(y), wall, wall2, params, refCount, targetsInk)) last = y;
+        uint i = pixelIndex(x, uint(y), params.width);
+        int above = seedY[i];
+        if (above < 0) seedY[i] = last;
+        else if (last >= 0 && (last - y) * (last - y) < (y - above) * (y - above)) seedY[i] = last;
+    }
+}
+
+// Mathematical floor division for a positive denominator; Metal's signed division truncates.
+static inline int edtFloorDiv(int numerator, int denominator) {
+    return numerator >= 0 ? numerator / denominator : -((-numerator + denominator - 1) / denominator);
+}
+
+// First integer x where q is strictly nearer than p, so p remains the deterministic winner on ties.
+// Recomputed during hull construction and query; no intersection array is allocated.
+static inline int edtFirstWins(uint p, uint q, uint y, const device int* seedY, uint width) {
+    int py = seedY[pixelIndex(p, y, width)];
+    int qy = seedY[pixelIndex(q, y, width)];
+    int pf = (int(y) - py) * (int(y) - py);
+    int qf = (int(y) - qy) * (int(y) - qy);
+    int numerator = int(q * q) + qf - int(p * p) - pf;
+    int denominator = 2 * (int(q) - int(p));
+    return edtFloorDiv(numerator, denominator) + 1;
+}
+
+// One thread owns a row. Candidate-X stacks occupy disjoint width-sized slices in workspace's
+// second half; final nearest int2 coordinates go to the other buffer.
+kernel void edtHorizontalEnvelope(const device int* seedY   [[buffer(0)]],
+                                  device uint* hull         [[buffer(1)]],
+                                  device int2* nearest       [[buffer(2)]],
+                                  constant FillParams& params [[buffer(3)]],
+                                  uint2 gid [[thread_position_in_grid]]) {
+    if (gid.x != 0u || gid.y >= params.height) return;
+    uint y = gid.y;
+    uint base = y * params.width;
+    uint count = 0;
+    for (uint q = 0; q < params.width; q++) {
+        if (seedY[base + q] < 0) continue;
+        while (count >= 2u) {
+            uint p = hull[base + count - 2u];
+            uint r = hull[base + count - 1u];
+            if (edtFirstWins(r, q, y, seedY, params.width) < edtFirstWins(p, r, y, seedY, params.width)) count--;
+            else break;
+        }
+        hull[base + count++] = q;
+    }
+    if (count == 0u) {
+        for (uint x = 0; x < params.width; x++) nearest[base + x] = int2(-1);
+        return;
+    }
+    uint active = 0;
+    for (uint x = 0; x < params.width; x++) {
+        while (active + 1u < count && edtFirstWins(hull[base + active], hull[base + active + 1u], y, seedY, params.width) <= int(x)) active++;
+        uint q = hull[base + active];
+        nearest[base + x] = int2(int(q), seedY[base + q]);
+    }
 }
 
 // MARK: - The canvas edge as a boundary
@@ -175,11 +229,9 @@ static inline float distanceToCanvasEdge(uint2 gid, constant FillParams& params)
 
 // Each open pixel's distance to the nearest ink, in quarter pixels — the distance map `FillBasins`
 // partitions the plain fill by (TODO (158)) — capped at `ceiling` (`FillBasins.ceiling`), above which
-// no cut the session will be asked for looks. `wallCoord` is the jump flood seeded on the walls; with
-// the canvas edge a boundary, the ring one pixel outside the artwork rect is ink too, from whichever
-// side the pixel lies. Walls write 0. The JFA's 1e20 sentinel (no walls at all) clamps to the
-// ceiling, so an empty canvas is one flat plateau and one basin.
-kernel void gapLevels(const device float2* wallCoord        [[buffer(0)]],
+// no cut the session will be asked for looks. The exact transform's (-1,-1) sentinel means no ink;
+// with the canvas edge enabled its analytic distance can still bound that pixel.
+kernel void gapLevels(const device int2* wallCoord          [[buffer(0)]],
                       device ushort*        levels           [[buffer(1)]],
                       constant FillParams&  params           [[buffer(2)]],
                       constant uint&        canvasEdgeIsInk  [[buffer(3)]],
@@ -187,7 +239,9 @@ kernel void gapLevels(const device float2* wallCoord        [[buffer(0)]],
                       uint2 gid [[thread_position_in_grid]]) {
     if (gid.x >= params.width || gid.y >= params.height) return;
     uint i = pixelIndex(gid.x, gid.y, params.width);
-    float d = distance(float2(gid), wallCoord[i]);
+    int2 nearest = wallCoord[i];
+    float d = nearest.x < 0 ? 1e20f : sqrt(float((int(gid.x) - nearest.x) * (int(gid.x) - nearest.x)
+                                                   + (int(gid.y) - nearest.y) * (int(gid.y) - nearest.y)));
     if (canvasEdgeIsInk != 0u) d = min(d, distanceToCanvasEdge(gid, params));
     levels[i] = ushort(clamp(round(d * 4.0), 0.0, float(ceiling)));
 }
@@ -463,7 +517,13 @@ kernel void paintRegionAlpha(const device uchar* alpha  [[buffer(0)]],
     out[i] = uchar4(clamp(params.fillColor * k * 255.0 + 0.5, 0.0, 255.0));
 }
 
-// MARK: - Mending the gap to a neighbouring fill (TODO (113))
+// MARK: - Mending internal gaps and fill-to-fill seams (TODO (113))
+//
+// Two proofs share this output mask. The original axis walk below grows only ink that joins this
+// fill to a neighbouring painted region. The internal branch uses the exact nearest-open map: every
+// equidistant nearest open site must prove a contiguous normal through ink to source fill on the
+// opposite side. Exterior paper, a lasso fence, an artwork edge, an unresolved buffer rim, or a
+// neighbour rejects that normal. This preserves holes and outer edges without saved fill provenance.
 //
 // **The seam, and why it exists at all.** A flood stops at the antialiased edge of the line it meets,
 // on whichever side it started. Two fills either side of one line therefore each stop at their own
@@ -472,8 +532,8 @@ kernel void paintRegionAlpha(const device uchar* alpha  [[buffer(0)]],
 // the line's near side. The mend is the third thing a fill can do about it, after Edge Overlap's
 // uniform disk: grow *only* where the colour on the other side of the line already is.
 //
-// **The rule: a pixel is mended when, along some straight line through it, ink runs unbroken from
-// this fill to the neighbour — and no wider than the reach.** That is the seam, exactly: the
+// **The neighbour-seam rule: a pixel joins when ink runs unbroken from this fill to the neighbour —
+// and no wider than the reach.** That is the seam, exactly: the
 // divider's own pixels between two cells qualify, and nothing else does. A radius cannot say it — a
 // dilation by half the reach leaves a strip against each side of a seam wider than that — and neither
 // can a distance to the nearest fill, which paints the outline of a shape whose far side is *paper*
@@ -496,6 +556,105 @@ kernel void paintRegionAlpha(const device uchar* alpha  [[buffer(0)]],
 /// under *either*.
 static inline bool mendIsInk(uint i, const device uchar* wall, const device uchar* wall2, uint refCount) {
     return wall[i] != 0 && (refCount < 2u || wall2[i] != 0);
+}
+
+static inline bool mendIsOpen(uint2 point, const device uchar* wall, const device uchar* wall2,
+                              constant FillParams& params, uint refCount) {
+    if (point.x >= params.width || point.y >= params.height || point.x == 0u || point.y == 0u
+        || point.x + 1u >= params.width || point.y + 1u >= params.height) return false;
+    uint i = pixelIndex(point.x, point.y, params.width);
+    return !mendIsInk(i, wall, wall2, refCount);
+}
+
+// Follow a rounded digital normal in both directions. Sampling each major-axis pixel makes this
+// a contiguous raster walk for coprime slopes such as (5,2), rather than jumping over ink cells.
+static inline int2 mendRayPoint(uint2 origin, int2 delta, int major, int k, bool opposite) {
+    float sign = opposite ? -1.0f : 1.0f;
+    return int2(origin) + int2(rint(sign * float(k * delta.x) / float(major)),
+                                rint(sign * float(k * delta.y) / float(major)));
+}
+
+static inline bool mendRaySideIsInk(int2 sample, uint2 origin,
+                                   const device uchar* neighbour, const device uchar* wall,
+                                   const device uchar* wall2, const device uchar* fence,
+                                   constant FillParams& params, uint refCount, uint hasFence) {
+    if (sample.x < 0 || sample.y < 0 || sample.x >= int(params.width) || sample.y >= int(params.height)) return false;
+    uint2 point = uint2(uint(sample.x), uint(sample.y));
+    if (insideArtworkRect(point.x, point.y, params) != insideArtworkRect(origin.x, origin.y, params)) return false;
+    uint index = pixelIndex(point.x, point.y, params.width);
+    return neighbour[index] == 0 && (hasFence == 0u || fence[index] != 0)
+        && mendIsInk(index, wall, wall2, refCount);
+}
+
+static inline bool mendNormalConnects(uint2 point, int2 offset,
+                                      const device uchar* source, const device uchar* neighbour,
+                                      const device uchar* wall, const device uchar* wall2,
+                                      const device uchar* fence, constant FillParams& params,
+                                      uint refCount, uint hasFence, float reach) {
+    int2 direction = offset;
+    int major = max(abs(direction.x), abs(direction.y));
+    if (major == 0) return false;
+    uint2 nearPoint = uint2(int(point.x) + direction.x, int(point.y) + direction.y);
+    if (!mendIsOpen(nearPoint, wall, wall2, params, refCount)) return false;
+    uint nearIndex = pixelIndex(nearPoint.x, nearPoint.y, params.width);
+    if (insideArtworkRect(nearPoint.x, nearPoint.y, params) != insideArtworkRect(point.x, point.y, params)
+        || (hasFence != 0u && fence[nearIndex] == 0)
+        || source[nearIndex] == 0 || neighbour[nearIndex] != 0) return false;
+    int2 previous = int2(point);
+    float nearLength = 0.0f;
+    for (int k = 1; k < major; k++) {
+        int2 sample = mendRayPoint(point, direction, major, k, false);
+        if (all(sample == previous)) continue;
+        nearLength += distance(float2(previous), float2(sample));
+        if (nearLength > reach) return false;
+        if (sample.x != previous.x && sample.y != previous.y) {
+            if (!mendRaySideIsInk(int2(sample.x, previous.y), point, neighbour, wall, wall2,
+                                  fence, params, refCount, hasFence)
+                || !mendRaySideIsInk(int2(previous.x, sample.y), point, neighbour, wall, wall2,
+                                     fence, params, refCount, hasFence)) return false;
+        }
+        if (sample.x < 0 || sample.y < 0 || sample.x >= int(params.width) || sample.y >= int(params.height)) return false;
+        uint index = pixelIndex(uint(sample.x), uint(sample.y), params.width);
+        if (insideArtworkRect(uint(sample.x), uint(sample.y), params) != insideArtworkRect(point.x, point.y, params)
+            || (hasFence != 0u && fence[index] == 0) || !mendIsInk(index, wall, wall2, refCount)
+            || neighbour[index] != 0) return false;
+        previous = sample;
+    }
+    if (nearPoint.x != uint(previous.x) && nearPoint.y != uint(previous.y)) {
+        if (!mendRaySideIsInk(int2(int(nearPoint.x), previous.y), point, neighbour, wall, wall2,
+                              fence, params, refCount, hasFence)
+            || !mendRaySideIsInk(int2(previous.x, int(nearPoint.y)), point, neighbour, wall, wall2,
+                                 fence, params, refCount, hasFence)) return false;
+    }
+    nearLength += distance(float2(previous), float2(nearPoint));
+    if (nearLength > reach) return false;
+    float travelled = 0.0f;
+    previous = int2(point);
+    int limit = int(ceil(reach)) + 2;
+    for (int k = 1; k <= limit; k++) {
+        int2 sample = mendRayPoint(point, direction, major, k, true);
+        if (all(sample == previous)) continue;
+        float stepLength = distance(float2(previous), float2(sample));
+        travelled += stepLength;
+        if (sample.x != previous.x && sample.y != previous.y) {
+            if (!mendRaySideIsInk(int2(sample.x, previous.y), point, neighbour, wall, wall2,
+                                  fence, params, refCount, hasFence)
+                || !mendRaySideIsInk(int2(previous.x, sample.y), point, neighbour, wall, wall2,
+                                     fence, params, refCount, hasFence)) return false;
+        }
+        if (sample.x < 0 || sample.y < 0 || sample.x >= int(params.width) || sample.y >= int(params.height)) return false;
+        uint2 farPoint = uint2(uint(sample.x), uint(sample.y));
+        if (insideArtworkRect(farPoint.x, farPoint.y, params) != insideArtworkRect(point.x, point.y, params)) return false;
+        uint index = pixelIndex(farPoint.x, farPoint.y, params.width);
+        if (neighbour[index] != 0 || (hasFence != 0u && fence[index] == 0)) return false;
+        if (mendIsInk(index, wall, wall2, refCount)) { previous = sample; continue; }
+        // Reach describes the whole ink strip, not just the far half from this candidate. Count
+        // both digital walks and subtract the final ink-to-open step so the far endpoint is not
+        // counted as ink (the axial equivalent is the legacy `a + b - 1` width).
+        return mendIsOpen(farPoint, wall, wall2, params, refCount) && source[index] != 0
+            && nearLength + travelled - stepLength <= reach;
+    }
+    return false;
 }
 
 /// Where a walk from a pixel ends, as `(what, steps)`: bit 1 of `what` is this fill, bit 2 the
@@ -525,13 +684,19 @@ static inline uint2 mendRun(uint2 from, int dx, int dy, int limit, bool onPaper,
 // read `painted` at every other pixel, so mending in place would make each answer depend on which
 // thread had run first. `unionMask` folds the result in. `reach` is in pixels.
 kernel void mendGap(const device uchar* painted   [[buffer(0)]],
-                    const device uchar* neighbour [[buffer(1)]],
-                    const device uchar* wall      [[buffer(2)]],
-                    const device uchar* wall2     [[buffer(3)]],
-                    device uchar*       mended    [[buffer(4)]],
-                    constant FillParams& params   [[buffer(5)]],
-                    constant float&      reach    [[buffer(6)]],
-                    constant uint&       refCount [[buffer(7)]],
+                    const device uchar* source    [[buffer(1)]],
+                    const device uchar* neighbour [[buffer(2)]],
+                    const device uchar* wall      [[buffer(3)]],
+                    const device uchar* wall2     [[buffer(4)]],
+                    const device int2* nearestOpen [[buffer(5)]],
+                    const device ushort2* circleRanges [[buffer(6)]],
+                    const device short2* circleOffsets [[buffer(7)]],
+                    device uchar*       mended    [[buffer(8)]],
+                    constant FillParams& params   [[buffer(9)]],
+                    constant float&      reach    [[buffer(10)]],
+                    constant uint&       refCount [[buffer(11)]],
+                    const device uchar* fence     [[buffer(12)]],
+                    constant uint&       hasFence [[buffer(13)]],
                     uint2 gid [[thread_position_in_grid]]) {
     if (gid.x >= params.width || gid.y >= params.height) return;
     uint i = pixelIndex(gid.x, gid.y, params.width);
@@ -550,4 +715,30 @@ kernel void mendGap(const device uchar* painted   [[buffer(0)]],
         // the steps: a seam of `reach` pixels is mended, which is what the slider's number says.
         if (joins && float(ahead.y + behind.y - 1u) * stride <= reach) { mended[i] = 255; return; }
     }
+    if (gid.x <= uint(ceil(reach)) || gid.y <= uint(ceil(reach))
+        || gid.x + uint(ceil(reach)) >= params.width
+        || gid.y + uint(ceil(reach)) >= params.height) return;
+    if (!onPaper) return;
+    if (hasFence != 0u && fence[i] == 0) return;
+    // Lasso `painted` may already be eroded relative to `source`; do not restore a source pixel the
+    // artist's Edge Overlap deliberately pulled back through the internal-gap branch.
+    if (source[i] != 0) return;
+    int2 nearest = nearestOpen[i];
+    if (nearest.x < 0 || nearest.y < 0) return;
+    int2 delta = nearest - int2(gid);
+    uint d2 = uint(delta.x * delta.x + delta.y * delta.y);
+    uint maxReach = uint(max(0.0f, reach)) + 1u;
+    if (d2 == 0u || 4u * d2 > maxReach * maxReach) return;
+    ushort2 range = circleRanges[d2];
+    if (range.y == 0u) return;
+    bool found = false;
+    for (uint k = 0; k < uint(range.y); k++) {
+        short2 offset = circleOffsets[uint(range.x) + k];
+        uint2 openPoint = uint2(int(gid.x) + int(offset.x), int(gid.y) + int(offset.y));
+        if (!mendIsOpen(openPoint, wall, wall2, params, refCount)) continue;
+        found = true;
+        if (!mendNormalConnects(gid, int2(offset), source, neighbour, wall, wall2,
+                                fence, params, refCount, hasFence, reach)) return;
+    }
+    if (found) mended[i] = 255;
 }

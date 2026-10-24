@@ -4,7 +4,7 @@ import simd
 
 /// GPU flood-fill engine (see Fill.metal). One `MetalFillEngine` owns the device + compiled kernels;
 /// each fill gesture makes a `MetalFillSession` that holds the per-canvas buffers and the composited
-/// reference the fill reads its walls from. A fill is colour-distance wall detection, a jump-flooded
+/// reference the fill reads its walls from. A fill is colour-distance wall detection, a feature-transformed
 /// distance map to those walls, the basins `FillBasins` partitions the open paper into on the CPU —
 /// which are the flood and gap closing at once — their cut for the slider's value on the GPU, a disk
 /// edge dilate, and the final paint.
@@ -28,13 +28,13 @@ final class MetalFillEngine {
     /// Every compiled kernel, by the name the stages below call it. A struct rather than a loose
     /// tuple so a kernel is added in one place and read as `p.name`.
     fileprivate struct Pipelines {
-        let walls, jfaInit, jfaStep: MTLComputePipelineState
+        let walls, edtVerticalSeeds, edtHorizontalEnvelope: MTLComputePipelineState
         /// Gap closing (TODO (158)): the distance map `FillBasins` is built from, and its cut.
         let gapLevels, basinRegion: MTLComputePipelineState
         let fillDomain, edgeDilate, paint: MTLComputePipelineState
         let unionMask: MTLComputePipelineState
         let lassoInvert, paintAlpha, lassoEdgeErode: MTLComputePipelineState
-        /// The mend (TODO (113)): the ink between this fill and a neighbour, which `unionMask` folds in.
+        /// Mending (TODO (113)): internal ink gaps and seams to neighboring paint, folded in by `unionMask`.
         let mendGap: MTLComputePipelineState
 
         /// Nil when any kernel is missing from `library`, which is the engine failing to exist.
@@ -44,8 +44,8 @@ final class MetalFillEngine {
                 return try? device.makeComputePipelineState(function: fn)
             }
             guard let walls = pipeline("computeWalls"),
-                  let jfaInit = pipeline("jfaInit"),
-                  let jfaStep = pipeline("jfaStep"),
+                  let edtVerticalSeeds = pipeline("edtVerticalSeeds"),
+                  let edtHorizontalEnvelope = pipeline("edtHorizontalEnvelope"),
                   let gapLevels = pipeline("gapLevels"),
                   let basinRegion = pipeline("basinRegion"),
                   let fillDomain = pipeline("fillDomain"),
@@ -56,7 +56,8 @@ final class MetalFillEngine {
                   let paintAlpha = pipeline("paintRegionAlpha"),
                   let lassoEdgeErode = pipeline("lassoEdgeErode"),
                   let mendGap = pipeline("mendGap") else { return nil }
-            self.walls = walls; self.jfaInit = jfaInit; self.jfaStep = jfaStep
+            self.walls = walls; self.edtVerticalSeeds = edtVerticalSeeds
+            self.edtHorizontalEnvelope = edtHorizontalEnvelope
             self.gapLevels = gapLevels; self.basinRegion = basinRegion
             self.fillDomain = fillDomain
             self.edgeDilate = edgeDilate; self.paint = paint
@@ -67,6 +68,39 @@ final class MetalFillEngine {
     }
 
     fileprivate let pipelines: Pipelines
+
+    fileprivate struct MendLookup {
+        let ranges: MTLBuffer
+        let offsets: MTLBuffer
+    }
+    private let mendLookup: MendLookup
+
+    private static func makeMendLookup(device: MTLDevice) -> MendLookup? {
+        let radius = Int(ceil(CanvasManager.fillMendReachRange.upperBound))
+        let maxSquaredDistance = radius * radius
+        var buckets = [[SIMD2<Int16>]](repeating: [], count: maxSquaredDistance + 1)
+        for dy in -radius...radius {
+            for dx in -radius...radius {
+                let d2 = dx * dx + dy * dy
+                guard d2 > 0, d2 <= maxSquaredDistance else { continue }
+                buckets[d2].append(SIMD2(Int16(dx), Int16(dy)))
+            }
+        }
+        var ranges = [SIMD2<UInt16>](repeating: .zero, count: buckets.count)
+        var offsets = [SIMD2<Int16>]()
+        for d2 in 0..<buckets.count where !buckets[d2].isEmpty {
+            guard offsets.count <= Int(UInt16.max), buckets[d2].count <= Int(UInt16.max) else { return nil }
+            ranges[d2] = SIMD2(UInt16(offsets.count), UInt16(buckets[d2].count))
+            offsets.append(contentsOf: buckets[d2])
+        }
+        guard let rangeBuffer = ranges.withUnsafeBytes({ raw in
+                  device.makeBuffer(bytes: raw.baseAddress!, length: raw.count, options: .storageModeShared)
+              }),
+              let offsetBuffer = offsets.withUnsafeBytes({ raw in
+                  device.makeBuffer(bytes: raw.baseAddress!, length: raw.count, options: .storageModeShared)
+              }) else { return nil }
+        return MendLookup(ranges: rangeBuffer, offsets: offsetBuffer)
+    }
 
     /// Mirror of the Metal `FillParams` struct (must match its field order/alignment exactly).
     struct FillParams {
@@ -101,9 +135,11 @@ final class MetalFillEngine {
             ?? device.makeDefaultLibrary()
         guard let library else { return nil }
         guard let pipelines = Pipelines(device: device, library: library) else { return nil }
+        guard let mendLookup = Self.makeMendLookup(device: device) else { return nil }
         self.device = device
         self.queue = queue
         self.pipelines = pipelines
+        self.mendLookup = mendLookup
     }
 
     /// Uploads `referenceRGBA` (premultiplied-last, row-major, `width*height*4` bytes) into a session
@@ -216,6 +252,33 @@ final class MetalFillEngine {
                                 threadsPerThreadgroup: MTLSize(width: tw, height: th, depth: 1))
     }
 
+    fileprivate func encodeNearestFeatures(_ encoder: MTLComputeCommandEncoder, width: Int, height: Int,
+                                           wall: MTLBuffer, wall2: MTLBuffer,
+                                           params: MTLBuffer, refCount: UInt32,
+                                           targetsInk: UInt32, workspace: MTLBuffer, result: MTLBuffer) {
+        let p = pipelines
+        var refs = refCount, inkFlag = targetsInk
+        encoder.setComputePipelineState(p.edtVerticalSeeds)
+        encoder.setBuffer(wall, offset: 0, index: 0)
+        encoder.setBuffer(wall2, offset: 0, index: 1)
+        encoder.setBuffer(params, offset: 0, index: 2)
+        encoder.setBytes(&refs, length: MemoryLayout<UInt32>.size, index: 3)
+        encoder.setBytes(&inkFlag, length: MemoryLayout<UInt32>.size, index: 4)
+        encoder.setBuffer(workspace, offset: 0, index: 5)
+        let verticalThreads = min(64, p.edtVerticalSeeds.maxTotalThreadsPerThreadgroup)
+        encoder.dispatchThreads(MTLSize(width: width, height: 1, depth: 1),
+                                threadsPerThreadgroup: MTLSize(width: verticalThreads, height: 1, depth: 1))
+
+        encoder.setComputePipelineState(p.edtHorizontalEnvelope)
+        encoder.setBuffer(workspace, offset: 0, index: 0)
+        encoder.setBuffer(workspace, offset: width * height * MemoryLayout<Int32>.stride, index: 1)
+        encoder.setBuffer(result, offset: 0, index: 2)
+        encoder.setBuffer(params, offset: 0, index: 3)
+        let horizontalThreads = min(64, p.edtHorizontalEnvelope.maxTotalThreadsPerThreadgroup)
+        encoder.dispatchThreads(MTLSize(width: 1, height: height, depth: 1),
+                                threadsPerThreadgroup: MTLSize(width: 1, height: horizontalThreads, depth: 1))
+    }
+
     /// Convenience for kernels that only need buffer arguments (no `setBytes`).
     fileprivate func encode2D(_ encoder: MTLComputeCommandEncoder, _ pipeline: MTLComputePipelineState,
                               width: Int, height: Int, buffers: [(MTLBuffer, Int)]) {
@@ -250,11 +313,10 @@ final class MetalFillSession {
     /// rather than inferring it from the pixels it produced. Nothing in the render path reads it.
     let hasPathWall: Bool
     private let wallBuf: MTLBuffer
-    /// **The mend's neighbour set** (TODO (113)): one byte a pixel, non-zero wherever something is
-    /// already painted on the cel this fill lands on — the fills the mend grows toward, and anything
+    /// **The optional neighbour set** (TODO (113)): one byte a pixel, non-zero wherever something is
+    /// already painted on the cel this fill lands on — the paint the seam branch can join, and anything
     /// else that layer holds. Always allocated, for `pathWallBuf`'s reason (Metal has no unbound
-    /// argument), and zero until `installNeighbours` — which is how a session that is never asked to
-    /// mend stays the byte-for-byte fill it was.
+    /// argument), and zero until `installNeighbours`. Internal ink-gap mending does not use this mask.
     private let neighbourBuf: MTLBuffer
     /// Whether `installNeighbours` has run, so the caller builds the mask once per session rather than
     /// once per slider tick.
@@ -264,10 +326,10 @@ final class MetalFillSession {
     /// invert and by `lastReachedMask()`; what gets painted is built in `regionTmpBuf`.
     private let regionBuf: MTLBuffer
     private let regionTmpBuf: MTLBuffer
-    /// The jump flood's ping-pong pair. Free once `gapLevels` has run, so one holds the distance map
-    /// and the other is `FillBasins`' scratch, and the mend borrows the first.
-    private let jfaA: MTLBuffer
-    private let jfaB: MTLBuffer
+    /// The transform workspace and coordinate output. During basin construction the output is scratch;
+    /// after all reference passes it holds the cached nearest-open map, while the workspace is mend output.
+    private let featureWorkspace: MTLBuffer
+    private let featureCoordinates: MTLBuffer
     /// Each pixel's basin, from `FillBasins` — what the slider's cut is a table over. One per flood
     /// pass, like the reached sets: `labels2Buf` exists only beside the lasso's second reference.
     private let labelsBuf: MTLBuffer
@@ -357,7 +419,8 @@ final class MetalFillSession {
 
     fileprivate init?(engine: MetalFillEngine, referenceRGBA: [UInt8], width: Int, height: Int,
                       lassoMask: [UInt8]?, pathWall: [UInt8]?, gapWidthLimit: Float) {
-        guard width > 0, height > 0, referenceRGBA.count >= width * height * 4 else { return nil }
+        guard width > 0, height > 0, width <= 16_383, height <= 16_383,
+              referenceRGBA.count >= width * height * 4 else { return nil }
         if let lassoMask, lassoMask.count < width * height { return nil }
         if let pathWall, pathWall.count < width * height * 4 { return nil }
         let count = width * height
@@ -366,8 +429,8 @@ final class MetalFillSession {
         guard let refBuf = referenceRGBA.withUnsafeBytes({ device.makeBuffer(bytes: $0.baseAddress!, length: count * 4, options: .storageModeShared) }),
               let wallBuf = buffer(count), let neighbourBuf = buffer(count),
               let regionBuf = buffer(count), let regionTmpBuf = buffer(count),
-              let jfaA = buffer(count * MemoryLayout<SIMD2<Float>>.stride),
-              let jfaB = buffer(count * MemoryLayout<SIMD2<Float>>.stride),
+              let featureWorkspace = buffer(count * MemoryLayout<SIMD2<Int32>>.stride),
+              let featureCoordinates = buffer(count * MemoryLayout<SIMD2<Int32>>.stride),
               let labelsBuf = buffer(count * MemoryLayout<Int32>.stride),
               let outBuf = buffer(count * 4),
               let paramsBuf = buffer(MemoryLayout<MetalFillEngine.FillParams>.stride) else { return nil }
@@ -375,7 +438,7 @@ final class MetalFillSession {
         // such thing as an unbound argument: the alternative to always having one is a second
         // pipeline, or a function constant, for a kernel that costs one extra texel read. When there
         // is no path wall this is `count * 4` zero bytes — 8 MiB at 2048x1024, beside the `count * 4`
-        // output buffer and two `count * 8` jump-flood buffers this session already holds — and the
+        // output buffer and two `count * 8` feature-transform buffers this session already holds — and the
         // kernel's answer is unchanged, since alpha 0 fails its own test.
         guard let pathWallBuf = buffer(count * 4) else { return nil }
         if let pathWall {
@@ -441,8 +504,8 @@ final class MetalFillSession {
         self.wallBuf = wallBuf
         self.regionBuf = regionBuf
         self.regionTmpBuf = regionTmpBuf
-        self.jfaA = jfaA
-        self.jfaB = jfaB
+        self.featureWorkspace = featureWorkspace
+        self.featureCoordinates = featureCoordinates
         self.labelsBuf = labelsBuf
         self.outBuf = outBuf
         self.paramsBuf = paramsBuf
@@ -461,7 +524,7 @@ final class MetalFillSession {
     /// window.
     var allocatedBytes: Int {
         let required = [refBuf, pathWallBuf, wallBuf, neighbourBuf, regionBuf, regionTmpBuf,
-                        jfaA, jfaB, labelsBuf, outBuf, paramsBuf]
+                        featureWorkspace, featureCoordinates, labelsBuf, outBuf, paramsBuf]
         let optional = [lassoBuf, ringBuf, alphaBuf, filledBuf, params2Buf, wall2Buf, region2Buf, labels2Buf]
         return required.reduce(0) { $0 + $1.length }
             + optional.reduce(0) { $0 + ($1?.length ?? 0) }
@@ -497,7 +560,7 @@ final class MetalFillSession {
     /// What every working pixel of a session costs, summed off the buffer list `allocatedBytes` sums.
     static func bytesPerPixel(isLasso: Bool, twoReferenceColours: Bool) -> Int {
         // refBuf, pathWallBuf, outBuf: 4 bytes a pixel each. wall/neighbour/region/regionTmp: 1 each.
-        // jfaA/jfaB: 8 each. The basin labels: 4. Plus the CPU reference copy at 4. **40 a pixel**,
+        // featureWorkspace/featureCoordinates: 8 each. The basin labels: 4. Plus the CPU reference copy at 4. **40 a pixel**,
         // equal to `allocatedBytes` by
         // `MemoryBudgetLogicTests.testAFillSessionsPredictedCostIsWhatItActuallyAllocates`.
         var bytes = (4 + 4 + 4) + 4 + 16 + 4 + 4
@@ -525,20 +588,64 @@ final class MetalFillSession {
                             Float(referenceRGBA[o + 2]), Float(referenceRGBA[o + 3])) / 255.0
     }
 
-    /// Hands the session the pixels already painted on the cel this fill lands on, for the mend
+    /// Hands the session the pixels already painted on the cel this fill lands on, for the fill-to-fill seam branch
     /// (TODO (113)): one byte per working pixel, non-zero where something is. Once per session — the
     /// cel cannot change while a fill is adjustable, since every edit settles it first.
     ///
     /// **The set is "whatever is on this cel", not "the fills on this cel", and that is a decision
     /// rather than a limit.** A raster layer flattens a committed fill into the same tier as its
     /// brush strokes, so a fill is not recoverable as such, and the rule that falls out is the safe
-    /// one: a mend grows toward paint that is already on the layer and never over it. Line art on
+    /// one: a seam grows toward paint that is already on the layer and never over it. Line art on
     /// the layer being filled is therefore a neighbour too, which is a no-op in practice — a fill
     /// already runs up to the ink it stopped against.
     func installNeighbours(_ mask: [UInt8]) {
         guard mask.count >= count else { return }
         mask.withUnsafeBytes { memcpy(neighbourBuf.contents(), $0.baseAddress!, count) }
         hasNeighbours = true
+    }
+
+    /// Mends a saved fill path as a new operation using the session's current lasso reference colours.
+    /// Returns only the added pixels, leaving Boolean union and path reconstruction to the caller.
+    func mendMask(sourceMask: [UInt8], threshold: Float, artworkRect: CGRect?, reach: Float) -> [UInt8]? {
+        guard isLasso, sourceMask.count >= count, reach >= 1,
+              reach <= Float(ceil(CanvasManager.fillMendReachRange.upperBound)) else { return nil }
+        sourceMask.withUnsafeBytes { memcpy(regionBuf.contents(), $0.baseAddress!, count) }
+        var params = MetalFillEngine.FillParams()
+        params.width = UInt32(width); params.height = UInt32(height)
+        params.threshold = threshold
+        params.seedColor = referenceColours.0
+        let boundary = artworkRect.map { $0.integral }.flatMap { $0.isEmpty ? nil : $0 }
+        let paper = boundary ?? bufferRect
+        params.artworkMinX = Float(paper.minX); params.artworkMinY = Float(paper.minY)
+        params.artworkMaxX = Float(paper.maxX); params.artworkMaxY = Float(paper.maxY)
+        memcpy(paramsBuf.contents(), &params, MemoryLayout<MetalFillEngine.FillParams>.size)
+        if let params2Buf, let second = referenceColours.1 {
+            var params2 = params
+            params2.seedColor = second
+            memcpy(params2Buf.contents(), &params2, MemoryLayout<MetalFillEngine.FillParams>.size)
+        }
+        guard let cb = engine.makeCommandBuffer(), let enc = cb.makeComputeCommandEncoder() else { return nil }
+        let p = engine.pipelines
+        engine.encode2D(enc, p.walls, width: width, height: height,
+                        buffers: [(refBuf, 0), (wallBuf, 1), (paramsBuf, 2), (pathWallBuf, 3)])
+        if let params2Buf, let wall2Buf, referenceColours.1 != nil {
+            engine.encode2D(enc, p.walls, width: width, height: height,
+                            buffers: [(refBuf, 0), (wall2Buf, 1), (params2Buf, 2), (pathWallBuf, 3)])
+        }
+        engine.encodeNearestFeatures(enc, width: width, height: height,
+                                     wall: wallBuf, wall2: wall2Buf ?? wallBuf, params: paramsBuf,
+                                     refCount: referenceColours.1 == nil ? 1 : 2,
+                                     targetsInk: 0,
+                                     workspace: featureWorkspace, result: featureCoordinates)
+        encodeMend(enc, painted: regionBuf, source: regionBuf, reach: reach,
+                   refCount: referenceColours.1 == nil ? 1 : 2,
+                   nearestOpen: featureCoordinates, fence: nil, mergeIntoPainted: false)
+        enc.endEncoding()
+        cb.commit()
+        cb.waitUntilCompleted()
+        guard cb.status == .completed else { return nil }
+        let bytes = featureWorkspace.contents().bindMemory(to: UInt8.self, capacity: count)
+        return Array(UnsafeBufferPointer(start: bytes, count: count))
     }
 
     /// Whether the reference pixel at the seed is opaque enough / distinct — currently always fills;
@@ -590,17 +697,16 @@ final class MetalFillSession {
     ///   already treats the canvas edge as part of the fence. The rect may extend past the buffer —
     ///   the buffer is a window of the canvas (`FillWindow`) — and a degenerate one is treated as
     ///   nil, because a zero-area rect would fence the flood into nothing.
-    /// - Parameter mendReach: grow the finished fill into the ink between it and the paint
-    ///   `installNeighbours` named, so two fills either side of one line meet under it instead of
-    ///   leaving the strip the flood could not enter (TODO (113); the rule and why it is a corridor
-    ///   are above `mendGap` in Fill.metal). The widest strip it closes, in working pixels, **counted
-    ///   from the fill as Edge Overlap leaves it** — the mend runs after the overlap, so the two add.
-    ///   0 is no mend, and so is a session with no neighbours installed.
+    /// - Parameter mendReach: the maximum ink width mended, in working pixels, counted from the fill
+    ///   after Edge Overlap. The internal-gap branch requires source fill on both sides of an ink
+    ///   run; `installNeighbours` additionally enables closing seams to existing paint (TODO (113)).
+    ///   0 is no mend. Without an installed neighbour mask, only the internal-gap branch is active.
     func fill(seedX: Int, seedY: Int, seedColor: SIMD4<Float>, threshold: Float,
               gapWidth: Float, edgeOverlap: Float, artworkRect: CGRect? = nil,
               mendReach: Float = 0, fillColor: SIMD4<Float>) -> [UInt8]? {
         // A lasso session works from its mask, so there is no tapped pixel to be in bounds.
-        guard isLasso || isSeedInBounds(x: seedX, y: seedY) else { return nil }
+        guard (isLasso || isSeedInBounds(x: seedX, y: seedY)),
+              mendReach <= Float(ceil(CanvasManager.fillMendReachRange.upperBound)) else { return nil }
         let p = engine.pipelines
 
         // Reference 0 is the tapped colour for a bucket fill and *paper* for a lasso; reference 1
@@ -639,7 +745,7 @@ final class MetalFillSession {
             structureBuilds += 1
             structure = built
         }
-        let mends = hasNeighbours && Int(mendReach.rounded()) >= 1
+        let mends = Int(mendReach.rounded()) >= 1
 
         // The cut, then invert and erode (lasso) or edge-overlap dilate (bucket), paint, read back.
         guard let cb3 = engine.makeCommandBuffer() else { return nil }
@@ -697,20 +803,25 @@ final class MetalFillSession {
             // **After the erosion and the count, not before**: the mend adds colour outside the fence
             // on purpose and must not change what the §6 step 5 empty check saw — a fill that was
             // eroded away is still an empty fill, whatever a neighbour would have lent it.
-            if mends { encodeMend(enc3, painted: regionTmpBuf, reach: mendReach, refCount: referenceColours.1 == nil ? 1 : 2) }
+            if mends { encodeMend(enc3, painted: regionTmpBuf, source: alphaBuf, reach: mendReach,
+                                  refCount: referenceColours.1 == nil ? 1 : 2,
+                                  nearestOpen: structure.nearestOpenFeatures, fence: lassoBuf) }
             engine.encode2D(enc3, p.paintAlpha, width: width, height: height,
                             buffers: [(regionTmpBuf, 0), (outBuf, 1), (paramsBuf, 2)])
         } else {
             // Into `regionTmpBuf` at every radius — 0 is a copy — so the mend never writes the cut.
             engine.encode2D(enc3, p.edgeDilate, width: width, height: height,
                             buffers: [(regionBuf, 0), (regionTmpBuf, 1), (paramsBuf, 2)])
-            if mends { encodeMend(enc3, painted: regionTmpBuf, reach: mendReach, refCount: 1) }
+            if mends { encodeMend(enc3, painted: regionTmpBuf, source: regionBuf, reach: mendReach,
+                                  refCount: 1, nearestOpen: structure.nearestOpenFeatures,
+                                  fence: lassoBuf) }
             engine.encode2D(enc3, p.paint, width: width, height: height,
                             buffers: [(regionTmpBuf, 0), (outBuf, 1), (paramsBuf, 2)])
         }
         enc3.endEncoding()
         cb3.commit()
         cb3.waitUntilCompleted()
+        guard cb3.status == .completed else { return nil }
 
         if let filledBuf {
             // `lassoEdgeErode`'s count, and nothing else's — one slot, one writer, and it runs on
@@ -737,6 +848,7 @@ final class MetalFillSession {
         let key: Key
         /// One per pass, in `passes`' order.
         let passes: [Basins]
+        let nearestOpenFeatures: MTLBuffer
         /// The level the distance map was capped at: every cut whose `FillBasins.ceiling` is no higher
         /// is exact on these basins.
         let ceiling: Int
@@ -787,12 +899,15 @@ final class MetalFillSession {
             enc.setBuffer(paramsBuf, offset: 0, index: 3)
             enc.setBytes(&hasLoop, length: MemoryLayout<UInt32>.size, index: 4)
             engine.dispatch2D(enc, p.fillDomain, width: width, height: height)
-            let coords = encodeJFA(enc, wall: pass.wall)
-            let levels = coords === jfaA ? jfaB : jfaA
+            engine.encodeNearestFeatures(enc, width: width, height: height,
+                                         wall: pass.wall, wall2: pass.wall, params: pass.params,
+                                         refCount: 1, targetsInk: 1,
+                                         workspace: featureWorkspace, result: featureCoordinates)
+            let levels = featureWorkspace
             var canvasEdgeIsInk = UInt32(key.paper == nil ? 0 : 1)
             var cap = UInt32(ceiling)
             enc.setComputePipelineState(p.gapLevels)
-            enc.setBuffer(coords, offset: 0, index: 0)
+            enc.setBuffer(featureCoordinates, offset: 0, index: 0)
             enc.setBuffer(levels, offset: 0, index: 1)
             enc.setBuffer(paramsBuf, offset: 0, index: 2)
             enc.setBytes(&canvasEdgeIsInk, length: MemoryLayout<UInt32>.size, index: 3)
@@ -801,13 +916,14 @@ final class MetalFillSession {
             enc.endEncoding()
             cb.commit()
             cb.waitUntilCompleted()
+            guard cb.status == .completed else { return nil }
 
             let labels = pass.labels.contents().bindMemory(to: Int32.self, capacity: count)
-            // The jump flood's coordinates are spent, so their buffer is the watershed's scratch.
+            // Exact feature coordinates are spent; the same buffer is watershed scratch.
             let basins = FillBasins(levels: levels.contents().bindMemory(to: UInt16.self, capacity: count),
                                     inDomain: pass.region.contents().bindMemory(to: UInt8.self, capacity: count),
                                     width: width, height: height, labels: labels,
-                                    scratch: coords.contents().bindMemory(to: Int32.self, capacity: 2 * count))
+                                    scratch: featureCoordinates.contents().bindMemory(to: Int32.self, capacity: 2 * count))
             let seeds: [Int32]
             if let ringBuf {
                 // Every basin the ring touches: the collar starts from all of them.
@@ -823,7 +939,17 @@ final class MetalFillSession {
                                                        options: .storageModeShared) else { return nil }
             built.append(Basins(basins: basins, seeds: seeds, table: table))
         }
-        return Structure(key: key, passes: built, ceiling: ceiling)
+        guard let cb = engine.makeCommandBuffer(), let enc = cb.makeComputeCommandEncoder() else { return nil }
+        engine.encodeNearestFeatures(enc, width: width, height: height,
+                                     wall: wallBuf, wall2: wall2Buf ?? wallBuf, params: paramsBuf,
+                                     refCount: referenceColours.1 == nil ? 1 : 2,
+                                     targetsInk: 0,
+                                     workspace: featureWorkspace, result: featureCoordinates)
+        enc.endEncoding()
+        cb.commit()
+        cb.waitUntilCompleted()
+        guard cb.status == .completed else { return nil }
+        return Structure(key: key, passes: built, nearestOpenFeatures: featureCoordinates, ceiling: ceiling)
     }
 
     /// Which of `sides` the **last** `fill(...)` painted within `band` pixels of — the question
@@ -855,50 +981,35 @@ final class MetalFillSession {
     /// neighbour set — `mendGap` in Fill.metal. `reach` is in working pixels.
     ///
     /// The kernel writes to a buffer of its own and `unionMask` folds it in, because every pixel's walk
-    /// reads `painted` at its neighbours. The scratch is the JFA's first buffer, which is free by now:
-    /// the distance map and the watershed's scratch are spent once the basins are built, and a
-    /// `float2` a pixel is far more than the byte this needs.
-    private func encodeMend(_ enc: MTLComputeCommandEncoder, painted: MTLBuffer, reach: Float, refCount: UInt32) {
+    /// reads `painted` at its neighbours. The scratch is the feature transform's first buffer, which is free by now:
+    /// the distance map and watershed scratch are spent once basins are built, and its 8-byte-per-pixel
+    /// allocation is reused for this byte mask.
+    private func encodeMend(_ enc: MTLComputeCommandEncoder, painted: MTLBuffer, source: MTLBuffer,
+                            reach: Float, refCount: UInt32, nearestOpen: MTLBuffer,
+                            fence: MTLBuffer? = nil, mergeIntoPainted: Bool = true) {
         let p = engine.pipelines
         var reachPixels = reach
         var references = refCount
+        var hasFence = UInt32(fence == nil ? 0 : 1)
         enc.setComputePipelineState(p.mendGap)
         enc.setBuffer(painted, offset: 0, index: 0)
-        enc.setBuffer(neighbourBuf, offset: 0, index: 1)
-        enc.setBuffer(wallBuf, offset: 0, index: 2)
-        enc.setBuffer(wall2Buf ?? wallBuf, offset: 0, index: 3)
-        enc.setBuffer(jfaA, offset: 0, index: 4)
-        enc.setBuffer(paramsBuf, offset: 0, index: 5)
-        enc.setBytes(&reachPixels, length: MemoryLayout<Float>.size, index: 6)
-        enc.setBytes(&references, length: MemoryLayout<UInt32>.size, index: 7)
+        enc.setBuffer(source, offset: 0, index: 1)
+        enc.setBuffer(neighbourBuf, offset: 0, index: 2)
+        enc.setBuffer(wallBuf, offset: 0, index: 3)
+        enc.setBuffer(wall2Buf ?? wallBuf, offset: 0, index: 4)
+        enc.setBuffer(nearestOpen, offset: 0, index: 5)
+        enc.setBuffer(engine.mendLookup.ranges, offset: 0, index: 6)
+        enc.setBuffer(engine.mendLookup.offsets, offset: 0, index: 7)
+        enc.setBuffer(featureWorkspace, offset: 0, index: 8)
+        enc.setBuffer(paramsBuf, offset: 0, index: 9)
+        enc.setBytes(&reachPixels, length: MemoryLayout<Float>.size, index: 10)
+        enc.setBytes(&references, length: MemoryLayout<UInt32>.size, index: 11)
+        enc.setBuffer(fence ?? wallBuf, offset: 0, index: 12)
+        enc.setBytes(&hasFence, length: MemoryLayout<UInt32>.size, index: 13)
         engine.dispatch2D(enc, p.mendGap, width: width, height: height)
-        engine.encode2D(enc, p.unionMask, width: width, height: height,
-                        buffers: [(jfaA, 0), (painted, 1), (paramsBuf, 2)])
-    }
-
-    // MARK: - JFA helper
-
-    /// Runs a jump-flooding distance transform seeded on `wall` and returns whichever ping-pong buffer
-    /// holds each pixel's nearest wall coordinate — the other one is free.
-    private func encodeJFA(_ encoder: MTLComputeCommandEncoder, wall: MTLBuffer) -> MTLBuffer {
-        let p = engine.pipelines
-        engine.encode2D(encoder, p.jfaInit, width: width, height: height,
-                        buffers: [(wall, 0), (jfaA, 1), (paramsBuf, 2)])
-        var src = jfaA, dst = jfaB
-        var step = 1
-        while step < max(width, height) { step <<= 1 }
-        step >>= 1
-        while step >= 1 {
-            var s = UInt32(step)
-            encoder.setComputePipelineState(p.jfaStep)
-            encoder.setBuffer(src, offset: 0, index: 0)
-            encoder.setBuffer(dst, offset: 0, index: 1)
-            encoder.setBuffer(paramsBuf, offset: 0, index: 2)
-            encoder.setBytes(&s, length: MemoryLayout<UInt32>.size, index: 3)
-            engine.dispatch2D(encoder, p.jfaStep, width: width, height: height)
-            swap(&src, &dst)
-            step >>= 1
+        if mergeIntoPainted {
+            engine.encode2D(enc, p.unionMask, width: width, height: height,
+                            buffers: [(featureWorkspace, 0), (painted, 1), (paramsBuf, 2)])
         }
-        return src
     }
 }

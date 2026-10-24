@@ -806,8 +806,6 @@ enum PixelOps {
 
     // MARK: - Automatic (magic wand) selection
 
-    private struct IntPoint: Hashable { var x: Int; var y: Int }
-
     /// Flood-fills from `point` (canvas point space) across pixels within `tolerance` (0...1 fraction
     /// of the 0-255 channel range) of the starting pixel's color, 4-connected, then traces the
     /// boundary of the filled region into a `CGPath` usable both for the marching-ants overlay and
@@ -860,125 +858,88 @@ enum PixelOps {
         return contourPath(selected: visited, width: width, height: height)
     }
 
-    /// Traces the boundary of a boolean pixel mask into a (possibly multi-loop) `CGPath`, by
-    /// collecting every unit edge between a selected pixel and a non-selected neighbor and
-    /// stitching those edges into closed loops. Enclosed unselected regions ("holes") fall out of
-    /// this naturally as their own loop with opposite winding, so a nonzero-winding fill/clip
-    /// correctly punches a hole for them.
+    /// Traces a boolean pixel mask into closed, axis-aligned loops. The four low bits at each
+    /// grid vertex store its outgoing east/south/west/north edges: one byte per vertex, including
+    /// corner contacts with two outgoing edges. There is no per-edge allocation or copied graph.
     ///
-    /// **A vertex can start *two* boundary edges, so the store has to be a multimap.** Where the
-    /// selected region touches itself corner to corner — a 2x2 checkerboard, `(x, y)` and
-    /// `(x+1, y+1)` selected with the other two clear — the shared corner is the start of one edge
-    /// from each of those pixels. One out-edge per vertex keeps whichever was written second; the
-    /// walk below then dead-ends there, `loop.count > 2` discards every edge it had already
-    /// consumed, and `CGContext.fillPath` closes the resulting open subpath with a **straight
-    /// line**. That is the straight-edged holes and wedges of TODO (44): the artist's *earlier*
-    /// fill is what visibly breaks, because committing a second fill is what bakes the first one's
-    /// GPU mask through this function for the first time. One dropped edge is not a small error —
-    /// two 50x50 squares meeting at a corner lose 1 of their 400 edges, and with it 2,152 px of the
-    /// 5,000 px they cover in the worst walk order measured.
+    /// Vertices are visited in row order. At a shared corner the walk turns right, staying with
+    /// the selected pixel it arrived beside, so touching regions keep separate loops. Only turns
+    /// are emitted; holes retain their opposite winding and straight runs need no point arrays.
     ///
-    /// With the multimap, correctness is not a matter of degree: every boundary edge leaves one
-    /// vertex and enters another, in- and out-degree are equal at every vertex, so by the Euler
-    /// argument every walk returns to where it started and no subpath is ever left open.
-    ///
-    /// **Loops start in the raster order the edges were found in, not the dictionary's.**
-    /// `IntPoint`'s `Hashable` is Swift's, whose hash seed is randomised per process, so
-    /// `remaining.keys.first` made one mask trace to a different path on every launch of the app.
-    /// `starts` makes the output a function of the mask alone. It is also *faster* — 495 ms against
-    /// 751 ms on a 1024x1024 mask with 47k such vertices, measured in a standalone `swiftc -O` port
-    /// of these lines on the Mac — because `Dictionary.keys.first` rescans from bucket zero on every
-    /// loop.
-    ///
-    /// **At a shared corner the walk stays on the pixel it arrived on** instead of crossing to the
-    /// diagonal one, which keeps the region 4-connected — the connectivity `floodFillMask` floods
-    /// with — and yields two simple loops that touch, rather than one figure-of-eight through the
-    /// corner. Both fill identically under either rule; the simple loops are the better input for
-    /// the boolean path ops that `VectorCanvas` splits a fill with. It is a tidiness rule and not a
-    /// guarantee: a walk that has to *begin* at a shared corner has no arrival direction to answer
-    /// from, so a mask riddled with them still traces some self-touching loops.
-    static func contourPath(selected: [Bool], width: Int, height: Int) -> CGPath? {
+    /// `maximumPointCount` limits the simplified output, not unit boundary edges. The vertex pass
+    /// counts those turns exactly and refuses before constructing a CGPath. Nil preserves the
+    /// existing unlimited callers. Nil output means an empty/invalid mask or a refused limit;
+    /// callers supplying a limit must distinguish an empty mask from a refused nonempty one.
+    static func contourPath(selected: [Bool], width: Int, height: Int,
+                            maximumPointCount: Int? = nil) -> CGPath? {
+        guard width > 0, height > 0, width < Int.max, height < Int.max else { return nil }
+        let (pixelCount, pixelOverflow) = width.multipliedReportingOverflow(by: height)
+        let vertexWidth = width + 1
+        let (vertexCount, vertexOverflow) = vertexWidth.multipliedReportingOverflow(by: height + 1)
+        guard !pixelOverflow, !vertexOverflow, selected.count >= pixelCount else { return nil }
         func isSelected(_ x: Int, _ y: Int) -> Bool {
-            guard x >= 0, x < width, y >= 0, y < height else { return false }
-            return selected[y * width + x]
+            x >= 0 && x < width && y >= 0 && y < height && selected[y * width + x]
         }
 
-        var edges: [IntPoint: [IntPoint]] = [:]
-        var starts: [IntPoint] = []
-        func addEdge(from tail: IntPoint, to head: IntPoint) {
-            if edges[tail] == nil {
-                edges[tail] = [head]
-                starts.append(tail)
-            } else {
-                edges[tail]?.append(head)
+        var edges = [UInt8](repeating: 0, count: vertexCount)
+        var pointCount = 0
+        for y in 0...height {
+            for x in 0...width {
+                let upLeft = isSelected(x - 1, y - 1), upRight = isSelected(x, y - 1)
+                let downLeft = isSelected(x - 1, y), downRight = isSelected(x, y)
+                var outgoing: UInt8 = 0
+                if downRight && !upRight { outgoing |= 1 } // east
+                if downLeft && !downRight { outgoing |= 2 } // south
+                if upLeft && !downLeft { outgoing |= 4 } // west
+                if upRight && !upLeft { outgoing |= 8 } // north
+                edges[y * vertexWidth + x] = outgoing
+                let count = (upLeft ? 1 : 0) + (upRight ? 1 : 0)
+                    + (downLeft ? 1 : 0) + (downRight ? 1 : 0)
+                if count == 1 || count == 3 { pointCount += 1 }
+                else if count == 2 && upLeft == downRight { pointCount += 2 }
+                if let maximumPointCount, pointCount > maximumPointCount { return nil }
             }
         }
-        for y in 0..<height {
-            for x in 0..<width where isSelected(x, y) {
-                if !isSelected(x, y - 1) { addEdge(from: IntPoint(x: x, y: y), to: IntPoint(x: x + 1, y: y)) }
-                if !isSelected(x + 1, y) { addEdge(from: IntPoint(x: x + 1, y: y), to: IntPoint(x: x + 1, y: y + 1)) }
-                if !isSelected(x, y + 1) { addEdge(from: IntPoint(x: x + 1, y: y + 1), to: IntPoint(x: x, y: y + 1)) }
-                if !isSelected(x - 1, y) { addEdge(from: IntPoint(x: x, y: y + 1), to: IntPoint(x: x, y: y)) }
-            }
-        }
-        guard !edges.isEmpty else { return nil }
+        guard pointCount > 0 else { return nil }
 
         let path = CGMutablePath()
-        var remaining = edges
-        for start in starts where remaining[start] != nil {
-            var loop: [IntPoint] = [start]
-            var current = start
-            var heading: (dx: Int, dy: Int)?
-            while let outgoing = remaining[current], !outgoing.isEmpty {
-                // The only vertex with a choice is a shared corner, where the two out-edges point
-                // opposite ways and the arrival is perpendicular to both — so exactly one of them
-                // turns towards the pixel the walk came in on, and that is the one with a positive
-                // cross product against the heading (y grows downwards here).
-                var choice = outgoing.count - 1
-                if outgoing.count > 1, let heading {
-                    for (index, head) in outgoing.enumerated()
-                    where heading.dx * (head.y - current.y) - heading.dy * (head.x - current.x) > 0 {
-                        choice = index
+        for start in edges.indices {
+            while edges[start] != 0 {
+                var current = start
+                let firstHeading = edges[start].trailingZeroBitCount
+                var heading = firstHeading
+                var began = false
+                func emit(_ vertex: Int) {
+                    let point = CGPoint(x: vertex % vertexWidth, y: vertex / vertexWidth)
+                    if began { path.addLine(to: point) }
+                    else { path.move(to: point); began = true }
+                }
+                while true {
+                    edges[current] &= ~(UInt8(1) << heading)
+                    let next: Int
+                    switch heading {
+                    case 0: next = current + 1
+                    case 1: next = current + vertexWidth
+                    case 2: next = current - 1
+                    default: next = current - vertexWidth
+                    }
+                    if next == start {
+                        if heading != firstHeading { emit(start) }
                         break
                     }
+                    let available = edges[next]
+                    guard available != 0 else { return nil } // A complete mask always closes.
+                    let right = (heading + 1) & 3
+                    let nextHeading = available & (UInt8(1) << right) != 0
+                        ? right : available.trailingZeroBitCount
+                    if heading != nextHeading { emit(next) }
+                    current = next
+                    heading = nextHeading
                 }
-                let next = outgoing[choice]
-                if outgoing.count == 1 {
-                    remaining.removeValue(forKey: current)
-                } else {
-                    remaining[current]?.remove(at: choice)
-                }
-                heading = (next.x - current.x, next.y - current.y)
-                current = next
-                if current == start { break }
-                loop.append(current)
+                path.closeSubpath()
             }
-            guard loop.count > 2 else { continue }
-            let simplified = simplifyCollinear(loop)
-            let points = simplified.map { CGPoint(x: $0.x, y: $0.y) }
-            path.addLines(between: points)
-            path.closeSubpath()
         }
         return path
-    }
-
-    /// Drops points that lie on a straight run between their neighbors, so long straight edges of
-    /// the flood-filled region become one segment instead of one point per pixel.
-    private static func simplifyCollinear(_ points: [IntPoint]) -> [IntPoint] {
-        let n = points.count
-        guard n > 2 else { return points }
-        var result: [IntPoint] = []
-        for i in 0..<n {
-            let prev = points[(i - 1 + n) % n]
-            let curr = points[i]
-            let next = points[(i + 1) % n]
-            let d1x = curr.x - prev.x, d1y = curr.y - prev.y
-            let d2x = next.x - curr.x, d2y = next.y - curr.y
-            if d1x * d2y - d1y * d2x != 0 {
-                result.append(curr)
-            }
-        }
-        return result.isEmpty ? points : result
     }
 
     // MARK: - Fill mask to vector path

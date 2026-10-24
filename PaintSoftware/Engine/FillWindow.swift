@@ -12,9 +12,10 @@ import UIKit
 ///
 /// **Exact at scale 1, and scale 1 is every window that fits the budget.** A lasso's window is the
 /// loop's bounds plus `halo`, and nothing a lasso fill computes can reach past it: the collar flood
-/// never leaves the loop (LASSO_FILL.md §6 step 3), gap closing's answer reads the distance to ink
-/// only as far as `FillBasins.reach` and that distance is exact wherever it is shorter than the way
-/// to the window's rim, and the coverage erosion reads `edgeRadius`. A bucket's window starts as
+/// never leaves the loop (LASSO_FILL.md §6 step 3), gap closing reads the distance to ink only as
+/// far as `FillBasins.reach`, mending reads nearest-open witnesses and walks no farther than
+/// `mendReach`, and coverage erosion reads `edgeRadius`. Those distances are exact wherever they
+/// are shorter than the way to the window's rim. A bucket's window starts as
 /// `initialBucketSide` around the tap and **grows** while the painted region reaches the halo band
 /// along any edge that is not the canvas's own (`MetalFillSession.paintedReaches`): a flood at the
 /// band may have more to reach, and a distance measured in the band was measured without the ink
@@ -39,9 +40,10 @@ struct FillWindow: Equatable {
 
     /// How far a fill's picture can depend on pixels beyond a window's rim, in canvas pixels: gap
     /// closing reads the distance to ink as far as `FillBasins.reach`, the edge dilate and the coverage
-    /// erosion read `edgeRadius`, and the two extra pixels cover the JFA's own rounding.
-    static func halo(gapWidth: CGFloat, edgeRadius: CGFloat) -> CGFloat {
-        (CGFloat(FillBasins.reach(forGapWidth: Float(gapWidth))) + edgeRadius + 2).rounded(.up)
+    /// erosion reads `edgeRadius`, mending rays read `mendReach`, and two pixels cover the sampled
+    /// boundary around those operations.
+    static func halo(gapWidth: CGFloat, edgeRadius: CGFloat, mendReach: CGFloat = 0) -> CGFloat {
+        (CGFloat(FillBasins.reach(forGapWidth: Float(gapWidth))) + edgeRadius + mendReach + 2).rounded(.up)
     }
 
     /// The side of a bucket fill's first window. Deliberately small: a fill of a shape in line art —

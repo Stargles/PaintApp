@@ -19,7 +19,7 @@ inventories/copied diagnostics; no device restart, app launch or install.
 2. **Smart saving.** Newest per fixed clock bucket, existing3/6/24/7/4 tiers, pre-save/latest/update
    protection and4GB logical cap. Standalone14/14, reverse-loop8/14 assertion-red and restored14/14;
    integrated retention14+backup21 passed in338. Bounded Session47–51 audit found no other concrete
-   dropped actionable ask. Copy-only APFS physical-cost experiment is running in its separate tree; no measured result yet.
+   dropped actionable ask. The declared28-save/26-cel copy workload passed;9 versions added12,562,432 allocated bytes under matched-fork/RO controls. No native rerun; all images detached and originals exact.
 3. **Test1 erasing respring.** Unresolved cause, no speculative production fix. Two same-build system
    reports kill backboardd at1850MiB (October23 at18:47 and23:03 Toronto). Owner recalls one failure,
    cannot identify time; do not choose either as confirmed match. PaintSoftware active, no app kill
@@ -37,24 +37,22 @@ inventories/copied diagnostics; no device restart, app launch or install.
    rejected. Review fixes require contiguous digital rays, all tied nearest-open witnesses and bounded
    picture ownership. No new saved provenance or second mending mode.
    Worktree `~/PaintWork/PaintApp-s53-fill-mend`; design evidence `~/PaintWork/s53-fill-mend/`.
-   **Further owner ruling: protect uncertain joins; attached stems remain in scope.** Preserve
-   real-time quick fill feedback; no expensive full-image CPU analysis per interactive tick.
-   Exact nearest-distance + lattice-circle tie lookup is validated offline against3920 random masks;
-   Metal implementation/performance remain unqualified. See design reports before app edits.
 
 ## Authoritative source and native ownership
 
 Integrated tree: `~/PaintWork/PaintApp-s52-vector-repair`, `tmp/s52-vector-repair`. Main/origin remains
-**afd2030c**. Source production is unchanged from6656a5a8; final338/17/UI qualified at ee50a570 or identical
+**afd2030c**. Integrated point/saving documentation head is65b39e01; fill branch rebases onto it. Source production is unchanged from6656a5a8; final338/17/UI qualified at ee50a570 or identical
 production. Later commits record new asks/diagnostics and correct only two stale test expectations.
 Old lead `s52-vector-points` is not authoritative. Root records tree `s52-erase-crash` is afd2030c.
 
 **Point qualification finished at47d7079c; integrated production remains frozen for deployment.**
 Corrected classes33/33 before and after2 assertion-red faults; exact Debug/Release each5259 reconcile.
-Erase_crash_trace now owns the sole native slot for the reviewed APFS experiment at clean47d in
-`PaintApp-s52-week-cost`, output `s52-saving-audit/week-cost/run-47d7079c`. Source/volume restoration
-and explicit handback are required before root's signed clean Release build. Renewal owns core fill
-source; mend_topology owns vector batch/menu/tests in the separate fill tree. No fill native grant.
+Root now owns the sole native slot: unchanged old47d `FillGapClosingBench` Release on39E84984,
+session32462, separate week-cost DD after normal source restoration. Evidence `s53-fill-mend/native/old-47d-bench0`.
+The copy-only APFS workload/control continuation finished; all images detached. Core/batch/contour
+source/tests are committed but uncompiled in the fill tree. Root must qualify focused Metal/contour/
+batch logic, mutations, affected cold UI + pictures, old/new distance/mask compatibility, press/tick
+and fragmented peak, then exact Debug/Release. No fill native success or device action is claimed.
 
 Owned simulators: logic/fast M5 **39E84984-3C6F-4A6A-8DC8-D1098F6B623E**; current UI iPad9
 **56CC563F-06D0-42FC-9C18-A2B230DE2D38** and old-control **B0533278-3F74-4944-AC58-3514D87C85D6**
@@ -103,13 +101,19 @@ recovery; basename fallback requires exactly one matching ID. No old/default run
 ## Backup-cost experiment and device next steps
 
 `~/PaintWork/s52-saving-audit/week-cost/` contains reviewed external driver/template. Separate tree
-`PaintApp-s52-week-cost` is clean47d7079c and freshly prepared; the one authorized run is in progress. No physical-cost result yet.
+`PaintApp-s52-week-cost` is clean47d7079c; the native workload passed1/1 and source/input restored exactly.
 Disposable512MiB APFS image; real Misc/Test2 copy (26cels,2048×1024,25files/1713279logical bytes),7 daily
 reopens×4 actual saves with small raster edit. Existing retention replays dated slots; validate/open
 survivors. Stable whole-filesystem allocated-block delta retained-minus-live-only, remount controls,
 Spotlight excluded and untouched source/live hashes. No du/logical/clone-sum substitute. This is a
 small declared workload, NOT historical device cost or a300–1000-cel estimate. Own DerivedData;
 normal rebuild required before any subsequent UI/install from diagnostic build products.
+
+Initial RW remount-only control changed allocation8192bytes and was rejected. Storage-only matched
+fork controls then qualified: both no-op forks16,207,872 allocated bytes, delete-only-Backups fork
+3,645,440 bytes, **incremental12,562,432 bytes (11.98MiB)** including APFS/delete metadata. All24 stable
+samples,6 strictly RO mounts/remounts and Library hashes matched; original image exact/all forks
+detached. No workload rerun. Evidence `week-cost/storage-forks-47d7079c/review.md`; rawfailure preserved.
 
 After clean Debug/Release qualification and cost measurement, build signed clean Release using identical
 clean/build args/DD, deep verify and profile>=5days. Obtain a **fresh saved-scene/unlock readiness and

@@ -1,4 +1,5 @@
 import XCTest
+import Combine
 import SwiftUI
 import UIKit
 
@@ -503,6 +504,194 @@ final class FillObjectLogicTests: XCTestCase {
         let restored = try JSONDecoder().decode(VectorFillElement.self,
                                                 from: JSONSerialization.data(withJSONObject: flatPayload))
         XCTAssertEqual(restored.solidColor, flat.solidColor)
+    }
+
+    // MARK: - Mend All Fills
+
+    /// Two independently drawn cels with different line art, plus a linked generated cel which must
+    /// remain derived. The saved paths contain an attached stroke gap and an intentional paper hole.
+    private func mendFixture() throws -> (manager: CanvasManager, layer: Int, vectors: [VectorCanvas], fills: [VectorFillElement]) {
+        _ = try XCTUnwrap(MetalFillEngine.shared, "the shared Metal fill engine is required")
+        let manager = CanvasFixture.manager(layerCount: 1)
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(0, 6), (6, 6), (12, 6)])
+        let field = CGRect(x: 10, y: 10, width: 44, height: 44)
+        let hole = CGRect(x: 16, y: 16, width: 12, height: 12)
+        let gaps = [CGRect(x: 30, y: 32, width: 24, height: 3),
+                    CGRect(x: 32, y: 30, width: 3, height: 24)]
+        for celIndex in 0..<3 {
+            let gap = gaps[min(celIndex, 1)]
+            let image = UIGraphicsImageRenderer(size: CanvasFixture.canvasSize,
+                                                 format: PixelOps.transparentFormat()).image { context in
+                UIColor.black.setFill()
+                context.cgContext.addRect(field.insetBy(dx: -2, dy: -2))
+                context.cgContext.addRect(field)
+                context.cgContext.fillPath(using: .evenOdd)
+                context.cgContext.fill(gap)
+                context.cgContext.addRect(hole)
+                context.cgContext.addRect(hole.insetBy(dx: 2, dy: 2))
+                context.cgContext.fillPath(using: .evenOdd)
+            }
+            CanvasFixture.setBakedContent(manager, layerIndex: 0, frame: celIndex * 6, image)
+        }
+        manager.addVectorLayer()
+        let layer = manager.currentLayerIndex
+        manager.setFillReference(layerIndex: layer, isReference: false)
+        CanvasFixture.setCelLayout(manager, layerIndex: layer, [(0, 6), (6, 6), (12, 6)])
+        var vectors: [VectorCanvas] = []
+        var fills: [VectorFillElement] = []
+        for celIndex in 0..<3 {
+            let path = CGMutablePath()
+            path.addRect(field)
+            path.addRect(hole)
+            // An even-odd contour represents the real saved geometry, including its open branch
+            // notch. Subtraction avoids adding another overlapping contour at the field boundary.
+            let source = path.normalized(using: .evenOdd)
+                .subtracting(CGPath(rect: gaps[min(celIndex, 1)], transform: nil), using: .winding)
+            let paint: FillPaint = celIndex == 0
+                ? .linearGradient(.spanning(field, angle: 0))
+                : .solid(CodableColor(red: 1, green: 0, blue: 0, alpha: 1))
+            var fill = VectorFillElement(path: source, paint: paint, opacity: 0.6, evenOddFill: true)
+            fill.animationGroupID = UUID()
+            let vector = VectorCanvas(size: CanvasFixture.canvasSize, elements: [.fill(fill)])
+            manager.layers[layer].cels[celIndex].vector = vector
+            if celIndex == 2 {
+                manager.layers[layer].cels[celIndex].interpolation = InterpolationRecipe(mode: .generate)
+            }
+            vectors.append(vector)
+            fills.append(fill)
+        }
+        manager.fillSettings.threshold = 0.15
+        manager.fillSettings.mendReach = 12
+        manager.currentFrame = 0
+        return (manager, layer, vectors, fills)
+    }
+
+    func testMendAllFillsUsesEachCelsReferencesPreservesPaintHolesAndDerivedCelsAsOneUndo() async throws {
+        let fixture = try mendFixture()
+        let manager = fixture.manager
+        let before = try fixture.vectors.map { try XCTUnwrap($0.render()?.cgImage) }
+        XCTAssertEqual(pixel(before[0], 40, 33)[3], 0, "PREMISE: horizontal attached stem is bare")
+        XCTAssertEqual(pixel(before[1], 33, 40)[3], 0, "PREMISE: second cel has a vertical gap")
+        let baseline = steps(manager)
+        let outcome = await manager.mendAllFills(layerIndex: fixture.layer)
+        XCTAssertEqual(outcome, .changed(2))
+        XCTAssertEqual(steps(manager) - baseline, 1, "the entire layer is one edit")
+        XCTAssertEqual(manager.history.undoStack.last?.label, .mendAllFills)
+        let after = try fixture.vectors.map { try XCTUnwrap($0.render()?.cgImage) }
+        XCTAssertEqual(pixel(after[0], 40, 33), pixel(after[0], 40, 42),
+                       "the gradient crosses the repaired stem with its original paint and opacity")
+        XCTAssertEqual(pixel(after[1], 33, 40), pixel(after[1], 42, 40),
+                       "the second cel uses its own vertical reference, not the playhead's horizontal line")
+        for index in 0..<2 {
+            let changed = try XCTUnwrap(fixture.vectors[index].elements.first?.fill)
+            let original = fixture.fills[index]
+            XCTAssertEqual(changed.id, original.id)
+            XCTAssertEqual(changed.paint, original.paint)
+            XCTAssertEqual(changed.opacity, original.opacity)
+            XCTAssertEqual(changed.animationGroupID, original.animationGroupID)
+            XCTAssertEqual(changed.evenOddFill, original.evenOddFill)
+            XCTAssertEqual(pixel(after[index], 20, 20)[3], 0, "intentional paper hole stays bare")
+            XCTAssertEqual(pixel(after[index], 55, 33)[3], 0, "outer outline stays bare")
+            XCTAssertEqual(pixel(after[index], 5, 5)[3], 0, "exterior paper stays bare")
+            XCTAssertEqual(pixel(after[index], 12, 40), pixel(before[index], 12, 40),
+                           "existing paint away from the gap is pixel-exact")
+        }
+        XCTAssertEqual(fixture.vectors[2].elements.first?.fill?.pathData, fixture.fills[2].pathData,
+                       "linked generated content is never flattened or rewritten")
+        XCTAssertEqual(manager.layers[fixture.layer].cels[2].interpolation?.mode, .generate)
+        manager.undo()
+        for index in 0..<3 {
+            XCTAssertEqual(fixture.vectors[index].elements.first?.fill?.pathData, fixture.fills[index].pathData)
+        }
+        XCTAssertEqual(pixel(try XCTUnwrap(fixture.vectors[0].render()?.cgImage), 40, 33)[3], 0,
+                       "one undo restores the drawn horizontal gap")
+        XCTAssertEqual(pixel(try XCTUnwrap(fixture.vectors[1].render()?.cgImage), 33, 40)[3], 0,
+                       "and the drawn vertical gap")
+        manager.redo()
+        for index in 0..<2 {
+            XCTAssertEqual(CanvasFixture.rgbaBytes(try XCTUnwrap(fixture.vectors[index].render()?.cgImage)),
+                           CanvasFixture.rgbaBytes(after[index]), "redo restores the exact whole picture")
+        }
+        let repeatedBaseline = steps(manager)
+        let repeated = await manager.mendAllFills(layerIndex: fixture.layer)
+        XCTAssertEqual(repeated, .unchanged,
+                       "an already repaired layer adds no new geometry")
+        XCTAssertEqual(steps(manager), repeatedBaseline, "no empty undo step on a repeat")
+    }
+
+    func testMendAllFillsRefusesAnUndoStepOverBudgetBeforeChangingAnyCel() async throws {
+        let fixture = try mendFixture()
+        let manager = fixture.manager
+        manager.history.maxCost = 1
+        let baseline = steps(manager)
+        let outcome = await manager.mendAllFills(layerIndex: fixture.layer)
+        XCTAssertEqual(outcome, .exceedsUndoBudget)
+        for index in 0..<3 {
+            XCTAssertEqual(fixture.vectors[index].elements.first?.fill?.pathData, fixture.fills[index].pathData,
+                           "a capacity refusal leaves every cel untouched")
+        }
+        XCTAssertEqual(steps(manager), baseline)
+    }
+
+    func testMendAllFillsLeavesRasterLayersAlone() async {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        let baseline = steps(manager)
+        let outcome = await manager.mendAllFills(layerIndex: 0)
+        XCTAssertEqual(outcome, .unchanged)
+        XCTAssertEqual(manager.layers[0].kind, .raster)
+        XCTAssertEqual(steps(manager), baseline)
+    }
+
+    func testMendAllFillsKeepsOnePlanInFlightAndClearsItsBusyState() async throws {
+        let fixture = try mendFixture()
+        let manager = fixture.manager
+        let gate = DispatchSemaphore(value: 0)
+        manager.fillQueue.async { gate.wait() }
+        defer { gate.signal() }
+        let started = expectation(description: "the batch exposes its busy state")
+        let observation = manager.$fillMendingLayerID.compactMap { $0 }.prefix(1).sink { _ in started.fulfill() }
+        defer { observation.cancel() }
+        let operation = Task { await manager.mendAllFills(layerIndex: fixture.layer) }
+        await fulfillment(of: [started], timeout: 5)
+        let declined = expectation(description: "a duplicate returns without entering the blocked queue")
+        let duplicate = Task {
+            let outcome = await manager.mendAllFills(layerIndex: fixture.layer)
+            declined.fulfill()
+            return outcome
+        }
+        await fulfillment(of: [declined], timeout: 5)
+        XCTAssertEqual(manager.fillMendingLayerID, manager.layers[fixture.layer].id)
+        gate.signal()
+        let outcome = await operation.value
+        let duplicateOutcome = await duplicate.value
+        XCTAssertEqual(duplicateOutcome, .superseded, "reopening the menu cannot retain another whole-layer plan")
+        XCTAssertEqual(outcome, .changed(2), "the first request still completes")
+        XCTAssertNil(manager.fillMendingLayerID, "the menu becomes available after completion")
+    }
+
+    func testMendAllFillsDiscardsPreparedGeometryWhenACanvasChangesDuringTheRequest() async throws {
+        let fixture = try mendFixture()
+        let manager = fixture.manager
+        let baseline = steps(manager)
+        let gate = DispatchSemaphore(value: 0)
+        manager.fillQueue.async { gate.wait() }
+        defer { gate.signal() }
+        let started = expectation(description: "the batch has captured its original geometry")
+        let observation = manager.$fillMendingLayerID.compactMap { $0 }.prefix(1).sink { _ in started.fulfill() }
+        defer { observation.cancel() }
+        let operation = Task { await manager.mendAllFills(layerIndex: fixture.layer) }
+        await fulfillment(of: [started], timeout: 5)
+        let edited = fixture.fills[0].reshaped(to: CGPath(rect: CGRect(x: 2, y: 2, width: 5, height: 5), transform: nil))
+        fixture.vectors[0].restoreElements([.fill(edited)], changedInk: nil, rewriting: [edited.id])
+        gate.signal()
+        let outcome = await operation.value
+        XCTAssertEqual(outcome, .superseded, "a captured version mismatch cancels the whole batch")
+        XCTAssertEqual(fixture.vectors[0].elements.first?.fill?.pathData, edited.pathData,
+                       "the artist's newer drawing is never overwritten")
+        XCTAssertEqual(fixture.vectors[1].elements.first?.fill?.pathData, fixture.fills[1].pathData,
+                       "the other cel does not receive a partial batch")
+        XCTAssertEqual(steps(manager), baseline, "discarded work records no undo")
+        XCTAssertNil(manager.fillMendingLayerID)
     }
 
     // MARK: - Reached only where it should be

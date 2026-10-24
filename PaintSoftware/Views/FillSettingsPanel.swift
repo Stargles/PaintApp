@@ -113,15 +113,15 @@ struct FillSettingsPanel: View {
                 // carries on the rest of the way when a fill already sits on the far side of it.
                 VStack(alignment: .leading) {
                     Toggle(isOn: Binding(
-                        get: { settings.mendsNeighbourGap },
-                        set: { canvasManager.setFillMendsNeighbourGap($0) }
+                        get: { settings.mendsGaps },
+                        set: { canvasManager.setFillMendsGaps($0) }
                     )) {
-                        Text("Mend Gap to Neighbouring Fill")
+                        Text("Mend Gaps")
                             .foregroundColor(.white)
                     }
                     .tint(Self.tint)
                     .accessibilityIdentifier("fillPanel.mendGapToggle")
-                    Text("Where a fill on this layer sits across a line from this one, the colour grows under the line to meet it, so no seam is left between them. It only crosses line, and never covers the other fill or open paper.")
+                    Text("Closes nearby line gaps inside a fill and seams to neighboring paint. The color stays inside filled areas and does not cross onto open paper.")
                         .font(.caption)
                         .foregroundColor(.gray)
 
@@ -130,16 +130,16 @@ struct FillSettingsPanel: View {
                     // option is off, like the Extension Buffer below: present, so the artist can see
                     // what the option has, and saying by its colour that it does nothing yet.
                     Text("Mend Reach: \(Int(settings.mendReach)) px")
-                        .foregroundColor(settings.mendsNeighbourGap ? .white : .gray)
+                        .foregroundColor(settings.mendsGaps ? .white : .gray)
                         .padding(.top, 4)
                     Slider(value: Binding(
                         get: { settings.mendReach },
                         set: { canvasManager.setFillMendReach($0) }
                     ), in: CanvasManager.fillMendReachRange, step: 1)
                         .tint(Self.tint)
-                        .disabled(!settings.mendsNeighbourGap)
+                        .disabled(!settings.mendsGaps)
                         .accessibilityIdentifier("fillPanel.mendReachSlider")
-                    Text("The widest strip of line the mend will close, counted from where Edge Overlap leaves each fill.")
+                    Text("The widest strip of line the mend will close, counted from the fill edge after Edge Overlap.")
                         .font(.caption)
                         .foregroundColor(.gray)
                 }

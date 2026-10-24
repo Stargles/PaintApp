@@ -41,7 +41,7 @@ extension CanvasManager {
     /// mid-gesture (`setCanvasPadding` calls `commitAllInteractiveState` first); the extension can,
     /// from its slider, and that is a re-render of the live fill like any other setting.
     ///
-    /// `mendReach` is `fillSettings.mendReach` while `fillMendsNeighbourGap` is on and 0 while it is off — one
+    /// `mendReach` is `fillSettings.mendReach` while `mendsGaps` is on and 0 while it is off — one
     /// field for both, so a slider moved with the option off changes nothing the render reads and
     /// schedules no work.
     struct FillKey: Equatable {
@@ -173,7 +173,8 @@ extension CanvasManager {
     /// top of both slider ranges, because a lasso's window is cut once per gesture and the sliders
     /// move after it is.
     static var fillWindowHalo: CGFloat {
-        FillWindow.halo(gapWidth: fillGapRange.upperBound, edgeRadius: fillExpandRange.upperBound)
+        FillWindow.halo(gapWidth: fillGapRange.upperBound, edgeRadius: fillExpandRange.upperBound,
+                        mendReach: fillMendReachRange.upperBound)
     }
 
     /// The live gesture's render inputs, as a render is minted (`mintFillRender`). Main thread only.
@@ -467,7 +468,7 @@ extension CanvasManager {
                 edge: Int(fillEdgeRadius(lasso: fillGestureIsLasso).rounded()),
                 edgeIsWall: fillSettings.canvasEdgeIsBoundary,
                 inset: Int(max(0, canvasPadding - fillSettings.canvasEdgeExtension).rounded()),
-                mendReach: fillSettings.mendsNeighbourGap ? Int(fillSettings.mendReach.rounded()) : 0)
+                mendReach: fillSettings.mendsGaps ? Int(fillSettings.mendReach.rounded()) : 0)
     }
 
     /// Toggles "the canvas edge bounds the fill" and, if a fill is currently adjustable, re-runs it so
@@ -492,14 +493,14 @@ extension CanvasManager {
     /// Turns the mend on or off and, like the other two switches, re-runs an adjustable fill — the
     /// natural order is to fill, see the seam, and flip this, and the seam should close under the
     /// artist's finger.
-    func setFillMendsNeighbourGap(_ enabled: Bool) {
-        guard fillSettings.mendsNeighbourGap != enabled else { return }
-        fillSettings.mendsNeighbourGap = enabled
+    func setFillMendsGaps(_ enabled: Bool) {
+        guard fillSettings.mendsGaps != enabled else { return }
+        fillSettings.mendsGaps = enabled
         if fillGestureActive { requestFillRender() }
     }
 
-    /// Sets how far the mend reaches and re-runs an adjustable fill so the seam is seen closing as the
-    /// slider moves. Whole pixels, within `fillMendReachRange`; set from the fill dropdown alone.
+    /// Sets how far the mend reaches and re-runs an adjustable fill so internal gaps and seams close
+    /// as the slider moves. Whole pixels, within `fillMendReachRange`; set from the fill dropdown alone.
     func setFillMendReach(_ pixels: CGFloat) {
         let v = min(max(pixels.rounded(), Self.fillMendReachRange.lowerBound), Self.fillMendReachRange.upperBound)
         guard fillSettings.mendReach != v else { return }
@@ -529,10 +530,14 @@ extension CanvasManager {
     /// its active cel for the current frame. Empty when nothing is a reference (the fill then floods the
     /// whole canvas).
     func fillReferenceSources() -> [(layer: Layer, cel: Cel)] {
+        fillReferenceSources(atFrame: currentFrame)
+    }
+
+    func fillReferenceSources(atFrame frame: Int) -> [(layer: Layer, cel: Cel)] {
         layers.indices.compactMap { i in
             let layer = layers[i]
             guard layer.isFillReference,
-                  let celIdx = activeCelIndex(inLayer: i, atFrame: currentFrame) else { return nil }
+                  let celIdx = activeCelIndex(inLayer: i, atFrame: frame) else { return nil }
             return (layer, layer.cels[celIdx])
         }
     }
@@ -1202,7 +1207,7 @@ extension CanvasManager {
     /// stride, MEASURED (`FillFootprintBench`) at `windowHeight × canvasWidth × 4` — 24 MB for a
     /// 1024-row window on a 6000² canvas, 33 MB on 8192², freed when the draw returns. Cropping the
     /// image to the window first does not avoid it; the crop shares the rows.
-    private static func compositeReferenceRGBA(references: [(layer: Layer, cel: Cel)], window: FillWindow) -> [UInt8]? {
+    static func compositeReferenceRGBA(references: [(layer: Layer, cel: Cel)], window: FillWindow) -> [UInt8]? {
         let width = window.workingWidth, height = window.workingHeight
         guard width > 0, height > 0 else { return nil }
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: width, height: height), format: PixelOps.transparentFormat())

@@ -383,8 +383,8 @@ final class FillContourLogicTests: XCTestCase {
         }
     }
 
-    /// A straight run of pixel edges is one segment, not one segment per pixel. `simplifyCollinear`
-    /// is what does it, and nothing else in this file notices if it stops: the shape, the area and
+    /// A straight run of pixel edges is one segment, not one segment per pixel. Turn-only emission
+    /// does it, and nothing else in this file notices if it stops: the shape, the area and
     /// the closure are all identical either way. What changes is size — the two-square fixture is 8
     /// points with it and 400 without — and a `VectorFillElement` stores its path in the document,
     /// so an unsimplified contour is paid for on every save, load and interpolation of that fill.
@@ -457,6 +457,57 @@ final class FillContourLogicTests: XCTestCase {
             XCTAssertEqual(areas.count, 1, "\(fixture.name) traced to \(areas.sorted()) — the area a fill "
                            + "covers depends on where it was drawn")
         }
+    }
+
+    // MARK: - Bounded fragmented output
+
+    func testAFragmentedCheckerboardKeepsEveryPixelAsASeparateFourCornerLoop() throws {
+        var mask = blank(64, 64)
+        for y in 0..<mask.height {
+            for x in 0..<mask.width where (x + y) % 2 == 0 { mask.bits[y * mask.width + x] = true }
+        }
+        let corners = mask.popcount * 4
+        let path = try XCTUnwrap(PixelOps.contourPath(selected: mask.bits, width: mask.width,
+                                                     height: mask.height, maximumPointCount: corners))
+        let loops = rings(path)
+        XCTAssertEqual(loops.count, mask.popcount, "corner contacts must not merge checkerboard islands")
+        XCTAssertTrue(loops.allSatisfy { $0.count == 4 }, "each isolated pixel has exactly four turns")
+        XCTAssertEqual(tracedArea(path), Double(mask.popcount), accuracy: 0)
+        XCTAssertEqual(rasterized(path, width: mask.width, height: mask.height), mask.bits)
+        XCTAssertNil(PixelOps.contourPath(selected: mask.bits, width: mask.width, height: mask.height,
+                                          maximumPointCount: corners - 1),
+                     "a nonempty contour over its output limit is refused in full")
+    }
+
+    func testAConnectedFieldWithManyPaperHolesKeepsTheirWindingAndRespectsItsPointLimit() throws {
+        var mask = Mask(bits: [Bool](repeating: true, count: 65 * 65), width: 65, height: 65)
+        var holes = 0
+        for y in stride(from: 2, to: 64, by: 3) {
+            for x in stride(from: 2, to: 64, by: 3) {
+                mask.bits[y * mask.width + x] = false
+                holes += 1
+            }
+        }
+        let corners = 4 * (holes + 1)
+        let path = try XCTUnwrap(PixelOps.contourPath(selected: mask.bits, width: mask.width,
+                                                     height: mask.height, maximumPointCount: corners))
+        XCTAssertEqual(rings(path).count, holes + 1, "the field and each paper hole remain separate loops")
+        XCTAssertEqual(rings(path).reduce(0) { $0 + $1.count }, corners)
+        XCTAssertEqual(tracedArea(path), Double(mask.popcount), accuracy: 0)
+        XCTAssertEqual(rasterized(path, width: mask.width, height: mask.height), mask.bits,
+                       "opposite hole winding must keep every intentional paper pixel clear")
+        XCTAssertNil(PixelOps.contourPath(selected: mask.bits, width: mask.width, height: mask.height,
+                                          maximumPointCount: corners - 1))
+    }
+
+    func testTheOutputLimitCountsTurnsRatherThanUnitEdges() throws {
+        let mask = rectangle(offsetX: 1, offsetY: 1)
+        let path = try XCTUnwrap(PixelOps.contourPath(selected: mask.bits, width: mask.width,
+                                                     height: mask.height, maximumPointCount: 4))
+        XCTAssertEqual(rings(path).map(\.count), [4])
+        XCTAssertEqual(rasterized(path, width: mask.width, height: mask.height), mask.bits)
+        XCTAssertNil(PixelOps.contourPath(selected: mask.bits, width: mask.width, height: mask.height,
+                                          maximumPointCount: 3))
     }
 
     // MARK: - (6) Through `pathFromAlphaMask`, the entry point the fill actually calls

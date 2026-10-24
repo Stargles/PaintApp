@@ -3,6 +3,20 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## Shared contour tracing can exceed a bounded mask budget on fragmented inputs — 2026-10-24
+
+Source review of `PixelOps.contourPath` found one hash entry and outgoing array per boundary vertex,
+a starts array, then a copy-on-write dictionary duplicate during traversal. A grid of isolated
+one-pixel patches gives a boundary proportional to all pixels. The pending Mend All Fills operation
+would reach this after releasing its Metal session, so its session price and later undo preflight do
+not bound this contour peak. This is allocation-structure evidence, not a native peak measurement.
+
+The active fix replaces the shared graph wholesale with compact directed-edge bits, direct turn
+emission and a preflighted output-point limit, preserving corner winding and rasterized shape.
+Existing contour callers must use the same helper; no batch-only alternative. Fragmented-mask,
+refusal, exact-area, touching-corner and undo tests plus native memory/latency gates remain pending.
+
+
 ## A value-layer Blend Mode tap does not open its menu in the Fog Glow drive (2026-10-15)
 
 `GlareUITests.testFogGlowSizePreviewKeepsItsDrawnFootprintThroughLift` stops at the Glare menu

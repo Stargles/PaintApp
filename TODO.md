@@ -11,8 +11,8 @@ until 10 a.m. Toronto time. The later point-only vector ruling below supersedes 
 **Checkpoint2026-10-24:** point-only Liquify and newest backup retention are integrated, unmerged
 and not installed. Final338/338,17 runtime mutants, final9/9 affected UI, old-code1.918× stretch control
 and required old workflows10/10 qualify. Corrected classes33/33 and2 mutation faults qualify; exact
-Debug/Release each5259=5255passed+4known skips. Physical backup-cost experiment is running in its
-separate tree. Erasing cause is unresolved. Fill engine and vector batch action are in implementation.
+Debug/Release each5259=5255passed+4known skips. The28-save workload and matched-fork physical controls passed:9 retained versions added
+12,562,432 allocated bytes including APFS metadata on the declared26-cel real scene. Erasing cause is unresolved. Fill engine and vector batch action are in implementation.
 Installed normal Release remainsbcd7a6af; device reads only, no restart/launch/install this pass.
 
 ## How to read and keep this file
@@ -130,9 +130,13 @@ The adjacent corrupted-manifest recovery guard is implemented: same-basename fal
 one backup ID, preserving the live package on ambiguity. Regression and mutation are qualified in the
 repair gate; this safety change is also unmerged.
 
-- [ ] Finish the running bounded APFS experiment on a copy of real Misc/Test2:7 daily reopens×4 real saves,
-      stable allocated-block delta with remount controls, untouched-source/live hashes. Report declared
-      workload limits; do not call this historical device cost or substitute logical bytes.
+The declared copy-only APFS workload passed1/1:7 daily reopens×4 real saves,9 retained versions,
+182 encodes/462 reuse operations. Initial RW remount control differed8192bytes and was rejected.
+Three byte-identical retained-image forks then used matched RW cycles and strictly RO measurements;
+both no-op controls agreed16,207,872 bytes, deletion treatment3,645,440, **delta12,562,432 bytes**.
+All24 stable readings/RO remount controls, Library hashes and original hashes qualify; every image
+is detached. Includes APFS/delete metadata; NOT historical iPad or300–1000-cel extrapolation.
+Evidence: `~/PaintWork/s52-saving-audit/week-cost/storage-forks-47d7079c/review.md`.
 
 ---
 
@@ -193,11 +197,12 @@ are not individually identifiable; no raster storage redesign is authorized. The
 correction still uses the shared raster/vector fill pipeline. Use the same setting/semantics as an
 individual fill; inspect existing batch edit/undo/save patterns.
 Determine raster/vector representation and boundary provenance from the code before assuming an
-implementation. Native work waits for current Liquify/saving qualification; read-only investigation
-can proceed in parallel. Worktree: `~/PaintWork/PaintApp-s53-fill-mend`, `tmp/s53-fill-mend`.
+implementation. Core, batch and compact shared contour source/tests are committed but uncompiled. Native fill
+gates follow the old47d benchmark; prototypes/static checks are not app qualification. Worktree: `~/PaintWork/PaintApp-s53-fill-mend`, `tmp/s53-fill-mend`.
 
 - [ ] Reproduce internal ink holes and identify the root cause in the existing mending path.
 - [ ] Cover interior stroke gaps while preserving the original outer edge, using the current setting.
+- [ ] Qualify the compact shared contour replacement, fragmented masks and preflighted point-limit refusal.
 - [ ] Add the layer-wide action for every fill in every cel; use existing mutation/undo ownership.
 - [ ] Mutation-backed logic tests, cold UI/pictures at iPad9 size and required Debug/Release gates.
 

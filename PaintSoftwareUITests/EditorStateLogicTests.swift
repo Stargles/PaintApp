@@ -46,7 +46,7 @@ final class EditorStateLogicTests: XCTestCase {
         manager.fillSettings.threshold = 0.4                             // C3
         manager.fillSettings.bucketEdgeOverlap = 4                       // C4
         manager.fillSettings.lassoEdgeOverlap = 1                        // C5
-        manager.fillSettings.mendsNeighbourGap = false                   // C7
+        manager.fillSettings.mendsGaps = false                           // C7
         manager.fillSettings.mendReach = 30                              // C8
         manager.fillSettings.canvasEdgeIsBoundary = false                // C9
         manager.fillSettings.canvasEdgeExtension = 40                    // C10

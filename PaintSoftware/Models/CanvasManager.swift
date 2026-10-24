@@ -3770,6 +3770,10 @@ final class CanvasManager: ObservableObject {
 
     /// Serial queue that owns every fill computation for the active gesture. Keeping it serial means
     /// the GPU session and the window below are only ever touched from one thread.
+    /// The layer edit currently preparing its bounded mend windows. Observed only at start/end so
+    /// reopening the menu shows progress and cannot launch a second retained edit plan.
+    @Published var fillMendingLayerID: UUID?
+
     let fillQueue = DispatchQueue(label: "com.paintsoftware.interactiveFill", qos: .userInteractive)
     let fillLock = NSLock()
 
