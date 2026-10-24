@@ -8,7 +8,6 @@ struct LiquifyRecipeSnapshot {
     let content: [CelRef: [VectorElement]]
     let guides: [GuideStroke]
     let options: InterpolationEvaluator.Options
-    let size: CGSize
 }
 
 /// One immutable Liquify tick owns its geometry, complete picture and presentation lifecycle.

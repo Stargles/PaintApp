@@ -69,7 +69,7 @@ extension CanvasManager {
         }
         let pixelSnapshot = CelPixelSnapshot(cel: cel)
         var recipeSnapshot: LiquifyRecipeSnapshot?
-        if let recipe = cel.interpolation, let canvasSize, recipe.references.count >= 2 {
+        if let recipe = cel.interpolation, recipe.references.count >= 2 {
             let span = CGFloat(recipe.references.count - 1)
             let segment = min(max(Int((recipe.spacing.eased(recipe.t) * span).rounded(.down)), 0), recipe.references.count - 2)
             var content: [CelRef: [VectorElement]] = [:]
@@ -77,7 +77,7 @@ extension CanvasManager {
                 for ref in reference.cels { content[ref] = interpolationContentProvider(ref) }
             }
             recipeSnapshot = LiquifyRecipeSnapshot(recipe: recipe, content: content,
-                guides: guides(driving: recipe), options: interpolationOptions, size: canvasSize)
+                guides: guides(driving: recipe), options: interpolationOptions)
         }
         return LiquifySession(layerID: layerID, celID: cel.id, vector: cel.vector,
                               renderSource: cel.vector?.freeze(quality: .full),
@@ -99,7 +99,7 @@ extension CanvasManager {
             var recipe = old.recipe
             recipe.deformations.append(session.gesture)
             recipeSnapshot = LiquifyRecipeSnapshot(recipe: recipe, content: old.content, guides: old.guides,
-                                              options: old.options, size: old.size)
+                                                  options: old.options)
         }
         let held = HeldEdit.celContent(LiveCelContentEdit(layerID: session.layerID, celID: session.celID,
             vectorCanvas: session.vector, pixelSnapshot: session.pixelSnapshot,
