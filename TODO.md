@@ -45,6 +45,13 @@ UI; permanent startup maintenance must stay. Erasing respring cause remains unpr
 memo followup found existing byte/LRU/12-owner eviction, not one retained full picture per visited cel.
 No generic raster-capacity figure is aggregate device RSS. No physical operation this pass.
 
+Root accepted the bounded TEST-ONLY red proposal before edits: extend existing
+FillMendLogicTests.testMendFeaturesWaitForEnabledReachAndSurviveOffOnTicks using its existing6x24
+rect/demandSession. Keep all current40px full-picture/off-on/cache assertions; add6px Reach, one
+full-RGBA body control and one complete12-pixel free-cap footprint assertion. No new method/helper,
+product edit or harness. Commit first, then run this one original method to establish its actual
+cap assertion red on unchanged production. The safe product-proof proposal remains under review.
+
 ## How to read and keep this file
 
 Every item is a **status**, a short **description** a future session can pick up cold, and **what is
