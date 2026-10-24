@@ -104,7 +104,10 @@ final class FrameBakeStore {
     let byteCeiling: Int
 
     private let lock = NSLock()
-    private var bytesOnDisk = 0
+    /// Inventory sizes, not current stat sizes: rejecting an externally truncated file must also
+    /// release the bytes previously charged to it, without scanning the whole store per miss.
+    private var fileSizes: [String: Int] = [:]
+    private var bytesOnDisk: Int { fileSizes.values.reduce(0, +) }
 
     /// **Why a write can fail, and none of these is a document failure** (§2.10, §3.5): the bake
     /// stops, the caller carries on, and playback shows the previous picture.
@@ -124,7 +127,7 @@ final class FrameBakeStore {
         self.root = root
         self.byteCeiling = byteCeiling
         try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        bytesOnDisk = Self.measure(root)
+        fileSizes = Self.inventory(root)
     }
 
     /// 512 MiB. A number rather than a fraction of the device, because §2.6 forbids a budget
@@ -194,9 +197,11 @@ final class FrameBakeStore {
             return .failure(.exceedsCeiling(needed: size, ceiling: byteCeiling))
         }
 
+        lock.lock()
+        defer { lock.unlock() }
         let destination = url(for: key)
-        let existing = Self.size(of: destination)
-        evict(toFree: size - existing, playhead: playhead, frames: frames, keeping: key)
+        let existing = fileSizes[url(for: key).lastPathComponent] ?? 0
+        evictLocked(toFree: size - existing, playhead: playhead, frames: frames, keeping: key)
 
         do {
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -204,9 +209,7 @@ final class FrameBakeStore {
         } catch {
             return .failure(.couldNotWrite)
         }
-        lock.lock()
-        bytesOnDisk += size - existing
-        lock.unlock()
+        fileSizes[url(for: key).lastPathComponent] = size
         return .success(size)
     }
 
@@ -227,15 +230,52 @@ final class FrameBakeStore {
     /// (`DecodedFrameRing`) holds `DecodedFrame`s rather than images by design — so a store that
     /// answered in `CGImage` could not fill the ring at all without decoding twice. §2.15: the
     /// superseded path is deleted rather than kept beside the new one.
-    func loadDecoded(_ key: FrameBakeKey) -> DecodedFrame? {
-        PlaybackTrace.span(.storeDecode) { loadDecodedNow(key) }
+    /// A missing/invalid disposable file can be rebuilt; a refused allocation cannot be repaired
+    /// by recompositing the same pixels. Ring admission is a separate decision after this read.
+    enum ReadResult {
+        case decoded(DecodedFrame)
+        case unavailable
+        case allocationRefused
+
+        var frame: DecodedFrame? {
+            if case .decoded(let frame) = self { return frame }
+            return nil
+        }
+
+        var isUnavailable: Bool {
+            if case .unavailable = self { return true }
+            return false
+        }
     }
 
-    private func loadDecodedNow(_ key: FrameBakeKey) -> DecodedFrame? {
-        guard let file = try? Data(contentsOf: url(for: key)),
-              file.count >= Self.headerBytes,
+    func loadDecoded(_ key: FrameBakeKey) -> DecodedFrame? { read(key).frame }
+
+    func read(_ key: FrameBakeKey) -> ReadResult {
+        PlaybackTrace.span(.storeDecode) {
+            // Reads and file replacement/removal share ownership: a late rejection cannot delete a
+            // good replacement another consumer has just written at the same content-addressed key.
+            lock.lock()
+            defer { lock.unlock() }
+            do {
+                return .decoded(try loadDecodedNow(key))
+            } catch ReadFailure.allocationRefused {
+                return .allocationRefused
+            } catch {
+                try? FileManager.default.removeItem(at: url(for: key))
+                let remaining = Self.size(of: url(for: key))
+                fileSizes[url(for: key).lastPathComponent] = remaining > 0 ? remaining : nil
+                return .unavailable
+            }
+        }
+    }
+
+    private enum ReadFailure: Error { case invalid, allocationRefused }
+
+    private func loadDecodedNow(_ key: FrameBakeKey) throws -> DecodedFrame {
+        let file = try Data(contentsOf: url(for: key))
+        guard file.count >= Self.headerBytes,
               Array(file.prefix(4)) == Self.magic,
-              file.readLE(at: 4) as UInt16 == Self.formatVersion else { return nil }
+              file.readLE(at: 4) as UInt16 == Self.formatVersion else { throw ReadFailure.invalid }
 
         let flags: UInt16 = file.readLE(at: 6)
         let width = Int(file.readLE(at: 8) as UInt32)
@@ -245,23 +285,22 @@ final class FrameBakeStore {
         let payloadCount = Int(file.readLE(at: 24) as UInt32)
         let digest = file.subdata(in: 32..<64)
 
-        // The digest is the whole freshness guarantee, so it is checked before anything is decoded.
-        guard digest == key.digest else { return nil }
-        guard width > 0, height > 0,
+        guard digest == key.digest,
+              width > 0, height > 0,
               bytesPerRow == width * 4,
               rawCount == height * bytesPerRow,
               payloadCount > 0,
-              file.count == Self.headerBytes + payloadCount else { return nil }
+              file.count == Self.headerBytes + payloadCount else { throw ReadFailure.invalid }
 
         let payload = file.subdata(in: Self.headerBytes..<(Self.headerBytes + payloadCount))
         let raw: Data
         if flags & Self.flagCompressed != 0 {
-            guard let decoded = Self.decompress(payload, to: rawCount) else { return nil }
-            raw = decoded
+            raw = try Self.decompressChecked(payload, to: rawCount)
         } else {
-            guard payloadCount == rawCount else { return nil }
+            guard payloadCount == rawCount else { throw ReadFailure.invalid }
             raw = payload
         }
+        fileSizes[url(for: key).lastPathComponent] = file.count
         return DecodedFrame(width: width, height: height, bytesPerRow: bytesPerRow, pixels: raw)
     }
 
@@ -282,13 +321,13 @@ final class FrameBakeStore {
 
     /// The same dump for one store's own corner, for a document that is closing or being re-rooted.
     func purgeAll() {
+        lock.lock()
+        defer { lock.unlock() }
         let fm = FileManager.default
         for url in (try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? [] {
             try? fm.removeItem(at: url)
         }
-        lock.lock()
-        bytesOnDisk = Self.measure(root)
-        lock.unlock()
+        fileSizes = Self.inventory(root)
     }
 
     /// Drops files, farthest from the playhead first, until at least `bytes` of headroom exists
@@ -302,9 +341,14 @@ final class FrameBakeStore {
                frames: [String: Set<Int>],
                keeping: FrameBakeKey? = nil) -> Int {
         lock.lock()
-        let current = bytesOnDisk
-        lock.unlock()
-        let overshoot = current + bytes - byteCeiling
+        defer { lock.unlock() }
+        return evictLocked(toFree: bytes, playhead: playhead, frames: frames, keeping: keeping)
+    }
+
+    @discardableResult
+    private func evictLocked(toFree bytes: Int, playhead: Int,
+                             frames: [String: Set<Int>], keeping: FrameBakeKey?) -> Int {
+        let overshoot = bytesOnDisk + bytes - byteCeiling
         guard overshoot > 0 else { return 0 }
 
         let fm = FileManager.default
@@ -330,10 +374,8 @@ final class FrameBakeStore {
         for candidate in candidates where freed < overshoot {
             guard (try? fm.removeItem(at: candidate.url)) != nil else { continue }
             freed += candidate.size
+            fileSizes[candidate.url.lastPathComponent] = nil
         }
-        lock.lock()
-        bytesOnDisk -= freed
-        lock.unlock()
         return freed
     }
 
@@ -391,10 +433,14 @@ final class FrameBakeStore {
     /// is a nil answer: the caller treats it as a miss, and `MemoryPressure` is told
     /// (`.allocationRefused`) so the caches trim and the artist hears why.
     static func decompress(_ payload: Data, to expected: Int) -> Data? {
-        guard expected > 0, !payload.isEmpty else { return nil }
+        try? decompressChecked(payload, to: expected)
+    }
+
+    private static func decompressChecked(_ payload: Data, to expected: Int) throws -> Data {
+        guard expected > 0, !payload.isEmpty else { throw ReadFailure.invalid }
         guard let bytes = malloc(expected) else {
             MemoryPressure.signal(.allocationRefused)
-            return nil
+            throw ReadFailure.allocationRefused
         }
         var out = Data(bytesNoCopy: bytes, count: expected, deallocator: .free)
         let written = out.withUnsafeMutableBytes { dst -> Int in
@@ -404,7 +450,8 @@ final class FrameBakeStore {
                 return compression_decode_buffer(destination, expected, base, payload.count, nil, algorithm)
             }
         }
-        return written == expected ? out : nil
+        guard written == expected else { throw ReadFailure.invalid }
+        return out
     }
 
     // MARK: - Disk arithmetic
@@ -414,9 +461,11 @@ final class FrameBakeStore {
         return values.fileSize ?? 0
     }
 
-    private static func measure(_ root: URL) -> Int {
+    private static func inventory(_ root: URL) -> [String: Int] {
         let urls = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: [.fileSizeKey])) ?? []
-        return urls.reduce(0) { $0 + size(of: $1) }
+        return Dictionary(uniqueKeysWithValues: urls.map {
+            ($0.lastPathComponent, size(of: $0))
+        })
     }
 }
 

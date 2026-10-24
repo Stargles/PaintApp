@@ -2319,3 +2319,14 @@ Read-only audit found three concrete lifecycle gaps; implementation is assigned 
 
 Deterministic regressions and a focused source review are in this worktree; no native qualification
 or measured device-memory cause is claimed. External review: `~/PaintWork/s54-architecture-audit/`.
+
+
+## Disposable bake recovery and retained-close landing — 2026-10-24, native gates pending
+
+Source trace: a current-key unreadable derived file could dedupe by existence after decode failed;
+a missing/evicted clean key was not requeued by resident top-up; reset did not cancel old ring/map
+landings. No new-project stale output or saved-project damage is established. Prepared on
+`tmp/s54-bake-lifecycle`: reject/account disposable invalid files at actual reads, requeue missing
+clean keys through existing scheduler, and reuse LatestWins landing cancellation for reset/close.
+Nine tiny drawn/count/readiness/ownership regressions are prepared in existing classes. Parse and
+UI lints pass; native baseline/mutations, affected UI/pictures and Debug/Release fast tiers are unrun.

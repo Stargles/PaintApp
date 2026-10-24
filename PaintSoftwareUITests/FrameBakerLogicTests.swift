@@ -143,6 +143,211 @@ final class FrameBakerLogicTests: XCTestCase {
         XCTAssertEqual(fileCount(), 1)
     }
 
+    // MARK: - Disposable frame recovery and worker ownership
+
+    private func recoveryDocument() -> CanvasManager {
+        let manager = perFrameDocument(frames: 1)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0, frame: 0,
+                                      CanvasFixture.solidImage(.red,
+                                          rect: CGRect(origin: .zero, size: CanvasFixture.canvasSize)))
+        return manager
+    }
+
+    /// Pin the actual painted picture, rather than accepting a clean bit as proof of recovery.
+    private func drawnBytes(_ baker: FrameBaker, frame: Int = 0,
+                            file: StaticString = #filePath, line: UInt = #line) throws -> [UInt8] {
+        let image = try XCTUnwrap(baker.image(atFrame: frame), file: file, line: line)
+        let pixels = try XCTUnwrap(FrameBakeStore.bgraBytes(image), file: file, line: line)
+        let offset = (5 * pixels.width + 5) * 4
+        XCTAssertEqual(Array(pixels.bytes[offset..<(offset + 4)]), [0, 0, 255, 255],
+                       "The red drawing is visible after recovery.", file: file, line: line)
+        return pixels.bytes
+    }
+
+    func testUnreadableDisposableBakeIsRebuiltOnceForAnExportRequest() throws {
+        let manager = recoveryDocument()
+        let baker = makeBaker(manager)
+        baker.noteDocumentChanged()
+        drain(baker)
+        let key = try XCTUnwrap(baker.keyByFrame[0])
+        let expected = try drawnBytes(baker)
+        baker.ring.removeAll()
+        try Data([0x50]).write(to: baker.store.url(for: key))
+
+        XCTAssertNil(baker.store.loadDecoded(key), "Premise: the current key names a one-byte invalid bake.")
+        XCTAssertFalse(baker.store.contains(key), "A rejected disposable file cannot dedupe as ready.")
+        XCTAssertEqual(baker.store.totalBytes, 0, "Rejection also removes its formerly accounted bytes.")
+        XCTAssertFalse(baker.isBaked(atFrame: 0))
+        let count = composites {
+            baker.requestExport(frame: 0, within: 0...0)
+            drain(baker)
+        }
+        XCTAssertEqual(count, 1, "One request must rebuild the one missing picture.")
+        XCTAssertTrue(baker.isBaked(atFrame: 0))
+        XCTAssertEqual(baker.keyByFrame[0], key, "Recovery does not invent a new content key.")
+        XCTAssertEqual(try drawnBytes(baker), expected)
+        let decoded = try XCTUnwrap(baker.store.loadDecoded(key))
+        XCTAssertEqual(Array(decoded.pixels), expected, "The replacement is readable on disk too.")
+    }
+
+    func testAnUnreadableCleanBakeIsRecoveredByPlaybackWithoutAnExport() throws {
+        let manager = recoveryDocument()
+        let baker = makeBaker(manager)
+        baker.noteDocumentChanged()
+        drain(baker)
+        let key = try XCTUnwrap(baker.keyByFrame[0])
+        let expected = try drawnBytes(baker)
+        baker.ring.removeAll()
+        try Data([0x50]).write(to: baker.store.url(for: key))
+        try assertPlaybackRecovery(baker, manager: manager, expected: expected)
+    }
+
+    func testAnEvictedCleanBakeBecomesUnreadyAndPlaybackRebuildsIt() throws {
+        let manager = recoveryDocument()
+        let baker = makeBaker(manager)
+        baker.noteDocumentChanged()
+        drain(baker)
+        let expected = try drawnBytes(baker)
+        baker.ring.removeAll()
+        XCTAssertGreaterThan(baker.store.evict(toFree: baker.store.byteCeiling, playhead: 0,
+                                             frames: baker.framesByDigest), 0)
+        XCTAssertFalse(baker.isBaked(atFrame: 0), "Eviction must not leave the timeline claiming ready.")
+        try assertPlaybackRecovery(baker, manager: manager, expected: expected)
+    }
+
+    private func assertPlaybackRecovery(_ baker: FrameBaker, manager: CanvasManager, expected: [UInt8],
+                                        file: StaticString = #filePath, line: UInt = #line) throws {
+        let key = try XCTUnwrap(baker.keyByFrame[0], file: file, line: line)
+        manager.playbackNow = { 0 }
+        manager.play()
+        defer { manager.stopPlayback() }
+        let count = composites {
+            XCTAssertNil(baker.image(atFrame: 0), "A playback miss never decodes on the display thread.",
+                         file: file, line: line)
+            drain(baker)
+        }
+        XCTAssertEqual(count, 1, "The ordinary resident walk rebuilds the missing or invalid clean file once.",
+                       file: file, line: line)
+        XCTAssertEqual(baker.keyByFrame[0], key, file: file, line: line)
+        XCTAssertTrue(baker.isBaked(atFrame: 0), file: file, line: line)
+        XCTAssertEqual(try drawnBytes(baker), expected, file: file, line: line)
+    }
+
+    func testRingBudgetRefusalKeepsAReadableBakeCleanWithoutRecompositing() throws {
+        let manager = recoveryDocument()
+        let baker = makeBaker(manager, ringBytes: 0)
+        baker.noteDocumentChanged()
+        drain(baker)
+        let key = try XCTUnwrap(baker.keyByFrame[0])
+        let decoded = try XCTUnwrap(baker.store.loadDecoded(key))
+        XCTAssertEqual(baker.ring.count, 0, "Premise: a valid picture cannot enter this ring.")
+        manager.playbackNow = { 0 }
+        manager.play()
+        defer { manager.stopPlayback() }
+        let count = composites {
+            XCTAssertNil(baker.image(atFrame: 0))
+            drain(baker)
+        }
+        XCTAssertEqual(count, 0, "Ring admission refusal is not a corrupt or missing file.")
+        XCTAssertTrue(baker.isBaked(atFrame: 0))
+        XCTAssertEqual(baker.keyByFrame[0], key)
+        XCTAssertEqual(baker.ring.count, 0)
+        manager.stopPlayback()
+        XCTAssertEqual(try drawnBytes(baker), Array(decoded.pixels))
+    }
+
+    func testCloseCancelsAnInFlightBakeLandingAndDropsItsConsumers() throws {
+        let manager = recoveryDocument()
+        let queue = DispatchQueue(label: "FrameBakerLogicTests.close-bake")
+        let gate = DispatchSemaphore(value: 0)
+        queue.async { gate.wait() }
+        defer { gate.signal() }
+        let baker = FrameBaker(manager: manager, store: FrameBakeStore(root: root),
+                               ring: DecodedFrameRing(byteBudget: 1024 * 1024), workQueue: queue)
+        let key = try XCTUnwrap(baker.currentKey(atFrame: 0))
+        var notifications = 0
+        baker.observeFrameFinished(self) { _, _ in notifications += 1 }
+        baker.onIdle = { notifications += 1 }
+        baker.requestExport(frame: 0, within: 0...0)
+        XCTAssertTrue(baker.isBaking, "Premise: the frozen bake is queued before close.")
+        baker.close()
+        waitForWorker(queue, releasing: gate)
+
+        XCTAssertTrue(baker.isClosed)
+        XCTAssertFalse(baker.isBaking)
+        XCTAssertTrue(baker.keyByFrame.isEmpty)
+        XCTAssertTrue(baker.framesByDigest.isEmpty)
+        XCTAssertEqual(baker.bakeQueue.pendingCount, 0)
+        XCTAssertEqual(baker.ring.byteCount, 0, "A canceled landing cannot repopulate the released ring.")
+        XCTAssertEqual(baker.bakedCount, 0)
+        XCTAssertEqual(notifications, 0, "Closed UI consumers must receive no late bake/idle callbacks.")
+        XCTAssertNil(baker.exportFocus)
+        XCTAssertNil(baker.image(for: key))
+        let completed = try XCTUnwrap(baker.store.loadDecoded(key))
+        let offset = (5 * completed.width + 5) * 4
+        XCTAssertEqual(Array(completed.pixels[offset..<(offset + 4)]), [0, 0, 255, 255],
+                       "The frozen worker actually completed; only its canceled landing was discarded.")
+    }
+
+    func testResetCancelsAQueuedRingFillAndAllowsTheExistingOwnerToResume() throws {
+        let manager = recoveryDocument()
+        let queue = DispatchQueue(label: "FrameBakerLogicTests.reset-ring")
+        let baker = FrameBaker(manager: manager, store: FrameBakeStore(root: root),
+                               ring: DecodedFrameRing(byteBudget: 1024 * 1024), workQueue: queue)
+        baker.noteDocumentChanged()
+        drain(baker)
+        let expected = try drawnBytes(baker)
+        baker.ring.removeAll()
+        let gate = DispatchSemaphore(value: 0)
+        queue.async { gate.wait() }
+        manager.playbackNow = { 0 }
+        manager.play()
+        defer { manager.stopPlayback() }
+        XCTAssertNil(baker.image(atFrame: 0))
+        XCTAssertTrue(baker.isBaking, "Premise: a ring-fill read is queued before reset.")
+        baker.reset()
+        waitForWorker(queue, releasing: gate)
+        XCTAssertEqual(baker.ring.count, 0)
+        XCTAssertTrue(baker.keyByFrame.isEmpty)
+        XCTAssertEqual(baker.bakeQueue.pendingCount, 0)
+        XCTAssertFalse(baker.isClosed)
+        manager.stopPlayback()
+        let count = composites {
+            baker.noteDocumentChanged()
+            drain(baker)
+        }
+        XCTAssertEqual(count, 0, "Reset permits reuse and dedupes the still-readable file.")
+        XCTAssertEqual(try drawnBytes(baker), expected)
+    }
+
+    func testGalleryCloseRetiresTheBakerAndReopeningUsesItsReadableStore() throws {
+        FrameBakeStore.cachesDirectoryOverride = root
+        let manager = recoveryDocument()
+        let retired = manager.frameBaker
+        retired.noteDocumentChanged()
+        drain(retired)
+        let expected = try drawnBytes(retired)
+        manager.closeFrameBaker()
+        XCTAssertTrue(retired.isClosed, "Gallery close must cancel the actual document's owner.")
+        XCTAssertEqual(retired.ring.count, 0)
+        let count = composites {
+            manager.syncFrameBake(suspended: false)
+            drain(manager.frameBaker)
+        }
+        XCTAssertFalse(manager.frameBaker === retired, "Reopening requires a fresh live owner.")
+        XCTAssertEqual(count, 0, "Closing releases residency, not the still-readable disk pictures.")
+        XCTAssertEqual(try drawnBytes(manager.frameBaker), expected)
+    }
+
+    /// A FIFO barrier after the real queued job also follows its main-thread landing. No delay,
+    /// allocation stress or product fault flag is needed to expose the reset/close interleaving.
+    private func waitForWorker(_ queue: DispatchQueue, releasing gate: DispatchSemaphore) {
+        let returned = expectation(description: "the frozen worker and its landing have completed")
+        queue.async { DispatchQueue.main.async { returned.fulfill() } }
+        gate.signal()
+        wait(for: [returned], timeout: 10)
+    }
+
     // MARK: - §2.16, the acceptance test
 
     /// **RENDER §2.16, in the owner's own words, as an executable claim.**

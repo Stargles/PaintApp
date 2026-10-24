@@ -195,6 +195,27 @@ final class FrameBakeStoreLogicTests: XCTestCase {
         try? file.write(to: store.url(for: key))
     }
 
+    func testRejectingOneUnreadableBakePreservesOtherDrawnFilesAndAccounting() throws {
+        let store = store()
+        let rejected = syntheticKey(31), retained = syntheticKey(32)
+        let picture = noiseImage(8)
+        guard case .success = store.store(flatColourImage(8), for: rejected),
+              case .success(let retainedSize) = store.store(picture, for: retained) else {
+            return XCTFail("Both tiny files must be written before rejecting one.")
+        }
+        try Data([0x50]).write(to: store.url(for: rejected))
+        XCTAssertTrue(store.read(rejected).isUnavailable)
+        XCTAssertFalse(store.contains(rejected))
+        XCTAssertTrue(store.contains(retained))
+        XCTAssertEqual(store.totalBytes, retainedSize)
+        let decoded = try XCTUnwrap(store.loadDecoded(retained))
+        let image = try XCTUnwrap(decoded.makeImage())
+        XCTAssertEqual(CanvasFixture.rgbaBytes(image), CanvasFixture.rgbaBytes(picture),
+                       "Rejecting a disposable file must leave other drawings byte-exact.")
+        XCTAssertEqual(store.totalBytes, FrameBakeStore(root: root).totalBytes,
+                       "The live inventory must agree with a fresh disk inventory after rejection.")
+    }
+
     func testAWrongMagicIsAMiss() {
         let key = syntheticKey(0x31), store = store()
         XCTAssertEqual(store.store(flatColourImage(64), for: key).isSuccess, true)

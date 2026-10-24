@@ -216,6 +216,39 @@ final class FrameExportSessionLogicTests: XCTestCase {
         XCTAssertEqual(session.phase, .idle)
     }
 
+    func testARejectedDisposableBakeIsRebuiltAndExportsItsDrawnPNG() async throws {
+        let manager = greyDocument(frames: 1)
+        await warm(manager)
+        let baker = manager.frameBaker
+        let key = try XCTUnwrap(baker.keyByFrame[0])
+        let expected = try XCTUnwrap(baker.store.loadDecoded(key))
+        baker.ring.removeAll()
+        try Data([0x50]).write(to: baker.store.url(for: key))
+        // Store recovery is asserted before export: a hanging export is not this test's primary
+        // corruption oracle. The baker test independently pins one-request drawn recovery.
+        XCTAssertNil(baker.store.loadDecoded(key))
+        XCTAssertFalse(baker.store.contains(key))
+        XCTAssertFalse(baker.isBaked(atFrame: 0))
+
+        let session = FrameExportSession(manager: manager)
+        CompositeProbe.begin()
+        session.exportFrame(0)
+        let phase = await settle(session)
+        let count = CompositeProbe.end().count
+        guard case .finished(let url) = phase else {
+            session.cancel()
+            return XCTFail("The repaired cache must export its PNG; stopped at \(phase).")
+        }
+        XCTAssertEqual(count, 1, "The shared baker regenerates the missing frame once.")
+        XCTAssertTrue(baker.isBaked(atFrame: 0))
+        XCTAssertEqual(baker.keyByFrame[0], key)
+        let source = try XCTUnwrap(CGImageSourceCreateWithURL(url as CFURL, nil))
+        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        let pixels = try XCTUnwrap(FrameBakeStore.bgraBytes(image))
+        XCTAssertEqual(pixels.bytes, Array(expected.pixels), "The exported PNG holds the actual repaired drawing.")
+        XCTAssertEqual(Array(pixels.bytes.prefix(4)), [40, 40, 40, 255])
+    }
+
     // MARK: - The walk
 
     /// **The movie holds the frames pressing play would show, in that order** — and it says so in

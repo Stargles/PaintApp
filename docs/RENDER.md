@@ -439,6 +439,11 @@ on the main actor — a cel edit dirties `[startFrame, endFrame)` of that cel's 
 mask, blend, effect track) dirties every frame. The exact test is the key (§3.3): a dirty frame whose recomputed
 key already has a file costs nothing, which is how a scrub through a hold is free.
 
+`LatestWins` owns one frozen worker job and its main-thread landing for both baking and resident
+reads. Reset cancels those landings before releasing bookkeeping/ring; gallery close also detaches the
+model and consumers. Reopening or changing the store root creates a fresh owner. Work already frozen
+may finish writing a disposable disk file, but cannot reinstall residency or call a closed UI.
+
 The baker produces `full`, which is what the live canvas shows at rest; `below` and `above` — keyed additionally
 by the active leaf, transient, never stored — stay on `CanvasView`'s own `sandwichQueue`, so the stroke still sits
 between two finished pictures. **This paragraph asked for one worker and wanted one memo, and stage 4d found the
@@ -634,14 +639,11 @@ the ruler's bottom 3 pt. Four things came out differently from what this section
   full-width band that says nothing and competes with the loop band and the playhead for the same 18 pt. Marking
   the unbaked leaves the ruler clean at rest and the mark shrinks toward nothing, which is a progress reading
   obtained out of the polarity instead of a second mechanism. The ring is deliberately not a third state.
-- **`isBaked(atFrame:)` as this section defined it could not serve the consumer this section names.** It was one
-  recipe mint and one `stat`, which is right for the one frame the *canvas* asks about and unusable for a ruler:
-  a mint is a `LeafSnapshot` per visible leaf, so a 300-frame document is 300 × layers of freezing and
-  `makeImage()` **per redraw**, costing more than the bake it describes. It is now
-  `!bakeQueue.isPending(frame) && keyByFrame[frame] != nil` — two dictionary lookups, and the baker's own belief
-  rather than a fresh statement about the filesystem. **Both halves are load-bearing**: an edit leaves
-  `keyByFrame` in place (entries are forgotten only on failure), so the recorded key still names a real file
-  holding the picture from *before* the edit, and the dirty bit is the only thing that says so.
+- **`isBaked(atFrame:)` checks a clean recorded key and file existence.** It never mints a recipe or
+  decodes pixels when painting the ruler. An actual read rejects/removes invalid disposable files and
+  reconciles their accounted bytes. A missing/invalid clean file found by the resident walk forgets
+  every frame sharing its digest and marks those frames dirty in the same bake queue. Ring budget or
+  decode allocation refusal ends the resident walk without declaring the valid disk file damaged.
 - **`onFrameFinished` is a registry, not a slot.** Stage 4d gave the single closure to `CanvasView.Coordinator`
   and the timeline is a second consumer of the same event; two named callbacks would be the peculiarity §2.15
   rules out. `observeFrameFinished(_ owner:_:)` is keyed by owner identity and self-pruning.

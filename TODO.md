@@ -290,6 +290,13 @@ account usage limits; root continues. The full source inventory is not yet fully
   Focused rerun/fast/mutation/cold visible UI gates remain. Native slot belongs to root;
   this task prepares code/tests without native runs.
 - [ ] Rendering/storage: derived-frame recovery/close, masked source budgets, editable raster residency, video pressure.
+  Active `tmp/s54-bake-lifecycle` from startup63b5abe3: reproduce corrupt disposable bake,
+  missing clean-key playback and retained-close landing with tiny drawn/count regressions. Reuse
+  store rejection/accounting, baker dirty/forget/top-up and one worker ownership; preserve ring
+  budget refusal and allocation refusal as distinct from invalid files. No native slot in this
+  branch. Nine drawn/count/readiness/queued-worker regression methods are prepared across existing
+  store/baker/export classes; parse and identifier/helper lints pass. Native gates remain unrun;
+  external exact-replacement mutation driver is prepared for root qualification.
 - [ ] Stream transport: bounded ordered backpressure, framing limits, connection readiness/close ownership.
 - [ ] Editor/brush: preview identity/budget, undo payload accounting, saved palette validation; verify stationary-sample opportunity.
 - [ ] Test hooks/obsolete runners: protect real-device persistent data and prune only verified unused paths.

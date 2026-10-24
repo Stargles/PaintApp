@@ -3,32 +3,10 @@ import SwiftUI
 
 // MARK: - The serial baker (RENDER.md §3.6)
 //
-// Stage 4a and 4b built five pieces that do not touch each other: a key that names a frame's pixels
-// (`FrameBakeKey`), a store that holds them (`FrameBakeStore`), a queue that says which frame is
-// next (`BakeQueue`), a ring that holds the decoded frames just ahead of the playhead
-// (`DecodedFrameRing`), and a recipe that turns the model into a composite off the main actor
-// (`FrameRecipe`). **This file is the loop that joins them, plus the read path off it.** Stage 4d
-// wired that read path to the live canvas and to playback, both through `CanvasManager.syncFrameBake`
-// and `CanvasView.Coordinator.refreshBakedFull`; the ring and the digest→frames map live here because
-// nothing else sees both a file name and a frame number.
-//
-// ## The idiom is `CanvasView.startSandwichRebuild`'s, deliberately
-//
-// A `@MainActor` owner, a serial `DispatchQueue`, and a hop back — the same shape the sandwich
-// rebuild has used since RENDER stage 2, rather than an actor or a `Task` tree. §2.15 forbids a
-// second path beside an existing one, and this *is* the existing one: mint on main in O(layers) with
-// no pixel work, do every pixel on the queue, assign on the way back.
-//
-// **`isBaking` is mutual exclusion, not a slot**, and §3.6's *"the queue reorders, it never
-// discards"* is what it is written for: every path back through `finish` clears it and kicks again,
-// so a request that arrives mid-bake waits one iteration rather than evaporating, and `BakeQueue` is
-// structurally incapable of losing a frame in the meantime.
-//
-// The live pair's rebuilds keep the same contract by another shape (`CanvasView.Coordinator
-// .sandwichRebuilds`, a `LatestWins`, TODO (179)): one rebuild in flight, and a request made during it
-// waits, replaced by any newer one, rather than evaporating. It coalesces where this reorders, because
-// the halves are a picture of *now* and the bake is a picture of every frame — the halves run on a
-// *serial* queue, so one rebuild per SwiftUI pass would hand a scrub a backlog nobody will see.
+// One main-actor scheduler joins content keys, the disposable disk store, the bounded decoded
+// ring and frozen frame recipes. BakeQueue retains every dirty frame. LatestWins serializes each
+// inspection/mint, off-main bake/read and main-thread landing, including reset/close cancellation.
+// Coalescing requests to inspect the dirty set never discards a frame from it.
 
 /// The background frame baker: one serial worker that keeps the store in step with the document.
 ///
@@ -52,7 +30,7 @@ final class FrameBaker {
     /// whole of §2's *"this should not interfere with the FPS of the user interface"*: the live
     /// canvas is what the artist is looking at, and the bake is work for a play button that has not
     /// been pressed yet.
-    private let workQueue = DispatchQueue(label: "com.paintapp.FrameBaker.bake", qos: .utility)
+    private let jobs: LatestWins
 
     /// The memory ceiling a single frame's composite may use. `ChunkedCompositor` cuts the walk to
     /// fit it (§3.4); it is a property rather than a constant so a test can force a narrow chunk
@@ -162,7 +140,10 @@ final class FrameBaker {
     /// **Mutual exclusion, not a slot.** True from the moment a job is handed to `workQueue` until
     /// its result lands back on the main actor. Never two composites at once, which is what "one
     /// serial baker" means and what keeps the peak memory to one frame's chunk width.
-    private(set) var isBaking = false
+    var isBaking: Bool { jobs.isBusy }
+
+    /// Closing detaches the model permanently; a reopened canvas gets a fresh owner.
+    var isClosed: Bool { manager == nil }
 
     /// Called on the main actor the moment the loop has nothing left — no dirty frame, and no cold
     /// frame inside the ring's lookahead — having drained and stopped rather than spun. Tests wait on
@@ -259,7 +240,9 @@ final class FrameBaker {
 
     // MARK: - Construction
 
-    init(manager: CanvasManager, store: FrameBakeStore, ring: DecodedFrameRing) {
+    init(manager: CanvasManager, store: FrameBakeStore, ring: DecodedFrameRing,
+         workQueue: DispatchQueue = DispatchQueue(label: "com.paintapp.FrameBaker.bake", qos: .utility)) {
+        jobs = LatestWins(queue: workQueue)
         self.manager = manager
         self.store = store
         self.ring = ring
@@ -330,6 +313,7 @@ final class FrameBaker {
     /// this one is resident. A scrub — playback stopped — still decodes synchronously: the artist
     /// has landed on a frame and wants that frame, not the one before it.
     func image(for key: FrameBakeKey) -> CGImage? {
+        guard !isClosed else { return nil }
         // `value` is the ring's answer — 1 resident, 0 a miss — so a `PlaybackTrace` report carries
         // the hit rate without a second counter, and `storeDecode`'s `onMain` count is what a
         // device run holds §3.5 against.
@@ -338,10 +322,16 @@ final class FrameBaker {
         }
         guard manager?.isPlaying != true else {
             PlaybackTrace.mark(.bakeRead, value: 0)
+            ringWalk = nil
+            kick()
             return nil
         }
         return PlaybackTrace.span(.bakeRead, value: 0) {
-            guard let decoded = store.loadDecoded(key) else { return nil }
+            let result = store.read(key)
+            guard let decoded = result.frame else {
+                if result.isUnavailable { recover(key) }
+                return nil
+            }
             ring.insert(decoded, for: key.fileName)
             // The ring changed by a hand other than the walk's, so what the walk settled no longer
             // holds; the next `kick` re-walks from the playhead.
@@ -357,39 +347,11 @@ final class FrameBaker {
         return image(for: key)
     }
 
-    /// **Whether the baker holds a current file for `frame`** — the timeline's baked-frame
-    /// indication (§3.7). Two dictionary lookups: no recipe, no key, no `stat`, no decode.
-    ///
-    /// ## This was one mint and one `stat`, and that spelling cannot serve the consumer §3.7 names
-    ///
-    /// The obvious body is `store.contains(currentKey(atFrame: frame))`, and that is what stood here
-    /// while nothing called it. It is the right answer for **one** frame — it is what the loop does
-    /// per iteration — and it is unusable for a whole ruler, which is the only thing that ever asks.
-    /// A mint is `makeFrameRecipe`: a `LeafSnapshot` per visible leaf, which freezes a
-    /// `VectorCanvas` or takes a raster tier's `CGContext.makeImage()`. Asking it once per frame of
-    /// a 300-frame document is 300 × layers of that per redraw, and the bar redraws while the baker
-    /// is running. It would cost far more than the bake it is describing.
-    ///
-    /// ## What "baked" means here, stated exactly, because it is not the same claim
-    ///
-    /// **The frame is not pending, and the baker recorded a key for it.** Those two facts together
-    /// are the baker's own belief that `frame`'s current key has a file:
-    ///
-    /// - `keyByFrame` alone is not enough. An edit to a cel spanning frames 2–6 leaves those five
-    ///   entries in place — they are only forgotten on a *failure* — so the file they name is the
-    ///   picture from before the edit. The dirty bit is what says so.
-    /// - The dirty bit alone is not enough either. A frame the baker has never visited is clean the
-    ///   moment `markClean` runs on a write failure, and un-recorded from the start.
-    ///
-    /// So this is the **scheduler's** state rather than a fresh statement about the filesystem, and
-    /// that is the honest thing to draw: it is the same state the canvas is in. §3.3 forbids showing
-    /// a stale *file* as fresh, and nothing here does — the display path still mints its own key
-    /// (`image(atFrame:)`) and a miss keeps the previous picture. This answers a different question,
-    /// *"is this stretch ready to play"*, and `BakeQueue`'s own rule that over-marking dirty is
-    /// always safe carries straight over: the failure this cannot have is claiming ready when it is
-    /// not, and marking too much unbaked is at worst a band that clears a moment later.
+    /// The scheduler's clean key still has a file. A metadata check only: timeline painting
+    /// never mints a recipe or decodes pixels. Actual reads reject invalid disposable files.
     func isBaked(atFrame frame: Int) -> Bool {
-        !bakeQueue.isPending(frame) && keyByFrame[frame] != nil
+        guard !bakeQueue.isPending(frame), let key = keyByFrame[frame] else { return false }
+        return store.contains(key)
     }
 
     // MARK: - Dirty marking (RENDER §3.6)
@@ -420,6 +382,7 @@ final class FrameBaker {
     /// `FrameBakeStore.purgeAll`, invoked by the app). This only drops the bookkeeping that would
     /// otherwise claim files that are gone.
     func reset() {
+        jobs.cancel()
         bakeQueue = BakeQueue()
         keyByFrame = [:]
         framesByDigest = [:]
@@ -433,14 +396,29 @@ final class FrameBaker {
         ring.removeAll()
     }
 
+    /// Drops all live consumers and cancels the shared worker's landing. Frozen work already on
+    /// its queue may finish, but cannot install a picture, restart the loop or notify a closed UI.
+    func close() {
+        manager = nil
+        reset()
+        exportFocus = nil
+        frameObservers.removeAll()
+        onIdle = nil
+    }
+
     // MARK: - The loop
 
-    /// Starts the loop, or does nothing if it is already running or there is nothing pending.
-    ///
-    /// Re-entrant and cheap: every path that could have changed what wants baking calls it, and the
-    /// two guards below make a redundant call free.
+    /// Requests one inspection of the dirty set. Requests during work coalesce; the next recipe
+    /// is minted only after the previous landing, using the current playhead and model.
     func kick() {
-        guard !isBaking, !isSuspended, let manager else { return }
+        guard !isSuspended, !isClosed else { return }
+        jobs.request { [weak self] in self?.nextWork() }
+    }
+
+    /// LatestWins owns the one worker and cancellation of both bake and decode landings. The
+    /// dirty queue still owns every frame; coalescing requests to inspect it discards no frame.
+    private func nextWork() -> LatestWins.Work? {
+        guard !isSuspended, let manager else { return nil }
         bakeQueue.frameCount = manager.contentEndFrame
 
         // **The one substitution stage 6 makes.** With no export running this is the artist's
@@ -460,11 +438,11 @@ final class FrameBaker {
             // Nothing left to composite. The frames ahead of the playhead may still be cold in the
             // ring, though — see `fillRingAhead`, which is the other half of §3.5's promise that
             // play never decodes on the display thread.
-            if fillRingAhead(playhead: playhead, direction: direction, range: range, looping: looping) {
-                return
+            if let work = fillRingAhead(playhead: playhead, direction: direction, range: range, looping: looping) {
+                return work
             }
             onIdle?()
-            return
+            return nil
         }
 
         // Step 1, on the main actor and O(layers) with no pixel work — RENDER §3.2's whole seam.
@@ -474,7 +452,7 @@ final class FrameBaker {
             // marking it would discard the request, and §3.6 says the queue never discards. The loop
             // stops here and the next `kick` — after a canvas exists — picks it up.
             onIdle?()
-            return
+            return nil
         }
         let resolution = manager.renderResolution
         let budget = budgetBytes
@@ -483,15 +461,15 @@ final class FrameBaker {
                                       direction: direction)
         let frames = framesByDigest
 
-        isBaking = true
-        workQueue.async { [weak self, store] in
+        return { [weak self, store] in
             // Step 2, off the main actor. Every value read here was frozen at mint time.
             let key = FrameBakeKey(recipe: recipe, renderResolution: resolution)
+            let cached = wantsRing ? store.read(key) : nil
+            var decoded = cached?.frame
             let outcome: Outcome
-            if store.contains(key) {
-                // **The dedupe, end to end.** A dirty frame whose recomputed key already has a file
-                // costs one mint and one `stat`; no composite happens at all. That is what makes a
-                // nine-frame hold one file and a scrub through it free (§3.3).
+            if cached?.isUnavailable != true, store.contains(key) {
+                // A hold reuses its content-addressed file. A decode already needed for the ring
+                // rejects an unreadable file before this decision; distant frames need only stat.
                 outcome = .alreadyOnDisk
             } else if let image = PlaybackTrace.span(.bakeComposite, {
                 if delay > 0 { Thread.sleep(forTimeInterval: delay) }
@@ -513,13 +491,14 @@ final class FrameBaker {
             // the re-read is deliberate: it is the *decode* path playback actually takes, so filling
             // the ring any other way would leave that path unexercised by every bake. One LZ4 decode
             // is single-digit milliseconds at 2048² (§3.5) and this queue is `.utility`.
-            if wantsRing, outcome.isOnDisk, let decoded = store.loadDecoded(key) {
-                self?.ring.insert(decoded, for: key.fileName)
+            if wantsRing, outcome.isOnDisk, decoded == nil, cached?.isUnavailable != false {
+                decoded = store.loadDecoded(key)
             }
-
-            Task { @MainActor in
+            return {
                 PlaybackTrace.span(.renderLanded) {
-                    self?.finish(frame: frame, key: key, outcome: outcome)
+                    guard let self else { return }
+                    if let decoded { self.ring.insert(decoded, for: key.fileName) }
+                    self.finish(frame: frame, key: key, outcome: outcome)
                 }
             }
         }
@@ -567,11 +546,11 @@ final class FrameBaker {
     /// for. The marker is dropped the moment the playhead or the direction moves, so a tick re-walks
     /// — and finds the near frames already in.
     private func fillRingAhead(playhead: Int, direction: BakeQueue.Direction,
-                               range: ClosedRange<Int>?, looping: Bool) -> Bool {
-        guard ringLookahead > 0, let manager else { return false }
+                               range: ClosedRange<Int>?, looping: Bool) -> LatestWins.Work? {
+        guard ringLookahead > 0, let manager else { return nil }
         let low = max(range?.lowerBound ?? 0, 0)
         let high = min(range?.upperBound ?? manager.contentEndFrame - 1, manager.contentEndFrame - 1)
-        guard low <= high else { return false }
+        guard low <= high else { return nil }
         let reach = min(ringLookahead, high - low)
 
         var distance = 0
@@ -605,20 +584,18 @@ final class FrameBaker {
                 continue
             }
             ringWalk = (playhead, direction, distance + 1)
-            isBaking = true
             let kept = nearer
-            workQueue.async { [weak self, store] in
-                let decoded = store.loadDecoded(key)
-                Task { @MainActor in
+            return { [weak self, store] in
+                let result = store.read(key)
+                return {
                     PlaybackTrace.span(.renderLanded) {
-                        self?.finishRingFill(key: key, decoded: decoded, keeping: kept)
+                        self?.finishRingFill(key: key, result: result, keeping: kept)
                     }
                 }
             }
-            return true
         }
         ringWalk = (playhead, direction, reach + 1)
-        return false
+        return nil
     }
 
     /// How far the top-up has already walked, and from where. See `fillRingAhead`.
@@ -626,19 +603,18 @@ final class FrameBaker {
 
     /// Takes one decoded frame in and goes round again — **but only if the ring took it**.
     ///
-    /// The insert's own answer is the test: `DecodedFrameRing.insert(_:for:keeping:)` refuses a
-    /// frame that would displace one nearer to the playhead, and everything farther than a refused
-    /// frame would be refused for the same reason. It also covers the outright refusal — a frame
-    /// larger than the whole budget, which that type declines by design — and a file the store no
-    /// longer holds. All three end the walk for this playhead rather than the whole feature: the
-    /// next tick re-walks.
+    /// A missing/invalid file requeues the frames sharing it. A valid decode refused by the ring
+    /// budget, or a decode allocation refusal, ends this playhead's walk without re-rendering.
     ///
     /// A frame that landed is announced to every frame it serves, the way a frame the loop bakes
     /// is: a canvas that missed on it during playback is showing the previous picture (§2.10) and is
     /// waiting to be told this one is resident.
-    private func finishRingFill(key: FrameBakeKey, decoded: DecodedFrame?, keeping kept: Set<String>) {
-        isBaking = false
-        guard let decoded, ring.insert(decoded, for: key.fileName, keeping: kept) else {
+    private func finishRingFill(key: FrameBakeKey, result: FrameBakeStore.ReadResult, keeping kept: Set<String>) {
+        if result.isUnavailable {
+            recover(key)
+            return
+        }
+        guard let decoded = result.frame, ring.insert(decoded, for: key.fileName, keeping: kept) else {
             if var walk = ringWalk {
                 walk.nextDistance = ringLookahead + 1
                 ringWalk = walk
@@ -675,8 +651,6 @@ final class FrameBaker {
     /// a scheduling hint (§3.3) and this one has been spent; the next edit to reach that frame
     /// re-raises it, and the *key* still says truthfully that there is no file.
     private func finish(frame: Int, key: FrameBakeKey, outcome: Outcome) {
-        isBaking = false
-
         // **The document can move while a composite is in flight, and clearing the bit regardless
         // would discard the edit that moved it.** `kick` mints the key on the main actor and then
         // hops to `workQueue`, so an edit landing in between is an edit this bake did not see. It
@@ -723,6 +697,18 @@ final class FrameBaker {
         forget(frame: frame)
         keyByFrame[frame] = key
         framesByDigest[key.fileName, default: []].insert(frame)
+    }
+
+    /// A real store miss invalidates every frame sharing the file. Ring budget/allocation refusals
+    /// never call this: they keep a valid disk picture clean and merely stop the resident walk.
+    private func recover(_ key: FrameBakeKey) {
+        let frames = framesByDigest[key.fileName] ?? []
+        for frame in frames {
+            forget(frame: frame)
+            bakeQueue.markDirty(frame: frame)
+        }
+        ringWalk = nil
+        kick()
     }
 
     /// Drops whatever `frame` used to resolve to, and the digest entry with it once no frame names it.

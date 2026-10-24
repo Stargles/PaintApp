@@ -3412,12 +3412,12 @@ final class CanvasManager: ObservableObject {
                        forFrameBytes: decodedFrameBytes)))
     }
 
-    /// **`FrameBaker.reset()`'s real caller.** `ContentView.returnToGallery` calls this on the way
+    /// **`FrameBaker.close()`'s real caller.** `ContentView.returnToGallery` calls this on the way
     /// back to the gallery: the canvas is off screen, but `ContentView` keeps this `CanvasManager` in
     /// `@State` rather than discarding it, so `frameBaker` would otherwise sit idle holding its
     /// bookkeeping and its decoded-frame ring — up to `Self.frameRingByteBudget` bytes — for a
-    /// document nobody is looking at, until a different project replaces it. `reset()` drops both and
-    /// leaves the on-disk store alone, exactly as its own doc comment says a document closing should.
+    /// document nobody is looking at. `close()` cancels live landings and drops both, leaving the
+    /// on-disk store available for a new canvas owner.
     ///
     /// **Unguarded on purpose.** `frameBaker` is lazy so a manager whose canvas was never shown never
     /// pays for a `FrameBakeStore` (and the cache directory its `init` creates) — see the doc comment
@@ -3428,7 +3428,7 @@ final class CanvasManager: ObservableObject {
     func closeFrameBaker() {
         thumbnailBackfillTask?.cancel()
         thumbnailBackfillTask = nil
-        frameBaker.reset()
+        frameBaker.close()
         // The document is leaving the screen, and its stream clients must not go on reconnecting
         // to a laptop for a canvas nobody is looking at.
         streamCoordinator.stopAll()
@@ -3478,7 +3478,10 @@ final class CanvasManager: ObservableObject {
         // read of `frameBaker` on this line is what instantiates it, against the *current* values,
         // so the first call through here never rebuilds.
         let wanted = FrameBakeStore.defaultRoot(projectID: projectID, renderResolution: renderResolution)
-        if frameBaker.store.root != wanted { frameBaker = makeFrameBaker() }
+        if frameBaker.isClosed || frameBaker.store.root != wanted {
+            frameBaker.close()
+            frameBaker = makeFrameBaker()
+        }
 
         let baker = frameBaker
         // §3.6's band 2. Equal leaves it alone: a pass that did not move the playhead says nothing

@@ -63,7 +63,11 @@ Detailed source evidence: `/Users/juliapark/PaintWork/s54-architecture-audit/per
 
 Unreadable existing derived frames can indefinitely retry export; missing/evicted frames may stay clean and fail playback recovery.
 
-Remaining: verify/reproduce, then fix or reject the premise with evidence.
+Prepared `tmp/s54-bake-lifecycle`: actual reads reject disposable invalid files with per-file accounting;
+clean-key resident misses forget/requeue their frames, with allocation/ring refusals kept separate.
+Nine tiny regression methods across store/baker/export cover drawn bytes, readiness, real recomposites,
+close/reset ownership and retained disk reuse. Parse/lints only; native reproduction/qualification,
+mutations, current UI/pictures and fast tiers remain root's gates.
 
 Detailed source evidence: `/Users/juliapark/PaintWork/s54-architecture-audit/render-review.md`.
 
@@ -71,7 +75,9 @@ Detailed source evidence: `/Users/juliapark/PaintWork/s54-architecture-audit/ren
 
 Retained baker may refill cleared bookkeeping/ring after close; no demonstrated cross-project stale output.
 
-Remaining: verify/reproduce, then fix or reject the premise with evidence.
+Prepared on the same branch: reuse `LatestWins` cancellation for bake and resident-read landings;
+gallery close detaches consumers/model, and reopening creates a fresh owner. Frozen work may finish
+one disposable disk write. Queued-job regressions are prepared; native gates remain unrun.
 
 Detailed source evidence: `/Users/juliapark/PaintWork/s54-architecture-audit/render-review.md`.
 
