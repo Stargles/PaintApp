@@ -2547,3 +2547,11 @@ Segment drawing, input sequence, headings, carry and arcWidths arithmetic remain
 reference/count tests bounded, operation diagnostics temporary/external, and O(N) input retention
 explicit. Actual cancel drops scratch but its view-held walk is replaced at next gesture; this task
 changes no cancellation/lifetime policy. Native/compiler remain unrun/root-owned.
+
+## Typed transform error boundary — 2026-10-24
+
+Actual clean9bd UI controls failed to compile before any test: CanvasManager+Document.prepare
+line506 catch was any Error although its local transform helper throws RasterResidency.Failure.
+Preserve exact typed failure propagation; correct the local do/catch inference boundary without
+a fallback/default mapping. Failed original result and728-source exact restoration are preserved
+in s54-final-qualification/native/ui-input-controls-9bd55029-run01. No runtime result is claimed.

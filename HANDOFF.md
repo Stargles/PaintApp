@@ -49,6 +49,13 @@ old-library cold UI and fresh saved-scene/export/signed-device/erasing gates rem
 artwork confirmation still precedes whole retirement of the temporary converter; keep permanent
 startup maintenance. External current coverage records the bounded audit and its real limits.
 
+Actual9bd focused build failed before tests: CanvasManager+Document.prepare line506 erased the
+local typed throw to any Error at its do/catch boundary. Native65,0tests,728sourceexact and clean.
+Recorded bounded successor: make that local error boundary explicit without fallback/default or
+new policy; also retain the existing RoughInk success screenshot for current drawn proof. No new
+test methods/preset/oracle changes. All9bd offline plans remain unrun, not runtime qualification.
+Root owns docs/Git; source grant follows this record on tmp/s54-typed-transform-boundary.
+
 ## Qualification and gates
 
 - Earlier normalf475 passed847/847 and base49 plus all52 mask/video/vector assertion-target cases
