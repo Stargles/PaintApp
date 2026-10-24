@@ -222,19 +222,11 @@ final class OutsideTheCanvasUITests: PaintUITestCase {
 
     /// The owner, 2026-09-16: *"I cant move the canvas when by touching outside the canvas."*
     ///
-    /// **Why a rotate on a tall, narrow canvas.** XCUITest's only multi-touch gestures are `pinch`
-    /// and `rotate`, both centred on the element they are sent to, with no way to say where the
-    /// fingers land — so where they land was MEASURED with the action recorder: a pinch *out* starts
-    /// its two fingers 5 pt apart at the element's centre, a pinch *in* starts them at the element's
-    /// diagonal corners (one of which is off the host, on the timeline), and a rotate starts them
-    /// about 47 pt either side of the centre. A 64×4096 document fits its height and leaves the paper
-    /// a strip some 20 pt wide down the middle of the host, so a rotate's fingers both land on the
-    /// surround. A two-finger *pan* cannot be placed at all, which is why this is the gesture that
-    /// stands for it; all three share one recognizer surface and one handler.
-    ///
-    /// The quarter-turn asked for is well past `CanvasView.Coordinator.rotationSnapThreshold`, so the
-    /// snap to a right angle does not swallow it.
-    func testARotationThatBeginsOnTheSurroundTransformsTheCanvas() throws {
+    /// A 64×4096 document fits its height and leaves a narrow strip down the host's centre.
+    /// Both pan fingers start in the surround; a vertical pan keeps that strip centred horizontally
+    /// for the rotation, whose fingers land about 47 pt either side of the host's centre.
+    /// The quarter-turn is beyond the rotation snap threshold, so the snap cannot swallow it.
+    func testAPanAndRotationThatBeginOnTheSurroundTransformTheCanvas() throws {
         let app = XCUIApplication()
         app.launch()
 
@@ -252,10 +244,28 @@ final class OutsideTheCanvasUITests: PaintUITestCase {
 
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let host = canvas.frame
+        let paperWidth = min(host.width, host.height * 64 / 4096)
+        let paperLeft = (1 - paperWidth / host.width) / 2
+        for start in [aboveTheDock(app, canvas, x: 0.10, y: 0.25),
+                      aboveTheDock(app, canvas, x: 0.22, y: 0.5)] {
+            XCTAssertLessThan(start.dx, paperLeft - 0.05, "both pan fingers must begin on the grey")
+            assertAboveTheDock(app, canvas, dy: Double(start.dy), "the pan's starting finger")
+        }
         let before = readTransform(app)
+        XCTAssertEqual(before.split(separator: ",").count, 4, "the exposed transform includes both offsets")
+        try panAboveTheDock(app, canvas, stagger: 0, delta: CGVector(dx: 0, dy: 60))
+        let panned = readTransform(app)
+        XCTAssertEqual(panned.split(separator: ",").count, 4)
+        XCTAssertNotEqual(Array(before.split(separator: ",").suffix(2)),
+                          Array(panned.split(separator: ",").suffix(2)),
+                          "a pan beginning on the grey must change the canvas offset (\(before) -> \(panned))")
+        attachScreenshot(canvas, "after-panning-from-the-grey")
+
         canvas.rotate(.pi / 2, withVelocity: 1.0)
-        let after = readTransform(app)
-        XCTAssertNotEqual(before, after,
-                          "a rotate whose fingers landed on the surround moved nothing (xform \(before) -> \(after))")
+        let rotated = readTransform(app)
+        XCTAssertNotEqual(panned, rotated,
+                          "a rotate whose fingers landed on the surround moved nothing (xform \(panned) -> \(rotated))")
+        attachScreenshot(canvas, "after-rotating-from-the-grey")
     }
 }
