@@ -401,7 +401,7 @@ final class SampleRecordLogicTests: XCTestCase {
     /// `size ← pressure` row reaches the top of its ramp and the output is exactly 1 whatever the row's
     /// amount, which is why "the modulation removed" and "the modulation reading the neutral" have the
     /// same answer and the comparison is at zero tolerance.
-    func testABrushReadingAChannelTheStrokeDoesNotCarryDrawsWhatTheSameBrushWithoutThatModulationDraws() {
+    func testABrushReadingAChannelTheStrokeDoesNotCarryDrawsWhatTheSameBrushWithoutThatModulationDraws() throws {
         let bare = StrokeSamples(points: (0..<6).map { CGPoint(x: 20 + CGFloat($0) * 18, y: 60) })
         XCTAssertFalse(bare.carries(.pressure), "Setup: this run must genuinely lack the channel")
 
@@ -424,7 +424,7 @@ final class SampleRecordLogicTests: XCTestCase {
                        "a missing channel changed the ink — the funnel is not answering the neutral")
 
         // And at the pixels, which is what the artist sees.
-        XCTAssertEqual(Self.rendered(bare, brush: reading), Self.rendered(bare, brush: removed),
+        XCTAssertEqual(try Self.rendered(bare, brush: reading), try Self.rendered(bare, brush: removed),
                        "the two renders differ by at least one byte")
 
         // The same fixture with a *non*-neutral pressure must differ, or the comparison above is
@@ -440,7 +440,7 @@ final class SampleRecordLogicTests: XCTestCase {
     /// The same guarantee for **tilt**, which has no modulation yet and so is pinned where it can still
     /// go wrong: carrying the channels must not disturb the ink drawn from the ones beside them. An
     /// off-by-one in the packer's per-channel offsets breaks this and nothing else would catch it.
-    func testCarryingTiltChangesNoPixelOfAStrokeDrawnWithABrushThatDoesNotReadIt() {
+    func testCarryingTiltChangesNoPixelOfAStrokeDrawnWithABrushThatDoesNotReadIt() throws {
         var withTilt = StrokeSamples(channels: .captured)
         var without = StrokeSamples(channels: .pressureOnly)
         for i in 0..<7 {
@@ -451,8 +451,8 @@ final class SampleRecordLogicTests: XCTestCase {
             without.append(VectorSample(x: p.x, y: p.y, pressure: pressure))
         }
         let brush = TestBrushes.hardRound
-        XCTAssertEqual(Self.rendered(PackedSampleRun(withTilt, about: .zero).samples, brush: brush),
-                       Self.rendered(PackedSampleRun(without, about: .zero).samples, brush: brush),
+        XCTAssertEqual(try Self.rendered(PackedSampleRun(withTilt, about: .zero).samples, brush: brush),
+                       try Self.rendered(PackedSampleRun(without, about: .zero).samples, brush: brush),
                        "tilt bytes leaked into the pressure the brush reads")
     }
 
@@ -569,12 +569,12 @@ final class SampleRecordLogicTests: XCTestCase {
     }
 
     /// The bytes a run actually paints, so "renders identically" is a statement about pixels.
-    private static func rendered(_ samples: StrokeSamples, brush: Brush) -> Data {
+    private static func rendered(_ samples: StrokeSamples, brush: Brush) throws -> Data {
         let texture = RasterLayerTexture(size: CGSize(width: 140, height: 110))
         BrushStamper.stampStroke(into: texture, samples: samples, brush: brush, color: .black,
                                  brushSize: 20, brushOpacity: 1, random: DabRandom(seed: 11))
-        guard let cg = texture.renderToUIImage().cgImage,
-              let data = cg.dataProvider?.data as Data? else { return Data() }
+        let cg = try XCTUnwrap(try texture.renderToUIImage().get().cgImage)
+        let data = try XCTUnwrap(cg.dataProvider?.data as Data?)
         return data
     }
 }

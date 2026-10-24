@@ -51,8 +51,8 @@ final class FrameRecipeLogicTests: XCTestCase {
 
         // 1 — a baked tier.
         manager.addLayer(name: "Baked")
-        manager.layers[1].cels[0].bakedImage =
-            CanvasFixture.solidImage(.red, rect: CGRect(x: 2, y: 2, width: 30, height: 30))
+        CanvasFixture.setBakedContent(manager, layerIndex: 1,
+            CanvasFixture.solidImage(.red, rect: CGRect(x: 2, y: 2, width: 30, height: 30)))
 
         // 2 — a vector tier.
         manager.addVectorLayer(name: "Vector")
@@ -104,7 +104,7 @@ final class FrameRecipeLogicTests: XCTestCase {
     /// `CompositorParityLogicTests.flatWalkComposite` accepts one tier up, and for the same reason: an
     /// oracle that shares an implementation with the thing it checks is not an oracle.
     private func referenceSources(_ manager: CanvasManager, atFrame frame: Int,
-                                  canvasSize: CGSize, quality: RenderQuality = .full) -> [CGImage?] {
+                                  canvasSize: CGSize, quality: RenderQuality = .full) throws -> [CGImage?] {
         var sources = [CGImage?](repeating: nil, count: manager.layers.count)
         let wanted = maskSourceLayers(manager, atFrame: frame)
         let provider = manager.celContentProvider(atFrame: frame)
@@ -124,11 +124,12 @@ final class FrameRecipeLogicTests: XCTestCase {
             // The flatten, frozen: baked → the raster tier's own pixels → the vector tier, replaced
             // by a derivation where there is one.
             let cel = layer.cels[celIndex]
-            let strokes = cel.raster.hasContent ? cel.raster.renderToUIImage() : nil
+            let strokes = cel.raster.hasContent ? try cel.raster.renderToUIImage().get() : nil
+            let baked = try cel.bakedImage?.resolveImage().get()
             let vector = derived?.render(quality) ?? cel.vector?.render(quality: quality)
             sources[index] = UIGraphicsImageRenderer(bounds: bounds,
                                                      format: PixelOps.transparentFormat()).image { _ in
-                cel.bakedImage?.draw(in: bounds)
+                baked?.draw(in: bounds)
                 strokes?.draw(in: bounds)
                 vector?.draw(in: bounds)
             }.cgImage
@@ -165,11 +166,11 @@ final class FrameRecipeLogicTests: XCTestCase {
     /// from the values it froze — so with a warm memo both sides would read the same entry and a
     /// `FrozenCel` short of a field would still pass. Cold, the recipe side actually draws from the
     /// frozen values, which is the thing under test.
-    func testTheRecipeResolvesToTheSamePixelsAsTheSynchronousWalk() {
+    func testTheRecipeResolvesToTheSamePixelsAsTheSynchronousWalk() throws {
         let (manager, _) = everyKindOfLeaf()
 
         PixelOps.clearRasterizeCache()
-        let expected = referenceSources(manager, atFrame: 0, canvasSize: size).map { $0.flatMap(CanvasFixture.rgbaBytes) }
+        let expected = try referenceSources(manager, atFrame: 0, canvasSize: size).map { $0.flatMap(CanvasFixture.rgbaBytes) }
 
         PixelOps.clearRasterizeCache()
         guard let recipe = manager.makeFrameRecipe(atFrame: 0, includeBackground: true) else {
@@ -193,12 +194,12 @@ final class FrameRecipeLogicTests: XCTestCase {
     }
 
     /// The same claim for the sandwich, whose three requests share one set of leaves.
-    func testTheSandwichRecipeResolvesToTheSamePixelsAndSharesOneSetOfLeaves() {
+    func testTheSandwichRecipeResolvesToTheSamePixelsAndSharesOneSetOfLeaves() throws {
         let (manager, vectorIndex) = everyKindOfLeaf()
 
         PixelOps.clearRasterizeCache()
         let renderSize = manager.liveCompositeSize(of: manager.renderTree(atFrame: 0), canvasSize: size)
-        let expected = referenceSources(manager, atFrame: 0, canvasSize: renderSize)
+        let expected = try referenceSources(manager, atFrame: 0, canvasSize: renderSize)
 
         PixelOps.clearRasterizeCache()
         guard let recipe = manager.makeSandwichRecipe(atFrame: 0, activeLayerIndex: vectorIndex) else {
@@ -264,11 +265,11 @@ final class FrameRecipeLogicTests: XCTestCase {
     ///
     /// **All four tiers are mutated, not one.** A snapshot that froze the vector tier and carried the
     /// other three live would pass a vector-only version of this test.
-    func testResolvingAfterTheArtistDrawsAgainShowsWhatWasMinted() {
+    func testResolvingAfterTheArtistDrawsAgainShowsWhatWasMinted() throws {
         let (manager, vectorIndex) = everyKindOfLeaf()
         PixelOps.clearRasterizeCache()
 
-        let before = referenceSources(manager, atFrame: 0, canvasSize: size).map { $0.flatMap(CanvasFixture.rgbaBytes) }
+        let before = try referenceSources(manager, atFrame: 0, canvasSize: size).map { $0.flatMap(CanvasFixture.rgbaBytes) }
 
         PixelOps.clearRasterizeCache()
         guard let recipe = manager.makeFrameRecipe(atFrame: 0, includeBackground: false) else {
@@ -285,8 +286,8 @@ final class FrameRecipeLogicTests: XCTestCase {
                                  }, channels: .pressureOnly),
                                  brush: TestBrushes.hardRound, color: .black, brushSize: 9, brushOpacity: 1,
                                  random: DabRandom(seed: 0))
-        manager.layers[1].cels[0].bakedImage =
-            CanvasFixture.solidImage(.yellow, rect: CGRect(x: 0, y: 0, width: 64, height: 64))
+        CanvasFixture.setBakedContent(manager, layerIndex: 1,
+            CanvasFixture.solidImage(.yellow, rect: CGRect(x: 0, y: 0, width: 64, height: 64)))
 
         PixelOps.clearRasterizeCache()
         let request = recipe.resolve()

@@ -1192,7 +1192,7 @@ final class UndoRepairBench: XCTestCase {
     /// that rasterizes **on the main thread** — `raster?.renderIfNonEmpty()` is called inline, with no
     /// `DeferredVectorRender` hop. Whether that costs anything is the question; a texture built from
     /// an image memoizes it, so the expectation is that it does not.
-    func testWhatARasterUndoPressSpendsOnTheMainThread() {
+    func testWhatARasterUndoPressSpendsOnTheMainThread() throws {
         for size in [CGSize(width: 2048, height: 1024), CGSize(width: 4096, height: 4096)] {
             autoreleasepool {
                 let manager = CanvasManager()
@@ -1200,10 +1200,10 @@ final class UndoRepairBench: XCTestCase {
                 manager.canvasSize = size
                 manager.addLayer()
                 let whole = CGRect(origin: .zero, size: size)
-                let old = RasterLayerTexture(size: size,
-                                             image: CanvasFixture.solidImage(.red, rect: whole, size: size))
-                let new = RasterLayerTexture(size: size,
-                                             image: CanvasFixture.solidImage(.blue, rect: whole, size: size))
+                let old = try CanvasFixture.rasterTexture(
+                    CanvasFixture.solidImage(.red, rect: whole, size: size), size: size)
+                let new = try CanvasFixture.rasterTexture(
+                    CanvasFixture.solidImage(.blue, rect: whole, size: size), size: size)
                 manager.layers[0].cels[0].raster = old
                 manager.history.removeAll()
                 manager.registerUndoableCelChange(layerID: manager.layers[0].id,
@@ -1216,7 +1216,10 @@ final class UndoRepairBench: XCTestCase {
                     if isRedo { manager.redo() } else { manager.undo() }
                 }, render: {
                     // What `refreshDisplay` does for a raster layer, on the main thread, inline.
-                    _ = manager.layers[0].cels[0].raster.renderIfNonEmpty()
+                    switch manager.layers[0].cels[0].raster.renderIfNonEmpty() {
+                    case .success: break
+                    case .failure(let error): XCTFail("Could not render raster after undo: \(error)")
+                    }
                     return 0
                 })
 

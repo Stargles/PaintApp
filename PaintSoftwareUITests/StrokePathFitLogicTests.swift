@@ -357,7 +357,11 @@ final class StrokePathFitLogicTests: XCTestCase {
                                          samples: StrokeSamples(input, channels: .pressureOnly),
                                          brush: brush, color: .black, brushSize: size, brushOpacity: 1,
                                          random: DabRandom(seed: 1234))
-                return texture.renderToUIImage()
+                do { return try texture.renderToUIImage().get() }
+                catch {
+                    XCTFail("Could not render fitted stroke: \(error)")
+                    return nil
+                }
             }
             guard let a = render(samples), let b = render(knots),
                   let report = RasterVectorParity.report(raster: a, vector: b, size: canvas, tolerance: 8) else {

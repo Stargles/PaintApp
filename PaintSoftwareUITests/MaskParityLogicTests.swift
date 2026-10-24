@@ -548,7 +548,7 @@ final class MaskParityLogicTests: XCTestCase {
     /// project rebuilds every `RasterLayerTexture` with its counter back at 0 under the same id, so a
     /// version-only key would serve the mask resolved before the edit. `LayerContentVersion` keys on
     /// the object *and* the counter, which makes a fresh buffer a fresh key by construction.
-    func testAFreshBufferUnderTheSameCelIDInvalidatesTheMask() {
+    func testAFreshBufferUnderTheSameCelIDInvalidatesTheMask() throws {
         let manager = CanvasFixture.manager(layerCount: 2)
         CanvasFixture.setBakedContent(manager, layerIndex: 0,
                                       CanvasFixture.solidImage(red, rect: CGRect(x: 0, y: 0, width: 32, height: 64)))
@@ -565,8 +565,8 @@ final class MaskParityLogicTests: XCTestCase {
         let replacement = RasterLayerTexture.empty(size: canvasSize)
         XCTAssertEqual(replacement.version, 0, "Fixture premise: the counter is back where it started")
         manager.layers[0].cels[celIndex].raster = replacement
-        manager.layers[0].cels[celIndex].bakedImage =
-            CanvasFixture.solidImage(red, rect: CGRect(x: 0, y: 0, width: 16, height: 64))
+        manager.layers[0].cels[celIndex].bakedImage = try CanvasFixture.rasterSource(
+            CanvasFixture.solidImage(red, rect: CGRect(x: 0, y: 0, width: 16, height: 64)))
 
         guard let after = manager.makeRenderRequest(atFrame: 0, includeBackground: false)
             .flatMap({ MaskResolver.coverage(for: [mask], of: $0) }) else {
@@ -1020,7 +1020,7 @@ final class MaskParityLogicTests: XCTestCase {
     /// it. The test is about surviving double rounding across a feathered edge, not about whichever
     /// half-width happens to be live, so it sets one wide enough to guarantee that edge exists — 0.05,
     /// the pre-bake default this fixture was written against.
-    func testNestedClipsAgreeByteForByteDespiteTheDoubleRounding() {
+    func testNestedClipsAgreeByteForByteDespiteTheDoubleRounding() throws {
         let manager = CanvasFixture.manager(layerCount: 3)
         // Soft-edged sources, so the antialiased band the two paths can disagree across actually
         // exists — a hard rectangle is 0 or 255 everywhere and would agree trivially.
@@ -1038,7 +1038,7 @@ final class MaskParityLogicTests: XCTestCase {
         }
 
         guard let request = manager.makeRenderRequest(atFrame: 0, includeBackground: false),
-              let content = manager.layers[2].cels[0].bakedImage?.cgImage,
+              let content = try manager.layers[2].cels[0].bakedImage?.resolveImage().get().cgImage,
               let leafCoverage = MaskResolver.coverage(for: [leafMask], of: request),
               let groupCoverage = MaskResolver.coverage(for: [groupMask], of: request),
               let chained = MaskResolver.coverage(for: [groupMask, leafMask], of: request) else {

@@ -170,7 +170,7 @@ final class AutosaveLogicTests: XCTestCase {
         XCTAssertTrue(ProjectBackupManager.validateProject(at: url),
                       "An incrementally written package names only files it contains")
         let reloaded = try XCTUnwrap(ProjectStore.load(from: url))
-        let dot = CanvasFixture.rgbaBytes(try XCTUnwrap(reloaded.layers[0].cels[0].raster.renderToUIImage().cgImage))
+        let dot = CanvasFixture.rgbaBytes(try XCTUnwrap(try reloaded.layers[0].cels[0].raster.renderToUIImage().get().cgImage))
         XCTAssertNotNil(dot)
         XCTAssertGreaterThan(dot?[(44 * 64 + 44) * 4 + 3] ?? 0, 0,
                              "The reloaded document has the second dot at (44, 44) on layer 0")
@@ -242,7 +242,7 @@ final class AutosaveLogicTests: XCTestCase {
         XCTAssertEqual(after.pngsEncoded, 1, "The next save encodes exactly the cel edited in flight")
         XCTAssertEqual(after.pngsReused, 1)
         let reloaded = try XCTUnwrap(ProjectStore.load(from: url))
-        let bytes = CanvasFixture.rgbaBytes(try XCTUnwrap(reloaded.layers[1].cels[0].raster.renderToUIImage().cgImage))
+        let bytes = CanvasFixture.rgbaBytes(try XCTUnwrap(try reloaded.layers[1].cels[0].raster.renderToUIImage().get().cgImage))
         XCTAssertGreaterThan(bytes?[(12 * 64 + 50) * 4 + 3] ?? 0, 0, "The in-flight dot is on disk now")
     }
 

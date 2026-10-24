@@ -72,7 +72,7 @@ final class ShapeInkLogicTests: XCTestCase {
         XCTAssertGreaterThan(inked, 60, "the preview stamped a stroke — \(inked) pixels with ink")
 
         manager.commitInteractiveShape()
-        let landed = rgba(manager.layers[0].cels[0].raster.renderToUIImage())
+        let landed = rgba(try manager.layers[0].cels[0].raster.renderToUIImage().get())
         let worst = zip(preview, landed).map { abs(Int($0) - Int($1)) }.max() ?? 0
         XCTAssertLessThanOrEqual(worst, 1, "the preview and the ink the commit landed differ by \(worst) in a channel")
     }

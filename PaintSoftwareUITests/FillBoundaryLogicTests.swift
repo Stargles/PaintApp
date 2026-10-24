@@ -675,7 +675,7 @@ final class FillBoundaryLogicTests: XCTestCase {
 
     private func committedAlpha(_ manager: CanvasManager) throws -> (Int, Int) -> UInt8 {
         let cel = try XCTUnwrap(manager.layers[0].cels.first)
-        let cg = try XCTUnwrap(cel.raster.renderToUIImage().cgImage)
+        let cg = try XCTUnwrap(try cel.raster.renderToUIImage().get().cgImage)
         // A tier nothing was committed to renders as a shared 1x1, so a fill that came back empty reads
         // as bare everywhere instead of trapping on an index.
         guard cg.width == Self.paddedCanvas else { return { _, _ in 0 } }

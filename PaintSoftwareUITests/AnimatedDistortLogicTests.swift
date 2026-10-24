@@ -503,7 +503,7 @@ final class AnimatedDistortLogicTests: XCTestCase {
         // linearisation is furthest off.
         let square = CGRect(x: 4, y: 48, width: 12, height: 12)
         var cel = Cel(id: UUID(), startFrame: 0, frameCount: 12, raster: .empty(size: size))
-        cel.bakedImage = CanvasFixture.solidImage(.red, rect: square)
+        cel.bakedImage = try CanvasFixture.rasterSource(CanvasFixture.solidImage(.red, rect: square))
 
         let quad = Quad(CGPoint(x: size.width / 4, y: 0), CGPoint(x: size.width * 3 / 4, y: 0),
                         CGPoint(x: size.width, y: size.height), CGPoint(x: 0, y: size.height))

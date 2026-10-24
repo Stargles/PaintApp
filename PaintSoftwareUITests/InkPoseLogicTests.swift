@@ -271,7 +271,7 @@ final class InkPoseLogicTests: XCTestCase {
         wait(for: [done], timeout: 6)
         manager.commitInteractiveFill()
 
-        let cg = try XCTUnwrap(manager.layers[0].cels[0].raster.renderToUIImage().cgImage)
+        let cg = try XCTUnwrap(try manager.layers[0].cels[0].raster.renderToUIImage().get().cgImage)
         let bytes = try XCTUnwrap(CanvasFixture.rgbaBytes(cg))
         func red(_ x: Int, _ y: Int) -> Bool {
             let i = (y * cg.width + x) * 4

@@ -710,14 +710,29 @@ final class BrushTipGeneratorLogicTests: XCTestCase {
     /// width would be reading the wrong pixels while still passing.
     private static func alphaImage(of texture: RasterLayerTexture)
         -> (bytes: [UInt8], width: Int, height: Int)? {
-        guard let cg = texture.renderToUIImage().cgImage, let bytes = alphaBytes(of: texture) else {
+        let cg: CGImage
+        do {
+            guard let image = try texture.renderToUIImage().get().cgImage else { return nil }
+            cg = image
+        } catch {
+            XCTFail("Could not render brush-tip pixels: \(error)")
+            return nil
+        }
+        guard let bytes = alphaBytes(of: texture) else {
             return nil
         }
         return (bytes, cg.width, cg.height)
     }
 
     private static func alphaBytes(of texture: RasterLayerTexture) -> [UInt8]? {
-        guard let cg = texture.renderToUIImage().cgImage else { return nil }
+        let cg: CGImage
+        do {
+            guard let image = try texture.renderToUIImage().get().cgImage else { return nil }
+            cg = image
+        } catch {
+            XCTFail("Could not render brush-tip pixels: \(error)")
+            return nil
+        }
         let width = cg.width, height = cg.height
         var bytes = [UInt8](repeating: 0, count: width * height * 4)
         let ok = bytes.withUnsafeMutableBytes { raw -> Bool in

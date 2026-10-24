@@ -557,7 +557,12 @@ final class PerfBaselineTests: XCTestCase {
     /// off the cel (`RasterLayerTexture.copiedPatch`). This fixture stamps into the texture
     /// directly, so it needs the snapshot to have a "before" to crop.
     private func strokeSnapshot(_ raster: RasterLayerTexture) -> (image: UIImage?, count: Int) {
-        (raster.hasContent ? raster.renderToUIImage() : nil, raster.strokeCount)
+        guard raster.hasContent else { return (nil, raster.strokeCount) }
+        do { return (try raster.renderToUIImage().get(), raster.strokeCount) }
+        catch {
+            XCTFail("Could not capture raster snapshot for undo fixture: \(error)")
+            return (nil, raster.strokeCount)
+        }
     }
 
     /// The cropped undo representation the view records, against the same engine API.
@@ -591,11 +596,19 @@ final class PerfBaselineTests: XCTestCase {
         let beforeCount = from.count, afterCount = to.count
         let cost = CanvasManager.approximateImageCost(beforePatch) + CanvasManager.approximateImageCost(afterPatch)
         manager.recordUndo(label: .brushStroke, cost: cost, undo: {
-            raster.restore(patch: beforePatch, at: origin)
-            raster.setStrokeCount(beforeCount)
+            do {
+                try raster.restore(patch: beforePatch, at: origin).get()
+                raster.setStrokeCount(beforeCount)
+            } catch {
+                XCTFail("Undo could not restore its captured raster patch: \(error)")
+            }
         }, redo: {
-            raster.restore(patch: afterPatch, at: origin)
-            raster.setStrokeCount(afterCount)
+            do {
+                try raster.restore(patch: afterPatch, at: origin).get()
+                raster.setStrokeCount(afterCount)
+            } catch {
+                XCTFail("Redo could not restore its captured raster patch: \(error)")
+            }
         })
     }
 
@@ -609,7 +622,15 @@ final class PerfBaselineTests: XCTestCase {
             // taken from the image would be one row long for a blank tier and canvas-tall for one
             // cleared back to blank — the same picture, compared unequal.
             let width = raster.pixelWidth, height = raster.pixelHeight
-            guard width > 0, height > 0, let cg = raster.renderToUIImage().cgImage else { return [] }
+            guard width > 0, height > 0 else { return [] }
+            let cg: CGImage
+            do {
+                guard let image = try raster.renderToUIImage().get().cgImage else { return [] }
+                cg = image
+            } catch {
+                XCTFail("Could not fingerprint raster pixels: \(error)")
+                return []
+            }
             var bytes = [UInt8](repeating: 0, count: width * height * 4)
             let ok = bytes.withUnsafeMutableBytes { raw -> Bool in
                 guard let ctx = CGContext(data: raw.baseAddress, width: width, height: height,
@@ -1163,7 +1184,7 @@ final class PerfBaselineTests: XCTestCase {
         // The scratch a `.replacement` role allocates once per gesture: a canvas-sized copy of the
         // layer's own render. Mode 1 has always paid this; Mode 2 now does too, once, at touch-down.
         let scratchStart = CFAbsoluteTimeGetCurrent()
-        let scratch = RasterLayerTexture.load(from: (try XCTUnwrap(canvas.render())), size: Self.canvasSize)
+        let scratch = try CanvasFixture.rasterTexture(try XCTUnwrap(canvas.render()), size: Self.canvasSize)
         let scratchAllocation = CFAbsoluteTimeGetCurrent() - scratchStart
 
         // (b) The exact-span preview, driven exactly as `recordVectorSample` drives it: one
@@ -1212,13 +1233,14 @@ final class PerfBaselineTests: XCTestCase {
             autoreleasepool {
                 VectorCanvas.applyPreview(CutPreviewProbe.edit(at: CGFloat(i)), into: scratch)
                 let start = CFAbsoluteTimeGetCurrent()
-                _ = scratch.renderToUIImage()
+                do { _ = try scratch.renderToUIImage().get() }
+                catch { XCTFail("Could not render cut-preview scratch: \(error)"); return }
                 toImage.append(CFAbsoluteTimeGetCurrent() - start)
             }
         }
 
         // (c) The footprint punch, on its own fresh scratch: the live walk itself.
-        let footprintScratch = RasterLayerTexture.load(from: (try XCTUnwrap(canvas.render())), size: Self.canvasSize)
+        let footprintScratch = try CanvasFixture.rasterTexture(try XCTUnwrap(canvas.render()), size: Self.canvasSize)
         var footprint: [Double] = []
         var footprintWalk = BrushStamper.LiveWalk(seed: 0)
         for point in points {
@@ -1520,7 +1542,7 @@ final class PerfBaselineTests: XCTestCase {
                                           width: canvasSize.width - 2 * inset,
                                           height: canvasSize.height - 2 * inset))
             }
-            manager.layers[index].cels[0].bakedImage = image
+            CanvasFixture.setBakedContent(manager, layerIndex: index, image)
         }
         return manager
     }
@@ -2156,12 +2178,12 @@ final class PerfBaselineTests: XCTestCase {
     @MainActor
     private func maskedCompositorManager(layerCount: Int, masked: Bool) -> CanvasManager {
         let manager = compositorManager(layerCount: layerCount)
-        manager.layers[0].cels[0].bakedImage = UIGraphicsImageRenderer(
+        CanvasFixture.setBakedContent(manager, layerIndex: 0, UIGraphicsImageRenderer(
             size: Self.canvasSize, format: PixelOps.transparentFormat()
         ).image { ctx in
             UIColor.black.setFill()
             ctx.cgContext.fill(CGRect(x: 0, y: 0, width: Self.canvasSize.width / 2, height: Self.canvasSize.height))
-        }
+        })
         guard masked else { return manager }
         let mask = AlphaMask(sources: [.layer(manager.layers[0].id)])
         for index in 1..<layerCount { manager.layers[index].alphaMask = mask }
@@ -2239,7 +2261,7 @@ final class PerfBaselineTests: XCTestCase {
         let resolve = measuringPeakMemory {
             autoreleasepool { resolved = MaskResolver.coverage(for: node.masks, of: maskedRequest) }
         }
-        guard let resolved, let leaf = clipped.layers[1].cels[0].bakedImage?.cgImage else {
+        guard let resolved, let leaf = try clipped.layers[1].cels[0].bakedImage?.resolveImage().get().cgImage else {
             return XCTFail("The fixture must resolve a coverage and carry canvas-sized leaf pixels")
         }
         let apply = measuringPeakMemory { autoreleasepool { _ = MaskResolver.apply(resolved, to: leaf) } }
@@ -2347,7 +2369,8 @@ final class PerfBaselineTests: XCTestCase {
             func rasterFrame() {
                 autoreleasepool {
                     dab(into: raster)
-                    _ = raster.renderToUIImage()
+                    do { _ = try raster.renderToUIImage().get() }
+                    catch { XCTFail("Could not render raster benchmark frame: \(error)"); return }
                 }
             }
             // `StrokeCanvasView.refreshDisplay`'s `.overlay` branch **before** item 11 — the cost
@@ -2358,7 +2381,8 @@ final class PerfBaselineTests: XCTestCase {
                     let base = committed.render()
                     _ = UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { _ in
                         base?.draw(in: bounds)
-                        scratch.renderToUIImage().draw(in: bounds)
+                        do { try scratch.renderToUIImage().get().draw(in: bounds) }
+                        catch { XCTFail("Could not render composited benchmark frame: \(error)"); return }
                     }
                 }
             }
@@ -2372,7 +2396,8 @@ final class PerfBaselineTests: XCTestCase {
                 autoreleasepool {
                     dab(into: scratch)
                     _ = committed.render()
-                    _ = scratch.renderToUIImage()
+                    do { _ = try scratch.renderToUIImage().get() }
+                    catch { XCTFail("Could not render layered benchmark frame: \(error)"); return }
                 }
             }
             // Discard the first of each: one-time faulting, not a dab.
@@ -2886,7 +2911,7 @@ final class PerfBaselineTests: XCTestCase {
     ///
     /// This is the number the device check hangs on. If ten skins cost more than a frame on the
     /// owner's hardware, `OnionSkinSettings.maxSkinsPerSide` is the lever, and it is one constant.
-    func testOnionSkinCompositeCostScalesWithSkinCountAndNotWithMemory() {
+    func testOnionSkinCompositeCostScalesWithSkinCountAndNotWithMemory() throws {
         let canvas = CGSize(width: 4096, height: 4096)
         // A 3 GB device's texture budget, stated rather than read, for
         // `CompositorBudget.textureBudgetBytes(physicalMemory:)`'s reason.
@@ -2957,8 +2982,8 @@ final class PerfBaselineTests: XCTestCase {
         // that every rebuild the cel appears in is a hit. Measured on a real `Cel` rather than a bare
         // image, so the `PixelOps.rasterize` the reduction reads through is in the number.
         var cel = Cel(id: UUID(), startFrame: 0, frameCount: 1, raster: .empty(size: canvas))
-        cel.bakedImage = CanvasFixture.solidImage(.blue, rect: CGRect(x: 0, y: 0, width: canvas.width * 0.6,
-                                                                     height: canvas.height * 0.6), size: canvas)
+        cel.bakedImage = try CanvasFixture.rasterSource(CanvasFixture.solidImage(.blue,
+            rect: CGRect(x: 0, y: 0, width: canvas.width * 0.6, height: canvas.height * 0.6), size: canvas))
         // A miss is *inherently* cold, so it cannot be warmed — but it can still be repeated, with the
         // cache cleared before each attempt, and the minimum taken. Without that this figure swung
         // from 119 ms to 256 ms between two runs on the same code purely with machine load.
@@ -3087,7 +3112,7 @@ final class PerfBaselineTests: XCTestCase {
     /// Sources are pre-reduced and the cache pre-warmed, because that is the steady state the app
     /// runs in: a rebuild happens when the playhead changes drawing, and by then the drawings in the
     /// window have been reduced once each. `sourceMiss` in the test above is the other half.
-    func testOnionSkinCostOfEachResolutionOption() {
+    func testOnionSkinCostOfEachResolutionOption() throws {
         // The owner's iPad 9 has 3 GB, and `CompositorBudget.textureBudgetBytes` is a sixteenth of
         // that. Stated rather than read, for `textureBudgetBytes(physicalMemory:)`'s reason: the
         // figures below describe that device, not whichever machine is running the test.
@@ -3131,10 +3156,8 @@ final class PerfBaselineTests: XCTestCase {
                 // per attempt, because a miss is inherently cold and the memoized Full path would
                 // otherwise report a hit.
                 var cel = Cel(id: UUID(), startFrame: 0, frameCount: 1, raster: .empty(size: canvas))
-                cel.bakedImage = CanvasFixture.solidImage(.blue,
-                                                          rect: CGRect(x: 0, y: 0, width: canvas.width * 0.6,
-                                                                       height: canvas.height * 0.6),
-                                                          size: canvas)
+                cel.bakedImage = try CanvasFixture.rasterSource(CanvasFixture.solidImage(.blue,
+                    rect: CGRect(x: 0, y: 0, width: canvas.width * 0.6, height: canvas.height * 0.6), size: canvas))
                 var bestMiss = Double.greatestFiniteMagnitude
                 for _ in 0..<4 {
                     OnionSkinRasterCache.removeAll()
@@ -4009,7 +4032,7 @@ final class PerfBaselineTests: XCTestCase {
     /// in `testWhatOpeningAMultiCelProjectCosts`, where it is what the artist actually waits for.
     ///
     /// **The peak is the second claim and it is the one that could have gone wrong quietly.** Both
-    /// walks retain every texture they build, so fanning out must not multiply what a load holds —
+    /// walks retain every texture they build, so fanning out must not multiply what an eager capture holds —
     /// which is why `PixelOps.parallelMap` drains an autorelease pool per iteration rather than
     /// letting each worker's temporaries pile up until the enclosing pool ends.
     @MainActor
@@ -4044,25 +4067,38 @@ final class PerfBaselineTests: XCTestCase {
                        "the fixture is raster-only, so `images/` holds one raster PNG per cel and nothing else")
         guard !pngs.isEmpty else { return }
 
-        func decodeOne(_ file: URL) -> RasterLayerTexture {
-            UIImage(contentsOfFile: file.path).map { RasterLayerTexture.load(from: $0, size: canvas) }
-                ?? .empty(size: canvas)
+        func decodeOne(_ file: URL) -> Result<RasterLayerTexture, Error> {
+            guard let image = UIImage(contentsOfFile: file.path) else {
+                return .failure(NSError(domain: "PerfBaselineTests.PNGDecode", code: 1,
+                                        userInfo: [NSFilePathErrorKey: file.path]))
+            }
+            return RasterLayerTexture.capturing(image, size: canvas).mapError { $0 as Error }
+        }
+        func assertDecoded(_ decoded: [Result<RasterLayerTexture, Error>], arm: String) {
+            let failures = decoded.enumerated().compactMap { index, result -> String? in
+                switch result {
+                case .success: return nil
+                case .failure(let error): return "PNG \(index): \(error)"
+                }
+            }
+            XCTAssertEqual(decoded.count, pngs.count, "\(arm) visits every PNG")
+            XCTAssertTrue(failures.isEmpty, "\(arm) must eagerly decode and capture every PNG: \(failures)")
         }
         func serialWalk() -> Double {
             measuringPeakMemory {
                 autoreleasepool {
-                    var built: [RasterLayerTexture] = []
-                    built.reserveCapacity(pngs.count)
-                    for file in pngs { built.append(decodeOne(file)) }
-                    XCTAssertEqual(built.count, pngs.count)
+                    var decoded: [Result<RasterLayerTexture, Error>] = []
+                    decoded.reserveCapacity(pngs.count)
+                    for file in pngs { decoded.append(decodeOne(file)) }
+                    assertDecoded(decoded, arm: "serial")
                 }
             }.seconds
         }
         func parallelWalk() -> Double {
             measuringPeakMemory {
                 autoreleasepool {
-                    let built = PixelOps.parallelMap(pngs.count) { decodeOne(pngs[$0]) }
-                    XCTAssertEqual(built.count, pngs.count)
+                    let decoded = PixelOps.parallelMap(pngs.count) { decodeOne(pngs[$0]) }
+                    assertDecoded(decoded, arm: "parallel")
                 }
             }.seconds
         }
@@ -4352,9 +4388,18 @@ final class PerfBaselineTests: XCTestCase {
         let layerCount = Self.openLayerCount, celsPerLayer = Self.openCelsPerLayer
         // One `UIImage` per cel, rendered once up front — exactly what `SaveSnapshot` hands the
         // write, so neither arm below is measuring `renderToUIImage()` instead of the encoder.
-        let images: [UIImage] = autoreleasepool {
+        var images: [UIImage] = []
+        autoreleasepool {
             let authored = multiCelDocument(layerCount: layerCount, celsPerLayer: celsPerLayer)
-            return authored.layers.flatMap { $0.cels.map { $0.raster.renderToUIImage() } }
+            for layer in authored.layers {
+                for cel in layer.cels {
+                    do { images.append(try cel.raster.renderToUIImage().get()) }
+                    catch {
+                        XCTFail("Could not capture PNG benchmark input: \(error)")
+                        return
+                    }
+                }
+            }
         }
         XCTAssertEqual(images.count, layerCount * celsPerLayer)
 
@@ -4474,7 +4519,8 @@ final class PerfBaselineTests: XCTestCase {
         autoreleasepool {
             let warm = Cel(id: UUID(), startFrame: 0, frameCount: 1, raster: .empty(size: canvas))
             inkOneCel(warm.raster, canvas: canvas, brush: brush, seed: 999)
-            _ = warm.raster.renderToUIImage()
+            do { _ = try warm.raster.renderToUIImage().get() }
+            catch { XCTFail("Could not warm raster memo: \(error)"); return }
             cels.append(warm)
         }
 
@@ -4498,7 +4544,10 @@ final class PerfBaselineTests: XCTestCase {
         // Now the derived half. Every cel gets its `renderToUIImage()` memo populated — which is what
         // a thumbnail regen, a flatten, a save and a composite each do — and the growth from that
         // alone is the answer to whether the memo is a second buffer or a view of the first.
-        for cel in cels { _ = cel.raster.renderToUIImage() }
+        for cel in cels {
+            do { _ = try cel.raster.renderToUIImage().get() }
+            catch { XCTFail("Could not render raster memo: \(error)"); return }
+        }
         let afterMemos = residentBytes()
 
         let firstHalfPerCel = Double(afterFirstHalf &- base) / Double(halfCount)

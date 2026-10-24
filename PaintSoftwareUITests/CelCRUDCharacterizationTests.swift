@@ -836,7 +836,7 @@ final class CelCRUDCharacterizationTests: XCTestCase {
         var cel = manager.layers[0].cels[0]
         let before = (try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: size())))
 
-        cel.bakedImage = CanvasFixture.solidImage(.blue, rect: CGRect(x: 10, y: 10, width: 20, height: 20))
+        cel.bakedImage = try CanvasFixture.rasterSource(CanvasFixture.solidImage(.blue, rect: CGRect(x: 10, y: 10, width: 20, height: 20)))
         XCTAssertFalse((try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: size()))) === before,
                        "A new bakedImage is a new flatten")
     }

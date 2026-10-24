@@ -66,7 +66,7 @@ final class StreamDisplayLogicTests: XCTestCase {
 
     func testOwnBlendAndUpperEffectReachTheStream() throws {
         let (manager, _, _) = fixture()
-        manager.layers[0].cels[0].bakedImage = image(.black, size: side)
+        manager.layers[0].cels[0].bakedImage = try CanvasFixture.rasterSource(image(.black, size: side))
         manager.setLayerBlendMode(layerIndex: 1, to: .multiply)
         XCTAssertEqual(try centre(XCTUnwrap(manager.makeStreamDisplayRecipe())), [0, 0, 0, 255])
         manager.setLayerBlendMode(layerIndex: 1, to: .normal)
@@ -90,7 +90,7 @@ final class StreamDisplayLogicTests: XCTestCase {
     func testMaskCanReadTheLiveStreamAndClipUpperInk() throws {
         let (manager, _, _) = fixture()
         manager.addVectorLayer()
-        manager.layers[2].cels[0].bakedImage = image(.blue, size: side)
+        manager.layers[2].cels[0].bakedImage = try CanvasFixture.rasterSource(image(.blue, size: side))
         manager.layers[2].alphaMask = AlphaMask(sources: [.layer(manager.layers[1].id)])
         let display = try XCTUnwrap(manager.makeStreamDisplayRecipe())
         XCTAssertEqual(try centre(display), [0, 0, 255, 255])
@@ -157,7 +157,7 @@ final class StreamDisplayLogicTests: XCTestCase {
         let faded = try centre(XCTUnwrap(manager.makeStreamDisplayRecipe(
             display: [manager.layers[2].id: PixelOps.CelDisplay(windows: [ink])], transientBounds: rect)))
         XCTAssertLessThanOrEqual(abs(Int(faded[0]) - 128), 1, "scratch opacity is applied exactly once")
-        manager.layers[2].cels[0].bakedImage = image(.black, size: side)
+        manager.layers[2].cels[0].bakedImage = try CanvasFixture.rasterSource(image(.black, size: side))
         let hole = PixelOps.InkWindow(image: image(.clear, size: rect.size), rect: rect,
             canvasSize: side, opacity: 1, replacesBase: true)
         let erased = try centre(XCTUnwrap(manager.makeStreamDisplayRecipe(

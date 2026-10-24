@@ -413,13 +413,10 @@ final class TextBakeCharacterizationTests: XCTestCase {
     /// Alpha coverage of the cel's **raster tier alone** — the one `registerUndoableCelChange` writes
     /// and the eraser stamps. `celPixels` above is the whole flatten, which on a vector cel includes
     /// `VectorCanvas.render()`, so it cannot tell "the element drew" from "the bake ran".
-    private func rasterTierPixelCount(_ manager: CanvasManager, layerIndex: Int = 1) -> Int {
-        guard let celIndex = manager.activeCelIndex(inLayer: layerIndex, atFrame: manager.currentFrame),
-              let cg = manager.layers[layerIndex].cels[celIndex].raster.renderToUIImage().cgImage,
-              let bytes = CanvasFixture.rgbaBytes(cg) else {
-            XCTFail("Could not read the cel's raster tier")
-            return -1
-        }
+    private func rasterTierPixelCount(_ manager: CanvasManager, layerIndex: Int = 1) throws -> Int {
+        let celIndex = try XCTUnwrap(manager.activeCelIndex(inLayer: layerIndex, atFrame: manager.currentFrame))
+        let cg = try XCTUnwrap(try manager.layers[layerIndex].cels[celIndex].raster.renderToUIImage().get().cgImage)
+        let bytes = try XCTUnwrap(CanvasFixture.rgbaBytes(cg))
         return coveredPixelCount(bytes)
     }
 
@@ -438,7 +435,7 @@ final class TextBakeCharacterizationTests: XCTestCase {
         let elements = vectorElements(manager)
         XCTAssertEqual(elements.count, 1)
         XCTAssertEqual(elements.first?.text?.recipe.string, "Label")
-        XCTAssertEqual(rasterTierPixelCount(manager), 0,
+        XCTAssertEqual(try rasterTierPixelCount(manager), 0,
                        "A vector layer's text must not also bake into the cel's raster tier.")
         XCTAssertGreaterThan(coveredPixelCount(try celPixels(manager, layerIndex: 1)), 0,
                              "…and the element has to actually draw, or it is an invisible object.")

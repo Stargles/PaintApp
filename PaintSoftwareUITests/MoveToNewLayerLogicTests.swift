@@ -132,8 +132,8 @@ final class MoveToNewLayerLogicTests: XCTestCase {
         let manager = CanvasFixture.manager(layerCount: 1)
         let size = CanvasFixture.canvasSize
         let painted = CGRect(x: 0, y: 24, width: 64, height: 16)
-        manager.layers[0].cels[0].raster = RasterLayerTexture(
-            size: size, image: CanvasFixture.solidImage(.red, rect: painted), strokeCount: 1)
+        manager.layers[0].cels[0].raster = try CanvasFixture.rasterTexture(
+            CanvasFixture.solidImage(.red, rect: painted), size: size, strokeCount: 1)
         manager.history.removeAll()
         manager.refreshUndoRedoState()
         let baseline = select(manager, aroundLeft)
@@ -201,9 +201,9 @@ final class MoveToNewLayerLogicTests: XCTestCase {
     func testNewLayersCelSpansExactlyTheSourceCelOnARasterLayer() throws {
         let manager = CanvasFixture.manager(layerCount: 1)
         let size = CanvasFixture.canvasSize
-        manager.layers[0].cels[0].raster = RasterLayerTexture(
-            size: size, image: CanvasFixture.solidImage(.red, rect: CGRect(x: 0, y: 24, width: 64, height: 16)),
-            strokeCount: 1)
+        manager.layers[0].cels[0].raster = try CanvasFixture.rasterTexture(
+            CanvasFixture.solidImage(.red, rect: CGRect(x: 0, y: 24, width: 64, height: 16)),
+            size: size, strokeCount: 1)
         manager.splitCel(layerIndex: 0, celIndex: 0, atFrame: 3)
         manager.splitCel(layerIndex: 0, celIndex: 1, atFrame: 6)
         manager.history.removeAll()
@@ -248,9 +248,9 @@ final class MoveToNewLayerLogicTests: XCTestCase {
     func testDuplicateOnARasterLayerAlsoSpansExactlyTheSourceCel() throws {
         let manager = CanvasFixture.manager(layerCount: 1)
         let size = CanvasFixture.canvasSize
-        manager.layers[0].cels[0].raster = RasterLayerTexture(
-            size: size, image: CanvasFixture.solidImage(.red, rect: CGRect(x: 0, y: 24, width: 64, height: 16)),
-            strokeCount: 1)
+        manager.layers[0].cels[0].raster = try CanvasFixture.rasterTexture(
+            CanvasFixture.solidImage(.red, rect: CGRect(x: 0, y: 24, width: 64, height: 16)),
+            size: size, strokeCount: 1)
         manager.splitCel(layerIndex: 0, celIndex: 0, atFrame: 3)
         manager.splitCel(layerIndex: 0, celIndex: 1, atFrame: 6)
         manager.history.removeAll()

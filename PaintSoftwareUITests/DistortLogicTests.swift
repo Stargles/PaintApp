@@ -221,7 +221,7 @@ final class DistortLogicTests: XCTestCase {
         var p = piece()
         p.distortQuad = trapezoid(p)
 
-        let baked = PixelOps.render(floatingPiece: p, into: Self.canvas)
+        let baked = try PixelOps.render(floatingPiece: p, into: Self.canvas).get().resolveImage().get()
         // The piece is 16 pt tall centred at y = 32, so it spans rows 24..40.
         let top = opaqueRun(baked, row: 27)
         let bottom = opaqueRun(baked, row: 37)
@@ -241,7 +241,7 @@ final class DistortLogicTests: XCTestCase {
         var p = piece()
         p.distortQuad = trapezoid(p)
         let homography = try XCTUnwrap(p.homography)
-        let baked = PixelOps.render(floatingPiece: p, into: Self.canvas)
+        let baked = try PixelOps.render(floatingPiece: p, into: Self.canvas).get().resolveImage().get()
 
         // Inside: the box's centre and the four points a quarter of the way in from each corner,
         // which stay clear of the bilinear skirt at the edge.

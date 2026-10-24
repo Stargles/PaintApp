@@ -688,8 +688,8 @@ final class OnionSkinLogicTests: XCTestCase {
     func testChangingResolutionMintsFreshSourcesRatherThanReusingTheOldOnes() throws {
         let canvas = CGSize(width: 4096, height: 4096)
         var cel = Cel(id: UUID(), startFrame: 0, frameCount: 1, raster: .empty(size: canvas))
-        cel.bakedImage = CanvasFixture.solidImage(.red, rect: CGRect(x: 0, y: 0, width: 2000, height: 2000),
-                                                  size: canvas)
+        cel.bakedImage = try CanvasFixture.rasterSource(CanvasFixture.solidImage(.red,
+            rect: CGRect(x: 0, y: 0, width: 2000, height: 2000), size: canvas))
         OnionSkinRasterCache.removeAll()
 
         let quarter = OnionSkinBudget.compositeSize(for: canvas, resolution: .quarter)
@@ -713,8 +713,8 @@ final class OnionSkinLogicTests: XCTestCase {
         let canvas = CGSize(width: 2048, height: 2048)
         let small = OnionSkinBudget.compositeSize(for: canvas, resolution: .quarter)
         var cel = Cel(id: UUID(), startFrame: 0, frameCount: 1, raster: .empty(size: canvas))
-        cel.bakedImage = CanvasFixture.solidImage(.red, rect: CGRect(x: 0, y: 0, width: 900, height: 900),
-                                                  size: canvas)
+        cel.bakedImage = try CanvasFixture.rasterSource(CanvasFixture.solidImage(.red,
+            rect: CGRect(x: 0, y: 0, width: 900, height: 900), size: canvas))
         OnionSkinRasterCache.removeAll()
 
         let first = try XCTUnwrap(OnionSkinRasterCache.image(for: cel, canvasSize: canvas, at: small))
@@ -724,8 +724,8 @@ final class OnionSkinLogicTests: XCTestCase {
 
         // Editing the cel is a new version, so it must *not* hit — a cache that served the old
         // pixels here would show the artist a stale ghost of their own drawing.
-        cel.bakedImage = CanvasFixture.solidImage(.blue, rect: CGRect(x: 0, y: 0, width: 500, height: 500),
-                                                  size: canvas)
+        cel.bakedImage = try CanvasFixture.rasterSource(CanvasFixture.solidImage(.blue,
+            rect: CGRect(x: 0, y: 0, width: 500, height: 500), size: canvas))
         XCTAssertFalse(try XCTUnwrap(OnionSkinRasterCache.image(for: cel, canvasSize: canvas, at: small)) === first)
 
         // And a canvas already within the cap is passed straight through: same object as the shared
@@ -733,7 +733,8 @@ final class OnionSkinLogicTests: XCTestCase {
         OnionSkinRasterCache.removeAll()
         let tiny = CanvasFixture.canvasSize
         var smallCel = Cel(id: UUID(), startFrame: 0, frameCount: 1, raster: .empty(size: tiny))
-        smallCel.bakedImage = CanvasFixture.solidImage(.red, rect: CGRect(x: 0, y: 0, width: 20, height: 20))
+        smallCel.bakedImage = try CanvasFixture.rasterSource(CanvasFixture.solidImage(.red,
+            rect: CGRect(x: 0, y: 0, width: 20, height: 20)))
         let passthrough = try XCTUnwrap(OnionSkinRasterCache.image(for: smallCel, canvasSize: tiny,
                                                      at: OnionSkinBudget.compositeSize(for: tiny, resolution: .quarter)))
         XCTAssertTrue(passthrough === (try XCTUnwrap(PixelOps.rasterize(cel: smallCel, canvasSize: tiny))))
@@ -741,7 +742,7 @@ final class OnionSkinLogicTests: XCTestCase {
                        "a document under the cap must not fill an onion cache it has no use for")
     }
 
-    func testTheSourceCacheEvictsRatherThanGrowing() {
+    func testTheSourceCacheEvictsRatherThanGrowing() throws {
         let canvas = CGSize(width: 2048, height: 2048)
         let small = OnionSkinBudget.compositeSize(for: canvas, resolution: .quarter)
         let perEntry = Int(small.width.rounded()) * Int(small.height.rounded()) * 4
@@ -749,9 +750,8 @@ final class OnionSkinLogicTests: XCTestCase {
         OnionSkinRasterCache.removeAll()
         for index in 0..<(limit + 4) {
             var cel = Cel(id: UUID(), startFrame: index, frameCount: 1, raster: .empty(size: canvas))
-            cel.bakedImage = CanvasFixture.solidImage(.red,
-                                                      rect: CGRect(x: index, y: 0, width: 40, height: 40),
-                                                      size: canvas)
+            cel.bakedImage = try CanvasFixture.rasterSource(CanvasFixture.solidImage(.red,
+                rect: CGRect(x: index, y: 0, width: 40, height: 40), size: canvas))
             _ = OnionSkinRasterCache.image(for: cel, canvasSize: canvas, at: small)
         }
         XCTAssertLessThanOrEqual(OnionSkinRasterCache.residentBytes, perEntry * limit,

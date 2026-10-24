@@ -82,7 +82,7 @@ final class FillGestureRestartLogicTests: XCTestCase {
     /// raster commit is allowed to land (see `registerUndoableCelChange`).
     private func bakedPixel(_ manager: CanvasManager, _ point: CGPoint) throws -> (r: UInt8, g: UInt8, b: UInt8, a: UInt8) {
         let cel = manager.layers[0].cels[try celIndex(manager)]
-        let cg = try XCTUnwrap(cel.raster.renderToUIImage().cgImage)
+        let cg = try XCTUnwrap(try cel.raster.renderToUIImage().get().cgImage)
         let bytes = try XCTUnwrap(CanvasFixture.rgbaBytes(cg))
         let i = (Int(point.y) * cg.width + Int(point.x)) * 4
         return (bytes[i], bytes[i + 1], bytes[i + 2], bytes[i + 3])

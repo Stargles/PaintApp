@@ -280,7 +280,7 @@ final class MemoryBudgetLogicTests: XCTestCase {
     /// the arithmetic that follows is measured against what `history.currentCost` says rather than
     /// against a second copy of the formula.
     @MainActor
-    func testWhatTheBudgetHoldsInWholeCelOperationsAtTheOwnersCanvas() {
+    func testWhatTheBudgetHoldsInWholeCelOperationsAtTheOwnersCanvas() throws {
         let owners = CGSize(width: 2048, height: 1024)
         // A whole-cel operation (a fill, a clear, a move commit, a text bake) retains a before *and*
         // an after buffer at canvas size.
@@ -296,10 +296,10 @@ final class MemoryBudgetLogicTests: XCTestCase {
         // Both sides have pixels, which is what a commit over existing artwork looks like. A blank
         // before-state is the other case and is charged nothing — `RasterLayerTexture.approximateCost`
         // asks `hasContent`, not the canvas size.
-        let before = RasterLayerTexture(size: owners,
-                                        image: CanvasFixture.solidImage(.red, rect: whole, size: owners))
-        let after = RasterLayerTexture(size: owners,
-                                       image: CanvasFixture.solidImage(.blue, rect: whole, size: owners))
+        let before = try CanvasFixture.rasterTexture(
+            CanvasFixture.solidImage(.red, rect: whole, size: owners), size: owners)
+        let after = try CanvasFixture.rasterTexture(
+            CanvasFixture.solidImage(.blue, rect: whole, size: owners), size: owners)
         manager.layers[0].cels[0].raster = before
         // `addLayer` is itself an undoable step, so the history is not empty by the time the fixture
         // is standing up. Cleared rather than subtracted, so the number asserted below is the commit's
@@ -335,16 +335,15 @@ final class MemoryBudgetLogicTests: XCTestCase {
     /// hands `registerUndoableCelChange` exactly that pair — a blank before and a drawn after — and
     /// charging the blank one would make an empty document read as half a budget's worth of history.
     @MainActor
-    func testABlankRasterIsChargedNothingWhateverItsCanvasSizeSays() {
+    func testABlankRasterIsChargedNothingWhateverItsCanvasSizeSays() throws {
         let owners = CGSize(width: 2048, height: 1024)
         let blank = RasterLayerTexture(size: owners)
         XCTAssertFalse(blank.hasContent, "Premise: a texture with no bitmap")
         XCTAssertEqual(blank.approximateCost, 0)
 
-        let drawn = RasterLayerTexture(size: owners,
-                                       image: CanvasFixture.solidImage(.red,
-                                                                       rect: CGRect(origin: .zero, size: owners),
-                                                                       size: owners))
+        let drawn = try CanvasFixture.rasterTexture(
+            CanvasFixture.solidImage(.red, rect: CGRect(origin: .zero, size: owners), size: owners),
+            size: owners)
         XCTAssertEqual(drawn.approximateCost, Int(owners.width) * Int(owners.height) * 4)
 
         let manager = CanvasManager()
@@ -372,16 +371,16 @@ final class MemoryBudgetLogicTests: XCTestCase {
     /// **Identity across two different textures is the assertion, not size**, because size alone does
     /// not distinguish "small" from "shared": a 1×1 minted per cel would pass a size check and still
     /// be a per-cel retention of exactly the kind this is about.
-    func testABlankRasterTierRendersToOneSharedPixelRatherThanACanvasOfNothing() {
+    func testABlankRasterTierRendersToOneSharedPixelRatherThanACanvasOfNothing() throws {
         let canvas = CGSize(width: 2048, height: 1024)
         let blank = RasterLayerTexture.empty(size: canvas)
         XCTAssertFalse(blank.hasContent, "control: an untouched tier has no bitmap")
 
-        XCTAssertEqual(blank.renderToUIImage().size, CGSize(width: 1, height: 1),
+        XCTAssertEqual(try blank.renderToUIImage().get().size, CGSize(width: 1, height: 1),
                        "a tier with no bitmap must not render to a canvas-sized sheet of transparency")
 
         let second = RasterLayerTexture.empty(size: canvas)
-        XCTAssertTrue(blank.renderToUIImage() === second.renderToUIImage(),
+        XCTAssertTrue(try blank.renderToUIImage().get() === second.renderToUIImage().get(),
                       "and it has to be *shared* — one image for every blank tier in the document, not one each")
         XCTAssertFalse(blank.hasContent, "asking must not have allocated the bitmap either")
     }
@@ -405,7 +404,7 @@ final class MemoryBudgetLogicTests: XCTestCase {
         XCTAssertEqual(flattened.size, canvas, "control: the flatten is canvas-sized — this cel has content")
 
         XCTAssertFalse(cel.raster.hasContent, "flattening must not allocate the empty tier's bitmap")
-        XCTAssertEqual(cel.raster.renderToUIImage().size, CGSize(width: 1, height: 1),
+        XCTAssertEqual(try cel.raster.renderToUIImage().get().size, CGSize(width: 1, height: 1),
                        "and must not leave a canvas-sized image memoised on it — that memo is the 2.4 GB")
     }
 
@@ -423,8 +422,8 @@ final class MemoryBudgetLogicTests: XCTestCase {
         let canvas = CGSize(width: 1024, height: 512)
         let canvasEntryBytes = Int(canvas.width) * Int(canvas.height) * 4
         var cel = Cel(id: UUID(), startFrame: 0, frameCount: 1, raster: .empty(size: canvas))
-        cel.bakedImage = CanvasFixture.solidImage(.red, rect: CGRect(x: 0, y: 0, width: 400, height: 200),
-                                                  size: canvas)
+        cel.bakedImage = try CanvasFixture.rasterSource(CanvasFixture.solidImage(.red,
+            rect: CGRect(x: 0, y: 0, width: 400, height: 200), size: canvas))
 
         PixelOps.clearRasterizeCache()
         defer { PixelOps.clearRasterizeCache() }

@@ -52,7 +52,13 @@ final class BrushModulationLogicTests: XCTestCase {
     }
 
     private static func bytes(of texture: RasterLayerTexture) -> [UInt8] {
-        let image = texture.renderToUIImage()
+        let image: UIImage
+        do {
+            image = try texture.renderToUIImage().get()
+        } catch {
+            XCTFail("Could not render brush-modulation pixels: \(error)")
+            return []
+        }
         let width = Int(canvas.width), height = Int(canvas.height)
         var buffer = [UInt8](repeating: 0, count: width * height * 4)
         buffer.withUnsafeMutableBytes { raw in

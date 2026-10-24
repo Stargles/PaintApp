@@ -330,7 +330,7 @@ final class CanvasPlaneLogicTests: XCTestCase {
             return VectorSample(x: -60 + 280 * t, y: 64 + 30 * sin(t * 3), pressure: 0.3 + 0.6 * t,
                                 deltaTime: 1 / 120)
         }
-        func draw(_ samples: [VectorSample], on size: CGSize) -> RasterLayerTexture {
+        func draw(_ samples: [VectorSample], on size: CGSize) throws -> RasterLayerTexture {
             let scratch = StrokeScratch(canvasSize: size, role: .additive, opacity: 1,
                                         blendMode: brush.stroke.blendMode.cgBlendMode, texture: brush.texture)
             var walk = BrushStamper.LiveWalk(seed: 0x121)
@@ -339,18 +339,19 @@ final class CanvasPlaneLogicTests: XCTestCase {
             }
             walk.finish(into: scratch, brush: brush, color: .black, brushSize: 18)
             let texture = RasterLayerTexture.empty(size: size)
-            scratch.commit(into: texture)
+            try scratch.commit(into: texture).get()
             return texture
         }
         XCTAssertLessThan(raw[0].x, 0, "the stroke starts on the paper, so this measures nothing")
 
-        let here = draw(raw, on: canvas).renderToUIImage()
-        let wider = draw(raw.map { var shifted = $0; shifted.x += margin; return shifted },
-                         on: CGSize(width: canvas.width + margin, height: canvas.height))
-        let extended = try XCTUnwrap(wider.copiedPatch(in: CGRect(origin: CGPoint(x: margin, y: 0), size: canvas)))
-        let report = try XCTUnwrap(RasterVectorParity.report(raster: here, vector: extended, size: canvas))
-        XCTAssertGreaterThan(RasterVectorParity.report(raster: here, vector: RasterLayerTexture.empty(size: canvas)
-                                                        .renderToUIImage(), size: canvas)?.differingPixelCount ?? 0,
+        let here = try draw(raw, on: canvas).renderToUIImage().get()
+        let wider = try draw(raw.map { var shifted = $0; shifted.x += margin; return shifted },
+                             on: CGSize(width: canvas.width + margin, height: canvas.height))
+        let extended = try XCTUnwrap(try wider.copiedPatch(in: CGRect(origin: CGPoint(x: margin, y: 0), size: canvas)).get())
+        let report = try XCTUnwrap(RasterVectorParity.report(raster: here,
+            vector: try extended.resolveImage().get(), size: canvas))
+        XCTAssertGreaterThan(RasterVectorParity.report(raster: here, vector: try RasterLayerTexture.empty(size: canvas)
+                                                        .renderToUIImage().get(), size: canvas)?.differingPixelCount ?? 0,
                              500, "the stroke left no ink on the paper, so the comparison is vacuous")
         XCTAssertEqual(report.differingPixelCount, 0,
                        "the visible ink differs from the extended canvas's: max \(report.maxChannelDelta)/255 "

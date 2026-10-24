@@ -142,7 +142,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
         let texture = try RasterVectorParity.rasterBase(scenario, backdrop: backdrop)
         RasterVectorParity.stamp(RasterVectorParity.paintStroke(scenario), into: texture, isEraser: false)
         RasterVectorParity.stamp(RasterVectorParity.eraseStroke(scenario), into: texture, isEraser: true)
-        return RasterVectorParity.report(raster: texture.renderToUIImage(), vector: (try XCTUnwrap(canvas.render())),
+        return RasterVectorParity.report(raster: try texture.renderToUIImage().get(), vector: (try XCTUnwrap(canvas.render())),
                                          size: scenario.canvasSize)
     }
 
@@ -532,7 +532,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
             punch.samples = gesture
             RasterVectorParity.stamp(punch, into: texture, isEraser: true)
         }
-        guard let report = RasterVectorParity.report(raster: texture.renderToUIImage(),
+        guard let report = RasterVectorParity.report(raster: try texture.renderToUIImage().get(),
                                                      vector: (try XCTUnwrap(canvas.render())),
                                                      size: scene.canvasSize) else {
             return XCTFail("Could not read back both tiers")
@@ -756,7 +756,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
         let texture = try RasterVectorParity.rasterBase(scene, backdrop: nil)
         RasterVectorParity.stamp(RasterVectorParity.paintStroke(scene), into: texture, isEraser: false)
         RasterVectorParity.stamp(RasterVectorParity.eraseStroke(scene), into: texture, isEraser: true)
-        guard let report = RasterVectorParity.report(raster: texture.renderToUIImage(),
+        guard let report = RasterVectorParity.report(raster: try texture.renderToUIImage().get(),
                                                      vector: (try XCTUnwrap(canvas.render())),
                                                      size: scene.canvasSize) else {
             return XCTFail("Could not read back both tiers")

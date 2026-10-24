@@ -40,7 +40,7 @@ final class LiquifyBench: XCTestCase {
             let fixtureCG = try XCTUnwrap(CoreGraphicsCompositor.makeImage(fromPremultiplied: source, width: width, height: height))
             let fullSource = UIGraphicsImageRenderer(size: CGSize(width: 4096, height: 4096),
                 format: PixelOps.transparentFormat()).image { _ in UIImage(cgImage: fixtureCG).draw(at: window.origin) }
-            let snapshot = CelPixelSnapshot(raster: nil, baked: fullSource, size: fullSource.size)
+            let snapshot = try XCTUnwrap(CelPixelSnapshot(capturing: nil, baked: fullSource, size: fullSource.size))
             let normalized = snapshot.replacementWindow(in: window)
             source = try XCTUnwrap(CoreGraphicsCompositor.premultipliedBytes(try XCTUnwrap(normalized.cgImage), width: width, height: height))
             let cold = render()

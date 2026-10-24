@@ -62,7 +62,7 @@ final class StrokeLiftParityLogicTests: XCTestCase {
 
     /// The live tier's picture: the walk the artist watches, committed at the stroke's opacity into
     /// a raster the way a raster layer commits it at lift.
-    private static func live(_ raw: [VectorSample], brush: Brush, size: CGFloat, opacity: Double) -> UIImage {
+    private static func live(_ raw: [VectorSample], brush: Brush, size: CGFloat, opacity: Double) throws -> UIImage {
         let scratch = StrokeScratch(canvasSize: canvasSize, role: .additive, opacity: CGFloat(opacity),
                                     blendMode: brush.stroke.blendMode.cgBlendMode, texture: brush.texture)
         var walk = BrushStamper.LiveWalk(seed: seed)
@@ -71,8 +71,8 @@ final class StrokeLiftParityLogicTests: XCTestCase {
         }
         walk.finish(into: scratch, brush: brush, color: .black, brushSize: size)
         let texture = RasterLayerTexture.empty(size: canvasSize)
-        scratch.commit(into: texture)
-        return texture.renderToUIImage()
+        try scratch.commit(into: texture).get()
+        return try texture.renderToUIImage().get()
     }
 
     /// The stored stroke's picture, as the cel renders it.
@@ -132,7 +132,7 @@ final class StrokeLiftParityLogicTests: XCTestCase {
         let raw = Self.raw()
         let rawRun = StrokeSamples(raw, channels: .captured)
         for (name, brush) in Self.shipped {
-            let delta = try Self.delta(Self.live(raw, brush: brush, size: brush.size, opacity: 1),
+            let delta = try Self.delta(try Self.live(raw, brush: brush, size: brush.size, opacity: 1),
                                        try Self.replay(rawRun, brush: brush, size: brush.size, opacity: 1))
             if Self.readsTheFrame(brush) {
                 XCTAssertLessThan(delta.mean, 0.05,
@@ -152,7 +152,7 @@ final class StrokeLiftParityLogicTests: XCTestCase {
         XCTAssertLessThan(stored.count, raw.count / 3, "the refit must have thinned the path, or this measures nothing")
         var worstRound = 0.0, worstSprite = 0.0
         for (name, brush) in Self.shipped {
-            let livePicture = Self.live(raw, brush: brush, size: brush.size, opacity: 1)
+            let livePicture = try Self.live(raw, brush: brush, size: brush.size, opacity: 1)
             let baked = try Self.replay(stored, brush: brush, size: brush.size, opacity: 1)
             let rawReplay = try Self.replay(StrokeSamples(raw, channels: .captured), brush: brush, size: brush.size, opacity: 1)
             let lift = try Self.delta(livePicture, baked)
@@ -170,7 +170,7 @@ final class StrokeLiftParityLogicTests: XCTestCase {
             VectorSample(x: 20 + CGFloat($0) * 0.9, y: 64, pressure: 0.35 + 0.5 * sin(CGFloat($0) / 240 * .pi), deltaTime: 1 / 120)
         }
         let brush = BrushLibrary.roundHard
-        let control = try Self.delta(Self.live(line, brush: brush, size: 16, opacity: 1),
+        let control = try Self.delta(try Self.live(line, brush: brush, size: 16, opacity: 1),
                                      try Self.replay(Self.refit(line), brush: brush, size: 16, opacity: 1))
         XCTAssertEqual(control.differing, 0, "on a straight line the refit changes no pixel: \(control)")
     }
@@ -193,7 +193,7 @@ final class StrokeLiftParityLogicTests: XCTestCase {
         let stored = Self.refit(raw)
         for (name, brush, ceiling) in [("roundHard", BrushLibrary.roundHard, 0.15), ("square", BrushLibrary.square, 0.7),
                                        ("splatter", BrushLibrary.splatter, 2.5)] {
-            let livePicture = Self.live(raw, brush: brush, size: brush.size, opacity: 1)
+            let livePicture = try Self.live(raw, brush: brush, size: brush.size, opacity: 1)
             let lift = try Self.delta(livePicture, try Self.replay(stored, brush: brush, size: brush.size, opacity: 1))
             let walk = try Self.delta(livePicture, try Self.replay(StrokeSamples(raw, channels: .captured),
                                                               brush: brush, size: brush.size, opacity: 1))

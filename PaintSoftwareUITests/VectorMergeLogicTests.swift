@@ -406,8 +406,8 @@ final class VectorMergeLogicTests: XCTestCase {
     func testAVectorCelCarryingBakedPixelsFallsBackToPixels() throws {
         for index in 0...1 {
             let manager = plainPair()
-            manager.layers[index].cels[0].bakedImage =
-                CanvasFixture.solidImage(.green, rect: CGRect(x: 2, y: 2, width: 20, height: 20))
+            manager.layers[index].cels[0].bakedImage = try CanvasFixture.rasterSource(
+                CanvasFixture.solidImage(.green, rect: CGRect(x: 2, y: 2, width: 20, height: 20)))
 
             try assertSurvivorMatchesTheCompositeItReplaced(manager, "baked pixels on layer \(index)")
 

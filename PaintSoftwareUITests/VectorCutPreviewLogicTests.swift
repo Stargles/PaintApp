@@ -59,7 +59,7 @@ final class VectorCutPreviewLogicTests: XCTestCase {
     /// looking at.
     private func previewed(_ canvas: VectorCanvas, gesture: StrokeSamples,
                            brush: Brush, size: CGFloat) throws -> RasterLayerTexture {
-        let scratch = RasterLayerTexture.load(from: (try XCTUnwrap(canvas.render())), size: Self.canvasSize)
+        let scratch = try CanvasFixture.rasterTexture(try XCTUnwrap(canvas.render()), size: Self.canvasSize)
         var previous: VectorSample?
         var accumulated: [UUID: VectorCanvas.CutPreviewProgress] = [:]
         for sample in gesture {
@@ -77,7 +77,7 @@ final class VectorCutPreviewLogicTests: XCTestCase {
     /// difference between the two can be a number instead of an argument.
     private func footprintPunched(_ canvas: VectorCanvas, gesture: StrokeSamples,
                                   brush: Brush, size: CGFloat) throws -> RasterLayerTexture {
-        let scratch = RasterLayerTexture.load(from: (try XCTUnwrap(canvas.render())), size: Self.canvasSize)
+        let scratch = try CanvasFixture.rasterTexture(try XCTUnwrap(canvas.render()), size: Self.canvasSize)
         let samples = StrokeSamples(gesture, channels: .pressureOnly)
         BrushStamper.stampStroke(into: scratch, samples: samples, brush: brush, color: .black,
                                  brushSize: size, brushOpacity: 1, isEraser: true,
@@ -193,8 +193,8 @@ final class VectorCutPreviewLogicTests: XCTestCase {
         XCTAssertEqual(cut.strokes.count, 2, "Setup: the line should end up in two pieces")
         let afterLift = (try XCTUnwrap(cut.render()))
 
-        let preview = try previewed(build(), gesture: gesture, brush: nib, size: 8).renderToUIImage()
-        let footprint = try footprintPunched(build(), gesture: gesture, brush: nib, size: 8).renderToUIImage()
+        let preview = try previewed(build(), gesture: gesture, brush: nib, size: 8).renderToUIImage().get()
+        let footprint = try footprintPunched(build(), gesture: gesture, brush: nib, size: 8).renderToUIImage().get()
 
         let removedByLift = pixelsChanged(original, afterLift)
         let removedByPreview = pixelsChanged(original, preview)
@@ -232,8 +232,8 @@ final class VectorCutPreviewLogicTests: XCTestCase {
         XCTAssertTrue(cut.erase(alongPath: gesture, brush: nib, size: 72, mode: .cutPoints))
         let afterLift = (try XCTUnwrap(cut.render()))
 
-        let preview = try previewed(build(), gesture: gesture, brush: nib, size: 72).renderToUIImage()
-        let footprint = try footprintPunched(build(), gesture: gesture, brush: nib, size: 72).renderToUIImage()
+        let preview = try previewed(build(), gesture: gesture, brush: nib, size: 72).renderToUIImage().get()
+        let footprint = try footprintPunched(build(), gesture: gesture, brush: nib, size: 72).renderToUIImage().get()
 
         let removedByLift = pixelsChanged(original, afterLift)
         let removedByFootprint = pixelsChanged(original, footprint)
@@ -267,7 +267,7 @@ final class VectorCutPreviewLogicTests: XCTestCase {
         let cut = build()
         XCTAssertTrue(cut.erase(alongPath: gesture, brush: nib, size: 24, mode: .cutPoints))
         let afterLift = (try XCTUnwrap(cut.render()))
-        let preview = try previewed(build(), gesture: gesture, brush: nib, size: 24).renderToUIImage()
+        let preview = try previewed(build(), gesture: gesture, brush: nib, size: 24).renderToUIImage().get()
 
         let removedByLift = pixelsChanged((try XCTUnwrap(build().render())), afterLift)
         XCTAssertGreaterThan(removedByLift, 100, "Setup: the cut should take a visible bite")
@@ -302,7 +302,7 @@ final class VectorCutPreviewLogicTests: XCTestCase {
         XCTAssertTrue(cut.erase(alongPath: gesture, brush: nib, size: 30, mode: .cutPoints))
         XCTAssertEqual(cut.strokes.count, 2, "Setup: the horizontal line's stub gone, its right piece and the vertical intact")
         let afterLift = (try XCTUnwrap(cut.render()))
-        let preview = try previewed(build(), gesture: gesture, brush: nib, size: 30).renderToUIImage()
+        let preview = try previewed(build(), gesture: gesture, brush: nib, size: 30).renderToUIImage().get()
 
         let removedByLift = pixelsChanged((try XCTUnwrap(build().render())), afterLift)
         let pop = pixelsChanged(preview, afterLift)
@@ -329,7 +329,7 @@ final class VectorCutPreviewLogicTests: XCTestCase {
         let cut = build()
         XCTAssertTrue(cut.erase(alongPath: gesture, brush: nib, size: 12, mode: .cutPoints))
         let afterLift = (try XCTUnwrap(cut.render()))
-        let preview = try previewed(build(), gesture: gesture, brush: nib, size: 12).renderToUIImage()
+        let preview = try previewed(build(), gesture: gesture, brush: nib, size: 12).renderToUIImage().get()
 
         let removedByLift = pixelsChanged((try XCTUnwrap(build().render())), afterLift)
         let removedByPreview = pixelsChanged((try XCTUnwrap(build().render())), preview)

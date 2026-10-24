@@ -528,7 +528,7 @@ final class BrushTableLogicTests: XCTestCase {
         let url = projectURL(name: "Drawn Before The Edit")
         saveAndWait(manager, to: url)
         let vectorBefore = try XCTUnwrap(pixels((try XCTUnwrap(vector.render()))))
-        let rasterBefore = try XCTUnwrap(pixels(manager.layers[0].cels[0].raster.renderToUIImage()))
+        let rasterBefore = try XCTUnwrap(pixels(try manager.layers[0].cels[0].raster.renderToUIImage().get()))
         assertHasInk(vectorBefore, "the vector stroke drawn before the edit")
         assertHasInk(rasterBefore, "the raster stroke drawn before the edit")
 
@@ -544,7 +544,7 @@ final class BrushTableLogicTests: XCTestCase {
         let reopenedVector = try XCTUnwrap(reopened.layers[layerIndex].cels[0].vector)
         XCTAssertEqual(reopenedVector.strokes.first?.brush, asDrawn, "The ink already drawn keeps its brush")
         XCTAssertEqual(try XCTUnwrap(pixels((try XCTUnwrap(reopenedVector.render())))), vectorBefore, "…and its pixels")
-        XCTAssertEqual(try XCTUnwrap(pixels(reopened.layers[0].cels[0].raster.renderToUIImage())), rasterBefore,
+        XCTAssertEqual(try XCTUnwrap(pixels(try reopened.layers[0].cels[0].raster.renderToUIImage().get())), rasterBefore,
                        "The raster ink is the pixels it was")
         XCTAssertEqual(reopened.toolProfiles.brush.preset, edited, "The next stroke is laid with the edited preset")
     }

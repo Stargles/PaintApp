@@ -469,7 +469,7 @@ final class FillGapClosingLogicTests: XCTestCase {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { done.fulfill() }
         wait(for: [done], timeout: 6)
         manager.commitInteractiveFill()
-        let cg = try XCTUnwrap(manager.layers[1].cels.first?.raster.renderToUIImage().cgImage)
+        let cg = try XCTUnwrap(try manager.layers[1].cels.first?.raster.renderToUIImage().get().cgImage)
         return try XCTUnwrap(CanvasFixture.rgbaBytes(cg))
     }
 }

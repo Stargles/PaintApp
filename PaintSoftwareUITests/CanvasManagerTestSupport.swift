@@ -180,15 +180,27 @@ enum CanvasFixture {
         }
     }
 
-    /// Paints `image` into a layer's cel at `frame` as baked content.
-    ///
-    /// `bakedImage` rather than `raster`: it is the tier that takes a whole image directly, so the
-    /// fixture states the pixels instead of producing them.
-    static func setBakedContent(_ manager: CanvasManager, layerIndex: Int, frame: Int = 0, _ image: UIImage) {
+    /// Captures `image` as immutable baked content in a layer's cel at `frame`.
+    static func rasterSource(_ image: UIImage, using residency: RasterResidency = .shared) throws -> RasterSource {
+        try RasterSource.capture(image, using: residency).get()
+    }
+
+    static func rasterTexture(_ image: UIImage, size: CGSize,
+                              strokeCount: Int = 1, using residency: RasterResidency = .shared) throws -> RasterLayerTexture {
+        try RasterLayerTexture.capturing(image, size: size, strokeCount: strokeCount, using: residency).get()
+    }
+
+    static func setBakedContent(_ manager: CanvasManager, layerIndex: Int, frame: Int = 0, _ image: UIImage,
+                                file: StaticString = #filePath, line: UInt = #line) {
         guard let celIndex = manager.activeCelIndex(inLayer: layerIndex, atFrame: frame) else {
-            return XCTFail("No cel on layer \(layerIndex) at frame \(frame) to paint into.")
+            return XCTFail("No cel on layer \(layerIndex) at frame \(frame) to paint into.", file: file, line: line)
         }
-        manager.layers[layerIndex].cels[celIndex].bakedImage = image
+        do {
+            let source = try rasterSource(image)
+            manager.layers[layerIndex].cels[celIndex].bakedImage = source
+        } catch {
+            XCTFail("Could not prepare fixture pixels: \(error)", file: file, line: line)
+        }
     }
 
     // MARK: - The chunking zoo

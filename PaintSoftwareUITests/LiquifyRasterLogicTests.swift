@@ -27,8 +27,9 @@ final class LiquifyRasterLogicTests: XCTestCase {
             UIColor.green.setFill(); ctx.fill(CGRect(x: 20, y: 28, width: 9, height: 7))
         }
         let bakedImage = image(.red)
-        manager.layers[0].cels[0].raster = RasterLayerTexture(size: size, image: rasterImage, strokeCount: 1)
-        manager.layers[0].cels[0].bakedImage = bakedImage
+        let bakedSource = try CanvasFixture.rasterSource(bakedImage)
+        manager.layers[0].cels[0].raster = try CanvasFixture.rasterTexture(rasterImage, size: size, strokeCount: 1)
+        manager.layers[0].cels[0].bakedImage = bakedSource
         manager.history.removeAll()
         let before = try bytes(UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { _ in
             bakedImage.draw(at: .zero); rasterImage.draw(at: .zero)
@@ -36,9 +37,9 @@ final class LiquifyRasterLogicTests: XCTestCase {
         let sourceRaster = manager.layers[0].cels[0].raster
         let session = try held(manager, layer: 0)
         XCTAssertTrue(manager.layers[0].cels[0].raster === sourceRaster, "preview leaves saved pixel tiers alone")
-        XCTAssertTrue(manager.layers[0].cels[0].bakedImage === bakedImage)
+        XCTAssertTrue(manager.layers[0].cels[0].bakedImage === bakedSource)
         manager.commitLiquify(session)
-        let after = try bytes(manager.layers[0].cels[0].raster.renderToUIImage())
+        let after = try bytes(manager.layers[0].cels[0].raster.renderToUIImage().get())
         XCTAssertNotEqual(after, before, "the drawn rectangle moves")
         let green = stride(from: 0, to: after.count, by: 4).filter { after[$0 + 1] > 180 && after[$0] < 60 && after[$0 + 2] < 60 }.count
         let red = stride(from: 0, to: after.count, by: 4).filter { after[$0] > 180 && after[$0 + 1] < 60 && after[$0 + 2] < 60 }.count
@@ -48,10 +49,10 @@ final class LiquifyRasterLogicTests: XCTestCase {
         XCTAssertEqual(Array(after[((54 * 64 + 54) * 4)..<((54 * 64 + 54) * 4 + 4)]), Array(before[((54 * 64 + 54) * 4)..<((54 * 64 + 54) * 4 + 4)]), "distant pixel island stays exact")
         XCTAssertEqual(manager.history.undo(), .liquify)
         XCTAssertTrue(manager.layers[0].cels[0].raster === sourceRaster)
-        XCTAssertTrue(manager.layers[0].cels[0].bakedImage === bakedImage)
+        XCTAssertTrue(manager.layers[0].cels[0].bakedImage === bakedSource)
         XCTAssertNil(manager.history.undo(), "one gesture has one history entry")
         XCTAssertEqual(manager.history.redo(), .liquify)
-        XCTAssertEqual(try bytes(manager.layers[0].cels[0].raster.renderToUIImage()), after)
+        XCTAssertEqual(try bytes(manager.layers[0].cels[0].raster.renderToUIImage().get()), after)
     }
     func testMixedCelMovesInkAndBackingTogetherButKeepsEditableImage() throws {
         let manager = CanvasFixture.manager(); manager.addVectorLayer()
@@ -61,7 +62,8 @@ final class LiquifyRasterLogicTests: XCTestCase {
         let editable = VectorImageElement(image: image(.yellow), transform: LayerTransform(position: CGPoint(x: 32, y: 32), scale: 1, rotation: 0))
         canvas.restoreElements([.stroke(ink), .image(editable)], changedInk: nil)
         let backing = image()
-        manager.layers[1].cels[0].bakedImage = backing
+        let backingSource = try CanvasFixture.rasterSource(backing)
+        manager.layers[1].cels[0].bakedImage = backingSource
         manager.history.removeAll()
         let session = try held(manager, layer: 1)
         manager.commitLiquify(session)
@@ -69,16 +71,16 @@ final class LiquifyRasterLogicTests: XCTestCase {
         XCTAssertNotEqual(moved.samples, ink.samples)
         XCTAssertEqual(kept.id, editable.id); XCTAssertEqual(kept.transform, editable.transform)
         XCTAssertTrue(kept.image === editable.image)
-        let after = try bytes(try XCTUnwrap(manager.layers[1].cels[0].bakedImage))
+        let after = try bytes(try XCTUnwrap(manager.layers[1].cels[0].bakedImage?.resolveImage().get()))
         XCTAssertNotEqual(after, try bytes(backing))
         XCTAssertFalse(manager.layers[1].cels[0].raster.hasContent, "mixed vector backing has one pixel tier")
         XCTAssertEqual(manager.history.undo(), .liquify)
         guard case .stroke(let undone) = canvas.elements[0] else { return XCTFail("ink") }
         XCTAssertEqual(undone.samples, ink.samples)
-        XCTAssertTrue(manager.layers[1].cels[0].bakedImage === backing)
+        XCTAssertTrue(manager.layers[1].cels[0].bakedImage === backingSource)
         XCTAssertNil(manager.history.undo())
         XCTAssertEqual(manager.history.redo(), .liquify)
-        XCTAssertEqual(try bytes(try XCTUnwrap(manager.layers[1].cels[0].bakedImage)), after)
+        XCTAssertEqual(try bytes(try XCTUnwrap(manager.layers[1].cels[0].bakedImage?.resolveImage().get())), after)
     }
     func testLinkedEmptyInkStillMovesBackingAndOneUndoRestoresRecipeAndPixels() throws {
         for withPixels in [true, false] {
@@ -87,7 +89,8 @@ final class LiquifyRasterLogicTests: XCTestCase {
             let recipe = InterpolationRecipe(references: refs, t: 0.37)
             manager.layers[2].cels[0].interpolation = recipe
             let backing = withPixels ? image() : nil
-            manager.layers[2].cels[0].bakedImage = backing
+            let backingSource = try backing.map { try CanvasFixture.rasterSource($0) }
+            manager.layers[2].cels[0].bakedImage = backingSource
             manager.history.removeAll()
             let session = try held(manager, layer: 2)
             let procedure = try XCTUnwrap(manager.liveCelContentEdit?.procedure)
@@ -98,12 +101,12 @@ final class LiquifyRasterLogicTests: XCTestCase {
             XCTAssertEqual(after.interpolation?.deformations.count, 1, "the new field remains in the linked recipe")
             XCTAssertGreaterThan(manager.history.currentCost, 0, "a linked-only field is retained history, even without pixels")
             if let backing {
-                XCTAssertNotEqual(try bytes(try XCTUnwrap(after.bakedImage)), try bytes(backing), "empty evaluated lists must not skip the last field's backing work")
+                XCTAssertNotEqual(try bytes(try XCTUnwrap(after.bakedImage?.resolveImage().get())), try bytes(backing), "empty evaluated lists must not skip the last field's backing work")
                 XCTAssertGreaterThan(manager.history.currentCost, Int(size.width * size.height * 4), "mixed history includes retained pixel buffers too")
             }
             XCTAssertEqual(manager.history.undo(), .liquify)
             XCTAssertEqual(manager.layers[2].cels[0].interpolation?.contentFingerprint, recipe.contentFingerprint)
-            XCTAssertTrue(manager.layers[2].cels[0].bakedImage === backing)
+            XCTAssertTrue(manager.layers[2].cels[0].bakedImage === backingSource)
             XCTAssertNil(manager.history.undo(), "recipe and backing share one reversal")
             XCTAssertEqual(manager.history.redo(), .liquify)
             XCTAssertEqual(manager.layers[2].cels[0].interpolation?.contentFingerprint, after.interpolation?.contentFingerprint)
@@ -114,7 +117,8 @@ final class LiquifyRasterLogicTests: XCTestCase {
     func testRejectedPixelWindowKeepsThePresentedPaintAndDoesNotCommitAtLift() throws {
         let manager = CanvasFixture.manager()
         let before = image()
-        manager.layers[0].cels[0].bakedImage = before
+        let beforeSource = try CanvasFixture.rasterSource(before)
+        manager.layers[0].cels[0].bakedImage = beforeSource
         manager.history.removeAll()
         manager.onHeldPictureMoved = {}
         var session = try held(manager, layer: 0)
@@ -141,7 +145,7 @@ final class LiquifyRasterLogicTests: XCTestCase {
         XCTAssertFalse(bad.procedure?.isPresented == true)
         XCTAssertTrue((view.layer.contents as? IOSurface) === priorSurface, "the prior drawn paint remains on screen")
         XCTAssertEqual(view.presentedCount, 1)
-        XCTAssertTrue(manager.layers[0].cels[0].bakedImage === before)
+        XCTAssertTrue(manager.layers[0].cels[0].bakedImage === beforeSource)
         XCTAssertFalse(manager.history.canUndo)
         XCTAssertNil(manager.liveCelContentEdit, "a rejected lift completes without waiting for a picture that cannot land")
     }
@@ -156,7 +160,7 @@ final class LiquifyRasterLogicTests: XCTestCase {
                 transform: LayerTransform(position: CGPoint(x: 24, y: 24), scale: 1, rotation: 0))
             canvas.elements = [.stream(stream)]; canvas.bumpVersion()
             canvas.setStreamFrame(id: stream.id, image: image(.green), index: 1)
-            if change != "display" { manager.layers[1].cels[0].bakedImage = image() }
+            if change != "display" { manager.layers[1].cels[0].bakedImage = try CanvasFixture.rasterSource(image()) }
             let original = manager.layers[1].cels[0]
             let revisions = CelContentRevisions()
             let beforeRevision = revisions.observe(original)
@@ -198,7 +202,7 @@ final class LiquifyRasterLogicTests: XCTestCase {
 
     func testBackingPatchConjugatesTheGestureThroughItsIndependentPlacement() throws {
         var cel = CanvasFixture.manager().layers[0].cels[0]
-        cel.bakedImage = image()
+        cel.bakedImage = try CanvasFixture.rasterSource(image())
         let snapshot = try XCTUnwrap(CelPixelSnapshot(cel: cel))
         let samples = [VectorSample(x: 24, y: 24), VectorSample(x: 32, y: 24)]
         let window = CGRect(x: 0, y: 0, width: 60, height: 48)
@@ -224,7 +228,7 @@ final class LiquifyRasterLogicTests: XCTestCase {
             UIColor.yellow.setFill(); ctx.fill(CGRect(x: 0, y: 10, width: 12, height: 12))
             UIColor.green.setFill(); ctx.fill(CGRect(x: 20, y: 10, width: 12, height: 12))
         }
-        cel.bakedImage = source
+        cel.bakedImage = try CanvasFixture.rasterSource(source)
         let shift = CGPoint(x: 20, y: 0)
         let pose = PoseMap.affine(CGAffineTransform(translationX: shift.x, y: shift.y))
         let placement = CelContentPlacement(ink: pose, backing: pose)
@@ -257,7 +261,7 @@ final class LiquifyRasterLogicTests: XCTestCase {
     @MainActor
     private func assertPosedWindow(mixed: Bool, pixels: Bool) throws {
         let manager = CanvasFixture.manager()
-        manager.layers[0].cels[0].bakedImage = pixels ? image() : nil
+        manager.layers[0].cels[0].bakedImage = try pixels ? CanvasFixture.rasterSource(image()) : nil
         if mixed {
             manager.layers[0].kind = .vector
             let ink = VectorStroke(brush: TestBrushes.hardRound, color: CodableColor(red: 0, green: 0, blue: 0, alpha: 0.83), size: 3.4, opacity: 0.83,
@@ -333,7 +337,7 @@ final class LiquifyRasterLogicTests: XCTestCase {
         let ink = VectorStroke(brush: TestBrushes.hardRound, color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1), size: 4, opacity: 1,
             samples: StrokeSamples([VectorSample(x: 18, y: 24), VectorSample(x: 38, y: 24)], channels: .pressureOnly))
         canvas.addStroke(ink)
-        manager.layers[1].cels[0].bakedImage = image()
+        manager.layers[1].cels[0].bakedImage = try CanvasFixture.rasterSource(image())
         let original = try XCTUnwrap(PixelOps.rasterize(cel: manager.layers[1].cels[0], canvasSize: size, memoize: false))
         let session = try held(manager, layer: 1)
         let old = try XCTUnwrap(manager.liveCelContentEdit)
@@ -382,8 +386,8 @@ final class LiquifyRasterLogicTests: XCTestCase {
             let target = stroke(12, 20, color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1))
             let other = stroke(1, 5, color: CodableColor(red: 0, green: 0, blue: 1, alpha: 1))
             canvas.restoreElements([.stroke(other), .stroke(target)], changedInk: nil)
-            manager.layers[1].cels[0].bakedImage = UIGraphicsImageRenderer(size: size,
-                format: PixelOps.transparentFormat()).image { ctx in UIColor.red.setFill(); ctx.fill(CGRect(origin: .zero, size: size)) }
+            manager.layers[1].cels[0].bakedImage = try CanvasFixture.rasterSource(UIGraphicsImageRenderer(size: size,
+                format: PixelOps.transparentFormat()).image { ctx in UIColor.red.setFill(); ctx.fill(CGRect(origin: .zero, size: size)) })
             let box = CGRect(origin: .zero, size: size)
             CanvasFixture.setPoseTrack(manager, layerID: manager.layers[1].id,
                 celID: manager.layers[1].cels[0].id, channel: .cel,
@@ -443,7 +447,7 @@ final class LiquifyRasterLogicTests: XCTestCase {
                 UIColor.red.setFill(); ctx.fill(CGRect(x: 60, y: 20, width: 36, height: 180))
                 UIColor.green.setFill(); ctx.fill(CGRect(x: 156, y: 20, width: 28, height: 180))
             }
-            manager.layers[0].cels[0].bakedImage = backing
+            manager.layers[0].cels[0].bakedImage = try CanvasFixture.rasterSource(backing)
             let pose = PoseMap(CGAffineTransform(translationX: 64, y: 0))
             let placement = CelContentPlacement(ink: pose)
             let source = StrokeScratch.CelContent(backing: CelPixelSnapshot(cel: manager.layers[0].cels[0]),
@@ -452,7 +456,7 @@ final class LiquifyRasterLogicTests: XCTestCase {
             let scratch = StrokeScratch(canvasSize: side,
                 role: subtractive ? .subtractive(backdrop: backdrop) : .replacing(backdrop: backdrop),
                 celContent: source)
-            let fullInk = RasterLayerTexture(size: side, image: backdrop, strokeCount: 1)
+            let fullInk = try CanvasFixture.rasterTexture(backdrop, size: side, strokeCount: 1)
             func erase(_ point: CGPoint) {
                 scratch.stampCircle(at: point, radius: 6, color: .black, alpha: 1, hardness: 1,
                     blendMode: subtractive ? .normal : .destinationOut)
@@ -467,7 +471,7 @@ final class LiquifyRasterLogicTests: XCTestCase {
             let before = complete(backdrop)
             erase(CGPoint(x: 108, y: 100))
             let first = try XCTUnwrap(scratch.renderedCelContent)
-            let truth = complete(fullInk.renderToUIImage())
+            let truth = complete(try fullInk.renderToUIImage().get())
             XCTAssertNotEqual(try bytes(before), try bytes(truth), "PREMISE: the full native ink oracle was erased")
             let crop = try XCTUnwrap(PixelOps.copiedSubimage(of: truth, in: first.window))
             XCTAssertTrue(try bytes(first.image) == bytes(crop), "live vector erasers redraw native ink and stationary backing through their shared union")
@@ -494,7 +498,7 @@ final class LiquifyRasterLogicTests: XCTestCase {
             XCTAssertTrue(try bytes(lifted) == bytes(truth), "the pending lift holds the already-posed bitmap without reposing its backing")
             erase(CGPoint(x: 118, y: 100))
             let next = try XCTUnwrap(scratch.renderedCelContent)
-            let nextTruth = complete(fullInk.renderToUIImage())
+            let nextTruth = complete(try fullInk.renderToUIImage().get())
             let nextCrop = try XCTUnwrap(PixelOps.copiedSubimage(of: nextTruth, in: next.window))
             XCTAssertTrue(try bytes(next.image) == bytes(nextCrop), "a later dab inside the same window invalidates its complete picture")
             XCTAssertTrue(try bytes(first.image) == bytes(crop), "the earlier held picture stays immutable as the scratch advances")
@@ -537,7 +541,7 @@ final class LiquifyRasterLogicTests: XCTestCase {
     @MainActor
     private func posedRasterRefusalFixture() -> CanvasManager {
         let manager = CanvasFixture.manager()
-        manager.layers[0].cels[0].bakedImage = image()
+        manager.layers[0].cels[0].bakedImage = try CanvasFixture.rasterSource(image())
         manager.addTransformLayer(name: "Raster pose")
         manager.layers[1].transform = LayerPose(pose: PoseQuad(box: CGRect(origin: .zero, size: size),
             mappedBy: CGAffineTransform(translationX: 8, y: 0)), mode: .move)
@@ -593,10 +597,10 @@ final class LiquifyRasterLogicTests: XCTestCase {
     }
 
     @MainActor
-    private func posedBakeRefusalFixture() -> CanvasManager {
+    private func posedBakeRefusalFixture() throws -> CanvasManager {
         let manager = CanvasFixture.manager(layerCount: 0)
         manager.addLayer(name: "Pixels")
-        manager.layers[0].cels[0].bakedImage = image()
+        manager.layers[0].cels[0].bakedImage = try CanvasFixture.rasterSource(image())
         manager.addVectorLayer(name: "Native ink")
         manager.layers[1].cels[0].vector?.addStroke(VectorStroke(brush: TestBrushes.hardRound,
             color: .init(red: 0, green: 0, blue: 0, alpha: 1), size: 4, opacity: 1,
@@ -610,7 +614,7 @@ final class LiquifyRasterLogicTests: XCTestCase {
     @MainActor
     func testPosedRasterRefusalRollsBackBakeWithoutConsumingPoseOrHistory() throws {
         defer { CompositorBudget.budgetOverrideBytes = nil; PixelOps.clearRasterizeCache() }
-        let manager = posedBakeRefusalFixture()
+        let manager = try posedBakeRefusalFixture()
         let vector = try XCTUnwrap(manager.layers[1].cels[0].vector)
         let baker = manager.layers[2].id, ids = manager.layers.map(\.id)
         let pixels = manager.layers[0].cels[0]
@@ -669,7 +673,7 @@ final class LiquifyRasterLogicTests: XCTestCase {
     @MainActor
     func testNestedBakeRefusalRestoresItsEntryStateAndPreservesPendingCrop() throws {
         defer { CompositorBudget.budgetOverrideBytes = nil; PixelOps.clearRasterizeCache() }
-        let manager = posedBakeRefusalFixture()
+        let manager = try posedBakeRefusalFixture()
         let vector = try XCTUnwrap(manager.layers[1].cels[0].vector)
         manager.layers[1].name = "Before gesture"
         guard case .plan(let plan) = manager.bakePlan(forLayerID: manager.layers[2].id) else { return XCTFail("valid Bake") }
@@ -708,7 +712,7 @@ final class LiquifyRasterLogicTests: XCTestCase {
             "a valid transparent landing owns an allocated context")
 
         let manager = CanvasFixture.manager()
-        manager.layers[0].cels[0].bakedImage = image()
+        manager.layers[0].cels[0].bakedImage = try CanvasFixture.rasterSource(image())
         manager.history.removeAll()
         manager.beginMove()
         let piece = try XCTUnwrap(manager.floatingPiece)
@@ -738,7 +742,7 @@ final class LiquifyRasterLogicTests: XCTestCase {
                 mappedBy: CGAffineTransform(translationX: 8, y: 0)), mode: .move)
             let baker = manager.layers[1].id
             manager.addLayer(name: "Held pixels")
-            manager.layers[2].cels[0].bakedImage = image()
+            manager.layers[2].cels[0].bakedImage = try CanvasFixture.rasterSource(image())
             manager.currentLayerIndex = 2
             let loop = CGRect(x: 24, y: 14, width: 24, height: 24)
             manager.selection = Selection(path: CGPath(rect: loop, transform: nil), bounds: loop)
@@ -775,7 +779,7 @@ final class LiquifyRasterLogicTests: XCTestCase {
             CompositorBudget.availableMemoryOverrideBytes = nil
             let manager = CanvasFixture.manager(layerCount: 2)
             manager.currentLayerIndex = 0
-            manager.layers[0].cels[0].bakedImage = image()
+            manager.layers[0].cels[0].bakedImage = try CanvasFixture.rasterSource(image())
             manager.beginMove()
             manager.floatingPiece?.transform.position.x += 5
             let piece = try XCTUnwrap(manager.floatingPiece), original = manager.layers[0].cels[0]
@@ -808,7 +812,7 @@ final class LiquifyRasterLogicTests: XCTestCase {
     func testRefusedLandingDoesNotSnapshotOrCompleteSave() throws {
         defer { CompositorBudget.availableMemoryOverrideBytes = nil }
         let manager = CanvasFixture.manager()
-        manager.layers[0].cels[0].bakedImage = image()
+        manager.layers[0].cels[0].bakedImage = try CanvasFixture.rasterSource(image())
         manager.beginMove()
         manager.floatingPiece?.transform.position.x += 5
         let piece = try XCTUnwrap(manager.floatingPiece)
@@ -836,7 +840,7 @@ final class LiquifyRasterLogicTests: XCTestCase {
     func testLiquifyFinalAllocationRefusalPreservesSourceAndHistory() throws {
         defer { CompositorBudget.availableMemoryOverrideBytes = nil }
         let manager = CanvasFixture.manager()
-        manager.layers[0].cels[0].bakedImage = image()
+        manager.layers[0].cels[0].bakedImage = try CanvasFixture.rasterSource(image())
         manager.history.removeAll()
         let source = manager.layers[0].cels[0]
         let session = try held(manager, layer: 0)
@@ -932,7 +936,9 @@ final class LiquifyRasterLogicTests: XCTestCase {
 
     func testReusedDerivedInkRequiresInstalledBackingVersionBeforeCoveringANewPose() throws {
         var cel = CanvasFixture.manager().layers[0].cels[0]
-        let oldBaked = image(.red), freshBaked = image(.green), ink = image(.blue)
+        let oldBaked = try CanvasFixture.rasterSource(image(.red))
+        let freshBaked = try CanvasFixture.rasterSource(image(.green))
+        let ink = image(.blue)
         cel.bakedImage = oldBaked
         let raster = cel.raster
         let shownVersion = raster.version
@@ -940,17 +946,17 @@ final class LiquifyRasterLogicTests: XCTestCase {
         let oldPose = CelContentPlacement.identity
         let newPose = CelContentPlacement(ink: nil, backing: .affine(CGAffineTransform(translationX: 9, y: 4)))
         let oldCoverage = try XCTUnwrap(revisions.captureDisplayedCoverage(of: cel,
-            bakedImage: oldBaked, raster: raster, rasterVersion: shownVersion,
+            bakedSource: oldBaked, raster: raster, rasterVersion: shownVersion,
             placement: oldPose, derivation: "unchanged-linked-ink"))
         var presentation = DerivedCelPresentation()
         XCTAssertEqual(presentation.install(ink, covering: oldCoverage, on: cel.id), .changed)
         raster.stampCircle(at: CGPoint(x: 30, y: 30), radius: 5, color: .yellow, alpha: 1, hardness: 1)
         cel.bakedImage = freshBaked
         let pending = revisions.observe(cel)
-        let newPixels = try bytes(raster.renderToUIImage())
+        let newPixels = try bytes(try raster.renderToUIImage().get())
         XCTAssertGreaterThan(raster.version, shownVersion, "the same texture really changed in place")
-        func reuse(baked: UIImage?, version: Int) -> Bool {
-            guard let coverage = revisions.captureDisplayedCoverage(of: cel, bakedImage: baked,
+        func reuse(baked: RasterSource?, version: Int) -> Bool {
+            guard let coverage = revisions.captureDisplayedCoverage(of: cel, bakedSource: baked,
                 raster: raster, rasterVersion: version, placement: newPose,
                 derivation: "unchanged-linked-ink") else { return false }
             return presentation.install(ink, covering: coverage, on: cel.id, aimingAt: newPose,
@@ -962,14 +968,14 @@ final class LiquifyRasterLogicTests: XCTestCase {
         XCTAssertEqual(presentation.coverage, oldCoverage, "image, linked key and old placement remain paired")
         XCTAssertFalse(reuse(baked: oldBaked, version: raster.version), "the baked sibling must also have landed")
         XCTAssertEqual(presentation.coverage, oldCoverage)
-        let installedRaster = raster.renderToUIImage()
+        let installedRaster = try raster.renderToUIImage().get()
         XCTAssertEqual(try bytes(installedRaster), newPixels)
         XCTAssertTrue(reuse(baked: freshBaked, version: raster.version))
         XCTAssertTrue(presentation.image === ink, "unchanged linked ink needs no second render")
         XCTAssertEqual(presentation.coverage, CelContentCoverage(celID: cel.id, revision: pending,
             placement: newPose, derivation: "unchanged-linked-ink"))
         let replacement = RasterLayerTexture(size: size)
-        XCTAssertNil(revisions.captureDisplayedCoverage(of: cel, bakedImage: freshBaked,
+        XCTAssertNil(revisions.captureDisplayedCoverage(of: cel, bakedSource: freshBaked,
             raster: replacement, rasterVersion: raster.version, placement: newPose,
             derivation: "unchanged-linked-ink"), "another texture with a matching version is not the installed source")
     }
@@ -1088,16 +1094,16 @@ final class LiquifyRasterLogicTests: XCTestCase {
         let crop = UIGraphicsImageRenderer(size: window.size, format: PixelOps.transparentFormat()).image { _ in full.draw(at: CGPoint(x: -window.minX, y: -window.minY)) }
         XCTAssertEqual(try bytes(XCTUnwrap(InterpolationEvaluator.composite(evaluation, size: size, window: window))), try bytes(crop), "window origin, fade and local eraser preserve the full picture")
     }
-    func testSkippedMixedCommitRetiresEarlierReplacementsAcrossTextureVersionZero() {
+    func testSkippedMixedCommitRetiresEarlierReplacementsAcrossTextureVersionZero() throws {
         let manager = CanvasFixture.manager(); manager.addVectorLayer()
         var cel = manager.layers[1].cels[0]
         let revisions = CelContentRevisions()
         let start = revisions.observe(cel)
-        cel.bakedImage = image(); cel.raster = RasterLayerTexture(size: size)
+        cel.bakedImage = try CanvasFixture.rasterSource(image()); cel.raster = RasterLayerTexture(size: size)
         let first = revisions.observe(cel)
         var ink = UnlandedInk()
         ink.hold(.init(id: 1, version: first, windowRect: CGRect(x: 10, y: 10, width: 20, height: 20), alpha: 1, replacesBase: true, image: image()))
-        cel.bakedImage = image(.green); cel.raster = RasterLayerTexture(size: size)
+        cel.bakedImage = try CanvasFixture.rasterSource(image(.green)); cel.raster = RasterLayerTexture(size: size)
         let latest = revisions.observe(cel)
         ink.hold(.init(id: 2, version: latest, windowRect: CGRect(x: 15, y: 15, width: 20, height: 20), alpha: 1, replacesBase: true, image: image(.green)))
         XCTAssertGreaterThan(first, start); XCTAssertGreaterThan(latest, first)

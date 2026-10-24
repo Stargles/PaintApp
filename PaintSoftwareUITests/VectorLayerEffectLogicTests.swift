@@ -158,7 +158,7 @@ final class VectorLayerEffectLogicTests: XCTestCase {
         let ink = (try XCTUnwrap(PixelOps.rasterize(cel: manager.layers[1].cels[celIndex], canvasSize: CanvasFixture.canvasSize)))
         manager.layers[1].kind = .raster
         manager.layers[1].cels[celIndex].vector = nil
-        manager.layers[1].cels[celIndex].bakedImage = ink
+        manager.layers[1].cels[celIndex].bakedImage = try CanvasFixture.rasterSource(ink)
         guard let image = composite(manager) else { return XCTFail("Fixture must composite") }
         XCTAssertEqual(pixel(image, underInk.0, underInk.1), [0, 0, 255, 255], "The raster layer's blue is composited")
         XCTAssertEqual(pixel(image, besideInk.0, besideInk.1), [255, 0, 0, 255])

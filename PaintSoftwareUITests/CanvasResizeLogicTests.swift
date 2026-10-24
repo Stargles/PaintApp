@@ -119,14 +119,14 @@ final class CanvasResizeLogicTests: XCTestCase {
         let manager = CanvasFixture.manager(layerCount: 1)
         CanvasFixture.setBakedContent(manager, layerIndex: 0,
                                       CanvasFixture.solidImage(.red, rect: CGRect(x: 8, y: 12, width: 20, height: 16)))
-        let before = try XCTUnwrap(manager.layers[0].cels[0].bakedImage?.cgImage)
+        let before = try XCTUnwrap(manager.layers[0].cels[0].bakedImage?.resolveImage().get().cgImage)
         let beforeBytes = try XCTUnwrap(CanvasFixture.rgbaBytes(before))
 
         XCTAssertTrue(manager.resizeCanvas(to: CGSize(width: 129, height: 91)))
         XCTAssertTrue(manager.resizeCanvas(to: CanvasFixture.canvasSize))
 
         XCTAssertEqual(manager.canvasSize, CanvasFixture.canvasSize)
-        let after = try XCTUnwrap(manager.layers[0].cels[0].bakedImage?.cgImage)
+        let after = try XCTUnwrap(manager.layers[0].cels[0].bakedImage?.resolveImage().get().cgImage)
         XCTAssertEqual(CanvasFixture.rgbaBytes(after), beforeBytes,
                        "a whole-point crop/expand out and back must be byte-identical")
     }
@@ -828,7 +828,7 @@ final class CanvasResizeLogicTests: XCTestCase {
                                       CanvasFixture.solidImage(.red, rect: CGRect(x: 8, y: 12, width: 24, height: 16)))
         XCTAssertTrue(manager.resizeCanvas(to: CGSize(width: 32, height: 32), mode: .scaleToFit))
 
-        let image = try XCTUnwrap(manager.layers[0].cels[0].bakedImage?.cgImage)
+        let image = try XCTUnwrap(manager.layers[0].cels[0].bakedImage?.resolveImage().get().cgImage)
         let painted = try XCTUnwrap(Self.paintedBounds(image), "the resize left the tier empty")
         // k = 0.5, offset zero (square to square), so (8, 12, 24, 16) becomes (4, 6, 12, 8).
         XCTAssertEqual(painted.minX, 4, accuracy: 1.5, "\(painted)")
@@ -1289,8 +1289,8 @@ final class CanvasResizeLogicTests: XCTestCase {
         XCTAssertEqual(plan.audit.inkedCels, 0)
         XCTAssertTrue(plan.audit.canProceed)
 
-        manager.layers[1].cels[0].bakedImage =
-            CanvasFixture.solidImage(.green, rect: CGRect(x: 2, y: 2, width: 4, height: 4))
+        CanvasFixture.setBakedContent(manager, layerIndex: 1,
+            CanvasFixture.solidImage(.green, rect: CGRect(x: 2, y: 2, width: 4, height: 4)))
         let withBaked = try XCTUnwrap(manager.planResize(to: CGSize(width: 96, height: 96)))
         XCTAssertEqual(withBaked.audit.inkedCels, 1, "bakedImage counts — it has no hasContent door")
         XCTAssertEqual(withBaked.audit.blankCels, 1)
@@ -1458,15 +1458,15 @@ final class CanvasResizeLogicTests: XCTestCase {
                                color: .red, alpha: 1, hardness: 1)
             raster.endStroke()
         }
-        manager.layers[0].cels[0].bakedImage =
-            CanvasFixture.solidImage(.blue, rect: CGRect(x: 24, y: 8, width: 12, height: 20), size: size)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0,
+            CanvasFixture.solidImage(.blue, rect: CGRect(x: 24, y: 8, width: 12, height: 20), size: size))
 
         // A second cel on layer 0, so the per-cel loop runs more than once per layer, and a third on
         // layer 1 with its own baked content.
         _ = manager.addCel(layerIndex: 0, startFrame: 12, frameCount: 2)
         _ = manager.addCel(layerIndex: 1, startFrame: 12, frameCount: 2)
-        manager.layers[1].cels[1].bakedImage =
-            CanvasFixture.solidImage(.yellow, rect: CGRect(x: 2, y: 30, width: 10, height: 10), size: size)
+        CanvasFixture.setBakedContent(manager, layerIndex: 1, frame: 12,
+            CanvasFixture.solidImage(.yellow, rect: CGRect(x: 2, y: 30, width: 10, height: 10), size: size))
 
         manager.addVectorLayer()
         manager.layers[2].cels[0].vector?.addStroke(
@@ -1485,12 +1485,13 @@ final class CanvasResizeLogicTests: XCTestCase {
     private static func documentWithManyInkedCels(count: Int) -> CanvasManager {
         let manager = CanvasFixture.manager(layerCount: 1)
         let image = CanvasFixture.solidImage(.red, rect: CGRect(x: 4, y: 4, width: 20, height: 20))
-        manager.layers[0].cels[0].bakedImage = image
+        CanvasFixture.setBakedContent(manager, layerIndex: 0, image)
         for index in 1..<count {
             _ = manager.addCel(layerIndex: 0, startFrame: index * 2 + 12, frameCount: 2)
         }
         for celIndex in manager.layers[0].cels.indices {
-            manager.layers[0].cels[celIndex].bakedImage = image
+            CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                frame: manager.layers[0].cels[celIndex].startFrame, image)
         }
         return manager
     }

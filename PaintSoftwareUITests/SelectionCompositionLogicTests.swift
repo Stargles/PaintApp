@@ -102,13 +102,12 @@ final class SelectionCompositionLogicTests: XCTestCase {
 
     /// **The wand composes too**: all three modes land through `finishSelection`, so a flood-filled
     /// loop is added to a rectangle exactly as a second rectangle is.
-    func testAWandSelectionComposesOntoARectangle() {
+    func testAWandSelectionComposesOntoARectangle() throws {
         let manager = CanvasFixture.manager(layerCount: 1)
         // A raster cel with an opaque square at the bottom right; the wand floods that square.
         let square = CGRect(x: 40, y: 40, width: 16, height: 16)
-        manager.layers[0].cels[0].raster = RasterLayerTexture(
-            size: CanvasFixture.canvasSize,
-            image: CanvasFixture.solidImage(.red, rect: square), strokeCount: 1)
+        manager.layers[0].cels[0].raster = try CanvasFixture.rasterTexture(
+            CanvasFixture.solidImage(.red, rect: square), size: CanvasFixture.canvasSize, strokeCount: 1)
         draw(aroundA, on: manager)
         manager.finishAutomaticSelection(at: CGPoint(x: 48, y: 48))
         XCTAssertTrue(contains(manager.selection, centreOfA), "the rectangle is still selected")

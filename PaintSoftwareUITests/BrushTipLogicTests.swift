@@ -349,7 +349,7 @@ final class BrushTipLogicTests: XCTestCase {
             scratch.stampImage(.builtIn(.square), at: point, diameter: diameter, angle: angle,
                                color: .blue, alpha: 0.7, blendMode: .normal)
         }
-        scratch.commit(into: viaScratch)
+        try scratch.commit(into: viaScratch).get()
 
         let a = try XCTUnwrap(Self.rgba(of: viaScratch)), b = try XCTUnwrap(Self.rgba(of: direct))
         XCTAssertTrue(b.bytes.contains { $0 != 0 }, "Setup: something was drawn at all")
@@ -798,7 +798,12 @@ final class BrushTipLogicTests: XCTestCase {
     }
 
     private static func rgba(of texture: RasterLayerTexture) -> (bytes: [UInt8], width: Int, height: Int)? {
-        rgba(of: texture.renderToUIImage().cgImage)
+        do {
+            return rgba(of: try texture.renderToUIImage().get().cgImage)
+        } catch {
+            XCTFail("Could not render brush-tip pixels: \(error)")
+            return nil
+        }
     }
 
     private static func rgba(of cg: CGImage?) -> (bytes: [UInt8], width: Int, height: Int)? {

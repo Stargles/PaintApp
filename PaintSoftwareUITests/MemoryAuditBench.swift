@@ -464,7 +464,11 @@ final class MemoryAuditBench: XCTestCase {
             var held: [UIImage] = []
             let start = CFAbsoluteTimeGetCurrent()
             for cel in manager.layers[0].cels where cel.raster.hasContent {
-                held.append(cel.raster.renderToUIImage())
+                do { held.append(try cel.raster.renderToUIImage().get()) }
+                catch {
+                    XCTFail("Could not render raster for the save-snapshot audit: \(error)")
+                    return
+                }
             }
             let elapsed = CFAbsoluteTimeGetCurrent() - start
             let after = residentBytes()

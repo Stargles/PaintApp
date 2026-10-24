@@ -164,7 +164,7 @@ enum RasterVectorParity {
     static func rasterBase(_ scenario: ParityScenario, backdrop: VectorElement?) throws -> RasterLayerTexture {
         guard let backdrop else { return RasterLayerTexture.empty(size: scenario.canvasSize) }
         let image = (try XCTUnwrap(VectorCanvas(size: scenario.canvasSize, elements: [backdrop]).render()))
-        return RasterLayerTexture.load(from: image, size: scenario.canvasSize)
+        return try CanvasFixture.rasterTexture(image, size: scenario.canvasSize)
     }
 
     /// Both renders of one scenario.
@@ -185,7 +185,7 @@ enum RasterVectorParity {
 
         let elements = (backdrop.map { [$0] } ?? []) + [.stroke(paint), .stroke(erase)]
         let vector = (try XCTUnwrap(VectorCanvas(size: scenario.canvasSize, elements: elements).render()))
-        return (texture.renderToUIImage(), vector)
+        return (try texture.renderToUIImage().get(), vector)
     }
 
     // MARK: - Comparison
@@ -319,7 +319,7 @@ enum RasterVectorParity {
 
         let elements = (backdrop.map { [$0] } ?? []) + pieces
         let vector = (try XCTUnwrap(VectorCanvas(size: scenario.canvasSize, elements: elements).render()))
-        return report(raster: texture.renderToUIImage(), vector: vector,
+        return report(raster: try texture.renderToUIImage().get(), vector: vector,
                       size: scenario.canvasSize, tolerance: tolerance)
     }
 }
@@ -591,7 +591,7 @@ final class RasterVectorParityLogicTests: XCTestCase {
 
         let vector = (try XCTUnwrap(VectorCanvas(size: scene.canvasSize,
                                   elements: [.stroke(paint), .stroke(erase)]).render()))
-        guard let report = RasterVectorParity.report(raster: texture.renderToUIImage(), vector: vector,
+        guard let report = RasterVectorParity.report(raster: try texture.renderToUIImage().get(), vector: vector,
                                                      size: scene.canvasSize) else {
             return XCTFail("Could not read back both tiers")
         }

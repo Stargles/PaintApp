@@ -713,7 +713,7 @@ final class LiquifyLogicTests: XCTestCase {
                 }
             }
         }
-        let snapshot = CelPixelSnapshot(raster: nil, baked: image, size: size)
+        let snapshot = try XCTUnwrap(CelPixelSnapshot(capturing: nil, baked: image, size: size))
         let source = try XCTUnwrap(CoreGraphicsCompositor.premultipliedBytes(try XCTUnwrap(image.cgImage), width: 320, height: 192))
         let previousBudget = CompositorBudget.budgetOverrideBytes
         defer { CompositorBudget.budgetOverrideBytes = previousBudget }

@@ -199,7 +199,14 @@ final class BrushEngineLogicTests: XCTestCase {
 
     /// Reads a texture's pixels back as straight (un-premultiplied) RGBA bytes.
     private func rgbaPixels(of texture: RasterLayerTexture) -> (bytes: [UInt8], width: Int, height: Int)? {
-        guard let cg = texture.renderToUIImage().cgImage else { return nil }
+        let cg: CGImage
+        do {
+            guard let image = try texture.renderToUIImage().get().cgImage else { return nil }
+            cg = image
+        } catch {
+            XCTFail("Could not render raster test pixels: \(error)")
+            return nil
+        }
         let width = cg.width, height = cg.height
         var bytes = [UInt8](repeating: 0, count: width * height * 4)
         let ok = bytes.withUnsafeMutableBytes { raw -> Bool in
@@ -1228,7 +1235,7 @@ final class BrushEngineLogicTests: XCTestCase {
     /// direction only. That is the intended behaviour rather than a regression to the square, and
     /// what has to be proved about it is not its size but that it loses nothing: the commit must
     /// still be byte-for-byte what stamping into the cel would have been.
-    func testAStrokeThatTurnsThroughNinetyDegreesCommitsExactly() {
+    func testAStrokeThatTurnsThroughNinetyDegreesCommitsExactly() throws {
         let size = CGSize(width: 512, height: 512)
         let direct = RasterLayerTexture(size: size)
         let viaScratch = RasterLayerTexture(size: size)
@@ -1245,7 +1252,7 @@ final class BrushEngineLogicTests: XCTestCase {
         XCTAssertGreaterThan(scratch.windowRect.height, 250,
                             "The turn is what grows the second axis — if it did not, the fixture is "
                             + "not exercising the case")
-        scratch.commit(into: viaScratch)
+        try scratch.commit(into: viaScratch).get()
 
         assertPixelsMatch(viaScratch, direct,
                           "A stroke that turns must carry every dab through every asymmetric "
@@ -1298,7 +1305,7 @@ final class BrushEngineLogicTests: XCTestCase {
     /// `tolerance: 2`, and that helper's own doc explains why (compositing into an 8-bit scratch and
     /// then over the layer rounds twice where stamping straight in rounds once). The slack is bounded
     /// and does not grow with the stroke; a geometry mistake is not bounded like that.
-    func testAnAdditiveScratchCommitsExactlyWhatDirectStampingWouldHave() {
+    func testAnAdditiveScratchCommitsExactlyWhatDirectStampingWouldHave() throws {
         let size = CGSize(width: 256, height: 256)
         let dabs: [(CGPoint, CGFloat)] = [(CGPoint(x: 90, y: 100), 12), (CGPoint(x: 104, y: 108), 14),
                                           (CGPoint(x: 120, y: 116), 10), (CGPoint(x: 133, y: 130), 16)]
@@ -1316,7 +1323,7 @@ final class BrushEngineLogicTests: XCTestCase {
             scratch.stampCircle(at: point, radius: radius, color: .blue, alpha: 0.5, hardness: 0.8,
                                 blendMode: .normal)
         }
-        scratch.commit(into: viaScratch)
+        try scratch.commit(into: viaScratch).get()
 
         assertPixelsMatch(viaScratch, direct,
                           "A paint stroke through the window must land the pixels stamping "
@@ -1326,7 +1333,7 @@ final class BrushEngineLogicTests: XCTestCase {
     /// The same equality for the erase, which is the case that cannot be expressed as something
     /// drawn on top: the window starts from the cel's own pixels, takes `.destinationOut` punches
     /// out of them, and commits by replacing that region outright.
-    func testAReplacingScratchCommitsExactlyWhatDirectErasingWouldHave() {
+    func testAReplacingScratchCommitsExactlyWhatDirectErasingWouldHave() throws {
         let size = CGSize(width: 256, height: 256)
         let direct = RasterLayerTexture(size: size)
         direct.stampCircle(at: CGPoint(x: 128, y: 128), radius: 60, color: .green, alpha: 1, hardness: 1)
@@ -1334,14 +1341,14 @@ final class BrushEngineLogicTests: XCTestCase {
         viaScratch.stampCircle(at: CGPoint(x: 128, y: 128), radius: 60, color: .green, alpha: 1, hardness: 1)
 
         let scratch = StrokeScratch(canvasSize: size,
-                                    role: .replacing(backdrop: viaScratch.renderIfNonEmpty()))
+                                    role: .replacing(backdrop: try viaScratch.renderIfNonEmpty().get()))
         for x in stride(from: CGFloat(100), through: 160, by: 6) {
             direct.stampCircle(at: CGPoint(x: x, y: 128), radius: 10, color: .black, alpha: 0.7,
                                hardness: 1, blendMode: .destinationOut)
             scratch.stampCircle(at: CGPoint(x: x, y: 128), radius: 10, color: .black, alpha: 0.7,
                                 hardness: 1, blendMode: .destinationOut)
         }
-        scratch.commit(into: viaScratch)
+        try scratch.commit(into: viaScratch).get()
 
         assertPixelsMatch(viaScratch, direct,
                           "An erase through the window must take away exactly what erasing straight "
@@ -1351,7 +1358,7 @@ final class BrushEngineLogicTests: XCTestCase {
     /// A stroke long enough to outgrow its first window still commits exactly, which is the claim
     /// the growth path has to earn: what the old window held is copied into the new one, and the
     /// backdrop fills the ring the old one never covered.
-    func testAStrokeThatOutgrowsItsWindowStillCommitsExactly() {
+    func testAStrokeThatOutgrowsItsWindowStillCommitsExactly() throws {
         let size = CGSize(width: 1024, height: 1024)
         let direct = RasterLayerTexture(size: size)
         direct.stampCircle(at: CGPoint(x: 512, y: 512), radius: 400, color: .red, alpha: 1, hardness: 1)
@@ -1359,7 +1366,7 @@ final class BrushEngineLogicTests: XCTestCase {
         viaScratch.stampCircle(at: CGPoint(x: 512, y: 512), radius: 400, color: .red, alpha: 1, hardness: 1)
 
         let scratch = StrokeScratch(canvasSize: size,
-                                    role: .replacing(backdrop: viaScratch.renderIfNonEmpty()))
+                                    role: .replacing(backdrop: try viaScratch.renderIfNonEmpty().get()))
         // Far longer than `minimumPad`, so the window is reallocated several times over.
         for x in stride(from: CGFloat(200), through: 820, by: 7) {
             direct.stampCircle(at: CGPoint(x: x, y: 512), radius: 9, color: .black, alpha: 1,
@@ -1368,7 +1375,7 @@ final class BrushEngineLogicTests: XCTestCase {
                                 hardness: 1, blendMode: .destinationOut)
         }
         XCTAssertGreaterThan(scratch.windowRect.width, 620, "The window followed the stroke")
-        scratch.commit(into: viaScratch)
+        try scratch.commit(into: viaScratch).get()
 
         assertPixelsMatch(viaScratch, direct,
                           "Growing the window must carry every dab it already held")
@@ -1377,16 +1384,16 @@ final class BrushEngineLogicTests: XCTestCase {
     /// **Erasing a tier that has no bitmap commits nothing, and allocates nothing to do it.** There
     /// is nothing to take away, and writing transparency into the cel would materialise the very
     /// canvas-sized context this whole change exists to avoid — 1 GiB at 16383², for a no-op.
-    func testAnEraserOnABlankTierLeavesItBlankAndUnallocated() {
+    func testAnEraserOnABlankTierLeavesItBlankAndUnallocated() throws {
         let raster = RasterLayerTexture(size: CGSize(width: 16383, height: 16383))
         XCTAssertFalse(raster.hasContent)
         let scratch = StrokeScratch(canvasSize: raster.size,
-                                    role: .replacing(backdrop: raster.renderIfNonEmpty()))
+                                    role: .replacing(backdrop: try raster.renderIfNonEmpty().get()))
         for x in stride(from: CGFloat(8000), through: 8060, by: 6) {
             scratch.stampCircle(at: CGPoint(x: x, y: 8000), radius: 10, color: .black, alpha: 1,
                                 hardness: 1, blendMode: .destinationOut)
         }
-        scratch.commit(into: raster)
+        try scratch.commit(into: raster).get()
         XCTAssertFalse(raster.hasContent,
                        "An erase over nothing must not be the thing that opens the canvas buffer")
     }
@@ -1394,19 +1401,20 @@ final class BrushEngineLogicTests: XCTestCase {
     /// A blank tier has no image, rather than a canvas-sized sheet of transparency. `handleBegin`
     /// used to take one of those as its pre-stroke snapshot and memoize it, so the first touch on an
     /// empty raster cel cost a whole canvas before a single dab was visible.
-    func testABlankTierRendersToNoImageAtAll() {
+    func testABlankTierRendersToNoImageAtAll() throws {
         let raster = RasterLayerTexture(size: CGSize(width: 16383, height: 16383))
-        XCTAssertNil(raster.renderIfNonEmpty(),
+        XCTAssertNil(try raster.renderIfNonEmpty().get(),
                      "Nothing has been drawn, so there is nothing to show and nothing to allocate")
         raster.stampCircle(at: CGPoint(x: 100, y: 100), radius: 8, color: .black, alpha: 1, hardness: 1)
-        XCTAssertNotNil(raster.renderIfNonEmpty(), "…and one dab is enough to change the answer")
+        try raster.lastMutationResult.get()
+        XCTAssertNotNil(try raster.renderIfNonEmpty().get(), "…and one dab is enough to change the answer")
     }
 
     /// The selection clip, in the window instead of across the canvas: what the stroke put outside
     /// the path is dropped before the commit, so undo/redo only ever sees the clipped result. This
     /// used to be a canvas-sized `PixelOps.maskedComposite` against a canvas-sized pre-stroke
     /// snapshot — two more whole canvases per clipped stroke than the clip needs.
-    func testTheSelectionClipDropsWhatTheStrokePutOutsideThePath() {
+    func testTheSelectionClipDropsWhatTheStrokePutOutsideThePath() throws {
         let size = CGSize(width: 256, height: 256)
         let raster = RasterLayerTexture(size: size)
         let scratch = StrokeScratch(canvasSize: size, role: .additive)
@@ -1415,7 +1423,7 @@ final class BrushEngineLogicTests: XCTestCase {
         scratch.stampCircle(at: CGPoint(x: 200, y: 128), radius: 12, color: .black, alpha: 1,
                             hardness: 1, blendMode: .normal)
         scratch.clip(to: CGPath(rect: CGRect(x: 0, y: 0, width: 128, height: 256), transform: nil))
-        scratch.commit(into: raster)
+        try scratch.commit(into: raster).get()
 
         guard let pixels = rgbaPixels(of: raster) else {
             return XCTFail("Could not read back the committed texture")
@@ -1555,26 +1563,26 @@ final class BrushEngineLogicTests: XCTestCase {
     /// `1 - 0.5² = 0.75` removed — 25% of the ink left standing — is what punching each dab
     /// separately produced, and the assertions name it so a regression cannot pass by darkening both
     /// probes together.
-    func testAnEraserAtHalfOpacityTakesAwayHalfOnBothTiers() {
+    func testAnEraserAtHalfOpacityTakesAwayHalfOnBothTiers() throws {
         let eraser = Self.flatBrush(flow: 1, spacing: 0.15)
         let samples = Self.crossingStroke()
 
-        func opaqueTexture() -> RasterLayerTexture {
+        func opaqueTexture() throws -> RasterLayerTexture {
             let texture = RasterLayerTexture(size: Self.canvasSize)
-            texture.reset(to: Self.solidImage(.black, size: Self.canvasSize), strokeCount: 1)
+            texture.reset(toSource: try CanvasFixture.rasterSource(Self.solidImage(.black, size: Self.canvasSize)), strokeCount: 1)
             return texture
         }
 
         // The replay tier.
-        let replayed = opaqueTexture()
+        let replayed = try opaqueTexture()
         BrushStamper.stampStroke(into: replayed, samples: samples, brush: eraser, color: .black,
                                  brushSize: 8, brushOpacity: 0.5, isEraser: true,
                                  random: DabRandom(seed: 7))
 
         // The live tier: the same dabs, into the window the pen erases into.
-        let committed = opaqueTexture()
+        let committed = try opaqueTexture()
         let scratch = StrokeScratch(canvasSize: Self.canvasSize,
-                                    role: .subtractive(backdrop: committed.renderToUIImage()),
+                                    role: .subtractive(backdrop: try committed.renderToUIImage().get()),
                                     opacity: 0.5)
         let walk = BrushStamper.bake(samples: samples, brush: eraser, color: .black, brushSize: 8,
                                      brushOpacity: 0.5, isEraser: true, random: DabRandom(seed: 7))
@@ -1585,7 +1593,7 @@ final class BrushEngineLogicTests: XCTestCase {
             scratch.stampCircle(at: dab.center, radius: dab.radius, color: dab.color,
                                 alpha: dab.alpha, hardness: hardness, blendMode: dab.blendMode)
         }
-        scratch.commit(into: committed)
+        try scratch.commit(into: committed).get()
 
         for (tier, texture) in [("the replay tier", replayed), ("the live tier", committed)] {
             guard let pixels = rgbaPixels(of: texture) else {
@@ -1719,10 +1727,10 @@ final class BrushEngineLogicTests: XCTestCase {
     ///
     /// The existing blend-mode tests are all one-dab or comparative (`VectorCanvas`' isolation rules
     /// compare a run against a run) and pin nothing about a stroke's overlap with itself.
-    func testAMultiplyStrokeBlendsOnceWhereItCrossesItself() {
+    func testAMultiplyStrokeBlendsOnceWhereItCrossesItself() throws {
         let backdrop = UIColor(white: 0.5, alpha: 1)
         let texture = RasterLayerTexture(size: Self.canvasSize)
-        texture.reset(to: Self.solidImage(backdrop, size: Self.canvasSize), strokeCount: 1)
+        texture.reset(toSource: try CanvasFixture.rasterSource(Self.solidImage(backdrop, size: Self.canvasSize)), strokeCount: 1)
         BrushStamper.stampStroke(into: texture, samples: Self.crossingStroke(),
                                  brush: Self.flatBrush(flow: 1, spacing: 0.15, blendMode: .multiply),
                                  color: UIColor(white: 0.5, alpha: 1),

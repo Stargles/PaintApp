@@ -112,9 +112,12 @@ final class FillMendLogicTests: XCTestCase {
     /// for a vector one. Never the line art, so a bare pixel here is a pixel no fill covers.
     private func fillLayerPixels(_ manager: CanvasManager) throws -> Pixels {
         let cel = try XCTUnwrap(manager.layers[1].cels.first)
-        let image = manager.layers[1].kind == .vector
-            ? try XCTUnwrap(cel.vector).render()
-            : cel.raster.renderToUIImage()
+        let image: UIImage?
+        if manager.layers[1].kind == .vector {
+            image = try XCTUnwrap(cel.vector).render()
+        } else {
+            image = try cel.raster.renderToUIImage().get()
+        }
         let cg = try XCTUnwrap(image?.cgImage)
         return Pixels(bytes: try XCTUnwrap(CanvasFixture.rgbaBytes(cg)), width: cg.width)
     }

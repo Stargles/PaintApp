@@ -344,8 +344,15 @@ final class ScatterAxesLogicTests: XCTestCase {
         BrushStamper.stampStroke(into: texture, samples: samples, brush: brush, color: .black,
                                  brushSize: brush.size, brushOpacity: 1,
                                  random: DabRandom(seed: seed))
-        guard let bytes = RasterVectorParity.premultipliedBytes(of: texture.renderToUIImage(),
-                                                               size: canvasSize) else { return 0 }
+        let bytes: [UInt8]
+        do {
+            guard let result = RasterVectorParity.premultipliedBytes(of: try texture.renderToUIImage().get(),
+                                                                     size: canvasSize) else { return 0 }
+            bytes = result
+        } catch {
+            XCTFail("Could not render scatter width: \(error)")
+            return 0
+        }
         let width = Int(canvasSize.width), height = Int(canvasSize.height)
         let centreRow = 120
         var furthest = 0
@@ -363,7 +370,13 @@ final class ScatterAxesLogicTests: XCTestCase {
         BrushStamper.stampStroke(into: texture, samples: samples, brush: brush, color: .black,
                                  brushSize: brush.size, brushOpacity: 1,
                                  random: DabRandom(seed: seed))
-        return RasterVectorParity.premultipliedBytes(of: texture.renderToUIImage(),
-                                                     size: canvasSize) ?? []
+        do {
+            guard let bytes = RasterVectorParity.premultipliedBytes(of: try texture.renderToUIImage().get(),
+                                                                    size: canvasSize) else { return [] }
+            return bytes
+        } catch {
+            XCTFail("Could not render scatter pixels: \(error)")
+            return []
+        }
     }
 }

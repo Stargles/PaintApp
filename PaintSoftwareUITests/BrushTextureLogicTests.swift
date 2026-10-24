@@ -106,8 +106,9 @@ final class BrushTextureLogicTests: XCTestCase {
 
     /// **The vector replay tier**, which is what `VectorLayer.stamp(stroke:into:isEraser:)` runs.
     private static func replayTier(_ brush: Brush, at origin: CGPoint, opacity: Double = 1,
-                                   isEraser: Bool = false, over base: UIImage? = nil) -> RasterLayerTexture {
-        let texture = RasterLayerTexture(size: canvas, image: base)
+                                   isEraser: Bool = false, over base: UIImage? = nil) throws -> RasterLayerTexture {
+        let texture = try base.map { try CanvasFixture.rasterTexture($0, size: canvas) }
+            ?? RasterLayerTexture.empty(size: canvas)
         BrushStamper.stampStroke(into: texture, samples: samples(from: origin), brush: brush,
                                  color: .black, brushSize: brush.size, brushOpacity: opacity,
                                  isEraser: isEraser, random: DabRandom(seed: 0x51A7))
@@ -134,7 +135,7 @@ final class BrushTextureLogicTests: XCTestCase {
     /// the other two if the window's own origin is not accounted for.
     private static func liveTier(_ brush: Brush, at origin: CGPoint, opacity: Double = 1,
                                  role: StrokeScratch.Role = .additive,
-                                 into cel: RasterLayerTexture? = nil) -> RasterLayerTexture {
+                                 into cel: RasterLayerTexture? = nil) throws -> RasterLayerTexture {
         let target = cel ?? RasterLayerTexture(size: canvas)
         let scratch = StrokeScratch(canvasSize: canvas, role: role, opacity: CGFloat(opacity),
                                     texture: brush.texture)
@@ -160,7 +161,7 @@ final class BrushTextureLogicTests: XCTestCase {
                 return BrushStamper.stampSpacing(brushSize: brush.size, fraction: resolved.spacing)
             }
         }
-        scratch.commit(into: target)
+        try scratch.commit(into: target).get()
         return target
     }
 
@@ -203,7 +204,7 @@ final class BrushTextureLogicTests: XCTestCase {
     }
 
     private static func pixels(_ texture: RasterLayerTexture) throws -> Pixels {
-        try pixels(texture.renderToUIImage())
+        try pixels(texture.renderToUIImage().get())
     }
 
     // MARK: - 1. A textured stroke differs, and only where the ink is
@@ -376,7 +377,7 @@ final class BrushTextureLogicTests: XCTestCase {
         // Deliberately not on a tile boundary and not at the canvas origin, so a window anchored to
         // itself lands the paper somewhere else rather than coincidentally in the same place.
         let origin = CGPoint(x: 53, y: 91)
-        let live = try Self.pixels(Self.liveTier(brush, at: origin))
+        let live = try Self.pixels(try Self.liveTier(brush, at: origin))
         let replay = try Self.pixels(Self.replayTier(brush, at: origin))
         XCTAssertFalse(live.isBlank, "fixture precondition: the live tier drew something")
 
@@ -410,7 +411,7 @@ final class BrushTextureLogicTests: XCTestCase {
         BrushStamper.stampStroke(into: scratch, samples: Self.samples(from: origin), brush: brush,
                                  color: .black, brushSize: brush.size, brushOpacity: 1,
                                  random: DabRandom(seed: 0x51A7))
-        scratch.commit(into: cel)
+        try scratch.commit(into: cel).get()
 
         let viaScratch = try Self.pixels(cel)
         let direct = try Self.pixels(Self.replayTier(brush, at: origin))

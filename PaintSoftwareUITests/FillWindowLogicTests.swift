@@ -246,7 +246,7 @@ final class FillWindowLogicTests: XCTestCase {
 
     private func committedPixel(_ manager: CanvasManager, _ point: CGPoint) throws -> (r: UInt8, a: UInt8) {
         let cel = manager.layers[0].cels[0]
-        let cg = try XCTUnwrap(cel.raster.renderToUIImage().cgImage)
+        let cg = try XCTUnwrap(try cel.raster.renderToUIImage().get().cgImage)
         XCTAssertEqual(cg.width, Int(Self.largeCanvas.width), "the raster tier is the canvas")
         let bytes = try XCTUnwrap(CanvasFixture.rgbaBytes(cg))
         let i = (Int(point.y) * cg.width + Int(point.x)) * 4

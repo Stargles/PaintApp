@@ -1257,8 +1257,8 @@ final class LassoFillLogicTests: XCTestCase {
     /// below, and content there was covered by a fill even before this change.
     private func setStrokeContent(_ manager: CanvasManager, _ image: UIImage) throws {
         let index = try XCTUnwrap(manager.activeCelIndex(inLayer: 0, atFrame: manager.currentFrame))
-        manager.layers[0].cels[index].raster = RasterLayerTexture(size: CanvasFixture.canvasSize,
-                                                                  image: image, strokeCount: 1)
+        manager.layers[0].cels[index].raster = try CanvasFixture.rasterTexture(
+            image, size: CanvasFixture.canvasSize, strokeCount: 1)
     }
 
     /// A vector layer holding one opaque black dab at the canvas centre — the "line art" the fill has
@@ -1297,7 +1297,7 @@ final class LassoFillLogicTests: XCTestCase {
     private func committedPixel(_ manager: CanvasManager,
                                 _ point: CGPoint) throws -> (r: UInt8, g: UInt8, b: UInt8, a: UInt8) {
         let cel = try XCTUnwrap(manager.layers[0].cels.first)
-        return try pixelOf(cel.raster.renderToUIImage(), at: point)
+        return try pixelOf(cel.raster.renderToUIImage().get(), at: point)
     }
 
     private func pixelOf(_ image: UIImage, at point: CGPoint) throws -> (r: UInt8, g: UInt8, b: UInt8, a: UInt8) {

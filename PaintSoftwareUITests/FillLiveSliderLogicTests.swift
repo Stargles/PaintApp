@@ -101,7 +101,7 @@ final class FillLiveSliderLogicTests: XCTestCase {
 
         XCTAssertNil(manager.liveFill, "the picture is let go")
         XCTAssertEqual(manager.history.undoStack.count, before + 1, "one step for the fill")
-        let landed = try XCTUnwrap(manager.layers[1].cels.first?.raster.renderToUIImage().cgImage)
+        let landed = try XCTUnwrap(try manager.layers[1].cels.first?.raster.renderToUIImage().get().cgImage)
         let bytes = try XCTUnwrap(CanvasFixture.rgbaBytes(landed))
         for point in [CGPoint(x: 30, y: 30), CGPoint(x: 14, y: 14), CGPoint(x: 60, y: 32)] {
             let landedAlpha = bytes[(Int(point.y) * landed.width + Int(point.x)) * 4 + 3]
@@ -191,7 +191,7 @@ final class FillLiveSliderLogicTests: XCTestCase {
 
         manager.commitInteractiveFill()
         let cel = try XCTUnwrap(manager.activeCelIndex(inLayer: 0, atFrame: manager.currentFrame))
-        let landed = try XCTUnwrap(manager.layers[0].cels[cel].raster.renderToUIImage().cgImage)
+        let landed = try XCTUnwrap(try manager.layers[0].cels[cel].raster.renderToUIImage().get().cgImage)
         let bytes = try XCTUnwrap(CanvasFixture.rgbaBytes(landed))
         func landedAlpha(_ point: CGPoint) -> UInt8 { bytes[(Int(point.y) * landed.width + Int(point.x)) * 4 + 3] }
         XCTAssertGreaterThan(landedAlpha(inside), 200, "the commit lands the fill inside the region")

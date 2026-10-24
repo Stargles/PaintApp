@@ -109,8 +109,8 @@ final class ProjectSaveLogicTests: XCTestCase {
         }
     }
 
-    private func hasVisiblePixels(_ cel: Cel) -> Bool {
-        PixelOps.opaqueContentBounds(cel.raster.renderToUIImage()) != nil
+    private func hasVisiblePixels(_ cel: Cel) throws -> Bool {
+        PixelOps.opaqueContentBounds(try cel.raster.renderToUIImage().get()) != nil
     }
 
     // MARK: - The thumbnail composites the tile, not the canvas
@@ -255,7 +255,7 @@ final class ProjectSaveLogicTests: XCTestCase {
 
     /// The baseline: everything the snapshot carries makes it to disk and comes back. If a field were
     /// dropped from `SaveSnapshot` while moving the write off main, this is what catches it.
-    func testSaveThenReloadProducesAFullyFormedPackage() {
+    func testSaveThenReloadProducesAFullyFormedPackage() throws {
         let manager = makeManager()
         let url = projectURL()
 
@@ -282,9 +282,9 @@ final class ProjectSaveLogicTests: XCTestCase {
         XCTAssertEqual(reloaded.layers[0].cels.count, 2, "Layer 0's second cel should survive")
         XCTAssertEqual(reloaded.layers[0].cels.map(\.startFrame).sorted(), [0, 12])
 
-        XCTAssertTrue(hasVisiblePixels(reloaded.layers[0].cels[0]),
+        XCTAssertTrue(try hasVisiblePixels(reloaded.layers[0].cels[0]),
                       "The stamped raster content should come back as pixels, not a blank cel")
-        XCTAssertTrue(hasVisiblePixels(reloaded.layers[1].cels[0]),
+        XCTAssertTrue(try hasVisiblePixels(reloaded.layers[1].cels[0]),
                       "The second raster layer's content should come back too")
         XCTAssertEqual(reloaded.layers[2].cels[0].vector?.strokes.count, 1,
                        "The vector layer's stroke should round-trip through its JSON payload")
@@ -1201,7 +1201,7 @@ final class ProjectSaveLogicTests: XCTestCase {
     /// order is not cosmetic — `activeCelIndex` searches it and `addCel` maintains it with an explicit
     /// sort — so a shuffle would show up as the wrong drawing at a frame, some time later, with
     /// nothing to connect it to a load. Asserting the ids in order is what makes that loud now.
-    func testLoadingInBackgroundDecodesOffTheMainThreadAndMatchesTheSynchronousLoad() async {
+    func testLoadingInBackgroundDecodesOffTheMainThreadAndMatchesTheSynchronousLoad() async throws {
         let manager = makeManager()
         // Enough cels on one layer that order is observable rather than accidental — one cel per
         // layer would pass a shuffle.
@@ -1242,7 +1242,7 @@ final class ProjectSaveLogicTests: XCTestCase {
         // The pixels, not only the bookkeeping: `makeManager` stamps ink on the first cel of the two
         // raster layers, and a decode that raced itself would most cheaply show up as a blank one.
         for layerIndex in 0..<2 {
-            XCTAssertTrue(hasVisiblePixels(background.layers[layerIndex].cels[0]),
+            XCTAssertTrue(try hasVisiblePixels(background.layers[layerIndex].cels[0]),
                           "layer \(layerIndex)'s stamped cel must come back with its pixels")
         }
         // The vector layer's display list is decoded on the same fan-out and is the other thing that
@@ -1426,7 +1426,7 @@ final class ProjectSaveLogicTests: XCTestCase {
     ///
     /// Each cel carries a dot at a position derived from its own index, so "cel 7's ink is on cel 7"
     /// is checkable rather than merely "there are pixels somewhere".
-    func testEveryCelsPixelsAndOrderSurviveTheParallelWrite() {
+    func testEveryCelsPixelsAndOrderSurviveTheParallelWrite() throws {
         let layerCount = 3, celsPerLayer = 5
         let manager = CanvasFixture.manager(layerCount: layerCount)
 
@@ -1471,7 +1471,7 @@ final class ProjectSaveLogicTests: XCTestCase {
                            "Layer \(layerIndex)'s cel timings must survive the write")
 
             for (celIndex, cel) in cels.enumerated() {
-                guard let bounds = PixelOps.opaqueContentBounds(cel.raster.renderToUIImage()) else {
+                guard let bounds = PixelOps.opaqueContentBounds(try cel.raster.renderToUIImage().get()) else {
                     return XCTFail("Layer \(layerIndex) cel \(celIndex) came back empty — its PNG went somewhere else")
                 }
                 let centre = CGPoint(x: bounds.midX, y: bounds.midY)
@@ -1596,7 +1596,7 @@ final class ProjectSaveLogicTests: XCTestCase {
     /// validator that had not been taught about `rasterOmitted` would make every save of this document
     /// silently do nothing, and a test that only inspected the loaded model would go on passing
     /// against a package from before the change.
-    func testACelWhoseRasterTierWasNeverDrawnOnWritesNoPNGAndStillReloads() {
+    func testACelWhoseRasterTierWasNeverDrawnOnWritesNoPNGAndStillReloads() throws {
         let manager = mixedBlanknessManager()
         let inkedCelID = manager.layers[0].cels[0].id
         let blankCelID = manager.layers[0].cels[1].id
@@ -1627,8 +1627,8 @@ final class ProjectSaveLogicTests: XCTestCase {
         XCTAssertEqual(reloaded.layers.count, 2)
         XCTAssertEqual(reloaded.layers[0].cels.map(\.startFrame), [0, 12])
         XCTAssertEqual(reloaded.layers[0].cels.map(\.id), [inkedCelID, blankCelID])
-        XCTAssertTrue(hasVisiblePixels(reloaded.layers[0].cels[0]), "the inked cel keeps its pixels")
-        XCTAssertFalse(hasVisiblePixels(reloaded.layers[0].cels[1]), "the blank cel comes back transparent")
+        XCTAssertTrue(try hasVisiblePixels(reloaded.layers[0].cels[0]), "the inked cel keeps its pixels")
+        XCTAssertFalse(try hasVisiblePixels(reloaded.layers[0].cels[1]), "the blank cel comes back transparent")
         XCTAssertEqual(reloaded.layers[1].cels[0].vector?.strokes.count, 1,
                        "the vector artwork is untouched by any of this")
         // The point of the whole change: no bitmap was allocated for the cels that had none.
@@ -1645,8 +1645,8 @@ final class ProjectSaveLogicTests: XCTestCase {
         let manager = CanvasFixture.manager(layerCount: 1)
         let canvas = try XCTUnwrap(manager.canvasSize)
         let cel = manager.layers[0].cels[0]
-        cel.raster.reset(to: transparentImage(size: canvas, opaquePixelAt: CGPoint(x: 41, y: 17)),
-                         strokeCount: 1)
+        cel.raster.reset(toSource: try CanvasFixture.rasterSource(
+            transparentImage(size: canvas, opaquePixelAt: CGPoint(x: 41, y: 17))), strokeCount: 1)
         let url = projectURL(name: "One Pixel")
         saveAndWait(manager, to: url)
 
@@ -1655,7 +1655,7 @@ final class ProjectSaveLogicTests: XCTestCase {
         XCTAssertNil(savedCelEntries(at: url)[cel.id.uuidString]?["rasterOmitted"])
 
         guard let reloaded = ProjectStore.load(from: url) else { return XCTFail("The package should load") }
-        guard let bounds = PixelOps.opaqueContentBounds(reloaded.layers[0].cels[0].raster.renderToUIImage()) else {
+        guard let bounds = PixelOps.opaqueContentBounds(try reloaded.layers[0].cels[0].raster.renderToUIImage().get()) else {
             return XCTFail("The single opaque pixel did not survive the round trip — this is artwork loss")
         }
         XCTAssertEqual(bounds.midX, 41.5, accuracy: 1)
@@ -1713,7 +1713,7 @@ final class ProjectSaveLogicTests: XCTestCase {
         let cel = reloaded.layers[0].cels[1]
         XCTAssertEqual(cel.id, blankCelID)
         XCTAssertTrue(cel.raster.hasContent, "One opaque pixel is artwork — the bitmap must be kept")
-        guard let bounds = PixelOps.opaqueContentBounds(cel.raster.renderToUIImage()) else {
+        guard let bounds = PixelOps.opaqueContentBounds(try cel.raster.renderToUIImage().get()) else {
             return XCTFail("The single opaque pixel was scanned away — this is artwork loss")
         }
         XCTAssertEqual(bounds.midX, 5.5, accuracy: 1)
@@ -1724,7 +1724,7 @@ final class ProjectSaveLogicTests: XCTestCase {
         saveAndWait(reloaded, to: resaved)
         XCTAssertTrue(rasterPNGNames(at: resaved).contains("\(blankCelID.uuidString)_raster.png"))
         guard let again = ProjectStore.load(from: resaved) else { return XCTFail("The re-save should load") }
-        XCTAssertNotNil(PixelOps.opaqueContentBounds(again.layers[0].cels[1].raster.renderToUIImage()),
+        XCTAssertNotNil(PixelOps.opaqueContentBounds(try again.layers[0].cels[1].raster.renderToUIImage().get()),
                         "The pixel must survive a second round trip too")
     }
 
