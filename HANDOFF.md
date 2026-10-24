@@ -6,45 +6,43 @@ budget, with quality/usage conservation before speed. Continue actionable work w
 only pauses; give concise queue reports. The owner explicitly says not to park for context; automatic
 compaction must preserve continuing work. Architecture is the top priority. Record before acting.
 
-## Combined source qualification — 2026-10-24
+## Current combined source qualification — 2026-10-24
 
-Root authorized a new `tmp/s54-integration` worktree from origin/main, then exact mask
-f34cbe57bde9e6ea16c62a309d329d9e749c0ec1 and cherry-picks video3227b0b8225543f9172dd4e717f16ee0016fbfda,
-vector4016378999f5c69d521f1048ea1d2f9344aa0968 and c5e0f97e6c47269a7548b3aa341610cc44063cf9.
-Record before acting: combine ready source without raster WIP or semantic production changes;
-preserve all current task records and pending gates. No TODO item removal until main merge.
-Root alone runs native. This worker performs source integration, static census/lints/PBX inspection,
-and external52-fault preparation only; no compiler, native, UI injection, simulator or device action.
-External evidence/package: `~/PaintWork/s54-integration/`; component plans remain authoritative inputs.
+Continue from `~/PaintWork/PaintApp-s54-integration`, branch `tmp/s54-integration`; resolve its current
+full pin with `git rev-parse HEAD` and the external `~/PaintWork/s54-integration/ready-for-root.md`.
+Do not restore another tree's older HANDOFF/TODO copy or merge/push/install this unqualified source.
 
-Vector undo payload accounting is active on `tmp/s54-vector-undo` from exact65a8afd831072dbb43d1aba20c37bceed0966e79.
-Trace budget semantics/real storage ownership before proposing code; root must review the compact
-proposal first. Approved: keep amortized max-list slots, price unshared real payload buffers/objects
-with operation-only identities and strong snapshot lifetimes, conservatively handle inline Data,
-and consolidate flat/surcharge consumers. Remove Move closure captures of unused full parts. Runtime
-samples are live arrays; PackedSampleRun is wire-only. Source-only work, no native, no geometry
-unpack/copy to count, persisted pointer/cache or UndoHistory rewrite. Raster author confirms model
-files do not overlap.
-One shared payload accountant now batches all affected canvas lists for a single action; no identity
-survives the call. All flat512 geometry consumers and the separate fill rewrite surcharge are gone;
-fill preflight still reserves the current old archive before allowing future output. Nine tiny logic
-methods plus two existing consumer assertions cover actual RGBA/undo/redo/cost/lifetime boundaries.
-Parsing, UI lints and diff-check are the only gates run here; no native/fault/UI/device claim.
-Root approved final arithmetic follow-up: reuse UndoBudget helpers to saturate nonnegative costs and
-preserve that sentinel in currentCost/extendLast/trim and reservations. Raster author owns the
-SelectionModels added-cost hunk; its preflight semantics remain untouched. Tiny real-history tests
-must prove saturation trims/refuses without trapping, beyond arithmetic alone.
+Integration scope was recorded before acting. Ready mask f34cbe57bde9e6ea16c62a309d329d9e749c0ec1 is
+combined with exact video3227b0b8225543f9172dd4e717f16ee0016fbfda and vector4016378999f5c69d521f1048ea1d2f9344aa0968
+plus c5e0f97e6c47269a7548b3aa341610cc44063cf9. The new worktree began at origin/main then fast-forwarded
+the mask dependency. Cherry-pick conflicts were documentation-only; all exclusive component app/test
+files remain byte-identical, and the three shared files compose disjoint original hunks. No semantic
+production integration change, raster WIP, TODO item removal, graph refresh or native/compiler action.
+Keep the raster author's pending SelectionModels saturated-sum and host-preflight factory integration
+for its coherent later source pin; do not copy that still-independent migration into this build.
 
-## Native qualification follow-up — 2026-10-24 17:10 UTC
+Actual deduplicated logic union is **847 methods in32 classes**: the18 prior501 classes now contain507
+with vector's six MemoryBudget additions; add mask122, video35, and183 distinct vector-consumer methods.
+MemoryBudget38 and FillObject28 are each selected once. External static-census.json lists every actual
+class/method, PBX IDs are unique, both UI lints and diff-check pass. This combined tip has **no native
+result yet**. Root owns the847 normal baseline,52 assertion-fault execution, exact restoration and a
+fresh normal rebuild before UI/device. External reviewed component recipes15 mask+15 video+22 vector
+are composed unchanged (only underscore component-prefixed IDs and provenance/pin metadata differ).
+The external driver is prepared-only, using owned Sim39E and architecture-audit/DerivedData. Consumer
+UI temporary controls are not injected; their separate prepared evidence remains outside the repo.
 
-Integration4f5f75 passed501/501 with zero failures/skips and all724 tracked source bytes/modes exact.
-Both expected-green fill refusal controls passed1/1 with their markers and exact restoration. Raster
-primitives f30b656c separately passed13/13; full consumer integration is still WIP on its own branch.
-The49-fault run stopped at library linked-entry case5: cases1–4 were actual assertion-red, case5
-was unexpectedly green, and all source restored exactly. Investigate the direct shared entry boundary
-rather than credit a later filesystem exception as link-policy proof. Source/app behavior is unchanged;
-add a direct assertion and requalify before remaining faults. No UI/device work after compiled mutants
-until committed normal source has been rebuilt. No merge/push/install.
+## Native qualification checkpoint — existing dependency only
+
+Root's exact65a8afd8 normal baseline passed501/501, zero failures/skips, all724 tracked app/test/project
+bytes/modes exact. It retains the new direct shared ProjectFileTree.entry(link) assertion correcting
+the earlier linked-entry mutant's unexpected green. The serial continuation43 fault run remains owned
+by root on its separate frozen65 tree; do not infer a completed result from this integration.
+Prior4f5 normal501 and both expected-green fill refusal controls passed. Raster primitives f30b656c
+separately passed13/13; full raster consumer source is still a different workstream. Mask afae's121
+compiled app/tests but ran119pass/2old-premise failures; f34's strengthened two-cut/timing/onion follow-up,
+video35, and vector249 are still awaiting native qualification at this combined tip. Full Debug/Release
+fast tiers, cold UI/drawn screenshots, paired bench/device and remaining audit gates stay pending.
+Installed normal app/owner files are untouched. No merge/push/install.
 
 ## Mask source planning work — 2026-10-24
 
