@@ -312,38 +312,28 @@ account usage limits; root continues. The full source inventory is not yet fully
   When retiring temporary repair/converter/UI, preserve permanent
   `ProjectBackupManager.runStartupMaintenance` scheduling and truthful post-maintenance gallery readiness.
 - [ ] Rendering/storage: derived-frame recovery/close, masked source budgets, editable raster residency, video pressure.
-  Raster source integration is now linearly rebased onto exactf475bb93599d2fb1b5b5785931bb2a87cc553424.
-  The coherent stroke factory stages/admits before settlement/recording and forwards the same affected
-  cels to mask/host reads, with live vector binding after commit and no late eraser source read.
-  Owned31 static methods include mask alpha/coexistence/refusal plus normal4096 tool admission;
-  broad native compilation, controls/mutants, UI pictures and fast Debug/Release are pending/root-owned.
-  Editable raster residency is active on `tmp/s54-raster-residency`, based on recorded integration
-  `f69a64ac21c15cefcbe3b79deb5ee035a7793aa4`. Trace actual raster/version/backing ownership before a
-  production rewrite; present the compact design to root first. Scope includes load, frozen render/save
-  snapshots, dirty/undo/baked-image ownership and admission refusal, preserving the current saved format.
-  Use one document source-byte owner and existing persistence/render seams, not a parallel cache or
-  legacy fallback. 300/1000-cel tiny fixtures will count actual resident pictures/bytes and exact output;
-  2048×1024 full-RGBA arithmetic is not measured RSS or the Test1 respring cause. No native jobs,
-  simulators, device actions, main merges or pushes until root grants them.
-  Root's isolated f30 primitive run passed13/13; production source/consumer migration is WIP, with
-  22 prepared residency methods (9 new unrun). Root approved provider-owned immutable tiers,
-  preflight/refusal, serial dirty checkpoints, atomic all-cel resize preparation and exact-owned
-  stale temp cleanup. Combine recorded mask factory dependency f34cbe57 before stroke admission.
-  Existing-test mechanical adaptation belongs to background_fix_review in the same tree; reserve
-  RasterResidencyLogicTests/new consumer regressions to the raster author. Normal-path300/1000cel
-  load/save-freeze/PNG clone replacement/rename and failed-checkpoint preservation are now prepared.
-  Preserve pending fill/shape/text artwork through final allocation refusal before any next edit,
-  and combine that prepared settlement with the mask's pure stroke factory before qualification. All wider
-  native/build/UI/fault gates remain root-owned and unrun; owned-byte sums do not prove process RSS.
-  Root approved affected-cel-only local preparation in Liquify→fill→shape→text order, same staged
-  overrides for planned-frame mask/host reads, Bool beginCanvasEdit guards before caller writes,
-  read-only current text bridge, and existing Liquify finish-owner retry without consuming a refused
-  draft/window. Add coexistence/late-refusal + queued-text focus + exact-one-Liquify-undo retry proofs.
-Raster-residency follow-up checkpoint: staged transient settlement, queued editor text and stable
-owner/cache/reference identities are source-prepared with27 static owned methods; no consumer native
-qualification or RAM/device claim. Merge exact combined f475bb93599d2fb1b5b5785931bb2a87cc553424 next,
-then join its pure stroke factory to staged mask/host/raster admission before timing/cel mutation.
-
+  Editable raster residency is source-prepared on `tmp/s54-raster-residency`, linearly based on
+  exactf475bb93599d2fb1b5b5785931bb2a87cc553424. One app-wide byte owner charges provider-owned
+  native raster buffers and configured working/checkpoint reservations; immutable Source handles
+  serve raster/baked tiers, frozen recipes, undo and saves. Protected compressed current-document
+  resources and dirty version checkpoints reuse ProjectStore's clone/PNG serializer; no format or
+  backup-policy change, eager all-cel hydration, parallel cache/writer or legacy fallback.
+  Staged Liquify→fill→shape→text preparation preserves all drafts/live pixels/history on later
+  refusal. The planned-frame stroke tuple admits hosts/masks with the same affected-cel overrides,
+  settles before recording baseline and begins after playback before cel spawn. Whole-cel and patch
+  undo preflight through the existing Action; failed reads never become blank. Stable owner UUIDs
+  distinguish equal-version source/vector replacements, including interpolation references;
+  snapshots retain original identities. Tag04 changes only disposable .pbk bake digests.
+  Source currently has32 owned static regression methods, including300/1000 normal package load/
+  save-freeze/clone/rename,1000 checkpointed transform outputs, refused undo/redo and transient
+  coexistence, staged linked/mask pixels and bounded4096 source/tool admission. Root's isolated f30
+  primitive13/13 is green. Broad app compilation progressed through the app module; the first three
+  isolated consumer builds stopped on now-corrected fixture/API types before execution. Consumer
+  runtime, mutants, affected cold UI/landscape pictures and fast Debug/Release remain root-owned
+  pending gates. 2048×1024 arithmetic/counted owned allocations do not prove total RSS, private
+  ImageIO/derived compositor memory or the Test1 respring cause. No native/simulator/device actions,
+  main merge or push by this task. External readiness and unexecuted mutation review live under
+  `~/PaintWork/s54-architecture-audit/`; qualify clean source before faults, preserve exact restore.
   Mask source scope active on `tmp/s54-mask-residency` from59d69f12: price each indivisible
   transitive dependency closure in existing chunk/strip source planning; resolve live-mask metadata
   cache before dependency pixels and omit unrelated leaves. Reuse FrameRecipe/MaskResolver; no
@@ -561,28 +551,3 @@ against a transcript this audit does not have.
 - **The raster Move's undo half.** `finalizePendingGesturesForHistoryAction` has fill, shape and text
   arms and no raster-float arm.
 - **Freeform text's minimum-size exemption** is still unruled.
-
-Root approved the narrow whole-cel undo admission follow-up: the existing seven-consumer
-registerUndoableCelChange seam must prepare target raster/baked sources via Action preflight,
-retain provider images through immediate apply, then release its temporary pins. Nil means failed
-preparation; an empty image list is successful logical blank. Refused undo/redo must leave stacks,
-metadata and drawn pixels unchanged and retry once. Structural snapshots continue to use the
-existing atomic visible-window presentation path, never eager whole-document hydration.
-
-Root's isolated9bfc consumer compile stopped before tests on one actual source error: localText
-returns a nonoptional VectorTextElement, so its staging call now uses that existing value contract
-instead of conditional binding. No API/fallback added. Whole-cel preflight follow-up and32nd owned
-method are prepared: refusal in both directions preserves stacks/metadata/RGBA/counts; retry lands
-once and releasing source caches proves temporary image pins are gone. Successful blank remains
-valid. Raster patch undo also stores an explicit successful Result before commit, so a nil source
-cannot be mistaken for an absent preflight. Native successor/other gates remain root-owned/unrun.
-
-Root's isolated8bb compile passed the app source phase and reached test compilation, then stopped
-on InkPoseLogicTests passing its now-owned remainder Source directly to UIImage-only opaque bounds.
-That existing throwing test now explicitly resolves/get()s its source before the actual bounds
-assertion. No compatibility overload or blank fallback. Consumer runtime remains unrun (32 static).
-
-Root's isolateda0aa compile reached the new residency class and stopped on two fixture type errors:
-shapeGestureSamples is an existing [VectorSample], and the local expected red array needs an
-explicit [UInt8] element type. Corrected only those types, preserving samples/pixels/assertions.
-The app module compiled; consumer tests still have not executed (32 static methods).

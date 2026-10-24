@@ -6,120 +6,57 @@ budget, with quality/usage conservation before speed. Continue actionable work w
 only pauses; give concise queue reports. The owner explicitly says not to park for context; automatic
 compaction must preserve continuing work. Architecture is the top priority. Record before acting.
 
-## Raster residency design work — 2026-10-24
+## Editable raster residency — source checkpoint, pending native qualification
 
-`tmp/s54-raster-residency` at `~/PaintWork/PaintApp-s54-raster-residency` starts from origin/main and
-fast-forwards exact integration `f69a64ac21c15cefcbe3b79deb5ee035a7793aa4`. Root assigned the queued
-editable-raster architecture item, including save/frozen reads and retained versions. Record precedes
-source work. First deliverable is an actual-consumer ownership trace and compact proposal for root;
-then coherent implementation and bounded fixtures. Native/test/simulator/device operations remain
-paused while the sole native slot is occupied. No new product feature or saved-format change.
+Own worktree `~/PaintWork/PaintApp-s54-raster-residency`, branch `tmp/s54-raster-residency`, is linearly
+rebased onto exact combined f475bb93599d2fb1b5b5785931bb2a87cc553424. Dependency source/status records
+and MaskParity's immediate purity assertions are preserved. Before-rebase clean checkpoints50ef/ab076
+and external source blob inventories preserve recovery; no divergent merge remains on this branch.
 
-First primitives are prepared: `RasterResidency` admits/counts source allocations and operation
-working reservations; `RasterSurface` owns RGBA8 memory through context/provider release callbacks,
-explicitly copies before a write with readers, and refuses an unprepared mutation. `RasterSource`
-retains an immutable version handle and checkpoints through the existing ProjectStore queue/PNG
-serializer. ProjectStore-owned resource handles clone only current-document compressed resources and
-remove their own temporary files. Six `RasterResidencyLogicTests` exercise extracted CGImage lifetime,
-UIImage rendering-mode alias lifetime, exact old/new COW pixels, admission refusal, escaped-image
-charge after cache eviction, and headroom/overflow. All new files registered by hand with unique PBX
-ids. These primitives are NOT yet connected to Cel/load/save/edit consumers and establish no runtime
-residency bound. No native compilation/tests/mutants/UI/fast tiers have run. Before broad consumers,
-encoder-headroom admission and the allocation/source API are now prepared and root reviewed the direction.
-Dirty allocations reserve one largest-version encoder workspace before filling the cap; actual encoder
-reservations consume that reserve. Checkpointed allocations must readmit workspace before another
-write. Default source+workspace envelope is twice the existing pure device texture-budget function,
-not its test override. The two-picture encoder workspace is a configured estimate; private ImageIO
-allocations and whole-process/device RAM are not proven by these counters. Dirty evictions enqueue
-one checkpoint on the existing save queue and immediately return pending/refusal; render workers never
-wait synchronously on that queue. Loaded source clones and checkpoint files share the normal clone/
-PNG helpers, including clean partial-copy failure. Eleven logic methods are now prepared, adding
-headroom/readmission, immutable file replacement, dirty checkpoint/reload and failed-checkpoint
-preservation. Foundation SDK header review caught NSCondition lacking try-lock; the source now uses
-NSLock plus one in-flight decode group. Static UI lints/plutil/diff-check pass. Native gates remain
-unrun; Cel/load/save/edit integration remains next, so these primitives still establish no runtime cap.
-Source decode now forces the ImageIO decode while its nominal input row storage is admitted,
-refusing corrupt input instead of accepting a later blank draw. The private decoder/encoder internals
-remain outside the owned-buffer proof. An exact alpha scan of the newly decoded private buffer
-records blank proof without treating unvisited resources as empty; the twelfth prepared method pairs
-transparent content with one painted corner texel. The existing serialization helper now rethrows
-for atomic throwing clients. No native gate has run.
+`RasterResidency` is the one app-wide managed raster byte owner. `RasterSurface` context/data-provider
+callbacks retain actual RGBA allocations through extracted CGImage/UIImage aliases, and immutable
+read leases pin before first image resolution. Writes explicitly copy around retained readers.
+`RasterSource` is a small immutable version/backing handle shared by raster/baked tiers, frozen jobs,
+undo and saving. Current-document compressed resources use existing APFS clone/bounded copy primitives;
+dirty old versions checkpoint on the existing ProjectStore save serializer. No1000FD lifetime, eager
+RGBA library copy, separate package writer/cache, new saved schema, compatibility decoder or backup
+policy. Temporary backings own their files; existing startup maintenance prunes only stale owned UUID
+directories once/process, preserving live owners, unknown paths, original resources and packages.
 
-Root's isolated exact e6f0d23d primitive check compiled successfully and ran12 methods:11passed,
-one final COW-release count failed while its temporary UIKit wrapper had no autorelease boundary.
-Old/new RGBA and two-buffer admission assertions passed. Make that release boundary explicit without
-weakening counts/caps. Immutable snapshots now own a read lease before requesting any UIImage;
-CGDataProviders retain the same lease through aliases/escapes. A thirteenth method freezes without
-resolving, edits, then verifies old red/new blue and exact released counts. Native rerun/faults remain
-root-owned and unrun on this revision. Production RasterLayerTexture Result/source migration is WIP
-and is deliberately excluded from this primitive checkpoint; consumers are not yet compile-ready.
-Root's isolated2ef rerun compiled13methods:12passed; unresolved-source pin and COW pool regression
-passed. Dirty checkpoint's first wrapper moved outside the fixture pool after the ReadLease change,
-so UIKit could legitimately retain that autoreleased wrapper after cache eviction and block reload.
-Provider wrapper construction now establishes its own pool and returns a retained Result across it;
-the zero-buffer and exact reload assertions stay unchanged. Native rerun remains pending/root-owned.
+`prepareCanvasEdit` stages only affected cels in Liquify→fill→shape→text order, using existing drawing
+bodies and undo seams. Failure preserves all drafts/live cells/history and queued editor keystrokes.
+Liquify retains its existing finish owner/window on refusal, completes no-ops and fences cancelled
+landings. Stroke preparation returns `(settle, begin, rasterBackdrop)`: required planned-frame host
+and mask reads share staged overrides, settle runs before recording baseline, then timing/playback
+precedes begin/cel spawn. Hosts bind live document vector owners after private geometry settlement.
+Patch/whole-cel undo use existing Action preflight, preserve successful logical blank distinctly from
+failure, and release prepared provider pins after immediate apply. Canvas transforms freeze inputs
+on the owning actor, serially checkpoint each output, then fence project/versions/close before atomic
+all-cel installation. Owner UUID+version keys include interpolation references and preserve original
+identity across freeze; canonical tag04 changes only disposable .pbk cache digests, reclaimed by the
+existing cache maintenance. Projects/Backups/Trash formats are unchanged.
 
-Root's isolated exact `f30b656c042e1d897b63cf57019f8f1efe330434` primitive run compiled and passed
-all13methods. Consumer migration now uses immutable RasterSource tiers/snapshots and typed failable
-reads/edits, the one existing save serializer for source clones/checkpoints, provider-owned scratch
-and patch outputs, preflighted raster undo, and all-cel preparation before atomic resize/flip landing.
-Root accepted these seams and the once-per-process owned-stale-temp sweep; none changes package format.
-Source work is WIP and not yet compile-qualified. Six additional bounded methods (19 total) cover
-the real4096owner, asymmetric crop/flip pixels, stale/live source cleanup, undo refusal/repeated
-landings, late-cel resize refusal, and1000serially checkpointed outputs. New load/save freeze/clone
-regressions remain next. The pending mask dependency `f34cbe57bde9e6ea16c62a309d329d9e749c0ec1`
-replaces stroke-begin callbacks with side-effect-free admission then immediate begin, and must be
-combined with raster admission before timing or cel mutation. No new runtime RAM bound is claimed.
-Existing-test adaptation is delegated to background_fix_review in this same tree, all existing test
-files except RasterResidencyLogicTests.swift; the raster author owns all new consumer regressions
-there and any future RasterResidencyUITests.swift. Exact signatures/census live externally at
-`~/PaintWork/s54-architecture-audit/raster-test-adaptation.md`. Void setBakedContent explicitly reports
-capture failure with XCTest file/line and returns without assignment; no nil/blank compatibility path.
-Three further normal-path methods now prepare300/1000cel load/save-freeze/PNG-clone replacement and
-rename checks plus a real dirty-checkpoint write-failure package-preservation case (22 total).
-Static UI lints/diff-check pass. Before qualification, preserve fill/shape/text drafts until their
-final raster preparation succeeds, propagate settlement refusal before the next edit, and join that
-admission to the mask's pure stroke factory. The current consumer checkpoint records this known
-remaining boundary; it is not runtime-qualified. Root owns native/fast/UI/mutation gates. The test
-adaptation author does not stage/commit; the raster author stages only reviewed owned paths.
-Root approved the required transient-refusal follow-up: one local prepareCanvasEdit tuple stages
-only affected cels in Liquify→fill→shape→text order, reusing each tool's drawing/undo seams, with no
-second durable edit model. All preparations must succeed before any draft/cel/history/timing write.
-Existing beginCanvasEdit becomes Bool and callers guard before their own writes. Mask/host admission
-must consume those same cel overrides at the planned frame; derived references must see them too.
-Text may read the current editor string through its existing view bridge without resigning or
-flushing a draft first; commit alone resigns. Liquify's existing finish owner supplies the same
-preparation for presentation/settlement, retains its callback/window on refusal, and must reject a
-cancelled/stale prepared landing. Add coexistence/later-tool refusal, queued keystroke/focus and
-Liquify refusal/retry/one-undo proofs before qualification. Root is assembling a newer combined
-mask/video/vector-undo dependency; do not rebase or merge while shared test adaptations are WIP.
+Root exact f30 primitive run compiled13/13 green. The current source has32 static residency methods;
+19 consumer methods remain unrun. They cover real300/1000 package cold load/save freeze/exact PNG
+clone/atomic replace/rename,1000 sequential transform outputs with bounded resident buffers, failed
+checkpoint package/dirty-pixel preservation, undo/redo refusal and pin release, coexisting draft late
+refusal plus exact queued text, equal-version owner/cache/linked-recipe pixels, staged mask alpha,
+Liquify refusal/retry/generation and normal4096 paint/erase/Move split/Liquify source admission.
+Broad app module compilation succeeds; three isolated builds stopped before tests on now-fixed
+nonoptional localText use, owned Move remainder read, and two new fixture types. Root owns the next
+normal32 run, native faults, affected cold UI/screenshots, fast Debug/Release and device gates. No
+compiler/parser/native/simulator/device operation by this task during root's restriction. UI helper/
+identifier lints and diff-check pass. No total-RSS/hardware claim follows from counted buffers or the
+two-picture encoder workspace estimate; private ImageIO, placed-image/video and derived renderer
+buffers retain separate existing scopes. Structural/composite presentation still uses the existing
+atomic visible-window path; undo never eagerly hydrates every cel in a structural snapshot.
 
-The staged settlement implementation now prepares only affected cels in Liquify→fill→shape→text
-order and guards every production beginCanvasEdit/beginStructureGesture caller before its own write.
-A shared Liquify finish generation retains refused final output/callback state for retry and rejects
-cancelled prepared landings; unchanged gestures still finish. Text admission reads the queued editor
-string through its existing bridge without resigning it. Owner UUIDs replace source/vector object
-addresses in cache/read identities, including referenced owners in actual interpolation derivation;
-freeze retains the original owner identity. Canonical bake-key tag04 changes disposable .pbk digests
-only, with existing cache maintenance reclaiming old files; Projects/Backups/Trash formats are unchanged.
-Five further methods bring RasterResidencyLogicTests to27 static methods: coexisting draft late refusal,
-queued text pixels/order, deterministic released/distinct-owner cache pixels and actual staged linked
-recipe derivation, Liquify refusal/retry/one undo, and unchanged/cancelled finish lifetime. These new
-consumer tests and production are NOT compiled/run. Root's f475bb93599d2fb1b5b5785931bb2a87cc553424
-combined dependency is the next merge; preserve its MaskParity early assertions. Stroke/mask/host
-admission still needs joining to staged overrides before a coherent consumer native gate.
-
-The task commits are now linearly rebased onto exact combined f475bb93599d2fb1b5b5785931bb2a87cc553424.
-Dependency records/MaskParity purity ordering and vector undo saturation are preserved. The shared
-stroke factory now returns immediate settle/begin closures plus a retained eraser backdrop: settlement
-lands before recording baseline, playback before cel spawn. Hosts and the one mask resolver prepare
-against the same affected-cel map at the planned frame, and hosts bind original live vector owners
-after settlement. No stored prepared flag or second source/cache mechanism. Four added methods
-bring the owned class to31 static tests, covering actual staged mask alpha and bounded4096 paint,
-erase, two-output Move split and Liquify window/final-picture admission with exact RGBA/counters.
-These prove only the configured owned allocation/workspace envelope when run, not private ImageIO,
-derived renderer or whole-process RAM. Source diff-check passes; broad app/test compilation, native
-consumer controls, mutations, UI/screenshots and fast Debug/Release remain unrun/root-owned.
+External current readiness: `~/PaintWork/s54-architecture-audit/raster-consumer-ready-9bfc.md` (updated
+successors therein). Unexecuted fault review: `raster-mutation-review-8bb.md`. Existing-test mechanical
+adaptations are committed separately; no nil/blank compatibility getter or global budget disable.
+Normal controls must be green before each controlled assertion fault; preserve exact app/test/project
+bytes/modes. The existing LiquifyRaster cold paint/undo/save/cold-reopen journey is an affected normal
+UI control; external mask/recording/Liquify refusal templates must use the new tuple factory.
 
 ## Current combined source qualification — 2026-10-24
 
@@ -513,28 +450,3 @@ source restore. The Trash regression compares equivalent URLs with a directory s
 compare standardized paths, and assert retained backup existence AFTER purge before its throwing read.
 The new startup-refusal case misuses a current-package preservation helper on origin.name; repair
 agent will correct that test after this commit. No product defect is inferred from these two failures.
-
-Root approved the narrow whole-cel undo admission follow-up: the existing seven-consumer
-registerUndoableCelChange seam must prepare target raster/baked sources via Action preflight,
-retain provider images through immediate apply, then release its temporary pins. Nil means failed
-preparation; an empty image list is successful logical blank. Refused undo/redo must leave stacks,
-metadata and drawn pixels unchanged and retry once. Structural snapshots continue to use the
-existing atomic visible-window presentation path, never eager whole-document hydration.
-
-Root's isolated9bfc consumer compile stopped before tests on one actual source error: localText
-returns a nonoptional VectorTextElement, so its staging call now uses that existing value contract
-instead of conditional binding. No API/fallback added. Whole-cel preflight follow-up and32nd owned
-method are prepared: refusal in both directions preserves stacks/metadata/RGBA/counts; retry lands
-once and releasing source caches proves temporary image pins are gone. Successful blank remains
-valid. Raster patch undo also stores an explicit successful Result before commit, so a nil source
-cannot be mistaken for an absent preflight. Native successor/other gates remain root-owned/unrun.
-
-Root's isolated8bb compile passed the app source phase and reached test compilation, then stopped
-on InkPoseLogicTests passing its now-owned remainder Source directly to UIImage-only opaque bounds.
-That existing throwing test now explicitly resolves/get()s its source before the actual bounds
-assertion. No compatibility overload or blank fallback. Consumer runtime remains unrun (32 static).
-
-Root's isolateda0aa compile reached the new residency class and stopped on two fixture type errors:
-shapeGestureSamples is an existing [VectorSample], and the local expected red array needs an
-explicit [UInt8] element type. Corrected only those types, preserving samples/pixels/assertions.
-The app module compiled; consumer tests still have not executed (32 static methods).
