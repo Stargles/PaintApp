@@ -7,6 +7,14 @@ speed. Architecture and preserving real artwork take priority. Record before act
 
 ## Current source and qualification — 2026-10-24
 
+Assembly recorded before source edits: root grants this consolidator sole-writer ownership from
+cleandb544db02a2edeacbdd5d0362787353d60d442ad. Apply ONLY reviewed final source nets: touch18a5d297,
+fixturebaa84c19 and responsive/capture2270b07b; no temporary diagnostic code or component doc histories.
+Expected9 existing source paths, prod only ResponseCurveEditorView. Keep owner asks/component ledger/
+architecture intact; refresh current proof statements and run static/lints/plutil only. Root owns all
+native/simulator gates; final coherent422 baseline and final-source qualification remain pending.
+Assembly artifacts: ~/PaintWork/s54-architecture-audit/final-integration/final-ui-assembly-db544/.
+
 The single linear consolidator remains `~/PaintWork/PaintApp-s54-final-integration` on
 `tmp/s54-final-integration`, a documentation successor of67641c5b78423fcce7d8ce2d59a733ff13870515.
 No main merge/push/physical install. Component preservation and exact mappings are external under

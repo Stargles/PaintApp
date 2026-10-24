@@ -10,6 +10,14 @@ is authorized by an old readiness answer: obtain fresh saved-scene readiness whe
 
 ## Current source and next action — 2026-10-24
 
+Assembly recorded before source edits: root grants this consolidator sole-writer ownership from
+cleandb544db02a2edeacbdd5d0362787353d60d442ad. Apply ONLY reviewed final source nets: touch18a5d297,
+fixturebaa84c19 and responsive/capture2270b07b; no temporary diagnostic code or component doc histories.
+Expected9 existing source paths, prod only ResponseCurveEditorView. Keep owner asks/component ledger/
+architecture intact; refresh current proof statements and run static/lints/plutil only. Root owns all
+native/simulator gates; final coherent422 baseline and final-source qualification remain pending.
+Assembly artifacts: ~/PaintWork/s54-architecture-audit/final-integration/final-ui-assembly-db544/.
+
 The single consolidator is `~/PaintWork/PaintApp-s54-final-integration`, `tmp/s54-final-integration`.
 This is a documentation successor of clean67641c5b78423fcce7d8ce2d59a733ff13870515; app/test/project
 bytes are unchanged. Main/origin remain afd2030c831db7a746271fe306e8b5a5b9b02df6. No main merge,
