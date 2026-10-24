@@ -142,9 +142,9 @@ final class LiquifyUITests: PaintUITestCase {
         adjustSlider(app.sliders["sideToolbar.liquifyPowerSlider"], to: 1, tolerance: 0.01)
         // Cross below the centre: the field moves the point, while its edge crosses the wide dab.
         // Transporting the old painted pixels stretches this asymmetric footprint horizontally.
-        canvas.coordinate(withNormalizedOffset: hostPoint(paper, 0.40, 0.39))
+        canvas.coordinate(withNormalizedOffset: hostPoint(paper, 0.40, 0.50))
             .press(forDuration: 0.05,
-                   thenDragTo: canvas.coordinate(withNormalizedOffset: hostPoint(paper, 0.61, 0.39)),
+                   thenDragTo: canvas.coordinate(withNormalizedOffset: hostPoint(paper, 0.61, 0.50)),
                    withVelocity: XCUIGestureVelocity(70), thenHoldForDuration: 0)
         let moved = NSPredicate { _, _ in
             guard let mark = try? footprint() else { return false }
