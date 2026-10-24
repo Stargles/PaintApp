@@ -172,15 +172,55 @@ final class MetalFillEngine {
     func makeSession(referenceRGBA: [UInt8], width: Int, height: Int,
                      lassoMask: [UInt8]? = nil, pathWall: [UInt8]? = nil,
                      gapWidthLimit: Float = .infinity) -> SessionOutcome {
+        makeSession(referenceRGBA: referenceRGBA, width: width, height: height,
+                    lassoMask: lassoMask, pathWall: pathWall, gapWidthLimit: gapWidthLimit) { ring in
+            LassoFillMask.referenceColours(referenceRGBA: referenceRGBA, mask: ring,
+                                           width: width, height: height)
+        }
+    }
+
+    /// A saved fill supplies known covered pixels, rather than a newly drawn lasso's collar. Edge
+    /// Overlap can put its contour inside the ink, so sampling that contour would make ink passable.
+    /// The source remains the endpoint mask for `mendMask`, not a fence around accepted additions.
+    func makeMendSession(referenceRGBA: [UInt8], width: Int, height: Int,
+                         sourceMask: [UInt8], pathWall: [UInt8]? = nil) -> SessionOutcome {
+        makeSession(referenceRGBA: referenceRGBA, width: width, height: height,
+                    lassoMask: sourceMask, pathWall: pathWall, gapWidthLimit: 0) { _ in
+            LassoFillMask.referenceColours(referenceRGBA: referenceRGBA, mask: sourceMask,
+                                           width: width, height: height)
+        }
+    }
+
+    /// Complete lasso inputs travel together; there is no bucket/reference-override combination.
+    fileprivate struct LassoPreparation {
+        let mask: [UInt8]
+        let ring: [UInt8]
+        let colours: (SIMD4<Float>, SIMD4<Float>?)
+    }
+
+    private func makeSession(referenceRGBA: [UInt8], width: Int, height: Int,
+                             lassoMask: [UInt8]?, pathWall: [UInt8]?, gapWidthLimit: Float,
+                             sampleReferenceColours: ([UInt8]) -> (SIMD4<Float>, SIMD4<Float>?)) -> SessionOutcome {
         let needed = MetalFillSession.predictedBytes(width: width, height: height,
                                                      isLasso: lassoMask != nil)
         guard CompositorBudget.hasHeadroom(for: needed) else {
             return .noHeadroom(needed: needed,
                                available: CompositorBudget.availableMemoryOverrideBytes ?? os_proc_available_memory())
         }
+        guard width > 0, height > 0, width <= 16_383, height <= 16_383,
+              referenceRGBA.count >= width * height * 4,
+              lassoMask.map({ $0.count >= width * height }) ?? true,
+              pathWall.map({ $0.count >= width * height * 4 }) ?? true else {
+            return .unavailable(needed: needed)
+        }
+        // Preparation follows the shared refusal checks, so a known budget refusal allocates no ring.
+        let lasso = lassoMask.map { mask in
+            let ring = LassoFillMask.ringMask(mask, width: width, height: height)
+            return LassoPreparation(mask: mask, ring: ring, colours: sampleReferenceColours(ring))
+        }
         guard let session = MetalFillSession(engine: self, referenceRGBA: referenceRGBA,
                                              width: width, height: height,
-                                             lassoMask: lassoMask, pathWall: pathWall,
+                                             lasso: lasso, pathWall: pathWall,
                                              gapWidthLimit: gapWidthLimit) else {
             return .unavailable(needed: needed)
         }
@@ -342,7 +382,7 @@ final class MetalFillSession {
     private let lassoBuf: MTLBuffer?
     /// The loop's one-pixel inner collar, from `LassoFillMask.ringMask` — the collar flood's seeds.
     private let ringBuf: MTLBuffer?
-    /// Second reference colour's walls / reached set / basins, allocated only when the ring's modal
+    /// Second reference colour's walls / reached set / basins, allocated only when the sampled modal
     /// colour is not paper (LASSO_FILL.md §6 2a caps `|C|` at 2).
     private let wall2Buf: MTLBuffer?
     private let region2Buf: MTLBuffer?
@@ -359,8 +399,8 @@ final class MetalFillSession {
     /// what it is from the fill queue without touching main-thread gesture state.
     let isLasso: Bool
 
-    /// The colours the collar flood may walk through — LASSO_FILL.md §6 2a's `C`, computed once from
-    /// the ring. Empty for a bucket fill.
+    /// LASSO_FILL.md §6 2a's paper/modal references, computed once from a new lasso's ring or a saved
+    /// fill's known coverage. Empty for a bucket fill.
     private(set) var referenceColours: (SIMD4<Float>, SIMD4<Float>?) = (.zero, nil)
 
     /// Pixels the **last** `fill(...)` painted at full coverage — the artist-visible fill, excluding
@@ -418,11 +458,7 @@ final class MetalFillSession {
     private let gapWidthLimit: Float
 
     fileprivate init?(engine: MetalFillEngine, referenceRGBA: [UInt8], width: Int, height: Int,
-                      lassoMask: [UInt8]?, pathWall: [UInt8]?, gapWidthLimit: Float) {
-        guard width > 0, height > 0, width <= 16_383, height <= 16_383,
-              referenceRGBA.count >= width * height * 4 else { return nil }
-        if let lassoMask, lassoMask.count < width * height { return nil }
-        if let pathWall, pathWall.count < width * height * 4 { return nil }
+                      lasso: MetalFillEngine.LassoPreparation?, pathWall: [UInt8]?, gapWidthLimit: Float) {
         let count = width * height
         let device = engine.device
         func buffer(_ bytes: Int) -> MTLBuffer? { device.makeBuffer(length: max(bytes, 4), options: .storageModeShared) }
@@ -455,20 +491,13 @@ final class MetalFillSession {
         self.width = width
         self.height = height
         self.count = count
-        self.isLasso = lassoMask != nil
-        if let lassoMask {
-            // The ring and the reference colours are per-*gesture*, not per-render: the loop does not
-            // move while the artist drags Threshold or Gap Closing, so deriving them here means a
-            // slider sweep re-runs only the GPU stages. It also means production and
-            // `LassoFillLogicTests` cannot drift apart on how the ring is defined, because neither
-            // computes it — the session does.
-            let ring = LassoFillMask.ringMask(lassoMask, width: width, height: height)
-            let colours = LassoFillMask.referenceColours(referenceRGBA: referenceRGBA, ring: ring,
-                                                         width: width, height: height)
-            guard let lasso = lassoMask.withUnsafeBytes({
+        self.isLasso = lasso != nil
+        if let lasso {
+            let colours = lasso.colours
+            guard let lassoB = lasso.mask.withUnsafeBytes({
                       device.makeBuffer(bytes: $0.baseAddress!, length: count, options: .storageModeShared)
                   }),
-                  let ringB = ring.withUnsafeBytes({
+                  let ringB = lasso.ring.withUnsafeBytes({
                       device.makeBuffer(bytes: $0.baseAddress!, length: count, options: .storageModeShared)
                   }),
                   let alpha = buffer(count),
@@ -481,7 +510,7 @@ final class MetalFillSession {
                   // is one counter and no choice to get wrong.
                   let filled = buffer(MemoryLayout<UInt32>.stride),
                   let params2 = buffer(MemoryLayout<MetalFillEngine.FillParams>.stride) else { return nil }
-            self.lassoBuf = lasso
+            self.lassoBuf = lassoB
             self.ringBuf = ringB
             self.alphaBuf = alpha
             self.filledBuf = filled
@@ -604,7 +633,7 @@ final class MetalFillSession {
         hasNeighbours = true
     }
 
-    /// Mends a saved fill path as a new operation using the session's current lasso reference colours.
+    /// Mends a saved fill path as a new operation using the session's current sampled reference colours.
     /// Returns only the added pixels, leaving Boolean union and path reconstruction to the caller.
     func mendMask(sourceMask: [UInt8], threshold: Float, artworkRect: CGRect?, reach: Float) -> [UInt8]? {
         guard isLasso, sourceMask.count >= count, reach >= 1,

@@ -504,7 +504,7 @@ final class LassoFillLogicTests: XCTestCase {
         let loop = rectangleLoop(CGRect(x: 45, y: 45, width: 40, height: 40))
         let ring = LassoFillMask.ringMask(try XCTUnwrap(LassoFillMask.rasterize(path: loop, width: Self.w, height: Self.h)),
                                           width: Self.w, height: Self.h)
-        let colours = LassoFillMask.referenceColours(referenceRGBA: solid, ring: ring, width: Self.w, height: Self.h)
+        let colours = LassoFillMask.referenceColours(referenceRGBA: solid, mask: ring, width: Self.w, height: Self.h)
 
         XCTAssertEqual(colours.0, .zero, "Paper is always the first reference")
         XCTAssertEqual(try XCTUnwrap(colours.1), SIMD4<Float>(0, 0, 0, 1),
@@ -545,7 +545,7 @@ final class LassoFillLogicTests: XCTestCase {
         let mask = try XCTUnwrap(LassoFillMask.rasterize(path: loop, width: Self.w, height: Self.h))
         let ring = LassoFillMask.ringMask(mask, width: Self.w, height: Self.h)
 
-        let colours = LassoFillMask.referenceColours(referenceRGBA: reference, ring: ring,
+        let colours = LassoFillMask.referenceColours(referenceRGBA: reference, mask: ring,
                                                      width: Self.w, height: Self.h)
         XCTAssertEqual(colours.0, .zero, "Transparent paper")
         XCTAssertNil(colours.1, "…and nothing else, so the ink stays a wall to the collar")
@@ -555,7 +555,7 @@ final class LassoFillLogicTests: XCTestCase {
     /// rather than a sentinel that would have to be branched on.
     func testAnEmptyRingReferencesBlankPaperAlone() {
         let colours = LassoFillMask.referenceColours(referenceRGBA: [UInt8](repeating: 0, count: Self.w * Self.h * 4),
-                                                     ring: [UInt8](repeating: 0, count: Self.w * Self.h),
+                                                     mask: [UInt8](repeating: 0, count: Self.w * Self.h),
                                                      width: Self.w, height: Self.h)
         XCTAssertEqual(colours.0, .zero)
         XCTAssertNil(colours.1)

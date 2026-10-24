@@ -32,8 +32,8 @@ extension CanvasManager {
     }
 
     /// A new edit using the current references/settings at each owned cel's start frame. Stored
-    /// fills carry no original flood seed: their complete contour uses the lasso's existing paper
-    /// and modal-contour reference rule. Only accepted patches are added to the original geometry.
+    /// fills carry no original flood seed: known coverage uses the lasso's existing paper/modal
+    /// colour rule. Only accepted patches are added to the original geometry.
     @MainActor
     func mendAllFills(layerIndex: Int) async -> FillMendOutcome {
         guard fillMendingLayerID == nil else { return .superseded }
@@ -224,9 +224,8 @@ extension CanvasManager {
         let pathWall = StrokeWallMask.mask(of: pathWallSources(work.references), width: width, height: height,
                                            transform: window.transform)
         guard let engine = MetalFillEngine.shared,
-              let session = engine.makeSession(referenceRGBA: rgba, width: width, height: height,
-                                                lassoMask: source, pathWall: pathWall,
-                                                gapWidthLimit: 0).session else { return .needsMoreMemory }
+              let session = engine.makeMendSession(referenceRGBA: rgba, width: width, height: height,
+                                                    sourceMask: source, pathWall: pathWall).session else { return .needsMoreMemory }
         guard var neighbours = neighbourMask(of: work.neighbours, in: window) else { return .needsMoreMemory }
         for index in source.indices where source[index] != 0 { neighbours[index] = 0 }
         session.installNeighbours(neighbours)

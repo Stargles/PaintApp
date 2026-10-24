@@ -102,8 +102,9 @@ enum LassoFillMask {
         return ring
     }
 
-    /// The colours the collar flood is allowed to walk through — LASSO_FILL.md §6 step 2a's set `C`,
-    /// capped at two: **paper, plus the modal colour of the ring when that is not paper.**
+    /// LASSO_FILL.md §6 step 2a's set `C`, capped at two: **paper, plus the modal sampled colour when
+    /// that is not paper.** A new lasso samples its collar ring; mending a saved fill samples its
+    /// known covered pixels, because Edge Overlap may place its contour inside the ink.
     ///
     /// **A lasso has no tapped pixel, so this is the question a bucket fill never has to answer**, and
     /// getting it wrong inverts the tool. The flood calls a pixel a wall when it differs from a
@@ -132,11 +133,11 @@ enum LassoFillMask {
     /// The 4-bit-per-channel histogram is the approximation of the spec's "cluster under the
     /// tolerance metric", and `dominantColour` averages the winning bucket rather than returning its
     /// centre — which is not a refinement, it is load-bearing. See there.
-    static func referenceColours(referenceRGBA: [UInt8], ring: [UInt8],
+    static func referenceColours(referenceRGBA: [UInt8], mask: [UInt8],
                                  width: Int, height: Int) -> (SIMD4<Float>, SIMD4<Float>?) {
         let paper = SIMD4<Float>.zero
-        let modal = dominantColour(referenceRGBA: referenceRGBA, mask: ring, width: width, height: height)
-        // An empty ring returns transparent black too, so this covers "no ring at all" without a
+        let modal = dominantColour(referenceRGBA: referenceRGBA, mask: mask, width: width, height: height)
+        // An empty sample returns transparent black too, so this covers "no sample at all" without a
         // separate branch — and one reference is the right answer there anyway.
         return modal.w < paperAlphaEpsilon ? (paper, nil) : (paper, modal)
     }
@@ -163,11 +164,10 @@ enum LassoFillMask {
     /// whole area. Both of LASSO_FILL.md's fill-nothing cases were affected: a loop inside a solid
     /// (§4 case 2) painted a 20% wash over its whole interior instead of nothing.
     ///
-    /// Two passes over the mask rather than one, and the second is over the ring only, which is a
-    /// perimeter rather than an area.
+    /// Two passes over the selected mask: a perimeter for a new lasso, covered area for saved mending.
     ///
-    /// Called by `referenceColours` with the **ring**, which is the input that makes it correct — see
-    /// there for why the ring and not the loop's whole interior. Returns transparent black for an
+    /// Called by `referenceColours` with its explicit sample — see there for why a new lasso needs
+    /// its ring while a saved fill supplies known coverage. Returns transparent black for an
     /// empty mask, which reads as paper.
     static func dominantColour(referenceRGBA: [UInt8], mask: [UInt8], width: Int, height: Int) -> SIMD4<Float> {
         let count = width * height
