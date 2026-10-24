@@ -1,6 +1,7 @@
 import XCTest
 import SwiftUI
 import Darwin
+import os
 
 @MainActor
 final class PointGeometryRepairLogicTests: XCTestCase {
@@ -30,38 +31,45 @@ final class PointGeometryRepairLogicTests: XCTestCase {
         let package = try install("material-strokes")
         let repairEntered = expectation(description: "repair worker entered")
         repairEntered.assertForOverFulfill = true
-        let maintenanceFinished = expectation(description: "maintenance sees current package")
+        let repairCalls = OSAllocatedUnfairLock(initialState: 0)
+        let maintenanceCalls = OSAllocatedUnfairLock(initialState: 0)
         let releaseRepair = DispatchSemaphore(value: 0)
         defer { releaseRepair.signal() }
         let startup = PointGeometryRepairStartup(repair: {
+            repairCalls.withLock { $0 += 1 }
             XCTAssertFalse(Thread.isMainThread, "File conversion must leave the main thread available for the first screen")
             repairEntered.fulfill()
             XCTAssertEqual(releaseRepair.wait(timeout: .now() + 5), .success)
             return try PointGeometryRepair.run()
         }, maintenance: {
+            maintenanceCalls.withLock { $0 += 1 }
             XCTAssertFalse(Thread.isMainThread)
             XCTAssertTrue(ProjectBackupManager.validateProjectForRestore(at: package),
                           "Ordinary recovery cannot see previous-format geometry")
-            maintenanceFinished.fulfill()
         })
         let launch = Task { await startup.start() }
         await fulfillment(of: [repairEntered], timeout: 2)
         XCTAssertEqual(startup.phase, .preparing, "A main-actor turn must still run while repair waits")
         // Another window/view appearance must share the in-flight pass, never start another swap.
         await startup.start()
+        XCTAssertEqual(repairCalls.withLock { $0 }, 1, "Another window must join the existing repair")
         XCTAssertEqual(startup.phase, .preparing)
         releaseRepair.signal()
         await launch.value
-        await fulfillment(of: [maintenanceFinished], timeout: 2)
+        XCTAssertEqual(maintenanceCalls.withLock { $0 }, 1, "Readiness must include the ordinary recovery pass")
         XCTAssertEqual(startup.phase, .ready)
         await startup.start()
+        XCTAssertEqual(repairCalls.withLock { $0 }, 1)
+        XCTAssertEqual(maintenanceCalls.withLock { $0 }, 1)
     }
 
     func testStartupKeepsLibraryGatedWhileOrdinaryRecoveryFinishes() async {
         let maintenanceEntered = expectation(description: "maintenance entered")
+        let maintenanceCalls = OSAllocatedUnfairLock(initialState: 0)
         let releaseMaintenance = DispatchSemaphore(value: 0)
         defer { releaseMaintenance.signal() }
         let startup = PointGeometryRepairStartup(repair: { PointGeometryRepair.Report() }, maintenance: {
+            maintenanceCalls.withLock { $0 += 1 }
             maintenanceEntered.fulfill()
             XCTAssertEqual(releaseMaintenance.wait(timeout: .now() + 5), .success)
         })
@@ -71,6 +79,7 @@ final class PointGeometryRepairLogicTests: XCTestCase {
                        "The gallery cannot race restore/retention after conversion has finished")
         releaseMaintenance.signal()
         await launch.value
+        XCTAssertEqual(maintenanceCalls.withLock { $0 }, 1)
         XCTAssertEqual(startup.phase, .ready)
     }
 
@@ -79,18 +88,26 @@ final class PointGeometryRepairLogicTests: XCTestCase {
         let before = try bytes(root)
         let repairEntered = expectation(description: "single repair attempt")
         repairEntered.assertForOverFulfill = true
+        let repairCalls = OSAllocatedUnfairLock(initialState: 0)
+        let maintenanceCalls = OSAllocatedUnfairLock(initialState: 0)
         let maintenance = expectation(description: "no maintenance after conversion refusal")
         maintenance.isInverted = true
         let startup = PointGeometryRepairStartup(repair: {
+            repairCalls.withLock { $0 += 1 }
             repairEntered.fulfill()
             return try PointGeometryRepair.run(beforeCommit: {
                 throw PointGeometryRepair.Failure(reason: "Conversion refused before replacement")
             })
-        }, maintenance: { maintenance.fulfill() })
+        }, maintenance: {
+            maintenanceCalls.withLock { $0 += 1 }
+            maintenance.fulfill()
+        })
         await startup.start()
         XCTAssertEqual(startup.phase, .failed("Conversion refused before replacement"))
         try assertInputsPreserved(before)
         await startup.start()
+        XCTAssertEqual(repairCalls.withLock { $0 }, 1, "Failure must wait for an explicit relaunch retry")
+        XCTAssertEqual(maintenanceCalls.withLock { $0 }, 0, "Recovery cannot run after conversion refusal")
         await fulfillment(of: [repairEntered, maintenance], timeout: 0.1)
         XCTAssertEqual(startup.phase, .failed("Conversion refused before replacement"))
     }

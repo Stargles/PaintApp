@@ -9,7 +9,9 @@ compaction must preserve continuing work. Architecture is the top priority. Reco
 ## Repair startup work — 2026-10-24
 
 `tmp/s54-repair-startup` at `~/PaintWork/PaintApp-s54-repair-startup` starts from origin/main and
-fast-forwards recorded fill dependency `fd73d8213075896d77de89b3ea6bc2129feea9a9`. Scope: show responsive
+fast-forwards recorded fill dependency `fd73d8213075896d77de89b3ea6bc2129feea9a9`, then rebases its
+startup-only commits onto combined library/background `770e9bf3e2a806bafb860cee17f71d7e69e9a83b`.
+Inherited library/background source and authoritative records are preserved. Scope: show responsive
 startup UI while temporary geometry conversion runs, gate gallery/read/write until success/error,
 preserve strict format and staged recovery. The repair is now explicitly nonisolated, retaining its
 synchronous run()/old-writer API and staged-swap body. App-owned PointGeometryRepairStartup detaches
@@ -18,9 +20,11 @@ startup.preparing/startup.progress; failure exposes startup.failed. No ContentVi
 runs, so gallery/project/settings reads and autosaves cannot race conversion or ordinary recovery.
 Three added PointGeometryRepairLogicTests cover worker/main-loop responsiveness, duplicate start,
 maintenance-before-readiness and failure preserving originals/no maintenance. Class now38 methods;
-old backup21/location19 and35 repair regression methods remain intact.
+all35 old repair methods remain intact; integrated backup25/location23 and five background
+regressions are inherited unchanged. Startup assertions include lock-protected direct repair and
+maintenance counts, with expectations only arranging the held-worker observations.
 No native build/test/simulator/device operation by this task; root owns qualification. Static UI
-lints, plutil and diff-check pass. Native compiler/isolation, focused38+21+19, Debug/Release full fast
+lints, plutil and diff-check pass. Native compiler/isolation, focused38+25+23 plus inherited background classes, Debug/Release full fast
 census, committed-baseline faults and cold old-library drawn screen/readiness remain unrun. Root can
 enhance the prepared external host-seeded cold harness to observe startup.preparing/progress before
 gallery and rotate while repair is in flight; seed the full copied library for a real visible phase.
