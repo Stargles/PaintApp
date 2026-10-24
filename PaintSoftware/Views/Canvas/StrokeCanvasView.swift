@@ -30,8 +30,9 @@ final class StrokeCanvasView: CanvasPlaneView {
     weak var canvasManager: CanvasManager?
 
     var layerID: UUID?
+    private var isBindingContent = false
     var raster: RasterLayerTexture? {
-        didSet { refreshDisplay() }
+        didSet { if !isBindingContent { refreshDisplay() } }
     }
     var brushColor: UIColor = .black
     /// Which tool's stroke this view lays — the brush's paint or the eraser's removal — and so which
@@ -299,8 +300,49 @@ final class StrokeCanvasView: CanvasPlaneView {
                 takeDownHeldEdit(landing: false)
                 showHeldDerivation(nil)
             }
-            refreshDisplay()
+            if !isBindingContent { refreshDisplay() }
         }
+    }
+
+    /// Bind the two editable identities together. Hidden/blanked hosts do not resolve source pixels.
+    func bindContent(raster: RasterLayerTexture?, vector: VectorCanvas?) {
+        bindContentIdentities(raster: raster, vector: vector)
+        refreshDisplay()
+    }
+
+    /// The coordinator already admitted every host in the new frame. Install that exact retained
+    /// image instead of resolving the same source a second time after another source was admitted.
+    func installContent(raster: RasterLayerTexture?, vector: VectorCanvas?, rasterImage: UIImage?) {
+        bindContentIdentities(raster: raster, vector: vector)
+        if vector == nil { installRasterImage(rasterImage) }
+        else if !hostIsBlanked { refreshDisplay() }
+    }
+
+    private func bindContentIdentities(raster: RasterLayerTexture?, vector: VectorCanvas?) {
+        isBindingContent = true
+        if self.raster !== raster { self.raster = raster }
+        if vectorCanvas !== vector { vectorCanvas = vector }
+        isBindingContent = false
+    }
+
+    private func installRasterImage(_ image: UIImage?) {
+        if imageView.image !== image { imageView.image = image }
+        displayedRasterVersion = raster?.version ?? Self.nothingDisplayed
+        baseDocumentVersion = Self.nothingDisplayed
+        unlandedInk.retire(upTo: contentRevisions.current)
+        showOverlays(scratch)
+    }
+
+    func hasDisplayedRaster(_ texture: RasterLayerTexture?) -> Bool {
+        raster === texture && displayedRasterVersion == (texture?.version ?? Self.nothingDisplayed)
+    }
+
+    /// Borrow the exact installed source picture during the coordinator's next admission pass.
+    /// Its provider remains the lifetime owner; a cache eviction must not force a duplicate decode
+    /// while this host still pins the same version. Outer nil means this host cannot supply it.
+    func retainedRasterPicture(ifCurrent texture: RasterLayerTexture?) -> (image: UIImage?, version: Int)? {
+        guard vectorCanvas == nil, !hostIsBlanked, hasDisplayedRaster(texture) else { return nil }
+        return (imageView.image, displayedRasterVersion)
     }
     /// The `VectorCanvas.version` last shown, so the coordinator can detect in-place vector edits
     /// (transform, image add) and refresh.
@@ -356,6 +398,11 @@ final class StrokeCanvasView: CanvasPlaneView {
         guard hostIsBlanked != blanked else { return }
         hostIsBlanked = blanked
         if blanked {
+            imageView.image = nil
+            displayedRasterVersion = Self.nothingDisplayed
+            displayedVectorVersion = Self.nothingDisplayed
+            shownVectorVersion = Self.nothingDisplayed
+            baseDocumentVersion = Self.nothingDisplayed
             // A surface nobody can see is not worth a window draw per frame, and a base under one
             // is not refreshed for stream frames — so the surfaces go, and the edge that comes back
             // repaints the base with the element's newest frame in it.
@@ -942,10 +989,10 @@ final class StrokeCanvasView: CanvasPlaneView {
                                   placement: placement, derivation: derivation)
     }
 
-    func captureDisplayedContentCoverage(of cel: Cel, bakedImage: UIImage?, placement: CelContentPlacement,
+    func captureDisplayedContentCoverage(of cel: Cel, bakedSource: RasterSource?, placement: CelContentPlacement,
                                          derivation: AnyHashable) -> CelContentCoverage? {
         let before = contentRevisions.current
-        let coverage = contentRevisions.captureDisplayedCoverage(of: cel, bakedImage: bakedImage,
+        let coverage = contentRevisions.captureDisplayedCoverage(of: cel, bakedSource: bakedSource,
             raster: raster, rasterVersion: displayedRasterVersion, placement: placement, derivation: derivation)
         if contentRevisions.current != before { celPixelSnapshot = CelPixelSnapshot(cel: cel) }
         return coverage
@@ -1006,6 +1053,7 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// - Returns: whether a current base was installed or was already available.
     @discardableResult
     func refreshDisplay(waitingForTheRender: Bool = false) -> Bool {
+        guard !hostIsBlanked else { return false }
         // While the Move tool is dragging a lifted piece, Core Animation is already showing every
         // delta (see `beginVectorFloat`) and a rasterize here would be the redundant work
         // [PERFORMANCE.md](PERFORMANCE.md) item 11 removed from the stroke path: the moved ids are
@@ -1018,7 +1066,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         // the Move tool used to write a whole-layer affine per touch-move and show it the same way.
         // Move with no selection lifts a float now, so there is one latch for both.
         guard vectorFloatBase == nil else { return false }
-        displayedRasterVersion = raster?.version ?? Self.nothingDisplayed
+        if vectorCanvas != nil { displayedRasterVersion = raster?.version ?? Self.nothingDisplayed }
         // A committed change under a live stream — ink drawn over it, an undo — is in the surface's
         // window too, and the surface is what the artist sees there. Redrawn from the same list the
         // base is about to be, so the two agree; dropped where `presentStreamFrame` refuses.
@@ -1026,11 +1074,15 @@ final class StrokeCanvasView: CanvasPlaneView {
         guard let vectorCanvas else {
             // `renderIfNonEmpty` rather than `renderToUIImage`: a blank tier's canvas-sized sheet of
             // transparency is 1 GiB at 16383², and Core Animation skips a nil contents outright.
-            let base = PlaybackTrace.span(.vectorRasterize) { raster?.renderIfNonEmpty() }
-            if imageView.image !== base { imageView.image = base }
-            baseDocumentVersion = Self.nothingDisplayed
-            unlandedInk.retire(upTo: contentRevisions.current)
-            showOverlays(scratch)
+            let result = PlaybackTrace.span(.vectorRasterize) { raster?.renderIfNonEmpty() ?? .success(nil) }
+            let base: UIImage?
+            switch result {
+            case .success(let image): base = image
+            case .failure:
+                canvasManager?.raise(.drawingSourceUnavailable)
+                return false
+            }
+            installRasterImage(base)
             return true
         }
         let documentVersion = vectorCanvas.documentVersion
@@ -1682,9 +1734,9 @@ final class StrokeCanvasView: CanvasPlaneView {
         if timingCelsBefore != nil { canvasManager?.timingStrokeIsLive = false }
         guard let raster else { return }
         shapeFollowingTouch = false
-        // Only for the stroke count: no dab reaches the cel until lift, so the cel's own dirty
-        // rect stays empty and the scratch's is what the undo step crops to.
-        raster.beginStroke()
+        let backdrop: UIImage?
+        do { backdrop = strokeTool == .eraser ? try raster.renderIfNonEmpty().get() : nil }
+        catch { canvasManager?.raise(.drawingSourceUnavailable); onStrokeCancelled?(); return }
         // The eraser's window needs the cel's own pixels to *show* the removal against and to decide
         // whether there is anything to remove; a paint stroke's holds its own ink and nothing else.
         // The backdrop is the already-resident render, never a second one, and **nil** for a tier
@@ -1695,13 +1747,13 @@ final class StrokeCanvasView: CanvasPlaneView {
         // merges under rather than something each dab carries. An eraser's window holds removal
         // *coverage* (`.subtractive`); a brush's holds ink.
         let scratch = StrokeScratch(canvasSize: raster.size,
-                                    role: strokeTool == .eraser ? .subtractive(backdrop: raster.renderIfNonEmpty())
+                                    role: strokeTool == .eraser ? .subtractive(backdrop: backdrop)
                                                    : .additive,
                                     opacity: CGFloat(profile.opacity),
                                     blendMode: strokeTool == .eraser ? .normal : profile.preset.stroke.blendMode.cgBlendMode,
                                     // BRUSH.md §2.25 — the live walk is ungrouped, so the paper is
                                     // the scratch's and is applied where the window merges.
-                                    texture: profile.preset.texture)
+                                    texture: profile.preset.texture, residency: raster.residency)
         self.scratch = scratch
         beginGesture(inCanvasPoints: false, at: touch.location(in: self))
         let input = StrokeInput(touch: touch, in: poseSpace)
@@ -1782,22 +1834,39 @@ final class StrokeCanvasView: CanvasPlaneView {
             scratch.clip(to: clipPath)
         }
         let beforeCount = raster.strokeCount
-        raster.endStroke()
         // The rect the stroke touched, outset by a pixel so fractional dab edges aren't lost, and
         // read from the *scratch* — the cel's own dirty rect stays empty because no dab was ever
         // stamped into it. Clamped here rather than inside the crop, because this same rect is the
         // patches' origin when undo puts them back, and an off-edge stroke would restore offset.
         let dirty = scratch.dirtyRect?.insetBy(dx: -1, dy: -1).integral
             .intersection(CGRect(origin: .zero, size: raster.size))
-        // Taken before the commit and after it, from the cel itself: a patch each, never a canvas.
-        let beforePatch = dirty.flatMap { raster.copiedPatch(in: $0) }
-        scratch.commit(into: raster)
+        guard let dirty, dirty.width >= 1, dirty.height >= 1 else {
+            endScratch(); refreshDisplay(); onStrokeEnded?(); return
+        }
+        if strokeTool == .eraser, !raster.hasContent {
+            endScratch(); refreshDisplay(); onStrokeEnded?(); return
+        }
+        let before: RasterSource
+        let after: RasterSource
+        do {
+            guard let patch = try raster.copiedPatch(in: dirty).get() else {
+                endScratch(); refreshDisplay(); onStrokeEnded?(); return
+            }
+            before = patch
+            after = try scratch.preparedPatch(over: before, in: dirty).get()
+            let image = try after.resolveImage().get()
+            try raster.restore(patch: image, at: dirty.origin).get()
+        } catch {
+            endScratch(); refreshDisplay()
+            canvasManager?.raise(.drawingSourceUnavailable)
+            onStrokeCancelled?()
+            return
+        }
+        raster.setStrokeCount(beforeCount + 1)
         endScratch()
         refreshDisplay()
-        if let dirty, let beforePatch, let afterPatch = raster.copiedPatch(in: dirty) {
-            registerRasterUndo(raster: raster, in: dirty, before: beforePatch, after: afterPatch,
-                               fromCount: beforeCount, toCount: raster.strokeCount)
-        }
+        registerRasterUndo(raster: raster, in: dirty, before: before, after: after,
+                           fromCount: beforeCount, toCount: raster.strokeCount)
         onStrokeEnded?()
     }
 
@@ -1912,18 +1981,31 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// side undoing an erase and reporting "brush stroke" would be exactly the label mismatch
     /// `HistoryActionLabel`'s doc warns a `String` parameter can't catch.
     private func registerRasterUndo(raster: RasterLayerTexture, in rect: CGRect,
-                                    before: UIImage, after: UIImage,
+                                    before: RasterSource, after: RasterSource,
                                     fromCount: Int, toCount: Int) {
         let origin = rect.origin
-        let cost = CanvasManager.approximateImageCost(before) + CanvasManager.approximateImageCost(after)
-        canvasManager?.recordUndo(label: strokeTool == .eraser ? .erase : .brushStroke, cost: cost, undo: { [weak self] in
-            raster.restore(patch: before, at: origin)
-            raster.setStrokeCount(fromCount)
+        let cost = CanvasManager.approximateSourceCost(before) + CanvasManager.approximateSourceCost(after)
+        var preparedUndo: RasterSource?
+        var preparedRedo: RasterSource?
+        canvasManager?.recordUndo(label: strokeTool == .eraser ? .erase : .brushStroke, cost: cost,
+            prepareUndo: { [weak self] in
+                switch raster.replacingPatch(with: before, at: origin) {
+                case .success(let source): preparedUndo = source; return true
+                case .failure: self?.canvasManager?.raise(.drawingSourceUnavailable); return false
+                }
+            }, prepareRedo: { [weak self] in
+                switch raster.replacingPatch(with: after, at: origin) {
+                case .success(let source): preparedRedo = source; return true
+                case .failure: self?.canvasManager?.raise(.drawingSourceUnavailable); return false
+                }
+            }, undo: { [weak self] in
+            raster.reset(toSource: preparedUndo, strokeCount: fromCount)
+            preparedUndo = nil
             self?.refreshDisplay()
             self?.onStrokeEnded?()
         }, redo: { [weak self] in
-            raster.restore(patch: after, at: origin)
-            raster.setStrokeCount(toCount)
+            raster.reset(toSource: preparedRedo, strokeCount: toCount)
+            preparedRedo = nil
             self?.refreshDisplay()
             self?.onStrokeEnded?()
         })

@@ -228,6 +228,7 @@ nonisolated enum ProjectBackupManager {
         }
 
         cleanupStaleSaveDirectories()
+        ProjectStore.RasterStorage.cleanupStaleSessionsOnLaunch()
 
         // App updated or redeployed? Snapshot every valid project BEFORE anything else can touch
         // them, so a bad update can never destroy the only copy of pre-update work.

@@ -192,26 +192,18 @@ extension CanvasManager {
     /// so the vector and raster commit paths share one collapse and one set of brush settings.
     private func stampShapeIntoRaster(_ stroke: VectorStroke, raster: RasterLayerTexture,
                                       layerID: UUID, celID: UUID) {
-        let before = raster.renderToUIImage()
-        let strokeCountBefore = raster.strokeCount
-        // stampStroke brackets itself in beginStroke/endStroke, so this is one undoable unit.
-        BrushStamper.stampStroke(into: raster, samples: stroke.samples,
+        guard let layer = layers.firstIndex(where: { $0.id == layerID }),
+              let cel = layers[layer].cels.first(where: { $0.id == celID }) else { return }
+        let prepared = raster.makeCopy()
+        BrushStamper.stampStroke(into: prepared, samples: stroke.samples,
                                  brush: stroke.brush, color: shapeGestureColor.uiColor,
                                  brushSize: stroke.size, brushOpacity: shapeGestureOpacity,
                                  random: DabRandom(seed: shapeGestureSeed))
-        let after = raster.renderToUIImage()
-        let strokeCountAfter = raster.strokeCount
-        let cost = Self.approximateImageCost(before) + Self.approximateImageCost(after)
-        // Undo/redo mutates the texture in place, which no live stroke is driving — so these have to
-        // republish the host refresh for the same reason the commit itself does, or undoing a shape
-        // leaves it on screen (and redoing leaves it off) until the next unrelated edit repaints.
-        recordUndo(label: .shape, cost: cost, undo: { [weak self] in
-            raster.reset(to: before, strokeCount: strokeCountBefore)
-            self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
-        }, redo: { [weak self] in
-            raster.reset(to: after, strokeCount: strokeCountAfter)
-            self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
-        })
+        guard case .success = prepared.lastMutationResult else { raise(.drawingSourceUnavailable); return }
+        registerUndoableCelChange(layerID: layerID, celID: celID,
+                                  oldRaster: raster, oldBaked: cel.bakedImage,
+                                  newRaster: prepared, newBaked: cel.bakedImage, label: .shape)
+
     }
 
     func cancelInteractiveShape() {

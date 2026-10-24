@@ -189,9 +189,9 @@ final class CanvasManager: ObservableObject {
     var projectID: UUID = UUID()
     var projectURL: URL?
     /// What this document's own saves have put in the package at `projectURL`, per cel — the store's
-    /// memo for skipping an unchanged cel's encode. Held here so its lifetime is the editing session:
-    /// a reopened document is a new `CanvasManager`, and its first save writes everything. Only
-    /// `ProjectStore` reads or writes it, and only on its own queue.
+    /// memo for cloning unchanged cel payloads. Reopened pixel sources already own compressed
+    /// backings, so even their first save avoids raster/baked reencoding. Only `ProjectStore` reads
+    /// or writes this ledger, on its own queue.
     let packageLedger = ProjectStore.PackageLedger()
 
     /// What the load of this document could not read, or empty for the ordinary case — a new project,
@@ -428,6 +428,7 @@ final class CanvasManager: ObservableObject {
     /// frame in which the overlay could appear — see `resizeCanvasAnnouncingProgress`, which decides
     /// which path a resize takes and carries the reasoning.
     @Published var isResizing: Bool = false
+    var canvasPixelTransforms: LatestWins?
 
     /// The motion group a canvas tap assigns to, or nil when tapping does nothing — the retagging
     /// gesture, armed from its chip on `InterpolateBar`.
@@ -1725,8 +1726,11 @@ final class CanvasManager: ObservableObject {
     /// Records one undoable action against the global `history` and refreshes `canUndo`/`canRedo`.
     /// The shared entry point every call site (content edits and structural edits alike) funnels
     /// through, so undo/redo bookkeeping lives in exactly one place.
-    func recordUndo(label: HistoryActionLabel, cost: Int = 0, undo: @escaping () -> Void, redo: @escaping () -> Void) {
-        history.record(.init(label: label, cost: cost, undo: undo, redo: redo))
+    func recordUndo(label: HistoryActionLabel, cost: Int = 0,
+                    prepareUndo: @escaping () -> Bool = { true }, prepareRedo: @escaping () -> Bool = { true },
+                    undo: @escaping () -> Void, redo: @escaping () -> Void) {
+        history.record(.init(label: label, cost: cost, prepareUndo: prepareUndo, prepareRedo: prepareRedo,
+                             undo: undo, redo: redo))
         refreshUndoRedoState()
         documentEdited.send()
     }
@@ -1751,6 +1755,11 @@ final class CanvasManager: ObservableObject {
     static func approximateImageCost(_ image: UIImage?) -> Int {
         guard let cg = image?.cgImage else { return 0 }
         return cg.width * cg.height * 4
+    }
+
+    static func approximateSourceCost(_ source: RasterSource?) -> Int {
+        guard let source else { return 0 }
+        return RasterSurface.byteCount(width: Int(source.size.width), height: Int(source.size.height)) ?? Int.max
     }
 
     /// Fires whenever a real drawing/fill interaction begins on the canvas — `DrawingView` uses this
@@ -3430,6 +3439,8 @@ final class CanvasManager: ObservableObject {
     /// and showing that view is what makes `syncFrameBake` — and so `frameBaker` — run at least once.
     @MainActor
     func closeFrameBaker() {
+        canvasPixelTransforms?.cancel()
+        isResizing = false
         thumbnailBackfillTask?.cancel()
         thumbnailBackfillTask = nil
         frameBaker.close()
@@ -3888,7 +3899,7 @@ final class CanvasManager: ObservableObject {
     // point at the same one (see `registerUndoableCelChange` for the same principle).
     var fillGestureLayerID: UUID?
     var fillGestureCelID: UUID?
-    var fillGestureBaseBaked: UIImage?  // layer's baked pixels before this gesture (undo/composite base)
+    var fillGestureBaseBaked: RasterSource?  // immutable baked version before this gesture
 
     /// Records the artist's own answer for whether a layer bounds the fill (§6.6) — written by the
     /// row's drop button, which is the only control that sets it.

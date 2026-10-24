@@ -6,6 +6,9 @@ extension ProjectStore {
     /// Temporary source resources, not another project format or backup policy. Files are immutable;
     /// each handle removes its own file and the last handle removes the session directory.
     final class RasterStorage {
+        private static let liveLock = NSLock()
+        private static var livePaths = Set<URL>()
+        private static let launchCleanup: Void = { cleanupStaleSessions(in: FileManager.default.temporaryDirectory) }()
         let url: URL
         private let lock = NSLock()
         private var created = false
@@ -15,17 +18,54 @@ extension ProjectStore {
             self.url = url
         }
 
-        func newResourceURL() -> URL? {
-            lock.lock(); defer { lock.unlock() }
-            if !created {
-                do { try FileManager.default.createDirectory(at: url, withIntermediateDirectories: false) }
-                catch { return nil }
-                created = true
+        static func cleanupStaleSessionsOnLaunch() { _ = launchCleanup }
+
+        /// Only this source owner's temporary namespace. A process crash skips deinits; startup
+        /// maintenance removes those abandoned directories while all current owners remain pinned.
+        static func cleanupStaleSessions(in temporaryRoot: URL) {
+            ProjectStore.serializingPackageMutation {
+                liveLock.lock()
+                let live = livePaths
+                liveLock.unlock()
+                guard let children = try? FileManager.default.contentsOfDirectory(at: temporaryRoot,
+                    includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey]) else { return }
+                let prefix = "PaintRasterSources-"
+                for child in children {
+                    let name = child.lastPathComponent
+                    guard name.hasPrefix(prefix), UUID(uuidString: String(name.dropFirst(prefix.count))) != nil,
+                          !live.contains(child.standardizedFileURL),
+                          let values = try? child.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey]),
+                          values.isDirectory == true, values.isSymbolicLink != true else { continue }
+                    try? FileManager.default.removeItem(at: child)
+                }
             }
-            return url.appendingPathComponent("\(UUID().uuidString).png")
         }
 
-        deinit { if created { try? FileManager.default.removeItem(at: url) } }
+        func newResourceURL() -> URL? {
+            ProjectStore.serializingPackageMutation {
+                lock.lock(); defer { lock.unlock() }
+                if !created {
+                    // Exclusive directory creation gives this path exactly one owner. The same
+                    // serializer excludes a concurrent stale sweep before it enters the live set.
+                    do { try FileManager.default.createDirectory(at: url, withIntermediateDirectories: false) }
+                    catch { return nil }
+                    Self.liveLock.lock()
+                    Self.livePaths.insert(url.standardizedFileURL)
+                    Self.liveLock.unlock()
+                    created = true
+                }
+                return url.appendingPathComponent("\(UUID().uuidString).png")
+            }
+        }
+
+        deinit {
+            if created {
+                try? FileManager.default.removeItem(at: url)
+                Self.liveLock.lock()
+                Self.livePaths.remove(url.standardizedFileURL)
+                Self.liveLock.unlock()
+            }
+        }
     }
 
     final class RasterBacking {
@@ -65,6 +105,14 @@ extension ProjectStore {
         struct Decoded {
             let image: UIImage
             let isTransparent: Bool
+        }
+
+        struct Checkpoint {
+            let backing: RasterBacking
+            var encodeSeconds = 0.0
+            var writeSeconds = 0.0
+            var bytesWritten = 0
+            var encoded = false
         }
 
         func decode(using residency: RasterResidency, excluding: Set<UUID>)
@@ -122,17 +170,22 @@ extension ProjectStore {
         }
 
         static func checkpoint(_ image: UIImage, using residency: RasterResidency,
-                               encoder: RasterResidency.Allocation) -> Result<RasterBacking, RasterResidency.Failure> {
+                               encoder: RasterResidency.Allocation) -> Result<Checkpoint, RasterResidency.Failure> {
             precondition(ProjectStore.isPerformingPackageMutation)
             defer { withExtendedLifetime(encoder) {} }
             return autoreleasepool {
                 guard let cg = image.cgImage else { return .failure(.unreadableBacking) }
-                guard let destination = residency.storage.newResourceURL(),
-                      let data = ProjectStore.encodeRasterPNG(image) else { return .failure(.checkpointFailed) }
+                guard let destination = residency.storage.newResourceURL() else { return .failure(.checkpointFailed) }
+                let encodeStarted = CFAbsoluteTimeGetCurrent()
+                guard let data = ProjectStore.encodeRasterPNG(image) else { return .failure(.checkpointFailed) }
+                let encodeSeconds = CFAbsoluteTimeGetCurrent() - encodeStarted
+                let writeStarted = CFAbsoluteTimeGetCurrent()
                 do { try data.write(to: destination, options: .atomic) }
                 catch { try? FileManager.default.removeItem(at: destination); return .failure(.checkpointFailed) }
-                return .success(RasterBacking(url: destination,
-                    size: CGSize(width: cg.width, height: cg.height), storage: residency.storage))
+                return .success(Checkpoint(backing: RasterBacking(url: destination,
+                    size: CGSize(width: cg.width, height: cg.height), storage: residency.storage),
+                    encodeSeconds: encodeSeconds, writeSeconds: CFAbsoluteTimeGetCurrent() - writeStarted,
+                    bytesWritten: data.count, encoded: true))
             }
         }
 

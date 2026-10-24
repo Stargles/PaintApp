@@ -28,7 +28,7 @@ enum LiquifyRasterUITestSeeds {
         }
         manager.layers[0].kind = .vector
         manager.layers[0].name = "Backing"
-        manager.layers[0].cels[0].bakedImage = backing
+        manager.layers[0].cels[0].bakedImage = owned(backing)
         let vector = VectorCanvas.empty(size: size)
         let green = UIGraphicsImageRenderer(size: CGSize(width: 18, height: 18), format: PixelOps.transparentFormat()).image { ctx in
             UIColor.green.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: 18, height: 18))
@@ -47,7 +47,7 @@ enum LiquifyRasterUITestSeeds {
         guard let reference = PixelOps.rasterize(cel: cel, canvasSize: size, memoize: false, derived: derived, pose: pose)
         else { preconditionFailure("The posed reference fixture must render before the drive") }
         manager.addLayer(name: "Reference")
-        manager.layers[2].cels[0].bakedImage = reference
+        manager.layers[2].cels[0].bakedImage = owned(reference)
         manager.layers[2].isVisible = false
         manager.addVectorLayer(name: "Screen")
         let streamCanvas = manager.layers[3].cels[0].vector!
@@ -70,11 +70,12 @@ enum LiquifyRasterUITestSeeds {
         let bounds = CGRect(origin: .zero, size: size)
         manager.layers[0].kind = .vector
         manager.layers[0].name = "Stationary backing"
-        manager.layers[0].cels[0].bakedImage = UIGraphicsImageRenderer(size: size,
+        let backing = UIGraphicsImageRenderer(size: size,
             format: PixelOps.transparentFormat()).image { ctx in
                 UIColor.red.setFill()
                 for x in [32, 96, 160] { ctx.fill(CGRect(x: x, y: 24, width: 16, height: 120)) }
             }
+        manager.layers[0].cels[0].bakedImage = owned(backing)
         let brush = Brush(name: "fixture", tip: .round, size: 8, dab: BrushDabSettings(hardness: 1))
         let stroke = VectorStroke(brush: brush, color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
             size: 8, opacity: 1, samples: StrokeSamples([VectorSample(x: 32, y: 80),
@@ -97,6 +98,13 @@ enum LiquifyRasterUITestSeeds {
         }
         manager.currentLayerIndex = 0
         manager.history.removeAll()
+    }
+
+    private static func owned(_ image: UIImage) -> RasterSource {
+        switch RasterSource.capture(image) {
+        case .success(let source): return source
+        case .failure: preconditionFailure("The bounded native backing fixture must admit its pixels")
+        }
     }
 
 }

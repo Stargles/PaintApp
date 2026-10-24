@@ -1,7 +1,7 @@
 import UIKit
 
 enum ThumbnailRenderer {
-    static func render(_ raster: RasterLayerTexture, canvasSize: CGSize, thumbnailSize: CGSize) -> UIImage {
+    static func render(_ raster: RasterLayerTexture, canvasSize: CGSize, thumbnailSize: CGSize) -> UIImage? {
         guard canvasSize.width > 0, canvasSize.height > 0 else {
             return UIImage()
         }
@@ -10,8 +10,9 @@ enum ThumbnailRenderer {
         // `raster` is always at native resolution (unlike PKDrawing.image(from:scale:), which could
         // rasterize vector strokes directly at the target scale) — downscale via a
         // UIGraphicsImageRenderer draw-and-shrink.
+        guard case .success(let image) = raster.renderToUIImage() else { return nil }
         return UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { _ in
-            raster.renderToUIImage().draw(in: CGRect(origin: .zero, size: size))
+            image.draw(in: CGRect(origin: .zero, size: size))
         }
     }
 

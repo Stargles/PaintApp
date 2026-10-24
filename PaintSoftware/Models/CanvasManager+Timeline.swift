@@ -189,8 +189,11 @@ extension CanvasManager {
         if cel.interpolation != nil, let canvasSize,
            let derived = derivedCelContent(for: cel, atFrame: cel.startFrame) {
             guard let flat = PixelOps.rasterize(cel: cel, canvasSize: canvasSize, derived: derived) else { return nil }
+            guard case .success(let source) = RasterSource.capture(flat, using: cel.raster.residency) else {
+                raise(.drawingSourceUnavailable); return nil
+            }
             // A flattened still keeps an empty vector tier so new strokes remain native ink.
-            return Cel.CopyTiers(raster: .empty(size: cel.raster.size), bakedImage: flat,
+            return Cel.CopyTiers(raster: .empty(size: cel.raster.size), bakedImage: source,
                                  vector: cel.vector.map { .empty(size: $0.size) },
                                  transformTracks: [:], pendingPoseBaselines: [:])
         }

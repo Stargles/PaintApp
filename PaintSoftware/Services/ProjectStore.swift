@@ -298,31 +298,15 @@ enum ProjectStore {
 
     // MARK: - Saving
 
-    /// Everything `writePackage` reads out of `@MainActor` state, captured as immutable values.
-    ///
-    /// This is what lets the encode-and-write half of a save run off the main thread while touching
-    /// no live app state at all: the background queue works from `UIImage`s already rendered on main,
-    /// value-type manifests, and `VectorCanvas` copies it owns outright. Nothing here is a view into
-    /// something the user can still be drawing on, so a stroke landing mid-save can neither race the
-    /// write nor contend with it for `RasterLayerTexture`'s lock.
+    /// Immutable values for the existing serialized package writer. Pixel tiers are stable source
+    /// handles: freezing a document does not decode every cel or retain one UIImage per cel.
     private struct SaveSnapshot {
         struct CelContent {
             let id: UUID
             let startFrame: Int
             let frameCount: Int
-            /// Rendered on the main thread. `RasterLayerTexture` memoizes this per `version`, so for a
-            /// cel that hasn't changed since it was last displayed it's a cache read, not a re-render.
-            ///
-            /// **Nil when the texture has no backing bitmap at all**, which is every cel of a vector
-            /// document and every cel of a raster layer nobody has drawn on yet. That nil is not
-            /// merely an encode this save skips — asking a blank texture for its image is what
-            /// *creates* the cost: `renderToUIImage()` has a non-optional return, so with no context
-            /// it mints a canvas-sized transparent `UIImage` (16 MiB at the owner's 2048²) and
-            /// memoizes it in `cachedImage`, where nothing ever drops it again. Deciding here, on the
-            /// main actor, from `hasContent` rather than from a rendered image is what keeps that
-            /// allocation from happening at all.
-            let rasterImage: UIImage?
-            let bakedImage: UIImage?
+            let rasterImage: RasterSource?
+            let bakedImage: RasterSource?
             /// A `makeCopy()`, so the write owns it and live drawing can't mutate it underneath.
             let vector: VectorCanvas?
             /// The cel's interpolation recipe, if it is a derived cel. A value type all the way
@@ -420,12 +404,10 @@ enum ProjectStore {
         /// agree; two literals is exactly how they would stop agreeing.
         static let thumbnailBounds = CGSize(width: 320, height: 320)
 
-        /// The save entry settles completed edits before constructing this snapshot, so it cannot
-        /// omit a held picture that failed to land. The snapshot reads state and shares cel images,
-        /// with no encoding or further pixel work on the artist's thread.
-        /// `renderToUIImage()` is a memo read for a cel the canvas has already displayed and a
-        /// copy-on-write share of the cel's own bitmap otherwise; `makeCopy()` shares the display
-        /// list the same way (PERFORMANCE.md §13.6). `SaveProfile.snapshotSeconds` is its clock.
+        /// The save entry settles completed edits first. This freeze then shares immutable pixel
+        /// version handles and vector display lists, with no image resolution or encoding on the
+        /// artist's thread. Dirty versions are checkpointed serially by the existing writer before
+        /// its parallel compressed-file clones. `SaveProfile.snapshotSeconds` measures this freeze.
         @MainActor
         init(_ canvasManager: CanvasManager) {
             projectID = canvasManager.projectID
@@ -490,7 +472,7 @@ enum ProjectStore {
                              cels: layer.cels.map { cel in
                     let hasRaster = cel.raster.hasContent
                     return CelContent(id: cel.id, startFrame: cel.startFrame, frameCount: cel.frameCount,
-                                      rasterImage: hasRaster ? cel.raster.renderToUIImage() : nil,
+                                      rasterImage: cel.raster.snapshot(),
                                       bakedImage: cel.bakedImage,
                                       vector: cel.vector?.makeCopy(),
                                       interpolation: cel.interpolation,
@@ -561,7 +543,7 @@ enum ProjectStore {
         private weak var vector: VectorCanvas?
         private let hasVector: Bool
         private let vectorVersion: Int
-        private weak var bakedImage: UIImage?
+        private weak var bakedImage: RasterSource?
         private let hasBakedImage: Bool
         private let canvasSize: CGSize
 
@@ -720,13 +702,11 @@ enum ProjectStore {
         /// `save` being called to the package being on disk. What `ContentView.returnToGallery`
         /// waits on before it shows the gallery.
         var totalSeconds: Double
-        /// How many PNG encodes this save attempted. One per raster cel, plus fills, baked images and
-        /// placed vector images — so it is ≥ `celCount` on a real document and exactly `celCount` on
-        /// a raster-only one.
+        /// PNG encodes attempted for dirty immutable tiers and placed vector images. Unchanged
+        /// protected raster/baked resources are cloned and do not contribute to this count.
         var pngsEncoded: Int
-        /// How many PNG encodes something answered without running the encoder. Zero today; the
-        /// field exists because it is the count a memoizing save would move, and PERFORMANCE.md §5
-        /// names that memo as the one permitted intermediate on this path.
+        /// Unchanged PNG resources cloned without running an encoder, including the first save
+        /// after reopening a document. A newly checkpointed source is counted as encoded instead.
         var pngsReused: Int
         var bytesWritten: Int
         /// Whether the encode-and-write half ran on the main thread. False is what `saveQueue` is
@@ -760,26 +740,26 @@ enum ProjectStore {
         private var encoded = 0
         private var reused = 0
         private var bytes = 0
-        private var jsonEncodingFailed = false
+        private var contentWriteFailed = false
         private var threads = Set<ObjectIdentifier>()
 
         func record(encodeSeconds: Double, writeSeconds: Double,
-                    pngsEncoded: Int, pngsReused: Int, bytesWritten: Int, jsonEncodingFailed: Bool) {
+                    pngsEncoded: Int, pngsReused: Int, bytesWritten: Int, contentWriteFailed: Bool) {
             lock.lock()
             encode += encodeSeconds
             write += writeSeconds
             encoded += pngsEncoded
             reused += pngsReused
             bytes += bytesWritten
-            self.jsonEncodingFailed = self.jsonEncodingFailed || jsonEncodingFailed
+            self.contentWriteFailed = self.contentWriteFailed || contentWriteFailed
             threads.insert(ObjectIdentifier(Thread.current))
             lock.unlock()
         }
 
-        var totals: (encode: Double, write: Double, encoded: Int, reused: Int, bytes: Int, threads: Int, jsonEncodingFailed: Bool) {
+        var totals: (encode: Double, write: Double, encoded: Int, reused: Int, bytes: Int, threads: Int, contentWriteFailed: Bool) {
             lock.lock()
             defer { lock.unlock() }
-            return (encode, write, encoded, reused, bytes, threads.count, jsonEncodingFailed)
+            return (encode, write, encoded, reused, bytes, threads.count, contentWriteFailed)
         }
     }
 
@@ -1205,8 +1185,28 @@ enum ProjectStore {
             snapshot.layers.enumerated().flatMap { layerIndex, layer in
                 layer.cels.map { (layerIndex, $0) }
             }
+        // Checkpoints use the same save queue as package mutation. Do this serially before any
+        // worker is launched, so no worker can wait for the queue that is waiting for that worker.
+        var prepared = Set<UUID>()
+        var encodedSources = Set<UUID>()
+        for job in jobs {
+            for source in [job.cel.rasterImage, job.cel.bakedImage].compactMap({ $0 }) {
+                guard prepared.insert(source.residencyID).inserted else { continue }
+                switch source.prepareForSave() {
+                case .success(let checkpoint):
+                    if checkpoint.encoded { encodedSources.insert(source.residencyID) }
+                    tally.record(encodeSeconds: checkpoint.encodeSeconds, writeSeconds: checkpoint.writeSeconds,
+                                 pngsEncoded: checkpoint.encoded ? 1 : 0, pngsReused: 0,
+                                 bytesWritten: checkpoint.bytesWritten, contentWriteFailed: false)
+                case .failure:
+                    tally.record(encodeSeconds: 0, writeSeconds: 0, pngsEncoded: 0, pngsReused: 0,
+                                 bytesWritten: 0, contentWriteFailed: true)
+                }
+            }
+        }
         let written = PixelOps.parallelMap(jobs.count) { index in
-            writeCel(jobs[index].cel, to: url, canvasSize: snapshot.canvasSize, tally: tally, reuse: reuse)
+            writeCel(jobs[index].cel, to: url, canvasSize: snapshot.canvasSize, tally: tally, reuse: reuse,
+                     encodedSources: encodedSources)
         }
         var celManifestsByLayer = [[CelManifest]](repeating: [], count: snapshot.layers.count)
         var ledgerEntries: [UUID: PackageLedger.Entry] = [:]
@@ -1332,7 +1332,7 @@ enum ProjectStore {
         )
         // The manifest certifies a complete package. Omitting it on a failed sidecar lets the
         // existing validator reject this stage now and if its diagnostic Trash copy is restored.
-        if !tally.totals.jsonEncodingFailed, let data = try? JSONEncoder().encode(manifest) {
+        if !tally.totals.contentWriteFailed, let data = try? JSONEncoder().encode(manifest) {
             try? data.write(to: url.appendingPathComponent("manifest.json"))
         }
 
@@ -1397,7 +1397,7 @@ enum ProjectStore {
     /// list rather than from completion — see its comment.
     private static func writeCel(_ cel: SaveSnapshot.CelContent, to packageURL: URL,
                                  canvasSize: CGSize, tally: WriteTally,
-                                 reuse: (ledger: PackageLedger, package: URL)?) -> CelWrite {
+                                 reuse: (ledger: PackageLedger, package: URL)?, encodedSources: Set<UUID>) -> CelWrite {
         let cost = CelCost()
         // TODO item (8): the centre of *this* canvas is what stored sample coordinates are measured
         // from, and it is the one thing the encoder needs that the payload cannot work out for
@@ -1421,7 +1421,8 @@ enum ProjectStore {
             }
             cost.writeSeconds += CFAbsoluteTimeGetCurrent() - started
         }
-        let pixelTiers = tiers ?? encodePixelTiers(cel, to: packageURL, sampleOrigin: sampleOrigin, cost: cost)
+        let pixelTiers = tiers ?? encodePixelTiers(cel, to: packageURL, sampleOrigin: sampleOrigin, cost: cost,
+                                                 encodedSources: encodedSources)
 
         // The interpolation recipe, when this cel is a derived one. Its own JSON file for the
         // same reason the vector payload has one: it is unbounded in size (lattices) and the
@@ -1450,7 +1451,7 @@ enum ProjectStore {
 
         tally.record(encodeSeconds: cost.encodeSeconds, writeSeconds: cost.writeSeconds,
                      pngsEncoded: cost.encoded, pngsReused: cost.reused, bytesWritten: cost.bytes,
-                     jsonEncodingFailed: cost.jsonEncodingFailed)
+                     contentWriteFailed: cost.contentWriteFailed)
 
         let manifest = CelManifest(id: cel.id, startFrame: cel.startFrame, frameCount: cel.frameCount,
                                    rasterFileName: pixelTiers.rasterFileName,
@@ -1474,7 +1475,7 @@ enum ProjectStore {
         var encoded = 0
         var reused = 0
         var bytes = 0
-        var jsonEncodingFailed = false
+        var contentWriteFailed = false
     }
 
     private static func encodeJSON<T: Encodable>(_ value: T, cel: UUID, sampleOrigin: CGPoint,
@@ -1492,7 +1493,7 @@ enum ProjectStore {
         } catch {
             // A failed archive cannot be represented by omitting the sidecar: that would
             // make the staged manifest describe an empty drawing and pass ordinary validation.
-            cost.jsonEncodingFailed = true
+            cost.contentWriteFailed = true
             log.error("""
                 Encoding \(String(describing: T.self), privacy: .public) for cel \
                 \(cel.uuidString, privacy: .public) failed, so that content is not written: \
@@ -1520,7 +1521,7 @@ enum ProjectStore {
     /// The encode half of `writeCel`: the raster, fill and baked PNGs, the placed images, the stream
     /// pictures, the clips, and the display list — the body of the old per-cel loop, verbatim.
     private static func encodePixelTiers(_ cel: SaveSnapshot.CelContent, to packageURL: URL,
-                                         sampleOrigin: CGPoint, cost: CelCost) -> PixelTiers {
+                                         sampleOrigin: CGPoint, cost: CelCost, encodedSources: Set<UUID>) -> PixelTiers {
         var files: [String] = []
         func png(_ image: UIImage) -> Data? {
             let started = CFAbsoluteTimeGetCurrent()
@@ -1600,15 +1601,23 @@ enum ProjectStore {
         // way.
         var tiers = PixelTiers(rasterFileName: "\(cel.id.uuidString)_raster.png", rasterOmitted: nil,
                                bakedFileName: nil, vectorFileName: nil, files: [])
-        if let rasterImage = cel.rasterImage {
-            if let data = png(rasterImage) { files.append(write(data, tiers.rasterFileName, .raster)) }
-        } else {
-            tiers.rasterOmitted = true
+        func copySource(_ source: RasterSource, named name: String, role: ProjectPackageLayout.Role) {
+            let started = CFAbsoluteTimeGetCurrent()
+            let path = ProjectPackageLayout.writePath(named: name, role: role)
+            switch source.copyPNG(to: ProjectPackageLayout.resolve(path, in: packageURL)) {
+            case .success:
+                files.append(path)
+                if !encodedSources.contains(source.residencyID) { cost.reused += 1 }
+            case .failure: cost.contentWriteFailed = true
+            }
+            cost.writeSeconds += CFAbsoluteTimeGetCurrent() - started
         }
-
-        if let baked = cel.bakedImage, let bakedData = png(baked) {
+        if let rasterImage = cel.rasterImage {
+            copySource(rasterImage, named: tiers.rasterFileName, role: .raster)
+        } else { tiers.rasterOmitted = true }
+        if let baked = cel.bakedImage {
             let name = "\(cel.id.uuidString)_baked.png"
-            files.append(write(bakedData, name, .baked))
+            copySource(baked, named: name, role: .baked)
             tiers.bakedFileName = name
         }
 
@@ -1769,8 +1778,8 @@ enum ProjectStore {
     struct LoadProfile: Equatable {
         var layerCount: Int
         var celCount: Int
-        /// Manifest decode plus the per-cel PNG decode and `RasterLayerTexture` build — everything
-        /// up to but not including the thumbnail walk.
+        /// Manifest decode, compressed-source protection and model construction, before thumbnails.
+        /// This metadata/file walk does not resolve every raster/baked tier to decoded pixels.
         var decodeSeconds: Double
         /// `regenerateAllThumbnails()`. Guaranteed cache-cold: every texture the decode just built
         /// is a new object identity at version 0, so nothing memoized on cel identity can hit.
@@ -1786,6 +1795,11 @@ enum ProjectStore {
         /// 9(b) is the kind of change that would go on passing every functional test if it silently
         /// stopped happening; this is the flag that would not.
         var decodedOnMainThread: Bool
+        /// Actual owner counters after source protection, before thumbnail consumers can hydrate.
+        /// The shared owner includes other open documents; an isolated owner makes a load's zero
+        /// decoded-picture admission directly observable without a test-only loader path.
+        var ownedRasterPicturesAfterSourceLoad = 0
+        var ownedRasterBytesAfterSourceLoad = 0
 
         /// Milliseconds per cel — the figure that scales to a document of another size, and the one
         /// worth quoting.
@@ -1808,7 +1822,7 @@ enum ProjectStore {
     /// `loadInBackground(from:)` instead, which is the same load with the fan-out on a queue of its
     /// own so the main thread is free to draw the spinner it was given on 2026-08-20.
     @MainActor
-    static func load(from url: URL) -> CanvasManager? {
+    static func load(from url: URL, residency: RasterResidency = .shared) -> CanvasManager? {
         let loadStarted = CFAbsoluteTimeGetCurrent()
         // TODO (57) part 2: the artist is opening this package, so the launch rename pass must
         // leave its directory name alone for the rest of this process. Registered before the
@@ -1816,7 +1830,7 @@ enum ProjectStore {
         PackageRenameGate.noteOpen(url)
         guard let manifest = loadManifest(at: url) else { return nil }
         let canvasSize = CGSize(width: manifest.canvasWidth, height: manifest.canvasHeight)
-        guard let decoded = decodeCels(manifest: manifest, projectURL: url, canvasSize: canvasSize) else { return nil }
+        guard let decoded = decodeCels(manifest: manifest, projectURL: url, canvasSize: canvasSize, residency: residency) else { return nil }
         return assemble(manifest: manifest, decoded: decoded, url: url, startedAt: loadStarted)
     }
 
@@ -1838,7 +1852,7 @@ enum ProjectStore {
     ///
     /// `loadManifest` stays on the calling side: it is one small JSON read, and hopping a queue for it
     /// would cost more than it saves.
-    static func loadInBackground(from url: URL) async -> CanvasManager? {
+    static func loadInBackground(from url: URL, residency: RasterResidency = .shared) async -> CanvasManager? {
         let loadStarted = CFAbsoluteTimeGetCurrent()
         // TODO (57) part 2: the artist is opening this package, so the launch rename pass must
         // leave its directory name alone for the rest of this process. Registered before the
@@ -1849,7 +1863,7 @@ enum ProjectStore {
         let decoded: Transfer<DecodedCels?> = await withCheckedContinuation { continuation in
             loadQueue.async {
                 continuation.resume(returning: Transfer(decodeCels(manifest: manifest, projectURL: url,
-                                                                   canvasSize: canvasSize)))
+                                                                   canvasSize: canvasSize, residency: residency)))
             }
         }
         guard let decoded = decoded.value else { return nil }
@@ -1867,8 +1881,8 @@ enum ProjectStore {
 
     /// Hands one value from the queue that made it to the actor that will own it.
     ///
-    /// `Cel` holds `RasterLayerTexture` and `UIImage`, neither of which is `Sendable`, and neither
-    /// should be: they are mutable buffers whose thread-safety is their owners' business. What the
+    /// `Cel` holds editable texture/vector identities whose thread-safety is their owners' business.
+    /// Its raster and baked pixels are immutable source handles. What the
     /// compiler cannot see is that these particular ones are *newly built and unreferenced* — the
     /// decode is the only thing that has ever touched them, it has finished, and it keeps nothing. So
     /// this is a transfer of ownership rather than sharing, which is exactly what the annotation
@@ -1899,7 +1913,8 @@ enum ProjectStore {
     /// what `activeCelIndex` scans and what `addCel` maintains with an explicit sort — so this is the
     /// one property of the change that would be quiet if it were wrong, and it is therefore the one
     /// that is arranged rather than assumed.
-    private static func decodeCels(manifest: ProjectManifest, projectURL: URL, canvasSize: CGSize) -> DecodedCels? {
+    private static func decodeCels(manifest: ProjectManifest, projectURL: URL, canvasSize: CGSize,
+                                   residency: RasterResidency) -> DecodedCels? {
         // Read before the fan-out, because `concurrentPerform` recruits its caller as one of the
         // workers: asking inside an iteration would sometimes answer for the caller's thread and
         // sometimes for a pool thread, and the question is about the caller.
@@ -1916,7 +1931,7 @@ enum ProjectStore {
             }
         let decoded = PixelOps.parallelMap(jobs.count) { index in
             decodeCel(jobs[index].cel, layerKind: jobs[index].kind,
-                      projectURL: projectURL, canvasSize: canvasSize, brushes: brushes)
+                      projectURL: projectURL, canvasSize: canvasSize, brushes: brushes, residency: residency)
         }
         var celsByLayer = [[Cel]](repeating: [], count: manifest.layers.count)
         // **The layer's name is attached here, not in `decodeCel`.** A cel does not know which layer
@@ -1938,7 +1953,8 @@ enum ProjectStore {
             damage.add(layerDamage)
         }
         return DecodedCels(celsByLayer: celsByLayer, damage: damage,
-                           startedOnMainThread: startedOnMainThread, brushTable: brushTable)
+                           startedOnMainThread: startedOnMainThread, brushTable: brushTable,
+                           sourceUsage: residency.usage)
     }
 
     /// What `decodeCels` hands back: the cels, what the decode could not read, and which thread asked
@@ -1954,6 +1970,7 @@ enum ProjectStore {
         /// imported tip files the *drawing* depends on, and reading the file twice would be two answers
         /// to one question with a window between them.
         let brushTable: BrushTable
+        let sourceUsage: RasterResidency.Usage
     }
 
     /// One decoded cel and what decoding it cost. A pair rather than two parallel returns because the
@@ -1992,7 +2009,7 @@ enum ProjectStore {
 
     private static func decodeCel(_ celManifest: CelManifest, layerKind: LayerKind,
                                   projectURL: URL, canvasSize: CGSize,
-                                  brushes: BrushTable.Remap) -> DecodedCel? {
+                                  brushes: BrushTable.Remap, residency: RasterResidency) -> DecodedCel? {
         var damage = ProjectLoadDamage.LayerDamage()
         /// Where one of this cel's files actually is — TODO (57). Every read below goes through it,
         /// **including the four whose answer never changes**: one rule, asked one way, is what stops
@@ -2010,44 +2027,28 @@ enum ProjectStore {
             decoder.userInfo[.brushTable] = brushes
             return decoder
         }
-        // **Three ways to end up with a blank raster tier, and only one of them touches the disk.**
-        //
-        //  * `rasterOmitted` — this save knew the tier held nothing and wrote no PNG. Straight to
-        //    `.empty`, which allocates no bitmap, without so much as a `stat`.
-        //  * no file — a package written by an older build that omitted the key, or one whose PNG is
-        //    genuinely gone. The existing `?? .empty` covers both; note that a *missing* PNG on a cel
-        //    that claims one cannot reach a normal open, because `validateProject` refuses the
-        //    package first (see `SaveDamageGate`).
-        //  * a PNG that is there and is fully transparent — the legacy case, and the one worth
-        //    healing. Every package written before this change carries one per undrawn cel, so
-        //    loading the owner's own project materialises a 16 MiB `CGContext` at 2048² per cel and
-        //    the save above would faithfully write it back out forever. The exact alpha scan in
-        //    `releaseBitmapIfFullyTransparent()` drops it, and the cel becomes as cheap as one
-        //    written by the new save — which is what lets a document that exists today heal itself
-        //    on the next open-and-save rather than staying expensive for its whole life.
-        //
-        // The heal also puts `strokeCount` back to 0. `load` defaults it to 1 (a flattened bitmap
-        // cannot recover a real count), and that 1 is the reason `Cel.isCertainlyBlank` answers
-        // false for every cel of every reopened project today. A cel that has just been *proved*
-        // pixel-blank should answer true: the onion skin (`OnionSkinSource`) then skips a
-        // canvas-sized draw for it instead of compositing nothing, which is the correct behaviour
-        // and was simply unreachable while every reloaded cel claimed a stroke.
-        let raster: RasterLayerTexture
-        if celManifest.rasterOmitted == true {
-            raster = .empty(size: canvasSize)
-        } else {
-            let rasterURL = fileURL(celManifest.rasterFileName, .raster)
-            if let image = UIImage(contentsOfFile: rasterURL.path) {
-                let loaded = RasterLayerTexture.load(from: image, size: canvasSize)
-                if loaded.releaseBitmapIfFullyTransparent() { loaded.setStrokeCount(0) }
-                raster = loaded
-            } else {
-                raster = .empty(size: canvasSize)
+        // Logical absence is recorded by the manifest. A named but unreadable source refuses the
+        // open; it must never be converted to an empty raster because admission or file IO failed.
+        // Protect compressed resources while the current package is stable, with no pixel decode.
+        func protectedSource(_ url: URL) -> RasterSource? {
+            switch RasterBacking.protect(url, using: residency) {
+            case .success(let backing): return RasterSource.backed(by: backing, using: residency)
+            case .failure:
+                log.error("Required raster resource could not be protected: \(url.path, privacy: .public)")
+                return nil
             }
         }
-        var bakedImage: UIImage?
+        let raster: RasterLayerTexture
+        if celManifest.rasterOmitted == true {
+            raster = RasterLayerTexture(size: canvasSize, residency: residency)
+        } else {
+            guard let source = protectedSource(fileURL(celManifest.rasterFileName, .raster)) else { return nil }
+            raster = RasterLayerTexture(size: canvasSize, source: source, strokeCount: 1)
+        }
+        var bakedImage: RasterSource?
         if let bakedFileName = celManifest.bakedImageFileName {
-            bakedImage = UIImage(contentsOfFile: fileURL(bakedFileName, .baked).path)
+            guard let source = protectedSource(fileURL(bakedFileName, .baked)) else { return nil }
+            bakedImage = source
         }
 
         // Vector content: decode the JSON (the ordered display list + image refs + transform)
@@ -2330,7 +2331,9 @@ enum ProjectStore {
             thumbnailSeconds: loadFinished - decodeFinished,
             totalSeconds: loadFinished - loadStarted,
             thumbnailRegenerations: manager.thumbnailRegenerationCount,
-            decodedOnMainThread: decoded.startedOnMainThread)
+            decodedOnMainThread: decoded.startedOnMainThread,
+            ownedRasterPicturesAfterSourceLoad: decoded.sourceUsage.pixelBufferCount,
+            ownedRasterBytesAfterSourceLoad: decoded.sourceUsage.pixelBytes)
         return manager
     }
 

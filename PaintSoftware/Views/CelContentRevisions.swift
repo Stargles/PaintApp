@@ -84,10 +84,10 @@ final class CelContentRevisions {
 
     /// Reusing derived ink can advance whole-cel coverage only after both pixel slots have
     /// installed the current backing. A retained texture can have changed in place.
-    func captureDisplayedCoverage(of cel: Cel, bakedImage: UIImage?, raster: RasterLayerTexture?,
+    func captureDisplayedCoverage(of cel: Cel, bakedSource: RasterSource?, raster: RasterLayerTexture?,
                                   rasterVersion: Int, placement: CelContentPlacement,
                                   derivation: AnyHashable) -> CelContentCoverage? {
-        guard bakedImage === cel.bakedImage, raster === cel.raster,
+        guard bakedSource === cel.bakedImage, raster === cel.raster,
               rasterVersion == cel.raster.version else { return nil }
         return CelContentCoverage(celID: cel.id, revision: observe(cel),
                                   placement: placement, derivation: derivation)

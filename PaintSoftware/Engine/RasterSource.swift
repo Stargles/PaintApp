@@ -27,13 +27,50 @@ final class RasterSource: RasterResidencyCandidate {
         residency.register(self)
     }
 
-    static func snapshot(of surface: RasterSurface, size: CGSize) -> Result<RasterSource, RasterResidency.Failure> {
-        .success(RasterSource(size: size, residency: surface.residency, image: nil, backing: nil,
-                              lease: surface.readLease()))
+    static func snapshot(of surface: RasterSurface, size: CGSize) -> RasterSource {
+        RasterSource(size: size, residency: surface.residency, image: nil, backing: nil,
+                     lease: surface.readLease())
     }
 
     static func backed(by backing: ProjectStore.RasterBacking, using residency: RasterResidency) -> RasterSource {
         RasterSource(size: backing.size, residency: residency, image: nil, backing: backing)
+    }
+
+    /// Persistent pixel operations share this admitted drawing seam. The drawing must complete in
+    /// private storage before an immutable handle is published or a live cel can be replaced.
+    static func render(size: CGSize, using residency: RasterResidency = .shared,
+                       drawing: (CGContext) -> Bool) -> Result<RasterSource, RasterResidency.Failure> {
+        RasterSurface.render(size: size, using: residency, drawing: drawing).map { snapshot(of: $0, size: size) }
+    }
+
+    func resized(to size: CGSize, placing content: CGRect) -> Result<RasterSource, RasterResidency.Failure> {
+        resolveImage().flatMap { image in
+            Self.render(size: size, using: residency) { context in
+                if content.size != self.size { context.interpolationQuality = .high }
+                image.draw(in: content)
+                return true
+            }
+        }
+    }
+
+    func cropped(to rect: CGRect) -> Result<RasterSource, RasterResidency.Failure> {
+        resolveImage().flatMap { image in
+            Self.render(size: rect.size, using: residency) { _ in
+                image.draw(at: CGPoint(x: -rect.minX, y: -rect.minY))
+                return true
+            }
+        }
+    }
+
+    func flipped(horizontal: Bool) -> Result<RasterSource, RasterResidency.Failure> {
+        resolveImage().flatMap { image in
+            Self.render(size: size, using: residency) { context in
+                if horizontal { context.translateBy(x: size.width, y: 0); context.scaleBy(x: -1, y: 1) }
+                else { context.translateBy(x: 0, y: size.height); context.scaleBy(x: 1, y: -1) }
+                image.draw(in: CGRect(origin: .zero, size: size))
+                return true
+            }
+        }
     }
 
     var isCertainlyTransparent: Bool {
@@ -58,7 +95,7 @@ final class RasterSource: RasterResidencyCandidate {
                     UIGraphicsPushContext(context)
                     image.draw(in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
                     UIGraphicsPopContext()
-                }.flatMap { snapshot(of: surface, size: CGSize(width: cg.width, height: cg.height)) }
+                }.map { snapshot(of: surface, size: CGSize(width: cg.width, height: cg.height)) }
             }
         }
     }
@@ -110,15 +147,19 @@ final class RasterSource: RasterResidencyCandidate {
     /// A durable version clones without decoding. A dirty version uses the same PNG serializer and
     /// serial queue as normal saving; its backing is owned by this resource's lifetime.
     func copyPNG(to destination: URL) -> Result<Void, RasterResidency.Failure> {
-        checkpoint().flatMap { backing in
-            ProjectStore.cloneRasterResource(from: backing.url, to: destination)
+        checkpoint().flatMap { checkpoint in
+            ProjectStore.cloneRasterResource(from: checkpoint.backing.url, to: destination)
                 ? .success(()) : .failure(.checkpointFailed)
         }
     }
 
-    private func checkpoint() -> Result<ProjectStore.RasterBacking, RasterResidency.Failure> {
+    /// Called serially before the package's parallel file walk. Dirty versions encode one at a
+    /// time; unchanged versions require no decode and contribute no new encode cost.
+    func prepareForSave() -> Result<ProjectStore.RasterBacking.Checkpoint, RasterResidency.Failure> { checkpoint() }
+
+    private func checkpoint() -> Result<ProjectStore.RasterBacking.Checkpoint, RasterResidency.Failure> {
         lock.lock()
-        if let backing { lock.unlock(); return .success(backing) }
+        if let backing { lock.unlock(); return .success(.init(backing: backing)) }
         // A package writer can be ahead of this version's already queued checkpoint. Waiting here
         // would block the only queue capable of finishing it, so save/render admission must retry.
         guard !isCheckpointing else { lock.unlock(); return .failure(.checkpointPending) }
@@ -156,11 +197,11 @@ final class RasterSource: RasterResidencyCandidate {
         return .failure(.checkpointPending)
     }
 
-    private func finishCheckpoint(_ result: Result<ProjectStore.RasterBacking, RasterResidency.Failure>,
+    private func finishCheckpoint(_ result: Result<ProjectStore.RasterBacking.Checkpoint, RasterResidency.Failure>,
                                   releasingImage: Bool = false) {
         lock.lock(); defer { lock.unlock() }
-        if case .success(let backing) = result {
-            self.backing = backing
+        if case .success(let checkpoint) = result {
+            self.backing = checkpoint.backing
             originalAllocation?.markDurable()
             if releasingImage { image = nil; lease = nil }
         }

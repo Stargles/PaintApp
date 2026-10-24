@@ -4,18 +4,27 @@ import UIKit
 /// Immutable pixel tiers of the active cel, captured once. Editable vector objects never enter
 /// this source. Only the active window is normalized and sampled while the brush moves.
 struct CelPixelSnapshot {
-    let raster: UIImage?
-    let baked: UIImage?
+    let raster: RasterSource?
+    let baked: RasterSource?
     let size: CGSize
+    var residency: RasterResidency { raster?.residency ?? baked?.residency ?? .shared }
 
-    init(raster: UIImage?, baked: UIImage?, size: CGSize) {
-        self.raster = raster
-        self.baked = baked
+    init(rasterSource: RasterSource?, bakedSource: RasterSource?, size: CGSize) {
+        raster = rasterSource
+        baked = bakedSource
+        self.size = size
+    }
+
+    init?(capturing raster: UIImage?, baked: UIImage?, size: CGSize, residency: RasterResidency = .shared) {
+        do {
+            self.raster = try raster.map { try RasterSource.capture($0, using: residency).get() }
+            self.baked = try baked.map { try RasterSource.capture($0, using: residency).get() }
+        } catch { return nil }
         self.size = size
     }
 
     init?(cel: Cel) {
-        raster = cel.raster.hasContent ? cel.raster.renderToUIImage() : nil
+        raster = cel.raster.snapshot()
         baked = cel.bakedImage
         size = cel.raster.size
         if raster == nil && baked == nil { return nil }
@@ -57,9 +66,9 @@ struct CelPixelSnapshot {
         let workingBytes = Self.liquifyWorkingBytes(sourceSize: sourceRect.size, destinationSize: rect.size)
         guard workingBytes <= CompositorBudget.textureBudgetBytes,
               CompositorBudget.hasHeadroom(for: workingBytes) else { return nil }
-        let source = UIGraphicsImageRenderer(size: sourceRect.size, format: PixelOps.transparentFormat()).image { _ in
-            draw(at: CGPoint(x: -sourceRect.minX, y: -sourceRect.minY))
-        }
+        guard case .success(let working) = residency.admitWorking(workingBytes) else { return nil }
+        defer { withExtendedLifetime(working) {} }
+        guard let source = replacementWindow(in: sourceRect) else { return nil }
         let sw = Int(sourceRect.width), sh = Int(sourceRect.height)
         guard let cg = source.cgImage,
               let bytes = CoreGraphicsCompositor.premultipliedBytes(cg, width: sw, height: sh) else { return nil }
@@ -107,40 +116,53 @@ struct CelPixelSnapshot {
             return joined
         }()
         guard let warped,
-              let image = CoreGraphicsCompositor.makeImage(fromPremultiplied: warped,
-                  width: width, height: height) else { return nil }
+              case .success(let output) = RasterSurface.allocate(width: width, height: height, using: residency),
+              case .success = output.replacePixels(with: warped),
+              case .success(let image) = output.image() else { return nil }
         var changed = false
         let dx = Int(rect.minX - sourceRect.minX), dy = Int(rect.minY - sourceRect.minY)
         for y in 0..<Int(rect.height) {
             let a = (y * width) * 4, b = ((y + dy) * sw + dx) * 4
             if !warped[a..<(a + width * 4)].elementsEqual(bytes[b..<(b + width * 4)]) { changed = true; break }
         }
-        return Patch(image: UIImage(cgImage: image), rect: rect, changed: changed)
+        return Patch(image: image, rect: rect, changed: changed)
     }
 
     /// One canvas allocation at lift; every preview before it held only its window.
-    func committing(_ patch: Patch) -> UIImage {
-        UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { context in
-            draw(at: .zero)
-            context.cgContext.clear(patch.rect)
-            patch.image.draw(in: patch.rect)
-        }
+    func committing(_ patch: Patch) -> RasterSource? {
+        guard let surface = render(in: CGRect(origin: .zero, size: size), applying: patch) else { return nil }
+        return RasterSource.snapshot(of: surface, size: size)
     }
 
-    func replacementWindow(in rect: CGRect, applying patch: Patch? = nil) -> UIImage {
-        UIGraphicsImageRenderer(size: rect.size, format: PixelOps.transparentFormat()).image { context in
-            draw(at: CGPoint(x: -rect.minX, y: -rect.minY))
+    func replacementWindow(in rect: CGRect, applying patch: Patch? = nil) -> UIImage? {
+        guard let surface = render(in: rect, applying: patch),
+              case .success(let image) = surface.image() else { return nil }
+        return image
+    }
+
+    private func render(in rect: CGRect, applying patch: Patch?) -> RasterSurface? {
+        // Resolve every required tier before drawing. An unavailable tier refuses the whole window;
+        // nil input is logical absence and remains different from a failed read.
+        let rasterImage: UIImage?
+        let bakedImage: UIImage?
+        do {
+            rasterImage = try raster?.resolveImage().get()
+            bakedImage = try baked?.resolveImage().get()
+        } catch { return nil }
+        guard case .success(let output) = RasterSurface.allocate(width: Int(rect.width), height: Int(rect.height),
+                                                                  using: residency) else { return nil }
+        guard case .success = output.mutate({ context in
+            UIGraphicsPushContext(context)
+            defer { UIGraphicsPopContext() }
+            let content = CGRect(origin: CGPoint(x: -rect.minX, y: -rect.minY), size: size)
+            bakedImage?.draw(in: content)
+            rasterImage?.draw(in: content)
             if let patch {
                 let local = patch.rect.offsetBy(dx: -rect.minX, dy: -rect.minY)
-                context.cgContext.clear(local)
+                context.clear(local)
                 patch.image.draw(in: local)
             }
-        }
-    }
-
-    private func draw(at origin: CGPoint) {
-        let rect = CGRect(origin: origin, size: size)
-        baked?.draw(in: rect)
-        raster?.draw(in: rect)
+        }) else { return nil }
+        return output
     }
 }

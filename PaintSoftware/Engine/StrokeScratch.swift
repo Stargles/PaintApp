@@ -132,6 +132,12 @@ final class StrokeScratch: DabTarget {
     private(set) var windowRect: CGRect = .null
 
     private var window: RasterLayerTexture?
+    private let residency: RasterResidency
+    private var failure: RasterResidency.Failure?
+    var lastMutationResult: Result<Void, RasterResidency.Failure> {
+        if let failure { return .failure(failure) }
+        return window?.lastMutationResult ?? .success(())
+    }
 
     /// The dirty rect accumulated by windows this stroke has already outgrown. The live window's
     /// own `strokeDirtyRect` is unioned onto it by `dirtyRect`; reallocation folds one into the
@@ -144,13 +150,15 @@ final class StrokeScratch: DabTarget {
     private static let minimumPad: CGFloat = 64
 
     init(canvasSize: CGSize, role: Role, opacity: CGFloat = 1, blendMode: CGBlendMode = .normal,
-         texture: BrushTextureSettings? = nil, celContent: CelContent? = nil) {
+         texture: BrushTextureSettings? = nil, celContent: CelContent? = nil,
+         residency: RasterResidency = .shared) {
         self.canvasSize = canvasSize
         self.role = role
         self.opacity = opacity
         self.blendMode = blendMode
         self.texture = texture
         self.celContent = celContent
+        self.residency = residency
     }
 
     // MARK: - Reading
@@ -172,10 +180,11 @@ final class StrokeScratch: DabTarget {
         // would never hit either.
         if let cached = punchedImage, cachedPunchVersion == window.version { return cached }
         guard let coverage = windowContents else { return nil }
-        let punched = UIGraphicsImageRenderer(size: windowRect.size, format: PixelOps.transparentFormat()).image { _ in
+        guard let punched = renderedImage(size: windowRect.size, drawing: { _ in
             backdrop?.draw(at: CGPoint(x: -windowRect.minX, y: -windowRect.minY))
             coverage.draw(at: .zero, blendMode: .destinationOut, alpha: opacity)
-        }
+            return true
+        }) else { return nil }
         punchedImage = punched
         cachedPunchVersion = window.version
         return punched
@@ -206,18 +215,20 @@ final class StrokeScratch: DabTarget {
     /// `StrokeCanvasView.refreshDisplay` asks several times between two dabs.
     private var windowContents: UIImage? {
         guard let window, !windowRect.isNull else { return nil }
-        let raw = window.renderToUIImage()
+        let raw: UIImage
+        switch window.renderToUIImage() {
+        case .success(let image): raw = image
+        case .failure(let error): failure = error; return nil
+        }
         guard let texture, texture.depth > 0, texturesItsOwnWindow else { return raw }
         if let cached = texturedImage, cachedTextureVersion == window.version { return cached }
-        let textured = UIGraphicsImageRenderer(size: windowRect.size,
-                                               format: PixelOps.transparentFormat()).image { ctx in
+        guard let textured = renderedImage(size: windowRect.size, drawing: { context in
             raw.draw(at: .zero)
-            // The window's origin is the phase: the same canvas point samples the same texel however
-            // far the pen has dragged the window since, which is what makes this paper.
-            BrushTextureMerge.apply(texture, into: ctx.cgContext,
+            BrushTextureMerge.apply(texture, into: context,
                                     over: CGRect(origin: .zero, size: windowRect.size),
                                     canvasOrigin: windowRect.origin)
-        }
+            return true
+        }) else { return nil }
         texturedImage = textured
         cachedTextureVersion = window.version
         return textured
@@ -349,21 +360,27 @@ final class StrokeScratch: DabTarget {
     /// which is why the clip has to redraw it rather than merely clearing.
     func clip(to path: CGPath) {
         guard let window, !windowRect.isNull else { return }
-        let current = window.renderToUIImage()
-        carriedDirtyRect = dirtyRect
-        let clipped = UIGraphicsImageRenderer(size: windowRect.size, format: PixelOps.transparentFormat()).image { ctx in
-            let cg = ctx.cgContext
-            // Into canvas space for the whole block, so `path` needs no transform of its own.
-            cg.translateBy(x: -windowRect.minX, y: -windowRect.minY)
-            backdrop?.draw(at: .zero)
-            cg.saveGState()
-            cg.addPath(path)
-            cg.clip()
-            current.draw(at: windowRect.origin)
-            cg.restoreGState()
+        let current: UIImage
+        switch window.renderToUIImage() {
+        case .success(let image): current = image
+        case .failure(let error): failure = error; return
         }
-        self.window = RasterLayerTexture(size: windowRect.size, image: clipped,
-                                         canvasOrigin: windowRect.origin)
+        carriedDirtyRect = dirtyRect
+        let clipped = RasterLayerTexture.rendered(size: windowRect.size, canvasOrigin: windowRect.origin,
+                                                   using: residency) { context in
+            context.translateBy(x: -windowRect.minX, y: -windowRect.minY)
+            backdrop?.draw(at: .zero)
+            context.saveGState()
+            context.addPath(path)
+            context.clip()
+            current.draw(at: windowRect.origin)
+            context.restoreGState()
+            return true
+        }
+        switch clipped {
+        case .success(let prepared): self.window = prepared
+        case .failure(let error): failure = error; return
+        }
         punchedImage = nil
         texturedImage = nil
         contentPresentation = nil
@@ -383,26 +400,35 @@ final class StrokeScratch: DabTarget {
     /// - `.replacing` copies (its window already holds the final pixels for its region, alpha
     ///   included — a source-over draw could not take ink away). It commits nothing today: the cut
     ///   preview it belongs to is a preview, and the cut itself is vector geometry.
-    func commit(into texture: RasterLayerTexture) {
-        guard !windowRect.isNull else { return }
-        switch role {
-        case .additive:
-            guard let image else { return }
-            texture.composite(patch: image, at: windowRect.origin, opacity: opacity,
-                              blendMode: blendMode)
-        case .subtractive(let backdrop):
-            // An eraser over a tier with no bitmap takes nothing away, and writing transparency
-            // into it would materialise the canvas-sized context this class exists to avoid.
-            guard backdrop != nil || texture.hasContent else { return }
-            // The window's own pixels, which are the coverage — *not* `image`, which is the picture
-            // of the removal that the display shows. Textured, because BRUSH.md §2.25's eraser is a
-            // stroke like any other: what the paper rejects is ink the eraser does not take away.
-            guard let coverage = windowContents else { return }
-            texture.erase(patch: coverage, at: windowRect.origin, opacity: opacity)
-        case .replacing(let backdrop):
-            guard backdrop != nil || texture.hasContent else { return }
-            guard let image else { return }
-            texture.restore(patch: image, at: windowRect.origin)
+    /// Prepare both undo pictures before the live tier changes. The final picture is drawn directly
+    /// into owned storage; the live write is one admitted copy and cannot leave a half-stroke.
+    func preparedPatch(over before: RasterSource, in rect: CGRect) -> Result<RasterSource, RasterResidency.Failure> {
+        if case .failure(let error) = lastMutationResult { return .failure(error) }
+        guard let contents = windowContents else { return .failure(failure ?? .unreadableBacking) }
+        return before.resolveImage().flatMap { base in
+            RasterSource.render(size: rect.size, using: residency) { _ in
+                base.draw(at: .zero)
+                let origin = CGPoint(x: windowRect.minX - rect.minX, y: windowRect.minY - rect.minY)
+                switch role {
+                case .additive: contents.draw(at: origin, blendMode: blendMode, alpha: opacity)
+                case .subtractive: contents.draw(at: origin, blendMode: .destinationOut, alpha: opacity)
+                case .replacing: contents.draw(at: origin, blendMode: .copy, alpha: 1)
+                }
+                return true
+            }
+        }
+    }
+
+    @discardableResult
+    func commit(into texture: RasterLayerTexture) -> Result<Void, RasterResidency.Failure> {
+        if case .failure(let error) = lastMutationResult { return .failure(error) }
+        guard !windowRect.isNull else { return .success(()) }
+        if case .subtractive(let backdrop) = role, backdrop == nil, !texture.hasContent { return .success(()) }
+        return texture.copiedPatch(in: windowRect).flatMap { before in
+            guard let before else { return .success(()) }
+            return preparedPatch(over: before, in: windowRect).flatMap { after in
+                after.resolveImage().flatMap { texture.restore(patch: $0, at: windowRect.origin) }
+            }
         }
     }
 
@@ -424,6 +450,7 @@ final class StrokeScratch: DabTarget {
     /// canvas — off-canvas pixels are storable nowhere and displayable nowhere, so a dab there is
     /// dropped rather than growing the box to reach it.
     private func window(containing rect: CGRect) -> RasterLayerTexture? {
+        guard failure == nil else { return nil }
         // Rounded the way `RasterLayerTexture` rounds its own size, so the window's pixel grid is
         // the cel's pixel grid: an integral origin is what makes a dab land on exactly the pixels it
         // would have landed on stamped straight into the cel, sub-pixel phase included.
@@ -449,8 +476,22 @@ final class StrokeScratch: DabTarget {
         // **The window's canvas origin travels with it**, which is the whole of BRUSH.md §2.25's
         // anchoring on the live tier: the paper is a function of the canvas point, so a window that
         // has just moved has to know where it now is or the texture would slide under the ink.
-        let grown = RasterLayerTexture(size: next.size, image: contents(for: next),
-                                       canvasOrigin: next.origin)
+        let previous: UIImage?
+        do { previous = try window?.renderToUIImage().get() }
+        catch { failure = error as? RasterResidency.Failure ?? .unreadableBacking; return nil }
+        let prepared = RasterLayerTexture.rendered(size: next.size, canvasOrigin: next.origin, using: residency) { _ in
+            backdrop?.draw(at: CGPoint(x: -next.minX, y: -next.minY))
+            if let previous, !windowRect.isNull {
+                previous.draw(at: CGPoint(x: windowRect.minX - next.minX, y: windowRect.minY - next.minY),
+                              blendMode: .copy, alpha: 1)
+            }
+            return true
+        }
+        let grown: RasterLayerTexture
+        switch prepared {
+        case .success(let value): grown = value
+        case .failure(let error): failure = error; return nil
+        }
         carriedDirtyRect = dirtyRect
         windowRect = next
         window = grown
@@ -479,22 +520,10 @@ final class StrokeScratch: DabTarget {
         return max(minimumPad, held / 2)
     }
 
-    /// What a freshly grown window starts life holding: the backdrop under it, then whatever the
-    /// window it replaces had already accumulated, copied over the top.
-    ///
-    /// `.copy` rather than a source-over draw, and for both roles: the old window's alpha is the
-    /// answer for its own region in either role — for `.replacing` because a punch is *lower* alpha
-    /// than the backdrop it came out of and source-over would put the backdrop straight back, and
-    /// for `.additive` because there is nothing underneath to preserve anyway.
-    private func contents(for rect: CGRect) -> UIImage? {
-        let previous = window?.renderToUIImage()
-        guard backdrop != nil || previous != nil else { return nil }
-        return UIGraphicsImageRenderer(size: rect.size, format: PixelOps.transparentFormat()).image { _ in
-            backdrop?.draw(at: CGPoint(x: -rect.minX, y: -rect.minY))
-            if let previous, !windowRect.isNull {
-                previous.draw(at: CGPoint(x: windowRect.minX - rect.minX, y: windowRect.minY - rect.minY),
-                              blendMode: .copy, alpha: 1)
-            }
+    private func renderedImage(size: CGSize, drawing: (CGContext) -> Bool) -> UIImage? {
+        switch RasterSource.render(size: size, using: residency, drawing: drawing).flatMap({ $0.resolveImage() }) {
+        case .success(let image): return image
+        case .failure(let error): failure = error; return nil
         }
     }
 }

@@ -139,7 +139,10 @@ final class CelContentPicture {
                 } else {
                     let sourceWindow = footprint.boundingBoxOfPath.integral.intersection(CGRect(origin: .zero, size: size))
                     if !sourceWindow.isEmpty, !sourceWindow.isNull {
-                        backing.replacementWindow(in: sourceWindow, applying: patch).draw(in: sourceWindow)
+                        guard let image = backing.replacementWindow(in: sourceWindow, applying: patch) else {
+                            completed = false; return
+                        }
+                        image.draw(in: sourceWindow)
                     }
                 }
             } else if let patch {

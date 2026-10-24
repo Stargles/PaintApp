@@ -37,14 +37,14 @@ struct ActionsMenu: View {
             pasteRow
 
             Button {
-                canvasManager.flipCanvas(horizontal: true)
+                canvasManager.flipCanvasAnnouncingProgress(horizontal: true)
             } label: {
                 row(icon: "arrow.left.and.right", title: "Flip Horizontal")
             }
             .accessibilityIdentifier("actions.flipHorizontalRow")
 
             Button {
-                canvasManager.flipCanvas(horizontal: false)
+                canvasManager.flipCanvasAnnouncingProgress(horizontal: false)
             } label: {
                 row(icon: "arrow.up.and.down", title: "Flip Vertical")
             }

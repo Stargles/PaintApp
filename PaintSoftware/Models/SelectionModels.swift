@@ -454,7 +454,7 @@ struct FloatingPiece {
 
     /// What the source cel should render instead of its real `bakedImage`/`drawing` while this piece
     /// is floating. Nil for `.duplicate`, where the source isn't touched at all.
-    var remainderPreview: UIImage?
+    var remainderPreview: RasterSource?
 
     var transform: FloatingTransform
     /// `transform` as the lift produced it. Every canvas-space delta the piece has travelled is
@@ -1141,10 +1141,15 @@ extension CanvasManager {
         }
         guard bounds.width > 0, bounds.height > 0 else { return }
 
-        let (rawPiece, shownRemainder) = PixelOps.maskedPiece(image: shown, path: path)
-        guard let croppedPiece = PixelOps.crop(rawPiece, to: bounds) else { return }
-        let remainder = pose == nil ? shownRemainder
-            : PixelOps.clear(base: stored, path: layerSpacePath(path, forLayerID: sourceLayerID))
+        let croppedPiece: UIImage
+        let remainder: RasterSource
+        do {
+            let split = try PixelOps.maskedPiece(image: shown, path: path, using: cel.raster.residency).get()
+            croppedPiece = try split.piece.cropped(to: bounds).get().resolveImage().get()
+            remainder = try pose == nil ? split.remainder
+                : PixelOps.clear(base: stored, path: layerSpacePath(path, forLayerID: sourceLayerID),
+                                 using: cel.raster.residency).get()
+        } catch { raise(.drawingSourceUnavailable); return }
 
         let sourceCelID = cel.id
         let lift = FloatingTransform(position: CGPoint(x: bounds.midX, y: bounds.midY),
@@ -1413,8 +1418,11 @@ extension CanvasManager {
         let bounds = selection.bounds.intersection(CGRect(origin: .zero, size: canvasSize))
         guard bounds.width > 0, bounds.height > 0 else { return }
 
-        let (rawPiece, _) = PixelOps.maskedPiece(image: shown, path: selection.path)
-        guard let croppedPiece = PixelOps.crop(rawPiece, to: bounds) else { return }
+        let croppedPiece: UIImage
+        do {
+            let split = try PixelOps.maskedPiece(image: shown, path: selection.path, using: cel.raster.residency).get()
+            croppedPiece = try split.piece.cropped(to: bounds).get().resolveImage().get()
+        } catch { raise(.drawingSourceUnavailable); return }
 
         let sourceLayerID = layers[sourceLayerIndex].id
         let sourceCelID = cel.id
@@ -1474,13 +1482,18 @@ extension CanvasManager {
         // piece moves to a layer that sits directly above this one in the same container, so the same
         // transformation layers carry it and nothing needs resampling to keep it where the loop was.
         guard let fullImage = PixelOps.rasterize(cel: cel, canvasSize: canvasSize) else { return }
-        let (piece, remainder) = PixelOps.maskedPiece(
-            image: fullImage, path: layerSpacePath(selection.path, forLayerID: sourceLayerID))
+        let piece: RasterSource
+        let remainder: RasterSource
+        do {
+            (piece, remainder) = try PixelOps.maskedPiece(image: fullImage,
+                path: layerSpacePath(selection.path, forLayerID: sourceLayerID), using: cel.raster.residency).get()
+        } catch { raise(.drawingSourceUnavailable); return }
 
         // TODO (108): span exactly the source cel, not the whole scene — see the same note on
         // `beginDuplicate` above, which had the identical defect.
-        let newCel = Cel(id: UUID(), startFrame: cel.startFrame, frameCount: cel.frameCount,
-                         raster: bakedRasterTexture(image: piece, likeExisting: .empty(size: canvasSize)))
+        let pieceRaster = preparedRasterTexture(source: piece, likeExisting: cel.raster)
+        let newRaster = preparedRasterTexture(source: remainder, likeExisting: cel.raster)
+        let newCel = Cel(id: UUID(), startFrame: cel.startFrame, frameCount: cel.frameCount, raster: pieceRaster)
         let newLayer = Layer(id: UUID(), name: defaultLayerName(for: .raster), opacity: 1.0,
                              isVisible: true, parentFolderID: layers[sourceIndex].parentFolderID,
                              cels: [newCel])
@@ -1489,7 +1502,6 @@ extension CanvasManager {
         let oldRaster = cel.raster, oldBaked = cel.bakedImage
         // Flattened into `raster` with the baked tier nil — `registerUndoableCelChange`'s rule for
         // every commit path, or the remainder lands somewhere the eraser cannot reach.
-        let newRaster = bakedRasterTexture(image: remainder, likeExisting: cel.raster)
 
         layers.insert(newLayer, at: insertAt)
         applyCelChange(layerID: sourceLayerID, celID: cel.id, raster: newRaster, baked: nil)
@@ -1497,7 +1509,7 @@ extension CanvasManager {
         self.selection = nil
 
         let cost = oldRaster.approximateCost + newRaster.approximateCost
-                 + Self.approximateImageCost(piece) + Self.approximateImageCost(oldBaked)
+                 + Self.approximateSourceCost(piece) + Self.approximateSourceCost(oldBaked)
         recordUndo(label: .moveToNewLayer, cost: cost, undo: { [weak self] in
             guard let self else { return }
             if let index = self.layers.firstIndex(where: { $0.id == newLayerID }) {
@@ -2027,16 +2039,24 @@ extension CanvasManager {
         // The piece floats in canvas points, where the artist sees it; the layer stores its pixels
         // in its own space, so what lands is the picture written back through the pose it is shown
         // through (`landingPose`) — the identity on a layer nothing poses.
-        let shown = PixelOps.render(floatingPiece: piece, into: canvasSize)
-        let rendered: UIImage
-        if let pose = piece.landingPose {
-            guard let inverse = pose.inverse, let image = PixelOps.posed(shown, through: inverse) else { return false }
-            rendered = image
-        } else { rendered = shown }
         let targetCel = layers[targetLayerIndex].cels[targetCelIndex]
-        let base = piece.kind == .move ? piece.remainderPreview ?? targetCel.bakedImage : targetCel.bakedImage
-        let finalImage = PixelOps.compositeOver(base: base, overlay: rendered)
-        guard let finalRaster = preparedRasterTexture(image: finalImage, likeExisting: targetCel.raster) else { return false }
+        let finalRaster: RasterLayerTexture
+        do {
+            let shown = try PixelOps.render(floatingPiece: piece, into: canvasSize,
+                                            using: targetCel.raster.residency).get().resolveImage().get()
+            let rendered: UIImage
+            if let pose = piece.landingPose {
+                guard let inverse = pose.inverse, let image = PixelOps.posed(shown, through: inverse) else {
+                    raise(.drawingSourceUnavailable); return false
+                }
+                rendered = image
+            } else { rendered = shown }
+            let base = try (piece.kind == .move ? piece.remainderPreview ?? targetCel.bakedImage
+                                               : targetCel.bakedImage)?.resolveImage().get()
+            let source = try PixelOps.compositeOver(base: base, overlay: rendered,
+                                                   using: targetCel.raster.residency).get()
+            finalRaster = preparedRasterTexture(source: source, likeExisting: targetCel.raster)
+        } catch { raise(.drawingSourceUnavailable); return false }
         // The selection and held picture are released only after the complete landing is ready.
         floatingPiece = nil
         boxNudge = nil
@@ -2217,11 +2237,13 @@ extension CanvasManager {
             if !selection.isRegion { self.selection = nil }
         } else {
             guard let base = PixelOps.rasterize(cel: cel, canvasSize: canvasSize) else { return }
-            let newImage = PixelOps.clear(base: base,
-                                          path: layerSpacePath(selection.path, forLayerID: layers[currentLayerIndex].id))
+            guard case .success(let source) = PixelOps.clear(base: base,
+                path: layerSpacePath(selection.path, forLayerID: layers[currentLayerIndex].id),
+                using: cel.raster.residency) else { raise(.drawingSourceUnavailable); return }
+            let raster = preparedRasterTexture(source: source, likeExisting: cel.raster)
             registerUndoableCelChange(layerID: layers[currentLayerIndex].id, celID: cel.id,
                                        oldRaster: cel.raster, oldBaked: cel.bakedImage,
-                                       newRaster: bakedRasterTexture(image: newImage, likeExisting: cel.raster),
+                                       newRaster: raster,
                                        newBaked: nil, label: .clearSelection)
         }
     }
@@ -2376,7 +2398,7 @@ extension CanvasManager {
     /// A raster-layer cel must hold its *at-rest* content in exactly one tier: `raster`.
     /// `bakedImage` exists only as transient scratch space while a shape is still adjustable — every
     /// commit path (Move, Duplicate, Fill, Clear) must pass its flattened result as `newRaster` (via
-    /// `bakedRasterTexture`) and `nil` for `newBaked`. Landing a commit in `bakedImage` instead is
+    /// `preparedRasterTexture`) and `nil` for `newBaked`. Landing a commit in `bakedImage` instead is
     /// the "ghost layer" bug: the eraser only ever stamps `Cel.raster`, so content left in
     /// `bakedImage` becomes permanently uneraseable, and any code that reasons about "the raster
     /// tier" (Move's lift, undo snapshots) silently disagrees with what's on screen.
@@ -2408,16 +2430,16 @@ extension CanvasManager {
     }
 
     func registerUndoableCelChange(layerID: UUID, celID: UUID,
-                                    oldRaster: RasterLayerTexture, oldBaked: UIImage?,
-                                    newRaster: RasterLayerTexture, newBaked: UIImage?,
+                                    oldRaster: RasterLayerTexture, oldBaked: RasterSource?,
+                                    newRaster: RasterLayerTexture, newBaked: RasterSource?,
                                     vector: CelVectorChange? = nil, recipe: CelRecipeChange? = nil,
                                     label: HistoryActionLabel) {
         applyCelChange(layerID: layerID, celID: celID, raster: newRaster, baked: newBaked,
                        vector: vector.map { ($0.canvas, $0.after, $0.rewriting) }, recipe: recipe?.after)
-        let cost = oldRaster.approximateCost + newRaster.approximateCost
-            + Self.approximateImageCost(oldBaked) + Self.approximateImageCost(newBaked)
-            + (vector.map { VectorUndoCost.bytes(from: $0.before, to: $0.after) } ?? 0)
-            + (recipe?.retainedBytes ?? 0)
+        let cost = [oldRaster.approximateCost, newRaster.approximateCost,
+                    Self.approximateSourceCost(oldBaked), Self.approximateSourceCost(newBaked),
+                    vector.map { VectorUndoCost.bytes(from: $0.before, to: $0.after) } ?? 0,
+                    recipe?.retainedBytes ?? 0].reduce(0, UndoBudget.addingCost)
         recordUndo(label: label, cost: cost, undo: { [weak self] in
             self?.applyCelChange(layerID: layerID, celID: celID, raster: oldRaster, baked: oldBaked,
                                  vector: vector.map { ($0.canvas, $0.before, $0.rewriting) }, recipe: recipe?.before)
@@ -2427,25 +2449,21 @@ extension CanvasManager {
         })
     }
 
-    /// Wraps a fully-flattened image (whatever combination of the old raster/baked/fill tiers a
-    /// commit path composited together) as a *new* `RasterLayerTexture` instance — see
-    /// `registerUndoableCelChange`'s doc comment for why every commit must land here instead of in
-    /// `bakedImage`. `strokeCount` is carried forward from `existing` (or set to 1 if it was 0, since
-    /// there's now visible content) — it's a display-only "has content" heuristic, not exact once
-    /// pixels have been flattened together.
-    func bakedRasterTexture(image: UIImage, likeExisting existing: RasterLayerTexture) -> RasterLayerTexture {
-        RasterLayerTexture(size: existing.size, image: image, strokeCount: max(existing.strokeCount, 1))
-    }
-
     /// A fallible commit prepares its replacement before releasing the held picture or saved tiers.
     /// An allocated transparent context is valid; a missing allocation must never become empty paint.
     func preparedRasterTexture(image: UIImage, likeExisting existing: RasterLayerTexture) -> RasterLayerTexture? {
-        guard CompositorBudget.hasHeadroom(for: existing.pixelWidth * existing.pixelHeight * 4) else { return nil }
-        let raster = bakedRasterTexture(image: image, likeExisting: existing)
-        return raster.hasContent ? raster : nil
+        switch RasterLayerTexture.capturing(image, size: existing.size,
+            strokeCount: max(existing.strokeCount, 1), using: existing.residency) {
+        case .success(let raster): return raster
+        case .failure: raise(.drawingSourceUnavailable); return nil
+        }
     }
 
-    private func applyCelChange(layerID: UUID, celID: UUID, raster: RasterLayerTexture, baked: UIImage?,
+    func preparedRasterTexture(source: RasterSource, likeExisting existing: RasterLayerTexture) -> RasterLayerTexture {
+        RasterLayerTexture(size: existing.size, source: source, strokeCount: max(existing.strokeCount, 1))
+    }
+
+    private func applyCelChange(layerID: UUID, celID: UUID, raster: RasterLayerTexture, baked: RasterSource?,
                                 vector: (VectorCanvas, [VectorElement], Set<UUID>)? = nil,
                                 recipe: InterpolationRecipe? = nil) {
         guard let layerIndex = layers.firstIndex(where: { $0.id == layerID }),

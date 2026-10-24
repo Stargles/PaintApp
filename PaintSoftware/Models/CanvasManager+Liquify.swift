@@ -10,7 +10,7 @@ struct LiquifySession {
     let renderSource: VectorCanvas.Frozen?
     let sourceIdentity: CelContentIdentity
     let oldRaster: RasterLayerTexture
-    let oldBaked: UIImage?
+    let oldBaked: RasterSource?
     let pixelSnapshot: CelPixelSnapshot?
     let recipeSnapshot: LiquifyRecipeSnapshot?
     let elementsBefore: [VectorElement]
@@ -147,15 +147,15 @@ extension CanvasManager {
             var raster = session.oldRaster
             var baked = session.oldBaked
             if pixelsChanged, let snapshot = session.pixelSnapshot, let patch = resolved.pixels {
-                let image = snapshot.committing(patch)
+                guard let source = snapshot.committing(patch) else {
+                    self.raise(.drawingSourceUnavailable); self.endLiveEdit(); return
+                }
                 if session.vector != nil {
                     raster = RasterLayerTexture(size: session.oldRaster.size)
-                    baked = image
+                    baked = source
                 } else {
-                    guard let prepared = self.preparedRasterTexture(image: image, likeExisting: session.oldRaster) else {
-                        self.endLiveEdit(); return
-                    }
-                    raster = prepared
+                    raster = RasterLayerTexture(size: session.oldRaster.size, source: source,
+                        strokeCount: max(session.oldRaster.strokeCount, 1))
                     baked = nil
                 }
             }

@@ -144,6 +144,8 @@ final class UndoHistory {
     struct Action {
         let label: HistoryActionLabel
         let cost: Int
+        var prepareUndo: () -> Bool = { true }
+        var prepareRedo: () -> Bool = { true }
         let undo: () -> Void
         let redo: () -> Void
     }
@@ -197,6 +199,7 @@ final class UndoHistory {
     func extendLast(cost: Int = 0, undo: @escaping () -> Void, redo: @escaping () -> Void) -> Bool {
         guard let last = undoStack.popLast() else { return false }
         undoStack.append(.init(label: last.label, cost: UndoBudget.addingCost(last.cost, cost),
+                               prepareUndo: last.prepareUndo, prepareRedo: last.prepareRedo,
                                undo: { undo(); last.undo() },
                                redo: { last.redo(); redo() }))
         trim()
@@ -207,7 +210,8 @@ final class UndoHistory {
     /// stack is empty — the caller's signal for whether to raise an "Undid …" notice at all.
     @discardableResult
     func undo() -> HistoryActionLabel? {
-        guard let action = undoStack.popLast() else { return nil }
+        guard let action = undoStack.last, action.prepareUndo() else { return nil }
+        undoStack.removeLast()
         action.undo()
         redoStack.append(action)
         return action.label
@@ -217,7 +221,8 @@ final class UndoHistory {
     /// if there is nothing to redo.
     @discardableResult
     func redo() -> HistoryActionLabel? {
-        guard let action = redoStack.popLast() else { return nil }
+        guard let action = redoStack.last, action.prepareRedo() else { return nil }
+        redoStack.removeLast()
         action.redo()
         undoStack.append(action)
         return action.label

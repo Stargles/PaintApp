@@ -17,7 +17,7 @@ import UIKit
 // touches `layers` 29 times (10 of them writes into the `@Published` array, including the vector
 // materialisation in `commitInteractiveFill`), plus `selection`, `currentFrame`,
 // `currentLayerIndex`, `canvasSize` and `allowsPaintingOutsideSelection`, and it calls back into
-// `beginCanvasEdit`, `recordUndo`, `registerUndoableCelChange`, `bakedRasterTexture`,
+// `beginCanvasEdit`, `recordUndo`, `registerUndoableCelChange`, `preparedRasterTexture`,
 // `celContentChangedOutsideStroke`, `refreshUndoRedoState`, `scheduleThumbnailRegen`,
 // `activeCelIndex`, `refreshDisplay` and `objectWillChange`.
 //
@@ -762,18 +762,21 @@ extension CanvasManager {
             // blank tier renders to a shared 1×1 (see `RasterLayerTexture.renderToUIImage`), so
             // handing it over as the overlay would size the whole composite to one pixel — and a
             // first fill on a fresh raster cel is exactly that case.
-            let existing = cel.raster.hasContent
-                ? PixelOps.compositeOver(base: fillGestureBaseBaked, overlay: cel.raster.renderToUIImage())
-                : fillGestureBaseBaked
-            // The preview covers its window; the flatten is the canvas, which is the raster tier's size.
             let canvas = CGRect(origin: .zero, size: cel.raster.size)
-            let finalImage = UIGraphicsImageRenderer(bounds: canvas, format: PixelOps.transparentFormat()).image { _ in
-                existing?.draw(in: canvas)
-                preview.draw()
-            }
+            let final: RasterSource
+            do {
+                let baked = try fillGestureBaseBaked?.resolveImage().get()
+                let strokes = try cel.raster.renderIfNonEmpty().get()
+                final = try RasterSource.render(size: cel.raster.size, using: cel.raster.residency) { _ in
+                    baked?.draw(in: canvas)
+                    strokes?.draw(in: canvas)
+                    preview.draw()
+                    return true
+                }.get()
+            } catch { raise(.drawingSourceUnavailable); endLiveFill(); return }
             registerUndoableCelChange(layerID: layerID, celID: celID,
                                       oldRaster: cel.raster, oldBaked: fillGestureBaseBaked,
-                                      newRaster: bakedRasterTexture(image: finalImage, likeExisting: cel.raster),
+                                      newRaster: preparedRasterTexture(source: final, likeExisting: cel.raster),
                                       newBaked: nil, label: label)
             endLiveFill(landing: preview)
         }
@@ -816,10 +819,11 @@ extension CanvasManager {
         }
         let cel = layers[layerIndex].cels[celIndex]
         guard let base = PixelOps.rasterize(cel: cel, canvasSize: canvasSize) else { return nil }
-        let newImage = PixelOps.fill(base: base, path: path, color: color)
+        guard case .success(let source) = PixelOps.fill(base: base, path: path, color: color,
+            using: cel.raster.residency) else { raise(.drawingSourceUnavailable); return nil }
         registerUndoableCelChange(layerID: layers[layerIndex].id, celID: cel.id,
                                   oldRaster: cel.raster, oldBaked: cel.bakedImage,
-                                  newRaster: bakedRasterTexture(image: newImage, likeExisting: cel.raster),
+                                  newRaster: preparedRasterTexture(source: source, likeExisting: cel.raster),
                                   newBaked: nil, label: label)
         return .pixels
     }
@@ -1224,8 +1228,10 @@ extension CanvasManager {
         let composited = renderer.image { context in
             let rect = window.canvasInWorking
             for source in references {
-                source.cel.bakedImage?.draw(in: rect)
-                source.cel.raster.renderToUIImage().draw(in: rect)
+                do {
+                    try source.cel.bakedImage?.resolveImage().get().draw(in: rect)
+                    try source.cel.raster.renderToUIImage().get().draw(in: rect)
+                } catch { completed = false; return }
                 if let vector = source.cel.vector {
                     if let excludingElement, excludingElement.celID == source.cel.id {
                         let elements = vector.elements.filter { $0.id != excludingElement.elementID }

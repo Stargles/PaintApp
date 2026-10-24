@@ -338,6 +338,20 @@ final class RasterSurface {
         }
     }
 
+    static func render(size: CGSize, using residency: RasterResidency,
+                       drawing: (CGContext) -> Bool) -> Result<RasterSurface, RasterResidency.Failure> {
+        guard let width = Int(exactly: size.width.rounded()), let height = Int(exactly: size.height.rounded()) else {
+            return .failure(.invalidSize)
+        }
+        return allocate(width: width, height: height, using: residency).flatMap { surface in
+            surface.mutate { context in
+                UIGraphicsPushContext(context)
+                defer { UIGraphicsPopContext() }
+                return drawing(context)
+            }.flatMap { $0 ? .success(surface) : .failure(.unreadableBacking) }
+        }
+    }
+
     /// Explicit COW: old providers continue reading the old charged buffer. No write occurs until
     /// admission and allocation both succeed, so a refusal preserves the complete previous version.
     func preparedForWrite(excluding: Set<UUID> = []) -> Result<RasterSurface, RasterResidency.Failure> {
@@ -360,4 +374,15 @@ final class RasterSurface {
 
     func readLease() -> ReadLease { ReadLease(self) }
     func image() -> Result<UIImage, RasterResidency.Failure> { readLease().image() }
+
+    /// Warpers already produce normalized RGBA8 bytes. Install them directly into admitted native
+    /// storage rather than creating an unowned CGImage whose array could escape its working charge.
+    func replacePixels(with bytes: [UInt8]) -> Result<Void, RasterResidency.Failure> {
+        guard bytes.count == byteCount else { return .failure(.invalidSize) }
+        return mutate { _ in
+            bytes.withUnsafeBytes { input in
+                buffer.address.copyMemory(from: input.baseAddress!, byteCount: byteCount)
+            }
+        }
+    }
 }

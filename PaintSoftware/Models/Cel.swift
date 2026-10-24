@@ -52,7 +52,7 @@ struct Cel: Identifiable {
     var raster: RasterLayerTexture
     /// Flattened raster content "baked" in by a pixel-level operation (select+move, duplicate,
     /// color fill, clear selection). Underneath `raster`'s live strokes.
-    var bakedImage: UIImage? = nil
+    var bakedImage: RasterSource? = nil
     /// Vector content for `.vector` layers (strokes/images as geometry, re-rasterized at
     /// canvas-native resolution). Nil on `.raster` layers. Still uses `bakedImage` the same way a
     /// raster layer does; only the live-stroke tier differs.
@@ -185,7 +185,7 @@ struct Cel: Identifiable {
     /// — and does not go through here.
     struct CopyTiers {
         var raster: RasterLayerTexture
-        var bakedImage: UIImage?
+        var bakedImage: RasterSource?
         var vector: VectorCanvas?
         var transformTracks: [String: TransformTrack]
         var pendingPoseBaselines: [String: PoseQuad]

@@ -10,7 +10,7 @@ import UIKit
 /// picture of the document as it is *then* rather than of what the artist copied.
 struct CopiedCel {
     var raster: RasterLayerTexture
-    var bakedImage: UIImage?
+    var bakedImage: RasterSource?
     var vector: VectorCanvas?
     /// **The pose channels travel with the drawing** — KEYFRAMES.md §3.1's *"it rides the cel through
     /// move, split, duplicate and paste for free"*, which is only true of paste because these two are

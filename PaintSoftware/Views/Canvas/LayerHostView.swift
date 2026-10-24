@@ -10,6 +10,7 @@ final class LayerHostView: CanvasPlaneView {
     /// into a floating piece. The **bottom** of the three, below `strokeView`'s live strokes and
     /// below the fill's preview.
     let bakedImageView = UIImageView()
+    private(set) var displayedBakedSource: RasterSource?
     let strokeView = StrokeCanvasView()
 
     /// **The live fill's plane: the layer's own space, posed** (`shownPose`). Its bounds are the host's
@@ -92,6 +93,12 @@ final class LayerHostView: CanvasPlaneView {
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func installBaked(source: RasterSource?, image: UIImage?) {
+        displayedBakedSource = source
+        if bakedImageView.image !== image { bakedImageView.image = image }
+        bakedImageView.isHidden = image == nil
+    }
 
     /// **Shows the adjustable fill's render over this layer's own pixels, or nothing**, and answers
     /// whether that changed anything — TODO (179). The bytes are drawn into a surface off the main
@@ -200,7 +207,9 @@ final class LayerHostView: CanvasPlaneView {
 
     /// The one answer the stroke view needs, from the two things that can produce it.
     private func hostContentVisibilityChanged() {
-        strokeView.hostBlankingChanged(to: isBlanked || isHidden)
+        let blanked = isBlanked || isHidden
+        if blanked { installBaked(source: nil, image: nil) }
+        strokeView.hostBlankingChanged(to: blanked)
     }
 
     /// **Whether this host is currently rendering nothing because the composite is drawing it** —

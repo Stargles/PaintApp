@@ -87,8 +87,8 @@ final class RasterResidencyLogicTests: XCTestCase {
     func testAnUnresolvedImmutableSourcePinsItsOldPixelsBeforeEditingBegins() throws {
         let owner = RasterResidency(budgetBytes: pictureBytes * 4, hasHeadroom: { _ in true })
         var current = try surface(owner)
-        var frozen: RasterSource? = try RasterSource.snapshot(of: current,
-            size: CGSize(width: width, height: height)).get()
+        var frozen: RasterSource? = RasterSource.snapshot(of: current,
+            size: CGSize(width: width, height: height))
         XCTAssertEqual(current.readLeaseCount, 1,
                        "Freezing must pin old pixels before any UIImage or CGImage is requested")
         XCTAssertEqual(owner.usage.allocations, 1)
@@ -230,7 +230,7 @@ final class RasterResidencyLogicTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         let owner = RasterResidency(budgetBytes: pictureBytes * 4, hasHeadroom: { _ in true })
         var source: RasterSource!
-        try autoreleasepool { source = try RasterSource.snapshot(of: surface(owner), size: CGSize(width: width, height: height)).get() }
+        try autoreleasepool { source = RasterSource.snapshot(of: try surface(owner), size: CGSize(width: width, height: height)) }
         XCTAssertEqual(owner.usage.pixelBufferCount, 1)
         XCTAssertEqual(owner.usage.reservedCheckpointBytes, pictureBytes * 2)
         let destination = root.appendingPathComponent("saved.png")
@@ -257,7 +257,7 @@ final class RasterResidencyLogicTests: XCTestCase {
         let storage = ProjectStore.RasterStorage(url: blocked)
         let owner = RasterResidency(budgetBytes: pictureBytes * 4, storage: storage, hasHeadroom: { _ in true })
         var source: RasterSource!
-        try autoreleasepool { source = try RasterSource.snapshot(of: surface(owner), size: CGSize(width: width, height: height)).get() }
+        try autoreleasepool { source = RasterSource.snapshot(of: try surface(owner), size: CGSize(width: width, height: height)) }
         let destination = root.appendingPathComponent("must-not-appear.png")
         XCTAssertThrowsError(try ProjectStore.serializingPackageMutation { try source.copyPNG(to: destination).get() }) { error in
             XCTAssertEqual(error as? RasterResidency.Failure, .checkpointFailed)
@@ -296,4 +296,398 @@ final class RasterResidencyLogicTests: XCTestCase {
         XCTAssertFalse(painted.isCertainlyTransparent, "Exact alpha proof must retain even one painted texel")
         XCTAssertLessThanOrEqual(owner.usage.highWaterBytes, owner.budgetBytes)
     }
+
+    func testTheRealOwnerAdmitsOldAndNew4096PicturesWithCheckpointHeadroom() throws {
+        let side = 4096
+        let bytes = side * side * 4
+        let budget = CompositorBudget.textureBudgetBytes(physicalMemory: 3 * 1024 * 1024 * 1024) * 2
+        let owner = RasterResidency(budgetBytes: budget, hasHeadroom: { _ in true })
+        var current = try RasterSurface.allocate(width: side, height: side, using: owner).get()
+        try current.mutate { context in
+            context.setFillColor(UIColor.red.cgColor)
+            context.fill(CGRect(x: 0, y: 0, width: side, height: side))
+        }.get()
+        let old = RasterSource.snapshot(of: current, size: CGSize(width: side, height: side))
+        current = try current.preparedForWrite().get()
+        try current.mutate { context in
+            context.setFillColor(UIColor.blue.cgColor)
+            context.fill(CGRect(x: 0, y: 0, width: side, height: side))
+        }.get()
+        try autoreleasepool {
+            XCTAssertEqual(try pixel(XCTUnwrap(old.resolveImage().get().cgImage)), [255, 0, 0, 255])
+            XCTAssertEqual(try pixel(XCTUnwrap(current.image().get().cgImage)), [0, 0, 255, 255])
+        }
+        XCTAssertEqual(owner.usage.pixelBufferCount, 2)
+        XCTAssertEqual(owner.usage.pixelBytes, bytes * 2)
+        XCTAssertEqual(owner.usage.reservedCheckpointBytes, bytes * 2)
+        XCTAssertEqual(owner.usage.admittedBytes, bytes * 4)
+        XCTAssertLessThanOrEqual(owner.usage.admittedBytes, budget)
+    }
+
+    func testOwnedEditDrawingKeepsAsymmetricRowsThroughCropAndFlip() throws {
+        let owner = RasterResidency(budgetBytes: pictureBytes * 12, hasHeadroom: { _ in true })
+        let input = try RasterSource.render(size: CGSize(width: width, height: height), using: owner) { context in
+            context.setFillColor(UIColor.red.cgColor)
+            context.fill(CGRect(x: 0, y: 0, width: 2, height: 1))
+            context.setFillColor(UIColor.blue.cgColor)
+            context.fill(CGRect(x: 4, y: 3, width: 3, height: 1))
+            return true
+        }.get()
+        let flipped = try input.flipped(horizontal: false).get()
+        let cropped = try flipped.cropped(to: CGRect(x: 4, y: 0, width: 3, height: 1)).get()
+        try autoreleasepool {
+            let image = try XCTUnwrap(cropped.resolveImage().get().cgImage)
+            let bytes = try XCTUnwrap(CoreGraphicsCompositor.premultipliedBytes(image, width: 3, height: 1))
+            XCTAssertEqual(bytes, Array(repeating: [UInt8(0), 0, 255, 255], count: 3).flatMap { $0 })
+            let original = try XCTUnwrap(input.resolveImage().get().cgImage)
+            let originalBytes = try XCTUnwrap(CoreGraphicsCompositor.premultipliedBytes(original, width: width, height: height))
+            XCTAssertEqual(Array(originalBytes.prefix(4)), [255, 0, 0, 255])
+            XCTAssertEqual(Array(originalBytes.suffix(4)), [0, 0, 0, 0])
+        }
+        XCTAssertLessThanOrEqual(owner.usage.admittedBytes, owner.budgetBytes)
+    }
+
+    func testStartupPrunesOnlyStaleOwnedSessionsAndProtectsLiveBackingsAndUnknownPaths() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("raster-sweep-\(UUID())")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let stale = root.appendingPathComponent("PaintRasterSources-\(UUID().uuidString)")
+        let unknown = root.appendingPathComponent("PaintRasterSources-unknown")
+        let other = root.appendingPathComponent("Projects")
+        for directory in [stale, unknown, other] {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try Data([7, 9]).write(to: directory.appendingPathComponent("keep"))
+        }
+        let liveURL = root.appendingPathComponent("PaintRasterSources-\(UUID().uuidString)")
+        let storage = ProjectStore.RasterStorage(url: liveURL)
+        let owner = RasterResidency(budgetBytes: pictureBytes * 6, storage: storage, hasHeadroom: { _ in true })
+        let original = root.appendingPathComponent("original.png")
+        let originalBytes = try XCTUnwrap(CanvasFixture.solidImage(.red,
+            rect: CGRect(x: 0, y: 0, width: width, height: height), size: CGSize(width: width, height: height)).pngData())
+        try originalBytes.write(to: original)
+        let backing = try ProjectStore.RasterBacking.protect(original, using: owner).get()
+        let symbolic = root.appendingPathComponent("PaintRasterSources-\(UUID().uuidString)")
+        try FileManager.default.createSymbolicLink(at: symbolic, withDestinationURL: other)
+        ProjectStore.RasterStorage.cleanupStaleSessions(in: root)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: stale.path))
+        XCTAssertEqual(try Data(contentsOf: backing.url), originalBytes)
+        XCTAssertEqual(try Data(contentsOf: original), originalBytes)
+        XCTAssertEqual(try Data(contentsOf: unknown.appendingPathComponent("keep")), Data([7, 9]))
+        XCTAssertEqual(try Data(contentsOf: other.appendingPathComponent("keep")), Data([7, 9]))
+        XCTAssertTrue(try symbolic.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink == true)
+        XCTAssertEqual(owner.usage.allocations, 0)
+        withExtendedLifetime(storage) {}
+    }
+
+    @MainActor
+    func testRasterUndoRefusalPreservesBothStacksPixelsAndCountsAndRepeatedLandingsReleaseTheirPreparedVersions() throws {
+        var allowed = true
+        let owner = RasterResidency(budgetBytes: pictureBytes * 6, hasHeadroom: { _ in allowed })
+        let before = RasterSource.snapshot(of: try surface(owner), size: CGSize(width: width, height: height))
+        let after = RasterSource.snapshot(of: try surface(owner, color: .blue), size: CGSize(width: width, height: height))
+        let raster = RasterLayerTexture(size: before.size, source: after, strokeCount: 4)
+        let history = UndoHistory(maxCost: pictureBytes * 12)
+        var preparedUndo: RasterSource?
+        var preparedRedo: RasterSource?
+        var bodies: [String] = []
+        history.record(.init(label: .brushStroke, cost: pictureBytes * 2,
+            prepareUndo: {
+                guard case .success(let source) = raster.replacingPatch(with: before, at: .zero) else { return false }
+                preparedUndo = source; return true
+            }, prepareRedo: {
+                guard case .success(let source) = raster.replacingPatch(with: after, at: .zero) else { return false }
+                preparedRedo = source; return true
+            }, undo: {
+                raster.reset(toSource: preparedUndo, strokeCount: 3); preparedUndo = nil; bodies.append("undo")
+            }, redo: {
+                raster.reset(toSource: preparedRedo, strokeCount: 4); preparedRedo = nil; bodies.append("redo")
+            }))
+        XCTAssertTrue(history.extendLast(undo: { bodies.append("extension undo") }, redo: { bodies.append("extension redo") }))
+        allowed = false
+        let version = raster.version
+        let usage = owner.usage
+        XCTAssertNil(history.undo())
+        XCTAssertEqual(history.undoStack.count, 1)
+        XCTAssertEqual(history.redoStack.count, 0)
+        XCTAssertEqual(bodies, [])
+        XCTAssertEqual(raster.version, version)
+        XCTAssertEqual(raster.strokeCount, 4)
+        XCTAssertEqual(owner.usage.pixelBytes, usage.pixelBytes)
+        try autoreleasepool { XCTAssertEqual(try pixel(XCTUnwrap(raster.renderToUIImage().get().cgImage)), [0, 0, 255, 255]) }
+        allowed = true
+        for _ in 0..<3 {
+            XCTAssertEqual(history.undo(), .brushStroke)
+            XCTAssertNil(preparedUndo)
+            XCTAssertEqual(raster.strokeCount, 3)
+            try autoreleasepool { XCTAssertEqual(try pixel(XCTUnwrap(raster.renderToUIImage().get().cgImage)), [255, 0, 0, 255]) }
+            allowed = false
+            let failedVersion = raster.version
+            let failedBytes = owner.usage.pixelBytes
+            let previousBodies = bodies
+            XCTAssertNil(history.redo())
+            XCTAssertEqual(history.undoStack.count, 0)
+            XCTAssertEqual(history.redoStack.count, 1)
+            XCTAssertEqual(bodies, previousBodies)
+            XCTAssertEqual(raster.version, failedVersion)
+            XCTAssertEqual(raster.strokeCount, 3)
+            XCTAssertEqual(owner.usage.pixelBytes, failedBytes)
+            allowed = true
+            XCTAssertEqual(history.redo(), .brushStroke)
+            XCTAssertNil(preparedRedo)
+            XCTAssertEqual(raster.strokeCount, 4)
+            try autoreleasepool { XCTAssertEqual(try pixel(XCTUnwrap(raster.renderToUIImage().get().cgImage)), [0, 0, 255, 255]) }
+            XCTAssertEqual(owner.usage.pixelBufferCount, 3)
+            XCTAssertLessThanOrEqual(owner.usage.admittedBytes, owner.budgetBytes)
+        }
+        XCTAssertEqual(Array(bodies.suffix(4)), ["extension undo", "undo", "redo", "extension redo"])
+    }
+
+    @MainActor
+    func testALateCelResizeRefusalKeepsEveryEarlierCelGeometrySizeAndHistoryUntouched() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("raster-resize-refusal-\(UUID())")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        var outputs = 0
+        let destination = CGSize(width: 32, height: 16)
+        let outputBytes = 32 * 16 * 4
+        let owner = RasterResidency(budgetBytes: outputBytes * 6, hasHeadroom: { bytes in
+            if bytes == outputBytes { outputs += 1; return outputs < 3 }
+            return true
+        })
+        let manager = CanvasFixture.manager()
+        let size = CGSize(width: width, height: height)
+        manager.canvasSize = size
+        var cels: [Cel] = []
+        for (index, color) in [UIColor.red, .green, .blue].enumerated() {
+            let url = root.appendingPathComponent("source-\(index).png")
+            try XCTUnwrap(CanvasFixture.solidImage(color, rect: CGRect(origin: .zero, size: size), size: size).pngData()).write(to: url)
+            let source = RasterSource.backed(by: try ProjectStore.RasterBacking.protect(url, using: owner).get(), using: owner)
+            let vector = VectorCanvas(size: size, elements: [.stroke(VectorStroke(brush: manager.toolProfiles.brush.preset,
+                color: CodableColor(color), size: 1, opacity: 1,
+                samples: [VectorSample(x: 1, y: 1), VectorSample(x: 5, y: 2)]))])
+            cels.append(Cel(id: UUID(), startFrame: index, frameCount: 1,
+                raster: RasterLayerTexture(size: size, source: source, strokeCount: index + 2), vector: vector))
+        }
+        manager.layers[0].cels = cels
+        manager.recordUndo(label: .brushStroke, undo: {}, redo: {})
+        let identities = cels.map(CelContentIdentity.init)
+        let ledgerBefore = manager.packageLedger.landedAt
+        let plan = CanvasResizePlan(map: CanvasResizeMap(from: size, to: destination, mode: .cropExpand),
+                                    audit: CanvasResizeAudit(blankCels: 0, inkedCels: 3), padding: 0)
+        XCTAssertFalse(manager.commitResize(plan))
+        XCTAssertEqual(outputs, 3, "The failure must occur after earlier output versions have been prepared")
+        XCTAssertEqual(manager.canvasSize, size)
+        XCTAssertEqual(manager.layers[0].cels.map(CelContentIdentity.init), identities)
+        XCTAssertEqual(manager.layers[0].cels.map { $0.raster.size }, [size, size, size])
+        XCTAssertEqual(manager.layers[0].cels.map { $0.raster.strokeCount }, [2, 3, 4])
+        XCTAssertEqual(manager.layers[0].cels.map { $0.vector?.size }, [size, size, size])
+        XCTAssertEqual(manager.history.undoStack.count, 1)
+        XCTAssertEqual(manager.history.redoStack.count, 0)
+        XCTAssertEqual(manager.packageLedger.landedAt, ledgerBefore)
+        XCTAssertEqual(manager.notice?.kind, .drawingSourceUnavailable)
+        for (index, expected) in [[UInt8(255), 0, 0, 255], [0, 255, 0, 255], [0, 0, 255, 255]].enumerated() {
+            try autoreleasepool { XCTAssertEqual(try pixel(XCTUnwrap(manager.layers[0].cels[index].raster.renderToUIImage().get().cgImage)), expected) }
+        }
+        XCTAssertLessThanOrEqual(owner.usage.admittedBytes, owner.budgetBytes)
+    }
+
+    @MainActor
+    func testAThousandPreparedVersionsUseABoundedDecodedWindow() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("raster-thousand-\(UUID())")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let owner = RasterResidency(budgetBytes: pictureBytes * 40, hasHeadroom: { _ in true })
+        let size = CGSize(width: width, height: height)
+        let png = root.appendingPathComponent("source.png")
+        try XCTUnwrap(CanvasFixture.solidImage(.red, rect: CGRect(origin: .zero, size: size), size: size).pngData()).write(to: png)
+        let source = RasterSource.backed(by: try ProjectStore.RasterBacking.protect(png, using: owner).get(), using: owner)
+        let manager = CanvasFixture.manager()
+        manager.canvasSize = size
+        manager.layers[0].cels = (0..<1000).map {
+            Cel(id: UUID(), startFrame: $0, frameCount: 1, raster: RasterLayerTexture(size: size, source: source, strokeCount: 1))
+        }
+        let input = CanvasPixelTransformInput(manager)
+        XCTAssertEqual(owner.usage.allocations, 0)
+        let newSize = CGSize(width: 16, height: 8)
+        let prepared = try input.prepare(.resize(size: newSize, content: CGRect(origin: .zero, size: newSize))).get()
+        XCTAssertEqual(prepared.cels.count, 1000)
+        XCTAssertTrue(prepared.cels.allSatisfy { $0.raster != nil && $0.raster?.size == newSize })
+        XCTAssertTrue(input.stillMatches(manager), "Preparation must leave all live identities and dimensions unchanged")
+        XCTAssertGreaterThanOrEqual(owner.usage.allocations, 1001, "Every output must actually be drawn before checkpointing")
+        XCTAssertLessThanOrEqual(owner.usage.pixelBufferCount, 8)
+        for at in [0, 499, 999] {
+            let rendered = try XCTUnwrap(prepared.cels[at].raster)
+            try autoreleasepool { XCTAssertEqual(try pixel(XCTUnwrap(rendered.resolveImage().get().cgImage)), [255, 0, 0, 255]) }
+        }
+        XCTAssertLessThanOrEqual(owner.usage.highWaterBytes, owner.budgetBytes)
+        XCTAssertLessThanOrEqual(owner.usage.admittedBytes, owner.budgetBytes)
+    }
+
+    @MainActor
+    func testThreeHundredCelLoadAndSaveFreezeKeepSourcesColdAndReuseExactPNGsAcrossReplacementAndRename() async throws {
+        try await assertColdPackageRoundTrip(celCount: 300)
+    }
+
+    @MainActor
+    func testAThousandCelLoadAndSaveFreezeKeepSourcesColdAndReuseExactPNGsAcrossReplacementAndRename() async throws {
+        try await assertColdPackageRoundTrip(celCount: 1000)
+    }
+
+    @MainActor
+    private func save(_ manager: CanvasManager, to url: URL, freezing owner: RasterResidency) async throws {
+        // Hold the existing writer so the synchronous save freeze can be observed independently
+        // of its later thumbnail/render/checkpoint consumers. The hold is always released.
+        let entered = expectation(description: "existing save serializer entered")
+        let release = DispatchSemaphore(value: 0)
+        ProjectStore.enqueueRasterCheckpoint { entered.fulfill(); release.wait() }
+        defer { release.signal() }
+        await fulfillment(of: [entered], timeout: 30)
+        let finished = expectation(description: "normal save completed")
+        let allocations = owner.usage.allocations
+        var failed = false
+        let decision = ProjectStore.save(manager, to: url, onSaveFailed: { failed = true },
+                                         completion: { finished.fulfill() })
+        XCTAssertEqual(decision, .write)
+        XCTAssertEqual(owner.usage.allocations, allocations,
+                       "Freezing every saved tier and the thumbnail recipe must not resolve their pixels")
+        release.signal()
+        await fulfillment(of: [finished], timeout: 30)
+        XCTAssertFalse(failed)
+        XCTAssertTrue(ProjectBackupManager.validateProject(at: manager.projectURL ?? url))
+    }
+
+    @MainActor
+    private func assertColdPackageRoundTrip(celCount: Int) async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("raster-package-\(UUID())")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let previousRoot = ProjectBackupManager.rootDirectoryOverride
+        ProjectBackupManager.rootDirectoryOverride = root
+        defer {
+            ProjectBackupManager.rootDirectoryOverride = previousRoot
+            try? FileManager.default.removeItem(at: root)
+        }
+        let size = CGSize(width: width, height: height)
+        let original = root.appendingPathComponent("input.png")
+        let png = try XCTUnwrap(CanvasFixture.solidImage(.red,
+            rect: CGRect(origin: .zero, size: size), size: size).pngData())
+        try png.write(to: original)
+        let authoredOwner = RasterResidency(budgetBytes: pictureBytes * 24, hasHeadroom: { _ in true })
+        let protected = try ProjectStore.RasterBacking.protect(original, using: authoredOwner).get()
+        let source = RasterSource.backed(by: protected, using: authoredOwner)
+        let authored = CanvasFixture.manager()
+        authored.projectName = "Cold \(celCount)"
+        authored.canvasSize = size
+        authored.layers[0].cels = (0..<celCount).map {
+            Cel(id: UUID(), startFrame: $0, frameCount: 1,
+                raster: RasterLayerTexture(size: size, source: source, strokeCount: 2), bakedImage: source)
+        }
+        let url = ProjectStore.createNewProjectURL(name: authored.projectName)
+        authored.projectURL = url
+        XCTAssertEqual(authoredOwner.usage.allocations, 0)
+        try await save(authored, to: url, freezing: authoredOwner)
+        XCTAssertEqual(ProjectStore.lastSaveProfile?.pngsEncoded, 0)
+        XCTAssertEqual(ProjectStore.lastSaveProfile?.pngsReused, celCount * 2)
+        try FileManager.default.removeItem(at: original)
+
+        let owner = RasterResidency(budgetBytes: pictureBytes * 24, hasHeadroom: { _ in true })
+        let loaded = await ProjectStore.loadInBackground(from: url, residency: owner)
+        let opened = try XCTUnwrap(loaded)
+        defer { opened.closeFrameBaker(); authored.closeFrameBaker() }
+        let profile = try XCTUnwrap(ProjectStore.lastLoadProfile)
+        XCTAssertEqual(profile.celCount, celCount)
+        XCTAssertEqual(profile.ownedRasterPicturesAfterSourceLoad, 0)
+        XCTAssertEqual(profile.ownedRasterBytesAfterSourceLoad, 0)
+        opened.thumbnailBackfillTask?.cancel()
+        await opened.thumbnailBackfillTask?.value
+        XCTAssertEqual(opened.layers[0].cels.count, celCount)
+        XCTAssertTrue(opened.layers[0].cels.allSatisfy { $0.raster.hasContent && $0.bakedImage != nil })
+        let identities = opened.layers[0].cels.map(CelContentIdentity.init)
+        let recipeAllocations = owner.usage.allocations
+        let frozen = opened.makeFrameRecipe(atFrame: celCount / 2, includeBackground: false)
+        XCTAssertNotNil(frozen)
+        XCTAssertEqual(owner.usage.allocations, recipeAllocations)
+
+        try await save(opened, to: url, freezing: owner)
+        XCTAssertEqual(ProjectStore.lastSaveProfile?.pngsEncoded, 0,
+                       "A reopened document's first save must clone immutable PNGs without reencoding")
+        XCTAssertEqual(ProjectStore.lastSaveProfile?.pngsReused, celCount * 2)
+        opened.projectName = "Renamed \(celCount)"
+        try await save(opened, to: url, freezing: owner)
+        let renamed = try XCTUnwrap(opened.projectURL)
+        XCTAssertNotEqual(renamed, url)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+        XCTAssertEqual(ProjectStore.lastSaveProfile?.pngsEncoded, 0)
+        XCTAssertEqual(ProjectStore.lastSaveProfile?.pngsReused, celCount * 2)
+        XCTAssertEqual(opened.layers[0].cels.map(CelContentIdentity.init), identities)
+        for at in [0, celCount / 2, celCount - 1] {
+            let cel = opened.layers[0].cels[at]
+            for (suffix, role) in [("raster", ProjectPackageLayout.Role.raster), ("baked", .baked)] {
+                let name = "\(cel.id.uuidString)_\(suffix).png"
+                let file = ProjectPackageLayout.resolve(ProjectPackageLayout.writePath(named: name, role: role), in: renamed)
+                XCTAssertEqual(try Data(contentsOf: file), png, "Unchanged resources must retain their exact compressed bytes")
+            }
+            try autoreleasepool {
+                XCTAssertEqual(try pixel(XCTUnwrap(cel.raster.renderToUIImage().get().cgImage)), [255, 0, 0, 255])
+                XCTAssertEqual(try pixel(XCTUnwrap(cel.bakedImage?.resolveImage().get().cgImage)), [255, 0, 0, 255])
+            }
+        }
+        XCTAssertLessThanOrEqual(owner.usage.pixelBufferCount, 24,
+                                 "The native provider count must remain a window, independent of cel count")
+        XCTAssertLessThanOrEqual(owner.usage.highWaterBytes, owner.budgetBytes)
+        XCTAssertLessThanOrEqual(owner.usage.admittedBytes, owner.budgetBytes)
+        withExtendedLifetime(frozen) {}
+    }
+
+    @MainActor
+    func testDirtyCheckpointFailurePreservesTheSavedPackageAndTheUnsavedLiveVersion() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("raster-save-refusal-\(UUID())")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let previousRoot = ProjectBackupManager.rootDirectoryOverride
+        ProjectBackupManager.rootDirectoryOverride = root
+        defer {
+            ProjectBackupManager.rootDirectoryOverride = previousRoot
+            try? FileManager.default.removeItem(at: root)
+        }
+        let size = CGSize(width: width, height: height)
+        let owner = RasterResidency(budgetBytes: pictureBytes * 12, hasHeadroom: { _ in true })
+        let manager = CanvasFixture.manager()
+        manager.projectName = "Checkpoint refusal"
+        manager.canvasSize = size
+        let blue = RasterSource.snapshot(of: try surface(owner, color: .blue), size: size)
+        manager.layers[0].cels[0].raster = RasterLayerTexture(size: size, source: blue, strokeCount: 3)
+        let url = ProjectStore.createNewProjectURL(name: manager.projectName)
+        manager.projectURL = url
+        defer { manager.closeFrameBaker() }
+        try await save(manager, to: url, freezing: owner)
+        let manifest = try Data(contentsOf: url.appendingPathComponent("manifest.json"))
+        let celID = manager.layers[0].cels[0].id
+        let savedRaster = ProjectPackageLayout.resolve(ProjectPackageLayout.writePath(
+            named: "\(celID.uuidString)_raster.png", role: .raster), in: url)
+        let savedPixels = try Data(contentsOf: savedRaster)
+        let blocker = root.appendingPathComponent("not-a-source-directory")
+        try Data([1, 2, 3]).write(to: blocker)
+        let refusedOwner = RasterResidency(budgetBytes: pictureBytes * 12,
+            storage: ProjectStore.RasterStorage(url: blocker), hasHeadroom: { _ in true })
+        let red = RasterSource.snapshot(of: try surface(refusedOwner), size: size)
+        manager.layers[0].cels[0].raster = RasterLayerTexture(size: size, source: red, strokeCount: 4)
+        let identity = CelContentIdentity(manager.layers[0].cels[0])
+        let ledger = manager.packageLedger.landedAt
+        let completed = expectation(description: "failed normal save completed")
+        var failed = false
+        XCTAssertEqual(ProjectStore.save(manager, to: url, onSaveFailed: { failed = true },
+                                         completion: { completed.fulfill() }), .write)
+        await fulfillment(of: [completed], timeout: 30)
+        XCTAssertTrue(failed)
+        XCTAssertEqual(try Data(contentsOf: url.appendingPathComponent("manifest.json")), manifest)
+        XCTAssertEqual(try Data(contentsOf: savedRaster), savedPixels)
+        XCTAssertTrue(ProjectBackupManager.validateProject(at: url))
+        XCTAssertEqual(CelContentIdentity(manager.layers[0].cels[0]), identity)
+        XCTAssertEqual(manager.layers[0].cels[0].raster.strokeCount, 4)
+        XCTAssertEqual(manager.packageLedger.landedAt, ledger)
+        try autoreleasepool {
+            XCTAssertEqual(try pixel(XCTUnwrap(manager.layers[0].cels[0].raster.renderToUIImage().get().cgImage)), [255, 0, 0, 255])
+        }
+        XCTAssertLessThanOrEqual(refusedOwner.usage.admittedBytes, refusedOwner.budgetBytes)
+    }
+
 }

@@ -59,6 +59,30 @@ so UIKit could legitimately retain that autoreleased wrapper after cache evictio
 Provider wrapper construction now establishes its own pool and returns a retained Result across it;
 the zero-buffer and exact reload assertions stay unchanged. Native rerun remains pending/root-owned.
 
+Root's isolated exact `f30b656c042e1d897b63cf57019f8f1efe330434` primitive run compiled and passed
+all13methods. Consumer migration now uses immutable RasterSource tiers/snapshots and typed failable
+reads/edits, the one existing save serializer for source clones/checkpoints, provider-owned scratch
+and patch outputs, preflighted raster undo, and all-cel preparation before atomic resize/flip landing.
+Root accepted these seams and the once-per-process owned-stale-temp sweep; none changes package format.
+Source work is WIP and not yet compile-qualified. Six additional bounded methods (19 total) cover
+the real4096owner, asymmetric crop/flip pixels, stale/live source cleanup, undo refusal/repeated
+landings, late-cel resize refusal, and1000serially checkpointed outputs. New load/save freeze/clone
+regressions remain next. The pending mask dependency `f34cbe57bde9e6ea16c62a309d329d9e749c0ec1`
+replaces stroke-begin callbacks with side-effect-free admission then immediate begin, and must be
+combined with raster admission before timing or cel mutation. No new runtime RAM bound is claimed.
+Existing-test adaptation is delegated to background_fix_review in this same tree, all existing test
+files except RasterResidencyLogicTests.swift; the raster author owns all new consumer regressions
+there and any future RasterResidencyUITests.swift. Exact signatures/census live externally at
+`~/PaintWork/s54-architecture-audit/raster-test-adaptation.md`. Void setBakedContent explicitly reports
+capture failure with XCTest file/line and returns without assignment; no nil/blank compatibility path.
+Three further normal-path methods now prepare300/1000cel load/save-freeze/PNG-clone replacement and
+rename checks plus a real dirty-checkpoint write-failure package-preservation case (22 total).
+Static UI lints/diff-check pass. Before qualification, preserve fill/shape/text drafts until their
+final raster preparation succeeds, propagate settlement refusal before the next edit, and join that
+admission to the mask's pure stroke factory. The current consumer checkpoint records this known
+remaining boundary; it is not runtime-qualified. Root owns native/fast/UI/mutation gates. The test
+adaptation author does not stage/commit; the raster author stages only reviewed owned paths.
+
 ## Current combined source qualification — 2026-10-24
 
 Root's normal combined baseline at6b5010d9 passed847/847, zero skips/failures; all724 tracked

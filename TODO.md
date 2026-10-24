@@ -320,6 +320,16 @@ account usage limits; root continues. The full source inventory is not yet fully
   legacy fallback. 300/1000-cel tiny fixtures will count actual resident pictures/bytes and exact output;
   2048×1024 full-RGBA arithmetic is not measured RSS or the Test1 respring cause. No native jobs,
   simulators, device actions, main merges or pushes until root grants them.
+  Root's isolated f30 primitive run passed13/13; production source/consumer migration is WIP, with
+  22 prepared residency methods (9 new unrun). Root approved provider-owned immutable tiers,
+  preflight/refusal, serial dirty checkpoints, atomic all-cel resize preparation and exact-owned
+  stale temp cleanup. Combine recorded mask factory dependency f34cbe57 before stroke admission.
+  Existing-test mechanical adaptation belongs to background_fix_review in the same tree; reserve
+  RasterResidencyLogicTests/new consumer regressions to the raster author. Normal-path300/1000cel
+  load/save-freeze/PNG clone replacement/rename and failed-checkpoint preservation are now prepared.
+  Preserve pending fill/shape/text artwork through final allocation refusal before any next edit,
+  and combine that prepared settlement with the mask's pure stroke factory before qualification. All wider
+  native/build/UI/fault gates remain root-owned and unrun; owned-byte sums do not prove process RSS.
   Mask source scope active on `tmp/s54-mask-residency` from59d69f12: price each indivisible
   transitive dependency closure in existing chunk/strip source planning; resolve live-mask metadata
   cache before dependency pixels and omit unrelated leaves. Reuse FrameRecipe/MaskResolver; no

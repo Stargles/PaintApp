@@ -1047,11 +1047,66 @@ struct CanvasView: UIViewRepresentable {
         /// opacity, the value layer's flat colour, which content tier each host shows, and the
         /// two interaction gates. Extracted from the middle of that function so it is a named
         /// row rather than part of `reconcile`'s remainder; the body is unchanged.
+        private struct HostSourcePictures {
+            let raster: RasterLayerTexture?
+            let vector: VectorCanvas?
+            let baked: RasterSource?
+            let bakedImage: UIImage?
+            let rasterImage: UIImage?
+        }
+
+        /// Admit every source that will be exposed before changing a host. Images in this value
+        /// retain their provider leases through the complete install; a failed frame replaces none.
+        private func prepareHostPictures(_ ids: Set<UUID>, atFrame frame: Int? = nil)
+            -> Result<[UUID: HostSourcePictures], RasterResidency.Failure> {
+            let frame = frame ?? canvasManager.currentFrame
+            let shownFrames = canvasManager.displayedFrames(atFrame: frame)
+            var pictures: [UUID: HostSourcePictures] = [:]
+            do {
+                for (index, layer) in canvasManager.layers.enumerated()
+                where ids.contains(layer.id) && canvasManager.isLayerEffectivelyVisible(index) {
+                    let at = canvasManager.activeCelIndex(inLayer: index,
+                        atFrame: shownFrames[index] ?? frame)
+                    let cel = at.map { layer.cels[$0] }
+                    let baked = bakedSourceToDisplay(layerIndex: index, celIndex: at)
+                    let host = layerHosts[layer.id]
+                    let bakedImage: UIImage?
+                    if let host, host.displayedBakedSource === baked {
+                        bakedImage = host.bakedImageView.image
+                    } else { bakedImage = try baked?.resolveImage().get() }
+                    let rasterImage: UIImage?
+                    if isFloatingMoveSource(layerIndex: index, celIndex: at) || cel?.vector != nil {
+                        rasterImage = nil
+                    } else if let installed = host?.strokeView.retainedRasterPicture(ifCurrent: cel?.raster) {
+                        rasterImage = installed.image
+                    } else { rasterImage = try cel?.raster.renderIfNonEmpty().get() }
+                    pictures[layer.id] = HostSourcePictures(raster: cel?.raster, vector: cel?.vector,
+                        baked: baked, bakedImage: bakedImage, rasterImage: rasterImage)
+                }
+                return .success(pictures)
+            } catch { return .failure(error as? RasterResidency.Failure ?? .unreadableBacking) }
+        }
+
+        private func installHostPictures(_ pictures: [UUID: HostSourcePictures]) {
+            for (id, picture) in pictures {
+                guard let host = layerHosts[id] else { continue }
+                host.installBaked(source: picture.baked, image: picture.bakedImage)
+                host.strokeView.installContent(raster: picture.raster, vector: picture.vector,
+                                              rasterImage: picture.rasterImage)
+            }
+        }
+
         private func reconcileLayerRows(touch: CanvasTouchInputs) {
             // §5.5's source frames, once for the whole loop: under a Repeat layer a host shows —
             // and a stroke lands in — the cel of the frame the layer is *showing*, not the
             // playhead's. Empty for every document with no Repeat layer, after one array scan.
             let shownFrames = canvasManager.displayedFrames(atFrame: canvasManager.currentFrame)
+            let exposed = Set(canvasManager.layers.filter { layerHosts[$0.id]?.isBlanked == false }.map(\.id))
+            let pictures: [UUID: HostSourcePictures]
+            switch prepareHostPictures(exposed) {
+            case .success(let prepared): pictures = prepared
+            case .failure: canvasManager.raise(.drawingSourceUnavailable); return
+            }
             for (index, layer) in canvasManager.layers.enumerated() {
                 guard let host = layerHosts[layer.id] else { continue }
                 if host.strokeView.pencilOnlyDrawing != canvasManager.pencilOnlyDrawing {
@@ -1063,9 +1118,19 @@ struct CanvasView: UIViewRepresentable {
                 // for the live canvas. See `isLayerEffectivelyVisible`/`effectiveOpacity`'s doc
                 // comments — the latter is a documented approximation, not exact group opacity.
                 let effectivelyVisible = canvasManager.isLayerEffectivelyVisible(index)
-                if host.isHidden != !effectivelyVisible { host.isHidden = !effectivelyVisible }
+                if !effectivelyVisible, !host.isHidden { host.isHidden = true }
                 let celIdx = canvasManager.activeCelIndex(inLayer: index,
                                                           atFrame: shownFrames[index] ?? canvasManager.currentFrame)
+                if let prepared = pictures[layer.id] {
+                    host.installBaked(source: prepared.baked, image: prepared.bakedImage)
+                    host.strokeView.installContent(raster: prepared.raster, vector: prepared.vector,
+                                                  rasterImage: prepared.rasterImage)
+                } else {
+                    host.installBaked(source: nil, image: nil)
+                    host.strokeView.bindContent(raster: celIdx.map { layer.cels[$0].raster },
+                                                vector: celIdx.flatMap { layer.cels[$0].vector })
+                }
+                if host.isHidden != !effectivelyVisible { host.isHidden = !effectivelyVisible }
                 // §6.5: while a mask-edit session is open, everything that isn't a legal source for
                 // it dims — folded in here rather than as a separate overlay, since this is already
                 // where every other per-layer canvas approximation (group opacity, visibility) gets
@@ -1074,10 +1139,6 @@ struct CanvasView: UIViewRepresentable {
                 showAlphaAndFill(on: host, ofLayerAt: index, celIndex: celIdx)
 
                 if let celIdx { host.strokeView.observeCelContent(canvasManager.layers[index].cels[celIdx]) }
-                let displayedBaked = bakedImageToDisplay(layerIndex: index, celIndex: celIdx)
-                if host.bakedImageView.image !== displayedBaked { host.bakedImageView.image = displayedBaked }
-                let bakedHidden = displayedBaked == nil
-                if host.bakedImageView.isHidden != bakedHidden { host.bakedImageView.isHidden = bakedHidden }
 
                 // While this cel's content is floating (lifted into a Move piece), its live strokes
                 // are hidden so the content doesn't render twice.
@@ -1085,21 +1146,7 @@ struct CanvasView: UIViewRepresentable {
                 if host.strokeView.isHidden != isFloatingSource {
                     host.strokeView.isHidden = isFloatingSource
                 }
-                if !isFloatingSource {
-                    let targetRaster = celIdx.map { canvasManager.layers[index].cels[$0].raster }
-                    if host.strokeView.raster !== targetRaster {
-                        host.strokeView.raster = targetRaster
-                    }
-                    // Vector layers route drawing into their VectorCanvas instead of the raster.
-                    let targetVector = celIdx.flatMap { canvasManager.layers[index].cels[$0].vector }
-                    if host.strokeView.vectorCanvas !== targetVector {
-                        host.strokeView.vectorCanvas = targetVector
-                    } else {
-                        // Same instance, but may have been mutated in place; version check brings
-                        // the display back in sync. See `displayedRasterVersion`.
-                        host.strokeView.refreshDisplayIfStale()
-                    }
-                }
+                if !isFloatingSource { host.strokeView.refreshDisplayIfStale() }
                 let hostCelID = celIdx.map { canvasManager.layers[index].cels[$0].id }
                 showLiveFill(on: host, layerID: layer.id, celID: hostCelID)
                 showLiveCelContentEdit(on: host, layerID: layer.id, celID: hostCelID)
@@ -1746,6 +1793,15 @@ struct CanvasView: UIViewRepresentable {
             }
 
             guard engaged else {
+                let hasComposite = sandwichPresentation != .disengaged || livePicture != nil || sandwichFull != nil
+                if hasComposite {
+                    switch prepareHostPictures(Set(layerHosts.keys)) {
+                    case .success(let pictures): installHostPictures(pictures)
+                    case .failure:
+                        canvasManager.raise(.drawingSourceUnavailable)
+                        return paperIsNowPaintedBy(true)
+                    }
+                }
                 landHeldFrame(key: nil, pictureIsCurrent: true)
                 paperIsNowPaintedBy(false)
                 // Before the early return below, which is reached on every pass once the canvas has
@@ -1856,6 +1912,17 @@ struct CanvasView: UIViewRepresentable {
                                                   key: key, cut: cut),
                             bandsOfThisFrame: livePicture?.holdsBands(of: canvasManager.currentFrame) ?? false))
             let live = presentation.activeHostDrawsItself
+            var drawnByHosts = Set<UUID>()
+            if live {
+                if let ids = livePicture?.cut.hostLayerIDs { drawnByHosts.formUnion(ids) }
+                if let activeID { drawnByHosts.insert(activeID) }
+                switch prepareHostPictures(drawnByHosts) {
+                case .success(let pictures): installHostPictures(pictures)
+                case .failure:
+                    canvasManager.raise(.drawingSourceUnavailable)
+                    return paperIsNowPaintedBy(compositeCarriesThePaper)
+                }
+            }
             // What the canvas shows of `key` under a held frame, once this presentation is applied.
             let shownIsCurrent: Bool
             switch presentation {
@@ -1912,8 +1979,6 @@ struct CanvasView: UIViewRepresentable {
             // wears it. An edit's live pair draws its layers plain — no mask, as no blend mode or
             // grade — until its bake lands: the owner's ruling for the fast picture (TODO (125),
             // `SandwichPresentation.live`).
-            var drawnByHosts: Set<UUID> = []
-            if live, let ids = livePicture?.cut.hostLayerIDs { drawnByHosts = Set(ids) }
             let mask = presentation == .midStroke ? liveMaskImage : nil
             for (id, host) in layerHosts {
                 let drawsItself = live && (id == activeID || drawnByHosts.contains(id))
@@ -2283,9 +2348,9 @@ struct CanvasView: UIViewRepresentable {
                     cg.saveGState()
                     cg.translateBy(x: content.minX, y: content.minY)
                     cg.scaleBy(x: content.width / size.width, y: content.height / size.height)
-                    PixelOps.drawFloatingPiece(piece, into: cg, clippedTo: cg.boundingBoxOfClipPath)
+                    let completed = PixelOps.drawFloatingPiece(piece, into: cg, clippedTo: cg.boundingBoxOfClipPath)
                     cg.restoreGState()
-                    return true
+                    return completed
                 }
                 values[piece.sourceLayerID] = value
                 let original = CGRect(x: -piece.baseSize.width / 2, y: -piece.baseSize.height / 2,
@@ -2447,9 +2512,18 @@ struct CanvasView: UIViewRepresentable {
                let at = canvasManager.displayedCelIndex(inLayer: index, atFrame: canvasManager.currentFrame) {
                 let cel = canvasManager.layers[index].cels[at]
                 host.strokeView.observeCelContent(cel)
-                host.bakedImageView.image = cel.bakedImage
-                host.bakedImageView.isHidden = cel.bakedImage == nil
-                if host.strokeView.raster !== cel.raster { host.strokeView.raster = cel.raster }
+                let expectedBaked = bakedSourceToDisplay(layerIndex: index, celIndex: at)
+                if !host.isBlanked && !host.isHidden {
+                    if host.displayedBakedSource !== expectedBaked || !host.strokeView.hasDisplayedRaster(cel.raster) {
+                        switch prepareHostPictures([layerID]) {
+                        case .success(let pictures): installHostPictures(pictures)
+                        case .failure: canvasManager.raise(.drawingSourceUnavailable); return false
+                        }
+                    }
+                } else {
+                    host.installBaked(source: nil, image: nil)
+                    host.strokeView.bindContent(raster: cel.raster, vector: cel.vector)
+                }
             }
             return host.strokeView.showHeldEdit(live)
         }
@@ -3094,19 +3168,16 @@ struct CanvasView: UIViewRepresentable {
 
             let cel = canvasManager.layers[index].cels[celIdx]
             host.strokeView.observeCelContent(cel)
-            host.bakedImageView.image = cel.bakedImage
-            host.bakedImageView.isHidden = cel.bakedImage == nil
-            host.strokeView.raster = cel.raster
-            host.strokeView.vectorCanvas = cel.vector
+            host.installBaked(source: nil, image: nil)
+            host.strokeView.bindContent(raster: cel.raster, vector: cel.vector)
             showLiveFill(on: host, layerID: canvasManager.layers[index].id, celID: cel.id)
             showLiveCelContentEdit(on: host, layerID: canvasManager.layers[index].id, celID: cel.id)
-            host.bakedImageView.image = cel.bakedImage
-            host.bakedImageView.isHidden = cel.bakedImage == nil
+            host.installBaked(source: nil, image: nil)
         }
 
         /// What a layer's `bakedImageView` should show: the real `bakedImage`, or — while that cel's
         /// content is lifted into a Move piece — the transient "hole" preview computed at lift time.
-        private func bakedImageToDisplay(layerIndex: Int, celIndex: Int?) -> UIImage? {
+        private func bakedSourceToDisplay(layerIndex: Int, celIndex: Int?) -> RasterSource? {
             guard let celIndex else { return nil }
             if let piece = canvasManager.floatingPiece, piece.kind == .move,
                canvasManager.layers[layerIndex].id == piece.sourceLayerID,
@@ -3595,7 +3666,7 @@ struct CanvasView: UIViewRepresentable {
                         // Reuse its ink only once the actual backing slots cover the same content.
                         if held == nil, let image = host.strokeView.interpolationImage,
                            let coverage = host.strokeView.captureDisplayedContentCoverage(of: shown.cel,
-                            bakedImage: host.bakedImageView.image, placement: placement, derivation: derived.identity) {
+                            bakedSource: host.displayedBakedSource, placement: placement, derivation: derived.identity) {
                             if host.strokeView.setInterpolationImage(image, covering: coverage, aimingAt: placement) {
                                 host.contentPlacement = coverage.placement
                             }

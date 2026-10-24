@@ -405,7 +405,7 @@ extension CanvasManager {
     ///
     /// **Landing the pixels is `registerUndoableCelChange`, not a private stamp helper.** That
     /// primitive is already tool-agnostic across Fill, Shape, Move, Duplicate and both selection
-    /// operations; it wraps the result via `bakedRasterTexture(image:likeExisting:)` into
+    /// operations; it wraps the result via `preparedRasterTexture(image:likeExisting:)` into
     /// `Cel.raster` and never `bakedImage` — the ghost-layer bug its own doc comment records —
     /// applies by resolved layer/cel *ID* rather than index, and registers one atomic step.
     ///
@@ -451,10 +451,12 @@ extension CanvasManager {
         // One canvas-sized flatten, one composite, once — `ADD_TEXT.md` §4 rule 7, and the same
         // shape and cost as a fill commit, which is already accepted.
         guard let base = PixelOps.rasterize(cel: cel, canvasSize: canvasSize) else { return }
-        let composited = PixelOps.compositeOver(base: base, overlay: glyphs)
+        guard case .success(let source) = PixelOps.compositeOver(base: base, overlay: glyphs,
+            using: cel.raster.residency) else { raise(.drawingSourceUnavailable); return }
+        let raster = preparedRasterTexture(source: source, likeExisting: cel.raster)
         registerUndoableCelChange(layerID: layerID, celID: celID,
                                   oldRaster: cel.raster, oldBaked: cel.bakedImage,
-                                  newRaster: bakedRasterTexture(image: composited, likeExisting: cel.raster),
+                                  newRaster: raster,
                                   newBaked: nil, label: .addText)
         // The bake never goes through `strokeEnded`, so the layer panel keeps showing the cel as it
         // was unless the thumbnail is refreshed here — `commitInteractiveShape`'s reason, verbatim.

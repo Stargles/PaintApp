@@ -453,7 +453,7 @@ struct DrawingView: View {
                         .progressViewStyle(.circular)
                         .tint(.white)
                         .scaleEffect(1.3)
-                    Text("Resizing canvas…")
+                    Text("Updating canvas…")
                         .font(.callout)
                         .foregroundColor(.white)
                 }

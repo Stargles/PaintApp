@@ -85,8 +85,8 @@ struct FrameRecipe {
     /// **Every leaf at once, which is the thing RENDER.md §3.4 is about.** One canvas-sized image per
     /// visible leaf is 840 MB for a hundred leaves at 2048x1024, against a 192 MiB budget on the
     /// owner's iPad — so this is the whole-frame resolve that `composite(budgetBytes:)` replaces for
-    /// anything that wants an image rather than a request. It stays because `SandwichRecipe` and
-    /// `liveMaskRequest` legitimately want one request over every leaf.
+    /// anything that wants an image rather than a request. `SandwichRecipe` still needs a complete
+    /// request; mask reads resolve only their dependency subset after the metadata cache lookup.
     func resolve() -> RenderRequest {
         let resolved = FrameRecipe.resolveSources(leaves, canvasSize: canvasSize, quality: quality,
                                                   window: window)

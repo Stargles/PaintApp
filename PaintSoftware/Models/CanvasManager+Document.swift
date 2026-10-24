@@ -427,6 +427,94 @@ struct CanvasResizePlan: Equatable {
     let padding: CGFloat
 }
 
+/// Immutable inputs for the existing whole-canvas operations. Source handles pin versions without
+/// decoding them; the background walk never reads mutable cels, layers or vector canvases.
+struct CanvasPixelTransformInput {
+    struct CelInput {
+        let layerID: UUID
+        let celID: UUID
+        let startFrame: Int
+        let frameCount: Int
+        let identity: CelContentIdentity
+        let raster: RasterSource?
+        let baked: RasterSource?
+        let strokeCount: Int
+    }
+    enum Operation {
+        case resize(size: CGSize, content: CGRect)
+        case flip(horizontal: Bool)
+    }
+    struct CelOutput {
+        let layerID: UUID
+        let celID: UUID
+        let raster: RasterSource?
+        let baked: RasterSource?
+        let strokeCount: Int
+    }
+    struct Prepared {
+        let input: CanvasPixelTransformInput
+        let cels: [CelOutput]
+    }
+    let projectID: UUID
+    let size: CGSize?
+    let layerIDs: [UUID]
+    let cels: [CelInput]
+
+    init(_ manager: CanvasManager) {
+        projectID = manager.projectID
+        size = manager.canvasSize
+        layerIDs = manager.layers.map(\.id)
+        cels = manager.layers.flatMap { layer in
+            layer.cels.map { cel in
+                CelInput(layerID: layer.id, celID: cel.id, startFrame: cel.startFrame, frameCount: cel.frameCount,
+                         identity: CelContentIdentity(cel), raster: cel.raster.snapshot(), baked: cel.bakedImage,
+                         strokeCount: cel.raster.strokeCount)
+            }
+        }
+    }
+
+    func stillMatches(_ manager: CanvasManager) -> Bool {
+        guard projectID == manager.projectID, size == manager.canvasSize,
+              layerIDs == manager.layers.map(\.id) else { return false }
+        let current = manager.layers.flatMap { layer in layer.cels.map { (layer.id, $0) } }
+        return current.count == cels.count && zip(cels, current).allSatisfy { old, new in
+            old.layerID == new.0 && old.celID == new.1.id && old.startFrame == new.1.startFrame
+                && old.frameCount == new.1.frameCount && old.identity == CelContentIdentity(new.1)
+        }
+    }
+
+    func prepare(_ operation: Operation) -> Result<Prepared, RasterResidency.Failure> {
+        ProjectStore.serializingPackageMutation {
+            var outputs: [CelOutput] = []
+            for cel in cels {
+                let result: Result<CelOutput, RasterResidency.Failure> = autoreleasepool {
+                    func transform(_ source: RasterSource?) throws -> RasterSource? {
+                        guard let source else { return nil }
+                        let changed: RasterSource
+                        switch operation {
+                        case .resize(let size, let content): changed = try source.resized(to: size, placing: content).get()
+                        case .flip(let horizontal): changed = try source.flipped(horizontal: horizontal).get()
+                        }
+                        // One output at a time on the existing serializer, never a 1000-image walk.
+                        _ = try changed.prepareForSave().get()
+                        _ = changed.releaseResidentPixels()
+                        return changed
+                    }
+                    do {
+                        return .success(CelOutput(layerID: cel.layerID, celID: cel.celID,
+                            raster: try transform(cel.raster), baked: try transform(cel.baked), strokeCount: cel.strokeCount))
+                    } catch { return .failure(error as? RasterResidency.Failure ?? .unreadableBacking) }
+                }
+                switch result {
+                case .success(let output): outputs.append(output)
+                case .failure(let error): return .failure(error)
+                }
+            }
+            return .success(Prepared(input: self, cels: outputs))
+        }
+    }
+}
+
 extension CanvasManager {
 
     // MARK: - Resize (CANVAS_RESIZE.md stages 1, 2 and 3)
@@ -572,20 +660,24 @@ extension CanvasManager {
             raise(.resizeRefused(plan.audit.refusal))
             return
         }
-        guard plan.audit.needsAnnouncing(scaling: plan.map.mode.scalesContent) else {
-            commitResize(plan)
-            return
+        if plan.audit.inkedCels > 0 {
+            prepareCanvasPixels(.resize(size: plan.map.newSize, content: plan.map.contentRect)) { [weak self] prepared in
+                guard let self else { return }
+                _ = self.commitResize(plan, preparedPixels: prepared)
+            }
+        } else {
+            // No PNG work exists in a native-only document. Preserve the existing fast path and
+            // announcement threshold for its geometry walk.
+            guard plan.audit.needsAnnouncing(scaling: plan.map.mode.scalesContent) else { commitResize(plan); return }
+            isResizing = true
+            Task { @MainActor [weak self] in
+                await Task.yield()
+                guard let self else { return }
+                self.commitResize(plan)
+                self.isResizing = false
+            }
         }
-        isResizing = true
-        Task { @MainActor [weak self] in
-            // Committed before the block, not merely requested: setting `isResizing` marks the view
-            // dirty and SwiftUI renders that at the end of this run-loop turn, so resuming *after*
-            // that turn is what puts the overlay on screen rather than in a queue.
-            await Task.yield()
-            guard let self else { return }
-            self.commitResize(plan)
-            self.isResizing = false
-        }
+
     }
 
     /// Decides a resize without performing any of it: the one map, and one walk of the document for
@@ -623,12 +715,14 @@ extension CanvasManager {
     /// function `resizeCanvas(to:mode:)` reaches, and rule 11 is a property of the operation rather
     /// than of the dialog that raised it.
     @discardableResult
-    func commitResize(_ plan: CanvasResizePlan) -> Bool {
+    func commitResize(_ plan: CanvasResizePlan,
+                      preparedPixels: CanvasPixelTransformInput.Prepared? = nil) -> Bool {
         guard plan.audit.canProceed else {
             raise(.resizeRefused(plan.audit.refusal))
             return false
         }
-        let changed = applyCanvasResize(plan.map, padding: plan.padding, history: .clearThenRecord)
+        let changed = applyCanvasResize(plan.map, padding: plan.padding, history: .clearThenRecord,
+                                        preparedPixels: preparedPixels)
         // **Said when the resize happens, not when undo is pressed** (§5 rule 10, §6 Q2). Both halves
         // are required: a resize that resamples nothing, or a document with no raster pixels to lose,
         // is exactly invertible and must not be told it is lossy — which is the ordinary case on the
@@ -742,7 +836,8 @@ extension CanvasManager {
     ///   - policy: see `ResizeHistory`.
     @discardableResult
     private func applyCanvasResize(_ map: CanvasResizeMap, padding newPadding: CGFloat,
-                                   history policy: ResizeHistory) -> Bool {
+                                   history policy: ResizeHistory,
+                                   preparedPixels: CanvasPixelTransformInput.Prepared? = nil) -> Bool {
         guard let oldSize = canvasSize else { return false }
         assert(oldSize == map.oldSize,
                "applyCanvasResize was handed a map from \(map.oldSize) while the document is "
@@ -761,47 +856,41 @@ extension CanvasManager {
         // Canvas" path, where the audit has to see the baked display list; a second call finds
         // nothing pending and is a no-op.
         guard commitAllInteractiveState() else { return false }
-        selection = nil
-
+        let prepared: CanvasPixelTransformInput.Prepared
+        if let preparedPixels { prepared = preparedPixels }
+        else {
+            switch CanvasPixelTransformInput(self).prepare(.resize(size: newSize, content: map.contentRect)) {
+            case .success(let pixels): prepared = pixels
+            case .failure: raise(.drawingSourceUnavailable); return false
+            }
+        }
+        guard prepared.input.stillMatches(self) else { raise(.drawingSourceUnavailable); return false }
         let placement = map.contentRect
-
-        for layerIndex in layers.indices {
-            for celIndex in layers[layerIndex].cels.indices {
-                // **One pool per cel, and it is the difference between a slow operation and a
-                // jetsam.** Each cel autoreleases at least two canvas-sized images here — the
-                // `renderToUIImage()` inside `resized`, and the `UIGraphicsImageRenderer` output —
-                // and without a pool none of them drain until the whole double loop returns, so the
-                // intermediates for *every* cel in the document are resident at once. MEASURED
-                // 2026-08-27 (`PerfBaselineTests.testWhatTheCanvasPaddingResizeCosts`): 32 cels at
-                // 2048×1024 peaked at 3.5 GB on a document that is 256 MiB at rest. The cost is
-                // linear in cel count by construction, so the 300–1000-cel document the owner
-                // intends (TODO.md) does not get slow on a 3 GB iPad, it gets killed.
-                //
-                // `flipCanvas` below is the same loop with the same omission and is deliberately not
-                // changed here — see CANVAS_RESIZE.md §0.
-                autoreleasepool {
-                    layers[layerIndex].cels[celIndex].raster =
-                        layers[layerIndex].cels[celIndex].raster.resized(to: newSize, placing: placement)
-                    if let baked = layers[layerIndex].cels[celIndex].bakedImage {
-                        layers[layerIndex].cels[celIndex].bakedImage = PixelOps.resizedCanvasImage(baked, to: newSize, placing: placement)
-                    }
-                    if let vector = layers[layerIndex].cels[celIndex].vector {
-                        layers[layerIndex].cels[celIndex].vector = vector.resized(to: newSize, placing: placement)
-                    }
-                    // An in-between's content is *derived*, so there is nothing here to redraw — but
-                    // the lattice it is derived through is geometry in canvas coordinates and would
-                    // otherwise stay behind while the keyframes it interpolates moved. §1.
-                    if let recipe = layers[layerIndex].cels[celIndex].interpolation {
-                        layers[layerIndex].cels[celIndex].interpolation = recipe.mapped(through: map)
-                    }
-                    // Nil rather than re-rendered, and picked up by the deferred backfill below.
-                    // **Through the funnel, not by assignment**: a tile write publishes nothing since
-                    // §18.6, and this one has to reach the timeline — the resize moves the artwork
-                    // inside the frame, so a block left drawing the old tile is drawing the wrong
-                    // picture rather than an old one.
-                    clearThumbnail(layerIndex: layerIndex, celIndex: celIndex)
+        var resizedLayers = layers
+        let replacements = Dictionary(uniqueKeysWithValues: prepared.cels.map { ($0.celID, $0) })
+        for layerIndex in resizedLayers.indices {
+            for celIndex in resizedLayers[layerIndex].cels.indices {
+                let original = resizedLayers[layerIndex].cels[celIndex]
+                guard let pixels = replacements[original.id], pixels.layerID == resizedLayers[layerIndex].id else {
+                    raise(.drawingSourceUnavailable); return false
+                }
+                resizedLayers[layerIndex].cels[celIndex].raster = RasterLayerTexture(size: newSize,
+                    source: pixels.raster, strokeCount: pixels.strokeCount, residency: original.raster.residency)
+                resizedLayers[layerIndex].cels[celIndex].bakedImage = pixels.baked
+                if let vector = original.vector {
+                    resizedLayers[layerIndex].cels[celIndex].vector = vector.resized(to: newSize, placing: placement)
+                }
+                if let recipe = original.interpolation {
+                    resizedLayers[layerIndex].cels[celIndex].interpolation = recipe.mapped(through: map)
                 }
             }
+        }
+        // This is the first live mutation. Every pixel output is durable and every identity still
+        // matches; a late-cel failure above leaves size, vectors, history and all earlier cels intact.
+        selection = nil
+        layers = resizedLayers
+        for layerIndex in layers.indices {
+            for celIndex in layers[layerIndex].cels.indices { clearThumbnail(layerIndex: layerIndex, celIndex: celIndex) }
         }
 
         // **Document-level geometry, missed by this walk until CANVAS_RESIZE.md stage 1.** A guide's
@@ -836,12 +925,31 @@ extension CanvasManager {
             // restoring any of them after a resize puts pixels of the wrong size in the wrong place.
             history.removeAll()
             let padding = newPadding
+            var undoPixels: CanvasPixelTransformInput.Prepared?
+            var redoPixels: CanvasPixelTransformInput.Prepared?
             recordUndo(label: .resizeCanvas, cost: Self.resizeUndoCostBytes,
+                       prepareUndo: { [weak self] in
+                           guard let self else { return false }
+                           switch CanvasPixelTransformInput(self).prepare(.resize(size: map.oldSize, content: map.inverse.contentRect)) {
+                           case .success(let pixels): undoPixels = pixels; return true
+                           case .failure: self.raise(.drawingSourceUnavailable); return false
+                           }
+                       }, prepareRedo: { [weak self] in
+                           guard let self else { return false }
+                           switch CanvasPixelTransformInput(self).prepare(.resize(size: map.newSize, content: map.contentRect)) {
+                           case .success(let pixels): redoPixels = pixels; return true
+                           case .failure: self.raise(.drawingSourceUnavailable); return false
+                           }
+                       },
                        undo: { [weak self] in
-                           self?.applyCanvasResize(map.inverse, padding: padding, history: .leaveAlone)
+                           if let undoPixels { self?.applyCanvasResize(map.inverse, padding: padding, history: .leaveAlone,
+                                                                       preparedPixels: undoPixels) }
+                           undoPixels = nil
                        },
                        redo: { [weak self] in
-                           self?.applyCanvasResize(map, padding: padding, history: .leaveAlone)
+                           if let redoPixels { self?.applyCanvasResize(map, padding: padding, history: .leaveAlone,
+                                                                       preparedPixels: redoPixels) }
+                           redoPixels = nil
                        })
         case .leaveAlone:
             break
@@ -855,49 +963,76 @@ extension CanvasManager {
         return true
     }
 
-    func flipCanvas(horizontal: Bool) {
-        guard let canvasSize else { return }
-        // Mirroring is a canvas edit: bake first, or the pending shape/fill would commit afterwards
-        // at its un-mirrored geometry, landing on the wrong side of the canvas it was drawn on.
-        guard commitAllInteractiveState() else { return }
-        for layerIndex in layers.indices {
-            for celIndex in layers[layerIndex].cels.indices {
-                layers[layerIndex].cels[celIndex].raster = layers[layerIndex].cels[celIndex].raster.flipped(horizontal: horizontal)
-                if let bakedImage = layers[layerIndex].cels[celIndex].bakedImage {
-                    layers[layerIndex].cels[celIndex].bakedImage = Self.flippedImage(bakedImage, canvasSize: canvasSize, horizontal: horizontal)
-                }
-                // Through the funnel for the reason `setCanvasPadding` gives: a tile write publishes
-                // nothing since §18.6, and a mirror is the other operation that leaves the old tile
-                // a picture of content that has moved.
-                clearThumbnail(layerIndex: layerIndex, celIndex: celIndex)
-            }
-            // NOTE: vector-layer content (strokes/shapes/fills/images, all stored as geometry in
-            // `cel.vector` — see `VectorCanvas`) is not mirrored by this loop at all, unlike
-            // raster/bakedImage above. This predates object layers being retired; a vector
-            // layer's live strokes already didn't flip. Flagged as a follow-up, not fixed here.
+    func flipCanvasAnnouncingProgress(horizontal: Bool) {
+        guard canvasSize != nil, commitAllInteractiveState() else { return }
+        prepareCanvasPixels(.flip(horizontal: horizontal)) { [weak self] prepared in
+            self?.flipCanvas(horizontal: horizontal, preparedPixels: prepared)
         }
-        // Not undoable, same as setCanvasPadding: every cel's raster/fill/baked content is mirrored
-        // in place, so any undo entry recorded before the flip would restore content in the wrong
-        // (pre-flip) orientation if left on the stack.
+    }
+
+    func flipCanvas(horizontal: Bool, preparedPixels: CanvasPixelTransformInput.Prepared? = nil) {
+        guard let canvasSize, commitAllInteractiveState() else { return }
+        let prepared: CanvasPixelTransformInput.Prepared
+        if let preparedPixels { prepared = preparedPixels }
+        else {
+            switch CanvasPixelTransformInput(self).prepare(.flip(horizontal: horizontal)) {
+            case .success(let pixels): prepared = pixels
+            case .failure: raise(.drawingSourceUnavailable); return
+            }
+        }
+        guard prepared.input.stillMatches(self) else { raise(.drawingSourceUnavailable); return }
+        var flipped = layers
+        let replacements = Dictionary(uniqueKeysWithValues: prepared.cels.map { ($0.celID, $0) })
+        for layerIndex in flipped.indices {
+            for celIndex in flipped[layerIndex].cels.indices {
+                let original = flipped[layerIndex].cels[celIndex]
+                guard let pixels = replacements[original.id], pixels.layerID == flipped[layerIndex].id else {
+                    raise(.drawingSourceUnavailable); return
+                }
+                flipped[layerIndex].cels[celIndex].raster = RasterLayerTexture(size: canvasSize,
+                    source: pixels.raster, strokeCount: pixels.strokeCount, residency: original.raster.residency)
+                flipped[layerIndex].cels[celIndex].bakedImage = pixels.baked
+            }
+        }
+        layers = flipped
+        for layerIndex in layers.indices {
+            for celIndex in layers[layerIndex].cels.indices { clearThumbnail(layerIndex: layerIndex, celIndex: celIndex) }
+        }
         history.removeAll()
         refreshUndoRedoState()
-        // Deferred, for the reason the resize walk above states: this is the same whole-document
-        // thumbnail pass, and nothing on screen is waiting on it. CANVAS_RESIZE.md §4 names fixing it
-        // here as a free consequence of fixing it there.
         startThumbnailBackfill()
     }
 
-    /// Mirrors a cel's baked raster content about the canvas center, so a flipped
-    /// canvas doesn't leave raster content behind on the wrong side.
-    ///
-    /// The geometry itself lives in `RasterLayerTexture.flippedImage` — this used to hold a second
-    /// copy of the same translate+scale, which had to be kept in step by hand with the one the
-    /// live-stroke tier uses. All this adds is the backing-image guard: a `UIImage` with no `cgImage`
-    /// has nothing to mirror, and the caller drops the buffer rather than storing a blank one.
-    private static func flippedImage(_ image: UIImage, canvasSize: CGSize, horizontal: Bool) -> UIImage? {
-        guard image.cgImage != nil else { return nil }
-        return RasterLayerTexture.flippedImage(image, canvasSize: canvasSize, horizontal: horizontal)
+    /// LatestWins already owns cancellation/generation for document jobs. Freeze on main, prepare
+    /// only source handles off-main, and reject stale identities before the atomic landing.
+    private func prepareCanvasPixels(_ operation: CanvasPixelTransformInput.Operation,
+                                     landing: @escaping (CanvasPixelTransformInput.Prepared) -> Void) {
+        guard !isResizing else { return }
+        isResizing = true
+        MainActor.assumeIsolated {
+            if canvasPixelTransforms == nil {
+                canvasPixelTransforms = LatestWins(queue: DispatchQueue(label: "com.paintapp.canvasPixels", qos: .userInitiated))
+            }
+            canvasPixelTransforms?.request { [weak self] in
+                guard let self else { return nil }
+                let input = CanvasPixelTransformInput(self)
+                return { [weak self] in
+                    let result = input.prepare(operation)
+                    return { [weak self] in
+                        guard let self else { return }
+                        defer { self.isResizing = false }
+                        guard input.stillMatches(self) else { self.raise(.drawingSourceUnavailable); return }
+                        switch result {
+                        case .success(let prepared): landing(prepared)
+                        case .failure: self.raise(.drawingSourceUnavailable)
+                        }
+                    }
+                }
+            }
+        }
     }
+
+
 }
 
 // MARK: - Baking full-precision strokes back onto the grid (TODO item (14))

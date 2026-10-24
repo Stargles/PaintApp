@@ -179,37 +179,14 @@ enum PixelOps {
         return image
     }
 
-    /// One cel's render inputs, frozen — every value `rasterizeUncached` draws, owned outright, plus
-    /// the identity those values have.
-    ///
-    /// **Why a cel copy is not a freeze, which is the whole point of this type.** `Cel` is a struct,
-    /// but `cel.raster` is a `RasterLayerTexture` *class* and `cel.vector` a `VectorCanvas` *class*.
-    /// While the flatten is synchronous on the main actor no artist edit can interleave with it — the
-    /// atomicity `renderSources` used to defend by staying there — but the moment it is not, a `Cel`
-    /// copy still points at the live tiers and the next dab tears the frame. So the two class tiers
-    /// are read here, once, and the two `UIImage` tiers are held by reference because a fill or a
-    /// bake *replaces* them wholesale rather than drawing into them: holding the reference **is** the
-    /// freeze for those.
-    ///
-    /// Building one costs at most what `rasterizeUncached` used to do inline — one memoized
-    /// `renderToUIImage()` and one `VectorCanvas.freeze` — so nothing on the live path pays for the
-    /// existence of the bake path.
-    ///
-    /// **What it does cost is one copy-on-write duplication, transiently, and RENDER.md §3.2 names
-    /// it as the price.** `renderToUIImage()`'s image shares the tier's `CGContext` buffer
-    /// copy-on-write, and until this type existed the only thing retaining it was
-    /// `RasterLayerTexture.cachedImage`, which the next stamp drops *before* it writes — so the write
-    /// was in place. A recipe in flight is a second retainer, so a stamp landing while one is
-    /// unresolved duplicates the canvas. That window is one composite long, it is bounded at one
-    /// buffer per raster leaf being edited, and it is what "the expensive state is already
-    /// copy-on-write" buys: the alternative is `ProjectStore.SaveSnapshot`'s eager copy of every cel,
-    /// which is the cost this stage removes.
+    /// One cel's render inputs, frozen as immutable handles. An unresolved recipe does not decode
+    /// raster pixels; only a requested dependency resolves them inside the residency owner's budget.
     /// A transient source for a display recipe. No save, bake, thumbnail or export supplies one.
     struct CelDisplay {
         let identity = UUID()
         var vector: VectorCanvas.Frozen?
         var windows: [InkWindow] = []
-        var replacingBase: UIImage?
+        var replacingBase: RasterSource?
         var drawOverlays: ((CGContext, CGRect) -> Bool)?
     }
 
@@ -288,11 +265,11 @@ enum PixelOps {
         let identity: Identity
         let size: CGSize
         let display: CelDisplay?
-        let bakedImage: UIImage?
+        let bakedImage: RasterSource?
         /// The raster tier's pixels, or nil where it holds no bitmap at all — the skip
         /// `rasterizeUncached` has always made, taken at freeze time so the answer cannot change
         /// under the draw. Every vector cel has an empty raster tier, so nil is the common case.
-        let strokesImage: UIImage?
+        let strokesImage: RasterSource?
         let vector: VectorCanvas.Frozen?
         /// Already values-only and thread-safe by its own contract — see `DerivedCelContent.render`.
         let derived: DerivedCelContent?
@@ -308,7 +285,7 @@ enum PixelOps {
             self.derived = display?.vector == nil ? derived : nil
             self.pose = pose
             bakedImage = cel.bakedImage
-            strokesImage = cel.raster.hasContent ? cel.raster.renderToUIImage() : nil
+            strokesImage = cel.raster.snapshot()
             // The native tier remains available to direct window/display rendering. A present
             // derived provider owns its pixels and cannot fall back here after refusing.
             vector = display?.vector ?? cel.vector?.freeze(quality: quality)
@@ -533,7 +510,7 @@ enum PixelOps {
     /// written back into the layer's own space.
     static func posed(_ image: UIImage, through pose: PoseMap) -> UIImage? {
         guard !pose.isIdentity else { return image }
-        let source = CelPixelSnapshot(raster: nil, baked: image, size: image.size)
+        guard let source = CelPixelSnapshot(capturing: nil, baked: image, size: image.size) else { return nil }
         var completed = true
         let output = UIGraphicsImageRenderer(size: image.size, format: transparentFormat()).image { context in
             completed = drawPosedRaster(canvasSize: image.size, through: pose, into: context.cgContext) {
@@ -558,13 +535,23 @@ enum PixelOps {
             guard let rendered = vector.render(quality: quality, fittingInto: content.size) else { return nil }
             vectorImage = rendered
         }
+        let bakedImage: UIImage?
+        let strokesImage: UIImage?
+        let replacingBase: UIImage?
+        do {
+            replacingBase = try cel.display?.replacingBase?.resolveImage().get()
+            if replacingBase == nil {
+                bakedImage = try cel.bakedImage?.resolveImage().get()
+                strokesImage = try cel.strokesImage?.resolveImage().get()
+            } else { bakedImage = nil; strokesImage = nil }
+        } catch { return nil }
         var completed = true
         let image = UIGraphicsImageRenderer(bounds: bounds, format: transparentFormat()).image { context in
             let cg = context.cgContext
-            if let replacement = cel.display?.replacingBase { replacement.draw(in: content) }
+            if let replacement = replacingBase { replacement.draw(in: content) }
             else {
                 if let pose = cel.pose, !pose.isIdentity, cel.bakedImage != nil || cel.strokesImage != nil {
-                    let source = CelPixelSnapshot(raster: cel.strokesImage, baked: cel.bakedImage, size: cel.size)
+                    let source = CelPixelSnapshot(rasterSource: cel.strokesImage, bakedSource: cel.bakedImage, size: cel.size)
                     withCelWindow(footprint: CGPath(rect: CGRect(origin: .zero, size: cel.size), transform: nil),
                                   canvasSize: cel.size, into: cg, content: content, replacing: false) {
                         completed = drawPosedRaster(canvasSize: cel.size, through: pose, into: cg) {
@@ -573,8 +560,8 @@ enum PixelOps {
                     }
                     guard completed else { return }
                 } else {
-                    cel.bakedImage?.draw(in: content)
-                    cel.strokesImage?.draw(in: content)
+                    bakedImage?.draw(in: content)
+                    strokesImage?.draw(in: content)
                 }
                 // Native geometry keeps its existing renderer and independently resolved placement.
                 if let vectorImage { vectorImage.draw(in: content) }
@@ -655,24 +642,17 @@ enum PixelOps {
 
     /// Splits a canvas-sized image into the pixels inside `path` ("piece") and the same image with
     /// that region cleared to transparent ("remainder"), both still canvas-sized.
-    static func maskedPiece(image: UIImage, path: CGPath) -> (piece: UIImage, remainder: UIImage) {
+    static func maskedPiece(image: UIImage, path: CGPath, using residency: RasterResidency = .shared)
+        -> Result<(piece: RasterSource, remainder: RasterSource), RasterResidency.Failure> {
         let bounds = CGRect(origin: .zero, size: image.size)
-        let format = transparentFormat()
-
-        let piece = UIGraphicsImageRenderer(bounds: bounds, format: format).image { ctx in
-            ctx.cgContext.saveGState()
-            ctx.cgContext.addPath(path)
-            ctx.cgContext.clip()
+        return RasterSource.render(size: image.size, using: residency) { context in
+            context.addPath(path)
+            context.clip()
             image.draw(in: bounds)
-            ctx.cgContext.restoreGState()
+            return true
+        }.flatMap { piece in
+            clear(base: image, path: path, using: residency).map { (piece, $0) }
         }
-        let remainder = UIGraphicsImageRenderer(bounds: bounds, format: format).image { ctx in
-            image.draw(in: bounds)
-            ctx.cgContext.setBlendMode(.clear)
-            ctx.cgContext.addPath(path)
-            ctx.cgContext.fillPath()
-        }
-        return (piece, remainder)
     }
 
     /// Crops a canvas-sized (scale-1) image to `rect`, in the same point space it was rendered at.
@@ -704,14 +684,16 @@ enum PixelOps {
     /// (`tools/distort_seam_ab.swift`, MEASURED 2026-09-02). Routing it through the warp anyway would
     /// trade CoreGraphics' resampler for `ImageWarp`'s bilinear one on every existing Move, which is
     /// a change to shipped output for no gain.
-    static func render(floatingPiece piece: FloatingPiece, into canvasSize: CGSize) -> UIImage {
-        let bounds = CGRect(origin: .zero, size: canvasSize)
-        let renderer = UIGraphicsImageRenderer(bounds: bounds, format: transparentFormat())
-        return renderer.image { ctx in drawFloatingPiece(piece, into: ctx.cgContext, clippedTo: bounds) }
+    static func render(floatingPiece piece: FloatingPiece, into canvasSize: CGSize,
+                       using residency: RasterResidency = .shared) -> Result<RasterSource, RasterResidency.Failure> {
+        RasterSource.render(size: canvasSize, using: residency) { context in
+            drawFloatingPiece(piece, into: context, clippedTo: CGRect(origin: .zero, size: canvasSize))
+        }
     }
 
     /// The live display draws the existing cropped bitmap into its own window, never a canvas image.
-    static func drawFloatingPiece(_ piece: FloatingPiece, into cg: CGContext, clippedTo clip: CGRect) {
+    @discardableResult
+    static func drawFloatingPiece(_ piece: FloatingPiece, into cg: CGContext, clippedTo clip: CGRect) -> Bool {
         if piece.distortQuad != nil, let source = piece.pieceImage.cgImage,
            piece.baseSize.width > 0, let map = piece.homography {
             let destination = piece.canvasQuad.boundingBox.integral.intersection(clip.integral)
@@ -719,54 +701,39 @@ enum PixelOps {
                   let warped = ImageWarp.warpedImage(source: source,
                     sourceScale: CGFloat(source.width) / piece.baseSize.width, boxSize: piece.baseSize,
                     homography: map, destination: destination,
-                    maximumDestinationTexels: maximumFloatingWarpTexels) else { return }
+                    maximumDestinationTexels: maximumFloatingWarpTexels) else { return false }
             UIImage(cgImage: warped, scale: 1, orientation: .up).draw(in: destination)
-            return
+            return true
         }
         cg.saveGState()
         cg.concatenate(piece.transform.affineTransform)
         piece.pieceImage.draw(in: CGRect(x: -piece.baseSize.width / 2, y: -piece.baseSize.height / 2,
                                          width: piece.baseSize.width, height: piece.baseSize.height))
         cg.restoreGState()
+        return true
     }
 
-    /// A `newSize` copy of a canvas-sized image with its whole extent re-placed into `content` (a
-    /// rectangle in the *new* canvas's point space), used by every canvas resize (see
-    /// `CanvasManager.resizeCanvas(to:mode:)`) for a cel's `bakedImage`.
-    ///
-    /// The rectangle, and the conditional `interpolationQuality`, are exactly
-    /// `RasterLayerTexture.resized(to:placing:)`'s — read that one's doc comment for why. The two are
-    /// separate functions only because one owns a `RasterLayerTexture` and the other a `UIImage`;
-    /// they must keep drawing into the same rectangle or a cel's three raster tiers land in three
-    /// places (`RasterLayerTexture.flippedImage`'s comment states that rule for the flip).
-    static func resizedCanvasImage(_ image: UIImage, to newSize: CGSize, placing content: CGRect) -> UIImage {
-        let renderer = UIGraphicsImageRenderer(bounds: CGRect(origin: .zero, size: newSize), format: transparentFormat())
-        let resamples = content.size != image.size
-        return renderer.image { ctx in
-            if resamples { ctx.cgContext.interpolationQuality = .high }
-            image.draw(in: content)
-        }
-    }
-
-    /// Draws `overlay` on top of `base` (or on transparent if `base` is nil), both canvas-sized.
-    static func compositeOver(base: UIImage?, overlay: UIImage) -> UIImage {
+    /// Draws `overlay` on top of `base`, into one admitted immutable edit result.
+    static func compositeOver(base: UIImage?, overlay: UIImage, using residency: RasterResidency = .shared)
+        -> Result<RasterSource, RasterResidency.Failure> {
         let bounds = CGRect(origin: .zero, size: overlay.size)
-        let renderer = UIGraphicsImageRenderer(bounds: bounds, format: transparentFormat())
-        return renderer.image { _ in
+        return RasterSource.render(size: overlay.size, using: residency) { _ in
             base?.draw(in: bounds)
             overlay.draw(in: bounds)
+            return true
         }
     }
 
-    /// Flat color fill inside `path`, composited over `base` (canvas-sized).
-    static func fill(base: UIImage, path: CGPath, color: UIColor) -> UIImage {
+    /// Flat color fill inside `path`, composited over `base` in the shared persistent drawing seam.
+    static func fill(base: UIImage, path: CGPath, color: UIColor, using residency: RasterResidency = .shared)
+        -> Result<RasterSource, RasterResidency.Failure> {
         let bounds = CGRect(origin: .zero, size: base.size)
-        let renderer = UIGraphicsImageRenderer(bounds: bounds, format: transparentFormat())
-        return renderer.image { ctx in
+        return RasterSource.render(size: base.size, using: residency) { context in
             base.draw(in: bounds)
-            ctx.cgContext.setFillColor(color.cgColor)
-            ctx.cgContext.addPath(path)
-            ctx.cgContext.fillPath()
+            context.setFillColor(color.cgColor)
+            context.addPath(path)
+            context.fillPath()
+            return true
         }
     }
 
@@ -790,14 +757,15 @@ enum PixelOps {
     }
 
     /// Clears the pixels inside `path` to transparent, over `base` (canvas-sized).
-    static func clear(base: UIImage, path: CGPath) -> UIImage {
+    static func clear(base: UIImage, path: CGPath, using residency: RasterResidency = .shared)
+        -> Result<RasterSource, RasterResidency.Failure> {
         let bounds = CGRect(origin: .zero, size: base.size)
-        let renderer = UIGraphicsImageRenderer(bounds: bounds, format: transparentFormat())
-        return renderer.image { ctx in
+        return RasterSource.render(size: base.size, using: residency) { context in
             base.draw(in: bounds)
-            ctx.cgContext.setBlendMode(.clear)
-            ctx.cgContext.addPath(path)
-            ctx.cgContext.fillPath()
+            context.setBlendMode(.clear)
+            context.addPath(path)
+            context.fillPath()
+            return true
         }
     }
 
