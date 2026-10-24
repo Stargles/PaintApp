@@ -37,6 +37,21 @@ read recency, warning half/normal refill/background clear and pressure registrat
 selectors. No new API, flag/counter, fixture overwrite, production edit or native/compiler operation.
 Rater consolidator receives exact owned test-only follow-up commit(s) after its two brush commits.
 
+## Old-geometry typed metadata recovery — scope recorded, 2026-10-24
+
+Root found a connected integration blocker after shared PaletteColor validation: a previous-writer
+manifest with malformed typed colour can enter PointGeometryRepair.stage, create owned copies and
+convert payloads, then fail full current-manifest validation at the end. That aborts the temporary
+startup gate before permanent runStartupMaintenance can recover a valid backup. Current-geometry
+metadata damage already reaches maintenance. Trace before production changes: normalize only the
+existing geometryVersion byte insertion first, strict-decode that exact manifest, and classify typed
+metadata ambiguity before any stage/owner/copy work, preserving all source bytes. Real drawing/payload
+conversion and I/O failures must remain hard errors; no legacy decoder/default/second serializer.
+Work is isolated in tmp/s54-repair-metadata from origin/main then exact Palette9b8f43cc48b16b7faf9403c48478f9901ebc4e37;
+Palette author's tree and frozen stream db20dddd remain unchanged. Prepare a real previous-writer
+package bad-colour+valid-backup logic gate through conversion then normal recovery, with original
+byte preservation and no stale repair stages. Source/static only, no native/compiler/simulator/device.
+
 
 ## Shared persisted colour validation — source committed, qualification pending, 2026-10-24
 
