@@ -10,6 +10,14 @@ is authorized by an old readiness answer: obtain fresh saved-scene readiness whe
 
 ## Current source and next action — 2026-10-24
 
+Actual final40f77 UI47 is still running under root's exclusive lease. BrushEditor13/13 passed;
+BrushMenu has8passes/1failure: the owner's cold RoughInk drawn check failed line533, spread
+0.26339134382131857 versus required>0.3 (37 sampled columns6px,3 columns7px). The corrected explicit
+22pt width comparison passed. No retry, threshold waiver or cause claim: await the closed bundle's
+actual pictures. The shared ScreenshotPixels orientation reader now also serves this rough profile;
+prior676 RoughInk passed, so reader geometry, seed and pixel-resolution premises need source/evidence
+review before any change. This is a recorded unresolved UI result, not permission to edit fixtures.
+
 Root-authorized bounded cleanup recorded before edits on tmp/s54-typed-failure-cleanup, from exact
 40f77f1919167d1a284b0c99d312c54c949ed4c9. Preserve the frozen qualification trees and canonical owner
 queue. Remove two redundant RasterResidency.Failure casts/fallbacks, mark only UndoBudget.addingCost

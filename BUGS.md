@@ -17,6 +17,19 @@ before implementation on tmp/s54-response-curve; no native/compiler/device run b
 
 # Known Issues
 
+## Cold RoughInk drawn-width variation failed in the final UI47 run — 2026-10-24
+
+Recorded before triage: actual frozen40f77 UI47 has BrushEditor13/13 green and BrushMenu8pass/1fail.
+The owner's RoughInk cold drawn check failed line533: spread0.26339134382131857, required>0.3;
+37 sampled columns were6px and3 were7px. The explicit22pt brush-width comparison passed. Other
+classes are still running, so this is not a closed47 gate. No retry or threshold waiver.
+
+Cause remains unknown until actual case pictures/activity are exported from the closed bundle.
+The shared ScreenshotPixels orientation reader also applies to this profile; the earlier676 RoughInk
+case passed. Reader geometry, seed and physical pixel resolution are hypotheses to check, not a
+production/fixture defect inferred from one value. Preserve drawn oracles and owner asks; no source
+triage change is authorized by this record. Root assigns independent source/evidence review.
+
 ## Recovery regression holds the pre-tidy fixture URL — 2026-10-24
 
 Current:6f9c8d6d resolves the live sameUUID package and preserves strict recovery oracles; all99 affected methods passed within normal1cf422/422. Final assembled-source and whole-library cold gates remain pending.
