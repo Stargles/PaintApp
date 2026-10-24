@@ -566,8 +566,9 @@ class PaintUITestCase: XCTestCase {
     /// **This is where a touch or a probe goes; `paperRect` is where the document is.** Choose where to put
     /// ink and where to tap from this, measured *after* the chrome the test will stand up is up; convert
     /// between host and canvas coordinates against `paperRect`, whose extent they are in.
-    func visiblePaperRect(_ app: XCUIApplication, in canvas: XCUIElement) -> CGRect {
-        var paper = paperRect(in: canvas)
+    func visiblePaperRect(_ app: XCUIApplication, in canvas: XCUIElement,
+                          canvasSize: CGSize = CGSize(width: 2048, height: 2048)) -> CGRect {
+        var paper = paperRect(in: canvas, canvasSize: canvasSize)
         paper.size.height = max(0, min(paper.maxY, CGFloat(dockTop(app, canvas))) - paper.minY)
         return paper
     }
@@ -1371,16 +1372,17 @@ class PaintUITestCase: XCTestCase {
 
     // MARK: - The paper on the glass
 
-    /// The paper's rect in the host's unit square: a square document (`launchIntoEditor` takes the
-    /// 2048×2048 default) letterboxed across a host that is not, as a centred square of side
-    /// `min(w, h)` with black surround. **Measure against this rather than against the host** whenever
-    /// "on the paper" is the subject — a normalized offset that turned out to be off it makes every
-    /// assertion vacuous.
-    func paperRect(in canvas: XCUIElement) -> CGRect {
+    /// The fresh, untransformed paper's rect in the host's unit square, aspect-fitted and centred.
+    /// Pass the same size used to create a non-square document; the default matches the ordinary
+    /// 2048×2048 launch. **Measure against this rather than against the host** whenever "on the paper"
+    /// is the subject — a normalized offset off it makes every assertion vacuous.
+    func paperRect(in canvas: XCUIElement,
+                   canvasSize: CGSize = CGSize(width: 2048, height: 2048)) -> CGRect {
         let frame = canvas.frame
-        let side = min(frame.width, frame.height)
-        return CGRect(x: (frame.width - side) / 2, y: (frame.height - side) / 2,
-                      width: side, height: side).applying(
+        let scale = min(frame.width / canvasSize.width, frame.height / canvasSize.height)
+        let size = CGSize(width: canvasSize.width * scale, height: canvasSize.height * scale)
+        return CGRect(x: (frame.width - size.width) / 2, y: (frame.height - size.height) / 2,
+                      width: size.width, height: size.height).applying(
                         CGAffineTransform(scaleX: 1 / frame.width, y: 1 / frame.height))
     }
 

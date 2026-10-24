@@ -39,7 +39,8 @@ final class FillMendUITests: PaintUITestCase {
         XCUIDevice.shared.orientation = .landscapeLeft
         defer { XCUIDevice.shared.orientation = .portrait }
         let app = XCUIApplication()
-        XCTAssertTrue(launchIntoEditor(app, size: CGSize(width: 2048, height: 1024)))
+        let canvasSize = CGSize(width: 2048, height: 1024)
+        XCTAssertTrue(launchIntoEditor(app, size: canvasSize))
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
@@ -47,7 +48,7 @@ final class FillMendUITests: PaintUITestCase {
         openLayerPanel(app)
         addVectorLayerFromOpenPanel(app)
         closeLayerRail(app)
-        let paper = visiblePaperRect(app, in: canvas)
+        let paper = visiblePaperRect(app, in: canvas, canvasSize: canvasSize)
         let left = Double(paper.minX + paper.width * 0.25)
         let right = Double(paper.minX + paper.width * 0.75)
         let top = Double(paper.minY + paper.height * 0.2)
@@ -146,7 +147,8 @@ final class FillMendUITests: PaintUITestCase {
     /// One cold document and one bucket fill. Both workflows read the colour layer with its line
     /// art hidden; the explicit reference remains on so the batch can use the same line art later.
     private func makeInternalMendScene(_ app: XCUIApplication, mendsGaps: Bool) throws -> InternalMendScene {
-        XCTAssertTrue(launchIntoEditor(app, size: CGSize(width: 2048, height: 1024)))
+        let canvasSize = CGSize(width: 2048, height: 1024)
+        XCTAssertTrue(launchIntoEditor(app, size: canvasSize))
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
         openLayerPanel(app)
@@ -176,7 +178,7 @@ final class FillMendUITests: PaintUITestCase {
         closeLayerRail(app)
         setBrushSize(app, normalized: 0.025)
         app.buttons["toolbar.brushButton"].tap() // close the brushes menu left open by the size helper
-        let paper = visiblePaperRect(app, in: canvas)
+        let paper = visiblePaperRect(app, in: canvas, canvasSize: canvasSize)
         let left = Double(paper.minX + paper.width * 0.25)
         let right = Double(paper.minX + paper.width * 0.75)
         let top = Double(paper.minY + paper.height * 0.2)
