@@ -8,6 +8,7 @@ extension ProjectStore {
     final class RasterStorage {
         let url: URL
         private let lock = NSLock()
+        private var created = false
 
         init(url: URL = FileManager.default.temporaryDirectory
             .appendingPathComponent("PaintRasterSources-\(UUID().uuidString)", isDirectory: true)) {
@@ -16,12 +17,15 @@ extension ProjectStore {
 
         func newResourceURL() -> URL? {
             lock.lock(); defer { lock.unlock() }
-            do { try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true) }
-            catch { return nil }
+            if !created {
+                do { try FileManager.default.createDirectory(at: url, withIntermediateDirectories: false) }
+                catch { return nil }
+                created = true
+            }
             return url.appendingPathComponent("\(UUID().uuidString).png")
         }
 
-        deinit { try? FileManager.default.removeItem(at: url) }
+        deinit { if created { try? FileManager.default.removeItem(at: url) } }
     }
 
     final class RasterBacking {
@@ -81,7 +85,10 @@ extension ProjectStore {
                             UIGraphicsPushContext(context)
                             UIImage(cgImage: image).draw(in: CGRect(origin: .zero, size: size))
                             UIGraphicsPopContext()
-                        }.flatMap { surface.image() }
+                        }.flatMap {
+                            surface.allocation.markDurable()
+                            return surface.image()
+                        }
                     }
                 }
             }
@@ -90,26 +97,29 @@ extension ProjectStore {
             return result
         }
 
-        static func checkpoint(_ image: UIImage, using residency: RasterResidency, excluding: Set<UUID>)
-            -> Result<RasterBacking, RasterResidency.Failure> {
+        static func admitCheckpoint(_ image: UIImage, using residency: RasterResidency, excluding: Set<UUID>)
+            -> Result<RasterResidency.Allocation, RasterResidency.Failure> {
             guard let cg = image.cgImage else { return .failure(.unreadableBacking) }
             let (bytes, overflow) = cg.bytesPerRow.multipliedReportingOverflow(by: cg.height)
             let (working, workingOverflow) = bytes.multipliedReportingOverflow(by: 2)
             guard !overflow, !workingOverflow else { return .failure(.invalidSize) }
             // One encoded output plus encoder working headroom is reserved before entering the
             // normal save queue. Failure retains the resident original and refuses eviction/save.
-            return residency.admitWorking(working, excluding: excluding).flatMap { encoder in
-                defer { withExtendedLifetime(encoder) {} }
-                return ProjectStore.serializingPackageMutation {
-                    autoreleasepool {
-                    guard let destination = residency.storage.newResourceURL(),
-                          let data = ProjectStore.encodeRasterPNG(image) else { return .failure(.checkpointFailed) }
-                    do { try data.write(to: destination, options: .atomic) }
-                    catch { try? FileManager.default.removeItem(at: destination); return .failure(.checkpointFailed) }
-                    return .success(RasterBacking(url: destination,
-                        size: CGSize(width: cg.width, height: cg.height), storage: residency.storage))
-                    }
-                }
+            return residency.admitCheckpointWorking(working, excluding: excluding)
+        }
+
+        static func checkpoint(_ image: UIImage, using residency: RasterResidency,
+                               encoder: RasterResidency.Allocation) -> Result<RasterBacking, RasterResidency.Failure> {
+            precondition(ProjectStore.isPerformingPackageMutation)
+            defer { withExtendedLifetime(encoder) {} }
+            return autoreleasepool {
+                guard let cg = image.cgImage else { return .failure(.unreadableBacking) }
+                guard let destination = residency.storage.newResourceURL(),
+                      let data = ProjectStore.encodeRasterPNG(image) else { return .failure(.checkpointFailed) }
+                do { try data.write(to: destination, options: .atomic) }
+                catch { try? FileManager.default.removeItem(at: destination); return .failure(.checkpointFailed) }
+                return .success(RasterBacking(url: destination,
+                    size: CGSize(width: cg.width, height: cg.height), storage: residency.storage))
             }
         }
 

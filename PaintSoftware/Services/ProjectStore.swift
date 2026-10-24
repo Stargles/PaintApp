@@ -672,6 +672,12 @@ enum ProjectStore {
         return saveQueue.sync(execute: body)
     }
 
+    static var isPerformingPackageMutation: Bool { DispatchQueue.getSpecific(key: saveQueueKey) == true }
+
+    /// Eviction workers cannot synchronously wait for a queue that may be awaiting their render.
+    /// At most one checkpoint per source version is queued, with its pixels/workspace still charged.
+    static func enqueueRasterCheckpoint(_ body: @escaping () -> Void) { saveQueue.async(execute: body) }
+
     /// STREAM.md §6: a stream's last picture is saved as JPEG at this quality.
     static let streamLastFrameJPEGQuality: CGFloat = 0.9
 
@@ -1668,7 +1674,7 @@ enum ProjectStore {
             let src = ProjectPackageLayout.resolve(path, in: source)
             let dst = ProjectPackageLayout.resolve(path, in: stage)
             if fm.fileExists(atPath: dst.path) { continue }
-            if cloneRasterResource(from: src, to: dst) || fm.fileExists(atPath: dst.path) {
+            if cloneRasterResource(from: src, to: dst, allowingExisting: true) {
                 cloned.append(dst)
                 continue
             }
@@ -1682,7 +1688,12 @@ enum ProjectStore {
     static func encodeRasterPNG(_ image: UIImage) -> Data? { image.pngData() }
 
     /// Resource copies stay file based on non-APFS volumes; no complete PNG passes through Data.
-    static func cloneRasterResource(from source: URL, to destination: URL) -> Bool {
+    private static let rasterResourceCloneLock = NSLock()
+
+    static func cloneRasterResource(from source: URL, to destination: URL, allowingExisting: Bool = false) -> Bool {
+        rasterResourceCloneLock.lock(); defer { rasterResourceCloneLock.unlock() }
+        let fm = FileManager.default
+        if fm.fileExists(atPath: destination.path) { return allowingExisting }
         let status: Int32 = source.withUnsafeFileSystemRepresentation { sourcePath in
             destination.withUnsafeFileSystemRepresentation { destinationPath in
                 guard let sourcePath, let destinationPath else { return -1 }
@@ -1690,8 +1701,8 @@ enum ProjectStore {
             }
         }
         if status == 0 { return true }
-        do { try FileManager.default.copyItem(at: source, to: destination); return true }
-        catch { return false }
+        do { try fm.copyItem(at: source, to: destination); return true }
+        catch { try? fm.removeItem(at: destination); return false }
     }
 
     // MARK: - Loading

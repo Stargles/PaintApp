@@ -7,23 +7,27 @@ final class RasterSource: RasterResidencyCandidate {
     let residencyID = UUID()
     let size: CGSize
     let residency: RasterResidency
-    private let condition = NSCondition()
+    private let lock = NSLock()
     private var image: UIImage?
     private var backing: ProjectStore.RasterBacking?
-    private var isLoading = false
+    private var loading: DispatchGroup?
     private var isCheckpointing = false
+    private weak var originalAllocation: RasterResidency.Allocation?
 
-    private init(size: CGSize, residency: RasterResidency, image: UIImage?, backing: ProjectStore.RasterBacking?) {
+    private init(size: CGSize, residency: RasterResidency, image: UIImage?, backing: ProjectStore.RasterBacking?,
+                 allocation: RasterResidency.Allocation? = nil) {
         self.size = size
         self.residency = residency
         self.image = image
         self.backing = backing
+        self.originalAllocation = allocation
         residency.register(self)
     }
 
     static func snapshot(of surface: RasterSurface, size: CGSize) -> Result<RasterSource, RasterResidency.Failure> {
         surface.image().map { image in
-            RasterSource(size: size, residency: surface.residency, image: image, backing: nil)
+            RasterSource(size: size, residency: surface.residency, image: image, backing: nil,
+                         allocation: surface.allocation)
         }
     }
 
@@ -39,7 +43,9 @@ final class RasterSource: RasterResidencyCandidate {
               RasterSurface.byteCount(width: cg.width, height: cg.height) != nil else {
             return .failure(.invalidSize)
         }
-        return residency.admitWorking(cg.bytesPerRow * cg.height).flatMap { borrowed in
+        let (inputBytes, overflow) = cg.bytesPerRow.multipliedReportingOverflow(by: cg.height)
+        guard !overflow else { return .failure(.invalidSize) }
+        return residency.admitWorking(inputBytes).flatMap { borrowed in
             defer { withExtendedLifetime(borrowed) {} }
             return RasterSurface.allocate(width: cg.width, height: cg.height, using: residency).flatMap { surface in
                 surface.mutate { context in
@@ -52,26 +58,32 @@ final class RasterSource: RasterResidencyCandidate {
     }
 
     func resolveImage() -> Result<UIImage, RasterResidency.Failure> {
-        condition.lock()
-        while isLoading { condition.wait() }
+        lock.lock()
+        while let loading {
+            lock.unlock()
+            loading.wait()
+            lock.lock()
+        }
         if let image {
-            condition.unlock()
+            lock.unlock()
             residency.touch(residencyID)
             return .success(image)
         }
         guard let backing else {
-            condition.unlock()
+            lock.unlock()
             return .failure(.unreadableBacking)
         }
-        isLoading = true
-        condition.unlock()
+        let loading = DispatchGroup()
+        loading.enter()
+        self.loading = loading
+        lock.unlock()
         // No source/owner lock crosses decoding or admission. Another worker shares the result.
         let result = backing.decode(using: residency, excluding: [residencyID])
-        condition.lock()
+        lock.lock()
         if case .success(let image) = result { self.image = image }
-        isLoading = false
-        condition.broadcast()
-        condition.unlock()
+        self.loading = nil
+        lock.unlock()
+        loading.leave()
         residency.touch(residencyID)
         return result
     }
@@ -80,45 +92,64 @@ final class RasterSource: RasterResidencyCandidate {
     /// serial queue as normal saving; its backing is owned by this resource's lifetime.
     func copyPNG(to destination: URL) -> Result<Void, RasterResidency.Failure> {
         checkpoint().flatMap { backing in
-            ProjectStore.serializingPackageMutation {
-                ProjectStore.cloneRasterResource(from: backing.url, to: destination)
-                    ? .success(()) : .failure(.checkpointFailed)
-            }
+            ProjectStore.cloneRasterResource(from: backing.url, to: destination)
+                ? .success(()) : .failure(.checkpointFailed)
         }
     }
 
-    private func checkpoint(mayWait: Bool = true) -> Result<ProjectStore.RasterBacking, RasterResidency.Failure> {
-        condition.lock()
-        while isCheckpointing {
-            guard mayWait else { condition.unlock(); return .failure(.budgetExceeded) }
-            condition.wait()
-        }
-        if let backing { condition.unlock(); return .success(backing) }
-        guard let image else { condition.unlock(); return .failure(.unreadableBacking) }
+    private func checkpoint() -> Result<ProjectStore.RasterBacking, RasterResidency.Failure> {
+        lock.lock()
+        if let backing { lock.unlock(); return .success(backing) }
+        // A package writer can be ahead of this version's already queued checkpoint. Waiting here
+        // would block the only queue capable of finishing it, so save/render admission must retry.
+        guard !isCheckpointing else { lock.unlock(); return .failure(.checkpointPending) }
+        guard let image else { lock.unlock(); return .failure(.unreadableBacking) }
         isCheckpointing = true
-        condition.unlock()
-        let result = ProjectStore.RasterBacking.checkpoint(image, using: residency, excluding: [residencyID])
-        condition.lock()
-        if case .success(let backing) = result { self.backing = backing }
+        lock.unlock()
+        let admission = ProjectStore.RasterBacking.admitCheckpoint(image, using: residency, excluding: [residencyID])
+        let encoder: RasterResidency.Allocation
+        switch admission {
+        case .success(let allocation): encoder = allocation
+        case .failure(let failure):
+            lock.lock(); isCheckpointing = false; lock.unlock()
+            return .failure(failure)
+        }
+        if ProjectStore.isPerformingPackageMutation {
+            let result = ProjectStore.RasterBacking.checkpoint(image, using: residency, encoder: encoder)
+            finishCheckpoint(result)
+            return result
+        }
+        ProjectStore.enqueueRasterCheckpoint { [self] in
+            let result = ProjectStore.RasterBacking.checkpoint(image, using: residency, encoder: encoder)
+            finishCheckpoint(result, releasingImage: true)
+        }
+        return .failure(.checkpointPending)
+    }
+
+    private func finishCheckpoint(_ result: Result<ProjectStore.RasterBacking, RasterResidency.Failure>,
+                                  releasingImage: Bool = false) {
+        lock.lock(); defer { lock.unlock() }
+        if case .success(let backing) = result {
+            self.backing = backing
+            originalAllocation?.markDurable()
+            if releasingImage { image = nil }
+        }
         isCheckpointing = false
-        condition.broadcast()
-        condition.unlock()
-        return result
     }
 
     func releaseResidentPixels() -> Bool {
         // An eviction never waits for a source whose worker may itself be requesting admission.
-        guard condition.try() else { return false }
-        guard image != nil, !isLoading, !isCheckpointing else { condition.unlock(); return false }
+        guard lock.try() else { return false }
+        guard image != nil, loading == nil, !isCheckpointing else { lock.unlock(); return false }
         let needsCheckpoint = backing == nil
-        condition.unlock()
+        lock.unlock()
         if needsCheckpoint {
-            guard case .success = checkpoint(mayWait: false) else { return false }
+            guard case .success = checkpoint() else { return false }
         }
-        condition.lock()
-        guard backing != nil, !isLoading, !isCheckpointing else { condition.unlock(); return false }
+        lock.lock()
+        guard backing != nil, loading == nil, !isCheckpointing else { lock.unlock(); return false }
         image = nil
-        condition.unlock()
+        lock.unlock()
         // An escaping CGImage can still hold these pixels. Its provider retains the allocation;
         // admission reads the remaining charge rather than assuming this dropped the last reader.
         return true

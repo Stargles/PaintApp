@@ -5,7 +5,9 @@ import UIKit
 /// Source pixels have one budget, including versions retained by undo or an asynchronous reader.
 /// Derived composites keep their existing compositor/cache budgets.
 final class RasterResidency {
-    static let shared = RasterResidency(budgetBytes: CompositorBudget.textureBudgetBytes)
+    // Includes both source buffers and the workspace needed to checkpoint dirty versions.
+    static let shared = RasterResidency(budgetBytes: CompositorBudget.textureBudgetBytes(
+        physicalMemory: ProcessInfo.processInfo.physicalMemory) * 2)
 
     enum Failure: Error, Equatable {
         case invalidSize
@@ -13,7 +15,9 @@ final class RasterResidency {
         case allocationRefused
         case unreadableBacking
         case checkpointFailed
+        case checkpointPending
         case writeRequiresCopy
+        case writeNotAdmitted
     }
 
     struct Usage: Equatable {
@@ -23,14 +27,17 @@ final class RasterResidency {
         let highWaterBytes: Int
         let allocations: Int
         let evictions: Int
+        let reservedCheckpointBytes: Int
 
         var chargedBytes: Int { pixelBytes + workingBytes }
+        var admittedBytes: Int { chargedBytes + reservedCheckpointBytes }
     }
 
     /// A reservation becomes the allocation's lifetime owner. In particular, a returned CGImage
     /// retains this through its data provider, even after its UIImage and source handle disappear.
     final class Allocation {
-        fileprivate enum Kind { case pixels, working }
+        fileprivate enum Kind { case pixels, working, checkpoint }
+        fileprivate let id = UUID()
         fileprivate let owner: RasterResidency
         fileprivate let kind: Kind
         let byteCount: Int
@@ -41,7 +48,9 @@ final class RasterResidency {
             self.byteCount = byteCount
         }
 
-        deinit { owner.release(byteCount, kind: kind) }
+        var isDirty: Bool { owner.isDirty(id) }
+        func markDurable() { owner.markDurable(id) }
+        deinit { owner.release(byteCount, kind: kind, id: id) }
     }
 
     private struct Candidate {
@@ -55,6 +64,8 @@ final class RasterResidency {
     private let lock = NSLock()
     private var pixelBytes = 0
     private var workingBytes = 0
+    private var checkpointWorkingBytes = 0
+    private var dirtyAllocations: [UUID: Int] = [:]
     private var pixelBufferCount = 0
     private var highWaterBytes = 0
     private var allocations = 0
@@ -73,7 +84,12 @@ final class RasterResidency {
         lock.lock(); defer { lock.unlock() }
         return Usage(pixelBytes: pixelBytes, workingBytes: workingBytes,
                      pixelBufferCount: pixelBufferCount, highWaterBytes: highWaterBytes,
-                     allocations: allocations, evictions: evictions)
+                     allocations: allocations, evictions: evictions,
+                     reservedCheckpointBytes: reservedCheckpointBytes)
+    }
+
+    private var reservedCheckpointBytes: Int {
+        max(0, (dirtyAllocations.values.max() ?? 0) - checkpointWorkingBytes)
     }
 
     func register(_ candidate: any RasterResidencyCandidate) {
@@ -98,21 +114,35 @@ final class RasterResidency {
         admit(bytes, kind: .working, excluding: excluding)
     }
 
+    func admitCheckpointWorking(_ bytes: Int, excluding: Set<UUID> = []) -> Result<Allocation, Failure> {
+        admit(bytes, kind: .checkpoint, excluding: excluding)
+    }
+
     private func admit(_ bytes: Int, kind: Allocation.Kind, excluding: Set<UUID>) -> Result<Allocation, Failure> {
         guard bytes >= 0 else { return .failure(.invalidSize) }
         guard bytes <= budgetBytes else { return .failure(.budgetExceeded) }
+        let (checkpointBytes, checkpointOverflow) = bytes.multipliedReportingOverflow(by: 2)
+        guard kind != .pixels || !checkpointOverflow else { return .failure(.invalidSize) }
         guard hasHeadroom(bytes) else { return .failure(.allocationRefused) }
         var attempted = excluding
         while true {
             lock.lock()
-            if bytes <= budgetBytes - pixelBytes - workingBytes {
+            let dirtyNeed = max(dirtyAllocations.values.max() ?? 0, kind == .pixels ? checkpointBytes : 0)
+            let fitsActualBytes = bytes <= budgetBytes - pixelBytes - workingBytes
+            let checkpointWorking = fitsActualBytes && kind == .checkpoint ? checkpointWorkingBytes + bytes : checkpointWorkingBytes
+            let reserve = max(0, dirtyNeed - checkpointWorking)
+            if fitsActualBytes && bytes <= budgetBytes - pixelBytes - workingBytes - reserve {
+                let allocation = Allocation(owner: self, kind: kind, byteCount: bytes)
                 switch kind {
-                case .pixels: pixelBytes += bytes; pixelBufferCount += 1; allocations += 1
+                case .pixels:
+                    pixelBytes += bytes; pixelBufferCount += 1; allocations += 1
+                    dirtyAllocations[allocation.id] = checkpointBytes
                 case .working: workingBytes += bytes
+                case .checkpoint: workingBytes += bytes; checkpointWorkingBytes += bytes
                 }
                 highWaterBytes = max(highWaterBytes, pixelBytes + workingBytes)
                 lock.unlock()
-                return .success(Allocation(owner: self, kind: kind, byteCount: bytes))
+                return .success(allocation)
             }
             candidates = candidates.filter { $0.value.value != nil }
             let next = candidates.filter { !attempted.contains($0.key) }
@@ -127,11 +157,45 @@ final class RasterResidency {
         }
     }
 
-    private func release(_ bytes: Int, kind: Allocation.Kind) {
+    private func isDirty(_ id: UUID) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return dirtyAllocations[id] != nil
+    }
+
+    private func markDurable(_ id: UUID) {
+        lock.lock(); defer { lock.unlock() }
+        dirtyAllocations[id] = nil
+    }
+
+    func prepareMutation(of allocation: Allocation, excluding: Set<UUID> = []) -> Result<Void, Failure> {
+        let (checkpointBytes, overflow) = allocation.byteCount.multipliedReportingOverflow(by: 2)
+        guard !overflow else { return .failure(.invalidSize) }
+        var attempted = excluding
+        while true {
+            lock.lock()
+            if dirtyAllocations[allocation.id] != nil { lock.unlock(); return .success(()) }
+            let need = max(dirtyAllocations.values.max() ?? 0, checkpointBytes)
+            if max(0, need - checkpointWorkingBytes) <= budgetBytes - pixelBytes - workingBytes {
+                dirtyAllocations[allocation.id] = checkpointBytes
+                lock.unlock()
+                return .success(())
+            }
+            let next = candidates.filter { !attempted.contains($0.key) }
+                .min { $0.value.touched < $1.value.touched }
+                .flatMap { entry in entry.value.value.map { (entry.key, $0) } }
+            lock.unlock()
+            guard let (id, candidate) = next else { return .failure(.budgetExceeded) }
+            attempted.insert(id)
+            if candidate.releaseResidentPixels() { lock.lock(); evictions += 1; lock.unlock() }
+        }
+    }
+
+    private func release(_ bytes: Int, kind: Allocation.Kind, id: UUID) {
         lock.lock(); defer { lock.unlock() }
         switch kind {
-        case .pixels: pixelBytes -= bytes; pixelBufferCount -= 1
+        case .pixels: pixelBytes -= bytes; pixelBufferCount -= 1; dirtyAllocations[id] = nil
         case .working: workingBytes -= bytes
+        case .checkpoint: workingBytes -= bytes; checkpointWorkingBytes -= bytes
         }
         precondition(pixelBytes >= 0 && workingBytes >= 0 && pixelBufferCount >= 0)
     }
@@ -188,6 +252,7 @@ final class RasterSurface {
     private let context: CGContext
 
     var byteCount: Int { buffer.allocation.byteCount }
+    var allocation: RasterResidency.Allocation { buffer.allocation }
     var readProviderCount: Int { buffer.readProviderCount }
 
     private init(width: Int, height: Int, bytesPerRow: Int, residency: RasterResidency,
@@ -232,7 +297,9 @@ final class RasterSurface {
     /// Explicit COW: old providers continue reading the old charged buffer. No write occurs until
     /// admission and allocation both succeed, so a refusal preserves the complete previous version.
     func preparedForWrite(excluding: Set<UUID> = []) -> Result<RasterSurface, RasterResidency.Failure> {
-        guard readProviderCount > 0 else { return .success(self) }
+        guard readProviderCount > 0 else {
+            return residency.prepareMutation(of: buffer.allocation, excluding: excluding).map { self }
+        }
         return Self.allocate(width: width, height: height, using: residency, excluding: excluding).map { copy in
             memcpy(copy.buffer.address, buffer.address, byteCount)
             return copy
@@ -243,6 +310,7 @@ final class RasterSurface {
     /// replace it with preparedForWrite's admitted result, then enter here under their own lock.
     func mutate<T>(_ body: (CGContext) -> T) -> Result<T, RasterResidency.Failure> {
         guard readProviderCount == 0 else { return .failure(.writeRequiresCopy) }
+        guard buffer.allocation.isDirty else { return .failure(.writeNotAdmitted) }
         return .success(body(context))
     }
 

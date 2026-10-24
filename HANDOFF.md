@@ -25,7 +25,19 @@ UIImage rendering-mode alias lifetime, exact old/new COW pixels, admission refus
 charge after cache eviction, and headroom/overflow. All new files registered by hand with unique PBX
 ids. These primitives are NOT yet connected to Cel/load/save/edit consumers and establish no runtime
 residency bound. No native compilation/tests/mutants/UI/fast tiers have run. Before broad consumers,
-finish encoder-headroom admission and review the allocation/source API with root.
+encoder-headroom admission and the allocation/source API are now prepared and root reviewed the direction.
+Dirty allocations reserve one largest-version encoder workspace before filling the cap; actual encoder
+reservations consume that reserve. Checkpointed allocations must readmit workspace before another
+write. Default source+workspace envelope is twice the existing pure device texture-budget function,
+not its test override. The two-picture encoder workspace is a configured estimate; private ImageIO
+allocations and whole-process/device RAM are not proven by these counters. Dirty evictions enqueue
+one checkpoint on the existing save queue and immediately return pending/refusal; render workers never
+wait synchronously on that queue. Loaded source clones and checkpoint files share the normal clone/
+PNG helpers, including clean partial-copy failure. Eleven logic methods are now prepared, adding
+headroom/readmission, immutable file replacement, dirty checkpoint/reload and failed-checkpoint
+preservation. Foundation SDK header review caught NSCondition lacking try-lock; the source now uses
+NSLock plus one in-flight decode group. Static UI lints/plutil/diff-check pass. Native gates remain
+unrun; Cel/load/save/edit integration remains next, so these primitives still establish no runtime cap.
 
 ## Current combined source qualification — 2026-10-24
 
