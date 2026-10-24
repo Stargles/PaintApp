@@ -364,6 +364,28 @@ account usage limits; root continues. The full source inventory is not yet fully
 
 - [ ] Stream transport: bounded ordered backpressure, framing limits, connection readiness/close ownership.
 - [ ] Editor/brush: preview identity/budget, undo payload accounting, saved palette validation; verify stationary-sample opportunity.
+  Active source-only `tmp/s54-vector-undo`, exact dependency65a8afd831072dbb43d1aba20c37bceed0966e79:
+  proposal-first trace of VectorUndoCost stable-ID heap approximation, remaining count×512 geometry
+  consumers, packed/live/rest/placement/lattice sample storage, fill path ownership and UndoHistory
+  retention semantics. Count actual borrowed buffer/immutable object identity only while snapshots
+  are retained; never unpack/copy geometry to price it, persist pointers or create an accounting cache.
+  Coordinate VectorLayer/stroke ownership with raster author; avoid its WIP UndoHistory preflight API.
+  Root owns native44 faults; this branch prepares source regressions/fault recipes only.
+  Approved scope: keep measured max-list-stride amortization; charge symmetric-difference of actual
+  retained payload identities, excluding common buffers. This is conservative per-action delta, not
+  whole-history RSS. PackedSampleRun is wire-only; current snapshots own live channel arrays. Borrow
+  keys stay inside the cost call with owners retained; inline Data gets conservative logical bytes,
+  never a temporary stack-address identity. Walk own/rest/placement/lattice buffers without decoding;
+  consolidate precision, nudge, keyframe/interpolation flat costs and fill's ad-hoc path surcharge.
+  Approved nudge cleanup freezes only actual before/after lists and used IDs/canvas, dropping whole
+  part/lifted/prelift captures that closures do not use. Raster author confirms no model-file overlap.
+  Implementation prepared: one VectorUndoCost with action-wide canvas-list batching and no retained
+  accounting state; all remaining flat512 geometry consumers and fill surcharge removed. Inline
+  Data/String/opaque metadata are conservative logical allowances. Added eight tiny logic methods
+  plus precision/fill consumer assertions, including actual blue RGBA, Move/pose undo+redo, trim costs,
+  archive identity and deallocation of an unused pre-lift path after trim/commit. Existing files only;
+  no UndoHistory/StrokeSamples/PackedSampleRun/placement model, saved-format or PBX changes.
+  Parse/UI guards/diff-check only; native controls/mutants/fast tiers/UI pictures/device remain unrun.
 - [ ] Test hooks/obsolete runners: protect real-device persistent data and prune only verified unused paths.
 - [ ] Complete file-level review gaps, independent reviews and regression/performance gates before closing audit.
 

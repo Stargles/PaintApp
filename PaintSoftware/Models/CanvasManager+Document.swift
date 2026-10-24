@@ -1004,7 +1004,7 @@ extension CanvasManager {
         // One `recordUndo` over every cel it touched — the whole point of collecting `edits` first
         // rather than registering per cel, which would cost the artist one press per cel to take back
         // a single menu tap.
-        let cost = edits.reduce(0) { $0 + ($1.before.count + $1.after.count) * 512 }
+        let cost = VectorUndoCost.bytes(fromLists: edits.map(\.before), toLists: edits.map(\.after))
         recordUndo(label: .bakePrecision, cost: cost, undo: { [weak self] in
             for edit in edits {
                 edit.canvas.elements = edit.before

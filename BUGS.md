@@ -630,7 +630,9 @@ the direction this entry named was the smaller of the two.
 buffer once, at `MemoryLayout<VectorElement>.stride`, plus the heap of the elements that differ by id. Once,
 not twice, because step *k*'s `to` array is step *k+1*'s `from` — the same buffer — so a run of N steps holds
 N+1 and not 2N. That is `phys_footprint` over thirty real steps saying so; `MemoryLayout` arithmetic alone says
-2N and is wrong. `VectorUndoCost` is the model.
+2N and is wrong. `VectorUndoCost` keeps that slot amortization. The2026-10-24 source follow-up below
+replaces this original ID-based heap approximation with actual retained-buffer identity; native
+qualification of that follow-up is still pending.
 
 ## Nothing batches per-cel content restores across several cels into one undo step (2026-09-04)
 
@@ -2357,3 +2359,34 @@ Located aliases ahead/behind, so each cached reader owns at most two distinct ap
 Their CVPixelBuffer payload diagnostics exclude AVFoundation internal pools; ring bytes exclude
 samples, one retiring in-flight reader and returned render images. No RSS reduction/device-memory
 cause or saved-format change claim.
+
+## Geometry rewrite undo payload accounting — 2026-10-24, proposal-first source task
+
+External brush/cel audit B3 identifies stable element IDs used as a shared-heap proxy and two
+remaining count×512 geometry rewrite consumers. Same-ID sample/path rewrites can retain distinct
+before/after payloads while metadata-only edits really share them. Trace current packed/live,
+rest/placement/lattice and immutable fill-path ownership plus UndoHistory trimming before choosing
+one shared cost fix. No native footprint, device failure or measured memory-saving claim. Worktree
+`tmp/s54-vector-undo` is based on exact65a8afd8; root owns all native qualification.
+
+
+Root approved conservative per-action delta accounting with measured max-list-stride amortization,
+not an exact global unique-history/RSS claim. Count common backing buffers as shared only from real
+identity; metadata edits can share channels while translation replaces positions. Inline Data cannot
+use its borrow's temporary stack address as heap identity. Additional source trace found flat costs
+in transform baseline restoration and the interpolation bracket, plus Move closures retaining whole
+parts/lifted/pre-lift geometry they never use. Consolidate all on one accountant and retain only the
+actual before/after Move lists and used IDs. Current StrokeSamples always owns live arrays;
+PackedSampleRun is temporary wire conversion, and fill snapshots own Data rather than decoded CGPath.
+
+
+Source implementation now uses one VectorUndoCost for affected canvas-list pairs with action-wide
+payload identity deduplication and measured per-canvas max-list slot amortization. Current sample
+arrays, rest/placement/lattice ancestors/parameters, archived Data and immutable CGImage payloads
+are visited without numeric geometry scans, packing, decoding or buffer copies. Small inline values
+and opaque metadata are conservative logical allowances. All flat512 geometry costs and the separate
+fill rewrite surcharge were removed. Future fill output still reserves the old archive before work;
+final actual cost is the shared accountant's. Move closures freeze actual restore lists and used IDs,
+including the correct pre-split list for first-nudge undo, rather than retaining the whole float part.
+Eight tiny logic methods and two existing consumer cost assertions are prepared; parsing/lints only,
+not native/mutation/UI qualification, allocator capacity accounting or a whole-history/RSS bound.

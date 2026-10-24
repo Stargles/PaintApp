@@ -540,6 +540,88 @@ final class LassoMoveLogicTests: XCTestCase {
 
     // MARK: - Undo
 
+    func testNudgeCostsTheActualFirstAndLaterRestoreListsAndUndoRedoDrawThosePictures() throws {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 4, y: 30), to: CGPoint(x: 60, y: 30), size: 4))
+        let original = vector.elements
+        func pixels(_ elements: [VectorElement]) throws -> [UInt8] {
+            try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(VectorCanvas(size: Self.size, elements: elements).render()?.cgImage)))
+        }
+        let originalPixels = try pixels(original)
+        select(manager, layerIndex, loop(CGRect(x: 34, y: 10, width: 26, height: 40)))
+        manager.history.removeAll()
+        XCTAssertTrue(manager.beginVectorLassoMove())
+        XCTAssertEqual(vector.elements.count, 2, "Premise: first undo must restore the unsplit list, not the lifted pieces.")
+        manager.nudgeVectorFloat(to: movedBy(manager, dx: 4, dy: 0))
+        let first = vector.elements
+        let firstPixels = try pixels(first)
+        XCTAssertEqual(manager.history.undoStack.last?.cost, VectorUndoCost.bytes(from: original, to: first))
+        XCTAssertGreaterThan(manager.history.currentCost, 2 * MemoryLayout<VectorElement>.stride)
+        manager.nudgeVectorFloat(to: movedBy(manager, dx: 4, dy: 0))
+        let second = vector.elements
+        let secondPixels = try pixels(second)
+        XCTAssertNotEqual(firstPixels, secondPixels)
+        XCTAssertEqual(manager.history.undoStack.last?.cost, VectorUndoCost.bytes(from: first, to: second),
+                       "Later nudges must not charge or retain the unused pre-lift list.")
+        manager.undo()
+        XCTAssertNotNil(manager.vectorFloat)
+        XCTAssertEqual(try pixels(vector.elements), firstPixels)
+        manager.undo()
+        XCTAssertNil(manager.vectorFloat)
+        XCTAssertEqual(vector.elements.map(\.id), original.map(\.id))
+        XCTAssertEqual(try pixels(vector.elements), originalPixels)
+        manager.redo()
+        XCTAssertEqual(try pixels(vector.elements), firstPixels)
+        manager.redo()
+        XCTAssertEqual(try pixels(vector.elements), secondPixels)
+    }
+
+    func testLaterNudgeHistoryDoesNotKeepAnUnusedPreLiftArchiveAfterTheFirstStepIsTrimmed() throws {
+        final class Lifetime {
+            private let lock = NSLock()
+            private var released = false
+            func markReleased() { lock.lock(); released = true; lock.unlock() }
+            var isReleased: Bool { lock.lock(); defer { lock.unlock() }; return released }
+        }
+        let lifetime = Lifetime()
+        let (manager, _, vector) = fixture()
+        autoreleasepool {
+            var fill = VectorFillElement(path: CGPath(rect: CGRect(x: 8, y: 8, width: 16, height: 16), transform: nil),
+                                         color: black())
+            let archived = fill.pathData
+            let storage = UnsafeMutableRawPointer.allocate(byteCount: archived.count, alignment: 1)
+            archived.withUnsafeBytes { raw in storage.copyMemory(from: raw.baseAddress!, byteCount: raw.count) }
+            fill.pathData = Data(bytesNoCopy: storage, count: archived.count, deallocator: .custom { pointer, _ in
+                pointer.deallocate()
+                lifetime.markReleased()
+            })
+            vector.elements = [.fill(fill)]
+            vector.bumpVersion()
+        }
+        manager.history.removeAll()
+        XCTAssertFalse(lifetime.isReleased, "Premise: the vector owns the custom-backed real path archive.")
+        XCTAssertTrue(manager.beginVectorWholeCelMove())
+        manager.nudgeVectorFloat(to: movedBy(manager, dx: 4, dy: 0))
+        manager.history.maxCost = 0
+        // Drop the first step, whose before-list legitimately owns the original archive. The float
+        // still owns it until commit; a later history step must not retain the whole original part.
+        manager.history.trimUnderMemoryPressure()
+        manager.history.maxCost = Int.max
+        manager.nudgeVectorFloat(to: movedBy(manager, dx: 4, dy: 0))
+        XCTAssertEqual(manager.history.undoStack.count, 1)
+        XCTAssertFalse(lifetime.isReleased)
+        autoreleasepool { XCTAssertTrue(manager.commitVectorFloatIfNeeded()) }
+        XCTAssertTrue(lifetime.isReleased,
+                      "After float commit, only actual old/new nudge archives belong to the remaining step.")
+        let after = try XCTUnwrap(vector.render()?.cgImage)
+        let drawn = try XCTUnwrap(CanvasFixture.rgbaBytes(after))
+        manager.undo()
+        let before = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(vector.render()?.cgImage)))
+        XCTAssertNotEqual(before, drawn)
+        manager.redo()
+        XCTAssertEqual(CanvasFixture.rgbaBytes(try XCTUnwrap(vector.render()?.cgImage)), drawn)
+    }
+
     /// **Four nudges are four steps, and the fourth press gives back the unsplit stroke.**
     ///
     /// The last half is the ruling of 2026-08-22: the cut was something the move did to make itself
@@ -2497,8 +2579,13 @@ final class LassoMoveLogicTests: XCTestCase {
         XCTAssertEqual(manager.preciseStrokeCount, 2, "one on each layer, and the ordinary one uncounted")
         let geometryBefore = (vector.strokes + second.strokes).map(\.samples)
         let stepsBefore = manager.history.undoStack.count
+        let costBefore = manager.history.currentCost
 
         XCTAssertEqual(manager.bakePreciseStrokes(), 2)
+        let geometryBytes = 3 * (3 + 2) * (MemoryLayout<CGPoint>.stride + MemoryLayout<CGFloat>.stride)
+        XCTAssertEqual(manager.history.currentCost - costBefore,
+                       3 * MemoryLayout<VectorElement>.stride + geometryBytes,
+                       "One shared old precise run and two new own/ancestor runs survive; ordinary geometry and parameters still share.")
 
         XCTAssertEqual(manager.preciseStrokeCount, 0, "nothing is stored at full precision afterwards")
         XCTAssertTrue((vector.strokes + second.strokes).allSatisfy { $0.lattice?.precise != true },

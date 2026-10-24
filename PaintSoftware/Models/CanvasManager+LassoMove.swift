@@ -2069,11 +2069,18 @@ extension CanvasManager {
                                               oldMirror: CGAffineTransform,
                                               newMirror: CGAffineTransform,
                                               endsFloat: Bool) {
-        let selectionBeforeLift = vectorFloat?.selectionBeforeLift
-        let cost = swaps.reduce(0) { $0 + ($1.oldElements.count + $1.newElements.count) * 512 }
+        let undoSelection = endsFloat ? vectorFloat?.selectionBeforeLift : oldSelection
+        // Freeze only the geometry each closure restores. Keeping the whole part would also retain
+        // liftedInside and every pre-lift list on later nudges, despite neither closure using them.
+        let edits = swaps.map { swap in
+            (canvas: swap.vector, layerID: swap.part.layerID, celID: swap.part.celID,
+             insideIDs: swap.part.insideIDs,
+             before: endsFloat ? swap.part.elementsBeforeLift : swap.oldElements, after: swap.newElements)
+        }
+        let cost = VectorUndoCost.bytes(fromLists: edits.map(\.before), toLists: edits.map(\.after))
         recordUndo(label: .move, cost: cost, undo: { [weak self] in
             guard let self else { return }
-            for swap in swaps {
+            for edit in edits {
                 // Undoing the first nudge undoes the split as well: the artist gets one stroke back,
                 // not two halves sitting on top of each other. Clearing the suppression is
                 // `.everything`, which is right — the parents come back into a picture that had the
@@ -2082,11 +2089,11 @@ extension CanvasManager {
                 // same float the nudge read them from: while the pieces are suppressed a press changes
                 // no pixel here, and once they are not it is bounded by where each was and where it
                 // goes.
-                if endsFloat { swap.vector.suppressedElementIDs = [] }
-                swap.vector.restoreElements(endsFloat ? swap.part.elementsBeforeLift : swap.oldElements,
-                                            changedInk: nil, rewriting: swap.part.insideIDs)
+                if endsFloat { edit.canvas.suppressedElementIDs = [] }
+                edit.canvas.restoreElements(edit.before,
+                                            changedInk: nil, rewriting: edit.insideIDs)
             }
-            self.selection = endsFloat ? selectionBeforeLift : oldSelection
+            self.selection = undoSelection
             if endsFloat {
                 self.vectorFloat = nil
             } else {
@@ -2097,13 +2104,13 @@ extension CanvasManager {
                 self.vectorFloat?.mirror = oldMirror
                 self.refreshVectorFloatSourceVersions()
             }
-            for swap in swaps {
-                self.celContentChangedOutsideStroke(layerID: swap.part.layerID, celID: swap.part.celID)
+            for edit in edits {
+                self.celContentChangedOutsideStroke(layerID: edit.layerID, celID: edit.celID)
             }
         }, redo: { [weak self] in
             guard let self else { return }
-            for swap in swaps {
-                swap.vector.restoreElements(swap.newElements, changedInk: nil, rewriting: swap.part.insideIDs)
+            for edit in edits {
+                edit.canvas.restoreElements(edit.after, changedInk: nil, rewriting: edit.insideIDs)
             }
             self.selection = newSelection
             self.vectorFloat?.frame.transform = newFrameTransform
@@ -2112,8 +2119,8 @@ extension CanvasManager {
             self.vectorFloat?.distort = newDistort
             self.vectorFloat?.mirror = newMirror
             self.refreshVectorFloatSourceVersions()
-            for swap in swaps {
-                self.celContentChangedOutsideStroke(layerID: swap.part.layerID, celID: swap.part.celID)
+            for edit in edits {
+                self.celContentChangedOutsideStroke(layerID: edit.layerID, celID: edit.celID)
             }
         })
     }

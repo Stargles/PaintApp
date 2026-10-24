@@ -504,7 +504,7 @@ extension CanvasManager {
     func recordTimingStrokeUndo(layerID: UUID, celsBefore: [Cel], celsAfter: [Cel],
                                 edits: [TimingStrokeEdit]) {
         guard !edits.isEmpty || celsBefore.count != celsAfter.count else { return }
-        let cost = edits.reduce(0) { $0 + VectorUndoCost.bytes(from: $1.before, to: $1.after) }
+        let cost = VectorUndoCost.bytes(fromLists: edits.map(\.before), toLists: edits.map(\.after))
         recordUndo(label: .brushStroke, cost: cost, undo: { [weak self] in
             self?.restoreTimingStroke(layerID: layerID, cels: celsBefore, edits: edits,
                                       elements: \.before)

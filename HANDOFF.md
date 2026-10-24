@@ -17,6 +17,20 @@ Root alone runs native. This worker performs source integration, static census/l
 and external52-fault preparation only; no compiler, native, UI injection, simulator or device action.
 External evidence/package: `~/PaintWork/s54-integration/`; component plans remain authoritative inputs.
 
+Vector undo payload accounting is active on `tmp/s54-vector-undo` from exact65a8afd831072dbb43d1aba20c37bceed0966e79.
+Trace budget semantics/real storage ownership before proposing code; root must review the compact
+proposal first. Approved: keep amortized max-list slots, price unshared real payload buffers/objects
+with operation-only identities and strong snapshot lifetimes, conservatively handle inline Data,
+and consolidate flat/surcharge consumers. Remove Move closure captures of unused full parts. Runtime
+samples are live arrays; PackedSampleRun is wire-only. Source-only work, no native, no geometry
+unpack/copy to count, persisted pointer/cache or UndoHistory rewrite. Raster author confirms model
+files do not overlap.
+One shared payload accountant now batches all affected canvas lists for a single action; no identity
+survives the call. All flat512 geometry consumers and the separate fill rewrite surcharge are gone;
+fill preflight still reserves the current old archive before allowing future output. Eight tiny logic
+methods plus two existing consumer assertions cover actual RGBA/undo/redo/cost/lifetime boundaries.
+Parsing, UI lints and diff-check are the only gates run here; no native/fault/UI/device claim.
+
 ## Native qualification follow-up — 2026-10-24 17:10 UTC
 
 Integration4f5f75 passed501/501 with zero failures/skips and all724 tracked source bytes/modes exact.

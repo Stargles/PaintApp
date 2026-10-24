@@ -836,12 +836,158 @@ final class MemoryBudgetLogicTests: XCTestCase {
                              "a 5,631-sample stroke retains two orders of magnitude more than 512 bytes")
         XCTAssertEqual(strokeCost, MemoryLayout<VectorElement>.stride + 5631 * (16 + 8))
 
-        // An element in *both* lists is copy-on-write shared with the live canvas and costs the step
-        // nothing beyond its slot — the property that makes the charge about the edit rather than
-        // about how much was already drawn.
+        // These identical lists retain the same actual geometry buffers, so the delta costs slots
+        // alone. Matching IDs by themselves would not prove that for a geometry rewrite.
         let unchanged = VectorUndoCost.bytes(from: many, to: many)
         XCTAssertEqual(unchanged, 1000 * MemoryLayout<VectorElement>.stride,
                        "two identical lists retain slots and no geometry at all")
+    }
+
+    private func payloadStroke(_ count: Int, y: CGFloat = 12) -> VectorStroke {
+        var samples = StrokeSamples(channels: .captured)
+        for n in 0..<count {
+            samples.append(VectorSample(x: CGFloat(n) + 8, y: y, pressure: 0.5,
+                                        deltaTime: 0.01, tiltAltitude: 1, tiltAzimuth: 0.2))
+        }
+        return VectorStroke(brush: TestBrushes.hardRound,
+                            color: CodableColor(red: 0, green: 0, blue: 1, alpha: 1),
+                            size: 4, opacity: 1, samples: samples)
+    }
+
+    func testSameIDGeometryRewriteChargesNewPositionsWhileRecolourSharesAllChannels() {
+        let original = payloadStroke(12)
+        var recoloured = original
+        recoloured.color = CodableColor(red: 1, green: 0, blue: 0, alpha: 1)
+        let slots = MemoryLayout<VectorElement>.stride
+        XCTAssertEqual(VectorUndoCost.bytes(from: [.stroke(original)], to: [.stroke(recoloured)]), slots,
+                       "A metadata-only recolour shares the actual position and sensor buffers.")
+        var translated = recoloured
+        translated.samples = translated.samples.transformed(by: CGAffineTransform(translationX: 16, y: 0))
+        XCTAssertEqual(translated.id, original.id)
+        XCTAssertEqual(translated.samples[0].x - original.samples[0].x, 16)
+        XCTAssertEqual(VectorUndoCost.bytes(from: [.stroke(original)], to: [.stroke(translated)]),
+                       slots + 2 * 12 * MemoryLayout<CGPoint>.stride,
+                       "Only distinct old/new positions are retained; all four sensor arrays still share.")
+        var rotated = original
+        rotated.samples = rotated.samples.transformed(by: CGAffineTransform(rotationAngle: .pi / 2))
+        XCTAssertEqual(VectorUndoCost.bytes(from: [.stroke(original)], to: [.stroke(rotated)]),
+                       slots + 2 * 12 * (MemoryLayout<CGPoint>.stride + MemoryLayout<CGFloat>.stride),
+                       "Rotation also replaces azimuth, while pressure/time/altitude share their buffers.")
+    }
+
+    func testRetainedRestPlacementAndAncestorBuffersAreCountedOnceByRealOwnership() {
+        var own = payloadStroke(3)
+        let ancestor = payloadStroke(5, y: 20).samples
+        let native = payloadStroke(4, y: 24).samples
+        let rest = payloadStroke(2, y: 28).samples
+        let parameters: [CGFloat] = [0, 1, 4]
+        let restParameters: [CGFloat] = [0, 4]
+        let lattice = DabLattice(samples: ancestor, parameters: parameters)
+        own.lattice = lattice
+        own.restWalk = StrokeRestWalk(samples: rest,
+                                      lattice: DabLattice(samples: ancestor, parameters: restParameters),
+                                      size: 4, pose: BrushStamper.DabPose.identity)
+        own.placement = StrokePlacement(map: .identity, restSize: 4,
+                                       source: .retained(samples: native, lattice: lattice))
+        let slots = MemoryLayout<VectorElement>.stride
+        let samples = (3 + 5 + 4 + 2) * (MemoryLayout<CGPoint>.stride + 4 * MemoryLayout<CGFloat>.stride)
+        let parameterBytes = (3 + 2) * MemoryLayout<CGFloat>.stride
+        XCTAssertEqual(VectorUndoCost.bytes(from: [.stroke(own)], to: []), slots + samples + parameterBytes,
+                       "Shared ancestor/lattice buffers are one payload even when rest and placement refer to them.")
+        XCTAssertEqual(VectorUndoCost.bytes(from: [], to: [.stroke(own)]), slots + samples + parameterBytes)
+        var rewritten = own
+        rewritten.restWalk?.samples = rest.transformed(by: CGAffineTransform(translationX: 3, y: 0))
+        XCTAssertEqual(VectorUndoCost.bytes(from: [.stroke(own)], to: [.stroke(rewritten)]),
+                       slots + 2 * 2 * MemoryLayout<CGPoint>.stride,
+                       "A rest-only rewrite retains its own changed positions without recharging shared ancestors.")
+    }
+
+    func testFillArchiveIdentityDistinguishesInlineBytesSharedAliasesAndEqualHeapCopies() {
+        let path = CGPath(rect: CGRect(x: 4, y: 4, width: 8, height: 8), transform: nil)
+        var before = VectorFillElement(path: path, color: CodableColor(red: 0, green: 0, blue: 1, alpha: 1))
+        var after = before
+        let slots = MemoryLayout<VectorElement>.stride
+        // These are deliberately not path archives: pricing must never decode them or borrow a
+        // temporary inline stack address as evidence that two values share a heap allocation.
+        before.pathData = Data([1, 2, 3])
+        after.pathData = Data([4, 5, 6])
+        XCTAssertEqual(VectorUndoCost.bytes(from: [.fill(before)], to: [.fill(after)]), slots + 6)
+        after.pathData = before.pathData
+        XCTAssertEqual(VectorUndoCost.bytes(from: [.fill(before)], to: [.fill(after)]), slots + 6,
+                       "Small inline Data uses a conservative logical allowance, never address deduplication.")
+        before.pathData = Data(repeating: 7, count: 128)
+        after.pathData = Data(repeating: 7, count: 128)
+        before.pathData.withUnsafeBytes { a in after.pathData.withUnsafeBytes { b in
+            XCTAssertNotEqual(a.baseAddress, b.baseAddress, "Fixture: byte-identical archives have separate real backing buffers.")
+        } }
+        XCTAssertEqual(before.pathData, after.pathData)
+        XCTAssertEqual(VectorUndoCost.bytes(from: [.fill(before)], to: [.fill(after)]), slots + 256,
+                       "Content equality is not storage sharing, even under the same element ID.")
+        after.pathData = before.pathData
+        after.opacity = 0.5
+        XCTAssertEqual(VectorUndoCost.bytes(from: [.fill(before)], to: [.fill(after)]), slots,
+                       "A true large archive alias survives a metadata edit without a second payload charge.")
+    }
+
+    func testFillReshapeChargesBothActualArchivesAndImageAliasesChargeOneImmutablePicture() throws {
+        let colour = CodableColor(red: 0, green: 0, blue: 1, alpha: 1)
+        let fill = VectorFillElement(path: CGPath(rect: CGRect(x: 4, y: 4, width: 8, height: 8), transform: nil),
+                                     color: colour)
+        let moved = fill.reshaped(to: CGPath(rect: CGRect(x: 24, y: 4, width: 8, height: 8), transform: nil))
+        let slots = MemoryLayout<VectorElement>.stride
+        XCTAssertEqual(VectorUndoCost.bytes(from: [.fill(fill)], to: [.fill(moved)]),
+                       slots + fill.pathData.count + moved.pathData.count)
+        let before = try XCTUnwrap(VectorCanvas(size: CanvasFixture.canvasSize, elements: [.fill(fill)]).render()?.cgImage)
+        let after = try XCTUnwrap(VectorCanvas(size: CanvasFixture.canvasSize, elements: [.fill(moved)]).render()?.cgImage)
+        let a = try XCTUnwrap(CanvasFixture.rgbaBytes(before)), b = try XCTUnwrap(CanvasFixture.rgbaBytes(after))
+        let old = (8 * before.width + 8) * 4, new = (8 * after.width + 28) * 4
+        XCTAssertEqual(Array(a[old..<(old + 4)]), [0, 0, 255, 255])
+        XCTAssertEqual(b[old + 3], 0)
+        XCTAssertEqual(Array(b[new..<(new + 4)]), [0, 0, 255, 255])
+        let image = VectorImageElement(image: UIImage(cgImage: before), transform: .identity)
+        var alias = image
+        alias.id = UUID()
+        let bytes = before.bytesPerRow * before.height
+        XCTAssertEqual(VectorUndoCost.bytes(from: [], to: [.image(image), .image(alias)]), 2 * slots + bytes)
+        XCTAssertEqual(VectorUndoCost.bytes(from: [.image(image)], to: [.image(alias)]), slots,
+                       "Element IDs differ, but both snapshots retain the same immutable CGImage.")
+    }
+
+    func testInterpolationHistoryTrimsByRewrittenGeometryAndUndoRedoStillDrawTheChargedSnapshots() throws {
+        let manager = CanvasFixture.manager(layerCount: 0)
+        manager.addVectorLayer()
+        let vector = try XCTUnwrap(manager.layers[0].cels[0].vector)
+        let stroke = payloadStroke(12)
+        vector.addStroke(stroke)
+        manager.history.removeAll()
+        let slots = MemoryLayout<VectorElement>.stride
+        let metadataCost = 4096 + slots
+        let rewriteCost = 4096 + slots + 2 * 12 * MemoryLayout<CGPoint>.stride
+        manager.history.maxCost = metadataCost + rewriteCost - 1
+        manager.withInterpolationUndo(label: .move, touching: [vector]) {
+            var changed = stroke
+            changed.opacity = 0.75
+            vector.elements = [.stroke(changed)]
+            vector.bumpVersion()
+        }
+        let before = vector.elements
+        let oldImage = try XCTUnwrap(vector.render()?.cgImage)
+        manager.withInterpolationUndo(label: .move, touching: [vector]) {
+            var changed = vector.strokes[0]
+            changed.samples = changed.samples.transformed(by: CGAffineTransform(translationX: 16, y: 0))
+            vector.elements = [.stroke(changed)]
+            vector.bumpVersion()
+        }
+        let newImage = try XCTUnwrap(vector.render()?.cgImage)
+        XCTAssertNotEqual(CanvasFixture.rgbaBytes(oldImage), CanvasFixture.rgbaBytes(newImage))
+        XCTAssertEqual(manager.history.currentCost, rewriteCost)
+        XCTAssertEqual(manager.history.undoStack.count, 1, "The older metadata step is trimmed; the charged geometry step remains.")
+        manager.undo()
+        XCTAssertEqual(vector.strokes[0].samples, before[0].stroke?.samples)
+        XCTAssertEqual(CanvasFixture.rgbaBytes(try XCTUnwrap(vector.render()?.cgImage)), CanvasFixture.rgbaBytes(oldImage))
+        XCTAssertEqual(manager.history.currentCost, rewriteCost, "Redo retains the same charged snapshots.")
+        manager.redo()
+        XCTAssertEqual(CanvasFixture.rgbaBytes(try XCTUnwrap(vector.render()?.cgImage)), CanvasFixture.rgbaBytes(newImage))
     }
 
     /// **A fill session predicts its own cost, and the prediction is what it allocates.**

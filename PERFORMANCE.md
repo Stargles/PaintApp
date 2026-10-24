@@ -3843,6 +3843,24 @@ written in three places — both undo registrars and `VectorCanvas.vacatedInkLim
 type outgrew it. All three read the stride now. PERFORMANCE §11.5's table put the retained figure at
 0.30 MB per step at a thousand strokes; the shape of that finding survives and the number does not.
 
+**2026-10-24 source correction, INFERRED payload arithmetic, native qualification pending:** the
+measured max-list-stride amortization remains, but stable element IDs were not evidence that their
+sample/path buffers shared. Same-ID Move/precision rewrites now compare actual borrowed backing
+identities while both snapshots remain retained. One action batches its affected canvases, deduplicates
+stored own/rest/placement/ancestor arrays and immutable images, and charges buffers unique to either
+side; metadata-only stroke colour edits keep their shared geometry charge at zero. Fill archives are
+priced as Data without decoding CGPath. Inline Data/String and storage without a proven identity use
+conservative logical bytes, never temporary stack-address sharing. Dictionary payloads use a logical
+entry allowance; spare capacity, allocator/object overhead and process RSS are not measured.
+
+Precision bake, Move, keyed restoration, interpolation, recording and eraser callers use the same
+accountant; the separate fill rewrite surcharge is removed. Move closures freeze only the actual
+before/after lists and used IDs, dropping unused whole-part/lifted/pre-lift captures. These are
+conservative per-action retained-payload deltas: unchanged current geometry is excluded, changed
+old/new buffers are included, and adjacent actions may charge a rewritten payload again. They are
+not a globally unique whole-history allocator bound. Tiny pixel/counter/lifetime regressions and
+intentional fault recipes are prepared; no new native memory/latency or RSS-saving claim.
+
 ### 13.5 Blanked hosts — declined, and this is the measurement that would settle it
 
 §9 item 5 recommends nilling the contents of blanked views. **Not built**, for two reasons and one

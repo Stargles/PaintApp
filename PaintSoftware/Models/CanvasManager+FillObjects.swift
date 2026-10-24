@@ -74,9 +74,9 @@ extension CanvasManager {
             var rewritten = Set<UUID>()
             for index in before.indices {
                 guard let fill = before[index].fill, let path = fill.cgPath, !path.isEmpty else { continue }
-                let reserving = rewritten.union([fill.id])
-                let reservedUndo = retainedCost + Self.fillMendUndoCost(before: before, after: after,
-                                                                       rewritten: reserving)
+                // The current archive is shared until replacement. Reserve its old payload now,
+                // then give the future replacement only the remaining allowance.
+                let reservedUndo = retainedCost + VectorUndoCost.bytes(from: before, to: after) + fill.pathData.count
                 let remainingUndo = max(0, history.maxCost - reservedUndo)
                 let geometryBytes = max(0, MetalFillEngine.fillBudgetBytes / 2 - 4 * fill.pathData.count)
                 let undoPoints = remainingUndo / Self.fillMendBytesPerPoint
@@ -85,7 +85,7 @@ extension CanvasManager {
                                         transform: vector.transform, size: size, references: references,
                                         neighbours: neighbours, threshold: threshold, reach: reach, paper: paper,
                                         maximumPointCount: min(undoPoints, geometryPoints),
-                                        maximumPathDataBytes: fill.pathData.count + remainingUndo)
+                                        maximumPathDataBytes: remainingUndo)
                 let patch = await withCheckedContinuation { continuation in
                     fillQueue.async {
                         let result = autoreleasepool { Self.prepareFillMend(work) }
@@ -100,14 +100,12 @@ extension CanvasManager {
                 case .fill(let mended):
                     after[index] = .fill(mended)
                     rewritten.insert(fill.id)
-                    // Same-id path rewrites share their element slots, so include their retained
-                    // path payloads explicitly beside the standard vector-list cost.
-                    guard retainedCost + Self.fillMendUndoCost(before: before, after: after, rewritten: rewritten)
+                    guard retainedCost + VectorUndoCost.bytes(from: before, to: after)
                             <= history.maxCost else { return .exceedsBudget }
                 }
             }
             guard !rewritten.isEmpty else { continue }
-            retainedCost += Self.fillMendUndoCost(before: before, after: after, rewritten: rewritten)
+            retainedCost += VectorUndoCost.bytes(from: before, to: after)
             let originalFills = Dictionary(uniqueKeysWithValues: before.compactMap { element -> (UUID, VectorFillElement)? in
                 guard rewritten.contains(element.id), let fill = element.fill else { return nil }
                 return (element.id, fill)
@@ -161,13 +159,6 @@ extension CanvasManager {
             layer.cels = []
             return (layer, source.cel)
         }
-    }
-
-    private static func fillMendUndoCost(before: [VectorElement], after: [VectorElement],
-                                         rewritten: Set<UUID>) -> Int {
-        VectorUndoCost.bytes(from: before, to: after)
-            + before.reduce(0) { $0 + (rewritten.contains($1.id) ? ($1.fill?.pathData.count ?? 0) : 0) }
-            + after.reduce(0) { $0 + (rewritten.contains($1.id) ? ($1.fill?.pathData.count ?? 0) : 0) }
     }
 
     /// A new contour point has a 16-byte CGPoint payload. Reserve eight payloads for the traced,

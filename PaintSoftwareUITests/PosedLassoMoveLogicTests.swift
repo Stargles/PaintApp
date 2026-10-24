@@ -322,6 +322,35 @@ final class PosedLassoMoveLogicTests: XCTestCase {
     /// dragging 9pt further means the frame's pose is +29, because what the artist moved was the ink
     /// at its posed position. Writing the raw +9 would snap the drawing 20pt left the instant they let
     /// go — visible, and the reason this asserts the number rather than merely that a key exists.
+    func testAKeyedMovePricesItsRealRestorationBuffersAndRedoDrawsTheCommittedPose() throws {
+        let (manager, layerIndex, vector) = fixture()
+        var samples = StrokeSamples(channels: .pressureOnly)
+        for n in 0..<32 { samples.append(VectorSample(x: 6 + CGFloat(n) * 16 / 31, y: 30, pressure: 1)) }
+        vector.addStroke(VectorStroke(brush: TestBrushes.hardRound, color: black(), size: 4, opacity: 1, samples: samples))
+        animate(manager, layerIndex, dx: 40)
+        manager.currentFrame = 6
+        let rest = vector.elements
+        manager.history.removeAll()
+        XCTAssertTrue(manager.beginVectorWholeCelMove())
+        manager.nudgeVectorFloat(to: movedBy(manager, dx: 9, dy: 0))
+        let moved = vector.elements
+        XCTAssertTrue(manager.commitVectorFloatIfNeeded())
+        let cost = try XCTUnwrap(manager.history.undoStack.last?.cost)
+        XCTAssertEqual(cost, VectorUndoCost.bytes(from: moved, to: rest))
+        XCTAssertGreaterThan(cost, 2 * 512, "Two distinct32-point position runs alone exceed the former flat charge.")
+        XCTAssertEqual(vector.strokes[0].samples, samples, "Keying restores the true resting geometry.")
+        let cel = manager.layers[layerIndex].cels[0]
+        let derived = try XCTUnwrap(manager.derivedCelContent(for: cel, atFrame: 6))
+        let image = try XCTUnwrap(derived.render(.full))
+        let bounds = try XCTUnwrap(PixelOps.opaqueContentBounds(image))
+        XCTAssertEqual(bounds.midX, 43, accuracy: 1.0, "Rest centre14 is drawn through the committed+29 pose.")
+        let drawn = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(image.cgImage)))
+        manager.undo()
+        manager.redo()
+        let restored = try XCTUnwrap(manager.derivedCelContent(for: manager.layers[layerIndex].cels[0], atFrame: 6))
+        XCTAssertEqual(CanvasFixture.rgbaBytes(try XCTUnwrap(restored.render(.full)?.cgImage)), drawn)
+    }
+
     func testACommitAtAPosedInBetweenKeysThatFrameWithTheComposedPose() throws {
         let (manager, layerIndex, vector) = fixture()
         vector.addStroke(stroke(from: CGPoint(x: 6, y: 30), to: CGPoint(x: 22, y: 30)))

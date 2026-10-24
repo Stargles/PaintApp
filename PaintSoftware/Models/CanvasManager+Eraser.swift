@@ -173,7 +173,7 @@ extension CanvasManager {
         for edit in edits {
             celContentChangedOutsideStroke(layerID: edit.target.layerID, celID: edit.target.celID)
         }
-        let cost = edits.reduce(0) { $0 + VectorUndoCost.bytes(from: $1.before, to: $1.after) }
+        let cost = VectorUndoCost.bytes(fromLists: edits.map(\.before), toLists: edits.map(\.after))
         recordUndo(label: .erase, cost: cost, undo: { [weak self] in
             self?.restoreUniversalErase(edits, elements: \.before)
         }, redo: { [weak self] in

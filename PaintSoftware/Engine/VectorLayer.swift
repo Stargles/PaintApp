@@ -1240,91 +1240,110 @@ enum VectorElement: Identifiable {
         case .stroke, .fill, .text: return nil
         }
     }
-
-    /// **The heap this element owns beyond the slot it occupies in an `elements` array** — what an
-    /// undo step uniquely retains when this element is in one of its two lists and not the other.
-    ///
-    /// The slot itself is `MemoryLayout<VectorElement>.stride` and is charged by `VectorUndoCost`,
-    /// once per step; this is the out-of-line storage, which varies by two orders of magnitude
-    /// between element kinds and is the whole reason a flat per-element constant could not work.
-    ///
-    /// **`.fill`, `.text` and `.video` are charged their inline payloads and nothing more, on
-    /// purpose.** A fill's `pathData` is an archived bezier — kilobytes for a lasso-shaped path, and
-    /// it is counted; a text object's recipe is a string and a font name; a video's payload is a
-    /// filename, and its pixels live in a file the undo step does not hold.
-    var retainedHeapBytes: Int {
-        switch self {
-        case .stroke(let stroke):
-            // One `CGPoint` per sample, plus one `CGFloat` per sample per populated channel — the
-            // arrays `StrokeSamples` actually stores, rather than `VectorSample`'s width, which
-            // counts five channels whether or not the run carries them.
-            let n = stroke.samples.count
-            return n * MemoryLayout<CGPoint>.stride
-                + stroke.samples.channels.channels.count * n * MemoryLayout<CGFloat>.stride
-        case .image(let image):
-            guard let cg = image.image.cgImage else { return 0 }
-            return cg.bytesPerRow * cg.height
-        case .fill(let fill):
-            return fill.pathData.count
-        case .text(let text):
-            return text.recipe.string.utf8.count
-        case .video:
-            return 0
-        case .stream:
-            // An address and a label. `displayFrame` is runtime-only and is not what an undo step
-            // holds — it is replaced by the next tick whatever the stack does.
-            return 0
-        }
-    }
 }
 
-/// **What one vector undo step actually retains** — BUGS.md's "Undo charges 3-6x what a vector edit
-/// retains", measured rather than estimated, and the answer is not 3–6× and not in that direction.
-///
-/// `StrokeCanvasView.registerVectorUndo` and `CanvasManager.registerVectorElementsUndo` both charged
-/// `(from.count + to.count) * 512`. MEASURED on an iOS 26.5 simulator, 2026-09-06 (RENDER.md §5
-/// stage 7), two ways that agree:
-///
-/// | edit | charged | retained | |
-/// |---|---|---|---|
-/// | one stroke onto a 1,000-stroke cel | 0.98 MB | **0.55 MB** | 1.8× **over** |
-/// | one 5,631-sample stroke onto an empty cel | 512 B | **135,720 B** | 265× **under** |
-///
-/// The retained figure for the first row is `phys_footprint` over thirty real steps, which is the
-/// only measurement here that argues with arithmetic and wins: `MemoryLayout` says two arrays of
-/// 1,000 × 576 bytes, and the allocator says **one**. Both are right — step *k*'s `to` array is step
-/// *k+1*'s `from`, the same buffer, so a run of N steps holds N+1 buffers and not 2N. That is why
-/// this charges `max` rather than the sum, and it is a fact about a *run* of steps rather than about
-/// any one of them, which is the level a budget cares about.
-///
-/// PERFORMANCE.md §11.5's table put the retained figure at 0.30 MB per step at a thousand strokes and
-/// concluded the charge was 3–6× too high. Half of that is right — it *is* one array per step — and
-/// the per-element figure was low: `MemoryLayout<VectorElement>.stride` is 576 bytes today, so a
-/// thousand-element array is 0.55 MB rather than 0.30. The type has grown since; the constant did
-/// not, and that is the general failure a stride reads its way out of.
+/// Conservative retained-payload delta for one vector undo action, not process RSS. The measured
+/// snapshot-chain model keeps one max-sized element array per action; common payload buffers need
+/// no additional retention, while distinct old/new geometry must both survive undo and redo.
+/// Adjacent actions may charge a rewritten payload again. No global identity registry is retained.
 enum VectorUndoCost {
-
-    /// Bytes to charge `UndoHistory` for a step that swaps `from` for `to` on one vector canvas.
-    ///
-    /// - The **array buffer**, once: `max(from.count, to.count) × MemoryLayout<VectorElement>.stride`.
-    ///   A stride rather than a constant, so the number cannot go stale the next time an element kind
-    ///   gains a field — which is exactly how 512 came to be wrong.
-    /// - The **heap of every element in one list and not the other**, by id. An element in both is
-    ///   copy-on-write shared with the live canvas and costs the step nothing; an element only this
-    ///   step can reach is bytes only this step is holding.
-    ///
-    /// A rewritten element — same id, different content, `ElementSwap.rewritesInPlace` — is charged
-    /// only its slot, which understates a recolour of a long stroke by that stroke's samples. Chosen
-    /// knowingly: catching it means comparing content rather than ids, which is O(samples) on every
-    /// edit, to correct a case where the *old* content is what is retained and the new one is in the
-    /// canvas anyway. The 265× case above is the one that mattered and it is an add, not a rewrite.
     static func bytes(from: [VectorElement], to: [VectorElement]) -> Int {
-        let slots = max(from.count, to.count) * MemoryLayout<VectorElement>.stride
-        let fromIDs = Set(from.map(\.id)), toIDs = Set(to.map(\.id))
-        var heap = 0
-        for element in from where !toIDs.contains(element.id) { heap += element.retainedHeapBytes }
-        for element in to where !fromIDs.contains(element.id) { heap += element.retainedHeapBytes }
-        return slots + heap
+        bytes(fromLists: [from], toLists: [to])
+    }
+
+    /// Several canvases changed by one action may share a retained ancestor. Price that payload
+    /// once across the action while preserving the measured per-canvas array-slot amortization.
+    static func bytes(fromLists from: [[VectorElement]], toLists to: [[VectorElement]]) -> Int {
+        precondition(from.count == to.count, "one before/after list per changed canvas")
+        // The snapshots keep every backing owner alive while operation-local borrow keys are used.
+        // These keys never leave this call, enter an undo closure, or dereference a borrowed address.
+        return withExtendedLifetime((from, to)) {
+            let before = Payloads(from), after = Payloads(to)
+            let slots = zip(from, to).reduce(0) { $0 + max($1.0.count, $1.1.count) * MemoryLayout<VectorElement>.stride }
+            let removed = before.owned.reduce(0) { $0 + (after.owned[$1.key] == nil ? $1.value : 0) }
+            let added = after.owned.reduce(0) { $0 + (before.owned[$1.key] == nil ? $1.value : 0) }
+            return slots + removed + added + before.unshared + after.unshared
+        }
+    }
+
+    private enum Identity: Hashable {
+        case buffer(address: UInt, bytes: Int)
+        case image(ObjectIdentifier)
+    }
+
+    /// Payload bytes, not allocator capacity/object headers. There is one visit per stored buffer,
+    /// independent of sample count; no numeric equality, packing, path decode or effective walk.
+    private struct Payloads {
+        var owned: [Identity: Int] = [:]
+        // Small inline values and opaque/noncontiguous storage have no provable heap identity.
+        // Conservatively charge their logical payload per snapshot rather than inventing sharing.
+        var unshared = 0
+
+        init(_ lists: [[VectorElement]]) {
+            for elements in lists {
+                for element in elements {
+                    switch element {
+                    case .stroke(let stroke):
+                        include(stroke.samples)
+                        include(stroke.lattice)
+                        if let rest = stroke.restWalk { include(rest.samples); include(rest.lattice) }
+                        if let placement = stroke.placement,
+                           case .retained(let samples, let lattice, _) = placement.source {
+                            include(samples)
+                            include(lattice)
+                        }
+                        if let thresholds = stroke.sampleVisibilityThresholds {
+                            unshared += thresholds.count * MemoryLayout<(Int, CGFloat)>.stride
+                        }
+                    case .fill(let fill): include(fill.pathData)
+                    case .image(let image):
+                        if let cg = image.image.cgImage { owned[.image(ObjectIdentifier(cg))] = cg.bytesPerRow * cg.height }
+                    case .text(let text): include(text.recipe.string)
+                    case .video, .stream: break // Runtime pictures/files are owned by their source services.
+                    }
+                }
+            }
+        }
+
+        private mutating func include(_ samples: StrokeSamples) {
+            include(samples.positions)
+            for channel in samples.storedChannels { include(samples.storedValues(channel)) }
+        }
+
+        private mutating func include(_ lattice: DabLattice?) {
+            guard let lattice else { return }
+            include(lattice.samples)
+            include(lattice.parameters)
+        }
+
+        private mutating func include<T>(_ array: [T]) {
+            guard !array.isEmpty else { return }
+            let visited: Void? = array.withContiguousStorageIfAvailable { buffer in
+                include(buffer.baseAddress.map { UnsafeRawPointer($0) }, bytes: buffer.count * MemoryLayout<T>.stride)
+            }
+            if visited == nil { unshared += array.count * MemoryLayout<T>.stride }
+        }
+
+        private mutating func include(_ data: Data) {
+            // Any inline representation must fit inside the value itself. Its borrow may point at
+            // reused stack scratch, so even byte-identical small values never get an address key.
+            guard data.count > MemoryLayout<Data>.size else { unshared += data.count; return }
+            data.withUnsafeBytes { buffer in include(buffer.baseAddress, bytes: buffer.count) }
+        }
+
+        private mutating func include(_ string: String) {
+            let count = string.utf8.count
+            guard count > MemoryLayout<String>.size else { unshared += count; return }
+            let visited: Void? = string.utf8.withContiguousStorageIfAvailable { buffer in
+                include(buffer.baseAddress.map { UnsafeRawPointer($0) }, bytes: buffer.count)
+            }
+            if visited == nil { unshared += count }
+        }
+
+        private mutating func include(_ address: UnsafeRawPointer?, bytes: Int) {
+            guard let address, bytes > 0 else { return }
+            owned[.buffer(address: UInt(bitPattern: address), bytes: bytes)] = bytes
+        }
     }
 }
 

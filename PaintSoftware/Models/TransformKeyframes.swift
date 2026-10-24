@@ -382,7 +382,7 @@ extension CanvasManager {
 
         guard structureUndoDepth == 0, gestureSnapshot == nil else { return }
         recordUndo(label: .effectKeys,
-                   cost: (movedElements.count + restElements.count) * 512,
+                   cost: VectorUndoCost.bytes(from: movedElements, to: restElements),
                    undo: { [weak self] in
                        vector.restoreElements(movedElements, changedInk: nil, rewriting: movedIDs)
                        self?.applyCelPoseState(before, layerID: layerID, celID: celID)

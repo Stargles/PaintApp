@@ -577,6 +577,11 @@ final class FillObjectLogicTests: XCTestCase {
         XCTAssertEqual(outcome, .changed(2))
         XCTAssertEqual(steps(manager) - baseline, 1, "the entire layer is one edit")
         XCTAssertEqual(manager.history.undoStack.last?.label, .mendAllFills)
+        let changedArchives = fixture.vectors.prefix(2).compactMap { $0.elements.first?.fill?.pathData.count }.reduce(0, +)
+        let originalArchives = fixture.fills.prefix(2).map { $0.pathData.count }.reduce(0, +)
+        XCTAssertEqual(manager.history.undoStack.last?.cost,
+                       2 * MemoryLayout<VectorElement>.stride + originalArchives + changedArchives,
+                       "The shared accountant prices the two actual archive replacements once, with no fill-only surcharge.")
         let after = try fixture.vectors.map { try XCTUnwrap($0.render()?.cgImage) }
         XCTAssertEqual(pixel(after[0], 40, 33), pixel(after[0], 40, 42),
                        "the gradient crosses the repaired stem with its original paint and opacity")

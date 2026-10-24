@@ -41,7 +41,7 @@ extension CanvasManager {
         let layersAfter = layers
         let elementsAfter = canvases.map { $0.elements }
 
-        let cost = 4096 + elementsBefore.reduce(0) { $0 + $1.count * 512 }
+        let cost = 4096 + VectorUndoCost.bytes(fromLists: elementsBefore, toLists: elementsAfter)
         recordUndo(label: label, cost: cost, undo: { [weak self] in
             self?.applyInterpolationState(groups: groupsBefore, guides: guidesBefore,
                                           layers: layersBefore, canvases: canvases,

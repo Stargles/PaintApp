@@ -184,9 +184,14 @@ Detailed source evidence: `/Users/juliapark/PaintWork/s54-architecture-audit/bru
 
 ### Vector undo accounting
 
-Stable element IDs are used as shared-heap proxy and some geometry edits use count*512, undercounting newly retained sample/path payloads.
+Source-confirmed: stable IDs missed same-ID geometry replacements, flat512 consumers remained,
+and Move closures retained unused whole parts. `tmp/s54-vector-undo` replaces the proxy with one
+operation-scoped payload accountant, batches affected canvases, and captures only actual Move restore
+lists/IDs. Live sample arrays, rest/placement/ancestors and archived fill Data are priced without
+unpacking/decoding; inline bytes use a conservative allowance. PackedSampleRun is wire-only.
 
-Remaining: verify/reproduce, then fix or reject the premise with evidence.
+Remaining: native focused controls/mutations, Debug/Release fast tiers, normal Move/precision UI and
+artist-size screenshots/device qualification. Source parse/lints are not footprint or RSS results.
 
 Detailed source evidence: `/Users/juliapark/PaintWork/s54-architecture-audit/brush-cel-review.md`.
 
