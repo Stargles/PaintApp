@@ -62,10 +62,15 @@ extension ProjectStore {
             return CGSize(width: width, height: height)
         }
 
+        struct Decoded {
+            let image: UIImage
+            let isTransparent: Bool
+        }
+
         func decode(using residency: RasterResidency, excluding: Set<UUID>)
-            -> Result<UIImage, RasterResidency.Failure> {
+            -> Result<Decoded, RasterResidency.Failure> {
             var decodedInput: RasterResidency.Allocation?
-            let result: Result<UIImage, RasterResidency.Failure> = autoreleasepool {
+            let result: Result<Decoded, RasterResidency.Failure> = autoreleasepool {
                 // Creating this uncached CGImage exposes its exact decoded row size before the
                 // decoder is asked to draw it. Input decoding is charged as operation working bytes.
                 guard let source = CGImageSourceCreateWithURL(url as CFURL,
@@ -79,15 +84,23 @@ extension ProjectStore {
                 guard !overflow else { return .failure(.invalidSize) }
                 return residency.admitWorking(inputBytes, excluding: excluding).flatMap { reservation in
                     decodedInput = reservation
-                    return RasterSurface.allocate(width: image.width, height: image.height,
+                    // Force complete decoding while charged. A corrupt resource must fail here,
+                    // rather than a later lazy draw quietly leaving a transparent output behind.
+                    guard let decoded = CGImageSourceCreateImageAtIndex(source, 0,
+                        [kCGImageSourceShouldCacheImmediately: true,
+                         kCGImageSourceShouldAllowFloat: false] as CFDictionary),
+                          decoded.width == image.width, decoded.height == image.height,
+                          decoded.bytesPerRow <= image.bytesPerRow else { return .failure(.unreadableBacking) }
+                    return RasterSurface.allocate(width: decoded.width, height: decoded.height,
                             using: residency, excluding: excluding).flatMap { surface in
                         surface.mutate { context in
                             UIGraphicsPushContext(context)
-                            UIImage(cgImage: image).draw(in: CGRect(origin: .zero, size: size))
+                            UIImage(cgImage: decoded).draw(in: CGRect(origin: .zero, size: size))
                             UIGraphicsPopContext()
                         }.flatMap {
                             surface.allocation.markDurable()
-                            return surface.image()
+                            let transparent = surface.isFullyTransparent
+                            return surface.image().map { Decoded(image: $0, isTransparent: transparent) }
                         }
                     }
                 }

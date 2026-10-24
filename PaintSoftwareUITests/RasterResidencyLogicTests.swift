@@ -240,4 +240,31 @@ final class RasterResidencyLogicTests: XCTestCase {
         XCTAssertEqual(owner.usage.workingBytes, 0)
         XCTAssertEqual(try pixel(XCTUnwrap(source.resolveImage().get().cgImage)), [255, 0, 0, 255])
     }
+
+    func testDeferredBlankProofPreservesASinglePaintedPixel() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("raster-blank-proof-\(UUID())")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let owner = RasterResidency(budgetBytes: pictureBytes * 8, hasHeadroom: { _ in true })
+        let size = CGSize(width: width, height: height)
+        let blankURL = root.appendingPathComponent("blank.png")
+        try XCTUnwrap(PixelOps.transparentImage(size: size).pngData()).write(to: blankURL)
+        let blank = RasterSource.backed(by: try ProjectStore.RasterBacking.protect(blankURL, using: owner).get(), using: owner)
+        let cornerURL = root.appendingPathComponent("corner.png")
+        let corner = CanvasFixture.solidImage(.red,
+            rect: CGRect(x: width - 1, y: height - 1, width: 1, height: 1), size: size)
+        try XCTUnwrap(corner.pngData()).write(to: cornerURL)
+        let painted = RasterSource.backed(by: try ProjectStore.RasterBacking.protect(cornerURL, using: owner).get(), using: owner)
+        XCTAssertEqual(owner.usage.allocations, 0)
+        XCTAssertFalse(blank.isCertainlyTransparent, "Unvisited content is never assumed empty")
+        try autoreleasepool {
+            _ = try blank.resolveImage().get()
+            let image = try XCTUnwrap(painted.resolveImage().get().cgImage)
+            let bytes = try XCTUnwrap(CoreGraphicsCompositor.premultipliedBytes(image, width: width, height: height))
+            XCTAssertEqual(stride(from: 3, to: bytes.count, by: 4).filter { bytes[$0] > 0 }.count, 1)
+        }
+        XCTAssertTrue(blank.isCertainlyTransparent)
+        XCTAssertFalse(painted.isCertainlyTransparent, "Exact alpha proof must retain even one painted texel")
+        XCTAssertLessThanOrEqual(owner.usage.highWaterBytes, owner.budgetBytes)
+    }
 }

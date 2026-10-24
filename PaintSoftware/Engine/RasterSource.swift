@@ -12,6 +12,7 @@ final class RasterSource: RasterResidencyCandidate {
     private var backing: ProjectStore.RasterBacking?
     private var loading: DispatchGroup?
     private var isCheckpointing = false
+    private var transparencyProven = false
     private weak var originalAllocation: RasterResidency.Allocation?
 
     private init(size: CGSize, residency: RasterResidency, image: UIImage?, backing: ProjectStore.RasterBacking?,
@@ -33,6 +34,11 @@ final class RasterSource: RasterResidencyCandidate {
 
     static func backed(by backing: ProjectStore.RasterBacking, using residency: RasterResidency) -> RasterSource {
         RasterSource(size: backing.size, residency: residency, image: nil, backing: backing)
+    }
+
+    var isCertainlyTransparent: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return transparencyProven
     }
 
     /// A foreign renderer's output is copied into the source owner's provider-backed allocation.
@@ -78,9 +84,13 @@ final class RasterSource: RasterResidencyCandidate {
         self.loading = loading
         lock.unlock()
         // No source/owner lock crosses decoding or admission. Another worker shares the result.
-        let result = backing.decode(using: residency, excluding: [residencyID])
+        let decoded = backing.decode(using: residency, excluding: [residencyID])
+        let result = decoded.map(\.image)
         lock.lock()
-        if case .success(let image) = result { self.image = image }
+        if case .success(let decoded) = decoded {
+            image = decoded.image
+            transparencyProven = decoded.isTransparent
+        }
         self.loading = nil
         lock.unlock()
         loading.leave()

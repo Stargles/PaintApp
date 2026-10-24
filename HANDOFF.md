@@ -38,6 +38,12 @@ headroom/readmission, immutable file replacement, dirty checkpoint/reload and fa
 preservation. Foundation SDK header review caught NSCondition lacking try-lock; the source now uses
 NSLock plus one in-flight decode group. Static UI lints/plutil/diff-check pass. Native gates remain
 unrun; Cel/load/save/edit integration remains next, so these primitives still establish no runtime cap.
+Source decode now forces the ImageIO decode while its nominal input row storage is admitted,
+refusing corrupt input instead of accepting a later blank draw. The private decoder/encoder internals
+remain outside the owned-buffer proof. An exact alpha scan of the newly decoded private buffer
+records blank proof without treating unvisited resources as empty; the twelfth prepared method pairs
+transparent content with one painted corner texel. The existing serialization helper now rethrows
+for atomic throwing clients. No native gate has run.
 
 ## Current combined source qualification — 2026-10-24
 

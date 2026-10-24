@@ -667,9 +667,9 @@ enum ProjectStore {
 
     /// Explicit gallery moves wait behind pending saves. Nested naming helpers stay on this queue;
     /// they never wait for a main-actor save completion, which would deadlock the gallery action.
-    static func serializingPackageMutation<T>(_ body: () -> T) -> T {
-        if DispatchQueue.getSpecific(key: saveQueueKey) == true { return body() }
-        return saveQueue.sync(execute: body)
+    static func serializingPackageMutation<T>(_ body: () throws -> T) rethrows -> T {
+        if DispatchQueue.getSpecific(key: saveQueueKey) == true { return try body() }
+        return try saveQueue.sync(execute: body)
     }
 
     static var isPerformingPackageMutation: Bool { DispatchQueue.getSpecific(key: saveQueueKey) == true }

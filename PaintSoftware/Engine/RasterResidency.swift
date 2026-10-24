@@ -255,6 +255,14 @@ final class RasterSurface {
     var allocation: RasterResidency.Allocation { buffer.allocation }
     var readProviderCount: Int { buffer.readProviderCount }
 
+    /// Exact blank proof for a newly decoded, still private source. No downsampling can discard a
+    /// single painted pixel; normal nonblank pictures return at their first nonzero alpha.
+    var isFullyTransparent: Bool {
+        let bytes = buffer.address.assumingMemoryBound(to: UInt8.self)
+        for index in stride(from: 3, to: byteCount, by: 4) where bytes[index] != 0 { return false }
+        return true
+    }
+
     private init(width: Int, height: Int, bytesPerRow: Int, residency: RasterResidency,
                  buffer: Buffer, context: CGContext) {
         self.width = width
