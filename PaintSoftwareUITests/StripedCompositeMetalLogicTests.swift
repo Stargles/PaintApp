@@ -80,7 +80,8 @@ final class StripedCompositeMetalLogicTests: XCTestCase {
     /// the formula, as the CoreGraphics suite does, so the arithmetic stays in one place.
     private func budgetBytes(forStripBufferRows rows: Int, recipe: FrameRecipe) -> Int {
         let rowBytes = CompositorBudget.textureBytes(for: CGSize(width: recipe.canvasSize.width, height: 1))
-        return rows * rowBytes * (1 + ChunkedCompositor.carriedTextures + recipe.tree.peakCompositeTextures)
+        let sources = ChunkedCompositor.minimumSources(for: recipe.tree, maskStacks: recipe.maskStacks)
+        return rows * rowBytes * (sources + ChunkedCompositor.carriedTextures + recipe.tree.peakCompositeTextures)
     }
 
     /// Composites `manager` both ways **on the GPU** at a stated strip height and asserts every byte
@@ -96,7 +97,7 @@ final class StripedCompositeMetalLogicTests: XCTestCase {
         }
         let budget = budgetBytes(forStripBufferRows: rows, recipe: recipe)
         XCTAssertEqual(ChunkedCompositor.affordableRows(width: recipe.canvasSize.width,
-                                                        tree: recipe.tree, budgetBytes: budget), rows,
+                                                        tree: recipe.tree, maskStacks: recipe.maskStacks, budgetBytes: budget), rows,
                        "The budget arithmetic must give the strip height the test asked for. \(message)",
                        file: file, line: line)
         XCTAssertEqual(ChunkedCompositor.resolvedBackend(for: recipe.tree), .metal,

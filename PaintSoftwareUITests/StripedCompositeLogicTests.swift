@@ -61,13 +61,14 @@ final class StripedCompositeLogicTests: XCTestCase {
     /// The budget that makes `ChunkedCompositor.affordableRows` answer exactly `rows`.
     ///
     /// Inverted from the formula rather than guessed at, exactly as the chunked suite inverts
-    /// `chunkSources`: `rows = budget / (rowBytes × (1 + carried + peak))`, hence
-    /// `budget = rows × rowBytes × (1 + carried + peak)`. Every caller asserts the inversion held, so
+    /// `chunkSources`: `rows = budget / (rowBytes × (minimumSources + carried + peak))`, hence
+    /// `budget = rows × rowBytes × (minimumSources + carried + peak)`. Every caller asserts the inversion held, so
     /// a drift in either direction is a failure rather than a test that quietly measures a different
     /// height from the one it names.
     private func budgetBytes(forStripBufferRows rows: Int, recipe: FrameRecipe) -> Int {
         let rowBytes = CompositorBudget.textureBytes(for: CGSize(width: recipe.canvasSize.width, height: 1))
-        return rows * rowBytes * (1 + ChunkedCompositor.carriedTextures + recipe.tree.peakCompositeTextures)
+        let sources = ChunkedCompositor.minimumSources(for: recipe.tree, maskStacks: recipe.maskStacks)
+        return rows * rowBytes * (sources + ChunkedCompositor.carriedTextures + recipe.tree.peakCompositeTextures)
     }
 
     /// Composites `manager` both ways at a stated strip buffer height and asserts every byte agrees.
@@ -88,7 +89,7 @@ final class StripedCompositeLogicTests: XCTestCase {
         }
         let budget = budgetBytes(forStripBufferRows: rows, recipe: recipe)
         XCTAssertEqual(ChunkedCompositor.affordableRows(width: recipe.canvasSize.width,
-                                                        tree: recipe.tree, budgetBytes: budget), rows,
+                                                        tree: recipe.tree, maskStacks: recipe.maskStacks, budgetBytes: budget), rows,
                        "The budget arithmetic must give the strip height the test asked for. \(message)",
                        file: file, line: line)
 
@@ -716,7 +717,7 @@ final class StripedCompositeLogicTests: XCTestCase {
 
     /// **One budget account, read two ways.** `ChunkedCompositor.affordableRows` is `chunkSources`
     /// solved for the height, and this asserts the rearrangement in both directions rather than
-    /// trusting it: at the height it answers a chunk affords at least one leaf, and one row taller it
+    /// trusting it: at the height it answers a chunk affords its indivisible source closure, and one row taller it
     /// does not.
     ///
     /// This is the claim that keeps the two cuts from disagreeing about what the budget is, and a
@@ -729,19 +730,21 @@ final class StripedCompositeLogicTests: XCTestCase {
         }
         let width = recipe.canvasSize.width
         for budget in [1_000_000, 4_000_000, 16_000_000, 64_000_000] {
-            let rows = ChunkedCompositor.affordableRows(width: width, tree: recipe.tree, budgetBytes: budget)
+            let minimum = ChunkedCompositor.minimumSources(for: recipe.tree, maskStacks: recipe.maskStacks)
+            let rows = ChunkedCompositor.affordableRows(width: width, tree: recipe.tree,
+                                                        maskStacks: recipe.maskStacks, budgetBytes: budget)
             XCTAssertGreaterThan(rows, 0, "budget \(budget): this canvas is 64 px wide, so a row is 256 bytes")
             XCTAssertGreaterThanOrEqual(
                 ChunkedCompositor.chunkSources(for: recipe.tree,
                                                canvasSize: CGSize(width: width, height: CGFloat(rows)),
-                                               budgetBytes: budget), 1,
-                "budget \(budget): at the height it answers, a chunk must afford at least one leaf")
+                                               budgetBytes: budget), minimum,
+                "budget \(budget): at the height it answers, a chunk must afford its source floor")
             // One row taller and it does not — which is only visible past the floor `chunkSources`
             // takes, so the unfloored arithmetic is what is asserted here.
             let tallerBytes = CompositorBudget.textureBytes(for: CGSize(width: width, height: CGFloat(rows + 1)))
             XCTAssertLessThan(budget / tallerBytes - ChunkedCompositor.carriedTextures
-                                - recipe.tree.peakCompositeTextures, 1,
-                              "budget \(budget): one row taller must not afford a leaf, or the height is not maximal")
+                                - recipe.tree.peakCompositeTextures, minimum,
+                              "budget \(budget): one row taller must not afford the source floor, or the height is not maximal")
         }
     }
 

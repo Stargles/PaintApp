@@ -2477,7 +2477,7 @@ struct CanvasView: UIViewRepresentable {
 
         /// The coverage clipping one layer, as an image `CALayer.mask` can apply.
         ///
-        /// **`makeRenderRequest` is what makes this agree with the compositor rather than merely
+        /// **`makeFrameRecipe` is what makes this agree with the compositor rather than merely
         /// resemble it.** `MaskResolver.coverage` keys on the masks plus the content versions of the
         /// layers they read, and a request built here carries the same `maskStacks` (derived from the
         /// whole tree, not from a sandwich half) and the same `contentVersions` as the three the
@@ -2491,11 +2491,8 @@ struct CanvasView: UIViewRepresentable {
         /// disjoint sets of canvas-sized `PixelOps.rasterize` flattens, evicting each other inside one
         /// budget, on exactly the documents that have masks to resolve.
         ///
-        /// It is also cheap despite building a whole request, because `PixelOps.rasterize` is
-        /// memoized on cel identity *and size* and the rebuild has just walked the same cels at the
-        /// same size. `includeBackground` is false to match what `makeSandwichRecipe` passes, though
-        /// nothing downstream reads it — `MaskResolver` composites each source stack onto transparency
-        /// regardless.
+        /// The recipe lets the shared mask cache answer before any source pixels are resolved.
+        /// A miss resolves only the mask's dependencies; unrelated leaves do no pixel work.
         private func resolveLiveMask(forLayerAt index: Int) -> CGImage? {
             // The same frame the request below is built at, and it has to be: the two are compared
             // against each other by `MaskResolver`'s cache, so a tree derived at one frame and a
@@ -2503,8 +2500,8 @@ struct CanvasView: UIViewRepresentable {
             guard let masks = RenderNode.masksClipping(leafAt: index,
                                                        in: canvasManager.renderTree(atFrame: canvasManager.currentFrame)),
                   !masks.isEmpty,
-                  let request = canvasManager.liveMaskRequest(atFrame: canvasManager.currentFrame),
-                  let resolved = MaskResolver.coverage(for: masks, of: request) else { return nil }
+                  let recipe = canvasManager.liveMaskRecipe(atFrame: canvasManager.currentFrame),
+                  let resolved = MaskResolver.coverage(for: masks, of: recipe) else { return nil }
             if let cached = liveMaskCache, cached.mask === resolved { return cached.image }
             guard let image = resolved.makeMaskImage() else { return nil }
             liveMaskCache = (mask: resolved, image: image)

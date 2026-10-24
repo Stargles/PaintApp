@@ -62,7 +62,8 @@ final class LiveHalvesStripLogicTests: XCTestCase {
     /// inverted from the formula rather than copied, so the arithmetic stays in one place.
     private func budgetBytes(forStripBufferRows rows: Int, of recipe: FrameRecipe) -> Int {
         let rowBytes = CompositorBudget.textureBytes(for: CGSize(width: recipe.canvasSize.width, height: 1))
-        return rows * rowBytes * (1 + ChunkedCompositor.carriedTextures + recipe.tree.peakCompositeTextures)
+        let sources = ChunkedCompositor.minimumSources(for: recipe.tree, maskStacks: recipe.maskStacks)
+        return rows * rowBytes * (sources + ChunkedCompositor.carriedTextures + recipe.tree.peakCompositeTextures)
     }
 
     /// **The largest budget at which the GPU still refuses this tree whole** — one byte under

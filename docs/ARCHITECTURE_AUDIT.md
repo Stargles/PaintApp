@@ -86,9 +86,13 @@ Detailed source evidence: `/Users/juliapark/PaintWork/s54-architecture-audit/ren
 
 ### Mask dependency budget
 
-Masked leaf closure can exceed planned source budget; live mask resolution may happen before cache lookup.
-
-Remaining: verify/reproduce, then fix or reject the premise with evidence.
+Source correction prepared: `ChunkedCompositor.minimumSources` prices indivisible transitive mask
+closures, assembled node outputs and earlier mix slots; strip height uses that floor in the existing
+budget arithmetic. Mix assembly reserves earlier slot pictures while resolving later slots.
+`liveMaskRecipe` asks the same mask cache with metadata first, resolving only its dependency subset
+on a miss. Nested-mask pixel/count and planner regressions are prepared. Native and mutation gates
+remain pending; this bounds planned picture costs, not total process residency, and retains the
+minimum-one-row exception when even that row cannot fit.
 
 Detailed source evidence: `/Users/juliapark/PaintWork/s54-architecture-audit/render-review.md`.
 

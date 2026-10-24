@@ -81,6 +81,34 @@ enum MaskResolver {
     /// More than one mask is an intersection, applied as a product of coverages — see
     /// `RenderNode.masks` for when a node carries two.
     static func coverage(for masks: [AlphaMask], of request: RenderRequest) -> ResolvedMask? {
+        guard !request.sourceResolutionFailed else { return nil }
+        return coverage(for: masks, metadata: request) { _ in request }
+    }
+
+    /// Live feedback asks with frozen identities first. A hit touches no source pixels; a miss
+    /// resolves only the transitive stacks already included in the shared cache key.
+    static func coverage(for masks: [AlphaMask], of recipe: FrameRecipe) -> ResolvedMask? {
+        let metadata = RenderRequest(tree: recipe.tree, sources: [],
+                                     contentVersions: recipe.leaves.map { $0?.version },
+                                     maskStacks: recipe.maskStacks, frame: recipe.frame,
+                                     canvasSize: recipe.canvasSize, background: recipe.background,
+                                     quality: recipe.quality, window: recipe.window)
+        return coverage(for: masks, metadata: metadata) { stacks in
+            let subset = Set(stacks.flatMap(\.leafLayerIndices))
+            let resolved = FrameRecipe.resolveSources(recipe.leaves, canvasSize: recipe.canvasSize,
+                                                     quality: recipe.quality, subset: subset,
+                                                     window: recipe.window)
+            guard !resolved.failed else { return nil }
+            return RenderRequest(tree: recipe.tree, sources: resolved.sources,
+                                 contentVersions: resolved.versions, maskStacks: recipe.maskStacks,
+                                 frame: recipe.frame, canvasSize: recipe.canvasSize,
+                                 background: recipe.background, quality: recipe.quality,
+                                 window: recipe.window)
+        }
+    }
+
+    private static func coverage(for masks: [AlphaMask], metadata request: RenderRequest,
+                                 resolving: ([[RenderNode]]) -> RenderRequest?) -> ResolvedMask? {
         guard !masks.isEmpty else { return nil }
         let width = Int(request.canvasSize.width.rounded())
         let height = Int(request.canvasSize.height.rounded())
@@ -92,7 +120,8 @@ enum MaskResolver {
                            versions: contentVersions(in: sourceStacks, of: request),
                            sourceStacks: sourceStacks)
         if let hit = cache.value(for: key) { return hit }
-        guard let resolved = resolveUncached(masks, of: request, width: width, height: height) else { return nil }
+        guard let pixels = resolving(sourceStacks),
+              let resolved = resolveUncached(masks, of: pixels, width: width, height: height) else { return nil }
         cache.store(resolved, for: key)
         return resolved
     }

@@ -745,6 +745,69 @@ final class MaskParityLogicTests: XCTestCase {
     }
 
     // MARK: - Live feedback while drawing (§6.4)
+
+    func testLiveMaskMissResolvesOnlyItsNestedSourcesAndAHitResolvesNothing() throws {
+        let manager = CanvasFixture.manager(layerCount: 4)
+        func vector(_ index: Int, rect: CGRect, alpha: Double = 1) -> VectorCanvas {
+            let canvas = VectorCanvas(size: CanvasFixture.canvasSize,
+                fills: [VectorFillElement(path: CGPath(rect: rect, transform: nil),
+                                          color: CodableColor(red: 1, green: 0, blue: 0, alpha: alpha))])
+            manager.layers[index].kind = .vector
+            manager.layers[index].cels[0].vector = canvas
+            return canvas
+        }
+        let left = vector(0, rect: CGRect(x: 0, y: 0, width: 32, height: 64))
+        let top = vector(1, rect: CGRect(x: 0, y: 0, width: 64, height: 32))
+        let unrelated = vector(2, rect: CGRect(origin: .zero, size: CanvasFixture.canvasSize), alpha: 0)
+        manager.layers[0].isVisible = false
+        manager.layers[1].isVisible = false
+        manager.layers[0].alphaMask = AlphaMask(sources: [.layer(manager.layers[1].id)])
+        manager.layers[3].alphaMask = AlphaMask(sources: [.layer(manager.layers[0].id), .layer(manager.layers[0].id)])
+        PixelOps.clearRasterizeCache()
+        let recipe = try XCTUnwrap(manager.liveMaskRecipe(atFrame: 0))
+        let masks = try XCTUnwrap(RenderNode.masksClipping(leafAt: 3, in: recipe.tree))
+        let cold = try XCTUnwrap(MaskResolver.coverage(for: masks, of: recipe))
+        XCTAssertEqual([left.rasterizations, top.rasterizations, unrelated.rasterizations], [1, 1, 0],
+                       "A cold live mask resolves its transitive sources, including hidden ones, exactly once")
+        XCTAssertEqual(cold.coverage[8 + 8 * cold.width], 255)
+        XCTAssertEqual(cold.coverage[48 + 8 * cold.width], 0)
+        XCTAssertEqual(cold.coverage[8 + 48 * cold.width], 0)
+
+        // Clear the flatten cache and invalidate an unrelated visible but transparent vector.
+        // The coverage remains valid and must hit before either dependency can rasterize again.
+        PixelOps.clearRasterizeCache()
+        left.dropCachedImage()
+        top.dropCachedImage()
+        unrelated.addFill(VectorFillElement(path: CGPath(rect: CGRect(x: 2, y: 2, width: 2, height: 2), transform: nil),
+                                            color: CodableColor(red: 0, green: 0, blue: 0, alpha: 0)))
+        let warm = try XCTUnwrap(manager.liveMaskRecipe(atFrame: 0))
+        XCTAssertTrue(cold === MaskResolver.coverage(for: masks, of: warm))
+        XCTAssertEqual([left.rasterizations, top.rasterizations, unrelated.rasterizations], [1, 1, 0],
+                       "A mask cache hit must resolve zero source pictures")
+
+        MaskResolver.clearCache()
+        let reference = try XCTUnwrap(MaskResolver.coverage(for: masks, of: warm.resolve()))
+        XCTAssertEqual(cold.coverage, reference.coverage, "Subset resolution must draw the same clipping pixels")
+    }
+
+    func testLiveMaskRecipeKeepsTheExistingCycleBreakingResult() throws {
+        let manager = CanvasFixture.manager(layerCount: 3)
+        for index in 0..<3 {
+            CanvasFixture.setBakedContent(manager, layerIndex: index,
+                CanvasFixture.solidImage(red, rect: CGRect(x: 0, y: 0, width: 32, height: 64)))
+        }
+        manager.layers[0].alphaMask = AlphaMask(sources: [.layer(manager.layers[1].id)])
+        manager.layers[1].alphaMask = AlphaMask(sources: [.layer(manager.layers[0].id), .layer(manager.layers[2].id)])
+        let recipe = try XCTUnwrap(manager.liveMaskRecipe(atFrame: 0))
+        let masks = try XCTUnwrap(RenderNode.masksClipping(leafAt: 1, in: recipe.tree))
+        XCTAssertEqual(masks.flatMap(\.sources), [.layer(manager.layers[2].id)],
+                       "The cycle edge disappears while the independent source survives")
+        let subset = MaskResolver.coverage(for: masks, of: recipe)?.coverage
+        MaskResolver.clearCache()
+        let full = MaskResolver.coverage(for: masks, of: recipe.resolve())?.coverage
+        XCTAssertNotNil(full, "The existing cycle rule must leave a drawable mask")
+        XCTAssertEqual(subset, full, "Dependency-only pixels must preserve the render tree's cycle policy")
+    }
     //
     // §6.4's claim is a strong one — the live stroke and the composite "agree by construction" — and
     // it rests on two things this section pins separately. The mask Core Animation applies has to be
@@ -817,7 +880,7 @@ final class MaskParityLogicTests: XCTestCase {
         manager.renderResolution = .half
 
         guard let sandwich = manager.makeSandwichRecipe(atFrame: 0, activeLayerIndex: 1)?.resolve(),
-              let live = manager.liveMaskRequest(atFrame: 0),
+              let live = manager.liveMaskRecipe(atFrame: 0),
               let native = manager.makeRenderRequest(atFrame: 0, includeBackground: false) else {
             return XCTFail("All three requests must build")
         }

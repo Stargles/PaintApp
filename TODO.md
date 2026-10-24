@@ -294,6 +294,16 @@ account usage limits; root continues. The full source inventory is not yet fully
   When retiring temporary repair/converter/UI, preserve permanent
   `ProjectBackupManager.runStartupMaintenance` scheduling and truthful post-maintenance gallery readiness.
 - [ ] Rendering/storage: derived-frame recovery/close, masked source budgets, editable raster residency, video pressure.
+  Mask source scope active on `tmp/s54-mask-residency` from59d69f12: price each indivisible
+  transitive dependency closure in existing chunk/strip source planning; resolve live-mask metadata
+  cache before dependency pixels and omit unrelated leaves. Reuse FrameRecipe/MaskResolver; no
+  second cache, global working-set framework or saved-format change. Raster residency/shared source
+  models belong to the other task. Source/static preparation only; root owns all native gates.
+  Source +4 regressions prepared: source floor prices masked leaves/buffered outputs and retained
+  mix slots; live metadata hit resolves zero leaves, miss resolves only dependency leaves. Existing
+  cycle policy/pixels pinned. Seven affected compositor classes statically total120 methods; Swift
+  parse/UI guards/whitespace pass. Native compile, focused/fast Debug+Release, mutants and visible
+  cold UI remain root-owned pending gates. Keep the minimum-one-row exception; no total RSS claim.
   Active `tmp/s54-bake-lifecycle`: existing baker/store/read-demand ownership is reused; no extra
   renderer/cache. Root's500 baseline covers bake634f5300, including shared-root authority, metadata-only
   readiness, owned read snapshots, typed export refusal, checked headers and1-byte eviction charge release.

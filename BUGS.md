@@ -1026,8 +1026,9 @@ trusting the rest of a list assembled by reading code.
    (`Engine/FrameRecipe.swift:155`). Sizing bounds the buffer, never the count: 100 leaves at 2048x1024 is
    800 MiB whatever the knob says. **RENDER §3.4 closed the whole-frame consumers** — the bake, the project
    thumbnail and the eyedropper composite through `FrameRecipe.composite`, which holds a chunk's worth — and
-   the site survives on the two callers that legitimately want one request over every leaf: the sandwich
-   halves (`CanvasView.startSandwichRebuild`) and `liveMaskRequest`.
+   live-mask coverage now asks `liveMaskRecipe` for metadata, checks the shared mask cache first and
+   resolves only transitive mask dependencies on a miss. The chunk/strip source floor includes those
+   indivisible closures and assembled mix slots. Source regressions prepared; native gates pending.
 2. **Nothing on the live-stroke path consults `hasHeadroom`**, which has exactly one call site
    (`Engine/MetalCompositor.swift:620`). The stroke itself no longer needs it — `Engine/StrokeScratch.swift` bounds the
    scratch by the stroke's own dirty rect rather than by the canvas, on both tiers — but committing one still opens the

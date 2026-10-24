@@ -355,6 +355,73 @@ final class ChunkedCompositeLogicTests: XCTestCase {
 
     // MARK: - The plan is pure, and the subset is honoured
 
+    func testTheSourceFloorIncludesTransitiveMasksWithoutCountingDuplicatesOrCyclesTwice() {
+        let a = MaskSource.layer(UUID()), b = MaskSource.layer(UUID())
+        func leaf(_ index: Int, masks: [AlphaMask] = []) -> RenderNode {
+            RenderNode(id: UUID(), content: .leaf(layerIndex: index), opacity: 1, isVisible: true,
+                       blendMode: .normal, isIsolated: false, masks: masks, effect: nil)
+        }
+        let tree = [leaf(0, masks: [AlphaMask(sources: [a, a])])]
+        // The planner's reachability also terminates on cyclic metadata. The model's existing
+        // render-tree builder removes actual cycle-closing mask edges before drawing.
+        let stacks = [a: [leaf(1, masks: [AlphaMask(sources: [b])])],
+                      b: [leaf(2, masks: [AlphaMask(sources: [a])])]]
+        XCTAssertEqual(ChunkedCompositor.minimumSources(for: tree, maskStacks: stacks), 3)
+        let size = CGSize(width: 128, height: 128)
+        let bytes = CompositorBudget.textureBytes(for: size)
+        let budget = bytes * (1 + ChunkedCompositor.carriedTextures + tree.peakCompositeTextures)
+        let strips = StripedCompositor.plan(tree: tree, maskStacks: stacks, canvasSize: size,
+                                            budgetBytes: budget)
+        XCTAssertGreaterThan(strips.count, 1, "A one-source budget cannot hold this three-source leaf whole")
+        for strip in strips {
+            let sources = ChunkedCompositor.chunkSources(for: tree, canvasSize: strip.buffer.size,
+                                                         budgetBytes: budget)
+            XCTAssertGreaterThanOrEqual(sources, 3, "Every strip must afford the indivisible dependency closure")
+        }
+    }
+
+    func testAssembledMixSlotsConsumeTheLaterSlotsSourceWidth() throws {
+        let manager = CanvasFixture.manager(layerCount: 8)
+        for index in manager.layers.indices {
+            CanvasFixture.setBakedContent(manager, layerIndex: index,
+                CanvasFixture.solidImage(index < 4 ? red : blue,
+                                         rect: CGRect(x: index * 3, y: index * 2, width: 35, height: 40)))
+        }
+        let original = try XCTUnwrap(manager.makeFrameRecipe(atFrame: 0, includeBackground: false))
+        let mix = RenderNode(id: UUID(), content: .node(op: .mix(.normal),
+                            inputs: [Array(original.tree.prefix(4)), Array(original.tree.suffix(4))]),
+                             opacity: 1, isVisible: true, blendMode: .normal, isIsolated: false,
+                             masks: [], effect: nil)
+        let recipe = FrameRecipe(tree: [mix], leaves: original.leaves, maskStacks: original.maskStacks,
+                                 frame: 0, canvasSize: original.canvasSize, background: nil, quality: .full)
+        XCTAssertEqual(ChunkedCompositor.minimumSources(for: recipe.tree, maskStacks: [:]), 2,
+                       "Two assembled slots fit while eight direct sources do not")
+        let budget = budgetBytes(forChunkSources: 2, recipe: recipe)
+        CompositeProbe.begin()
+        let chunked = ChunkedCompositor.composite(recipe, budgetBytes: budget)
+        let draws = CompositeProbe.end()
+        // First slot: two chunks at width two. Second: four at width one, because the first
+        // slot image is still owned. One final fold. Keeping width two in both slots costs five.
+        XCTAssertEqual(draws.count, 7, "Previously assembled slots must reserve their source pictures")
+        assertPixelsIdentical(chunked, Compositor.composite(recipe.resolve()), "Slot reservation preserves the fold")
+
+        let duplicate = mix.replacingInputs([Array(original.tree.prefix(1)), Array(original.tree.prefix(1))])
+        XCTAssertEqual(ChunkedCompositor.minimumSources(for: [duplicate], maskStacks: [:]), 1,
+                       "A node whose direct dependencies fit must not be forced into slot assembly")
+
+        let maskSource = MaskSource.layer(UUID())
+        let maskedStack = RenderNode(id: UUID(), content: .node(op: .stack, inputs: [[mix]]),
+                                     opacity: 0.5, isVisible: true, blendMode: .normal, isIsolated: false,
+                                     masks: [AlphaMask(sources: [maskSource])], effect: nil)
+        let maskLeaves = [8, 9].map { index in
+            RenderNode(id: UUID(), content: .leaf(layerIndex: index), opacity: 1, isVisible: true,
+                       blendMode: .normal, isIsolated: false, masks: [], effect: nil)
+        }
+        XCTAssertEqual(ChunkedCompositor.minimumSources(for: [maskedStack],
+                                                        maskStacks: [maskSource: maskLeaves]), 3,
+                       "The assembled stack picture and its own mask dependencies remain simultaneous")
+    }
+
     /// **Planning touches no pixel**, which is what lets a chunk width be chosen on the main actor in
     /// O(nodes) before anything is rasterized. Asserted twice over: no composite is recorded while the
     /// plan runs, and the plan is a value — the same input gives an equal answer, so nothing about it

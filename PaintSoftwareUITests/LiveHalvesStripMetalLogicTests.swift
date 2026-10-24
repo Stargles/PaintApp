@@ -65,7 +65,8 @@ final class LiveHalvesStripMetalLogicTests: XCTestCase {
 
     private func budgetBytes(forStripBufferRows rows: Int, of recipe: FrameRecipe) -> Int {
         let rowBytes = CompositorBudget.textureBytes(for: CGSize(width: recipe.canvasSize.width, height: 1))
-        return rows * rowBytes * (1 + ChunkedCompositor.carriedTextures + recipe.tree.peakCompositeTextures)
+        let sources = ChunkedCompositor.minimumSources(for: recipe.tree, maskStacks: recipe.maskStacks)
+        return rows * rowBytes * (sources + ChunkedCompositor.carriedTextures + recipe.tree.peakCompositeTextures)
     }
 
     // MARK: - The premise, observed rather than assumed

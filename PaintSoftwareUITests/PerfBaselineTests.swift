@@ -2530,7 +2530,7 @@ final class PerfBaselineTests: XCTestCase {
             ("walkBytes", megabytes(UInt64(walk * perTexture))),
             ("totalBytes", megabytes(UInt64((walk + uploads) * perTexture))),
             ("budget3GB", megabytes(UInt64(iPad9))),
-            ("stripRows", "\(ChunkedCompositor.affordableRows(width: canvas.width, tree: tree, budgetBytes: iPad9))"),
+            ("stripRows", "\(ChunkedCompositor.affordableRows(width: canvas.width, tree: tree, maskStacks: scene.maskSourceStacks(of: tree), budgetBytes: iPad9))"),
             ("strips", "\(StripedCompositor.plan(tree: tree, maskStacks: scene.maskSourceStacks(of: tree), canvasSize: canvas, budgetBytes: iPad9).count)"),
         ])
 

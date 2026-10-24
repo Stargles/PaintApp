@@ -701,7 +701,7 @@ extension CanvasManager {
         RenderRequest.wholePixels(renderResolution.renderSize(for: canvasSize))
     }
 
-    /// The request `CanvasView.Coordinator.resolveLiveMask` resolves its coverage against.
+    /// The metadata `CanvasView.Coordinator.resolveLiveMask` asks for before resolving coverage.
     ///
     /// Here rather than in the coordinator for `isSandwichEngaged`'s reason: a `UIViewRepresentable`
     /// coordinator is not reachable headlessly, and the one decision made here — **which size** — is
@@ -717,16 +717,12 @@ extension CanvasManager {
     /// "no mask" for one pass and rebuilds the ghost on the next. Neither is mechanical to defer and
     /// deferring either changes behaviour rather than only timing.
     ///
-    /// What it costs after stage 2 is a whole `FrameRecipe` — O(layers) of identity work and then a
-    /// `resolve()` whose flattens are memo hits, because the rebuild has just walked the same cels at
-    /// the same size (`RenderSizing.liveComposite` is what makes them the same entries). The cold
-    /// case is a masked document at a frame nothing has composited yet, and it is genuinely
-    /// canvas-sized main-thread work. **The fix is stage 3's `renderSources(subset:)`**, not a queue
-    /// hop: a mask reads a small subset of the leaves, and resolving only those is both cheaper and
-    /// the thing §3.4 rule 4 already needs built.
+    /// Minting captures O(layers) of identities. `MaskResolver` checks its existing metadata cache
+    /// before resolving any pixels, then flattens only the mask's transitive source dependencies on
+    /// a miss. A cold dependency can still cost canvas-sized synchronous work at first touch.
     @MainActor
-    func liveMaskRequest(atFrame frame: Int) -> RenderRequest? {
-        makeRenderRequest(atFrame: frame, includeBackground: false, sizing: .liveComposite)
+    func liveMaskRecipe(atFrame frame: Int) -> FrameRecipe? {
+        makeFrameRecipe(atFrame: frame, includeBackground: false, sizing: .liveComposite)
     }
 
     /// Captures the current stack at `frame` as a `FrameRecipe` — everything the model has to be

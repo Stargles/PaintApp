@@ -944,10 +944,10 @@ it is the dependency order.
    display's memo instead of re-stamping the cel — MEASURED on the owner's iPad 9 in Release,
    2026-09-02: a 20-stroke cel at 2048² is **70.3 ms** to rasterize and **0.0 ms** to read back, so a
    snapshot that carried only the elements would have doubled the very work this stage removes.
-   (b) `liveMaskRequest` — §3.1's fourth row — is **not** deferred: both callers need the coverage in
+   (b) `liveMaskRecipe` — §3.1's fourth row — is **not** deferred: both callers need the coverage in
    the turn they ask for it (a `CALayer.mask` at first touch, and the onion skin's cache key). Its
-   flattens are memo hits behind the rebuild; the cold case is stage 3's `renderSources(subset:)`,
-   not a queue hop.
+   metadata is checked against the existing mask cache before any flatten; a miss resolves only
+   transitive mask dependencies through `FrameRecipe.resolveSources(subset:)`.
 
    The main-thread figure this removes, MEASURED on the same device run: **`snapshotCold` 36.3 ms
    against a 41.6 ms frame budget** — 87% of a frame — plus the 70.3 ms re-render above.
@@ -959,8 +959,8 @@ it is the dependency order.
    and without paper; four fixtures MEASURED red by deleting each rule in turn; and a plan that
    composites nothing. **The two whole-frame consumers are routed through it** — the project thumbnail
    and the eyedropper, whose flatten therefore leaves the main actor as well — so there is no second
-   whole-frame path (§2.15). `makeRenderRequest`/`resolve()` stay: `SandwichRecipe` and `liveMaskRequest`
-   legitimately want one request over every leaf, and stage 4 is what moves the live canvas.
+   whole-frame path (§2.15). `makeRenderRequest`/`resolve()` stay for consumers that need a complete
+   request. Live-mask coverage uses metadata first and only its dependency pixels on a miss.
 4. **Store and scheduler** (§3.5, §3.6): the key, the LZ4 files, the ring, the queue, the live canvas and play served
    from it, the timeline's baked-frame indication. MEASURE the compression ratio and the decode time on the device.
    **4a is done, 2026-09-02** — `Engine/FrameBakeKey.swift` and `Engine/FrameBakeStore.swift`, both pure and

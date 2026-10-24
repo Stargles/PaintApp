@@ -17,6 +17,31 @@ rather than credit a later filesystem exception as link-policy proof. Source/app
 add a direct assertion and requalify before remaining faults. No UI/device work after compiled mutants
 until committed normal source has been rebuilt. No merge/push/install.
 
+## Mask source planning work — 2026-10-24
+
+`~/PaintWork/PaintApp-s54-mask-residency`, `tmp/s54-mask-residency`, starts from origin/main then
+fast-forwards exact59d69f12511672468153132299f4ac926398afab. Scope recorded before implementation:
+make existing source/strip planning account for transitive indivisible mask dependencies; place
+live-mask cache lookup before resolving dependency pixels, without unrelated visible leaves. Keep
+one MaskResolver cache and existing FrameRecipe source resolution. No shared raster/source model
+edits; coordinate the bottom live-mask entry in RenderRequest.swift with root. No native operations;
+root owns qualification. No aggregate/RSS savings or Test1 cause is claimed.
+
+Prepared source correction: `minimumSources` reuses transitive `sourceIndices` for the indivisible
+closure and substituted buffered nodes. Later mix-slot assembly reserves earlier slot pictures.
+`affordableRows` requires mask metadata and shares the same source/carried/walk arithmetic; the
+minimum-one-row exception remains. `liveMaskRecipe` replaces the old full-request seam whole;
+`MaskResolver` checks its existing key first, resolving only `stacksRead` dependencies on a miss.
+The raster author confirmed the bottom RenderRequest seam/resolveSources tuple are compatible.
+Four new real regressions cover nested/duplicate/cyclic reach, strip source width, buffered node
+masks, counted mix draws plus pixel parity, zero unrelated cold leaf work, zero source work on a
+warm hit after dropping source memos, and existing cycle breaking. Existing strip budget helpers
+now price the source floor. Seven affected compositing classes contain120 test methods (15 chunk,
+11 chunk Metal,49 mask,20 strip,13 strip Metal,8 live-half,4 live-half Metal), a static count only.
+Swift frontend parsing, both UI guards and whitespace checks pass. Native app/test compilation,
+Debug/Release fast tiers, focused/UI driving, screenshots and assertion mutation runs remain unrun;
+root owns those gates. External assertion recipes will be pinned after the coherent source commit.
+
 ## Current targeted qualification — 2026-10-24
 
 Root's latest integrated59d69f12 baseline passed **500/500, zero skips**, with all **724 tracked

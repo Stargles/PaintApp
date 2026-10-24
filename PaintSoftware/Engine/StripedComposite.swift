@@ -31,7 +31,7 @@ import UIKit
 //
 // **Which cut runs first is not arbitrary either.** The node cut is free; the space cut costs an
 // apron, and the apron is duplicated work in every strip. So the plan takes the *tallest* strip whose
-// buffer still affords one leaf, and lets chunking absorb everything past that. A document that fits
+// buffer still affords its indivisible source closures, and lets chunking absorb everything past that. A document that fits
 // today takes one strip covering the whole frame, which is the unstripped path with no window, no
 // crop and no apron — measurably the same code, not merely the same picture.
 //
@@ -213,7 +213,8 @@ enum StripedCompositor {
                           frameSize: (Int((effectFrameSize ?? canvasSize).width.rounded()),
                                       Int((effectFrameSize ?? canvasSize).height.rounded())))
         let bufferRows = ChunkedCompositor.affordableRows(width: canvasSize.width,
-                                                          tree: tree, budgetBytes: budgetBytes)
+                                                          tree: tree, maskStacks: maskStacks,
+                                                          budgetBytes: budgetBytes)
         // The whole frame in one piece — including the case where the apron alone would not fit,
         // because a frame that already fits needs no apron at all.
         guard bufferRows < frameRows else {

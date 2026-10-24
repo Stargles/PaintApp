@@ -94,13 +94,13 @@ enum ChunkedCompositor {
     /// *"the budget chooses the strip height instead of the resolution"*, and the reason the strip
     /// driver has no arithmetic of its own.
     ///
-    /// The tallest buffer at `width` for which `chunkSources` would answer at least one **without
-    /// taking its floor**. That is the whole target: one leaf is the least a chunk can hold, so a
-    /// buffer at which even one leaf does not fit is a buffer the *space* cut has to make shorter,
-    /// and any buffer above that is one chunking can finish on its own. Rearranging
+    /// The tallest buffer at `width` for which `chunkSources` affords every indivisible source
+    /// closure **without taking its floor**. A masked leaf can require several sources at once, so a
+    /// buffer at which its dependency closure does not fit is a buffer the *space* cut has to shorten,
+    /// and any buffer no taller than that lets chunking finish within its source width. Rearranging
     ///
     /// ```
-    /// budget / (width · rows · 4) − carried − peak ≥ 1
+    /// budget / (width · rows · 4) − carried − peak ≥ minimumSources
     /// ```
     ///
     /// for `rows` is the expression below, term for term. `StripedCompositeLogicTests` asserts the
@@ -110,10 +110,40 @@ enum ChunkedCompositor {
     ///
     /// Zero for a degenerate width, and zero for a budget too small to hold even one row — both of
     /// which the caller reads as "shorter than the frame" and floors at a single row of its own.
-    static func affordableRows(width: CGFloat, tree: [RenderNode], budgetBytes: Int) -> Int {
+    static func affordableRows(width: CGFloat, tree: [RenderNode],
+                               maskStacks: [MaskSource: [RenderNode]], budgetBytes: Int) -> Int {
         let rowBytes = CompositorBudget.textureBytes(for: CGSize(width: width, height: 1))
         guard rowBytes > 0, budgetBytes > 0 else { return 0 }
-        return max(0, budgetBytes / (rowBytes * (1 + carriedTextures + tree.peakCompositeTextures)))
+        let sources = minimumSources(for: tree, maskStacks: maskStacks)
+        return max(0, budgetBytes / (rowBytes * (sources + carriedTextures + tree.peakCompositeTextures)))
+    }
+
+    /// The least source width the existing recursive plan can honour. Leaves keep their complete
+    /// transitive mask reach. An oversized buffered node can instead keep its assembled slots plus
+    /// its own masks; earlier mix slots remain resident while the next slot is assembled.
+    /// This prices source pictures, carried pictures and the existing compositor walk, not total RSS.
+    static func minimumSources(for nodes: [RenderNode],
+                               maskStacks: [MaskSource: [RenderNode]]) -> Int {
+        spliced(nodes).reduce(1) { peak, node in
+            let direct = sourceIndices(of: [node], maskStacks: maskStacks).count
+            guard case .node(let op, let inputs) = node.content else { return max(peak, direct) }
+            let streams: [[RenderNode]]
+            switch op {
+            case .stack: streams = [inputs.flatMap { $0 }]
+            case .mix: streams = inputs
+            }
+            // Synthetic negative indices cannot collide with real layer indices. Use the same
+            // source reach as the actual substitution, including masks on the buffered node.
+            let slots = streams.indices.map { index in
+                [RenderNode(id: node.id, content: .leaf(layerIndex: -index - 1), opacity: 1,
+                            isVisible: true, blendMode: .normal, isIsolated: false, masks: [], effect: nil)]
+            }
+            var assembled = sourceIndices(of: [node.replacingInputs(slots)], maskStacks: maskStacks).count
+            for (held, stream) in streams.enumerated() {
+                assembled = max(assembled, held + minimumSources(for: stream, maskStacks: maskStacks))
+            }
+            return max(peak, min(direct, assembled))
+        }
     }
 
     /// **`.automatic` answered once, for the whole frame.** See `Compositor.composite(_:resolving:)`,
@@ -395,7 +425,9 @@ enum ChunkedCompositor {
                     var images: [CGImage] = []
                     var slots: [[RenderNode]] = []
                     for input in inputs {
-                        guard let assembled = composite(input, background: nil) else { return nil }
+                        let remaining = Run(recipe: recipe, backend: backend,
+                                            maxSources: max(1, maxSources - images.count))
+                        guard let assembled = remaining.composite(input, background: nil) else { return nil }
                         slots.append([Self.syntheticLeaf(at: syntheticBase + images.count)])
                         images.append(assembled)
                     }
