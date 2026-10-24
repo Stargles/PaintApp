@@ -413,9 +413,12 @@ final class BackupManagerLogicTests: XCTestCase {
 
         XCTAssertFalse(FileManager.default.fileExists(atPath: expired.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: kept.path))
+        let retainedHistoryExists = FileManager.default.fileExists(atPath: latest.path)
+        XCTAssertTrue(retainedHistoryExists, "Purging an independent older project must preserve the retained project's history")
+        guard retainedHistoryExists else { return }
         XCTAssertEqual(try Data(contentsOf: latest), before, "History belongs to the recent project's UUID")
         XCTAssertTrue(backupDirFileNames(oldID).isEmpty, "The expired independent project's own history is purged")
-        XCTAssertEqual(ProjectBackupManager.listTrash().map(\.url), [kept])
+        XCTAssertEqual(ProjectBackupManager.listTrash().map { $0.url.standardizedFileURL.path }, [kept.standardizedFileURL.path])
     }
 
     func testRetainedTrashWithTheSameProjectIDKeepsItsHistory() throws {

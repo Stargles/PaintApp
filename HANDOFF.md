@@ -240,3 +240,9 @@ The library-ready dependency's TODO/HANDOFF/BUGS records remain authoritative; t
 review found no concrete production defect. Current-format fixture scan found no legacy-format
 assumptions. Native qualification remains pending. The reviewed external mutation plan is under
 ~/PaintWork and will be pinned to the final native source SHA there.
+
+Combined63b native baseline compiled app/tests and ran189 methods:187passed/2failed,724exact
+source restore. The Trash regression compares equivalent URLs with a directory slash difference;
+compare standardized paths, and assert retained backup existence AFTER purge before its throwing read.
+The new startup-refusal case misuses a current-package preservation helper on origin.name; repair
+agent will correct that test after this commit. No product defect is inferred from these two failures.
