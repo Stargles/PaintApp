@@ -2328,5 +2328,7 @@ a missing/evicted clean key was not requeued by resident top-up; reset did not c
 landings. No new-project stale output or saved-project damage is established. Prepared on
 `tmp/s54-bake-lifecycle`: reject/account disposable invalid files at actual reads, requeue missing
 clean keys through existing scheduler, and reuse LatestWins landing cancellation for reset/close.
-Nine tiny drawn/count/readiness/ownership regressions are prepared in existing classes. Parse and
+Fifteen tiny drawn/count/readiness/ownership regressions are prepared in existing classes. Review
+77278642's per-frame filesystem polling, same-root ownership, overflowing header arithmetic and typed
+export refusal blockers are corrected in source. Parse and
 UI lints pass; native baseline/mutations, affected UI/pictures and Debug/Release fast tiers are unrun.

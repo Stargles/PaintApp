@@ -49,7 +49,7 @@ completed number resolves. Two are cited often enough to name here — **(10a)**
 and **(38)**, the graph editor's bezier tangent handles and their tap grammar. Do not re-add a finished
 item to this file to make a citation resolve.
 
-**Verify a status before trusting it, including this file's own.** That same audit found fourteen
+**Verify a status before trusting it, including this file's own.** That same audit found fifteen
 assertions here that the code contradicted — features called unbuilt that shipped weeks ago, a blocker
 called live that had lifted, and two commit shas that are not on `main`.
 
@@ -294,9 +294,14 @@ account usage limits; root continues. The full source inventory is not yet fully
   missing clean-key playback and retained-close landing with tiny drawn/count regressions. Reuse
   store rejection/accounting, baker dirty/forget/top-up and one worker ownership; preserve ring
   budget refusal and allocation refusal as distinct from invalid files. No native slot in this
-  branch. Nine drawn/count/readiness/queued-worker regression methods are prepared across existing
+  branch. Fifteen drawn/count/readiness/queued-worker regression methods are prepared across existing
   store/baker/export classes; parse and identifier/helper lints pass. Native gates remain unrun;
   external exact-replacement mutation driver is prepared for root qualification.
+  Review77278642 rejected per-frame filesystem readiness and per-instance same-root I/O/accounting.
+  Correct with one weakly shared root owner, short metadata-only readiness, bounded owned read
+  snapshots, checked untrusted header arithmetic and terminal typed export allocation refusal.
+  Add real two-wrapper cap/accounting and old-read/new-write regressions; no native work.
+
 - [ ] Stream transport: bounded ordered backpressure, framing limits, connection readiness/close ownership.
 - [ ] Editor/brush: preview identity/budget, undo payload accounting, saved palette validation; verify stationary-sample opportunity.
 - [ ] Test hooks/obsolete runners: protect real-device persistent data and prune only verified unused paths.

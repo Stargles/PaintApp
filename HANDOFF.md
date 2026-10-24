@@ -6,10 +6,14 @@ budget, with quality/usage conservation before speed. Continue actionable work w
 only pauses; give concise queue reports. The owner explicitly says not to park for context; automatic
 compaction must preserve continuing work. Architecture is the top priority. Record before acting.
 
+Bake review77278642 requires shared-root I/O/accounting, metadata-only readiness, checked header
+arithmetic and typed terminal export refusal; follow-up source/tests active, no native slot.
+
 Bake recovery/close source task is active on `tmp/s54-bake-lifecycle` (startup dependency63b5abe3).
-No native jobs here; root owns qualification. Nine regression methods are prepared across existing
-baker/store/export classes. Current static focused count is117 (55 baker +23 store +23 export +16
-LatestWins); no native count is claimed. TODO records the hypotheses and bounded ownership scope.
+No native jobs here; root owns qualification. Fifteen regression methods are prepared across existing
+baker/store/export classes. Current static focused count is123 (56 baker +27 store +24 export +16
+LatestWins); no native count is claimed. No benchmark-time full source freeze or graph rebuild;
+refresh the graph when root releases that CPU work. TODO records the hypotheses and ownership scope.
 
 ## Repair startup work — 2026-10-24
 

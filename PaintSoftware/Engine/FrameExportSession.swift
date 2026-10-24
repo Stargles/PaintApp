@@ -381,6 +381,16 @@ final class FrameExportSession: ObservableObject {
                                       includingPadding: includingPadding)
     }
 
+    /// A decode allocation refusal is terminal for this export attempt. Asking the baker cannot
+    /// repair a valid file whose decoded buffer does not fit, and would only repeat dedupe progress.
+    static func frame(from read: FrameBakeStore.ReadResult, at frame: Int) throws -> DecodedFrame? {
+        switch read {
+        case .decoded(let decoded): return decoded
+        case .unavailable: return nil
+        case .allocationRefused: throw Failure.readAllocationRefused(frame: frame)
+        }
+    }
+
     /// One frame's pixels out of the store, waiting on the baker for as long as it takes.
     ///
     /// **The key is minted fresh every round rather than remembered**, which is §3.3's rule for the
@@ -402,7 +412,8 @@ final class FrameExportSession: ObservableObject {
             // rule that `done` counts frames *complete*: this frame is baked and not yet written,
             // which is the state `produce`'s `.writing(done: index, …)` on the very next line says.
             // Claiming `index + 1` here would be claiming a frame that has not been written.
-            if let decoded = try await offMain({ store.loadDecoded(key) }) { return decoded }
+            let read = try await offMain({ store.read(key) })
+            if let decoded = try Self.frame(from: read, at: frame) { return decoded }
             // The baker tried this frame and gave up on it. `finish` marks a failed frame clean and
             // forgets its key, so "not pending and unrecorded, *after* we asked" is exactly that
             // state — and it is the one thing that must never be waited on forever.
@@ -497,6 +508,7 @@ final class FrameExportSession: ObservableObject {
         case nothingToExport
         case noCanvas
         case unreadableFrame(Int)
+        case readAllocationRefused(frame: Int)
         case bakeFailed(frame: Int, reason: FrameBakeStore.WriteFailure?)
         case bakeStalled(frame: Int)
         case couldNotWrite(String)
@@ -509,6 +521,9 @@ final class FrameExportSession: ObservableObject {
                 return "This document has no canvas size yet, so there is nothing to render."
             case .unreadableFrame(let frame):
                 return "Frame \(frame + 1) could not be read back from the render cache."
+            case .readAllocationRefused(let frame):
+                return "There is not enough memory to read frame \(frame + 1). "
+                     + "Lower the Render Resolution and try again."
             case .bakeFailed(let frame, let reason):
                 switch reason {
                 case .exceedsCeiling:

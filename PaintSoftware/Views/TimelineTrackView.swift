@@ -628,10 +628,10 @@ struct TimelineTrackView: UIViewRepresentable {
         /// touching one view. The difference from `movePlayhead` is that a bake finishing raises no
         /// SwiftUI pass at all, so it also needs `observeFrameFinished` below.
         ///
-        /// **Cheap enough to sit on both paths.** `FrameBaker.isBaked` is two dictionary lookups —
-        /// see its doc for why it is no longer a recipe mint and a `stat` — so this is O(scene
-        /// length) of hashing and no allocation per frame, against a key build that already walks
-        /// every cel of every layer.
+        /// **Metadata only on both paths.** `FrameBaker.isBaked` checks the dirty set, recorded key
+        /// and shared store inventory under a short metadata lock. It performs no recipe mint,
+        /// filesystem poll or decode while this O(scene length) walk paints the ruler. Actual
+        /// read demand detects external cache loss; owned eviction updates the inventory at once.
         private func refreshBakeIndication() {
             guard contentView != nil else { return }
             syncBakeObservation()

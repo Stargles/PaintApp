@@ -65,8 +65,11 @@ Unreadable existing derived frames can indefinitely retry export; missing/evicte
 
 Prepared `tmp/s54-bake-lifecycle`: actual reads reject disposable invalid files with per-file accounting;
 clean-key resident misses forget/requeue their frames, with allocation/ring refusals kept separate.
-Nine tiny regression methods across store/baker/export cover drawn bytes, readiness, real recomposites,
-close/reset ownership and retained disk reuse. Parse/lints only; native reproduction/qualification,
+Fifteen tiny regression methods across store/baker/export cover drawn bytes, metadata readiness,
+real recomposites, close/reset ownership, shared-root caps/accounting, old-read/new-write ownership,
+checked hostile-header arithmetic and terminal typed export refusal. Review77278642's filesystem
+polling and per-instance ownership blockers are corrected in source; native qualification is pending.
+Parse/lints only; native reproduction/qualification,
 mutations, current UI/pictures and fast tiers remain root's gates.
 
 Detailed source evidence: `/Users/juliapark/PaintWork/s54-architecture-audit/render-review.md`.

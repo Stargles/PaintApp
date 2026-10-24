@@ -249,6 +249,34 @@ final class FrameExportSessionLogicTests: XCTestCase {
         XCTAssertEqual(Array(pixels.bytes.prefix(4)), [40, 40, 40, 255])
     }
 
+    func testDecodeAllocationRefusalIsTerminalAndKeepsTheReadableBakeIntact() async throws {
+        let manager = greyDocument(frames: 1)
+        await warm(manager)
+        let baker = manager.frameBaker
+        let key = try XCTUnwrap(baker.keyByFrame[0])
+        let readable = try XCTUnwrap(baker.store.loadDecoded(key))
+        let bytes = baker.store.totalBytes
+        let reads = baker.store.fileReadCount
+        CompositeProbe.begin()
+        // Exercise the exact typed decision the export read calls. A real malloc failure is not
+        // forced: the result is a value, so the terminal decision needs no allocation stress.
+        XCTAssertThrowsError(try FrameExportSession.frame(from: .allocationRefused, at: 0)) { error in
+            XCTAssertEqual(error as? FrameExportSession.Failure, .readAllocationRefused(frame: 0))
+        }
+        XCTAssertNil(try FrameExportSession.frame(from: .unavailable, at: 0))
+        let delivered = try XCTUnwrap(FrameExportSession.frame(from: .decoded(readable), at: 0))
+        XCTAssertEqual(delivered.pixels, readable.pixels)
+        XCTAssertEqual(CompositeProbe.end().count, 0)
+        XCTAssertEqual(baker.store.fileReadCount, reads, "The terminal decision neither rereads nor waits on a bake.")
+        XCTAssertEqual(baker.store.totalBytes, bytes)
+        XCTAssertTrue(baker.store.contains(key))
+        XCTAssertTrue(baker.isBaked(atFrame: 0))
+        XCTAssertNil(baker.exportFocus)
+        XCTAssertEqual(baker.bakeQueue.pendingCount, 0)
+        XCTAssertEqual(baker.store.loadDecoded(key)?.pixels, readable.pixels,
+                       "Allocation refusal is not damage: the valid cached drawing survives.")
+    }
+
     // MARK: - The walk
 
     /// **The movie holds the frames pressing play would show, in that order** — and it says so in

@@ -202,6 +202,24 @@ final class FrameBakerLogicTests: XCTestCase {
         try assertPlaybackRecovery(baker, manager: manager, expected: expected)
     }
 
+    func testReadinessUsesOnlyInventoryUntilActualPlaybackDemandDetectsExternalLoss() throws {
+        let manager = recoveryDocument()
+        let baker = makeBaker(manager)
+        baker.noteDocumentChanged()
+        drain(baker)
+        let expected = try drawnBytes(baker)
+        let key = try XCTUnwrap(baker.keyByFrame[0])
+        let reads = baker.store.fileReadCount
+        baker.ring.removeAll()
+        try FileManager.default.removeItem(at: baker.store.url(for: key))
+        var allReady = true
+        for _ in 0..<1000 { allReady = baker.isBaked(atFrame: 0) && allReady }
+        XCTAssertTrue(allReady, "Ruler checks read owned inventory without polling external file changes.")
+        XCTAssertEqual(baker.store.fileReadCount, reads, "A thousand readiness queries perform zero file reads.")
+        try assertPlaybackRecovery(baker, manager: manager, expected: expected)
+        XCTAssertGreaterThan(baker.store.fileReadCount, reads, "Only real frame demand performs the recovery read.")
+    }
+
     func testAnEvictedCleanBakeBecomesUnreadyAndPlaybackRebuildsIt() throws {
         let manager = recoveryDocument()
         let baker = makeBaker(manager)

@@ -639,11 +639,15 @@ the ruler's bottom 3 pt. Four things came out differently from what this section
   full-width band that says nothing and competes with the loop band and the playhead for the same 18 pt. Marking
   the unbaked leaves the ruler clean at rest and the mark shrinks toward nothing, which is a progress reading
   obtained out of the polarity instead of a second mechanism. The ring is deliberately not a third state.
-- **`isBaked(atFrame:)` checks a clean recorded key and file existence.** It never mints a recipe or
-  decodes pixels when painting the ruler. An actual read rejects/removes invalid disposable files and
-  reconciles their accounted bytes. A missing/invalid clean file found by the resident walk forgets
-  every frame sharing its digest and marks those frames dirty in the same bake queue. Ring budget or
-  decode allocation refusal ends the resident walk without declaring the valid disk file damaged.
+- **`isBaked(atFrame:)` checks a clean recorded key and the owned store inventory.** This is O(1)
+  metadata under a short lock independent of file I/O/decompression. It never polls the filesystem,
+  mints a recipe or decodes pixels when painting the ruler. Same-root facades, including reopened
+  documents, share one weakly registered directory owner and running byte total. Actual reads capture
+  immutable file bytes/revision, decode outside locks, then reject only the still-owned invalid
+  revision; a good replacement survives an old read's rejection. Missing/invalid clean files found
+  by read demand forget/requeue every frame sharing the digest in the same bake queue. Ring budget
+  or decode allocation refusal ends resident warming without declaring the valid file damaged;
+  export reports decode allocation refusal immediately instead of requesting another dedupe bake.
 - **`onFrameFinished` is a registry, not a slot.** Stage 4d gave the single closure to `CanvasView.Coordinator`
   and the timeline is a second consumer of the same event; two named callbacks would be the peculiarity §2.15
   rules out. `observeFrameFinished(_ owner:_:)` is keyed by owner identity and self-pruning.

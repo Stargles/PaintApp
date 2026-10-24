@@ -27,8 +27,8 @@ import Compression
 /// hands it a temp directory, and stage 6's kept bake hands it a `.paintbake` folder. The override
 /// seam matches `ProjectBackupManager.rootDirectoryOverride` rather than inventing a second idiom.
 ///
-/// A `final class` because byte accounting is mutable state two queues touch — the baker writes
-/// while the display path reads — and everything below takes one lock.
+/// Same-root stores share one weakly held directory owner. File I/O and inventory updates serialize;
+/// metadata-only readiness uses its own short lock, independently of pixel reads and decompression.
 final class FrameBakeStore {
 
     // MARK: - Format
@@ -100,14 +100,95 @@ final class FrameBakeStore {
 
     let root: URL
 
-    /// What this store may hold on disk. A write that would exceed it evicts first (§3.5).
+    /// This facade's write ceiling (§3.5). Each accepted write evicts against this limit; another
+    /// facade may request a larger cap, so shared totalBytes can exceed a smaller facade's cap.
     let byteCeiling: Int
 
-    private let lock = NSLock()
-    /// Inventory sizes, not current stat sizes: rejecting an externally truncated file must also
-    /// release the bytes previously charged to it, without scanning the whole store per miss.
-    private var fileSizes: [String: Int] = [:]
-    private var bytesOnDisk: Int { fileSizes.values.reduce(0, +) }
+    /// All facades for the same directory share one I/O and inventory owner, including a freshly
+    /// loaded CanvasManager while an older baker still owes frozen work. Facades retain their
+    /// requested per-write ceiling; totalBytes always reports this shared directory's usage.
+    private let owner: Root
+
+    fileprivate enum FileID: Hashable {
+        case bake(FrameBakeKey)
+        case other(String)
+    }
+
+    fileprivate final class Root {
+        struct Entry { let size: Int; let revision: UInt64 }
+        let url: URL
+        let io = NSLock()
+        private let metadata = NSLock()
+        private var files: [FileID: Entry]
+        private var bytes: Int
+        private var revision: UInt64 = 0
+        private var reads = 0
+
+        init(_ url: URL) {
+            self.url = url
+            try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+            let sizes = FrameBakeStore.inventory(url)
+            files = sizes.mapValues { Entry(size: $0, revision: 0) }
+            bytes = sizes.values.reduce(0, +)
+        }
+
+        var totalBytes: Int {
+            metadata.lock(); defer { metadata.unlock() }
+            return bytes
+        }
+
+        var readCount: Int {
+            metadata.lock(); defer { metadata.unlock() }
+            return reads
+        }
+
+        func noteRead() {
+            metadata.lock(); defer { metadata.unlock() }
+            reads += 1
+        }
+
+        func entry(_ name: FileID) -> Entry? {
+            metadata.lock(); defer { metadata.unlock() }
+            return files[name]
+        }
+
+        /// Called only while I/O ownership is held. Metadata readers never wait on file access or
+        /// decompression; they see each complete inventory update under this short separate lock.
+        func replaceInventory(_ sizes: [FileID: Int]) {
+            metadata.lock(); defer { metadata.unlock() }
+            revision &+= 1
+            files = sizes.mapValues { Entry(size: $0, revision: revision) }
+            bytes = sizes.values.reduce(0, +)
+        }
+
+        func record(_ name: FileID, size: Int?) {
+            metadata.lock(); defer { metadata.unlock() }
+            bytes -= files[name]?.size ?? 0
+            revision &+= 1
+            if let size, size > 0 {
+                files[name] = Entry(size: size, revision: revision)
+                bytes += size
+            } else {
+                files[name] = nil
+            }
+        }
+    }
+
+    private final class WeakRoot {
+        weak var value: Root?
+        init(_ value: Root) { self.value = value }
+    }
+    private static let rootsLock = NSLock()
+    private static var roots: [URL: WeakRoot] = [:]
+
+    private static func rootOwner(_ url: URL) -> Root {
+        rootsLock.lock(); defer { rootsLock.unlock() }
+        roots = roots.filter { $0.value.value != nil }
+        if let existing = roots[url]?.value { return existing }
+        let owner = Root(url)
+        roots[url] = WeakRoot(owner)
+        return owner
+    }
 
     /// **Why a write can fail, and none of these is a document failure** (§2.10, §3.5): the bake
     /// stops, the caller carries on, and playback shows the previous picture.
@@ -124,10 +205,9 @@ final class FrameBakeStore {
     }
 
     init(root: URL, byteCeiling: Int = FrameBakeStore.defaultByteCeiling) {
-        self.root = root
+        self.root = URL(fileURLWithPath: root.standardizedFileURL.path, isDirectory: true)
         self.byteCeiling = byteCeiling
-        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        fileSizes = Self.inventory(root)
+        owner = Self.rootOwner(self.root)
     }
 
     /// 512 MiB. A number rather than a fraction of the device, because §2.6 forbids a budget
@@ -137,8 +217,7 @@ final class FrameBakeStore {
 
     /// What the store is holding, in bytes, right now.
     var totalBytes: Int {
-        lock.lock(); defer { lock.unlock() }
-        return bytesOnDisk
+        owner.totalBytes
     }
 
     func url(for key: FrameBakeKey) -> URL {
@@ -146,7 +225,7 @@ final class FrameBakeStore {
     }
 
     func contains(_ key: FrameBakeKey) -> Bool {
-        FileManager.default.fileExists(atPath: url(for: key).path)
+        owner.entry(.bake(key)) != nil
     }
 
     // MARK: - Writing
@@ -197,10 +276,10 @@ final class FrameBakeStore {
             return .failure(.exceedsCeiling(needed: size, ceiling: byteCeiling))
         }
 
-        lock.lock()
-        defer { lock.unlock() }
+        owner.io.lock()
+        defer { owner.io.unlock() }
         let destination = url(for: key)
-        let existing = fileSizes[url(for: key).lastPathComponent] ?? 0
+        let existing = owner.entry(.bake(key))?.size ?? 0
         evictLocked(toFree: size - existing, playhead: playhead, frames: frames, keeping: key)
 
         do {
@@ -209,7 +288,7 @@ final class FrameBakeStore {
         } catch {
             return .failure(.couldNotWrite)
         }
-        fileSizes[url(for: key).lastPathComponent] = size
+        owner.record(.bake(key), size: size)
         return .success(size)
     }
 
@@ -250,29 +329,60 @@ final class FrameBakeStore {
 
     func loadDecoded(_ key: FrameBakeKey) -> DecodedFrame? { read(key).frame }
 
+    /// Owned bytes from one file read. Keeping the revision with the bytes prevents a decode of
+    /// old invalid data from deleting a good replacement written while the decode was running.
+    struct ReadSnapshot {
+        fileprivate let owner: Root
+        fileprivate let key: FrameBakeKey
+        fileprivate let revision: UInt64?
+        fileprivate let file: Data?
+    }
+
+    var fileReadCount: Int { owner.readCount }
+
+    func readSnapshot(_ key: FrameBakeKey) -> ReadSnapshot {
+        owner.io.lock(); defer { owner.io.unlock() }
+        owner.noteRead()
+        return ReadSnapshot(owner: owner, key: key,
+                            revision: owner.entry(.bake(key))?.revision,
+                            file: try? Data(contentsOf: url(for: key)))
+    }
+
     func read(_ key: FrameBakeKey) -> ReadResult {
-        PlaybackTrace.span(.storeDecode) {
-            // Reads and file replacement/removal share ownership: a late rejection cannot delete a
-            // good replacement another consumer has just written at the same content-addressed key.
-            lock.lock()
-            defer { lock.unlock() }
-            do {
-                return .decoded(try loadDecodedNow(key))
-            } catch ReadFailure.allocationRefused {
-                return .allocationRefused
-            } catch {
-                try? FileManager.default.removeItem(at: url(for: key))
-                let remaining = Self.size(of: url(for: key))
-                fileSizes[url(for: key).lastPathComponent] = remaining > 0 ? remaining : nil
-                return .unavailable
-            }
+        PlaybackTrace.span(.storeDecode) { Self.decode(readSnapshot(key)) }
+    }
+
+    static func decode(_ snapshot: ReadSnapshot) -> ReadResult {
+        do {
+            guard let file = snapshot.file else { throw ReadFailure.invalid }
+            let decoded = try decodeFile(file, key: snapshot.key)
+            settle(snapshot, decodedSize: file.count)
+            return .decoded(decoded)
+        } catch ReadFailure.allocationRefused {
+            return .allocationRefused
+        } catch {
+            settle(snapshot, decodedSize: nil)
+            return .unavailable
+        }
+    }
+
+    private static func settle(_ snapshot: ReadSnapshot, decodedSize: Int?) {
+        let owner = snapshot.owner
+        let url = owner.url.appendingPathComponent(snapshot.key.fileName + ".pbk")
+        owner.io.lock(); defer { owner.io.unlock() }
+        guard owner.entry(.bake(snapshot.key))?.revision == snapshot.revision else { return }
+        if let decodedSize {
+            owner.record(.bake(snapshot.key), size: decodedSize)
+        } else {
+            try? FileManager.default.removeItem(at: url)
+            let remaining = size(of: url)
+            owner.record(.bake(snapshot.key), size: remaining > 0 ? remaining : nil)
         }
     }
 
     private enum ReadFailure: Error { case invalid, allocationRefused }
 
-    private func loadDecodedNow(_ key: FrameBakeKey) throws -> DecodedFrame {
-        let file = try Data(contentsOf: url(for: key))
+    private static func decodeFile(_ file: Data, key: FrameBakeKey) throws -> DecodedFrame {
         guard file.count >= Self.headerBytes,
               Array(file.prefix(4)) == Self.magic,
               file.readLE(at: 4) as UInt16 == Self.formatVersion else { throw ReadFailure.invalid }
@@ -286,9 +396,8 @@ final class FrameBakeStore {
         let digest = file.subdata(in: 32..<64)
 
         guard digest == key.digest,
-              width > 0, height > 0,
-              bytesPerRow == width * 4,
-              rawCount == height * bytesPerRow,
+              let expectedBytes = pixelByteCount(width: width, height: height, bytesPerRow: bytesPerRow),
+              rawCount == expectedBytes,
               payloadCount > 0,
               file.count == Self.headerBytes + payloadCount else { throw ReadFailure.invalid }
 
@@ -300,8 +409,16 @@ final class FrameBakeStore {
             guard payloadCount == rawCount else { throw ReadFailure.invalid }
             raw = payload
         }
-        fileSizes[url(for: key).lastPathComponent] = file.count
         return DecodedFrame(width: width, height: height, bytesPerRow: bytesPerRow, pixels: raw)
+    }
+
+    /// Header arithmetic is checked before allocating or attempting any payload decompression.
+    static func pixelByteCount(width: Int, height: Int, bytesPerRow: Int) -> Int? {
+        guard width > 0, height > 0 else { return nil }
+        let row = width.multipliedReportingOverflow(by: 4)
+        let total = height.multipliedReportingOverflow(by: bytesPerRow)
+        guard !row.overflow, !total.overflow, row.partialValue == bytesPerRow else { return nil }
+        return total.partialValue
     }
 
     // MARK: - Purging and eviction
@@ -321,13 +438,13 @@ final class FrameBakeStore {
 
     /// The same dump for one store's own corner, for a document that is closing or being re-rooted.
     func purgeAll() {
-        lock.lock()
-        defer { lock.unlock() }
+        owner.io.lock()
+        defer { owner.io.unlock() }
         let fm = FileManager.default
         for url in (try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? [] {
             try? fm.removeItem(at: url)
         }
-        fileSizes = Self.inventory(root)
+        owner.replaceInventory(Self.inventory(root))
     }
 
     /// Drops files, farthest from the playhead first, until at least `bytes` of headroom exists
@@ -340,15 +457,15 @@ final class FrameBakeStore {
                playhead: Int,
                frames: [String: Set<Int>],
                keeping: FrameBakeKey? = nil) -> Int {
-        lock.lock()
-        defer { lock.unlock() }
+        owner.io.lock()
+        defer { owner.io.unlock() }
         return evictLocked(toFree: bytes, playhead: playhead, frames: frames, keeping: keeping)
     }
 
     @discardableResult
     private func evictLocked(toFree bytes: Int, playhead: Int,
                              frames: [String: Set<Int>], keeping: FrameBakeKey?) -> Int {
-        let overshoot = bytesOnDisk + bytes - byteCeiling
+        let overshoot = owner.totalBytes + bytes - byteCeiling
         guard overshoot > 0 else { return 0 }
 
         let fm = FileManager.default
@@ -374,7 +491,7 @@ final class FrameBakeStore {
         for candidate in candidates where freed < overshoot {
             guard (try? fm.removeItem(at: candidate.url)) != nil else { continue }
             freed += candidate.size
-            fileSizes[candidate.url.lastPathComponent] = nil
+            owner.record(Self.fileID(candidate.url), size: nil)
         }
         return freed
     }
@@ -461,11 +578,30 @@ final class FrameBakeStore {
         return values.fileSize ?? 0
     }
 
-    private static func inventory(_ root: URL) -> [String: Int] {
+    /// Parse canonical bake filenames once when enumerating the directory. Hot readiness looks
+    /// up the already-owned digest directly; it never constructs URLs or formats hex strings.
+    private static func fileID(_ url: URL) -> FileID {
+        let name = url.lastPathComponent
+        let hex = Array(name.utf8)
+        guard hex.count == 68, name.hasSuffix(".pbk") else { return .other(name) }
+        func nibble(_ c: UInt8) -> UInt8? {
+            switch c {
+            case 48...57: return c - 48
+            case 97...102: return c - 87
+            default: return nil
+            }
+        }
+        var bytes = Data(capacity: 32)
+        for index in stride(from: 0, to: 64, by: 2) {
+            guard let high = nibble(hex[index]), let low = nibble(hex[index + 1]) else { return .other(name) }
+            bytes.append((high << 4) | low)
+        }
+        return .bake(FrameBakeKey(rawDigest: bytes))
+    }
+
+    private static func inventory(_ root: URL) -> [FileID: Int] {
         let urls = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: [.fileSizeKey])) ?? []
-        return Dictionary(uniqueKeysWithValues: urls.map {
-            ($0.lastPathComponent, size(of: $0))
-        })
+        return Dictionary(uniqueKeysWithValues: urls.map { (fileID($0), size(of: $0)) })
     }
 }
 

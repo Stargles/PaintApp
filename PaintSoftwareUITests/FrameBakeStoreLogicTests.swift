@@ -213,7 +213,93 @@ final class FrameBakeStoreLogicTests: XCTestCase {
         XCTAssertEqual(CanvasFixture.rgbaBytes(image), CanvasFixture.rgbaBytes(picture),
                        "Rejecting a disposable file must leave other drawings byte-exact.")
         XCTAssertEqual(store.totalBytes, FrameBakeStore(root: root).totalBytes,
-                       "The live inventory must agree with a fresh disk inventory after rejection.")
+                       "Every same-root facade must report the same retained inventory after rejection.")
+    }
+
+    func testSameRootFacadesShareAccountingAndApplyTheirRequestedWriteCaps() throws {
+        let generous = FrameBakeStore(root: root, byteCeiling: 8192)
+        let narrow = FrameBakeStore(root: URL(fileURLWithPath: root.path), byteCeiling: 4096)
+        let image = noiseImage(16)
+        let first = syntheticKey(41)
+        guard case .success(let each) = generous.store(image, for: first) else {
+            return XCTFail("The first tiny image must write.")
+        }
+        XCTAssertEqual(narrow.totalBytes, each, "A facade opened before the write sees the same authoritative bytes.")
+        XCTAssertTrue(narrow.contains(first))
+        XCTAssertLessThanOrEqual(3 * each, narrow.byteCeiling)
+        XCTAssertGreaterThan(4 * each, narrow.byteCeiling, "Premise: the fourth write requires the narrow cap to evict.")
+        for seed in UInt8(42)...43 {
+            XCTAssertTrue(generous.store(image, for: syntheticKey(seed)).isSuccess)
+        }
+        let newest = syntheticKey(44)
+        XCTAssertTrue(narrow.store(image, for: newest).isSuccess)
+        XCTAssertEqual(generous.totalBytes, 3 * each)
+        XCTAssertEqual(narrow.totalBytes, generous.totalBytes)
+        XCTAssertLessThanOrEqual(generous.totalBytes, narrow.byteCeiling)
+        let refused = FrameBakeStore(root: root, byteCeiling: each - 1)
+        XCTAssertEqual(refused.totalBytes, generous.totalBytes,
+                       "A lower requested cap does not invent a smaller private usage total.")
+        guard case .failure(.exceedsCeiling) = refused.store(image, for: syntheticKey(45)) else {
+            return XCTFail("A frame above this facade's cap must refuse before evicting shared files.")
+        }
+        XCTAssertEqual(refused.totalBytes, 3 * each)
+        let decoded = try XCTUnwrap(generous.loadDecoded(newest)?.makeImage())
+        XCTAssertEqual(CanvasFixture.rgbaBytes(decoded), CanvasFixture.rgbaBytes(image))
+        XCTAssertEqual(narrow.totalBytes, generous.totalBytes)
+    }
+
+    func testAReleasedRootOwnerIsNotRetainedByTheDirectoryRegistry() throws {
+        let key = syntheticKey(48)
+        var first: FrameBakeStore? = store()
+        weak var released = first
+        XCTAssertTrue(first!.store(noiseImage(8), for: key).isSuccess)
+        let file = first!.url(for: key)
+        first = nil
+        XCTAssertNil(released)
+        try FileManager.default.removeItem(at: file)
+        let reopened = store()
+        XCTAssertEqual(reopened.totalBytes, 0,
+                       "Once all directory owners are released, a new owner inventories the real files.")
+        XCTAssertFalse(reopened.contains(key), "The weak directory registry cannot retain obsolete inventory forever.")
+    }
+
+    func testAnOldInvalidReadCannotDeleteAnotherFacadesGoodReplacement() throws {
+        let old = FrameBakeStore(root: root), reopened = FrameBakeStore(root: root)
+        let key = syntheticKey(46)
+        XCTAssertTrue(old.store(flatColourImage(8), for: key).isSuccess)
+        try Data([0x50]).write(to: old.url(for: key))
+        // These are the real production read/decode boundaries: no product fault flag, delay or
+        // fake file implementation is needed to hold an old read while a new facade writes.
+        let invalidRead = old.readSnapshot(key)
+        let replacement = noiseImage(16)
+        guard case .success(let size) = reopened.store(replacement, for: key) else {
+            return XCTFail("The new owner must replace the damaged disposable file.")
+        }
+        XCTAssertTrue(FrameBakeStore.decode(invalidRead).isUnavailable)
+        XCTAssertTrue(old.contains(key))
+        XCTAssertTrue(reopened.contains(key))
+        XCTAssertEqual(old.totalBytes, size)
+        XCTAssertEqual(reopened.totalBytes, size)
+        let surviving = try XCTUnwrap(old.loadDecoded(key)?.makeImage())
+        XCTAssertEqual(CanvasFixture.rgbaBytes(surviving), CanvasFixture.rgbaBytes(replacement),
+                       "Settling old invalid bytes must preserve the replacement's actual drawing.")
+    }
+
+    func testOverflowingDimensionsRejectATinyCorrectlyKeyedHeaderBeforeDecode() throws {
+        let store = store(), key = syntheticKey(47)
+        XCTAssertTrue(store.store(noiseImage(8), for: key).isSuccess)
+        var header = Data(try Data(contentsOf: store.url(for: key)).prefix(FrameBakeStore.headerBytes))
+        header.replaceSubrange(8..<12, with: [0xff, 0xff, 0xff, 0x3f])
+        header.replaceSubrange(12..<16, with: [0xff, 0xff, 0xff, 0xff])
+        header.replaceSubrange(16..<20, with: [0xfc, 0xff, 0xff, 0xff])
+        header.replaceSubrange(20..<24, with: [4, 0, 0, 0])
+        XCTAssertEqual(header.count, 64, "The overflow fixture owns only a header, never a huge buffer.")
+        XCTAssertNil(FrameBakeStore.pixelByteCount(width: 0x3fffffff, height: 0xffffffff,
+                                                  bytesPerRow: 0xfffffffc))
+        try header.write(to: store.url(for: key))
+        XCTAssertTrue(store.read(key).isUnavailable)
+        XCTAssertFalse(store.contains(key))
+        XCTAssertEqual(store.totalBytes, 0)
     }
 
     func testAWrongMagicIsAMiss() {

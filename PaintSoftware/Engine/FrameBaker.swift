@@ -347,8 +347,9 @@ final class FrameBaker {
         return image(for: key)
     }
 
-    /// The scheduler's clean key still has a file. A metadata check only: timeline painting
-    /// never mints a recipe or decodes pixels. Actual reads reject invalid disposable files.
+    /// The scheduler's clean key remains in the shared store inventory. Timeline painting never
+    /// mints a recipe, polls the filesystem or decodes pixels. Owned eviction updates inventory;
+    /// actual read demand detects external removal and rejects invalid disposable files.
     func isBaked(atFrame frame: Int) -> Bool {
         guard !bakeQueue.isPending(frame), let key = keyByFrame[frame] else { return false }
         return store.contains(key)
