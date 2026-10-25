@@ -60,10 +60,12 @@ replacement controls at9e79 passed but add ZERO distinct statements beyond exist
 Remaining35 just completed at b849: normal20 passed20/20, no skips/expected; root independently
 re-extracted actual results and729 freeze. All35 faults reached approved mapped assertions, with
 303 mapped issues at50 of72 selected distinct statements and22 UNHIT; two unmapped keyframe460
-consequences excluded. Root independently re-extracted all35 before changing source; causal review
-is PENDING, so do not add them to qualified totals yet. Exact729 restored, cleanHEAD, driver closed.
-Evidence: `native/remaining35-{normal20,faults}-b849ffc1-run01/`. Original failures/inconclusive
-attempts remain preserved. Never infer all assertions covered from all cases being red.
+consequences excluded. Root independently re-extracted all35 before changing source and accepted
+independent causal review:35 specific cases qualify at50 distinct statements/86 reached case-bound
+identities. The22 unhit remain open; original126 union/gap reconciliation is in progress. Exact729
+restored, cleanHEAD, driver closed. Evidence: `native/remaining35-faults-b849ffc1-run01/root-independent-qualification.json`.
+Reference/arrangement checks receive no product-fault credit. Original failed/inconclusive attempts
+remain preserved. Never infer all assertions covered from all cases being red.
 
 **Remaining final gates:** finish live fill and its containment work; original logic/coldUI,
 undo/redo, owner1080x810 pictures actually LOOKed at, meaningful new assertion controls; close audit
@@ -88,14 +90,15 @@ No old readiness answer authorizes a physical restart. Deferred items below rema
   (15 distinct recipes),4 arrangement controls, all63 source/fixture hashes restored. Root verified
   all63 bytes identical in676. Evidence: `windows-16-qualified-7c177be0.json` under s54-stream-ownership
   and `s54-final-qualification/windows63-current-676-identity.json`. Real-link stage5 remains owner work.
-- New Swift107 assertion targets /99 recipes /66 methods are OFFLINE PREPARED ONLY at1cf. All66
-  targets passed normal422. Repin once to final clean source and its actual422 result before running.
-  Inputs/results: `s54-final-qualification/new-faults-1cf-offline/`. UI consumer faults remain separate.
+- The original107 Swift targets were split into first29 plus remaining78. Use the current ledger
+  above: first29 assertions are qualified;41 earlier original78 cases and the final35 specific cases
+  qualify at their named receipts. Assertion gaps remain. Do not rerun the obsolete107 plan
+  or infer assertion coverage from case counts. Separate UI consumer faults remain unrun.
 - Mask6 controls+11 faults /5 selectors are OFFLINE PREPARED ONLY at676. External two-phase executor
   SHA70527efe has independent acceptance: build child finishes, all728 source entries restored before
   test-without-building, meaningful source-located assertions required. Repin final source; root must
   LOOK at positive pictures before granting faults. It is not a natural in-flight timing proof.
-- Current static census: fast5398/full5987, PBX1327 unique. Both UI lints and PBX plutil passed676.
+- Current static census: fast5413/full6002, PBX1329 unique. Earlier UI lints/PBX checks passed676.
   Final fast Debug/Release, graph, actual full/class UI and required old workflows remain pending.
 - Paired fill16 Release ABBA and whole256-package previous-writer cold UI are prepared, not run.
   Read-only current API readiness found no blocker; explicitly repin NEW path/SHA/DD at final source.
@@ -103,10 +106,12 @@ No old readiness answer authorizes a physical restart. Deferred items below rema
 - Device preservation/signature/install, actual erasing all-process measurement and owner artwork
   confirmation remain open. Raster allocation corrections do not establish the respring's cause.
 
-Root erased ONLY its shutdown M5 test simulator39E84984-3C6F-4A6A-8DC8-D1098F6B623E after UI lease
-release; all results, originals and device binaries preserved. Owner9 simulator56CC563F remains the
-active target. Disk around7.7GiB; clean only owned inactive rebuildable products if needed, never
-user artwork/exports or active jobs. Always rebuild clean normal source after compiled fault probes.
+Owned M5 simulator39E84984-3C6F-4A6A-8DC8-D1098F6B623E is the active serial native target;
+owned iPad9 simulators56CC563F and AC8049AC remain shutdown. Only39E synthetic data was reset;
+all results, originals and device binaries were preserved. Root reclaimed only inactive s49 Build
+and retired cap-diagnostic Build/Index scratch, with receipts under s54-final-qualification. Disk was
+8.75GiB before the fresh ABBA grant; never delete artwork/exports, evidence or active jobs. Rebuild
+clean normal source after compiled fault/temporary benchmark probes before ordinary UI/install.
 
 ## Architecture and refusal boundaries to preserve
 

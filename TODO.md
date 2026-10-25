@@ -52,10 +52,12 @@ replacement controls at9e79 passed but add ZERO distinct statements beyond exist
 Remaining35 just completed at b849: normal20 passed20/20, no skips/expected; root independently
 re-extracted actual results and729 freeze. All35 faults reached approved mapped assertions, with
 303 mapped issues at50 of72 selected distinct statements and22 UNHIT; two unmapped keyframe460
-consequences excluded. Root independently re-extracted all35 before changing source; causal review
-is PENDING, so do not add them to qualified totals yet. Exact729 restored, cleanHEAD, driver closed.
-Evidence: `native/remaining35-{normal20,faults}-b849ffc1-run01/`. Original failures/inconclusive
-attempts remain preserved. Never infer all assertions covered from all cases being red.
+consequences excluded. Root independently re-extracted all35 before changing source and accepted
+independent causal review:35 specific cases qualify at50 distinct statements/86 reached case-bound
+identities. The22 unhit remain open; original126 union/gap reconciliation is in progress. Exact729
+restored, cleanHEAD, driver closed. Evidence: `native/remaining35-faults-b849ffc1-run01/root-independent-qualification.json`.
+Reference/arrangement checks receive no product-fault credit. Original failed/inconclusive attempts
+remain preserved. Never infer all assertions covered from all cases being red.
 
 **Remaining final gates:** finish live fill and its containment work; original logic/coldUI,
 undo/redo, owner1080x810 pictures actually LOOKed at, meaningful new assertion controls; close audit
@@ -320,10 +322,6 @@ design around a window/byte budget, never load it all. Deferred features stay de
 The19 finding clusters and file-level gaps are in docs/ARCHITECTURE_AUDIT.md and external findings-index.json.
 Inventory-only files are not reviewed code. New source is not called complete because it is committed.
 
-Source-only audit follow-up: the Metal compiler reports `kDuplicateRegionIntersection` unused;
-repository search finds only its declaration. Remove that dead constant and narrow its comment;
-compile validation joins the next normal Metal build. No behavior or new assertion is needed.
-
 - [ ] Data protection/background: finish final-source gates for strict migration/Trash ownership,
       export cancellation, serialized cleanup and close-owned thumbnails; retain the qualified controls.
 - [ ] Temporary geometry repair: cold previous-writer library UI and responsive first screen still
@@ -357,25 +355,27 @@ compile validation joins the next normal Metal build. No behavior or new asserti
       patch/whole-cel undo preflight distinguishes admitted blank from failed reads and drops pins.
       Resize/flip prepare all outputs serially before fenced atomic install. Owner UUID+version keys
       include interpolation references; frozen snapshots reuse original owners. Tag04 changes only
-      disposable .pbk digests.32 native methods green;43 cases/35 exact recipes prepared, unexecuted.
-      Full fast/cold drawn UI/landscape and mutation gates remain. Counted ownership is not whole RSS,
+      disposable .pbk digests. Original32 methods and5 finite-pass additions pass within normal430;
+      qualified raster faults and the original broad-control limits are recorded in the current ledger.
+      Full fast/cold drawn UI/landscape and remaining assertion gates remain. Counted ownership is not whole RSS,
       private ImageIO, derived compositor memory, placed-image/video ownership or Test1 causation.
 - [ ] Stream: one completion-paced writer/run, bounded producer payloads,64MiB frame/256KiB chunk checks,
       old-connection callback fencing/join and error/stop settlement replace unbounded ownership.
       Final7c C#166 normal methods pass both configurations;16 assertion targets/15 recipes and4
       arrangement controls qualify, with63 source/fixture entries exact. Swift76 and the callback
-      completion correction passed within normal1cf422/422, zero skips; its three semantic faults and
-      final-source gates remain pending. Windows fake transcripts return synchronized snapshots. Real-link stage5 remains owner-waiting; no deploy.
+      completion correction passed within normal1cf422/422, zero skips; final35 stream/fit/walk
+      controls qualify at their selected mapped assertions; remaining assertion gaps and final-source/UI
+      gates stay pending. Windows fake transcripts return synchronized snapshots. Real-link stage5 remains owner-waiting; no deploy.
 - [ ] Brush/editor: bounded8MiB actual-image preview LRU and keyed row result replace unbounded/unkeyed
       retention. Final823e proof distinguishes exact2 vs2.25 scale within one old rounded bucket and
       checks actual requested600×120 pixels. Shared PaletteColor rejects malformed persisted hex rather
       than silently displaying black; normal strings are byte-preserved. Brush/palette logic passed within normal1cf422. Cold A→B→A drawn row and typed-colour
-      recovery UI passed in the earlier676 UI73 gate. Final-source whole classes and new assertion
-      mutants remain pending.
+      recovery UI passed in the earlier676 UI73 gate. First29/gap8 fault qualification covers all53
+      selected brush/palette/metadata/curve assertions. Final-source whole UI classes remain pending.
 - [ ] Curve editor drag: sourcecf184033 is integrated. Existing moving returns the authoritative
       landed frame with the updated curve, so clamped continuation cannot freeze or retarget a neighbor.
-      Two logic and one drawn landscape UI method added; root must run the new full class controls
-      and actual assertion faults, preserving brush response/channel behavior.
+      Two logic and one drawn landscape UI method added; the selected logic/fault assertions qualify
+      in the first29/gap8 ledger. Final full UI class still must preserve brush response/channel behavior.
 - [ ] Stroke path/heading: exact redundant stationary chord-scan bypass and LiveWalk prefix draining
       retain all samples/channels and floating-point timing order. Naive coalescing was refuted by a1ULP
       counterexample; O(N) input storage remains. Qualify new controls/faults/drawn parity and measure
