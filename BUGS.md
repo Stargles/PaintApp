@@ -17,6 +17,19 @@ before implementation on tmp/s54-response-curve; no native/compiler/device run b
 
 # Known Issues
 
+## Vector selection transfers lose cel pose and omit fresh undo payload — 2026-10-25
+
+Source53637328 and independent43957eca identify TWO clusters in beginVectorLassoDuplicate and
+moveVectorSelectionToNewLayer: the drawn lasso is pulled to rest but its new no-track cel receives
+no cel-local/group pose; history prices omit fresh split inside buffers/archives retained by the new
+layer. Existing translation fixture predicts a20pt jump; this is source/math, not native proof.
+Prepare selected elements through one shared existing TransformChannel/VectorCanvas.baking seam,
+strict/atomic for transfers, retaining existing Bake fallback/reidentify policy and inherited parent
+once. Preserve current-frame/rest-walk appearance and valid group ownership, no new animation policy.
+Batch actual lists through VectorUndoCost, with explicit nest-safe structure cost. Source-independent
+reports are frozen under s54-architecture-audit/vector-command-{audit,independent-design}-53637328/.
+Implementation/logic/mutation/cold qualification remain pending; no RSS/respring attribution.
+
 ## Neighborhood effect limits, apron and warm admission — 2026-10-25
 
 Read-only source audit ec843eee freezes three root causes before code: tapCount converts finite large

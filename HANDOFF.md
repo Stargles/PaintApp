@@ -12,7 +12,8 @@ is authorized by an old readiness answer: obtain fresh saved-scene readiness whe
 
 Main/origin remain afd2030c. Latest accepted logic source is bddb83db; integration has advanced cold UI fixtures and remains
 unmerged/uninstalled. Root owns integration, independent evidence and ONE Mac native lease. Native
-is idle after the compiler0 attempt; normal source still needs a successful rebuild before UI.
+is idle after normal-built UI21 atc4df:18pass3fail. Source compiled/executed normally; the UI
+gate remains red, with no install/full/performance qualification.
 All historical attempts remain at named immutable pins; do not retag them.
 
 **Actual root-accepted results:**
@@ -51,19 +52,37 @@ the existing gesture seed through required existing erase/universal APIs and exi
 mechanically; old assertions remain exact after normalization. Modes2/3/4 do not stamp this punch,
 so this does not establish the cause of the owner's Mode3 respring.
 
-**Cold UI remains open:** named0e215 whole UI10 was8pass2fail. EditedText restoration passes and all
-three whole landscape captures retain Hello. New graph596 focused0 vs3 and video shows a canvas
-no-drawing-surface warning; raw screenPoint was not observed, so double orientation mapping remains
-inference. ONLY that new method now uses actual current band-frame gesture points atbf941684,
-retaining outcomes/public tap/shared touch helper and adding visible-path premises. Existing colour
-method failed toolbar clearance11.5<44 in portrait before colour outcomes. Sequential decode reaches
-actual finalPTS32.733333/#FA0505; no colour-input defect. ONLY that method now launches landscape and
-uses whole-screen captures atb66c2386, retaining drag/tapAway44/every outcome. Earlier misleading
-near-end sample and named successor trace are preserved; root LOOKed the actual final frame.
+**Actual cold UI21 atc4df:18pass3fail, zero skips/expected failures.** Root independently
+reconciled all21 exact methods, owned iPad9 and729 immutable entries; native processes joined and
+source clean. AllGraph6 pass, including continuation/returned-drag/Undo. Root LOOKed all three new
+whole landscape graph pictures: focus/handles persist, return restores the point/readout, Undo reaches
+preceding authoring. Root also LOOKed all three actual final failed-video frames; author LOOKed15
+reached named pictures. All15 original/display hashes and lossless normalization verified;8 of23
+named captures unreached. Receipts5374b5de (red extraction) and7ce960c7 (root6-picture LOOK) under
+native/owner-ui21-c4df4add-run01/. This is not a green whole-class gate.
 
-New Blend cold method7157 is harvested315cf171: actual rounded50% slider domain, two luminance patches,
-real Merge Down/stripe/hide/reveal/paper controls and four whole pictures. Existing helpers/product
-unchanged; old body/oracle exactness reviewed. Whole Blend10 native remains UNRUN.
+New Blend UI stops before blending: expected opaqueC80000 input core was not found; the other3 input
+cores passed. Recording confirms picker#C80000/100% and actual red stroke at its intended probe, but
+lossy video is not exact RGBA and no Blend PNG was retained. No input/quantization/product cause is
+proved. Record scope BEFORE code: in ONLY this new method preserve preset/colours/geometry/opacity/
+all outcomes, retain the last actual waitForPixel RGBA in its failure message and attach one whole
+screen ONLY when that unchanged core premise fails. Then one cold existing-selector diagnostic run,
+separate explicit native grant. No guessed input/tolerance change, alternate preset or product fix.
+
+Text selection stops before longpress: maximum actual black-ink grip clearance20.908<=22.129.
+Whole frame shows the small Wwww box and eight grips. A bounded size-control adjustment BEFORE
+single-glyph/far-band measurement is in scope, using existing panel control, while preserving actual
+clearance/dock/geometry premises and drawn replacement outcomes. Check keyboard capitalization and
+public menu delivery without post-style refocus. Text colour reaches RGB/red checks but black7320
+fails<1512; whole final frame visibly shows red Hello and black panel/keyboard. Trace actual sampled
+window against those UI regions before changing ONLY this colour method's measured window. Preserve
+all colour/session outcomes; no product colour fix without evidence. Startup owns these two source/
+image diagnoses. Historical0e UI10/177 compiler0 and all later packets stay immutable.
+
+New Blend method7157 remains integrated: real rounded50% domain/two luminance patches/Merge Down/
+stripe/hide/reveal/paper controls; four outcome captures remain unreached. Existing helpers/product
+unchanged. A later input-fixture correction needs source facts and a new proof; old arithmetic/source
+packets cannot be retagged. The graph coordinate correctionbf94 is now exercised by actualGraph6.
 
 **Cold selected-text scope, recorded before code:** ONE method in existing TextSession4→5, no product,
 helper or AX hook. Measured actual W/w glyph/white far band and four-letter ink prove geometry before
@@ -93,12 +112,30 @@ neighborhood-effect-audit-ec843eee/. Source equations predict a glare contributi
 this is not native pixel/RSS/physical respring proof. Independent review44d0162e confirms the3 source causes and refines native controls; author
 vector_mend_proof is implementing the recorded scope in a separate worktree, without native access.
 
+**Vector transfer scope recorded before code:** independent source/design review43957eca confirms
+TWO clusters: Duplicate/To New Layer pull selected posed ink to rest, then create a no-track cel
+without its cel-local/group pose; their undo costs also omit fresh retained split payloads. Current
+appearance contract says the transferred ink sits over its source. Share existing TransformChannel
+composition→VectorCanvas.baking preparation, preserving the existing Bake caller's fallback and
+reidentification policy; strict transfers preserve IDs and prepare ALL elements before any mutation,
+refusing unsupported/noninvertible maps. Consume only source cel/group pose, keep inherited container
+once, preserve genuine rest-walk appearance and existing group/track ownership rules. No point-only
+replacement, renderer/material/cache/schema or new animation policy. Batch actual prepared before/
+after lists through VectorUndoCost plus existing structural allowance; explicit payload cost must
+survive nesting. Existing separate-verb closures/undo/invalidation remain atomic. Add existing-fixture
+translation/parent controls, real pixels/undo/redo, fresh-split/shared-alias cost+budget eviction and
+cold artist workflows. Reports under s54-architecture-audit/vector-command-audit-53637328/ and
+vector-command-independent-design-53637328/ are source/math evidence only; native unrun.
+
 **Next gates, in order:**
 
-1. Resolve the finite cold-text longpress premise, harvest reviewed source, run normal rebuilt whole
+1. Diagnose actual UI21 three failures without weakening outcomes, then run normal rebuilt whole
    Text5+GraphGesture6+Blend10 (21 methods), independently extract outcomes and LOOK whole pictures.
    Then exact positive-source Graph3/Blend3/selected-text1 faults; actual reached assertions only.
 2. Finish scoped three effects corrections/review/logic controls and ordinary cold effects workflow.
+   Effects55383dd6 has13 finite controls (11product/2premise) awaiting independent successor review;
+   first-growth5-picture fixture and removed redundant radius-identity loop only, production exactdf.
+   Then implement/qualify the TWO recorded vector transfer/undo clusters at shared existing owners.
    Drive stored-vector eraser Splatter/Undo/Redo; no flaky expected random field/new test hooks.
 3. Repin historical UI13/mask6-positive+11-fault packets to final source; LOOK positive pictures before
    faults. Preserve two-phase build→all-source-restore→test-without-building contract.

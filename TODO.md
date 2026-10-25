@@ -10,13 +10,13 @@ Named evidence and limits are in HANDOFF.md. Last compiled app is a mutant: rebu
 
 Current queue (items remain until merged):
 
-- Cold selected-text longpress now uses actual ink clear of every exposed grip; reviewed2d94 is
-  harvested with old4/outcomes exact, no geometry changes. UI21 at177 stopped at compiler0 (new
-  nonexistent Self.coordinate); one native-coordinate-call correction4c73 is reviewed/harvested.
-  Run fresh whole Text5+
-  GraphGesture6+Blend10 (21), LOOK owner pictures. Historical UI10 was8pass2fail: graph delivery and
-  portrait toolbar clearance, not proven product focus/colour failures. Corrected sources are
-  integrated; actual final colour video is#FA0505. Then meaningful Graph3/Blend3/text1 UI controls.
+- Resolve actual cold UI21 atc4df:18pass3fail; allGraph6pass and root LOOKed new3wholepictures.
+  Blend stops at C80000 opaque input; retain actual last RGBA/failure-only screenshot in that NEW
+  method before a separately granted existing-selector diagnostic. No guessed tolerance/input fix.
+  Selected-text box has no22pt-clear ink point; adjust existing size control BEFORE measurement,
+  preserve clearance/drawn outcomes. Colour final visibly red Hello; trace black panel/keyboard
+  contamination before correcting ONLY that method's sample window. Then whole Text5+Graph6+Blend10
+  and meaningful Graph3/Blend3/text1 UI controls. Older failures/captures remain immutable.
 - Correct THREE scoped effects audit clusters via existing owners: cap radius before Int; normalize
   periodic angles/shared apron inputs; price actual missing GPU scratch/intermediate pictures plus
   readback at warm first-effect growth. Independent audit review44d0162e accepted; scoped implementation underway. Actual consumer, refusal,
@@ -28,6 +28,11 @@ Current queue (items remain until merged):
   graph, touched UI classes/full phase. Current5435 fast/6027 full runnable with cold-text harvested.
 - Final fill sampler/count/cost gates,16 paired Release trials and genuine cold previous-writer
   library UI; untouched original256-package export and old071 product stay preserved.
+- TWO source-confirmed vector transfer defects: missing cel/group pose on Duplicate/To New Layer,
+  and fresh split payloads omitted from undo cost. Use one existing pose/bake preflight with strict
+  transfer refusal/ID preservation and normal rest-walk appearance; existing Bake policy stays.
+  Price actual prepared lists with VectorUndoCost and nest-safe explicit structural cost. Existing
+  parent/pose/pixel/undo/cost/eviction and cold controls required; independent43957eca design accepted.
 - Genuine remaining architecture coverage: vector tools/undo/render, graph evaluation, remaining
   fonts/panels/platform/RSS. Read prior reports before reopening anything; inventory is not review.
 - Fresh saved-scene readiness/export/signing/old workflows/device checks; actual Test1 eraser cause
