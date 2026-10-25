@@ -2,157 +2,73 @@
 
 ## Current source and next actions — 2026-10-25
 
-Main/origin remain afd2030c; no merge, push or iPad install this pass. Active tree is
-PaintApp-s54-mend-free-caps. Product32185179 remains a FAILED fill candidate: full FillMend logic
-18/20 passed; two original circular-outline protections failed. No cold FillUI4/performance/fault
-qualification for321, and it must not ship. Actual evidence and root source/count review:
-`s54-final-qualification/native/geodesic-logic20-32185179-run01/`.
+Main/origin remain afd2030c; no merge, push or iPad install this pass. Integration source is
+b849ffc1 (PaintApp-s54-mend-free-caps). Its live32185179 fill implementation is FAILED:18/20
+FillMend methods passed, with two circular-outline protection failures. It must not ship. The
+replacement is being implemented in the separate PaintApp-s54-vector-mend-reference tree; do not
+confuse a successful support-producer slice with the unfinished live feature.
 
-**Owner ruling, recorded before implementation:** Kevin says the new Mend Gaps work is required only
-for vector, and the implementation choice is engineering work that needs no further approval. He is
-asleep for a few hours; continue independently. Use current editable stroke geometry through the
-existing brush renderer for the new interior rule. Preserve uncertain joins and the true outline;
-keep real-time feedback. Unknown flattened/reference content remains conservative. Do not reopen
-this scope question. The existing neighboring-fill seam retains its current behavior.
+**Owner ruling, recorded before implementation:** Kevin says new interior Mend Gaps is required
+only for vector and engineering choices need no further approval. Continue while he sleeps. Cover
+interior and attached strokes, preserve the true outline and uncertain joins, and keep real-time
+feedback. Unknown flattened/reference content stays conservative; preserve the existing neighbor
+seam. No repeated capability question, second brush renderer, persisted stroke fields or old/new flag.
 
-Next implement one shared current-reference contract for interactive fill and Mend All Fills. Remove
-the failed distance/nearest-open proof whole, with dead kernels, CPU lookup tables, buffers/parameters,
-cache state, tests and spec text; retain shared ink EDT/basin resources and actual contour/cap/attached-
-stem/Reach oracles. No second renderer, old/new flag, persisted stroke fields or compatibility path.
-Geometry/coverage/overlap attribution and bounded memory need a coherent design before coding.
-Reports: `mend-free-caps-b865-readonly/current-vector-seam-feasibility/` (assessment and removal map).
-The A/B illustration was a proposal, not app output; owner does not need another capability approval.
+**Active fill work:** corrected canonical producer at b849ffc1 passed all7 selected methods, zero
+failures/skips/expected, on owned39E M5, with729 exact source entries before/after. Root accepted
+the actual result. It uses the existing render walk/bounds, full contact/halo coverage, indexed
+contributor closure and bounded storage. Earlier capacity refusals and reversed retrace defect were
+corrected without widening limits or weakening contour/cap oracles. The temporary diagnostic was
+removed whole. Evidence: `native/canonical7-b849ffc1-run03/root-independent-acceptance.json` and
+`canonical-continuation-harvest/`; earlier failed results remain preserved at their original pins.
+Live wiring is now explicitly granted. The author has removed the old distance waves/lookups in its
+separate tree and is completing one frozen reference factory, one session-owned stencil and original
+GPU/drawn regressions. Independent review requested zero-stencil caching and key invalidation before
+neighbor writes. Whole4096 reference resampling is an OPEN engineering gate: native1:1 support is
+not a universal certificate. Inspect reuse of existing bounded ImageWarp sampling; appearance,
+containment and cost must be checked before accepting that route. No live replacement native run yet.
 
-**Independent unrelated gate:** actual422/422 passed, zero failures/skips/expected,18classes on owned
-M539E at b827cbfc. Root independently verified all728 byte/kind/mode records match subsequent clean
-records-only pins; do not retag the old binary. First29 fault targets comprise brush14,
-palette4, metadata4, curve7;14selectors/69 meaningful statements inherited from accepted107 map.
-Root must inspect exact recipes/source locations and explicitly grant one-Mac native execution.
-Stop on compiler/crash/setup failure or unexpected green; rebuild normal after mutations before UI.
-Stream/media are omitted from29; remaining78 targets stay queued. Root has independently accepted
-first4 at21ad plus remaining25 at1195 (56 actual mapped issue instances total); all29 targets reached
-intended semantic assertions. Original ineffective control/interrupted case remain excluded. Secondary
-post-state failures are preserved separately, not counted as additional primary oracles. Source728
-restored exact; post-fault normal422 at1195 passed422/422,0skip/expected, same39E/18classes. Evidence:
-`native/fault-remaining25-1195db75-run01/root-independent-qualification.json` and normal acceptance.
+**Raster admission correction:** root integrated the reviewed finite weak-metadata eviction pass
+at d4d7c523. It orders candidates once outside the mutex, rechecks current accounting/registration
+before callbacks and final admission, and retains live cold handles. This replaces repeated
+filter/min scans; no new persistent cache/queue/telemetry. Actual normal430 passed430/430, zero
+failures/skips/expected; old425 plus5new methods and exact729 entries reconciled. All8 deliberate
+fault cases are root-qualified at16 approved distinct statements/19 mapped issues;18 other issues
+are excluded. This does not cover all46 premise/regression macros or prove whole-scene RSS.
+Dirty-allocation maximum scans remain. Evidence: `native/finite-pass-normal430-d4d7c523-run01/`
+and `native/finite-pass-faults8-d4d7c523-run01/root-independent-qualification.json`.
+A separate clean b849 host now has the sole native lease for exactly4 Release candidate-ordering
+trials, ABBA,300/1000 live handles,1warm+16measured requests each. Temporary compiled sources are
+restored before every test-without-building. Results/performance claim pending; no iPad extrapolation.
+Harness and exact grant: `vector-mend-independent-proof/raster-ordering-paired-cost/`.
 
-**First29 assertion coverage complete at its named pins:** the69 receipts describe53 unique
-statements. Root independently verified all8 additional controls at79a reached their intended
-semantic failures: curve133/134/138/143/157/166, palette462 and damaged-Trash170. Earlier admissions
-remained valid; the later neighbor164 issue is retained without extra credit. Prior45 plus8 now covers
-all53 unique statements. All728 source entries restored exact, cleanHEAD, native lease RELEASED.
-Evidence: `native/gap8-79a272c4-run01/root-independent-qualification.json`. This does not qualify the
-remaining78 targets, new media assertions, or final fill. Old failed/interrupted attempts stay excluded.
+**Audit evidence, keep identities distinct:** first29 targets outside the original78 are qualified
+at all53 distinct approved statements (69 case-bound receipts); final media fix reaches all16 new
+statements. Their named receipts remain under `native/gap8-79a272c4-run01/` and
+`native/media16-0565e96f-run01/`. Media normal425 is actual79a; shared-walk normal425 is actual3a8ca.
+Within original78, first27 plus next14 qualified41 cases/52 of126 distinct statements. Original
+broad1000-cel load28 is INCONCLUSIVE; broad freeze29 remains UNRUN. Two bounded single-source
+replacement controls at9e79 passed but add ZERO distinct statements beyond existing300-cel helpers.
+Remaining35 just completed at b849: normal20 passed20/20, no skips/expected; root independently
+re-extracted actual results and729 freeze. All35 faults reached approved mapped assertions, with
+303 mapped issues at50 of72 selected distinct statements and22 UNHIT; two unmapped keyframe460
+consequences excluded. Root independently re-extracted all35 before changing source; causal review
+is PENDING, so do not add them to qualified totals yet. Exact729 restored, cleanHEAD, driver closed.
+Evidence: `native/remaining35-{normal20,faults}-b849ffc1-run01/`. Original failures/inconclusive
+attempts remain preserved. Never infer all assertions covered from all cases being red.
 
-**Media final-owner fix integrated from a58498bd:** the final VT session is transferred to the decoder's
-existing serial queue; reset/rebuild/final release share one native wait/invalidate operation. Product
-+18/-4, test+150/0, exactly2files; all old8tests unchanged,3newmethods/16 meaningful assertions. Final
-cleanup captures session/operation, no decoder/client. New tests use deterministic queue fences rather
-than wait for the cleanup/completion being tested; inflight release uses two fences. No new queue,
-QoS/video/client/PBX change. Actual normal425 at79a passed425/425, zero skips/failures/expected,
-18classes on owned39E, all old422 plus exactly3 new methods. Root independently read the actual
-xcresult/static census, fresh H264 compilation in both targets/new test source and all728 exact bytes.
-Five runtime QoS warnings remain (four native VT waits on decoder worker, one VideoFrameReader test);
-43 compile warnings retained. No suppression or QoS change. Receipt:
-`native/media-normal425-79a272c4-run01/root-independent-acceptance.json`.
-
-**Media assertions qualified at0565:** actual16 selector-cases/15 production recipes reached all16
-unique approved statements (19 case-bound primary issues), zero skips. Root independently extracted
-all16 actual xcresults, compiled hashes, native issue locations and exact728 restoration. Nine other
-post-state issues are retained without credit; R09's missing-picture counts are the intended failed
-recreation, not an initial fixture failure. R10's last retained-CF invalid-session stress reached final
-cleanup count6 versus2 without crash/hang/setup failure. No expected literal or test-source mutation.
-Receipt: `native/media16-0565e96f-run01/root-independent-qualification.json`. Normal425 remains the
-actual79a binary; no UI/fast/full/device qualification is implied. Sourceauthor branch preserved.
-
-**Audit78 partial, source restored:** the first27 controls reached intended semantic assertion
-failures at a699acbc. Root independently re-read every actual result and compiled source:33 mapped
-case-bound issues /31 unique statements;73 other consequences retained without credit. Control28,
-the deliberately eager 1,000-cel load, stalled before a useful verdict and was stopped after one
-bounded process sample. It is INCONCLUSIVE, not a red qualification. The remaining50 cases never
-started;95 of the126 selected unique statements remain unhit. All728 source byte/kind/mode entries
-were restored exactly, driver/test processes ended and native lease released. Normal425 remains the
-actual79a binary; no repeat baseline was inferred. Receipts:
-`native/remaining78-a699acbc-run01/root-independent-first27-qualification.json` and
-`closed-partial-report.json`. Read-only investigation of candidate-scan scaling and a safer targeted
-negative control continues; the sample alone proves neither a fixed deadlock nor a production crash.
-Repin/review remaining recipes after source changes; rebuild normal before UI/install.
-
-**Fill producer compiled, native refused:** root harvested only the eight source/PBX/test paths
-from independently reviewed324c0ccd. VectorStrokeRenderWalk shares the renderer's existing rest/
-lattice/pose recipe, and VectorMendSupport records only canonical primitive bounds and path
-parameters. It adds no bitmap renderer, per-dab drawing, saved stroke fields or live fill changes.
-Local indexed closure covers complete support and gate halos, including hidden unknown/nonlocal
-contributors; compressed contacts require every OPEN/SOURCE cell. Conservative bounds are potential
-support, never a claim of physical painted coverage. Runtime bounds/capacity/work admission is
-explicit; allocator peaks and latency remain unmeasured. The failed321 live algorithm remains unchanged
-and unshippable. At7cbe, actual7 controls ran: spatial-index1 passed; all6 support methods threw
-exceedsBudget before semantic assertions. All729 source entries remained exact; compiler succeeded
-in both targets. Host probe confirms tiny Bool/UInt8 storage rounds to16bytes; the old2×element
-capacity guard falsely refused it. Independently reviewed0644be06 now precharges each owned container's
-header/rounding and checks actual capacity bytes, retaining2×payload/work limits and fixture budgets.
-The fixed2048byte pool was not repurposed as a many-stroke cap. Actual corrected7 at9e79 passed5/failed2:
-free-cap method still throws exceedsBudget, reverse curved retrace misses real ink at assertion1290.
-A concrete3-knot thin/wide witness found premature local parameter cutoff. Reviewed1eabdf71 now proves
-only the touching cohort's intervening regular interval, preserving fixed cuts and protecting interior
-creases while allowing true endpoints. The isolated cap diagnostic located stride8 capacity6140 at
-count2918 (49120actual/46704prepaid): implicit allocator-rounded growth, not64MiB exhaustion. Contacts
-now count exact rows, precharge controlled amortized reservations/copy/old+new peak, and use existing
-spare capacity before allocating; other outputs reserve exact known counts. No limit/assertion weakening,
-new scratch/allocator/cache or diagnostic hooks. Root harvested these two exact source/test paths;
-corrected7 is next. Independent source/976case arithmetic review accepted, not native/RSS proof.
-No live-wiring grant. Receipt: `canonical-continuation-harvest/`. Actual corrected result:
-`native/canonical7-9e79f00e-run02/root-independent-review.json`. Earlier failed receipt:
-`native/canonical7-7cbe0f42-run01/root-independent-review.json`; correction: `canonical-capacity-harvest/`.
-Before live wiring, review each reference-image resampling stage, source-keyed stencil ownership,
-physical-ink bits versus synthetic walls, whole failed-path deletion and unchanged neighbor mending.
-No live-wiring grant yet. Author pin324c0ccd and root receipt: `canonical-producer-harvest/`;
-independent review: `vector-mend-independent-proof/bound-superset-review.md`.
-
-**Latest unrelated baseline/audit:** after shared brush recipe extraction, actual normal425 at3a8ca
-again passed425/425, zero skips/failures/expected, exact729 entries and the same425 selected methods.
-Receipt: `native/shared-walk-normal425-3a8ca053-run01/root-independent-acceptance.json`. The next14
-raster controls are root-qualified after independent causal review:29 mapped issues at21 unique
-statements,31 unmapped consequences excluded, exact729 restoration. Across first27+next14,41 original
-cases hit52 of126 statements;74 remain unhit. Frozen14 map retains inherited78/52 header metadata;
-actual14 case array/grant/extraction are authoritative. Remaining35 original stream/fit/walk cases are
-prepared-only at3a8ca and independently reviewed. The safer single-source1000-cel controls at9e79 ran:
-normal1 passed1/1, both faults reached599/600/552, no other issues, exact729 restoration. Those3 helper
-statements were already hit by300-cel controls: no extra unique credit. Original broad load stress
-stays inconclusive, broad freeze unrun. Receipts: `native/raster14-3a8ca053-run01/root-independent-qualification.json`
-and `native/first-source-faults2-9e79f00e-run01/root-independent-qualification.json`.
-
-**New audit finding, recorded before correction:** RasterResidency admission/mutation repeatedly
-filter/min the whole candidate dictionary after each unsuccessful fit. A finite population can cost
-O(N²) metadata scans under its mutex. The case28 sample supports contention, not a deadlock claim.
-Root accepts one shared finite weak-registration snapshot, oldest-first ordering outside the lock,
-actual accounting checks before each callback/final return, and no callback/final strong release
-under the owner lock. Entries touched/re-registered since capture are skipped; new entries remain
-for the next request; live cold registrations must remain. Only unchanged expired weak entries may
-be pruned. No persistent heap/cache/queue or product telemetry. Source-only correction/tests committed at a52857a6 and independently accepted for native
-qualification: one helper,5 new methods, old32 bodies exact, PBX unchanged. Root harvested only the
-source/test pair, author-byte-exact. Actual normal430 atd4d7 passed430/430,0skip/expected; independent
-review reconciled original425+5new methods, exact729 committed/stored bytes, fresh source/test compile
-and correct39E. Five runtime warnings remain, no suppression. All8faults finished; root independently
-extracted16 unique mapped statements/19issues, with18 other consequences excluded pending causal
-review. This is not all46 raw premise/regression macros. Exact729 restored before this new harvest.
-Performance is unmeasured; dirty-allocation maxima still scan and no whole-admission asymptotic claim
-is made. Evidence: `native/finite-pass-normal430-d4d7c523-run01/` and `finite-pass-faults8-d4d7c523-run01/`. Receipt: `raster-finite-pass-harvest/`. Trace: `raster-admission-case28-readonly/report.md`.
-
-**Device:** install is off immediate priority; owner authorizes future qualified installs. Review
-Releaseee36770d built/signature verified (UUIDF699A856-9C3F-34F1-AE99-E7C221BF9FF8), but profile
-2026-10-30T00:18:54Z had under5days and install was refused. It also predates failed321. No short-life
-exception inferred. Old workflows5 passed at that pin; root LOOKed playback/pan/stroke portrait,
-no Move/graph media or owner-landscape claim. Fresh saved-scene/export/readiness is needed when
-actually ready for physical restart/install. Preserve all real artwork and original export.
-
-**Remaining final gates:** successor Fill logic/coldUI+owner-landscape LOOK and meaningful faults;
-new107/UI13/mask6positive+11faults; normal rebuild; fast Debug AND Release; touched whole UI classes,
-full phase; paired16ReleaseABBA; genuine256-package previous-writer cold UI; ordinary old workflows;
-fresh saved/export/signed device, eraser all-process capture and owner artwork confirmation. Source
-static5413fast/6002full/398classes/PBX1329 is not native qualification. Earlier named gates/receipts
-remain valid only at their pins and unchanged source scopes. Erasing respring cause is unproved.
-Retire the temporary format converter/UI whole only after owner confirms current real artwork.
+**Remaining final gates:** finish live fill and its containment work; original logic/coldUI,
+undo/redo, owner1080x810 pictures actually LOOKed at, meaningful new assertion controls; close audit
+assertion gaps and separate UI13/mask6positive+11faults; normal rebuild; exact fast Debug AND Release,
+touched whole UI classes/full phase, lints/PBX/graph; paired fill16 Release ABBA; genuine256-package
+previous-writer cold UI; ordinary old workflows; fresh saved-scene/export/readiness and qualified
+signed iPad build; separate actual Test1 erasing all-process capture and owner artwork confirmation.
+Current static5413fast/6002full/398classes/PBX1329 is not native final qualification. Earlier gates
+remain valid only at their named pins/unchanged scopes. Erasing respring cause remains unproved.
+Retire the one-shot format converter/UI whole only after owner confirms real artwork. Preserve the
+untouched original export, old071 paired product and all native results. Owner authorizes future
+qualified installs; the old ee36770d review product had under5days signing life and is not qualified.
+No old readiness answer authorizes a physical restart. Deferred items below remain deferred.
 
 ## How to read and keep this file
 
