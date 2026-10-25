@@ -245,6 +245,18 @@ do not infer a covered edge. A short ambiguous patch may remain at the join whil
 is mended. The original lasso fence, artwork boundary and unresolved window rim constrain this new
 same-fill behavior. Only the existing neighboring-fill corridor may extend outside the lasso fence.
 
+The same-fill ownership proof uses unit eight-neighbor distance **through original reference ink**
+from current unfilled open paper, fences, artwork edges, unknown window rims and neighboring paint.
+Owned open paper blocks that travel. A genuine source-to-source crossing must fit Mend Reach after
+Edge Overlap, and its full original ink width must be smaller than that danger distance. Keep all
+nearest-contact ownership vetoes and the ray's actual endpoint/supercover checks. Existing nearest
+normal directions and the four seam axes share one crossing proof; there is no stroke-head classifier
+or historical stroke inference. This deliberately protects additional ink at uncertain nearby joins.
+A bounded byte transform uses the existing scratch allocation, with synchronous ping-pong waves for
+the current source cut. The distance bound includes diagonal walk length; its saturated value means
+only “farther than the bound,” never infinity. This temporary source-dependent work is recomputed
+for enabled mending; it adds no retained geometry cache. Real-time cost remains a qualification gate.
+
 Filling must retain quick, real-time feedback. Prepare reference geometry once per structural change
 and reuse it for Gap Closing, Edge Overlap, Mend Reach and color changes. The exact nearest-open
 feature map is needed only by mending: prepare it on the first enabled Mend Reach, retain it across

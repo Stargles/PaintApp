@@ -2,6 +2,26 @@
 
 ## Current source and next actions — 2026-10-24
 
+Next controlled application —2026-10-25: actual02ab86bdGPU2methods FAILED as predicted, with exactly
+THREElegacyissues:646square48/448atReach40;681notch255instead0;748distanthole255instead0. Wide40
+and longdiagonalno-hole255/bare/removalpremises reportednoissues. Root independently reread actual
+xcresult/selectors/device/source locations and728exactclean. Nativelease RELEASED. Evidence:
+native/ownership-regressions2-02ab86bd-run01/root-independent-acceptance.json. Summarylists2method
+representatives; actuallegacycontainsall3issues. No normal-green or currentfeaturecompletionclaim.
+
+RootAND independentRaster review now ACCEPT frozenproductpatch9d9bc7356f5482cf290e12ca98981242d773b5174fca7353ef0807e94d6d4e1a
+for APPLICATION ONLY toFill.metal/MetalFillEngine.swift. Fullfrozenmanifest60f1d207 and exacttemp
+application/oldseam/near/far/supercover/Reach/scratch/danger/byteoverflow/sentinel/max74 bounds verified.
+Sharedlocalcrossing+inkdangerdistance REPLACES ALL-nearest-geometric acceptance; all tiednearest
+OWNERSHIP vetoes stay, fourexistingaxes discover genuinecapcrossings through the same rayproof.
+No retainedmap/cache/flag/allocation/newCPUscan; oldneighborcorridor byte-identical andfirst. Current
+FillMendLogicTests0bc2 andallother source remainunchanged. Applyexactcopies, commitbeforefaults,
+thenwhole20logicGPU, whole4coldFillUI andinspectedownerlandscapepictures; thenmeaningfulassertion
+faults/restorednormal andperformance. Acceptingsource is NOT native/performance qualification.
+Evidence: geodesic-proposal-fbb/root-preliminary-source-acceptance.json and
+mend-free-caps-b865-readonly/raster-geodesic-v1-independent-review.md. Priorstaged/medial external
+proposals remainrejected, no compatibilitypath orcap-shapeclassifier is introduced.
+
 Latest owner steering —2026-10-25: “immediate ipad instalation is off priority now. Install new
 ipad versions whenever you wish.” Continue substantive work and useful running agents; quick status
 provided. Do not interpret this as an explicit waiver of the5day signing rule. No fresh saved-scene
@@ -447,7 +467,7 @@ compile validation joins the next normal Metal build. No behavior or new asserti
 - [ ] Finish file-level/independent review, new affected zero-skip baseline, actual assertion mutants,
       exact final fast Debug/Release, lints/PBX/graph, cold workflows/pictures and paired performance.
       Then fresh owner save/unlock/export, signed clean Release/device checks and actual eraser cause.
-      No main merge/push/install is authorized by this consolidation.
+      Owner now permits review installs at agent discretion; preservation/signing/actualdevice gates remain.
 
 ---
 
