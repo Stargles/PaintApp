@@ -10,9 +10,10 @@ is authorized by an old readiness answer: obtain fresh saved-scene readiness whe
 
 ## Current source and next actions — 2026-10-25
 
-Main/origin remain afd2030c; no merge, push or iPad install this pass. Integration source freeze4e2f36f1
-is in PaintApp-s54-mend-free-caps. Actual Debug71 passed71/71; owner iPad9 cold UI4 passed2/failed2.
-The feature is NOT qualified. Trace the actual UI reference/window route before another UI attempt.
+Main/origin remain afd2030c; no merge, push or iPad install this pass. Integration source freeze2da54484
+is in PaintApp-s54-mend-free-caps. Actual Debug86 passed86/86, including useful4096 factory/GPU output.
+The earlier owner iPad9 cold UI4 at4e2 passed2/failed2. The feature is NOT qualified; finish shared
+fresh-raster proof and its worker invocation before the next owner UI attempt.
 
 **Owner ruling:** interior Mend Gaps is vector only; engineering choices need no further approval.
 Continue actionable work while Kevin sleeps, with agents and concise updates. Cover interior and
@@ -29,13 +30,12 @@ The same transient meter admits encoded input/work, with temporary decode object
 this is not a proved opaque native decode peak. Unbounded autosize text and invalid geometry stay unknown.
 All temporary factory/Reach prints were removed whole, with729-source restoration receipts.
 
-**Actual logic gate:**4e2f36f1 Debug71=71passed,0failed/skipped/expected, owned39E, exact729 immutable/
-before/after/current sources and71 method identities independently checked. Whole straight/curved/Rough
-caps and all28 FillObject/17 StrokeWall pass. The width fixture's original strokes genuinely touched;
-endpoint55 isolates its width probes without altering any old assertion. Actual one-cell ink separation
-is asserted, and original joined10/16 arrangements remain GPU join-negative/far-positive controls.
-Evidence: `native/v5-normal71-4e2f36f1-run01/root-independent-acceptance.json`.
-Earlier54/17 and69/2 results and their actual diagnostics remain preserved at their named pins.
+**Actual logic gate:**2da54484 Debug86=86passed,0failed/skipped/expected, owned39E; all729 immutable/
+before/after/current sources and actual86 method identities independently checked. Whole4096 returns
+useful fitted support, certifies actual shared-filter stroke body/free caps and passes real GPU mend.
+FillMend28+FillObject28+StrokeWall17+RasterSampling13 all pass. This is no appearance/performance or final
+fast-tier qualification. Earlier4e2 native71green and54/17,69/2 failures remain preserved at named pins.
+Evidence: `native/scaled-normal86-2da54484-run01/root-independent-acceptance.json`.
 
 **Actual owner UI gate:** whole FillMendUITests4 on owned56CC iPad9 at4e2 passed neighbor seam and
 extension; new fill266 and Mend All302 failed attached-body coverage. Root LOOKed all7 retained named
@@ -56,22 +56,21 @@ Add a fresh in-memory flow regression if confirmed. RasterSource/RasterBuffer sc
 the nine-path scaled owner. Record before implementation and do not call source reasoning native proof.
 
 
-**Scaled route, reviewed and ready for first compilation:** author94980fdb replaces the uncompiled
-0cab checkpoint with its independently reviewed allocation follow-up. Root verified the frozen nine
-source paths and their immutable commit hashes before harvest. Retire worker core/readback aliases and
-completed command wrappers before growth; incremental allocation valves and typed pool scope preserve
-failure/cancellation. The existing displayed preview and borrowed document memos remain external owners;
-this is no total-process/RSS release claim. Reuse the existing sampler and one request meter; no cache,
-renderer clone, persisted field or new file/PBX identifier. Harvest only these nine source paths, then
-commit and run first Debug FillMend28+FillObject28+StrokeWall17+RasterSampling13=86 on owned39E.
-Shared clear-raster proof must precede scaled unknown classification through an explicit worker phase;
-cheap metadata getters/snapshot remain scan-free. That contract is being coordinated separately.
-Whole4096 useful output, source preservation, owner-size appearance A/B and cold/hot counts stay OPEN.
-Evidence: `scale-stage-reviewed-94980fdb/receipt.json`; allocation review9dcac7d8.
-First root a9773c9c compiler attempt completed with0 tests: the nested typed `do` lifetime scope has
-no catch, which Swift rejects. All729 sources remain exact. Record before changing only that scope
-to plain `do`; preserve the outer typed failure boundary and inner Result/pool lifetime. Runtime,
-appearance and performance remain UNRUN. Failed result is retained at `native/scaled-normal86-a9773c9c-run01/`.
+**Scaled route, integrated and first native slice green:** reviewed author94980fdb's nine source
+paths were harvested exactly at a9773c9c. Its first compiler attempt ran0 tests because a nested typed
+`do` had no catch;2da54484 changes only that lexical scope and actual Debug86 passes86/86. Worker core/
+readback aliases and completed command wrappers retire before growth; incremental allocation valves
+and typed pool scope preserve failure/cancellation. The displayed preview and borrowed document memos
+remain external owners; no total-process/RSS release claim. One existing sampler/request meter; no
+cache, renderer clone, persisted field or new file/PBX identifier. Whole4096 useful factory/actual ink/
+GPU output now passed at2da; appearance A/B, source/fence controls and cold/hot counts remain OPEN.
+Shared clear-raster proof must precede scaled unknown classification. Use an explicit admitted worker
+operation over the currently pinned immutable lease, reuse the existing exact alpha scan, and cache
+inspected true/false through the existing proof field. Cheap getters/snapshot stay scan-free. No lease
+means cached fact or conservative unknown without IO/eager decode/new image; strict later backed
+resolution retains its existing proof/error behavior. Both native/scaled callers use the same Builder
+work allowance, no second budget or generic throwing API. Source/caller/tests are being reviewed.
+Evidence: `scale-stage-reviewed-94980fdb/receipt.json`; allocation review9dcac7d8; native2da86green.
 
 **New assertion controls:** the locality/Reach5 plan is OFFLINE ONLY at4e2 (3 product/2 premise
 identities). Preserve its original candidate and use a separately named packet for the reviewed broad
@@ -137,7 +136,7 @@ assertion gaps and separate UI13/mask6positive+11faults; normal rebuild; exact f
 touched whole UI classes/full phase, lints/PBX/graph; paired fill16 Release ABBA; genuine256-package
 previous-writer cold UI; ordinary old workflows; fresh saved-scene/export/readiness and qualified
 signed iPad build; separate actual Test1 erasing all-process capture and owner artwork confirmation.
-Current static5413fast/6002full/398classes/PBX1329 is not native final qualification. Earlier gates
+Current static5417fast/6006full/398classes/PBX1329 is not native final qualification. Earlier gates
 remain valid only at their named pins/unchanged scopes. Erasing respring cause remains unproved.
 Retire the one-shot format converter/UI whole only after owner confirms real artwork. Preserve the
 untouched original export, old071 paired product and all native results. Owner authorizes future
@@ -162,7 +161,7 @@ No old readiness answer authorizes a physical restart. Deferred items below rema
   SHA70527efe has independent acceptance: build child finishes, all728 source entries restored before
   test-without-building, meaningful source-located assertions required. Repin final source; root must
   LOOK at positive pictures before granting faults. It is not a natural in-flight timing proof.
-- Current static census: fast5413/full6002, PBX1329 unique. Earlier UI lints/PBX checks passed676.
+- Current static census: fast5417/full6006, PBX1329 unique. Earlier UI lints/PBX checks passed676.
   Final fast Debug/Release, graph, actual full/class UI and required old workflows remain pending.
 - Paired fill16 Release ABBA and whole256-package previous-writer cold UI are prepared, not run.
   Read-only current API readiness found no blocker; explicitly repin NEW path/SHA/DD at final source.
