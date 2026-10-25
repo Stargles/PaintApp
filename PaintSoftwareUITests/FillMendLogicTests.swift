@@ -180,26 +180,37 @@ final class FillMendLogicTests: XCTestCase {
         return try XCTUnwrap(session.mendMask(sourceMask: source, threshold: 0, artworkRect: nil, reach: reach))
     }
 
-    // MARK: - Demand preparation and shared-buffer ownership
-
-    private func demandSession(lasso: Bool = false) throws -> MetalFillSession {
-        let side = Self.side
-        var rgba = [UInt8](repeating: 0, count: side * side * 4)
-        var mask = [UInt8](repeating: 0, count: side * side)
-        for y in 0..<side {
-            for x in 0..<side {
-                let frame = (4..<60).contains(x) && (4..<60).contains(y)
-                    && (!(6..<58).contains(x) || !(6..<58).contains(y))
-                let stroke = lasso
-                    ? (29..<35).contains(x) && (4..<60).contains(y)
-                    : (28..<34).contains(x) && (20..<44).contains(y)
-                if frame || stroke { rgba[(y * side + x) * 4 + 3] = 255 }
-                if (2..<32).contains(x) && (2..<62).contains(y) { mask[y * side + x] = 255 }
-            }
+    private func canonicalPatch(_ strokes: [VectorStroke], side: Int,
+                                source: [UInt8]? = nil, reach: Float) throws -> [UInt8] {
+        let prepared = try supportReference(strokes, side: side)
+        let source = source ?? stride(from: 3, to: prepared.rgba.count, by: 4).map {
+            prepared.rgba[$0] == 0 ? UInt8(255) : 0
         }
         let engine = try XCTUnwrap(MetalFillEngine.shared)
-        let session = try XCTUnwrap(engine.makeSession(referenceRGBA: rgba, width: side, height: side,
+        let session = try XCTUnwrap(engine.makeMendSession(referenceRGBA: prepared.rgba, width: side, height: side,
+            sourceMask: source).session)
+        session.installVectorReference(prepared.support)
+        return try XCTUnwrap(session.mendMask(sourceMask: source, threshold: 0, artworkRect: nil, reach: reach))
+    }
+
+    // MARK: - Demand preparation and shared-buffer ownership
+
+    private func demandReference(lasso: Bool = false) throws -> CanvasManager.FillReference {
+        let frame = supportStroke([CGPoint(x: 5, y: 5), CGPoint(x: 59, y: 5), CGPoint(x: 59, y: 59),
+                                   CGPoint(x: 5, y: 59), CGPoint(x: 5, y: 5)], size: 2)
+        let body = supportStroke(lasso ? [CGPoint(x: 32, y: 4), CGPoint(x: 32, y: 60)]
+            : [CGPoint(x: 31, y: 23), CGPoint(x: 31, y: 41)])
+        return try supportReference([frame, body], side: Self.side)
+    }
+
+    private func demandSession(lasso: Bool = false) throws -> MetalFillSession {
+        let side = Self.side, prepared = try demandReference(lasso: lasso)
+        var mask = [UInt8](repeating: 0, count: side * side)
+        for y in 2..<62 { for x in 2..<32 { mask[y * side + x] = 255 } }
+        let engine = try XCTUnwrap(MetalFillEngine.shared)
+        let session = try XCTUnwrap(engine.makeSession(referenceRGBA: prepared.rgba, width: side, height: side,
                                                         lassoMask: lasso ? mask : nil, gapWidthLimit: 0).session)
+        session.installVectorReference(prepared.support)
         if lasso {
             var neighbours = [UInt8](repeating: 0, count: side * side)
             for y in 6..<58 { for x in 35..<58 { neighbours[y * side + x] = 255 } }
@@ -225,15 +236,18 @@ final class FillMendLogicTests: XCTestCase {
         }
         let on = try XCTUnwrap(demandFill(session, reach: 40))
         XCTAssertTrue(session.hasPreparedMendFeatures, "first enabled Reach owns a completed map")
+        let reference = try demandReference()
+        let ink = stride(from: 3, to: reference.rgba.count, by: 4).map { reference.rgba[$0] != 0 }
+        let outside = supportExterior(ink, side: Self.side)
+        let bodyInk = try supportInk([supportStroke([CGPoint(x: 31, y: 23), CGPoint(x: 31, y: 41)])], side: Self.side)
         for y in 0..<Self.side {
             for x in 0..<Self.side {
-                let i = (y * Self.side + x) * 4
-                let interior = (6..<58).contains(x) && (6..<58).contains(y)
-                let stroke = (28..<34).contains(x) && (20..<44).contains(y)
-                XCTAssertEqual(off[i + 3], interior && !stroke ? 255 : 0,
-                               "off has exactly the interior with the internal ink left bare at (\(x),\(y))")
-                XCTAssertEqual(on[i + 3], interior ? 255 : 0,
-                               "on mends all internal ink and preserves the whole outside at (\(x),\(y))")
+                let pixel = y * Self.side + x, i = pixel * 4
+                let paper = !ink[pixel] && !outside[pixel]
+                XCTAssertEqual(Array(off[i..<(i + 4)]), paper ? [255, 0, 0, 255] : [0, 0, 0, 0],
+                               "off has exactly the source paper with actual canonical ink left bare at (\(x),\(y))")
+                XCTAssertEqual(Array(on[i..<(i + 4)]), paper || bodyInk[pixel] ? [255, 0, 0, 255] : [0, 0, 0, 0],
+                               "on covers the whole real body/caps and preserves every outline/outside pixel at (\(x),\(y))")
             }
         }
         // Reach bounds this stroke's six-pixel width, including its two free caps, not its length.
@@ -322,7 +336,7 @@ final class FillMendLogicTests: XCTestCase {
         let queue = try XCTUnwrap(device.makeCommandQueue())
         var references: [UInt8] = [], paths: [UInt8] = []
         var seeds: [SIMD4<Float>] = []
-        var labels: [String] = []
+        var labels: [String] = [], expectedContributions: [UInt8] = []
         func colour(_ byte: UInt8, alphaOnly: Bool) -> [UInt8] {
             alphaOnly ? [0, 0, 0, byte] : [byte, byte, byte, 255]
         }
@@ -330,11 +344,12 @@ final class FillMendLogicTests: XCTestCase {
             for value in 0...255 {
                 let same = colour(UInt8(value), alphaOnly: alphaOnly)
                 let adjacent = colour(UInt8(value == 255 ? 254 : value + 1), alphaOnly: alphaOnly)
-                for throughPath in [false, true] {
-                    references += same + (throughPath ? same : adjacent)
-                    paths += (throughPath ? same + adjacent : [UInt8](repeating: 0, count: 8))
+                for contributions in [UInt8(1), 2, 3] {
+                    references += same + (contributions & 1 != 0 ? adjacent : same)
+                    paths += (contributions & 2 != 0 ? same + adjacent : [UInt8](repeating: 0, count: 8))
+                    expectedContributions.append(contributions)
                     seeds.append(SIMD4(Float(same[0]), Float(same[1]), Float(same[2]), Float(same[3])) / 255.0)
-                    labels.append("\(alphaOnly ? "alpha" : "RGB") \(throughPath ? "path" : "reference") byte \(value)")
+                    labels.append("\(alphaOnly ? "alpha" : "RGB") contributions \(contributions) byte \(value)")
                 }
             }
         }
@@ -345,7 +360,7 @@ final class FillMendLogicTests: XCTestCase {
             device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: .storageModeShared)
         })
         // Each dispatch reads two pixels. Four output bytes per case keep every buffer offset
-        // aligned; the two padding bytes are irrelevant. All 1024 small dispatches share one CB.
+        // aligned; the two padding bytes are irrelevant. All 1536 small dispatches share one CB.
         let output = try XCTUnwrap(device.makeBuffer(length: seeds.count * 4, options: .storageModeShared))
         memset(output.contents(), 255, output.length)
         let command = try XCTUnwrap(queue.makeCommandBuffer())
@@ -370,9 +385,98 @@ final class FillMendLogicTests: XCTestCase {
         var wrong: [String] = []
         for index in labels.indices {
             if actual[index * 4] != 0 { wrong.append("\(labels[index]): exact match became a wall") }
-            if actual[index * 4 + 1] != 1 { wrong.append("\(labels[index]): adjacent byte became passable") }
+            if actual[index * 4 + 1] != expectedContributions[index] {
+                wrong.append("\(labels[index]): expected exact contribution \(expectedContributions[index]), got \(actual[index * 4 + 1])")
+            }
         }
         XCTAssertTrue(wrong.isEmpty, "byte identity/adjacency: \(wrong.count) wrong, first \(wrong.prefix(8))")
+
+        // The two-reference reader must distinguish physical INK under BOTH references from a
+        // physical/path-only mixture. Exercise the real classifier and final mend dispatch; no
+        // synthetic path hairline may become newly painted internal ink.
+        func state(_ name: String) throws -> MTLComputePipelineState {
+            try device.makeComputePipelineState(function: XCTUnwrap(library.makeFunction(name: name)))
+        }
+        func buffer<T>(_ rows: [T]) throws -> MTLBuffer {
+            try XCTUnwrap(rows.withUnsafeBytes {
+                device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: .storageModeShared)
+            })
+        }
+        let clear = try state("mendSupportClear"), classify = try state("mendSupportClassify")
+        let mend = try state("mendGap"), side = 16, n = side * side, centre = 8 * side + 8
+        let patch = try buffer([VectorMendSupport.Patch(contactStart: 0, contactCount: 1,
+            spanStart: 0, spanCount: 1, unknown: 0)])
+        let contact = try buffer([VectorMendSupport.Contact(start: UInt32(centre), count: 1)])
+        let strictContact = try buffer([VectorMendSupport.Contact(
+            start: UInt32(centre + 1) | VectorMendSupport.Contact.openBit, count: 1)])
+        let span = try buffer([VectorMendSupport.Span(start: UInt32(centre), count: 1)])
+        var source = [UInt8](repeating: 255, count: n); source[centre] = 0
+        let owned = try buffer(source), empty = try buffer([UInt8](repeating: 0, count: n))
+        let nearest = try buffer([SIMD2<Int32>](repeating: SIMD2(7, 8), count: n))
+        var params = MetalFillEngine.FillParams()
+        params.width = UInt32(side); params.height = UInt32(side)
+        params.artworkMaxX = Float(side); params.artworkMaxY = Float(side)
+        let parameterBuffer = try buffer([params])
+        let modes: [(UInt8, UInt8, Bool)] = [(1, 1, true), (3, 3, true),
+                                                          (1, 2, false), (2, 1, false), (2, 2, false)]
+        for (first, second, physical) in modes {
+            for requiresOpen in [false, true] {
+                var a = [UInt8](repeating: 0, count: n), b = a
+                a[centre] = first; b[centre] = second
+                if requiresOpen { a[centre + 1] = 1; b[centre + 1] = 1 }
+                let chosenContact = requiresOpen ? strictContact : contact
+                let wall = try buffer(a), wall2 = try buffer(b)
+                let workspace = try buffer([UInt8](repeating: 17, count: n * 8))
+                var references: UInt32 = 2, hasFence: UInt32 = 0, patches: UInt32 = 1
+                let classifyCommand = try XCTUnwrap(queue.makeCommandBuffer())
+                let classifyEncoder = try XCTUnwrap(classifyCommand.makeComputeCommandEncoder())
+                classifyEncoder.setComputePipelineState(clear)
+                classifyEncoder.setBuffer(workspace, offset: 0, index: 0)
+                classifyEncoder.setBuffer(parameterBuffer, offset: 0, index: 1)
+                classifyEncoder.dispatchThreads(MTLSize(width: side, height: side, depth: 1),
+                    threadsPerThreadgroup: MTLSize(width: 8, height: 8, depth: 1))
+                classifyEncoder.setComputePipelineState(classify)
+                for (slot, value) in [patch, chosenContact, span, owned, wall, wall2, empty, empty,
+                                      workspace, parameterBuffer].enumerated() {
+                    classifyEncoder.setBuffer(value, offset: 0, index: slot)
+                }
+                classifyEncoder.setBytes(&references, length: 4, index: 10)
+                classifyEncoder.setBytes(&hasFence, length: 4, index: 11)
+                classifyEncoder.setBytes(&patches, length: 4, index: 12)
+                classifyEncoder.dispatchThreads(MTLSize(width: 1, height: 1, depth: 1),
+                    threadsPerThreadgroup: MTLSize(width: 1, height: 1, depth: 1))
+                classifyEncoder.endEncoding(); classifyCommand.commit(); classifyCommand.waitUntilCompleted()
+                XCTAssertEqual(classifyCommand.status, .completed)
+                guard classifyCommand.status == .completed else { continue }
+                let bytes = workspace.contents().bindMemory(to: UInt8.self, capacity: n * 8)
+                let stencil = workspace.contents().advanced(by: n * 4).bindMemory(to: UInt32.self, capacity: n)
+                XCTAssertTrue((0..<n).allSatisfy { bytes[$0] == 17 }, "classifying support preserves the public first-N output")
+                XCTAssertEqual(stencil[centre], physical && !requiresOpen ? 1 : 3,
+                    "untagged SOURCE-zero needs physical ink under BOTH refs; tagged OPEN rejects foreign INK even at SOURCE255")
+                // Independently exercise the final physical gate even with an accepting known flag.
+                if !requiresOpen { stencil[centre] = 1 }
+                let command = try XCTUnwrap(queue.makeCommandBuffer())
+                let encoder = try XCTUnwrap(command.makeComputeCommandEncoder())
+                encoder.setComputePipelineState(mend)
+                for (slot, value) in [owned, owned, empty, wall, wall2, nearest, workspace, parameterBuffer].enumerated() {
+                    encoder.setBuffer(value, offset: 0, index: slot)
+                }
+                var reach: Float = 1, proofSpan: Float = 18
+                encoder.setBytes(&reach, length: 4, index: 8)
+                encoder.setBytes(&references, length: 4, index: 9)
+                encoder.setBuffer(empty, offset: 0, index: 10)
+                encoder.setBytes(&hasFence, length: 4, index: 11)
+                encoder.setBytes(&proofSpan, length: 4, index: 12)
+                encoder.dispatchThreads(MTLSize(width: side, height: side, depth: 1),
+                    threadsPerThreadgroup: MTLSize(width: 8, height: 8, depth: 1))
+                encoder.endEncoding(); command.commit(); command.waitUntilCompleted()
+                XCTAssertEqual(command.status, .completed)
+                guard command.status == .completed else { continue }
+                XCTAssertEqual(bytes[centre], physical && !requiresOpen ? 255 : 0,
+                    "internal paint requires actual physical ink and every strict OPEN contact; SOURCE255 on foreign ink is not paper")
+                XCTAssertTrue((0..<n).allSatisfy { $0 == centre || bytes[$0] == 0 }, "no neighboring paper is added")
+            }
+        }
     }
 
     private func assertExactDistanceMap(name: String, width: Int, height: Int, ink: [UInt8],
@@ -519,9 +623,8 @@ final class FillMendLogicTests: XCTestCase {
 
     // MARK: - Flood fills
 
-    /// A single stored fill can surround an internal line, or run up to an outer wall. The same
-    /// reach closes an isolated stroke and an attached stem, while the nearest-open witnesses on
-    /// the exterior and inside an intentional loop keep those boundaries untouched.
+    /// Flattened reference contours have no canonical provenance and stay protected. The paired
+    /// canonical control mends a real wide interior stroke near that unrelated outer frame.
     func testMendingCoversInternalAndAttachedInkWithoutGrowingOuterEdgesOrHoles() throws {
         let width = 72, height = 72
         var source = [UInt8](repeating: 0, count: width * height)
@@ -589,10 +692,8 @@ final class FillMendLogicTests: XCTestCase {
         for x in 6...65 { markInk(x, 6); markInk(x, 65) }
 
         let patch = try mendPatch(width: width, height: height, source: source, ink: ink)
-        XCTAssertNotEqual(patch[24 * width + 35], 0, "isolated internal stroke is mended")
-        XCTAssertNotEqual(patch[43 * width + 20], 0, "the interior stem remains mendable after joining the wall")
-        XCTAssertNotEqual(patch[18 * width + 17], 0, "diagonal internal ink is mended")
-        XCTAssertNotEqual(patch[58 * width + 50], 0, "curved internal ink is mended")
+        XCTAssertTrue(patch.allSatisfy { $0 == 0 },
+                      "flattened input has no canonical contributor proof and cannot mint vector interior additions")
         // An independent drawing-space oracle: the frame, circular hole wall and U rectangles
         // are all protected contours. It knows nothing about nearest sites, rays or the mend's
         // implementation. At the attached arm's three frame pixels the protected boundary wins.
@@ -611,10 +712,7 @@ final class FillMendLogicTests: XCTestCase {
         let grownBoundary = protectedBoundary.filter { patch[$0] != 0 }.sorted()
         let grownCoordinates = grownBoundary.prefix(8).map { "(\($0 % width),\($0 / width))" }
         XCTAssertTrue(grownBoundary.isEmpty, "no protected contour may grow: \(grownCoordinates)")
-        // At (57,17), the nearest site above connects tangentially to filled paper below through
-        // seven ink pixels. The equally near site on the right sees the intentional hole across
-        // the ring. Keeping only the first site would incorrectly accept this boundary pixel.
-        XCTAssertEqual(patch[17 * width + 57], 0, "every tied nearest-open witness must protect the donut tangent")
+        XCTAssertEqual(patch[17 * width + 57], 0, "the original donut tangent remains protected on flattened input")
         XCTAssertTrue(patch.enumerated().allSatisfy { pair in pair.element == 0 || ink.contains(pair.offset) },
                       "the mend adds only missing reference-ink pixels")
 
@@ -648,239 +746,124 @@ final class FillMendLogicTests: XCTestCase {
             XCTAssertTrue(squarePatch.enumerated().allSatisfy { $0.element == 0 || squareInk.contains($0.offset) },
                           "Reach \(reach) adds no paint outside the reference ink, including inside the intentional hole")
         }
-        // Owned paper separates this wide internal strip from an unrelated enclosing frame.
-        let nearFrameSide = 128
-        var nearFrameInk = Set<Int>()
-        var nearFrameSource = [UInt8](repeating: 0, count: nearFrameSide * nearFrameSide)
-        for y in 4..<124 { for x in 4..<124 {
-            let index = y * nearFrameSide + x
-            let frame = !(6..<122).contains(x) || !(6..<122).contains(y)
-            let strip = (10..<50).contains(x) && (30..<90).contains(y)
-            if frame || strip { nearFrameInk.insert(index) } else { nearFrameSource[index] = 255 }
-        } }
-        XCTAssertTrue((6..<10).allSatisfy { nearFrameSource[60 * nearFrameSide + $0] == 255 },
-                      "PREMISE: four owned open columns separate the strip from the frame")
-        let nearFramePatch = try mendPatch(width: nearFrameSide, height: nearFrameSide,
-            source: nearFrameSource, ink: nearFrameInk, reach: 40)
-        XCTAssertEqual(nearFramePatch[60 * nearFrameSide + 13], 255,
-                       "a true forty-pixel internal crossing remains mendable beside unrelated outer ink")
-
-        // A safe-looking side crossing must not paint the nearby explicit unowned notch border.
-        let notchSide = 64
-        var notchInk = Set<Int>()
-        var notchSource = [UInt8](repeating: 0, count: notchSide * notchSide)
-        for y in 4..<60 { for x in 4..<60 {
-            let index = y * notchSide + x
-            let frame = !(6..<58).contains(x) || !(6..<58).contains(y)
-            let strip = (29..<34).contains(x) && (20..<44).contains(y)
-            let notch = (29..<34).contains(x) && (18..<20).contains(y)
-            if frame || strip { notchInk.insert(index) } else if !notch { notchSource[index] = 255 }
-        } }
-        let notchPatch = try mendPatch(width: notchSide, height: notchSide,
-            source: notchSource, ink: notchInk, reach: 6)
-        XCTAssertEqual(notchPatch[21 * notchSide + 29], 0,
-                       "the unowned notch wins over the candidate's owned nearest side and convenient five-pixel crossing")
+        // A real canonical wide strip remains useful near unrelated outer ink. Its actual
+        // footprint is not inferred from the old hand-authored raster rectangles above.
+        let side = 128
+        let frame = supportStroke([CGPoint(x: 5, y: 5), CGPoint(x: 123, y: 5), CGPoint(x: 123, y: 123),
+                                   CGPoint(x: 5, y: 123), CGPoint(x: 5, y: 5)], size: 2)
+        let strip = supportStroke([CGPoint(x: 30, y: 50), CGPoint(x: 30, y: 70)], size: 40)
+        let prepared = try supportReference([frame, strip], side: side)
+        let ink = stride(from: 3, to: prepared.rgba.count, by: 4).map { prepared.rgba[$0] != 0 }
+        let owned = supportExterior(ink, side: side, seed: 60 * side + 7).map { $0 ? UInt8(255) : 0 }
+        let real = try canonicalPatch([frame, strip], side: side, source: owned, reach: 40)
+        XCTAssertEqual(real[60 * side + 13], 255, "a true forty-pixel crossing remains useful with four owned paper columns before the frame")
+        let outline = try supportInk([frame], side: side)
+        XCTAssertTrue(outline.indices.allSatisfy { !outline[$0] || real[$0] == 0 },
+                      "the actual enclosing contour is protected despite the wide nearby accepted strip")
 
     }
 
     func testMendReachCountsTheWholeAsymmetricAxialAndDiagonalCrossSection() throws {
-        let width = 72, height = 72
+        let axial = supportStroke([CGPoint(x: 20, y: 25), CGPoint(x: 52, y: 25)], size: 10)
+        let short = try canonicalPatch([axial], side: 72, reach: 9)
+        let exact = try canonicalPatch([axial], side: 72, reach: 10)
+        XCTAssertEqual(short[22 * 72 + 36], 0, "the real ten-pixel asymmetric crossing exceeds Reach nine")
+        XCTAssertEqual(exact[22 * 72 + 36], 255, "the actual canonical crossing fits Reach ten")
 
-        var axialSource = [UInt8](repeating: 0, count: width * height)
-        for y in 4..<68 { for x in 4..<68 { axialSource[y * width + x] = 255 } }
-        var axialInk = Set<Int>()
-        for y in 20..<30 {
-            for x in 20..<52 {
-                axialSource[y * width + x] = 0
-                axialInk.insert(y * width + x)
-            }
-        }
-        let axialTooShort = try mendPatch(width: width, height: height, source: axialSource,
-                                          ink: axialInk, reach: 9)
-        let axialExact = try mendPatch(width: width, height: height, source: axialSource,
-                                       ink: axialInk, reach: 10)
-        XCTAssertEqual(axialTooShort[22 * width + 36], 0,
-                       "near three plus far eight minus the exit pixel is ten, so reach nine refuses")
-        XCTAssertNotEqual(axialExact[22 * width + 36], 0,
-                          "the same asymmetric axial strip is accepted at its exact ten-pixel reach")
+        let diagonal = supportStroke([CGPoint(x: 20, y: 19), CGPoint(x: 52, y: 51)], size: 6)
+        let diagonalShort = try canonicalPatch([diagonal], side: 72, reach: 5)
+        let diagonalExact = try canonicalPatch([diagonal], side: 72, reach: 6)
+        XCTAssertEqual(diagonalShort[35 * 72 + 35], 0, "the asymmetric diagonal crossing exceeds Reach five")
+        XCTAssertEqual(diagonalExact[35 * 72 + 35], 255, "four diagonal ink steps fit Reach six")
 
-        var diagonalSource = [UInt8](repeating: 0, count: width * height)
-        for y in 4..<68 { for x in 4..<68 { diagonalSource[y * width + x] = 255 } }
-        var diagonalInk = Set<Int>()
-        for y in 8..<64 {
-            for x in 8..<64 where (-3...5).contains(x - y) && (24...108).contains(x + y) {
-                diagonalSource[y * width + x] = 0
-                diagonalInk.insert(y * width + x)
-            }
-        }
-        let diagonalTooShort = try mendPatch(width: width, height: height, source: diagonalSource,
-                                             ink: diagonalInk, reach: 5)
-        let diagonalExact = try mendPatch(width: width, height: height, source: diagonalSource,
-                                          ink: diagonalInk, reach: 6)
-        XCTAssertEqual(diagonalTooShort[35 * width + 35], 0,
-                       "two near and three far diagonal steps span four sqrt(2) pixels, beyond reach five")
-        XCTAssertNotEqual(diagonalExact[35 * width + 35], 0,
-                          "the asymmetric diagonal strip is accepted at reach six")
-
-        // A supported diagonal proof can travel farther than its major-axis step bound.
-        let longSide = 240
-        var longInk = Set<Int>()
-        var longSource = [UInt8](repeating: 0, count: longSide * longSide)
-        for y in 4..<236 { for x in 4..<236 {
-            let index = y * longSide + x
-            let frame = !(6..<234).contains(x) || !(6..<234).contains(y)
-            let band = (-42...42).contains(x - y)
-            if frame || band { longInk.insert(index) }
-            if !frame && (!band || x - y <= -34 || x - y >= 0) { longSource[index] = 255 }
-        } }
-        let longProbe = 110 * longSide + 80
-        XCTAssertEqual(longSource[longProbe], 0, "PREMISE: the diagonal crossing still has an unpainted gap")
-        let longOwned = try mendPatch(width: longSide, height: longSide,
-            source: longSource, ink: longInk, reach: 40)
-        XCTAssertEqual(longOwned[longProbe], 255,
-                       "raw diagonal width above fifty-two remains admissible when its uncovered gap fits Reach and no danger is nearby")
-        let distantHole = 166 * longSide + 136
-        let removedInk = longInk.remove(distantHole)
-        XCTAssertNotNil(removedInk, "PREMISE: removing one ink pixel creates the intentional open hole")
-        longSource[distantHole] = 0
-        let longProtected = try mendPatch(width: longSide, height: longSide,
-            source: longSource, ink: longInk, reach: 40)
-        XCTAssertEqual(longProtected[longProbe], 0,
-                       "the unowned hole fifty-six ink steps away remains inside this diagonal crossing's raw support")
-
-        // A rounded cap's far open endpoint can touch another owned open cell at a raster corner.
-        // The two orientations make each independent side check decisive, including a tied normal.
-        for vertical in [false, true] {
-            for (radius, overlap) in [(3, Float(0)), (6, Float(2))] {
-                var roundedInk = Set<Int>()
-                var roundedSource = [UInt8](repeating: 0, count: width * height)
-                var reference = [UInt8](repeating: 0, count: width * height * 4)
-                for y in 4..<68 {
-                    for x in 4..<68 {
-                        let along = vertical ? y : x
-                        let across = (vertical ? x : y) - 32
-                        let capDistance = max(20 - along, max(along - 44, 0))
-                        let index = y * width + x
-                        if capDistance * capDistance + across * across <= radius * radius {
-                            roundedInk.insert(index)
-                            reference[index * 4 + 3] = 255
-                        } else {
-                            roundedSource[index] = 255
-                        }
-                    }
+        // Whole real footprints, including every cap pixel; no hand-made raster is passed off as
+        // vector provenance. A saved partial SOURCE removes two independent actual OPEN contacts.
+        let capPaths = [[CGPoint(x: 24, y: 32), CGPoint(x: 48, y: 32)],
+                        [CGPoint(x: 32, y: 24), CGPoint(x: 32, y: 48)],
+                        [CGPoint(x: 24, y: 24), CGPoint(x: 48, y: 48)],
+                        [CGPoint(x: 20, y: 20), CGPoint(x: 34, y: 25), CGPoint(x: 42, y: 45), CGPoint(x: 54, y: 50)]]
+        let capStrokes = capPaths.map { supportStroke($0) }
+            + [supportStroke(capPaths[3], size: 6, brush: BrushLibrary.roughInk)]
+        for stroke in capStrokes {
+            let prepared = try supportReference([stroke], side: 72)
+            let ink = stride(from: 3, to: prepared.rgba.count, by: 4).map { prepared.rgba[$0] != 0 }
+            let owned = ink.map { $0 ? UInt8(0) : 255 }
+            let full = try canonicalPatch([stroke], side: 72, source: owned, reach: 40)
+            XCTAssertTrue(ink.contains(true) && ink.indices.allSatisfy { !ink[$0] || full[$0] == 255 },
+                          "every actual straight, curved, textured body and free-cap pixel is mended")
+            let packet = try VectorMendSupport.produce(prepared.support,
+                admission: .init(bytes: 64 * 1024 * 1024, work: 64_000_000))
+            let target = try XCTUnwrap(packet.patches.first { patch in
+                patch.unknown == 0 && packet.canonicalCoverage[Int(patch.spanStart)..<Int(patch.spanStart + patch.spanCount)].contains {
+                    (Int($0.start)..<Int($0.start + $0.count)).contains { ink[$0] }
                 }
-                let cap = radius == 3 ? 18 : 16
-                let probe = vertical ? (x: 32, y: cap) : (x: cap, y: 32)
-                let offset = (probe.y * width + probe.x) * 4
-                let engine = try XCTUnwrap(MetalFillEngine.shared)
-                let session = try XCTUnwrap(engine.makeSession(referenceRGBA: reference, width: width,
-                                                                height: height, gapWidthLimit: 0).session)
-                let off = try XCTUnwrap(session.fill(seedX: 8, seedY: 8, seedColor: .zero,
-                    threshold: 0, gapWidth: 0, edgeOverlap: overlap, mendReach: 0, fillColor: SIMD4(1, 0, 0, 1)))
-                let on = try XCTUnwrap(session.fill(seedX: 8, seedY: 8, seedColor: .zero,
-                    threshold: 0, gapWidth: 0, edgeOverlap: overlap, mendReach: 12, fillColor: SIMD4(1, 0, 0, 1)))
-                XCTAssertEqual(Array(off[offset..<(offset + 4)]), [0, 0, 0, 0],
-                               "PREMISE: overlap \(overlap) leaves this rounded cap pixel bare")
-                XCTAssertEqual(Array(on[offset..<(offset + 4)]), [255, 0, 0, 255],
-                               "the rounded cap endpoint mends at overlap \(overlap) in \(vertical ? "vertical" : "horizontal") ink")
-                if radius == 3 {
-                    let owned = try mendPatch(width: width, height: height, source: roundedSource,
-                                               ink: roundedInk, reach: 12)
-                    XCTAssertEqual(owned[probe.y * width + probe.x], 255,
-                                   "PREMISE: the saved-fill source owns both rounded endpoint side witnesses")
-                    // Omit the side on the non-primary tied normal; the other normal still accepts.
-                    let unowned = vertical ? (x: 28, y: 21) : (x: 21, y: 28)
-                    roundedSource[unowned.y * width + unowned.x] = 0
-                    let protected = try mendPatch(width: width, height: height, source: roundedSource,
-                                                   ink: roundedInk, reach: 12)
-                    XCTAssertEqual(protected[probe.y * width + probe.x], 0,
-                                   "an unowned \(vertical ? "first" : "second") side witness vetoes every-tie endpoint admission")
-                }
+            })
+            let targetInk = try XCTUnwrap(packet.canonicalCoverage[Int(target.spanStart)..<Int(target.spanStart + target.spanCount)]
+                .lazy.flatMap { Int($0.start)..<Int($0.start + $0.count) }.first { ink[$0] })
+            let contacts = packet.contacts[Int(target.contactStart)..<Int(target.contactStart + target.contactCount)]
+            let open = contacts.filter(\.requiresOpen).flatMap { $0.index..<($0.index + Int($0.count)) }
+            XCTAssertGreaterThanOrEqual(open.count, 2, "PREMISE: two independent physical OPEN ownership witnesses")
+            for witness in [try XCTUnwrap(open.first), try XCTUnwrap(open.last)] {
+                XCTAssertFalse(ink[witness], "PREMISE: this actual contact is OPEN, never foreign INK")
+                var missing = owned; missing[witness] = 0
+                let refused = try canonicalPatch([stroke], side: 72, source: missing, reach: 40)
+                XCTAssertEqual(refused[targetInk], 0, "either unowned contact protects the whole contributing footprint")
             }
         }
     }
 
-    /// The shared bucket pipeline must charge Reach for the gap remaining after its real Edge
-    /// Overlap pass. Both strokes are ten pixels thick; overlap two leaves six pixels to mend.
+    /// The actual bucket overlap pass precedes the same real crossing proof. Covered neck flanks
+    /// are not certificates, and they do not disappear from the geometric support either.
     func testInternalMendReachCountsOnlyWhatProductionEdgeOverlapLeaves() throws {
-        let width = 96, height = 96
-        func rectangle(_ xs: Range<Int>, _ ys: Range<Int>) -> Set<Int> {
-            Set(ys.flatMap { y in xs.map { y * width + $0 } })
-        }
-        let frame = rectangle(8..<88, 8..<88).subtracting(rectangle(12..<84, 12..<84))
-        let detached = rectangle(28..<38, 23..<45)
-        let attached = rectangle(8..<48, 60..<70)
-        let holeWall = Set((0..<(width * height)).filter { index in
-            let x = index % width - 70, y = index / width - 34
-            return (36...81).contains(x * x + y * y)
-        })
-        let diagonal = Set(rectangle(55..<82, 50..<78).filter { index in
-            let x = index % width, y = index / width
-            return (-3...5).contains(x - y) && (118...146).contains(x + y)
-        })
-        let ink = frame.union(detached).union(attached).union(holeWall).union(diagonal)
-        var reference = [UInt8](repeating: 0, count: width * height * 4)
-        for index in ink { reference[index * 4 + 3] = 255 } // Exact RGBA: black ink, transparent paper.
-        let engine = try XCTUnwrap(MetalFillEngine.shared)
-        let session = try XCTUnwrap(engine.makeSession(referenceRGBA: reference, width: width,
-                                                        height: height, gapWidthLimit: 0).session)
-        func render(overlap: Float, reach: Float) throws -> Pixels {
-            let bytes = try XCTUnwrap(session.fill(seedX: 16, seedY: 16, seedColor: .zero,
-                                                   threshold: 0, gapWidth: 0, edgeOverlap: overlap,
-                                                   mendReach: reach, fillColor: SIMD4(1, 0, 0, 1)))
-            return Pixels(bytes: bytes, width: width)
-        }
-        // Compare every pixel outside the two interior strokes with the same overlap-only render.
-        // This protects the complete frame, hole and exterior, including boundary ink that overlap
-        // itself legitimately covers. At the attached join the frame takes priority.
-        let permitted = detached.union(attached).union(diagonal).subtracting(frame)
-        let protected = Set(0..<(width * height)).subtracting(permitted)
-        func assertProtected(_ images: [Pixels], baseline: Pixels, _ label: String) {
-            let changed = protected.filter { index in
-                let x = index % width, y = index / width
-                return images.contains { $0.at(x, y) != baseline.at(x, y) }
-            }.sorted()
-            XCTAssertTrue(changed.isEmpty,
-                          "\(label) preserves the complete outline, intentional hole and exterior: \(changed.prefix(6))")
-        }
-        let settings: [(Int, Float, Float)] = [(2, 6, 5), (0, 10, 9), (2, 40, 5.5)]
-        for (overlap, exactReach, shortReach) in settings {
-            let off = try render(overlap: Float(overlap), reach: 0)
-            let exact = try render(overlap: Float(overlap), reach: exactReach)
-            let tooShort = try render(overlap: Float(overlap), reach: shortReach)
-            let label = "overlap \(overlap), reach \(exactReach)/\(shortReach)"
-            XCTAssertTrue(off.isRed(16, 16), "PREMISE: \(label) fills the region around both strokes")
-            XCTAssertTrue(off.isBare(70, 34), "PREMISE: \(label) leaves the intentional hole empty")
-            let detachedGap = rectangle((28 + overlap)..<(38 - overlap), 28..<40)
-            let attachedGap = rectangle(20..<40, (60 + overlap)..<(70 - overlap))
-            for (name, gap) in [("detached", detachedGap), ("attached", attachedGap)] {
-                XCTAssertTrue(gap.allSatisfy { off.isBare($0 % width, $0 / width) },
-                              "PREMISE: \(label) leaves the complete \(name) gap bare")
-                XCTAssertTrue(gap.allSatisfy { exact.isRed($0 % width, $0 / width) },
-                              "\(label) mends every remaining pixel of the \(name) gap")
-                XCTAssertTrue(gap.allSatisfy { tooShort.isBare($0 % width, $0 / width) },
-                              "\(label) refuses the too-wide \(name) gap")
+        for (size, overlap, reach, short) in [(CGFloat(10), Float(2), Float(6), Float(5)),
+                                             (10, 0, 10, 9), (16, 6, 4, 3)] {
+            let frame = supportStroke([CGPoint(x: 10, y: 10), CGPoint(x: 86, y: 10), CGPoint(x: 86, y: 86),
+                                       CGPoint(x: 10, y: 86), CGPoint(x: 10, y: 10)], size: 4)
+            let detached = supportStroke([CGPoint(x: 33, y: 23), CGPoint(x: 33, y: 65)], size: size)
+            let attached = supportStroke([CGPoint(x: 10, y: 75), CGPoint(x: 48, y: 75)], size: 10)
+            let holePoints = (0...24).map { step -> CGPoint in
+                let angle = CGFloat(step) * 2 * .pi / 24
+                return CGPoint(x: 70 + 7.5 * cos(angle), y: 34 + 7.5 * sin(angle))
             }
-            assertProtected([exact, tooShort], baseline: off, label)
+            let hole = supportStroke(holePoints, size: 3)
+            let strokes = [frame, detached, attached, hole]
+            let prepared = try supportReference(strokes)
+            let session = try XCTUnwrap(MetalFillEngine.shared?.makeSession(referenceRGBA: prepared.rgba,
+                width: 96, height: 96, pathWall: nil, gapWidthLimit: 0).session)
+            session.installVectorReference(prepared.support)
+            func render(_ mend: Float) throws -> Pixels {
+                Pixels(bytes: try XCTUnwrap(session.fill(seedX: 16, seedY: 16, seedColor: .zero,
+                    threshold: 0, gapWidth: 0, edgeOverlap: overlap, mendReach: mend,
+                    fillColor: SIMD4(1, 0, 0, 1))), width: 96)
+            }
+            let off = try render(0), exact = try render(reach), tooShort = try render(short)
+            XCTAssertTrue(off.isRed(16, 16) && off.isBare(70, 34), "PREMISE: actual source owns paper but not the intentional hole")
+            let low = 33 - Int(size / 2) + Int(overlap), high = 33 + Int(size / 2) - Int(overlap)
+            for y in 34..<54 { for x in low..<high {
+                XCTAssertTrue(off.isBare(x, y), "PREMISE: production overlap leaves this body gap")
+                XCTAssertTrue(exact.isRed(x, y), "Reach covers every pixel of the actual uncovered body")
+                XCTAssertTrue(tooShort.isBare(x, y), "a below-width Reach cannot cross the remaining body")
+            } }
+            if size == 10 {
+                for y in (70 + Int(overlap))..<(80 - Int(overlap)) { for x in 30..<40 {
+                    XCTAssertTrue(off.isBare(x, y), "PREMISE: attached stem remains uncovered away from its uncertain join")
+                    XCTAssertTrue(exact.isRed(x, y), "the remote attached body uses the same Mend setting")
+                    XCTAssertTrue(tooShort.isBare(x, y), "the attached body's remaining width still bounds Reach")
+                } }
+            }
+            let frameInk = try supportInk([frame]), holeInk = try supportInk([hole])
+            let permitted = try supportInk([detached, attached])
+            let protected = permitted.indices.filter { !permitted[$0] || frameInk[$0] || holeInk[$0] }
+            let changed = protected.filter { i in
+                exact.at(i % 96, i / 96) != off.at(i % 96, i / 96)
+                    || tooShort.at(i % 96, i / 96) != off.at(i % 96, i / 96)
+            }
+            XCTAssertTrue(changed.isEmpty, "every real contour/cardinal/hole/outside pixel keeps its overlap-only RGBA: \(changed.prefix(8))")
         }
-        let diagonalOff = try render(overlap: 2, reach: 0)
-        let diagonalExact = try render(overlap: 2, reach: 3)
-        let diagonalTooShort = try render(overlap: 2, reach: 2.8)
-        for (x, y) in [(66, 66), (67, 65)] {
-            XCTAssertTrue(diagonalOff.isBare(x, y), "PREMISE: overlap two leaves the diagonal core bare")
-            XCTAssertTrue(diagonalExact.isRed(x, y), "two diagonal steps span 2sqrt(2), within reach three")
-            XCTAssertTrue(diagonalTooShort.isBare(x, y), "2sqrt(2) exceeds fractional reach2.8")
-        }
-        assertProtected([diagonalExact, diagonalTooShort], baseline: diagonalOff, "diagonal overlap")
-
-        let clippedInk = Set((14...16).flatMap { y in (0...20).map { y * 32 + $0 } })
-        var clippedSource = [UInt8](repeating: 255, count: 32 * 32)
-        for index in clippedInk { clippedSource[index] = 0 }
-        let clippedPatch = try mendPatch(width: 32, height: 32, source: clippedSource, ink: clippedInk)
-        XCTAssertEqual(clippedPatch[15 * 32 + 1], 0,
-                       "an omitted rim witness could be nearer than the two filled vertical endpoints")
-        XCTAssertNotEqual(clippedPatch[15 * 32 + 12], 0,
-                          "the same strip away from the unresolved rim remains mendable")
+        let clipped = supportStroke([CGPoint(x: 0, y: 15.5), CGPoint(x: 20, y: 15.5)], size: 3)
+        let patch = try canonicalPatch([clipped], side: 32, reach: 8)
+        XCTAssertEqual(patch[15 * 32 + 1], 0, "an unresolved clipped free end stays protected")
+        XCTAssertEqual(patch[15 * 32 + 12], 255, "the same thin body away from the rim remains useful")
     }
 
     /// The control, and the reason the rest mean anything: with the option off, two fills either side
@@ -1164,7 +1147,7 @@ final class FillMendLogicTests: XCTestCase {
         }
     }
 
-    // MARK: - Isolated canonical vector support construction (not the live mend renderer)
+    // MARK: - Canonical support and actual frozen-reference construction
 
     private func supportStroke(_ points: [CGPoint], size: CGFloat = 6, brush: Brush? = nil,
                                opacity: Double = 1) -> VectorStroke {
@@ -1182,9 +1165,9 @@ final class FillMendLogicTests: XCTestCase {
     }
 
     /// Actual OPEN connectivity, used only to supply a frozen source to the metadata contract.
-    private func supportExterior(_ ink: [Bool], side: Int) -> [Bool] {
+    private func supportExterior(_ ink: [Bool], side: Int, seed: Int = 0) -> [Bool] {
         var source = [Bool](repeating: false, count: ink.count), queue: [Int] = []
-        if !ink[0] { source[0] = true; queue.append(0) }
+        if !ink[seed] { source[seed] = true; queue.append(seed) }
         var head = 0
         while head < queue.count {
             let i = queue[head]; head += 1
@@ -1199,11 +1182,42 @@ final class FillMendLogicTests: XCTestCase {
         return source
     }
 
+    private func supportReference(_ strokes: [VectorStroke], side: Int = 96,
+                                  canvasSize: CGSize? = nil, window: FillWindow? = nil,
+                                  transform: CGAffineTransform = .identity,
+                                  emptyReferenceAbove: Bool = false, unknownRects: [CGRect] = []) throws -> CanvasManager.FillReference {
+        let manager = CanvasManager()
+        let size = canvasSize ?? CGSize(width: side, height: side)
+        manager.canvasSize = size
+        manager.addVectorLayer()
+        let canvas = try XCTUnwrap(manager.layers.first?.cels.first?.vector)
+        canvas.elements = strokes.map(VectorElement.stroke) + unknownRects.map {
+            .fill(VectorFillElement(path: CGPath(rect: $0, transform: nil), color: CodableColor(UIColor.black)))
+        }
+        canvas.transform = transform
+        canvas.bumpVersion()
+        if !unknownRects.isEmpty { _ = try XCTUnwrap(canvas.render(), "measure actual unknown-object bounds before capture") }
+        if emptyReferenceAbove {
+            manager.addVectorLayer()
+            let empty = try XCTUnwrap(manager.layers[manager.currentLayerIndex].cels[0].vector)
+            XCTAssertTrue(empty.elements.isEmpty && manager.layers[manager.currentLayerIndex].isFillReference,
+                          "PREMISE: the ordinary newly added upper vector layer is an empty selected reference")
+            XCTAssertEqual(try XCTUnwrap(empty.render()?.cgImage).width, 1,
+                           "PREMISE: its exact empty memo is the shared transparent pixel")
+        }
+        let window = window ?? FillWindow.fitting(CGRect(origin: .zero, size: size),
+            in: size, pixelBudget: Int(size.width * size.height))
+        return try XCTUnwrap(CanvasManager.makeFillReference(references: manager.fillReferenceSources(), window: window))
+    }
+
     private func supportPacket(_ strokes: [VectorStroke], side: Int = 96,
                                unknown: [VectorMendSupport.Span] = []) throws -> VectorMendSupport.Packet {
-        try VectorMendSupport.produce(strokes.map { .init(stroke: $0, transform: .identity) },
-                                     unknownCoverage: unknown, width: side, height: side,
-                                     admission: .init(bytes: 64 * 1024 * 1024, work: 64_000_000))
+        let rectangles = unknown.map {
+            CGRect(x: Int($0.start) % side, y: Int($0.start) / side, width: Int($0.count), height: 1)
+        }
+        let reference = try supportReference(strokes, side: side, unknownRects: rectangles)
+        return try VectorMendSupport.produce(reference.support,
+            admission: .init(bytes: 64 * 1024 * 1024, work: 64_000_000))
     }
 
     /// Interpreter of the proposed upload contract. It does not draw a brush or make a width proof.
@@ -1256,9 +1270,34 @@ final class FillMendLogicTests: XCTestCase {
             XCTAssertTrue(ink.indices.allSatisfy { !ink[$0] || covered[$0] },
                           "integral canonical bounds must contain every actual native alpha pixel")
         }
+        let lower = supportStroke([CGPoint(x: 20, y: 20), CGPoint(x: 70, y: 20)])
+        let layered = try supportReference([lower], emptyReferenceAbove: true)
+        let layeredPacket = try VectorMendSupport.produce(layered.support,
+            admission: .init(bytes: 64 * 1024 * 1024, work: 64_000_000))
+        let layeredInk = stride(from: 3, to: layered.rgba.count, by: 4).map { layered.rgba[$0] != 0 }
+        XCTAssertEqual(supportEligible(layeredPacket, ink: layeredInk, source: layeredInk.map { !$0 }), layeredInk,
+                       "an empty selected reference above cannot veto the useful vector below")
         let invisible = supportStroke(points, opacity: 0)
         XCTAssertTrue(try supportPacket([invisible]).canonicalCoverage.isEmpty,
                       "an exactly invisible stroke supplies no obstacle or known-support claim")
+
+        // These use ordinary new-scene/default reference selection and the actual memoized native
+        // image route. White document paper and its logically empty raster tier are not unknown ink.
+        for (size, box) in [(CGSize(width: 2048, height: 1024), CGRect(x: 0, y: 0, width: 2048, height: 1024)),
+                            (CGSize(width: 4096, height: 4096), CGRect(x: 1024, y: 1024, width: 96, height: 96))] {
+            let origin = box.origin
+            let stroke = supportStroke([CGPoint(x: origin.x + 20, y: origin.y + 20),
+                                        CGPoint(x: origin.x + 40, y: origin.y + 35),
+                                        CGPoint(x: origin.x + 70, y: origin.y + 25)])
+            let window = FillWindow.fitting(box, in: size, pixelBudget: Int(box.width * box.height))
+            let reference = try supportReference([stroke], canvasSize: size, window: window)
+            let packet = try VectorMendSupport.produce(reference.support,
+                admission: .init(bytes: 64 * 1024 * 1024, work: 64_000_000))
+            let ink = stride(from: 3, to: reference.rgba.count, by: 4).map { reference.rgba[$0] != 0 }
+            let eligible = supportEligible(packet, ink: ink, source: ink.map { !$0 })
+            XCTAssertTrue(ink.contains(true) && ink.indices.allSatisfy { !ink[$0] || eligible[$0] },
+                "ordinary 2048 full and 4096 localized references must certify their actual curved ink")
+        }
     }
 
     func testCanonicalSupportCertifiesWholeStraightCurvedAndScatteredFreeCaps() throws {
@@ -1352,15 +1391,70 @@ final class FillMendLogicTests: XCTestCase {
         partialRound[internalOpen] = false
         XCTAssertFalse(supportEligible(roundPacket, ink: roundInk, source: partialRound).contains(true),
                        "rectangle-only internal OPEN cells require SOURCE as well as the outer boundary")
-        let input = VectorMendSupport.Input(stroke: stroke, transform: .identity)
+        let reference = try supportReference([stroke]).support
         for admission in [VectorMendSupport.Admission(bytes: 1, work: 64_000_000), .init(bytes: 64 * 1024 * 1024, work: 1)] {
-            XCTAssertThrowsError(try VectorMendSupport.produce([input], unknownCoverage: [], width: 96, height: 96,
-                                                             admission: admission),
+            XCTAssertThrowsError(try VectorMendSupport.produce(reference, admission: admission),
                                  "admission refusal returns no partial accepting certificate")
         }
-        XCTAssertThrowsError(try VectorMendSupport.produce([.init(stroke: stroke, transform: .init(scaleX: 0.5, y: 0.5))],
-            unknownCoverage: [], width: 96, height: 96, admission: .init(bytes: 64 * 1024 * 1024, work: 64_000_000)),
-                             "unproved resampled reference routes are explicit, never an empty drawing")
+        let reduced = FillWindow.fitting(CGRect(x: 0, y: 0, width: 96, height: 96),
+                                         in: CGSize(width: 96, height: 96), pixelBudget: 48 * 48)
+        let resampled = try supportReference([stroke], window: reduced, transform: .init(scaleX: 2, y: 2))
+        let unsupported = try VectorMendSupport.produce(resampled.support,
+            admission: .init(bytes: 64 * 1024 * 1024, work: 64_000_000))
+        XCTAssertTrue(resampled.rgba.contains { $0 != 0 }, "the actual resampled reference still draws")
+        XCTAssertTrue(unsupported.canonicalCoverage.isEmpty,
+                      "opposite image-stage scales cannot forge native support by composing to identity")
+
+        let manager = CanvasManager()
+        manager.canvasSize = CGSize(width: 96, height: 96)
+        manager.addLayer()
+        let raster = manager.layers[0].cels[0].raster
+        let white = UIGraphicsImageRenderer(size: CGSize(width: 96, height: 96),
+            format: PixelOps.transparentFormat()).image { context in
+                UIColor.white.setFill(); context.fill(CGRect(x: 0, y: 0, width: 96, height: 96))
+            }
+        try raster.restore(patch: white, at: .zero).get()
+        XCTAssertTrue(raster.hasContent, "PREMISE: this is genuine opaque raster paint, not the empty tier")
+        manager.addVectorLayer()
+        let vector = try XCTUnwrap(manager.layers[manager.currentLayerIndex].cels[0].vector)
+        vector.restoreElements([.stroke(stroke)], changedInk: nil)
+        let window = FillWindow.fitting(CGRect(x: 0, y: 0, width: 96, height: 96),
+            in: CGSize(width: 96, height: 96), pixelBudget: 96 * 96)
+        let paintedPaper = try XCTUnwrap(CanvasManager.makeFillReference(
+            references: manager.fillReferenceSources(), window: window))
+        let paintedPacket = try VectorMendSupport.produce(paintedPaper.support,
+            admission: .init(bytes: 64 * 1024 * 1024, work: 64_000_000))
+        XCTAssertFalse(supportEligible(paintedPacket, ink: ink, source: ink.map { !$0 }).contains(true),
+                       "an opaque white raster is not an empty-list or pixel-color provenance exemption")
+
+        let multiple = CanvasManager(); multiple.canvasSize = CGSize(width: 96, height: 96)
+        for y in [CGFloat(20), 40, 60] {
+            multiple.addVectorLayer()
+            let canvas = try XCTUnwrap(multiple.layers[multiple.currentLayerIndex].cels[0].vector)
+            canvas.restoreElements([.stroke(supportStroke([CGPoint(x: 20, y: y), CGPoint(x: 70, y: y)]))], changedInk: nil)
+        }
+        let selected = multiple.fillReferenceSources()
+        XCTAssertEqual(selected.count, 3, "PREMISE: the allowance covers one selected list, not each reference independently")
+        let complete = try XCTUnwrap(CanvasManager.makeFillReference(references: selected, window: window))
+        let completePacket = try VectorMendSupport.produce(complete.support,
+            admission: .init(bytes: 64 * 1024 * 1024, work: 64_000_000))
+        XCTAssertFalse(completePacket.canonicalCoverage.isEmpty, "PREMISE: the complete ordinary list is useful")
+        typealias Snapshot = (RasterSource?, RasterSource?, VectorCanvas.Frozen?, LayerKind, UUID)
+        let lists = 96 + 2 * selected.count * (MemoryLayout<Snapshot>.stride + MemoryLayout<VectorCanvas.Frozen>.stride)
+        let remaining = complete.support.retainedBytes / 3
+        let limit = MetalFillSession.predictedBytes(width: 96, height: 96, isLasso: false)
+            + 2 * 96 * 96 + 512 + lists + remaining
+        let priorBudget = CompositorBudget.budgetOverrideBytes
+        defer { CompositorBudget.budgetOverrideBytes = priorBudget }
+        CompositorBudget.budgetOverrideBytes = limit
+        let refused = try XCTUnwrap(CanvasManager.makeFillReference(references: selected, window: window))
+        XCTAssertEqual(refused.rgba, complete.rgba, "support admission cannot make the ordinary reference picture disappear")
+        XCTAssertLessThanOrEqual(refused.support.retainedBytes, remaining,
+                                 "aggregate refusal cannot retain three independently admitted output pairs")
+        let refusedPacket = try VectorMendSupport.produce(refused.support,
+            admission: .init(bytes: 64 * 1024 * 1024, work: 64_000_000))
+        XCTAssertTrue(refusedPacket.canonicalCoverage.isEmpty,
+                      "session/source reservation plus aggregate construction peak is admitted before retaining any accepting support")
     }
 
     func testCanonicalSupportChecksUnknownContributorsInTheExcusedGateHalo() throws {

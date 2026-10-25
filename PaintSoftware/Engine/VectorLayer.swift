@@ -255,6 +255,117 @@ struct StrokeRestWalk {
     var pose: BrushStamper.DabPose
 }
 
+extension VectorMendSupport {
+    /// Minted only beside the actual frozen reference draw, after every image stage is admitted.
+    struct Input {
+        let stroke: VectorStroke
+        let transform: CGAffineTransform
+        fileprivate init(stroke: VectorStroke, transform: CGAffineTransform) {
+            self.stroke = stroke; self.transform = transform
+        }
+    }
+
+    struct Reference {
+        let width: Int, height: Int
+        private let inputs: [Input]
+        private let unknown: [CGRect]
+
+        /// Only the narrow, admitted geometry recipe survives the draw. The frozen canvas's
+        /// memo, source, footprint dictionary and suppression set are not packet owners.
+        var retainedBytes: Int {
+            func array<T>(_ values: [T]) -> Int {
+                values.capacity == 0 ? 0 : UndoBudget.addingCost(32,
+                    UndoBudget.payloadBytes(count: values.capacity, stride: MemoryLayout<T>.stride))
+            }
+            return UndoBudget.addingCost(array(inputs), array(unknown))
+        }
+        private init(width: Int, height: Int, inputs: [Input], unknown: [CGRect]) {
+            self.width = width; self.height = height; self.inputs = inputs; self.unknown = unknown
+        }
+        static func unavailable(width: Int, height: Int) -> Reference {
+            Reference(width: width, height: height, inputs: [],
+                      unknown: [CGRect(x: 0, y: 0, width: width, height: height)])
+        }
+        /// One transient aggregate collector for the actual chosen reference list. Its two arrays
+        /// are admitted before either allocates; no per-reference slices or merge copies survive.
+        struct Builder {
+            private let width: Int, height: Int, maximum: Int
+            private var inputs: [Input] = []
+            private var unknown: [CGRect] = []
+            init(width: Int, height: Int, maximumRecords: Int, admission: Admission) throws(Failure) {
+                self.width = width; self.height = height; maximum = maximumRecords
+                var meter = Meter(admission: admission)
+                try meter.retainArray(Input.self, count: maximumRecords)
+                try meter.retainArray(CGRect.self, count: maximumRecords)
+                try meter.visit(maximumRecords)
+                guard CompositorBudget.hasHeadroom(for: meter.bytes) else { throw .exceedsBudget }
+                inputs.reserveCapacity(maximumRecords); unknown.reserveCapacity(maximumRecords)
+                try meter.checkCapacity(inputs, chargedCount: maximumRecords)
+                try meter.checkCapacity(unknown, chargedCount: maximumRecords)
+            }
+            mutating func appendUnknown(_ rect: CGRect) throws(Failure) {
+                guard unknown.count < maximum else { throw .exceedsBudget }
+                guard rect.minX.isFinite, rect.minY.isFinite,
+                      rect.maxX.isFinite, rect.maxY.isFinite else { throw .invalidWindow }
+                unknown.append(rect)
+            }
+            fileprivate mutating func append(_ canvas: VectorCanvas.Frozen,
+                                              transform: CGAffineTransform?) throws(Failure) {
+                // The exact empty-list fast path is transparent at any pose, even its1×1 memo.
+                guard !canvas.elements.isEmpty else { return }
+                let window = CGRect(x: 0, y: 0, width: width, height: height)
+                guard let transform else { try appendUnknown(window); return }
+                for element in canvas.elements where !canvas.suppressed.contains(element.id) {
+                    let known = canvas.known[element.id].flatMap { bounds -> CGRect? in
+                        let mapped = bounds.applying(transform)
+                        guard mapped.minX.isFinite, mapped.minY.isFinite,
+                              mapped.maxX.isFinite, mapped.maxY.isFinite else { return nil }
+                        return mapped.integral
+                    }
+                    if let known, !known.intersects(window) { continue }
+                    if case .stroke(let stroke) = element {
+                        if stroke.opacity > 0 {
+                            guard inputs.count < maximum else { throw .exceedsBudget }
+                            inputs.append(Input(stroke: stroke, transform: transform))
+                        }
+                    } else { try appendUnknown(known ?? window) }
+                }
+            }
+            func finish() -> Reference {
+                Reference(width: width, height: height, inputs: inputs, unknown: unknown)
+            }
+        }
+        func resolve(meter: inout Meter) throws(Failure) -> ([Input], [Span]) {
+            let window = CGRect(x: 0, y: 0, width: width, height: height)
+            var rows = 0
+            for rect in unknown {
+                try meter.visit(1)
+                guard rect.minX.isFinite, rect.minY.isFinite,
+                      rect.maxX.isFinite, rect.maxY.isFinite else { throw .invalidWindow }
+                let clipped = rect.integral.intersection(window)
+                if !clipped.isNull && !clipped.isEmpty {
+                    let (total, overflow) = rows.addingReportingOverflow(Int(clipped.height))
+                    guard !overflow else { throw .exceedsBudget }
+                    rows = total
+                }
+            }
+            try meter.retainArray(Span.self, count: rows)
+            try meter.visit(rows)
+            var spans: [Span] = []; spans.reserveCapacity(rows)
+            for rect in unknown {
+                let clipped = rect.integral.intersection(window)
+                guard !clipped.isNull, !clipped.isEmpty else { continue }
+                for y in Int(clipped.minY)..<Int(clipped.maxY) {
+                    spans.append(Span(start: UInt32(y * width + Int(clipped.minX)), count: UInt32(clipped.width)))
+                }
+            }
+            try meter.checkCapacity(spans, chargedCount: rows)
+            return (inputs, spans)
+        }
+
+    }
+}
+
 /// One resolved native walk for rendering and derived current-reference geometry. This is a
 /// transient recipe: no stroke fields or persistence change, and no second sample/lattice selection.
 struct VectorStrokeRenderWalk {
@@ -6084,6 +6195,45 @@ final class VectorCanvas {
             return walked.dabCount
         }
 
+        /// Draw the exact ordinary image route or saved-fill direct route, and mint support only
+        /// after inspecting their actual stages. No composed affine can certify a resampled image.
+        var fillReferenceRecordCount: Int { elements.count }
+
+        func drawFillReference(into cg: CGContext, frameRect: CGRect, width: Int, height: Int,
+                               excludingElement: UUID?, support: inout VectorMendSupport.Reference.Builder?) -> Frozen? {
+            let snapshot: Frozen
+            if let excludingElement {
+                let retained = elements.filter { $0.id != excludingElement }
+                snapshot = replacingDisplayElements(retained, rewriting: [excludingElement],
+                    referenceIDs: Set(retained.lazy.filter(\.isReference).map(\.id)))
+            } else { snapshot = self }
+            let ctm = cg.ctm
+            let nativeContext = cg.width == width && cg.height == height
+                && ctm.a == 1 && ctm.b == 0 && ctm.c == 0 && ctm.d == -1
+                && ctm.tx == 0 && ctm.ty == CGFloat(height)
+                && cg.boundingBoxOfClipPath == CGRect(x: 0, y: 0, width: width, height: height)
+            var native = nativeContext && size.width > 0 && size.height > 0
+                && size.width.rounded() == size.width && size.height.rounded() == size.height
+                && frameRect.size == size && frameRect.minX.rounded() == frameRect.minX
+                && frameRect.minY.rounded() == frameRect.minY && transform.isIdentity
+            if excludingElement != nil {
+                guard snapshot.draw(into: cg, frameRect: frameRect, quality: .full) != nil else { return nil }
+            } else {
+                guard let image = snapshot.render(quality: .full), let pixels = image.cgImage else { return nil }
+                native = native && image.scale == 1 && image.imageOrientation == .up && image.size == size
+                    && pixels.width == Int(size.width) && pixels.height == Int(size.height)
+                image.draw(in: frameRect)
+            }
+            let mapping = native ? CGAffineTransform(translationX: frameRect.minX, y: frameRect.minY) : nil
+            do throws(VectorMendSupport.Failure) { try support?.append(snapshot, transform: mapping) }
+            catch { support = nil } // A refused certificate never discards the ordinary reference picture.
+            return snapshot
+        }
+
+        func appendFillWalls(to strokes: inout [(path: CGPath, colour: UIColor)]) {
+            StrokeWallMask.appendWalls(elements: elements, suppressed: suppressed, transform: transform, to: &strokes)
+        }
+
         /// How many raster pixels per canvas point a buffer of `destination` points can show. Not
         /// clamped — the caller above is the one place that decides a request may only ask for less.
         ///
@@ -6139,6 +6289,18 @@ final class VectorCanvas {
         return Frozen(source: nil, version: version, memoized: nil,
                       size: size, elements: _elements.withoutReference, transform: _transform,
                       suppressed: _suppressedElementIDs, known: paintedBounds)
+    }
+
+    /// Fill references are display values (including a captured stream frame). Reuse the ordinary
+    /// memo only when no stream frame must be frozen; saved-fill exclusion happens on this value.
+    func freezeFillReference() -> Frozen {
+        lock.lock(); defer { lock.unlock() }
+        let frozen = Frozen(source: holdsStreamLocked ? nil : self, version: version,
+                            memoized: holdsStreamLocked ? nil : cachedImage, size: size, elements: _elements,
+                            transform: _transform, suppressed: _suppressedElementIDs, known: paintedBounds)
+        guard holdsStreamLocked else { return frozen }
+        return frozen.replacingDisplayElements(_elements, rewriting: [],
+            referenceIDs: Set(_elements.lazy.filter(\.isReference).map(\.id)))
     }
 
     /// The live display's explicit exception to reference-free freezing. Each stream frame is

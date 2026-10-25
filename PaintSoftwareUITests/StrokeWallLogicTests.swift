@@ -142,7 +142,7 @@ final class StrokeWallLogicTests: XCTestCase {
     }
 
     private func wallMask(_ canvases: [VectorCanvas]) -> [UInt8]? {
-        StrokeWallMask.mask(of: canvases, width: Self.side, height: Self.side)
+        StrokeWallMask.mask(of: canvases.map { $0.freezeFillReference() }, width: Self.side, height: Self.side)
     }
 
     // MARK: - The ask
@@ -493,13 +493,17 @@ final class StrokeWallLogicTests: XCTestCase {
         let references = manager.layers.indices.map { (layer: manager.layers[$0],
                                                        cel: manager.layers[$0].cels[0]) }
 
-        let sources = CanvasManager.pathWallSources(references)
-
+        let window = FillWindow.fitting(CGRect(origin: .zero, size: size), in: size,
+                                        pixelBudget: Int(size.width * size.height))
+        let actual = CanvasManager.makeFillReference(references: references, window: window)?.pathWall(in: window)
+        let vectorOnly = CanvasManager.makeFillReference(references: references.filter { $0.layer.kind == .vector },
+                                                        window: window)?.pathWall(in: window)
+        let rasterOnly = CanvasManager.makeFillReference(references: references.filter { $0.layer.kind == .raster },
+                                                        window: window)?.pathWall(in: window)
         XCTAssertEqual(manager.layers.count, 2, "premise: one vector layer and one raster layer")
-        XCTAssertEqual(sources.count, 1,
-                       "only the vector layer's display list walls, though both cels carry one")
-        XCTAssertTrue(sources[0] === manager.layers.first(where: { $0.kind == .vector })?.cels[0].vector,
-                      "and it is the vector layer's")
+        XCTAssertNotNil(vectorOnly, "the real vector-reference factory draws a path wall")
+        XCTAssertEqual(actual, vectorOnly, "only the vector layer walls, though both cels carry display lists")
+        XCTAssertNil(rasterOnly, "a raster layer's display list contributes no synthetic path wall")
     }
 
     /// **The wiring, which no other test in this file can see** — the coverage gap
@@ -558,11 +562,12 @@ final class StrokeWallLogicTests: XCTestCase {
                                                            brush: solidBrush()))
         manager.layers[0].fillReferenceOverride = false
 
-        // The production expression, verbatim — `beginInteractiveFill` computes exactly this.
-        XCTAssertTrue(CanvasManager.pathWallSources(manager.fillReferenceSources()).isEmpty,
-                      "a layer excluded from the reference set is excluded from the wall set")
+        let window = FillWindow.fitting(CGRect(origin: .zero, size: size), in: size,
+                                        pixelBudget: Int(size.width * size.height))
+        XCTAssertNil(CanvasManager.makeFillReference(references: manager.fillReferenceSources(), window: window)?.pathWall(in: window),
+                     "a layer excluded from the actual reference factory contributes no wall")
         manager.layers[0].fillReferenceOverride = true
-        XCTAssertEqual(CanvasManager.pathWallSources(manager.fillReferenceSources()).count, 1,
-                       "and included when it is included")
+        XCTAssertNotNil(CanvasManager.makeFillReference(references: manager.fillReferenceSources(), window: window)?.pathWall(in: window),
+                        "the same layer contributes its actual wall when selected")
     }
 }

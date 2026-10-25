@@ -46,6 +46,9 @@ static inline float colourDistance(float4 a, float4 b) {
 }
 
 // MARK: - Walls
+constant uchar kPhysicalWall = 1;
+constant uchar kSyntheticPathWall = 2;
+
 
 // A pixel is a wall when its colour differs from the seed colour by more than `threshold`. This is
 // what makes the fill stop at colour borders (and recolour a flat-filled region: its interior is
@@ -84,7 +87,8 @@ kernel void computeWalls(const device uchar4* reference [[buffer(0)]],
     float4 c = colourFromRGBA8(reference[i]);
     float4 p = colourFromRGBA8(pathWall[i]);
     bool pathIsWall = p.w > 0.0 && colourDistance(p, params.seedColor) > params.threshold;
-    wall[i] = (pathIsWall || colourDistance(c, params.seedColor) > params.threshold) ? 1 : 0;
+    wall[i] = (colourDistance(c, params.seedColor) > params.threshold ? kPhysicalWall : uchar(0))
+        | (pathIsWall ? kSyntheticPathWall : uchar(0));
 }
 
 // MARK: - Exact separable Euclidean distance transform
@@ -97,7 +101,8 @@ static inline bool edtTarget(uint x, uint y, const device uchar* wall,
                              const device uchar* wall2, constant FillParams& params,
                              uint refCount, uint targetsInk) {
     uint i = pixelIndex(x, y, params.width);
-    bool ink = wall[i] != 0 && (refCount < 2u || wall2[i] != 0);
+    uint mask = targetsInk == 0u ? uint(kPhysicalWall) : uint(kPhysicalWall | kSyntheticPathWall);
+    bool ink = (wall[i] & mask) != 0 && (refCount < 2u || (wall2[i] & mask) != 0);
     if (targetsInk != 0u) return ink;
     // Keep exterior paper as a nearest-open witness: it vetoes a proposed normal that could cross
     // the artwork edge. The buffer rim itself is unknown; mendGap protects candidates near it.
@@ -527,10 +532,10 @@ kernel void paintRegionAlpha(const device uchar* alpha  [[buffer(0)]],
 // MARK: - Mending internal gaps and fill-to-fill seams (TODO (113))
 //
 // Two proofs share this output mask. The original axis walk below grows only ink that joins this
-// fill to a neighbouring painted region. The internal branch proves a real source-to-source ink
-// crossing, then requires its full raw width to be smaller than the ink distance to unowned paper,
-// a fence, artwork edge, unresolved rim or neighbour. The current source cut owns this distance;
-// covered paint never substitutes for geometry. Nearest contacts retain their ownership vetoes.
+// fill to a neighbouring painted region. The internal branch requires canonical vector support
+// certified against every current physical OPEN/SOURCE contact and contributor, then a real
+// source-to-source crossing within the uncovered-gap Reach. The source-owned stencil protects
+// uncertain joins and contours; covered paint never substitutes for either geometric proof.
 //
 // **The seam, and why it exists at all.** A flood stops at the antialiased edge of the line it meets,
 // on whichever side it started. Two fills either side of one line therefore each stop at their own
@@ -565,77 +570,70 @@ static inline bool mendIsInk(uint i, const device uchar* wall, const device ucha
     return wall[i] != 0 && (refCount < 2u || wall2[i] != 0);
 }
 
+static inline bool mendIsPhysicalInk(uint i, const device uchar* wall,
+                                     const device uchar* wall2, uint refCount) {
+    return (wall[i] & kPhysicalWall) != 0 && (refCount < 2u || (wall2[i] & kPhysicalWall) != 0);
+}
+
 static inline bool mendIsOpen(uint2 point, const device uchar* wall, const device uchar* wall2,
                               constant FillParams& params, uint refCount) {
     if (point.x >= params.width || point.y >= params.height || point.x == 0u || point.y == 0u
         || point.x + 1u >= params.width || point.y + 1u >= params.height) return false;
     uint i = pixelIndex(point.x, point.y, params.width);
-    return !mendIsInk(i, wall, wall2, refCount);
+    return !mendIsPhysicalInk(i, wall, wall2, refCount);
 }
 
-// The current source cut owns open paper; unowned paper and invalid cells are danger0.
-// Owned open paper is255, a barrier. Valid original ink starts beyond the finite distance bound.
-// Workspace firstN remains the public mend mask; the two byte planes use N..2N and2N..3N.
-kernel void mendDistanceSeed(const device uchar* source [[buffer(0)]],
-                             const device uchar* neighbour [[buffer(1)]],
-                             const device uchar* wall [[buffer(2)]],
-                             const device uchar* wall2 [[buffer(3)]],
-                             const device uchar* fence [[buffer(4)]],
-                             device uchar* workspace [[buffer(5)]],
-                             constant FillParams& params [[buffer(6)]],
-                             constant uint& refCount [[buffer(7)]],
-                             constant uint& hasFence [[buffer(8)]],
-                             constant uint& distanceLimit [[buffer(9)]],
-                             uint2 gid [[thread_position_in_grid]]) {
-    if (gid.x >= params.width || gid.y >= params.height) return;
-    uint i = pixelIndex(gid.x, gid.y, params.width);
-    uchar value;
-    if (gid.x == 0u || gid.y == 0u || gid.x + 1u == params.width || gid.y + 1u == params.height
-        || neighbour[i] != 0 || (hasFence != 0u && fence[i] == 0)) {
-        value = 0;
-    } else if (!mendIsInk(i, wall, wall2, refCount)) {
-        value = source[i] != 0 ? uchar(255) : uchar(0);
-    } else {
-        value = uchar(distanceLimit + 1u);
-        bool onPaper = insideArtworkRect(gid.x, gid.y, params);
-        // Membership is a barrier between cells, not a traversable danger pixel. Both sides
-        // start at distance1 from it; subsequent waves may not cross that barrier.
-        for (int dy = -1; dy <= 1; dy++) {
-            for (int dx = -1; dx <= 1; dx++) {
-                uint2 q = uint2(int2(gid) + int2(dx, dy));
-                if (insideArtworkRect(q.x, q.y, params) != onPaper) value = 1;
-            }
-        }
-    }
-    workspace[params.width * params.height + i] = value;
-}
+struct MendSupportPatch { uint contactStart, contactCount, spanStart, spanCount, unknown; };
+struct MendSupportRow { uint start, count; };
 
-kernel void mendDistanceStep(device uchar* workspace [[buffer(0)]],
+// The nearest-feature workspace is dead before this dispatch. Its first N bytes remain the public
+// mend output; the aligned upper4N bytes are the one known/protected stencil, with no extra buffer.
+kernel void mendSupportClear(device uchar* workspace [[buffer(0)]],
                              constant FillParams& params [[buffer(1)]],
-                             constant uint& inputOffset [[buffer(2)]],
-                             constant uint& outputOffset [[buffer(3)]],
-                             constant uint& distanceLimit [[buffer(4)]],
                              uint2 gid [[thread_position_in_grid]]) {
     if (gid.x >= params.width || gid.y >= params.height) return;
-    uint i = pixelIndex(gid.x, gid.y, params.width);
-    uchar value = workspace[inputOffset + i];
-    // Fixed danger and owned-open barriers never become propagation paths of another kind.
-    if (value != 0 && value != 255) {
-        uint best = uint(value);
-        bool onPaper = insideArtworkRect(gid.x, gid.y, params);
-        for (int dy = -1; dy <= 1; dy++) {
-            for (int dx = -1; dx <= 1; dx++) {
-                if (dx == 0 && dy == 0) continue;
-                int2 q = int2(gid) + int2(dx, dy);
-                if (q.x < 0 || q.y < 0 || q.x >= int(params.width) || q.y >= int(params.height)) continue;
-                if (insideArtworkRect(uint(q.x), uint(q.y), params) != onPaper) continue;
-                uint other = uint(workspace[inputOffset + pixelIndex(uint(q.x), uint(q.y), params.width)]);
-                best = min(best, min(distanceLimit + 1u, other + 1u));
-            }
+    device atomic_uint* stencil = (device atomic_uint*)(workspace + 4u * params.width * params.height);
+    atomic_store_explicit(stencil + pixelIndex(gid.x, gid.y, params.width), 0u, memory_order_relaxed);
+}
+
+kernel void mendSupportClassify(const device MendSupportPatch* patches [[buffer(0)]],
+                                const device MendSupportRow* contacts [[buffer(1)]],
+                                const device MendSupportRow* spans [[buffer(2)]],
+                                const device uchar* source [[buffer(3)]],
+                                const device uchar* wall [[buffer(4)]],
+                                const device uchar* wall2 [[buffer(5)]],
+                                const device uchar* neighbour [[buffer(6)]],
+                                const device uchar* fence [[buffer(7)]],
+                                device uchar* workspace [[buffer(8)]],
+                                constant FillParams& params [[buffer(9)]],
+                                constant uint& refCount [[buffer(10)]],
+                                constant uint& hasFence [[buffer(11)]],
+                                constant uint& patchCount [[buffer(12)]],
+                                uint2 gid [[thread_position_in_grid]]) {
+    if (gid.y != 0u || gid.x >= patchCount) return;
+    MendSupportPatch patch = patches[gid.x];
+    bool unsafe = patch.unknown != 0u;
+    for (uint r = 0; r < patch.contactCount && !unsafe; r++) {
+        MendSupportRow row = contacts[patch.contactStart + r];
+        bool requiresOpen = (row.start & 0x80000000u) != 0u;
+        uint start = row.start & 0x7fffffffu;
+        for (uint i = start; i < start + row.count; i++) {
+            uint x = i % params.width, y = i / params.width;
+            bool ink = mendIsPhysicalInk(i, wall, wall2, refCount);
+            bool owned = source[i] != 0;
+            if (x == 0u || y == 0u || x + 1u == params.width || y + 1u == params.height
+                || !insideArtworkRect(x, y, params) || neighbour[i] != 0
+                || (hasFence != 0u && fence[i] == 0)
+                || (requiresOpen ? (ink || !owned) : (!ink && !owned))) { unsafe = true; break; }
         }
-        value = uchar(best);
     }
-    workspace[outputOffset + i] = value;
+    device atomic_uint* stencil = (device atomic_uint*)(workspace + 4u * params.width * params.height);
+    uint bits = unsafe ? 3u : 1u;
+    for (uint r = 0; r < patch.spanCount; r++) {
+        MendSupportRow row = spans[patch.spanStart + r];
+        for (uint i = row.start; i < row.start + row.count; i++)
+            atomic_fetch_or_explicit(stencil + i, bits, memory_order_relaxed);
+    }
 }
 
 // Follow a rounded digital normal in both directions. Sampling each major-axis pixel makes this
@@ -658,7 +656,7 @@ static inline bool mendRaySideAllows(int2 sample, uint2 origin,
     if (openEnd && (point.x == 0u || point.y == 0u
         || point.x + 1u >= params.width || point.y + 1u >= params.height)) return false;
     return neighbour[index] == 0 && (hasFence == 0u || fence[index] != 0)
-        && (mendIsInk(index, wall, wall2, refCount)
+        && (mendIsPhysicalInk(index, wall, wall2, refCount)
             || (openEnd && mendIsOpen(point, wall, wall2, params, refCount) && source[index] != 0));
 }
 
@@ -667,8 +665,7 @@ static inline bool mendNormalConnects(uint2 point, int2 offset,
                                       const device uchar* neighbour,
                                       const device uchar* wall, const device uchar* wall2,
                                       const device uchar* fence, constant FillParams& params,
-                                      uint refCount, uint hasFence, float reach, float proofSpan,
-                                      uchar unsafeDistance, uint distanceLimit) {
+                                      uint refCount, uint hasFence, float reach, float proofSpan) {
     int2 direction = offset;
     int major = max(abs(direction.x), abs(direction.y));
     int proofSteps = int(ceil(proofSpan));
@@ -695,7 +692,7 @@ static inline bool mendNormalConnects(uint2 point, int2 offset,
         if (sample.x < 0 || sample.y < 0 || sample.x >= int(params.width) || sample.y >= int(params.height)) return false;
         uint index = pixelIndex(uint(sample.x), uint(sample.y), params.width);
         if (insideArtworkRect(uint(sample.x), uint(sample.y), params) != insideArtworkRect(point.x, point.y, params)
-            || (hasFence != 0u && fence[index] == 0) || !mendIsInk(index, wall, wall2, refCount)
+            || (hasFence != 0u && fence[index] == 0) || !mendIsPhysicalInk(index, wall, wall2, refCount)
             || neighbour[index] != 0) return false;
         if (nearPainted < 0.0f && painted[index] != 0) nearPainted = nearLength;
         previous = sample;
@@ -741,15 +738,11 @@ static inline bool mendNormalConnects(uint2 point, int2 offset,
             farPainted = travelled;
             farPaintedStep = stepLength;
         }
-        if (mendIsInk(index, wall, wall2, refCount)) { previous = sample; continue; }
+        if (mendIsPhysicalInk(index, wall, wall2, refCount)) { previous = sample; continue; }
         // Geometry is proved open-to-open, but Reach counts only the gap left by Edge Overlap.
         // First painted hits end that interval; subtract the far paint-entry step, just as the
         // neighboring-fill branch counts `a + b - 1`. Never stop the geometry proof at covered ink.
-        float rawWidth = nearLength + travelled - stepLength;
-        // The distance is exact through original ink up to distanceLimit, with a lower-bound
-        // sentinel beyond it. Never use covered paint as the geometry or ownership proof.
         return mendIsOpen(farPoint, wall, wall2, params, refCount) && source[index] != 0
-            && rawWidth <= float(distanceLimit) && float(unsafeDistance) > rawWidth
             && farPainted >= 0.0f && nearPainted + farPainted - farPaintedStep <= reach;
     }
     return false;
@@ -763,7 +756,7 @@ static inline int2 mendAxisOpenOffset(uint2 point, int2 axis,
     for (int k = 1; k <= limit; k++) {
         int2 q = int2(point) + axis * k;
         if (q.x <= 0 || q.y <= 0 || q.x + 1 >= int(params.width) || q.y + 1 >= int(params.height)) return int2(0);
-        if (!mendIsInk(pixelIndex(uint(q.x), uint(q.y), params.width), wall, wall2, refCount)) return axis * k;
+        if (!mendIsPhysicalInk(pixelIndex(uint(q.x), uint(q.y), params.width), wall, wall2, refCount)) return axis * k;
     }
     return int2(0);
 }
@@ -794,24 +787,19 @@ static inline uint2 mendRun(uint2 from, int dx, int dy, int limit, bool onPaper,
 // Writes 255 where the pixel is to be mended and 0 everywhere else, into a buffer of its own: the walks
 // read `painted` at every other pixel, so mending in place would make each answer depend on which
 // thread had run first. `unionMask` folds the result in. `reach` is in pixels.
-kernel void mendGap(const device uchar* painted   [[buffer(0)]],
-                    const device uchar* source    [[buffer(1)]],
+kernel void mendGap(const device uchar* painted [[buffer(0)]],
+                    const device uchar* source [[buffer(1)]],
                     const device uchar* neighbour [[buffer(2)]],
-                    const device uchar* wall      [[buffer(3)]],
-                    const device uchar* wall2     [[buffer(4)]],
+                    const device uchar* wall [[buffer(3)]],
+                    const device uchar* wall2 [[buffer(4)]],
                     const device int2* nearestOpen [[buffer(5)]],
-                    const device ushort2* circleRanges [[buffer(6)]],
-                    const device short2* circleOffsets [[buffer(7)]],
-                    device uchar*       mended    [[buffer(8)]],
-                    constant FillParams& params   [[buffer(9)]],
-                    constant float&      reach    [[buffer(10)]],
-                    constant uint&       refCount [[buffer(11)]],
-                    const device uchar* fence     [[buffer(12)]],
-                    constant uint&       hasFence [[buffer(13)]],
-                    constant float&      proofSpan [[buffer(14)]],
-                    constant uint&       circleRangeCount [[buffer(15)]],
-                    constant uint&       distanceOffset [[buffer(16)]],
-                    constant uint&       distanceLimit [[buffer(17)]],
+                    device uchar* mended [[buffer(6)]],
+                    constant FillParams& params [[buffer(7)]],
+                    constant float& reach [[buffer(8)]],
+                    constant uint& refCount [[buffer(9)]],
+                    const device uchar* fence [[buffer(10)]],
+                    constant uint& hasFence [[buffer(11)]],
+                    constant float& proofSpan [[buffer(12)]],
                     uint2 gid [[thread_position_in_grid]]) {
     if (gid.x >= params.width || gid.y >= params.height) return;
     uint i = pixelIndex(gid.x, gid.y, params.width);
@@ -835,42 +823,21 @@ kernel void mendGap(const device uchar* painted   [[buffer(0)]],
     // Lasso `painted` may already be eroded relative to `source`; do not restore a source pixel the
     // artist's Edge Overlap deliberately pulled back through the internal-gap branch.
     if (source[i] != 0) return;
+    const device uint* stencil = (const device uint*)(mended + 4u * params.width * params.height);
+    if (!mendIsPhysicalInk(i, wall, wall2, refCount) || stencil[i] != 1u) return;
     int2 nearest = nearestOpen[i];
-    if (nearest.x < 0 || nearest.y < 0) return;
-    int2 delta = nearest - int2(gid);
-    uint d2 = uint(delta.x * delta.x + delta.y * delta.y);
-    float diameter = proofSpan + 1.0f;
-    if (d2 == 0u || d2 >= circleRangeCount || 4.0f * float(d2) > diameter * diameter) return;
-    // Rim sites are deliberately absent from the open-feature map. If an omitted rim or outside
-    // site could be nearer or tied, the normal is unresolved. Farther rims cannot change its ties;
-    // the actual ray bounds still reject a proof that later reaches the edge of this window.
-    uint rim = min(min(gid.x, gid.y), min(params.width - 1u - gid.x, params.height - 1u - gid.y));
-    if (rim * rim <= d2) return;
-    ushort2 range = circleRanges[d2];
-    if (range.y == 0u) return;
-    uchar unsafeDistance = mended[distanceOffset + i];
-    bool connects = false;
-    for (uint k = 0; k < uint(range.y); k++) {
-        short2 offset = circleOffsets[uint(range.x) + k];
-        uint2 openPoint = uint2(int(gid.x) + int(offset.x), int(gid.y) + int(offset.y));
-        if (!mendIsOpen(openPoint, wall, wall2, params, refCount)) continue;
-        uint openIndex = pixelIndex(openPoint.x, openPoint.y, params.width);
-        // Every tied nearest contact retains its actual ownership veto, even after one
-        // geometric crossing succeeded. Exhaustion of another direction is not a veto.
-        if (insideArtworkRect(openPoint.x, openPoint.y, params) != onPaper
-            || source[openIndex] == 0 || neighbour[openIndex] != 0
-            || (hasFence != 0u && fence[openIndex] == 0)) return;
-        if (!connects) connects = mendNormalConnects(gid, int2(offset), painted, source, neighbour, wall, wall2,
-                                fence, params, refCount, hasFence, reach, proofSpan, unsafeDistance, distanceLimit);
+    if (nearest.x >= 0 && nearest.y >= 0
+        && mendNormalConnects(gid, nearest - int2(gid), painted, source, neighbour, wall, wall2,
+                              fence, params, refCount, hasFence, reach, proofSpan)) {
+        mended[i] = 255; return;
     }
-    if (connects) { mended[i] = 255; return; }
-    // The same four axes used by the seam can find transverse cap crossings. Try both
+    // The same four axes used by the seam find real transverse cap crossings. Try both
     // orientations because the existing near supercover is intentionally stricter than far open.
     for (int a = 0; a < 4; a++) {
         for (int sign = -1; sign <= 1; sign += 2) {
             int2 offset = mendAxisOpenOffset(gid, axes[a] * sign, wall, wall2, params, refCount, int(ceil(proofSpan)));
             if (any(offset != int2(0)) && mendNormalConnects(gid, offset, painted, source, neighbour, wall, wall2,
-                                fence, params, refCount, hasFence, reach, proofSpan, unsafeDistance, distanceLimit)) {
+                                fence, params, refCount, hasFence, reach, proofSpan)) {
                 mended[i] = 255;
                 return;
             }

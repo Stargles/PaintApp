@@ -245,18 +245,28 @@ do not infer a covered edge. A short ambiguous patch may remain at the join whil
 is mended. The original lasso fence, artwork boundary and unresolved window rim constrain this new
 same-fill behavior. Only the existing neighboring-fill corridor may extend outside the lasso fence.
 
-**Current candidate is under qualification and fails existing circular-outline protection.**
-The proposed same-fill ownership proof uses unit eight-neighbor distance **through original reference ink**
-from current unfilled open paper, fences, artwork edges, unknown window rims and neighboring paint.
-Owned open paper blocks that travel. A genuine source-to-source crossing must fit Mend Reach after
-Edge Overlap, and its full original ink width must be smaller than that danger distance. Keep all
-nearest-contact ownership vetoes and the ray's actual endpoint/supercover checks. Existing nearest
-normal directions and the four seam axes share one crossing proof; there is no stroke-head classifier
-or historical stroke inference. This deliberately protects additional ink at uncertain nearby joins.
-A bounded byte transform uses the existing scratch allocation, with synchronous ping-pong waves for
-the current source cut. The distance bound includes diagonal walk length; its saturated value means
-only “farther than the bound,” never infinity. This temporary source-dependent work is recomputed
-for enabled mending; it adds no retained geometry cache. Real-time cost remains a qualification gate.
+**The replacement is under qualification.** Interior mending uses the current editable vector
+reference, captured from the same frozen display list and image stages that supply the fill's pixels.
+The canonical brush walk supplies conservative primitive clip bounds; it does not supply a second
+brush renderer or infer a hidden outline. Each local regular support patch checks all contributors,
+including buried and nonlocal contributors, and all physical OPEN contacts against this fill's SOURCE.
+An unsupported contributor, uncertain join, unowned paper contact, fence, artwork edge or unresolved
+rim protects the whole contributing target footprint. True free caps have no artificial continuation
+gate. Exact whole-trace forward/reverse retraces may share regular support; unrelated overlapping
+paths cannot borrow one another's outline role.
+
+One session owns the resulting geometry packet. A known/protected stencil is classified from actual
+physical ink and the current SOURCE, in the existing feature workspace; synthetic centerline walls
+are not physical ink. Its completed source key is reused across Reach, Edge Overlap and color changes,
+and invalidated before any shared source, neighbor or workspace rewrite. After that gate, one actual
+source-to-source crossing must fit Mend Reach across the uncovered gap left by Edge Overlap. Existing
+nearest-open directions and the four seam axes share the same endpoint/supercover crossing helper.
+The neighboring-fill seam remains separate and unchanged.
+
+Native 1:1 reference stages are admitted individually. A raster, object or unsupported resampled
+reference supplies no new interior acceptance, while ordinary fill and the neighboring seam remain
+available. Whole-4096 resampling containment and same-budget packet admission remain required open
+engineering gates; this conservative interim state is not a claim that all artwork scales are done.
 
 Filling must retain quick, real-time feedback. Prepare reference geometry once per structural change
 and reuse it for Gap Closing, Edge Overlap, Mend Reach and color changes. The exact nearest-open

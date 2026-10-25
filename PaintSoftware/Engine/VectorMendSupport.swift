@@ -1,25 +1,18 @@
 import CoreGraphics
 import UIKit
 
-/// Current-window support for vector mending. This isolated producer is not connected to the
-/// live mend path. It records the canonical renderer's primitive clip bounds, never brush math.
+/// Current-window support for vector mending. It records the canonical renderer's primitive clip
+/// bounds, never brush math; physical ink and current SOURCE are classified by the fill session.
 enum VectorMendSupport {
     enum Failure: Error, Equatable {
         case invalidWindow
         case exceedsBudget
         case exceedsWork
-        case unsupportedReferenceRoute
     }
 
     struct Admission {
         let bytes: Int
         let work: Int
-    }
-
-    struct Input {
-        let stroke: VectorStroke
-        /// Cel coordinates to this working window; the renderer applies this same affine.
-        let transform: CGAffineTransform
     }
 
     struct Span: Equatable {
@@ -260,7 +253,7 @@ enum VectorMendSupport {
         }
     }
 
-    private struct Meter {
+    struct Meter {
         let admission: Admission
         var bytes = 0
         var work = 0
@@ -634,24 +627,13 @@ enum VectorMendSupport {
     /// Canonical integral bounds are potential-support supersets, not a second alpha renderer.
     /// Complete contributor/contact checks can only protect extra ink; final physical INK prevents
     /// rectangle-only paper or synthetic path walls from becoming painted eligibility.
-    static func produce(_ inputs: [Input], unknownCoverage: [Span], width: Int, height: Int,
-                        admission: Admission) throws(Failure) -> Packet {
+    static func produce(_ reference: Reference, admission: Admission) throws(Failure) -> Packet {
+        let width = reference.width, height = reference.height
         let (count, overflow) = width.multipliedReportingOverflow(by: height)
         guard width > 0, height > 0, !overflow, count < Int(Contact.openBit),
               width <= 16_383, height <= 16_383 else { throw .invalidWindow }
-        // Native identity/integer-translation windows only. General live bitmap resampling has no
-        // proved dab-bound containment and must not silently reuse this certificate.
-        guard inputs.allSatisfy({ input in
-            let t = input.transform
-            return t.a == 1 && t.b == 0 && t.c == 0 && t.d == 1
-                && t.tx.isFinite && t.ty.isFinite && t.tx.rounded() == t.tx && t.ty.rounded() == t.ty
-        }) else { throw .unsupportedReferenceRoute }
-        guard unknownCoverage.allSatisfy({ span in
-            let end = UInt64(span.start) + UInt64(span.count)
-            return span.count > 0 && end <= UInt64(count)
-                && Int(span.start) / width == (Int(end) - 1) / width
-        }) else { throw .invalidWindow }
         var meter = Meter(admission: admission)
+        let (inputs, unknownCoverage) = try reference.resolve(meter: &meter)
         try meter.retainArray(UInt8.self, count: count)
         // These growing containers pay one header/rounding allowance now; every later append
         // retains its existing doubled payload charge before growth.

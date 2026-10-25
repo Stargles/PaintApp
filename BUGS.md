@@ -27,7 +27,9 @@ The deliberately eager-load control stalled and remains inconclusive; no fixed d
 or iPad respring cause is proved. Root accepted a finite weak ordered pass shared by admit and
 prepareMutation, retaining accounting/reserve/refusal semantics and live registrations. Source-only
 correctiona52857a6 is independently reviewed and harvested, with5new controls and original32method
-bodies exact. Fresh normal430/faults8/performance remain unrun. Evidence:
+bodies exact. Normal430 passed430/430; all8 faults qualify at16 distinct statements. The exact four
+Release ABBA candidate-ordering trials also passed and root recomputed all raw medians; PERFORMANCE.md
+states the synthetic scope. Final-source fast/UI/device gates remain open. Evidence:
 `s54-final-qualification/raster-admission-case28-readonly/report.md`.
 
 ## Media reads produce runtime priority-inversion warnings — 2026-10-25
@@ -49,8 +51,10 @@ Actualwhole20 at32185179 passed18/failed2: original400mask cardinal4 and product
 cardinal4 grow. Source728exact/clean, freshMetalcompile/link, root independentlyrereadactualissues.
 Rawthrough-ink dangerD2/4 exceeds a true onepixel tangent crossingW1, soV1'slocal safetyguard is
 insufficient. Caps/square/notch/diagonalcontrols reportnoissues; thisdoesnotqualifythefeature.
-Preserve actualcircle/400/448oracles; no shapeexception ormagicmargin. Sharedruleassessment continues
-with freshindependentreviewer; typedunsafe/BODY/diskunion counterexamples recordedbeforefurthercode.
+Preserve actualcircle/400/448oracles; no shapeexception ormagicmargin. The reviewed f75a900c
+replacement removes the failed distance/circle ownership path whole and shares actual frozen vector
+support with the real reference draw. Canonical support7 passed at b849; new live71/compiler/GPU/UI
+qualification and required whole4096 extension remain unrun. Source review is not a runtime fix claim.
 Evidence: s54-final-qualification/native/geodesic-logic20-32185179-run01/root-independent-acceptance.json.
 
 ## FillMend ON cold setup taps a moving opacity control — 2026-10-24

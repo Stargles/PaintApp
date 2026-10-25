@@ -410,11 +410,16 @@ enum StrokeWallMask {
     ///   The hairline stays `hairlineWidth` in *buffer* pixels whatever the window's scale, which is
     ///   what keeps a vector layer's walls continuous at a reduced working resolution — the
     ///   resampled ink can thin below the threshold there; the path cannot.
-    static func mask(of canvases: [VectorCanvas], width: Int, height: Int,
+    static func mask(of snapshots: [VectorCanvas.Frozen], width: Int, height: Int,
                      transform: CGAffineTransform = .identity) -> [UInt8]? {
         guard width > 0, height > 0 else { return nil }
         var strokes: [(path: CGPath, colour: UIColor)] = []
-        for canvas in canvases { appendWalls(of: canvas, to: &strokes) }
+        for snapshot in snapshots { snapshot.appendFillWalls(to: &strokes) }
+        return mask(strokes: strokes, width: width, height: height, transform: transform)
+    }
+
+    private static func mask(strokes: [(path: CGPath, colour: UIColor)], width: Int, height: Int,
+                             transform: CGAffineTransform) -> [UInt8]? {
         guard !strokes.isEmpty else { return nil }
 
         var bytes = [UInt8](repeating: 0, count: width * height * 4)
@@ -457,7 +462,7 @@ enum StrokeWallMask {
         return ok ? bytes : nil
     }
 
-    /// Appends the centre lines of `canvas`'s wall strokes, in canvas coordinates.
+    /// Appends the centre lines of one frozen display list, in canvas coordinates.
     ///
     /// **Which elements are walls, and why each of the others is not.**
     ///
@@ -471,7 +476,7 @@ enum StrokeWallMask {
     ///   would invent a barrier where a transparent PNG shows nothing.
     /// - A **suppressed** element is not, because it is not drawn — it is the piece the artist is
     ///   dragging in a lasso move, or the text they are editing, and the reference composite this
-    ///   wall accompanies (`CanvasManager.compositeReferenceRGBA`, via `VectorCanvas.render`) skips
+    ///   wall accompanies (`CanvasManager.makeFillReference`) skips
     ///   it for exactly the same reason.
     ///
     /// **A stroke that paints nothing is not a wall, and that is derived rather than ruled.** Its
@@ -481,14 +486,9 @@ enum StrokeWallMask {
     /// wall exactly as far as 5% ink is a wall for the painted pixels**, which is the same answer the
     /// artist already gets from the Threshold slider, and it is why this needed no cut-off nobody
     /// could predict from looking at the canvas.
-    private static func appendWalls(of canvas: VectorCanvas,
-                                    to strokes: inout [(path: CGPath, colour: UIColor)]) {
-        let suppressed = canvas.suppressedElementIDs
-        // The layer's own affine, which `renderLocked` applies to the whole content after the walk —
-        // so the wall lands where the reference composite drew the ink rather than where the cel
-        // stores it.
-        let transform = canvas.transform
-        for element in canvas.elements {
+    static func appendWalls(elements: [VectorElement], suppressed: Set<UUID>, transform: CGAffineTransform,
+                            to strokes: inout [(path: CGPath, colour: UIColor)]) {
+        for element in elements {
             guard case .stroke(let stroke) = element,
                   stroke.composite == .paint,
                   !suppressed.contains(stroke.id) else { continue }

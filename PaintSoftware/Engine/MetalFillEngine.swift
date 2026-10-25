@@ -35,7 +35,7 @@ final class MetalFillEngine {
         let unionMask: MTLComputePipelineState
         let lassoInvert, paintAlpha, lassoEdgeErode: MTLComputePipelineState
         /// Mending (TODO (113)): internal ink gaps and seams to neighboring paint, folded in by `unionMask`.
-        let mendDistanceSeed, mendDistanceStep, mendGap: MTLComputePipelineState
+        let mendSupportClear, mendSupportClassify, mendGap: MTLComputePipelineState
 
         /// Nil when any kernel is missing from `library`, which is the engine failing to exist.
         init?(device: MTLDevice, library: MTLLibrary) {
@@ -55,8 +55,8 @@ final class MetalFillEngine {
                   let lassoInvert = pipeline("lassoInvert"),
                   let paintAlpha = pipeline("paintRegionAlpha"),
                   let lassoEdgeErode = pipeline("lassoEdgeErode"),
-                  let mendDistanceSeed = pipeline("mendDistanceSeed"),
-                  let mendDistanceStep = pipeline("mendDistanceStep"),
+                  let mendSupportClear = pipeline("mendSupportClear"),
+                  let mendSupportClassify = pipeline("mendSupportClassify"),
                   let mendGap = pipeline("mendGap") else { return nil }
             self.walls = walls; self.edtVerticalSeeds = edtVerticalSeeds
             self.edtHorizontalEnvelope = edtHorizontalEnvelope
@@ -65,45 +65,12 @@ final class MetalFillEngine {
             self.edgeDilate = edgeDilate; self.paint = paint
             self.unionMask = unionMask
             self.lassoInvert = lassoInvert; self.paintAlpha = paintAlpha; self.lassoEdgeErode = lassoEdgeErode
-            self.mendDistanceSeed = mendDistanceSeed; self.mendDistanceStep = mendDistanceStep
+            self.mendSupportClear = mendSupportClear; self.mendSupportClassify = mendSupportClassify
             self.mendGap = mendGap
         }
     }
 
     fileprivate let pipelines: Pipelines
-
-    fileprivate struct MendLookup {
-        let ranges: MTLBuffer
-        let offsets: MTLBuffer
-    }
-    fileprivate let mendLookup: MendLookup
-
-    private static func makeMendLookup(device: MTLDevice) -> MendLookup? {
-        let radius = Int(ceil(CanvasManager.fillMendReachRange.upperBound))
-        let maxSquaredDistance = radius * radius
-        var buckets = [[SIMD2<Int16>]](repeating: [], count: maxSquaredDistance + 1)
-        for dy in -radius...radius {
-            for dx in -radius...radius {
-                let d2 = dx * dx + dy * dy
-                guard d2 > 0, d2 <= maxSquaredDistance else { continue }
-                buckets[d2].append(SIMD2(Int16(dx), Int16(dy)))
-            }
-        }
-        var ranges = [SIMD2<UInt16>](repeating: .zero, count: buckets.count)
-        var offsets = [SIMD2<Int16>]()
-        for d2 in 0..<buckets.count where !buckets[d2].isEmpty {
-            guard offsets.count <= Int(UInt16.max), buckets[d2].count <= Int(UInt16.max) else { return nil }
-            ranges[d2] = SIMD2(UInt16(offsets.count), UInt16(buckets[d2].count))
-            offsets.append(contentsOf: buckets[d2])
-        }
-        guard let rangeBuffer = ranges.withUnsafeBytes({ raw in
-                  device.makeBuffer(bytes: raw.baseAddress!, length: raw.count, options: .storageModeShared)
-              }),
-              let offsetBuffer = offsets.withUnsafeBytes({ raw in
-                  device.makeBuffer(bytes: raw.baseAddress!, length: raw.count, options: .storageModeShared)
-              }) else { return nil }
-        return MendLookup(ranges: rangeBuffer, offsets: offsetBuffer)
-    }
 
     /// Mirror of the Metal `FillParams` struct (must match its field order/alignment exactly).
     struct FillParams {
@@ -138,11 +105,9 @@ final class MetalFillEngine {
             ?? device.makeDefaultLibrary()
         guard let library else { return nil }
         guard let pipelines = Pipelines(device: device, library: library) else { return nil }
-        guard let mendLookup = Self.makeMendLookup(device: device) else { return nil }
         self.device = device
         self.queue = queue
         self.pipelines = pipelines
-        self.mendLookup = mendLookup
     }
 
     /// Uploads `referenceRGBA` (premultiplied-last, row-major, `width*height*4` bytes) into a session
@@ -341,6 +306,85 @@ final class MetalFillSession {
     let width: Int
     let height: Int
     private let count: Int
+
+    private struct MendSupportBuffers {
+        let patches: MTLBuffer, contacts: MTLBuffer, spans: MTLBuffer
+        let patchCount: UInt32
+        var bytes: Int { patches.length + contacts.length + spans.length }
+    }
+    private enum VectorSupport {
+        case waiting(VectorMendSupport.Reference)
+        case ready(MendSupportBuffers)
+        case unavailable
+    }
+    private var vectorSupport = VectorSupport.unavailable
+    /// Exact completed SOURCE cut. Structure/neighbour/workspace writes invalidate it before encoding.
+    /// The serial session is the sole owner; no float slider value stands in for these table bytes.
+    private var completedMendCut: [[UInt8]]?
+
+    func installVectorReference(_ reference: VectorMendSupport.Reference) {
+        completedMendCut = nil
+        vectorSupport = .unavailable
+        let bytes = reference.retainedBytes
+        guard reference.width == width, reference.height == height,
+              bytes <= MetalFillEngine.fillBudgetBytes - allocatedBytes,
+              CompositorBudget.hasHeadroom(for: bytes) else { return }
+        vectorSupport = .waiting(reference)
+    }
+
+    private var supportBuffers: MendSupportBuffers? {
+        if case .ready(let buffers) = vectorSupport { return buffers }
+        return nil
+    }
+
+    /// Geometry is built once for this frozen reference/window, outside Structure's threshold owner.
+    /// Refusal disables only new interior eligibility; ordinary fill and the neighbour seam continue.
+    private func prepareVectorSupport() {
+        guard case .waiting(let reference) = vectorSupport else { return }
+        vectorSupport = .unavailable
+        // Keep construction and uploaded rows beside each other, plus two current/old source cuts.
+        let cutReserve = count * (isLasso ? 4 : 2) + 512
+        let available = max(0, MetalFillEngine.fillBudgetBytes - allocatedBytes - cutReserve - reference.retainedBytes)
+        let budget = available / 2
+        guard budget > 0, CompositorBudget.hasHeadroom(for: available + cutReserve) else { return }
+        do throws(VectorMendSupport.Failure) {
+            let packet = try VectorMendSupport.produce(reference, admission: .init(bytes: budget, work: 64_000_000))
+            guard !packet.patches.isEmpty else { return }
+            func upload<T>(_ rows: [T]) -> MTLBuffer? {
+                let (length, overflow) = rows.count.multipliedReportingOverflow(by: MemoryLayout<T>.stride)
+                guard !overflow else { return nil }
+                if length == 0 { return engine.device.makeBuffer(length: 4, options: .storageModeShared) }
+                return rows.withUnsafeBytes {
+                    engine.device.makeBuffer(bytes: $0.baseAddress!, length: length, options: .storageModeShared)
+                }
+            }
+            guard let patches = upload(packet.patches), let contacts = upload(packet.contacts),
+                  let spans = upload(packet.canonicalCoverage) else { return }
+            let buffers = MendSupportBuffers(patches: patches, contacts: contacts, spans: spans,
+                                            patchCount: UInt32(packet.patches.count))
+            guard buffers.bytes <= available, allocatedBytes + buffers.bytes + cutReserve <= MetalFillEngine.fillBudgetBytes else { return }
+            vectorSupport = .ready(buffers)
+        } catch { return }
+    }
+
+    private func encodeMendSupport(_ enc: MTLComputeCommandEncoder, source: MTLBuffer,
+                                   refCount: UInt32, fence: MTLBuffer?) {
+        let p = engine.pipelines
+        engine.encode2D(enc, p.mendSupportClear, width: width, height: height,
+                        buffers: [(featureWorkspace, 0), (paramsBuf, 1)])
+        guard let support = supportBuffers else { return }
+        var references = refCount, hasFence = UInt32(fence == nil ? 0 : 1), patches = support.patchCount
+        enc.setComputePipelineState(p.mendSupportClassify)
+        for (buffer, slot) in [(support.patches, 0), (support.contacts, 1), (support.spans, 2),
+                               (source, 3), (wallBuf, 4), (wall2Buf ?? wallBuf, 5),
+                               (neighbourBuf, 6), (fence ?? wallBuf, 7), (featureWorkspace, 8), (paramsBuf, 9)] {
+            enc.setBuffer(buffer, offset: 0, index: slot)
+        }
+        enc.setBytes(&references, length: MemoryLayout<UInt32>.stride, index: 10)
+        enc.setBytes(&hasFence, length: MemoryLayout<UInt32>.stride, index: 11)
+        enc.setBytes(&patches, length: MemoryLayout<UInt32>.stride, index: 12)
+        engine.dispatch2D(enc, p.mendSupportClassify, width: Int(patches), height: 1)
+    }
 
     /// CPU copy of the reference, kept so the seed colour can be sampled without a GPU round-trip.
     private let referenceRGBA: [UInt8]
@@ -551,9 +595,9 @@ final class MetalFillSession {
     /// makes it the one site in BUGS.md's census whose `w·h·4` column *understates*.
     ///
     /// The CPU copy of the reference is counted too: `referenceRGBA` is held for the life of the
-    /// session so `seedColor(atX:y:)` needs no round trip, and it is another `count * 4`. Not counted:
-    /// the basin table, one byte a basin, which is made beside the basins and is not a function of the
-    /// window.
+    /// session so `seedColor(atX:y:)` needs no round trip, and it is another `count * 4`. Lazy vector
+    /// reference metadata, uploaded rows, basin tables and the retained SOURCE cut are included
+    /// when those owners exist. Their sizes depend on actual records rather than just the window.
     var allocatedBytes: Int {
         let required = [refBuf, pathWallBuf, wallBuf, neighbourBuf, regionBuf, regionTmpBuf,
                         featureWorkspace, featureCoordinates, labelsBuf, outBuf, paramsBuf]
@@ -561,6 +605,12 @@ final class MetalFillSession {
         return required.reduce(0) { $0 + $1.length }
             + optional.reduce(0) { $0 + ($1?.length ?? 0) }
             + referenceRGBA.count
+            + (supportBuffers?.bytes ?? 0)
+            + { if case .waiting(let reference) = vectorSupport { return reference.retainedBytes }; return 0 }()
+            + (completedMendCut.map { cut in
+                cut.capacity * MemoryLayout<[UInt8]>.stride + 32 + cut.reduce(0) { $0 + $1.capacity + 32 }
+            } ?? 0)
+            + (structure?.passes.reduce(0) { $0 + $1.table.length } ?? 0)
     }
 
     /// **What a session of this shape will cost, before a byte of it is allocated** — the number
@@ -632,6 +682,7 @@ final class MetalFillSession {
     /// already runs up to the ink it stopped against.
     func installNeighbours(_ mask: [UInt8]) {
         guard mask.count >= count else { return }
+        completedMendCut = nil
         mask.withUnsafeBytes { memcpy(neighbourBuf.contents(), $0.baseAddress!, count) }
         hasNeighbours = true
     }
@@ -644,6 +695,8 @@ final class MetalFillSession {
         // This independent preparation rewrites the walls and feature buffers shared with fill.
         // Drop their old owner before any write, including a preparation that later refuses.
         structure = nil
+        completedMendCut = nil
+        prepareVectorSupport()
         sourceMask.withUnsafeBytes { memcpy(regionBuf.contents(), $0.baseAddress!, count) }
         var params = MetalFillEngine.FillParams()
         params.width = UInt32(width); params.height = UInt32(height)
@@ -667,7 +720,8 @@ final class MetalFillSession {
             engine.encode2D(enc, p.walls, width: width, height: height,
                             buffers: [(refBuf, 0), (wall2Buf, 1), (params2Buf, 2), (pathWallBuf, 3)])
         }
-        encodeNearestOpenFeatures(enc)
+        if supportBuffers != nil { encodeNearestOpenFeatures(enc) }
+        encodeMendSupport(enc, source: regionBuf, refCount: referenceColours.1 == nil ? 1 : 2, fence: nil)
         encodeMend(enc, painted: regionBuf, source: regionBuf, reach: reach,
                    refCount: referenceColours.1 == nil ? 1 : 2,
                    nearestOpen: featureCoordinates, fence: nil, mergeIntoPainted: false)
@@ -774,12 +828,25 @@ final class MetalFillSession {
             // The rebuild overwrites shared labels and feature buffers. A refusal cannot leave
             // the previous key pointing at those new or partially prepared contents.
             self.structure = nil
+            completedMendCut = nil
             guard let built = buildStructure(key, ceiling: ceiling) else { return nil }
             self.structure = built
             structureBuilds += 1
             structure = built
         }
         let mends = Int(mendReach.rounded()) >= 1
+        if mends {
+            prepareVectorSupport()
+            // Cut tables are already produced by the flood. Retaining a completed cut adds owned
+            // CPU capacity; admit the new table arrays while the old key still exists.
+            let outer = 2 * structure.passes.count * MemoryLayout<[UInt8]>.stride + 48
+            let cutPrice = structure.passes.reduce(outer) { $0 + 2 * $1.basins.basinCount + 48 }
+            if supportBuffers != nil && (cutPrice > MetalFillEngine.fillBudgetBytes - allocatedBytes
+                || !CompositorBudget.hasHeadroom(for: cutPrice)) {
+                vectorSupport = .unavailable
+                completedMendCut = nil
+            }
+        }
 
         // The cut, then invert and erode (lasso) or edge-overlap dilate (bucket), paint, read back.
         guard let cb3 = engine.makeCommandBuffer() else { return nil }
@@ -792,10 +859,11 @@ final class MetalFillSession {
         // open features; prepare them on its first enabled tick, then retain them across off/on.
         // Availability is published after completion, so a failed command cannot cache partial data.
         let nearestOpen: MTLBuffer?
-        if mends {
+        if mends && supportBuffers != nil {
             if let kept = structure.nearestOpenFeatures {
                 nearestOpen = kept
             } else {
+                completedMendCut = nil
                 encodeNearestOpenFeatures(enc3)
                 nearestOpen = featureCoordinates
             }
@@ -804,12 +872,26 @@ final class MetalFillSession {
         }
         // One table a pass, cut for this slider value, and the region rewritten from the labels — the
         // whole of a Gap Closing tick.
+        var currentCut: [[UInt8]] = []
+        if mends && supportBuffers != nil {
+            currentCut.reserveCapacity(passes.count)
+            if currentCut.capacity * MemoryLayout<[UInt8]>.stride
+                > 2 * passes.count * MemoryLayout<[UInt8]>.stride + 16 {
+                vectorSupport = .unavailable; completedMendCut = nil
+            }
+        }
         for (pass, gap) in zip(passes, structure.passes) {
             let table = gap.basins.reached(from: gap.seeds, gapWidth: gapWidth)
+            if mends && supportBuffers != nil {
+                if table.capacity <= 2 * table.count + 16 { currentCut.append(table) }
+                else { vectorSupport = .unavailable; completedMendCut = nil; currentCut.removeAll() }
+            }
             table.withUnsafeBytes { memcpy(gap.table.contents(), $0.baseAddress!, table.count) }
             engine.encode2D(enc3, p.basinRegion, width: width, height: height,
                             buffers: [(pass.labels, 0), (gap.table, 1), (pass.region, 2), (paramsBuf, 3)])
         }
+        let needsMendSupport = mends && completedMendCut != currentCut
+        if needsMendSupport { completedMendCut = nil }
         if let lassoBuf, let alphaBuf, let filledBuf {
             // **`fill = loopMask ∧ ¬reached`, and it replaced a union of the loop back over the
             // flood.** The old line painted everything the loop enclosed and let the flood carry on
@@ -851,17 +933,21 @@ final class MetalFillSession {
             // **After the erosion and the count, not before**: the mend adds colour outside the fence
             // on purpose and must not change what the §6 step 5 empty check saw — a fill that was
             // eroded away is still an empty fill, whatever a neighbour would have lent it.
-            if let nearestOpen { encodeMend(enc3, painted: regionTmpBuf, source: alphaBuf, reach: mendReach,
+            if needsMendSupport {
+                encodeMendSupport(enc3, source: alphaBuf, refCount: referenceColours.1 == nil ? 1 : 2, fence: lassoBuf)
+            }
+            if mends { encodeMend(enc3, painted: regionTmpBuf, source: alphaBuf, reach: mendReach,
                                             refCount: referenceColours.1 == nil ? 1 : 2,
-                                            nearestOpen: nearestOpen, fence: lassoBuf) }
+                                            nearestOpen: nearestOpen ?? featureCoordinates, fence: lassoBuf) }
             engine.encode2D(enc3, p.paintAlpha, width: width, height: height,
                             buffers: [(regionTmpBuf, 0), (outBuf, 1), (paramsBuf, 2)])
         } else {
             // Into `regionTmpBuf` at every radius — 0 is a copy — so the mend never writes the cut.
             engine.encode2D(enc3, p.edgeDilate, width: width, height: height,
                             buffers: [(regionBuf, 0), (regionTmpBuf, 1), (paramsBuf, 2)])
-            if let nearestOpen { encodeMend(enc3, painted: regionTmpBuf, source: regionBuf, reach: mendReach,
-                                            refCount: 1, nearestOpen: nearestOpen,
+            if needsMendSupport { encodeMendSupport(enc3, source: regionBuf, refCount: 1, fence: nil) }
+            if mends { encodeMend(enc3, painted: regionTmpBuf, source: regionBuf, reach: mendReach,
+                                            refCount: 1, nearestOpen: nearestOpen ?? featureCoordinates,
                                             fence: lassoBuf) }
             engine.encode2D(enc3, p.paint, width: width, height: height,
                             buffers: [(regionTmpBuf, 0), (outBuf, 1), (paramsBuf, 2)])
@@ -871,6 +957,7 @@ final class MetalFillSession {
         cb3.waitUntilCompleted()
         guard cb3.status == .completed else { return nil }
         if let nearestOpen { self.structure?.nearestOpenFeatures = nearestOpen }
+        if needsMendSupport { completedMendCut = currentCut }
 
         if let filledBuf {
             // `lassoEdgeErode`'s count, and nothing else's — one slot, one writer, and it runs on
@@ -1034,8 +1121,8 @@ final class MetalFillSession {
     ///
     /// The kernel writes to a buffer of its own and `unionMask` folds it in, because every pixel's walk
     /// reads `painted` at its neighbours. The scratch is the feature transform's first buffer, which is free by now:
-    /// the distance map and watershed scratch are spent once basins are built, and its 8-byte-per-pixel
-    /// allocation is reused for this byte mask.
+    /// the distance-map/watershed workspace is spent once basins are built. Its first N bytes hold
+    /// this mask; its aligned upper4N bytes retain the source-owned known/protected stencil.
     private func encodeMend(_ enc: MTLComputeCommandEncoder, painted: MTLBuffer, source: MTLBuffer,
                             reach: Float, refCount: UInt32, nearestOpen: MTLBuffer,
                             fence: MTLBuffer? = nil, mergeIntoPainted: Bool = true) {
@@ -1045,37 +1132,8 @@ final class MetalFillSession {
         // overlap can cover both sides of a strip. This finite geometric cap is not historical
         // provenance for an arbitrarily edited saved fill; unresolved wider geometry stays alone.
         var proofSpan = reach + 2 * Float(CanvasManager.fillExpandRange.upperBound)
-        var circleRangeCount = UInt32(engine.mendLookup.ranges.length / MemoryLayout<SIMD2<UInt16>>.stride)
         var references = refCount
         var hasFence = UInt32(fence == nil ? 0 : 1)
-        // The full digital walk can accumulate sqrt(2) per major-axis step. Two byte planes
-        // fit in the existing8N scratch beside its firstN public mend output; no retained map.
-        let pixelCount = UInt32(width * height)
-        var distanceLimit = UInt32(ceil(sqrt(Float(2)) * ceil(proofSpan)))
-        enc.setComputePipelineState(p.mendDistanceSeed)
-        enc.setBuffer(source, offset: 0, index: 0)
-        enc.setBuffer(neighbourBuf, offset: 0, index: 1)
-        enc.setBuffer(wallBuf, offset: 0, index: 2)
-        enc.setBuffer(wall2Buf ?? wallBuf, offset: 0, index: 3)
-        enc.setBuffer(fence ?? wallBuf, offset: 0, index: 4)
-        enc.setBuffer(featureWorkspace, offset: 0, index: 5)
-        enc.setBuffer(paramsBuf, offset: 0, index: 6)
-        enc.setBytes(&references, length: MemoryLayout<UInt32>.stride, index: 7)
-        enc.setBytes(&hasFence, length: MemoryLayout<UInt32>.stride, index: 8)
-        enc.setBytes(&distanceLimit, length: MemoryLayout<UInt32>.stride, index: 9)
-        engine.dispatch2D(enc, p.mendDistanceSeed, width: width, height: height)
-        var distanceOffset = pixelCount
-        var nextDistanceOffset = 2 * pixelCount
-        for _ in 0..<Int(distanceLimit) {
-            enc.setComputePipelineState(p.mendDistanceStep)
-            enc.setBuffer(featureWorkspace, offset: 0, index: 0)
-            enc.setBuffer(paramsBuf, offset: 0, index: 1)
-            enc.setBytes(&distanceOffset, length: MemoryLayout<UInt32>.stride, index: 2)
-            enc.setBytes(&nextDistanceOffset, length: MemoryLayout<UInt32>.stride, index: 3)
-            enc.setBytes(&distanceLimit, length: MemoryLayout<UInt32>.stride, index: 4)
-            engine.dispatch2D(enc, p.mendDistanceStep, width: width, height: height)
-            swap(&distanceOffset, &nextDistanceOffset)
-        }
         enc.setComputePipelineState(p.mendGap)
         enc.setBuffer(painted, offset: 0, index: 0)
         enc.setBuffer(source, offset: 0, index: 1)
@@ -1083,18 +1141,13 @@ final class MetalFillSession {
         enc.setBuffer(wallBuf, offset: 0, index: 3)
         enc.setBuffer(wall2Buf ?? wallBuf, offset: 0, index: 4)
         enc.setBuffer(nearestOpen, offset: 0, index: 5)
-        enc.setBuffer(engine.mendLookup.ranges, offset: 0, index: 6)
-        enc.setBuffer(engine.mendLookup.offsets, offset: 0, index: 7)
-        enc.setBuffer(featureWorkspace, offset: 0, index: 8)
-        enc.setBuffer(paramsBuf, offset: 0, index: 9)
-        enc.setBytes(&reachPixels, length: MemoryLayout<Float>.size, index: 10)
-        enc.setBytes(&references, length: MemoryLayout<UInt32>.size, index: 11)
-        enc.setBuffer(fence ?? wallBuf, offset: 0, index: 12)
-        enc.setBytes(&hasFence, length: MemoryLayout<UInt32>.size, index: 13)
-        enc.setBytes(&proofSpan, length: MemoryLayout<Float>.size, index: 14)
-        enc.setBytes(&circleRangeCount, length: MemoryLayout<UInt32>.size, index: 15)
-        enc.setBytes(&distanceOffset, length: MemoryLayout<UInt32>.stride, index: 16)
-        enc.setBytes(&distanceLimit, length: MemoryLayout<UInt32>.stride, index: 17)
+        enc.setBuffer(featureWorkspace, offset: 0, index: 6)
+        enc.setBuffer(paramsBuf, offset: 0, index: 7)
+        enc.setBytes(&reachPixels, length: MemoryLayout<Float>.size, index: 8)
+        enc.setBytes(&references, length: MemoryLayout<UInt32>.size, index: 9)
+        enc.setBuffer(fence ?? wallBuf, offset: 0, index: 10)
+        enc.setBytes(&hasFence, length: MemoryLayout<UInt32>.size, index: 11)
+        enc.setBytes(&proofSpan, length: MemoryLayout<Float>.size, index: 12)
         engine.dispatch2D(enc, p.mendGap, width: width, height: height)
         if mergeIntoPainted {
             engine.encode2D(enc, p.unionMask, width: width, height: height,

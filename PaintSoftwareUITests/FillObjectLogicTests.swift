@@ -508,6 +508,13 @@ final class FillObjectLogicTests: XCTestCase {
 
     // MARK: - Mend All Fills
 
+    private func mendReferenceStroke(_ points: [CGPoint], size: CGFloat) -> VectorStroke {
+        let brush = Brush(name: "mend reference", tip: .round, size: size,
+                          dab: BrushDabSettings(flow: 1, spacing: 0.1, hardness: 1))
+        return VectorStroke(brush: brush, color: CodableColor(UIColor.black), size: size, opacity: 1,
+                            samples: StrokeSamples(points: points), seed: 0x7354)
+    }
+
     /// Two independently drawn cels with different line art, plus a linked generated cel which must
     /// remain derived. The saved paths contain an attached stroke gap and an intentional paper hole.
     private func mendFixture() throws -> (manager: CanvasManager, layer: Int, vectors: [VectorCanvas], fills: [VectorFillElement]) {
@@ -518,20 +525,17 @@ final class FillObjectLogicTests: XCTestCase {
         let hole = CGRect(x: 16, y: 16, width: 12, height: 12)
         let gaps = [CGRect(x: 30, y: 32, width: 24, height: 3),
                     CGRect(x: 32, y: 30, width: 3, height: 24)]
+        manager.layers[0].kind = .vector
         for celIndex in 0..<3 {
-            let gap = gaps[min(celIndex, 1)]
-            let image = UIGraphicsImageRenderer(size: CanvasFixture.canvasSize,
-                                                 format: PixelOps.transparentFormat()).image { context in
-                UIColor.black.setFill()
-                context.cgContext.addRect(field.insetBy(dx: -2, dy: -2))
-                context.cgContext.addRect(field)
-                context.cgContext.fillPath(using: .evenOdd)
-                context.cgContext.fill(gap)
-                context.cgContext.addRect(hole)
-                context.cgContext.addRect(hole.insetBy(dx: 2, dy: 2))
-                context.cgContext.fillPath(using: .evenOdd)
-            }
-            CanvasFixture.setBakedContent(manager, layerIndex: 0, frame: celIndex * 6, image)
+            let frame = mendReferenceStroke([CGPoint(x: 9, y: 9), CGPoint(x: 55, y: 9),
+                CGPoint(x: 55, y: 55), CGPoint(x: 9, y: 55), CGPoint(x: 9, y: 9)], size: 2)
+            let hole = mendReferenceStroke([CGPoint(x: 17, y: 17), CGPoint(x: 27, y: 17),
+                CGPoint(x: 27, y: 27), CGPoint(x: 17, y: 27), CGPoint(x: 17, y: 17)], size: 2)
+            let body = mendReferenceStroke(celIndex == 0
+                ? [CGPoint(x: 31.5, y: 33.5), CGPoint(x: 54, y: 33.5)]
+                : [CGPoint(x: 33.5, y: 31.5), CGPoint(x: 33.5, y: 54)], size: 3)
+            manager.layers[0].cels[celIndex].vector = VectorCanvas(size: CanvasFixture.canvasSize,
+                strokes: [frame, hole, body])
         }
         manager.addVectorLayer()
         let layer = manager.currentLayerIndex
@@ -673,19 +677,17 @@ final class FillObjectLogicTests: XCTestCase {
         for attached in [true, false] {
             let manager = CanvasFixture.manager(layerCount: 1)
             manager.canvasSize = size
-            manager.layers[0].cels[0].raster = RasterLayerTexture(size: size)
+            manager.layers[0].kind = .vector
+            manager.layers[0].cels[0].raster = .empty(size: size)
             let stroke = attached ? CGRect(x: 16, y: 59, width: 49, height: 10)
                                   : CGRect(x: 54, y: 44, width: 10, height: 40)
             let interiorStroke = attached ? CGRect(x: 26, y: 59, width: 39, height: 10) : stroke
-            let art = UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { context in
-                context.cgContext.setShouldAntialias(false)
-                UIColor.black.setFill()
-                context.cgContext.addRect(CGRect(x: 16, y: 16, width: 96, height: 96))
-                context.cgContext.addRect(CGRect(x: 26, y: 26, width: 76, height: 76))
-                context.cgContext.fillPath(using: .evenOdd)
-                context.cgContext.fill(stroke)
-            }
-            CanvasFixture.setBakedContent(manager, layerIndex: 0, art)
+            let frame = mendReferenceStroke([CGPoint(x: 21, y: 21), CGPoint(x: 107, y: 21),
+                CGPoint(x: 107, y: 107), CGPoint(x: 21, y: 107), CGPoint(x: 21, y: 21)], size: 10)
+            let body = mendReferenceStroke(attached
+                ? [CGPoint(x: 21, y: 64), CGPoint(x: 60, y: 64)]
+                : [CGPoint(x: 59, y: 49), CGPoint(x: 59, y: 79)], size: 10)
+            manager.layers[0].cels[0].vector = VectorCanvas(size: size, strokes: [frame, body])
             manager.addVectorLayer()
             let layer = manager.currentLayerIndex
             let vector = try XCTUnwrap(manager.layers[layer].cels[0].vector)

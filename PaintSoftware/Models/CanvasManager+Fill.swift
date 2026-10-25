@@ -335,11 +335,8 @@ extension CanvasManager {
     /// `fillQueue` — the one place a session is made, for the first window of a gesture and for
     /// every window `renderFill` grows it to.
     ///
-    /// The reference composite, TODO (46)'s path wall and the lasso's stencil are all drawn through
-    /// the window's transform, so each is the window's working size. The path wall is built off the
-    /// same `references` list and from the same `VectorCanvas` objects `render()` was just called
-    /// on — see `pathWallSources` — which is safe here for `VectorCanvas.render`'s own reason: the
-    /// canvas serialises `elements`/`transform` on its lock and documents a background reader.
+    /// The reference pixels, path walls and canonical certificate share one frozen selected list.
+    /// Every image stage and the own-fill exclusion belong to that same snapshot/window.
     ///
     /// **A refused session is announced now.** It used to be a bare nil that reached the render,
     /// which produced no preview and no message, so the artist tapped the bucket
@@ -353,13 +350,12 @@ extension CanvasManager {
         let references = fillGestureReferences
         let width = window.workingWidth, height = window.workingHeight
         var outcome: MetalFillEngine.SessionOutcome?
-        if let refBytes = Self.compositeReferenceRGBA(references: references, window: window) {
-            let pathWall = StrokeWallMask.mask(of: Self.pathWallSources(references),
-                                               width: width, height: height, transform: window.transform)
-            outcome = MetalFillEngine.shared?.makeSession(referenceRGBA: refBytes, width: width,
+        if let prepared = Self.makeFillReference(references: references, window: window, isLasso: lassoMask != nil) {
+            outcome = MetalFillEngine.shared?.makeSession(referenceRGBA: prepared.rgba, width: width,
                                                           height: height, lassoMask: lassoMask,
-                                                          pathWall: pathWall,
+                                                          pathWall: prepared.pathWall(in: window),
                                                           gapWidthLimit: Float(Self.fillGapRange.upperBound * window.scale))
+            outcome?.session?.installVectorReference(prepared.support)
         }
         let session = outcome?.session
         if session == nil { reportFillRefusal(context) }
@@ -506,24 +502,6 @@ extension CanvasManager {
         guard fillSettings.mendReach != v else { return }
         fillSettings.mendReach = v
         if fillGestureActive { requestFillRender() }
-    }
-
-    /// The vector canvases whose stroke paths wall this fill — **TODO (46)**, and exactly the
-    /// reference set the pixels come from.
-    ///
-    /// Derived from `fillReferenceSources`'s own list rather than from the layer stack again, so the
-    /// wall and the reference composite cannot describe different documents: a layer the artist has
-    /// unticked as a reference contributes neither its pixels nor its paths. Raster layers have no
-    /// path and contribute nothing, which is the whole of the vector/raster divergence the owner
-    /// ruled on — *"let it be. It's just a property with vector layers."*
-    ///
-    /// A cel carrying a display list on a layer whose `kind` is not `.vector` is skipped, because the
-    /// reference composite draws `cel.vector` for any kind and the *property* is the layer's. That
-    /// guard is load-bearing rather than defensive: the app can put a display list on a raster layer
-    /// (see `VectorMergeLogicTests`' fixture), and a raster layer that silently walled by path would
-    /// be the divergence appearing where the ruling says it does not.
-    static func pathWallSources(_ references: [(layer: Layer, cel: Cel)]) -> [VectorCanvas] {
-        references.compactMap { $0.layer.kind == .vector ? $0.cel.vector : nil }
     }
 
     /// The layers whose content bounds the fill, bottom-to-top: every layer marked `isFillReference`, at
@@ -1200,52 +1178,103 @@ extension CanvasManager {
     /// A saved fill being mended is absent from its own reference, just as an adjustable fill is.
     /// The matching cel draws its remaining display list directly into the working window; all
     /// other vector references keep the ordinary memoized render path.
-    static func compositeReferenceRGBA(references: [(layer: Layer, cel: Cel)], window: FillWindow,
-                                        excludingElement: (celID: UUID, elementID: UUID)? = nil) -> [UInt8]? {
+    struct FillReference {
+        let rgba: [UInt8]
+        let support: VectorMendSupport.Reference
+        private let walls: [VectorCanvas.Frozen]
+        init(rgba: [UInt8], support: VectorMendSupport.Reference, walls: [VectorCanvas.Frozen]) {
+            self.rgba = rgba; self.support = support; self.walls = walls
+        }
+        func pathWall(in window: FillWindow) -> [UInt8]? {
+            StrokeWallMask.mask(of: walls, width: window.workingWidth, height: window.workingHeight,
+                                transform: window.transform)
+        }
+    }
+
+    /// One frozen selected list owns the pixels, path walls and lazy canonical certificate. Raster
+    /// snapshots are immutable source handles; nil is their existing exact transparency proof.
+    static func makeFillReference(references: [(layer: Layer, cel: Cel)], window: FillWindow,
+                                  excludingElement: (celID: UUID, elementID: UUID)? = nil,
+                                  isLasso: Bool = false) -> FillReference? {
         let width = window.workingWidth, height = window.workingHeight
-        guard width > 0, height > 0 else { return nil }
+        let (count, overflow) = width.multipliedReportingOverflow(by: height)
+        guard width > 0, height > 0, !overflow, count <= Int.max / 64 else { return nil }
+        typealias Snapshot = (baked: RasterSource?, raster: RasterSource?, vector: VectorCanvas.Frozen?, kind: LayerKind, celID: UUID)
+        // Reserve the impending session and old/new SOURCE cuts before support metadata. The
+        // frozen draw list and path-wall list coexist with that one output pair during preparation.
+        let cutReserve = UndoBudget.addingCost(512,
+            UndoBudget.payloadBytes(count: count, stride: isLasso ? 4 : 2))
+        let listReserve = UndoBudget.addingCost(96, UndoBudget.payloadBytes(count: references.count,
+            stride: 2 * (MemoryLayout<Snapshot>.stride + MemoryLayout<VectorCanvas.Frozen>.stride)))
+        let reserved = [MetalFillSession.predictedBytes(width: width, height: height, isLasso: isLasso),
+                        cutReserve, listReserve].reduce(0, UndoBudget.addingCost)
+        let allowance = max(0, MetalFillEngine.fillBudgetBytes - reserved)
+        let snapshots: [Snapshot] = references.map { source in
+            (baked: source.cel.bakedImage, raster: source.cel.raster.snapshot(),
+             vector: source.cel.vector?.freezeFillReference(), kind: source.layer.kind, celID: source.cel.id)
+        }
+        var maximumRecords = references.count
+        for snapshot in snapshots {
+            maximumRecords = UndoBudget.addingCost(maximumRecords, snapshot.vector?.fillReferenceRecordCount ?? 0)
+        }
+        var support: VectorMendSupport.Reference.Builder?
+        do throws(VectorMendSupport.Failure) {
+            guard UndoBudget.payloadBytes(count: snapshots.capacity, stride: MemoryLayout<Snapshot>.stride)
+                <= UndoBudget.addingCost(16, UndoBudget.payloadBytes(count: references.count,
+                    stride: 2 * MemoryLayout<Snapshot>.stride)) else { throw .exceedsBudget }
+            support = try .init(width: width, height: height, maximumRecords: maximumRecords,
+                admission: .init(bytes: allowance, work: 64_000_000))
+        } catch { support = nil }
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: width, height: height), format: PixelOps.transparentFormat())
         var completed = true
+        var walls: [VectorCanvas.Frozen] = []
+        walls.reserveCapacity(references.count)
         let composited = renderer.image { context in
             let rect = window.canvasInWorking
-            for source in references {
+            for source in snapshots {
                 do {
-                    try source.cel.bakedImage?.resolveImage().get().draw(in: rect)
-                    try source.cel.raster.renderToUIImage().get().draw(in: rect)
+                    try source.baked?.resolveImage().get().draw(in: rect)
+                    try source.raster?.resolveImage().get().draw(in: rect)
                 } catch { completed = false; return }
-                if let vector = source.cel.vector {
-                    if let excludingElement, excludingElement.celID == source.cel.id {
-                        let elements = vector.elements.filter { $0.id != excludingElement.elementID }
-                        let referenceIDs = Set(elements.lazy.filter(\.isReference).map(\.id))
-                        let frozen = vector.freezeDisplay(quality: .full, referenceIDs: referenceIDs,
-                                                          replacing: elements,
-                                                          rewriting: [excludingElement.elementID])
-                        guard frozen.draw(into: context.cgContext, frameRect: rect, quality: .full) != nil else {
-                            completed = false
-                            return
-                        }
-                    } else {
-                        guard let image = vector.render() else { completed = false; return }
-                        image.draw(in: rect)
+                if source.baked.map({ !$0.isCertainlyTransparent }) == true
+                    || source.raster.map({ !$0.isCertainlyTransparent }) == true {
+                    do throws(VectorMendSupport.Failure) {
+                        try support?.appendUnknown(CGRect(x: 0, y: 0, width: width, height: height))
+                    } catch { support = nil }
+                }
+                if let vector = source.vector {
+                    let excluded = excludingElement.flatMap { $0.celID == source.celID ? $0.elementID : nil }
+                    guard let drawn = vector.drawFillReference(into: context.cgContext, frameRect: rect,
+                                                              width: width, height: height,
+                                                              excludingElement: excluded, support: &support) else {
+                        completed = false; return
                     }
+                    if source.kind == .vector { walls.append(drawn) }
                 }
             }
         }
         guard completed, let cg = composited.cgImage else { return nil }
         var bytes = [UInt8](repeating: 0, count: width * height * 4)
-        let bytesPerRow = width * 4
         let ok: Bool = bytes.withUnsafeMutableBytes { raw in
             guard let ctx = CGContext(data: raw.baseAddress, width: width, height: height, bitsPerComponent: 8,
-                                      bytesPerRow: bytesPerRow, space: PixelOps.deviceRGBColorSpace,
+                                      bytesPerRow: width * 4, space: PixelOps.deviceRGBColorSpace,
                                       bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
             ctx.interpolationQuality = .none
-            // No flip: drawing a top-down UIImage's cgImage into a default bitmap context already lands
-            // its top row at buffer row 0. (The old engine's translate/scale(-1) here was the long-latent
-            // vertical-mirror bug — invisible on the centred shapes every earlier test used.)
+            // Same-size top-down image copy; no extra flip or resampling stage.
             ctx.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
             return true
         }
-        return ok ? bytes : nil
+        guard ok else { return nil }
+        if UndoBudget.payloadBytes(count: walls.capacity, stride: MemoryLayout<VectorCanvas.Frozen>.stride)
+            > UndoBudget.addingCost(16, UndoBudget.payloadBytes(count: references.count,
+                stride: 2 * MemoryLayout<VectorCanvas.Frozen>.stride)) { support = nil }
+        return FillReference(rgba: bytes,
+            support: support?.finish() ?? .unavailable(width: width, height: height), walls: walls)
+    }
+
+    static func compositeReferenceRGBA(references: [(layer: Layer, cel: Cel)], window: FillWindow,
+                                        excludingElement: (celID: UUID, elementID: UUID)? = nil) -> [UInt8]? {
+        makeFillReference(references: references, window: window, excludingElement: excludingElement)?.rgba
     }
 
     /// Where `sources` have any paint at all, in the window's working pixels — the mend's neighbour set

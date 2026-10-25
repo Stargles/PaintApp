@@ -213,13 +213,12 @@ extension CanvasManager {
         let width = window.workingWidth, height = window.workingHeight
         guard let source = LassoFillMask.rasterize(path: shown, width: width, height: height,
                                                   transform: window.transform),
-              let rgba = compositeReferenceRGBA(references: work.references, window: window,
-                  excludingElement: (celID: work.celID, elementID: work.fill.id)) else { return .needsMoreMemory }
-        let pathWall = StrokeWallMask.mask(of: pathWallSources(work.references), width: width, height: height,
-                                           transform: window.transform)
+              let prepared = makeFillReference(references: work.references, window: window,
+                  excludingElement: (celID: work.celID, elementID: work.fill.id), isLasso: true) else { return .needsMoreMemory }
         guard let engine = MetalFillEngine.shared,
-              let session = engine.makeMendSession(referenceRGBA: rgba, width: width, height: height,
-                                                    sourceMask: source, pathWall: pathWall).session else { return .needsMoreMemory }
+              let session = engine.makeMendSession(referenceRGBA: prepared.rgba, width: width, height: height,
+                                                    sourceMask: source, pathWall: prepared.pathWall(in: window)).session else { return .needsMoreMemory }
+        session.installVectorReference(prepared.support)
         guard var neighbours = neighbourMask(of: work.neighbours, in: window) else { return .needsMoreMemory }
         for index in source.indices where source[index] != 0 { neighbours[index] = 0 }
         session.installNeighbours(neighbours)

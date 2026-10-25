@@ -2,11 +2,11 @@
 
 ## Current source and next actions — 2026-10-25
 
-Main/origin remain afd2030c; no merge, push or iPad install this pass. Integration source is
-b849ffc1 (PaintApp-s54-mend-free-caps). Its live32185179 fill implementation is FAILED:18/20
-FillMend methods passed, with two circular-outline protection failures. It must not ship. The
-replacement is being implemented in the separate PaintApp-s54-vector-mend-reference tree; do not
-confuse a successful support-producer slice with the unfinished live feature.
+Main/origin remain afd2030c; no merge, push or iPad install this pass. Integration tree is
+PaintApp-s54-mend-free-caps. Root accepted the exact ten-path replacement from committed f75a900c
+for harvest after independent V5 source review. The old32185179 distance-wave/circle-lookup path
+failed18/20 and is removed whole by this replacement. New live Swift/Metal/GPU/UI/performance gates
+are UNRUN; whole4096 remains required. Do not ship or call a producer-only pass feature completion.
 
 **Owner ruling, recorded before implementation:** Kevin says new interior Mend Gaps is required
 only for vector and engineering choices need no further approval. Continue while he sleeps. Cover
@@ -21,12 +21,23 @@ contributor closure and bounded storage. Earlier capacity refusals and reversed 
 corrected without widening limits or weakening contour/cap oracles. The temporary diagnostic was
 removed whole. Evidence: `native/canonical7-b849ffc1-run03/root-independent-acceptance.json` and
 `canonical-continuation-harvest/`; earlier failed results remain preserved at their original pins.
-Live wiring is now explicitly granted. The author has removed the old distance waves/lookups in its
-separate tree and is completing one frozen reference factory, one session-owned stencil and original
-GPU/drawn regressions. Independent review requested zero-stencil caching and key invalidation before
-neighbor writes. Whole4096 reference resampling is an OPEN engineering gate: native1:1 support is
-not a universal certificate. Inspect reuse of existing bounded ImageWarp sampling; appearance,
-containment and cost must be checked before accepting that route. No live replacement native run yet.
+The reviewed live replacement at f75a900c has one actual frozen-reference factory, one pre-admitted
+aggregate Input/unknown pair across chosen references, one session-owned geometry packet/stencil,
+exact SOURCE completion ownership, physical-ink bits distinct from synthetic walls and the unchanged
+neighbor seam. It drops redundant Frozen/maps/memo captures and per-reference slice/merge copies;
+zero-unavailable stencils cache once and keys invalidate before rewrites. Exact empty-vector
+placeholders do not veto lower references. Seven product and three existing test paths replace the
+failed path; no new file, method, persisted field or PBX identifier. Actual canonical vector fixtures
+replace unsupported raster-positive premises while original FillObject result/undo/exterior assertions
+remain byte-exact. Strict OPEN-on-INK/SOURCE255 GPU coverage is added. Root reviewed the separate
+LASSO_FILL spec removal; author stale TODO/HANDOFF/BUGS are not copied. Independent receipt:
+`vector-mend-independent-proof/live-v5-source-review/receipt.json` (e0609bf3). Full three-class71
+native controls are next, after commit/census; compiler/runtime/UI/faults remain UNRUN.
+Whole4096 resampling and same-budget window refinement remain required OPEN engineering work.
+The sharpened external ImageWarp scale-stage proposal retains one total work account across retries,
+prepares geometry before expensive filtering/core allocation, and samples the final picture once.
+Review its finite retry/retirement/peak constraints and actual tap cost before implementation; native1:1
+source acceptance is not a universal certificate. Proposal: `imagewarp-scale-extension-v2/plan.md`.
 
 **Raster admission correction:** root integrated the reviewed finite weak-metadata eviction pass
 at d4d7c523. It orders candidates once outside the mutex, rechecks current accounting/registration
@@ -69,8 +80,13 @@ the picture plus checkpoint workspace. The write-error send fixture used explici
 checking the outcome, masking failure settlement. Observe after an independent existing queued
 ENOTDIR probe, hold every chunk so an ignored error cannot race later writes, and stop/join solely
 for cleanup after the original assertions. Root reviewed the exact two-test-only patch0ed70e80;
-all existing expected values/method counts remain unchanged. No product hook or new method. Native
-normal/fault verification remains pending; do not treat source review as qualification.
+all existing expected values/method counts remain unchanged. No product hook or new method.
+Actual normal12 on isolated0ed passed12/12,0skip/fail/expected; root independently accepted actual
+results/729source freeze. The exact16 new controls reached19/19 targets (16 product and3 premise
+identities),27 mapped issues with15 uncredited consequences. Root re-extracted all16; independent
+causal review remains PENDING, so global coverage stays102/126 until acceptance. Five explicit limits
+remain even if accepted. Isolated0ed is source-identical to c517 at these729 files; this is not blanket
+qualification of the new live replacement.
 
 **Remaining final gates:** finish live fill and its containment work; original logic/coldUI,
 undo/redo, owner1080x810 pictures actually LOOKed at, meaningful new assertion controls; close audit
