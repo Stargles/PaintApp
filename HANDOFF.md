@@ -73,7 +73,10 @@ cap. The corrected source accepts them. No schema, cache, renderer or point-size
 Root harvested ONLY the four reviewed source/test/spec paths byte-exact at24d96652; author scope
 bcfd and corrected review417ea63d precede harvest. All27 old TextLayout bodies remain exact;3new methods give30, with
 TextTransform52/Homography18 targeted (100 total) and whole TextSessionUITests4. App compilation,
-normal tests, meaningful fault checks and appearance are UNRUN. No full text/font audit claim.
+normal tests, meaningful fault checks and appearance are UNRUN. Before runtime fault preparation,
+add an explicit nonnil assertion for the valid fractional-scale contract before the unwrap: this
+distinguishes a product refusal from an uncredited setup error. No old assertion changes. Keep a
+separate exact-source text qualification tree so integration can advance. No full text/font audit claim.
 
 **New bounded graph-drag fix — recorded before harvest:** source83380 has three related lifecycle
 bugs: focus follows only the first moved frame; a nil readout leaves an old value visible; returning
