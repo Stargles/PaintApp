@@ -81,7 +81,7 @@ extension CanvasManager {
     /// folder that contains itself (directly or transitively) as top-level.
     private func resolvedContainer(ofFolder folderID: UUID) -> UUID? {
         guard let parent = folders.first(where: { $0.id == folderID })?.parentFolderID,
-              folders.contains(where: { $0.id == parent }),
+              parent != folderID, folders.contains(where: { $0.id == parent }),
               !isFolder(parent, descendantOf: folderID) else { return nil }
         return parent
     }

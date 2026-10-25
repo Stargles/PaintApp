@@ -358,7 +358,8 @@ final class RenderTreeCharacterizationTests: XCTestCase {
     /// folder in a cycle resolves to top-level, so the recursion terminates and, crucially, **no
     /// layer is lost or drawn twice**: a cycle that dropped a layer from the tree would erase it
     /// from the canvas the moment the compositor lands.
-    func testAFolderCycleIsBrokenWithoutLosingOrDuplicatingALayer() {
+    @MainActor
+    func testAFolderCycleIsBrokenWithoutLosingOrDuplicatingALayer() throws {
         let manager = namedManager(["A", "B"])
         let first = manager.addFolder(name: "First")
         let second = manager.addFolder(name: "Second")
@@ -372,6 +373,41 @@ final class RenderTreeCharacterizationTests: XCTestCase {
         let leaves = manager.renderLeafOrder(atFrame: 0)
         XCTAssertEqual(leaves.sorted(), [0, 1], "Both layers, once each")
         assertRenderTreeMatchesFlatOrder(manager)
+
+        // A direct self-parent is the one-folder cycle. It reaches the same saved-parent boundary
+        // as the pair above; public restacking refuses to author either shape.
+        let single = namedManager(["Ink"])
+        let size = CanvasFixture.canvasSize
+        single.layers[0].cels[0].raster = try CanvasFixture.rasterTexture(
+            CanvasFixture.solidImage(.red, rect: CGRect(x: 10, y: 10, width: 20, height: 20)),
+            size: size, strokeCount: 1)
+        let requestBefore = try XCTUnwrap(single.makeRenderRequest(atFrame: 0, includeBackground: false))
+        let imageBefore = try XCTUnwrap(Compositor.composite(requestBefore, resolving: .coreGraphics))
+        let expected = try XCTUnwrap(CanvasFixture.rgbaBytes(imageBefore))
+        XCTAssertTrue(stride(from: 3, to: expected.count, by: 4).contains { expected[$0] > 0 },
+                      "PREMISE: the real source composite is not blank before the metadata cycle")
+        let sourceID = single.layers[0].id
+        let selfParent = single.addFolder(name: "Self")
+        single.layers[0].parentFolderID = selfParent
+        let folderIndex = try XCTUnwrap(single.folders.firstIndex { $0.id == selfParent })
+        single.folders[folderIndex].parentFolderID = selfParent
+
+        XCTAssertEqual(single.renderLeafOrder(atFrame: 0), [0], "The one-folder cycle keeps its leaf once")
+        XCTAssertEqual(renderRows(single), ["0:Self", "1:Ink"], "Self-parent recovery is a top-level group")
+        let presentedLayers = single.layerStackRows.compactMap { row -> UUID? in
+            if case .layer(let id, _, _) = row { return id }
+            return nil
+        }
+        let presentedFolders = single.layerStackRows.compactMap { row -> UUID? in
+            if case .folder(let id, _, _) = row { return id }
+            return nil
+        }
+        XCTAssertEqual(presentedLayers, [sourceID], "The panel's row still exposes the original layer once")
+        XCTAssertEqual(presentedFolders, [selfParent], "The panel exposes the recovered folder once")
+        let recovered = try XCTUnwrap(single.makeRenderRequest(atFrame: 0, includeBackground: false))
+        let image = try XCTUnwrap(Compositor.composite(recovered, resolving: .coreGraphics))
+        let actual = try XCTUnwrap(CanvasFixture.rgbaBytes(image))
+        XCTAssertTrue(actual.elementsEqual(expected), "The recovered tree draws the original nonblank pixels")
     }
 
     /// A three-folder cycle, which resolves through a different branch of `folderSubtree` than the
