@@ -1,89 +1,70 @@
 # TODO
 
-## Current source and qualification — 2026-10-24
+## Current source and next actions — 2026-10-24
 
-Current consolidated CODE is8bb68907ee135820900906a537c56ce46a76b887, clean in final-integration
-and final-check with all728 source byte/kind/mode entries exact. Main/origin stayafd2030c; no merge,
-push or device install. The new mend-free-caps task starts from that code; only the recorded test edits are authorized; product edits await proof review. Root owns docs/Git and the single Mac native lease; delegate implementation and review.
+Main/origin remain afd2030c; no merge, push or iPad install. Consolidated product code is8bb68907
+in final-integration/final-check. The active mend-free-caps task iscdf9c2589442e3ada095b70561e2e189bde2304a:
+only committed regression/fixture edits so far, product byte-identical8bb. All728 source entries
+were exact/clean at the last native closure. Root owns docs/Git and the single Mac native lease;
+agents own bounded implementation, native verification and independent review. Native lease RELEASED.
 
-Actual ordinary owner9 UI47 CLOSED47passed/0failed/0skipped/0expected, native0/wrapper0 at8bb.
-All8 whole classes and all6 genuine hold callers passed, including point-only wide-dot, raster move/
-undo/cold-reopen, shape, vector content and video. Exports/LOOK and final728/device reconciliation are complete; root accepted all47 identities and
-LOOKed current Rough/new-fill/batch before/after. Raster released the native lease. Actual focusedb8652/2
-and root whole-picture LOOK are preserved. Earlier40 normal422/422 is green; new8bb422 is not run.
+Actual closed evidence, with limits:
+- Whole8bb UI47:47passed/0failed/skipped/expected; root verified identities/source/device and LOOKed
+  owner-landscape pictures. This did not assert the remaining tiny free-cap holes.
+- Paper helper correction5cd447c1: existing helpers now use the actual2048x1024 aspect. Whole fillUI
+  class4passed/0skip; all728source exact/clean. Raster LOOKed9pictures; root independently accepted
+  results and LOOKed3. All4red fill sides are bounded inside paper;3six-pixel cap holes remain.
+- Logic regression5ae8073a: one actual GPU method failed only at its new12cap-pixel assertion;
+  every cap was transparent, body/prior40px/off-on/cache checks reported no failures.
+- Stronger two actual cold consumers atcdf:2actual/2failed/0skip, native65/wrapper1. Exact intended
+  new-fill line273 and batch line318 each found6non-red detached-left cap pixels instead of0.
+  Original preceding body/outside/setup/OFF assertions and batch undo/redo reported no failure.
+  Fail-fast leaves later2caps and redo cap assertions UNREACHED, not9qualified failures. Raster
+  LOOKed6owner-landscape pictures; root verified actual source issues/freeze/device and LOOKed2.
+  Ordinary gate remains failed. Evidence: s54-final-qualification/native/
+  mend-cap-consumers-red-cdf9c258-run01/root-independent-red-acceptance.json.
+- Earlier40f77 normal422/422 is green. It is not current-successor qualification. The9bd control
+  attempt failed compilation0tests; explicit typed do fixed that, andb8652actual cold tests passed.
 
-IMPORTANT remaining product defect: current8bb new-fill AND Mend All pictures show3 tiny white free-
-cap patches beneath interior strokes. Both detached ends and the attached stem FREE end are affected;
-each is6 white displayed pixels. They are hundreds of pixels from the outside outline join. The
-owner's protect-uncertain-joins policy does not justify these holes; existing body probes missed them.
-Recorded BEFORE code on tmp/s54-mend-free-caps (initial scopee409378f), in BUGS and this existing fill
-ask. Bake proposes the shared bounded geometry correction; Startup independently reviews.
-The committed logic cap regression is actually RED; the two-file paper fixture correction is green. Preserve all equal-nearest witness checks, original outer edge,
-protected hole/notch/rim/fence cases and uncertain joins. No generic small-hole closer, second fill
-pipeline, persistent setting or appearance-policy change. Add discriminating full-cap coverage using
-existing seams after the concrete cause/proposal is accepted; commit before deliberate faults.
-Evidence: s54-final-qualification/native/ui47-8bb68907-run01/closed-exports/attachments/:
-new-fill2FE209C7-4A28-4B53-95FD-66843D015D46.png, batch-after67F8600F-0225-49C6-831F-BBA4A7E05ABD.png,
-batch-before17A2ADD4-90CE-4370-A006-94A2B45BC073.png. There is no retained ON-before artwork image;
-the batch-before is a separate OFF case. Originalb865 and40 pictures remain preserved.
+Remaining fill defect: both new fill and Mend All leave internal free-cap holes. Preserve the true
+outside edge, holes, uncertain joins, every equal-nearest witness and all rim/artwork/fence/neighbor
+checks. No hidden stroke-history inference, generic tiny-hole closer, persistent setting/cache,
+parallel fill pipeline or full-image CPU analysis per tick. Owner wants attached stems too and
+real-time feedback. Existing body-only green is not completion.
 
-All8bb new107 logic/99recipes/66methods/247semantic statement maps, UI13/7methods/33statements
-(10product-consumer+3fixture), mask6controls+11faults/5methods/18statements are OFFLINE ONLY and
-root-independently accepted. Hold their native execution until cap correction and successor source/
-normal gates. Originals are immutable. Source countsfast5398/full5987/PBX1327; no methods added by
-the preceding UI/typed-do corrections. Both UI lints and PBX validation passed. The first9bd attempt
-failed compilation0tests; explicit typed do fixed it andb865 app compiled/passed2. Do not count a
-compiler failure, skip, timeout, crash or unrelated assertion as a qualifying fault.
+Two distinct causes under review: actual6x24/Reach6 GPU cap exhaustion is proved; finite integer
+capsule tracing also finds a far OPEN endpoint rejected because its diagonal side cell is itself
+source-owned OPEN. That second trace is offline Python geometry, NOT actual GPU/AA screenshot
+classification. Source proposal is the SMALL shared endpoint correction first; larger bounded-head
+staging is not granted. Its old expensive repeated proof was rejected; existing8N temporary workspace
+can support staged reuse if ultimately justified. An alleged distant-ring contradiction was withdrawn:
+calling an identical remote attached stem an original outline assumed unavailable stroke history.
 
-Final fastDebug/Release, whole/full phase, paired16Release ABBA, whole256 previous-writer library cold
-UI and fresh saved-scene/export/signed-device/erasing checks remain open. Full external adapter943a2652
-is independently accepted with20offlinefakefixtures,5987/398classes and61exact opt-in skip guards;
-actual clone ownership and actual skip source/reasons need postreview. No full native run occurred.
-Owner artwork confirmation still precedes whole retirement of the temporary converter and temporary
-UI; permanent startup maintenance must stay. Erasing respring cause remains unproved. Bounded vector
-memo followup found existing byte/LRU/12-owner eviction, not one retained full picture per visited cel.
-No generic raster-capacity figure is aggregate device RSS. No physical operation this pass.
+Next before product edits: independently review/record exact2file endpoint patch
+mend-free-caps-b865-readonly/endpoint-only-proposed.patch (SHAaace38b43f9e8009b6b08d54e635030191f76b726c41159f6e05c07419b0ecb6).
+It extends ONE existing side helper only at an actual far OPEN centerline endpoint; intermediate/
+near checks stay ink-only, actual source-side ownership stays mandatory and Reach/ties unchanged.
+Append actualRGBA horizontal/vertical/default-overlap positives and independent missing-source-side
+negatives in the existing cross-section logic method; no new test method/file/framework/dispatch.
+Root and Startup independently accepted that exact patch BEFORE edits. This recorded scope grants
+ONLY Fill.metal and FillMendLogicTests.swift for the endpoint correction/test additions; no other
+source/docs/Git/native edit by the implementation agent. The old helper is replaced whole, with no
+compatibility path. Root commits then grants the existing cross-section method and protected controls.
+The long rectangular12cap assertion remains intentionally RED; staged head work is not granted.
+Commit before meaningful faults; compiler/timeout/crash/skip cannot qualify. No UI completion claim.
 
-Root accepted the bounded TEST-ONLY red proposal before edits: extend existing
-FillMendLogicTests.testMendFeaturesWaitForEnabledReachAndSurviveOffOnTicks using its existing6x24
-rect/demandSession. Keep all current40px full-picture/off-on/cache assertions; add6px Reach, one
-full-RGBA body control and one complete12-pixel free-cap footprint assertion. No new method/helper,
-product edit or harness. Commit first, then run this one original method to establish its actual
-cap assertion red on unchanged production. The safe product-proof proposal remains under review.
+Final gates remain: successor normal422 and wholeUI47; meaningful new107logic/99recipes/66selectors
+(247mapped statements), UI13/7selectors/33statements and mask6positiveLOOK+11faults/5selectors/18statements;
+normal rebuild after faults; fastDebug AND Release; full phase; paired16Release ABBA; genuine256package
+previous-writer cold-library UI; required old workflows; fresh saved-scene/export/signed-iPad/erasing
+checks.8bb preparations are OFFLINE only and root-independently accepted; repin once coherent source
+settles. Static counts5398fast/5987full/398classes/PBX1327. Both UI lints pass. Full external adapter
+943a2652 has20offlinefake fixtures and61exact opt-in guards accepted; actual clones/skip reasons still
+need postreview. No full native run. Preserve old071Release DD and untouched original artwork/export.
 
-Actual committed regression5ae8073a reproduced RED on the GPU:1actual method, sole failure at
-FillMendLogicTests250, all12cap RGBA values[0,0,0,0]; body and preserved checks reported no failures.
-Native65/wrapper1 is an expected regression red, not a normal green or a product fix. All728 source
-entries stayed exact/clean; production is byte-identical8bb. Native lease is now released.
-
-Recorded test-fixture correction BEFORE edits: both existing2048x1024 FillMend setups call
-visiblePaperRect→square-only paperRect, so their top outline gesture is off the actual artwork.
-Extend those EXISTING helpers with defaulted canvasSize/aspect-fit arithmetic, preserving square
-callers, and pass each FillMend launch's SAME2048x1024 size. No new helper/framework/test method,
-app ID, product change or xform inversion. This fixes the actual four-sided enclosure proof and
-supports future non-square fixtures. Root grants only the two named test files after this record;
-cap-pixel UI assertions and product proof remain separate pending scopes. Preserve all original
-captured evidence and outside/undo assertions. Native class/owner-picture validation follows commit.
-
-Actual test-only paper correction5cd447c1 now passed the WHOLE FillMendUITests4:4unique/4passed,
-0failed/skipped/expected, native0/wrapper0. All728 source entries stayed exact and clean, correct
-owner9 landscape. Raster LOOKed9whole pictures; root independently reconciled4actual identities,
-current source/counts and LOOKed new-fill/batch before/after. The red fill is now bounded inside paper
-on all4sides; the SAME3six-pixel free-cap holes remain in both ON and batch. This fixes only fixture
-geometry and does not close the product gap. Evidence: s54-final-qualification/native/
-fill-paper-fixture-5cd447c1-run01/{completion-evidence,root-independent-acceptance}.json.
-Native lease released. Product remains byte-identical8bb; no product edit has been granted.
-
-Recorded/accepted next TEST-ONLY scope BEFORE edits: extend only existing FillMendUITests with3
-geometry-derived interior free-cap collars. Reuse its private ScreenshotPixels extension for ONE
-predicate-count rectangle helper over every displayed native pixel; no duplicated scan, pixel reader,
-app hook or test method. Existing4methods/body/outer-edge/undo assertions remain. ON must show zero
-non-red pixels in all3collars; batch OFF must expose bare pixels, and batch/redo must show zero.
-Collars derive from original endpoints, remain inside enclosure/above dock and use the SAME isRed.
-Exact reviewed proposal34a91f8fb97b5d8a7f4b9414817c6e219b081ec4e256967de32484ef956cc9d4 is external
-owner-screen-evidence/mend-free-cap-ui-proposal-5cd447c1/proposal.diff. Commit before native2consumer
-RED on unchanged product; actual semantic fault qualification follows an eventual safe green fix.
-No product grant, no hidden-history policy, no new persistent data/cache or full-image CPU fill pass.
+No physical operation this pass. Fresh saved-scene/unlocked readiness is required when actually
+ready; do not reuse old readiness answers. Erasing respring cause remains unproved. Owner artwork
+confirmation precedes whole temporary-converter/UI retirement; permanent startup maintenance stays.
 
 ## How to read and keep this file
 

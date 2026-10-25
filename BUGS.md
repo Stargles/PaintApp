@@ -2586,3 +2586,11 @@ four-sided fill. Geometry bug corrected, unmerged. The three six-pixel free caps
 fill and batch pictures. Independent evidence: s54-final-qualification/native/
 fill-paper-fixture-5cd447c1-run01/root-independent-acceptance.json. Separate cap logic5ae regression
 failed exactly at all12transparent cap pixels while body/existing40px checks reported no failures.
+
+Actual stronger consumer checks atcdf9c258 now reproduce the same cap defect:2actual/2failed,
+0skips, native65/wrapper1, sole intended source assertions273(new fill)/318(batch),6non-red pixels
+instead of0each. Original preceding body/edge/OFF/undo/redo checks reported no failures; later cap/
+redo-cap assertions are unreached under fail-fast.728source entries exact/clean; root LOOKed2whole
+owner-landscape pictures. Evidence: native/mend-cap-consumers-red-cdf9c258-run01 under
+s54-final-qualification. Product unchanged8bb; narrow far-open endpoint proposal under review,
+long rectangular proof exhaustion remains open. Offline capsule tracing is not actualAA/GPU proof.
