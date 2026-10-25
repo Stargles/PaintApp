@@ -648,6 +648,39 @@ final class FillMendLogicTests: XCTestCase {
             XCTAssertTrue(squarePatch.enumerated().allSatisfy { $0.element == 0 || squareInk.contains($0.offset) },
                           "Reach \(reach) adds no paint outside the reference ink, including inside the intentional hole")
         }
+        // Owned paper separates this wide internal strip from an unrelated enclosing frame.
+        let nearFrameSide = 128
+        var nearFrameInk = Set<Int>()
+        var nearFrameSource = [UInt8](repeating: 0, count: nearFrameSide * nearFrameSide)
+        for y in 4..<124 { for x in 4..<124 {
+            let index = y * nearFrameSide + x
+            let frame = !(6..<122).contains(x) || !(6..<122).contains(y)
+            let strip = (10..<50).contains(x) && (30..<90).contains(y)
+            if frame || strip { nearFrameInk.insert(index) } else { nearFrameSource[index] = 255 }
+        } }
+        XCTAssertTrue((6..<10).allSatisfy { nearFrameSource[60 * nearFrameSide + $0] == 255 },
+                      "PREMISE: four owned open columns separate the strip from the frame")
+        let nearFramePatch = try mendPatch(width: nearFrameSide, height: nearFrameSide,
+            source: nearFrameSource, ink: nearFrameInk, reach: 40)
+        XCTAssertEqual(nearFramePatch[60 * nearFrameSide + 13], 255,
+                       "a true forty-pixel internal crossing remains mendable beside unrelated outer ink")
+
+        // A safe-looking side crossing must not paint the nearby explicit unowned notch border.
+        let notchSide = 64
+        var notchInk = Set<Int>()
+        var notchSource = [UInt8](repeating: 0, count: notchSide * notchSide)
+        for y in 4..<60 { for x in 4..<60 {
+            let index = y * notchSide + x
+            let frame = !(6..<58).contains(x) || !(6..<58).contains(y)
+            let strip = (29..<34).contains(x) && (20..<44).contains(y)
+            let notch = (29..<34).contains(x) && (18..<20).contains(y)
+            if frame || strip { notchInk.insert(index) } else if !notch { notchSource[index] = 255 }
+        } }
+        let notchPatch = try mendPatch(width: notchSide, height: notchSide,
+            source: notchSource, ink: notchInk, reach: 6)
+        XCTAssertEqual(notchPatch[21 * notchSide + 29], 0,
+                       "the unowned notch wins over the candidate's owned nearest side and convenient five-pixel crossing")
+
     }
 
     func testMendReachCountsTheWholeAsymmetricAxialAndDiagonalCrossSection() throws {
@@ -688,6 +721,32 @@ final class FillMendLogicTests: XCTestCase {
                        "two near and three far diagonal steps span four sqrt(2) pixels, beyond reach five")
         XCTAssertNotEqual(diagonalExact[35 * width + 35], 0,
                           "the asymmetric diagonal strip is accepted at reach six")
+
+        // A supported diagonal proof can travel farther than its major-axis step bound.
+        let longSide = 240
+        var longInk = Set<Int>()
+        var longSource = [UInt8](repeating: 0, count: longSide * longSide)
+        for y in 4..<236 { for x in 4..<236 {
+            let index = y * longSide + x
+            let frame = !(6..<234).contains(x) || !(6..<234).contains(y)
+            let band = (-42...42).contains(x - y)
+            if frame || band { longInk.insert(index) }
+            if !frame && (!band || x - y <= -34 || x - y >= 0) { longSource[index] = 255 }
+        } }
+        let longProbe = 110 * longSide + 80
+        XCTAssertEqual(longSource[longProbe], 0, "PREMISE: the diagonal crossing still has an unpainted gap")
+        let longOwned = try mendPatch(width: longSide, height: longSide,
+            source: longSource, ink: longInk, reach: 40)
+        XCTAssertEqual(longOwned[longProbe], 255,
+                       "raw diagonal width above fifty-two remains admissible when its uncovered gap fits Reach and no danger is nearby")
+        let distantHole = 166 * longSide + 136
+        let removedInk = longInk.remove(distantHole)
+        XCTAssertNotNil(removedInk, "PREMISE: removing one ink pixel creates the intentional open hole")
+        longSource[distantHole] = 0
+        let longProtected = try mendPatch(width: longSide, height: longSide,
+            source: longSource, ink: longInk, reach: 40)
+        XCTAssertEqual(longProtected[longProbe], 0,
+                       "the unowned hole fifty-six ink steps away remains inside this diagonal crossing's raw support")
 
         // A rounded cap's far open endpoint can touch another owned open cell at a raster corner.
         // The two orientations make each independent side check decisive, including a tied normal.
