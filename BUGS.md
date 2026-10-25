@@ -19,11 +19,14 @@ before implementation on tmp/s54-response-curve; no native/compiler/device run b
 
 ## Media reads produce runtime priority-inversion warnings — 2026-10-25
 
-Actualunrelated422passed atb827cbfc butrecordedthreeThreadPerformanceChecker warnings:
-H264StreamDecoder101/361 andVideoFrameReader308. HighQoS caller waits on unspecified/Utility work.
-No runtimefailure/artistlatency/eraser attribution. Traceproductionversusfixture priority and existing
-queue/read ownership beforefixing; no blanketpriority increase, duplicateddecoder ortestsilencing.
-Evidence: native/unrelated-normal422-b827cbfc-run01/root-independent-acceptance.json.
+Actual unrelated422 passed at b827cbfc with three ThreadPerformanceChecker warnings. Independent
+trace confirms one production-reachable ownership defect: final H264 native cleanup can execute on
+main when weak client stop is overtaken by final release. Design a narrow transfer of only that
+session to its existing serial queue, with one shared native cleanup operation; no self/client capture,
+new queue or QoS increase. No fix granted yet. The reset warning is already worker-owned; this run's
+video warning is the test's direct pixel oracle. Separate synchronous production video UI pulls are
+source-confirmed risks, not a measured slowdown or eraser cause. Report:
+`s54-final-qualification/media-qos-trace-683f40a3.md`; actual422 evidence remains at its true pin.
 
 ## Interior mending repaints circular outline tips — 2026-10-25
 

@@ -68,6 +68,29 @@ H264StreamDecoder101/361, VideoFrameReader308; main/highQoS waiter on unspecifie
 No artistlag/cause established; traceproduction versusfixture call ownership beforechangingQoS.
 Evidence: native/unrelated-normal422-b827cbfc-run01/root-independent-acceptance.json.
 
+**Current follow-through, recorded before action:** the owner capability question is now pending,
+with an original three-panel illustration at `s54-final-qualification/mend-reference-decision/`:
+editable vector marks may mend through stems/caps while flattened references preserve ambiguous
+attached ink; alternatives are conservative behavior everywhere or retaining full scope for further
+research. No narrowing/implementation is approved yet. Independent removal map would delete the
+failed distance/nearest-open machinery whole, retaining shared ink EDT and the first neighbor seam.
+
+Read-only media trace found one concrete final-owner defect: `H264StreamDecoder.deinit` can invalidate
+its native session on the releasing/main thread after weak client stop loses ownership. A narrow fix
+is being designed: retire only the final session on its EXISTING serial queue, share one self-free
+native cleanup operation with reset/rebuild; no decoder/client capture, new queue or priority bump.
+The reset warning already runs on a worker. This run's video warning is the test's main-thread pixel
+oracle; separate synchronous video UI consumers remain a documented risk, not a measured slowdown.
+Report: `s54-final-qualification/media-qos-trace-683f40a3.md`. No source fix/native change granted yet.
+
+While the fill answer is pending, prepare the first unrelated29 assertion targets: brush14, palette4,
+metadata4, curve7 (69 meaningful statements), omitting stream/media. All relevant recipes/oracles
+must match the accepted107 map; actual normal422 remains labeled b827cbfc, not retagged. Root has
+independently proved all728 source byte/kind/mode records equal clean683 and the actual normal run.
+After this records-only commit, repin just29 and obtain root's explicit one-Mac native grant. Stop on
+unexpected green/compiler/crash/setup failure; generic red is not semantic qualification. Preserve
+all originals; rebuild normal source after faults before any UI/install. No physical action planned.
+
 **Mend scope decision being prepared, NOT applied:** freshindependentreviewer recommends current
 VECTORreference geometry ratherthan anotherpixelclassifier. ExistingVectorCanvas→BrushStamper→
 DabTarget supplies canonicalrendered dab positions/size/tips, but needs explicitfirsttangent/pose
