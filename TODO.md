@@ -2,15 +2,36 @@
 
 ## Current source and next actions — 2026-10-24
 
-Owner priority —2026-10-24 evening: “status report and install the latest build to ipad, and continue.”
-Prepare the latest clean integrated candidate (productfbb) for a REVIEW install while the two known
-Mend defects and final combined gates remain open; do not label it final qualification. Drive required
-old workflows, rebuild normal optimized Release, verify whole signature and at least5days profile
-life. Preserve a fresh current saved library/export before a repair-bearing install. Obtain fresh
-saved/unlocked readiness immediately before the necessary device restart/export/install; earlier
-readiness is stale. No destructive scene cleanup. Continue independent fill design work externally
-while candidate source is frozen for native preparation. If current signing cannot satisfy5days,
-report the exact portal/profile result; do not silently reuse the expiring profile.
+Latest owner steering —2026-10-25: “immediate ipad instalation is off priority now. Install new
+ipad versions whenever you wish.” Continue substantive work and useful running agents; quick status
+provided. Do not interpret this as an explicit waiver of the5day signing rule. No fresh saved-scene
+readiness or artwork confirmation has been obtained; do not reuse old readiness answers.
+
+Latest reviewRelease at clean ee36770d built successfully with real Swift-O; full signature verified
+independently by root. ExecutableUUIDF699A856-9C3F-34F1-AE99-E7C221BF9FF8. Apple reused profile expiry
+2026-10-30T00:18:54Z, only4.75days at build, below the mandated5days; NOinstall/export/launch occurred.
+Evidence: s54-final-qualification/ipad-review-ee36770d/root-independent-build-acceptance.json.
+Ordinaryoldworkflows5 then passed5/5,0failed/skipped/expected on owned9;728source exact/clean, root
+independently reread actualselector/count/device/freeze. Agent LOOKed6portraitPNG; root LOOKed4:
+playback wholeportrait, pan/rotation pair, stroke crop. Move+graph passed actualbehavior assertions
+but retained NOmedia. No ownerlandscape claim. Nativelease RELEASED. Evidence:
+native/preinstall-oldworkflows5-ee36770d-run01/root-independent-acceptance.json.
+
+Shared mend correction direction is now finite-reviewed: distance THROUGH original ink to current
+unownedopen/domain/rim/fence/neighbor danger, compared to EACH genuine local crossing's full rawwidth;
+Reach still counts only its uncovered gap afterOverlap. A global52px veto was rejected because it
+breaks thin strokes near a window rim/attachedjoin. The owner gave no global/body-brush-width rule;
+a valid short cap chord is not a semantic defect. Two agents agreed on localownership+crossing
+invariant; no universal shape/performance claim. Bake prepares an EXTERNAL ONLY twofile proposal
+(Fill.metal/MetalFillEngine.swift). Reuse2Nbyte planes in existing8Nworkspace plusfirstNoutput;
+no newallocation/cache/CPUfullimagepertick. Danger siteD0, adjacentinkD1, ownedopenbarrier255;
+propagate onlyoriginalink with immutablepingpong. BandB=ceil(sqrt(2)*ceil(proofSpan)), max74, covers
+existing major-step digitalwalk's rawdiagonalwidth. Unknown/saturateddistance is a bound, notinfinity.
+Keep strictnear/far endpoint/supercover/domainchecks and old neighboring-fillcorridor. Replace
+ALLnearest acceptance with genuinecrossing+distance; reuse nearestfeature directions and existing
+fouraxes for captransversecrossings. No cap-shape/body-width classifier. Exactcode/assertions require
+independent review and root scope before productapply, thenGPU/UI/fault/performance proof. No product
+edit granted yet; all prior externalstaged/medialdesigns remain NOTREADY.
 
 Main/origin remain afd2030c; no merge, push or iPad install. Consolidated product code is8bb68907
 in final-integration/final-check. The active mend-free-caps tip is0ca9d75951850e5c89e6c9865bbba87fa6ccccfb
