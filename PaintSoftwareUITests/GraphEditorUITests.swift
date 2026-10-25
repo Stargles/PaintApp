@@ -574,9 +574,10 @@ final class GraphEditorGestureUITests: PaintUITestCase {
         let original = "\(id):0,6"
         XCTAssertEqual(band.value as? String, original)
         let ppf = TimelineKeyMarkers.basePixelsPerFrame
-        let point = band.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+        let nodeOffset = CGVector(
             dx: TimelineGraphBand.x(ofFrame: 0, pixelsPerFrame: ppf),
-            dy: TimelineGraphBand.y(ofValue: authored.start, in: 0...2, bandHeight: band.frame.height)))
+            dy: TimelineGraphBand.y(ofValue: authored.start, in: 0...2, bandHeight: band.frame.height))
+        let point = band.coordinate(withNormalizedOffset: .zero).withOffset(nodeOffset)
         point.tap()
         let startFocus = TimelineGraphBand.encodeGesture(
             focus: .init(parameterID: id, frame: 0), readout: nil, selectedCount: 1)
@@ -584,11 +585,16 @@ final class GraphEditorGestureUITests: PaintUITestCase {
                                                            object: band)], timeout: 5)
         XCTAssertEqual(band.label, startFocus, "The first tap exposes the focused node's handles")
 
-        let origin = point.screenPoint
-        try fingerStroke(through: [origin,
+        let bandFrame = band.frame
+        let origin = CGPoint(x: bandFrame.minX + nodeOffset.dx, y: bandFrame.minY + nodeOffset.dy)
+        let continuedPath = [origin,
             CGPoint(x: origin.x + ppf, y: origin.y),
             CGPoint(x: origin.x + ppf * 2, y: origin.y),
-            CGPoint(x: origin.x + ppf * 3, y: origin.y)], interval: 0.25)
+            CGPoint(x: origin.x + ppf * 3, y: origin.y)]
+        let visibleBand = bandFrame.intersection(window.frame)
+        XCTAssertTrue(continuedPath.allSatisfy { visibleBand.contains($0) },
+                      "PREMISE: every continuation point is inside the visible graph band")
+        try fingerStroke(through: continuedPath, interval: 0.25)
         let landed = TimelineGraphBand.encodeGesture(
             focus: .init(parameterID: id, frame: 3), readout: nil, selectedCount: 1)
         _ = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", landed),
@@ -605,15 +611,21 @@ final class GraphEditorGestureUITests: PaintUITestCase {
         let cel = try XCTUnwrap(readCel(app, layerIndex: 1, celIndex: 0))
         block.coordinate(withNormalizedOffset: CGVector(dx: 0.5 / Double(cel.length), dy: 0.5)).tap()
         XCTAssertEqual(readFrameLabel(app)?.current, 1, "The playhead observes the node about to move")
-        let returnedPoint = band.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+        let returnOffset = CGVector(
             dx: TimelineGraphBand.x(ofFrame: 0, pixelsPerFrame: ppf),
-            dy: TimelineGraphBand.y(ofValue: authored.start, in: 0...2, bandHeight: band.frame.height)))
+            dy: TimelineGraphBand.y(ofValue: authored.start, in: 0...2, bandHeight: band.frame.height))
+        let returnedPoint = band.coordinate(withNormalizedOffset: .zero).withOffset(returnOffset)
         returnedPoint.tap()
-        let returnOrigin = returnedPoint.screenPoint
-        try fingerStroke(through: [returnOrigin,
+        let returnFrame = band.frame
+        let returnOrigin = CGPoint(x: returnFrame.minX + returnOffset.dx, y: returnFrame.minY + returnOffset.dy)
+        let returnedPath = [returnOrigin,
             CGPoint(x: returnOrigin.x, y: returnOrigin.y + 20),
             CGPoint(x: returnOrigin.x, y: returnOrigin.y + 35),
-            CGPoint(x: returnOrigin.x, y: returnOrigin.y + 20), returnOrigin], interval: 0.25)
+            CGPoint(x: returnOrigin.x, y: returnOrigin.y + 20), returnOrigin]
+        let visibleReturnBand = returnFrame.intersection(window.frame)
+        XCTAssertTrue(returnedPath.allSatisfy { visibleReturnBand.contains($0) },
+                      "PREMISE: every return point is inside the visible graph band")
+        try fingerStroke(through: returnedPath, interval: 0.25)
         let slider = app.sliders["effectSettings.brightness"]
         let restored = NSPredicate { _, _ in
             guard let text = slider.value as? String, let value = Double(text) else { return false }
