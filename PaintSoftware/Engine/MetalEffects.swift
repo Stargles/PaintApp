@@ -192,6 +192,9 @@ final class EffectPipelines {
     /// accounting and for the tests that pin the bound.
     var residentIntermediateSizes: [TexturePixelSize] { scratchOrder }
 
+    /// Settled textures actually held by this owner, rather than a previous requested high-water mark.
+    func residentIntermediateCount(at size: TexturePixelSize) -> Int { scratch[size]?.count ?? 0 }
+
     /// Makes sure `count` intermediates exist at this size, allocating only what is missing, and
     /// hands back the pair the caller ping-pongs through. Nil is an allocation this device declined.
     ///

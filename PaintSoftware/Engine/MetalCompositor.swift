@@ -149,6 +149,8 @@ private final class ScratchTexturePool {
     let height: Int
     private var free: [MTLTexture] = []
 
+    var reusableCount: Int { free.count }
+
     /// How many textures this composite created. Reset by `beginComposite`, because a lifetime total
     /// stops being the interesting number the moment the pool outlives one frame: what a reader wants
     /// to know is whether *this* frame allocated, and a warm pool's answer is 0.
@@ -614,8 +616,8 @@ final class CompositorMetalEngine {
         // a composite that discovers halfway down that it cannot finish has already spent the memory
         // it was trying not to spend.
         let canvasBytes = width * height * 4
-        let walkTextures = request.tree.peakCompositeTextures
-        let wanted = walkTextures * canvasBytes
+        let textureCounts = request.tree.compositeTextureCounts
+        let wanted = (textureCounts.walk + textureCounts.intermediates) * canvasBytes
         let budget = CompositorBudget.textureBudgetBytes
         guard wanted <= budget else {
             lastAdmission = .overBudget(wantedBytes: wanted, budgetBytes: budget)
@@ -631,15 +633,13 @@ final class CompositorMetalEngine {
             // to CoreGraphics, for the duration of the stroke.
             return .unavailable
         }
-        // Cold means the pool has to be built from nothing, so the whole working set is a new
-        // allocation; warm means the pool and the intermediates are already resident and the only
-        // new canvas-sized thing this frame will ask for is the image `readBack` hands out.
-        //
-        // **This is one of the two things the size map buys directly**: the live canvas's next frame
-        // after a save used to be cold, because the save's own size had evicted it. It is warm now.
+        // Price only missing textures from each settled owner, plus the new readback. The same size
+        // can need a larger walk or its first effect; one owner's spare textures cannot fund another.
         let size = TexturePixelSize(width: width, height: height)
-        let isCold = pools[size] == nil
-        guard CompositorBudget.hasHeadroom(for: isCold ? wanted + canvasBytes : canvasBytes) else {
+        let missingWalk = max(0, textureCounts.walk - (pools[size]?.reusableCount ?? 0))
+        let missingIntermediates = max(0, textureCounts.intermediates - (effects?.residentIntermediateCount(at: size) ?? 0))
+        let additionalBytes = (missingWalk + missingIntermediates + 1) * canvasBytes
+        guard CompositorBudget.hasHeadroom(for: additionalBytes) else {
             lastAdmission = .noHeadroom(wantedBytes: wanted)
             // Give back what is held before declining. The CPU reference is about to composite this
             // same frame and will want a canvas-sized buffer or three of its own, and everything this

@@ -422,6 +422,59 @@ final class GlareEffectLogicTests: XCTestCase {
                        "A buffer with the full apron must match the whole frame's own row exactly")
     }
 
+    func testPeriodicGlareKeepsUsefulPixelsAndBothPayloadAngleFormsInsideItsApron() throws {
+        try XCTSkipIf(MetalEffectEngine.shared == nil, "No Metal device in this test bundle")
+        let engine = try XCTUnwrap(MetalEffectEngine.shared)
+        let width = 64, height = 132, destination = 130
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        for pixel in stride(from: 3, to: bytes.count, by: 4) { bytes[pixel] = 255 }
+        for (x, y) in [(54, 3), (61, 5)] {
+            for channel in 0..<3 { bytes[(x + y * width) * 4 + channel] = 255 }
+        }
+        let glare = Effect.Glare(threshold: 0.3, intensity: 1, streaks: 2,
+                                 angleOffset: 100000003, fade: 1, length: 128)
+        let effect = Effect.glare(glare)
+        var reduced = glare
+        reduced.angleOffset = 283
+        let equivalent = Effect.glare(reduced)
+        let whole = cpu(effect, bytes, width: width, height: height)
+        XCTAssertEqual(whole, cpu(equivalent, bytes, width: width, height: height))
+        XCTAssertGreaterThan(pixel(whole, 32, destination, width: width)[0], 0,
+                             "The normalized ray must actually carry light, independently of parity")
+        let apron = effect.verticalKernelRadius(frameSize: (width, height))
+        let top = max(0, destination - apron)
+        let window = Array(bytes[(top * width * 4)...])
+        let cropped = cpu(effect, window, width: width, height: height - top)
+        XCTAssertEqual(pixel(cropped, 32, destination - top, width: width),
+                       pixel(whole, 32, destination, width: width))
+        let gpu = try XCTUnwrap(engine.apply(effect, to: bytes, width: width, height: height))
+        let reducedGPU = try XCTUnwrap(engine.apply(equivalent, to: bytes, width: width, height: height))
+        XCTAssertEqual(gpu, reducedGPU)
+        XCTAssertGreaterThan(pixel(gpu, 32, destination, width: width)[0], 0)
+        let gpuCrop = try XCTUnwrap(engine.apply(effect, to: window, width: width, height: height - top))
+        XCTAssertEqual(pixel(gpuCrop, 32, destination - top, width: width),
+                       pixel(gpu, 32, destination, width: width))
+
+        for angle in [45.0, -77, 100000003, 1e20, Double.greatestFiniteMagnitude] {
+            for count in 2...Effect.maxGlareStreaks {
+                let value = Effect.glare(Effect.Glare(streaks: count, angleOffset: angle, length: 128))
+                let p = value.params
+                XCTAssertTrue(p.glareAngle.isFinite, "Finite input must not overflow before sampling")
+                guard p.glareAngle.isFinite else { return }
+                XCTAssertEqual(p.glareAngle, Float(angle.truncatingRemainder(dividingBy: 360) * .pi / 180))
+                let radius = value.verticalKernelRadius(frameSize: (width, height))
+                for i in 0..<count {
+                    let cpuAngle = Double(p.glareAngle) + Double(i) * Double(p.glareAngleStep)
+                    let metalAngle = p.glareAngle + Float(i) * p.glareAngleStep
+                    let cpuDelta = Float(sin(cpuAngle)) * Float(p.taps)
+                    let metalDelta = Float(sin(Double(metalAngle))) * Float(p.taps)
+                    XCTAssertLessThanOrEqual(Int(ceil(abs(Double(cpuDelta)))), radius)
+                    XCTAssertLessThanOrEqual(Int(ceil(abs(Double(metalDelta)))), radius)
+                }
+            }
+        }
+    }
+
     // MARK: - Persistence
 
     /// `{"kind":"glare","params":{…}}` round-trips every type; what an older document lacks (no

@@ -12,7 +12,7 @@ is authorized by an old readiness answer: obtain fresh saved-scene readiness whe
 
 Main/origin remain afd2030c. Latest accepted logic source is bddb83db; integration has advanced cold UI fixtures and remains
 unmerged/uninstalled. Root owns integration, independent evidence and ONE Mac native lease. Native
-is idle after normal-built UI21 atc4df:18pass3fail. Source compiled/executed normally; the UI
+is idle after exact Blend diagnostic94fed (sample199vs200) and normal-built UI21 atc4df:18pass3fail. Source compiled/executed normally; the UI
 gate remains red, with no install/full/performance qualification.
 All historical attempts remain at named immutable pins; do not retag them.
 
@@ -111,6 +111,17 @@ regressions plus meaningful assertion controls. Report8b106831 under s54-archite
 neighborhood-effect-audit-ec843eee/. Source equations predict a glare contribution25 vs cropped0;
 this is not native pixel/RSS/physical respring proof. Independent review44d0162e confirms the3 source causes and refines native controls; author
 vector_mend_proof is implementing the recorded scope in a separate worktree, without native access.
+
+**Effects source55383dd6 harvested after independent7a1b6a17/root review:** ONLY7 source/test paths;
+four production files retain the reviewed shared cap/periodic-angle/apron/actual-owner admission
+changes, no shader/PBX/schema/state added. All118 old bodies exact;4 new methods yield122 whole,
+121 ordinary excluding ONLY the existing cost opt-in.13 proposed controls/12 recipes cover31 product
+and4 explicit premise identities;25 setup/arrangement occurrences are excluded. All native/compiler
+results remain UNRUN. Source-capped kernels still use raw sigma. First-growth5-picture fixture now
+discriminates each missing owner; reuse3 remains one-readback-only. Future safe controls exercise
+real allocations/outputs, not fabricated metrics. Frozen packet neighborhood-effect-53637328/
+committed-55383dd6; root/peer reviewed every source/output hash. Next native: ordinary121 exact
+methods (no opt-in), then separate13-control grant only after actual positive root acceptance.
 
 **Vector transfer scope recorded before code:** independent source/design review43957eca confirms
 TWO clusters: Duplicate/To New Layer pull selected posed ink to rest, then create a no-track cel

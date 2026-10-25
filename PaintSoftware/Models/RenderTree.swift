@@ -627,6 +627,13 @@ extension Array where Element == RenderNode {
     /// degrades to today's uncached behaviour when it has no room, where the textures below are what
     /// the walk cannot proceed without. `uploadableLeafCount` is the other half.
     var peakCompositeTextures: Int {
+        let counts = compositeTextureCounts
+        return counts.walk + counts.intermediates
+    }
+
+    /// Separate owners grow independently: reusable walk textures cannot stand in for an effect's
+    /// private intermediates. Both counts come from the same estimate used by the static budget.
+    var compositeTextureCounts: (walk: Int, intermediates: Int) {
         // The root accumulator pair `composite` acquires before the walk begins, plus whatever the
         // deepest point of the walk holds on top of it, plus the intermediates a multi-pass effect
         // ping-pongs through — which live at `EffectPipelines`' lifetime rather than the walk's, so
@@ -634,7 +641,7 @@ extension Array where Element == RenderNode {
         //
         // `self` is the root, and `paperInBackdrop: true` is the premise `composite` starts from —
         // the two things the walk itself threads, for the reasons below.
-        2 + nestedCompositeTextures(root: self, paperInBackdrop: true) + effectIntermediateTextures
+        (2 + nestedCompositeTextures(root: self, paperInBackdrop: true), effectIntermediateTextures)
     }
 
     /// Textures held *below* the caller's own accumulator pair, at the deepest point of the walk.

@@ -19,7 +19,8 @@ Current queue (items remain until merged):
   and meaningful Graph3/Blend3/text1 UI controls. Older failures/captures remain immutable.
 - Correct THREE scoped effects audit clusters via existing owners: cap radius before Int; normalize
   periodic angles/shared apron inputs; price actual missing GPU scratch/intermediate pictures plus
-  readback at warm first-effect growth. Independent audit review44d0162e accepted; scoped implementation underway. Actual consumer, refusal,
+  readback at warm first-effect growth. Source55383dd6 independently7a1b6a17 reviewed and harvested7paths, old118 exact/four newmethods.
+  Native ordinary121 and13controls/35behavior+premise identities remain UNRUN. Actual consumer, refusal,
   strip/periodicity/reuse and meaningful fault controls. Preserve sigma/appearance/budgets/fallback;
   no new retained counter/cache/renderer/schema. Audit8b106831 is source/model evidence, not RSS.
 - Cold stored-vector eraser Splatter/Undo/Redo. Existing-seed handoff and UTF-16 selection are

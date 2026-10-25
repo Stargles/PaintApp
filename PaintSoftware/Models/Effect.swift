@@ -1701,8 +1701,9 @@ extension Effect {
             p.isMonochrome = noise.isMonochrome ? 1 : 0
         case .blur(let blur):
             p.taps = UInt32(Self.tapCount(forRadius: blur.radius))
+            let angle = Self.periodicRadians(blur.angleDegrees)
             let step = blur.isDirectional
-                ? SIMD2<Double>(cos(blur.angleDegrees * .pi / 180), sin(blur.angleDegrees * .pi / 180))
+                ? SIMD2<Double>(cos(angle), sin(angle))
                 : SIMD2<Double>(1, 0)
             p.offsetX = Float(step.x)
             p.offsetY = Float(step.y)
@@ -1801,7 +1802,7 @@ extension Effect {
             let count = Self.glareStreakCount(s)
             p.glareStreakCount = UInt32(count)
             p.glareAngleStep = count > 0 ? Float.pi / Float(count) : 0
-            p.glareAngle = Float((s.angleOffset.isFinite ? s.angleOffset : 0) * .pi / 180)
+            p.glareAngle = Float(Self.periodicRadians(s.angleOffset))
             // No colour of its own — white is `bloomCombine`'s identity, the reused kind's own rule.
             p.colorR = 1; p.colorG = 1; p.colorB = 1
         case .colorWheels(let wheels):
@@ -2173,14 +2174,18 @@ extension Effect {
             // Every direction's own vertical reach, taken at its worst — `duplicateOffset`'s own
             // "read it, don't guess it" reasoning, over `maxGlareStreaks` directions rather than four
             // corners.
-            let s = glare.resolvedAsStreaks
-            let taps = Self.tapCount(forRadius: s.length)
+            let p = params
+            let taps = Int(p.taps)
             guard taps > 0 else { return 0 }
-            let count = Self.glareStreakCount(s)
-            let step = Double.pi / Double(count)
-            let angle0 = (s.angleOffset.isFinite ? s.angleOffset : 0) * .pi / 180
+            let count = Int(p.glareStreakCount)
             var maxSine = 0.0
-            for i in 0..<count { maxSine = max(maxSine, abs(sin(angle0 + Double(i) * step))) }
+            for i in 0..<count {
+                // The CPU widens the payload before adding; Metal forms the angle in Float.
+                // Inspect both bounded forms, with one row for bilinear/Float rounding.
+                let cpuAngle = Double(p.glareAngle) + Double(i) * Double(p.glareAngleStep)
+                let metalAngle = p.glareAngle + Float(i) * p.glareAngleStep
+                maxSine = max(maxSine, abs(sin(cpuAngle)), abs(sin(Double(metalAngle))))
+            }
             return Int((Double(taps) * maxSine).rounded(.up)) + 1
         // The reach is the radius — the two passes' discs sum to it (`lensBlurSampleOffsets` scales
         // the unit disc, and a polygon's radius never exceeds 1) — plus one bilinear tap per pass.
@@ -2242,7 +2247,13 @@ extension Effect {
 
     private static func tapCount(forRadius radius: Double) -> Int {
         guard radius.isFinite, radius > 0 else { return 0 }
-        return min(Int(radius.rounded()), maxBlurTaps)
+        return Int(min(radius, Double(maxBlurTaps)).rounded())
+    }
+
+    /// Keep periodic knobs finite before radians or Float narrowing; stored degrees stay unchanged.
+    private static func periodicRadians(_ degrees: Double) -> Double {
+        guard degrees.isFinite else { return 0 }
+        return degrees.truncatingRemainder(dividingBy: 360) * .pi / 180
     }
 
     /// `w[i] = exp(-i² / 2σ²)`, σ = radius/3, normalized so `w[0] + 2 Σ w[i] == 1`.

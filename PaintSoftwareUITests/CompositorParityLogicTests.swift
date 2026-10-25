@@ -1949,6 +1949,59 @@ final class CompositorParityLogicTests: XCTestCase {
                        "…and using a size moves it to the most-recently-used end")
     }
 
+    func testAWarmSimpleFramePricesItsFirstBlurAndThenReusesIt() throws {
+        try skipUnlessGPUAvailable()
+        let engine = try XCTUnwrap(CompositorMetalEngine.shared)
+        defer {
+            CompositorBudget.availableMemoryOverrideBytes = nil
+            CompositorBudget.budgetOverrideBytes = nil
+            engine.purge()
+        }
+        let manager = overlappingManager()
+        let simple = try XCTUnwrap(manager.makeRenderRequest(atFrame: 0, includeBackground: true))
+        manager.addValueLayer(effect: .blur(Effect.Blur(radius: 4)))
+        let blurred = try XCTUnwrap(manager.makeRenderRequest(atFrame: 0, includeBackground: true))
+        XCTAssertEqual(poolKey(simple), poolKey(blurred), "Premise: this is growth at one size")
+        XCTAssertEqual(simple.tree.compositeTextureCounts.walk, 2)
+        XCTAssertEqual(simple.tree.compositeTextureCounts.intermediates, 0)
+        XCTAssertEqual(blurred.tree.compositeTextureCounts.walk, 3)
+        XCTAssertEqual(blurred.tree.compositeTextureCounts.intermediates, 1)
+        let picture = CompositorBudget.textureBytes(for: simple.canvasSize)
+        CompositorBudget.budgetOverrideBytes = picture * 16
+        CompositorBudget.availableMemoryOverrideBytes = picture * 16
+        engine.purge()
+        let original = try XCTUnwrap(MetalCompositor.composite(simple))
+        XCTAssertEqual(engine.lastScratchAllocated, 2, "Premise: only the simple walk was warmed")
+
+        CompositorBudget.availableMemoryOverrideBytes = picture * 5
+        let underPressure: Bool
+        if case .underPressure = MetalCompositor.attempt(blurred) { underPressure = true }
+        else { underPressure = false }
+        XCTAssertTrue(underPressure, "First blur needs one walk texture, one intermediate and readback")
+        XCTAssertEqual(engine.lastAdmission, .noHeadroom(wantedBytes: picture * 4))
+        XCTAssertTrue(engine.residentPoolSizes.isEmpty, "Refusal uses the existing pressure purge")
+
+        CompositorBudget.availableMemoryOverrideBytes = picture * 16
+        _ = try XCTUnwrap(MetalCompositor.composite(simple))
+        let grown = try XCTUnwrap(MetalCompositor.composite(blurred))
+        XCTAssertEqual(engine.lastScratchAllocated, 1, "Only the missing walk texture is newly allocated")
+        let grownBytes = try XCTUnwrap(CanvasFixture.rgbaBytes(grown))
+        let originalBytes = try XCTUnwrap(CanvasFixture.rgbaBytes(original))
+        XCTAssertNotEqual(grownBytes, originalBytes,
+                          "The actual new effect must change the picture")
+        XCTAssertLessThan(pixel(grown, 40, 10)[1], pixel(original, 40, 10)[1],
+                          "Blur must carry the red edge into its white neighbour")
+
+        CompositorBudget.availableMemoryOverrideBytes = picture * 3
+        let reuse = MetalCompositor.attempt(blurred)
+        XCTAssertEqual(engine.lastAdmission, .admitted, "A settled blur only needs a new readback")
+        guard case .image(let reused) = reuse else {
+            return XCTFail("An admitted reuse must return its actual image")
+        }
+        XCTAssertEqual(engine.lastScratchAllocated, 0)
+        assertPixelsIdentical(reused, grown)
+    }
+
     /// **The map is bounded, and the bound is what stops the fix becoming a leak.**
     ///
     /// A pool per size with no limit would accumulate one per render resolution the artist has ever

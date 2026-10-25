@@ -383,6 +383,66 @@ final class EffectMultiPassLogicTests: XCTestCase {
         XCTAssertEqual(Effect.blur(Effect.Blur(radius: -3)).weights, [1], "A negative radius is not a mirror")
     }
 
+    func testHugeFiniteDecodedRadiiKeepBoundedSupportAndRawSigma() throws {
+        for radius in [1e20, Double.greatestFiniteMagnitude] {
+            let effects: [Effect] = [.blur(Effect.Blur(radius: radius)),
+                                     .bloom(Effect.Bloom(radius: radius)),
+                                     .sharpen(Effect.Sharpen(radius: radius))]
+            for effect in effects {
+                let decoded = try JSONDecoder().decode(Effect.self, from: JSONEncoder().encode(effect))
+                XCTAssertEqual(decoded.params.taps, UInt32(Effect.maxBlurTaps))
+                XCTAssertEqual(decoded.verticalKernelRadius(frameSize: (64, 64)), Effect.maxBlurTaps)
+                let weights = decoded.weights
+                XCTAssertEqual(weights.count, Effect.maxBlurTaps + 1)
+                XCTAssertTrue(weights.allSatisfy { $0.isFinite && $0 >= 0 })
+                let total = Double(weights[0]) + 2 * weights.dropFirst().reduce(0) { $0 + Double($1) }
+                XCTAssertEqual(total, 1, accuracy: 1e-6)
+            }
+            let glare = try JSONDecoder().decode(Effect.self, from: JSONEncoder().encode(
+                Effect.glare(Effect.Glare(fade: 1, length: radius))))
+            XCTAssertEqual(glare.params.taps, UInt32(Effect.maxBlurTaps))
+            XCTAssertEqual(glare.weights, [Float](repeating: 1, count: Effect.maxBlurTaps + 1))
+            XCTAssertEqual(glare.verticalKernelRadius(frameSize: (64, 64)), Effect.maxBlurTaps + 1)
+        }
+
+        let radius = 4000.0, sigma = radius / 3
+        let ideal = (0...Effect.maxBlurTaps).map { exp(-Double($0 * $0) / (2 * sigma * sigma)) }
+        let total = ideal[0] + 2 * ideal.dropFirst().reduce(0, +)
+        XCTAssertEqual(Double(try XCTUnwrap(Effect.blur(Effect.Blur(radius: radius)).weights.last)),
+                       try XCTUnwrap(ideal.last) / total, accuracy: 1e-8,
+                       "Capping support must not replace the raw radius used for sigma")
+        let widest = Effect.blur(Effect.Blur(radius: Double.greatestFiniteMagnitude)).weights
+        XCTAssertEqual(widest.last, Float(1.0 / Double(2 * Effect.maxBlurTaps + 1)),
+                       "An unbounded sigma approaches uniform weights over the bounded support")
+    }
+
+    func testFinitePeriodicAnglesKeepDirectionalPixelsAndFinitePayloads() throws {
+        try skipUnlessGPUAvailable()
+        let engine = try XCTUnwrap(MetalEffectEngine.shared)
+        let bytes = spectrumBytes()
+        for angle in [100000003.0, 1e20, Double.greatestFiniteMagnitude] {
+            let reduced = angle.truncatingRemainder(dividingBy: 360)
+            let effect = Effect.blur(Effect.Blur(radius: 6, angleDegrees: angle, isDirectional: true))
+            let equivalent = Effect.blur(Effect.Blur(radius: 6, angleDegrees: reduced, isDirectional: true))
+            let p = effect.params
+            XCTAssertTrue(p.offsetX.isFinite && p.offsetY.isFinite, "Finite angles must reach a finite sampler")
+            guard p.offsetX.isFinite && p.offsetY.isFinite else { return }
+            XCTAssertEqual(p.offsetX, Float(cos(reduced * .pi / 180)))
+            XCTAssertEqual(p.offsetY, Float(sin(reduced * .pi / 180)))
+            let reference = cpu(effect, bytes)
+            XCTAssertEqual(reference, cpu(equivalent, bytes))
+            XCTAssertNotEqual(reference, bytes, "The periodic comparison must actually blur a nonuniform picture")
+            let rendered = try XCTUnwrap(engine.apply(effect, to: bytes, width: Self.side, height: Self.side))
+            let reducedRender = try XCTUnwrap(engine.apply(equivalent, to: bytes, width: Self.side, height: Self.side))
+            XCTAssertEqual(rendered, reducedRender)
+        }
+        for angle in [Double.infinity, Double.nan] {
+            let p = Effect.blur(Effect.Blur(radius: 6, angleDegrees: angle, isDirectional: true)).params
+            XCTAssertEqual(p.offsetX, 1)
+            XCTAssertEqual(p.offsetY, 0)
+        }
+    }
+
     // MARK: - (2b) Bloom
 
     /// Nothing below the threshold glows, and the pixels that do glow are the bright ones — the whole
