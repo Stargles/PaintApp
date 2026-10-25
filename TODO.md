@@ -39,7 +39,12 @@ earlier compiler-only attempts and their local-name corrections remain preserved
 was unchanged. Record before one isolated factory diagnostic of context/image metadata, builder
 admission and packet counts. Identify the rejected stage before changing any guard. Preserve all
 cap/contour/batch assertions. Ordinary UI and whole4096 source work wait for this shared native path.
-Runtime is NOT qualified.
+Runtime is NOT qualified. The one-selector diagnostic atb976c1f4 retained its failures and
+proved UIKit's non-bitmap drawing context reports cg.width/cg.height0 while CTM/clip/frame and actual
+source CGImage are native96. Builder admission succeeds; the false context-size guard yields0inputs/
+1whole-window unknown. Record before removing temporary prints whole, then move output dimensions to
+actual completed UIImage/CGImage validation while preserving transform/clip/source-stage checks.
+No guard is waived by a shape exception. Rerun the same71 after independent narrow fix review.
 Whole4096 resampling and same-budget window refinement remain required OPEN engineering work.
 The reviewed ImageWarp scale-stage proposal shares one work account and prepares geometry before
 filtering/core allocation. Its isolated source grant is paused after actual71 failures, before any

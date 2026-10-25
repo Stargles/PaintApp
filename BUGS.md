@@ -57,7 +57,11 @@ support with the real reference draw. Canonical support7 passed at b849; actual 
 (12FillMend,5FillObject),0skip, exact729. Factory-driven support is empty for ordinary native strokes;
 contacts are absent and batch is unchanged. Record before one bounded isolated factory diagnostic
 of actual context/image/budget admission. Keep every cap/contour/batch assertion and do not loosen
-provenance guards without evidence. Whole4096 source work is paused before sampler edits.
+provenance guards without evidence. Whole4096 source work is paused before sampler edits. Diagnosticb976 retained1RED and proves
+cg.width/cg.height0 for UIKit's non-bitmap context despite correct CTM/clip and actual96sourceimage.
+This false bitmap-context premise rejects every ordinary vector reference. Move output-size checks
+to the actual completed UIImage/CGImage; preserve the per-stage geometry/image checks. Remove all
+print instrumentation and compare restored729source before harvesting the narrow fix.
 Evidence: s54-final-qualification/native/geodesic-logic20-32185179-run01/root-independent-acceptance.json.
 
 ## FillMend ON cold setup taps a moving opacity control — 2026-10-24

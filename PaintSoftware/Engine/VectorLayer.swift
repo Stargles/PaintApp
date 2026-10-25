@@ -332,8 +332,7 @@ extension VectorMendSupport {
                 }
             }
             func finish() -> Reference {
-                print("FACTORY_DIAGNOSTIC finished", width, height, inputs.count, unknown.count)
-                return Reference(width: width, height: height, inputs: inputs, unknown: unknown)
+                Reference(width: width, height: height, inputs: inputs, unknown: unknown)
             }
         }
         func resolve(meter: inout Meter) throws(Failure) -> ([Input], [Span]) {
@@ -6217,24 +6216,17 @@ final class VectorCanvas {
                 && size.width.rounded() == size.width && size.height.rounded() == size.height
                 && frameRect.size == size && frameRect.minX.rounded() == frameRect.minX
                 && frameRect.minY.rounded() == frameRect.minY && transform.isIdentity
-            print("FACTORY_DIAGNOSTIC context", cg.width, cg.height, width, height,
-                  ctm.a, ctm.b, ctm.c, ctm.d, ctm.tx, ctm.ty, cg.boundingBoxOfClipPath,
-                  frameRect, size, transform, nativeContext, native, support != nil)
             if excludingElement != nil {
                 guard snapshot.draw(into: cg, frameRect: frameRect, quality: .full) != nil else { return nil }
             } else {
                 guard let image = snapshot.render(quality: .full), let pixels = image.cgImage else { return nil }
-                print("FACTORY_DIAGNOSTIC image", image.scale, image.imageOrientation.rawValue,
-                      image.size, pixels.width, pixels.height)
                 native = native && image.scale == 1 && image.imageOrientation == .up && image.size == size
                     && pixels.width == Int(size.width) && pixels.height == Int(size.height)
                 image.draw(in: frameRect)
             }
-            print("FACTORY_DIAGNOSTIC admitted", native, support != nil)
             let mapping = native ? CGAffineTransform(translationX: frameRect.minX, y: frameRect.minY) : nil
             do throws(VectorMendSupport.Failure) { try support?.append(snapshot, transform: mapping) }
             catch { support = nil } // A refused certificate never discards the ordinary reference picture.
-            print("FACTORY_DIAGNOSTIC appended", support != nil)
             return snapshot
         }
 

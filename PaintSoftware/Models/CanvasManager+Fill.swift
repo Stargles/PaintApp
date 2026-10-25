@@ -1225,11 +1225,6 @@ extension CanvasManager {
             support = try .init(width: width, height: height, maximumRecords: maximumRecords,
                 admission: .init(bytes: allowance, work: 64_000_000))
         } catch { support = nil }
-        print("FACTORY_DIAGNOSTIC admission", width, height, reserved, allowance, maximumRecords, support != nil)
-        for snapshot in snapshots {
-            print("FACTORY_DIAGNOSTIC tiers", snapshot.kind, snapshot.baked?.isCertainlyTransparent as Any,
-                  snapshot.raster?.isCertainlyTransparent as Any, snapshot.vector?.fillReferenceRecordCount as Any)
-        }
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: width, height: height), format: PixelOps.transparentFormat())
         var completed = true
         var walls: [VectorCanvas.Frozen] = []
