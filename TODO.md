@@ -27,8 +27,8 @@ Current queue (all items below remain until merged):
   touched UI classes and full phase. Current pre-Blend-UI census fast5431/full6021 runnable.
 - Qualify fill sampler/count/cost gates,16 paired Release trials and genuine cold previous-writer
   library UI. Keep original256-package export and old071 benchmark product unchanged.
-- Fix newly traced Mode1 eraser gesture-seed handoff and full UTF-16 text selection preservation
-  through existing owners; source, native and cold controls required. No Mode3 respring claim.
+- Finish Mode1 eraser gesture-seed handoff; full UTF-16 selection source is reviewed/harvested17026caf
+  with actual-view31/2faults/cold controls still UNRUN. Existing view test membership meant no PBX edit. No Mode3 respring claim.
 - Continue genuine source-audit gaps without reopening qualified findings: vector tools/undo/render,
   remaining effects/graph/font/panels/platform/RSS. Inventory-only coverage is not reviewed code.
 - Fresh saved-scene readiness/export/signing/old workflows/device checks; actual Test1 eraser cause

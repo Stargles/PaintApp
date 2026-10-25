@@ -68,10 +68,11 @@ whole-class/owner qualification. Preserve `native/owner-ui10-0e215b4f-run01/` an
 **Offline controls:** an isolated exact0e215 tree is preparing a named26-case successor: Text7,
 Graph11 logic, Blend7 and Text publication1. Source-level independent reviews accept these causal
 candidates; native mutations remain UNRUN. Graph3 cold faults require positive wholeGesture6 first.
-A reviewed112-line BlendModesAndCompositorUITests method at7157 adds the real two-patch opacity/merge
+The reviewed112-line BlendModesAndCompositorUITests method at7157 adds the real two-patch opacity/merge
 workflow using existing helpers, no product/helper/PBX changes. Root/source independent review
-accepts it; the UI10 source hold is closed, so harvest only its reviewed test path next. Whole class10 and four whole-screen captures
-remain UNRUN. Its3 future faults map6 intended drawn IDs but may reach only3 because the first failure
+accepted it and harvested only its test path at315cf171. Whole class10 and four whole-screen captures
+remain UNRUN. Reviewed graph-coordinate sourcefa4c is harvestedbf941684; text-colour owner landscape
+sourceb66c has independent acceptance61946fee. Neither correction has a fresh native UI result. Its3 future faults map6 intended drawn IDs but may reach only3 because the first failure
 stops the method; report actual reached statements only. Historical611's Bool/RGBA helper mismatch
 and half-up arithmetic receipt are preserved; corrected7157 reuses waitForPixel and named ties-even
 arithmetic. The domain proof covers actual rounded50% readout, not an assumed exact0.5 slider value.
@@ -264,3 +265,12 @@ brush importer37 dropped for now; future audio28/video30/interpolation need owne
 raster Move undo and freeform-text minimum exemptions as deliberately carried. Older recognizer freeze
 logs predate Liquify f813346; owner saw repair message only, so no speculative UIKit repair. Auto-resign
 renewal evidence remains docs/bug-evidence/auto-resign-2026-10-22.md. Full UI suite is not run per item.
+
+**Selection source checkpoint:** root/source independent reviews accept051bdd and root harvested
+ONLY TextOverlayView + existing TextBakeCharacterizationTests at17026caf. The saved range is assigned
+directly; no new clamp/helper/state. Existing test membership already includes both view dependencies,
+so the earlier audit's app-only PBX premise was wrong and no project edit was needed. Old-product+
+2regressions a33123fc is preserved. All29 old methods remain exact; class now31, with actual view.update,
+font80/kern3 premises, UTF-16 end caret/selectedBC and actual insertText controls. Source-only; normal31,
+2minimal reverse faults and cold selected-text replacement remain UNRUN. Current static before seed
+fix is fast5433/full6024 runnable, raw5436/6027, PBX1329; reconcile again after final harvest.
