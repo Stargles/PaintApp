@@ -10,13 +10,14 @@ Named evidence and limits are in HANDOFF.md. Last compiled app is a mutant: rebu
 
 Current queue (items remain until merged):
 
-- Resolve cold selected-text longpress geometry; harvest reviewed315da method. Run whole Text5+
+- Cold selected-text longpress now uses actual ink clear of every exposed grip; reviewed2d94 is
+  harvested with old4/outcomes exact, no geometry changes. Run whole Text5+
   GraphGesture6+Blend10 (21), LOOK owner pictures. Historical UI10 was8pass2fail: graph delivery and
   portrait toolbar clearance, not proven product focus/colour failures. Corrected sources are
   integrated; actual final colour video is#FA0505. Then meaningful Graph3/Blend3/text1 UI controls.
 - Correct THREE scoped effects audit clusters via existing owners: cap radius before Int; normalize
   periodic angles/shared apron inputs; price actual missing GPU scratch/intermediate pictures plus
-  readback at warm first-effect growth. Independent review before code; actual consumer, refusal,
+  readback at warm first-effect growth. Independent audit review44d0162e accepted; scoped implementation underway. Actual consumer, refusal,
   strip/periodicity/reuse and meaningful fault controls. Preserve sigma/appearance/budgets/fallback;
   no new retained counter/cache/renderer/schema. Audit8b106831 is source/model evidence, not RSS.
 - Cold stored-vector eraser Splatter/Undo/Redo. Existing-seed handoff and UTF-16 selection are

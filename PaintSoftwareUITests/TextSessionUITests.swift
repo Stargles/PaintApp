@@ -191,4 +191,159 @@ final class TextSessionUITests: PaintUITestCase {
         XCTAssertLessThan(try count(isBlackInk), black / 5, "…and no longer in black")
         attachScreenshot(XCUIScreen.main, "text-drawn-in-the-picked-colour")
     }
+
+    /// A public selection survives a live colour change: the next key replaces the word, rather
+    /// than inserting before it. Measure while editing; ending the session may undo its follow pan.
+    func testRestylingASelectedWordKeepsTheSelectionForTheNextTypedReplacement() throws {
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app), "setup: a brand-new document")
+        XCTAssertGreaterThan(app.windows.firstMatch.frame.width, app.windows.firstMatch.frame.height,
+                             "PREMISE: the selection workflow is actually landscape")
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let host = canvas.frame
+        let transform = readTransform(app)
+        XCTAssertFalse(transform.isEmpty, "PREMISE: the effective canvas transform is exposed")
+        let boxTopLeft = writeWords("", app, canvas)
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5),
+                      "PREMISE: this control requires the software keyboard, not a paste longpress")
+        let letter = app.keys["W"].exists ? "W" : "w"
+        XCTAssertTrue(app.keys[letter].exists, "PREMISE: a real W/w software key is available")
+        let inside = CGPoint(x: boxTopLeft.x + 0.01 * host.width, y: boxTopLeft.y + 0.01 * host.height)
+        typeIntoTextBox(letter, app, at: inside)
+        XCTAssertEqual(readTransform(app), transform, "PREMISE: typing here does not pan the paper")
+        XCTAssertEqual(canvas.frame, host, "PREMISE: the host geometry stays fixed")
+
+        let paper = visiblePaperRect(app, in: canvas)
+        let visible = CGRect(x: host.minX + paper.minX * host.width,
+                             y: host.minY + paper.minY * host.height,
+                             width: paper.width * host.width, height: paper.height * host.height)
+        let words = wordsWindow(in: host).intersection(visible)
+        XCTAssertFalse(words.isEmpty, "PREMISE: the words have a visible paper window")
+        assertAboveTheDock(app, canvas, dy: (words.maxY - host.minY) / host.height, "the words window")
+        let single = try inkReading(canvas, in: words)
+        XCTAssertGreaterThan(single.ink, 0, "PREMISE: the actual single glyph is drawn in black")
+        let glyphWidth = single.right - single.topLeft.x
+        XCTAssertGreaterThan(glyphWidth, 0, "PREMISE: the single glyph has a measured width")
+        let near = CGRect(x: single.topLeft.x, y: words.minY, width: glyphWidth * 2, height: words.height)
+        let far = CGRect(x: single.right + glyphWidth, y: words.minY, width: glyphWidth, height: words.height)
+        let exterior = CGRect(x: single.topLeft.x - glyphWidth * 2, y: words.minY,
+                              width: glyphWidth, height: words.height)
+        XCTAssertTrue(words.contains(far.insetBy(dx: -glyphWidth, dy: 0)),
+                      "PREMISE: the far band and another glyph of trailing room fit on visible paper")
+        XCTAssertTrue(words.contains(exterior), "PREMISE: untouched paper beside the word is visible")
+
+        // Reuse the shared displayed-orientation pixel probe, not a second screenshot reader.
+        func count(in rect: CGRect, matching predicate: (RGBA) -> Bool) throws -> Int {
+            let pixel = try pixelProbe(canvas)
+            let window = canvasWindow(rect, in: canvas)
+            var hits = 0
+            for xi in 0..<320 {
+                for yi in 0..<120 where predicate(pixel(window.minX + window.width * Double(xi) / 320,
+                                                         window.minY + window.height * Double(yi) / 120)) {
+                    hits += 1
+                }
+            }
+            return hits
+        }
+        XCTAssertEqual(try count(in: far, matching: { !isWhitish($0) }), 0,
+                       "PREMISE: the single glyph leaves the entire measured far band white")
+        XCTAssertEqual(try count(in: exterior, matching: { !isWhitish($0) }), 0,
+                       "PREMISE: untouched exterior paper starts white")
+        typeIntoTextBox(String(repeating: letter, count: 3), app, at: inside)
+        XCTAssertEqual(readTransform(app), transform, "PREMISE: the four-glyph word does not pan the paper")
+        XCTAssertEqual(canvas.frame, host, "PREMISE: the host geometry stays fixed while typing")
+        XCTAssertGreaterThan(try settled { try count(in: far, matching: { isInk($0) }) }, 0,
+                             "PREMISE: the actual old word occupies the far band")
+        let word = try inkReading(canvas, in: words)
+        XCTAssertLessThan(word.right + glyphWidth, words.maxX,
+                          "PREMISE: the old word and another glyph fit without clipping")
+        attachScreenshot(XCUIScreen.main, "text-selection-word-before")
+
+        // The upper-left point is inside a 22 pt grip target. Use actual word ink that clears
+        // every grip on the public, upright textbox hull; the midpoint can hit an edge grip too.
+        let bounds = readField(app, "textbox:").split(separator: ",").compactMap { Double($0) }
+        XCTAssertEqual(bounds.count, 4, "PREMISE: the live text box exposes its actual drawn hull")
+        let box = CGRect(x: host.minX + CGFloat(bounds[0]) * host.width,
+                         y: host.minY + CGFloat(bounds[1]) * host.height,
+                         width: CGFloat(bounds[2]) * host.width, height: CGFloat(bounds[3]) * host.height)
+        XCTAssertFalse(box.isEmpty, "PREMISE: the drawn text hull is nonempty")
+        let grips = [CGPoint(x: box.minX, y: box.minY), CGPoint(x: box.midX, y: box.minY),
+                     CGPoint(x: box.maxX, y: box.minY), CGPoint(x: box.maxX, y: box.midY),
+                     CGPoint(x: box.maxX, y: box.maxY), CGPoint(x: box.midX, y: box.maxY),
+                     CGPoint(x: box.minX, y: box.maxY), CGPoint(x: box.minX, y: box.midY)]
+        // Each origin/extent is rounded to four normalized decimals: a far corner can err by
+        // at most .0001 of each host dimension. The rotation grip is 36 pt outside this fresh box.
+        let requiredClearance = 22 + 0.0001 * hypot(host.width, host.height)
+        let wordPixels = try pixelProbe(canvas)
+        let wordWindow = canvasWindow(words, in: canvas)
+        var selectionPoint: CGPoint?
+        var clearance: CGFloat = 0
+        for xi in 0..<320 {
+            for yi in 0..<120 {
+                let x = wordWindow.minX + wordWindow.width * Double(xi) / 320
+                let y = wordWindow.minY + wordWindow.height * Double(yi) / 120
+                guard isInk(wordPixels(x, y)) else { continue }
+                let point = CGPoint(x: host.minX + x * host.width, y: host.minY + y * host.height)
+                guard box.contains(point) else { continue }
+                let distance = grips.map { hypot(point.x - $0.x, point.y - $0.y) }.min() ?? 0
+                if distance > clearance {
+                    clearance = distance
+                    selectionPoint = point
+                }
+            }
+        }
+        XCTAssertGreaterThan(clearance, requiredClearance,
+                             "PREMISE: actual word ink has a point outside every text-grip target")
+        let pressPoint = try XCTUnwrap(selectionPoint, "PREMISE: a measured glyph-interior longpress point")
+        assertAboveTheDock(app, canvas, dy: (pressPoint.y - host.minY) / host.height, "the selection longpress")
+        Self.coordinate(app, at: pressPoint).press(forDuration: 1.0)
+        let selectAll = app.menuItems["Select All"]
+        XCTAssertTrue(selectAll.waitForExistence(timeout: 5), "PREMISE: the public edit menu offers Select All")
+        XCTAssertTrue(tapWhenHittable(selectAll, "Select All"), "PREMISE: Select All was delivered")
+        XCTAssertTrue(app.menuItems["Cut"].waitForExistence(timeout: 5),
+                      "PREMISE: the public edit menu exposes a nonempty selection")
+        attachScreenshot(XCUIScreen.main, "text-selection-select-all")
+
+        // DrawingView binds this toolbar picker to activeEditColor, which restyles the live text.
+        openColorPanel(app)
+        let square = app.otherElements["colorPanel.svSquare"]
+        dragWithinElement(square, from: CGVector(dx: 0.5, dy: 0.5), to: CGVector(dx: 0.98, dy: 0.02))
+        closeColorPanel(app)
+        let swatch = app.buttons["textPanel.colorSwatch"]
+        let value = try XCTUnwrap(swatch.value as? String, "PREMISE: the live text exposes its picked colour")
+        XCTAssertEqual(value.count, 6, "PREMISE: the text colour has three actual channels")
+        let channels = stride(from: 0, to: 6, by: 2).map { i -> Int in
+            let start = value.index(value.startIndex, offsetBy: i)
+            return Int(value[start..<value.index(start, offsetBy: 2)], radix: 16) ?? -1
+        }
+        XCTAssertGreaterThan(channels[0], 0xE0, "PREMISE: the live text colour is red (\(value))")
+        XCTAssertGreaterThanOrEqual(min(channels[1], channels[2]), 0, "PREMISE: the text colour channels parse")
+        XCTAssertLessThan(max(channels[1], channels[2]), 0x20, "PREMISE: the text colour has little green/blue")
+        XCTAssertTrue(waitForTextState(app, "editing"), "PREMISE: colour restyling keeps the text editor focused")
+        XCTAssertTrue(app.keyboards.firstMatch.exists, "PREMISE: the same software keyboard remains")
+        XCTAssertTrue(app.keys[letter].exists && app.keys[letter].isHittable,
+                      "PREMISE: the SAME recorded letter key is actually hittable, without refocusing")
+        XCTAssertEqual(readTransform(app), transform, "PREMISE: restyling does not move the measured picture")
+        XCTAssertEqual(canvas.frame, host, "PREMISE: restyling keeps the host geometry")
+        XCTAssertGreaterThan(try settled { try count(in: far, matching: { isRed($0) }) }, 0,
+                             "PREMISE: the selected old word is actually drawn red in the far band")
+        attachScreenshot(XCUIScreen.main, "text-selection-restyled")
+
+        XCTAssertTrue(tapWhenHittable(app.keys[letter], "The same replacement letter"),
+                      "PREMISE: the replacement key was delivered without another editor touch")
+        XCTAssertTrue(waitForTextState(app, "editing"), "PREMISE: the replacement is still being edited")
+        let drawn = try settled {
+            [try count(in: near, matching: { isRed($0) }),
+             try count(in: far, matching: { isRed($0) }),
+             try count(in: exterior, matching: { !isWhitish($0) })]
+        }
+        XCTAssertEqual(readTransform(app), transform, "PREMISE: replacement keeps the measured picture in place")
+        XCTAssertEqual(canvas.frame, host, "PREMISE: replacement keeps the host geometry")
+        XCTAssertGreaterThan(drawn[0], 0, "the replacement is drawn in red near the original single glyph")
+        XCTAssertEqual(drawn[1], 0, "the selected old word is gone: no red remains in its measured far band")
+        XCTAssertEqual(drawn[2], 0, "the replacement leaves untouched exterior paper white")
+        attachScreenshot(XCUIScreen.main, "text-selection-replaced-while-editing")
+    }
 }

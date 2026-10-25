@@ -69,9 +69,11 @@ unchanged; old body/oracle exactness reviewed. Whole Blend10 native remains UNRU
 helper or AX hook. Measured actual W/w glyph/white far band and four-letter ink prove geometry before
 public Select All, style change and actual software-key replacement. No refocus/paste/input after
 style until that same key. Assert red replacement near and zero far red while still editing; commit
-smoke follows. Author315da275 and independent review14b6d7d4 are frozen, not harvested. Root is checking
-whether the longpress point meets a blue handle; a measured interior point may replace ONLY that
-longpress coordinate after source evidence. Public menu delivery remains unproved. Reverse selected-
+smoke follows. Author2d94b162 replaces ONLY the new longpress span: actual public textbox hull/eight grip centres
+and existing black-pixel probe choose maximum measured clearance beyond22pt plus hull rounding.
+No size/zoom/word changes; no safe point fails an input premise. All old4/prior outcomes stay exact.
+Root and independent821b4b7a review accepted the source; only TextSession is harvested. Public menu
+delivery remains unproved. Reverse selected-
 length collapse must reach drawn far-band assertion, not a setup/menu/input failure.
 
 **Bounded effects scope recorded before implementation:** audit ec843eee freezes THREE clusters:
@@ -84,7 +86,8 @@ appearance, raw sigma behavior, static budgets/LRU/refusal/fallback and zero-gro
 actual-consumer finite boundary/periodicity/full-versus-strip and warm-first-effect/refusal/reuse
 regressions plus meaningful assertion controls. Report8b106831 under s54-architecture-audit/
 neighborhood-effect-audit-ec843eee/. Source equations predict a glare contribution25 vs cropped0;
-this is not native pixel/RSS/physical respring proof. Independent audit review precedes code.
+this is not native pixel/RSS/physical respring proof. Independent review44d0162e confirms the3 source causes and refines native controls; author
+vector_mend_proof is implementing the recorded scope in a separate worktree, without native access.
 
 **Next gates, in order:**
 
