@@ -108,7 +108,8 @@ invalidation oracle must pass, together with interactive-commit/atomic-failure c
 TextSession edited-box visible-ink workflow. Native reproduction is the actual76aff failure, not a
 new speculative symptom. Source implementation/review/fault reversal remain pending. Before cold UI, improve ONLY the
 existing edited-box TextSession method's evidence: prelaunch landscape, assert its actual window is
-landscape (owner dimensions verified by the runner), and capture XCUIScreen.main before/open/after.
+landscape (owner dimensions verified by the runner), and capture XCUIScreen.main before/open/after. Require actual visible ink before reopening, so
+a zero-to-zero pixel comparison cannot pass as restoration.
 Retain all original behavior/pixel oracles and4 methods; no wrapper test, app hook or shared-helper
 change. This closes the known app.screenshot landscape crop premise without weakening a product test.
 
@@ -131,6 +132,17 @@ whole-source byte rewrite and apply fade in Float in the existing CPU loop. No n
 exception, tolerance relaxation, color-space policy, cache or flag. Agent records scope before source,
 preserves a committed old-code regression checkpoint, and freezes a separately reviewed correction.
 Report: `blend-effect-bounded-audit-83380/report.md`; not whole-effects or native qualification.
+
+**Blend cold UI scope — recorded before authoring:** add ONE method in existing
+BlendModesAndCompositorUITests, reusing actual brush/color/layer/blend/opacity/merge helpers. Exact
+Opaque Round cores C80000 over004E7F/00499A bracket the source luminance by1/25500. Actual slider
+readout50% means opacity[.495,.505); the two patches discriminate old byte rounding throughout that
+interval without pretending an exact0.5 entry. Existing raw input/core-color premises must pass;
+no color tolerance change, seeded pixels, retry or app hook. Check both drawn intersections through
+real Merge Down and lower-layer hide/reveal, preserving outside white/other ink. Prelaunch landscape,
+assert width>height (full suite also runs13inch; no hardcoded owner dimensions), XCUIScreen.main
+captures; root separately verifies owner1080×810 and LOOKs them. Darker/group/raw alpha stay in logic
+coverage. Proposal `blend-opacity-09d6c7f8/fault-proposal-f50e4e15/ui-proposal.md`; no native claim yet.
 
 **Raster admission correction:** root integrated the reviewed finite weak-metadata eviction pass
 at d4d7c523. It orders candidates once outside the mutex, rechecks current accounting/registration
