@@ -1447,11 +1447,11 @@ final class FillMendLogicTests: XCTestCase {
         let priorBudget = CompositorBudget.budgetOverrideBytes
         defer { CompositorBudget.budgetOverrideBytes = priorBudget }
         CompositorBudget.budgetOverrideBytes = limit
-        let refused = try XCTUnwrap(CanvasManager.makeFillReference(references: selected, window: window))
-        XCTAssertEqual(refused.rgba, complete.rgba, "support admission cannot make the ordinary reference picture disappear")
-        XCTAssertLessThanOrEqual(refused.support.retainedBytes, remaining,
+        let refusedReference = try XCTUnwrap(CanvasManager.makeFillReference(references: selected, window: window))
+        XCTAssertEqual(refusedReference.rgba, complete.rgba, "support admission cannot make the ordinary reference picture disappear")
+        XCTAssertLessThanOrEqual(refusedReference.support.retainedBytes, remaining,
                                  "aggregate refusal cannot retain three independently admitted output pairs")
-        let refusedPacket = try VectorMendSupport.produce(refused.support,
+        let refusedPacket = try VectorMendSupport.produce(refusedReference.support,
             admission: .init(bytes: 64 * 1024 * 1024, work: 64_000_000))
         XCTAssertTrue(refusedPacket.canonicalCoverage.isEmpty,
                       "session/source reservation plus aggregate construction peak is admitted before retaining any accepting support")

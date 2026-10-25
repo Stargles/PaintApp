@@ -32,7 +32,7 @@ replace unsupported raster-positive premises while original FillObject result/un
 remain byte-exact. Strict OPEN-on-INK/SOURCE255 GPU coverage is added. Root reviewed the separate
 LASSO_FILL spec removal; author stale TODO/HANDOFF/BUGS are not copied. Independent receipt:
 `vector-mend-independent-proof/live-v5-source-review/receipt.json` (e0609bf3). Full three-class71
-native controls are next, after commit/census; compiler/runtime/UI/faults remain UNRUN.
+first native71 stopped at compilation: duplicate fixture-local `refused` in FillMendLogicTests; zero methods executed. Record before the narrow rename to `refusedReference`, then rerun the same71; all result/undo/contour expectations stay intact. Both Metal targets compiled, but runtime/UI/faults remain UNRUN.
 Whole4096 resampling and same-budget window refinement remain required OPEN engineering work.
 The sharpened external ImageWarp scale-stage proposal retains one total work account across retries,
 prepares geometry before expensive filtering/core allocation, and samples the final picture once.

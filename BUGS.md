@@ -54,7 +54,7 @@ insufficient. Caps/square/notch/diagonalcontrols reportnoissues; thisdoesnotqual
 Preserve actualcircle/400/448oracles; no shapeexception ormagicmargin. The reviewed f75a900c
 replacement removes the failed distance/circle ownership path whole and shares actual frozen vector
 support with the real reference draw. Canonical support7 passed at b849; new live71/compiler/GPU/UI
-qualification and required whole4096 extension remain unrun. Source review is not a runtime fix claim.
+qualification remains open: first71 compile stopped before tests on a duplicate local test name; both Metal targets compiled. Rename only the aggregate-reference fixture variable and rerun71. Required whole4096 extension remains unrun. Source review is not a runtime fix claim.
 Evidence: s54-final-qualification/native/geodesic-logic20-32185179-run01/root-independent-acceptance.json.
 
 ## FillMend ON cold setup taps a moving opacity control — 2026-10-24
