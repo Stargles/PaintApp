@@ -328,7 +328,7 @@ enum BrushStamper {
         if draws(at: 0) {
             stampDab(into: raster, at: samples.positions[0], brush: brush, values: resolved,
                      color: color, brushSize: brushSize, random: random, arcWidths: arcWidths,
-                     tangent: sensors.direction(at: first))
+                     tangent: sensors.direction(at: first), parameter: 0)
         }
         var carry = WalkCarry(spacing: stampSpacing(brushSize: brushSize, fraction: resolved.spacing))
         for index in 0..<max(samples.count - 1, 0) {
@@ -352,7 +352,7 @@ enum BrushStamper {
                     // direction-following tip cannot disagree about which way the stroke is going.
                     stampDab(into: raster, at: dab, brush: brush, values: resolved,
                              color: color, brushSize: brushSize, random: random, arcWidths: arcWidths,
-                             tangent: sensors.direction(at: site), travel: walked)
+                             tangent: sensors.direction(at: site), travel: walked, parameter: site.parameter)
                 }
                 return stampSpacing(brushSize: brushSize, fraction: resolved.spacing)
             }
@@ -400,7 +400,8 @@ enum BrushStamper {
     static func stampDab(into raster: DabTarget, at point: CGPoint, brush: Brush,
                          values: BrushDabValues, color: UIColor, brushSize: CGFloat,
                          random: DabRandom, arcWidths: CGFloat,
-                         tangent: CGPoint = CGPoint(x: 1, y: 0), travel: CGFloat = 0) {
+                         tangent: CGPoint = CGPoint(x: 1, y: 0), travel: CGFloat = 0,
+                         parameter: CGFloat? = nil) {
         // **BRUSH.md §2.32 — the dab is stamped when its resolved `density` is at least 0.5.**
         //
         // One comparison, and no draw of its own. Until 2026-09-05 this rolled an intrinsic dice
@@ -420,7 +421,8 @@ enum BrushStamper {
         let alpha = CGFloat(values.flow)
         guard alpha > 0, radius > 0 else { return }
 
-        raster.dabSite(at: point, travel: CGPoint(x: tangent.x * travel, y: tangent.y * travel))
+        raster.dabSite(at: point, travel: CGPoint(x: tangent.x * travel, y: tangent.y * travel),
+                       parameter: parameter)
         let stampPoint = applyScatter(to: point, radius: radius,
                                       across: values.scatterAcross, along: values.scatterAlong,
                                       tangent: tangent, random: random, arcWidths: arcWidths)
@@ -635,7 +637,7 @@ extension BrushStamper {
         private(set) var travels: [CGPoint] = []
         private let tracksTravel: Bool
         private var siteTravel: CGPoint = .zero
-        func dabSite(at point: CGPoint, travel: CGPoint) { siteTravel = travel }
+        func dabSite(at point: CGPoint, travel: CGPoint, parameter: CGFloat?) { siteTravel = travel }
         func drain() -> [(BakedDab, CGPoint)] {
             let result = Array(zip(dabs, travels))
             dabs.removeAll(keepingCapacity: true); travels.removeAll(keepingCapacity: true)
@@ -701,6 +703,11 @@ extension BrushStamper {
 
         func beginStroke() { inner.beginStroke() }
         func endStroke() { inner.endStroke() }
+
+        // Parameter and positional travel describe the native walk, not the posed tip.
+        func dabSite(at point: CGPoint, travel: CGPoint, parameter: CGFloat?) {
+            inner.dabSite(at: point, travel: travel, parameter: parameter)
+        }
 
         /// Forwarded untouched. A pose moves, scales and turns *dabs*; it has no opinion about what
         /// the finished stroke may reach or how it meets what is under it — and because the merge's

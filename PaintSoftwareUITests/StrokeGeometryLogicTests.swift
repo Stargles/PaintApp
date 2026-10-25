@@ -781,6 +781,25 @@ final class StrokeGeometryLogicTests: XCTestCase {
         XCTAssertTrue(index.segments(near: CGRect(x: 5000, y: 5000, width: 10, height: 10)).isEmpty)
     }
 
+    func testSpatialIndexResolvedFootprintsCanStopBeforeReadingACell() throws {
+        let index = StrokeSpatialIndex(cellSize: 8)
+        let footprint = CGRect(x: 2, y: 2, width: 20, height: 20)
+        XCTAssertEqual(index.insertionCellCount(for: footprint), 9)
+        index.insert(bounds: footprint, elementIndex: 81)
+        var cells = 0, candidates: [StrokeSpatialIndex.SegmentRef] = []
+        index.forEachCandidate(near: footprint, visitCell: { cells += 1 }) { candidates.append($0) }
+        XCTAssertEqual(cells, 9)
+        XCTAssertEqual(candidates.count, 9, "raw callbacks let admission price repeated bucket visits")
+        XCTAssertEqual(Set(candidates), [StrokeSpatialIndex.SegmentRef(elementIndex: 81, sampleIndex: 0)])
+        enum AdmissionRefusal: Error { case work }
+        var examined = 0
+        XCTAssertThrowsError(try index.forEachCandidate(near: footprint,
+            visitCell: { throw AdmissionRefusal.work }) { _ in examined += 1 })
+        XCTAssertEqual(examined, 0, "refusing a cell must happen before any candidate work")
+        XCTAssertEqual(index.segments(near: footprint).count, 1,
+                       "the existing deduplicated query contract stays intact")
+    }
+
     func testSpatialIndexPaddingFindsInkOutsideTheCenterlineBox() {
         // A stroke along y = 0; the query sits 15pt below it. Both indexes use 8pt cells, small enough
         // that the grid itself doesn't paper over the gap — only the padding can bridge it.

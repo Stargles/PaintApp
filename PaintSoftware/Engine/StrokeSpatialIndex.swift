@@ -117,6 +117,22 @@ final class StrokeSpatialIndex {
         }
     }
 
+    /// Indexes a caller's already-resolved conservative footprint. No centreline or brush-width
+    /// approximation is made here; the opaque element index is returned just as for segments.
+    func insert(bounds: CGRect, elementIndex: Int) {
+        guard !bounds.isNull else { return }
+        insert(SegmentRef(elementIndex: elementIndex, sampleIndex: 0), box: bounds.standardized)
+    }
+
+    /// Storage/work admission can price the bucket entries before inserting a known footprint.
+    /// Overflow is a refusal, rather than an attempt to enumerate an unbounded cell range.
+    func insertionCellCount(for bounds: CGRect) -> Int? {
+        guard !bounds.isNull else { return 0 }
+        let (x0, y0, x1, y1) = cellRange(of: bounds.standardized)
+        let (count, overflow) = (x1 - x0 + 1).multipliedReportingOverflow(by: y1 - y0 + 1)
+        return overflow ? nil : count
+    }
+
     /// Convenience builder for a flat list of sample runs, indexed by their position in the array —
     /// the shape a caller with only strokes (a test, or a `VectorCanvas` before the Phase 1 display
     /// list lands) has on hand.
@@ -152,6 +168,24 @@ final class StrokeSpatialIndex {
     }
 
     // MARK: - Querying
+
+    /// Allocation-free broad phase for an admitted consumer. `visitCell` runs before reading each
+    /// bucket and `body` before the caller examines each raw candidate. A footprint spanning cells
+    /// can occur more than once; callers which need uniqueness can use their existing work queue's
+    /// visit stamps. Throwing from either callback stops the query immediately.
+    func forEachCandidate<E: Error>(near rect: CGRect, visitCell: () throws(E) -> Void,
+                                   _ body: (SegmentRef) throws(E) -> Void) throws(E) {
+        guard !refs.isEmpty, !rect.isNull else { return }
+        let (x0, y0, x1, y1) = cellRange(of: rect.standardized)
+        for cy in y0...y1 {
+            for cx in x0...x1 {
+                try visitCell()
+                if let bucket = buckets[Self.key(cx, cy)] {
+                    for slot in bucket { try body(refs[Int(slot)]) }
+                }
+            }
+        }
+    }
 
     /// Segments whose (padded) bounding box may intersect `rect`.
     ///

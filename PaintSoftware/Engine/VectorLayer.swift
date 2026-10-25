@@ -255,6 +255,35 @@ struct StrokeRestWalk {
     var pose: BrushStamper.DabPose
 }
 
+/// One resolved native walk for rendering and derived current-reference geometry. This is a
+/// transient recipe: no stroke fields or persistence change, and no second sample/lattice selection.
+struct VectorStrokeRenderWalk {
+    private let stroke: VectorStroke
+    let samples: StrokeSamples
+    let size: CGFloat
+    let pose: BrushStamper.DabPose?
+    let visibleRange: ClosedRange<CGFloat>?
+
+    init(_ stroke: VectorStroke) {
+        self.stroke = stroke
+        let rest = stroke.effectiveWalk
+        // A missing range may not expose an ancestor's whole walk.
+        let lattice = (rest?.lattice ?? stroke.lattice).flatMap { $0.range == nil ? nil : $0 }
+        samples = lattice?.samples ?? rest?.samples ?? stroke.samples
+        size = rest?.size ?? stroke.size
+        pose = rest?.pose
+        visibleRange = lattice?.range
+    }
+
+    func stamp(into target: DabTarget, isEraser: Bool) {
+        let sink: DabTarget = pose.map { BrushStamper.PosedDabTarget(target, pose: $0) } ?? target
+        BrushStamper.stampStroke(into: sink, samples: samples, brush: stroke.brush,
+                                 color: stroke.uiColor, brushSize: size,
+                                 brushOpacity: stroke.opacity, isEraser: isEraser,
+                                 random: stroke.dabRandom, visibleRange: visibleRange)
+    }
+}
+
 extension DabLattice {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -7534,17 +7563,7 @@ final class VectorCanvas {
     /// floors; and the random field is addressed at the rest walk's arc lengths, so a posed dab draws
     /// what the artist's own dab drew.
     private static func stamp(stroke: VectorStroke, into target: DabTarget, isEraser: Bool) {
-        let rest = stroke.effectiveWalk
-        // A lattice without a usable range would otherwise stamp the *parent* whole, which is worse
-        // than either option — so an unreadable one falls back to the stroke's own geometry.
-        let lattice = (rest?.lattice ?? stroke.lattice).flatMap { $0.range == nil ? nil : $0 }
-        let samples = lattice?.samples ?? rest?.samples ?? stroke.samples
-        let sink: DabTarget = rest.map { BrushStamper.PosedDabTarget(target, pose: $0.pose) } ?? target
-        BrushStamper.stampStroke(into: sink, samples: samples, brush: stroke.brush,
-                                 color: stroke.uiColor, brushSize: rest?.size ?? stroke.size,
-                                 brushOpacity: stroke.opacity, isEraser: isEraser,
-                                 random: stroke.dabRandom,
-                                 visibleRange: lattice?.range)
+        VectorStrokeRenderWalk(stroke).stamp(into: target, isEraser: isEraser)
     }
 }
 

@@ -15,8 +15,11 @@ import CoreGraphics
 /// `stampImage` would silently drop every square-brush dab, which is the failure this protocol is
 /// shaped to make impossible to write by accident.
 protocol DabTarget: AnyObject {
-    /// The unscattered walk site; collectors use travel for positional tools. Pixel targets ignore it.
-    func dabSite(at point: CGPoint, travel: CGPoint)
+    /// The unscattered canonical walk-space site. A stored replay supplies its path parameter;
+    /// live/direct stamps have none. Pose wrappers preserve this metadata in walk space while
+    /// mapping the finished stamp, so consumers derive path geometry from the matching recipe.
+    /// Existing positional tools read travel; pixel targets ignore the metadata.
+    func dabSite(at point: CGPoint, travel: CGPoint, parameter: CGFloat?)
     func beginStroke()
     func endStroke()
 
@@ -83,7 +86,7 @@ protocol DabTarget: AnyObject {
 }
 
 extension DabTarget {
-    func dabSite(at point: CGPoint, travel: CGPoint) {}
+    func dabSite(at point: CGPoint, travel: CGPoint, parameter: CGFloat?) {}
 }
 
 /// The pixels an image dab of `diameter` turned by `angle` about `point` can touch.

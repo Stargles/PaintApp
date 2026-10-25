@@ -1163,4 +1163,222 @@ final class FillMendLogicTests: XCTestCase {
             XCTAssertTrue(pixels.isBlue(31, 32), "\(kind): the mend is the second loop's colour")
         }
     }
+
+    // MARK: - Isolated canonical vector support construction (not the live mend renderer)
+
+    private func supportStroke(_ points: [CGPoint], size: CGFloat = 6, brush: Brush? = nil,
+                               opacity: Double = 1) -> VectorStroke {
+        let plain = Brush(name: "support", tip: .round, size: size,
+                          dab: BrushDabSettings(flow: 1, spacing: 0.1, hardness: 1))
+        return VectorStroke(brush: brush ?? plain, color: CodableColor(UIColor.black), size: size,
+                            opacity: opacity, samples: StrokeSamples(points: points), seed: 0x7354)
+    }
+
+    private func supportInk(_ strokes: [VectorStroke], side: Int = 96) throws -> [Bool] {
+        let canvas = VectorCanvas(size: CGSize(width: side, height: side), strokes: strokes)
+        let image = try XCTUnwrap(canvas.render()?.cgImage)
+        let bytes = try XCTUnwrap(CanvasFixture.rgbaBytes(image))
+        return (0..<(side * side)).map { bytes[$0 * 4 + 3] != 0 }
+    }
+
+    /// Actual OPEN connectivity, used only to supply a frozen source to the metadata contract.
+    private func supportExterior(_ ink: [Bool], side: Int) -> [Bool] {
+        var source = [Bool](repeating: false, count: ink.count), queue: [Int] = []
+        if !ink[0] { source[0] = true; queue.append(0) }
+        var head = 0
+        while head < queue.count {
+            let i = queue[head]; head += 1
+            let x = i % side, y = i / side
+            for (dx, dy) in [(0, -1), (-1, 0), (1, 0), (0, 1)] {
+                let qx = x + dx, qy = y + dy
+                guard qx >= 0, qy >= 0, qx < side, qy < side else { continue }
+                let q = qy * side + qx
+                if !ink[q] && !source[q] { source[q] = true; queue.append(q) }
+            }
+        }
+        return source
+    }
+
+    private func supportPacket(_ strokes: [VectorStroke], side: Int = 96,
+                               unknown: [VectorMendSupport.Span] = []) throws -> VectorMendSupport.Packet {
+        try VectorMendSupport.produce(strokes.map { .init(stroke: $0, transform: .identity) },
+                                     unknownCoverage: unknown, width: side, height: side,
+                                     admission: .init(bytes: 64 * 1024 * 1024, work: 64_000_000))
+    }
+
+    /// Interpreter of the proposed upload contract. It does not draw a brush or make a width proof.
+    /// OPEN contacts cannot be satisfied by lasso SOURCE=255 on physical INK.
+    private func supportEligible(_ packet: VectorMendSupport.Packet, ink: [Bool], source: [Bool]) -> [Bool] {
+        var flags = [UInt8](repeating: 0, count: ink.count)
+        for span in packet.canonicalCoverage {
+            for i in Int(span.start)..<Int(span.start + span.count) { flags[i] |= 1 }
+        }
+        for patch in packet.patches {
+            let contacts = packet.contacts[Int(patch.contactStart)..<Int(patch.contactStart + patch.contactCount)]
+            let unsafe = patch.unknown != 0 || contacts.contains { contact in
+                (contact.index..<(contact.index + Int(contact.count))).contains { i in
+                    contact.requiresOpen ? (ink[i] || !source[i]) : (!ink[i] && !source[i])
+                }
+            }
+            if unsafe {
+                for span in packet.canonicalCoverage[Int(patch.spanStart)..<Int(patch.spanStart + patch.spanCount)] {
+                    for i in Int(span.start)..<Int(span.start + span.count) { flags[i] |= 2 }
+                }
+            }
+        }
+        return ink.indices.map { ink[$0] && flags[$0] == 1 }
+    }
+
+    func testCanonicalSupportContainsSeparatedNativeDabsAndTexturedLowAlphaCoverage() throws {
+        // A larger group clip must not hide an undersized individual dab bound. These sparse dabs
+        // also exercise fractional centres, rough rotated image tips, scatter and actual paper.
+        var sparse = Brush(name: "sparse", tip: .round, size: 7,
+                           dab: BrushDabSettings(flow: 0.4, spacing: 3, hardness: 1))
+        let points = [CGPoint(x: 16.25, y: 24.5), CGPoint(x: 76.75, y: 24.5)]
+        let first = supportStroke(points, size: 7, brush: sparse)
+        sparse.dab.spacing = 0.1
+        let overlap = supportStroke([CGPoint(x: 16.25, y: 44.5), CGPoint(x: 76.75, y: 44.5)],
+                                    size: 7, brush: sparse, opacity: 1.0 / 255)
+        var imageBrush = sparse
+        imageBrush.tip = .stamp(.builtIn(.square))
+        imageBrush.dab.spacing = 3
+        imageBrush.dab.angle.base = 0.125
+        let separatedImages = supportStroke(points, size: 9, brush: imageBrush)
+        let rough = supportStroke([CGPoint(x: 16, y: 70), CGPoint(x: 42, y: 66), CGPoint(x: 76, y: 72)],
+                                  size: BrushLibrary.roughInk.size, brush: BrushLibrary.roughInk)
+        for stroke in [first, overlap, separatedImages, rough] {
+            let ink = try supportInk([stroke]), packet = try supportPacket([stroke])
+            var covered = [Bool](repeating: false, count: ink.count)
+            for span in packet.canonicalCoverage {
+                for i in Int(span.start)..<Int(span.start + span.count) { covered[i] = true }
+            }
+            XCTAssertTrue(ink.contains(true), "the real canonical renderer must draw the control")
+            XCTAssertTrue(ink.indices.allSatisfy { !ink[$0] || covered[$0] },
+                          "integral canonical bounds must contain every actual native alpha pixel")
+        }
+        let invisible = supportStroke(points, opacity: 0)
+        XCTAssertTrue(try supportPacket([invisible]).canonicalCoverage.isEmpty,
+                      "an exactly invisible stroke supplies no obstacle or known-support claim")
+    }
+
+    func testCanonicalSupportCertifiesWholeStraightCurvedAndScatteredFreeCaps() throws {
+        let paths = [[CGPoint(x: 20, y: 20), CGPoint(x: 76, y: 20)],
+                     [CGPoint(x: 20, y: 20), CGPoint(x: 20, y: 76)],
+                     [CGPoint(x: 20, y: 20), CGPoint(x: 70, y: 70)],
+                     [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 25), CGPoint(x: 48, y: 47), CGPoint(x: 70, y: 55)]]
+        for points in paths {
+            let stroke = supportStroke(points), ink = try supportInk([stroke])
+            let eligible = supportEligible(try supportPacket([stroke]), ink: ink, source: ink.map { !$0 })
+            XCTAssertTrue(ink.contains(true) && ink.indices.allSatisfy { !ink[$0] || eligible[$0] },
+                          "the whole real stroke, including both full cap footprints, must be certified")
+        }
+        let rough = supportStroke(paths[3], size: 6, brush: BrushLibrary.roughInk)
+        let ink = try supportInk([rough])
+        XCTAssertEqual(supportEligible(try supportPacket([rough]), ink: ink, source: ink.map { !$0 }), ink,
+                       "ordinary curved Rough Ink must remain useful, not an all-unknown prototype")
+    }
+
+    func testCanonicalSupportRecognizesReverseCurvedRetracesWithoutChronologicalInterference() throws {
+        let points = [CGPoint(x: 20, y: 60), CGPoint(x: 40, y: 65), CGPoint(x: 48, y: 77), CGPoint(x: 70, y: 80)]
+        let thin = supportStroke(points, size: 4), wide = supportStroke(Array(points.reversed()), size: 8)
+        let ring = supportStroke([CGPoint(x: 20, y: 16), CGPoint(x: 70, y: 16), CGPoint(x: 70, y: 40),
+                                  CGPoint(x: 20, y: 40), CGPoint(x: 20, y: 16)])
+        let strokes = [thin, ring, wide], ink = try supportInk(strokes)
+        let source = supportExterior(ink, side: 96)
+        let eligible = supportEligible(try supportPacket(strokes), ink: ink, source: source)
+        let retraceInk = try supportInk([thin, wide])
+        XCTAssertTrue(retraceInk.contains(true) && ink.indices.allSatisfy { !retraceInk[$0] || eligible[$0] },
+                      "whole reversed native-knot correspondence must survive Hermite roundoff and unrelated IDs")
+        let ringInk = try supportInk([ring])
+        XCTAssertTrue(ink.indices.allSatisfy { !ringInk[$0] || !eligible[$0] },
+                      "the unrelated original closed contour still protects every actual pixel")
+    }
+
+    func testCanonicalSupportKeepsContoursHiddenContributorsAndSameGestureJoinsProtected() throws {
+        let ringPoints = [CGPoint(x: 20, y: 20), CGPoint(x: 62, y: 20), CGPoint(x: 62, y: 62),
+                          CGPoint(x: 20, y: 62), CGPoint(x: 20, y: 20)]
+        let ring = supportStroke(ringPoints)
+        let hidden = supportStroke([CGPoint(x: 16, y: 20), CGPoint(x: 68, y: 20)], size: 18)
+        let hiddenInk = try supportInk([ring, hidden])
+        let hiddenEligible = supportEligible(try supportPacket([ring, hidden]), ink: hiddenInk,
+                                             source: supportExterior(hiddenInk, side: 96))
+        XCTAssertTrue(hiddenInk[20 * 96 + 40] && !hiddenEligible[20 * 96 + 40],
+                      "a different parallel spine cannot hide and then certify the old outline")
+        let branched = supportStroke(ringPoints + [CGPoint(x: 20, y: 76), CGPoint(x: 76, y: 76)])
+        let ink = try supportInk([branched])
+        let eligible = supportEligible(try supportPacket([branched]), ink: ink, source: supportExterior(ink, side: 96))
+        XCTAssertTrue(ink[76 * 96 + 75] && (73...79).allSatisfy { y in
+            (73...79).allSatisfy { x in !ink[y * 96 + x] || eligible[y * 96 + x] }
+        },
+                      "one gesture's remote attached branch and real free cap remain eligible")
+        XCTAssertTrue(ink[20 * 96 + 20] && !eligible[20 * 96 + 20],
+                      "the same gesture's nonlocal branch/outline join is unresolved, never averaged")
+        let unknown = [VectorMendSupport.Span(start: UInt32(76 * 96 + 48), count: 1)]
+        let refused = supportEligible(try supportPacket([branched], unknown: unknown), ink: ink,
+                                      source: supportExterior(ink, side: 96))
+        XCTAssertFalse(refused[76 * 96 + 48], "buried unknown coverage vetoes the whole overlapping target")
+        XCTAssertTrue(refused[76 * 96 + 75], "a local unknown must not protect the entire walk")
+    }
+
+    func testCanonicalSupportRequiresEveryOpenContactAndRefusesIncompleteConstruction() throws {
+        let stroke = supportStroke([CGPoint(x: 20, y: 20), CGPoint(x: 70, y: 20)])
+        let ink = try supportInk([stroke]), packet = try supportPacket([stroke])
+        let allOpen = ink.map { !$0 }
+        let baseline = supportEligible(packet, ink: ink, source: allOpen)
+        var partial = allOpen
+        let contact = try XCTUnwrap(packet.contacts.first { $0.requiresOpen && $0.count >= 3
+            && ($0.index..<($0.index + Int($0.count))).allSatisfy { !ink[$0] } })
+        let middle = contact.index + Int(contact.count) / 2
+        partial[middle] = false
+        let refused = supportEligible(packet, ink: ink, source: partial)
+        XCTAssertTrue(baseline.indices.contains { baseline[$0] && !refused[$0] },
+                      "saved partial SOURCE must veto even one unowned OPEN support-boundary cell")
+        var lasso = allOpen, foreign = ink
+        lasso[middle] = true; foreign[middle] = true
+        let lassoRefused = supportEligible(packet, ink: foreign, source: lasso)
+        XCTAssertTrue(baseline.indices.contains { baseline[$0] && !lassoRefused[$0] },
+                      "SOURCE=255 on foreign INK is not an OPEN boundary witness")
+        let round = supportStroke([CGPoint(x: 40, y: 40)])
+        let roundInk = try supportInk([round]), roundPacket = try supportPacket([round])
+        XCTAssertEqual(supportEligible(roundPacket, ink: roundInk, source: roundInk.map { !$0 }), roundInk,
+                       "the single-point control is useful before its internal OPEN witness is removed")
+        let internalOpen = try XCTUnwrap(roundPacket.contacts.filter { !$0.requiresOpen }.lazy.flatMap {
+            $0.index..<($0.index + Int($0.count))
+        }.first { !roundInk[$0] })
+        var partialRound = roundInk.map { !$0 }
+        partialRound[internalOpen] = false
+        XCTAssertFalse(supportEligible(roundPacket, ink: roundInk, source: partialRound).contains(true),
+                       "rectangle-only internal OPEN cells require SOURCE as well as the outer boundary")
+        let input = VectorMendSupport.Input(stroke: stroke, transform: .identity)
+        for admission in [VectorMendSupport.Admission(bytes: 1, work: 64_000_000), .init(bytes: 64 * 1024 * 1024, work: 1)] {
+            XCTAssertThrowsError(try VectorMendSupport.produce([input], unknownCoverage: [], width: 96, height: 96,
+                                                             admission: admission),
+                                 "admission refusal returns no partial accepting certificate")
+        }
+        XCTAssertThrowsError(try VectorMendSupport.produce([.init(stroke: stroke, transform: .init(scaleX: 0.5, y: 0.5))],
+            unknownCoverage: [], width: 96, height: 96, admission: .init(bytes: 64 * 1024 * 1024, work: 64_000_000)),
+                             "unproved resampled reference routes are explicit, never an empty drawing")
+    }
+
+    func testCanonicalSupportChecksUnknownContributorsInTheExcusedGateHalo() throws {
+        let stroke = supportStroke([CGPoint(x: 20, y: 20), CGPoint(x: 70, y: 20)])
+        let packet = try supportPacket([stroke]), ink = try supportInk([stroke])
+        var witness: (Int, Int)?
+        for (index, patch) in packet.patches.enumerated() where patch.unknown == 0 && witness == nil {
+            let spans = packet.canonicalCoverage[Int(patch.spanStart)..<Int(patch.spanStart + patch.spanCount)]
+            let left = try XCTUnwrap(spans.map { Int($0.start) % 96 }.min())
+            let right = try XCTUnwrap(spans.map { Int($0.start) % 96 + Int($0.count) }.max())
+            for contact in packet.contacts[Int(patch.contactStart)..<Int(patch.contactStart + patch.contactCount)] where !contact.requiresOpen {
+                for q in contact.index..<(contact.index + Int(contact.count)) where ink[q] {
+                    if q % 96 <= left - 3 || q % 96 >= right + 2 { witness = (index, q); break }
+                }
+                if witness != nil { break }
+            }
+        }
+        let (target, q) = try XCTUnwrap(witness)
+        let refused = try supportPacket([stroke], unknown: [.init(start: UInt32(q), count: 1)])
+        XCTAssertEqual(refused.patches[target].unknown, 1,
+                       "a gate cannot excuse physical INK from an unaccounted contributor in its halo")
+    }
+
 }

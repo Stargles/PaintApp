@@ -73,34 +73,32 @@ cleanup count6 versus2 without crash/hang/setup failure. No expected literal or 
 Receipt: `native/media16-0565e96f-run01/root-independent-qualification.json`. Normal425 remains the
 actual79a binary; no UI/fast/full/device qualification is implied. Sourceauthor branch preserved.
 
-**Next audit78:** raster43, stream14, fit8, LiveWalk10 and stream-fixture3 are mechanically prepared
-and independently RAM-reviewed against the same728 source and actual425 baseline: 70 distinct recipes,
-52 selected methods and178 case-bound receipts/126 unique statements. All original case objects,
-edits, statements and composed hashes match; only3 H264 compositions and old-method line positions
-changed with the reviewed media source. The inherited map.components summary still names107; use
-these actual selected78 counts. Receipt: `final-repin-offline/remaining78-0565e96f/root-independent-preparation-acceptance.json`.
-Repin metadata to this records-only checkpoint and review before one native grant; stop on unexpected
-green/compiler/crash/setup masking, preserve every issue, and inventory actual unique statement hits.
-Rebuild normal after all mutation batches before UI/install; do not repeat normal425 merely between
-unchanged-source fault tranches.
+**Audit78 partial, source restored:** the first27 controls reached intended semantic assertion
+failures at a699acbc. Root independently re-read every actual result and compiled source:33 mapped
+case-bound issues /31 unique statements;73 other consequences retained without credit. Control28,
+the deliberately eager 1,000-cel load, stalled before a useful verdict and was stopped after one
+bounded process sample. It is INCONCLUSIVE, not a red qualification. The remaining50 cases never
+started;95 of the126 selected unique statements remain unhit. All728 source byte/kind/mode entries
+were restored exactly, driver/test processes ended and native lease released. Normal425 remains the
+actual79a binary; no repeat baseline was inferred. Receipts:
+`native/remaining78-a699acbc-run01/root-independent-first27-qualification.json` and
+`closed-partial-report.json`. Read-only investigation of candidate-scan scaling and a safer targeted
+negative control continues; the sample alone proves neither a fixed deadlock nor a production crash.
+Repin/review remaining recipes after source changes; rebuild normal before UI/install.
 
-**Fill design remains unproved, no new product patch:** independent finite models reject tangent-only
-or nearest-face shortcuts (sharp corners, non-nearest unfilled contacts and gapped centerlines whose
-physical ink is closed). Global min/max chronological dab IDs can also withhold an entire retraced
-interior stem. Those variants are not approved for implementation. One source-keyed protected-footprint
-stencil with complete parameter-local support certificates is being built through existing brush
-rendering in isolated PaintApp-s54-vector-mend-reference (scope record24562dc1); proof agent reviews
-independently. This is the actual canonical footprint/contact/span producer, not a product acceptance.
-Complete contributor closure covers all local support, including buried unknown/nonlocal branches;
-only unsafe target footprints are protected. True path derivative differs from held brush direction.
-GPU contacts must distinguish physical RGBA INK from synthetic gap-closing hairlines and require
-actual OPEN plus SOURCE at non-gate boundaries. Tagged contacts and known/protected stencil bits
-avoid a second source formula/readback. One source-keyed stencil reuses current scratch only after
-its prior owner finishes; exact aliasing, checked memory/work admission and cold/hot performance
-remain gates. No second renderer, global ID interval or new planar graph. Reports:
-`vector-mend-independent-proof/` and current-vector seam feasibility support-patch proposal. No fill
-native grant yet; failed321 remains unshippable until wholly replaced and qualified.
-
+**Fill producer committed, native unrun:** root harvested only the eight source/PBX/test paths
+from independently reviewed324c0ccd. VectorStrokeRenderWalk shares the renderer's existing rest/
+lattice/pose recipe, and VectorMendSupport records only canonical primitive bounds and path
+parameters. It adds no bitmap renderer, per-dab drawing, saved stroke fields or live fill changes.
+Local indexed closure covers complete support and gate halos, including hidden unknown/nonlocal
+contributors; compressed contacts require every OPEN/SOURCE cell. Conservative bounds are potential
+support, never a claim of physical painted coverage. Runtime bounds/capacity/work admission is
+explicit; allocator peaks and latency remain unmeasured. The failed321 live algorithm remains unchanged
+and unshippable. Seven focused native controls are next, then meaningful production-source faults.
+Before live wiring, review each reference-image resampling stage, source-keyed stencil ownership,
+physical-ink bits versus synthetic walls, whole failed-path deletion and unchanged neighbor mending.
+No live-wiring grant yet. Author pin324c0ccd and root receipt: `canonical-producer-harvest/`;
+independent review: `vector-mend-independent-proof/bound-superset-review.md`.
 
 **Device:** install is off immediate priority; owner authorizes future qualified installs. Review
 Releaseee36770d built/signature verified (UUIDF699A856-9C3F-34F1-AE99-E7C221BF9FF8), but profile
@@ -113,7 +111,7 @@ actually ready for physical restart/install. Preserve all real artwork and origi
 new107/UI13/mask6positive+11faults; normal rebuild; fast Debug AND Release; touched whole UI classes,
 full phase; paired16ReleaseABBA; genuine256-package previous-writer cold UI; ordinary old workflows;
 fresh saved/export/signed device, eraser all-process capture and owner artwork confirmation. Source
-static5401fast/5990full/398classes/PBX1327 is not native qualification. Earlier named gates/receipts
+static5408fast/5997full/398classes/PBX1329 is not native qualification. Earlier named gates/receipts
 remain valid only at their pins and unchanged source scopes. Erasing respring cause is unproved.
 Retire the temporary format converter/UI whole only after owner confirms current real artwork.
 
