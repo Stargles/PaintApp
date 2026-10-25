@@ -306,7 +306,7 @@ final class RasterResidencyLogicTests: XCTestCase {
     }
 
     func testHeadroomRefusalAndOverflowNeverAdmitAnAllocation() {
-        let owner = RasterResidency(budgetBytes: pictureBytes, hasHeadroom: { _ in false })
+        let owner = RasterResidency(budgetBytes: pictureBytes * 3, hasHeadroom: { _ in false })
         XCTAssertThrowsError(try RasterSurface.allocate(width: width, height: height, using: owner).get()) { error in
             XCTAssertEqual(error as? RasterResidency.Failure, .allocationRefused)
         }

@@ -62,10 +62,20 @@ re-extracted actual results and729 freeze. All35 faults reached approved mapped 
 303 mapped issues at50 of72 selected distinct statements and22 UNHIT; two unmapped keyframe460
 consequences excluded. Root independently re-extracted all35 before changing source and accepted
 independent causal review:35 specific cases qualify at50 distinct statements/86 reached case-bound
-identities. The22 unhit remain open; original126 union/gap reconciliation is in progress. Exact729
-restored, cleanHEAD, driver closed. Evidence: `native/remaining35-faults-b849ffc1-run01/root-independent-qualification.json`.
+identities. The original126 union is now102 reached/24 UNHIT across76 qualified original cases;
+new finite-pass16 assertions are outside that inventory. Original broad load/freeze stay unresolved.
+Exact729 restored, cleanHEAD, driver closed. Evidence: `native/remaining35-faults-b849ffc1-run01/root-independent-qualification.json`.
 Reference/arrangement checks receive no product-fault credit. Original failed/inconclusive attempts
 remain preserved. Never infer all assertions covered from all cases being red.
+
+**Test isolation correction, recorded before source edits:** the headroom-only raster fixture's
+one-picture byte budget could mask the intended headroom failure; give that small fixture room for
+the picture plus checkpoint workspace. The write-error send fixture used explicit stop before
+checking the outcome, masking failure settlement. Observe after an independent existing queued
+ENOTDIR probe, hold every chunk so an ignored error cannot race later writes, and stop/join solely
+for cleanup after the original assertions. Root reviewed the exact two-test-only patch0ed70e80;
+all existing expected values/method counts remain unchanged. No product hook or new method. Native
+normal/fault verification remains pending; do not treat source review as qualification.
 
 **Remaining final gates:** finish live fill and its containment work; original logic/coldUI,
 undo/redo, owner1080x810 pictures actually LOOKed at, meaningful new assertion controls; close audit

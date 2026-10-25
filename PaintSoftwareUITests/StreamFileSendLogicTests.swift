@@ -213,17 +213,23 @@ final class StreamFileSendLogicTests: XCTestCase {
         var types: [StreamMessageType] = [], outcomes: [StreamFileReceiveOutcome] = []
         client.writeFrameOverride = { type, _, completed in
             types.append(type)
-            if type == .fileChunk, release == nil { release = completed; stalled.fulfill() }
-            else { completed(nil) }
+            if type == .fileChunk {
+                if release == nil { release = completed; stalled.fulfill() }
+            } else { completed(nil) }
         }
         client.sendFile(url: url, kind: "video", onProgress: { _, _ in }) { outcomes.append($0) }
         wait(for: [stalled], timeout: 5)
         release?(CocoaError(.fileWriteUnknown))
-        let stopped = expectation(description: "write result processed before explicit stop")
-        client.stop { stopped.fulfill() }
-        wait(for: [stopped], timeout: 5)
+        let processed = expectation(description: "write result processed before observation")
+        // A regular file cannot contain a child; this queue probe refuses without wire I/O.
+        client.sendFile(url: url.appendingPathComponent("queue-probe"), kind: "video",
+                        onProgress: { _, _ in }) { _ in processed.fulfill() }
+        wait(for: [processed], timeout: 5)
         XCTAssertEqual(types, [.fileBegin, .fileChunk], "A failed write may not advance the disk pump")
         XCTAssertEqual(outcomes, [.refused("The connection was lost.")])
+        let stopped = expectation(description: "cleanup joined client work")
+        client.stop { stopped.fulfill() }
+        wait(for: [stopped], timeout: 5)
     }
 
 }
