@@ -61,7 +61,10 @@ provenance guards without evidence. Whole4096 source work is paused before sampl
 cg.width/cg.height0 for UIKit's non-bitmap context despite correct CTM/clip and actual96sourceimage.
 This false bitmap-context premise rejects every ordinary vector reference. Move output-size checks
 to the actual completed UIImage/CGImage; preserve the per-stage geometry/image checks. Remove all
-print instrumentation and compare restored729source before harvesting the narrow fix.
+print instrumentation and compare restored729source before harvesting the narrow fix. Actualc267
+rerun69/71 resolves15 failures, including every whole cap and all28FillObject. Two FillMend methods
+still fail at1362(unknown locality),844/850(Reach after Overlap). Preserve these assertions and trace
+the shared contact/width proof before changing source; final71/UI/whole4096 gates remain open.
 Evidence: s54-final-qualification/native/geodesic-logic20-32185179-run01/root-independent-acceptance.json.
 
 ## FillMend ON cold setup taps a moving opacity control — 2026-10-24

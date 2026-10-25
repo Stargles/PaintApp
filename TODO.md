@@ -44,7 +44,12 @@ proved UIKit's non-bitmap drawing context reports cg.width/cg.height0 while CTM/
 source CGImage are native96. Builder admission succeeds; the false context-size guard yields0inputs/
 1whole-window unknown. Record before removing temporary prints whole, then move output dimensions to
 actual completed UIImage/CGImage validation while preserving transform/clip/source-stage checks.
-No guard is waived by a shape exception. Rerun the same71 after independent narrow fix review.
+No guard is waived by a shape exception. The exact two-path fix is integrated atc2678676. Its actual Debug71 rerun is69pass/2fail,
+0skip/expected, exact729/owned39E. All28FillObject and17StrokeWall pass; whole straight/curved/Rough
+caps pass. Remaining FillMend assertions:1362 local unknown protection must remain local,844 whole
+uncovered body after Edge Overlap,850 remote attached body. Record before diagnosing those two shared
+geometry/Reach cases; keep all original expectations. Whole4096 and ordinary UI remain on hold until
+the native path is qualified. Evidence: `native/v5-normal71-c2678676-run01/`.
 Whole4096 resampling and same-budget window refinement remain required OPEN engineering work.
 The reviewed ImageWarp scale-stage proposal shares one work account and prepares geometry before
 filtering/core allocation. Its isolated source grant is paused after actual71 failures, before any
