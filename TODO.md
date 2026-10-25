@@ -369,6 +369,10 @@ design around a window/byte budget, never load it all. Deferred features stay de
 The19 finding clusters and file-level gaps are in docs/ARCHITECTURE_AUDIT.md and external findings-index.json.
 Inventory-only files are not reviewed code. New source is not called complete because it is committed.
 
+Source-only audit follow-up: the Metal compiler reports `kDuplicateRegionIntersection` unused;
+repository search finds only its declaration. Remove that dead constant and narrow its comment;
+compile validation joins the next normal Metal build. No behavior or new assertion is needed.
+
 - [ ] Data protection/background: finish final-source gates for strict migration/Trash ownership,
       export cancellation, serialized cleanup and close-owned thumbnails; retain the qualified controls.
 - [ ] Temporary geometry repair: cold previous-writer library UI and responsive first screen still

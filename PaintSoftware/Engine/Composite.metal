@@ -389,9 +389,8 @@ constant uint kGuideGrid        = 0;
 constant uint kGuideIsometric   = 1;
 constant uint kGuidePerspective = 2;
 
-/// Duplicate Offset's two regions — mirrors `Effect.DuplicateOffset.Region.code`.
-constant uint kDuplicateRegionRim          = 0;
-constant uint kDuplicateRegionIntersection = 1;
+/// Duplicate Offset's rim code — mirrors `Effect.DuplicateOffset.Region.code`.
+constant uint kDuplicateRegionRim = 0;
 
 /// Mirrors `EffectParams` in Effect.swift field for field. **All-scalar, deliberately**: a `float2`
 /// here has an alignment a Swift `SIMD2<Float>` matches only by luck, and a padding disagreement
