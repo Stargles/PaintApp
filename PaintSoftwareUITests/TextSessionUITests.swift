@@ -129,8 +129,11 @@ final class TextSessionUITests: PaintUITestCase {
     /// system popover over the canvas. What the artist does next: the swatch reads the colour they chose,
     /// a touch outside closes the panel, and the box is still open to keep writing in.
     func testThePanelsColourSwatchRaisesTheAppsOwnPickerAndTheWordsTakeItsColour() throws {
+        XCUIDevice.shared.orientation = .landscapeLeft
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app), "setup: a brand-new document")
+        XCTAssertGreaterThan(app.windows.firstMatch.frame.width, app.windows.firstMatch.frame.height,
+                             "PREMISE: the owner colour workflow is actually landscape")
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
         let host = canvas.frame
@@ -164,7 +167,7 @@ final class TextSessionUITests: PaintUITestCase {
         let square = app.otherElements["colorPanel.svSquare"]
         XCTAssertTrue(square.waitForExistence(timeout: 5), "…and it is the app's colour panel")
         XCTAssertTrue(app.buttons["colorPanel.tab.palettes"].exists, "…with its palettes")
-        attachScreenshot(app, "text-colour-panel")
+        attachScreenshot(XCUIScreen.main, "text-colour-panel")
 
         // Top right of the square is full saturation and brightness, and the panel opens on hue 0.
         dragWithinElement(square, from: CGVector(dx: 0.5, dy: 0.5), to: CGVector(dx: 0.98, dy: 0.02))
@@ -186,6 +189,6 @@ final class TextSessionUITests: PaintUITestCase {
         while red <= 40, Date() < deadline { Thread.sleep(forTimeInterval: 0.4); red = try count(isRedInk) }
         XCTAssertGreaterThan(red, 40, "the words being written are drawn in the colour that was picked (red pixels \(red))")
         XCTAssertLessThan(try count(isBlackInk), black / 5, "…and no longer in black")
-        attachScreenshot(app, "text-drawn-in-the-picked-colour")
+        attachScreenshot(XCUIScreen.main, "text-drawn-in-the-picked-colour")
     }
 }
