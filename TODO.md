@@ -32,12 +32,12 @@ replace unsupported raster-positive premises while original FillObject result/un
 remain byte-exact. Strict OPEN-on-INK/SOURCE255 GPU coverage is added. Root reviewed the separate
 LASSO_FILL spec removal; author stale TODO/HANDOFF/BUGS are not copied. Independent receipt:
 `vector-mend-independent-proof/live-v5-source-review/receipt.json` (e0609bf3). Full three-class71
-first two native71 attempts stopped at compilation with zero methods executed: duplicate fixture locals `refused` (renamed at1ddf6eb6), then `ink`. Record before renaming the latter canonical fixture local to `referenceInk`; independently audit all three changed test files for remaining collisions before the same71 rerun. Product source and all result/undo/contour expectations stay intact. Both Metal targets compiled, but runtime/UI/faults remain UNRUN.
+actual Debug71 at2972c7c4 compiled and executed all71:54pass/17fail,0skip/expected, exact729source/owned39E. All17 StrokeWall pass;12FillMend and5FillObject fail. Factory-driven canonical coverage is empty, contacts are absent, live preparation never publishes and batch reports unchanged. First two compiler-only attempts remain preserved; their two local-name fixes do not alter product behavior. Record before one isolated native factory diagnostic (actual context/image metadata, builder admission and packet counts); establish which stage rejects before changing any guard. No assertion weakening, ordinary UI or whole4096 implementation until the shared native path is corrected. Runtime is NOT qualified.
 Whole4096 resampling and same-budget window refinement remain required OPEN engineering work.
 The sharpened external ImageWarp scale-stage proposal retains one total work account across retries,
 prepares geometry before expensive filtering/core allocation, and samples the final picture once.
-Review its finite retry/retirement/peak constraints and actual tap cost before implementation; native1:1
-source acceptance is not a universal certificate. Proposal: `imagewarp-scale-extension-v2/plan.md`.
+Its isolated implementation grant is paused after actual71 failures, before any sampler/producer edits.
+Diagnose and fix native factory acceptance first; native1:1 source review is not a runtime certificate. Proposal: `imagewarp-scale-extension-v2/plan.md`.
 
 **Raster admission correction:** root integrated the reviewed finite weak-metadata eviction pass
 at d4d7c523. It orders candidates once outside the mutex, rechecks current accounting/registration
