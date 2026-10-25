@@ -63,6 +63,14 @@ pixel is CPU-ineligible in the actual factory packet; actual reference ink confi
 contact/overlap. This is not GPU stencil readback. No Reach arithmetic defect is established. Record
 before restoring the temporary test file whole and considering a separated geometry premise with
 all original width/short-Reach/outside assertions retained plus an explicit joined safety control.
+**Recorded engineering correction:** exact unknown-locality fix7ad79c11 is harvested at36b82a87,
+reusing the shared footprint helper/meter with no cache or saved fields. The Reach positive fixture's
+endpoint65 is shortened to55, leaving every original body-width/short-Reach/outside assertion intact.
+Add a premise based on actual per-stroke RGBA with a one-cell collar; retain the original joined10/16
+geometry as explicit GPU join-protection and far-body-positive controls atReach40. This isolates width
+from the observed unrelated join without removing safety coverage. Four new assertions require normal
+71 then meaningful assertion faults; no fixture-only control receives product-fault credit. Record
+before applying exact test proposald915ecf0; no shader/Reach math changes. All native gates remain open.
 Whole4096 resampling and same-budget window refinement remain required OPEN engineering work.
 The reviewed ImageWarp scale-stage proposal shares one work account and prepares geometry before
 filtering/core allocation. Its isolated source grant is paused after actual71 failures, before any

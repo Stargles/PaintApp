@@ -71,7 +71,10 @@ cost limits. Reach's fixture may physically join its nominally separate strokes;
 coordinate/CPUeligible diagnostic retained1RED and proves actual ink contact; every missing pixel
 is CPU-ineligible (not GPU stencil readback). No Reach arithmetic defect is established. Keep all
 original result assertions on a genuinely separated fixture; preserve connected uncertain-join
-safety, verify disjointness in actual rendered ink and mutation-test new premises after green.
+safety, verify disjointness in actual rendered ink and mutation-test new premises after green. Engineering
+ruling before test edit: endpoint55 isolates existing width oracles; actual rendered one-cell-collar
+premise makes separation binding. Preserve original joined10/16 as GPU join-negative/far-body-positive
+atReach40. Unknown-locality source fix is harvested36b82a87; same71 and new assertion faults pending.
 Evidence: s54-final-qualification/native/geodesic-logic20-32185179-run01/root-independent-acceptance.json.
 
 ## FillMend ON cold setup taps a moving opacity control — 2026-10-24

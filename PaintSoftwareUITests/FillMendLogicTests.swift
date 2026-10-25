@@ -819,8 +819,14 @@ final class FillMendLogicTests: XCTestCase {
                                              (10, 0, 10, 9), (16, 6, 4, 3)] {
             let frame = supportStroke([CGPoint(x: 10, y: 10), CGPoint(x: 86, y: 10), CGPoint(x: 86, y: 86),
                                        CGPoint(x: 10, y: 86), CGPoint(x: 10, y: 10)], size: 4)
-            let detached = supportStroke([CGPoint(x: 33, y: 23), CGPoint(x: 33, y: 65)], size: size)
+            let detached = supportStroke([CGPoint(x: 33, y: 23), CGPoint(x: 33, y: 55)], size: size)
             let attached = supportStroke([CGPoint(x: 10, y: 75), CGPoint(x: 48, y: 75)], size: 10)
+            let detachedInk = try supportInk([detached]), attachedInk = try supportInk([attached])
+            let detachedRows = Set(detachedInk.indices.filter { detachedInk[$0] }.map { $0 / 96 })
+            let attachedRows = Set(attachedInk.indices.filter { attachedInk[$0] }.map { $0 / 96 })
+            XCTAssertTrue(detachedRows.allSatisfy { y in
+                ((y - 1)...(y + 1)).allSatisfy { !attachedRows.contains($0) }
+            }, "PREMISE: actual independent ink and its full one-cell collar do not meet the attached stem")
             let holePoints = (0...24).map { step -> CGPoint in
                 let angle = CGFloat(step) * 2 * .pi / 24
                 return CGPoint(x: 70 + 7.5 * cos(angle), y: 34 + 7.5 * sin(angle))
@@ -859,6 +865,22 @@ final class FillMendLogicTests: XCTestCase {
                     || tooShort.at(i % 96, i / 96) != off.at(i % 96, i / 96)
             }
             XCTAssertTrue(changed.isEmpty, "every real contour/cardinal/hole/outside pixel keeps its overlap-only RGBA: \(changed.prefix(8))")
+            if overlap == 0 || size == 16 {
+                // The old endpoint really meets the attached stroke. Preserve that arrangement
+                // as a join veto, separately from the independent width/overlap positives above.
+                let joined = supportStroke([CGPoint(x: 33, y: 23), CGPoint(x: 33, y: 65)], size: size)
+                let connected = [frame, joined, attached, hole]
+                let connectedInk = try supportInk(connected)
+                let connectedSource = supportExterior(connectedInk, side: 96, seed: 16 * 96 + 16)
+                    .map { $0 ? UInt8(255) : 0 }
+                let protectedJoin = try canonicalPatch(connected, side: 96, source: connectedSource, reach: 40)
+                XCTAssertTrue(connectedInk[75 * 96 + 33] && connectedInk[40 * 96 + 33],
+                              "PREMISE: the original join and its remote body are actual canonical ink")
+                XCTAssertEqual(protectedJoin[75 * 96 + 33], 0,
+                               "the original connected arrangement keeps its uncertain join bare")
+                XCTAssertEqual(protectedJoin[40 * 96 + 33], 255,
+                               "protecting the original join does not disable the remote body")
+            }
         }
         let clipped = supportStroke([CGPoint(x: 0, y: 15.5), CGPoint(x: 20, y: 15.5)], size: 3)
         let patch = try canonicalPatch([clipped], side: 32, reach: 8)
