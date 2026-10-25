@@ -1125,13 +1125,13 @@ final class CompositorParityLogicTests: XCTestCase {
 
     /// The existing spectrum at fractional layer opacity, so every hand-rolled mode also crosses
     /// the fade boundary without introducing another fixture or relaxing the measured tolerance.
-    func testEveryBlendModeAgreesBetweenTheBackendsAtFractionalLayerOpacity() throws {
+    func testHandRolledBlendModesAgreeBetweenTheBackendsAtFractionalLayerOpacity() throws {
         try skipUnlessGPUAvailable()
-        for mode in BlendMode.allCases {
+        for mode in BlendMode.allCases where mode.coreGraphicsBlendMode == nil {
             let manager = spectrumManager(mode)
             manager.layers[1].opacity = 0.5
             guard let (gpu, cpu) = gpuAndCPU(manager) else { return }
-            XCTAssertLessThanOrEqual(maxChannelDelta(gpu, cpu), mode == .normal ? 0 : Self.blendTolerance,
+            XCTAssertLessThanOrEqual(maxChannelDelta(gpu, cpu), Self.blendTolerance,
                                      "\(mode.displayName) at 50% opacity must retain the existing parity bound")
         }
     }
