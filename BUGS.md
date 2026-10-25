@@ -53,26 +53,30 @@ failure frames; Mend All shows its no-gaps notice. Two later captures and undo/r
 Exact729 source, no retries. Actual logic71/71 at the same pin does not establish this UI behavior.
 Read the actual reference/window/source route before a bounded diagnostic; scaling is only a hypothesis.
 
-Candidate recorded before implementation: both failing workflows deliberately rasterize an empty default
-Layer1 and retain its visible default fill-reference selection. Actual saved2048×1024 Layer1 pixels
-are all alpha0. Fresh RasterSource surface snapshots start with transparencyProven=false and their
-lease-resolution path does not establish it, so the factory can mark this clear layer full-window
-unknown. Backed-image reload can establish transparency and would miss the fresh-lease premise.
-Trace the actual empty-rasterize/live-version ownership before a fix; preserve immutable-version
-identity and the existing transparency proof, no factory color heuristic or disabling the reference.
-Add a fresh in-memory flow regression if confirmed. RasterSource/RasterBuffer scope is separate from
-the nine-path scaled owner. Record before implementation and do not call source reasoning native proof.
+Source-confirmed candidate, recorded before implementation: both failing workflows rasterize an empty
+default Layer1 and keep its visible fill-reference selection. Saved2048×1024 pixels are all alpha0;
+fresh immutable leases lack the existing backed-decode transparency proof. Source checkpoint d91efe48
+moves the same exact alpha loop onto the shared buffer/lease and exposes admitted worker preparation;
+cheap getters/snapshot/ordinary lease resolve remain scan-free, immutable cached true/false survives
+resolution/COW/eviction, and unresolved backing is not eagerly decoded. Three new methods cover fresh
+96 and owner2048 rasterize flows plus ownership/refusal. Caller and Source remain UNCOMPILED together.
 
+A second source-confirmed ordering defect is recorded before its caller correction: scaled staging
+can preserve a full-window UNKNOWN after final decode proves a cold backing clear. Raster/baked unknowns
+always cover the whole window, so defer their safety to the existing final strict-draw classification:
+monotonically downgrade the existing override to unavailable for any nonempty/unproved raster. Preserve
+all vector/localized unknowns; never re-promote after a later clear source. This avoids eager decoding,
+replay or extra retained capture/cache/budget. Require cold first-request useful support/GPU output,
+both clear/painted orders, one-pixel veto and unchanged actual RGBA. Recorded before implementation.
 
-The old321 distance/circle path failed original400/cardinal outline probes and was removed whole.
-Current native fixes validate completed-image dimensions instead of non-bitmap CGContext0×0, and reuse
-shared derivedFootprint for finite nonstroke unknowns rather than stroke-only known bounds. A Reach
-fixture contact was proved in actual ink; its independent width assertions are all preserved, with
-actual separation plus original joined GPU safety/usefulness controls. All71 current logic methods pass;
-new assertion faults and final-source gates remain pending. No shader-width relaxation was justified.
-The separate whole4096 nine-path0cab source checkpoint remains uncompiled and under owner/budget review.
-Evidence: `s54-final-qualification/native/owner-ui4-4e2-run01/` and
-`native/v5-normal71-4e2f36f1-run01/root-independent-acceptance.json`; all earlier red results remain.
+The old321 distance/circle path failed outline probes and was removed whole. Completed-image dimension
+validation and shared derivedFootprint fix the native factory roots; the independent width fixture now
+has actual ink separation plus original joined controls, with old width assertions preserved. Current
+2da54484 Debug86 passes86/86 including useful whole4096 factory/shared-filter/GPU output; this is no
+owner UI, new assertion fault, appearance or performance qualification. All729 sources independently
+match immutable/before/after/current. Earlier red and green results remain at their original pins.
+Evidence: `native/scaled-normal86-2da54484-run01/root-independent-acceptance.json` and
+`s54-final-qualification/native/owner-ui4-4e2-run01/`.
 
 ## FillMend ON cold setup taps a moving opacity control — 2026-10-24
 

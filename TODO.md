@@ -63,6 +63,14 @@ means cached fact or conservative unknown without IO/eager decode/new image; str
 resolution retains its existing proof/error behavior. Both native/scaled callers use the same Builder
 work allowance, no second budget or generic throwing API. Source/caller/tests are being reviewed.
 Evidence: `scale-stage-reviewed-94980fdb/receipt.json`; allocation review9dcac7d8; native2da86green.
+The frozen shared Source checkpoint d91efe48 adds3 RasterResidency methods (37→40), uncompiled.
+A separate source-confirmed cold-backed-clear ordering issue is recorded BEFORE its caller correction:
+scaled staging must defer raster/baked whole-window safety to the existing final strict-draw check.
+Stage vector/localized unknowns unchanged; after each actual raster draw, monotonically downgrade the
+existing support override to unavailable if a source remains nonempty/unproved. This equals today's
+whole-window unknown veto; a later clear source cannot re-promote it. No capture retention/replay,
+extra decode/cache/budget or anonymous-span deletion. Add first-cold scaled clear usefulness, both
+clear/painted orders and exact RGBA/one-pixel veto controls. Native/cold UI qualification remains OPEN.
 
 **New assertion controls:** the locality/Reach5 plan is OFFLINE ONLY at4e2 (3 product/2 premise
 identities). Preserve its original candidate and use a separately named packet for the reviewed broad
@@ -327,10 +335,12 @@ to continue while he sleeps. Use current vector brush geometry for interior mend
 joins and keep fast feedback; unknown flattened content remains conservative. Preserve the existing
 neighbor seam. Do not ask this capability question again.
 
-**Core implemented; actual rounded free-cap holes remain.** Current wholeUI47 passes its body probes,
-but new-fill and Mend All pictures retain3 tiny interior free-end holes. Correct the shared normal/
-corner proof with full-cap regression coverage while protecting the original outline and uncertain
-joins; then finish final integrated gates. Owner reports: “when I fill
+**Core integrated; final fresh-raster/cold UI correction in progress.** The earlier tiny-cap path
+was replaced whole by the canonical shared-renderer support seam. Current2da Debug86 passes whole
+straight/curved/Rough caps and useful4096 factory/GPU output. Actual owner UI4 at4e2 still failed2/4
+with whole interior gaps, now traced to the fresh clear raster reference proof. Finish the shared
+worker proof, final cold-backed safety classification and unchanged wholeUI4/undo/redo before claiming
+this behavior complete. Owner reports: “when I fill
 stuff, the fill leaves white in places where brushstrokes were.” An enclosed filled region can contain
 an internal brushstroke whose footprint stays unfilled. Extend the **same Mend Gaps setting** to cover
 those interior stroke-shaped gaps as well as its current behavior. Preserve the actual original outer

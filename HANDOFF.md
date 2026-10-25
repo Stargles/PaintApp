@@ -71,6 +71,14 @@ means cached fact or conservative unknown without IO/eager decode/new image; str
 resolution retains its existing proof/error behavior. Both native/scaled callers use the same Builder
 work allowance, no second budget or generic throwing API. Source/caller/tests are being reviewed.
 Evidence: `scale-stage-reviewed-94980fdb/receipt.json`; allocation review9dcac7d8; native2da86green.
+The frozen shared Source checkpoint d91efe48 adds3 RasterResidency methods (37→40), uncompiled.
+A separate source-confirmed cold-backed-clear ordering issue is recorded BEFORE its caller correction:
+scaled staging must defer raster/baked whole-window safety to the existing final strict-draw check.
+Stage vector/localized unknowns unchanged; after each actual raster draw, monotonically downgrade the
+existing support override to unavailable if a source remains nonempty/unproved. This equals today's
+whole-window unknown veto; a later clear source cannot re-promote it. No capture retention/replay,
+extra decode/cache/budget or anonymous-span deletion. Add first-cold scaled clear usefulness, both
+clear/painted orders and exact RGBA/one-pixel veto controls. Native/cold UI qualification remains OPEN.
 
 **New assertion controls:** the locality/Reach5 plan is OFFLINE ONLY at4e2 (3 product/2 premise
 identities). Preserve its original candidate and use a separately named packet for the reviewed broad
