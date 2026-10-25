@@ -54,7 +54,7 @@ against Swift Character count and forces length0. For A😀B an end caret4 becom
 ASCII selected range is also collapsed. Preserve the full saved range through the existing owner.
 No new selection state/helper or copied-formula test. Direct selection preservation is integrated;
 actual view/update/insertText tests pass within Debug260 and both faults qualify4 intended statements.
-Cold interaction remains pending. This is independent of the glyph cap and text commit fix.
+Cold interaction remains pending; Text4b060d05 fixture is source-reviewed/harvested, not runtime-qualified. This is independent of the glyph cap and text commit fix.
 
 ## Mode1 vector eraser rerolls the gesture field at commit — 2026-10-25
 

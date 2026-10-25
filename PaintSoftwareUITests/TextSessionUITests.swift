@@ -138,7 +138,14 @@ final class TextSessionUITests: PaintUITestCase {
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
         let host = canvas.frame
         _ = writeWords("Hello", app, canvas)
-        let words = canvasWindow(wordsWindow(in: host), in: canvas)
+        let paper = visiblePaperRect(app, in: canvas)
+        let visible = CGRect(x: host.minX + paper.minX * host.width,
+                             y: host.minY + paper.minY * host.height,
+                             width: paper.width * host.width, height: paper.height * host.height)
+        let window = wordsWindow(in: host).intersection(visible)
+        XCTAssertFalse(window.isEmpty, "PREMISE: the colour sample is visible paper, not a black margin")
+        assertAboveTheDock(app, canvas, dy: (window.maxY - host.minY) / host.height, "the colour sample")
+        let words = canvasWindow(window, in: canvas)
 
         /// How many pixels of the words' window match `predicate`, off one screenshot.
         func count(_ predicate: (RGBA) -> Bool) throws -> Int {
@@ -205,11 +212,23 @@ final class TextSessionUITests: PaintUITestCase {
         let host = canvas.frame
         let transform = readTransform(app)
         XCTAssertFalse(transform.isEmpty, "PREMISE: the effective canvas transform is exposed")
-        let boxTopLeft = writeWords("", app, canvas)
+        // Set size while the control is exposed: the software keyboard covers this row later.
+        app.buttons["toolbar.addButton"].tap()
+        let addText = app.buttons["add.addTextRow"]
+        XCTAssertTrue(addText.waitForExistence(timeout: 5), "PREMISE: Add offers a text box")
+        addText.tap()
+        let size = app.sliders["textPanel.sizeSlider"]
+        XCTAssertTrue(size.waitForExistence(timeout: 5), "PREMISE: text size is available before placement")
+        size.adjust(toNormalizedSliderPosition: 0.30)
+        let boxTopLeft = CGPoint(x: host.minX + Self.wordsOffset.dx * host.width,
+                                 y: host.minY + Self.wordsOffset.dy * host.height)
+        canvas.coordinate(withNormalizedOffset: Self.wordsOffset).tap()
+        XCTAssertTrue(waitForTextState(app, "editing"), "PREMISE: the public placement opens text editing")
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5),
                       "PREMISE: this control requires the software keyboard, not a paste longpress")
-        let letter = app.keys["W"].exists ? "W" : "w"
-        XCTAssertTrue(app.keys[letter].exists, "PREMISE: a real W/w software key is available")
+        let letter = "w"
+        XCTAssertTrue(app.keys[letter].exists || app.keys[letter.uppercased()].exists,
+                      "PREMISE: a real W/w software key is available")
         let inside = CGPoint(x: boxTopLeft.x + 0.01 * host.width, y: boxTopLeft.y + 0.01 * host.height)
         typeIntoTextBox(letter, app, at: inside)
         XCTAssertEqual(readTransform(app), transform, "PREMISE: typing here does not pan the paper")
@@ -299,6 +318,7 @@ final class TextSessionUITests: PaintUITestCase {
         let pressPoint = try XCTUnwrap(selectionPoint, "PREMISE: a measured glyph-interior longpress point")
         assertAboveTheDock(app, canvas, dy: (pressPoint.y - host.minY) / host.height, "the selection longpress")
         app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: pressPoint.x, dy: pressPoint.y)).press(forDuration: 1.0)
+        attachScreenshot(XCUIScreen.main, "text-selection-public-edit-menu")
         let selectAll = app.menuItems["Select All"]
         XCTAssertTrue(selectAll.waitForExistence(timeout: 5), "PREMISE: the public edit menu offers Select All")
         XCTAssertTrue(tapWhenHittable(selectAll, "Select All"), "PREMISE: Select All was delivered")
@@ -323,15 +343,17 @@ final class TextSessionUITests: PaintUITestCase {
         XCTAssertLessThan(max(channels[1], channels[2]), 0x20, "PREMISE: the text colour has little green/blue")
         XCTAssertTrue(waitForTextState(app, "editing"), "PREMISE: colour restyling keeps the text editor focused")
         XCTAssertTrue(app.keyboards.firstMatch.exists, "PREMISE: the same software keyboard remains")
-        XCTAssertTrue(app.keys[letter].exists && app.keys[letter].isHittable,
-                      "PREMISE: the SAME recorded letter key is actually hittable, without refocusing")
+        // Shift may have changed since the first auto-capitalized glyph; this is the same W/w key.
+        let replacement = app.keys[letter].exists ? app.keys[letter] : app.keys[letter.uppercased()]
+        XCTAssertTrue(replacement.exists && replacement.isHittable,
+                      "PREMISE: the SAME physical W/w key is actually hittable, without refocusing")
         XCTAssertEqual(readTransform(app), transform, "PREMISE: restyling does not move the measured picture")
         XCTAssertEqual(canvas.frame, host, "PREMISE: restyling keeps the host geometry")
         XCTAssertGreaterThan(try settled { try count(in: far, matching: { isRed($0) }) }, 0,
                              "PREMISE: the selected old word is actually drawn red in the far band")
         attachScreenshot(XCUIScreen.main, "text-selection-restyled")
 
-        XCTAssertTrue(tapWhenHittable(app.keys[letter], "The same replacement letter"),
+        XCTAssertTrue(tapWhenHittable(replacement, "The same replacement letter"),
                       "PREMISE: the replacement key was delivered without another editor touch")
         XCTAssertTrue(waitForTextState(app, "editing"), "PREMISE: the replacement is still being edited")
         let drawn = try settled {

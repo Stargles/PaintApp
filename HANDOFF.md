@@ -61,23 +61,23 @@ reached named pictures. All15 original/display hashes and lossless normalization
 named captures unreached. Receipts5374b5de (red extraction) and7ce960c7 (root6-picture LOOK) under
 native/owner-ui21-c4df4add-run01/. This is not a green whole-class gate.
 
-New Blend UI stops before blending: expected opaqueC80000 input core was not found; the other3 input
-cores passed. Recording confirms picker#C80000/100% and actual red stroke at its intended probe, but
-lossy video is not exact RGBA and no Blend PNG was retained. No input/quantization/product cause is
-proved. Record scope BEFORE code: in ONLY this new method preserve preset/colours/geometry/opacity/
-all outcomes, retain the last actual waitForPixel RGBA in its failure message and attach one whole
-screen ONLY when that unchanged core premise fails. Then one cold existing-selector diagnostic run,
-separate explicit native grant. No guessed input/tolerance change, alternate preset or product fix.
+Actual exact Blend diagnostic94fed failed its unchanged opaque input premise at [199,0,0,255]
+versus [200,0,0,255]. Root independently extracted the joined one-test failure and LOOKed the whole
+lossless failure PNG; exact floor-row sampling matches the callback. A local brush region contains
+199/200/201, so a +/-1 tolerance would invalidate the near-tie winner. No product quantization cause
+is established. Root review7bc71fff and exact trace00e10812 are under native/blend-core-diagnostic1-
+94fedfee-run01/ and blend-core-trace-94fedfee/. Native is idle. Public Add Rectangle solid fills are
+now scoped in ONLY the new Blend method, retaining exact colours/probes/all outcomes and diagnostic;
+prove fixed local input uniformity and capture whole inputs before fade. Author startup_repair owns
+that fixture correction, proposal75c4b25d/scope85b2b938, no native grant yet.
 
-Text selection stops before longpress: maximum actual black-ink grip clearance20.908<=22.129.
-Whole frame shows the small Wwww box and eight grips. A bounded size-control adjustment BEFORE
-single-glyph/far-band measurement is in scope, using existing panel control, while preserving actual
-clearance/dock/geometry premises and drawn replacement outcomes. Check keyboard capitalization and
-public menu delivery without post-style refocus. Text colour reaches RGB/red checks but black7320
-fails<1512; whole final frame visibly shows red Hello and black panel/keyboard. Trace actual sampled
-window against those UI regions before changing ONLY this colour method's measured window. Preserve
-all colour/session outcomes; no product colour fix without evidence. Startup owns these two source/
-image diagnoses. Historical0e UI10/177 compiler0 and all later packets stay immutable.
+Text author4b060d05 is harvested after independentbc23d186/root source review. ONLY two TextSession
+methods change: existing colour ROI intersects actual visible paper (61 outside columns*120=7320,
+exactly the old failure); selected-text sets existing public Size.30 before placement/keyboard and
+uses the same physical W/w key despite shift. Old colour thresholds/assertions, other3 methods and
+all drawn selection outcomes remain exact. Public Select All stays mandatory, with one whole menu
+capture before its guard. Actual larger fit/menu/key delivery and positive whole Text5 remain UNRUN;
+future selection reversal must reach the unchanged drawn far-band assertion now367, never setup.
 
 New Blend method7157 remains integrated: real rounded50% domain/two luminance patches/Merge Down/
 stripe/hide/reveal/paper controls; four outcome captures remain unreached. Existing helpers/product
@@ -144,14 +144,15 @@ vector-command-independent-design-53637328/ are source/math evidence only; nativ
    Text5+GraphGesture6+Blend10 (21 methods), independently extract outcomes and LOOK whole pictures.
    Then exact positive-source Graph3/Blend3/selected-text1 faults; actual reached assertions only.
 2. Finish scoped three effects corrections/review/logic controls and ordinary cold effects workflow.
-   Effects55383dd6 has13 finite controls (11product/2premise) awaiting independent successor review;
+   Effects55383dd6 has13 finite controls (11product/2premise) independently source-reviewed;
    first-growth5-picture fixture and removed redundant radius-identity loop only, production exactdf.
+   Ordinary121 must pass before a separate controls grant; all effects native/compiler remain UNRUN.
    Then implement/qualify the TWO recorded vector transfer/undo clusters at shared existing owners.
    Drive stored-vector eraser Splatter/Undo/Redo; no flaky expected random field/new test hooks.
 3. Repin historical UI13/mask6-positive+11-fault packets to final source; LOOK positive pictures before
    faults. Preserve two-phase build→all-source-restore→test-without-building contract.
 4. Final fast Debug AND Release using CLAUDE verbatim command, actual/static method reconciliation,
-   lints/PBX/graph, all touched UI classes and full phase. Current census5435 fast/6027 full
+   lints/PBX/graph, all touched UI classes and full phase. Current census5439 fast/6031 full
    runnable,729 source entries/PBX1329; new cold-text method is included.
 5. Fill16 paired Release ABBA, sampler/source/fence/cancel/budget counts and genuine cold256-package
    previous-writer library UI. Preserve original export and old071 benchmark product.

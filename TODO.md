@@ -6,17 +6,16 @@ Integration remains unmerged/uninstalled; main/origin remain afd2030c. Root acce
 492/492 at0e215 and260/260 atbddb, zero failures/skips/expected failures. Logic26 qualifies36 intended
 statements and selection/seed5 qualifies10; actual source/device/method identities and729 immutable
 entries reconcile. Fill126/owner UI4/all29 controls qualify at83380 with whole pictures inspected.
-Named evidence and limits are in HANDOFF.md. Last compiled app is a mutant: rebuild normal before UI.
+Named evidence and limits are in HANDOFF.md. Last compiled UI app is normal94fed; effects/Text fixture successors still require normal rebuilds.
 
 Current queue (items remain until merged):
 
-- Resolve actual cold UI21 atc4df:18pass3fail; allGraph6pass and root LOOKed new3wholepictures.
-  Blend stops at C80000 opaque input; retain actual last RGBA/failure-only screenshot in that NEW
-  method before a separately granted existing-selector diagnostic. No guessed tolerance/input fix.
-  Selected-text box has no22pt-clear ink point; adjust existing size control BEFORE measurement,
-  preserve clearance/drawn outcomes. Colour final visibly red Hello; trace black panel/keyboard
-  contamination before correcting ONLY that method's sample window. Then whole Text5+Graph6+Blend10
-  and meaningful Graph3/Blend3/text1 UI controls. Older failures/captures remain immutable.
+- Resolve actual cold UI21 atc4df:18pass3fail; allGraph6 pass and root LOOKed3 whole pictures.
+  Exact Blend diagnostic94fed proves brush input199/200/201, invalidating near-tie premises; scoped
+  public solid-fill fixture retains exact outcomes and fixed uniformity checks, source in progress.
+  Text4b060d05 harvested after independent review: clip existing colour ROI to actual visible paper
+  (exact7320 margin samples); set public size before keyboard and preserve W/w physical key.
+  Whole Text5+Graph6+Blend10 and meaningful Graph3/Blend3/text1 UI controls remain pending.
 - Correct THREE scoped effects audit clusters via existing owners: cap radius before Int; normalize
   periodic angles/shared apron inputs; price actual missing GPU scratch/intermediate pictures plus
   readback at warm first-effect growth. Source55383dd6 independently7a1b6a17 reviewed and harvested7paths, old118 exact/four newmethods.
@@ -26,7 +25,7 @@ Current queue (items remain until merged):
 - Cold stored-vector eraser Splatter/Undo/Redo. Existing-seed handoff and UTF-16 selection are
   integrated and pass related260 plus all5 meaningful faults; no new state and no Mode3 cause claim.
 - Repin historical UI13/mask6-positive+11-fault gates; final fast Debug AND Release, counts/lints/PBX/
-  graph, touched UI classes/full phase. Current5435 fast/6027 full runnable with cold-text harvested.
+  graph, touched UI classes/full phase. Current5439 fast/6031 full runnable with cold-text harvested.
 - Final fill sampler/count/cost gates,16 paired Release trials and genuine cold previous-writer
   library UI; untouched original256-package export and old071 product stay preserved.
 - TWO source-confirmed vector transfer defects: missing cel/group pose on Duplicate/To New Layer,
