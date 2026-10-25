@@ -45,10 +45,13 @@ fault cases are root-qualified at16 approved distinct statements/19 mapped issue
 are excluded. This does not cover all46 premise/regression macros or prove whole-scene RSS.
 Dirty-allocation maximum scans remain. Evidence: `native/finite-pass-normal430-d4d7c523-run01/`
 and `native/finite-pass-faults8-d4d7c523-run01/root-independent-qualification.json`.
-A separate clean b849 host now has the sole native lease for exactly4 Release candidate-ordering
-trials, ABBA,300/1000 live handles,1warm+16measured requests each. Temporary compiled sources are
-restored before every test-without-building. Results/performance claim pending; no iPad extrapolation.
-Harness and exact grant: `vector-mend-independent-proof/raster-ordering-paired-cost/`.
+The separate clean b849 host completed exactly4 Release candidate-ordering ABBA trials:4×1/1
+passed,300/1000 live handles,1warm+16measured requests each,128 raw samples/83,200 measured callbacks.
+Root independently re-extracted actual results and computed the same medians; all729 sources were
+restored before every test and at final cleanHEAD. The finite pass was cheaper in this isolated
+comparison; see PERFORMANCE.md for exact numbers/limits. No whole-admission, scene, RSS or iPad claim.
+Evidence: `vector-mend-independent-proof/raster-ordering-paired-cost/prepared-run02/root-independent-acceptance.json`.
+Native lease is released; last temporary benchmark product must not be used for ordinary UI/install.
 
 **Audit evidence, keep identities distinct:** first29 targets outside the original78 are qualified
 at all53 distinct approved statements (69 case-bound receipts); final media fix reaches all16 new

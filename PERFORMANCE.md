@@ -6576,3 +6576,34 @@ Unseeded vector and raster Push both moved drawn ink during the held gesture and
 original picture in one Undo; raster Redo/save/cold-reopen preserved the pushed picture. All seven
 full-screen iPad9 pictures were inspected. This qualifies those workflows and the vector test's
 existing editor-pass bound; it does not measure touch-to-display latency or an artwork-size envelope.
+
+## Finite raster candidate ordering — 2026-10-25
+
+**MEASURED, Release, owned iPad Pro13 M5 simulator39E, one serial ABBA cycle.** Common host/test
+source is b849ffc17fecffb6353d52c4412f317f947722b3. A swaps only RasterResidency.swift to
+9e79f00e0ccc10e291a14806a63d6cfbf39cbd99; B uses its finite weak-snapshot pass from d4d7c523.
+No other product/test composition differs. A temporary same-file test uses300 or1000 strongly held
+cold registrations whose callbacks decline release, plus a real128-byte working allocation filling
+the owner budget. The dirty-allocation dictionary is empty. Every request refuses, visits each
+registration once in the same oldest-first order, and leaves all owner counters unchanged. This
+isolates candidate ordering; it does not measure decoding, scene latency, concurrent admission,
+process RSS, or the physical iPad. Dirty-allocation maximum scans still exist in the actual owner.
+
+Each population has1 warm request and16 timed requests per run. Timers enclose admission, callback
+recording and the autorelease pool; transcript/counter assertions run afterward. Four actual selected
+methods passed1/1 each, zero skips/failures/expected. Eight records contain128 raw timed samples,
+83,200 measured callbacks and88,400 total callbacks. The table is the median of the two run medians
+per arm, not a threshold or a repeated-until-faster result.
+
+| Live cold registrations | Old median/request | Finite-pass median/request | New/old |
+|---|---:|---:|---:|
+|300 |30.065562 ms |0.660208 ms |0.021959 |
+|1000 |334.923917 ms |2.900656 ms |0.008661 |
+
+Root independently re-extracted all four actual xcresults, recomputed medians from the raw logs,
+and checked exact compiled arm hashes, owned device, joined build/test children, and all729 source
+byte/kind/mode entries restored before **each** test-without-building and at final cleanHEAD.
+Evidence: `~/PaintWork/s54-final-qualification/vector-mend-independent-proof/raster-ordering-paired-cost/prepared-run02/`,
+including `result.json` and `root-independent-acceptance.json`. The original interrupted first build
+ran no test and produced zero measurements; it remains preserved and excluded. No permanent
+benchmark API, telemetry, source hook, extra test method or runtime threshold was added.
