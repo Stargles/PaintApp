@@ -20,8 +20,8 @@ Current queue (all items below remain until merged):
   toolbar-clearance premise. Actual final video colour reaches#FA0505; no input defect demonstrated.
   Preserve the red evidence/oracles; run this colour method in owner landscape with whole captures.
 - Harvest independently reviewed new Blend UI7157; run whole class10 and LOOK four captures.
-- Execute root-reviewed isolated exact-source logic26 (Text7+Graph11+Blend7+text publication1), then rebuild
-  normal source. Graph3/Blend3 UI faults require exact positive source/device first. Count actual
+- Logic26 is root-qualified at0e215:26product cases/24recipes/all36 intended behavior statements.
+  Rebuild normal final source after compiled mutants. Graph3/Blend3 UI faults require exact positive source/device first. Count actual
   reached assertions only; setups/unwraps and masked later statements earn no credit.
 - Repin historical UI13/mask6-positive+11-fault gates; final fast Debug/Release, counts/lints/PBX/graph,
   touched UI classes and full phase. Current pre-Blend-UI census fast5431/full6021 runnable.
@@ -355,9 +355,11 @@ Inventory-only files are not reviewed code. New source is not called complete be
 - [ ] Newly traced Mode1 eraser handoff: preserve the already-minted gesture seed through existing
       VectorCanvas.erase/hybrid punch and universal commit. Actual pixel/undo/archive and cold artist
       controls required; do not attribute the owner's Mode3 respring to this independent issue.
-- [ ] Newly traced text style update: preserve UITextView's full UTF-16 selectedRange while rebuilding
-      attributes over identical text. Remove Character-count clamping and unconditional deselection;
-      use actual existing view/update/insertText controls, no copied formula or new selection owner.
+- [ ] Text style update: reviewed minimal direct full UTF-16 range restoration is integrated17026caf;
+      actual-view class31/2reverse faults remain unrun. Add one cold TextSession method using measured
+      one-glyph/old-word far band, public Select All, actual text-colour change and same software key.
+      Read drawn replacement while editing, before keyboard/commit can move the canvas; no hidden AX,
+      app.typeText, post-style refocus/paste or product/helper changes. Normal/reverse/LOOK required.
 - [ ] Resolve actual UI10 graph gesture delivery and text-colour safe-dismissal premise without
       weakening product oracles, then fresh whole-class runs and whole owner pictures.
 - [ ] Finish file-level/independent review, new affected zero-skip baseline, actual assertion mutants,

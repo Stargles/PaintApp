@@ -65,9 +65,13 @@ method in prelaunch landscape with actual width>height and XCUIScreen captures; 
 public drag, harmless tapAway44 and every colour/pixel/session outcome. No tool-tap substitution. Actual orientations are2landscape and8portrait. This is NOT a green
 whole-class/owner qualification. Preserve `native/owner-ui10-0e215b4f-run01/` and root red review.
 
-**Offline controls:** an isolated exact0e215 tree is preparing a named26-case successor: Text7,
-Graph11 logic, Blend7 and Text publication1. Source-level independent reviews accept these causal
-candidates; native mutations remain UNRUN. Graph3 cold faults require positive wholeGesture6 first.
+**Actual26 controls qualified:** isolated exact0e215 completed Text7+Graph11logic+Blend7+Text
+publication1. Root independently extracted all26 actual single-failed-method/device/source results
+and causally accepted all36 intended unique behavior statements,24 distinct production recipes.
+80 mapped legacy issues count;6 other issues are excluded. Native raw141 location records include
+duplicates and are a different population. Receipt: `native/logic26-0e215b4f-isolated-run01/
+root-independent-qualification.json` SHAb70b095a. The isolated tree stays clean0e215; shared compiled
+product is the final text-publication mutant, so NORMAL REBUILD is mandatory before ordinary UI/install. Graph3 cold faults require positive wholeGesture6 first.
 The reviewed112-line BlendModesAndCompositorUITests method at7157 adds the real two-patch opacity/merge
 workflow using existing helpers, no product/helper/PBX changes. Root/source independent review
 accepted it and harvested only its test path at315cf171. Whole class10 and four whole-screen captures
@@ -81,9 +85,8 @@ arithmetic. The domain proof covers actual rounded50% readout, not an assumed ex
 
 1. Resolve actual UI10 setup/delivery failures without weakening outcomes; harvest reviewed Blend UI
    and run whole class10. Preserve the named8/10red; a fresh committed source/run is required.
-2. Exact-source logic26 is root-reviewed/prepared and granted to Bake in its separate fixed tree;
-   execute meaningful faults serially, restore all729 paths,
-   independently extract actual mapped issues and causality, then rebuild normal product. Graph3
+2. Logic26 is root-qualified at its named0e215 source; preserve its clean tree and rebuild ordinary
+   final source next. Qualify selection31/2faults and eraser-seed affected classes/controls. Graph3
    and Blend3 cold faults require their own exact positive source/device basis.
 3. Repin older UI13/mask6-positive+11-fault packets to final source; LOOK positive pictures before
    faults. Preserve their two-phase build→source-restore→test-without-building contract.
@@ -113,6 +116,28 @@ text but clamps UITextView.selectedRange against Swift Character count and drops
 the saved full UTF-16 range at the same existing owner; no new selection state/helper/policy wrapper.
 Use actual view/update/UITextView consumer regressions, not a copied clamp formula. Both source and
 cold artist qualification remain open. External source-pinned audit reports retain finite witnesses.
+
+**Selection source checkpoint:** root/source independent reviews accept051bdd and root harvested
+ONLY TextOverlayView + existing TextBakeCharacterizationTests at17026caf. The saved range is assigned
+directly; no new clamp/helper/state. Existing test membership already includes both view dependencies,
+so the earlier audit's app-only PBX premise was wrong and no project edit was needed. Old-product+
+2regressions a33123fc is preserved. All29 old methods remain exact; class now31, with actual view.update,
+font80/kern3 premises, UTF-16 end caret/selectedBC and actual insertText controls. Source-only; normal31,
+2minimal reverse faults and cold selected-text replacement remain UNRUN. Current static before seed
+fix is fast5433/full6024 runnable, raw5436/6027, PBX1329; reconcile again after final harvest.
+
+**Cold selected-text scope — recorded before authoring:** ONE new method in existing
+TextSessionUITests,4→5, no product/helper/AX hook. Use the existing software-key route to measure one
+actual W/w glyph and white far band, append three letters and prove old-word ink occupies that band
+with room/unchanged effective geometry. Public Select All/Cut-presence, toolbar's verified active-text
+colour binding and same recorded software key must stay reachable; no refocusing/paste after style.
+Assert drawn red replacement near the first glyph and zero red in the far band while STILL editing,
+where blue handles do not match red. Avoid requiring premeasured coordinates to survive keyboard
+avoidance resetting after commit. Brush commit may follow the drawn assertions/capture as a separate
+state-none smoke. Actual public menu delivery/selection survival are unproved until normal+reverse
+and LOOK; arrangement failures do not count. Reverse only unconditional selected-length collapse
+must fail the drawn far-band oracle, not a menu/input/setup guard. Reuse existing pixel readers and
+whole XCUIScreen captures; no new generic driver. Source proposal: text-selection-cold-route-design-051bdd63.
 
 ## Qualification and gates
 
@@ -265,12 +290,3 @@ brush importer37 dropped for now; future audio28/video30/interpolation need owne
 raster Move undo and freeform-text minimum exemptions as deliberately carried. Older recognizer freeze
 logs predate Liquify f813346; owner saw repair message only, so no speculative UIKit repair. Auto-resign
 renewal evidence remains docs/bug-evidence/auto-resign-2026-10-22.md. Full UI suite is not run per item.
-
-**Selection source checkpoint:** root/source independent reviews accept051bdd and root harvested
-ONLY TextOverlayView + existing TextBakeCharacterizationTests at17026caf. The saved range is assigned
-directly; no new clamp/helper/state. Existing test membership already includes both view dependencies,
-so the earlier audit's app-only PBX premise was wrong and no project edit was needed. Old-product+
-2regressions a33123fc is preserved. All29 old methods remain exact; class now31, with actual view.update,
-font80/kern3 premises, UTF-16 end caret/selectedBC and actual insertText controls. Source-only; normal31,
-2minimal reverse faults and cold selected-text replacement remain UNRUN. Current static before seed
-fix is fast5433/full6024 runnable, raw5436/6027, PBX1329; reconcile again after final harvest.
