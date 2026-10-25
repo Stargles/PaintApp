@@ -53,6 +53,17 @@ failure frames; Mend All shows its no-gaps notice. Two later captures and undo/r
 Exact729 source, no retries. Actual logic71/71 at the same pin does not establish this UI behavior.
 Read the actual reference/window/source route before a bounded diagnostic; scaling is only a hypothesis.
 
+Candidate recorded before implementation: both failing workflows deliberately rasterize an empty default
+Layer1 and retain its visible default fill-reference selection. Actual saved2048×1024 Layer1 pixels
+are all alpha0. Fresh RasterSource surface snapshots start with transparencyProven=false and their
+lease-resolution path does not establish it, so the factory can mark this clear layer full-window
+unknown. Backed-image reload can establish transparency and would miss the fresh-lease premise.
+Trace the actual empty-rasterize/live-version ownership before a fix; preserve immutable-version
+identity and the existing transparency proof, no factory color heuristic or disabling the reference.
+Add a fresh in-memory flow regression if confirmed. RasterSource/RasterBuffer scope is separate from
+the nine-path scaled owner. Record before implementation and do not call source reasoning native proof.
+
+
 The old321 distance/circle path failed original400/cardinal outline probes and was removed whole.
 Current native fixes validate completed-image dimensions instead of non-bitmap CGContext0×0, and reuse
 shared derivedFootprint for finite nonstroke unknowns rather than stroke-only known bounds. A Reach

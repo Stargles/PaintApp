@@ -45,6 +45,17 @@ undo/redo were not reached. Source729 remains exact; no retries or source change
 read-only stage/window/reference diagnosis or a bounded probe; do not infer scaling is the cause.
 Evidence: `native/owner-ui4-4e2-run01/`; owner-screen-metadata.json preserves originals and orientation.
 
+**Recorded UI diagnosis candidate:** both failing workflows deliberately rasterize an empty default
+Layer1 and retain its visible default fill-reference selection. Actual saved2048×1024 Layer1 pixels
+are all alpha0. Fresh RasterSource surface snapshots start with transparencyProven=false and their
+lease-resolution path does not establish it, so the factory can mark this clear layer full-window
+unknown. Backed-image reload can establish transparency and would miss the fresh-lease premise.
+Trace the actual empty-rasterize/live-version ownership before a fix; preserve immutable-version
+identity and the existing transparency proof, no factory color heuristic or disabling the reference.
+Add a fresh in-memory flow regression if confirmed. RasterSource/RasterBuffer scope is separate from
+the nine-path scaled owner. Record before implementation and do not call source reasoning native proof.
+
+
 **Scaled route, separate and uncompiled:** author0cab26de in PaintApp-s54-mend-scale-stage is a frozen
 nine-path checkpoint, not harvested. Shared ImageWarp crop/inverse support and recursive cancellation
 have independent source review; actual sampling, cumulative request work/byte phases, fitted window
