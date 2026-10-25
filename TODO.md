@@ -88,14 +88,26 @@ support, never a claim of physical painted coverage. Runtime bounds/capacity/wor
 explicit; allocator peaks and latency remain unmeasured. The failed321 live algorithm remains unchanged
 and unshippable. At7cbe, actual7 controls ran: spatial-index1 passed; all6 support methods threw
 exceedsBudget before semantic assertions. All729 source entries remained exact; compiler succeeded
-in both targets. No behavior qualification. Root-cause collection admission review is underway; do
-not raise fixture budgets or weaken safety guards. Actual receipt:
-`native/canonical7-7cbe0f42-run01/root-independent-review.json`. Re-run the corrected seven, then
-meaningful production-source faults.
+in both targets. Host probe confirms tiny Bool/UInt8 storage rounds to16bytes; the old2×element
+capacity guard falsely refused it. Independently reviewed0644be06 now precharges each owned container's
+header/rounding and checks actual capacity bytes, retaining2×payload/work limits and fixture budgets.
+The fixed2048byte pool was not repurposed as a many-stroke cap. Only this one source path was harvested;
+seven corrected native controls are next. Actual failed receipt:
+`native/canonical7-7cbe0f42-run01/root-independent-review.json`; correction: `canonical-capacity-harvest/`.
 Before live wiring, review each reference-image resampling stage, source-keyed stencil ownership,
 physical-ink bits versus synthetic walls, whole failed-path deletion and unchanged neighbor mending.
 No live-wiring grant yet. Author pin324c0ccd and root receipt: `canonical-producer-harvest/`;
 independent review: `vector-mend-independent-proof/bound-superset-review.md`.
+
+**Latest unrelated baseline/audit:** after shared brush recipe extraction, actual normal425 at3a8ca
+again passed425/425, zero skips/failures/expected, exact729 entries and the same425 selected methods.
+Receipt: `native/shared-walk-normal425-3a8ca053-run01/root-independent-acceptance.json`. The next14
+raster controls also finished; root independently extracted actual native issues at all21 mapped
+unique statements, with exact source restoration. Causal review of every extra/setup consequence is
+pending; generic assertion-red alone is not qualification. Frozen14 map retains inherited78/52 header
+metadata; actual14 case array/grant/extraction are authoritative. Remaining35 original stream/fit/walk
+cases are prepared-only at3a8ca and independently reviewed; two safer single-source cold load/freeze
+controls remain prepared-only. Original broad load stress stays inconclusive, broad freeze unrun.
 
 **New audit finding, recorded before correction:** RasterResidency admission/mutation repeatedly
 filter/min the whole candidate dictionary after each unsuccessful fit. A finite population can cost
@@ -104,8 +116,9 @@ Root accepts one shared finite weak-registration snapshot, oldest-first ordering
 actual accounting checks before each callback/final return, and no callback/final strong release
 under the owner lock. Entries touched/re-registered since capture are skipped; new entries remain
 for the next request; live cold registrations must remain. Only unchanged expired weak entries may
-be pruned. No persistent heap/cache/queue or product telemetry. Source-only correction/tests assigned
-to a separate task tree; native/performance unrun. Trace: `raster-admission-case28-readonly/report.md`.
+be pruned. No persistent heap/cache/queue or product telemetry. Source-only correction/tests committed at a52857a6 and independently accepted for native
+qualification: one helper,5 new methods, old32 bodies exact, PBX unchanged. Not yet harvested;
+native/performance unrun. Trace: `raster-admission-case28-readonly/report.md`.
 
 **Device:** install is off immediate priority; owner authorizes future qualified installs. Review
 Releaseee36770d built/signature verified (UUIDF699A856-9C3F-34F1-AE99-E7C221BF9FF8), but profile

@@ -165,7 +165,8 @@ enum VectorMendSupport {
         let transform = pose.concatenating(captured.transform)
         let path = StrokePath(points: walk.samples.positions)
         guard let first = path.points.first else { return nil }
-        try meter.retain(path.points.count, stride: 2 * (MemoryLayout<Curve>.stride + MemoryLayout<Bool>.stride))
+        try meter.retainArray(Curve.self, count: path.points.count)
+        try meter.retainArray(Bool.self, count: path.points.count)
         // Distinct-neighbour searches can cross a whole stationary run at each knot.
         try meter.visit(path.points.count, times: path.points.count)
         try meter.visit(path.points.count, times: 8)
@@ -183,8 +184,8 @@ enum VectorMendSupport {
         let range = walk.visibleRange ?? 0...path.domainEnd
         guard range.lowerBound.isFinite, range.upperBound.isFinite,
               range.lowerBound >= 0, range.upperBound <= path.domainEnd else { return nil }
-        try meter.checkCapacity(curves.capacity, chargedCount: path.points.count)
-        try meter.checkCapacity(creases.capacity, chargedCount: path.points.count)
+        try meter.checkCapacity(curves, chargedCount: path.points.count)
+        try meter.checkCapacity(creases, chargedCount: path.points.count)
         return Trace(knots: path.points, transform: transform, curves: curves, creases: creases,
                      point: first.applying(transform), range: range)
     }
@@ -276,9 +277,26 @@ enum VectorMendSupport {
             guard count >= 0, !overflow, total <= admission.work else { throw .exceedsWork }
             work = total
         }
-        func checkCapacity(_ actual: Int, chargedCount: Int) throws(Failure) {
-            let (limit, overflow) = max(1, chargedCount).multipliedReportingOverflow(by: 2)
-            guard !overflow, actual <= limit else { throw .exceedsBudget }
+        /// A container has its own header/rounding allowance, even when it holds one byte.
+        /// Reserve before allocation; a thousand small arrays pay a thousand allowances instead
+        /// of competing for a fixed global slack pool. Payload growth remains charged separately.
+        mutating func retainArray<T>(_ type: T.Type, count: Int) throws(Failure) {
+            try retain(count, stride: 2 * MemoryLayout<T>.stride)
+            try retain(1, stride: 32 + 16)
+        }
+        func checkCapacity<T>(_ array: [T], chargedCount: Int) throws(Failure) {
+            try checkCapacity(array.capacity, stride: MemoryLayout<T>.stride,
+                              chargedCount: chargedCount, chargedStride: 2 * MemoryLayout<T>.stride)
+        }
+        /// Validate bytes, not element counts: Array<Bool>.reserveCapacity(2) can own16bytes.
+        /// The16byte addition was admitted once by retainArray (or the memo's header charge).
+        /// This bounds owned logical payload/capacity, not allocator metadata or process RSS.
+        func checkCapacity(_ capacity: Int, stride: Int, chargedCount: Int, chargedStride: Int) throws(Failure) {
+            let (actual, overflow) = capacity.multipliedReportingOverflow(by: stride)
+            let (payload, payloadOverflow) = chargedCount.multipliedReportingOverflow(by: chargedStride)
+            let (allowance, allowanceOverflow) = payload.addingReportingOverflow(16)
+            guard capacity >= 0, chargedCount >= 0, !overflow, !payloadOverflow,
+                  !allowanceOverflow, actual <= allowance else { throw .exceedsBudget }
         }
     }
 
@@ -286,8 +304,8 @@ enum VectorMendSupport {
     /// shared one-point floor, and at most one extra site per segment covers roundoff/carry.
     private static func capture(_ inputs: [Input], meter: inout Meter) throws(Failure) -> [Captured] {
         var recipes: [(VectorStrokeRenderWalk, Int)] = []
-        try meter.retain(inputs.count, stride: 2 * MemoryLayout<(VectorStrokeRenderWalk, Int)>.stride)
-        try meter.retain(inputs.count, stride: 2 * MemoryLayout<Captured>.stride)
+        try meter.retainArray((VectorStrokeRenderWalk, Int).self, count: inputs.count)
+        try meter.retainArray(Captured.self, count: inputs.count)
         recipes.reserveCapacity(inputs.count)
         var upperDabs = 0
         for input in inputs {
@@ -318,17 +336,18 @@ enum VectorMendSupport {
         for (input, recipe) in zip(inputs, recipes) {
             let (walk, capacity) = recipe
             try meter.visit(capacity, times: max(1, walk.samples.count))
+            try meter.retainArray(Dab.self, count: 0) // its payload was precharged in upperDabs
             let target = Capture(capacity: capacity)
             if capacity > 0 {
                 autoreleasepool { walk.stamp(into: target, isEraser: input.stroke.composite == .erase) }
             }
             guard target.dabs.count <= capacity else { throw .exceedsBudget }
-            try meter.checkCapacity(target.dabs.capacity, chargedCount: capacity)
+            try meter.checkCapacity(target.dabs, chargedCount: capacity)
             captured.append(Captured(walk: walk, dabs: target.dabs,
                                      blendMode: target.blendMode, transform: input.transform))
         }
-        try meter.checkCapacity(recipes.capacity, chargedCount: inputs.count)
-        try meter.checkCapacity(captured.capacity, chargedCount: inputs.count)
+        try meter.checkCapacity(recipes, chargedCount: inputs.count)
+        try meter.checkCapacity(captured, chargedCount: inputs.count)
         return captured
     }
 
@@ -346,7 +365,6 @@ enum VectorMendSupport {
         try meter.retain(1, stride: 128)
         let value = ta.correspondence(to: tb)
         memo[key] = value
-        try meter.checkCapacity(memo.capacity, chargedCount: max(2, memo.count))
         return value
     }
 
@@ -371,13 +389,15 @@ enum VectorMendSupport {
                                 unknownCoverage: [Span], width: Int, height: Int,
                                 patches: inout [Patch], contacts: inout [Contact],
                                 support: inout [UInt8], meter: inout Meter) throws(Failure) {
-        try meter.retain(captured.count, stride: 2 * MemoryLayout<Trace?>.stride)
+        try meter.retainArray(Trace?.self, count: captured.count)
         var traces: [Trace?] = []; traces.reserveCapacity(captured.count)
         for group in captured { traces.append(try trace(group, meter: &meter)) }
         let (entryCount, overflow) = addresses.count.addingReportingOverflow(unknownCoverage.count)
         guard !overflow, entryCount < Int(Int32.max), addresses.count < Int(UInt32.max) else { throw .exceedsBudget }
-        try meter.retain(entryCount, stride: 2 * (MemoryLayout<CGRect>.stride + MemoryLayout<UInt32>.stride))
-        try meter.retain(addresses.count, stride: 2 * (MemoryLayout<UInt32>.stride + MemoryLayout<Int>.stride))
+        try meter.retainArray(CGRect.self, count: entryCount)
+        try meter.retainArray(UInt32.self, count: entryCount)
+        try meter.retainArray(UInt32.self, count: addresses.count)
+        try meter.retainArray(Int.self, count: addresses.count)
         var bounds: [CGRect] = []; bounds.reserveCapacity(entryCount)
         let index = StrokeSpatialIndex()
         for patch in patches {
@@ -400,6 +420,7 @@ enum VectorMendSupport {
         var included = [UInt32](repeating: 0, count: addresses.count)
         var queue: [Int] = []; queue.reserveCapacity(addresses.count)
         var queryToken: UInt32 = 0
+        try meter.retain(1, stride: 128) // memo header + capacity rounding, before first insertion
         var memo: [GroupPair: Int8] = [:]
         var dirty = CGRect.null
         for target in addresses.indices {
@@ -548,12 +569,14 @@ enum VectorMendSupport {
             dirty = contactBounds
 
         }
-        try meter.checkCapacity(traces.capacity, chargedCount: captured.count)
-        try meter.checkCapacity(bounds.capacity, chargedCount: entryCount)
-        try meter.checkCapacity(seen.capacity, chargedCount: entryCount)
-        try meter.checkCapacity(included.capacity, chargedCount: addresses.count)
-        try meter.checkCapacity(queue.capacity, chargedCount: addresses.count)
-        try meter.checkCapacity(contacts.capacity, chargedCount: contacts.count)
+        try meter.checkCapacity(traces, chargedCount: captured.count)
+        try meter.checkCapacity(bounds, chargedCount: entryCount)
+        try meter.checkCapacity(seen, chargedCount: entryCount)
+        try meter.checkCapacity(included, chargedCount: addresses.count)
+        try meter.checkCapacity(queue, chargedCount: addresses.count)
+        try meter.checkCapacity(contacts, chargedCount: contacts.count)
+        try meter.checkCapacity(memo.capacity, stride: MemoryLayout<(GroupPair, Int8)>.stride,
+                                chargedCount: memo.count, chargedStride: 128)
     }
 
     /// Canonical integral bounds are potential-support supersets, not a second alpha renderer.
@@ -577,10 +600,13 @@ enum VectorMendSupport {
                 && Int(span.start) / width == (Int(end) - 1) / width
         }) else { throw .invalidWindow }
         var meter = Meter(admission: admission)
-        // Array/hash headers and small-allocation rounding, separate from their checked payload
-        // capacities below. This is admission of owned records, not a process-RSS promise.
-        try meter.retain(1, stride: 2048)
-        try meter.retain(count, stride: 2 * MemoryLayout<UInt8>.stride)
+        try meter.retainArray(UInt8.self, count: count)
+        // These growing containers pay one header/rounding allowance now; every later append
+        // retains its existing doubled payload charge before growth.
+        try meter.retainArray(Patch.self, count: 0)
+        try meter.retainArray(Span.self, count: 0)
+        try meter.retainArray(Address.self, count: 0)
+        try meter.retainArray(Contact.self, count: 0)
         let captured = try capture(inputs, meter: &meter)
         let window = CGRect(x: 0, y: 0, width: width, height: height)
         var support = [UInt8](repeating: 0, count: count)
@@ -612,10 +638,10 @@ enum VectorMendSupport {
         try certify(captured, addresses: addresses, spans: spans, unknownCoverage: unknownCoverage,
                     width: width, height: height, patches: &patches, contacts: &contacts,
                     support: &support, meter: &meter)
-        try meter.checkCapacity(support.capacity, chargedCount: count)
-        try meter.checkCapacity(patches.capacity, chargedCount: patches.count)
-        try meter.checkCapacity(spans.capacity, chargedCount: spans.count)
-        try meter.checkCapacity(addresses.capacity, chargedCount: addresses.count)
+        try meter.checkCapacity(support, chargedCount: count)
+        try meter.checkCapacity(patches, chargedCount: patches.count)
+        try meter.checkCapacity(spans, chargedCount: spans.count)
+        try meter.checkCapacity(addresses, chargedCount: addresses.count)
         return Packet(width: width, height: height, patches: patches, contacts: contacts,
                       canonicalCoverage: spans)
     }
