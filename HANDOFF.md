@@ -156,7 +156,9 @@ before earlier-tool settlement; later refusal promises no transfer mutation afte
 No new retained state/renderer/schema or whole-scene geometry scan. All22 old methods exact;5new
 methods and9 affected whole classes270 require normal qualification. Candidate13 controls/30 IDs
 are offline only. Own scopesb458/a793/78b5 precede code; rootb537 scope recorded both causes.
-Cold single PoseBake method1→2 is authorized from proposalaf3fd23e, not yet harvested/executed.
+Cold PoseBake8fc0e766 harvested after independent118bcb04/root review: ONE new method1→2,
+old method/all helpers exact, measured Select grid, hidden-source Duplicate and actual ToNew
+Undo/Redo picture comparisons,3 whole captures. Native public delivery/owner layout remain UNRUN.
 
 **Next gates, in order:**
 
@@ -172,7 +174,7 @@ Cold single PoseBake method1→2 is authorized from proposalaf3fd23e, not yet ha
 3. Repin historical UI13/mask6-positive+11-fault packets to final source; LOOK positive pictures before
    faults. Preserve two-phase build→all-source-restore→test-without-building contract.
 4. Final fast Debug AND Release using CLAUDE verbatim command, actual/static method reconciliation,
-   lints/PBX/graph, all touched UI classes and full phase. Current census5444 fast/6036 full
+   lints/PBX/graph, all touched UI classes and full phase. Current census5444 fast/6037 full
    runnable,729 source entries/PBX1329; new cold-text method is included.
 5. Fill16 paired Release ABBA, sampler/source/fence/cancel/budget counts and genuine cold256-package
    previous-writer library UI. Preserve original export and old071 benchmark product.

@@ -251,4 +251,152 @@ final class PoseBakeUITests: PaintUITestCase {
         assertSameDrawing(try settledInk(app, canvas), animatedInk, "the middle frame animates again")
         attachScreenshot(app, "4-after-one-undo")
     }
+
+    /// Transfer the drawing at a middle pose, rather than its rest geometry. The copy is read with
+    /// the original hidden; To New Layer is read through both history directions at the same frame.
+    func testPosedSelectionTransfersStayWhereTheyAreDrawnThroughDuplicateNewLayerUndoAndRedo() throws {
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let window = app.windows.firstMatch
+        XCTAssertGreaterThan(window.frame.width, window.frame.height, "PREMISE: the owner route is landscape")
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        // Fix the sampling basis with the Select card already up, before choosing the drawing's row.
+        app.buttons["toolbar.selectButton"].tap()
+        let rectangle = app.buttons["selectPanel.mode.rectangle"]
+        XCTAssertTrue(rectangle.waitForExistence(timeout: 5))
+        rectangle.tap()
+        let touching = app.segmentedControls["selectPanel.membershipPicker"].buttons["Touching"]
+        XCTAssertTrue(touching.waitForExistence(timeout: 5))
+        touching.tap()
+        let paper = visiblePaperRect(app, in: canvas)
+        XCTAssertGreaterThan(paper.width, 0.08, "PREMISE: the sample grid has visible paper")
+        XCTAssertGreaterThan(paper.height, 0.08)
+        let left = paper.minX + 0.25 * paper.width
+        let right = paper.minX + 0.60 * paper.width
+        let moveX = paper.minX + 0.42 * paper.width
+        let restY = paper.minY + 0.28 * paper.height
+        let endY = paper.minY + 0.62 * paper.height
+        for point in [CGPoint(x: left, y: restY), CGPoint(x: right, y: restY),
+                      CGPoint(x: moveX, y: restY), CGPoint(x: moveX, y: endY)] {
+            XCTAssertTrue(paper.contains(point), "PREMISE: every drawing/Move point is on visible paper")
+            XCTAssertTrue(window.frame.contains(CGPoint(x: canvas.frame.minX + point.x * canvas.frame.width,
+                                                       y: canvas.frame.minY + point.y * canvas.frame.height)))
+            assertAboveTheDock(app, canvas, dy: Double(point.y), "The posed-transfer gesture")
+            assertBelowTheToolbar(app, canvas, dy: Double(point.y), "The posed-transfer gesture")
+        }
+        app.buttons["toolbar.selectButton"].tap()
+        setBrushSize(app, normalized: 0.7)
+        dragOnCanvas(app, from: CGVector(dx: left, dy: restY), to: CGVector(dx: right, dy: restY))
+        markKeyframe(app, onCelAt: 0.04)
+        scrub(app, toCelFraction: 0.95)
+        app.buttons["toolbar.moveButton"].tap()
+        let done = app.buttons["moveBar.doneButton"]
+        XCTAssertTrue(done.waitForExistence(timeout: 5))
+        for y in [restY, endY] {
+            assertAboveTheDock(app, canvas, dy: Double(y), "The actual Move path")
+            assertBelowTheToolbar(app, canvas, dy: Double(y), "The actual Move path")
+        }
+        dragOnCanvas(app, from: CGVector(dx: moveX, dy: restY), to: CGVector(dx: moveX, dy: endY))
+        done.tap()
+        XCTAssertTrue(done.waitForNonExistence(timeout: 5))
+        markKeyframe(app, onCelAt: 0.95)
+        let two = try XCTUnwrap(markers(app))
+        XCTAssertEqual(two.split(separator: "|").compactMap { Int($0) }.count, 2,
+                       "PREMISE: two actual timeline keys make the motion")
+
+        scrub(app, toCelFraction: 0.04)
+        if !rectangle.exists { app.buttons["toolbar.selectButton"].tap() }
+        XCTAssertTrue(rectangle.waitForExistence(timeout: 5))
+        XCTAssertEqual(visiblePaperRect(app, in: canvas), paper, "PREMISE: the same Select-visible grid")
+        let resting = try settledInk(app, canvas)
+        scrub(app, toCelFraction: 0.54)
+        let shown = try XCTUnwrap(readFrameLabel(app)?.current)
+        XCTAssertTrue(shown > 2 && shown < 12, "PREMISE: a middle frame, rather than either key")
+        let animated = try settledInk(app, canvas)
+        assertDifferentDrawing(animated, resting, "PREMISE: the middle pose is visibly away from rest")
+        let extent = try XCTUnwrap(inkExtent(animated), "PREMISE: actual middle-frame ink defines the loop")
+        let x0 = paper.minX + 0.04, x1 = paper.maxX - 0.04
+        let y0 = paper.minY + 0.04, y1 = paper.maxY - 0.04
+        let loopMin = CGVector(dx: x0 + (x1 - x0) * CGFloat(extent.cols.lowerBound) / 59 - 0.03,
+                               dy: y0 + (y1 - y0) * CGFloat(extent.rows.lowerBound) / 299 - 0.03)
+        let loopMax = CGVector(dx: x0 + (x1 - x0) * CGFloat(extent.cols.upperBound) / 59 + 0.03,
+                               dy: y0 + (y1 - y0) * CGFloat(extent.rows.upperBound) / 299 + 0.03)
+        for point in [CGPoint(x: loopMin.dx, y: loopMin.dy), CGPoint(x: loopMax.dx, y: loopMin.dy),
+                      CGPoint(x: loopMax.dx, y: loopMax.dy), CGPoint(x: loopMin.dx, y: loopMax.dy)] {
+            XCTAssertTrue(paper.contains(point), "PREMISE: the padded actual-ink loop stays in visible paper")
+            XCTAssertTrue(window.frame.contains(CGPoint(x: canvas.frame.minX + point.x * canvas.frame.width,
+                                                       y: canvas.frame.minY + point.y * canvas.frame.height)))
+            assertAboveTheDock(app, canvas, dy: Double(point.y), "The lasso corner")
+            assertBelowTheToolbar(app, canvas, dy: Double(point.y), "The lasso corner")
+        }
+
+        let undo = app.buttons["sideToolbar.undoButton"]
+        let redo = app.buttons["sideToolbar.redoButton"]
+        for copying in [true, false] {
+            XCTAssertTrue(rectangle.exists)
+            XCTAssertEqual(visiblePaperRect(app, in: canvas), paper, "PREMISE: loop and grid share their measured basis")
+            rectangle.tap()
+            touching.tap()
+            dragOnCanvas(app, from: loopMin, to: loopMax)
+            let action = app.buttons[copying ? "selectPanel.duplicateButton" : "selectPanel.moveToNewLayerButton"]
+            XCTAssertTrue(action.isEnabled, "The actual posed loop enables the transfer")
+            action.tap()
+            XCTAssertTrue(done.waitForExistence(timeout: 5))
+            done.tap()
+            XCTAssertTrue(done.waitForNonExistence(timeout: 5))
+            XCTAssertEqual(readFrameLabel(app)?.current, shown, "A transfer does not scrub the frame")
+            openLayerPanel(app)
+            XCTAssertEqual(readVectorMarker(app, layerIndex: 0)?.strokes, copying ? 1 : 0,
+                           "Only To New Layer removes the source stroke")
+            XCTAssertEqual(readVectorMarker(app, layerIndex: 1)?.strokes, 1,
+                           "The fresh layer owns the transferred stroke")
+            if copying {
+                let sourceEye = app.buttons["layerPanel.row.0.visibility"]
+                XCTAssertTrue(sourceEye.exists)
+                sourceEye.tap()
+            }
+            closeLayerRail(app)
+            if !rectangle.exists { app.buttons["toolbar.selectButton"].tap() }
+            XCTAssertTrue(rectangle.waitForExistence(timeout: 5))
+            XCTAssertEqual(visiblePaperRect(app, in: canvas), paper, "PREMISE: no rail/card changes the pixel basis")
+            let transferred = try settledInk(app, canvas)
+            assertSameDrawing(transferred, animated, "The transferred layer alone keeps the current posed picture")
+            assertDifferentDrawing(transferred, resting, "The transfer did not revert to the rest drawing")
+            if copying { attachScreenshot(XCUIScreen.main, "posed-transfer-duplicate-only") }
+            else { attachScreenshot(XCUIScreen.main, "posed-transfer-new-layer") }
+
+            XCTAssertTrue(undo.isEnabled)
+            if copying { undo.tap() } // the single source-visibility step precedes the transfer
+            undo.tap()
+            XCTAssertEqual(readFrameLabel(app)?.current, shown, "Undo keeps the current middle frame")
+            openLayerPanel(app)
+            XCTAssertFalse(app.staticTexts["layerPanel.row.1"].exists, "One transfer Undo removes the fresh layer")
+            XCTAssertEqual(readVectorMarker(app, layerIndex: 0)?.strokes, 1, "Undo restores the original source")
+            closeLayerRail(app)
+            if !rectangle.exists { app.buttons["toolbar.selectButton"].tap() }
+            XCTAssertTrue(rectangle.waitForExistence(timeout: 5))
+            XCTAssertEqual(visiblePaperRect(app, in: canvas), paper, "PREMISE: Undo's drawing uses the same grid")
+            assertSameDrawing(try settledInk(app, canvas), animated, "Undo restores the source's actual posed drawing")
+
+            if !copying {
+                XCTAssertTrue(redo.isEnabled)
+                redo.tap()
+                XCTAssertEqual(readFrameLabel(app)?.current, shown, "Redo keeps the current middle frame")
+                openLayerPanel(app)
+                XCTAssertEqual(readVectorMarker(app, layerIndex: 0)?.strokes, 0)
+                XCTAssertEqual(readVectorMarker(app, layerIndex: 1)?.strokes, 1)
+                closeLayerRail(app)
+                if !rectangle.exists { app.buttons["toolbar.selectButton"].tap() }
+                XCTAssertTrue(rectangle.waitForExistence(timeout: 5))
+                XCTAssertEqual(visiblePaperRect(app, in: canvas), paper, "PREMISE: Redo's drawing uses the same grid")
+                let redone = try settledInk(app, canvas)
+                assertSameDrawing(redone, animated, "Redo restores the transferred actual posed drawing")
+                assertDifferentDrawing(redone, resting, "Redo cannot resurrect a rest-space copy")
+                attachScreenshot(XCUIScreen.main, "posed-transfer-redone")
+            }
+        }
+    }
 }

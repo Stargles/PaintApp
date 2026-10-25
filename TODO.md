@@ -26,7 +26,7 @@ Current queue (items remain until merged):
 - Cold stored-vector eraser Splatter/Undo/Redo. Existing-seed handoff and UTF-16 selection are
   integrated and pass related260 plus all5 meaningful faults; no new state and no Mode3 cause claim.
 - Repin historical UI13/mask6-positive+11-fault gates; final fast Debug AND Release, counts/lints/PBX/
-  graph, touched UI classes/full phase. Current5444 fast/6036 full runnable with cold-text harvested.
+  graph, touched UI classes/full phase. Current5444 fast/6037 full runnable with cold-text harvested.
 - Final fill sampler/count/cost gates,16 paired Release trials and genuine cold previous-writer
   library UI; untouched original256-package export and old071 product stay preserved.
 - TWO source-confirmed vector transfer defects: missing cel/group pose on Duplicate/To New Layer,
