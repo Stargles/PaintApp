@@ -245,7 +245,8 @@ do not infer a covered edge. A short ambiguous patch may remain at the join whil
 is mended. The original lasso fence, artwork boundary and unresolved window rim constrain this new
 same-fill behavior. Only the existing neighboring-fill corridor may extend outside the lasso fence.
 
-The same-fill ownership proof uses unit eight-neighbor distance **through original reference ink**
+**Current candidate is under qualification and fails existing circular-outline protection.**
+The proposed same-fill ownership proof uses unit eight-neighbor distance **through original reference ink**
 from current unfilled open paper, fences, artwork edges, unknown window rims and neighboring paint.
 Owned open paper blocks that travel. A genuine source-to-source crossing must fit Mend Reach after
 Edge Overlap, and its full original ink width must be smaller than that danger distance. Keep all

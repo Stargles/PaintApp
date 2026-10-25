@@ -17,6 +17,16 @@ before implementation on tmp/s54-response-curve; no native/compiler/device run b
 
 # Known Issues
 
+## Interior mending repaints circular outline tips — 2026-10-25
+
+Actualwhole20 at32185179 passed18/failed2: original400mask cardinal4 and production96circle
+cardinal4 grow. Source728exact/clean, freshMetalcompile/link, root independentlyrereadactualissues.
+Rawthrough-ink dangerD2/4 exceeds a true onepixel tangent crossingW1, soV1'slocal safetyguard is
+insufficient. Caps/square/notch/diagonalcontrols reportnoissues; thisdoesnotqualifythefeature.
+Preserve actualcircle/400/448oracles; no shapeexception ormagicmargin. Sharedruleassessment continues
+with freshindependentreviewer; typedunsafe/BODY/diskunion counterexamples recordedbeforefurthercode.
+Evidence: s54-final-qualification/native/geodesic-logic20-32185179-run01/root-independent-acceptance.json.
+
 ## FillMend ON cold setup taps a moving opacity control — 2026-10-24
 
 Actual40f77 UI47 closed45pass/2fail/0skip,728exact. ON failed before overlap/ink at its options

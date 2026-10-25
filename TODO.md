@@ -1,161 +1,78 @@
 # TODO
 
-## Current source and next actions — 2026-10-24
+## Current source and next actions — 2026-10-25
 
-Next controlled application —2026-10-25: actual02ab86bdGPU2methods FAILED as predicted, with exactly
-THREElegacyissues:646square48/448atReach40;681notch255instead0;748distanthole255instead0. Wide40
-and longdiagonalno-hole255/bare/removalpremises reportednoissues. Root independently reread actual
-xcresult/selectors/device/source locations and728exactclean. Nativelease RELEASED. Evidence:
-native/ownership-regressions2-02ab86bd-run01/root-independent-acceptance.json. Summarylists2method
-representatives; actuallegacycontainsall3issues. No normal-green or currentfeaturecompletionclaim.
+Main/origin remain afd2030c; no merge/push/iPad install. Active treePaintApp-s54-mend-free-caps,
+product32185179b35f9b7b86785c7a3e6a8bce8f32ce52 plus later records. Root owns integration/docs/Git and
+one Mac native lease; delegate implementation and independent review. Continue actionable work,
+not recommendation-only pauses. Native lease RELEASED after whole20 closure; source728 exact/clean.
 
-RootAND independentRaster review now ACCEPT frozenproductpatch9d9bc7356f5482cf290e12ca98981242d773b5174fca7353ef0807e94d6d4e1a
-for APPLICATION ONLY toFill.metal/MetalFillEngine.swift. Fullfrozenmanifest60f1d207 and exacttemp
-application/oldseam/near/far/supercover/Reach/scratch/danger/byteoverflow/sentinel/max74 bounds verified.
-Sharedlocalcrossing+inkdangerdistance REPLACES ALL-nearest-geometric acceptance; all tiednearest
-OWNERSHIP vetoes stay, fourexistingaxes discover genuinecapcrossings through the same rayproof.
-No retainedmap/cache/flag/allocation/newCPUscan; oldneighborcorridor byte-identical andfirst. Current
-FillMendLogicTests0bc2 andallother source remainunchanged. Applyexactcopies, commitbeforefaults,
-thenwhole20logicGPU, whole4coldFillUI andinspectedownerlandscapepictures; thenmeaningfulassertion
-faults/restorednormal andperformance. Acceptingsource is NOT native/performance qualification.
-Evidence: geodesic-proposal-fbb/root-preliminary-source-acceptance.json and
-mend-free-caps-b865-readonly/raster-geodesic-v1-independent-review.md. Priorstaged/medial external
-proposals remainrejected, no compatibilitypath orcap-shapeclassifier is introduced.
+**Current fill correction is NOT SAFE/QUALIFIED.** Whole20FillMend logic on owned9:18passed/2failed,
+0skip/expected, native65/wrapper1. Root independently checked actual20selectors, counts/device,
+alllegacyissues and728freeze. FreshFill.metal compile+MetalLink in app/testtargets, noMetalerrors.
+Only2actualissues:613 original400boundary grew circularcardinals(52,14),(46,20),(58,20),(52,26);
+843 productionOverlap0Reach10/9 changed originalcircle pixels(70,25),(61,34),(79,34),(70,43).
+Caps12/completepicture, square448, notch, longdiagonal/nearframe positives reportedNOotherissues.
+ColdFillUI4/performance/mutants have NOT run for321. Evidence: s54-final-qualification/native/
+geodesic-logic20-32185179-run01/root-independent-acceptance.json. No retries/physical actions.
 
-Latest owner steering —2026-10-25: “immediate ipad instalation is off priority now. Install new
-ipad versions whenever you wish.” Continue substantive work and useful running agents; quick status
-provided. Do not interpret this as an explicit waiver of the5day signing rule. No fresh saved-scene
-readiness or artwork confirmation has been obtained; do not reuse old readiness answers.
+Rootcause of V1 failure: a circular outertip has genuine tangent crossingW1 but unownedholeD2/4;
+D>W alone allows it. Keep old400/448outside/hole/attached/fullcap behavior oracles. Do not add a
+circle exception/magicradius/head classifier. Twofinite alternatives are also insufficient:
+ALLnearest explicit-unsafe opposite veto can make Reach nonmonotonic; originalALLnearest+geodesic
+BODY seed itself misclassifies a donut's visible onepixelstem join. Unsafeinscribed-disk union
+catches these but misses a40square/10thick intentionalhole corner: minimumunsafe power+40,
+actualrawaxisW40. Geodesic FROM expanded diskunion can overprotect legitimateattachedbodies;
+assessbeforecoding. Fresh independentfill_boundary_design agent is reviewing coherentobservable
+semantics/architecture. No furtherproductpatch granted. Externalreports live under
+mend-free-caps-b865-readonly/{post-v1-body-support-assessment.md,disk-union-feasibility-321,
+unsafe-disk-union-finite-assessment.md}. Do not treat earlier source-review acceptance as nativeproof.
 
-Latest reviewRelease at clean ee36770d built successfully with real Swift-O; full signature verified
-independently by root. ExecutableUUIDF699A856-9C3F-34F1-AE99-E7C221BF9FF8. Apple reused profile expiry
-2026-10-30T00:18:54Z, only4.75days at build, below the mandated5days; NOinstall/export/launch occurred.
-Evidence: s54-final-qualification/ipad-review-ee36770d/root-independent-build-acceptance.json.
-Ordinaryoldworkflows5 then passed5/5,0failed/skipped/expected on owned9;728source exact/clean, root
-independently reread actualselector/count/device/freeze. Agent LOOKed6portraitPNG; root LOOKed4:
-playback wholeportrait, pan/rotation pair, stroke crop. Move+graph passed actualbehavior assertions
-but retained NOmedia. No ownerlandscape claim. Nativelease RELEASED. Evidence:
-native/preinstall-oldworkflows5-ee36770d-run01/root-independent-acceptance.json.
+CurrentV1 source replaced ALLnearest GEOMETRIC acceptance with anygenuinecrossing plus current
+through-ink dangerdistance. All tiednearest OWNERSHIP/domain guards remain; four existingaxes use
+ONEnear/farrayproof, strictnear/intermediate/far guards and Reach-afterOverlap arithmetic unchanged.
+Oldneighborseam is byte-identical/first. TwoNbyte planes reuse existing8Nworkspace; no allocation,
+retainedcache/key, CPUscan or intermediate readback. Bceil(sqrt2*ceilproofSpan))max74 coversdigital
+rawlength; sentinel is a bound, notinfinity. Performanceunmeasured. Frozenproposal patch9d9bc735 and
+independentRaster/root reviews preserved; it compiled but is now a FAILED candidate, notfinaldesign.
 
-Shared mend correction direction is now finite-reviewed: distance THROUGH original ink to current
-unownedopen/domain/rim/fence/neighbor danger, compared to EACH genuine local crossing's full rawwidth;
-Reach still counts only its uncovered gap afterOverlap. A global52px veto was rejected because it
-breaks thin strokes near a window rim/attachedjoin. The owner gave no global/body-brush-width rule;
-a valid short cap chord is not a semantic defect. Two agents agreed on localownership+crossing
-invariant; no universal shape/performance claim. Bake prepares an EXTERNAL ONLY twofile proposal
-(Fill.metal/MetalFillEngine.swift). Reuse2Nbyte planes in existing8Nworkspace plusfirstNoutput;
-no newallocation/cache/CPUfullimagepertick. Danger siteD0, adjacentinkD1, ownedopenbarrier255;
-propagate onlyoriginalink with immutablepingpong. BandB=ceil(sqrt(2)*ceil(proofSpan)), max74, covers
-existing major-step digitalwalk's rawdiagonalwidth. Unknown/saturateddistance is a bound, notinfinity.
-Keep strictnear/far endpoint/supercover/domainchecks and old neighboring-fillcorridor. Replace
-ALLnearest acceptance with genuinecrossing+distance; reuse nearestfeature directions and existing
-fouraxes for captransversecrossings. No cap-shape/body-width classifier. Exactcode/assertions require
-independent review and root scope before productapply, thenGPU/UI/fault/performance proof. No product
-edit granted yet; all prior externalstaged/medialdesigns remain NOTREADY.
+**Actual predecessor counterexamples:**02ab86bd GPU2methods failed exactly3legacyassertions:
+646square48/448atReach40,681notch255vs0,748distantdiaghole255vs0. Wide40/no-hole diagonalpositives
+andpremises reportednoissues; rootactualsource/728device verification accepted. Test-only59lines
+in2existingmethods preserved20names andoldlines. The distant56step negative was an implementation-
+specific geodesicsupport oracle, not an owneroriginal-contour proof; if the algorithm is replaced,
+retire/reframe that premise honestly rather than force unrelated geometry to mimic it. True400/448
+contour/cap/attached/nearframe oracles remain binding. Evidence: ownership-regressions2-02ab86bd-run01.
 
-Before source edits: root independently accepts exact59line TEST-ONLY proposal in
-ownership-fixtures-ab2724df-proposal, patchSHAf91b80ccda6555c6afbad276ecf934116d9446a165de31b50f61d51dbadf5a2f.
-Only FillMendLogicTests.swift may change:7statements in TWOexistingmethods, all20names/priorlines
-preserved and exacttemp-apply verified. Add true40wide internalstrip separated fromframe by4owned
-papercolumns, explicitunownednotch control, and matched longdiagonal no-hole255/hole0 controls.
-The diagonal rawwidth62.154exceeds52 while its46majorsteps fit proofSpan52; uncoveredgap23.213 fits
-Reach40, and unownedhole56inkstepsaway mustveto. No-hole positive also prevents overconservative52
-truncation; negative alone cannot distinguish correctfailclosed52. Commit test before one actualGPU
-2method RED reproduction; inspect everyactuallegacyissue plus allpositivepremises/728source freeze.
-No newhelper/file/testmethod/framework. Productproposal frozenexternalpatch9d9bc7356f5482cf290e12ca98981242d773b5174fca7353ef0807e94d6d4e1a
-changes onlyFill.metal/MetalFillEngine.swift; independentcode review pending, NOTgranted forapply.
+**Earlier qualified slices, not final321 proof:**8bb UI47passed; corrected widepaper fixture5cd
+FillUI4passed and ownerlandscape pictures LOOKed; stronger cap consumers then failed atcdf6pixels,
+fbb4pixels each(12total on3picturedcaps). Latercap/redo assertions wereunreached duefail-fast.
+Smallfbb endpoint correction3normal+6meaningfulfaults(4product/2fixture,12actualissues)+postnormal3
+qualify narrowly. Rootaccepted actualsource/locations/restoration. Cap12/Reach6 regression wasRED
+before321 andnowpassesinwhole20. Fullcompletionstillblockedbytruecirclecontours. Evidencefolders
+under s54-final-qualification/native/{endpoint-*,mend-cap-consumers-*,fill-paper-fixture-*}.
 
-Main/origin remain afd2030c; no merge, push or iPad install. Consolidated product code is8bb68907
-in final-integration/final-check. The active mend-free-caps tip is0ca9d75951850e5c89e6c9865bbba87fa6ccccfb
-(productfbb0e182; later commit adds test-only coverage). The narrow endpoint correction is qualified;
-free caps and high-Reach square-hole protection remain open.
-All728 source entries were exact/clean at the last native closure. Root owns docs/Git and the single Mac native lease;
-agents own bounded implementation, native verification and independent review. Native lease RELEASED.
+**Ownersteering:** immediateiPad install is offpriority afterlimitreset; ownerpermits futureinstalls
+atagentdiscretion. LatestreviewReleaseee36770d built optimizedSwift-O/signature rootverified,
+UUIDF699A856-9C3F-34F1-AE99-E7C221BF9FF8; portalreusedexpiry2026-10-30T00:18:54Z(<5days), soNOinstall.
+No explicit shortprofileexception assumed. Ordinaryoldworkflows5 then5/5passed0skip atsamepin:
+playback/grey-pan/stroke/Move/graph. AgentLOOK6portraitPNG, rootLOOK4; Move/graphhaveNOmedia,
+noownerlandscapeclaim. Preserve current artwork; fresh saved-scene/export/readiness whenactuallyready.
+Signedbuild is alreadybehind currentfailed321; do notinstallthatfailedcandidate. No scenecleanup.
 
-Actual closed evidence, with limits:
-- Whole8bb UI47:47passed/0failed/skipped/expected; root verified identities/source/device and LOOKed
-  owner-landscape pictures. This did not assert the remaining tiny free-cap holes.
-- Paper helper correction5cd447c1: existing helpers now use the actual2048x1024 aspect. Whole fillUI
-  class4passed/0skip; all728source exact/clean. Raster LOOKed9pictures; root independently accepted
-  results and LOOKed3. All4red fill sides are bounded inside paper;3six-pixel cap holes remain.
-- Logic regression5ae8073a: one actual GPU method failed only at its new12cap-pixel assertion;
-  every cap was transparent, body/prior40px/off-on/cache checks reported no failures.
-- Stronger two actual cold consumers atcdf:2actual/2failed/0skip, native65/wrapper1. Exact intended
-  new-fill line273 and batch line318 each found6non-red detached-left cap pixels instead of0.
-  Original preceding body/outside/setup/OFF assertions and batch undo/redo reported no failure.
-  Fail-fast leaves later2caps and redo cap assertions UNREACHED, not9qualified failures. Raster
-  LOOKed6owner-landscape pictures; root verified actual source issues/freeze/device and LOOKed2.
-  Ordinary gate remains failed. Evidence: s54-final-qualification/native/
-  mend-cap-consumers-red-cdf9c258-run01/root-independent-red-acceptance.json.
-- Earlier40f77 normal422/422 is green. It is not current-successor qualification. The9bd control
-  attempt failed compilation0tests; explicit typed do fixed that, andb8652actual cold tests passed.
+**Parallel usefulgate next:** run the alreadyreviewed18unrelated logicclasses(422methods) on this
+committedsuccessor while designwork stays external/read-only. They cover backup/brush/palette/metadata/
+raster/stream/path modules, notFillMend. Repincommand explicitly, verifyexact422/0skip and728freeze.
+This is a focusedmodule baseline, not finalwhole-product qualification. Do notrun107faults until
+source/artifact plan is explicitlyprepared/granted; unchangedmodules cancarry namedpin evidence.
 
-Remaining fill defect: both new fill and Mend All leave internal free-cap holes. Preserve the true
-outside edge, holes, uncertain joins, every equal-nearest witness and all rim/artwork/fence/neighbor
-checks. No hidden stroke-history inference, generic tiny-hole closer, persistent setting/cache,
-parallel fill pipeline or full-image CPU analysis per tick. Owner wants attached stems too and
-real-time feedback. Existing body-only green is not completion.
-
-Two distinct causes under review: actual6x24/Reach6 GPU cap exhaustion is proved; finite integer
-capsule tracing also finds a far OPEN endpoint rejected because its diagonal side cell is itself
-source-owned OPEN. That second trace is offline Python geometry, NOT actual GPU/AA screenshot
-classification. Source proposal is the SMALL shared endpoint correction first; larger bounded-head
-staging is not granted. Its old expensive repeated proof was rejected; existing8N temporary workspace
-can support staged reuse if ultimately justified. An alleged distant-ring contradiction was withdrawn:
-calling an identical remote attached stem an original outline assumed unavailable stroke history.
-
-The small endpoint correction was independently reviewed and applied exactly atfbb from
-mend-free-caps-b865-readonly/endpoint-only-proposed.patch (SHAaace38b43f9e8009b6b08d54e635030191f76b726c41159f6e05c07419b0ecb6).
-It extends ONE existing side helper only at an actual far OPEN centerline endpoint; intermediate/
-near checks stay ink-only, actual source-side ownership stays mandatory and Reach/ties unchanged.
-Append actualRGBA horizontal/vertical/default-overlap positives and independent missing-source-side
-negatives in the existing cross-section logic method; no new test method/file/framework/dispatch.
-The old helper was replaced whole, with no compatibility path. Atfbb,3positive methods passed:
-actual H/V roundedRGBA including defaultOverlap2, independent missing-source sides, original400
-protected pixels and productionOverlap/Reach/rim checks. Root independently accepted all3.
-Six reviewed faults then failed meaningfully:4product faults+2fixture controls,12actual source-located
-legacy issues, all6compiled hashes/locations and EACH728-source restoration independently verified.
-Post-fault normal3rebuilt/passed0skip; the normal-binary prerequisite is clear. Evidence under
-s54-final-qualification/native/{endpoint-normal3,endpoint-faults6,endpoint-restored-normal3}-fbb0e182-run01.
-Actual2coldUI consumers atfbb STILLfail at lines273/318, now4non-red pixels instead of6each. All3
-pictured caps retain4whitepixels (12total); later cap/redo assertions remain unreached. Root LOOKed
-both whole pictures and verified actual2failures/728/device. The long rectangular12cap assertion
-remains intentionally RED. All this is a qualified narrow correction, not feature completion.
-Staged-head V1 is frozen external NOT READY:45degree/default-overlap cap holes remain predicted.
-No staged product edit is granted. Prefer one coherent shared proof over additional case exemptions.
-
-Actual square-hole GPU reproduction is now closed at0ca9d759 (productfbb). The existing protected-
-contour method has31 added test-only lines, preserving all prior assertions and20methods. The96square
-fixture has a448pixel ring around an intentional empty rectangle. One actual method failed ONLY at
-line646: Reach40 grows48of448ring pixels; Reach6/12 and all prior400contour/ink-only controls reported
-no other failures. Native65/wrapper1,0skip/expected, correct owner9; all728source bytes/kind/modes match
-before/after/current and HEAD is clean. Root independently reread the actual xcresult and source.
-Only first8sorted coordinates are printed; do not invent the complete48. Original8bb versusfbb
-agreement remains source-only, not native causal proof. Evidence:
-s54-final-qualification/native/square-ring-red-0ca9d759-run01/root-independent-acceptance.json.
-
-The direct point-normal rule is insufficient at visible hole corners. A common radius-ascent rule
-is under finite independent assessment ONLY, with no product grant: convenient selected paths can
-avoid an unowned boundary, while maximal-center-only rules can miss square free caps. Retain ALL
-nearest/contact/domain vetoes. Staged-head V1 remains external NOT READY; no exception stack, new
-full-image CPU work per tick or extra retained map/cache is accepted. Check existing reference stroke
-metadata as an architectural seam; saved fills have no historical reference/seed provenance. Next:
-settle a coherent bounded shared proof for BOTH observed defects, then implement/test before repinning
-final gates. Native lease RELEASED; no simulator or device operation is active.
-Commit before meaningful faults; compiler/timeout/crash/skip cannot qualify. No UI completion claim.
-
-Final gates remain: successor normal422 and wholeUI47; meaningful new107logic/99recipes/66selectors
-(247mapped statements), UI13/7selectors/33statements and mask6positiveLOOK+11faults/5selectors/18statements;
-normal rebuild after faults; fastDebug AND Release; full phase; paired16Release ABBA; genuine256package
-previous-writer cold-library UI; required old workflows; fresh saved-scene/export/signed-iPad/erasing
-checks.8bb preparations are OFFLINE only and root-independently accepted; repin once coherent source
-settles. Static counts5398fast/5987full/398classes/PBX1327. Both UI lints pass. Full external adapter
-943a2652 has20offlinefake fixtures and61exact opt-in guards accepted; actual clones/skip reasons still
-need postreview. No full native run. Preserve old071Release DD and untouched original artwork/export.
-
-No physical operation this pass. Fresh saved-scene/unlocked readiness is required when actually
-ready; do not reuse old readiness answers. Erasing respring cause remains unproved. Owner artwork
-confirmation precedes whole temporary-converter/UI retirement; permanent startup maintenance stays.
+Finalgates remain: successorwholeFill20/coldUI4withownerlandscapeLOOK+meaningfulnewfaults; unrelated
+422/wholeUI47, logic107targets/99recipes/66selectors(247statements), UI13/7selectors/33statements,
+mask6positiveLOOK+11faults/5selectors/18statements; normalrebuild afterfaults; exactfastDebugANDRelease,
+fullphase, paired16ReleaseABBA, genuine256packageold-librarycoldUI, oldworkflows; freshsaved/export/
+signeddevice/erasingmeasurements/artworkconfirmation.8bb offlinepreparations are NOT currentnative
+proof. Static5398fast/5987full/398classes/PBX1327; preserve071ReleaseDD and untouchedoriginalexport.
+Erasing respringcauseunproved. Retiretemporaryconverter/UIwhole ONLYafterownerartworkconfirmation.
 
 ## How to read and keep this file
 
