@@ -338,8 +338,8 @@ final class TextLayoutLogicTests: XCTestCase {
         for request in [CGFloat.zero, -1, .infinity, -.infinity, .nan] {
             XCTAssertNil(TextLayout.rasterScale(for: normal, requested: request))
         }
-        for box in [CGSize.zero, CGSize(width: -1, height: 200), CGSize(width: .infinity, height: 200),
-                    CGSize(width: 800, height: .nan)] {
+        for box in [CGSize.zero, CGSize(width: -1, height: 200), CGSize(width: CGFloat.infinity, height: 200),
+                    CGSize(width: 800, height: CGFloat.nan)] {
             XCTAssertNil(TextLayout.rasterScale(for: box, requested: 1),
                          "Invalid geometry must not reach UIKit")
         }
