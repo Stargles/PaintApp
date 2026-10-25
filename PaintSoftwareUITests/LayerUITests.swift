@@ -1836,9 +1836,16 @@ final class BlendModesAndCompositorUITests: PaintUITestCase {
                 }
                 setBrushColor(app, hex: stroke.hex)
                 drawLine(on: canvas, from: stroke.from, to: stroke.to)
-                let core = try XCTUnwrap(waitForPixel(canvas, at: stroke.probe, matches: { pixel in
-                    [pixel.r, pixel.g, pixel.b, pixel.a] == stroke.rgba
-                }), "PREMISE: actual opaque \(stroke.hex) core; stop if coverage or colour conversion differs")
+                var lastObserved: [UInt8] = []
+                let sampledCore = waitForPixel(canvas, at: stroke.probe, matches: { pixel in
+                    lastObserved = [pixel.r, pixel.g, pixel.b, pixel.a]
+                    return lastObserved == stroke.rgba
+                })
+                if case .none = sampledCore {
+                    attachScreenshot(XCUIScreen.main, "blend-opaque-input-core-failure-whole")
+                }
+                let core = try XCTUnwrap(sampledCore,
+                    "PREMISE: actual opaque \(stroke.hex) core; last sample \(lastObserved); stop if coverage or colour conversion differs")
                 XCTAssertEqual([core.r, core.g, core.b, core.a], stroke.rgba,
                                "PREMISE: exact artist-entered input, not a blend result")
             }
