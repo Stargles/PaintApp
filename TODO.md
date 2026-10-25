@@ -2,115 +2,58 @@
 
 ## Current source and next actions — 2026-10-25
 
-Main/origin remain afd2030c; no merge/push/iPad install. Active treePaintApp-s54-mend-free-caps,
-product32185179b35f9b7b86785c7a3e6a8bce8f32ce52 plus later records. Root owns integration/docs/Git and
-one Mac native lease; delegate implementation and independent review. Continue actionable work,
-not recommendation-only pauses. Native lease RELEASED after whole20 closure; source728 exact/clean.
+Main/origin remain afd2030c; no merge, push or iPad install this pass. Active tree is
+PaintApp-s54-mend-free-caps. Product32185179 remains a FAILED fill candidate: full FillMend logic
+18/20 passed; two original circular-outline protections failed. No cold FillUI4/performance/fault
+qualification for321, and it must not ship. Actual evidence and root source/count review:
+`s54-final-qualification/native/geodesic-logic20-32185179-run01/`.
 
-**Current fill correction is NOT SAFE/QUALIFIED.** Whole20FillMend logic on owned9:18passed/2failed,
-0skip/expected, native65/wrapper1. Root independently checked actual20selectors, counts/device,
-alllegacyissues and728freeze. FreshFill.metal compile+MetalLink in app/testtargets, noMetalerrors.
-Only2actualissues:613 original400boundary grew circularcardinals(52,14),(46,20),(58,20),(52,26);
-843 productionOverlap0Reach10/9 changed originalcircle pixels(70,25),(61,34),(79,34),(70,43).
-Caps12/completepicture, square448, notch, longdiagonal/nearframe positives reportedNOotherissues.
-ColdFillUI4/performance/mutants have NOT run for321. Evidence: s54-final-qualification/native/
-geodesic-logic20-32185179-run01/root-independent-acceptance.json. No retries/physical actions.
+**Owner ruling, recorded before implementation:** Kevin says the new Mend Gaps work is required only
+for vector, and the implementation choice is engineering work that needs no further approval. He is
+asleep for a few hours; continue independently. Use current editable stroke geometry through the
+existing brush renderer for the new interior rule. Preserve uncertain joins and the true outline;
+keep real-time feedback. Unknown flattened/reference content remains conservative. Do not reopen
+this scope question. The existing neighboring-fill seam retains its current behavior.
 
-Rootcause of V1 failure: a circular outertip has genuine tangent crossingW1 but unownedholeD2/4;
-D>W alone allows it. Keep old400/448outside/hole/attached/fullcap behavior oracles. Do not add a
-circle exception/magicradius/head classifier. Twofinite alternatives are also insufficient:
-ALLnearest explicit-unsafe opposite veto can make Reach nonmonotonic; originalALLnearest+geodesic
-BODY seed itself misclassifies a donut's visible onepixelstem join. Unsafeinscribed-disk union
-catches these but misses a40square/10thick intentionalhole corner: minimumunsafe power+40,
-actualrawaxisW40. Geodesic FROM expanded diskunion can overprotect legitimateattachedbodies;
-assessbeforecoding. Fresh independentfill_boundary_design agent is reviewing coherentobservable
-semantics/architecture. No furtherproductpatch granted. Externalreports live under
-mend-free-caps-b865-readonly/{post-v1-body-support-assessment.md,disk-union-feasibility-321,
-unsafe-disk-union-finite-assessment.md}. Do not treat earlier source-review acceptance as nativeproof.
+Next implement one shared current-reference contract for interactive fill and Mend All Fills. Remove
+the failed distance/nearest-open proof whole, with dead kernels, CPU lookup tables, buffers/parameters,
+cache state, tests and spec text; retain shared ink EDT/basin resources and actual contour/cap/attached-
+stem/Reach oracles. No second renderer, old/new flag, persisted stroke fields or compatibility path.
+Geometry/coverage/overlap attribution and bounded memory need a coherent design before coding.
+Reports: `mend-free-caps-b865-readonly/current-vector-seam-feasibility/` (assessment and removal map).
+The A/B illustration was a proposal, not app output; owner does not need another capability approval.
 
-CurrentV1 source replaced ALLnearest GEOMETRIC acceptance with anygenuinecrossing plus current
-through-ink dangerdistance. All tiednearest OWNERSHIP/domain guards remain; four existingaxes use
-ONEnear/farrayproof, strictnear/intermediate/far guards and Reach-afterOverlap arithmetic unchanged.
-Oldneighborseam is byte-identical/first. TwoNbyte planes reuse existing8Nworkspace; no allocation,
-retainedcache/key, CPUscan or intermediate readback. Bceil(sqrt2*ceilproofSpan))max74 coversdigital
-rawlength; sentinel is a bound, notinfinity. Performanceunmeasured. Frozenproposal patch9d9bc735 and
-independentRaster/root reviews preserved; it compiled but is now a FAILED candidate, notfinaldesign.
+**Independent unrelated gate:** actual422/422 passed, zero failures/skips/expected,18classes on owned
+M539E at b827cbfc. Root independently verified all728 byte/kind/mode records match subsequent clean
+records-only pins; do not retag the old binary. First29 fault targets are being prepared: brush14,
+palette4, metadata4, curve7;14selectors/69 meaningful statements inherited from accepted107 map.
+Root must inspect exact recipes/source locations and explicitly grant one-Mac native execution.
+Stop on compiler/crash/setup failure or unexpected green; rebuild normal after mutations before UI.
+Stream/media are omitted from29; remaining78 targets stay queued. No native lease currently active.
 
-**Actual predecessor counterexamples:**02ab86bd GPU2methods failed exactly3legacyassertions:
-646square48/448atReach40,681notch255vs0,748distantdiaghole255vs0. Wide40/no-hole diagonalpositives
-andpremises reportednoissues; rootactualsource/728device verification accepted. Test-only59lines
-in2existingmethods preserved20names andoldlines. The distant56step negative was an implementation-
-specific geodesicsupport oracle, not an owneroriginal-contour proof; if the algorithm is replaced,
-retire/reframe that premise honestly rather than force unrelated geometry to mimic it. True400/448
-contour/cap/attached/nearframe oracles remain binding. Evidence: ownership-regressions2-02ab86bd-run01.
+Media trace found a concrete final-owner defect: H264StreamDecoder deinit can invalidate its native
+session on the releasing/main thread after weak client stop loses ownership. Design a tiny transfer
+of only that session to the existing serial queue and one shared real wait/invalidate operation.
+No self/client capture, second queue, observer-only retained fields or priority bump. Narrow production
+scope is the decoder and existing test file; implement only after the current native freeze is clear.
+The reset warning already runs on a worker; this run's video warning is the test's direct pixel oracle.
+Separate synchronous video UI pulls remain an unmeasured risk, not the eraser cause. Reports:
+`media-qos-trace-683f40a3.md` and `media-qos-retirement-seam-683f40a3.md` under s54-final-qualification.
 
-**Earlier qualified slices, not final321 proof:**8bb UI47passed; corrected widepaper fixture5cd
-FillUI4passed and ownerlandscape pictures LOOKed; stronger cap consumers then failed atcdf6pixels,
-fbb4pixels each(12total on3picturedcaps). Latercap/redo assertions wereunreached duefail-fast.
-Smallfbb endpoint correction3normal+6meaningfulfaults(4product/2fixture,12actualissues)+postnormal3
-qualify narrowly. Rootaccepted actualsource/locations/restoration. Cap12/Reach6 regression wasRED
-before321 andnowpassesinwhole20. Fullcompletionstillblockedbytruecirclecontours. Evidencefolders
-under s54-final-qualification/native/{endpoint-*,mend-cap-consumers-*,fill-paper-fixture-*}.
+**Device:** install is off immediate priority; owner authorizes future qualified installs. Review
+Releaseee36770d built/signature verified (UUIDF699A856-9C3F-34F1-AE99-E7C221BF9FF8), but profile
+2026-10-30T00:18:54Z had under5days and install was refused. It also predates failed321. No short-life
+exception inferred. Old workflows5 passed at that pin; root LOOKed playback/pan/stroke portrait,
+no Move/graph media or owner-landscape claim. Fresh saved-scene/export/readiness is needed when
+actually ready for physical restart/install. Preserve all real artwork and original export.
 
-**Ownersteering:** immediateiPad install is offpriority afterlimitreset; ownerpermits futureinstalls
-atagentdiscretion. LatestreviewReleaseee36770d built optimizedSwift-O/signature rootverified,
-UUIDF699A856-9C3F-34F1-AE99-E7C221BF9FF8; portalreusedexpiry2026-10-30T00:18:54Z(<5days), soNOinstall.
-No explicit shortprofileexception assumed. Ordinaryoldworkflows5 then5/5passed0skip atsamepin:
-playback/grey-pan/stroke/Move/graph. AgentLOOK6portraitPNG, rootLOOK4; Move/graphhaveNOmedia,
-noownerlandscapeclaim. Preserve current artwork; fresh saved-scene/export/readiness whenactuallyready.
-Signedbuild is alreadybehind currentfailed321; do notinstallthatfailedcandidate. No scenecleanup.
-
-**Unrelated modulegate CLOSED:**b827cbfc actual422/422passed,0failure/skip/expected, exact18selected
-classes/selectors onownedM539E. Root independently reread xcresult/728freeze/cleanHEAD. Note original
-class-manifest also contains8UIclasses; root filtered the actual18logiccommand, notall26manifestkeys.
-FillMendEXCLUDED anditsfailed20unchanged. ThreeactualThreadPerformanceChecker warnings preserved:
-H264StreamDecoder101/361, VideoFrameReader308; main/highQoS waiter on unspecified/Utility worker.
-No artistlag/cause established; traceproduction versusfixture call ownership beforechangingQoS.
-Evidence: native/unrelated-normal422-b827cbfc-run01/root-independent-acceptance.json.
-
-**Current follow-through, recorded before action:** the owner capability question is now pending,
-with an original three-panel illustration at `s54-final-qualification/mend-reference-decision/`:
-editable vector marks may mend through stems/caps while flattened references preserve ambiguous
-attached ink; alternatives are conservative behavior everywhere or retaining full scope for further
-research. No narrowing/implementation is approved yet. Independent removal map would delete the
-failed distance/nearest-open machinery whole, retaining shared ink EDT and the first neighbor seam.
-
-Read-only media trace found one concrete final-owner defect: `H264StreamDecoder.deinit` can invalidate
-its native session on the releasing/main thread after weak client stop loses ownership. A narrow fix
-is being designed: retire only the final session on its EXISTING serial queue, share one self-free
-native cleanup operation with reset/rebuild; no decoder/client capture, new queue or priority bump.
-The reset warning already runs on a worker. This run's video warning is the test's main-thread pixel
-oracle; separate synchronous video UI consumers remain a documented risk, not a measured slowdown.
-Report: `s54-final-qualification/media-qos-trace-683f40a3.md`. No source fix/native change granted yet.
-
-While the fill answer is pending, prepare the first unrelated29 assertion targets: brush14, palette4,
-metadata4, curve7 (69 meaningful statements), omitting stream/media. All relevant recipes/oracles
-must match the accepted107 map; actual normal422 remains labeled b827cbfc, not retagged. Root has
-independently proved all728 source byte/kind/mode records equal clean683 and the actual normal run.
-After this records-only commit, repin just29 and obtain root's explicit one-Mac native grant. Stop on
-unexpected green/compiler/crash/setup failure; generic red is not semantic qualification. Preserve
-all originals; rebuild normal source after faults before any UI/install. No physical action planned.
-
-**Mend scope decision being prepared, NOT applied:** freshindependentreviewer recommends current
-VECTORreference geometry ratherthan anotherpixelclassifier. ExistingVectorCanvas→BrushStamper→
-DabTarget supplies canonicalrendered dab positions/size/tips, but needs explicitfirsttangent/pose
-forwarding pluscoverage/overlap/unknown-contributor handling. Reuseonebrushwalk/renderer; this is
-moderate source-contract work, notfree metadata. Savedfills stillneednohistoricalassociation because
-MendAll alreadyuses currentreferences. Flattened/raster/image/baked/text/video refs lackthisdata;
-conservativefallback wouldleave ambiguousattachedink. Thatnarrows currentownerask and requiresa
-plain capability ruling, with an illustrativeA/B showingthevisiblegap, beforeimplementation.
-DoNOT reaskalreadyanswered attachedstems/protectuncertainjoins; askonlyreference-typecapability.
-No feature narrowing/newrenderercontract is granted untilowneranswers. Currentfailed321mustnotship.
-Reports: mend-free-caps-b865-readonly/current-vector-seam-feasibility/assessment.md andfreshdesign
-agentverdict. No more pixelclassifier productpatch granted.
-
-Finalgates remain: successorwholeFill20/coldUI4withownerlandscapeLOOK+meaningfulnewfaults; unrelated
-422/wholeUI47, logic107targets/99recipes/66selectors(247statements), UI13/7selectors/33statements,
-mask6positiveLOOK+11faults/5selectors/18statements; normalrebuild afterfaults; exactfastDebugANDRelease,
-fullphase, paired16ReleaseABBA, genuine256packageold-librarycoldUI, oldworkflows; freshsaved/export/
-signeddevice/erasingmeasurements/artworkconfirmation.8bb offlinepreparations are NOT currentnative
-proof. Static5398fast/5987full/398classes/PBX1327; preserve071ReleaseDD and untouchedoriginalexport.
-Erasing respringcauseunproved. Retiretemporaryconverter/UIwhole ONLYafterownerartworkconfirmation.
+**Remaining final gates:** successor Fill logic/coldUI+owner-landscape LOOK and meaningful faults;
+new107/UI13/mask6positive+11faults; normal rebuild; fast Debug AND Release; touched whole UI classes,
+full phase; paired16ReleaseABBA; genuine256-package previous-writer cold UI; ordinary old workflows;
+fresh saved/export/signed device, eraser all-process capture and owner artwork confirmation. Source
+static5398fast/5987full/398classes/PBX1327 is not native qualification. Earlier named gates/receipts
+remain valid only at their pins and unchanged source scopes. Erasing respring cause is unproved.
+Retire the temporary format converter/UI whole only after owner confirms current real artwork.
 
 ## How to read and keep this file
 
@@ -297,6 +240,12 @@ hashes are preserved. Evidence: `~/PaintWork/s52-erase-crash/mode3-diagnostic/`.
 ---
 
 ## Mend fill gaps beneath interior brushstrokes; apply across a layer — 2026-10-24
+
+**Latest scope ruling, 2026-10-25:** “All i know is that the mend gaps stuff is only required for
+vector if that helps.” Kevin says this implementation choice does not require approval and asks us
+to continue while he sleeps. Use current vector brush geometry for interior mending, protect uncertain
+joins and keep fast feedback; unknown flattened content remains conservative. Preserve the existing
+neighbor seam. Do not ask this capability question again.
 
 **Core implemented; actual rounded free-cap holes remain.** Current wholeUI47 passes its body probes,
 but new-fill and Mend All pictures retain3 tiny interior free-end holes. Correct the shared normal/
