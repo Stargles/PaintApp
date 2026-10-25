@@ -17,6 +17,37 @@ before implementation on tmp/s54-response-curve; no native/compiler/device run b
 
 # Known Issues
 
+## Text style updates move a Unicode caret and discard selection — 2026-10-25
+
+Source0e215, read-only audit before implementation. TextOverlayView.applyTypingAttributes saves
+UITextView.selectedRange (UTF-16), rebuilds attributes over identical text, then clamps location
+against Swift Character count and forces length0. For A😀B an end caret4 becomes3, before B; an
+ASCII selected range is also collapsed. Preserve the full saved range through the existing owner.
+No new selection state/helper or copied-formula test. Actual view/update/insertText, cold interaction
+and mutation qualification remain pending. This is independent of the glyph cap and text commit fix.
+
+## Mode1 vector eraser rerolls the gesture field at commit — 2026-10-25
+
+Source0e215, read-only audit before implementation. StrokeCanvasView mints strokeSeed and uses it
+for LiveWalk preview; stored-vector erase omits it, so eraseHybrid's VectorStroke initializer mints
+another. Universal erasing also remints per target/run. Subsequent replay, undo and archive keep that
+new seed stably. Thread the existing seed through existing entry points rather than introduce a
+second owner/default/overload path. Finite scatter fields132/133 remove different areas; actual
+canonical pixel/undo/roundtrip and cold controls remain pending. Modes2/3/4 do not stamp this punch;
+this does not explain the owner's Mode3 respring. External report: s54-architecture-audit/
+vector-erase-owner-0e215b4f/notes.md.
+
+## Cold graph/text controls expose delivery and toolbar premises — 2026-10-25
+
+Actual0e215 whole UI10:8pass2fail, exact source/device/methods. NewGraph596 remains focused0 instead
+of3; recording shows keys0,6 and a canvas no-drawing-surface warning. A test coordinate-contract
+correction using actual current band frame is recommended; raw screenPoint is unobserved, so double
+mapping remains inference. Existing Text colour172 fails harmless-toolbar clearance11.5<44 before
+its colour outcomes; recording also shows only partial SV movement. Preserve both failures/oracles,
+trace input and dismissal, then fresh committed whole-class evidence. EditedText restoration passes
+and three whole landscape pictures retain visible Hello. No product focus/colour diagnosis yet.
+
+
 ## Raster admission repeatedly scans cold registrations — 2026-10-25
 
 Source a699acbc and the bounded case28 sample identify repeated full candidate filtering/minimum

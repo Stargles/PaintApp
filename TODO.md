@@ -2,207 +2,41 @@
 
 ## Current source and next actions — 2026-10-25
 
-Main/origin remain afd2030c; no merge, push or iPad install this pass. Integrated source83380b76
-passed Debug126/126 and all4 FillMend UI tests on the owned iPad9 simulator. Root independently
-checked actual test identities, devices and all729 source entries, then LOOKed the owner-size pictures.
-Final fault, performance and combined release gates remain open; this is not an install qualification.
+Main/origin remain afd2030c; current accepted integration0e215b4f is not merged or installed. Actual
+Debug492/492 passed with zero failures/skips/expected failures; root checked every actual method,
+device and all729 immutable source entries. The unchanged text-restoration regression is fixed via
+existing atomic commitTextEdit. Shared text cap, graph drag ownership and CPU Float fading pass their
+bounded logic coverage. See HANDOFF.md for named source/evidence and preserved failed attempts.
 
-**Owner ruling:** interior Mend Gaps is vector only. Cover interior and attached strokes, preserve
-the outside outline and uncertain joins, and keep real-time feedback. Engineering choices need no
-further approval. Continue while Kevin sleeps, delegate useful work and report briefly. No duplicate
-renderer, persisted stroke fields or old/new flag. Unknown flattened content stays conservative.
+Fill126 and whole owner FillMend UI4 pass at83380, with six unique whole-screen pictures inspected.
+All29 fill controls are causally qualified:27 product/2 premise cases at26/2 unique statements.
+Detached/attached bodies/free ends mend; outside and uncertain joins stay protected; batch undo/redo
+assertions reached. These are bounded correctness results, not final performance/install completion.
 
-**Fill implementation and root causes:** the frozen-reference replacement removes failed32185179
-circle/distance machinery whole. It extends the existing brush walk and ImageWarp sampler with one
-selected/excluded frozen list, cumulative request work meter, bounded support packet and source-keyed
-stencil. Physical ink remains distinct from path walls; the neighbor seam stays shared. Completed
-images, not UIKit's non-bitmap CGContext dimensions, validate rendering. Finite nonstroke footprints
-reuse derivedFootprint; unbounded autosize text/invalid geometry stay unknown. Encoded-input admission
-is not a measured opaque native decoder peak. No temporary factory/Reach diagnostics remain.
+Current queue (all items below remain until merged):
 
-Shared RasterSource proof reuses the existing exact alpha scan on a pinned immutable lease through
-an explicitly admitted worker call. Its existing proof field caches inspected true AND false; cheap
-getters and snapshots do not scan. Backed sources do not decode eagerly. Scaled staging preserves
-localized vector unknowns, then the actual strict raster draw monotonically vetoes support whenever
-any raster is nonempty/unproved. A later clear source cannot re-promote it. No extra decode, capture
-replay, cache or budget. Reviewed Source d91efe48/caller5fde79b3 are integrated at83380b76.
+- Resolve actual cold UI10 at0e215:8pass2fail. EditedText passes and three whole landscape pictures
+  retain visible Hello. NewGraph gesture appears misdelivered to canvas; text-colour stops at a
+  toolbar-clearance premise. Preserve the red evidence and meaningful oracles; fresh rerun required.
+- Harvest independently reviewed new Blend UI7157; run whole class10 and LOOK four captures.
+- Execute root-reviewed isolated exact-source logic26 (Text7+Graph11+Blend7+text publication1), then rebuild
+  normal source. Graph3/Blend3 UI faults require exact positive source/device first. Count actual
+  reached assertions only; setups/unwraps and masked later statements earn no credit.
+- Repin historical UI13/mask6-positive+11-fault gates; final fast Debug/Release, counts/lints/PBX/graph,
+  touched UI classes and full phase. Current pre-Blend-UI census fast5431/full6021 runnable.
+- Qualify fill sampler/count/cost gates,16 paired Release trials and genuine cold previous-writer
+  library UI. Keep original256-package export and old071 benchmark product unchanged.
+- Fix newly traced Mode1 eraser gesture-seed handoff and full UTF-16 text selection preservation
+  through existing owners; source, native and cold controls required. No Mode3 respring claim.
+- Continue genuine source-audit gaps without reopening qualified findings: vector tools/undo/render,
+  remaining effects/graph/font/panels/platform/RSS. Inventory-only coverage is not reviewed code.
+- Fresh saved-scene readiness/export/signing/old workflows/device checks; actual Test1 eraser cause
+  remains unresolved. Remove one-shot geometry repair/UI only after owner artwork confirmation.
 
-The scaled owner retires worker/readback aliases and completed command wrappers before growth;
-incremental allocation checks and typed pool scope retain cancellation/failure behavior. The displayed
-preview and borrowed document memos remain external owners; no whole-process/RSS-release claim.
-The earlier a977 compiler attempt ran0 tests;2da changed only its invalid nested typed-do scope.
-
-**Actual logic:**83380b76 Debug126/126,0failure/skip/expected: FillMend28, FillObject28, StrokeWall17,
-RasterSampling13, RasterResidency40. The useful whole4096 factory, actual shared-filter stroke bodies
-and free caps, real GPU mend, fresh blank/strict cold-backed clear sources and painted-source vetoes
-pass. Root acceptance: `native/combined-normal126-83380b76-run01/root-independent-acceptance.json`.
-Earlier2da86green and4e2native71green remain named evidence, not retagged results.
-
-**Actual owner UI:**83380b76 whole FillMendUITests4/4,0failure/skip/expected, iPad9 landscape1080×810.
-New fills and Mend All cover detached/attached bodies and free ends; exterior stays white and a tiny
-uncertain-outline-join notch stays protected. Extension and neighbor-seam controls pass. Batch undo
-and redo reach their unchanged drawn assertions. Nine named whole-screen PNGs include six unique
-pictures; root LOOKed all six and checked the duplicate bytes. No separate undo/redo captures exist.
-Root LOOK/acceptance: `native/owner-ui4-83380b76-run01/root-screen-look.json` and
-`root-independent-acceptance.json`. Prior4e2 UI2pass/2fail and its gap screenshots remain preserved:
-a fresh empty raster reference lacked an admitted transparency proof. Those failures are resolved
-by the current named run, not silently discarded.
-
-**Fault checks now queued:**29 reviewed cases,9 selectors,27 product/2 premise cases target26 unique
-product and2 premise statements. They combine locality/Reach5, scaled9 and Source15. Source83380 is
-committed before mutation; a separate exact729-file tree PaintApp-s54-controls29 isolates the run
-from integration work. The driver stops on compiler/crash/setup/inconclusive/unexpected-green and
-restores exact sources. Root must extract actual mapped statements and review causality; a generic
-assertion-red banner is not qualification. Normal-source rebuild follows compiled faults. Packets:
-`reviewed-controls29-83380b76-isolated-v2/`. Original rejected/unrun plans remain historical evidence.
-
-**New bounded text audit fix — recorded before harvest:** the0.05 scale floor defeats the existing
-4096-texel glyph cap beyond81920 document points (100000×400 requests5000×20). Reviewed310357ce
-shares one finite raster-scale function among overlay, warped source and rasterizer, removes duplicate
-cap/floor spellings and preserves unlimited document geometry. Four actual raw UIKit probe controls
-refuted an unnecessarily strict raw-short-axis>=1 premise: positive fractional axes render within the
-cap. The corrected source accepts them. No schema, cache, renderer or point-size limit is added.
-Root harvested ONLY the four reviewed source/test/spec paths byte-exact at24d96652; author scope
-bcfd and corrected review417ea63d precede harvest. All27 old TextLayout bodies remain exact;3new methods give30, with
-TextTransform52/Homography18 targeted (100 total) and whole TextSessionUITests4. App compilation,
-normal tests, meaningful fault checks and appearance are UNRUN. Before runtime fault preparation,
-add an explicit nonnil assertion for the valid fractional-scale contract before the unwrap: this
-distinguishes a product refusal from an uncredited setup error. No old assertion changes. Keep a
-separate exact-source text qualification tree so integration can advance. No full text/font audit claim.
-
-**Combined first478 attempt — actual compiler0, recorded before correction:** clean5f91c954
-selected Fill126+Text135+Graph148+Blend69, but TextLayoutLogicTests' new CGSize(width:.infinity,
-height:200) is ambiguous, so0 tests ran. Source729/HEAD remained exact. Qualify the new invalid-input
-fixture's infinity/NaN literals explicitly as CGFloat; values, assertions, methods and production stay
-unchanged. Preserve `native/combined-normal478-5f91c954-run01/`; a fresh committed rerun is required.
-
-**Actual combined478 at76aff —476pass/2fail, recorded before triage/correction:** all478 actual
-identities and729 source entries reconcile, zero skips/expected failures. The new fractional blend
-sweep incorrectly extrapolates the original full-opacity Normal delta0 premise to50% opacity; actual
-Normal differs by1. Normal's CPU/GPU paths are unchanged by the hand-rolled correction. Narrow ONLY
-this new sweep to the hand-rolled modes changed by the fix, rename it and keep their existing1-step
-bound; all61 original parity methods/exact source-over gates stay byte-exact. No broad tolerance fix.
-The unchanged TextBakeCharacterization open-edit/unchanged-commit regression fails at its final
-restoration:0covered pixels versus1095 before editing. Root cause is UNPROVED; trace actual suppression,
-equality/cache invalidation and commit ownership at immutable76aff before changing code or tests.
-Preserve actual `native/combined-normal478-76affba3-run01/`; no retry or green qualification yet.
-
-**Text commit ownership root cause — recorded before implementation:** read-only trace at76aff
-finds prepareInteractiveText verifies a detached copy with VectorCanvas.commitTextEdit, but publishes
-via live restoreElements. The live editingElementID/suppressed ID survives; ending the manager session
-alone cannot clear vector suppression, and unchanged element geometry does not invalidate its hidden
-memo. This regression entered the earlier99070b06 atomic-preparation refactor; it is independent of
-the new glyph cap. Reuse the existing atomic live commitTextEdit(editingID:element:) primitive at
-publication; preserve admission/copy preflight, staged fill→shape→text ordering and undo registration.
-Remove any now-unused snapshot binding whole. No separate unsuppress setter, duplicate invalidation,
-new cache/state/format or weakened assertion. Existing TextBake459 and VectorTextPersistence two-
-invalidation oracle must pass, together with interactive-commit/atomic-failure coverage and cold
-TextSession edited-box visible-ink workflow. Native reproduction is the actual76aff failure, not a
-new speculative symptom. Source implementation/review/fault reversal remain pending. Before cold UI, improve ONLY the
-existing edited-box TextSession method's evidence: prelaunch landscape, assert its actual window is
-landscape (owner dimensions verified by the runner), and capture XCUIScreen.main before/open/after. Require actual visible ink before reopening, so
-a zero-to-zero pixel comparison cannot pass as restoration.
-Retain all original behavior/pixel oracles and4 methods; no wrapper test, app hook or shared-helper
-change. This closes the known app.screenshot landscape crop premise without weakening a product test.
-
-**New bounded graph-drag fix — recorded before harvest:** source83380 has three related lifecycle
-bugs: focus follows only the first moved frame; a nil readout leaves an old value visible; returning
-inside initial tap slop can commit the earlier displacement. Identity ticks also need to replace
-held affected curves with baseline and cancel empty undo. Scope0fe7bff4 is recorded in the isolated
-graph tree before implementation. Reuse TimelineGraphBand's shared value transition and existing
-coordinator/hold/undo owners; preserve unrelated channels. No new framework, persistent state, cache,
-file/PBX entry or evaluation/interpolation redesign. Logic controls must exercise the state actually
-consumed by the coordinator; cold drawn continuation/return/cancel controls remain required.
-
-**New bounded blend-opacity audit fix — recorded before implementation:** the CPU hand-rolled
-blend seam quantizes faded source RGBA to8bits before unpremultiplying; Metal keeps Float until final
-output. Exact source(200,0,0,255), backdrop(0,101,2,255), opacity0.5 can reverse the whole-color winner
-in Lighter/Darker Color (about100 channel steps predicted, native UNRUN). Ordinary layers, buffered
-groups and Merge Down use the affected seam. Existing all-mode sweep uses opacity1. Preserve exact
-RGBA premises and independent expected winner/output alpha in existing parity/merge tests; remove the
-whole-source byte rewrite and apply fade in Float in the existing CPU loop. No new backend, per-mode
-exception, tolerance relaxation, color-space policy, cache or flag. Agent records scope before source,
-preserves a committed old-code regression checkpoint, and freezes a separately reviewed correction.
-Report: `blend-effect-bounded-audit-83380/report.md`; not whole-effects or native qualification.
-
-**Blend cold UI scope — recorded before authoring:** add ONE method in existing
-BlendModesAndCompositorUITests, reusing actual brush/color/layer/blend/opacity/merge helpers. Exact
-Opaque Round cores C80000 over004E7F/00499A bracket the source luminance by1/25500. Actual slider
-readout50% means opacity[.495,.505); the two patches discriminate old byte rounding throughout that
-interval without pretending an exact0.5 entry. Existing raw input/core-color premises must pass;
-no color tolerance change, seeded pixels, retry or app hook. Check both drawn intersections through
-real Merge Down and lower-layer hide/reveal, preserving outside white/other ink. Prelaunch landscape,
-assert width>height (full suite also runs13inch; no hardcoded owner dimensions), XCUIScreen.main
-captures; root separately verifies owner1080×810 and LOOKs them. Darker/group/raw alpha stay in logic
-coverage. Proposal `blend-opacity-09d6c7f8/fault-proposal-f50e4e15/ui-proposal.md`; no native claim yet.
-
-**Raster admission correction:** root integrated the reviewed finite weak-metadata eviction pass
-at d4d7c523. It orders candidates once outside the mutex, rechecks current accounting/registration
-before callbacks and final admission, and retains live cold handles. This replaces repeated
-filter/min scans; no new persistent cache/queue/telemetry. Actual normal430 passed430/430, zero
-failures/skips/expected; old425 plus5new methods and exact729 entries reconciled. All8 deliberate
-fault cases are root-qualified at16 approved distinct statements/19 mapped issues;18 other issues
-are excluded. This does not cover all46 premise/regression macros or prove whole-scene RSS.
-Dirty-allocation maximum scans remain. Evidence: `native/finite-pass-normal430-d4d7c523-run01/`
-and `native/finite-pass-faults8-d4d7c523-run01/root-independent-qualification.json`.
-The separate clean b849 host completed exactly4 Release candidate-ordering ABBA trials:4×1/1
-passed,300/1000 live handles,1warm+16measured requests each,128 raw samples/83,200 measured callbacks.
-Root independently re-extracted actual results and computed the same medians; all729 sources were
-restored before every test and at final cleanHEAD. The finite pass was cheaper in this isolated
-comparison; see PERFORMANCE.md for exact numbers/limits. No whole-admission, scene, RSS or iPad claim.
-Evidence: `vector-mend-independent-proof/raster-ordering-paired-cost/prepared-run02/root-independent-acceptance.json`.
-The old temporary benchmark product is not an ordinary build. Current83380 fill logic/UI gates pass;
-final controls, performance and release gates still prevent an install qualification.
-
-**Audit evidence, keep identities distinct:** first29 targets outside the original78 are qualified
-at all53 distinct approved statements (69 case-bound receipts); final media fix reaches all16 new
-statements. Their named receipts remain under `native/gap8-79a272c4-run01/` and
-`native/media16-0565e96f-run01/`. Media normal425 is actual79a; shared-walk normal425 is actual3a8ca.
-Within original78, first27 plus next14 qualified41 cases/52 of126 distinct statements. Original
-broad1000-cel load28 is INCONCLUSIVE; broad freeze29 remains UNRUN. Two bounded single-source
-replacement controls at9e79 passed but add ZERO distinct statements beyond existing300-cel helpers.
-Remaining35 just completed at b849: normal20 passed20/20, no skips/expected; root independently
-re-extracted actual results and729 freeze. All35 faults reached approved mapped assertions, with
-303 mapped issues at50 of72 selected distinct statements and22 UNHIT; two unmapped keyframe460
-consequences excluded. Root independently re-extracted all35 before changing source and accepted
-independent causal review:35 specific cases qualify at50 distinct statements/86 reached case-bound
-identities. The original126 union now has118 product identities plus3 premise identities and5 explicit
-limits after root accepted the separate gap16 causal review;76 original case identities stay unchanged.
-New finite-pass16 assertions are outside that inventory. Original broad load/freeze stay unresolved.
-Exact729 restored, cleanHEAD, driver closed. Evidence: `native/remaining35-faults-b849ffc1-run01/root-independent-qualification.json`.
-Reference/arrangement checks receive no product-fault credit. Original failed/inconclusive attempts
-remain preserved. Never infer all assertions covered from all cases being red.
-
-**Test isolation correction, recorded before source edits:** the headroom-only raster fixture's
-one-picture byte budget could mask the intended headroom failure; give that small fixture room for
-the picture plus checkpoint workspace. The write-error send fixture used explicit stop before
-checking the outcome, masking failure settlement. Observe after an independent existing queued
-ENOTDIR probe, hold every chunk so an ignored error cannot race later writes, and stop/join solely
-for cleanup after the original assertions. Root reviewed the exact two-test-only patch0ed70e80;
-all existing expected values/method counts remain unchanged. No product hook or new method.
-Actual normal12 on isolated0ed passed12/12,0skip/fail/expected; root independently accepted actual
-results/729source freeze. The exact16 new controls reached19/19 targets (16 product and3 premise
-identities),27 mapped issues with15 uncredited consequences. Root re-extracted all16 and accepted
-independent causal review after verifying139 input/4 output hashes; original126 is118 product plus3
-premise identities, with5 explicit limits. Broad load stays inconclusive; broad freeze stays unrun.
-Evidence: `native/gap16-faults-0ed70e80-run01/root-independent-qualification.json`. Isolated0ed is source-identical to c517 at these729 files; this is not blanket
-qualification of the new live replacement.
-
-**Remaining final gates:** qualify meaningful new fill assertion controls and sampler appearance/cost;
-text and graph fixes need their own logic/fault/cold-UI gates. Close separate UI13/mask6positive+11faults;
-normal rebuild; exact fast Debug AND Release,
-touched whole UI classes/full phase, lints/PBX/graph; paired fill16 Release ABBA; genuine256-package
-previous-writer cold UI; ordinary old workflows; fresh saved-scene/export/readiness and qualified
-signed iPad build; separate actual Test1 erasing all-process capture and owner artwork confirmation.
-At83380 static5420fast/6009full/398classes/PBX1329 is not native final qualification; text/graph additions
-require a fresh census. Remaining audit boundaries are recorded in coverage-gap-reconciliation-5b8e5738:
-complete CPU/Metal effect parity, graph/tool/VectorLayer/text/font/panel bodies and platform delivery.
-The19 finding clusters are not exhaustive314-file review coverage. Earlier gates
-remain valid only at their named pins/unchanged scopes. Erasing respring cause remains unproved.
-Retire the one-shot format converter/UI whole only after owner confirms real artwork. Preserve the
-untouched original export, old071 paired product and all native results. Owner authorizes future
-qualified installs; the old ee36770d review product had under5days signing life and is not qualified.
-No old readiness answer authorizes a physical restart. Deferred items below remain deferred.
+Owner's scope is settled: Mend Gaps is vector only, includes attached marks, protects uncertain joins
+and the outside outline, and must remain interactive. Implementation choices need no extra approval.
+Vector Liquify is point-position-only; smart saving keeps newest versions per clock bucket. Keep
+working and delegate useful tasks; later features/interpolation overhaul remain deferred.
 
 ## How to read and keep this file
 
@@ -517,6 +351,14 @@ Inventory-only files are not reviewed code. New source is not called complete be
 - [ ] Test hooks/obsolete runner: destructive reset/corruption seeding is simulator-only even in Release;
       use direct existing platform fact, no policy wrapper. Verified unused parallel_test.sh removed.
       Ordinary simulator UI/device compile and final static gates remain pending.
+- [ ] Newly traced Mode1 eraser handoff: preserve the already-minted gesture seed through existing
+      VectorCanvas.erase/hybrid punch and universal commit. Actual pixel/undo/archive and cold artist
+      controls required; do not attribute the owner's Mode3 respring to this independent issue.
+- [ ] Newly traced text style update: preserve UITextView's full UTF-16 selectedRange while rebuilding
+      attributes over identical text. Remove Character-count clamping and unconditional deselection;
+      use actual existing view/update/insertText controls, no copied formula or new selection owner.
+- [ ] Resolve actual UI10 graph gesture delivery and text-colour input/dismissal premises without
+      weakening product oracles, then fresh whole-class runs and whole owner pictures.
 - [ ] Finish file-level/independent review, new affected zero-skip baseline, actual assertion mutants,
       exact final fast Debug/Release, lints/PBX/graph, cold workflows/pictures and paired performance.
       Then fresh owner save/unlock/export, signed clean Release/device checks and actual eraser cause.
