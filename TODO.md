@@ -23,10 +23,11 @@ Current queue (items remain until merged):
   Cold appearance and final fast/Release remain pending. Actual consumer, refusal,
   strip/periodicity/reuse and meaningful fault controls. Preserve sigma/appearance/budgets/fallback;
   no new retained counter/cache/renderer/schema. Audit8b106831 is source/model evidence, not RSS.
-- Cold stored-vector eraser Splatter/Undo/Redo. Existing-seed handoff and UTF-16 selection are
+- Cold stored-vector eraser Splatter/Undo/Redo source59a3fb51 is harvested after independent review;
+  Mode1 wholeclass4/runtime sampled-mask stability and4wholepictures remain pending. Existing-seed handoff and UTF-16 selection are
   integrated and pass related260 plus all5 meaningful faults; no new state and no Mode3 cause claim.
 - Repin historical UI13/mask6-positive+11-fault gates; final fast Debug AND Release, counts/lints/PBX/
-  graph, touched UI classes/full phase. Current5444 fast/6037 full runnable with cold-text harvested.
+  graph, touched UI classes/full phase. Current5444 fast/6038 full runnable with cold-text harvested.
 - Final fill sampler/count/cost gates,16 paired Release trials and genuine cold previous-writer
   library UI; untouched original256-package export and old071 product stay preserved.
 - TWO source-confirmed vector transfer defects: missing cel/group pose on Duplicate/To New Layer,
@@ -360,8 +361,8 @@ Inventory-only files are not reviewed code. New source is not called complete be
       use direct existing platform fact, no policy wrapper. Verified unused parallel_test.sh removed.
       Ordinary simulator UI/device compile and final static gates remain pending.
 - [ ] Newly traced Mode1 eraser handoff: preserve the already-minted gesture seed through existing
-      VectorCanvas.erase/hybrid punch and universal commit. Actual pixel/undo/archive and cold artist
-      controls required; do not attribute the owner's Mode3 respring to this independent issue.
+      VectorCanvas.erase/hybrid punch and universal commit. Actual pixel/undo/archive qualify at260/seed5; new coldMode1 source59a3 is harvested,
+      public runtime/wholepictures pending. Do not attribute the owner's Mode3 respring to this independent issue.
 - [ ] Text style update: reviewed minimal direct full UTF-16 range restoration is integrated17026caf;
       actual-view class31 and2reverse faults qualify within260/seed-selection5; cold route remains pending. Add one cold TextSession method using measured
       one-glyph/old-word far band, public Select All, actual text-colour change and same software key.
@@ -369,6 +370,12 @@ Inventory-only files are not reviewed code. New source is not called complete be
       app.typeText, post-style refocus/paste or product/helper changes. Normal/reverse/LOOK required.
 - [ ] Resolve actual UI10 graph gesture delivery and text-colour safe-dismissal premise without
       weakening product oracles, then fresh whole-class runs and whole owner pictures.
+- [ ] Current saved text omission/null defaults: source reportb6582fb1/receipt133f2e95 shows a
+      required string can become empty without existing text-damage/save gating. Peer/scope pending;
+      remove saved required-field fallbacks through existing owners, preserve API defaults/explicit
+      empty/legitimate nils. Current writer equals previousafd; no invented blank repair/schema.
+      Actual real-package/mutation/cold qualification required. Graph creation-capacity trace also
+      remains source-only pending current spec/consumer reconciliation.
 - [ ] Finish file-level/independent review, new affected zero-skip baseline, actual assertion mutants,
       exact final fast Debug/Release, lints/PBX/graph, cold workflows/pictures and paired performance.
       Then fresh owner save/unlock/export, signed clean Release/device checks and actual eraser cause.

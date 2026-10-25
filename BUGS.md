@@ -17,6 +17,19 @@ before implementation on tmp/s54-response-curve; no native/compiler/device run b
 
 # Known Issues
 
+## Missing saved text fields bypass the existing damage gate — 2026-10-25
+
+Read-only source0fb/reportb6582fb1/receipt133f2e95 traces required recipe.string missing/null to
+TextRecipe defaults, clean VectorCanvasData.LossySlot, no ProjectLoadDamage.texts and ordinary
+SaveDamageGate.write. Empty text then draws no glyphs; later re-encode can persist it. Wrong-type
+text already reaches the existing damage owner. ID/frame/required typography defaults and invalid
+corner-count repair share this policy cluster. Source counterexample only; no actual damaged owner
+package or runtime reproduction claimed. Immediately previous writerafd has exact same TextObject
+bytes and emits required keys. Proposed strict current decoding reuses existing loss/damage/gate,
+keeps API defaults/explicit empty/legitimate nils; no new validator/schema/blank-text repair. Scope,
+peer and actual current/previous-writer package tests remain pending before source changes.
+
+
 ## Vector selection transfers lose cel pose and omit fresh undo payload — 2026-10-25
 
 Source53637328 and independent43957eca identify TWO clusters in beginVectorLassoDuplicate and

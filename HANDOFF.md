@@ -154,11 +154,27 @@ before publication. One narrow shared layer/source reversal prices actual prepar
 existing end-frame clamp. Unsupported enclosing structure/interpolation/gesture brackets refuse
 before earlier-tool settlement; later refusal promises no transfer mutation after normal settlement.
 No new retained state/renderer/schema or whole-scene geometry scan. All22 old methods exact;5new
-methods and9 affected whole classes270 require normal qualification. Candidate13 controls/30 IDs
+methods and9 affected whole classes270 require normal qualification. Candidate13 controls/29 eligible IDs
 are offline only. Own scopesb458/a793/78b5 precede code; rootb537 scope recorded both causes.
 Cold PoseBake8fc0e766 harvested after independent118bcb04/root review: ONE new method1→2,
 old method/all helpers exact, measured Select grid, hidden-source Duplicate and actual ToNew
 Undo/Redo picture comparisons,3 whole captures. Native public delivery/owner layout remain UNRUN.
+
+**Cold textured Mode1 source59a3fb51 harvested after independent3ae89df2/root review:** ONE
+new method in Mode1UITests3→4, all9 older file methods/helpers exact. Public Opaque Round input is
+committed before Texture/Splatter/Erase; one completed gesture must remove observed dark samples,
+keep distant bands and restore observed before/committed masks via Undo/Redo. Four whole captures.
+This is201×61 classified samples, not every physical pixel, live-field equality or save/reopen.
+Runtime delivery/stability/owner pictures remain UNRUN. Vector control eligible-v2 receipt67a9160a
+preserves13recipes but excludes an impossible source-suppression target:40references/29IDs. Original
+13/30 packet remains historical; exact actual faults still required after healthy normal270.
+
+**New bounded source findings awaiting implementation scope/peer:** current text omissions/nulls
+bypass existing known-text damage and silently produce empty/identity values (reportb6582fb1,
+receipt133f2e95 at0fb). Current TextObject bytes equal previous writerafd; propose strict required
+saved fields through existing LossySlot→loadDamage→SaveDamageGate, retain API defaults/explicit
+empty/legitimate nils, no blank-text repair/new validator/schema. Actual package control unrun.
+Graph grammar/creation-capacity audit is still finishing its spec/consumer trace; no fix authorized.
 
 **Next gates, in order:**
 
@@ -174,7 +190,7 @@ Undo/Redo picture comparisons,3 whole captures. Native public delivery/owner lay
 3. Repin historical UI13/mask6-positive+11-fault packets to final source; LOOK positive pictures before
    faults. Preserve two-phase build→all-source-restore→test-without-building contract.
 4. Final fast Debug AND Release using CLAUDE verbatim command, actual/static method reconciliation,
-   lints/PBX/graph, all touched UI classes and full phase. Current census5444 fast/6037 full
+   lints/PBX/graph, all touched UI classes and full phase. Current census5444 fast/6038 full
    runnable,729 source entries/PBX1329; new cold-text method is included.
 5. Fill16 paired Release ABBA, sampler/source/fence/cancel/budget counts and genuine cold256-package
    previous-writer library UI. Preserve original export and old071 benchmark product.

@@ -234,6 +234,119 @@ final class Mode1UITests: VectorEraserTestSupport {
                              + "never follows the finger")
     }
 
+    /// Observe one real textured punch, then require history to restore those same two pictures.
+    /// The synchronous drag ends on lift; the separate live-preview test owns publication delivery.
+    func testASplatterPunchOnCommittedVectorInkRestoresTheSamePictureThroughUndoAndRedo() throws {
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let window = app.windows.firstMatch
+        XCTAssertGreaterThan(window.frame.width, window.frame.height, "PREMISE: the artist route is landscape")
+        addVectorLayer(app)
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        XCTAssertEqual(vectorMarkerViaPanel(app, layerIndex: 1)?.isVector, true,
+                       "PREMISE: the target is an actual vector layer")
+
+        openBrushLibrary(app)
+        let basics = app.buttons["brushPanel.group.Basics"]
+        tapWhenHittable(basics, "The public Basics group")
+        let opaque = app.buttons["brushPanel.brush.Opaque Round"]
+        XCTAssertTrue(opaque.waitForExistence(timeout: 5))
+        if !opaque.isSelected { tapWhenHittable(opaque, "The Opaque Round brush") }
+        XCTAssertTrue(opaque.isSelected)
+        setBrushSize(app, normalized: 0.6)
+        app.buttons["toolbar.brushButton"].tap()
+        XCTAssertTrue(app.scrollViews["brushPanel.groupList"].waitForNonExistence(timeout: 5))
+        setBrushColor(app, hex: "000000")
+
+        let paper = visiblePaperRect(app, in: canvas)
+        XCTAssertGreaterThan(paper.width, 0.1)
+        XCTAssertGreaterThan(paper.height, 0.1)
+        for point in [onHost(paper, 0.20, 0.40), onHost(paper, 0.80, 0.40),
+                      onHost(paper, 0.50, 0.22), onHost(paper, 0.50, 0.58),
+                      onHost(paper, 0.20, 0.32), onHost(paper, 0.80, 0.48)] {
+            XCTAssertTrue(paper.contains(CGPoint(x: point.dx, y: point.dy)),
+                          "PREMISE: every gesture endpoint and sample corner is on visible paper")
+            XCTAssertTrue(window.frame.contains(CGPoint(x: canvas.frame.minX + point.dx * canvas.frame.width,
+                                                       y: canvas.frame.minY + point.dy * canvas.frame.height)))
+            assertAboveTheDock(app, canvas, dy: Double(point.dy), "The textured eraser fixture")
+            assertBelowTheToolbar(app, canvas, dy: Double(point.dy), "The textured eraser fixture")
+        }
+        drawLine(on: canvas, from: onHost(paper, 0.20, 0.40), to: onHost(paper, 0.80, 0.40))
+        let stored = vectorMarkerViaPanel(app, layerIndex: 1)
+        XCTAssertEqual(stored?.strokes, 1, "PREMISE: one completed paint stroke is stored before erasing")
+        XCTAssertEqual(stored?.erases, 0)
+
+        openEraserPanel(app)
+        tapWhenHittable(app.buttons["eraserPanel.group.Texture"], "The public Texture group")
+        let splatter = app.buttons["eraserPanel.brush.Splatter"]
+        XCTAssertTrue(splatter.waitForExistence(timeout: 5))
+        if !splatter.isSelected { tapWhenHittable(splatter, "The Splatter eraser") }
+        XCTAssertTrue(splatter.isSelected, "PREMISE: the actual textured eraser is selected")
+        pickVectorEraserMode(app, "Erase")
+        closeEraserPanel(app)
+
+        let hostFrame = canvas.frame
+        let transform = readTransform(app)
+        XCTAssertFalse(transform.isEmpty)
+        let frame = try XCTUnwrap(readFrameLabel(app)?.current)
+        let white = onHost(paper, 0.10, 0.15)
+        let snapshot: (String) throws -> [Bool] = { phase in
+            XCTAssertEqual(canvas.frame, hostFrame, "\(phase): the host must not move between pictures")
+            XCTAssertEqual(self.visiblePaperRect(app, in: canvas), paper,
+                           "\(phase): the measured paper basis must stay fixed")
+            XCTAssertEqual(self.readTransform(app), transform, "\(phase): no pan, zoom or rotation")
+            XCTAssertEqual(self.readFrameLabel(app)?.current, frame, "\(phase): the same animation frame")
+            let pixel = try self.pixelProbe(canvas)
+            XCTAssertTrue(self.isWhitish(pixel(Double(white.dx), Double(white.dy))),
+                          "\(phase): untouched paper stays white")
+            return (0...60).flatMap { row in (0...200).map { column in
+                let point = self.onHost(paper, 0.20 + 0.60 * Double(column) / 200,
+                                       0.32 + 0.16 * Double(row) / 60)
+                return self.isInk(pixel(Double(point.dx), Double(point.dy)))
+            } }
+        }
+        let before = try settled { try snapshot("Before") }
+        let left = before.indices.filter { $0 % 201 <= 50 }
+        let right = before.indices.filter { $0 % 201 >= 150 }
+        let centre = before.indices.filter { $0 % 201 > 50 && $0 % 201 < 150 }
+        XCTAssertTrue(left.contains { before[$0] }, "PREMISE: actual dark ink fills the left control band")
+        XCTAssertTrue(right.contains { before[$0] }, "PREMISE: actual dark ink fills the right control band")
+        XCTAssertTrue(centre.contains { before[$0] }, "PREMISE: actual dark ink crosses the eraser path")
+        attachScreenshot(XCUIScreen.main, "mode1-splatter-vector-before")
+
+        let start = canvas.coordinate(withNormalizedOffset: onHost(paper, 0.50, 0.22))
+        let end = canvas.coordinate(withNormalizedOffset: onHost(paper, 0.50, 0.58))
+        start.press(forDuration: 0.3, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.3)
+        XCTAssertEqual(vectorMarkerViaPanel(app, layerIndex: 1)?.erases, 1,
+                       "Mode1 retains the actual completed textured punch")
+        let committed = try settled { try snapshot("Committed") }
+        XCTAssertTrue(centre.contains { before[$0] && !committed[$0] },
+                      "The actual Splatter gesture removes dark ink from the committed picture")
+        XCTAssertEqual(left.map { committed[$0] }, left.map { before[$0] },
+                       "The distant left ink stays unchanged")
+        XCTAssertEqual(right.map { committed[$0] }, right.map { before[$0] },
+                       "The distant right ink stays unchanged")
+        attachScreenshot(XCUIScreen.main, "mode1-splatter-vector-committed")
+
+        let undo = app.buttons["sideToolbar.undoButton"]
+        XCTAssertTrue(undo.isEnabled)
+        undo.tap()
+        XCTAssertEqual(vectorMarkerViaPanel(app, layerIndex: 1)?.erases, 0)
+        let undone = try settled { try snapshot("Undo") }
+        XCTAssertEqual(undone, before, "One Undo restores the whole observed pre-erase picture")
+        attachScreenshot(XCUIScreen.main, "mode1-splatter-vector-undo")
+
+        let redo = app.buttons["sideToolbar.redoButton"]
+        XCTAssertTrue(redo.isEnabled)
+        redo.tap()
+        XCTAssertEqual(vectorMarkerViaPanel(app, layerIndex: 1)?.erases, 1)
+        let redone = try settled { try snapshot("Redo") }
+        XCTAssertEqual(redone, committed, "One Redo restores the same observed committed textured picture")
+        attachScreenshot(XCUIScreen.main, "mode1-splatter-vector-redo")
+    }
+
 }
 
 /// The two cutting modes (Mode 2 "Cut", Mode 3 "To Cross"): which of them previews, and Mode 3's
