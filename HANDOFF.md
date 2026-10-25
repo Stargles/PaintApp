@@ -41,6 +41,18 @@ fouraxes for captransversecrossings. No cap-shape/body-width classifier. Exactco
 independent review and root scope before productapply, thenGPU/UI/fault/performance proof. No product
 edit granted yet; all prior externalstaged/medialdesigns remain NOTREADY.
 
+Before source edits: root independently accepts exact59line TEST-ONLY proposal in
+ownership-fixtures-ab2724df-proposal, patchSHAf91b80ccda6555c6afbad276ecf934116d9446a165de31b50f61d51dbadf5a2f.
+Only FillMendLogicTests.swift may change:7statements in TWOexistingmethods, all20names/priorlines
+preserved and exacttemp-apply verified. Add true40wide internalstrip separated fromframe by4owned
+papercolumns, explicitunownednotch control, and matched longdiagonal no-hole255/hole0 controls.
+The diagonal rawwidth62.154exceeds52 while its46majorsteps fit proofSpan52; uncoveredgap23.213 fits
+Reach40, and unownedhole56inkstepsaway mustveto. No-hole positive also prevents overconservative52
+truncation; negative alone cannot distinguish correctfailclosed52. Commit test before one actualGPU
+2method RED reproduction; inspect everyactuallegacyissue plus allpositivepremises/728source freeze.
+No newhelper/file/testmethod/framework. Productproposal frozenexternalpatch9d9bc7356f5482cf290e12ca98981242d773b5174fca7353ef0807e94d6d4e1a
+changes onlyFill.metal/MetalFillEngine.swift; independentcode review pending, NOTgranted forapply.
+
 Main/origin remain afd2030c; no merge, push or iPad install. Consolidated product code is8bb68907
 in final-integration/final-check. The active mend-free-caps tip is0ca9d75951850e5c89e6c9865bbba87fa6ccccfb
 (productfbb0e182; later commit adds test-only coverage). The narrow endpoint correction is qualified;
