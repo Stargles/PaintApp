@@ -240,10 +240,25 @@ enum TextLayout {
     /// of one number is the kind of thing that drifts.
     static let minimumBoxWidth: CGFloat = TextFrame.minimumExtent
 
-    /// The floor under `renderBox`'s backing scale. Not zero — a zero-scale renderer produces an
-    /// empty image and a caller that divided by it would produce a NaN — and low enough that the
-    /// texel cap, not this, is what a very wide box actually meets.
-    static let minimumRenderScale: CGFloat = 0.05
+    /// The absolute glyph-bitmap limit, independent of document point size or display zoom.
+    static let maximumGlyphTexels: CGFloat = 4096
+
+    /// Shared by the live overlay, warped source and rasterizer. Document geometry stays unlimited;
+    /// only backing resolution changes. A fixed positive floor would defeat this cap for wide boxes.
+    static func rasterScale(for boxSize: CGSize, requested: CGFloat) -> CGFloat? {
+        guard boxSize.width.isFinite, boxSize.height.isFinite,
+              boxSize.width > 0, boxSize.height > 0, requested.isFinite, requested > 0 else { return nil }
+        let longest = max(boxSize.width, boxSize.height)
+        var scale = min(requested, maximumGlyphTexels / longest)
+        // A rounded-up division/product must not ask UIKit for a 4097th texel. Ordinary uncapped
+        // scales remain unchanged; one ULP down corrects an overshooting cap quotient.
+        if ceil(longest * scale) > maximumGlyphTexels { scale = scale.nextDown }
+        let width = boxSize.width * scale, height = boxSize.height * scale
+        guard scale.isFinite, scale > 0, width.isFinite, height.isFinite,
+              width > 0, height > 0,
+              ceil(width) <= maximumGlyphTexels, ceil(height) <= maximumGlyphTexels else { return nil }
+        return scale
+    }
 
     // MARK: - Rasterizing
 
@@ -304,15 +319,10 @@ enum TextLayout {
     /// overlay's `contentsScale`, reused for the bake because it is the same trade.
     static let maximumWarpSupersample: CGFloat = 3
 
-    /// And the absolute one, in texels on the longest side. §4 rule 1: "capped absolutely at
-    /// 4096×4096 texels even fully supersampled". A cap in *points* is not a cap at all once
-    /// `autoSize` can grow a title as wide as the string.
-    static let maximumWarpTexels: CGFloat = 4096
-
     /// The same 4096, on the warp's **destination**, and it is a second bound rather than the same
     /// one restated.
     ///
-    /// `maximumWarpTexels` bounds the glyph bitmap the warp reads. This bounds what it writes, and
+    /// `maximumGlyphTexels` bounds the glyph bitmap the warp reads. This bounds what it writes, and
     /// the destination is where the memory actually is: `ImageWarp.warpedImage` holds three
     /// `w × h × 4` buffers of it at once, on top of the canvas-sized flatten and composite the bake
     /// already pays for. At 4096 that is 3 × 64 MiB against ADD_TEXT.md §4 rule 6's 192 MiB, which
@@ -330,10 +340,9 @@ enum TextLayout {
     /// The densest part is a *corner* — `Homography.maximumCornerScale` says why — which is exactly
     /// the property that makes a strongly foreshortened quad affordable: the near edge asks for the
     /// detail and the far edge, which is where most of the area went, costs nothing extra.
-    static func warpSourceScale(boxSize: CGSize, homography: Homography) -> CGFloat {
+    static func warpSourceScale(boxSize: CGSize, homography: Homography) -> CGFloat? {
         let wanted = max(1, min(homography.maximumCornerScale(ofBox: boxSize), maximumWarpSupersample))
-        let longest = max(boxSize.width, boxSize.height, 1)
-        return max(minimumRenderScale, min(wanted, maximumWarpTexels / longest))
+        return rasterScale(for: boxSize, requested: wanted)
     }
 
     /// The recipe's glyphs carried onto the frame's quad: the image, and the canvas rectangle it
@@ -367,8 +376,8 @@ enum TextLayout {
         guard !recipe.string.isEmpty, let homography = frame.homography else { return nil }
         let destination = frame.boundingBox.integral.intersection(clip.integral)
         guard destination.width >= 1, destination.height >= 1 else { return nil }
-        let scale = warpSourceScale(boxSize: frame.size, homography: homography)
-        guard let source = renderBox(recipe: recipe, boxSize: frame.size, clip: !frame.autoSize,
+        guard let scale = warpSourceScale(boxSize: frame.size, homography: homography),
+              let source = renderBox(recipe: recipe, boxSize: frame.size, clip: !frame.autoSize,
                                      scale: scale, library: library)?.cgImage,
               source.width > 0, source.height > 0 else { return nil }
         let sourceScale = CGFloat(source.width) / frame.size.width
@@ -410,27 +419,22 @@ enum TextLayout {
     /// translate, differing only in scale. Stage 5's `CATransform3D` preview is where the divergence
     /// §4 records as an open risk actually starts.
     ///
-    /// `scale` is backing pixels per canvas point. The caller caps it; see
-    /// `TextOverlayView.glyphContentsScale`.
-    ///
-    /// **A `scale` below 1 is honoured, and stage 4 is what made that matter.** It used to be
-    /// floored at 1, which was harmless while `autoSize` capped a box at the canvas's right edge and
-    /// silently stopped bounding anything the moment that cap was removed: a point-text box now
-    /// grows as wide as the string, and a floor of 1 would turn a very long title into a bitmap as
-    /// many pixels across as it is points. The caller's cap is expressed in *texels* precisely so it
-    /// can ask for less than one pixel per point, which is ADD_TEXT.md §4 rule 1 — "capped absolutely
-    /// at 4096×4096 texels even fully supersampled" — and a floor at 1 defeated it.
+    /// `scale` is requested backing pixels per canvas point. The shared cap is checked here too,
+    /// so no caller can re-expand a very wide point-text box past the admitted glyph resolution.
     static func renderBox(recipe: TextRecipe, boxSize: CGSize, clip: Bool, scale: CGFloat,
                           library: FontLibrary = .shared) -> UIImage? {
-        guard !recipe.string.isEmpty, boxSize.width > 0, boxSize.height > 0 else { return nil }
+        guard !recipe.string.isEmpty, let scale = rasterScale(for: boxSize, requested: scale) else { return nil }
         let font = library.resolve(recipe.font, size: recipe.typography.clamped.pointSize).font
         let format = UIGraphicsImageRendererFormat.preferred()
         format.opaque = false
-        format.scale = max(minimumRenderScale, scale)
+        format.scale = scale
         let renderer = UIGraphicsImageRenderer(bounds: CGRect(origin: .zero, size: boxSize), format: format)
-        return renderer.image { context in
+        let image = renderer.image { context in
             draw(recipe, font: font, boxSize: boxSize, clip: clip, into: context.cgContext)
         }
+        guard let cg = image.cgImage, cg.width > 0, cg.height > 0,
+              CGFloat(cg.width) <= maximumGlyphTexels, CGFloat(cg.height) <= maximumGlyphTexels else { return nil }
+        return image
     }
 
     /// Draws into `cg` with the box's top-left at the current origin, y increasing downward.

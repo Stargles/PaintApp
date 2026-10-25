@@ -130,7 +130,8 @@ final class TextOverlayView: CanvasPlaneView, UITextViewDelegate {
         let recipe: TextRecipe
         let boxSize: CGSize
         let clip: Bool
-        let scale: CGFloat
+        /// A refused raster size still lands nil through the existing path, retiring old glyphs.
+        let scale: CGFloat?
     }
 
     // MARK: - Init
@@ -420,24 +421,12 @@ final class TextOverlayView: CanvasPlaneView, UITextViewDelegate {
 
     // MARK: - Glyphs
 
-    /// Backing pixels per canvas point for the glyph bitmap, capped twice.
-    ///
-    /// Capped at 3× because past that the artist cannot see the difference and the backing store is
-    /// the square of it, and capped again so the store cannot exceed `maximumGlyphTexels` on its
-    /// longest side however far they zoom — ADD_TEXT.md §4's rule that nothing in the live path is
-    /// canvas-sized only holds if the box's own store is bounded too.
-    ///
-    /// **The texel cap is applied last and is allowed to take the answer below 1**, which stage 4
-    /// changed. It used to be floored at 1, and that floor was invisible only because stage 1's
-    /// `autoSize` capped a box at the canvas's right edge. Stage 4 removed that cap — a point-text
-    /// box now grows as wide as the string — so a floor of 1 would let a long title mint a bitmap as
-    /// many pixels across as it is canvas points. `TextLayout.renderBox` honours a sub-1 scale for
-    /// exactly this.
-    private var glyphContentsScale: CGFloat {
+    /// The live display/warp request shares the rasterizer's finite, absolute texel cap.
+    /// Capping the bitmap never limits the text's document-space layout box.
+    private var glyphContentsScale: CGFloat? {
         let display = max(traitCollection.displayScale, 1)
         let wanted = max(1, min(canvasScale * display * warpMagnification, 3 * display))
-        let longest = max(glyphBoxSize.width, glyphBoxSize.height, 1)
-        return max(TextLayout.minimumRenderScale, min(wanted, Self.maximumGlyphTexels / longest))
+        return TextLayout.rasterScale(for: glyphBoxSize, requested: wanted)
     }
 
     /// How much the frame's own map magnifies the box at its densest corner. `TextFrame` owns the
@@ -454,8 +443,6 @@ final class TextOverlayView: CanvasPlaneView, UITextViewDelegate {
         return display.boundingBox.size
     }
 
-    private static let maximumGlyphTexels: CGFloat = 4096
-
     /// **Asks for the glyphs of the box as it is when the last render lands** — ADD_TEXT.md §4 rule 3,
     /// coalescing taken to its end: a fast typist's keystrokes and a slider's ticks each ask, and only
     /// the request standing when the render in flight lands is laid out, off the main thread, by the
@@ -469,8 +456,9 @@ final class TextOverlayView: CanvasPlaneView, UITextViewDelegate {
                                 scale: self.glyphContentsScale)
             guard key != self.renderedKey else { return nil }
             return {
-                let image = TextLayout.renderBox(recipe: key.recipe, boxSize: key.boxSize,
-                                                 clip: key.clip, scale: key.scale)
+                let image = key.scale.flatMap {
+                    TextLayout.renderBox(recipe: key.recipe, boxSize: key.boxSize, clip: key.clip, scale: $0)
+                }
                 return { [weak self] in self?.showGlyphs(image, for: key) }
             }
         }
@@ -485,10 +473,10 @@ final class TextOverlayView: CanvasPlaneView, UITextViewDelegate {
         // reads as lag.
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        glyphLayer.contentsScale = key.scale
+        if let scale = key.scale { glyphLayer.contentsScale = scale }
         glyphLayer.contents = image?.cgImage
         if !ghostLayer.isHidden {
-            ghostLayer.contentsScale = key.scale
+            if let scale = key.scale { ghostLayer.contentsScale = scale }
             ghostLayer.contents = image?.cgImage
         }
         CATransaction.commit()

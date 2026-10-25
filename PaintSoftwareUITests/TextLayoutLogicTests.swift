@@ -314,6 +314,82 @@ final class TextLayoutLogicTests: XCTestCase {
         XCTAssertEqual(cg.height, 50)
     }
 
+    func testGlyphRasterScaleSharesTheCapWithoutLimitingDocumentPoints() throws {
+        let normal = CGSize(width: 800, height: 200)
+        XCTAssertEqual(try XCTUnwrap(TextLayout.rasterScale(for: normal, requested: 0.25)), 0.25,
+                       "Ordinary requested scales remain exact, not a new resolution policy")
+        for longest in [CGFloat(4096), 81_920, 81_921, 100_000, 1_000_000] {
+            for box in [CGSize(width: longest, height: 400), CGSize(width: 400, height: longest)] {
+                let scale = try XCTUnwrap(TextLayout.rasterScale(for: box, requested: 3))
+                XCTAssertTrue(scale.isFinite && scale > 0)
+                XCTAssertLessThanOrEqual(ceil(box.width * scale), 4096)
+                XCTAssertLessThanOrEqual(ceil(box.height * scale), 4096)
+                let shared = try XCTUnwrap(TextLayout.rasterScale(for: box, requested: 1))
+                XCTAssertEqual(try XCTUnwrap(TextLayout.warpSourceScale(boxSize: box, homography: .identity)), shared,
+                               "The warp must use the same bound as the live glyph backing")
+                XCTAssertEqual(try XCTUnwrap(TextLayout.rasterScale(for: box, requested: scale)), scale,
+                               "The rasterizer cannot re-expand an already capped request")
+            }
+        }
+    }
+
+    func testGlyphRasterScaleRefusesInvalidAndUnrepresentableRequests() {
+        let normal = CGSize(width: 800, height: 200)
+        for request in [CGFloat.zero, -1, .infinity, -.infinity, .nan] {
+            XCTAssertNil(TextLayout.rasterScale(for: normal, requested: request))
+        }
+        for box in [CGSize.zero, CGSize(width: -1, height: 200), CGSize(width: .infinity, height: 200),
+                    CGSize(width: 800, height: .nan)] {
+            XCTAssertNil(TextLayout.rasterScale(for: box, requested: 1),
+                         "Invalid geometry must not reach UIKit")
+        }
+        XCTAssertNil(TextLayout.renderBox(recipe: recipe("Title"), boxSize: normal, clip: false, scale: 0),
+                     "Scale zero is refused, not UIKit's device-scale default")
+    }
+
+    func testLargePointTextKeepsBoundedNonblankBackingAndOrdinaryPixelParity() throws {
+        let text = recipe("H", Typography(pointSize: 128))
+        for box in [CGSize(width: 100_000, height: 400), CGSize(width: 400, height: 100_000)] {
+            let image = try XCTUnwrap(TextLayout.renderBox(recipe: text, boxSize: box, clip: false, scale: 1))
+            let cg = try XCTUnwrap(image.cgImage)
+            XCTAssertLessThanOrEqual(cg.width, 4096, "The actual backing, not only the requested scale, is bounded")
+            XCTAssertLessThanOrEqual(cg.height, 4096)
+            XCTAssertGreaterThan(cg.width, 0)
+            XCTAssertGreaterThan(cg.height, 0)
+            XCTAssertLessThan(image.scale, 0.05, "An unlimited point box must accept a scale below the old floor")
+            let pixels = try XCTUnwrap(CanvasFixture.rgbaBytes(cg))
+            XCTAssertTrue(stride(from: 3, to: pixels.count, by: 4).contains { pixels[$0] != 0 },
+                          "The bounded glyph picture still contains actual text")
+        }
+        // UIKit rounds a positive fractional axis up to one backing texel. Rejecting raw<1
+        // would blank these representable boxes; glyph visibility still follows the real box clip.
+        let witness = CGSize(width: 12288.1, height: 3.0000244140625)
+        let ratio: CGFloat = 4096 / witness.width
+        let fractional: [(CGSize, CGFloat, Int, Int)] = [
+            (CGSize(width: 100_000, height: 1), 1, 4096, 1),
+            (CGSize(width: 1, height: 100_000), 1, 1, 4096),
+            (witness, ratio, 4096, 1), (witness, ratio.nextUp, 4096, 1)
+        ]
+        for (box, request, width, height) in fractional {
+            let scale = try XCTUnwrap(TextLayout.rasterScale(for: box, requested: request))
+            XCTAssertTrue(scale.isFinite && scale > 0)
+            let image = try XCTUnwrap(TextLayout.renderBox(recipe: text, boxSize: box, clip: false, scale: request)?.cgImage)
+            XCTAssertEqual(image.width, width, "Actual rounded width preserves the texel cap")
+            XCTAssertEqual(image.height, height, "Positive fractional height remains representable")
+        }
+        let ordinary = recipe("Plain\ntext")
+        let box = CGSize(width: 400, height: 160)
+        let actual = try XCTUnwrap(TextLayout.renderBox(recipe: ordinary, boxSize: box, clip: false, scale: 1)?.cgImage)
+        let baked = try XCTUnwrap(TextLayout.render(recipe: ordinary,
+            frame: TextFrame(origin: .zero, size: box), canvasSize: box)?.cgImage)
+        XCTAssertEqual(actual.width, 400)
+        XCTAssertEqual(actual.height, 160)
+        let pixels = try XCTUnwrap(CanvasFixture.rgbaBytes(actual))
+        XCTAssertTrue(stride(from: 3, to: pixels.count, by: 4).contains { pixels[$0] != 0 })
+        XCTAssertEqual(pixels, try XCTUnwrap(CanvasFixture.rgbaBytes(baked)),
+                       "An ordinary glyph backing preserves the unchanged canvas rasterizer's exact pixels")
+    }
+
     // MARK: - A box shorter than its own text
 
     /// The pre-fix drawing path, spelled out so the tests below can ask what it did: CoreText laid
