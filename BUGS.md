@@ -26,7 +26,8 @@ them is not a valid fix. Ordinary window pressure after 1,000-handle cold load c
 The deliberately eager-load control stalled and remains inconclusive; no fixed deadlock, corruption
 or iPad respring cause is proved. Root accepted a finite weak ordered pass shared by admit and
 prepareMutation, retaining accounting/reserve/refusal semantics and live registrations. Source-only
-work is separate; no native/performance qualification yet. Evidence:
+correctiona52857a6 is independently reviewed and harvested, with5new controls and original32method
+bodies exact. Fresh normal430/faults8/performance remain unrun. Evidence:
 `s54-final-qualification/raster-admission-case28-readonly/report.md`.
 
 ## Media reads produce runtime priority-inversion warnings — 2026-10-25

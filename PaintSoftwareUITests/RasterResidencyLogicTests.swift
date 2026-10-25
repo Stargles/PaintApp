@@ -120,8 +120,166 @@ final class RasterResidencyLogicTests: XCTestCase {
     private final class CachedPicture: RasterResidencyCandidate {
         let residencyID = UUID()
         var image: UIImage?
-        init(image: UIImage) { self.image = image }
-        func releaseResidentPixels() -> Bool { image = nil; return true }
+        var onRelease: (() -> Bool)?
+        init(image: UIImage? = nil, onRelease: (() -> Bool)? = nil) {
+            self.image = image
+            self.onRelease = onRelease
+        }
+        func releaseResidentPixels() -> Bool {
+            if let onRelease { return onRelease() }
+            image = nil
+            return true
+        }
+    }
+
+    func testAdmissionEvictsTheLeastRecentPictureAndKeepsColdRegistrationsEligible() throws {
+        let owner = RasterResidency(budgetBytes: pictureBytes * 4, hasHeadroom: { _ in true })
+        let first = CachedPicture()
+        let second = CachedPicture()
+        try autoreleasepool {
+            let red = try surface(owner)
+            red.allocation.markDurable()
+            first.image = try red.image().get()
+            let blue = try surface(owner, color: .blue)
+            blue.allocation.markDurable()
+            second.image = try blue.image().get()
+        }
+        owner.register(first)
+        owner.register(second)
+        owner.touch(first.residencyID)
+        var working: RasterResidency.Allocation? = try owner.admitWorking(pictureBytes * 3).get()
+        XCTAssertNil(second.image, "A read makes the first picture more recent than the second")
+        XCTAssertEqual(try pixel(XCTUnwrap(first.image?.cgImage)), [255, 0, 0, 255])
+        XCTAssertEqual(owner.usage.pixelBytes, pictureBytes)
+        XCTAssertEqual(owner.usage.workingBytes, pictureBytes * 3)
+        withExtendedLifetime(working) {}
+        working = nil
+        try autoreleasepool {
+            let blue = try surface(owner, color: .blue)
+            blue.allocation.markDurable()
+            second.image = try blue.image().get()
+        }
+        // Rehydration touches an existing registration; eviction must not have removed it.
+        owner.touch(second.residencyID)
+        working = try owner.admitWorking(pictureBytes * 3, excluding: [first.residencyID]).get()
+        XCTAssertNil(second.image, "A cold registration must remain eligible after its pixels return")
+        XCTAssertEqual(try pixel(XCTUnwrap(first.image?.cgImage)), [255, 0, 0, 255])
+        XCTAssertEqual(owner.usage.evictions, 2)
+        XCTAssertLessThanOrEqual(owner.usage.admittedBytes, owner.budgetBytes)
+        withExtendedLifetime(working) {}
+    }
+
+    func testAdmissionDefersACallbackRegistrationUntilTheNextRequest() throws {
+        let owner = RasterResidency(budgetBytes: pictureBytes * 3, hasHeadroom: { _ in true })
+        var held: RasterResidency.Allocation? = try owner.admitWorking(owner.budgetBytes).get()
+        var visits: [String] = []
+        let later = CachedPicture(onRelease: { visits.append("later"); held = nil; return true })
+        var registered = false
+        let first = CachedPicture(onRelease: {
+            visits.append("first")
+            if !registered { registered = true; owner.register(later) }
+            return false
+        })
+        owner.register(first)
+        XCTAssertThrowsError(try owner.admitWorking(pictureBytes).get()) { error in
+            XCTAssertEqual(error as? RasterResidency.Failure, .budgetExceeded)
+        }
+        XCTAssertEqual(visits, ["first"], "A callback cannot extend the captured population")
+        XCTAssertNotNil(held)
+        XCTAssertEqual(owner.usage.workingBytes, owner.budgetBytes)
+        let admitted = try owner.admitWorking(pictureBytes).get()
+        XCTAssertEqual(visits, ["first", "first", "later"])
+        XCTAssertNil(held)
+        XCTAssertEqual(owner.usage.workingBytes, pictureBytes)
+        withExtendedLifetime(admitted) {}
+    }
+
+    func testAdmissionSkipsCandidatesTouchedOrReregisteredDuringItsPass() throws {
+        for reregister in [false, true] {
+            let owner = RasterResidency(budgetBytes: pictureBytes * 3, hasHeadroom: { _ in true })
+            var held: RasterResidency.Allocation? = try owner.admitWorking(owner.budgetBytes).get()
+            var visits: [String] = []
+            let recent = CachedPicture(onRelease: { visits.append("recent"); held = nil; return true })
+            var refreshed = false
+            let first = CachedPicture(onRelease: {
+                visits.append("first")
+                if !refreshed {
+                    refreshed = true
+                    if reregister { owner.register(recent) } else { owner.touch(recent.residencyID) }
+                }
+                return false
+            })
+            owner.register(first)
+            owner.register(recent)
+            XCTAssertThrowsError(try owner.admitWorking(pictureBytes).get()) { error in
+                XCTAssertEqual(error as? RasterResidency.Failure, .budgetExceeded)
+            }
+            XCTAssertEqual(visits, ["first"], "A refreshed candidate belongs to the next pass")
+            XCTAssertNotNil(held)
+            let admitted = try owner.admitWorking(pictureBytes).get()
+            XCTAssertEqual(visits, ["first", "first", "recent"])
+            XCTAssertNil(held)
+            XCTAssertEqual(owner.usage.workingBytes, pictureBytes)
+            withExtendedLifetime(admitted) {}
+        }
+    }
+
+    func testRefusedMutationPreservesPixelsAndDefersNewRegistrationsUntilRetry() throws {
+        let owner = RasterResidency(budgetBytes: pictureBytes * 3, hasHeadroom: { _ in true })
+        let current = try surface(owner)
+        current.allocation.markDurable()
+        var held: RasterResidency.Allocation? = try owner.admitWorking(pictureBytes).get()
+        var visits: [String] = []
+        let later = CachedPicture(onRelease: { visits.append("later"); held = nil; return true })
+        var registered = false
+        let first = CachedPicture(onRelease: {
+            visits.append("first")
+            if !registered { registered = true; owner.register(later) }
+            return false
+        })
+        owner.register(first)
+        XCTAssertThrowsError(try owner.prepareMutation(of: current.allocation).get()) { error in
+            XCTAssertEqual(error as? RasterResidency.Failure, .budgetExceeded)
+        }
+        XCTAssertEqual(visits, ["first"])
+        XCTAssertFalse(current.allocation.isDirty)
+        XCTAssertEqual(owner.usage.reservedCheckpointBytes, 0)
+        XCTAssertThrowsError(try paint(current, color: .blue)) { error in
+            XCTAssertEqual(error as? RasterResidency.Failure, .writeNotAdmitted)
+        }
+        try autoreleasepool {
+            XCTAssertEqual(try pixel(XCTUnwrap(current.image().get().cgImage)), [255, 0, 0, 255])
+        }
+        try owner.prepareMutation(of: current.allocation).get()
+        XCTAssertEqual(visits, ["first", "first", "later"])
+        XCTAssertNil(held)
+        XCTAssertEqual(owner.usage.reservedCheckpointBytes, pictureBytes * 2)
+        try paint(current, color: .blue)
+        try autoreleasepool {
+            XCTAssertEqual(try pixel(XCTUnwrap(current.image().get().cgImage)), [0, 0, 255, 255])
+        }
+        XCTAssertEqual(owner.usage.pixelBufferCount, 1)
+        XCTAssertEqual(owner.usage.admittedBytes, owner.budgetBytes)
+    }
+
+    func testBusyAndColdCandidatesAreTriedOncePerPassAndRemainRegistered() throws {
+        let owner = RasterResidency(budgetBytes: pictureBytes, hasHeadroom: { _ in true })
+        let held = try owner.admitWorking(pictureBytes).get()
+        var visits: [Int] = []
+        let cold = (0..<64).map { index in
+            CachedPicture(onRelease: { visits.append(index); return false })
+        }
+        cold.forEach { owner.register($0) }
+        for _ in 0..<2 {
+            visits.removeAll()
+            XCTAssertThrowsError(try owner.admitWorking(1).get()) { error in
+                XCTAssertEqual(error as? RasterResidency.Failure, .budgetExceeded)
+            }
+            XCTAssertEqual(visits, Array(0..<64))
+            XCTAssertEqual(owner.usage.workingBytes, pictureBytes)
+            XCTAssertEqual(owner.usage.evictions, 0)
+        }
+        withExtendedLifetime((held, cold)) {}
     }
 
     func testEvictingAWrapperCannotPretendAnEscapedCGImageGaveItsBytesBack() throws {

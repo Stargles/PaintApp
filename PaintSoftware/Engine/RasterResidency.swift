@@ -124,9 +124,7 @@ final class RasterResidency {
         let (checkpointBytes, checkpointOverflow) = bytes.multipliedReportingOverflow(by: 2)
         guard kind != .pixels || !checkpointOverflow else { return .failure(.invalidSize) }
         guard hasHeadroom(bytes) else { return .failure(.allocationRefused) }
-        var attempted = excluding
-        while true {
-            lock.lock()
+        return withEvictionPass(excluding: excluding) {
             let dirtyNeed = max(dirtyAllocations.values.max() ?? 0, kind == .pixels ? checkpointBytes : 0)
             let fitsActualBytes = bytes <= budgetBytes - pixelBytes - workingBytes
             let checkpointWorking = fitsActualBytes && kind == .checkpoint ? checkpointWorkingBytes + bytes : checkpointWorkingBytes
@@ -141,19 +139,9 @@ final class RasterResidency {
                 case .checkpoint: workingBytes += bytes; checkpointWorkingBytes += bytes
                 }
                 highWaterBytes = max(highWaterBytes, pixelBytes + workingBytes)
-                lock.unlock()
-                return .success(allocation)
+                return allocation
             }
-            candidates = candidates.filter { $0.value.value != nil }
-            let next = candidates.filter { !attempted.contains($0.key) }
-                .min { $0.value.touched < $1.value.touched }
-                .flatMap { entry in entry.value.value.map { (entry.key, $0) } }
-            lock.unlock()
-            guard let (id, candidate) = next else { return .failure(.budgetExceeded) }
-            attempted.insert(id)
-            if candidate.releaseResidentPixels() {
-                lock.lock(); evictions += 1; lock.unlock()
-            }
+            return nil
         }
     }
 
@@ -170,24 +158,46 @@ final class RasterResidency {
     func prepareMutation(of allocation: Allocation, excluding: Set<UUID> = []) -> Result<Void, Failure> {
         let (checkpointBytes, overflow) = allocation.byteCount.multipliedReportingOverflow(by: 2)
         guard !overflow else { return .failure(.invalidSize) }
-        var attempted = excluding
-        while true {
-            lock.lock()
-            if dirtyAllocations[allocation.id] != nil { lock.unlock(); return .success(()) }
+        return withEvictionPass(excluding: excluding) {
+            if dirtyAllocations[allocation.id] != nil { return () }
             let need = max(dirtyAllocations.values.max() ?? 0, checkpointBytes)
             if max(0, need - checkpointWorkingBytes) <= budgetBytes - pixelBytes - workingBytes {
                 dirtyAllocations[allocation.id] = checkpointBytes
-                lock.unlock()
-                return .success(())
+                return ()
             }
-            let next = candidates.filter { !attempted.contains($0.key) }
-                .min { $0.value.touched < $1.value.touched }
-                .flatMap { entry in entry.value.value.map { (entry.key, $0) } }
-            lock.unlock()
-            guard let (id, candidate) = next else { return .failure(.budgetExceeded) }
-            attempted.insert(id)
-            if candidate.releaseResidentPixels() { lock.lock(); evictions += 1; lock.unlock() }
+            return nil
         }
+    }
+
+    /// The operation reads/commits accounting under lock; candidate work never holds that lock.
+    /// One weak snapshot bounds a pass even when callbacks register sources or refresh recency.
+    private func withEvictionPass<Value>(excluding: Set<UUID>, attempt: () -> Value?) -> Result<Value, Failure> {
+        lock.lock()
+        if let value = attempt() { lock.unlock(); return .success(value) }
+        let snapshot = candidates.filter { !excluding.contains($0.key) }
+        lock.unlock()
+        let ordered = snapshot.sorted { $0.value.touched < $1.value.touched }
+        for (id, captured) in ordered {
+            lock.lock()
+            if let value = attempt() { lock.unlock(); return .success(value) }
+            let unchanged = candidates[id]?.touched == captured.touched
+            lock.unlock()
+            guard unchanged else { continue }
+            // Promote and finally release the weak target outside the owner lock: its final
+            // provider/allocation release can call back into this owner's accounting.
+            let released = autoreleasepool { captured.value?.releaseResidentPixels() }
+            lock.lock()
+            if let released {
+                if released { evictions += 1 }
+            } else if candidates[id]?.touched == captured.touched {
+                candidates[id] = nil
+            }
+            lock.unlock()
+        }
+        lock.lock()
+        let value = attempt()
+        lock.unlock()
+        return value.map { .success($0) } ?? .failure(.budgetExceeded)
     }
 
     private func release(_ bytes: Int, kind: Allocation.Kind, id: UUID) {
