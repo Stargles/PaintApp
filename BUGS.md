@@ -2594,3 +2594,18 @@ redo-cap assertions are unreached under fail-fast.728source entries exact/clean;
 owner-landscape pictures. Evidence: native/mend-cap-consumers-red-cdf9c258-run01 under
 s54-final-qualification. Product unchanged8bb; narrow far-open endpoint proposal under review,
 long rectangular proof exhaustion remains open. Offline capsule tracing is not actualAA/GPU proof.
+
+## Candidate: wide Mend Reach grows square-hole corners — 2026-10-24
+
+Source-only finite integer tracing found a448pixel protected square-hole ring inside a frame:
+96square; frame8..<88 minus12..<84; ringx28..<58/y24..<58 minusinnerholex32..<54/y28..<54.
+Source is filled inner-frame paper excludingink/hole. Predicted additions0atReach6/12 but48at40.
+Exact original8bb and currentfbb compare identically;56accepted nearest witnesses are AXIAL,
+so this is not a predicted endpoint-change regression. No native proof yet. Owner's outer-edge/
+hole protection requires actual GPU triage before the larger cap correction is accepted. Add only
+full protected-ring assertions in the existing method/helper; no new fill pipeline or code exemption.
+Evidence: s54-final-qualification/mend-free-caps-b865-readonly/square-ring-original-vs-endpoint/.
+
+Narrow endpointfbb closure: actualpositive3green,6meaningfulfaults(4product+2fixture)/12legacy
+issues rootverified, postfaultnormal3green, each728source exact/clean. ActualUI2stillfails with
+4instead of6non-red pixels at the firstcap;12whitepixel residue remains across3pictured caps.

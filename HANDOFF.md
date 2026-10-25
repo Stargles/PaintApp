@@ -11,9 +11,9 @@ is authorized by an old readiness answer: obtain fresh saved-scene readiness whe
 ## Current source and next actions — 2026-10-24
 
 Main/origin remain afd2030c; no merge, push or iPad install. Consolidated product code is8bb68907
-in final-integration/final-check. The active mend-free-caps task iscdf9c2589442e3ada095b70561e2e189bde2304a:
-only committed regression/fixture edits so far, product byte-identical8bb. All728 source entries
-were exact/clean at the last native closure. Root owns docs/Git and the single Mac native lease;
+in final-integration/final-check. The active mend-free-caps task isfbb0e1820f9191b8246873d42b0cb23762f7323d:
+the small shared endpoint correction and its tests are committed; the full cap defect remains open.
+All728 source entries were exact/clean at the last native closure. Root owns docs/Git and the single Mac native lease;
 agents own bounded implementation, native verification and independent review. Native lease RELEASED.
 
 Actual closed evidence, with limits:
@@ -48,17 +48,34 @@ staging is not granted. Its old expensive repeated proof was rejected; existing8
 can support staged reuse if ultimately justified. An alleged distant-ring contradiction was withdrawn:
 calling an identical remote attached stem an original outline assumed unavailable stroke history.
 
-Next before product edits: independently review/record exact2file endpoint patch
+The small endpoint correction was independently reviewed and applied exactly atfbb from
 mend-free-caps-b865-readonly/endpoint-only-proposed.patch (SHAaace38b43f9e8009b6b08d54e635030191f76b726c41159f6e05c07419b0ecb6).
 It extends ONE existing side helper only at an actual far OPEN centerline endpoint; intermediate/
 near checks stay ink-only, actual source-side ownership stays mandatory and Reach/ties unchanged.
 Append actualRGBA horizontal/vertical/default-overlap positives and independent missing-source-side
 negatives in the existing cross-section logic method; no new test method/file/framework/dispatch.
-Root and Startup independently accepted that exact patch BEFORE edits. This recorded scope grants
-ONLY Fill.metal and FillMendLogicTests.swift for the endpoint correction/test additions; no other
-source/docs/Git/native edit by the implementation agent. The old helper is replaced whole, with no
-compatibility path. Root commits then grants the existing cross-section method and protected controls.
-The long rectangular12cap assertion remains intentionally RED; staged head work is not granted.
+The old helper was replaced whole, with no compatibility path. Atfbb,3positive methods passed:
+actual H/V roundedRGBA including defaultOverlap2, independent missing-source sides, original400
+protected pixels and productionOverlap/Reach/rim checks. Root independently accepted all3.
+Six reviewed faults then failed meaningfully:4product faults+2fixture controls,12actual source-located
+legacy issues, all6compiled hashes/locations and EACH728-source restoration independently verified.
+Post-fault normal3rebuilt/passed0skip; the normal-binary prerequisite is clear. Evidence under
+s54-final-qualification/native/{endpoint-normal3,endpoint-faults6,endpoint-restored-normal3}-fbb0e182-run01.
+Actual2coldUI consumers atfbb STILLfail at lines273/318, now4non-red pixels instead of6each. All3
+pictured caps retain4whitepixels (12total); later cap/redo assertions remain unreached. Root LOOKed
+both whole pictures and verified actual2failures/728/device. The long rectangular12cap assertion
+remains intentionally RED. All this is a qualified narrow correction, not feature completion.
+Staged-head V1 is frozen external NOT READY:45degree/default-overlap cap holes remain predicted.
+No staged product edit is granted. Prefer one coherent shared proof over additional case exemptions.
+
+New candidate recorded BEFORE test edits: a96square scene with original inkframe8..<88 minus
+12..<84 and448pixel square-hole ringx28..<58/y24..<58 minusholex32..<54/y28..<54. Source fills the
+frame interior except ink/hole. Integer tracing predicts0ring additions atReach6/12 but48at40,
+IDENTICAL under8bb andfbb; all56accepting nearest witnesses are axial, so the endpoint edit is not
+implicated by this source-only comparison. This is NOT native proof. Add only bounded assertions
+inside the EXISTING protected-contour method, reusing mendPatch: full448remain0at6/12/40, preserve
+all prior400/source/outside oracles, no new method/helper/file. Exact test proposal/root record and
+commit precede an actual one-method GPU reproduction. Keep this within the existing Mend task.
 Commit before meaningful faults; compiler/timeout/crash/skip cannot qualify. No UI completion claim.
 
 Final gates remain: successor normal422 and wholeUI47; meaningful new107logic/99recipes/66selectors
