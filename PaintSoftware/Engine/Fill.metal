@@ -581,16 +581,20 @@ static inline int2 mendRayPoint(uint2 origin, int2 delta, int major, int k, bool
                                 rint(sign * float(k * delta.y) / float(major)));
 }
 
-static inline bool mendRaySideIsInk(int2 sample, uint2 origin,
-                                   const device uchar* neighbour, const device uchar* wall,
-                                   const device uchar* wall2, const device uchar* fence,
-                                   constant FillParams& params, uint refCount, uint hasFence) {
+static inline bool mendRaySideAllows(int2 sample, uint2 origin,
+                                   const device uchar* neighbour, const device uchar* source,
+                                   const device uchar* wall, const device uchar* wall2,
+                                   const device uchar* fence, constant FillParams& params,
+                                   uint refCount, uint hasFence, bool openEnd) {
     if (sample.x < 0 || sample.y < 0 || sample.x >= int(params.width) || sample.y >= int(params.height)) return false;
     uint2 point = uint2(uint(sample.x), uint(sample.y));
     if (insideArtworkRect(point.x, point.y, params) != insideArtworkRect(origin.x, origin.y, params)) return false;
     uint index = pixelIndex(point.x, point.y, params.width);
+    if (openEnd && (point.x == 0u || point.y == 0u
+        || point.x + 1u >= params.width || point.y + 1u >= params.height)) return false;
     return neighbour[index] == 0 && (hasFence == 0u || fence[index] != 0)
-        && mendIsInk(index, wall, wall2, refCount);
+        && (mendIsInk(index, wall, wall2, refCount)
+            || (openEnd && mendIsOpen(point, wall, wall2, params, refCount) && source[index] != 0));
 }
 
 static inline bool mendNormalConnects(uint2 point, int2 offset,
@@ -617,10 +621,10 @@ static inline bool mendNormalConnects(uint2 point, int2 offset,
         if (all(sample == previous)) continue;
         nearLength += distance(float2(previous), float2(sample));
         if (sample.x != previous.x && sample.y != previous.y) {
-            if (!mendRaySideIsInk(int2(sample.x, previous.y), point, neighbour, wall, wall2,
-                                  fence, params, refCount, hasFence)
-                || !mendRaySideIsInk(int2(previous.x, sample.y), point, neighbour, wall, wall2,
-                                     fence, params, refCount, hasFence)) return false;
+            if (!mendRaySideAllows(int2(sample.x, previous.y), point, neighbour, source, wall, wall2,
+                                  fence, params, refCount, hasFence, false)
+                || !mendRaySideAllows(int2(previous.x, sample.y), point, neighbour, source, wall, wall2,
+                                     fence, params, refCount, hasFence, false)) return false;
         }
         if (sample.x < 0 || sample.y < 0 || sample.x >= int(params.width) || sample.y >= int(params.height)) return false;
         uint index = pixelIndex(uint(sample.x), uint(sample.y), params.width);
@@ -631,10 +635,10 @@ static inline bool mendNormalConnects(uint2 point, int2 offset,
         previous = sample;
     }
     if (nearPoint.x != uint(previous.x) && nearPoint.y != uint(previous.y)) {
-        if (!mendRaySideIsInk(int2(int(nearPoint.x), previous.y), point, neighbour, wall, wall2,
-                              fence, params, refCount, hasFence)
-            || !mendRaySideIsInk(int2(previous.x, int(nearPoint.y)), point, neighbour, wall, wall2,
-                                 fence, params, refCount, hasFence)) return false;
+        if (!mendRaySideAllows(int2(int(nearPoint.x), previous.y), point, neighbour, source, wall, wall2,
+                              fence, params, refCount, hasFence, false)
+            || !mendRaySideAllows(int2(previous.x, int(nearPoint.y)), point, neighbour, source, wall, wall2,
+                                 fence, params, refCount, hasFence, false)) return false;
     }
     nearLength += distance(float2(previous), float2(nearPoint));
     if (nearPainted < 0.0f && painted[nearIndex] != 0) nearPainted = nearLength;
@@ -652,10 +656,15 @@ static inline bool mendNormalConnects(uint2 point, int2 offset,
         float stepLength = distance(float2(previous), float2(sample));
         travelled += stepLength;
         if (sample.x != previous.x && sample.y != previous.y) {
-            if (!mendRaySideIsInk(int2(sample.x, previous.y), point, neighbour, wall, wall2,
-                                  fence, params, refCount, hasFence)
-                || !mendRaySideIsInk(int2(previous.x, sample.y), point, neighbour, wall, wall2,
-                                     fence, params, refCount, hasFence)) return false;
+            // Only a real open endpoint may touch source-owned open cells at its digital corner.
+            // Intermediate ink steps keep the strict ink-only supercover check.
+            bool openEnd = sample.x >= 0 && sample.y >= 0
+                && sample.x < int(params.width) && sample.y < int(params.height)
+                && mendIsOpen(uint2(uint(sample.x), uint(sample.y)), wall, wall2, params, refCount);
+            if (!mendRaySideAllows(int2(sample.x, previous.y), point, neighbour, source, wall, wall2,
+                                  fence, params, refCount, hasFence, openEnd)
+                || !mendRaySideAllows(int2(previous.x, sample.y), point, neighbour, source, wall, wall2,
+                                     fence, params, refCount, hasFence, openEnd)) return false;
         }
         if (sample.x < 0 || sample.y < 0 || sample.x >= int(params.width) || sample.y >= int(params.height)) return false;
         uint2 farPoint = uint2(uint(sample.x), uint(sample.y));

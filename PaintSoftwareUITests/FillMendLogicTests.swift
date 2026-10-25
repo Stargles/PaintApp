@@ -657,6 +657,57 @@ final class FillMendLogicTests: XCTestCase {
                        "two near and three far diagonal steps span four sqrt(2) pixels, beyond reach five")
         XCTAssertNotEqual(diagonalExact[35 * width + 35], 0,
                           "the asymmetric diagonal strip is accepted at reach six")
+
+        // A rounded cap's far open endpoint can touch another owned open cell at a raster corner.
+        // The two orientations make each independent side check decisive, including a tied normal.
+        for vertical in [false, true] {
+            for (radius, overlap) in [(3, Float(0)), (6, Float(2))] {
+                var roundedInk = Set<Int>()
+                var roundedSource = [UInt8](repeating: 0, count: width * height)
+                var reference = [UInt8](repeating: 0, count: width * height * 4)
+                for y in 4..<68 {
+                    for x in 4..<68 {
+                        let along = vertical ? y : x
+                        let across = (vertical ? x : y) - 32
+                        let capDistance = max(20 - along, max(along - 44, 0))
+                        let index = y * width + x
+                        if capDistance * capDistance + across * across <= radius * radius {
+                            roundedInk.insert(index)
+                            reference[index * 4 + 3] = 255
+                        } else {
+                            roundedSource[index] = 255
+                        }
+                    }
+                }
+                let cap = radius == 3 ? 18 : 16
+                let probe = vertical ? (x: 32, y: cap) : (x: cap, y: 32)
+                let offset = (probe.y * width + probe.x) * 4
+                let engine = try XCTUnwrap(MetalFillEngine.shared)
+                let session = try XCTUnwrap(engine.makeSession(referenceRGBA: reference, width: width,
+                                                                height: height, gapWidthLimit: 0).session)
+                let off = try XCTUnwrap(session.fill(seedX: 8, seedY: 8, seedColor: .zero,
+                    threshold: 0, gapWidth: 0, edgeOverlap: overlap, mendReach: 0, fillColor: SIMD4(1, 0, 0, 1)))
+                let on = try XCTUnwrap(session.fill(seedX: 8, seedY: 8, seedColor: .zero,
+                    threshold: 0, gapWidth: 0, edgeOverlap: overlap, mendReach: 12, fillColor: SIMD4(1, 0, 0, 1)))
+                XCTAssertEqual(Array(off[offset..<(offset + 4)]), [0, 0, 0, 0],
+                               "PREMISE: overlap \(overlap) leaves this rounded cap pixel bare")
+                XCTAssertEqual(Array(on[offset..<(offset + 4)]), [255, 0, 0, 255],
+                               "the rounded cap endpoint mends at overlap \(overlap) in \(vertical ? "vertical" : "horizontal") ink")
+                if radius == 3 {
+                    let owned = try mendPatch(width: width, height: height, source: roundedSource,
+                                               ink: roundedInk, reach: 12)
+                    XCTAssertEqual(owned[probe.y * width + probe.x], 255,
+                                   "PREMISE: the saved-fill source owns both rounded endpoint side witnesses")
+                    // Omit the side on the non-primary tied normal; the other normal still accepts.
+                    let unowned = vertical ? (x: 28, y: 21) : (x: 21, y: 28)
+                    roundedSource[unowned.y * width + unowned.x] = 0
+                    let protected = try mendPatch(width: width, height: height, source: roundedSource,
+                                                   ink: roundedInk, reach: 12)
+                    XCTAssertEqual(protected[probe.y * width + probe.x], 0,
+                                   "an unowned \(vertical ? "first" : "second") side witness vetoes every-tie endpoint admission")
+                }
+            }
+        }
     }
 
     /// The shared bucket pipeline must charge Reach for the gap remaining after its real Edge
