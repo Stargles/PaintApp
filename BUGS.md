@@ -45,37 +45,23 @@ worker-owned native VT waits and one direct video-test pixel oracle; they were n
 source-confirmed risks, not a measured slowdown or eraser cause. Report:
 `s54-final-qualification/media-qos-trace-683f40a3.md`; actual422 evidence remains at its true pin.
 
-## Interior mending repaints circular outline tips — 2026-10-25
+## Interior mending remains unavailable in the owner workflow — 2026-10-25
 
-Actualwhole20 at32185179 passed18/failed2: original400mask cardinal4 and production96circle
-cardinal4 grow. Source728exact/clean, freshMetalcompile/link, root independentlyrereadactualissues.
-Rawthrough-ink dangerD2/4 exceeds a true onepixel tangent crossingW1, soV1'slocal safetyguard is
-insufficient. Caps/square/notch/diagonalcontrols reportnoissues; thisdoesnotqualifythefeature.
-Preserve actualcircle/400/448oracles; no shapeexception ormagicmargin. The reviewed f75a900c
-replacement removes the failed distance/circle ownership path whole and shares actual frozen vector
-support with the real reference draw. Canonical support7 passed at b849; actual Debug71 at2972 compiled and ran54pass/17fail
-(12FillMend,5FillObject),0skip, exact729. Factory-driven support is empty for ordinary native strokes;
-contacts are absent and batch is unchanged. Record before one bounded isolated factory diagnostic
-of actual context/image/budget admission. Keep every cap/contour/batch assertion and do not loosen
-provenance guards without evidence. Whole4096 source work is paused before sampler edits. Diagnosticb976 retained1RED and proves
-cg.width/cg.height0 for UIKit's non-bitmap context despite correct CTM/clip and actual96sourceimage.
-This false bitmap-context premise rejects every ordinary vector reference. Move output-size checks
-to the actual completed UIImage/CGImage; preserve the per-stage geometry/image checks. Remove all
-print instrumentation and compare restored729source before harvesting the narrow fix. Actualc267
-rerun69/71 resolves15 failures, including every whole cap and all28FillObject. Two FillMend methods
-still fail at1362(unknown locality),844/850(Reach after Overlap). Preserve these assertions and trace
-the shared contact/width proof before changing source; final71/UI/whole4096 gates remain open. Source
-proves nonstroke objects have no entry in stroke-only known bounds, so a finite fill is wrongly global
-UNKNOWN. Reuse the existing derived-footprint seam with admitted input/work and honest opaque-decode
-cost limits. Reach's fixture may physically join its nominally separate strokes; one test-only native
-coordinate/CPUeligible diagnostic retained1RED and proves actual ink contact; every missing pixel
-is CPU-ineligible (not GPU stencil readback). No Reach arithmetic defect is established. Keep all
-original result assertions on a genuinely separated fixture; preserve connected uncertain-join
-safety, verify disjointness in actual rendered ink and mutation-test new premises after green. Engineering
-ruling before test edit: endpoint55 isolates existing width oracles; actual rendered one-cell-collar
-premise makes separation binding. Preserve original joined10/16 as GPU join-negative/far-body-positive
-atReach40. Unknown-locality source fix is harvested36b82a87; same71 and new assertion faults pending.
-Evidence: s54-final-qualification/native/geodesic-logic20-32185179-run01/root-independent-acceptance.json.
+Actual owner iPad9 wholeUI4 at4e2 passed2/failed2: new fill266 and Mend All302 retain the entire
+detached/attached white gaps. Root LOOKed all7 named1080×810-point screenshots and both video-derived
+failure frames; Mend All shows its no-gaps notice. Two later captures and undo/redo were unreached.
+Exact729 source, no retries. Actual logic71/71 at the same pin does not establish this UI behavior.
+Read the actual reference/window/source route before a bounded diagnostic; scaling is only a hypothesis.
+
+The old321 distance/circle path failed original400/cardinal outline probes and was removed whole.
+Current native fixes validate completed-image dimensions instead of non-bitmap CGContext0×0, and reuse
+shared derivedFootprint for finite nonstroke unknowns rather than stroke-only known bounds. A Reach
+fixture contact was proved in actual ink; its independent width assertions are all preserved, with
+actual separation plus original joined GPU safety/usefulness controls. All71 current logic methods pass;
+new assertion faults and final-source gates remain pending. No shader-width relaxation was justified.
+The separate whole4096 nine-path0cab source checkpoint remains uncompiled and under owner/budget review.
+Evidence: `s54-final-qualification/native/owner-ui4-4e2-run01/` and
+`native/v5-normal71-4e2f36f1-run01/root-independent-acceptance.json`; all earlier red results remain.
 
 ## FillMend ON cold setup taps a moving opacity control — 2026-10-24
 

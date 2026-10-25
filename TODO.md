@@ -2,80 +2,55 @@
 
 ## Current source and next actions — 2026-10-25
 
-Main/origin remain afd2030c; no merge, push or iPad install this pass. Integration tree is
-PaintApp-s54-mend-free-caps. Root accepted the exact ten-path replacement from committed f75a900c
-for harvest after independent V5 source review. The old32185179 distance-wave/circle-lookup path
-failed18/20 and is removed whole by this replacement. Live compiler/GPU controls have run but remain RED (latest69/71);
-UI/performance are UNRUN and whole4096 remains required. Do not ship or call a producer-only pass feature completion.
+Main/origin remain afd2030c; no merge, push or iPad install this pass. Integration source freeze4e2f36f1
+is in PaintApp-s54-mend-free-caps. Actual Debug71 passed71/71; owner iPad9 cold UI4 passed2/failed2.
+The feature is NOT qualified. Trace the actual UI reference/window route before another UI attempt.
 
-**Owner ruling, recorded before implementation:** Kevin says new interior Mend Gaps is required
-only for vector and engineering choices need no further approval. Continue while he sleeps. Cover
-interior and attached strokes, preserve the true outline and uncertain joins, and keep real-time
-feedback. Unknown flattened/reference content stays conservative; preserve the existing neighbor
-seam. No repeated capability question, second brush renderer, persisted stroke fields or old/new flag.
+**Owner ruling:** interior Mend Gaps is vector only; engineering choices need no further approval.
+Continue actionable work while Kevin sleeps, with agents and concise updates. Cover interior and
+attached strokes, preserve the outside outline and uncertain joins, and keep real-time feedback.
+Unknown flattened content stays conservative. No second renderer, persisted stroke fields or old/new flag.
 
-**Active fill work:** corrected canonical producer at b849ffc1 passed all7 selected methods, zero
-failures/skips/expected, on owned39E M5, with729 exact source entries before/after. Root accepted
-the actual result. It uses the existing render walk/bounds, full contact/halo coverage, indexed
-contributor closure and bounded storage. Earlier capacity refusals and reversed retrace defect were
-corrected without widening limits or weakening contour/cap oracles. The temporary diagnostic was
-removed whole. Evidence: `native/canonical7-b849ffc1-run03/root-independent-acceptance.json` and
-`canonical-continuation-harvest/`; earlier failed results remain preserved at their original pins.
-The reviewed live replacement at f75a900c has one actual frozen-reference factory, one pre-admitted
-aggregate Input/unknown pair across chosen references, one session-owned geometry packet/stencil,
-exact SOURCE completion ownership, physical-ink bits distinct from synthetic walls and the unchanged
-neighbor seam. It drops redundant Frozen/maps/memo captures and per-reference slice/merge copies;
-zero-unavailable stencils cache once and keys invalidate before rewrites. Exact empty-vector
-placeholders do not veto lower references. Seven product and three existing test paths replace the
-failed path; no new file, method, persisted field or PBX identifier. Actual canonical vector fixtures
-replace unsupported raster-positive premises while original FillObject result/undo/exterior assertions
-remain byte-exact. Strict OPEN-on-INK/SOURCE255 GPU coverage is added. Root reviewed the separate
-LASSO_FILL spec removal; author stale TODO/HANDOFF/BUGS are not copied. Independent receipt:
-`vector-mend-independent-proof/live-v5-source-review/receipt.json` (e0609bf3).
-Actual Debug71 at2972c7c4 compiled and executed71:54pass/17fail,0skip/expected, exact729source
-on owned39E. All17 StrokeWall pass;12FillMend and5FillObject fail. Factory-driven canonical coverage
-is empty, contacts are absent, live preparation never publishes and batch reports unchanged. The two
-earlier compiler-only attempts and their local-name corrections remain preserved; product behavior
-was unchanged. Record before one isolated factory diagnostic of context/image metadata, builder
-admission and packet counts. Identify the rejected stage before changing any guard. Preserve all
-cap/contour/batch assertions. Ordinary UI and whole4096 source work wait for this shared native path.
-Runtime is NOT qualified. The one-selector diagnostic atb976c1f4 retained its failures and
-proved UIKit's non-bitmap drawing context reports cg.width/cg.height0 while CTM/clip/frame and actual
-source CGImage are native96. Builder admission succeeds; the false context-size guard yields0inputs/
-1whole-window unknown. Record before removing temporary prints whole, then move output dimensions to
-actual completed UIImage/CGImage validation while preserving transform/clip/source-stage checks.
-No guard is waived by a shape exception. The exact two-path fix is integrated atc2678676. Its actual Debug71 rerun is69pass/2fail,
-0skip/expected, exact729/owned39E. All28FillObject and17StrokeWall pass; whole straight/curved/Rough
-caps pass. Remaining FillMend assertions:1362 local unknown protection must remain local,844 whole
-uncovered body after Edge Overlap,850 remote attached body. Record before diagnosing those two shared
-geometry/Reach cases; keep all original expectations. Whole4096 and ordinary UI remain on hold until
-the native path is qualified. Evidence: `native/v5-normal71-c2678676-run01/`.
-Source confirms nonstroke objects never populate Frozen.known; a finite unknown fill became full-window
-unknown. Reuse existing derivedFootprint and the builder's one transient meter; encoded bytes are an
-input/work proxy, not a native decode peak bound. Keep unbounded autosize text and invalid geometry
-unknown, draining temporary decode owners before credit. The Reach fixture has actual neighboring/
-overlapping detached-cap and attached-stem ink; record before one bounded existing-selector test-only
-diagnostic of missing coordinates, actual ink topology and CPUeligible interpretation. No production,
-shader, fixture, assertion or limit changes in that diagnostic; do not call CPUeligible GPU readback.
-Actual test-only Reach diagnostic at5df128ea retained1RED and0skips. It records0/60 missing
-body/attached pixels for10px/Overlap2,0/100 for10px/Overlap0,28/0 for16px/Overlap6. Every missing
-pixel is CPU-ineligible in the actual factory packet; actual reference ink confirms the unintended
-contact/overlap. This is not GPU stencil readback. No Reach arithmetic defect is established. Record
-before restoring the temporary test file whole and considering a separated geometry premise with
-all original width/short-Reach/outside assertions retained plus an explicit joined safety control.
-**Recorded engineering correction:** exact unknown-locality fix7ad79c11 is harvested at36b82a87,
-reusing the shared footprint helper/meter with no cache or saved fields. The Reach positive fixture's
-endpoint65 is shortened to55, leaving every original body-width/short-Reach/outside assertion intact.
-Add a premise based on actual per-stroke RGBA with a one-cell collar; retain the original joined10/16
-geometry as explicit GPU join-protection and far-body-positive controls atReach40. This isolates width
-from the observed unrelated join without removing safety coverage. Four new assertions require normal
-71 then meaningful assertion faults; no fixture-only control receives product-fault credit. Record
-before applying exact test proposald915ecf0; no shader/Reach math changes. All native gates remain open.
-Whole4096 resampling and same-budget window refinement remain required OPEN engineering work.
-The reviewed ImageWarp scale-stage proposal shares one work account and prepares geometry before
-filtering/core allocation. Its isolated source grant is paused after actual71 failures, before any
-sampler/producer edit. Diagnose native factory acceptance first; source review is not runtime proof.
-Proposal: `imagewarp-scale-extension-v2/plan.md`.
+**Native source:** the frozen-reference replacement removes failed32185179 distance/circle machinery
+whole. It uses the existing brush walk, one selected/excluded frozen list and aggregate support owner,
+one session packet and SOURCE-keyed stencil, physical-ink bits distinct from path walls, and the
+existing neighbor seam. Actual diagnostics found two root causes: UIKit's non-bitmap context reports
+0×0 despite a valid image, and nonstroke objects never enter the stroke-only measured-bounds table.
+Dimensions now validate on the completed image; finite unknown objects reuse existing derivedFootprint.
+The same transient meter admits encoded input/work, with temporary decode objects drained before credit;
+this is not a proved opaque native decode peak. Unbounded autosize text and invalid geometry stay unknown.
+All temporary factory/Reach prints were removed whole, with729-source restoration receipts.
+
+**Actual logic gate:**4e2f36f1 Debug71=71passed,0failed/skipped/expected, owned39E, exact729 immutable/
+before/after/current sources and71 method identities independently checked. Whole straight/curved/Rough
+caps and all28 FillObject/17 StrokeWall pass. The width fixture's original strokes genuinely touched;
+endpoint55 isolates its width probes without altering any old assertion. Actual one-cell ink separation
+is asserted, and original joined10/16 arrangements remain GPU join-negative/far-positive controls.
+Evidence: `native/v5-normal71-4e2f36f1-run01/root-independent-acceptance.json`.
+Earlier54/17 and69/2 results and their actual diagnostics remain preserved at their named pins.
+
+**Actual owner UI gate:** whole FillMendUITests4 on owned56CC iPad9 at4e2 passed neighbor seam and
+extension; new fill266 and Mend All302 failed attached-body coverage. Root LOOKed all7 retained named
+whole-screen PNGs at2160×1620 (1080×810@2), plus both video-derived final failure frames. Both entire
+interior stroke gaps remain; Mend All displays its no-gaps notice. Two later post-action captures and
+undo/redo were not reached. Source729 remains exact; no retries or source changes. Record before
+read-only stage/window/reference diagnosis or a bounded probe; do not infer scaling is the cause.
+Evidence: `native/owner-ui4-4e2-run01/`; owner-screen-metadata.json preserves originals and orientation.
+
+**Scaled route, separate and uncompiled:** author0cab26de in PaintApp-s54-mend-scale-stage is a frozen
+nine-path checkpoint, not harvested. Shared ImageWarp crop/inverse support and recursive cancellation
+have independent source review; actual sampling, cumulative request work/byte phases, fitted window
+consumers, old-core coexistence and final publication remain under review. No cache or renderer clone.
+Four new methods give FillMend28+FillObject28+StrokeWall17+RasterSampling13=86; no new file/PBX identifier.
+Whole4096 useful output, real source preservation, owner-size appearance A/B and cold/hot counts remain
+required. Do not call native1:1 logic proof or a conservative refusal whole-canvas completion.
+Frozen patch: `scale-live-owner-draft-v3/source.patch` (a97caabe); all9 hashes match0cab26de.
+
+**New assertion controls:** the locality/Reach5 plan is OFFLINE ONLY at4e2 (3 product/2 premise
+identities). Preserve its original candidate and use a separately named packet for the reviewed broad
+unsafe-target bypass; never silently substitute or claim stencil-only isolation. Repin final source
+and normal baseline before execution. All4 new fixture assertions need actual meaningful fault proof;
+fixture-only controls receive no product credit. Other final gates are listed below.
 
 **Raster admission correction:** root integrated the reviewed finite weak-metadata eviction pass
 at d4d7c523. It orders candidates once outside the mutex, rechecks current accounting/registration
@@ -92,7 +67,8 @@ Root independently re-extracted actual results and computed the same medians; al
 restored before every test and at final cleanHEAD. The finite pass was cheaper in this isolated
 comparison; see PERFORMANCE.md for exact numbers/limits. No whole-admission, scene, RSS or iPad claim.
 Evidence: `vector-mend-independent-proof/raster-ordering-paired-cost/prepared-run02/root-independent-acceptance.json`.
-Native lease is released; last temporary benchmark product must not be used for ordinary UI/install.
+Native lease is released. The current normal4e2 product passed logic but failed the owner UI feature;
+it is not a qualified install. The old temporary benchmark product is not an ordinary build.
 
 **Audit evidence, keep identities distinct:** first29 targets outside the original78 are qualified
 at all53 distinct approved statements (69 case-bound receipts); final media fix reaches all16 new
