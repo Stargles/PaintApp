@@ -2579,3 +2579,10 @@ The top drawn outline lies above the artwork; actual pictures touch the artwork 
 test-geometry defect, separate from actual free-cap mending holes. Reuse aspect-fit geometry in
 the existing helpers with a defaulted explicit canvasSize; preserve every square caller. Record
 and validate the full visible enclosure without adding another screenshot-only test or helper.
+
+Actual follow-up5cd447c1: the existing aspect-fit paper helpers now take the actual2048x1024 size.
+Whole FillMendUI4passed/0skip,728source entries exact/clean, owner landscape; root LOOKed bounded
+four-sided fill. Geometry bug corrected, unmerged. The three six-pixel free caps remain on both new
+fill and batch pictures. Independent evidence: s54-final-qualification/native/
+fill-paper-fixture-5cd447c1-run01/root-independent-acceptance.json. Separate cap logic5ae regression
+failed exactly at all12transparent cap pixels while body/existing40px checks reported no failures.

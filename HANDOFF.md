@@ -25,8 +25,8 @@ cap patches beneath interior strokes. Both detached ends and the attached stem F
 each is6 white displayed pixels. They are hundreds of pixels from the outside outline join. The
 owner's protect-uncertain-joins policy does not justify these holes; existing body probes missed them.
 Recorded BEFORE code on tmp/s54-mend-free-caps (initial scopee409378f), in BUGS and this existing fill
-ask. Bake traces/proposes the shared rounded-cap normal/corner proof; Startup independently reviews.
-No source/logic/UI change yet. Preserve all equal-nearest witness checks, original outer edge,
+ask. Bake proposes the shared bounded geometry correction; Startup independently reviews.
+The committed logic cap regression is actually RED; the two-file paper fixture correction is green. Preserve all equal-nearest witness checks, original outer edge,
 protected hole/notch/rim/fence cases and uncertain joins. No generic small-hole closer, second fill
 pipeline, persistent setting or appearance-policy change. Add discriminating full-cap coverage using
 existing seams after the concrete cause/proposal is accepted; commit before deliberate faults.
@@ -72,6 +72,26 @@ app ID, product change or xform inversion. This fixes the actual four-sided encl
 supports future non-square fixtures. Root grants only the two named test files after this record;
 cap-pixel UI assertions and product proof remain separate pending scopes. Preserve all original
 captured evidence and outside/undo assertions. Native class/owner-picture validation follows commit.
+
+Actual test-only paper correction5cd447c1 now passed the WHOLE FillMendUITests4:4unique/4passed,
+0failed/skipped/expected, native0/wrapper0. All728 source entries stayed exact and clean, correct
+owner9 landscape. Raster LOOKed9whole pictures; root independently reconciled4actual identities,
+current source/counts and LOOKed new-fill/batch before/after. The red fill is now bounded inside paper
+on all4sides; the SAME3six-pixel free-cap holes remain in both ON and batch. This fixes only fixture
+geometry and does not close the product gap. Evidence: s54-final-qualification/native/
+fill-paper-fixture-5cd447c1-run01/{completion-evidence,root-independent-acceptance}.json.
+Native lease released. Product remains byte-identical8bb; no product edit has been granted.
+
+Recorded/accepted next TEST-ONLY scope BEFORE edits: extend only existing FillMendUITests with3
+geometry-derived interior free-cap collars. Reuse its private ScreenshotPixels extension for ONE
+predicate-count rectangle helper over every displayed native pixel; no duplicated scan, pixel reader,
+app hook or test method. Existing4methods/body/outer-edge/undo assertions remain. ON must show zero
+non-red pixels in all3collars; batch OFF must expose bare pixels, and batch/redo must show zero.
+Collars derive from original endpoints, remain inside enclosure/above dock and use the SAME isRed.
+Exact reviewed proposal34a91f8fb97b5d8a7f4b9414817c6e219b081ec4e256967de32484ef956cc9d4 is external
+owner-screen-evidence/mend-free-cap-ui-proposal-5cd447c1/proposal.diff. Commit before native2consumer
+RED on unchanged product; actual semantic fault qualification follows an eventual safe green fix.
+No product grant, no hidden-history policy, no new persistent data/cache or full-image CPU fill pass.
 
 ## Qualification and gates
 
