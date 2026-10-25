@@ -50,6 +50,7 @@ nonisolated final class H264StreamDecoder {
     }
 
     private let queue: DispatchQueue
+    private let retireSession: (VTDecompressionSession) -> Void
     // Admission and epoch share the existing slot lock. No queue of compressed access units.
     private var inputBusy = false
     private var epoch: UInt64 = 0
@@ -92,14 +93,28 @@ nonisolated final class H264StreamDecoder {
     /// a notification validated here may otherwise outlive reconnect. Fires once per gap.
     var onNeedsKeyframe: ((UInt64) -> Void)?
 
-    init(queue: DispatchQueue = DispatchQueue(label: "PaintSoftware.ScreenStream.decode", qos: .userInitiated)) {
+    init(queue: DispatchQueue = DispatchQueue(label: "PaintSoftware.ScreenStream.decode", qos: .userInitiated),
+         retireSession: @escaping (VTDecompressionSession) -> Void = H264StreamDecoder.retireNativeSession) {
         self.queue = queue
+        self.retireSession = retireSession
     }
 
     deinit {
         if let session {
-            VTDecompressionSessionInvalidate(session)
+            Self.enqueueFinalRetirement(session, on: queue, using: retireSession)
         }
+    }
+
+    /// Final release can happen on main. Keep only the native session and cleanup operation alive
+    /// until the existing decode queue can finish, without retaining this decoder.
+    private static func enqueueFinalRetirement(_ session: VTDecompressionSession, on queue: DispatchQueue,
+                                               using retire: @escaping (VTDecompressionSession) -> Void) {
+        queue.async { retire(session) }
+    }
+
+    static func retireNativeSession(_ session: VTDecompressionSession) {
+        VTDecompressionSessionWaitForAsynchronousFrames(session)
+        VTDecompressionSessionInvalidate(session)
     }
 
     // MARK: - Input
@@ -357,8 +372,7 @@ nonisolated final class H264StreamDecoder {
 
     private func tearDownSession() {
         if let session {
-            VTDecompressionSessionWaitForAsynchronousFrames(session)
-            VTDecompressionSessionInvalidate(session)
+            retireSession(session)
         }
         session = nil
     }

@@ -23,7 +23,7 @@ Actual unrelated422 passed at b827cbfc with three ThreadPerformanceChecker warni
 trace confirms one production-reachable ownership defect: final H264 native cleanup can execute on
 main when weak client stop is overtaken by final release. Design a narrow transfer of only that
 session to its existing serial queue, with one shared native cleanup operation; no self/client capture,
-new queue or QoS increase. No fix granted yet. The reset warning is already worker-owned; this run's
+new queue or QoS increase. A narrow fix is integrated from a58498bd; native qualification remains pending. The reset warning is already worker-owned; this run's
 video warning is the test's direct pixel oracle. Separate synchronous production video UI pulls are
 source-confirmed risks, not a measured slowdown or eraser cause. Report:
 `s54-final-qualification/media-qos-trace-683f40a3.md`; actual422 evidence remains at its true pin.

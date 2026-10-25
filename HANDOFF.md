@@ -37,28 +37,39 @@ records-only pins; do not retag the old binary. First29 fault targets are being 
 palette4, metadata4, curve7;14selectors/69 meaningful statements inherited from accepted107 map.
 Root must inspect exact recipes/source locations and explicitly grant one-Mac native execution.
 Stop on compiler/crash/setup failure or unexpected green; rebuild normal after mutations before UI.
-Stream/media are omitted from29; remaining78 targets stay queued. First4 corrected palette/storage
-controls now QUALIFY at21ad2b7d: root independently reread all4 actual native results,1failed method
-each,13located meaningful assertion failures, full728 exact/clean. Case3's later TrashItem unwrap169
-is the direct missing-quarantine consequence AFTER intended recovery failures166/168: it does not
-invalidate those two reached oracles, but is NOT an additional qualified assertion; final Trash-byte
-assertion170 was unreached. Earlier setup/unrelated masking failures still disqualify. All actual
-issues must remain visible. Root receipt: native/corrected-fault-tranche29-21ad2b7d-run01/
-root-independent-qualified-first4.json. Interrupted case5 and24unstarted =25stillunqualified; prepare
-ONLY those25 unchanged recipes/maps, then rootreview/grant. Do not rerun first4. Normal422 follows
-remaining25; compiled objects currently require normal rebuilding before UI/install. Native lease
-RELEASED. Prior reversed-predicate control1/1green remains excluded; corrected guardtrue reaches bad
-swatches. Restored normal ColorPicker32/32 was separately rootaccepted, fresh Palette BOTHtargets.
-No product/test change was needed for the ineffective control or the missing-Trash consequence.
+Stream/media are omitted from29; remaining78 targets stay queued. Root has independently accepted
+first4 at21ad plus remaining25 at1195 (56 actual mapped issue instances total); all29 targets reached
+intended semantic assertions. Original ineffective control/interrupted case remain excluded. Secondary
+post-state failures are preserved separately, not counted as additional primary oracles. Source728
+restored exact; post-fault normal422 at1195 passed422/422,0skip/expected, same39E/18classes. Evidence:
+`native/fault-remaining25-1195db75-run01/root-independent-qualification.json` and normal acceptance.
 
-Media trace found a concrete final-owner defect: H264StreamDecoder deinit can invalidate its native
-session on the releasing/main thread after weak client stop loses ownership. Design a tiny transfer
-of only that session to the existing serial queue and one shared real wait/invalidate operation.
-No self/client capture, second queue, observer-only retained fields or priority bump. Narrow production
-scope is the decoder and existing test file; implement only after the current native freeze is clear.
-The reset warning already runs on a worker; this run's video warning is the test's direct pixel oracle.
-Separate synchronous video UI pulls remain an unmeasured risk, not the eraser cause. Reports:
-`media-qos-trace-683f40a3.md` and `media-qos-retirement-seam-683f40a3.md` under s54-final-qualification.
+**Assertion coverage is not finished:** the69 receipts describe53 unique statements;45 were actually
+hit by approved native failures. Root inventoried8 still-unproved statements (curve return ticks,
+endpoint/neighbor preservation, valid-palette bytes and archived damaged bytes). Prepare8 focused
+external controls; do not change product/tests or count unreached assertions. Inventory:
+`native/fault-remaining25-1195db75-run01/root-assertion-coverage-inventory.json`. Native lease RELEASED.
+
+**Media final-owner fix integrated from a58498bd:** the final VT session is transferred to the decoder's
+existing serial queue; reset/rebuild/final release share one native wait/invalidate operation. Product
++18/-4, test+150/0, exactly2files; all old8tests unchanged,3newmethods/16 meaningful assertions. Final
+cleanup captures session/operation, no decoder/client. New tests use deterministic queue fences rather
+than wait for the cleanup/completion being tested; inflight release uses two fences. No new queue,
+QoS/video/client/PBX change. Native compiler/11-method class and15 external recipe/16assertion controls
+remain UNRUN; source inspection/static lints are not qualification. Next normal18class slice should
+count425 (422+3), excluding FillMend. Root will reconcile actual static/native counts before faults.
+Reports/plans: `media-retirement-a58498bd-offline/`; sourceauthor branch preserved.
+
+**Fill design remains unproved, no new product patch:** independent finite models reject tangent-only
+or nearest-face shortcuts (sharp corners, non-nearest unfilled contacts and gapped centerlines whose
+physical ink is closed). Global min/max chronological dab IDs can also withhold an entire retraced
+interior stem. Those variants are not approved for implementation. One source-keyed protected-footprint
+stencil with complete parameter-local support certificates is now being designed through existing
+brush rendering; unknown joins protect whole contributors. Real CPU/GPU source availability, full
+coverage, cache invalidation and bounded cost must be concrete before coding. No second renderer or
+new planar-graph subsystem is assumed. Reports: `vector-mend-independent-proof/` and current-vector
+seam feasibility reports. Current failed321 remains unshippable until replaced and qualified.
+
 
 **Device:** install is off immediate priority; owner authorizes future qualified installs. Review
 Releaseee36770d built/signature verified (UUIDF699A856-9C3F-34F1-AE99-E7C221BF9FF8), but profile
@@ -71,7 +82,7 @@ actually ready for physical restart/install. Preserve all real artwork and origi
 new107/UI13/mask6positive+11faults; normal rebuild; fast Debug AND Release; touched whole UI classes,
 full phase; paired16ReleaseABBA; genuine256-package previous-writer cold UI; ordinary old workflows;
 fresh saved/export/signed device, eraser all-process capture and owner artwork confirmation. Source
-static5398fast/5987full/398classes/PBX1327 is not native qualification. Earlier named gates/receipts
+static5401fast/5990full/398classes/PBX1327 is not native qualification. Earlier named gates/receipts
 remain valid only at their pins and unchanged source scopes. Erasing respring cause is unproved.
 Retire the temporary format converter/UI whole only after owner confirms current real artwork.
 

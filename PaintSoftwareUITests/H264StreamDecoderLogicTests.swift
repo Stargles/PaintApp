@@ -24,6 +24,13 @@ final class H264StreamDecoderLogicTests: XCTestCase {
         wait(for: [settled], timeout: 5)
     }
 
+    /// Feed completion precedes its queued closure's final release of the decoder.
+    private func finishQueuedWork(on queue: DispatchQueue) {
+        let finished = expectation(description: "earlier decode work returned")
+        queue.async { finished.fulfill() }
+        wait(for: [finished], timeout: 5)
+    }
+
     private func fixtureBytes() throws -> Data {
         let url = try XCTUnwrap(Bundle(for: H264StreamDecoderLogicTests.self)
             .url(forResource: "stream-testsrc-640x360", withExtension: "h264"),
@@ -181,6 +188,149 @@ final class H264StreamDecoderLogicTests: XCTestCase {
         feed(decoder, StreamVideoPayload(isKeyframe: false, presentationTimeMicroseconds: 0, accessUnit: Data()))
         XCTAssertTrue(decoder.latestCGImage() === complete, "Reset keeps the last complete displayed image")
         XCTAssertEqual(decoder.decodedFrameCount, count)
+    }
+
+    @MainActor
+    func testFinalSessionRetirementUsesTheDecodeQueueWithoutKeepingTheDecoderAlive() throws {
+        let payloads = try wireFrames(from: accessUnits(in: fixtureBytes()))
+        for resetCount in [0, 2] {
+            let queue = DispatchQueue(label: "test.stream.decode.final.\(resetCount)")
+            let queueKey = DispatchSpecificKey<Int>()
+            queue.setSpecific(key: queueKey, value: 1)
+            let lock = NSLock()
+            var retirementCount = 0
+            var retiredOnDecodeQueue = true
+            var decoder: H264StreamDecoder? = H264StreamDecoder(queue: queue, retireSession: { session in
+                let onDecodeQueue = DispatchQueue.getSpecific(key: queueKey) == 1
+                H264StreamDecoder.retireNativeSession(session)
+                lock.lock()
+                retirementCount += 1
+                retiredOnDecodeQueue = retiredOnDecodeQueue && onDecodeQueue
+                lock.unlock()
+            })
+            weak var releasedDecoder = decoder
+            feed(decoder!, payloads[0])
+            finishQueuedWork(on: queue)
+
+            queue.suspend()
+            var suspended = true
+            defer { if suspended { queue.resume() } }
+            for _ in 0..<resetCount { decoder!.reset() }
+            decoder = nil
+            XCTAssertNil(releasedDecoder, "Queued final cleanup and weak resets must not retain the decoder")
+            lock.lock(); let beforeResume = retirementCount; lock.unlock()
+            XCTAssertEqual(beforeResume, 0, "Final native cleanup must wait for its suspended decode queue")
+
+            queue.resume()
+            suspended = false
+            finishQueuedWork(on: queue)
+            lock.lock()
+            let count = retirementCount, onDecodeQueue = retiredOnDecodeQueue
+            lock.unlock()
+            XCTAssertEqual(count, 1, "Final ownership retires its one native session exactly once")
+            XCTAssertTrue(onDecodeQueue, "Final native cleanup must run on this decoder's queue")
+        }
+    }
+
+    @MainActor
+    func testRepeatedResetRetiresEachSessionOnceBeforeRecreation() throws {
+        let payloads = try wireFrames(from: accessUnits(in: fixtureBytes()))
+        let queue = DispatchQueue(label: "test.stream.decode.reset.retirement")
+        let queueKey = DispatchSpecificKey<Int>()
+        queue.setSpecific(key: queueKey, value: 1)
+        let lock = NSLock()
+        var retirementCount = 0
+        var retiredOnDecodeQueue = true
+        var retirementsBeforePictures: [Int] = []
+        var decoder: H264StreamDecoder? = H264StreamDecoder(queue: queue, retireSession: { session in
+            let onDecodeQueue = DispatchQueue.getSpecific(key: queueKey) == 1
+            H264StreamDecoder.retireNativeSession(session)
+            lock.lock()
+            retirementCount += 1
+            retiredOnDecodeQueue = retiredOnDecodeQueue && onDecodeQueue
+            lock.unlock()
+        })
+        decoder!.onFrame = {
+            lock.lock(); retirementsBeforePictures.append(retirementCount); lock.unlock()
+        }
+        feed(decoder!, payloads[0])
+        finishQueuedWork(on: queue)
+        let empty = StreamVideoPayload(isKeyframe: false, presentationTimeMicroseconds: 0, accessUnit: Data())
+
+        queue.suspend()
+        var suspended = true
+        defer { if suspended { queue.resume() } }
+        decoder!.reset()
+        decoder!.reset()
+        let recreated = expectation(description: "real replacement IDR settled")
+        XCTAssertTrue(decoder!.feed(payloads[0]) { recreated.fulfill() },
+                      "The replacement IDR is admitted after the two queued resets")
+        queue.resume()
+        suspended = false
+        wait(for: [recreated], timeout: 5)
+        finishQueuedWork(on: queue)
+        lock.lock()
+        let firstRetirementCount = retirementCount, beforePictures = retirementsBeforePictures
+        lock.unlock()
+        XCTAssertEqual(firstRetirementCount, 1, "Repeated resets retire the current native session only once")
+        XCTAssertEqual(beforePictures, [0, 1], "The old native session must retire before its replacement publishes")
+        XCTAssertEqual(decoder!.decodedFrameCount, 2, "After retirement, another real IDR creates a usable session")
+        decoder!.reset()
+        decoder!.reset()
+        feed(decoder!, empty)
+        finishQueuedWork(on: queue)
+        lock.lock(); let secondRetirementCount = retirementCount; lock.unlock()
+        XCTAssertEqual(secondRetirementCount, 2, "The replacement session has one cleanup operation of its own")
+
+        decoder = nil
+        finishQueuedWork(on: queue)
+        lock.lock()
+        let finalCount = retirementCount, onDecodeQueue = retiredOnDecodeQueue
+        lock.unlock()
+        XCTAssertEqual(finalCount, 2, "Final release after reset must not retire an already-cleared session")
+        XCTAssertTrue(onDecodeQueue, "Reset cleanup must use the same decoder queue as final cleanup")
+    }
+
+    @MainActor
+    func testAdmittedWorkSettlesBeforeFinalSessionRetirementAfterReset() throws {
+        let payloads = try wireFrames(from: accessUnits(in: fixtureBytes()))
+        let queue = DispatchQueue(label: "test.stream.decode.admitted.retirement")
+        let lock = NSLock()
+        var events: [String] = []
+        var pictures = 0, keyframes = 0
+        var decoder: H264StreamDecoder? = H264StreamDecoder(queue: queue, retireSession: { session in
+            H264StreamDecoder.retireNativeSession(session)
+            lock.lock(); events.append("retired"); lock.unlock()
+        })
+        weak var releasedDecoder = decoder
+        decoder!.onFrame = { lock.lock(); pictures += 1; lock.unlock() }
+        decoder!.onNeedsKeyframe = { _ in lock.lock(); keyframes += 1; lock.unlock() }
+        feed(decoder!, payloads[0])
+        finishQueuedWork(on: queue)
+
+        queue.suspend()
+        var suspended = true
+        defer { if suspended { queue.resume() } }
+        XCTAssertTrue(decoder!.feed(payloads[1]) {
+            lock.lock(); events.append("settled"); lock.unlock()
+        }, "The real next AU must be admitted before its epoch is retired")
+        decoder!.reset()
+        decoder!.reset()
+        decoder = nil
+        XCTAssertNotNil(releasedDecoder, "Admitted work owns the decoder until it has settled")
+
+        queue.resume()
+        suspended = false
+        // The admitted closure can enqueue final retirement behind the first sentinel as it exits.
+        // A second sentinel also fences that cleanup, even when a fault omits either observed event.
+        finishQueuedWork(on: queue)
+        finishQueuedWork(on: queue)
+        lock.lock()
+        let order = events, arrived = pictures, requested = keyframes
+        lock.unlock()
+        XCTAssertEqual(order, ["settled", "retired"], "Final native cleanup follows the one admitted completion")
+        XCTAssertEqual(arrived, 1, "The retired AU cannot publish a picture after the establishing IDR")
+        XCTAssertEqual(requested, 0, "Retired work cannot request a keyframe for a replacement run")
     }
 
     /// **Nothing decodes before a keyframe, and a keyframe is asked for.** Feed the P-frames after
