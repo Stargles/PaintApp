@@ -460,7 +460,7 @@ extension CanvasManager {
                       let at = self.layers[layer].cels.firstIndex(where: { $0.id == celID }) else { return }
                 if self.layers[layer].cels[at].vector == nil { self.layers[layer].cels[at].vector = .empty(size: canvasSize) }
                 guard let vector = self.layers[layer].cels[at].vector else { return }
-                vector.restoreElements(elements, changedInk: nil, rewriting: [])
+                vector.commitTextEdit(editingID: ended.editingID, element: element)
                 self.registerVectorElementsUndo(vectorCanvas: vector, oldElements: before,
                     newElements: elements, layerID: layerID, celID: celID,
                     label: ended.editingID == nil ? .addText : .editText,
