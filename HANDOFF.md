@@ -10,84 +10,79 @@ is authorized by an old readiness answer: obtain fresh saved-scene readiness whe
 
 ## Current source and next actions — 2026-10-25
 
-Main/origin remain afd2030c; no merge, push or iPad install this pass. Latest qualified logic freeze2da54484
-is in PaintApp-s54-mend-free-caps. Actual Debug86 passed86/86, including useful4096 factory/GPU output.
-The earlier owner iPad9 cold UI4 at4e2 passed2/failed2. The feature is NOT qualified; finish shared
-fresh-raster proof and its worker invocation before the next owner UI attempt.
+Main/origin remain afd2030c; no merge, push or iPad install this pass. Integrated source83380b76
+passed Debug126/126 and all4 FillMend UI tests on the owned iPad9 simulator. Root independently
+checked actual test identities, devices and all729 source entries, then LOOKed the owner-size pictures.
+Final fault, performance and combined release gates remain open; this is not an install qualification.
 
-**Owner ruling:** interior Mend Gaps is vector only; engineering choices need no further approval.
-Continue actionable work while Kevin sleeps, with agents and concise updates. Cover interior and
-attached strokes, preserve the outside outline and uncertain joins, and keep real-time feedback.
-Unknown flattened content stays conservative. No second renderer, persisted stroke fields or old/new flag.
+**Owner ruling:** interior Mend Gaps is vector only. Cover interior and attached strokes, preserve
+the outside outline and uncertain joins, and keep real-time feedback. Engineering choices need no
+further approval. Continue while Kevin sleeps, delegate useful work and report briefly. No duplicate
+renderer, persisted stroke fields or old/new flag. Unknown flattened content stays conservative.
 
-**Native source:** the frozen-reference replacement removes failed32185179 distance/circle machinery
-whole. It uses the existing brush walk, one selected/excluded frozen list and aggregate support owner,
-one session packet and SOURCE-keyed stencil, physical-ink bits distinct from path walls, and the
-existing neighbor seam. Actual diagnostics found two root causes: UIKit's non-bitmap context reports
-0×0 despite a valid image, and nonstroke objects never enter the stroke-only measured-bounds table.
-Dimensions now validate on the completed image; finite unknown objects reuse existing derivedFootprint.
-The same transient meter admits encoded input/work, with temporary decode objects drained before credit;
-this is not a proved opaque native decode peak. Unbounded autosize text and invalid geometry stay unknown.
-All temporary factory/Reach prints were removed whole, with729-source restoration receipts.
+**Fill implementation and root causes:** the frozen-reference replacement removes failed32185179
+circle/distance machinery whole. It extends the existing brush walk and ImageWarp sampler with one
+selected/excluded frozen list, cumulative request work meter, bounded support packet and source-keyed
+stencil. Physical ink remains distinct from path walls; the neighbor seam stays shared. Completed
+images, not UIKit's non-bitmap CGContext dimensions, validate rendering. Finite nonstroke footprints
+reuse derivedFootprint; unbounded autosize text/invalid geometry stay unknown. Encoded-input admission
+is not a measured opaque native decoder peak. No temporary factory/Reach diagnostics remain.
 
-**Actual logic gate:**2da54484 Debug86=86passed,0failed/skipped/expected, owned39E; all729 immutable/
-before/after/current sources and actual86 method identities independently checked. Whole4096 returns
-useful fitted support, certifies actual shared-filter stroke body/free caps and passes real GPU mend.
-FillMend28+FillObject28+StrokeWall17+RasterSampling13 all pass. This is no appearance/performance or final
-fast-tier qualification. Earlier4e2 native71green and54/17,69/2 failures remain preserved at named pins.
-Evidence: `native/scaled-normal86-2da54484-run01/root-independent-acceptance.json`.
+Shared RasterSource proof reuses the existing exact alpha scan on a pinned immutable lease through
+an explicitly admitted worker call. Its existing proof field caches inspected true AND false; cheap
+getters and snapshots do not scan. Backed sources do not decode eagerly. Scaled staging preserves
+localized vector unknowns, then the actual strict raster draw monotonically vetoes support whenever
+any raster is nonempty/unproved. A later clear source cannot re-promote it. No extra decode, capture
+replay, cache or budget. Reviewed Source d91efe48/caller5fde79b3 are integrated at83380b76.
 
-**Actual owner UI gate:** whole FillMendUITests4 on owned56CC iPad9 at4e2 passed neighbor seam and
-extension; new fill266 and Mend All302 failed attached-body coverage. Root LOOKed all7 retained named
-whole-screen PNGs at2160×1620 (1080×810@2), plus both video-derived final failure frames. Both entire
-interior stroke gaps remain; Mend All displays its no-gaps notice. Two later post-action captures and
-undo/redo were not reached. Source729 remains exact; no retries or source changes. Record before
-read-only stage/window/reference diagnosis or a bounded probe; do not infer scaling is the cause.
-Evidence: `native/owner-ui4-4e2-run01/`; owner-screen-metadata.json preserves originals and orientation.
+The scaled owner retires worker/readback aliases and completed command wrappers before growth;
+incremental allocation checks and typed pool scope retain cancellation/failure behavior. The displayed
+preview and borrowed document memos remain external owners; no whole-process/RSS-release claim.
+The earlier a977 compiler attempt ran0 tests;2da changed only its invalid nested typed-do scope.
 
-**Recorded UI diagnosis candidate:** both failing workflows deliberately rasterize an empty default
-Layer1 and retain its visible default fill-reference selection. Actual saved2048×1024 Layer1 pixels
-are all alpha0. Fresh RasterSource surface snapshots start with transparencyProven=false and their
-lease-resolution path does not establish it, so the factory can mark this clear layer full-window
-unknown. Backed-image reload can establish transparency and would miss the fresh-lease premise.
-Trace the actual empty-rasterize/live-version ownership before a fix; preserve immutable-version
-identity and the existing transparency proof, no factory color heuristic or disabling the reference.
-Add a fresh in-memory flow regression if confirmed. RasterSource/RasterBuffer scope is separate from
-the nine-path scaled owner. Record before implementation and do not call source reasoning native proof.
+**Actual logic:**83380b76 Debug126/126,0failure/skip/expected: FillMend28, FillObject28, StrokeWall17,
+RasterSampling13, RasterResidency40. The useful whole4096 factory, actual shared-filter stroke bodies
+and free caps, real GPU mend, fresh blank/strict cold-backed clear sources and painted-source vetoes
+pass. Root acceptance: `native/combined-normal126-83380b76-run01/root-independent-acceptance.json`.
+Earlier2da86green and4e2native71green remain named evidence, not retagged results.
 
+**Actual owner UI:**83380b76 whole FillMendUITests4/4,0failure/skip/expected, iPad9 landscape1080×810.
+New fills and Mend All cover detached/attached bodies and free ends; exterior stays white and a tiny
+uncertain-outline-join notch stays protected. Extension and neighbor-seam controls pass. Batch undo
+and redo reach their unchanged drawn assertions. Nine named whole-screen PNGs include six unique
+pictures; root LOOKed all six and checked the duplicate bytes. No separate undo/redo captures exist.
+Root LOOK/acceptance: `native/owner-ui4-83380b76-run01/root-screen-look.json` and
+`root-independent-acceptance.json`. Prior4e2 UI2pass/2fail and its gap screenshots remain preserved:
+a fresh empty raster reference lacked an admitted transparency proof. Those failures are resolved
+by the current named run, not silently discarded.
 
-**Scaled route, integrated and first native slice green:** reviewed author94980fdb's nine source
-paths were harvested exactly at a9773c9c. Its first compiler attempt ran0 tests because a nested typed
-`do` had no catch;2da54484 changes only that lexical scope and actual Debug86 passes86/86. Worker core/
-readback aliases and completed command wrappers retire before growth; incremental allocation valves
-and typed pool scope preserve failure/cancellation. The displayed preview and borrowed document memos
-remain external owners; no total-process/RSS release claim. One existing sampler/request meter; no
-cache, renderer clone, persisted field or new file/PBX identifier. Whole4096 useful factory/actual ink/
-GPU output now passed at2da; appearance A/B, source/fence controls and cold/hot counts remain OPEN.
-Shared clear-raster proof must precede scaled unknown classification. Use an explicit admitted worker
-operation over the currently pinned immutable lease, reuse the existing exact alpha scan, and cache
-inspected true/false through the existing proof field. Cheap getters/snapshot stay scan-free. No lease
-means cached fact or conservative unknown without IO/eager decode/new image; strict later backed
-resolution retains its existing proof/error behavior. Both native/scaled callers use the same Builder
-work allowance, no second budget or generic throwing API. Source/caller/tests are being reviewed.
-Evidence: `scale-stage-reviewed-94980fdb/receipt.json`; allocation review9dcac7d8; native2da86green.
-Shared Source d91efe48 and caller5fde79b3 are jointly source-reviewed and harvested (six paths,
-no author docs). Three new RasterResidency methods give37→40; combined first Debug126 is next:
-FillMend28+FillObject28+StrokeWall17+RasterSampling13+RasterResidency40. Static fast5420/full6009;
-no new file/PBX. Actual native Source/caller qualification is still UNRUN. Joint review7850e0af.
-A separate source-confirmed cold-backed-clear ordering issue is recorded BEFORE its caller correction:
-scaled staging must defer raster/baked whole-window safety to the existing final strict-draw check.
-Stage vector/localized unknowns unchanged; after each actual raster draw, monotonically downgrade the
-existing support override to unavailable if a source remains nonempty/unproved. This equals today's
-whole-window unknown veto; a later clear source cannot re-promote it. No capture retention/replay,
-extra decode/cache/budget or anonymous-span deletion. Add first-cold scaled clear usefulness, both
-clear/painted orders and exact RGBA/one-pixel veto controls. Native/cold UI qualification remains OPEN.
+**Fault checks now queued:**29 reviewed cases,9 selectors,27 product/2 premise cases target26 unique
+product and2 premise statements. They combine locality/Reach5, scaled9 and Source15. Source83380 is
+committed before mutation; a separate exact729-file tree PaintApp-s54-controls29 isolates the run
+from integration work. The driver stops on compiler/crash/setup/inconclusive/unexpected-green and
+restores exact sources. Root must extract actual mapped statements and review causality; a generic
+assertion-red banner is not qualification. Normal-source rebuild follows compiled faults. Packets:
+`reviewed-controls29-83380b76-isolated-v2/`. Original rejected/unrun plans remain historical evidence.
 
-**New assertion controls:** the locality/Reach5 plan is OFFLINE ONLY at4e2 (3 product/2 premise
-identities). Preserve its original candidate and use a separately named packet for the reviewed broad
-unsafe-target bypass; never silently substitute or claim stencil-only isolation. Repin final source
-and normal baseline before execution. All4 new fixture assertions need actual meaningful fault proof;
-fixture-only controls receive no product credit. Other final gates are listed below.
+**New bounded text audit fix — recorded before harvest:** the0.05 scale floor defeats the existing
+4096-texel glyph cap beyond81920 document points (100000×400 requests5000×20). Reviewed310357ce
+shares one finite raster-scale function among overlay, warped source and rasterizer, removes duplicate
+cap/floor spellings and preserves unlimited document geometry. Four actual raw UIKit probe controls
+refuted an unnecessarily strict raw-short-axis>=1 premise: positive fractional axes render within the
+cap. The corrected source accepts them. No schema, cache, renderer or point-size limit is added.
+Root will harvest ONLY the four reviewed source/test/spec paths; author scope bcfd and corrected
+review417ea63d precede harvest. All27 old TextLayout bodies remain exact;3new methods give30, with
+TextTransform52/Homography18 targeted (100 total) and whole TextSessionUITests4. App compilation,
+normal tests, meaningful fault checks and appearance are UNRUN. No full text/font audit claim.
+
+**New bounded graph-drag fix — recorded before harvest:** source83380 has three related lifecycle
+bugs: focus follows only the first moved frame; a nil readout leaves an old value visible; returning
+inside initial tap slop can commit the earlier displacement. Identity ticks also need to replace
+held affected curves with baseline and cancel empty undo. Scope0fe7bff4 is recorded in the isolated
+graph tree before implementation. Reuse TimelineGraphBand's shared value transition and existing
+coordinator/hold/undo owners; preserve unrelated channels. No new framework, persistent state, cache,
+file/PBX entry or evaluation/interpolation redesign. Logic controls must exercise the state actually
+consumed by the coordinator; cold drawn continuation/return/cancel controls remain required.
 
 **Raster admission correction:** root integrated the reviewed finite weak-metadata eviction pass
 at d4d7c523. It orders candidates once outside the mutex, rechecks current accounting/registration
@@ -104,8 +99,8 @@ Root independently re-extracted actual results and computed the same medians; al
 restored before every test and at final cleanHEAD. The finite pass was cheaper in this isolated
 comparison; see PERFORMANCE.md for exact numbers/limits. No whole-admission, scene, RSS or iPad claim.
 Evidence: `vector-mend-independent-proof/raster-ordering-paired-cost/prepared-run02/root-independent-acceptance.json`.
-Native lease is released. The current normal4e2 product passed logic but failed the owner UI feature;
-it is not a qualified install. The old temporary benchmark product is not an ordinary build.
+The old temporary benchmark product is not an ordinary build. Current83380 fill logic/UI gates pass;
+final controls, performance and release gates still prevent an install qualification.
 
 **Audit evidence, keep identities distinct:** first29 targets outside the original78 are qualified
 at all53 distinct approved statements (69 case-bound receipts); final media fix reaches all16 new
@@ -141,13 +136,16 @@ premise identities, with5 explicit limits. Broad load stays inconclusive; broad 
 Evidence: `native/gap16-faults-0ed70e80-run01/root-independent-qualification.json`. Isolated0ed is source-identical to c517 at these729 files; this is not blanket
 qualification of the new live replacement.
 
-**Remaining final gates:** finish live fill and its containment work; original logic/coldUI,
-undo/redo, owner1080x810 pictures actually LOOKed at, meaningful new assertion controls; close audit
-assertion gaps and separate UI13/mask6positive+11faults; normal rebuild; exact fast Debug AND Release,
+**Remaining final gates:** qualify meaningful new fill assertion controls and sampler appearance/cost;
+text and graph fixes need their own logic/fault/cold-UI gates. Close separate UI13/mask6positive+11faults;
+normal rebuild; exact fast Debug AND Release,
 touched whole UI classes/full phase, lints/PBX/graph; paired fill16 Release ABBA; genuine256-package
 previous-writer cold UI; ordinary old workflows; fresh saved-scene/export/readiness and qualified
 signed iPad build; separate actual Test1 erasing all-process capture and owner artwork confirmation.
-Current static5420fast/6009full/398classes/PBX1329 is not native final qualification. Earlier gates
+At83380 static5420fast/6009full/398classes/PBX1329 is not native final qualification; text/graph additions
+require a fresh census. Remaining audit boundaries are recorded in coverage-gap-reconciliation-5b8e5738:
+complete CPU/Metal effect parity, graph/tool/VectorLayer/text/font/panel bodies and platform delivery.
+The19 finding clusters are not exhaustive314-file review coverage. Earlier gates
 remain valid only at their named pins/unchanged scopes. Erasing respring cause remains unproved.
 Retire the one-shot format converter/UI whole only after owner confirms real artwork. Preserve the
 untouched original export, old071 paired product and all native results. Owner authorizes future
