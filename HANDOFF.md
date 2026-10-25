@@ -58,9 +58,11 @@ product focus defect. Record scope before changing only that new method, preserv
 oracle/public tap and adding visible-path premises. Shared touch helper stays unchanged.
 
 The existing text-colour method fails at emptyToolbarPoint:11.5pt clearance versus required44 in
-portrait. Its final colour assertions/capture are unreached; the recording also shows only partial
-colour movement, so trace both input and dismissal rather than weakening a guard or substituting a
-tool tap that ends text editing. Actual orientations are2landscape and8portrait. This is NOT a green
+portrait. Its final colour assertions/capture are unreached. The old near-end video sample was taken DURING
+the drag; sequential decode reaches actual lastPTS32.733333 at#FA0505, so there is no demonstrated
+colour-input defect. Preserve the old sample and named successor trace. Run ONLY this owner colour
+method in prelaunch landscape with actual width>height and XCUIScreen captures; retain the existing
+public drag, harmless tapAway44 and every colour/pixel/session outcome. No tool-tap substitution. Actual orientations are2landscape and8portrait. This is NOT a green
 whole-class/owner qualification. Preserve `native/owner-ui10-0e215b4f-run01/` and root red review.
 
 **Offline controls:** an isolated exact0e215 tree is preparing a named26-case successor: Text7,

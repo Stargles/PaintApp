@@ -17,7 +17,8 @@ Current queue (all items below remain until merged):
 
 - Resolve actual cold UI10 at0e215:8pass2fail. EditedText passes and three whole landscape pictures
   retain visible Hello. NewGraph gesture appears misdelivered to canvas; text-colour stops at a
-  toolbar-clearance premise. Preserve the red evidence and meaningful oracles; fresh rerun required.
+  toolbar-clearance premise. Actual final video colour reaches#FA0505; no input defect demonstrated.
+  Preserve the red evidence/oracles; run this colour method in owner landscape with whole captures.
 - Harvest independently reviewed new Blend UI7157; run whole class10 and LOOK four captures.
 - Execute root-reviewed isolated exact-source logic26 (Text7+Graph11+Blend7+text publication1), then rebuild
   normal source. Graph3/Blend3 UI faults require exact positive source/device first. Count actual
@@ -357,7 +358,7 @@ Inventory-only files are not reviewed code. New source is not called complete be
 - [ ] Newly traced text style update: preserve UITextView's full UTF-16 selectedRange while rebuilding
       attributes over identical text. Remove Character-count clamping and unconditional deselection;
       use actual existing view/update/insertText controls, no copied formula or new selection owner.
-- [ ] Resolve actual UI10 graph gesture delivery and text-colour input/dismissal premises without
+- [ ] Resolve actual UI10 graph gesture delivery and text-colour safe-dismissal premise without
       weakening product oracles, then fresh whole-class runs and whole owner pictures.
 - [ ] Finish file-level/independent review, new affected zero-skip baseline, actual assertion mutants,
       exact final fast Debug/Release, lints/PBX/graph, cold workflows/pictures and paired performance.

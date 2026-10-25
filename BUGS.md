@@ -43,8 +43,11 @@ Actual0e215 whole UI10:8pass2fail, exact source/device/methods. NewGraph596 rema
 of3; recording shows keys0,6 and a canvas no-drawing-surface warning. A test coordinate-contract
 correction using actual current band frame is recommended; raw screenPoint is unobserved, so double
 mapping remains inference. Existing Text colour172 fails harmless-toolbar clearance11.5<44 before
-its colour outcomes; recording also shows only partial SV movement. Preserve both failures/oracles,
-trace input and dismissal, then fresh committed whole-class evidence. EditedText restoration passes
+its colour outcomes. The old alleged final video sample was actually during the drag; sequential
+decode reaches actual lastPTS32.733333/#FA0505, no colour-input defect shown. Preserve historical
+metadata/sample and named successor text-colour-ui-trace-0e215. Scope: prelaunch landscape, actual
+window width>height and whole-screen captures in ONLY that existing colour method; retain public
+drag, tapAway44 and every outcome. Fresh committed whole-class evidence remains required. EditedText restoration passes
 and three whole landscape pictures retain visible Hello. No product focus/colour diagnosis yet.
 
 
