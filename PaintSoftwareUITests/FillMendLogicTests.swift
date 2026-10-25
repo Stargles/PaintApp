@@ -617,6 +617,37 @@ final class FillMendLogicTests: XCTestCase {
         XCTAssertEqual(patch[17 * width + 57], 0, "every tied nearest-open witness must protect the donut tangent")
         XCTAssertTrue(patch.enumerated().allSatisfy { pair in pair.element == 0 || ink.contains(pair.offset) },
                       "the mend adds only missing reference-ink pixels")
+
+        // A rectangular intentional hole protects its whole contour, including all four corners.
+        let squareSide = 96
+        var squareInk = Set<Int>()
+        var squareRing = Set<Int>()
+        var squareSource = [UInt8](repeating: 0, count: squareSide * squareSide)
+        for y in 0..<squareSide {
+            for x in 0..<squareSide {
+                let index = y * squareSide + x
+                let enclosingFrame = (8..<88).contains(x) && (8..<88).contains(y)
+                    && (!(12..<84).contains(x) || !(12..<84).contains(y))
+                let hole = (32..<54).contains(x) && (28..<54).contains(y)
+                let ring = (28..<58).contains(x) && (24..<58).contains(y) && !hole
+                if enclosingFrame || ring { squareInk.insert(index) }
+                if ring { squareRing.insert(index) }
+                if (12..<84).contains(x) && (12..<84).contains(y) && !ring && !hole {
+                    squareSource[index] = 255
+                }
+            }
+        }
+        XCTAssertEqual(squareRing.count, 448, "PREMISE: the protected square contour is 30×34 minus its 22×26 hole")
+        for reach in [Float(6), Float(12), Float(40)] {
+            let squarePatch = try mendPatch(width: squareSide, height: squareSide,
+                                            source: squareSource, ink: squareInk, reach: reach)
+            let grown = squareRing.filter { squarePatch[$0] != 0 }.sorted()
+            let coordinates = grown.prefix(8).map { "(\($0 % squareSide),\($0 / squareSide))" }
+            XCTAssertTrue(grown.isEmpty,
+                          "Reach \(reach) must preserve all 448 square-hole contour pixels: \(grown.count) grew, first \(coordinates)")
+            XCTAssertTrue(squarePatch.enumerated().allSatisfy { $0.element == 0 || squareInk.contains($0.offset) },
+                          "Reach \(reach) adds no paint outside the reference ink, including inside the intentional hole")
+        }
     }
 
     func testMendReachCountsTheWholeAsymmetricAxialAndDiagonalCrossSection() throws {
