@@ -10,134 +10,106 @@ is authorized by an old readiness answer: obtain fresh saved-scene readiness whe
 
 ## Current source and next actions — 2026-10-25
 
-Main/origin remain afd2030c. Integration was clean0e215b4f for the latest accepted run; no merge,
-push or physical iPad operation this continuation. Root owns integration, independent evidence and
-ONE native lease. Historical attempts remain in named external directories; never retag them.
+Main/origin remain afd2030c. Current integration bddb83db is clean and unmerged; no push or physical
+iPad operation. Root owns integration, independent evidence and ONE Mac native lease. Native is idle
+and released. The last compiled app contains the archive-seed mutant: rebuild normal source before UI.
+All historical attempts remain at named immutable pins; do not retag them.
 
-**Actual green logic:** Debug492/492 at0e215b4f, zero failures, skips or expected failures. Root
-independently reconciled all492 actual method IDs,17 classes, the owned M5 and all729 immutable source
-entries. This includes Fill126, Text135, Graph148, Blend69 and VectorTextPersistence14. Evidence:
-`~/PaintWork/s54-final-qualification/native/combined-normal492-0e215b4f-run01/`.
+**Actual root-accepted results:**
 
-The two failures from the earlier476/478 run are resolved by this named run. Text publication now
-uses existing VectorCanvas.commitTextEdit at the live owner, clearing suppression atomically; the
-unchanged open-edit/commit test restores1095 ink pixels and the existing two-invalidation test passes.
-No extra setter/cache/state was added. The new blend sweep now covers only the hand-rolled modes
-changed by Float fading, preserving their existing1-step bound and every original exact Normal gate.
-The earlier5f91 compiler0,76aff476/478 and schema-only extractor errors stay preserved.
+- Debug492/492 at0e215b4f: Fill126, Text135, Graph148, Blend69 and VectorTextPersistence14; zero
+  failures/skips/expected failures,17 actual classes and all729 source entries reconciled.
+- Debug260/260 atbddb83db: whole TextBake31, VectorEraserHybrid23, VectorEraserCommit17 plus seven
+  affected brush/liquify/repair/undo classes; zero failures/skips/expected failures,729 exact entries.
+  Includes new actual UITextView selection/insertion and real eraser live/commit/archive/undo pixels.
+- Logic26 at isolated0e215:26 product cases/24 recipes/all36 intended unique behavior statements;
+  root causally accepted80 mapped issues and excluded6 other issues. Raw141 location records have a
+  different duplicate population. Receipt b70b095a under native/logic26-0e215b4f-isolated-run01/.
+- Selection/seed5 atbddb83db: all5 product faults reach all10 intended unique behavior statements;
+  root causally accepted15 mapped issues, excluded4 later consequences. Unicode insertion/range,
+  selected replacement, actual live/commit removal, per-target field and reopened pixels all expose
+  their intended defects. Receipt038b6bd7 under native/text-selection-eraser-seed5-bddb83db-run01/.
+- Fill126 and whole owner FillMendUITests4/4 at83380. Root LOOKed six unique whole1080×810 pictures
+  (nine named files): attached/detached bodies and free caps mend; outside/uncertain joins protected;
+  extension/seam controls and batch undo/redo assertions reached. All29 controls root-qualified:
+  27 product cases/26 unique statements and2 premise cases/2 statements. Cost/sampler/RSS stay open.
 
-**Fill qualification:** at83380, Debug126/126 and whole FillMendUITests4/4 pass. Root LOOKed six unique
-whole-screen owner1080×810 pictures (nine named files): detached/attached bodies and free caps mend,
-outside stays white, uncertain outline joins stay protected, and extension/seam controls pass. Batch
-undo/redo assertions reached; there are no separately named undo/redo captures. All29 deliberate
-controls then produced their required actual failures, with root causal acceptance:27 product cases
-at26 unique product statements and2 premise cases at2 premise statements. Other issues are excluded.
-Case4 is a broad protected-target bypass, not stencil-only isolation; the distant Float case proves
-logical crop/influence, not distant GPU dispatch. Normal492 rebuilt ordinary source after mutants.
-Receipts: `native/controls29-83380b76-isolated-run01/root-independent-qualification.json` and the
-owner UI4 root acceptance/LOOK files. Useful whole4096 factory/shared filter/GPU passes; sampler
-appearance, source/fence/cancel/budget counts, paired fill cost and whole RSS are distinct open gates.
+Exact normal evidence lives under ~/PaintWork/s54-final-qualification/native/ as
+combined-normal492-0e215b4f-run01 and seed-selection-normal260-bddb83db-run01. These bounded Debug
+results are not final fast Debug/Release, whole UI, performance or device qualification.
 
-**Current source changes:** one existing shared text raster-scale calculation enforces the4096
-backing cap without the old0.05 floor, while preserving unlimited document geometry and positive
-fractional short axes. Actual raw UIKit controls refuted a needless raw-axis>=1 restriction. Graph
-multi-tick drag uses the existing shared transition/hold/undo owners: focus follows each tick, nil
-clears stale readout, returning restores baseline curves and own consumed marks without overwriting
-current unrelated edits. Existing CPU blend loop fades in Float and quantizes only final output;
-no new renderer, flag, schema or cache. These bounded fixes do not certify whole typography, graph
-evaluation or every shader/effect equation.
+**Integrated architecture changes:** shared text raster-scale caps backing4096 without the0.05
+floor; positive fractional axes remain valid. Existing graph drag/hold/undo owners retain current
+focus, nil readout, baseline curves and consumed marks. CPU blend fades in Float and quantizes final
+output. Text publication calls existing atomic commitTextEdit, restoring1095 ink pixels and existing
+two-invalidation contract. No parallel renderer/cache/schema/state was added by these corrections.
 
-**Actual cold UI10 at0e215:8pass/2fail, zero skips/expected failures.** Root independently
-reconciled all10 methods, device and immutable729 entries. The edited-box text method passes; root
-LOOKed all three landscape pictures and Hello stays visible before/open/after. New graph596 fails
-focused0 vs expected3; its later three captures/returned-drag/Undo are unreached. Last recording frame
-shows unchanged0,6 nodes and a no-drawing-surface canvas warning. Deriving custom gesture points
-from the current band frame instead of XCUICoordinate.screenPoint removes an orientation-contract
-assumption; actual raw screenPoint was not captured, so double mapping is an inference, not a proven
-product focus defect. Record scope before changing only that new method, preserving every outcome
-oracle/public tap and adding visible-path premises. Shared touch helper stays unchanged.
+TextOverlayView now preserves its saved full UTF-16 selection directly after restyling identical
+text; no clamp/helper/state/PBX edit. All29 older TextBake methods remain exact. Mode1 erasing passes
+the existing gesture seed through required existing erase/universal APIs and existing punch owner;
+72 calls supply it, no new random owner/default/overload/schema. Seed test-call arguments changed
+mechanically; old assertions remain exact after normalization. Modes2/3/4 do not stamp this punch,
+so this does not establish the cause of the owner's Mode3 respring.
 
-The existing text-colour method fails at emptyToolbarPoint:11.5pt clearance versus required44 in
-portrait. Its final colour assertions/capture are unreached. The old near-end video sample was taken DURING
-the drag; sequential decode reaches actual lastPTS32.733333 at#FA0505, so there is no demonstrated
-colour-input defect. Preserve the old sample and named successor trace. Run ONLY this owner colour
-method in prelaunch landscape with actual width>height and XCUIScreen captures; retain the existing
-public drag, harmless tapAway44 and every colour/pixel/session outcome. No tool-tap substitution. Actual orientations are2landscape and8portrait. This is NOT a green
-whole-class/owner qualification. Preserve `native/owner-ui10-0e215b4f-run01/` and root red review.
+**Cold UI remains open:** named0e215 whole UI10 was8pass2fail. EditedText restoration passes and all
+three whole landscape captures retain Hello. New graph596 focused0 vs3 and video shows a canvas
+no-drawing-surface warning; raw screenPoint was not observed, so double orientation mapping remains
+inference. ONLY that new method now uses actual current band-frame gesture points atbf941684,
+retaining outcomes/public tap/shared touch helper and adding visible-path premises. Existing colour
+method failed toolbar clearance11.5<44 in portrait before colour outcomes. Sequential decode reaches
+actual finalPTS32.733333/#FA0505; no colour-input defect. ONLY that method now launches landscape and
+uses whole-screen captures atb66c2386, retaining drag/tapAway44/every outcome. Earlier misleading
+near-end sample and named successor trace are preserved; root LOOKed the actual final frame.
 
-**Actual26 controls qualified:** isolated exact0e215 completed Text7+Graph11logic+Blend7+Text
-publication1. Root independently extracted all26 actual single-failed-method/device/source results
-and causally accepted all36 intended unique behavior statements,24 distinct production recipes.
-80 mapped legacy issues count;6 other issues are excluded. Native raw141 location records include
-duplicates and are a different population. Receipt: `native/logic26-0e215b4f-isolated-run01/
-root-independent-qualification.json` SHAb70b095a. The isolated tree stays clean0e215; shared compiled
-product is the final text-publication mutant, so NORMAL REBUILD is mandatory before ordinary UI/install. Graph3 cold faults require positive wholeGesture6 first.
-The reviewed112-line BlendModesAndCompositorUITests method at7157 adds the real two-patch opacity/merge
-workflow using existing helpers, no product/helper/PBX changes. Root/source independent review
-accepted it and harvested only its test path at315cf171. Whole class10 and four whole-screen captures
-remain UNRUN. Reviewed graph-coordinate sourcefa4c is harvestedbf941684; text-colour owner landscape
-sourceb66c has independent acceptance61946fee. Neither correction has a fresh native UI result. Its3 future faults map6 intended drawn IDs but may reach only3 because the first failure
-stops the method; report actual reached statements only. Historical611's Bool/RGBA helper mismatch
-and half-up arithmetic receipt are preserved; corrected7157 reuses waitForPixel and named ties-even
-arithmetic. The domain proof covers actual rounded50% readout, not an assumed exact0.5 slider value.
+New Blend cold method7157 is harvested315cf171: actual rounded50% slider domain, two luminance patches,
+real Merge Down/stripe/hide/reveal/paper controls and four whole pictures. Existing helpers/product
+unchanged; old body/oracle exactness reviewed. Whole Blend10 native remains UNRUN.
+
+**Cold selected-text scope, recorded before code:** ONE method in existing TextSession4→5, no product,
+helper or AX hook. Measured actual W/w glyph/white far band and four-letter ink prove geometry before
+public Select All, style change and actual software-key replacement. No refocus/paste/input after
+style until that same key. Assert red replacement near and zero far red while still editing; commit
+smoke follows. Author315da275 and independent review14b6d7d4 are frozen, not harvested. Root is checking
+whether the longpress point meets a blue handle; a measured interior point may replace ONLY that
+longpress coordinate after source evidence. Public menu delivery remains unproved. Reverse selected-
+length collapse must reach drawn far-band assertion, not a setup/menu/input failure.
+
+**Bounded effects scope recorded before implementation:** audit ec843eee freezes THREE clusters:
+existing tapCount converts finite large radius to Int before128 cap; raw periodic angle narrowing can
+diverge from the glare apron or overflow; a same-size simple→Gaussian backdrop GPU attempt prices
+only1 new picture while requesting3 logical RGBA8 pictures (24 vs8MiB at2048×1024). Correct the existing
+helper/angle planning and actual scratch/intermediate owners under the existing lock/headroom valve.
+No new retained counters/cache/renderer/format or broad scalar-validation framework. Preserve ordinary
+appearance, raw sigma behavior, static budgets/LRU/refusal/fallback and zero-growth warm reuse. Add
+actual-consumer finite boundary/periodicity/full-versus-strip and warm-first-effect/refusal/reuse
+regressions plus meaningful assertion controls. Report8b106831 under s54-architecture-audit/
+neighborhood-effect-audit-ec843eee/. Source equations predict a glare contribution25 vs cropped0;
+this is not native pixel/RSS/physical respring proof. Independent audit review precedes code.
 
 **Next gates, in order:**
 
-1. Resolve actual UI10 setup/delivery failures without weakening outcomes; harvest reviewed Blend UI
-   and run whole class10. Preserve the named8/10red; a fresh committed source/run is required.
-2. Logic26 is root-qualified at its named0e215 source; preserve its clean tree and rebuild ordinary
-   final source next. Qualify selection31/2faults and eraser-seed affected classes/controls. Graph3
-   and Blend3 cold faults require their own exact positive source/device basis.
-3. Repin older UI13/mask6-positive+11-fault packets to final source; LOOK positive pictures before
-   faults. Preserve their two-phase build→source-restore→test-without-building contract.
-4. Final fast Debug AND Release using CLAUDE verbatim command, static/actual count reconciliation,
-   lints/PBX/graph, all touched UI classes and full phase. Current census before new Blend UI is
-   fast5431/full6021 runnable methods,729 source entries,PBX1329.
-5. Fill16 paired Release ABBA and genuine cold256-package previous-writer library UI; preserve old071
-   products and untouched original export. Final-source source/sampler/publish counts remain explicit.
-6. Finish bounded audit gaps: vector tools/undo/invalidation, remaining effects/graph/font/panels and
-   delivery/RSS. Read reports before reopening already-qualified findings; inventory is not coverage.
-7. Fresh owner save/unlock/export, signed clean Release>=5days, old five workflows, physical Test1
+1. Resolve the finite cold-text longpress premise, harvest reviewed source, run normal rebuilt whole
+   Text5+GraphGesture6+Blend10 (21 methods), independently extract outcomes and LOOK whole pictures.
+   Then exact positive-source Graph3/Blend3/selected-text1 faults; actual reached assertions only.
+2. Finish scoped three effects corrections/review/logic controls and ordinary cold effects workflow.
+   Drive stored-vector eraser Splatter/Undo/Redo; no flaky expected random field/new test hooks.
+3. Repin historical UI13/mask6-positive+11-fault packets to final source; LOOK positive pictures before
+   faults. Preserve two-phase build→all-source-restore→test-without-building contract.
+4. Final fast Debug AND Release using CLAUDE verbatim command, actual/static method reconciliation,
+   lints/PBX/graph, all touched UI classes and full phase. Current bddb census5435 fast/6026 full
+   runnable,729 source entries/PBX1329; cold-text method adds1 full only after harvest.
+5. Fill16 paired Release ABBA, sampler/source/fence/cancel/budget counts and genuine cold256-package
+   previous-writer library UI. Preserve original export and old071 benchmark product.
+6. Genuine remaining audit coverage: vector tools/undo/invalidation, graph evaluation, fonts/panels,
+   delivery/RSS. Read returned reports; inventory is not review and qualified findings stay closed.
+7. Fresh owner save/unlock/export, signed normal Release>=5days, old five workflows, physical Test1
    all-process erasing capture and owner artwork confirmation. Retire temporary geometry repair/UI
-   whole only after artwork confirmation. Old readiness does not authorize restarting real artwork.
+   whole only after confirmation. Old readiness does not authorize restarting real artwork.
 
-Owner rulings remain: vector-only interior mending covers attached strokes while protecting uncertain
-joins and outside edges; engineering choices need no approval. Vector Liquify moves point positions
-only through normal stroke rendering; smart saving uses newest clock-bucket versions. Deferred
-interpolation overhaul/features stay written, not researched. Keep working while owner sleeps.
-
-**New bounded audit findings, recorded before implementation:** Mode1 stored-vector erasing
-loses the already-minted gesture seed at the erase→hybrid-punch handoff; replay/undo/archive then
-stably preserve the different seed. Thread the existing seed through the existing erase/universal
-entry points, no parallel random state/overload/default that silently rerolls. Test actual canonical
-pixels and existing undo/roundtrip seams. This is separate from the owner's Mode3 respring and does
-not establish its cause. TextOverlayView.applyTypingAttributes rebuilds attributes over identical
-text but clamps UITextView.selectedRange against Swift Character count and drops length. Preserve
-the saved full UTF-16 range at the same existing owner; no new selection state/helper/policy wrapper.
-Use actual view/update/UITextView consumer regressions, not a copied clamp formula. Both source and
-cold artist qualification remain open. External source-pinned audit reports retain finite witnesses.
-
-**Selection source checkpoint:** root/source independent reviews accept051bdd and root harvested
-ONLY TextOverlayView + existing TextBakeCharacterizationTests at17026caf. The saved range is assigned
-directly; no new clamp/helper/state. Existing test membership already includes both view dependencies,
-so the earlier audit's app-only PBX premise was wrong and no project edit was needed. Old-product+
-2regressions a33123fc is preserved. All29 old methods remain exact; class now31, with actual view.update,
-font80/kern3 premises, UTF-16 end caret/selectedBC and actual insertText controls. Source-only; normal31,
-2minimal reverse faults and cold selected-text replacement remain UNRUN. Current static before seed
-fix is fast5433/full6024 runnable, raw5436/6027, PBX1329; reconcile again after final harvest.
-
-**Cold selected-text scope — recorded before authoring:** ONE new method in existing
-TextSessionUITests,4→5, no product/helper/AX hook. Use the existing software-key route to measure one
-actual W/w glyph and white far band, append three letters and prove old-word ink occupies that band
-with room/unchanged effective geometry. Public Select All/Cut-presence, toolbar's verified active-text
-colour binding and same recorded software key must stay reachable; no refocusing/paste after style.
-Assert drawn red replacement near the first glyph and zero red in the far band while STILL editing,
-where blue handles do not match red. Avoid requiring premeasured coordinates to survive keyboard
-avoidance resetting after commit. Brush commit may follow the drawn assertions/capture as a separate
-state-none smoke. Actual public menu delivery/selection survival are unproved until normal+reverse
-and LOOK; arrangement failures do not count. Reverse only unconditional selected-length collapse
-must fail the drawn far-band oracle, not a menu/input/setup guard. Reuse existing pixel readers and
-whole XCUIScreen captures; no new generic driver. Source proposal: text-selection-cold-route-design-051bdd63.
+Owner rulings remain: vector-only mending includes attached strokes and protects uncertain joins and
+outside edges; engineering choices need no approval. Vector Liquify moves point positions only;
+smart saving uses newest clock-bucket versions. Deferred interpolation/features stay written, not
+researched. Continue while owner sleeps; do not park for context.
 
 ## Qualification and gates
 

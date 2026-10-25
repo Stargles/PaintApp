@@ -17,14 +17,31 @@ before implementation on tmp/s54-response-curve; no native/compiler/device run b
 
 # Known Issues
 
+## Neighborhood effect limits, apron and warm admission — 2026-10-25
+
+Read-only source audit ec843eee freezes three root causes before code: tapCount converts finite large
+radius to Int before128 cap; raw periodic angles narrowed separately from apron math can omit edge
+samples or overflow; existing same-size pool is treated fully warm even when first Gaussian backdrop
+growth requests one new walk texture, one intermediate and readback. That is3 logical RGBA8 pictures,
+not1 (24 vs8MiB at2048×1024). This is allocation-request arithmetic, not measured RSS/respring cause.
+Current raw Codable/model routes reach finite values beyond sliders. External source-equation model
+predicts a glare impulse contribution25 omitted by apron126; native pixels remain unproved.
+
+Scope: correct existing cap and periodic planning helpers; price actual missing owners under the
+existing engine lock/headroom valve. Preserve raw sigma, ordinary appearance, budgets/LRU/refusal and
+warm reuse; no new retained state/framework/schema. Independent review before implementation; actual
+consumer regressions and meaningful controls remain required. Receipt8b106831 under
+s54-architecture-audit/neighborhood-effect-audit-ec843eee/.
+
 ## Text style updates move a Unicode caret and discard selection — 2026-10-25
 
 Source0e215, read-only audit before implementation. TextOverlayView.applyTypingAttributes saves
 UITextView.selectedRange (UTF-16), rebuilds attributes over identical text, then clamps location
 against Swift Character count and forces length0. For A😀B an end caret4 becomes3, before B; an
 ASCII selected range is also collapsed. Preserve the full saved range through the existing owner.
-No new selection state/helper or copied-formula test. Actual view/update/insertText, cold interaction
-and mutation qualification remain pending. This is independent of the glyph cap and text commit fix.
+No new selection state/helper or copied-formula test. Direct selection preservation is integrated;
+actual view/update/insertText tests pass within Debug260 and both faults qualify4 intended statements.
+Cold interaction remains pending. This is independent of the glyph cap and text commit fix.
 
 ## Mode1 vector eraser rerolls the gesture field at commit — 2026-10-25
 
@@ -33,7 +50,8 @@ for LiveWalk preview; stored-vector erase omits it, so eraseHybrid's VectorStrok
 another. Universal erasing also remints per target/run. Subsequent replay, undo and archive keep that
 new seed stably. Thread the existing seed through existing entry points rather than introduce a
 second owner/default/overload path. Finite scatter fields132/133 remove different areas; actual
-canonical pixel/undo/roundtrip and cold controls remain pending. Modes2/3/4 do not stamp this punch;
+canonical pixel/undo/roundtrip now pass within Debug260 and3 faults qualify6 intended statements.
+Cold artist controls remain pending. Modes2/3/4 do not stamp this punch;
 this does not explain the owner's Mode3 respring. External report: s54-architecture-audit/
 vector-erase-owner-0e215b4f/notes.md.
 

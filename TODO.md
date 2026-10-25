@@ -2,42 +2,38 @@
 
 ## Current source and next actions — 2026-10-25
 
-Main/origin remain afd2030c; current accepted integration0e215b4f is not merged or installed. Actual
-Debug492/492 passed with zero failures/skips/expected failures; root checked every actual method,
-device and all729 immutable source entries. The unchanged text-restoration regression is fixed via
-existing atomic commitTextEdit. Shared text cap, graph drag ownership and CPU Float fading pass their
-bounded logic coverage. See HANDOFF.md for named source/evidence and preserved failed attempts.
+Integration bddb83db is unmerged/uninstalled; main/origin remain afd2030c. Root accepted actual Debug
+492/492 at0e215 and260/260 atbddb, zero failures/skips/expected failures. Logic26 qualifies36 intended
+statements and selection/seed5 qualifies10; actual source/device/method identities and729 immutable
+entries reconcile. Fill126/owner UI4/all29 controls qualify at83380 with whole pictures inspected.
+Named evidence and limits are in HANDOFF.md. Last compiled app is a mutant: rebuild normal before UI.
 
-Fill126 and whole owner FillMend UI4 pass at83380, with six unique whole-screen pictures inspected.
-All29 fill controls are causally qualified:27 product/2 premise cases at26/2 unique statements.
-Detached/attached bodies/free ends mend; outside and uncertain joins stay protected; batch undo/redo
-assertions reached. These are bounded correctness results, not final performance/install completion.
+Current queue (items remain until merged):
 
-Current queue (all items below remain until merged):
-
-- Resolve actual cold UI10 at0e215:8pass2fail. EditedText passes and three whole landscape pictures
-  retain visible Hello. NewGraph gesture appears misdelivered to canvas; text-colour stops at a
-  toolbar-clearance premise. Actual final video colour reaches#FA0505; no input defect demonstrated.
-  Preserve the red evidence/oracles; run this colour method in owner landscape with whole captures.
-- Harvest independently reviewed new Blend UI7157; run whole class10 and LOOK four captures.
-- Logic26 is root-qualified at0e215:26product cases/24recipes/all36 intended behavior statements.
-  Rebuild normal final source after compiled mutants. Graph3/Blend3 UI faults require exact positive source/device first. Count actual
-  reached assertions only; setups/unwraps and masked later statements earn no credit.
-- Repin historical UI13/mask6-positive+11-fault gates; final fast Debug/Release, counts/lints/PBX/graph,
-  touched UI classes and full phase. Current pre-Blend-UI census fast5431/full6021 runnable.
-- Qualify fill sampler/count/cost gates,16 paired Release trials and genuine cold previous-writer
-  library UI. Keep original256-package export and old071 benchmark product unchanged.
-- Finish Mode1 eraser gesture-seed handoff; full UTF-16 selection source is reviewed/harvested17026caf
-  with actual-view31/2faults/cold controls still UNRUN. Existing view test membership meant no PBX edit. No Mode3 respring claim.
-- Continue genuine source-audit gaps without reopening qualified findings: vector tools/undo/render,
-  remaining effects/graph/font/panels/platform/RSS. Inventory-only coverage is not reviewed code.
+- Resolve cold selected-text longpress geometry; harvest reviewed315da method. Run whole Text5+
+  GraphGesture6+Blend10 (21), LOOK owner pictures. Historical UI10 was8pass2fail: graph delivery and
+  portrait toolbar clearance, not proven product focus/colour failures. Corrected sources are
+  integrated; actual final colour video is#FA0505. Then meaningful Graph3/Blend3/text1 UI controls.
+- Correct THREE scoped effects audit clusters via existing owners: cap radius before Int; normalize
+  periodic angles/shared apron inputs; price actual missing GPU scratch/intermediate pictures plus
+  readback at warm first-effect growth. Independent review before code; actual consumer, refusal,
+  strip/periodicity/reuse and meaningful fault controls. Preserve sigma/appearance/budgets/fallback;
+  no new retained counter/cache/renderer/schema. Audit8b106831 is source/model evidence, not RSS.
+- Cold stored-vector eraser Splatter/Undo/Redo. Existing-seed handoff and UTF-16 selection are
+  integrated and pass related260 plus all5 meaningful faults; no new state and no Mode3 cause claim.
+- Repin historical UI13/mask6-positive+11-fault gates; final fast Debug AND Release, counts/lints/PBX/
+  graph, touched UI classes/full phase. Current5435 fast/6026 full runnable before cold-text harvest.
+- Final fill sampler/count/cost gates,16 paired Release trials and genuine cold previous-writer
+  library UI; untouched original256-package export and old071 product stay preserved.
+- Genuine remaining architecture coverage: vector tools/undo/render, graph evaluation, remaining
+  fonts/panels/platform/RSS. Read prior reports before reopening anything; inventory is not review.
 - Fresh saved-scene readiness/export/signing/old workflows/device checks; actual Test1 eraser cause
-  remains unresolved. Remove one-shot geometry repair/UI only after owner artwork confirmation.
+  unresolved. Remove one-shot geometry repair/UI only after owner artwork confirmation.
 
-Owner's scope is settled: Mend Gaps is vector only, includes attached marks, protects uncertain joins
-and the outside outline, and must remain interactive. Implementation choices need no extra approval.
-Vector Liquify is point-position-only; smart saving keeps newest versions per clock bucket. Keep
-working and delegate useful tasks; later features/interpolation overhaul remain deferred.
+Owner scope is settled: vector-only mending includes attached marks and protects uncertain joins and
+outside outline, with interactive feedback. Engineering choices need no extra approval. Vector Liquify
+is point-position-only; smart saving keeps newest clock-bucket versions. Continue and delegate useful
+tasks; later features/interpolation overhaul remain deferred.
 
 ## How to read and keep this file
 
