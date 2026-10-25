@@ -13,7 +13,7 @@ final class RasterSource: RasterResidencyCandidate {
     private var backing: ProjectStore.RasterBacking?
     private var loading: DispatchGroup?
     private var isCheckpointing = false
-    private var transparencyProven = false
+    private var transparencyProven: Bool?
     private weak var originalAllocation: RasterResidency.Allocation?
 
     private init(size: CGSize, residency: RasterResidency, image: UIImage?, backing: ProjectStore.RasterBacking?,
@@ -75,7 +75,39 @@ final class RasterSource: RasterResidencyCandidate {
 
     var isCertainlyTransparent: Bool {
         lock.lock(); defer { lock.unlock() }
-        return transparencyProven
+        return transparencyProven == true
+    }
+
+    /// Called on a preparation worker before contributor classification. A pinned version needs
+    /// no image, decode or pixel allocation. Metadata reads never initiate this exact alpha scan.
+    func prepareTransparencyProof(admittingScan: (Int) -> Bool) -> Result<Bool, RasterResidency.Failure> {
+        lock.lock()
+        while let loading {
+            lock.unlock()
+            loading.wait()
+            lock.lock()
+        }
+        if let transparencyProven { lock.unlock(); return .success(transparencyProven) }
+        // Unresolved backing is unknown. Its ordinary admitted decode supplies the same proof;
+        // preparation must not accumulate decoded images before the selected draw is admitted.
+        guard let lease else { lock.unlock(); return .success(false) }
+        let loading = DispatchGroup()
+        loading.enter()
+        self.loading = loading
+        lock.unlock()
+        var inspected: Bool?
+        defer {
+            lock.lock()
+            if let inspected { transparencyProven = inspected }
+            self.loading = nil
+            lock.unlock()
+            loading.leave()
+        }
+        // This is the existing tightly packed RGBA buffer's exact maximum alpha-cell visits.
+        guard admittingScan(lease.allocation.byteCount / 4) else { return .failure(.budgetExceeded) }
+        let transparent = lease.isFullyTransparent
+        inspected = transparent
+        return .success(transparent)
     }
 
     /// A foreign renderer's output is copied into the source owner's provider-backed allocation.
@@ -124,7 +156,7 @@ final class RasterSource: RasterResidencyCandidate {
         lock.unlock()
         // No source/owner lock crosses decoding or admission. Another worker shares the result.
         let result: Result<UIImage, RasterResidency.Failure>
-        var transparent = false
+        var transparent: Bool?
         if let lease { result = lease.image() }
         else if let backing {
             result = backing.decode(using: residency, excluding: [residencyID]).map {
@@ -135,7 +167,7 @@ final class RasterSource: RasterResidencyCandidate {
         lock.lock()
         if case .success(let image) = result {
             self.image = image
-            transparencyProven = transparent
+            if let transparent { transparencyProven = transparent }
         }
         self.loading = nil
         lock.unlock()

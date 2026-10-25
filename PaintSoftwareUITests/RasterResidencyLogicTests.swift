@@ -455,6 +455,181 @@ final class RasterResidencyLogicTests: XCTestCase {
         XCTAssertLessThanOrEqual(owner.usage.highWaterBytes, owner.budgetBytes)
     }
 
+    func testPinnedBlankProofIsAdmittedOnceAndCannotCrossIntoANewPaintedVersion() throws {
+        let owner = RasterResidency(budgetBytes: pictureBytes * 8, hasHeadroom: { _ in true })
+        let size = CGSize(width: width, height: height)
+        var current = try RasterSurface.allocate(width: width, height: height, using: owner).get()
+        let blank = RasterSource.snapshot(of: current, size: size)
+        XCTAssertFalse(blank.isCertainlyTransparent, "Freezing and metadata reads must not scan pixels")
+        let before = owner.usage
+        var attempts = 0
+        XCTAssertThrowsError(try blank.prepareTransparencyProof { count in
+            attempts += 1
+            XCTAssertEqual(count, self.width * self.height)
+            return false
+        }.get()) { error in
+            XCTAssertEqual(error as? RasterResidency.Failure, .budgetExceeded)
+        }
+        XCTAssertFalse(blank.isCertainlyTransparent, "Refused work cannot publish a blank proof")
+        XCTAssertTrue(try blank.prepareTransparencyProof { count in
+            attempts += 1
+            XCTAssertEqual(count, self.width * self.height)
+            return true
+        }.get(), "A refusal must leave the immutable version eligible for a later admitted scan")
+        XCTAssertEqual(attempts, 2)
+        XCTAssertEqual(owner.usage, before, "A lease proof creates no image or pixel allocation")
+        _ = try blank.resolveImage().get()
+        XCTAssertTrue(blank.isCertainlyTransparent, "Image resolution must preserve an earlier lease proof")
+
+        current = try current.preparedForWrite().get()
+        try current.mutate { context in
+            context.setFillColor(UIColor.black.cgColor)
+            context.fill(CGRect(x: self.width - 1, y: self.height - 1, width: 1, height: 1))
+        }.get()
+        let painted = RasterSource.snapshot(of: current, size: size)
+        var paintedScans = 0
+        XCTAssertFalse(try painted.prepareTransparencyProof { count in
+            paintedScans += 1
+            XCTAssertEqual(count, self.width * self.height)
+            return true
+        }.get(), "Even one painted texel makes this new immutable version nonempty")
+        for source in [blank, painted] {
+            _ = try source.prepareTransparencyProof { _ in
+                XCTFail("Both inspected true and false are cached per immutable version")
+                return false
+            }.get()
+        }
+        XCTAssertEqual(paintedScans, 1)
+        XCTAssertTrue(blank.isCertainlyTransparent)
+        XCTAssertFalse(painted.isCertainlyTransparent)
+        let old = try XCTUnwrap(CanvasFixture.rgbaBytes(XCTUnwrap(blank.resolveImage().get().cgImage)))
+        let new = try XCTUnwrap(CanvasFixture.rgbaBytes(XCTUnwrap(painted.resolveImage().get().cgImage)))
+        XCTAssertTrue(stride(from: 3, to: old.count, by: 4).allSatisfy { old[$0] == 0 })
+        XCTAssertEqual(stride(from: 3, to: new.count, by: 4).filter { new[$0] != 0 }.count, 1)
+        XCTAssertEqual(owner.usage.pixelBufferCount, 2, "COW retains two charged, distinct versions")
+        XCTAssertTrue(ProjectStore.serializingPackageMutation { blank.releaseResidentPixels() })
+        XCTAssertTrue(try blank.prepareTransparencyProof { _ in
+            XCTFail("Retiring resident pixels cannot invalidate an immutable inspected fact")
+            return false
+        }.get())
+
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("uninspected-proof-\(UUID())")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("blank.png")
+        try XCTUnwrap(PixelOps.transparentImage(size: size).pngData()).write(to: url)
+        let backing = try ProjectStore.RasterBacking.protect(url, using: owner).get()
+        let deferred = RasterSource.backed(by: backing, using: owner)
+        let cold = owner.usage
+        XCTAssertFalse(try deferred.prepareTransparencyProof { _ in
+            XCTFail("An unresolved backing cannot eagerly decode before draw admission")
+            return true
+        }.get())
+        XCTAssertEqual(owner.usage, cold)
+        XCTAssertFalse(deferred.isCertainlyTransparent, "Uninspected backing remains unknown")
+        _ = try deferred.resolveImage().get()
+        XCTAssertTrue(deferred.isCertainlyTransparent, "Ordinary backed decode keeps its existing exact proof")
+        let unreadable = RasterSource.backed(by: backing, using: owner)
+        try FileManager.default.removeItem(at: backing.url)
+        XCTAssertThrowsError(try unreadable.resolveImage().get()) { error in
+            XCTAssertEqual(error as? RasterResidency.Failure, .unreadableBacking)
+        }
+        XCTAssertFalse(unreadable.isCertainlyTransparent, "Failure must never become an empty picture")
+    }
+
+    private func mendCoverage(_ prepared: CanvasManager.FillReference, width: Int, height: Int) throws -> [UInt8] {
+        let source = stride(from: 3, to: prepared.rgba.count, by: 4).map { prepared.rgba[$0] == 0 ? UInt8(255) : 0 }
+        let session = try XCTUnwrap(MetalFillEngine.shared?.makeMendSession(referenceRGBA: prepared.rgba,
+            width: width, height: height, sourceMask: source).session)
+        session.installVectorReference(prepared.support)
+        return try XCTUnwrap(session.mendMask(sourceMask: source, threshold: 0, artworkRect: nil, reach: 40))
+    }
+
+    @MainActor
+    private func assertFreshEmptyRasterizePreservesMendCoverage(size: CGSize, strokes: [VectorStroke],
+                                                               target: CGPoint) throws {
+        let manager = CanvasFixture.manager(layerCount: 0)
+        manager.canvasSize = size
+        manager.addVectorLayer()
+        XCTAssertTrue(manager.rasterizeLayer(layerIndex: 0), "Use the artist's actual empty Rasterize operation")
+        XCTAssertEqual(manager.layers[0].kind, .raster)
+        XCTAssertTrue(manager.layers[0].isFillReference, "The ordinary visible reference stays selected")
+        let raster = try XCTUnwrap(manager.layers[0].cels.first?.raster)
+        let frozenBlank = try XCTUnwrap(raster.snapshot())
+        XCTAssertFalse(frozenBlank.isCertainlyTransparent, "Fresh snapshot metadata must not perform an alpha scan")
+        manager.addVectorLayer()
+        try XCTUnwrap(manager.layers[1].cels.first?.vector).restoreElements(strokes.map(VectorElement.stroke), changedInk: nil)
+        let references = manager.fillReferenceSources()
+        XCTAssertEqual(references.count, 2)
+        XCTAssertTrue(references[0].cel.raster.snapshot() === frozenBlank,
+                      "Preparation must inspect the same live version selected by the artist")
+        let width = Int(size.width), height = Int(size.height)
+        let window = FillWindow.fitting(CGRect(origin: .zero, size: size), in: size, pixelBudget: width * height)
+        let targetIndex = Int(target.y) * width + Int(target.x)
+        let expected = try manager.fillQueue.sync {
+            let vectorOnly = try XCTUnwrap(CanvasManager.makeFillReference(references: Array(references.dropFirst()), window: window))
+            let withFreshRaster = try XCTUnwrap(CanvasManager.makeFillReference(references: references, window: window))
+            XCTAssertEqual(withFreshRaster.rgba, vectorOnly.rgba, "Clear reference pixels do not alter the drawn ink")
+            let baseline = try self.mendCoverage(vectorOnly, width: width, height: height)
+            let actual = try self.mendCoverage(withFreshRaster, width: width, height: height)
+            XCTAssertEqual(baseline[targetIndex], 255, "PREMISE: this real vector body has useful admitted coverage")
+            XCTAssertEqual(actual, baseline, "Every mended pixel survives the selected fresh clear raster reference")
+            return baseline
+        }
+        XCTAssertTrue(frozenBlank.isCertainlyTransparent, "The factory worker must establish its selected lease proof")
+        XCTAssertNil(raster.snapshot(), "A proven clear tier can now use the existing empty snapshot contract")
+        let dot = CanvasFixture.solidImage(.black, rect: CGRect(x: 0, y: 0, width: 1, height: 1),
+                                           size: CGSize(width: 1, height: 1))
+        try raster.restore(patch: dot, at: .zero).get()
+        let changed = manager.fillReferenceSources()
+        try manager.fillQueue.sync {
+            let painted = try XCTUnwrap(CanvasManager.makeFillReference(references: changed, window: window))
+            XCTAssertEqual(painted.rgba[3], 255, "PREMISE: the new raster version really contains opaque ink")
+            let protected = try self.mendCoverage(painted, width: width, height: height)
+            XCTAssertEqual(expected[targetIndex], 255)
+            XCTAssertEqual(protected[targetIndex], 0, "A painted reference keeps the conservative unknown-contributor veto")
+        }
+        XCTAssertTrue(frozenBlank.isCertainlyTransparent, "Later raster edits cannot change the pinned old proof")
+        XCTAssertFalse(try XCTUnwrap(raster.snapshot()).isCertainlyTransparent)
+    }
+
+    @MainActor
+    func testFreshEmptyRasterizeReferencePreservesSmallVectorMendCoverage() throws {
+        let brush = Brush(name: "clear reference control", tip: .round, size: 6,
+                          dab: BrushDabSettings(flow: 1, spacing: 0.1, hardness: 1))
+        let stroke = VectorStroke(brush: brush, color: CodableColor(UIColor.black), size: 6,
+            opacity: 1, samples: StrokeSamples(points: [CGPoint(x: 24, y: 32), CGPoint(x: 48, y: 32)]), seed: 0x7354)
+        try assertFreshEmptyRasterizePreservesMendCoverage(size: CGSize(width: 96, height: 96),
+                                                          strokes: [stroke], target: CGPoint(x: 36, y: 32))
+    }
+
+    @MainActor
+    func testFreshEmptyRasterizeReferencePreservesTheOwnerSixStrokeMendCoverage() throws {
+        // The six 232-sample runs and seeds retained from the failed owner-sized cold UI scene.
+        // Only geometry is decoded here; the raster is freshly created through Rasterize, never
+        // loaded from that saved package (which could already have a decoded transparency proof).
+        let runs: [(UInt64, String)] = [
+            (6773026793075080920, "BAD4WPoAJfhY+qdV+Fj6IYj4WPohv/hY+iH6+Fj6ITX5WPohdPlY+iG0+Vj6IfT5WPohN/pY+iF7+lj6Ib/6WPohBvtY+iFL+1j6IZL7WPoh2vtY+iEl/Fj6IW38WPohufxY+iEB/Vj6IU39WPohmP1Y+iHk/Vj6ITD+WPohfP5Y+iHI/lj6IRT/WPohYP9Y+iGs/1j6Ifj/WPohRABY+iGQAFj6INwAWPoiKAFY+iF0AVj6IcABWPohDAJY+iFVAlj6IaECWPoh6QJY+iEyA1j6IX0DWPohxQNY+iEKBFj6IVIEWPohlwRY+iHbBFj6IR8FWPohYwVY+iGkBVj6IeQFWPohIQZY+iFdBlj6IZkGWPoh0gZY+iEHB1j6ITwHWPohbQdY+iGaB1j6IcMHWPoh6AdY+iEACFj6IQ=="),
+            (8875885953873151058, "BAAIWPoAAAh9+qcACLD6IQAI7fohAAgs+yEACG/7IQAIs/shAAj6+yEACEL8IQAIjfwhAAjY/CEACCT9IQAIcP0iAAi8/SEACAj+IQAIVP4hAAig/iEACOz+IQAINf8hAAh+/yEACMb/IQAICwAhAAhMACEACIkAIQAIxQAhAAj7ACEACCoBIQAIUAEhAAhcAQA="),
+            (3025619991251117483, "BAAIXAEA2wdcAaerB1wBIXgHXAEhQQdcASEGB1wBIcsGXAEhjAZcASFMBlwBIQwGXAEhyQVcASGFBVwBIUEFXAEh+gRcASG1BFwBIW4EXAEhJgRcASHbA1wBIZMDXAEhRwNcASH/AlwBIbMCXAEhaAJcASEcAlwBIdABXAEhhAFcASE4AVwBIewAXAEhoABcASFUAFwBIQgAXAEfvP9cASNw/1wBIST/XAEh2P5cASGM/lwBIUD+XAEh9P1cASGr/VwBIV/9XAEhF/1cASHO/FwBIYP8XAEhO/xcASH2+1wBIa77XAEhaftcASEl+1wBIeH6XAEhnfpcASFc+lwBIRz6XAEh3/lcASGj+VwBIWf5XAEhLvlcASH5+FwBIcT4XAEhk/hcASFm+FwBIT34XAEhGPhcASEA+FwBIQ=="),
+            (17381031590244746548, "BAD4XAEAAPg3AacA+AQBIQD4xwAhAPiIACEA+EUAIQD4AQAhAPi6/yEA+HL/IQD4J/8hAPjc/iEA+JD+IQD4RP4hAPj4/SEA+Kz9IQD4YP0hAPgU/SEA+Mj8IQD4f/whAPg2/CEA+O77IQD4qfshAPho+yEA+Cv7IQD47/ohAPi5+iEA+Ir6IQD4ZPohAPhY+gA="),
+            (15815243569150207091, "BDT/2P0AWf/Y/aeM/9j9IcP/2P0hAQDY/SFAANj9IYMA2P0hxwDY/SEOAdj9IVYB2P0hoQHY/SHpAdj9ITUC2P0hgALY/SHMAtj9IRgD2P0hZAPY/SGwA9j9IfwD2P0hSATY/SGUBNj9IeAE2P0hKQXY/SFyBdj9IboF2P0hAgbY/SFHBtj9IYsG2P0hzAbY/SEJB9j9IUIH2P0hegfY/SGsB9j9IdcH2P0hAAjY/SE="),
+            (17010733379972411770, "BOD6mPwAC/uY/KdG+5j8IYv7mPwh1fuY/CEg/Jj8IWz8mPwhtfyY/CH+/Jj8IUP9mPwhgf2Y/CGx/Zj8IcT9mPwh")
+        ]
+        var brush = BrushLibrary.roundSoft
+        brush.size = 4.999999957159162
+        let strokes = try runs.map { seed, data in
+            let json = "{\"o\":[1024,512],\"d\":\"\(data)\"}"
+            let samples = try JSONDecoder().decode(PackedSampleRun.self, from: Data(json.utf8)).samples
+            return VectorStroke(brush: brush, color: CodableColor(UIColor.black), size: brush.size,
+                                opacity: 1, samples: samples, seed: seed)
+        }
+        XCTAssertEqual(strokes.count, 6)
+        XCTAssertEqual(strokes.reduce(0) { $0 + $1.samples.count }, 232)
+        try assertFreshEmptyRasterizePreservesMendCoverage(size: CGSize(width: 2048, height: 1024),
+                                                          strokes: strokes, target: CGPoint(x: 780, y: 294))
+    }
+
     func testTheRealOwnerAdmitsOldAndNew4096PicturesWithCheckpointHeadroom() throws {
         let side = 4096
         let bytes = side * side * 4

@@ -239,6 +239,12 @@ final class RasterSurface {
             return readers
         }
 
+        var isFullyTransparent: Bool {
+            let bytes = address.assumingMemoryBound(to: UInt8.self)
+            for index in stride(from: 3, to: allocation.byteCount, by: 4) where bytes[index] != 0 { return false }
+            return true
+        }
+
         func beginReading() { lock.lock(); readers += 1; lock.unlock() }
         func endReading() { lock.lock(); readers -= 1; precondition(readers >= 0); lock.unlock() }
         deinit { free(address) }
@@ -253,6 +259,9 @@ final class RasterSurface {
         let bytesPerRow: Int
         let residency: RasterResidency
         var allocation: RasterResidency.Allocation { buffer.allocation }
+
+        /// The lease pins this exact buffer against mutation; proof needs no image or pixel copy.
+        var isFullyTransparent: Bool { buffer.isFullyTransparent }
 
         fileprivate init(_ surface: RasterSurface) {
             buffer = surface.buffer
@@ -301,13 +310,9 @@ final class RasterSurface {
     var allocation: RasterResidency.Allocation { buffer.allocation }
     var readLeaseCount: Int { buffer.readLeaseCount }
 
-    /// Exact blank proof for a newly decoded, still private source. No downsampling can discard a
-    /// single painted pixel; normal nonblank pictures return at their first nonzero alpha.
-    var isFullyTransparent: Bool {
-        let bytes = buffer.address.assumingMemoryBound(to: UInt8.self)
-        for index in stride(from: 3, to: byteCount, by: 4) where bytes[index] != 0 { return false }
-        return true
-    }
+    /// Exact blank proof for private storage or an immutable lease. No downsampling can discard
+    /// a single painted pixel; normal nonblank pictures return at their first nonzero alpha.
+    var isFullyTransparent: Bool { buffer.isFullyTransparent }
 
     private init(width: Int, height: Int, bytesPerRow: Int, residency: RasterResidency,
                  buffer: Buffer, context: CGContext) {
