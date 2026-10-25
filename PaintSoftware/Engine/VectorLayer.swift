@@ -326,6 +326,9 @@ extension VectorMendSupport {
                 try meter.checkCapacity(inputs, chargedCount: maximumRecords)
                 try meter.checkCapacity(unknown, chargedCount: maximumRecords)
             }
+            /// Actual worker-only pixel proof work joins this same construction allowance.
+            mutating func consumeWork(_ count: Int) throws(Failure) { try meter.visit(count) }
+
             mutating func appendUnknown(_ rect: CGRect) throws(Failure) {
                 guard unknown.count < maximum else { throw .exceedsBudget }
                 guard rect.minX.isFinite, rect.minY.isFinite,

@@ -1263,6 +1263,24 @@ extension CanvasManager {
         }
     }
 
+    /// Explicit worker proof only. The source keeps its getter cheap and scans no image/backing;
+    /// an admitted builder pays the pinned lease's actual alpha visits before its sole scan.
+    private static func prepareFillTransparency(_ source: RasterSource,
+        support: inout VectorMendSupport.Reference.Builder?, isCurrent: () -> Bool) throws(VectorMendSupport.Failure) {
+        guard var builder = support else { return }
+        defer { support = builder }
+        var denied: VectorMendSupport.Failure?
+        let result = source.prepareTransparencyProof { count in
+            do throws(VectorMendSupport.Failure) {
+                guard isCurrent() else { throw .cancelled }
+                try builder.consumeWork(count)
+                return true
+            } catch { denied = error; return false }
+        }
+        if let denied { throw denied }
+        guard case .success = result else { throw .exceedsBudget }
+    }
+
     /// One frozen selected list owns the pixels, path walls and lazy canonical certificate. Raster
     /// snapshots are immutable source handles; nil is their existing exact transparency proof.
     static func makeFillReference(references: [(layer: Layer, cel: Cel)], window: FillWindow,
@@ -1314,10 +1332,15 @@ extension CanvasManager {
                     height: Int(size.height), maximumRecords: maximumRecords, admission: request.admission)
                 for source in snapshots {
                     guard isCurrent() else { throw .cancelled }
-                    if source.baked.map({ !$0.isCertainlyTransparent }) == true
-                        || source.raster.map({ !$0.isCertainlyTransparent }) == true {
-                        try builder?.appendUnknown(CGRect(origin: .zero, size: size))
+                    if let baked = source.baked {
+                        try prepareFillTransparency(baked, support: &builder, isCurrent: isCurrent)
                     }
+                    if let raster = source.raster {
+                        try prepareFillTransparency(raster, support: &builder, isCurrent: isCurrent)
+                    }
+                    // Raster/baked uncertainty covers this ENTIRE window. The same final strict
+                    // draw resolves its cached proof, then either keeps this private vector packet
+                    // or disables it wholesale; do not capture an anonymous stale raster span.
                     let excluded = excludingElement.flatMap { $0.celID == source.celID ? $0.elementID : nil }
                     source.vector?.stageFillReference(into: &builder, nativeSize: size, excludingElement: excluded)
                     guard builder != nil else { throw .exceedsBudget }
@@ -1492,6 +1515,15 @@ extension CanvasManager {
             let rect = window.canvasInWorking
             for source in snapshots {
                 guard isCurrent() else { completed = false; return }
+                do throws(VectorMendSupport.Failure) {
+                    if let baked = source.baked {
+                        try prepareFillTransparency(baked, support: &support, isCurrent: isCurrent)
+                    }
+                    if let raster = source.raster {
+                        try prepareFillTransparency(raster, support: &support, isCurrent: isCurrent)
+                    }
+                } catch { support = nil }
+                guard isCurrent() else { completed = false; return }
                 do {
                     for value in [source.baked, source.raster] {
                         guard let raster = value, !raster.isCertainlyTransparent else { continue }
@@ -1517,6 +1549,9 @@ extension CanvasManager {
                 } catch { completed = false; return }
                 if source.baked.map({ !$0.isCertainlyTransparent }) == true
                     || source.raster.map({ !$0.isCertainlyTransparent }) == true {
+                    // Monotonic across the actual frozen draw order: one nonempty/unproved
+                    // raster invalidates scaled support, even if a later contributor is clear.
+                    if acceptedOverride != nil { acceptedOverride = .unavailable(width: width, height: height) }
                     do throws(VectorMendSupport.Failure) {
                         try support?.appendUnknown(CGRect(x: 0, y: 0, width: width, height: height))
                     } catch { support = nil }

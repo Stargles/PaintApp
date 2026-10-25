@@ -1369,6 +1369,61 @@ final class FillMendLogicTests: XCTestCase {
             XCTAssertEqual($0 as? VectorMendSupport.Failure, .exceedsWork,
                            "a second window attempt uses the same finite request work allowance")
         }
+
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("scaled-clear-proof-\(UUID())")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let sceneSize = CGSize(width: 96, height: 96)
+        let blankURL = directory.appendingPathComponent("blank.png")
+        let paintedURL = directory.appendingPathComponent("one-texel.png")
+        try XCTUnwrap(PixelOps.transparentImage(size: sceneSize).pngData()).write(to: blankURL)
+        try XCTUnwrap(CanvasFixture.solidImage(.blue, rect: CGRect(x: 90, y: 60, width: 1, height: 1),
+                                             size: sceneSize).pngData()).write(to: paintedURL)
+        for order in [[blankURL], [blankURL, paintedURL], [paintedURL, blankURL]] {
+            let owner = RasterResidency(budgetBytes: 96 * 96 * 4 * 16, hasHeadroom: { _ in true })
+            let manager = CanvasManager(); manager.canvasSize = sceneSize
+            var sources: [RasterSource] = []
+            for url in order {
+                let source = RasterSource.backed(by: try ProjectStore.RasterBacking.protect(url, using: owner).get(),
+                                                 using: owner)
+                sources.append(source)
+                manager.addLayer()
+                manager.layers[manager.currentLayerIndex].cels[0].raster.reset(toSource: source, strokeCount: 0)
+            }
+            XCTAssertEqual(owner.usage.allocations, 0, "PREMISE: these selected references are genuinely cold backings")
+            XCTAssertTrue(sources.allSatisfy { !$0.isCertainlyTransparent })
+            manager.addVectorLayer()
+            let vector = try XCTUnwrap(manager.layers[manager.currentLayerIndex].cels[0].vector)
+            vector.restoreElements([.stroke(stroke)], changedInk: nil)
+            let references = manager.fillReferenceSources()
+            let reference = try XCTUnwrap(CanvasManager.prepareFillReference(references: references, window: next,
+                                                                             isCurrent: { true }))
+            let packet = try XCTUnwrap(reference.support.preparedPacket)
+            let ordinary = try XCTUnwrap(CanvasManager.makeFillReference(references: references, window: reference.window))
+            XCTAssertEqual(reference.rgba, ordinary.rgba, "certificate decisions must preserve the actual strict frozen picture")
+            let ink = stride(from: 3, to: reference.rgba.count, by: 4).map { reference.rgba[$0] != 0 }
+            let source = ink.map { $0 ? UInt8(0) : 255 }
+            let session = try XCTUnwrap(MetalFillEngine.shared?.makeMendSession(referenceRGBA: reference.rgba,
+                width: packet.width, height: packet.height, sourceMask: source).session)
+            session.installVectorReference(reference.support)
+            let mended = try XCTUnwrap(session.mendMask(sourceMask: source, threshold: 0, artworkRect: nil,
+                                                       reach: Float(40 * reference.window.scale)))
+            if order.contains(paintedURL) {
+                XCTAssertTrue(packet.canonicalCoverage.isEmpty,
+                              "one nonempty raster vetoes the whole packet in either mixed source order")
+                XCTAssertTrue(stride(from: 2, to: reference.rgba.count, by: 4).contains { reference.rgba[$0] > 0 },
+                              "the real filtered one-texel blue contributor must remain drawn")
+                XCTAssertTrue(mended.allSatisfy { $0 == 0 },
+                              "one painted texel leaves every vector target bare in BOTH mixed source orders")
+            } else {
+                XCTAssertTrue(sources.allSatisfy(\.isCertainlyTransparent),
+                              "the first strict draw discovers the cold backing's exact clear proof")
+                XCTAssertTrue(ink.contains(true) && !packet.canonicalCoverage.isEmpty,
+                              "the FIRST scaled request must keep a useful vector packet after clear decode")
+                XCTAssertEqual(mended, ink.map { $0 ? 255 : 0 },
+                               "cold clear backing must preserve every real filtered body/cap and add no outside pixel")
+            }
+        }
     }
 
     func testWhole4096ReferenceFitsTheOwnerBudgetAndCertifiesItsActualFilteredInk() throws {
@@ -1378,6 +1433,11 @@ final class FillMendLogicTests: XCTestCase {
         let manager = CanvasManager()
         let size = CGSize(width: 4096, height: 4096)
         manager.canvasSize = size
+        let freshBlank = try RasterSource.render(size: size, drawing: { _ in true }).get()
+        manager.addLayer()
+        manager.layers[manager.currentLayerIndex].cels[0].raster.reset(toSource: freshBlank, strokeCount: 0)
+        XCTAssertFalse(freshBlank.isCertainlyTransparent,
+                       "PREMISE: fresh resident blank pixels have not been inspected by a metadata getter")
         manager.addVectorLayer()
         let canvas = try XCTUnwrap(manager.layers[manager.currentLayerIndex].cels[0].vector)
         let stroke = supportStroke([CGPoint(x: 512, y: 512), CGPoint(x: 576, y: 520),
@@ -1388,6 +1448,8 @@ final class FillMendLogicTests: XCTestCase {
         XCTAssertLessThan(original.scale, 1, "PREMISE: ordinary whole4096 requires the resampled owner-budget route")
         let reference = try XCTUnwrap(CanvasManager.prepareFillReference(
             references: manager.fillReferenceSources(), window: original, isCurrent: { true }))
+        XCTAssertTrue(freshBlank.isCertainlyTransparent,
+                      "the admitted worker must establish blankness before staging unknown reference coverage")
         XCTAssertLessThan(reference.window.workingWidth * reference.window.workingHeight,
                           original.workingWidth * original.workingHeight,
                           "core fitting must reserve the actual packet/upload and adjacent working owners")

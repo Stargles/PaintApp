@@ -2,7 +2,7 @@
 
 ## Current source and next actions — 2026-10-25
 
-Main/origin remain afd2030c; no merge, push or iPad install this pass. Integration source freeze2da54484
+Main/origin remain afd2030c; no merge, push or iPad install this pass. Latest qualified logic freeze2da54484
 is in PaintApp-s54-mend-free-caps. Actual Debug86 passed86/86, including useful4096 factory/GPU output.
 The earlier owner iPad9 cold UI4 at4e2 passed2/failed2. The feature is NOT qualified; finish shared
 fresh-raster proof and its worker invocation before the next owner UI attempt.
@@ -63,7 +63,10 @@ means cached fact or conservative unknown without IO/eager decode/new image; str
 resolution retains its existing proof/error behavior. Both native/scaled callers use the same Builder
 work allowance, no second budget or generic throwing API. Source/caller/tests are being reviewed.
 Evidence: `scale-stage-reviewed-94980fdb/receipt.json`; allocation review9dcac7d8; native2da86green.
-The frozen shared Source checkpoint d91efe48 adds3 RasterResidency methods (37→40), uncompiled.
+Shared Source d91efe48 and caller5fde79b3 are jointly source-reviewed and harvested (six paths,
+no author docs). Three new RasterResidency methods give37→40; combined first Debug126 is next:
+FillMend28+FillObject28+StrokeWall17+RasterSampling13+RasterResidency40. Static fast5420/full6009;
+no new file/PBX. Actual native Source/caller qualification is still UNRUN. Joint review7850e0af.
 A separate source-confirmed cold-backed-clear ordering issue is recorded BEFORE its caller correction:
 scaled staging must defer raster/baked whole-window safety to the existing final strict-draw check.
 Stage vector/localized unknowns unchanged; after each actual raster draw, monotonically downgrade the
@@ -136,7 +139,7 @@ assertion gaps and separate UI13/mask6positive+11faults; normal rebuild; exact f
 touched whole UI classes/full phase, lints/PBX/graph; paired fill16 Release ABBA; genuine256-package
 previous-writer cold UI; ordinary old workflows; fresh saved-scene/export/readiness and qualified
 signed iPad build; separate actual Test1 erasing all-process capture and owner artwork confirmation.
-Current static5417fast/6006full/398classes/PBX1329 is not native final qualification. Earlier gates
+Current static5420fast/6009full/398classes/PBX1329 is not native final qualification. Earlier gates
 remain valid only at their named pins/unchanged scopes. Erasing respring cause remains unproved.
 Retire the one-shot format converter/UI whole only after owner confirms real artwork. Preserve the
 untouched original export, old071 paired product and all native results. Owner authorizes future
