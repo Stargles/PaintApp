@@ -123,7 +123,8 @@ enum VectorMendSupport {
             let first = max(0, Int(range.lowerBound.rounded(.down)))
             let last = min(curves.count - 1, Int(range.upperBound.rounded(.up)) - 1)
             guard first <= last else { return false }
-            try meter.visit(last - first + 1)
+            try meter.visit(last - first + 1, times: 2)
+            if first < last && ((first + 1)...last).contains(where: { creases[$0] }) { return false }
             return (first...last).allSatisfy { curves[$0].increases(along: axis) }
         }
     }
@@ -422,6 +423,9 @@ enum VectorMendSupport {
         var queryToken: UInt32 = 0
         try meter.retain(1, stride: 128) // memo header + capacity rounding, before first insertion
         var memo: [GroupPair: Int8] = [:]
+        // Contacts start empty with one prepaid container allowance. Paid slots, rather than
+        // allocator capacity or logical count, own each amortized reservation below.
+        var paidContactCapacity = 0
         var dirty = CGRect.null
         for target in addresses.indices {
             if !dirty.isNull {
@@ -485,23 +489,17 @@ enum VectorMendSupport {
                     let match = try correspondence(address.group, other.group, captured: captured,
                                                    traces: traces, memo: &memo, meter: &meter)
                     let parameter = captured[other.group].dabs[other.dab].parameter
-                    let regular = parameter.map { chart.range.contains(match < 0 ? trace.end - $0 : $0) } ?? false
-                    var admitted = match != 0 && regular
-                    if admitted, let axis = chart.axis, let otherTrace = traces[other.group] {
-                        let range = match < 0 ? (trace.end - chart.range.upperBound)...(trace.end - chart.range.lowerBound) : chart.range
-                        let direction = match < 0 ? CGPoint(x: -axis.x, y: -axis.y) : axis
-                        admitted = try otherTrace.isRegular(in: range, along: direction, meter: &meter)
-                    }
+                    let mapped = parameter.map { match < 0 ? trace.end - $0 : $0 }
+                    let cohort = match != 0 && (mapped.map { trace.range.contains($0) } ?? false)
                     let patch = patches[i]
-                    var touches = false
+                    var touches = false, overlaps = false
                     for span in spans[Int(patch.spanStart)..<Int(patch.spanStart + patch.spanCount)] {
-                        let local = intersection(span, with: admitted ? dirty.insetBy(dx: -1, dy: -1) : dirty, width: width)
-                        try meter.visit(local.count, times: admitted ? 9 : 1)
+                        let local = intersection(span, with: cohort ? dirty.insetBy(dx: -1, dy: -1) : dirty, width: width)
+                        try meter.visit(local.count, times: cohort ? 9 : 1)
                         for p in local {
                             guard chart.contains(pixelCenter(p, width: width), halo: halo) else { continue }
-                            if !admitted {
-                                if support[p] != 0 { unknown = true; break }
-                            } else {
+                            if support[p] != 0 { overlaps = true }
+                            if cohort {
                                 let x = p % width, y = p / width
                                 for dy in -1...1 { for dx in -1...1 {
                                     let qx = x + dx, qy = y + dy
@@ -510,9 +508,31 @@ enum VectorMendSupport {
                                 } }
                             }
                         }
-                        if unknown || touches { break }
+                        if overlaps && (touches || !cohort) { break }
                     }
-                    if admitted && touches { try include(i, meter: &meter) }
+                    guard cohort, touches, let mapped else {
+                        if overlaps { unknown = true }
+                        return
+                    }
+                    // The cuts stay fixed. A wider touching cohort dab can originate just beyond
+                    // the initial segment-rounded chart interval; prove its intervening regular
+                    // continuation instead of treating that artificial interval as a foreign join.
+                    let extended = min(chart.range.lowerBound, mapped)...max(chart.range.upperBound, mapped)
+                    // A site exactly on a crease is not a continuation, even when it is the
+                    // newly extended interval's endpoint rather than an interior knot.
+                    let atInteriorCrease = mapped > 0 && mapped < trace.end
+                        && mapped == mapped.rounded() && trace.creases[Int(mapped)]
+                    var admitted = !atInteriorCrease
+                    if admitted, let axis = chart.axis, let otherTrace = traces[other.group] {
+                        admitted = try trace.isRegular(in: extended, along: axis, meter: &meter)
+                        if admitted {
+                            let range = match < 0 ? (trace.end - extended.upperBound)...(trace.end - extended.lowerBound) : extended
+                            let direction = match < 0 ? CGPoint(x: -axis.x, y: -axis.y) : axis
+                            admitted = try otherTrace.isRegular(in: range, along: direction, meter: &meter)
+                        }
+                    }
+                    if admitted { try include(i, meter: &meter) }
+                    else if overlaps { unknown = true }
                 }
             }
             if unknown || dirty.isNull { continue }
@@ -547,23 +567,55 @@ enum VectorMendSupport {
                     } }
                 }
             }
-            try meter.visit(Int(contactBounds.width), times: Int(contactBounds.height))
-            for y in Int(contactBounds.minY)..<Int(contactBounds.maxY) {
-                var x = Int(contactBounds.minX)
-                while x < Int(contactBounds.maxX) {
-                    let flags = support[y * width + x] & 12
-                    if flags == 0 { x += 1; continue }
-                    let open = flags & 4 != 0
-                    let start = x
-                    repeat { x += 1 } while x < Int(contactBounds.maxX)
-                        && (support[y * width + x] & 12 != 0)
-                        && (support[y * width + x] & 4 != 0) == open
-                    try meter.retain(1, stride: MemoryLayout<Contact>.stride * 2)
-                    contacts.append(Contact(start: UInt32(y * width + start) | (open ? Contact.openBit : 0),
-                                            count: UInt32(x - start)))
+            // Count the finished row runs before growing storage. Implicit Array.append growth
+            // doubles an old allocator-rounded capacity, not the logical count we prepaid.
+            // Both row passes and amortized copying are admitted; no per-patch array is retained.
+            func forEachContact(_ body: (Contact) -> Void) {
+                for y in Int(contactBounds.minY)..<Int(contactBounds.maxY) {
+                    var x = Int(contactBounds.minX)
+                    while x < Int(contactBounds.maxX) {
+                        let flags = support[y * width + x] & 12
+                        if flags == 0 { x += 1; continue }
+                        let open = flags & 4 != 0
+                        let start = x
+                        repeat { x += 1 } while x < Int(contactBounds.maxX)
+                            && (support[y * width + x] & 12 != 0)
+                            && (support[y * width + x] & 4 != 0) == open
+                        body(Contact(start: UInt32(y * width + start) | (open ? Contact.openBit : 0),
+                                     count: UInt32(x - start)))
+                    }
                 }
             }
-            guard contacts.count <= Int(UInt32.max) else { throw .exceedsBudget }
+            try meter.visit(Int(contactBounds.width), times: Int(contactBounds.height))
+            var additions = 0
+            forEachContact { _ in additions += 1 }
+            let (total, totalOverflow) = contacts.count.addingReportingOverflow(additions)
+            guard !totalOverflow, total <= Int(UInt32.max) else { throw .exceedsBudget }
+            if total > paidContactCapacity {
+                if total > contacts.capacity {
+                    let (doubled, reservationOverflow) = paidContactCapacity.multipliedReportingOverflow(by: 2)
+                    guard !reservationOverflow else { throw .exceedsBudget }
+                    let reservation = max(total, max(1, doubled))
+                    // Keep both payloads/headers charged during native reallocation and copy.
+                    try meter.retainArray(Contact.self, count: reservation)
+                    try meter.visit(contacts.count)
+                    contacts.reserveCapacity(reservation)
+                    try meter.checkCapacity(contacts, chargedCount: reservation)
+                    let (oldPayload, payloadOverflow) = paidContactCapacity.multipliedReportingOverflow(
+                        by: 2 * MemoryLayout<Contact>.stride)
+                    let (oldCharge, chargeOverflow) = oldPayload.addingReportingOverflow(32 + 16)
+                    guard !payloadOverflow, !chargeOverflow, oldCharge <= meter.bytes else { throw .exceedsBudget }
+                    meter.bytes -= oldCharge
+                    paidContactCapacity = reservation
+                } else {
+                    // Allocator rounding already supplied enough room; no new buffer or copy.
+                    try meter.retain(total - paidContactCapacity, stride: 2 * MemoryLayout<Contact>.stride)
+                    try meter.checkCapacity(contacts, chargedCount: total)
+                    paidContactCapacity = total
+                }
+            }
+            try meter.visit(Int(contactBounds.width), times: Int(contactBounds.height))
+            forEachContact { contacts.append($0) }
             patches[target] = Patch(contactStart: UInt32(contactStart), contactCount: UInt32(contacts.count - contactStart),
                                     spanStart: old.spanStart, spanCount: old.spanCount, unknown: unknown ? 1 : 0)
             dirty = contactBounds
@@ -574,7 +626,7 @@ enum VectorMendSupport {
         try meter.checkCapacity(seen, chargedCount: entryCount)
         try meter.checkCapacity(included, chargedCount: addresses.count)
         try meter.checkCapacity(queue, chargedCount: addresses.count)
-        try meter.checkCapacity(contacts, chargedCount: contacts.count)
+        try meter.checkCapacity(contacts, chargedCount: paidContactCapacity)
         try meter.checkCapacity(memo.capacity, stride: MemoryLayout<(GroupPair, Int8)>.stride,
                                 chargedCount: memo.count, chargedStride: 128)
     }
@@ -610,7 +662,30 @@ enum VectorMendSupport {
         let captured = try capture(inputs, meter: &meter)
         let window = CGRect(x: 0, y: 0, width: width, height: height)
         var support = [UInt8](repeating: 0, count: count)
+        var patchCount = 0, rowCount = 0
+        for group in captured {
+            for dab in group.dabs {
+                try meter.visit(1)
+                let raw = dab.bounds
+                guard raw.minX.isFinite, raw.minY.isFinite, raw.width.isFinite, raw.height.isFinite else {
+                    throw .invalidWindow
+                }
+                let bounds = raw.integral.applying(group.transform).integral.intersection(window)
+                let rows = bounds.isNull || bounds.isEmpty ? 0 : Int(bounds.height)
+                let (nextRows, rowOverflow) = rowCount.addingReportingOverflow(rows)
+                let (nextPatch, patchOverflow) = patchCount.addingReportingOverflow(1)
+                guard !rowOverflow, !patchOverflow, nextRows <= Int(UInt32.max),
+                      nextPatch < Int(UInt32.max) else { throw .exceedsBudget }
+                rowCount = nextRows; patchCount = nextPatch
+            }
+        }
+        try meter.retain(rowCount, stride: MemoryLayout<Span>.stride * 2)
+        try meter.retain(patchCount, stride: 2 * (MemoryLayout<Patch>.stride + MemoryLayout<Address>.stride))
         var patches: [Patch] = [], spans: [Span] = [], addresses: [Address] = []
+        patches.reserveCapacity(patchCount); spans.reserveCapacity(rowCount); addresses.reserveCapacity(patchCount)
+        try meter.checkCapacity(patches, chargedCount: patchCount)
+        try meter.checkCapacity(spans, chargedCount: rowCount)
+        try meter.checkCapacity(addresses, chargedCount: patchCount)
         for (groupIndex, group) in captured.enumerated() {
             for (dabIndex, dab) in group.dabs.enumerated() {
                 try meter.visit(1)
@@ -622,13 +697,10 @@ enum VectorMendSupport {
                 let start = spans.count
                 if !bounds.isNull, !bounds.isEmpty {
                     try meter.visit(Int(bounds.height))
-                    try meter.retain(Int(bounds.height), stride: MemoryLayout<Span>.stride * 2)
-                    guard spans.count <= Int(UInt32.max) - Int(bounds.height) else { throw .exceedsBudget }
                     for y in Int(bounds.minY)..<Int(bounds.maxY) {
                         spans.append(Span(start: UInt32(y * width + Int(bounds.minX)), count: UInt32(bounds.width)))
                     }
                 }
-                try meter.retain(1, stride: 2 * (MemoryLayout<Patch>.stride + MemoryLayout<Address>.stride))
                 patches.append(Patch(contactStart: 0, contactCount: 0, spanStart: UInt32(start),
                                      spanCount: UInt32(spans.count - start), unknown: 1))
                 addresses.append(Address(group: groupIndex, dab: dabIndex))

@@ -1279,19 +1279,22 @@ final class FillMendLogicTests: XCTestCase {
     }
 
     func testCanonicalSupportRecognizesReverseCurvedRetracesWithoutChronologicalInterference() throws {
-        let points = [CGPoint(x: 20, y: 60), CGPoint(x: 40, y: 65), CGPoint(x: 48, y: 77), CGPoint(x: 70, y: 80)]
-        let thin = supportStroke(points, size: 4), wide = supportStroke(Array(points.reversed()), size: 8)
-        let ring = supportStroke([CGPoint(x: 20, y: 16), CGPoint(x: 70, y: 16), CGPoint(x: 70, y: 40),
-                                  CGPoint(x: 20, y: 40), CGPoint(x: 20, y: 16)])
-        let strokes = [thin, ring, wide], ink = try supportInk(strokes)
-        let source = supportExterior(ink, side: 96)
-        let eligible = supportEligible(try supportPacket(strokes), ink: ink, source: source)
-        let retraceInk = try supportInk([thin, wide])
-        XCTAssertTrue(retraceInk.contains(true) && ink.indices.allSatisfy { !retraceInk[$0] || eligible[$0] },
-                      "whole reversed native-knot correspondence must survive Hermite roundoff and unrelated IDs")
-        let ringInk = try supportInk([ring])
-        XCTAssertTrue(ink.indices.allSatisfy { !ringInk[$0] || !eligible[$0] },
-                      "the unrelated original closed contour still protects every actual pixel")
+        let paths = [[CGPoint(x: 20, y: 60), CGPoint(x: 40, y: 65), CGPoint(x: 48, y: 77), CGPoint(x: 70, y: 80)],
+                     [CGPoint(x: 20, y: 60), CGPoint(x: 40, y: 60), CGPoint(x: 70, y: 60)]]
+        for points in paths {
+            let thin = supportStroke(points, size: 4), wide = supportStroke(Array(points.reversed()), size: 8)
+            let ring = supportStroke([CGPoint(x: 20, y: 16), CGPoint(x: 70, y: 16), CGPoint(x: 70, y: 40),
+                                      CGPoint(x: 20, y: 40), CGPoint(x: 20, y: 16)])
+            let strokes = [thin, ring, wide], ink = try supportInk(strokes)
+            let source = supportExterior(ink, side: 96)
+            let eligible = supportEligible(try supportPacket(strokes), ink: ink, source: source)
+            let retraceInk = try supportInk([thin, wide])
+            XCTAssertTrue(retraceInk.contains(true) && ink.indices.allSatisfy { !retraceInk[$0] || eligible[$0] },
+                          "whole reversed native-knot correspondence must survive Hermite roundoff and unrelated IDs")
+            let ringInk = try supportInk([ring])
+            XCTAssertTrue(ink.indices.allSatisfy { !ringInk[$0] || !eligible[$0] },
+                          "the unrelated original closed contour still protects every actual pixel")
+        }
     }
 
     func testCanonicalSupportKeepsContoursHiddenContributorsAndSameGestureJoinsProtected() throws {

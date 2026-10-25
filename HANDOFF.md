@@ -101,10 +101,15 @@ capacity guard falsely refused it. Independently reviewed0644be06 now precharges
 header/rounding and checks actual capacity bytes, retaining2×payload/work limits and fixture budgets.
 The fixed2048byte pool was not repurposed as a many-stroke cap. Actual corrected7 at9e79 passed5/failed2:
 free-cap method still throws exceedsBudget, reverse curved retrace misses real ink at assertion1290.
-A concrete3-knot thin/wide witness finds premature local parameter cutoff; on-demand adjacent regular
-interval proof keeps fixed gates and rejects interior creases. This correction is source-only pending
-review/native. One isolated diagnostic of the unchanged cap method is finding the exact refusal guard;
-no fixture/limit/assertion weakening or live-wiring grant. Actual corrected result:
+A concrete3-knot thin/wide witness found premature local parameter cutoff. Reviewed1eabdf71 now proves
+only the touching cohort's intervening regular interval, preserving fixed cuts and protecting interior
+creases while allowing true endpoints. The isolated cap diagnostic located stride8 capacity6140 at
+count2918 (49120actual/46704prepaid): implicit allocator-rounded growth, not64MiB exhaustion. Contacts
+now count exact rows, precharge controlled amortized reservations/copy/old+new peak, and use existing
+spare capacity before allocating; other outputs reserve exact known counts. No limit/assertion weakening,
+new scratch/allocator/cache or diagnostic hooks. Root harvested these two exact source/test paths;
+corrected7 is next. Independent source/976case arithmetic review accepted, not native/RSS proof.
+No live-wiring grant. Receipt: `canonical-continuation-harvest/`. Actual corrected result:
 `native/canonical7-9e79f00e-run02/root-independent-review.json`. Earlier failed receipt:
 `native/canonical7-7cbe0f42-run01/root-independent-review.json`; correction: `canonical-capacity-harvest/`.
 Before live wiring, review each reference-image resampling stage, source-keyed stencil ownership,
@@ -134,9 +139,13 @@ under the owner lock. Entries touched/re-registered since capture are skipped; n
 for the next request; live cold registrations must remain. Only unchanged expired weak entries may
 be pruned. No persistent heap/cache/queue or product telemetry. Source-only correction/tests committed at a52857a6 and independently accepted for native
 qualification: one helper,5 new methods, old32 bodies exact, PBX unchanged. Root harvested only the
-source/test pair, author-byte-exact; native normal430 and8 meaningful faults are next. Performance is
-unmeasured; accounting still scans dirty-allocation maxima and no whole-admission asymptotic claim
-is made. Receipt: `raster-finite-pass-harvest/`. Trace: `raster-admission-case28-readonly/report.md`.
+source/test pair, author-byte-exact. Actual normal430 atd4d7 passed430/430,0skip/expected; independent
+review reconciled original425+5new methods, exact729 committed/stored bytes, fresh source/test compile
+and correct39E. Five runtime warnings remain, no suppression. All8faults finished; root independently
+extracted16 unique mapped statements/19issues, with18 other consequences excluded pending causal
+review. This is not all46 raw premise/regression macros. Exact729 restored before this new harvest.
+Performance is unmeasured; dirty-allocation maxima still scan and no whole-admission asymptotic claim
+is made. Evidence: `native/finite-pass-normal430-d4d7c523-run01/` and `finite-pass-faults8-d4d7c523-run01/`. Receipt: `raster-finite-pass-harvest/`. Trace: `raster-admission-case28-readonly/report.md`.
 
 **Device:** install is off immediate priority; owner authorizes future qualified installs. Review
 Releaseee36770d built/signature verified (UUIDF699A856-9C3F-34F1-AE99-E7C221BF9FF8), but profile
