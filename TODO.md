@@ -76,6 +76,17 @@ height:200) is ambiguous, so0 tests ran. Source729/HEAD remained exact. Qualify 
 fixture's infinity/NaN literals explicitly as CGFloat; values, assertions, methods and production stay
 unchanged. Preserve `native/combined-normal478-5f91c954-run01/`; a fresh committed rerun is required.
 
+**Actual combined478 at76aff —476pass/2fail, recorded before triage/correction:** all478 actual
+identities and729 source entries reconcile, zero skips/expected failures. The new fractional blend
+sweep incorrectly extrapolates the original full-opacity Normal delta0 premise to50% opacity; actual
+Normal differs by1. Normal's CPU/GPU paths are unchanged by the hand-rolled correction. Narrow ONLY
+this new sweep to the hand-rolled modes changed by the fix, rename it and keep their existing1-step
+bound; all61 original parity methods/exact source-over gates stay byte-exact. No broad tolerance fix.
+The unchanged TextBakeCharacterization open-edit/unchanged-commit regression fails at its final
+restoration:0covered pixels versus1095 before editing. Root cause is UNPROVED; trace actual suppression,
+equality/cache invalidation and commit ownership at immutable76aff before changing code or tests.
+Preserve actual `native/combined-normal478-76affba3-run01/`; no retry or green qualification yet.
+
 **New bounded graph-drag fix — recorded before harvest:** source83380 has three related lifecycle
 bugs: focus follows only the first moved frame; a nil readout leaves an old value visible; returning
 inside initial tap slop can commit the earlier displacement. Identity ticks also need to replace
